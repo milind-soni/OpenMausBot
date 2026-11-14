@@ -101,11 +101,11 @@ describe("the keys page", () => {
     expect(rowsShown()).not.toContain("elevenlabs");
   });
 
-  it("offers the Live calls service, OpenAI, Azure OpenAI or Fish Audio, on the separate live key row", () => {
+  it("offers the Live calls service, OpenAI, Azure OpenAI, Fish Audio or Gemini, on the separate live key row", () => {
     setConfig({ ...fx.config, live: { configured: false, provider: "azure", voice: "", readTypedReplies: true, idleMinutes: 5 } });
     page();
     const select = row("liveKey")!.querySelector<HTMLSelectElement>("select")!;
-    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure", "fish"]);
+    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure", "fish", "gemini"]);
     expect(select.value).toBe("azure");
     expect(row("liveKey")!.querySelector('input[type="url"]')).not.toBeNull();
   });
