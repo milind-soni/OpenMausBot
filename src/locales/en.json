@@ -5957,6 +5957,7 @@
   "mcp.cancel": "Cancel",
   "mcp.save": "Save",
   "mcp.loading": "Loading MCP servers…",
+  "mcp.loadAppsFailed": "Couldn't load MCP apps: {reason}",
   "mcp.empty.title": "No custom MCP servers yet",
   "mcp.empty.desc": "Add a trusted MCP server (a local command or a URL) to give your bots more tools.",
   "mcp.badge.on": "On",
