@@ -326,7 +326,11 @@ const CELL_CHARS_MAX = 2000;
 
 export function boundRows(rows: RunResult["rows"], maxRows: number, maxBytes: number): { rows: RunResult["rows"]; truncated: boolean } {
   let truncated = rows.length > maxRows;
-  let kept = rows.slice(0, maxRows).map((row) => row.map((cell) => (typeof cell === "string" && cell.length > CELL_CHARS_MAX ? `${cell.slice(0, CELL_CHARS_MAX)}…` : cell)));
+  let kept = rows.slice(0, maxRows).map((row) => row.map((cell) => {
+    if (typeof cell !== "string" || cell.length <= CELL_CHARS_MAX) return cell;
+    truncated = true;
+    return `${cell.slice(0, CELL_CHARS_MAX)}…`;
+  }));
   while (kept.length && JSON.stringify(kept).length > maxBytes) {
     kept = kept.slice(0, Math.max(0, kept.length - Math.max(1, Math.ceil(kept.length / 10))));
     truncated = true;
@@ -680,7 +684,8 @@ export async function runSql(ctx: DataContext, input: SqlInput): Promise<SqlOutp
   if (kind.kind === "create") {
     await ctx.database.run(input.sql, runOptions(ctx));
     const described = await ctx.database.describe(kind.target, runOptions(ctx));
-    return { table: kind.target, columns: boundColumns(described.columns, DATA_LIMITS.describeBytesMax).columns, rowCount: described.rowCount, rows: [], truncated: false, elapsedMs: Date.now() - started };
+    const bounded = boundColumns(described.columns, DATA_LIMITS.describeBytesMax);
+    return { table: kind.target, columns: bounded.columns, rowCount: described.rowCount, rows: [], truncated: bounded.truncated, elapsedMs: Date.now() - started };
   }
   if (!kind.materialisable) {
     const result = await ctx.database.run(input.sql, runOptions(ctx, { maxRows: limit + 1 }));
