@@ -2653,8 +2653,12 @@ describe("ACP turns (fake CLI)", () => {
       await create();
     };
 
-    it("rejects a transient setup failure only after its exact child stops, without terminal events", async () => {
-      await failStartup();
+    it.each([
+      "503 Service Unavailable",
+      "Internal error: Internal service failure (session/new, ServiceUnavailableError)",
+      "Internal error: fetchAvailableModels failed: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1082)",
+    ])("offers startup recovery only after its exact child stops: %s", async (message) => {
+      await failStartup(message);
       const kill = vi.spyOn(procs, "killCliTree");
       const failed = await instance.adapter.sendTurn({ threadId: "startup", text: "go", startupRecovery: true }).catch((error) => error);
       expect(failed).toBeInstanceOf(TurnNotStartedError);
