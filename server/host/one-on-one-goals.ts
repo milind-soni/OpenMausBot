@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 
 import { failedTurnTool } from "../../shared/failed-turn.ts";
 import type { HostTurnResult } from "../coordinator.ts";
+import type { LoopbackTurnProvenance } from "../direct-send.ts";
 import { GROUP_GOAL_WAIT_MAX_MS, runGoalRun, type GoalRunEnd, type GoalStepOutcome, type GoalStepResult } from "../group-goal-run.ts";
 import { OUTSIDE, workOrigin, type WorkOrigin } from "../peer-provenance.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
@@ -26,6 +27,7 @@ export interface OneOnOneGoalDeps {
     unattended: boolean;
     /** The goal run this step belongs to: the step is its own turn, so it can hand work to teammates. */
     goalRunId: string;
+    requestProvenance?: LoopbackTurnProvenance;
     onSettled: (outcome: HostTurnResult) => void;
   }): Promise<unknown>;
   isUnattended(botId: string, threadId: string): boolean;
@@ -36,6 +38,7 @@ export interface OneOnOneGoalStart {
   runId?: string;
   sendId?: string;
   sender?: Message["sender"];
+  requestProvenance?: LoopbackTurnProvenance;
 }
 
 type LiveGoal = {
@@ -95,7 +98,7 @@ export function createOneOnOneGoals(deps: OneOnOneGoalDeps) {
     });
   }
 
-  async function step(goal: LiveGoal, threadId: string, request: { id: string; origin: WorkOrigin }, bot: BotRecord, instructions: string): Promise<GoalStepResult> {
+  async function step(goal: LiveGoal, threadId: string, request: { id: string; origin: WorkOrigin; requestProvenance?: LoopbackTurnProvenance }, bot: BotRecord, instructions: string): Promise<GoalStepResult> {
     const { run } = goal;
     const stayedBusy = (): GoalStepResult => {
       const minutes = Math.max(1, Math.round(GROUP_GOAL_WAIT_MAX_MS / 60_000));
@@ -123,6 +126,7 @@ export function createOneOnOneGoals(deps: OneOnOneGoalDeps) {
             origin: request.origin,
             unattended: deps.isUnattended(bot.id, threadId),
             goalRunId: run.runId,
+            ...(request.requestProvenance ? { requestProvenance: request.requestProvenance } : {}),
             onSettled: settle,
           });
         } catch (error) {
@@ -186,7 +190,7 @@ export function createOneOnOneGoals(deps: OneOnOneGoalDeps) {
       cancelled: false,
     };
     live.set(threadId, goal);
-    const request = { id: message.id, origin: options.runId ? OUTSIDE : workOrigin(message) };
+    const request = { id: message.id, origin: options.runId ? OUTSIDE : workOrigin(message), ...(options.requestProvenance ? { requestProvenance: options.requestProvenance } : {}) };
     void runGoalRun({
       run: goal.run,
       coordinator: bot,

@@ -2,7 +2,7 @@
 // Browsers never get loopback trust: a page a bot opens is a browser on this machine too.
 import { TEAM_LEFT_REFUSAL } from "../shared/cloud-hints.ts";
 import type { IncomingMessage } from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 
 import { BOT_PROFILE_PATCH_FIELDS } from "./bot-profile.ts";
@@ -16,8 +16,12 @@ export type LoopbackTrust = "owner" | "service";
 export type RequestAuth =
   | {
     kind: "loopback"; scopes: readonly Scope[]; trust?: "service";
+    /** Set only after the desktop-owner token and own-page origin both verify. */
+    desktopOwner?: true;
     /** Set only on the verified companion-token path: the sidecar's id for the phone that authenticated. */
     companionDevice?: string;
+    /** One-way fingerprint of the verified loopback credential, used to invalidate in-flight turns after rotation. */
+    loopbackCredentialId?: string;
   }
   | { kind: "session"; session: SessionRecord; via: "bearer" | "cookie" | "ticket"; scopes: readonly Scope[] };
 
@@ -29,6 +33,10 @@ export interface RequestAuthResult {
 
 const LOOPBACK_SCOPES: readonly Scope[] = ["admin", "client"];
 const SERVICE_SCOPES: readonly Scope[] = ["client"];
+
+export function loopbackCredentialId(token: string): string {
+  return createHash("sha256").update(token).digest("base64url");
+}
 
 /** What a `service`-trust loopback caller may reach: health and identity, the cloud Slack worker's routes (it
  * shares the workspace's network namespace), and the turn-scoped capability routes, whose bearer the handler checks.
@@ -686,7 +694,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
         !/^[\w-]{1,128}$/.test(headerValue(req.headers["x-openmausbot-companion-device"]) ?? "") ||
         (companionDenial({ path, method, authenticated: true }) && !isCompanionNotice(method, path))
       ) return deny(403, "forbidden: invalid companion request");
-      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, companionDevice: headerValue(req.headers["x-openmausbot-companion-device"]) }, status: 401, error: "" };
+      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, companionDevice: headerValue(req.headers["x-openmausbot-companion-device"]), loopbackCredentialId: loopbackCredentialId(companionToken) }, status: 401, error: "" };
     }
     const desktopOwner = options.loopbackMutationToken !== undefined &&
       secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), options.loopbackMutationToken) && fromOwnPage(req);
@@ -707,7 +715,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
       }
       return { auth: { kind: "loopback", scopes: SERVICE_SCOPES, trust: "service" }, status: 401, error: "" };
     }
-    return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+    return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, ...(desktopOwner ? { desktopOwner: true as const, loopbackCredentialId: loopbackCredentialId(options.loopbackMutationToken!) } : {}) }, status: 401, error: "" };
   }
 
   if (proxied) {

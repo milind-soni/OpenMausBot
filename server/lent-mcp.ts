@@ -182,17 +182,22 @@ export function createLentMcp(deps: LentMcpDeps) {
   function tools(computerId: string, definition: LentMcpServer, principal: string, active: () => boolean, fresh = false): Promise<unknown[]> {
     const key = `${computerId}\n${definitionKey(definition)}`;
     const known = listings.get(key);
-    if (!fresh && known && Date.now() - known.at < LISTING_MS) return known.tools;
-    const listed = deps.computers.request({ computer_id: computerId, action: "mcp_tools", server: definition }, principal, active).then((result) => {
-      const error = failed(result);
-      if (error) throw new Error(error);
-      const list = (result as { tools?: unknown })?.tools;
-      if (!Array.isArray(list)) throw new Error(`${definition.name} listed no tools.`);
-      return list;
+    let listed = !fresh && known && Date.now() - known.at < LISTING_MS ? known.tools : undefined;
+    if (!listed) {
+      listed = deps.computers.request({ computer_id: computerId, action: "mcp_tools", server: definition }, principal, active).then((result) => {
+        const error = failed(result);
+        if (error) throw new Error(error);
+        const list = (result as { tools?: unknown })?.tools;
+        if (!Array.isArray(list)) throw new Error(`${definition.name} listed no tools.`);
+        return list;
+      });
+      listings.set(key, { at: Date.now(), tools: listed });
+      listed.catch(() => { if (listings.get(key)?.tools === listed) listings.delete(key); });
+    }
+    return listed.then((result) => {
+      if (!active()) throw new Error("This turn is no longer authorized.");
+      return result;
     });
-    listings.set(key, { at: Date.now(), tools: listed });
-    listed.catch(() => { if (listings.get(key)?.tools === listed) listings.delete(key); });
-    return listed;
   }
 
   async function rpc(name: string, frame: unknown, turn: Turn): Promise<unknown | undefined> {
@@ -217,7 +222,7 @@ export function createLentMcp(deps: LentMcpDeps) {
     const state = lentState(deps.computers, principal, server);
     if (state.kind !== "ready") return refuse(lentLine(name, state, words));
     const definition = lentDefinition(name, server);
-    const active = () => deps.active(turn);
+    const active = () => deps.active(turn) && deps.principal(turn) === principal;
     try {
       if (method === "tools/list") return reply(id, { tools: await tools(state.computerId, definition, principal, active) });
       const params = (message.params ?? {}) as { name?: unknown; arguments?: unknown };
@@ -249,7 +254,7 @@ export function createLentMcp(deps: LentMcpDeps) {
         if (state.kind !== "ready") continue;
         token ??= deps.mint(turn);
         mounted[name] = { type: "http", url: `${deps.origin}${LENT_MCP_PATH}${name}`, headers: { authorization: `Bearer ${token}` } };
-        void tools(state.computerId, lentDefinition(name, server), principal, () => deps.active(turn)).catch(() => {});
+        void tools(state.computerId, lentDefinition(name, server), principal, () => deps.active(turn) && deps.principal(turn) === principal).catch(() => {});
       }
       return mounted;
     },

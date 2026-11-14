@@ -5,6 +5,11 @@ import type { DataContext } from "./data-context.ts";
 import type { Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
 
+export type LoopbackTurnProvenance =
+  | { kind: "desktop-owner"; credentialId: string }
+  | { kind: "companion"; deviceId: string; credentialId: string }
+  | { kind: "session"; sessionId: string; person: string };
+
 export interface DirectSendInput {
   botId: string;
   threadId: string;
@@ -24,6 +29,7 @@ export interface DirectSendInput {
   mentions?: string[];
   /** The sender is the team's Owner or an Admin, so a typed stop may end someone else's run. */
   admin?: boolean;
+  requestProvenance?: LoopbackTurnProvenance;
 }
 
 export type DirectSendReceipt =

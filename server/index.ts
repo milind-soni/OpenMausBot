@@ -20,7 +20,7 @@ import { autoCompactWindow } from "./drivers/claude.ts";
 import { RoomContextTracker, roomResetNote } from "./room-context.ts";
 import { createRoomTranscript, GROUP_CONTEXT_MESSAGES } from "./host/room-transcript.ts";
 import { createRoomSessions } from "./host/room-sessions.ts";
-import { LentComputers, provenRequestPerson, SharedComputers, sharedComputerOperation } from "./shared-computers.ts"; import { lentScreenResult } from "./lent-screen-guidance.ts"; import { DeviceLinks } from "./device-links.ts"; import { createLentMcp, isLentMcpPath } from "./lent-mcp.ts";
+import { LentComputers, SharedComputers, sharedComputerOperation } from "./shared-computers.ts"; import { lentScreenResult } from "./lent-screen-guidance.ts"; import { DeviceLinks } from "./device-links.ts"; import { createLentMcp, isLentMcpPath } from "./lent-mcp.ts";
 import { cloudHomeLendingRefusal, cloudHomeOwnTurnRefusal, createCloudRoutineAuthors, ownerOnlyConversation } from "./cloud-lending.ts"; import { createOwnHome } from "./own-home.ts"; import { createPlacesElsewhere } from "./places-elsewhere.ts"; import { createPlacesElsewhereRoutes } from "./routes/places-elsewhere.ts"; import { assertRoomFolder } from "./room-folder.ts"; import { cloudConnectedAppsBrokerUrl, startCloudHomeConnectedApps, stopCloudHomeConnectedApps } from "./cloud-connected-apps.ts"; import { createTeamConnectionsHost } from "./host/team-connections-host.ts"; import { createCloudLendingTurns } from "./host/cloud-lending-turns.ts"; import { createTeamConnectionRoutes } from "./routes/team-connections.ts";
 import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
@@ -90,7 +90,7 @@ import { createQueuedNotes, createWaitWords } from "./host/wait-words.ts";
 import { landTurnFiles, parkedFilesKey, settleParkedFiles, takeParkedFiles, type ParkedTurnAttachment } from "./host/turn-attachments.ts";
 import { createReplyVoiceNotes } from "./host/reply-voice-notes.ts";
 import { runtimeRequestCardFields } from "./request-card.ts";
-import type { DirectSendInput, DirectSendReceipt } from "./direct-send.ts";
+import type { DirectSendInput, DirectSendReceipt, LoopbackTurnProvenance } from "./direct-send.ts";
 import { finishedWithoutSummaryLine, ROOM_SUMMARY_REASK, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
 import { chosenPlace, pickComputer } from "./computer-selection.ts";
 import * as boat from "./boat.ts"; import { keyHint, keyStatus, nestedKeyStatus, withoutKeyHints } from "./key-hint.ts";
@@ -643,7 +643,8 @@ import { clearInternalTurn, isInternalTurn, markInternalTurn } from "./internal-
 import { createReactionRoutes } from "./routes/reactions.ts";
 import { createReactions, withReactionNotes, type Reactor } from "./reactions.ts";
 import { createPersonReplies } from "./person-replies.ts";
-import { lendingPerson, lendingPersonKey, personKey, relayedPersonKey } from "./person-key.ts";
+import { lendingPersonKey, personKey, relayedPersonKey } from "./person-key.ts";
+import { loopbackCredentialIsCurrent, requestTurnProvenance, SharedComputerTurnAuthorization } from "./loopback-turn-provenance.ts";
 import { createOutsideLineage, OUTSIDE_STAYS_HERE } from "./host/outside-lineage.ts"; import { OUTSIDE_REFUSAL, outsideRouteRefused } from "./host/outside-fence.ts"; import { createOutsideWrites } from "./host/outside-writes.ts";
 import { teamAiOwner } from "./host/team-ai-owner.ts"; import { createTeamOwners, type AskViewer } from "./host/team-owners.ts"; import { createTeamMessages } from "./host/team-messages.ts"; import { createTeamAwayHost } from "./host/team-away-host.ts"; import { createPlaceInbox, guestNameIn, placeInboxViewer } from "./host/place-inbox.ts"; import { relayedTurn } from "./host/relayed-turn.ts"; import { createPersonCalendar } from "./host/person-calendar.ts";
 import { createDevsReports } from "./host/devs-reports.ts"; import { bugReportEndpoint, devsReportSender, devsStatusAsker } from "./devs-report-send.ts"; import { captureRecentLog } from "./recent-log.ts"; import { createShareAnswer } from "./host/share-answer.ts";
@@ -903,11 +904,7 @@ function turnOrigin(capability: Pick<InternalCapability, "threadId" | "generatio
 }
 
 /** Fail closed: only the person whose own message provably started this exact turn generation. Deliberately not the usage ledger's trigger, which defaults to the owner. */
-function sharedComputerPrincipal(capability: Pick<InternalCapability, "botId" | "threadId" | "generation">): string | null {
-  if (CLOUD_HOME) return cloudLendingRefusal(capability) === null ? CLOUD_HOME_LENDER : null;
-  return lendingPerson(provenRequestPerson(directRequestOwners.get(capability.threadId), capability.generation,
-    (messageId) => linePersonKey(store.messagesFor(capability.threadId).find((message) => message.id === messageId))), ownHome.ownServer(), () => sessions.list());
-}
+function sharedComputerPrincipal(capability: Pick<InternalCapability, "botId" | "threadId" | "generation">): string | null { return CLOUD_HOME ? cloudLendingRefusal(capability) === null ? CLOUD_HOME_LENDER : null : sharedComputerAuthorization.principal(directRequestOwners.get(capability.threadId), capability.generation, ownHome.ownServer(), sessions.list(), (id) => sessions.isLive(id), store.messagesFor(capability.threadId), (proof) => loopbackCredentialIsCurrent(proof, desktopMutationToken, companionMutationToken)); }
 
 /** The only conversations that may feed a bot's memory, daily log, recall or brief; dropped whenever a session is revoked. */
 const ownerOnlyCache = new Map<string, { length: number; last?: string; owner: boolean }>();
@@ -1910,10 +1907,10 @@ function boatNotConfigured(bot: { name: string }, source: PlaceSource): PlaceUna
   return placeUnavailable("cloud", { state: CLOUD_HOME ? "cc-unavailable" : "cc-needs-key", params: { bot: bot.name }, source }, Boolean(CLOUD_HOME));
 }
 const directTurnDispatchClaims = new Map<string, DirectTurnDispatchClaim>();
-const directTurnGenerationByThread = new Map<string, string>();
+const directTurnGenerationByThread = new Map<string, string>(), sharedComputerAuthorization = new SharedComputerTurnAuthorization();
 // Latest direct request per thread, kept past Stop until completion or failure cleanup; unknown continuations deliberately lose proof.
 const directRequestOwners = new Map<string, {
-  generation: string; messageId?: string; generations: Set<string>; turnId: string | null; stopped?: boolean;
+  generation: string; messageId?: string; generations: Set<string>; turnId: string | null; stopped?: boolean; requestProvenance?: LoopbackTurnProvenance;
   automation?: RoutineRunTrigger;
   origin?: WorkOrigin; personLine?: true; kind?: TurnKind;
   gmailDrafts?: Set<string>;
@@ -7141,7 +7138,7 @@ function drainQueuedSendsNow() {
     new Promise<void>((resolve, reject) => {
       void startTurn(botId, prompt, {
         threadId, userMessage, excludeMessageIds: excludeIds, unattended, onTurnSettled: resolve, allowRoomTurnElsewhere: !head.peerAsk,
-        trigger: queuedTurnTrigger(head), ...(head.origin ? { origin: head.origin } : {}), ...(head.mentions ? { mentions: head.mentions } : {}),
+        trigger: queuedTurnTrigger(head), ...(head.origin ? { origin: head.origin } : {}), ...(head.mentions ? { mentions: head.mentions } : {}), ...sharedComputerAuthorization.takeOption(userMessage.id, userMessage.queueId),
       }).catch((err) => {
         const why = err instanceof Error ? err.message : String(err);
         const chief = head.peerAsk?.incident ? store.bot(botId) : null;
@@ -7161,7 +7158,7 @@ function drainQueuedSendsNow() {
   );
 }
 
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] }, mentions?: string[]) {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] }, mentions?: string[], requestProvenance?: LoopbackTurnProvenance) {
   const decision = admit("direct", {}, {
     atCapacity: botAtThreadCapacity(botId, threadId),
     threadBusy: threadBusy(botId, threadId),
@@ -7179,11 +7176,12 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
       trigger,
       via,
       callId,
-      reaction: replyTo?.reactedWith,
+      reaction: replyTo?.reactedWith, authorizationGroup: sharedComputerAuthorization.coalescingKey(requestProvenance),
     });
+    if (requestProvenance) sharedComputerAuthorization.queue(queued.id, requestProvenance);
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason, why: waitWords.queued(threadId, decision.reason) };
   }
-  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions, allowRoomTurnElsewhere: true });
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions, allowRoomTurnElsewhere: true, ...(requestProvenance ? { requestProvenance } : {}) });
   return { ok: true as const, threadId, message };
 }
 
@@ -7213,7 +7211,7 @@ async function acceptDirectSend(
   input: DirectSendInput,
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
 ): Promise<DirectSendReceipt> {
-  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, dataContext, personPresent, app, followUp, mentions, admin } = input;
+  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, dataContext, personPresent, app, followUp, mentions, admin, requestProvenance } = input;
   const refused = directSendRefusal(botId, threadId);
   if (refused) throw refused;
   return sendSequencer.run(
@@ -7267,7 +7265,8 @@ async function acceptDirectSend(
       const typedStop = await stopOnTypedCommand({ botId, threadId, text, trigger, personPresent, fromApp: Boolean(app), busy: currentAtStart.busy === true, row: { replyToId: replyTo?.id, sendId, sender, ...spokenLineFields(via, callId) }, by: { ...(sender?.id ? { person: sender.id } : {}), admin: admin === true } });
       if (typedStop) return typedStop;
       if (currentAtStart.busy) {
-        const personsOwn = personPresent && !app && (trigger.kind === "user" || trigger.kind === "owner"), queuedPrompt = (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId))); if (runOwners.arrival(threadId, sender, personPresent && Boolean(sender?.id)) === "queue") return { ok: true as const, queued: true as const, threadId, queueId: queueSteeredMessage(currentAtStart.id, threadId, text, { replyToId: replyTo?.id, sendId, dataContext, fromApp: app?.fromApp, mentions, prompt: queuedPrompt, sender, trigger, via, callId, first: personPresent && Boolean(sender?.id) }).id };
+        const personsOwn = personPresent && !app && (trigger.kind === "user" || trigger.kind === "owner"), queuedPrompt = (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId)));
+        if (runOwners.arrival(threadId, sender, personPresent && Boolean(sender?.id)) === "queue") return { ok: true as const, queued: true as const, threadId, queueId: sharedComputerAuthorization.queueWith(requestProvenance, () => queueSteeredMessage(currentAtStart.id, threadId, text, { replyToId: replyTo?.id, sendId, dataContext, fromApp: app?.fromApp, mentions, prompt: queuedPrompt, sender, trigger, via, callId, first: personPresent && Boolean(sender?.id), authorizationGroup: sharedComputerAuthorization.coalescingKey(requestProvenance) })).id };
         const instance = runningTurnInstance(currentAtStart, threadId);
         let steered: SteerOutcome = "refused";
         const steerInput = extractTurnImages(text);
@@ -7282,7 +7281,11 @@ async function acceptDirectSend(
         });
         // A chosen wait (queue, or restart's Stop) is never cut short by person-first.
         const chose = busyAdmission.action === "queue" ? busyAdmission.chose : undefined;
-        if (busyAdmission.action === "steer" && instance?.adapter.steer) {
+        const activeRequest = directRequestOwners.get(threadId);
+        const activePrincipal = activeRequest ? sharedComputerPrincipal({ botId, threadId, generation: activeRequest.generation }) : null;
+        const ownServer = ownHome.ownServer();
+        const maySteer = !ownServer || !activeRequest || Boolean(activePrincipal && sharedComputerAuthorization.canSteer(activePrincipal, activeRequest.requestProvenance, requestProvenance, ownServer, sessions.list(), (id) => sessions.isLive(id), (proof) => loopbackCredentialIsCurrent(proof, desktopMutationToken, companionMutationToken)));
+        if (busyAdmission.action === "steer" && maySteer && instance?.adapter.steer) {
           const prompt = (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(steerInput.text, dataContext), replyTo, userNameFor(threadId)));
           steered = await (steerInput.images.length > 0
             ? instance.adapter.steer(threadId, prompt, steerInput.images)
@@ -7319,11 +7322,11 @@ async function acceptDirectSend(
           store.setTaskAskedAt(botId, threadId, message.at);
           handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
           signInSettle.answerInChat(botId, threadId);
-          if (personsOwn) personFirst.wait(threadId, { requeue: (note) => void queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, via, callId, mentions, aheadOfOthers: runOwners.askerFirst(threadId) }) });
+          if (personsOwn) personFirst.wait(threadId, { requeue: (note) => sharedComputerAuthorization.afterSteer(message.id, requestProvenance, () => queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, via, callId, mentions, aheadOfOthers: runOwners.askerFirst(threadId), authorizationGroup: sharedComputerAuthorization.coalescingKey(requestProvenance) })) });
           return { ok: true as const, steered: true as const, threadId, message };
         }
         if (!current.busy) {
-          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions);
+          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions, requestProvenance);
         }
         const queued = queueSteeredMessage(current.id, threadId, text, {
           replyToId: replyTo?.id,
@@ -7334,13 +7337,14 @@ async function acceptDirectSend(
           trigger,
           via,
           callId,
-          first: personsOwn || chose === "restart", aheadOfOthers: runOwners.askerFirst(threadId),
+          first: personsOwn || chose === "restart", aheadOfOthers: runOwners.askerFirst(threadId), authorizationGroup: sharedComputerAuthorization.coalescingKey(requestProvenance),
         });
+        if (requestProvenance) sharedComputerAuthorization.queue(queued.id, requestProvenance);
         if (personsOwn && !chose) personFirst.wait(threadId, {});
         if (chose === "restart") await restartForPerson(botId, threadId, trigger);
         return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
       }
-      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions);
+      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions, requestProvenance);
     },
   );
 }
@@ -7518,7 +7522,7 @@ async function beginTurn(
     commsDepth?: number;
     userMessage?: Message;
     editedMessageId?: string;
-    sender?: ResolvedSender;
+    sender?: ResolvedSender; requestProvenance?: LoopbackTurnProvenance;
     trigger?: UsageTrigger;
     excludeMessageIds?: string[];
     threadId?: string;
@@ -7728,9 +7732,10 @@ async function beginTurn(
   // A continuation keeps its request's origin and never re-reads a stored line, which cannot say a routine or webhook wrote it.
   const continuation = Boolean(opts?.cardContinuation || opts?.computerSelectionContinuation);
   const continued = continuedOrigin(previousRequest, requestMessageId, opts?.cardContinuation);
+  const requestProvenance = sharedComputerAuthorization.forTurn(opts?.requestProvenance, sharedComputerAuthorization.take(userMessage.id, userMessage.queueId), continuation && previousRequest && previousRequest.messageId === requestMessageId && !previousRequest.stopped ? previousRequest.requestProvenance : undefined);
   const requestOrigin = requestWorkOrigin({ trigger: opts?.automationSource, guest: guestConfined, handed: opts?.origin, continued,
     line: !continuation && requestMessageId === userMessage.id ? userMessage : undefined });
-  directRequestOwners.set(threadId, { generation: dispatchClaimId, messageId: requestMessageId,
+  directRequestOwners.set(threadId, { generation: dispatchClaimId, messageId: requestMessageId, ...(requestProvenance ? { requestProvenance } : {}),
     gmailDrafts: opts?.coordination ? gmailDrafts.forNode(opts.coordination.id) :
       continuation && previousRequest && !previousRequest.stopped && (!requestMessageId || previousRequest.messageId === requestMessageId)
         ? previousRequest.gmailDrafts ?? new Set<string>() : new Set<string>(),
@@ -12064,7 +12069,17 @@ ROUTES.push(createBotMessageRoutes({
   routines: () => routines,
   fromPhone: phones.fromPhone, notePhoneSend: phones.noteSend,
   desktopManaged: DESKTOP_MANAGED, cloudHome: Boolean(CLOUD_HOME), DirectSendRefused,
-  acceptDirectSend, directSendRefusal, startTurn, usageTriggerFor, messageSender, cloudGuestSendRefusal, cloudThreadRefusal, runOwners, runActor, resolveAccessRequest: (threadId, requestId, behavior, message) => lendingLifts?.resolve(threadId, requestId, behavior) ?? accessRequests.resolve(threadId, requestId, behavior, message), relayRefusal: CLOUD_TEAM ? (bot, email) => relayedSendRefusal(bot, email, Boolean(email && teamOwners.people?.list().some((one) => one.email === email && one.role !== "member"))) : undefined,
+  sharedComputerSteerAllowed: (auth, botId, threadId, queueIds) => {
+    const ownServer = ownHome.ownServer();
+    if (!ownServer) return true;
+    const request = directRequestOwners.get(threadId);
+    if (!request) return true;
+    const principal = sharedComputerPrincipal({ botId, threadId, generation: request.generation });
+    if (!principal) return false;
+    const current = (proof: LoopbackTurnProvenance | undefined) => sharedComputerAuthorization.canSteer(principal, request.requestProvenance, proof, ownServer, sessions.list(), (id) => sessions.isLive(id), (item) => loopbackCredentialIsCurrent(item, desktopMutationToken, companionMutationToken));
+    return current(requestTurnProvenance(auth, ownServer, actorKey)) && queueIds.every((id) => current(sharedComputerAuthorization.queuedProof(id)));
+  },
+  acceptDirectSend, directSendRefusal, startTurn, usageTriggerFor, messageSender, requestProvenance: (auth) => requestTurnProvenance(auth, ownHome.ownServer(), actorKey), cloudGuestSendRefusal, cloudThreadRefusal, runOwners, runActor, resolveAccessRequest: (threadId, requestId, behavior, message) => lendingLifts?.resolve(threadId, requestId, behavior) ?? accessRequests.resolve(threadId, requestId, behavior, message), relayRefusal: CLOUD_TEAM ? (bot, email) => relayedSendRefusal(bot, email, Boolean(email && teamOwners.people?.list().some((one) => one.email === email && one.role !== "member"))) : undefined,
   noAiRefusal: noAiNotice.refusal, cardAnswerRefusal, commandRememberRefusal, requestBehavior, requestedTaskBot, botForThread, threadBusy,
   botAtThreadCapacity, parksBehindCoordination, activeGroupTurnForBot, runningTurnInstance, engineSteersImages, resolveReplyTarget,
   turnSelection, policyModelRefusal, clearUnattended, drainQueuedSends, answeringCardAs, resolveAndSendTrust, resolveAndSendTeamSetup, resolveAndSendMcp,
@@ -12493,7 +12508,7 @@ ROUTES.push(createDataRoutes({
   exportRoots: dataExportRoots,
 }));
 ROUTES.push(createLiveRoutes({
-  calls: liveCalls,
+  calls: liveCalls, companionRevoked: (deviceId) => sharedComputerAuthorization.revokeCompanion(deviceId, directRequestOwners.values()),
   resolveTarget: (botId, threadId) => {
     const bot = store.bot(botId);
     if (!bot) return null;
@@ -13123,10 +13138,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (await phoneGate.internal({ method, path, res, json, turn: internalCapability, requireActive: requireActiveInternalCapability, readBody: readInternalBody, signal: callSignal }) !== PASS) return;
       // Off: a 404 like a route that never existed. On: a turn sees only the computers of the person it provably acts for.
       if (method === "GET" && path === "/api/internal/shared-computers" && botLending()) {
-        const principal = sharedComputerPrincipal(internalCapability); await sharedComputers.settledAfterWake(principal, () => internalCapabilityIsActive(internalCapability));
+        const principal = sharedComputerPrincipal(internalCapability), eligible = await sharedComputerAuthorization.afterWake(principal, () => internalCapabilityIsActive(internalCapability), () => sharedComputerPrincipal(internalCapability), (current, check) => sharedComputers.settledAfterWake(current, check));
         // `say` too: the bot says why instead of asking the person to open OpenMausBot, which can't help while the computer is lent already.
-        const why = CLOUD_HOME && !principal && (CLOUD_TEAM || sharedComputers.status(CLOUD_HOME_LENDER).length > 0) ? cloudLendingRefusalNotice(internalCapability) : null;
-        return json(res, 200, { computers: sharedComputers.list(principal), ...sharedComputers.away(principal), ...sharedComputers.screenNotLent(principal), ...(why ? { unavailable: cloudLendingRefusalForBot(internalCapability), say: why } : {}) });
+        const why = CLOUD_HOME && !eligible && (CLOUD_TEAM || sharedComputers.status(CLOUD_HOME_LENDER).length > 0) ? cloudLendingRefusalNotice(internalCapability) : null; return json(res, 200, { computers: sharedComputers.list(eligible), ...sharedComputers.away(eligible), ...sharedComputers.screenNotLent(eligible), ...(why ? { unavailable: cloudLendingRefusalForBot(internalCapability), say: why } : {}) });
       }
       if (method === "POST" && path === "/api/internal/shared-computers" && botLending()) {
         const parsed = sharedComputerOperation.safeParse(await readInternalBody());
@@ -13139,7 +13153,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const principal = sharedComputerPrincipal(internalCapability);
         const why = (CLOUD_TEAM ? managedPolicy.computerRefusal("thisComputer") : null) ?? (CLOUD_HOME && !principal ? cloudLendingRefusalForBot(internalCapability) : null);
         if (why) return json(res, 403, { error: why });
-        return json(res, 200, { result: lentScreenResult(parsed.data, await sharedComputers.request(parsed.data, principal, () => botLending() && internalCapabilityIsActive(internalCapability), store.bot(internalCapability.botId))) });
+        return json(res, 200, { result: lentScreenResult(parsed.data, await sharedComputers.request(parsed.data, principal, () => botLending() && internalCapabilityIsActive(internalCapability) && sharedComputerPrincipal(internalCapability) === principal, store.bot(internalCapability.botId))) });
       }
       if (method === "GET" && path === "/api/internal/agents") {
         const sender = internalSender;

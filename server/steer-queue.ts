@@ -50,6 +50,7 @@ interface QueueEntry {
 export type SteerQueueHead = Pick<QueueEntry["items"][number], "trigger" | "sender" | "peerAsk" | "origin" | "mentions">;
 
 const queues = new Map<string, QueueEntry>();
+const authorizationGroups = new WeakMap<object, string>();
 
 export interface HeldSteerQueue {
   botId: string;
@@ -109,7 +110,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; first?: boolean; queuedAt?: number; mentions?: string[]; aheadOfOthers?: string } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; first?: boolean; queuedAt?: number; mentions?: string[]; aheadOfOthers?: string; authorizationGroup?: string } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -135,6 +136,7 @@ export function queueSteeredMessage(
     ...(options.rowId ? { rowId: options.rowId } : {}),
     ...(options.mentions?.length ? { mentions: options.mentions } : {}),
   };
+  if (options.authorizationGroup) authorizationGroups.set(item, options.authorizationGroup);
   saveChatFollowup({ id, kind: "bot", ownerId: botId, threadId, payload: item });
   // `first`: ahead of everything queued but the person's own messages sent before it; with `aheadOfOthers` (the person
   // whose request runs, where several people write), ahead of everyone else's too.
@@ -260,7 +262,8 @@ function coalesceIdentity(item: QueueEntry["items"][number]): string {
   if (item.peerAsk) return `peer:${item.peerAsk.botId}:${item.unattended === true ? "unattended" : "attended"}:${JSON.stringify(item.origin ?? null)}`;
   if (item.unattended === true) return "unattended";
   const person = item.sender ? `person:${item.sender.id ?? item.sender.name}` : "person:local";
-  return item.via === "call" ? `call:${item.callId ?? ""}|${person}` : person;
+  const authorization = authorizationGroups.get(item) ?? "unproven";
+  return item.via === "call" ? `call:${item.callId ?? ""}|${person}|${authorization}` : `${person}|${authorization}`;
 }
 
 export function queuedSteeredMessage(

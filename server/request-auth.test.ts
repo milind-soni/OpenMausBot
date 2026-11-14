@@ -18,6 +18,7 @@ import {
   isLoopbackHost,
   isProxied,
   isSameOrigin,
+  loopbackCredentialId,
   provesSameOrigin,
   parseCookies,
   requestOrigin,
@@ -307,7 +308,7 @@ describe("resolveRequestAuth", () => {
       ["GET", "/api/events"], ["PATCH", "/api/bots/b/profile"],
       ["GET", "/api/bots/b/browser/live"], ["POST", "/api/bots/b/browser/action"],
     ]) expect(check(method, path).auth?.kind, path).toBe("loopback");
-    expect(check("GET", "/api/phones/self/jobs").auth).toEqual({ kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" });
+    expect(check("GET", "/api/phones/self/jobs").auth).toEqual({ kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1", loopbackCredentialId: loopbackCredentialId("relay-secret") });
     const plain = resolveRequestAuth(request({ host: "127.0.0.1:8799", "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1" }, "GET"), {
       sessions, cookieName, streamPath: "/api/events", url: new URL("/api/phones/self/jobs", "http://localhost"),
       loopbackMutationToken: "desktop-secret", companionMutationToken: "relay-secret",
@@ -424,12 +425,14 @@ describe("resolveRequestAuth", () => {
       }, "POST"),
       options("/api/routines"),
     );
-    expect(desktop.auth?.kind).toBe("loopback");
+    expect(desktop.auth).toMatchObject({ kind: "loopback", desktopOwner: true });
 
-    expect(resolveRequestAuth(
+    const bareLoopback = resolveRequestAuth(
       request({ host: "127.0.0.1:8799" }, "GET"),
       options("/api/bots"),
-    ).auth?.kind).toBe("loopback");
+    ).auth;
+    expect(bareLoopback?.kind).toBe("loopback");
+    expect(bareLoopback).not.toHaveProperty("desktopOwner");
     const connectorRefresh = resolveRequestAuth(
       request({ host: "127.0.0.1:8799" }, "GET"),
       options("/api/bots/bot-1/connector-cards/card-1/status?threadId=thread-1"),
@@ -769,7 +772,7 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
 
   it("ignores service trust while the desktop capability is in force", () => {
     expect(check("PUT", "/api/config", { trust: "service", desktopToken: "owner-token", headers: { "x-openmausbot-desktop-owner": "owner-token" } }).auth)
-      .toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+      .toMatchObject({ kind: "loopback", scopes: ["admin", "client"], desktopOwner: true, loopbackCredentialId: loopbackCredentialId("owner-token") });
   });
 
   it("defaults to service on a hosted workspace, owner elsewhere, and lets the operator choose", () => {

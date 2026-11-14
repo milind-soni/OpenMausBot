@@ -4,23 +4,29 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createLentMcp, isLoopbackUrl, LENT_MCP_PATH, lentLine, needsTheirComputer, type HereChecks, type LentMcpDeps } from "./lent-mcp.ts";
 import type { StoredMcpServer } from "./mcp-registry.ts";
+import { SharedComputerTurnAuthorization } from "./loopback-turn-provenance.ts";
 import { PASS } from "./routes/table.ts";
 import type { SharedComputers } from "./shared-computers.ts";
 
 const MAC = { environmentId: "11111111-1111-4111-8111-111111111111", label: "Ada's Mac" };
 const TURN = { botId: "kiwi", threadId: "t-1", generation: "g-1" };
+type TestTurn = typeof TURN;
 const local = { type: "http" as const, url: "http://127.0.0.1:19501/mcp", headers: { Authorization: "Bearer saved-header" }, enabled: true, runsOn: MAC };
 const notes = { command: "/Users/ada/bin/notes-mcp", args: [], env: { NOTES_TOKEN: "saved-env" }, enabled: true, runsOn: MAC };
 const here = (over: Partial<HereChecks> = {}): HereChecks => ({ exists: () => false, program: () => true, answers: async () => false, ...over });
 
 type Online = NonNullable<ReturnType<SharedComputers["runsOn"]>["online"]>;
-function fixture(options: { keys?: LentMcpDeps["keys"]; online?: Partial<Online> | null; known?: { lent: boolean } | null; principal?: string | null; servers?: Record<string, unknown>; mcpServers?: string[]; toolScope?: unknown; answer?: (operation: Record<string, unknown>) => unknown; lenders?: ReturnType<SharedComputers["mcpLenders"]>; here?: HereChecks; personal?: boolean; place?: string } = {}) {
+function fixture(options: { keys?: LentMcpDeps["keys"]; online?: Partial<Online> | null; known?: { lent: boolean } | null; principal?: string | null | ((turn: TestTurn) => string | null); active?: (turn: TestTurn) => boolean; servers?: Record<string, unknown>; mcpServers?: string[]; toolScope?: unknown; answer?: (operation: Record<string, unknown>) => unknown; lenders?: ReturnType<SharedComputers["mcpLenders"]>; here?: HereChecks; personal?: boolean; place?: string } = {}) {
   const requests: Array<{ operation: Record<string, unknown>; principal: string | null }> = [];
+  const activeChecks: Array<() => boolean> = [];
+  const principalChecks: TestTurn[] = [];
   const online = options.online === null ? null : { id: "mac-1", name: "Ada's Mac", platform: "darwin" as const, terminal: false, mcpServers: true, ...options.online };
   const computers: LentMcpDeps["computers"] = {
     runsOn: (principal) => (principal === "cloud-home" ? { online, known: options.known === null ? null : { name: "Ada's Mac", platform: "darwin", lent: options.known?.lent ?? true } } : { online: null, known: null }),
     mcpLenders: (principal) => (principal === "cloud-home" ? options.lenders ?? [] : []),
-    request: async (operation, principal) => {
+    request: async (operation, principal, active) => {
+      activeChecks.push(active);
+      if (!active()) throw new Error("turn is no longer authorized");
       requests.push({ operation: operation as Record<string, unknown>, principal });
       const answer = options.answer?.(operation as Record<string, unknown>);
       if (answer instanceof Error) throw answer;
@@ -34,25 +40,25 @@ function fixture(options: { keys?: LentMcpDeps["keys"]; online?: Partial<Online>
     computers,
     policy: (servers) => servers,
     bot: (id) => (id === "kiwi" ? { id, ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}), toolScope: options.toolScope } : undefined),
-    principal: () => (options.principal === undefined ? "cloud-home" : options.principal),
+    principal: (turn) => { principalChecks.push(turn); return typeof options.principal === "function" ? options.principal(turn) : options.principal === undefined ? "cloud-home" : options.principal; },
     notice: () => "Someone else wrote in this conversation, so it can't use your Mac. Start a new conversation to use it.",
     refusal: () => "Someone else wrote in this conversation, so it can't use your Mac. Start a new conversation to use it. Only the person can change this.",
     mint: () => { minted.push("token"); return "turn-bearer"; },
-    active: () => true,
+    active: (turn) => options.active?.(turn) ?? true,
     origin: "http://127.0.0.1:4242",
     personal: options.personal ?? true,
     place: options.place ?? "My Cloud",
     here: options.here ?? here(),
   });
-  return { lent, requests, minted };
+  return { lent, requests, minted, activeChecks, principalChecks };
 }
 
 const rpc = (method: string, params: unknown = {}, id = 1) => ({ jsonrpc: "2.0", id, method, params });
 
-async function route(lent: ReturnType<typeof createLentMcp>, path: string, body: unknown, method = "POST") {
+async function route(lent: ReturnType<typeof createLentMcp>, path: string, body: unknown, method = "POST", turn: TestTurn = TURN) {
   const json = vi.fn();
   const res = Object.assign(new EventEmitter(), { writeHead: vi.fn(function (this: unknown) { return this; }), end: vi.fn() }) as unknown as ServerResponse & { writeHead: ReturnType<typeof vi.fn> };
-  const out = await lent.route({ method, path, req: {} as IncomingMessage, res, turn: TURN, readBody: async () => body, json });
+  const out = await lent.route({ method, path, req: {} as IncomingMessage, res, turn, readBody: async () => body, json });
   return { out, json, res };
 }
 
@@ -173,6 +179,44 @@ describe("the MCP endpoint a turn's engine reaches", () => {
     ]);
     expect((await route(lent, `${LENT_MCP_PATH}local`, rpc("tools/list"))).json, "listed again within ten minutes: kept").toHaveBeenCalled();
     expect(requests.filter((request) => request.operation.action === "mcp_tools")).toHaveLength(1);
+  });
+
+  it("cancels mount-time discovery and MCP calls when the verified principal changes", async () => {
+    let principal: string | null = "cloud-home";
+    const { lent, activeChecks } = fixture({ principal: () => principal });
+    lent.mounts({ id: "kiwi" }, TURN);
+    expect(activeChecks[0]?.()).toBe(true);
+    principal = null;
+    expect(activeChecks[0]?.()).toBe(false);
+
+    principal = "cloud-home";
+    await route(lent, `${LENT_MCP_PATH}local`, rpc("tools/call", { name: "search" }));
+    const callIsActive = activeChecks.at(-1)!;
+    expect(callIsActive()).toBe(true);
+    principal = null;
+    expect(callIsActive()).toBe(false);
+  });
+
+  it("does not share a pending tools list with a turn whose requester is revoked", async () => {
+    let resolveTools!: (value: unknown) => void;
+    const pendingTools = new Promise<unknown>((resolve) => { resolveTools = resolve; });
+    const authorization = new SharedComputerTurnAuthorization();
+    const desktop = { requestProvenance: { kind: "desktop-owner" as const, credentialId: "desktop" }, messageId: "desktop-message", generations: new Set(["g-desktop"]) };
+    const phone = { requestProvenance: { kind: "companion" as const, deviceId: "phone", credentialId: "phone-token" }, messageId: "phone-message", generations: new Set(["g-phone"]) };
+    const principal = (turn: TestTurn) => authorization.principal(turn.generation === "g-desktop" ? desktop : phone, turn.generation, { admin: null }, [], () => true, [], () => true) ? "cloud-home" : null;
+    const { lent, principalChecks, activeChecks } = fixture({ principal, answer: () => pendingTools });
+    const listedByDesktop = route(lent, `${LENT_MCP_PATH}local`, rpc("tools/list"), "POST", { ...TURN, generation: "g-desktop" });
+    await vi.waitFor(() => expect(activeChecks).toHaveLength(1));
+    const listedByPhone = route(lent, `${LENT_MCP_PATH}local`, rpc("tools/list"), "POST", { ...TURN, generation: "g-phone" });
+    await vi.waitFor(() => expect(principalChecks.some((turn) => turn.generation === "g-phone")).toBe(true));
+    expect(principal({ ...TURN, generation: "g-desktop" })).toBe("cloud-home");
+    expect(principal({ ...TURN, generation: "g-phone" })).toBe("cloud-home");
+    authorization.revokeCompanion("phone", [phone]);
+    expect(principal({ ...TURN, generation: "g-phone" })).toBeNull();
+    resolveTools({ tools: [{ name: "private-tool" }] });
+    const [desktopResult, phoneResult] = await Promise.all([listedByDesktop, listedByPhone]);
+    expect(desktopResult.json.mock.calls[0]?.[2]).toMatchObject({ result: { tools: [{ name: "private-tool" }] } });
+    expect(JSON.stringify(phoneResult.json.mock.calls[0]?.[2])).not.toContain("private-tool");
   });
 
   it("refuses a server that isn't this bot's now, a turn that can't use the computer, and an offline computer, with no job sent", async () => {

@@ -29,6 +29,7 @@ import {
 import type { BotRecord, Message } from "./store.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { SharedComputerTurnAuthorization } from "./loopback-turn-provenance.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
@@ -311,6 +312,35 @@ describe("steer-queue module", () => {
       ["and the tests", "call-1"],
       ["then deploy", "call-2"],
     ]);
+  });
+
+  it("never coalesces queued requests carrying different in-memory authorization groups", () => {
+    const bot = fakeBot("bot-auth-groups", "thread-auth-groups", true);
+    const store = fakeStore([bot]);
+    const sender = { name: "Owner", id: "p_owner" };
+    const authorization = new SharedComputerTurnAuthorization();
+    const companion = { kind: "companion" as const, deviceId: "device-a", credentialId: "a" };
+    const desktop = { kind: "desktop-owner" as const, credentialId: "b" };
+    const first = queueSteeredMessage(bot.id, bot.threadId, "companion request", { sender, authorizationGroup: authorization.coalescingKey(companion) });
+    authorization.queue(first.id, companion);
+    const second = queueSteeredMessage(bot.id, bot.threadId, "desktop request", { sender, authorizationGroup: authorization.coalescingKey(desktop) });
+    authorization.queue(second.id, desktop);
+    const third = queueSteeredMessage(bot.id, bot.threadId, "same desktop proof", { sender, authorizationGroup: authorization.coalescingKey(desktop) });
+    authorization.queue(third.id, desktop);
+    const held = holdSteeredQueue(bot.id, bot.threadId, first.id)!;
+    expect(held.items.every((item) => !("authorizationGroup" in item))).toBe(true);
+    restoreHeldSteeredQueue(held);
+    bot.busy = false;
+    const delivered: Array<{ prompt: string; proof: unknown }> = [];
+    const dispatch = (_botId: string, _threadId: string, prompt: string, message: Message) => { delivered.push({ prompt, proof: authorization.take(message.id, message.queueId) }); };
+    drainSteeredMessages(store, dispatch);
+    drainSteeredMessages(store, dispatch);
+    drainSteeredMessages(store, dispatch);
+    expect(delivered).toEqual([
+      { prompt: "companion request", proof: companion },
+      { prompt: "desktop request\n\nsame desktop proof", proof: desktop },
+    ]);
+    expect(store.messages.every((message) => !("authorizationGroup" in message))).toBe(true);
   });
 
   it("never puts a call id on a line that was not spoken", () => {

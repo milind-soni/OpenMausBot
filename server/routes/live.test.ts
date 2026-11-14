@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { LiveCallState, LiveSettings } from "../../shared/wire.ts";
+import type { Scope } from "../sessions.ts";
 import { json, readBody } from "../harness/http.ts";
 import { LiveCallBusyError, LiveCallSignedOutError } from "../live-call-controller.ts";
 import { LIVE_NEEDS_KEY, LiveSessionError } from "../live-call.ts";
@@ -18,13 +19,13 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
 });
 
-async function serve(deps: LiveRouteDeps): Promise<string> {
+async function serve(deps: LiveRouteDeps, auth: { kind: "loopback"; scopes: readonly Scope[]; companionDevice?: string } = { kind: "loopback", scopes: ["admin", "client"] }): Promise<string> {
   const routes = [createLiveRoutes(deps)];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const handled = await dispatchRoutes(routes, {
       req, res, url, path: url.pathname, method: req.method ?? "GET",
-      auth: { kind: "loopback", scopes: ["admin", "client"] }, json, readBody,
+      auth, json, readBody,
     });
     if (!handled) json(res, 404, { from: "inline routes" });
   });
@@ -33,8 +34,8 @@ async function serve(deps: LiveRouteDeps): Promise<string> {
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 
-async function request(deps: LiveRouteDeps, method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<{ status: number; body: unknown }> {
-  const base = await serve(deps);
+async function request(deps: LiveRouteDeps, method: string, path: string, body?: unknown, headers: Record<string, string> = {}, auth?: { kind: "loopback"; scopes: readonly Scope[]; companionDevice?: string }): Promise<{ status: number; body: unknown }> {
+  const base = await serve(deps, auth);
   const response = await fetch(`${base}${path}`, {
     method,
     headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...headers },
@@ -211,16 +212,30 @@ describe("live routes", () => {
     });
     it("ends when the companion says its phone was unpaired", async () => {
       const d = deps();
-      expect(await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone()))
+      expect(await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone(), { kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" }))
         .toMatchObject({ status: 200, body: { call: { status: "ending" } } });
       expect(d.calls.deviceRevoked).toHaveBeenCalledWith("phone-1");
-      expect(await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone("phone-2"))).toEqual({ status: 200, body: { call: null } });
+      expect(await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone("phone-2"), { kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-2" })).toEqual({ status: 200, body: { call: null } });
+    });
+    it("invalidates authenticated companion turn provenance on unpair", async () => {
+      const companionRevoked = vi.fn();
+      const d = deps({ companionRevoked });
+      expect((await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone("phone-7"), { kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-7" })).status).toBe(200);
+      expect(companionRevoked).toHaveBeenCalledWith("phone-7");
+    });
+    it("keeps standalone unpair notices able to end calls without granting revocation provenance", async () => {
+      const companionRevoked = vi.fn();
+      const d = deps({ companionRevoked });
+      expect(await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone())).toMatchObject({ status: 200, body: { call: { status: "ending" } } });
+      expect(d.calls.deviceRevoked).toHaveBeenCalledWith("phone-1");
+      expect(companionRevoked).not.toHaveBeenCalled();
     });
     it("takes the unpairing only from the companion, for a well-formed phone", async () => {
       const d = deps();
       expect((await request(d, "POST", "/api/live/device-revoked", undefined, { "x-openmausbot-companion-device": "phone-1" })).status).toBe(403);
       expect((await request(d, "POST", "/api/live/device-revoked", undefined, { "x-openmausbot-companion": "1" })).status).toBe(400);
       expect((await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone("a/b"))).status).toBe(400);
+      expect((await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone("phone-1"), { kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-other" })).status).toBe(403);
       expect(d.calls.deviceRevoked).not.toHaveBeenCalled();
     });
   });

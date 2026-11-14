@@ -28,7 +28,7 @@ import type { ReplyTarget } from "../replies.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import { acceptedSendMatch, parseSendId } from "../send-idempotency.ts";
-import type { DirectSendInput, DirectSendReceipt } from "../direct-send.ts";
+import type { DirectSendInput, DirectSendReceipt, LoopbackTurnProvenance } from "../direct-send.ts";
 import { cancelSteeredMessage, holdSteeredQueue, queuedSteerSender, queuedSteeredMessage, restoreHeldSteeredQueue, settleHeldSteeredQueue } from "../steer-queue.ts";
 import { routeRunOwners, type Actor, type RouteRunOwners } from "../host/run-owner.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
@@ -73,11 +73,13 @@ export interface BotMessageRouteDeps {
   acceptDirectSend(input: DirectSendInput, guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>): Promise<DirectSendReceipt>;
   directSendRefusal(botId: string, threadId: string): { status: number; body: Record<string, unknown> } | null;
   startTurn(botId: string, text: string, opts?: {
-    threadId?: string; replyTo?: Message; sendId?: string; sender?: ResolvedSender; trigger?: UsageTrigger; relayed?: boolean;
+    threadId?: string; replyTo?: Message; sendId?: string; sender?: ResolvedSender; trigger?: UsageTrigger; relayed?: boolean; requestProvenance?: LoopbackTurnProvenance;
     dataContext?: DataContext; compactOnly?: boolean; cardContinuation?: boolean; editedMessageId?: string;
   }): Promise<Message>;
   usageTriggerFor(auth: RequestAuth): UsageTrigger;
   messageSender(auth: RequestAuth): ResolvedSender | undefined;
+  requestProvenance(auth: RequestAuth): LoopbackTurnProvenance | undefined;
+  sharedComputerSteerAllowed?(auth: RequestAuth, botId: string, threadId: string, queueIds: readonly string[]): boolean;
   cloudGuestSendRefusal(auth: RequestAuth, threadId: string): string | null;
   cloudThreadRefusal(auth: RequestAuth, threadId: string): string | null;
   cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: string, behavior: string): string | null;
@@ -247,7 +249,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         const accepted = goalSendId ? acceptedSendMatch(store.messagesFor(threadId), goalSendId, typed, undefined, "goal") : null;
         if (accepted?.kind === "conflict") return json(res, 409, { error: "sendId already belongs to another message" });
         if (accepted?.kind === "match") return json(res, 202, { ok: true, threadId, message: accepted.message });
-        const message = goals.start(bot.id, threadId, typed, { sendId: goalSendId, sender: messageSender(auth) });
+        const message = goals.start(bot.id, threadId, typed, { sendId: goalSendId, sender: messageSender(auth), requestProvenance: deps.requestProvenance(auth) });
         return json(res, 202, { ok: true, threadId, message });
       }
       const onBehalfOf = guardedBody?.data?.onBehalfOf;
@@ -306,6 +308,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           }
         : undefined;
       const sender = messageSender(auth);
+      const requestProvenance = deps.requestProvenance(auth);
       const guardedStart = guarded
         ? async (currentAtStart: BotRecord): Promise<DirectSendReceipt> => {
             // No await between these checks and startTurn: never steer or enqueue under stale permissions.
@@ -328,7 +331,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
               throw Object.assign(new Error("wait for a free thread slot before retrying this message"), { status: 409, code: "guarded_busy" });
             }
             // The relayed line is named after the person it is for; with no key it is nobody's own line and acts for nobody.
-            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender: onBehalfOf ? { name: onBehalfOf.name ?? onBehalfOf.email! } : sender, trigger, relayed: true, dataContext });
+            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender: onBehalfOf ? { name: onBehalfOf.name ?? onBehalfOf.email! } : sender, trigger, relayed: true, dataContext, ...(!onBehalfOf && requestProvenance ? { requestProvenance } : {}) });
             return { ok: true as const, threadId, message };
           }
         : undefined;
@@ -341,6 +344,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       try {
         const receipt = await acceptDirectSend({
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext, ...(app ? { app } : {}),
+          ...(requestProvenance ? { requestProvenance } : {}),
           personPresent, admin: owners.admin(auth), ...(followUp ? { followUp } : {}),
           ...(mentions?.length && !press && !appSent ? { mentions } : {}),
         }, guardedStart);
@@ -382,6 +386,10 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       // Hold the whole queue atomically: a racing settle drains it or this request steers it, never both.
       const held = holdSteeredQueue(bot.id, bot.threadId, m[2]);
       if (!held) return json(res, 404, { error: "no such queued message" });
+      if (deps.sharedComputerSteerAllowed && !deps.sharedComputerSteerAllowed(auth, bot.id, bot.threadId, held.items.map((item) => item.messageId))) {
+        restoreHeldSteeredQueue(held);
+        return json(res, 200, { ok: true, queued: true, threadId: bot.threadId });
+      }
       const waitsItsTurn = owners.joinRefusal(auth, bot.threadId, held.items.map((item) => item.sender));
       if (waitsItsTurn) {
         restoreHeldSteeredQueue(held);
@@ -541,8 +549,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const quoted = source.replyToId ? resolveReplyTarget(bot.threadId, source.replyToId) : undefined;
       const replyTo: ReplyTarget | undefined = quoted && source.reaction && text === source.text ? { ...quoted, reactedWith: source.reaction } : quoted;
       const dataContext = parseDataContext(body.dataContext) ?? (text === source.text ? source.dataContext : undefined);
+      const requestProvenance = deps.requestProvenance(auth);
       const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, sendId, trigger: usageTriggerFor(auth), dataContext,
-        ...(CLOUD_HOME ? { sender: messageSender(auth) } : {}) });
+        ...(CLOUD_HOME ? { sender: messageSender(auth) } : {}), ...(requestProvenance ? { requestProvenance } : {}) });
       return json(res, 202, { ok: true, message });
     }
 
