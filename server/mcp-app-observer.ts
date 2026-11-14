@@ -136,7 +136,7 @@ export function appReportBody(report: McpAppReport, maxBytes = APP_REPORT_MAX_BY
   body = JSON.stringify(smaller);
   if (bytes(body) <= maxBytes) return body;
   const over = bytes(body) - maxBytes;
-  const total = texts.reduce((sum, block) => sum + bytes(block.text), 0);
+  const total = texts.reduce((sum, block) => sum + bytes(JSON.stringify(block.text)) - 2, 0);
   if (total <= over) return null;
   // JSON escaping can make a character cost more than its UTF-8 bytes, so shrink until it fits.
   for (let keep = (total - over) / total; keep > 0.01; keep *= 0.8) {
