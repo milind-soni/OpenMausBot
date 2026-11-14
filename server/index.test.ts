@@ -2975,6 +2975,11 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("marks a DM's canonical thread read without requiring a room task", async () => {
+    expect((await api("POST", "/api/groups/test-dm/read", { threadId: "test-dm-thread" })).status).toBe(200);
+    expect((await api("POST", "/api/groups/test-dm/read", { threadId: "another-thread" })).status).toBe(404);
+  });
+
   it("keeps bot-to-bot channels single-threaded and lets another task start beside an open approval", async () => {
     const dm = await api("POST", "/api/groups/test-dm/tasks", {});
     expect(dm.status).toBe(400);
@@ -4892,11 +4897,96 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("stores the room order: a partial, stable reorder every client reads back", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const room = async (name: string) => (await api("POST", "/api/groups", { name, memberIds: [bot.id] })).body.group;
+    const first = await room("Room one"), second = await room("Room two"), third = await room("Room three");
+    const mine = new Set([first.id, second.id, third.id]);
+    const listed = async () => ((await api("GET", "/api/bots?messages=0")).body.groups as { id: string }[]).map((group) => group.id).filter((id) => mine.has(id));
+    try {
+      const start = await listed();
+      expect(start).toHaveLength(3);
+      const wanted = [...start].reverse();
+
+      const stream = await openSse(`${BASE}/api/events`);
+      try {
+        await stream.until((frame) => frame.kind === "hello");
+        const full = await api("PUT", "/api/groups/order", { groupIds: wanted });
+        expect(full.status).toBe(200);
+        expect(full.body.groupIds.filter((id: string) => mine.has(id))).toEqual(wanted);
+        const frame = await stream.until((candidate) => candidate.kind === "groups.order");
+        expect(frame.groupIds).toEqual(full.body.groupIds);
+      } finally {
+        stream.close();
+      }
+      expect(await listed()).toEqual(wanted);
+
+      // Listing two rooms moves only those two, into the positions they already share.
+      const partial = await api("PUT", "/api/groups/order", { groupIds: [wanted[2], wanted[0]] });
+      expect(partial.status).toBe(200);
+      expect(await listed()).toEqual([wanted[2], wanted[1], wanted[0]]);
+
+      expect(await api("PUT", "/api/groups/order", { groupIds: [first.id, first.id] })).toMatchObject({ status: 400, body: { error: "groupIds must be a non-empty array of distinct room ids" } });
+      expect(await api("PUT", "/api/groups/order", { groupIds: [] })).toMatchObject({ status: 400 });
+      expect(await api("PUT", "/api/groups/order", { groupIds: "nope" })).toMatchObject({ status: 400 });
+      expect(await api("PUT", "/api/groups/order", { groupIds: [first.id], extra: true })).toMatchObject({ status: 400 });
+      expect(await api("PUT", "/api/groups/order", { groupIds: [first.id, "room-nope"] })).toMatchObject({ status: 400, body: { error: "unknown room: room-nope" } });
+      expect(await listed()).toEqual([wanted[2], wanted[1], wanted[0]]);
+    } finally {
+      for (const group of [first, second, third]) await api("DELETE", `/api/groups/${group.id}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("words a new bot's refused department access by key, keeping its English", async () => {
     expect(await api("POST", "/api/bots", { settings: { managedSections: ["Nowhere"] } })).toEqual({ status: 400,
       body: { error: "Only a Chief may manage existing additional departments", errorKey: "serverError.department.chiefOnlyExtra" } });
     expect(await api("POST", "/api/bots", { settings: { chiefOfStaff: true, managedSections: [""] } })).toEqual({ status: 400,
       body: { error: "Confirm additional department access (acknowledgePeerScope)", errorKey: "serverError.department.confirmExtra" } });
+  });
+
+  it("gives a Chief in charge of every department each new one, live, and nothing to a Chief in charge of only some", async () => {
+    const whole = (await api("POST", "/api/bots")).body.bot;
+    const partial = (await api("POST", "/api/bots")).body.bot;
+    const made: string[] = [];
+    const department = async (name: string) => {
+      made.push(name);
+      expect((await api("POST", "/api/sidebar-sections", { name, botIds: [] })).status).toBe(200);
+    };
+    const managed = async (id: string) => ((await api("GET", "/api/bots?messages=0")).body.bots
+      .find((entry: { id: string }) => entry.id === id).managedSections ?? []) as string[];
+    try {
+      await department("Whole fixture");
+      await department("Partial fixture");
+      for (const [bot, section] of [[whole, "Whole fixture"], [partial, "Partial fixture"]] as const) {
+        expect((await api("PATCH", `/api/bots/${bot.id}`, { section })).status).toBe(200);
+      }
+      const others = ((await api("GET", "/api/sidebar-sections")).body.sections as string[]).filter((name) => name !== "Whole fixture");
+      expect((await api("PATCH", `/api/bots/${whole.id}`, { chiefOfStaff: true, managedSections: ["", ...others], acknowledgePeerScope: true })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${partial.id}`, { chiefOfStaff: true, managedSections: [""], acknowledgePeerScope: true })).status).toBe(200);
+
+      const stream = await openSse(`${BASE}/api/events`);
+      try {
+        await stream.until((frame) => frame.kind === "hello");
+        await department("New fixture A");
+        const frame = await stream.until((candidate) => candidate.kind === "bot" && candidate.bot?.id === whole.id &&
+          Boolean(candidate.bot.managedSections?.includes("New fixture A")));
+        expect(frame.bot.chiefOfStaff).toBe(true);
+      } finally {
+        stream.close();
+      }
+      expect(await managed(whole.id)).toEqual(["", ...others, "New fixture A"]);
+      expect(await managed(partial.id)).toEqual([""]);
+
+      // The owner can still untick it, and a Chief no longer in charge of every department gets no new one.
+      expect((await api("PATCH", `/api/bots/${whole.id}`, { managedSections: ["", ...others] })).status).toBe(200);
+      await department("New fixture B");
+      expect(await managed(whole.id)).toEqual(["", ...others]);
+      expect(await managed(partial.id)).toEqual([""]);
+    } finally {
+      for (const bot of [whole, partial]) await api("DELETE", `/api/bots/${bot.id}`);
+      for (const name of made) await api("DELETE", `/api/sidebar-sections?section=${encodeURIComponent(name)}`);
+    }
   });
 
   it("rejects a sidebar section Chief collision without changing any bot", async () => {
@@ -5313,10 +5403,21 @@ describe("harness HTTP API", () => {
       expect(statSync(result.path).mode & 0o777).toBe(0o600);
     }
 
-    const unsupported = await fetch(`${BASE}/api/files?name=payload.zip`, {
+    const archive = Buffer.from("archive");
+    const zip = await fetch(`${BASE}/api/files?name=payload.zip`, {
       method: "POST",
       headers: { "content-type": "application/zip" },
-      body: Buffer.from("archive"),
+      body: archive,
+    });
+    expect(zip.status).toBe(201);
+    const zipResult = (await zip.json()) as { path: string; name: string; mime: string; bytes: number };
+    expect(zipResult).toMatchObject({ name: "payload.zip", mime: "application/zip", bytes: archive.byteLength });
+    expect(zipResult.path).toMatch(/\.zip$/);
+
+    const unsupported = await fetch(`${BASE}/api/files?name=payload.exe`, {
+      method: "POST",
+      headers: { "content-type": "application/x-msdownload" },
+      body: Buffer.from("binary"),
     });
     expect(unsupported.status).toBe(400);
 

@@ -22,7 +22,7 @@ describe("VPS SSH connection sharing supplied by the app", () => {
   it("does nothing on Windows, where OpenSSH has no connection sharing", async () => {
     const data = scratch();
     expect(prepareVpsSsh(data, "C:\\Windows\\System32", "win32")).toEqual({ configPath: null, path: "C:\\Windows\\System32" });
-    await expect(ensureVpsSshMaster({ configPath: null, path: "missing-ssh" }, "fixture-vps")).resolves.toBeUndefined();
+    await expect(ensureVpsSshMaster({ configPath: null, path: "missing-ssh" }, "fixture-vps")).resolves.toBe(0);
     expect(existsSync(join(data, "ssh"))).toBe(false);
   });
 });

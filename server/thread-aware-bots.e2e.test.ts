@@ -763,6 +763,62 @@ describe("coordinate_bots on a teammate", () => {
   }, 60_000);
 });
 
+describe("post_to_thread", () => {
+  it("posts into an open thread of your own or a teammate's as a bot's words, read on its next run or woken now, once per delivery id", async () => {
+    const pm = await createBot("Pam", "gated");
+    const qa = await createBot("Quinn", "gated");
+    try {
+      const token = await heldTurn(pm, "Keep the jobs posted.");
+      const post = (body: Record<string, unknown>) => api("POST", "/api/internal/post-to-thread", body, token);
+      const own = await api("POST", "/api/internal/threads", { title: "Notes", message: "Take notes. [[gate:post-own]]" }, token);
+      expect(own.status, JSON.stringify(own.body)).toBe(201);
+      const notes = own.body.threadId;
+      release("post-own");
+      await expect.poll(async () => (await taskOf(pm.id, notes))?.busy, { timeout: 15_000 }).toBe(false);
+
+      // No wake: a row the person sees, nothing starts, and a retry with the same delivery id posts nothing more.
+      const quiet = await post({ toThreadId: notes, message: "The build is green.", deliveryId: "build-1" });
+      expect(quiet.status, JSON.stringify(quiet.body)).toBe(200);
+      expect(quiet.body).toMatchObject({ deliveryId: "build-1", threadId: notes, botName: "Pam", woke: false });
+      expect((await post({ toThreadId: notes, message: "The build is green.", deliveryId: "build-1" })).body).toMatchObject({ duplicate: true });
+      const rows = (await messages(notes)).filter((message) => message.threadPost);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ role: "bot", kind: "activity", from: { botId: pm.id, name: "Pam" }, tool: { output: "The build is green." },
+        threadPost: { deliveryId: "build-1", fromBotId: pm.id, fromThreadId: pm.threadId } });
+      expect((await taskOf(pm.id, notes)).busy).toBe(false);
+      expect((await post({ toThreadId: "no-such-thread", message: "hi" })).status).toBe(404);
+      expect((await post({ toThreadId: notes, message: "hi", deliveryId: "has space" })).status).toBe(400);
+      expect((await post({ toThreadId: pm.threadId, message: "hi" })).status).toBeGreaterThanOrEqual(400);
+
+      // That thread's next run reads it first (the thread keeps its engine process, so its prompts stay under its first gate), as information from a bot, never as the person's words; then it is read.
+      expect((await api("POST", `/api/bots/${pm.id}/messages`, { text: "Carry on. [[gate:post-own-2]]", threadId: notes })).status).toBe(202);
+      await expect.poll(() => [...promptsOf("post-own"), ...promptsOf("post-own-2")].at(-1)?.message.content ?? "", { timeout: 15_000 }).toContain("The build is green.");
+      const read = [...promptsOf("post-own"), ...promptsOf("post-own-2")].at(-1).message.content as string;
+      expect(read).toContain("message posted into this thread");
+      expect(read).toContain("information only");
+      expect(read.indexOf("The build is green.")).toBeLessThan(read.indexOf("Carry on."));
+      release("post-own-2");
+      await expect.poll(async () => (await messages(notes)).find((message) => message.threadPost)?.threadPost.seen, { timeout: 15_000 }).toBe(true);
+
+      // A teammate's thread, woken now.
+      const peer = await api("POST", "/api/internal/threads", { toBotId: qa.id, title: "Logs", message: "Look at the logs. [[gate:post-peer]]" }, token);
+      expect(peer.status, JSON.stringify(peer.body)).toBe(200);
+      const logs: string = peer.body.receipts[0].threadId;
+      release("post-peer");
+      await expect.poll(async () => (await taskOf(qa.id, logs))?.busy, { timeout: 15_000 }).toBe(false);
+      const woken = await post({ toThreadId: logs, message: "Also check the disk. [[gate:post-peer-2]]", wake: true });
+      expect(woken.status, JSON.stringify(woken.body)).toBe(200);
+      expect(woken.body).toMatchObject({ threadId: logs, botName: "Quinn", woke: true });
+      await expect.poll(() => [...promptsOf("post-peer"), ...promptsOf("post-peer-2")].at(-1)?.message.content ?? "", { timeout: 15_000 }).toContain("Also check the disk.");
+      expect([...promptsOf("post-peer"), ...promptsOf("post-peer-2")].at(-1).message.content).toContain("Pam");
+      release("post-peer-2");
+      release(pm.threadId);
+    } finally {
+      await cleanup([pm.id, qa.id]);
+    }
+  }, 60_000);
+});
+
 describe("list_threads", () => {
   it("lists your own threads and the ones you opened on a teammate, never a teammate's other threads", async () => {
     const pm = await createBot("Parker", "gated");

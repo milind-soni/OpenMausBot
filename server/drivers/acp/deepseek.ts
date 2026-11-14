@@ -201,7 +201,7 @@ export function fetchDeepSeekCatalog(
     try {
       // Security: while the bot box is on, dsh runs in it, as a bot's turn does: it reads ~/.dsh, which a bot can write.
       const resolved = resolveCli(cli, ["--profile", "acp"], env as NodeJS.ProcessEnv);
-      child = spawnCli(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, box: { allowEnv } });
+      child = spawnCli(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: { ...env, ...resolved.env }, box: { allowEnv } });
     } catch (error) {
       return reject(error instanceof Error ? error : new Error(String(error)));
     }

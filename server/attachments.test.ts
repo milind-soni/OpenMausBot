@@ -535,11 +535,15 @@ describe("shared files", () => {
     resetDir();
   });
 
-  it("allows useful document mimes but not executables, archives, or active markup", () => {
+  it("allows useful document and archive mimes but not executables or active markup", () => {
     expect(extensionForFileMime("text/plain; charset=utf-8")).toBe(".txt");
     expect(extensionForFileMime("application/pdf")).toBe(".pdf");
     expect(extensionForFileMime("application/vnd.openxmlformats-officedocument.wordprocessingml.document")).toBe(".docx");
-    expect(extensionForFileMime("application/zip")).toBeNull();
+    expect(extensionForFileMime("application/zip")).toBe(".zip");
+    expect(extensionForFileMime("application/x-compressed-tar")).toBe(".tgz");
+    expect(extensionForFileMime("application/x-zip-compressed")).toBe(".zip");
+    expect(extensionForFileMime("Application/X-RAR-Compressed")).toBe(".rar");
+    expect(extensionForFileMime("application/x-gzip")).toBe(".gz");
     expect(extensionForFileMime("application/x-msdownload")).toBeNull();
     expect(extensionForFileMime("application/octet-stream")).toBeNull();
     expect(extensionForFileMime("text/html")).toBeNull();
@@ -552,7 +556,8 @@ describe("shared files", () => {
     expect(() => sanitizeSharedFileName("../../secret.txt", "text/plain")).toThrow(/filename, not a path/);
     expect(() => sanitizeSharedFileName("..\\..\\secret.txt", "text/plain")).toThrow(/filename, not a path/);
     expect(() => sanitizeSharedFileName("..%2F..%2Fsecret.txt", "text/plain")).toThrow(/filename, not a path/);
-    expect(() => sanitizeSharedFileName("notes.txt", "application/zip")).toThrow(/supported document/);
+    expect(sanitizeSharedFileName("logs.tar.gz", "application/gzip")).toBe("logs.tar.gz");
+    expect(() => sanitizeSharedFileName("notes.txt", "application/x-msdownload")).toThrow(/supported document/);
   });
 
   it("streams a file under a generated name with private permissions", async () => {
@@ -589,6 +594,18 @@ describe("shared files", () => {
     expect(readFileSync(first.path)).toEqual(bytes);
     if (process.platform !== "win32") expect(statSync(first.path).mode & 0o777).toBe(0o600);
     expect(readdirSync(ATTACHMENTS_DIR)).toEqual([`${UPLOAD_A}${extension}`]);
+  });
+
+  it.each([
+    ["Project.ZIP", "application/x-zip-compressed", ".zip", "Project.zip"],
+    ["logs.tar.gz", "application/x-gzip", ".gz", "logs.tar.gz"],
+    ["dump.rar", "application/x-rar-compressed", ".rar", "dump.rar"],
+  ])("stores %s sent as %s unchanged, under its archive extension", async (name, mime, extension, shown) => {
+    const bytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 1, 2]);
+    const saved = await saveFile((async function* () { yield bytes; })(), name, mime, { uploadId: UPLOAD_A });
+    expect(saved.path).toBe(join(ATTACHMENTS_DIR, `${UPLOAD_A}${extension}`));
+    expect(saved.name).toBe(shown);
+    expect(readFileSync(saved.path)).toEqual(bytes);
   });
 
   it("rejects empty and oversized streams without leaving partial files", async () => {

@@ -129,7 +129,10 @@ export interface EnsuredProfile {
 export function ensureProfile(dataDir: string, key: string, { acceptLanguages = "en-US,en", backend = "local" as ProfileRecord["backend"], now = () => new Date() } = {}): EnsuredProfile {
   const dir = profileDir(dataDir, key);
   const existing = readProfileRecord(dir);
-  if (existing) return { dir, record: existing, created: false };
+  if (existing) {
+    mergePreferences(dir, profilePreferences(acceptLanguages));
+    return { dir, record: existing, created: false };
+  }
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const record: ProfileRecord = { key, backend, egress: "direct", identity: null, chromeVersion: null, createdAt: now().toISOString() };
   mergePreferences(dir, profilePreferences(acceptLanguages));

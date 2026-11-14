@@ -132,6 +132,11 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // Names and on/off only. The MCP settings list, which carries commands and
   // addresses, stays closed.
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/mcp-servers$/ },
+  // The bot's Data, read-only: the sheet and tables, a page of rows (a POST
+  // only for its body), a chart card's picture. Running SQL stays on the host.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/data$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/data\/page$/ },
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/data\/cards\/c_\d+\/image$/ },
   // Team memory edits are content, not execution policy. The section rides as
   // a query string.
   { method: "GET", path: /^\/api\/team-memory$/ },

@@ -1,7 +1,7 @@
 import { userError } from "../user-errors.ts";
 import { basename, join } from "node:path";
 
-import type { WireBot, WireGroup } from "../../shared/wire.ts";
+import type { BotsResponse, WireBot, WireGroup } from "../../shared/wire.ts";
 import { NO_SUCH_BOT } from "../../shared/bot-read.ts";
 import {
   ATTACHMENTS_DIR, attachmentStorageUsage, clearAttachments, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES,
@@ -124,7 +124,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
             return [bot.id, { held: snapshot.held, helpReason: snapshot.helpReason, ...(snapshot.help ? { help: snapshot.help } : {}) }];
           }),
         ),
-      });
+      } satisfies BotsResponse<MessagePage["messages"][number]>);
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)$/);

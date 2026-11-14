@@ -153,10 +153,10 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     expect(pageDoc).toMatchObject({ room: true, can: { message: false, modelContext: false, serverTools: false, openLinks: true } });
     expect(await api("GET", `/api/threads/${room.threadId}/messages/${boardRow.id}/app`)).toMatchObject({ room: true, can: { serverTools: false, serverResources: false, message: false } });
 
-    // Both rows render in the room for the person, view-only: no Point and no Share on the page.
+    // Both rows render in the room for the person, view-only: Point (its pick goes to the page's bot), no Share.
     const live = (id: string) => `[data-app="${id}"][data-app-room][data-app-state="live"] iframe[data-app-frame]`;
     await until(() => evaluate(`Boolean(document.querySelector('${live(pageId)}') && document.querySelector('${live(boardRow.id)}'))`), "both frames to go live", 30_000);
-    expect(await evaluate(`[...document.querySelectorAll('[data-app="${pageId}"] button')].map((b) => b.textContent.trim()).filter((t) => t === "Point" || t === "Share")`)).toEqual([]);
+    expect(await evaluate(`[...document.querySelectorAll('[data-app="${pageId}"] button')].map((b) => b.textContent.trim()).filter((t) => t === "Point" || t === "Share")`)).toEqual(["Point"]);
     expect(await evaluate(`Boolean([...document.querySelectorAll('[data-app="${pageId}"] button')].find((b) => b.getAttribute("aria-label") === "Full screen"))`)).toBe(true);
     mkdirSync(evidenceDir, { recursive: true });
 
@@ -188,9 +188,8 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     await inView(pageId);
     await ui("screenshot", "--out", join(evidenceDir, "room-pages-clicked-send.png"));
 
-    const board = await inView(boardRow.id);
-    // The board's "Paint it red" button: under its heading and its result line, in the browser's default styles.
-    await click(board, 48, 124);
+    await inView(boardRow.id);
+    await ui("click", "--name", "Paint it red");
     await until(() => shows(`Error -32000: ${ROOM_VIEW_ONLY}`), "the board to show the host's refusal");
     await inView(boardRow.id);
     await ui("screenshot", "--out", join(evidenceDir, "room-pages-clicked-app.png"));

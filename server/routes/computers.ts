@@ -1,5 +1,6 @@
 import { z, type ZodString } from "zod";
 import * as boat from "../boat.ts";
+import { boatHealth } from "../boat-health.ts";
 import type { ComputerControl } from "../computer-control.ts";
 import { isValidSshAlias, localVmMaxInstances, localVmMode, localVmResources, localVmPersistentAddons, type AppConfig } from "../config.ts";
 import {
@@ -27,6 +28,7 @@ import { teamComputerAssignment, teamComputerCreate, teamComputerOwner, type Tea
 import * as vps from "../vps-computer.ts";
 import { vpsAliasesInPlay } from "../vps-hosts.ts";
 import type { BusyFlag, RemoteComputerProvider } from "./config.ts";
+import { createCloudComputerRecoveryRoutes, type CloudComputerRecoveryRouteDeps } from "./cloud-computer-recovery.ts";
 import { createComputerFramesRoutes } from "./computer-frames.ts";
 import { createComputerUsageRoutes } from "./computer-usage.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -83,6 +85,9 @@ export interface ComputerRouteDeps {
   claimManagedVpsMutation(containerName: string): () => void;
   /** A cloud computer was just woken, created or opened: its idle window starts again. */
   cloudComputerUsed(owner: string): void;
+  boatRecovery: CloudComputerRecoveryRouteDeps["boatRecovery"];
+  /** Whose cloud computer a bot uses: its own id, or its team computer's key. */
+  cloudComputerOwner(bot: BotRecord): string;
 }
 
 export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
@@ -99,9 +104,11 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
   const usage = createComputerUsageRoutes(deps);
   // A map owner is a bot id or a team computer's key; a bot's hold may sit on the shared desktop's key.
   const frames = createComputerFramesRoutes({ ...deps, computerControl: { snapshot: botComputerControlSnapshot } });
+  const recovery = createCloudComputerRecoveryRoutes({ ...deps, botComputerControlKey: deps.cloudComputerOwner });
   return async (context) => {
     if (await usage(context) !== PASS) return;
     if (await frames(context) !== PASS) return;
+    if (await recovery(context) !== PASS) return;
     const { req, res, url, path, method, auth, json, readBody } = context;
     const routines = deps.routines();
     let m: RegExpMatchArray | null = null;
@@ -208,7 +215,10 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
     // Read-only; lifecycle changes are revalidated against a fresh provider listing. The path keeps its historical /boxes segment.
     if (method === "GET" && path === "/api/computers/boxes") {
       res.setHeader("cache-control", "private, no-store");
-      return json(res, 200, await boat.listManagedBoats(cfg, managedBoatOwners()));
+      const inventory = await boat.listManagedBoats(cfg, managedBoatOwners());
+      // A computer that stopped answering is not shown running, whatever the provider still says.
+      return json(res, 200, { ...inventory, instances: inventory.instances.map((instance) =>
+        boatHealth.notRespondingSince(instance.boxId) === null ? instance : { ...instance, state: "error" }) });
     }
     m = path.match(/^\/api\/computers\/boxes\/([\w-]+)\/(sleep|delete)$/);
     if (m && method === "POST") {

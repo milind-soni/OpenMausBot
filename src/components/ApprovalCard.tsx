@@ -159,6 +159,8 @@ function plainWhen(schedule: RoutineRequestSchedule): string {
 }
 
 export function appliedChange(card: OptionCardData, name: string): { line: string; canUndo: boolean; cancels?: boolean } | undefined {
+  const setting = card.appSettingRequest;
+  if (setting) return { line: t("approval.applied.appSetting", { name, title: `${setting.label}: ${approvalDetailText(card)}` }), canUndo: true };
   const routine = card.routineRequest;
   if (routine) {
     const operation = routine.operation;

@@ -143,7 +143,7 @@ describe("QueuedComposerMessages", () => {
     );
     expect(interruptMarkup).toContain(">Stop and send</button>");
     expect(interruptMarkup).toContain('aria-label="Stop and send"');
-    expect(interruptMarkup).toContain('title="Stop the running turn and send this message now"');
+    expect(interruptMarkup).toContain('title="Stop the running turn and any work it handed to other bots, then send this message now"');
     expect(interruptMarkup).not.toContain("aria-label=\"Steer queued message now\"");
   });
 
@@ -178,7 +178,7 @@ describe("QueuedComposerMessages", () => {
     );
     expect(markup).toContain(">Stop and send next</button>");
     expect(markup).toContain('aria-label="Stop and send next"');
-    expect(markup).toContain('title="Stop the running turn and send the next queued message now"');
+    expect(markup).toContain('title="Stop the running turn and any work it handed to other bots, then send the next queued message now"');
     expect(markup).not.toContain("aria-label=\"Steer the next queued message now\"");
   });
 
@@ -191,7 +191,7 @@ describe("QueuedComposerMessages", () => {
     }));
     expect(markup).toContain(">Stop and send all</button>");
     expect(markup).toContain('aria-label="Stop and send all"');
-    expect(markup).toContain('title="Stop the running turn and send all 2 queued messages now"');
+    expect(markup).toContain('title="Stop the running turn and any work it handed to other bots, then send all 2 queued messages now"');
   });
 
   it("puts the queue-level Steer action on the head only and keeps every delete distinct", () => {

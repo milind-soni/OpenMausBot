@@ -50,6 +50,15 @@ function focus(text: string) {
 }
 
 describe("search match highlighting", () => {
+  it("locates a copied message inside the viewed transcript", () => {
+    const scoped = { querySelector: vi.fn(() => ({ lastElementChild: target })) };
+    fixture.text = "";
+    useFocusMessage("thread", true, { current: scoped as unknown as HTMLElement });
+    cleanup = fixture.effect!() as () => void;
+    expect(scoped.querySelector).toHaveBeenCalledWith('[data-mid="message"]');
+    expect(target.scrollIntoView).toHaveBeenCalledOnce();
+  });
+
   it.each(["", " ", "\t\r\n"])("does not create an empty range for %j", (text) => {
     focus(text);
     expect(ranges).toEqual([]);
