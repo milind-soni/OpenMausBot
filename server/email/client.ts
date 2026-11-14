@@ -198,11 +198,19 @@ export async function testSending(login: { username: string; password: string } 
   const connection = new SMTPConnection(smtpOptions(server, at));
   // A failure after the answer below reports here too; the awaited step carries it.
   connection.on("error", () => {});
+  const step = (start: (done: (error?: Error | null) => void) => void) => new Promise<void>((resolve, reject) => {
+    const done = (error?: Error | null) => {
+      connection.removeListener("error", done);
+      if (error) reject(error); else resolve();
+    };
+    connection.once("error", done);
+    try { start(done); } catch (error) { connection.removeListener("error", done); reject(error); }
+  });
   try {
-    await new Promise<void>((resolve, reject) => { connection.once("error", reject); connection.connect(() => { connection.removeListener("error", reject); resolve(); }); });
+    await step((done) => connection.connect(done));
     if (!connection.secure) throw new SendingError("no-tls", server);
     if (!connection.allowsAuth) throw new SendingError("no-sign-in", server);
-    if (login) await new Promise<void>((resolve, reject) => connection.login({ user: login.username, pass: login.password }, (error) => (error ? reject(error) : resolve())));
+    if (login) await step((done) => connection.login({ user: login.username, pass: login.password }, done));
   } catch (error) {
     throw sendingError(error, server);
   } finally { connection.close(); }
