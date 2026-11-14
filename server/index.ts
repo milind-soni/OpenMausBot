@@ -145,7 +145,7 @@ import {
   type Runtime,
 } from "./container-computer.ts";
 import { containerComputerMcp } from "./local-vm-box.ts";
-import { attachedFileLine, attachForTurn, saveBotAttachment } from "./bot-attachment.ts";
+import { attachedFileLine, attachForTurn, saveBotAttachment, saveBotAvatarImage } from "./bot-attachment.ts";
 import {
   cacheUntilConfigChanges,
   ensureDirs,
@@ -9227,6 +9227,7 @@ const teamSetupRequests = new TeamSetupRequestService({
   store, teams: teamSetupTeams, hasTeamAuthority, canPersist: proposalPersistence, maxBots: MAX_WORKSPACE_BOTS,
   autoApply: appliesDirectly,
   validateChange: (before, fields) => assertTeamComputerChangeIdle(before, { ...before, ...fields }),
+  attachmentExists: storedAvatarExists,
   ownsThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)),
   targetBusy: (botId, sourceThreadId) => {
     if (!sourceThreadId) return Boolean(store.bot(botId)?.busy || hasDirectDispatch(botId) || activeGroupTurnForBot(botId) || routines?.activeRunForBot(botId));
@@ -11077,6 +11078,18 @@ function messageFileRootsForThread(senderId: string, threadId: string): string[]
     attachments: ATTACHMENTS_DIR,
     pinnedCwd,
     configuredCwd,
+  });
+}
+
+/** An avatar a bot proposes: a stored attachment URL or "" (clear) passes through for the request's own checks; anything
+ * else is a picture file in the requesting bot's own folders, copied into the attachment store as a stored URL. */
+async function avatarFromProposal(value: unknown, capability: InternalCapability): Promise<unknown> {
+  if (typeof value !== "string" || value.trim() === "" || value.startsWith("/api/attachments/")) return value;
+  const vm = await attachmentVmForTurn(capability);
+  return saveBotAvatarImage({
+    path: value,
+    roots: messageFileRootsForThread(capability.botId, capability.threadId).filter((root) => root !== ATTACHMENTS_DIR),
+    ...(vm ? { guest: { root: VM_WORKSPACE_GUEST, host: vm.workspaceDir } } : {}),
   });
 }
 
@@ -13388,11 +13401,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const owner = connectorThread(from.id, body.fromThreadId);
         if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
         const targetBotId = body.forBotId?.trim() || from.id;
+        let changes = body.changes;
+        if (changes && typeof changes === "object" && !Array.isArray(changes) && "avatarUrl" in changes) {
+          changes = { ...changes, avatarUrl: await avatarFromProposal((changes as Record<string, unknown>).avatarUrl, internalCapability) };
+        }
         const proposed = profileRequests.submit({
           botId: from.id,
           threadId: body.fromThreadId,
           targetBotId,
-          changes: body.changes,
+          changes,
           reason: body.reason,
           from: owner.group ? { botId: from.id, name: from.name, color: from.color } : undefined,
         });
@@ -13440,7 +13457,19 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const chief = store.bot(internalCapability.botId)!;
         const owner = connectorThread(chief.id, internalCapability.threadId);
         if (!owner) return json(res, 403, { error: "Source conversation no longer belongs to the Chief" });
-        const proposed = await teamSetupRequests.submit({ botId: chief.id, threadId: internalCapability.threadId, plan: parsed.data.plan,
+        let plan = parsed.data.plan;
+        const operations = plan && typeof plan === "object" && !Array.isArray(plan) ? (plan as { operations?: unknown }).operations : undefined;
+        if (Array.isArray(operations) && operations.length <= 40) {
+          const withAvatars = [];
+          for (const operation of operations) {
+            const fields = operation && typeof operation === "object" ? (operation as { fields?: unknown }).fields : undefined;
+            withAvatars.push(fields && typeof fields === "object" && !Array.isArray(fields) && "avatarUrl" in fields
+              ? { ...operation, fields: { ...fields, avatarUrl: await avatarFromProposal((fields as Record<string, unknown>).avatarUrl, internalCapability) } }
+              : operation);
+          }
+          plan = { ...(plan as object), operations: withAvatars };
+        }
+        const proposed = await teamSetupRequests.submit({ botId: chief.id, threadId: internalCapability.threadId, plan,
           canCommit: () => internalCapabilityIsActive(internalCapability),
           ...(owner.group ? { from: { botId: chief.id, name: chief.name, color: chief.color } } : {}) });
         if (proposed.state === "applied" || proposed.state === "pending") appendDecision(DATA_DIR, { threadId: internalCapability.threadId, requestId: proposed.requestId, botId: chief.id,
@@ -14111,6 +14140,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (!checkedCwd.ok) return json(res, 400, { error: checkedCwd.error });
           cwd = checkedCwd.cwd ?? undefined;
         }
+        const avatarUrl = body.avatarUrl === undefined ? undefined : await avatarFromProposal(body.avatarUrl, internalCapability);
         // Discovery can yield; check current authority and capacity again before writing.
         if (store.bot(chief.id) !== chief || chief.hidden || !chiefLevel(chief) || !connectorThread(chief.id, fromThreadId)) {
           return json(res, 403, { error: "only an active Chief of Staff can create operator bots" });
@@ -14146,6 +14176,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 soul,
                 modelSelection: selection,
                 ...(cwd !== undefined ? { cwd } : {}),
+                ...(avatarUrl !== undefined ? { avatarUrl } : {}),
               },
             }],
           },

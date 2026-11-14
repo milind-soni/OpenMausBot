@@ -686,6 +686,10 @@
           "cwd": {
             "type": "string",
             "description": "Absolute path of the folder this specialist's tools read and write in (for example /Users/me/Projects/site). It must already exist. Leave it out for the specialist's private workspace."
+          },
+          "avatar_url": {
+            "type": "string",
+            "description": "Stored /api/attachments/... picture URL, or a PNG, JPEG, GIF or WebP file path in your working folder."
           }
         },
         "required": [
@@ -789,6 +793,19 @@
                       "type": "string",
                       "maxLength": 60,
                       "description": "Exact authorized existing team, or a team explicitly named in newTeams. Empty string means General."
+                    },
+                    "avatarUrl": {
+                      "type": "string",
+                      "description": "Stored /api/attachments/... picture URL, or a PNG, JPEG, GIF or WebP file path in your working folder. \"\" = mascot."
+                    },
+                    "avatarCrop": {
+                      "type": "string",
+                      "enum": [
+                        "mascot",
+                        "circle",
+                        "rounded",
+                        "square"
+                      ]
                     },
                     "modelSelection": {
                       "type": "object",
@@ -1843,7 +1860,7 @@
     },
     {
       "name": "propose_profile",
-      "description": "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), working folder (cwd), alert and voice toggles (notifications, speakReplies), mascot color, or custom avatar image. Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead. A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section. Read the result: it applies immediately at every access level, and the person sees it with an Undo where possible. If applied, continue the work without another confirmation. Only a pending result (a Cloud conversation its owner did not drive) means ending the turn to wait for the owner. Never claim success without an applied result; report failures honestly. This does not elevate another bot's execution permissions.",
+      "description": "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), working folder (cwd), alert and voice toggles (notifications, speakReplies), color or avatar. Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead. A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section. Read the result: it applies immediately at every access level, and the person sees it with an Undo where possible. If applied, continue the work without another confirmation. Only a pending result (a Cloud conversation its owner did not drive) means ending the turn to wait for the owner. Never claim success without an applied result; report failures honestly. This does not elevate another bot's execution permissions.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1893,11 +1910,11 @@
               "silver",
               "chrome"
             ],
-            "description": "Mascot color, shown while the avatar uses the mascot shape."
+            "description": "Mascot color."
           },
           "avatar_url": {
             "type": "string",
-            "description": "Custom avatar image already stored by the app, as an /api/attachments/... URL (for example a picture the person shared in this conversation). An empty string removes the custom image and returns to the mascot."
+            "description": "Stored /api/attachments/... picture URL, or a PNG, JPEG, GIF or WebP file path in your working folder. \"\" = mascot."
           },
           "reason": {
             "type": "string",

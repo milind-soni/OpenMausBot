@@ -9,6 +9,7 @@ import {
   saveFile,
   saveImage,
 } from "./attachments.ts";
+import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { mimeFor, openFileSavedSince, openMessageFile, type OpenedMessageFile } from "./message-file.ts";
 import type { Message } from "./store.ts";
 
@@ -96,6 +97,33 @@ export async function saveBotAttachment(input: SaveBotAttachmentInput): Promise<
       expectedBytes: file.bytes,
     });
     return { attachment: { kind: "file", path: saved.path, mime: saved.mime, name: saved.name, source: file.path }, bytes: saved.bytes };
+  } finally {
+    await file.handle.close().catch(() => undefined);
+  }
+}
+
+export interface SaveBotAvatarInput {
+  path: string;
+  /** Host directories the bot may read from (its working folder, workspace); never the attachment store itself. */
+  roots: readonly string[];
+  guest?: { root: string; host: string };
+}
+
+/** A bot's own picture file becomes a stored avatar URL. Only PNG, JPEG, GIF and WebP inside the roots qualify: the
+ * shared resolver refuses `..` escapes and links that leave them, and the image cap applies before anything is copied. */
+export async function saveBotAvatarImage(input: SaveBotAvatarInput): Promise<string> {
+  const requested = input.path.trim();
+  if (!requested) throw statusError(400, "avatar path is required");
+  const guestHost = input.guest ? guestWorkspaceToHost(requested, input.guest.root, input.guest.host) : null;
+  const roots = input.guest ? [input.guest.host, ...input.roots] : input.roots;
+  const file = await openMessageFile(guestHost ?? requested, roots, IMAGE_MAX_BYTES);
+  try {
+    const mime = mimeFor(file.name);
+    if (!extensionForMime(mime)) throw statusError(415, `${file.name} is not a PNG, JPEG, GIF, or WebP image`);
+    if (file.bytes > IMAGE_MAX_BYTES) throw statusError(413, `image exceeds ${IMAGE_MAX_BYTES} bytes`);
+    const url = botAvatarUrlFromStoredPath(saveImage(await file.handle.readFile(), mime).path);
+    if (!url) throw statusError(500, "the picture could not be stored");
+    return url;
   } finally {
     await file.handle.close().catch(() => undefined);
   }

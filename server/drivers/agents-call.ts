@@ -192,9 +192,7 @@ function confirmationResult(r: Json, fallback: string, noun = "routine"): { text
   const completed = completedProposalResult(r, fallback);
   if (completed) return completed;
   const summary = typeof r.summary === "string" && r.summary.trim() ? `\n\n${r.summary.trim()}` : "";
-  return {
-    text: `A confirmation card is now visible to the user for ${fallback}.${summary}\n\nThis change has not been applied yet. End this turn and wait for the user to confirm or deny the card; do not claim the ${noun} was created or changed before confirmation.`,
-  };
+  return { text: `A confirmation card is now visible to the user for ${fallback}.${summary}\n\nThis change has not been applied yet. End this turn and wait for the user to confirm or deny the card; do not claim the ${noun} was created or changed before confirmation.` };
 }
 
 function recallSpeaker(hit: Json): string {
@@ -540,6 +538,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         ...(copyFrom ? { copyFromBotId: copyFrom } : {}),
         ...(args.modelSelection !== undefined ? { modelSelection: args.modelSelection } : {}),
         ...(typeof args.cwd === "string" ? { cwd: args.cwd.trim() } : {}),
+        ...(typeof args.avatar_url === "string" && args.avatar_url.trim() ? { avatarUrl: args.avatar_url.trim() } : {}),
       }),
     });
     if (r.state === "pending") {
@@ -548,9 +547,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!r.id) return completedProposalResult(r, `creating @${botName}`) ?? { text: `@${botName} was not created.`, isError: true };
     const created = r.name ?? botName;
     const noComputer = r.noCloudComputerYet === true ? noCloudComputerNote(String(created)) : "";
-    return {
-      text: `Created @${created} in ${r.section ?? "General"} [id: ${r.id}].${r.modelSelection ? ` Model: ${JSON.stringify(r.modelSelection)}.` : ""} Assign work with coordinate_bots.${noComputer}`,
-    };
+    return { text: `Created @${created} in ${r.section ?? "General"} [id: ${r.id}].${r.modelSelection ? ` Model: ${JSON.stringify(r.modelSelection)}.` : ""} Assign work with coordinate_bots.${noComputer}` };
   }
   if (member === "create_room") {
     if (args.section !== undefined) return { text: "A room you create stays in your own department; ask the user to move it.", isError: true };
@@ -678,14 +675,10 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     }
   }
   if (name === "propose_profile") {
-    if ((args.notifications !== undefined && typeof args.notifications !== "boolean")
-      || (args.speakReplies !== undefined && typeof args.speakReplies !== "boolean")) {
+    if ((args.notifications !== undefined && typeof args.notifications !== "boolean") || (args.speakReplies !== undefined && typeof args.speakReplies !== "boolean")) {
       return { text: "propose_profile notifications and speakReplies must be true or false.", isError: true };
     }
-    // A whitespace-only avatar_url would trim to an empty string that reads
-    // as an intentional clear, removing the avatar on a malformed proposal.
-    // Reject the whole call instead; an explicit empty string stays the clear
-    // command.
+    // Whitespace would trim to "" and read as a clear; only an explicit "" clears the avatar.
     if (typeof args.avatar_url === "string" && args.avatar_url !== "" && !args.avatar_url.trim()) {
       return { text: "propose_profile avatar_url must be a URL, or an empty string to clear it.", isError: true };
     }

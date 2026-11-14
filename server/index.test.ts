@@ -2844,6 +2844,55 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("turns a picture file in the Chief's working folder into the avatar of a bot it creates, sets up or updates", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    const created: string[] = [];
+    try {
+      const folder = mkdtempSync(join(tmpdir(), "omb-avatar-file-"));
+      writeFileSync(join(folder, "face.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]));
+      writeFileSync(join(folder, "face.svg"), "<svg/>");
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask", cwd: folder })).status).toBe(200);
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const post = async (path: string, body: Record<string, unknown>) => {
+        const response = await fetch(`${BASE}${path}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ fromBotId: chief.id, fromThreadId: chief.threadId, ...body }),
+        });
+        return { status: response.status, body: await response.json() as { id?: string; state?: string; error?: string; result?: { bots?: Array<{ id: string }> } } };
+      };
+      const bots = async () => (await api("GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; avatarUrl?: string; avatarCrop?: string }>;
+      const stored = /^\/api\/attachments\/[A-Za-z0-9-]+\.png$/;
+
+      const made = await post("/api/internal/create-bot", { name: `Painted ${chief.id}`, role: "Ops", instructions: "Work.", avatarUrl: "face.png" });
+      expect(made.status, JSON.stringify(made.body)).toBe(201);
+      created.push(made.body.id!);
+      expect((await bots()).find((bot) => bot.id === made.body.id)).toMatchObject({ avatarUrl: expect.stringMatching(stored), avatarCrop: "circle" });
+
+      const vector = await post("/api/internal/create-bot", { name: `Vector ${chief.id}`, role: "Ops", instructions: "Work.", avatarUrl: "face.svg" });
+      expect(vector.status).toBe(415);
+      const escaped = await post("/api/internal/create-bot", { name: `Escaped ${chief.id}`, role: "Ops", instructions: "Work.", avatarUrl: "../face.png" });
+      expect([403, 404]).toContain(escaped.status);
+      const modelSelection = ((await api("GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; modelSelection: unknown }>)
+        .find((bot) => bot.id === made.body.id)!.modelSelection;
+      const setup = await post("/api/internal/team-setup-requests", { plan: { reason: "you asked", operations: [
+        { action: "create", key: "framed", fields: { name: `Framed ${chief.id}`, title: "Ops", soul: "Work.", avatarUrl: join(folder, "face.png"), avatarCrop: "rounded", modelSelection } },
+      ] } });
+      expect(setup.status, JSON.stringify(setup.body)).toBe(201);
+      const framedId = setup.body.result?.bots?.[0]?.id;
+      expect(framedId).toEqual(expect.any(String));
+      created.push(framedId!);
+      expect((await bots()).find((bot) => bot.id === framedId)).toMatchObject({ avatarUrl: expect.stringMatching(stored), avatarCrop: "rounded" });
+
+      const own = await post("/api/internal/profile-requests", { changes: { avatarUrl: "face.png" }, reason: "you asked" });
+      expect(own.status, JSON.stringify(own.body)).toBe(201);
+      expect((await bots()).find((bot) => bot.id === chief.id)).toMatchObject({ avatarUrl: expect.stringMatching(stored), avatarCrop: "circle" });
+    } finally {
+      for (const id of created) await api("DELETE", `/api/bots/${id}`);
+      await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
   it("takes a created operator's role description up to 4000 characters, and says what to do with a longer one", async () => {
     const chief = (await api("POST", "/api/bots")).body.bot;
     let createdId: string | undefined;

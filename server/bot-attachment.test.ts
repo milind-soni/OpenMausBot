@@ -7,8 +7,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // attachments.ts reads DATA_DIR at import time.
 const DATA_ROOT = mkdtempSync(join(tmpdir(), "omb-bot-attachment-"));
 process.env.OMB_DATA_DIR = join(DATA_ROOT, "data");
-const { attachForTurn, deliveredCopy, guestWorkspaceToHost, saveBotAttachment } = await import("./bot-attachment.ts");
-const { ATTACHMENTS_DIR, FILE_MAX_BYTES, PREVIEW_MAX_BYTES } = await import("./attachments.ts");
+const { attachForTurn, deliveredCopy, guestWorkspaceToHost, saveBotAttachment, saveBotAvatarImage } = await import("./bot-attachment.ts");
+const { ATTACHMENTS_DIR, FILE_MAX_BYTES, IMAGE_MAX_BYTES, PREVIEW_MAX_BYTES } = await import("./attachments.ts");
 
 const WORK = join(DATA_ROOT, "work");
 const VM_HOME = join(DATA_ROOT, "vm-home");
@@ -43,6 +43,53 @@ describe("guestWorkspaceToHost", () => {
     ]) {
       expect(guestWorkspaceToHost(bad, guest, host), bad).toBeNull();
     }
+  });
+});
+
+describe("saveBotAvatarImage", () => {
+  const AVATARS = join(WORK, "avatars");
+  beforeAll(() => mkdirSync(AVATARS, { recursive: true }));
+
+  it("stores a picture from the bot's folder and returns its avatar URL", async () => {
+    writeFileSync(join(AVATARS, "me.png"), PNG);
+    const url = await saveBotAvatarImage({ path: "avatars/me.png", roots: [WORK] });
+    expect(url).toMatch(/^\/api\/attachments\/[A-Za-z0-9-]+\.png$/);
+    expect(readFileSync(join(ATTACHMENTS_DIR, url.split("/").pop()!))).toEqual(PNG);
+    expect(await saveBotAvatarImage({ path: join(AVATARS, "me.png"), roots: [WORK] })).toMatch(/\.png$/);
+  });
+
+  it("maps a Local VM workspace path onto its host folder", async () => {
+    writeFileSync(join(VM_HOME, "reports", "face.webp"), PNG);
+    const guest = { root: "/home/cua/workspace", host: VM_HOME };
+    expect(await saveBotAvatarImage({ path: "/home/cua/workspace/reports/face.webp", roots: [WORK], guest })).toMatch(/\.webp$/);
+  });
+
+  it("refuses files that are not PNG, JPEG, GIF or WebP", async () => {
+    for (const name of ["logo.svg", "page.html", "notes.txt", "report.pdf"]) {
+      writeFileSync(join(AVATARS, name), "<svg onload=alert(1)>");
+      await expect(saveBotAvatarImage({ path: `avatars/${name}`, roots: [WORK] }), name).rejects.toMatchObject({ status: 415 });
+    }
+  });
+
+  it("refuses a picture over the image limit before copying it", async () => {
+    const big = join(AVATARS, "big.png");
+    writeFileSync(big, "");
+    truncateSync(big, IMAGE_MAX_BYTES + 1);
+    await expect(saveBotAvatarImage({ path: "avatars/big.png", roots: [WORK] })).rejects.toMatchObject({ status: 413 });
+  });
+
+  it("never reads outside the bot's folders, through .. or a link", async () => {
+    const outside = join(DATA_ROOT, "elsewhere");
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, "secret.png"), PNG);
+    await expect(saveBotAvatarImage({ path: "../elsewhere/secret.png", roots: [WORK] })).rejects.toMatchObject({ status: 403 });
+    await expect(saveBotAvatarImage({ path: join(outside, "secret.png"), roots: [WORK] })).rejects.toMatchObject({ status: 403 });
+    symlinkSync(join(outside, "secret.png"), join(AVATARS, "linked.png"));
+    await expect(saveBotAvatarImage({ path: "avatars/linked.png", roots: [WORK] })).rejects.toMatchObject({ status: 403 });
+    await expect(saveBotAvatarImage({ path: "/home/cua/workspace/../../elsewhere/secret.png", roots: [WORK], guest: { root: "/home/cua/workspace", host: VM_HOME } }))
+      .rejects.toMatchObject({ status: 404 });
+    await expect(saveBotAvatarImage({ path: "avatars/missing.png", roots: [WORK] })).rejects.toMatchObject({ status: 404 });
+    await expect(saveBotAvatarImage({ path: "  ", roots: [WORK] })).rejects.toMatchObject({ status: 400 });
   });
 });
 

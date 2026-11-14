@@ -1402,6 +1402,8 @@ export class Store {
         nextBots[at] = next;
       }
       if (operation.fields.chiefOfStaff === false) delete next.managedSections;
+      // "" in a reviewed setup (or its Undo) means no picture: keep none rather than an empty URL.
+      if (next.avatarUrl === "") delete next.avatarUrl;
       next.section = sectionKey(next.section) || undefined;
       if (operation.fields.soul !== undefined) { next.soulHash = soulHash(operation.fields.soul); next.soulDrift = false; }
       changed.push(next);

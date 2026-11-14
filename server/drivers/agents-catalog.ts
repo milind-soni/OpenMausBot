@@ -5,6 +5,7 @@ import { OPTIONS_CARD_LIMITS, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/o
 import { FILE_MAX_BYTES, limitMegabytes } from "../../shared/upload-limits.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 import { MAUS_COLOR_NAMES } from "../../shared/wire.ts";
+import { BOT_AVATAR_CROPS } from "../../shared/bot-avatar.ts";
 import { CHAT_CARD_TOOL_DEFINITIONS } from "./agents-chat-card-tools.ts";
 import { DEVS_TOOL_DEFINITIONS } from "./agents-devs-tools.ts";
 import { HELPER_TOOL_DEFINITIONS } from "./agents-helper-tools.ts";
@@ -181,6 +182,9 @@ const TRIGGER_FIELDS_SCHEMA = {
 const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
 const APPLIES_OUTCOME = " Read the result: it applies immediately at every access level, and the person sees it with an Undo where possible. If applied, continue the work without another confirmation. Only a pending result (a Cloud conversation its owner did not drive) means ending the turn to wait for the owner. Never claim success without an applied result; report failures honestly. This does not elevate another bot's execution permissions.";
 
+
+/** A stored picture, or an image file the bot made or saved in its own folder; the server copies the file into the store. */
+const AVATAR_SOURCE = "Stored /api/attachments/... picture URL, or a PNG, JPEG, GIF or WebP file path in your working folder.";
 
 const TOOL_DEFINITIONS = [
   {
@@ -426,6 +430,7 @@ const TOOL_DEFINITIONS = [
           maxLength: 1024,
           description: "Absolute path of the folder this specialist's tools read and write in (for example /Users/me/Projects/site). It must already exist. Leave it out for the specialist's private workspace.",
         },
+        avatar_url: { type: "string", maxLength: 1024, description: AVATAR_SOURCE },
       },
       required: ["name"],
     },
@@ -461,6 +466,8 @@ const TOOL_DEFINITIONS = [
               soulAppend: { type: "string", description: "Update only, instead of soul: text appended to its current instructions." },
               cwd: { type: "string", maxLength: 1024, description: "Create only: absolute path of the folder the new bot's tools read and write in. It must already exist. Leave it out for a private workspace." },
               section: { type: "string", maxLength: 60, description: "Exact authorized existing team, or a team explicitly named in newTeams. Empty string means General." },
+              avatarUrl: { type: "string", maxLength: 1024, description: `${AVATAR_SOURCE} "" = mascot.` },
+              avatarCrop: { type: "string", enum: [...BOT_AVATAR_CROPS] },
               modelSelection: { type: "object", additionalProperties: false, properties: {
                 instanceId: { type: "string" }, model: { type: "string" }, effort: { type: "string" }, variant: { type: "string" },
               }, required: ["instanceId", "model"] },
@@ -714,7 +721,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "propose_profile",
     description:
-      "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), working folder (cwd), alert and voice toggles (notifications, speakReplies), mascot color, or custom avatar image. Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead." + CHIEF_PROFILE_TARGET + APPLIES_OUTCOME,
+      "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), working folder (cwd), alert and voice toggles (notifications, speakReplies), color or avatar. Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead." + CHIEF_PROFILE_TARGET + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -723,34 +730,13 @@ const TOOL_DEFINITIONS = [
         title: { type: "string", maxLength: 200, description: "New role or title." },
         description: { type: "string", maxLength: 4000, description: "New one-line blurb shown in rosters." },
         soul: { type: "string", description: "Full replacement text for SOUL.md, at most 24000 bytes." },
-        cwd: {
-          type: "string",
-          maxLength: 1024,
-          description: "Absolute path of the folder your tools read and write in (for example /Users/me/Projects/site). It must already exist. An empty string means your private workspace.",
-        },
-        notifications: {
-          type: "boolean",
-          description: "Completion and attention notifications for this bot on the host and paired clients.",
-        },
-        speakReplies: {
-          type: "boolean",
-          description: "Speak this bot's replies aloud as they settle, without being asked.",
-        },
-        color: {
-          type: "string",
-          enum: [...MAUS_COLOR_NAMES],
-          description: "Mascot color, shown while the avatar uses the mascot shape.",
-        },
-        avatar_url: {
-          type: "string",
-          maxLength: 256,
-          description: "Custom avatar image already stored by the app, as an /api/attachments/... URL (for example a picture the person shared in this conversation). An empty string removes the custom image and returns to the mascot.",
-        },
+        cwd: { type: "string", maxLength: 1024, description: "Absolute path of the folder your tools read and write in (for example /Users/me/Projects/site). It must already exist. An empty string means your private workspace." },
+        notifications: { type: "boolean", description: "Completion and attention notifications for this bot on the host and paired clients." },
+        speakReplies: { type: "boolean", description: "Speak this bot's replies aloud as they settle, without being asked." },
+        color: { type: "string", enum: [...MAUS_COLOR_NAMES], description: "Mascot color." },
+        avatar_url: { type: "string", maxLength: 1024, description: `${AVATAR_SOURCE} "" = mascot.` },
         reason: { type: "string", minLength: 1, maxLength: 500, description: "One sentence the user will see explaining why." },
-        for_bot_id: {
-          type: "string",
-          description: "Chief of Staff only: the id of another bot in your section whose profile this changes. Omit to change your own.",
-        },
+        for_bot_id: { type: "string", description: "Chief of Staff only: the id of another bot in your section whose profile this changes. Omit to change your own." },
       },
       required: ["reason"],
     },
