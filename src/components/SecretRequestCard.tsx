@@ -34,10 +34,11 @@ export function SecretRequestCard({
   const secret = message.secret!;
   const localize = activeLocale() !== "en";
   const greenference = localize && secret.target === "greenferenceApiKey";
+  const llmtr = localize && secret.target === "llmtrApiKey";
   const modelgo = localize && secret.target === "modelgoApiKey";
   const gemini = localize && secret.target === "geminiTtsKey";
-  const label = greenference ? t("keys.greenference.label") : modelgo ? t("keys.modelgo.label") : gemini ? t("keys.label.geminiTts") : secret.label;
-  const placeholder = greenference ? t("keys.greenference.placeholder") : modelgo ? t("keys.modelgo.placeholder") : gemini ? t("voice.gemini.keyPlaceholder") : secret.placeholder;
+  const label = greenference ? t("keys.greenference.label") : llmtr ? t("keys.llmtr.label") : modelgo ? t("keys.modelgo.label") : gemini ? t("keys.label.geminiTts") : secret.label;
+  const placeholder = greenference ? t("keys.greenference.placeholder") : llmtr ? t("keys.llmtr.placeholder") : modelgo ? t("keys.modelgo.placeholder") : gemini ? t("voice.gemini.keyPlaceholder") : secret.placeholder;
   const parts = secret.descriptionParts;
   const suppliedDescription = localize && parts
     ? [t(parts.baseCode), parts.reason, t("server.connect.secretNeverRead", { bot: parts.bot })].filter(Boolean).join(" ")

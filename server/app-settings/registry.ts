@@ -113,7 +113,7 @@ export const withoutKeys = <T extends z.ZodType>(schema: T, except: readonly str
 
 const PROVIDER_KEY_SECTION = {
   openaiApiKey: "openai", anthropicApiKey: "anthropic", openrouterApiKey: "openrouter", mistralApiKey: "mistral", cerebrasApiKey: "cerebras",
-  groqApiKey: "groq", greenferenceApiKey: "greenference", modelgoApiKey: "modelgo", metaApiKey: "meta", deepseekApiKey: "deepseek",
+  groqApiKey: "groq", greenferenceApiKey: "greenference", llmtrApiKey: "llmtr", modelgoApiKey: "modelgo", metaApiKey: "meta", deepseekApiKey: "deepseek",
 } as const satisfies Record<(typeof PROVIDER_CREDENTIAL_TARGETS)[number], keyof CredentialConfig>;
 type ProviderKeyId = keyof typeof PROVIDER_KEY_SECTION;
 /** A local server takes no key; Settings sends the same stand-in for one. */

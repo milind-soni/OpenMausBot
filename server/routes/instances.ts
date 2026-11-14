@@ -486,8 +486,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           else delete entry.hidden;
         }
         if (body.tools !== undefined) {
-          if (!["openai-compat", "grok", "minimax", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta"].includes(entry.driver)) {
-            return json(res, 400, { error: "The tools setting is available for OpenAI-compatible, Grok API, MiniMax API, Mistral API, Cerebras API, Groq API, Greenference API, ModelGo API and Meta API instances only." });
+          if (!["openai-compat", "grok", "minimax", "mistral", "cerebras", "groq", "greenference", "llmtr", "modelgo", "meta"].includes(entry.driver)) {
+            return json(res, 400, { error: "The tools setting is available for OpenAI-compatible, Grok API, MiniMax API, Mistral API, Cerebras API, Groq API, Greenference API, LLMTR API, ModelGo API and Meta API instances only." });
           }
           entry.config = { ...entry.config as Record<string, unknown>, tools: body.tools };
         }

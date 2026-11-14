@@ -26049,7 +26049,10 @@
       "computer.recovery.replaceTitle": "1fb32169c985ef3739cdc00e7951e7bb9574a29880967ece8d8f22a16417b811",
       "inbox.markAllRead": "d7592650e1c90a85fc6151e5454c57227d9474f1ce9fdbf184178bea34974c44",
       "defaultBot.demote": "fda808f10af0d461174c2c5740fcc981ede71c37ce27719e86eb1eee2931e592",
-      "defaultBot.demoteHint": "1db5e6931e4fd99cccdd7c54134199a32b9cc29fc5aaee717826ae164de2960b"
+      "defaultBot.demoteHint": "1db5e6931e4fd99cccdd7c54134199a32b9cc29fc5aaee717826ae164de2960b",
+      "keys.llmtr.label": "eac978cadfae157b6b20e6ad421f766a947439683fb14e3be5a33d0898674219",
+      "keys.llmtr.placeholder": "e7078f67d82ecae126e0d7765ecd865f1bd064c18b54ddfe4ed065360a2bd6e9",
+      "keys.purpose.llmtr": "47af39f879ab8b6dafa49660418fa3d11210de3d4c7dbaf482fcc1fb6e77e33c"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -36732,7 +36735,11 @@
       "settings.browser.proxyConfigured": "05565d7de5c36e10f5859900c77b9a3600c48ccf213cfbe5ebb5afd1225f5cd8",
       "settings.browser.proxyInactive": "ab2ef0c1c52fc3ffb24536578e5eb2a8d06a7027291bfd480eb577a4a3d1b9da",
       "settings.browser.proxySave": "1509f561f2416598629b886ad7d3c05a7e221e4e0675c84bbff4ee6d9e03913d",
-      "settings.browser.proxyClear": "c3812fc4acb861d5182fc2b8155f327f736fbe5e5eb86a7bd7afcb6dc5497282"
+      "settings.browser.proxyClear": "c3812fc4acb861d5182fc2b8155f327f736fbe5e5eb86a7bd7afcb6dc5497282",
+      "keys.llmtr.label": "eac978cadfae157b6b20e6ad421f766a947439683fb14e3be5a33d0898674219",
+      "keys.llmtr.placeholder": "e7078f67d82ecae126e0d7765ecd865f1bd064c18b54ddfe4ed065360a2bd6e9",
+      "keys.purpose.llmtr": "47af39f879ab8b6dafa49660418fa3d11210de3d4c7dbaf482fcc1fb6e77e33c",
+      "secretCard.llmtr.description": "5af443716d6cf941c8448c3df66e2e8f90e2aeebcb3055977f5a0cb4b3065b1b"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -46869,7 +46876,11 @@
       "botIdentity.ai.noProvider": "ede7cf429355234ab1d95a518637f6ed3b7bba675d950f7272e21f7a55225352",
       "botIdentity.ai.openImageSettings": "2ea2e5c8b7a855d5df52664a4d4c7178266afef14dba4cc58c5208d91cc140f9",
       "imageGen.key.xai": "a0e3fcfec16e8ce6b63f370d15d185f7503f5fe7f141cbe2490ee41d9d32f8ee",
-      "imageGen.key.openrouter": "89616b71606749cb60ff685a8d3a659868399545345331bed992a755e5c9e2c4"
+      "imageGen.key.openrouter": "89616b71606749cb60ff685a8d3a659868399545345331bed992a755e5c9e2c4",
+      "keys.llmtr.label": "eac978cadfae157b6b20e6ad421f766a947439683fb14e3be5a33d0898674219",
+      "keys.llmtr.placeholder": "e7078f67d82ecae126e0d7765ecd865f1bd064c18b54ddfe4ed065360a2bd6e9",
+      "keys.purpose.llmtr": "47af39f879ab8b6dafa49660418fa3d11210de3d4c7dbaf482fcc1fb6e77e33c",
+      "secretCard.llmtr.description": "5af443716d6cf941c8448c3df66e2e8f90e2aeebcb3055977f5a0cb4b3065b1b"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -57168,7 +57179,11 @@
       "server.rooms.pickNotSent": "ee5e8edca984f6f1a7d2401d2d765fb86bbf321587c03418c8e2f080159d1fb3",
       "inbox.markAllRead": "d7592650e1c90a85fc6151e5454c57227d9474f1ce9fdbf184178bea34974c44",
       "defaultBot.demote": "fda808f10af0d461174c2c5740fcc981ede71c37ce27719e86eb1eee2931e592",
-      "defaultBot.demoteHint": "1db5e6931e4fd99cccdd7c54134199a32b9cc29fc5aaee717826ae164de2960b"
+      "defaultBot.demoteHint": "1db5e6931e4fd99cccdd7c54134199a32b9cc29fc5aaee717826ae164de2960b",
+      "keys.llmtr.label": "eac978cadfae157b6b20e6ad421f766a947439683fb14e3be5a33d0898674219",
+      "keys.llmtr.placeholder": "e7078f67d82ecae126e0d7765ecd865f1bd064c18b54ddfe4ed065360a2bd6e9",
+      "keys.purpose.llmtr": "47af39f879ab8b6dafa49660418fa3d11210de3d4c7dbaf482fcc1fb6e77e33c",
+      "secretCard.llmtr.description": "5af443716d6cf941c8448c3df66e2e8f90e2aeebcb3055977f5a0cb4b3065b1b"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

@@ -20,6 +20,7 @@ export interface ConfigStatus {
   cerebras?: SavedKey;
   groq?: SavedKey;
   greenference?: SavedKey;
+  llmtr?: SavedKey;
   modelgo?: SavedKey;
   deepseek?: SavedKey;
   meta?: SavedKey;
