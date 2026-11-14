@@ -417,6 +417,7 @@
   "server.teammates.briefCovers.one": "O resumo do trabalho recente de {bot} inclui {count} conversa privada com você",
   "server.teammates.briefCovers.many": "O resumo do trabalho recente de {bot} inclui {count} conversas privadas com você",
   "server.teammates.closedBy": "Conversa encerrada por @{bot}",
+  "server.peerResend.failed": "Não foi possível reenviar isto para a IA de reserva: {detail}",
   "server.teammates.sendFailed": "Não foi possível enviar — {detail}",
   "server.teammates.resultWithheld": "Resultado não repassado: {problem}",
   "server.teammates.replied": "{bot} respondeu",

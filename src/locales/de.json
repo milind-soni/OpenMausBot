@@ -298,6 +298,7 @@
   "server.teammates.briefCovers.one": "Die Übersicht von {bot} über die letzte Arbeit umfasst {count} privaten Chat mit dir",
   "server.teammates.briefCovers.many": "Die Übersicht von {bot} über die letzte Arbeit umfasst {count} private Chats mit dir",
   "server.teammates.closedBy": "Geschlossen von @{bot}",
+  "server.peerResend.failed": "Konnte das nicht an die Ersatz-KI erneut senden: {detail}",
   "server.teammates.sendFailed": "Senden fehlgeschlagen: {detail}",
   "server.teammates.resultWithheld": "Ergebnis zurückgehalten: {problem}",
   "server.teammates.replied": "{bot} hat geantwortet",

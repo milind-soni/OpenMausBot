@@ -57,7 +57,7 @@ function fixture(rows: Message[] = [], overrides: Partial<PeerLimitResendDeps<Op
     guest: () => false,
     generation: () => generation,
     blocked: () => false,
-    settle, release: vi.fn(), startTurn,
+    settle, release: vi.fn(), failedLine: (_threadId: string, detail: string) => `Could not resend this to the backup AI: ${detail}`, startTurn,
     ...overrides,
   } as unknown as PeerLimitResendDeps<Opts, Outcome>;
   const resend = createPeerLimitResend<Opts, Outcome>(deps);

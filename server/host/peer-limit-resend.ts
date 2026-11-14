@@ -67,6 +67,8 @@ export interface PeerLimitResendDeps<Opts, Outcome> {
   generation(threadId: string): string | undefined;
   /** A busy thread, queued steering or the person's Stop: a resend never runs over them. */
   blocked(botId: string, threadId: string): boolean;
+  /** The status row, in the thread's language, saying the resend could not run and why. */
+  failedLine(threadId: string, detail: string): string;
   /** Reports a hand-off's outcome (settleDirectCoordination). */
   settle(generation: string, outcome: Outcome): void;
   /** Lets go of the failed attempt's hand-off: the resend owns its result. */
@@ -138,8 +140,8 @@ export function createPeerLimitResend<Opts extends PeerTurnOpts<Outcome>, Outcom
   function resend(threadId: string): boolean {
     const turn = take(threadId);
     if (!turn) return false;
-    const giveUp = (why?: string): false => {
-      if (why && store.taskByThread(turn.botId, threadId)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: why, ok: false } });
+    const giveUp = (detail?: string): false => {
+      if (detail && store.taskByThread(turn.botId, threadId)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: deps.failedLine(threadId, detail), ok: false } });
       if (turn.held) deps.settle(turn.generation, turn.held);
       return false;
     };
@@ -163,19 +165,19 @@ export function createPeerLimitResend<Opts extends PeerTurnOpts<Outcome>, Outcom
         : deps.policyModelRefusal(target) ?? (instance ? recoveryCapabilityError(
           { driverKind: instance.driverKind, capabilities: instance.adapter.capabilities },
           { driverKind: target.driverKind, capabilities: target.adapter.capabilities }) : undefined);
-      if (refusal || !checked.ok) return giveUp(refusal && `Could not resend this to the backup AI: ${refusal}`);
+      if (refusal || !checked.ok) return giveUp(refusal);
       try {
         deps.assertWithinBudget();
         store.switchTaskModel(turn.botId, threadId, checked.selection, false, false, { ...deps.hostedModels?.resetTask(from, checked.selection), rewound: true });
       } catch (error) {
-        return giveUp(`Could not resend this to the backup AI: ${error instanceof Error ? error.message : String(error)}`);
+        return giveUp(error instanceof Error ? error.message : String(error));
       }
       for (const tool of deps.takeover().carriedOn(current, threadId, from, checked.selection, { scope: turn.scope })) store.appendMessage(threadId, { role: "bot", kind: "activity", tool });
       deps.release(turn.generation);
       void deps.startTurn(turn.botId, turn.text, { ...turn.opts, threadId, userMessage: turn.userMessage, editedMessageId: undefined, peerLimitResent: true }).catch(error => {
-        const why = `Could not resend this to the backup AI: ${error instanceof Error ? error.message : String(error)}`;
+        const detail = error instanceof Error ? error.message : String(error), why = `Could not resend this to the backup AI: ${detail}`;
         (turn.opts.coordination?.settle ?? turn.opts.onSettled)?.({ ok: false, text: turn.held ? `${turn.held.text} ${why}` : why } as Outcome);
-        if (store.taskByThread(turn.botId, threadId)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: why, ok: false } });
+        if (store.taskByThread(turn.botId, threadId)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: deps.failedLine(threadId, detail), ok: false } });
       });
     });
     return true;
