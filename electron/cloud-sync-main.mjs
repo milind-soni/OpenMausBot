@@ -10,6 +10,11 @@ import { lendingForFiles } from "./lent-folders.mjs";
 
 const TOKEN_MS = 30 * 60_000;
 
+// Electron 43 throws when Windows can't resolve the Documents known folder, e.g. one redirected to a drive or share that is gone.
+function documentsDir(app) {
+  try { return app.getPath("documents"); } catch { return path.join(app.getPath("home"), "Documents"); }
+}
+
 /** Whose Files this folder keeps: the first account to use it, as it was before there could be several. Another account's
  * are in a folder of their own, so a folder one account shares is never registered on another's Cloud. */
 export function filesFolderOf(root, accountId, read = (file) => { try { return JSON.parse(fs.readFileSync(file, "utf8")).accountId ?? null; } catch { return null; } },
@@ -27,7 +32,7 @@ export function installCloudFiles({ app, ipcMain, dialog, shell, powerMonitor, f
   const root = path.join(app.getPath("userData"), stateDir);
   const open = (dir) => makeService({ t,
     settingsFile: path.join(dir, "settings.json"), stateFile: path.join(dir, "state.db"),
-    documentsDir: app.getPath("documents"), homeDir: app.getPath("home"), localDataDir, cloudOrigin, fetch, ...(power ? { power } : {}),
+    documentsDir: documentsDir(app), homeDir: app.getPath("home"), localDataDir, cloudOrigin, fetch, ...(power ? { power } : {}),
     trashItem: (file) => shell.trashItem(file), markDownloaded: createDownloadMarker(),
     onChange: (state) => send("files:state-changed", state),
     lending, planDisk: () => { try { return cloudPlanDisk(cloudAccount().state()); } catch { return null; } },
