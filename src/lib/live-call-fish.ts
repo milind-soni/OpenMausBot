@@ -1,6 +1,6 @@
-// A Fish Audio call: Fish's SDK holds the microphone and the agent's audio; the harness hears the call only through what
-// this relays to POST /api/live/relay, and the bot's replies come back the same way.
-import type { LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken, LiveFishTransport } from "../../shared/wire";
+// A Fish Audio or Gemini Live call: the provider's session holds the microphone and the agent's audio; the harness hears
+// the call only through what this relays to POST /api/live/relay, and the bot's replies come back the same way.
+import type { LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken } from "../../shared/wire";
 
 /** The client tool the Fish agent calls to delegate; set up on the agent as a client tool with `expects_response`. */
 export const FISH_DELEGATE_TOOL = "delegate";
@@ -20,8 +20,11 @@ export interface FishAgentSession {
   end(): Promise<void>;
 }
 
-export interface FishSessionOptions {
-  sessionToken: LiveFishSessionToken;
+/** What a relayed call's client gets from the harness: the provider's session and the relay's token. */
+export type RelaySession = { session_id: string };
+
+export interface FishSessionOptions<S extends RelaySession = LiveFishSessionToken> {
+  sessionToken: S;
   clientTools: Record<string, (params: Record<string, unknown>, context: { callId: string }) => Promise<unknown>>;
   clientToolTimeoutMs: number;
   callbacks: {
@@ -34,7 +37,7 @@ export interface FishSessionOptions {
   };
 }
 
-export type FishSessionStarter = (options: FishSessionOptions) => Promise<FishAgentSession>;
+export type FishSessionStarter<S extends RelaySession = LiveFishSessionToken> = (options: FishSessionOptions<S>) => Promise<FishAgentSession>;
 
 /** Loaded on the first Fish call only. */
 export const startFishAgentSession: FishSessionStarter = async (options) => {
@@ -53,17 +56,17 @@ export interface FishCallHooks {
   heard(text: string): void;
   /** What the agent is saying, for the caption. */
   said(text: string): void;
-  /** Fish ended the session. */
+  /** The provider ended the session. */
   ended(reason: string): void;
   now(): number;
 }
 
 type RelayAnswer = { commands: LiveFishRelayCommand[]; closed: boolean };
 
-export class FishCall {
-  private readonly transport: LiveFishTransport;
+export class FishCall<S extends RelaySession = LiveFishSessionToken> {
+  private readonly transport: { session: S; relayToken: string };
   private readonly hooks: FishCallHooks;
-  private readonly starter: FishSessionStarter;
+  private readonly starter: FishSessionStarter<S>;
   private readonly startedAt: number;
   private session: FishAgentSession | null = null;
   private closed = false;
@@ -75,14 +78,14 @@ export class FishCall {
   private speakingSince: number | null = null;
   private readonly waiting = new Map<string, (content: string | null) => void>();
 
-  constructor(transport: LiveFishTransport, hooks: FishCallHooks, starter: FishSessionStarter = startFishAgentSession) {
+  constructor(transport: { session: S; relayToken: string }, hooks: FishCallHooks, starter: FishSessionStarter<S>) {
     this.transport = transport;
     this.hooks = hooks;
     this.starter = starter;
     this.startedAt = hooks.now();
   }
 
-  /** Joins the session; rejects as Fish's SDK does, e.g. with code `mic_permission_denied`. */
+  /** Joins the session; rejects as the starter does, e.g. with code `mic_permission_denied` or a NotAllowedError. */
   async start(): Promise<void> {
     const session = await this.starter({
       sessionToken: this.transport.session,
@@ -116,7 +119,7 @@ export class FishCall {
     void this.session?.setMicMuted(muted).catch(() => undefined);
   }
 
-  /** Ends the Fish session and stops relaying. */
+  /** Ends the provider's session and stops relaying. */
   close(): void {
     if (this.closed) return;
     this.closed = true;

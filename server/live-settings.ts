@@ -1,19 +1,24 @@
 import type { LiveKeySource, LiveSettings } from "../shared/wire.ts";
 import { saveConfig, syncCredentialEnv, type AppConfig } from "./config.ts";
-import { azureLiveEndpoint, LIVE_NEEDS_AZURE, LIVE_NEEDS_FISH, LIVE_NEEDS_KEY, openAiLiveEndpoint, type LiveEndpoint } from "./live-call.ts";
+import { azureLiveEndpoint, LIVE_NEEDS_AZURE, LIVE_NEEDS_FISH, LIVE_NEEDS_GEMINI, LIVE_NEEDS_KEY, openAiLiveEndpoint, type LiveEndpoint } from "./live-call.ts";
 import { liveSavePatch, usableLiveKey, type LiveConfig as LiveConfigSection } from "./live-config.ts";
 import { fishLiveEndpoint, usableFishAgent } from "./live-fish.ts";
+import { geminiLiveEndpoint } from "./live-gemini.ts";
 
 export const LIVE_IDLE_MINUTES_DEFAULT = 5;
 
 type LiveConfig = Pick<AppConfig, "live" | "openai" | "tts">;
 
 /** A saved Live key goes only to the provider and host it was saved for (`usableLiveKey`), the OpenAI API key only ever to
- * OpenAI, and the Fish Audio key only to Fish Audio. */
+ * OpenAI, the Fish Audio key only to Fish Audio and the Gemini key only to Gemini. */
 export function liveCallKey(cfg: LiveConfig): { key: string; source: LiveKeySource } | null {
   if (cfg.live?.provider === "fish") {
     const fish = cfg.tts?.fishKey?.trim();
     return fish ? { key: fish, source: "fishAudio" } : null;
+  }
+  if (cfg.live?.provider === "gemini") {
+    const gemini = cfg.tts?.geminiKey?.trim();
+    return gemini ? { key: gemini, source: "gemini" } : null;
   }
   const live = usableLiveKey(cfg.live);
   if (live) return { key: live, source: "live" };
@@ -27,12 +32,13 @@ export function liveCallKey(cfg: LiveConfig): { key: string; source: LiveKeySour
 export function liveCallEndpoint(cfg: LiveConfig, env: NodeJS.ProcessEnv = process.env): LiveEndpoint | null {
   if (cfg.live?.provider === "azure") return azureLiveEndpoint(cfg.live.azureEndpoint, cfg.live.azureDeployment);
   if (cfg.live?.provider === "fish") return fishLiveEndpoint(usableFishAgent(cfg.live, cfg.tts?.fishKey ?? ""), env);
+  if (cfg.live?.provider === "gemini") return geminiLiveEndpoint(env);
   return openAiLiveEndpoint(env);
 }
 
 export function liveSetupProblem(cfg: LiveConfig): string | null {
   const provider = cfg.live?.provider;
-  const missing = provider === "azure" ? LIVE_NEEDS_AZURE : provider === "fish" ? LIVE_NEEDS_FISH : LIVE_NEEDS_KEY;
+  const missing = provider === "azure" ? LIVE_NEEDS_AZURE : provider === "fish" ? LIVE_NEEDS_FISH : provider === "gemini" ? LIVE_NEEDS_GEMINI : LIVE_NEEDS_KEY;
   if (!liveCallKey(cfg)) return missing;
   return liveCallEndpoint(cfg) ? null : missing;
 }
@@ -61,10 +67,11 @@ export function liveSettingsFor(cfg: AppConfig): LiveSettings {
   return {
     configured: liveSetupProblem(cfg) === null,
     ...(key ? { keySource: key.source } : {}),
-    ...(provider === "azure" || provider === "fish" ? { provider } : {}),
+    ...(provider === "azure" || provider === "fish" || provider === "gemini" ? { provider } : {}),
     ...(cfg.live?.azureEndpoint ? { azureEndpoint: cfg.live.azureEndpoint } : {}),
     ...(cfg.live?.azureDeployment ? { azureDeployment: cfg.live.azureDeployment } : {}),
     voice: cfg.live?.voice ?? "",
+    ...(cfg.live?.geminiVoice ? { geminiVoice: cfg.live.geminiVoice } : {}),
     readTypedReplies: cfg.live?.readTypedReplies ?? true,
     idleMinutes: Number.isInteger(minutes) && minutes! >= 1 && minutes! <= 60 ? minutes! : LIVE_IDLE_MINUTES_DEFAULT,
   };

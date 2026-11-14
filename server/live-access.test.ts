@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { teamRoleScopes, type TeamRole } from "./cloud-team.ts";
-import { azureLiveCallRefusal, fishLiveCallRefusal, LIVE_AZURE_REFUSAL, LIVE_FISH_REFUSAL, liveScopeRefusal } from "./live-access.ts";
+import { azureLiveCallRefusal, fishLiveCallRefusal, geminiLiveCallRefusal, LIVE_AZURE_REFUSAL, LIVE_FISH_REFUSAL, LIVE_GEMINI_REFUSAL, liveScopeRefusal } from "./live-access.ts";
 import { requiredScope, resolveRequestAuth, type RequestAuth, type ResolveOptions } from "./request-auth.ts";
 import { SessionRegistry, type Scope, type SessionRecord } from "./sessions.ts";
 import { moveInRefusal } from "./team-move-in.ts";
@@ -27,7 +27,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-interface Place { resolve?: Partial<ResolveOptions>; othersOnLoopback?: boolean; provider?: "azure" | "openai" | "fish" }
+interface Place { resolve?: Partial<ResolveOptions>; othersOnLoopback?: boolean; provider?: "azure" | "openai" | "fish" | "gemini" }
 
 /** "gets a call", or the words the person reads and who said them. */
 function verdict(headers: Record<string, string>, place: Place = {}): string {
@@ -37,7 +37,7 @@ function verdict(headers: Record<string, string>, place: Place = {}): string {
     ...place.resolve,
   });
   if (!auth) return `sign-in gate ${status}: ${error}`;
-  const refuse = place.provider === "fish" ? fishLiveCallRefusal : azureLiveCallRefusal;
+  const refuse = place.provider === "fish" ? fishLiveCallRefusal : place.provider === "gemini" ? geminiLiveCallRefusal : azureLiveCallRefusal;
   const refusal = refuse(auth, { othersOnLoopback: place.othersOnLoopback ?? false });
   return refusal ? `limit: ${refusal}` : "gets a call";
 }
@@ -178,6 +178,7 @@ describe("the words for a session without the admin scope", () => {
     expect(liveScopeRefusal({}, "POST", LIVE)).toBeNull();
     expect(liveScopeRefusal({ live: { provider: "fish" } }, "POST", LIVE)).toBe(LIVE_FISH_REFUSAL);
     expect(liveScopeRefusal({ live: { provider: "fish" } }, "POST", "/api/live/relay")).toBeNull();
+    expect(liveScopeRefusal({ live: { provider: "gemini" } }, "POST", LIVE)).toBe(LIVE_GEMINI_REFUSAL);
   });
   it("change no one's scope: every Live route stays closed to a client session", () => {
     for (const [method, path] of [["POST", LIVE], ["POST", "/api/live/call/end"], ["GET", "/api/live/call"], ["PATCH", "/api/live/settings"], ["POST", "/api/live/device-revoked"], ["POST", "/api/live/relay"]] as const) {
@@ -203,5 +204,22 @@ describe("a Fish Audio Live call", () => {
     expect(verdict(LOCAL, { ...FISH, othersOnLoopback: true })).toBe(`limit: ${LIVE_FISH_REFUSAL}`);
     const unknown = { kind: "something-new", scopes: ["admin", "client"] } as unknown as RequestAuth;
     expect(fishLiveCallRefusal(unknown, { othersOnLoopback: false })).toBe(LIVE_FISH_REFUSAL);
+  });
+});
+
+describe("a Gemini Live call", () => {
+  const GEMINI = { provider: "gemini" as const };
+  const TEAM = { ...GEMINI, ...SERVICE, othersOnLoopback: true };
+
+  it("goes to the owner and a team admin, as on Fish Audio", () => {
+    expect(verdict(LOCAL, GEMINI)).toBe(CALL);
+    expect(verdict(device(["admin", "client"]), GEMINI)).toBe(CALL);
+    expect(verdict(teamMember("admin"), TEAM)).toBe(CALL);
+  });
+
+  it("is refused in its own words to a chat-only session, a team User and a local request others share", () => {
+    expect(verdict(device(["client"]), GEMINI)).toBe(`sign-in gate 403: ${LIVE_GEMINI_REFUSAL}`);
+    expect(verdict(teamMember("member"), TEAM)).toBe(`sign-in gate 403: ${LIVE_GEMINI_REFUSAL}`);
+    expect(verdict(LOCAL, { ...GEMINI, othersOnLoopback: true })).toBe(`limit: ${LIVE_GEMINI_REFUSAL}`);
   });
 });
