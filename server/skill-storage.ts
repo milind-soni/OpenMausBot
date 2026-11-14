@@ -6,7 +6,10 @@ import { dirname, join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
 
-export const STAGED_SKILL_FILE_MAX_BYTES = 32 * 1024;
+/** A learned skill's SKILL.md. */
+export const STAGED_SKILL_FILE_MAX_BYTES = 64 * 1024;
+/** Each of its references/<topic>.md files. */
+export const STAGED_SKILL_REFERENCE_MAX_BYTES = 32 * 1024;
 export const MAX_SKILL_REFERENCES = 8;
 const SKILL_REFERENCE_PATH = /^references\/[a-z0-9][a-z0-9-]{0,63}\.md$/;
 
@@ -65,8 +68,8 @@ export function referenceLimitError(files: Array<{ path: string; content: string
   for (const file of references) {
     if (!isSkillReferencePath(file.path)) return referencePathError(file.path);
     const bytes = Buffer.byteLength(file.content, "utf8");
-    if (bytes > STAGED_SKILL_FILE_MAX_BYTES) {
-      return `${file.path} must be at most ${STAGED_SKILL_FILE_MAX_BYTES / 1024}KB; it is ${formatKb(bytes)}. Split it into more references/<topic>.md files.`;
+    if (bytes > STAGED_SKILL_REFERENCE_MAX_BYTES) {
+      return `${file.path} must be at most ${STAGED_SKILL_REFERENCE_MAX_BYTES / 1024}KB; it is ${formatKb(bytes)}. Split it into more references/<topic>.md files.`;
     }
   }
   if (new Set(references.map((file) => file.path)).size !== references.length) {
@@ -89,7 +92,7 @@ export function readReferenceFiles(directory: string): Array<{ path: string; con
     const path = `references/${name}`;
     if (!isSkillReferencePath(path)) return null;
     const stat = lstatSync(join(references, name));
-    if (!stat.isFile() || stat.size > STAGED_SKILL_FILE_MAX_BYTES) return null;
+    if (!stat.isFile() || stat.size > STAGED_SKILL_REFERENCE_MAX_BYTES) return null;
     files.push({ path, content: readFileSync(join(references, name), "utf8") });
   }
   return files;

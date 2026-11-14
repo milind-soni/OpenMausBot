@@ -12031,10 +12031,10 @@ describe("harness HTTP API", () => {
       };
 
       expect((await post({ action: "create", skill_md: skillMd() })).status).toBe(201);
-      const tooBig = await post({ action: "update", skill_name: "expense-rules", skill_md: skillMd("- one more rule\n".repeat(2_500)) });
+      const tooBig = await post({ action: "update", skill_name: "expense-rules", skill_md: skillMd("- one more rule\n".repeat(5_000)) });
       expect(tooBig.status).toBe(422);
       expect(((await tooBig.json()) as { error: string }).error).toMatch(
-        /at most 32KB; this SKILL\.md is \d+\.\dKB, the current version is 0\.\dKB\. .*references\/<topic>\.md/,
+        /at most 64KB; this SKILL\.md is \d+\.\dKB, the current version is 0\.\dKB\. .*references\/<topic>\.md/,
       );
 
       const moved = await post({
