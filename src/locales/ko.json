@@ -7784,5 +7784,6 @@
   "settings.browser.proxyConfigured": "새로 여는 기본 브라우저 연결에 이 SOCKS5 프록시를 사용합니다. My Chrome에는 적용되지 않으며, 사설·로컬 주소는 기존 차단 규칙을 유지합니다.",
   "settings.browser.proxyInactive": "저장되어 있지만 지원되는 환경에서 기본 브라우저를 사용할 때만 적용됩니다.",
   "settings.browser.proxySave": "저장",
-  "settings.browser.proxyClear": "삭제"
+  "settings.browser.proxyClear": "삭제",
+  "composer.command.burstDesc": "작업의 여러 부분을 한 번에 실행한 뒤 결과 합치기"
 }

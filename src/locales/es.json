@@ -6500,5 +6500,6 @@
   "computer.recovery.restart": "Reiniciar computadora",
   "computer.recovery.restartTitle": "Detiene y vuelve a iniciar esta computadora en la nube. Los programas abiertos se cierran; sus archivos se conservan.",
   "computer.recovery.replace": "Reemplazar computadora",
-  "computer.recovery.replaceTitle": "Elimina esta computadora en la nube y le da una nueva al bot. Los archivos que solo están en ella se pierden."
+  "computer.recovery.replaceTitle": "Elimina esta computadora en la nube y le da una nueva al bot. Los archivos que solo están en ella se pierden.",
+  "composer.command.burstDesc": "Ejecutar muchas partes de un trabajo a la vez y luego unir los resultados"
 }

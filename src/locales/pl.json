@@ -7264,5 +7264,6 @@
   "computer.recovery.restart": "Uruchom komputer ponownie",
   "computer.recovery.restartTitle": "Zatrzymuje i ponownie uruchamia ten komputer w chmurze. Otwarte programy zostaną zamknięte; pliki zostają.",
   "computer.recovery.replace": "Zastąp komputer",
-  "computer.recovery.replaceTitle": "Usuwa ten komputer w chmurze i daje botowi nowy. Pliki, które są tylko na nim, zostaną utracone."
+  "computer.recovery.replaceTitle": "Usuwa ten komputer w chmurze i daje botowi nowy. Pliki, które są tylko na nim, zostaną utracone.",
+  "composer.command.burstDesc": "Uruchom wiele części zadania naraz, a potem połącz wyniki"
 }

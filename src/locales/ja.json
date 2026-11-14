@@ -8094,5 +8094,6 @@
   "computer.recovery.restart": "コンピューターを再起動",
   "computer.recovery.restartTitle": "このクラウドコンピューターを停止して起動し直します。開いているプログラムは閉じられますが、ファイルは残ります。",
   "computer.recovery.replace": "コンピューターを置き換え",
-  "computer.recovery.replaceTitle": "このクラウドコンピューターを削除し、ボットに新しいものを用意します。ここにしかないファイルは失われます。"
+  "computer.recovery.replaceTitle": "このクラウドコンピューターを削除し、ボットに新しいものを用意します。ここにしかないファイルは失われます。",
+  "composer.command.burstDesc": "作業の多くの部分を同時に実行し、結果をまとめます"
 }
