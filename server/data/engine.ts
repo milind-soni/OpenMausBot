@@ -166,7 +166,7 @@ function missingTableName(message: string): string | null {
 
 type InterruptCause = "timeout" | "cancelled";
 
-type RunState = { interrupted: InterruptCause | null; deadline: number; retry?: NodeJS.Timeout };
+type RunState = { interrupted: InterruptCause | null; retry?: NodeJS.Timeout };
 
 function failureFrom(error: unknown, sql: string, interrupted: InterruptCause | null, timeoutMs: number): DataFailure {
   if (error instanceof DataFailure) return error;
@@ -196,7 +196,7 @@ export class Lane {
   private async execute<T>(sql: string, options: { timeoutMs?: number; signal?: AbortSignal }, work: (connection: DuckDB.DuckDBConnection) => Promise<T>): Promise<T> {
     const timeoutMs = options.timeoutMs ?? DATA_LIMITS.sqlTimeoutMs;
     if (options.signal?.aborted) throw new DataFailure({ code: "cancelled", message: "Cancelled before it ran.", sql });
-    const state: RunState = { interrupted: null, deadline: Date.now() + timeoutMs };
+    const state: RunState = { interrupted: null };
     this.running = state;
     const timer = setTimeout(() => this.stop(state, "timeout"), timeoutMs);
     const onAbort = () => this.stop(state, "cancelled");
@@ -222,16 +222,7 @@ export class Lane {
   private stop(state: RunState, cause: InterruptCause): void {
     state.interrupted ??= cause;
     this.connection.interrupt();
-    if (state.retry || Date.now() >= state.deadline) return;
-    const retry = setInterval(() => {
-      if (Date.now() >= state.deadline) {
-        clearInterval(retry);
-        state.retry = undefined;
-        return;
-      }
-      this.connection.interrupt();
-    }, INTERRUPT_DELIVERY_MS);
-    state.retry = retry;
+    state.retry ??= setInterval(() => this.connection.interrupt(), INTERRUPT_DELIVERY_MS).unref();
   }
 }
 
