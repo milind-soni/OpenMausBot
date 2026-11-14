@@ -158,6 +158,8 @@ export class Downloads {
       download.path = path;
       download.receivedBytes = size;
       download.state = "completed";
+      this.#byGuid.delete(download.guid);
+      this.#byGuid.set(download.guid, download);
     } catch (error) {
       download.state = "canceled";
       download.canceledBecause = error instanceof Error ? error.message : String(error);

@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { CdpConnection } from "./connection.ts";
 import { Downloads } from "./downloads.ts";
@@ -9,7 +9,7 @@ import type { CdpTransport } from "./transport.ts";
 
 let directory: string;
 beforeEach(() => { directory = mkdtempSync(join(tmpdir(), "omb-download-retention-")); });
-afterEach(() => { rmSync(directory, { recursive: true, force: true }); });
+afterEach(() => { vi.useRealTimers(); rmSync(directory, { recursive: true, force: true }); });
 
 function setup() {
   const listeners: Array<(message: string) => void> = [];
@@ -35,7 +35,7 @@ function setup() {
     expect(download.state).toBe("completed");
     return download;
   };
-  return { downloads, complete };
+  return { downloads, complete, emit };
 }
 
 it("an unowned download never evicts files retained by identified tabs", () => {
@@ -67,4 +67,30 @@ it("identified tabs keep their existing independent retention limits", () => {
   expect(existsSync(first.path!)).toBe(false);
   expect(existsSync(other.path!)).toBe(true);
   expect(downloads.list("tab-a").map((item) => item.guid)).toEqual(["a-newest"]);
+});
+
+it("retains the last completed download when concurrent files finish out of start order", () => {
+  vi.useFakeTimers();
+  const { downloads, complete, emit } = setup();
+  emit("Browser.downloadWillBegin", { guid: "slow", frameId: "tab-a", url: "https://example.test/slow", suggestedFilename: "slow.txt" });
+  writeFileSync(join(directory, "slow"), "slow download");
+  const fast = complete("fast", "tab-a");
+  const slow = downloads.list().find((entry) => entry.guid === "slow")!;
+  const completedPaths: string[] = [];
+  downloads.onChange((entry) => {
+    if (entry.state === "completed") {
+      expect(existsSync(entry.path!)).toBe(true);
+      completedPaths.push(entry.path!);
+    }
+  });
+  emit("Browser.downloadProgress", { guid: "slow", state: "completed", receivedBytes: 13 });
+  expect(slow.finishedAt).toBe(fast.finishedAt);
+  expect(downloads.list("tab-a").map((entry) => entry.guid)).toEqual(["slow"]);
+  expect(existsSync(slow.path!)).toBe(true);
+  expect(existsSync(fast.path!)).toBe(false);
+  expect(completedPaths).toEqual([slow.path]);
+  const next = complete("next", "tab-a");
+  expect(existsSync(slow.path!)).toBe(false);
+  expect(existsSync(next.path!)).toBe(true);
+  expect(downloads.list("tab-a").map((entry) => entry.guid)).toEqual(["next"]);
 });
