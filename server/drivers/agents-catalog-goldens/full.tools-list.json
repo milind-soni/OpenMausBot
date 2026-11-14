@@ -2036,7 +2036,7 @@
           "references": {
             "type": "array",
             "maxItems": 8,
-            "description": "Optional detail files (32KB each) for when SKILL.md would pass 32KB: keep the core steps in SKILL.md, move long rules or examples here, and link each from SKILL.md. On update, omitted references stay; empty content removes one.",
+            "description": "Optional detail files (32KB each) for when SKILL.md would pass 64KB: keep the core steps in SKILL.md, move long rules or examples here, and link each from SKILL.md. On update, omitted references stay; empty content removes one.",
             "items": {
               "type": "object",
               "additionalProperties": false,
