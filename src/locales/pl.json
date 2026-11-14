@@ -5927,6 +5927,7 @@
   "botSettings.search": "Szukaj",
   "botSettings.searchAria": "Szukaj w ustawieniach",
   "botSettings.searchNone": "Brak wyników dla „{query}”",
+  "botSettings.searchLoading": "Przeszukuję połączone aplikacje…",
   "botSettings.sections.skills": "Umiejętności",
   "botSettings.sections.memory": "Pamięć",
   "botSettings.sections.routines": "Rutyny",

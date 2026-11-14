@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { setLocale } from "@/lib/i18n";
-import { BOT_SECTIONS, sectionMatches } from "./sections";
+import { BOT_SECTIONS, searchEmptyText, sectionMatches } from "./sections";
 
 const section = (id: string) => {
   const entry = BOT_SECTIONS.find((candidate) => candidate.id === id);
@@ -32,5 +32,11 @@ describe("bot settings search", () => {
   it("keeps the English keywords and shows everything for an empty search", () => {
     expect(found("composio")).toEqual(["access"]);
     expect(found("")).toHaveLength(BOT_SECTIONS.length);
+  });
+
+  it("says it is still looking while the connected apps load, and nothing matches only after", () => {
+    expect(searchEmptyText("github", "loading")).toBe("Looking through connected apps…");
+    expect(searchEmptyText("github", "ready")).toBe("Nothing matches “github”");
+    expect(searchEmptyText("github", "unknown")).toBe("Nothing matches “github”");
   });
 });

@@ -6404,6 +6404,7 @@
   "botSettings.search": "검색",
   "botSettings.searchAria": "설정 검색",
   "botSettings.searchNone": "“{query}”와(과) 일치하는 항목이 없어요",
+  "botSettings.searchLoading": "연결된 앱을 찾고 있어요…",
   "botSettings.sections.skills": "스킬",
   "botSettings.sections.memory": "메모리",
   "botSettings.sections.routines": "루틴",
