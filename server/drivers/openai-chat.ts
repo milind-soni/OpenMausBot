@@ -599,6 +599,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const seenCalls = new Set<string>();
       let nudges = 0;
       let unread: string[] = [];
+      const deliveredAsides: string[] = [];
       let callsAtNudge = -1;
       const repeats = options.localModel ? new ChatRepeatGuard() : undefined;
       let unreadable = false, askedAgain = false;
@@ -621,7 +622,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           abort.signal.throwIfAborted();
             // Between rounds, never inside a tool batch.
           unread = turnEntry.asides.splice(0);
-          if (unread.length) messages.push({ role: "user", content: unread.join("\n\n") });
+          if (unread.length) {
+            messages.push({ role: "user", content: unread.join("\n\n") });
+            deliveredAsides.push(...unread);
+          }
           turnEntry.ending = round === MAX_CHAT_ROUNDS - 1;
           native("out", options.nativeLog.outgoing(turn, messages, model, tools.definitions));
           let attempt = 0;
@@ -907,14 +911,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           const continuable = classifyContinuable(stopReason, failure);
           if (continuable) {
             const handoffPath = writeTurnHandoff({
-              threadId: turn.threadId,
-              turnId,
-              model,
-              usage,
-              hasUsage,
-              failure,
-              toolCalls: seenCalls.size,
-              messages,
+              threadId: turn.threadId, turnId, model,
+              usage, hasUsage, failure, toolCalls: seenCalls.size,
+              task: turn.text, updates: deliveredAsides,
+              messages: messages.slice(messages.indexOf(request) + 1),
             });
             if (handoffPath) emit({ ...base(turn.threadId, turnId), type: "cap.exhausted", handoffPath, reason: continuable });
           }

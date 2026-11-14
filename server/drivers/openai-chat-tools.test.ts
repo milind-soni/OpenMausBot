@@ -1359,6 +1359,41 @@ describe("structured tool execution boundaries", () => {
     })]);
   });
 
+  it.each([1, 25])("preserves the active task and delivered steering in a cap handoff (%i calls per reply)", async callsPerReply => {
+    const first = deferred<ServerResponse>();
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) first.resolve(response);
+      else reply(response, round);
+    });
+    function reply(response: ServerResponse, round: number) {
+      sse(response, [chunk({ tool_calls: Array.from({ length: callsPerReply }, (_, index) => ({
+        ...toolCall("audit_write", `{"name":"step","value":"${round}-${index}"}`, `call_${round}_${index}`), index,
+      })) }, "tool_calls")]);
+    }
+    const task = "Prepare the release draft";
+    const updates = ["Do not publish it", "Use version 2"];
+    await f.start({ approvalMode: "full", text: task, transcript: [
+      { role: "user", text: "List repository files" },
+      { role: "assistant", text: "Listed the files" },
+    ] });
+    const response = await first.promise;
+    for (const update of updates) await expect(f.instance.adapter.steer!(f.threadId, update)).resolves.toBe("steered");
+    reply(response, 1);
+    expect(await f.completed()).toMatchObject({ ok: false, stopReason: "error" });
+    const cap = f.recorder.events.find(event => event.type === "cap.exhausted");
+    expect(cap?.type).toBe("cap.exhausted");
+    if (cap?.type !== "cap.exhausted") throw new Error("missing cap handoff");
+    const handoff = readFileSync(cap.handoffPath, "utf8");
+    expect(handoff).toContain(task);
+    expect(handoff).not.toContain("List repository files");
+    expect(handoff).not.toContain("Listed the files");
+    for (const update of updates) expect(handoff).toContain(update);
+    expect(handoff.indexOf(updates[0]!)).toBeLessThan(handoff.indexOf(updates[1]!));
+    expect(JSON.stringify(f.requests[1]!.messages)).toContain(updates.join("\\n\\n"));
+    expect(f.requests).toHaveLength(callsPerReply === 1 ? 64 : 9);
+    expect(f.effects()).toHaveLength(callsPerReply === 1 ? 64 : 200);
+  });
+
   it("answers in the last allowed step and leaves a message steered during it for the next turn", async () => {
     const last = deferred<ServerResponse>();
     const f = await fixture((_body, response, round) => round < 64
