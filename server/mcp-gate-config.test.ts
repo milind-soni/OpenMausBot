@@ -186,4 +186,16 @@ describe("untrimmed bot servers", () => {
     expect(limit({ OMB_MCP_RESULT_BUDGET: "0" }, { docs: remote })).toBeUndefined();
     expect(limit({ MAX_MCP_OUTPUT_TOKENS: "40000" }, { docs: remote })).toBe("40000");
   });
+
+  it("keeps a limit the bot's settings file sets", () => {
+    const env: NodeJS.ProcessEnv = {};
+    limitUngatedOutput(env, { docs: remote }, ["docs"], undefined, "40000");
+    expect(env.MAX_MCP_OUTPUT_TOKENS).toBeUndefined();
+  });
+
+  it("leaves the process-wide limit unset when another untrimmed server asks for whole payloads", () => {
+    expect(limit({}, { whole: remote, docs: remote }, { whole: 0 })).toBeUndefined();
+    expect(limit({}, { docs: remote, whole: remote }, { whole: 0 })).toBeUndefined();
+    expect(limit({}, { whole: gated, docs: remote }, { whole: 0 })).toBe(String(UNGATED_MCP_OUTPUT_TOKENS));
+  });
 });

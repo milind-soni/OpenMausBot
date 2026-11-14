@@ -1695,6 +1695,19 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       expect(seen.settings.claudeMdExcludes).toEqual([join(homedir(), ".claude", "CLAUDE.md")]);
     });
 
+    it("keeps an MCP output limit the bot's settings set instead of the automatic one", async () => {
+      const dump = join(scratch, "bot-settings-mcp-limit.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create();
+      const { thread, file } = botFolders("mcp-limit", { env: { MAX_MCP_OUTPUT_TOKENS: "40000" } });
+      await instance.adapter.sendTurn({ threadId: "t-bot-settings-mcp-limit", text: "hi", cwd: thread, botSettingsFile: file,
+        integrations: { custom: { docs: { type: "http", url: "https://docs.example/mcp", headers: {} } } } });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.env.MAX_MCP_OUTPUT_TOKENS).toBeUndefined();
+      expect(seen.settings.env.MAX_MCP_OUTPUT_TOKENS).toBe("40000");
+    });
+
     it("is left to Claude Code when the turn runs in the folder that holds it", async () => {
       const dump = join(scratch, "bot-settings-own-folder.json");
       process.env.FAKE_CLAUDE_DUMP = dump;
@@ -1825,8 +1838,8 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     process.env.FAKE_CLAUDE_DUMP = dump;
     const docs = { type: "http" as const, url: "https://docs.example/mcp", headers: {} };
     const turn = async (threadId: string, integrations: SendTurnInput["integrations"]) => {
-      await instance.adapter.sendTurn({ threadId, text: "hi", integrations });
-      await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId);
+      const { turnId } = await instance.adapter.sendTurn({ threadId, text: "hi", integrations });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
       return JSON.parse(readFileSync(dump, "utf8")).env.MAX_MCP_OUTPUT_TOKENS;
     };
 
@@ -1836,6 +1849,9 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(await turn("t-gated-url", { custom: { docs }, customResultBudgets: { docs: 4000 } })).toBeUndefined();
     expect(await turn("t-whole-url", { custom: { docs }, customResultBudgets: { docs: 0 } })).toBeUndefined();
     expect(await turn("t-no-custom", {})).toBeUndefined();
+    // The limit is part of the warm process's contract: changing a server's limit on the same thread starts a fresh process.
+    expect(await turn("t-ungated-url", { custom: { docs }, customResultBudgets: { docs: 0 } })).toBeUndefined();
+    expect(await turn("t-ungated-url", { custom: { docs } })).toBe(String(UNGATED_MCP_OUTPUT_TOKENS));
   });
 
   // Claude Code advertises no MCP Apps UI extension and keeps tool results to itself, so only OMB's
