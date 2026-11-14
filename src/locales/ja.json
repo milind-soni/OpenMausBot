@@ -6652,6 +6652,7 @@
   "botSettings.search": "検索",
   "botSettings.searchAria": "設定を検索",
   "botSettings.searchNone": "「{query}」に一致するものはありません",
+  "botSettings.searchLoading": "接続済みのアプリを確認しています…",
   "botSettings.sections.skills": "スキル",
   "botSettings.sections.memory": "メモリー",
   "botSettings.sections.routines": "ルーティン",

@@ -5976,6 +5976,7 @@
   "botSettings.search": "Поиск",
   "botSettings.searchAria": "Поиск по настройкам",
   "botSettings.searchNone": "Ничего не найдено по запросу «{query}»",
+  "botSettings.searchLoading": "Ищем среди подключённых приложений…",
   "botSettings.sections.skills": "Навыки",
   "botSettings.sections.memory": "Память",
   "botSettings.sections.routines": "Процедуры",

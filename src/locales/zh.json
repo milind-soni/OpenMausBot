@@ -6827,6 +6827,7 @@
   "botSettings.search": "搜索",
   "botSettings.searchAria": "搜索设置",
   "botSettings.searchNone": "没有与「{query}」匹配的内容",
+  "botSettings.searchLoading": "正在查找已连接的应用…",
   "botSettings.sections.skills": "技能",
   "botSettings.sections.memory": "记忆",
   "botSettings.sections.routines": "例行任务",
