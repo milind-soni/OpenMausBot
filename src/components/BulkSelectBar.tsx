@@ -133,7 +133,7 @@ export function BulkSelectBar({ rows, selected, maxDeletable, freshConversation,
   </div>;
 }
 
-export function ThreadListFooter({ bulk, rows, selected, total, canShowAll, canSelect, onShowAll, maxDeletable, freshConversation, onDelete }: {
+export function ThreadListFooter({ bulk, rows, selected, total, canShowAll, canSelect, onShowAll, onShowFewer, maxDeletable, freshConversation, onDelete }: {
   bulk: ReturnType<typeof useBulkSelect>;
   rows: readonly SelectableRow[];
   selected: Selection;
@@ -141,6 +141,8 @@ export function ThreadListFooter({ bulk, rows, selected, total, canShowAll, canS
   canShowAll: boolean;
   canSelect: boolean;
   onShowAll: () => void;
+  /** Offered instead of "Show all" while a remembered full list is on and the short list would hide threads. */
+  onShowFewer?: () => void;
   maxDeletable?: number;
   freshConversation: boolean;
   onDelete: (threadIds: string[]) => Promise<BulkDeleteResult>;
@@ -148,10 +150,11 @@ export function ThreadListFooter({ bulk, rows, selected, total, canShowAll, canS
   if (bulk.active) {
     return <BulkSelectBar rows={rows} selected={selected} maxDeletable={maxDeletable} freshConversation={freshConversation} onChange={bulk.setSelected} onDelete={onDelete} />;
   }
-  if (!canShowAll && !canSelect) return null;
+  if (!canShowAll && !onShowFewer && !canSelect) return null;
   const link = "inline-flex h-7 items-center text-[13px] font-medium leading-4 text-ink-secondary hover:text-ink";
   return <div className="flex items-center justify-between pl-6 pr-2">
-    {canShowAll ? <button type="button" onClick={onShowAll} className={link}>{t("task.showAll", { count: total })}</button> : <span />}
+    {canShowAll ? <button type="button" onClick={onShowAll} className={link}>{t("task.showAll", { count: total })}</button>
+      : onShowFewer ? <button type="button" data-sidebar-show-fewer onClick={onShowFewer} className={link}>{t("task.showFewer")}</button> : <span />}
     {canSelect && <button type="button" onClick={bulk.start} className={link}>{t("task.bulk.select")}</button>}
   </div>;
 }
