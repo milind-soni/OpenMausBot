@@ -295,8 +295,15 @@ export interface ReadMessage extends MessageSummary {
 
 /** A file name that stays inside the folder, from a name a stranger wrote. */
 export function safeAttachmentName(raw: string | undefined, index: number): string {
-  const name = basename((raw ?? "").replaceAll("\\", "/")).replace(/[^\p{L}\p{N}._ -]+/gu, "_").replace(/^[.\s]+/u, "").slice(-120).trim();
-  return name || `attachment-${index + 1}`;
+  const clean = basename((raw ?? "").replaceAll("\\", "/")).replace(/[^\p{L}\p{N}._ -]+/gu, "_").trim();
+  let name = "", bytes = 0;
+  for (const character of Array.from(clean).reverse()) {
+    const size = Buffer.byteLength(character);
+    if (name.length + character.length > 120 || bytes + size > 252) break;
+    name = character + name;
+    bytes += size;
+  }
+  return name.replace(/^[.\s]+/u, "") || `attachment-${index + 1}`;
 }
 
 /** Security: `folder` is the server's own and read-only in the box, so a bot can't plant a link in it, and the file is
