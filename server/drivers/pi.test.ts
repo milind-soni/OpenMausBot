@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,7 @@ import {
   applyPiLocalCatalog,
   decodePiFrame,
   ensurePiInjectModel,
+  ensurePiInstanceAgentDir,
   fetchPiModels,
   parsePiCatalog,
   PiDriver,
@@ -1168,7 +1169,7 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(dumps.some((row) => row.setModel?.provider === "omlx" && row.setModel?.modelId === "MiniMax-M3-4bit")).toBe(
       true,
     );
-    const written = JSON.parse(readFileSync(join(home, ".pi", "agent", "models.json"), "utf8")) as {
+    const written = JSON.parse(readFileSync(join(home, ".openmausbot", "pi", "pi-test", "models.json"), "utf8")) as {
       providers: { omlx: { baseUrl: string; models: Array<{ id: string }> } };
     };
     expect(written.providers.omlx.baseUrl).toBe("http://127.0.0.1:8080/v1");
@@ -1291,6 +1292,93 @@ describe("ensurePiInjectModel", () => {
       modelId: "MiniMax-M3-4bit",
     });
     expect(readFileSync(path, "utf8")).toBe("not json");
+  });
+});
+
+describe("ensurePiInstanceAgentDir", () => {
+  let home: string;
+  beforeEach(() => { home = mkdtempSync(join(tmpdir(), "omb-pi-home-")); });
+  afterEach(async () => { await removeTempDir(home); });
+
+  it.skipIf(process.platform === "win32")("creates the instance dir and symlinks auth.json + models.json from the operator dir", () => {
+    const operatorDir = join(home, ".pi", "agent");
+    mkdirSync(operatorDir, { recursive: true });
+    writeFileSync(join(operatorDir, "auth.json"), '{"token":"test"}');
+    writeFileSync(join(operatorDir, "models.json"), '{"providers":{}}');
+    const instanceDir = ensurePiInstanceAgentDir("inst-" + randomUUID(), operatorDir, { HOME: home });
+    expect(existsSync(instanceDir)).toBe(true);
+    expect(lstatSync(join(instanceDir, "auth.json")).isSymbolicLink()).toBe(true);
+    expect(realpathSync(join(instanceDir, "auth.json"))).toBe(realpathSync(join(operatorDir, "auth.json")));
+    expect(lstatSync(join(instanceDir, "models.json")).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(instanceDir, "AGENTS.md"))).toBe(false);
+  });
+
+  it("is idempotent: calling twice does not throw", () => {
+    const operatorDir = join(home, ".pi", "agent");
+    mkdirSync(operatorDir, { recursive: true });
+    writeFileSync(join(operatorDir, "auth.json"), '{"token":"x"}');
+    const id = "inst-idem-" + randomUUID();
+    ensurePiInstanceAgentDir(id, operatorDir, { HOME: home });
+    expect(() => ensurePiInstanceAgentDir(id, operatorDir, { HOME: home })).not.toThrow();
+  });
+
+  it("skips symlinks for operator files that do not exist", () => {
+    const operatorDir = join(home, ".pi", "agent-empty");
+    mkdirSync(operatorDir, { recursive: true });
+    const instanceDir = ensurePiInstanceAgentDir("inst-nofiles-" + randomUUID(), operatorDir, { HOME: home });
+    expect(existsSync(join(instanceDir, "auth.json"))).toBe(false);
+    expect(existsSync(join(instanceDir, "models.json"))).toBe(false);
+  });
+
+  // Permission-based failures cannot be forced on Windows or as root.
+  const canDenyWrites = process.platform !== "win32" && process.getuid?.() !== 0;
+
+  it.skipIf(!canDenyWrites)("reports a failed seed (symlink and copy both fail) instead of starting without auth", () => {
+    const operatorDir = join(home, ".pi", "agent");
+    mkdirSync(operatorDir, { recursive: true });
+    writeFileSync(join(operatorDir, "auth.json"), '{"token":"x"}');
+    const id = "inst-seedfail-" + randomUUID();
+    const instanceDir = join(home, ".openmausbot", "pi", id);
+    mkdirSync(instanceDir, { recursive: true });
+    chmodSync(instanceDir, 0o500);
+    try {
+      expect(() => ensurePiInstanceAgentDir(id, operatorDir, { HOME: home })).toThrow(/could not seed auth\.json/);
+    } finally {
+      chmodSync(instanceDir, 0o700);
+    }
+  });
+});
+
+describe("ensurePiInjectModel symlink detachment", () => {
+  let home: string;
+  beforeEach(() => { home = mkdtempSync(join(tmpdir(), "omb-pi-detach-")); });
+  afterEach(async () => { await removeTempDir(home); });
+  const canDenyWrites = process.platform !== "win32" && process.getuid?.() !== 0;
+
+  it.skipIf(process.platform === "win32")("replaces a dangling models.json symlink with an instance-owned file", () => {
+    const agentDir = join(home, "agent");
+    mkdirSync(agentDir, { recursive: true });
+    symlinkSync(join(home, "deleted-operator-models.json"), join(agentDir, "models.json"));
+    const split = ensurePiInjectModel("omlx::MiniMax-M3-4bit", { HOME: home, PI_CODING_AGENT_DIR: agentDir });
+    expect(split).toEqual({ provider: "omlx", modelId: "MiniMax-M3-4bit" });
+    expect(lstatSync(join(agentDir, "models.json")).isSymbolicLink()).toBe(false);
+    expect(existsSync(join(home, "deleted-operator-models.json"))).toBe(false);
+    expect(readFileSync(join(agentDir, "models.json"), "utf8")).toContain("omlx");
+  });
+
+  it.skipIf(!canDenyWrites)("throws and leaves the operator models.json untouched when the symlink cannot be detached", () => {
+    const operatorModels = join(home, "operator-models.json");
+    writeFileSync(operatorModels, '{"providers":{}}');
+    const agentDir = join(home, "agent");
+    mkdirSync(agentDir, { recursive: true });
+    symlinkSync(operatorModels, join(agentDir, "models.json"));
+    chmodSync(agentDir, 0o500);
+    try {
+      expect(() => ensurePiInjectModel("omlx::MiniMax-M3-4bit", { HOME: home, PI_CODING_AGENT_DIR: agentDir })).toThrow();
+      expect(readFileSync(operatorModels, "utf8")).toBe('{"providers":{}}');
+    } finally {
+      chmodSync(agentDir, 0o700);
+    }
   });
 });
 

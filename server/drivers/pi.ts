@@ -3,7 +3,7 @@ import { RuntimeNoticeError, runtimeErrorText } from "./runtime-notice-error.ts"
 // The pi coding agent (@earendil-works/pi-coding-agent) over its own stdio JSON-RPC mode
 // (`pi --mode rpc --no-session`), not ACP. pi is BYOK and reads ~/.pi/agent/auth.json itself, so
 // this driver holds no key; resumeCursor is pi's `sessionFile` (switch_session).
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -167,7 +167,36 @@ export async function applyPiLocalCatalog(
 }
 
 function piAgentDir(env: Record<string, string | undefined>): string {
+  if (env.PI_CODING_AGENT_DIR) return env.PI_CODING_AGENT_DIR;
   return join(env.HOME || env.USERPROFILE || homedir(), ".pi", "agent");
+}
+
+/** Create a MausBot-owned pi agent dir for this instance and symlink auth.json + models.json
+ *  from the operator's ~/.pi/agent so bots don't inherit AGENTS.md, skills, or extensions. */
+export function ensurePiInstanceAgentDir(
+  instanceId: string,
+  operatorAgentDir: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const dir = join(env.HOME || env.USERPROFILE || homedir(), ".openmausbot", "pi", instanceId);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  for (const file of ["auth.json", "models.json"] as const) {
+    const link = join(dir, file);
+    const target = join(operatorAgentDir, file);
+    if (!existsSync(link) && existsSync(target)) {
+      try {
+        symlinkSync(target, link);
+      } catch {
+        // Symlinks require elevated privileges on Windows; fall back to a copy so auth works.
+        try {
+          copyFileSync(target, link);
+        } catch (error) {
+          throw new Error(`pi: could not seed ${file} into ${dir}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
+  }
+  return dir;
 }
 
 /** Upsert a live local host into ~/.pi/agent/models.json so `set_model` can reach it. */
@@ -185,6 +214,25 @@ export function ensurePiInjectModel(
   const dir = piAgentDir(env);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "models.json");
+  // If models.json is a symlink to the operator's file (from ensurePiInstanceAgentDir seeding),
+  // replace it with an owned copy so inject writes don't modify the operator's shared config.
+  let isSymlink = false;
+  try {
+    isSymlink = lstatSync(path).isSymbolicLink();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (isSymlink) {
+    let content: string | null = null;
+    try {
+      content = readFileSync(path, "utf8");
+    } catch (error) {
+      // Dangling link (operator deleted the file after seeding): drop it and start from an owned file.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    unlinkSync(path);
+    if (content !== null) writeFileSync(path, content, { mode: 0o600 });
+  }
   let root: Record<string, unknown> = { providers: {} };
   if (existsSync(path)) {
     try {
@@ -245,10 +293,10 @@ export function ensurePiInjectModel(
   return split;
 }
 
+/** Read `provider/model` from the pi agent dir's settings.json; "" when unset or unreadable. */
 function readPiDefaultModel(env: Record<string, string | undefined>): string {
-  const home = env.HOME || env.USERPROFILE || homedir();
   try {
-    const s = JSON.parse(readFileSync(`${home}/.pi/agent/settings.json`, "utf8")) as {
+    const s = JSON.parse(readFileSync(join(piAgentDir(env), "settings.json"), "utf8")) as {
       defaultProvider?: string;
       defaultModel?: string;
     };
@@ -375,9 +423,16 @@ export const PiDriver: ProviderDriver<PiConfig> = {
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
 
+  /** Build a pi instance: resolve its agent dir (explicit `PI_CODING_AGENT_DIR` or a seeded per-instance dir),
+   *  then expose the model catalog and turn runner against that dir. */
   async create(input: DriverCreateInput<PiConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
-    const catalogEnv = piEnvironment({ ...process.env, ...input.environment });
+    const baseEnv = piEnvironment({ ...process.env, ...input.environment });
+    // If the operator already set PI_CODING_AGENT_DIR explicitly, honour it; otherwise
+    // create a MausBot-owned instance dir seeded from the operator's default ~/.pi/agent.
+    const instancePiDir = baseEnv.PI_CODING_AGENT_DIR
+      ?? ensurePiInstanceAgentDir(instanceId, join(baseEnv.HOME || baseEnv.USERPROFILE || homedir(), ".pi", "agent"), baseEnv);
+    const catalogEnv = { ...baseEnv, PI_CODING_AGENT_DIR: instancePiDir };
     let models = EMPTY;
     const readModels = async () => {
       let base = models, listed = false;
@@ -458,7 +513,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
 
       // Before any credential-bearing temp file, so a model setup failure leaves nothing to clean up.
       if (typeof turn.model === "string" && turn.model) {
-        ensurePiInjectModel(turn.model, { ...process.env, ...input.environment });
+        ensurePiInjectModel(turn.model, { ...process.env, ...input.environment, PI_CODING_AGENT_DIR: instancePiDir });
       }
 
       // The MCP config carries credentials: a 0600 temp file removed at settle, never argv.
@@ -487,6 +542,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             env: piEnvironment({
               ...process.env,
               ...input.environment,
+              PI_CODING_AGENT_DIR: instancePiDir,
               OMB_MCP_CONFIG: join(mcpTempDir, "mcp.json"),
             }),
           }, "bot");
