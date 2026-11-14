@@ -177,7 +177,8 @@ const helperSource = (room: boolean) => `(function () {
       notify("${APP_SELECTION_METHOD}", { text: text.slice(0, ${APP_SELECTION_CHARS}), left: end.left, bottom: end.bottom });
     };
     document.addEventListener("selectionchange", function () {
-      if (timer === null) timer = setTimeout(report, 100);
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(report, 100);
     });
   };
   var ready = request("ui/initialize", {

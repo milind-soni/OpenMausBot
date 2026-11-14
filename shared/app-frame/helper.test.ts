@@ -236,6 +236,18 @@ describe("the text the person selects in a bot page", () => {
     expect(page.seen.selections).toHaveLength(2);
   });
 
+  it("waits until the person stops changing it, so a selection still being made is not offered", async () => {
+    const page = boot();
+    await expect.poll(() => page.bridge.initialized).toBe(true);
+    for (const text of ["T", "To", "Tot", "Tota", "Total: 42"]) {
+      selectText(page, text);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    await expect.poll(() => page.seen.selections.length).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(page.seen.selections).toEqual([expect.objectContaining({ text: "Total: 42" })]);
+  });
+
   it("is never reported from a room's page", async () => {
     const page = boot(true, { room: true });
     await expect.poll(() => page.bridge.initialized).toBe(true);
