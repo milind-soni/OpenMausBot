@@ -11,8 +11,10 @@ import {
   PAIRING_CODE_ALPHABET,
   PAIRING_CODE_LENGTH,
   PAIRING_CREDENTIAL_PREFIX,
+  PAIRING_INPUT_PROBLEM_CODE,
   PAIRING_INPUT_PROBLEM_KEY,
   readPairingInput,
+  type PairingErrorCode,
 } from "../shared/pairing-code.ts";
 import { userError, type UserError } from "./user-errors.ts";
 
@@ -136,7 +138,7 @@ export interface PublicPairing {
 
 export type ExchangeResult =
   | { ok: true; token: string; session: PublicSession }
-  | ({ ok: false; status: 400 | 401 | 403 | 429 } & UserError);
+  | ({ ok: false; status: 400 | 401 | 403 | 429; code: PairingErrorCode } & UserError);
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 /** The English fallback's clock; a client words `until` in its own time zone. */
@@ -446,7 +448,7 @@ export class SessionRegistry {
     this.prune();
     const now = this.now();
     const read = readPairingInput(input.code);
-    if (read.kind === "wrong" && read.problem !== "notACode") return { ok: false, status: 400, ...userError(PAIRING_INPUT_PROBLEM_KEY[read.problem]) };
+    if (read.kind === "wrong" && read.problem !== "notACode") return { ok: false, status: 400, code: PAIRING_INPUT_PROBLEM_CODE[read.problem], ...userError(PAIRING_INPUT_PROBLEM_KEY[read.problem]) };
     // A credential is hashed as presented: normalizePairingCode folds 0 to O and 1 to I, which would merge distinct secrets.
     const presented = sha256(read.kind === "credential" ? read.credential : read.kind === "code" ? read.code : normalizePairingCode(input.code));
     const browser = input.browser === true;
@@ -457,18 +459,18 @@ export class SessionRegistry {
     const lock = unnamed ? { locked: false, retryAfterMs: 0 } : this.lockState(this.codeFailures, input.source);
     if (lock.locked) {
       const until = now + lock.retryAfterMs;
-      return { ok: false, status: 429, ...userError("serverError.pair.tooMany", { seconds: Math.ceil(lock.retryAfterMs / 1000), until, time: utcClock(until) }) };
+      return { ok: false, status: 429, code: "pairing_too_many", ...userError("serverError.pair.tooMany", { seconds: Math.ceil(lock.retryAfterMs / 1000), until, time: utcClock(until) }) };
     }
     const index = this.pairings.findIndex((p) => (p.browser === true) === browser &&
       (sameDigest(p.credentialHash, presented) || (!p.browser && sameDigest(p.codeHash, presented))));
     if (index < 0) {
       if (unnamed) this.wrongFromUnnamed();
       else this.recordFailure(this.codeFailures, PAIRING_LOCKOUT, input.source);
-      return { ok: false, status: 401, ...userError("serverError.pair.codeWrong") };
+      return { ok: false, status: 401, code: "pairing_code_wrong", ...userError("serverError.pair.codeWrong") };
     }
     const [pairing] = this.pairings.splice(index, 1);
     this.codeFailures.delete(input.source);
-    if (this.personal(pairing.scopes)) return { ok: false, status: 403, ...this.adminOnly! };
+    if (this.personal(pairing.scopes)) return { ok: false, status: 403, code: "cloud_personal", ...this.adminOnly! };
     const token = `omb_sess_${randomBytes(32).toString("base64url")}`;
     const checkedAt = pairing.memberCheckedAt ?? now;
     const record: SessionRecord = {

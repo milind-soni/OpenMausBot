@@ -30,6 +30,12 @@ export type DeviceRoutes = "any" | "local";
 
 export type PublicDevice = Omit<DeviceRecord, "tokenHash">;
 
+/** A refused `POST /api/pair`: `code` is one of the phone protocol's PairingErrorCode values. */
+export interface PairingRefusal {
+  error: string;
+  code: "pairing_bad_request" | "pairing_not_open" | "pairing_too_many" | "pairing_code_wrong" | "pairing_device_limit" | "pairing_failed";
+}
+
 /** `token` rides in the QR, has enough entropy to stand alone and is never
  * persisted. `code` is six digits, so it lives two minutes and dies after a
  * few wrong guesses. Redeeming either burns both. */
@@ -277,7 +283,7 @@ export class DeviceRegistry {
     credential: string,
     name: unknown,
     pairRequestId?: unknown,
-  ): { device: PublicDevice; token: string } | { error: string } {
+  ): { device: PublicDevice; token: string } | PairingRefusal {
     const presented = String(credential ?? "");
     const requestId =
       typeof pairRequestId === "string" && /^[A-Za-z0-9._-]{16,128}$/.test(pairRequestId)
@@ -296,19 +302,19 @@ export class DeviceRegistry {
 
     const windows = this.pairingWindows();
     const window = windows.find((candidate) => sameCredential(candidate.code, presented) || sameCredential(candidate.token, presented));
-    if (windows.length === 0) return { error: "no pairing is in progress — open Phone settings on your computer" };
+    if (windows.length === 0) return { error: "no pairing is in progress — open Phone settings on your computer", code: "pairing_not_open" };
     if (!window) {
       // Every open window pays for a wrong guess: without burning them, six digits is seconds of guessing.
       for (const open of windows) open.attemptsLeft -= 1;
       if (windows.some((open) => open.attemptsLeft <= 0)) {
         this.closePairing();
-        return { error: "too many incorrect codes — start pairing again" };
+        return { error: "too many incorrect codes — start pairing again", code: "pairing_too_many" };
       }
-      return { error: "that pairing credential is not right" };
+      return { error: "that pairing credential is not right", code: "pairing_code_wrong" };
     }
     // After the code check: a full fleet must not answer wrong guesses, which
     // would leak state and cost no attempts.
-    if (this.devices.length >= MAX_DEVICES) return { error: "too many paired devices — remove one first" };
+    if (this.devices.length >= MAX_DEVICES) return { error: "too many paired devices — remove one first", code: "pairing_device_limit" };
     // Consume every open window without clearing a replay; `closePairing` clears both.
     this.window = null;
     this.previousWindow = null;
@@ -331,7 +337,7 @@ export class DeviceRegistry {
       this.persist();
     } catch (e) {
       this.devices.pop();
-      return { error: `could not save the pairing: ${(e as Error).message}` };
+      return { error: `could not save the pairing: ${(e as Error).message}`, code: "pairing_failed" };
     }
     this.changed();
     const unconfirmed = setTimeout(() => {

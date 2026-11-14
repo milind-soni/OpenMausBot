@@ -36,7 +36,7 @@ const sidecar = async (redeemed: unknown[] = []) => {
     authenticate: (token) => token === "paired" ? { id: "phone", cloudDesktopAccess: true, browserControlAccess: false } : null,
     redeem: (code, deviceName) => {
       redeemed.push([code, deviceName]);
-      return { error: "that pairing credential is not right" };
+      return { error: "that pairing credential is not right", code: "pairing_code_wrong" };
     },
     serverName: () => "Fixture",
   });

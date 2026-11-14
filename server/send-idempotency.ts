@@ -68,3 +68,44 @@ export class SendSequencer {
 export function sendFingerprint(text: string, replyToId?: string, channelMode?: "chat" | "goal"): string {
   return JSON.stringify([text, replyToId ?? null, channelMode ?? null]);
 }
+
+/** A Stop's `stopId`: the same client-generated form as a `sendId`. Null when one is sent but malformed. */
+export function parseStopId(value: unknown): string | undefined | null {
+  if (value === undefined) return undefined;
+  const parsed = sendIdSchema.safeParse(value);
+  return parsed.success && parsed.data !== undefined ? parsed.data : null;
+}
+
+/** One answer per Stop. A phone resends a POST when its pooled connection dies, so a Stop it resends must not stop the
+ * turn that started after the first one did: every resend of a key within `keepMs` gets the first one's answer. An
+ * attempt that throws keeps no answer, so its resend runs again. */
+export class StopReceipts<T> {
+  private readonly receipts = new Map<string, { at: number; answer: Promise<T> }>();
+  private readonly keepMs: number;
+  private readonly max: number;
+  private readonly now: () => number;
+
+  constructor(options: { keepMs?: number; max?: number; now?: () => number } = {}) {
+    this.keepMs = options.keepMs ?? 10 * 60_000;
+    this.max = options.max ?? 1_000;
+    this.now = options.now ?? Date.now;
+  }
+
+  run(key: string | undefined, stop: () => Promise<T>): Promise<T> {
+    if (!key) return stop();
+    const now = this.now();
+    for (const [old, receipt] of this.receipts) {
+      if (now - receipt.at < this.keepMs) break;
+      this.receipts.delete(old);
+    }
+    const kept = this.receipts.get(key);
+    if (kept) return kept.answer;
+    const entry = { at: now, answer: stop() };
+    this.receipts.set(key, entry);
+    if (this.receipts.size > this.max) this.receipts.delete(this.receipts.keys().next().value!);
+    entry.answer.catch(() => {
+      if (this.receipts.get(key) === entry) this.receipts.delete(key);
+    });
+    return entry.answer;
+  }
+}

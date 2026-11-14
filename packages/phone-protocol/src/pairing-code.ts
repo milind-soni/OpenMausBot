@@ -43,6 +43,36 @@ export const PAIRING_INPUT_PROBLEM_KEY: Record<PairingInputProblem, keyof typeof
   notACode: "serverError.pair.notACode",
 };
 
+/** The `code` on every refused pairing: `POST /api/pair` on a computer, a server or a Cloud, and `POST /api/auth/pair`.
+ * `error` stays plain words any client can show; a client branches on `code`, never on `error`. */
+export type PairingErrorCode =
+  /** Not JSON, or not the fields a pairing sends. */
+  | "pairing_bad_request"
+  /** No open pairing has this code or credential. */
+  | "pairing_code_wrong"
+  /** A computer has no pairing open. */
+  | "pairing_not_open"
+  /** Too many wrong codes: wait (a server or Cloud says until when), or start pairing again (a computer). */
+  | "pairing_too_many"
+  /** A browser sign-in link that has expired or was used. */
+  | "pairing_link_expired"
+  | "pairing_email_code"
+  | "pairing_old_code"
+  | "pairing_script_key"
+  /** Through the encrypted relay only the QR code's credential pairs, never a typed code. */
+  | "pairing_qr_only"
+  /** A computer already has as many paired devices as it allows. */
+  | "pairing_device_limit"
+  /** A personal Cloud pairs only its owner's devices. */
+  | "cloud_personal"
+  | "pairing_failed";
+
+export const PAIRING_INPUT_PROBLEM_CODE: Record<Exclude<PairingInputProblem, "notACode">, PairingErrorCode> = {
+  emailCode: "pairing_email_code",
+  oldCode: "pairing_old_code",
+  scriptKey: "pairing_script_key",
+};
+
 function fromLink(raw: string): string | null {
   let url: URL;
   try {

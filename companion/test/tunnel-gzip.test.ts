@@ -36,7 +36,7 @@ beforeAll(async () => {
   const proxy = createProxyHandler({
     harnessPort: await listen(harness),
     authenticate: (t) => (t === TOKEN ? { id: "phone-1", cloudDesktopAccess: true, browserControlAccess: false } : null),
-    redeem: () => ({ error: "not used here" }),
+    redeem: () => ({ error: "not used here", code: "pairing_code_wrong" }),
     serverName: () => "Test computer",
     endpoints: () => ENDPOINTS,
   });
