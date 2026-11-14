@@ -217,6 +217,23 @@ export class SharedComputers {
     return this.lent?.list(principal).some(record => record.id === id && record.stoppedAt === null) ?? false;
   }
   private online(entry: Computer) { return this.sessionLive(entry.owner.session) && Date.now() - entry.seen < 40_000; }
+  /** One computer can be registered twice after the desktop pairs again: the old session stays signed in, so its entry
+   * remains, and it is the one inserted first. A request or the known list has to use the entry that is polling. */
+  private prefer(current: Computer | undefined, candidate: Computer): Computer {
+    if (!current) return candidate;
+    const currentOnline = this.online(current);
+    const candidateOnline = this.online(candidate);
+    if (candidateOnline !== currentOnline) return candidateOnline ? candidate : current;
+    return candidate.seen >= current.seen ? candidate : current;
+  }
+  private chosen(principal: string, id: string): Computer | undefined {
+    let best: Computer | undefined;
+    for (const candidate of this.computers.values()) {
+      if (candidate.registration.id !== id || candidate.owner.person !== principal) continue;
+      best = this.prefer(best, candidate);
+    }
+    return best;
+  }
   /** The desktop takes a 401 or 403 for a lost sign-in and signs in again, so a stopping server answers 503. */
   private authorize(id: string, session: string, secret: string) {
     if (this.closed) throw failure(RESTARTING, 503);
@@ -262,9 +279,8 @@ export class SharedComputers {
   /** Every computer this person lent, now or before, newest first: online, offline since, or no longer lent. */
   known(principal: string | null): KnownLentComputer[] {
     if (!principal) return [];
-    const live = [...this.computers.values()].filter(entry => entry.owner.person === principal);
     return (this.lent?.list(principal) ?? []).map(record => {
-      const entry = live.find(candidate => candidate.registration.id === record.id);
+      const entry = this.chosen(principal, record.id);
       return { id: record.id, name: record.name, platform: record.platform, online: entry ? this.online(entry) : false, busy: (entry?.jobs.size ?? 0) > 0,
         lent: record.stoppedAt === null, lastSeenAt: entry ? Math.max(entry.seen, record.lastSeenAt) : record.lastSeenAt, lastUsedAt: record.lastUsedAt,
         scopes: { folders: record.folders, terminal: record.terminal, screen: record.screen, internet: record.internet === true, chrome: record.chrome === true } };
@@ -308,7 +324,12 @@ export class SharedComputers {
   status(principal: string | null): SharedComputerStatus[] {
     if (!principal) return [];
     this.reap();
-    return [...this.computers.values()].filter(entry => entry.owner.person === principal).map(entry => ({
+    const shown = new Map<string, Computer>();
+    for (const entry of this.computers.values()) {
+      if (entry.owner.person !== principal) continue;
+      shown.set(entry.registration.id, this.prefer(shown.get(entry.registration.id), entry));
+    }
+    return [...shown.values()].map(entry => ({
       id: entry.registration.id, name: entry.registration.name, online: this.online(entry), busy: entry.jobs.size > 0, lastSeenAt: entry.seen,
       scopes: {
         folders: entry.registration.folders.map(({ id, name, write }) => ({ id, name, write })),
@@ -346,8 +367,12 @@ export class SharedComputers {
       entry.wake = wake;
     });
     this.authorize(id, session, secret);
-    entry.seen = Date.now();
-    this.lent?.seen(entry.owner.person, id);
+    // A poll whose client already left, or that a newer poll replaced, must not mark this registration
+    // just seen. After a re-pair that would make the old session look like the live one.
+    if (entry.polls === mine && !gone?.aborted) {
+      entry.seen = Date.now();
+      this.lent?.seen(entry.owner.person, id);
+    }
     return next();
   }
   private send(entry: Computer, job: Job) {
@@ -386,7 +411,7 @@ export class SharedComputers {
   /** Another person's computer answers exactly like one that does not exist. */
   async request(operation: Operation, principal: string | null, active: () => boolean, by?: ActingBot | null): Promise<unknown> {
     if (!principal) throw failure("This conversation cannot use a shared computer: only a conversation started by the person who shared it can.", 403);
-    const lent = () => [...this.computers.values()].find(candidate => candidate.registration.id === operation.computer_id && candidate.owner.person === principal);
+    const lent = () => this.chosen(principal, operation.computer_id);
     for (const deadline = Date.now() + RECONNECT_WAIT_MS; ;) {
       const known = lent();
       if (known && this.online(known)) break;
