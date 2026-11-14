@@ -1782,7 +1782,7 @@
   "teamShare.skip.skill_changed": "검토한 뒤에 바뀌었어요",
   "teamShare.skip.skill_conflict": "두 봇에 같은 이름의 서로 다른 스킬이 있어요",
   "teamShare.skip.bot_skill_limit": "봇 하나는 스킬을 최대 30개까지 공유할 수 있어요(켜진 스킬이 먼저 들어가요)",
-  "teamShare.skip.team_skill_limit": "부서 하나는 스킬을 최대 60개까지 공유할 수 있어요",
+  "teamShare.skip.team_skill_limit": "부서 하나는 스킬을 최대 120개까지 공유할 수 있어요",
   "teamShare.field.soul": "상시 지침",
   "teamShare.field.notes": "시작 메모",
   "teamShare.field.brief": "공유 지침",

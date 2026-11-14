@@ -1228,7 +1228,7 @@
   "teamShare.skip.skill_changed": "incelendikten sonra değiştirildi",
   "teamShare.skip.skill_conflict": "iki bot bu ada sahip farklı becerilere sahip",
   "teamShare.skip.bot_skill_limit": "bir bot en fazla 30 beceri paylaşabilir (açık olan beceriler önce gelir)",
-  "teamShare.skip.team_skill_limit": "bir departman en fazla 60 beceri paylaşabilir",
+  "teamShare.skip.team_skill_limit": "bir departman en fazla 120 beceri paylaşabilir",
   "teamShare.field.soul": "kalıcı talimatlar",
   "teamShare.field.notes": "başlangıç notları",
   "teamShare.field.brief": "paylaşılan talimatlar",

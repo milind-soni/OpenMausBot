@@ -1,7 +1,7 @@
 import { parse as parseYaml } from "yaml";
 import { t } from "./i18n";
 import { parseTeamBackup, TEAM_BACKUP_CONTENTS } from "../../shared/team-backup";
-import { PACKAGE_VERSION, parsePackageDocument, type PackageDocument } from "../../shared/package-format";
+import { PACKAGE_V2_VERSION, PACKAGE_VERSION, parsePackageDocument, type PackageDocument } from "../../shared/package-format";
 
 export interface PendingTeamImport {
   manifest: unknown;
@@ -156,7 +156,7 @@ function libraryPreview(document: PackageDocument, manifest: unknown): PendingTe
 
 function packagePreview(root: Record<string, unknown>, manifest: unknown): PendingTeamImport {
   if (typeof root.version === "number" && root.version > PACKAGE_VERSION) throw new Error(t("teamImport.newer"));
-  if (root.version === PACKAGE_VERSION) return sharedTeamPreview(parsePackageDocument(manifest), manifest);
+  if (root.version === PACKAGE_V2_VERSION || root.version === PACKAGE_VERSION) return sharedTeamPreview(parsePackageDocument(manifest), manifest);
   if (root.version !== 1) throw new Error(t("teamImport.playbookVersion", { version: String(root.version) }));
   if (!root.package || typeof root.package !== "object" || Array.isArray(root.package)) {
     throw new Error(t("teamImport.playbookMissing"));

@@ -1692,7 +1692,7 @@
   "teamShare.skip.skill_changed": "zmieniono po przeglądzie",
   "teamShare.skip.skill_conflict": "dwa boty mają różne umiejętności o tej samej nazwie",
   "teamShare.skip.bot_skill_limit": "bot może udostępnić maksymalnie 30 umiejętności (najpierw włączone umiejętności)",
-  "teamShare.skip.team_skill_limit": "dział może udostępnić maksymalnie 60 umiejętności",
+  "teamShare.skip.team_skill_limit": "dział może udostępnić maksymalnie 120 umiejętności",
   "teamShare.field.soul": "stałe instrukcje",
   "teamShare.field.notes": "notatki startowe",
   "teamShare.field.brief": "wspólne instrukcje",

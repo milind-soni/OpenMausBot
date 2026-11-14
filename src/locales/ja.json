@@ -1870,7 +1870,7 @@
   "teamShare.skip.skill_changed": "確認後に変更されています",
   "teamShare.skip.skill_conflict": "同名で内容の異なるスキルを持つボットが 2 体います",
   "teamShare.skip.bot_skill_limit": "ボットが共有できるスキルは最大 30 件です（オンのスキルを優先）",
-  "teamShare.skip.team_skill_limit": "部署が共有できるスキルは最大 60 件です",
+  "teamShare.skip.team_skill_limit": "部署が共有できるスキルは最大 120 件です",
   "teamShare.field.soul": "常時適用する指示",
   "teamShare.field.notes": "初期メモ",
   "teamShare.field.brief": "共有の指示",

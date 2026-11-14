@@ -174,7 +174,7 @@ describe("the catalog", () => {
     const app = await installation();
     const library = app.open();
     const team = release("full-team.v2.json");
-    const newer = entry(TEAM_ID, team, { release: { ...entry(TEAM_ID, team).release, formatVersion: 3 } });
+    const newer = entry(TEAM_ID, team, { release: { ...entry(TEAM_ID, team).release, formatVersion: 4 } });
     library.applyRelay(relay(catalog([newer])));
     await library.settled();
     const readBlob = vi.spyOn(library, "readBlob");
