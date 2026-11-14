@@ -1,7 +1,8 @@
 // A real server and the real injected agents proxy; only the provider's planning is scripted (room-handoff-agent).
 // The bot is on Full access, the default: changes apply at once with Undo, and no card waits on an answer.
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 
@@ -210,6 +211,43 @@ it("a Full-access bot's own approval mode changes at once on every thread, and U
   expect(now.tasks.every((task: any) => (task.approvalMode ?? "ask") === "ask")).toBe(true);
   expect(await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: (await newest("bots.approvalModes")).requestId })).toMatchObject({ ok: true, undone: true });
   expect((await botNow()).approvalMode).toBe("full");
+}, 90_000);
+
+it("a bot gives itself and the person a picture from a file in its workspace, refuses a fake picture and a file outside, and Undo takes each back", async () => {
+  const PNG = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from("a picture")]);
+  const workspace = join(dataDir, "workspaces", bot.id);
+  const elsewhere = mkdtempSync(join(tmpdir(), "omb-picture-outside-"));
+  try {
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(join(workspace, "face.png"), PNG);
+    writeFileSync(join(workspace, "fake.png"), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+    writeFileSync(join(elsewhere, "outside.png"), PNG);
+    await start("PICTURES", [
+      step({ action: "set", id: "bots.picture", value: JSON.stringify({ botId: bot.id, path: join(workspace, "face.png") }) }),
+      step({ action: "set", id: "profile.photo", value: JSON.stringify({ path: "face.png" }) }),
+      step({ action: "set", id: "bots.picture", value: JSON.stringify({ botId: bot.id, path: join(workspace, "fake.png") }) }, true),
+      step({ action: "set", id: "profile.photo", value: JSON.stringify({ path: join(elsewhere, "outside.png") }) }, true),
+    ], 60_000);
+    const [given, photo, fake, outside] = results(await finished("PICTURES"));
+    expect(given).toMatchObject({ isError: false, text: expect.stringMatching(/^Done: Give Setter the picture face\.png\./) });
+    expect(photo).toMatchObject({ isError: false, text: expect.stringMatching(/^Done: Make face\.png your photo\./) });
+    expect(fake).toMatchObject({ isError: true, text: expect.stringContaining("fake.png is not a PNG, JPEG, GIF or WebP picture.") });
+    expect(outside).toMatchObject({ isError: true, text: expect.stringContaining("is outside your workspace") });
+
+    const shown = await botNow();
+    expect(shown).toMatchObject({ avatarUrl: expect.stringMatching(/^\/api\/attachments\/[\w-]+\.png$/), avatarCrop: "circle" });
+    const served = await fetch(url + shown.avatarUrl, { headers: { origin: url } });
+    expect(Buffer.from(await served.arrayBuffer()).equals(PNG), "the stored copy is served as the bot's picture").toBe(true);
+    expect(config().profile.avatarUrl).toMatch(/^\/api\/attachments\/[\w-]+\.png$/);
+    expect((await api("GET", "/api/config")).profile.avatarUrl).toBe(config().profile.avatarUrl);
+
+    await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: (await newest("bots.picture")).requestId });
+    await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: (await newest("profile.photo")).requestId });
+    expect(await botNow()).toMatchObject({ avatarUrl: null, avatarCrop: "mascot" });
+    expect(config().profile.avatarUrl ?? "").toBe("");
+  } finally {
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
 }, 90_000);
 
 it("pinning a bot goes through the sidebar's own bot route, and Undo unpins it", async () => {
