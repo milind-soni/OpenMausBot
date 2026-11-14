@@ -7,7 +7,7 @@ import { ChromeRow } from "./ChromeRow";
 
 const props: ComponentProps<typeof ChromeRow> = {
   botName: "Scout", tabs: [], nav: { url: "about:blank", loading: false, canGoBack: false, canGoForward: false },
-  connected: false, control: null, takeStatus: "", commandsReady: false, profileName: "Work", fullscreen: false, maximized: false, menu: null,
+  connected: false, control: null, takeStatus: "", commandsReady: false, closesLastTab: false, profileName: "Work", fullscreen: false, maximized: false, menu: null,
   onCommand: vi.fn(), onAddress: vi.fn(), onTake: vi.fn(), onHandBack: vi.fn(), onFullscreen: vi.fn(), onMaximize: vi.fn(), onProfiles: vi.fn(),
 };
 
