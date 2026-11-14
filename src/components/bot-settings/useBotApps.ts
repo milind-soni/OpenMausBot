@@ -73,12 +73,14 @@ export function botAppsFrom(
   return { phase: "ready", apps, connectedSlugs };
 }
 
-export function useBotApps(bot: Bot): BotApps {
+/** `load` false skips the requests until it turns true (the settings search loads apps only once someone searches). */
+export function useBotApps(bot: Bot, load = true): BotApps {
   const [inventory, setInventory] = useState<ConnectorInventory | null>(null);
   const [cards, setCards] = useState<ReadonlyMap<string, ToolkitCard>>(() => new Map());
   const [email, setEmail] = useState<EmailStatus | null>(null);
 
   useEffect(() => {
+    if (!load) return;
     let cancelled = false;
     void preloadConnectedApps().then((result) => {
       if (!cancelled) setInventory(result);
@@ -90,7 +92,7 @@ export function useBotApps(bot: Bot): BotApps {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [load]);
 
   return botAppsFrom(bot, inventory, cards, email);
 }

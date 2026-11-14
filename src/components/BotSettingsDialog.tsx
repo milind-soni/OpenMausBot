@@ -4,7 +4,8 @@ import { ChevronDown, Search, X } from "lucide-react";
 import { useStore, type Bot, type BotSettingsSection } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "./DesktopCapabilities";
-import { BOT_SECTIONS } from "./bot-settings/sections";
+import { BOT_SECTIONS, sectionLabel, sectionMatches } from "./bot-settings/sections";
+import { useBotApps } from "./bot-settings/useBotApps";
 import { useBotSettingsDerived } from "./bot-settings/useBotSettingsDerived";
 import { OverviewSection } from "./bot-settings/OverviewSection";
 import { IdentitySection } from "./bot-settings/IdentitySection";
@@ -34,13 +35,6 @@ import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
 /** Where the Library's memory, skills and folder rows lead in Advanced settings. */
 const LIBRARY_LINKS: Partial<Record<SimplePageId, BotSettingsSection>> = { memory: "memory", skills: "skills", folder: "access" };
 
-const sectionLabel = (entry: (typeof BOT_SECTIONS)[number]) => (entry.labelKey ? t(entry.labelKey) : entry.label);
-
-function sectionMatches(entry: (typeof BOT_SECTIONS)[number], query: string): boolean {
-  if (!query) return true;
-  return [entry.label, sectionLabel(entry), ...entry.keywords].some((part) => part.toLowerCase().includes(query));
-}
-
 export function BotSettingsDialog({ bot, overlay = false }: {
   bot: Bot;
   overlay?: boolean;
@@ -62,7 +56,10 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   const sections = BOT_SECTIONS
     .filter((entry) => entry.id !== "slack" || slackUrl !== null)
     .filter((entry) => entry.id !== "visibility" || (!window.ogb && ownerOrAdmin === true && !teamName));
-  const visibleSections = sections.filter((entry) => sectionMatches(entry, q));
+  // Connected apps load only once the person searches; their names find the Access section.
+  const searchApps = useBotApps(bot, q !== "");
+  const appNames = searchApps.apps.flatMap((app) => [app.label, app.slug]);
+  const visibleSections = sections.filter((entry) => sectionMatches(entry, q, appNames));
 
   const { overview, overviewError, prompt, promptError } = useBotOverview(bot, {
     overview: section === "overview" && !simpleView,
@@ -233,7 +230,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
           {sections.map((entry) => {
             const { id, icon: Icon } = entry;
             const label = sectionLabel(entry);
-            const matched = sectionMatches(entry, q);
+            const matched = sectionMatches(entry, q, appNames);
             if (!matched && id !== "memory") return null;
             const open = !collapsed && section === id;
             return (
