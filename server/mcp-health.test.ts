@@ -35,6 +35,46 @@ function fixture(options: { startsFor?: (name: string, botId: string) => boolean
 }
 
 describe("checking that command servers start", () => {
+  it.each([false, true])("reserves a released slot for its queued check when a new check arrives (reject=%s)", async (rejectFirst) => {
+    const { deps } = fixture({ servers: { a: notes, b: notes, c: notes, d: notes } });
+    const started: string[] = [];
+    const finish = new Map<string, (reject?: boolean) => void>();
+    let active = 0, peak = 0, cleanup = false;
+    const health = createMcpHealth({ ...deps, start: (name) => {
+      started.push(name);
+      if (cleanup) return Promise.resolve({ ok: true });
+      active += 1;
+      peak = Math.max(peak, active);
+      return new Promise<{ ok: true }>((resolve, reject) => {
+        finish.set(name, (failed = false) => {
+          finish.delete(name);
+          active -= 1;
+          if (failed) reject(new Error("fixture startup failed"));
+          else resolve({ ok: true });
+        });
+      });
+    } });
+    const first = health.prepare("iris", ["a", "b", "c"]);
+    let later: Promise<void> | undefined;
+    try {
+      expect(started).toEqual(["a", "b"]);
+      finish.get("a")!(rejectFirst);
+      queueMicrotask(() => { later = health.prepare("iris", ["d"]); });
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      expect(peak).toBe(2);
+      expect(started).toEqual(["a", "b", "c"]);
+      finish.get("b")!();
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      expect(started).toEqual(["a", "b", "c", "d"]);
+      expect(peak).toBe(2);
+    } finally {
+      cleanup = true;
+      for (const settle of finish.values()) settle();
+      await Promise.all([first, later]);
+      await health.settled();
+    }
+  });
+
   it("checks a server every bot uses once for all of them, and a bot's own for that bot, once each", async () => {
     const { health, starts } = fixture();
     await health.prepare("paul", ["notes"]);
