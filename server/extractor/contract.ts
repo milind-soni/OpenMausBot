@@ -127,13 +127,13 @@ export function typedValue(spec: FieldSpec, value: unknown): FieldValue | undefi
 /** `values` for exactly the fields asked: a missing one is null, a mistyped one makes the whole answer malformed. */
 export function parseExtractValues(values: unknown, fields: FieldSchema): ExtractedValues | null {
   if (!isRecord(values)) return null;
-  const out: ExtractedValues = {};
+  const out: Array<[string, FieldValue]> = [];
   for (const [name, spec] of Object.entries(fields)) {
-    const typed = typedValue(spec, values[name]);
+    const typed = typedValue(spec, Object.hasOwn(values, name) ? values[name] : undefined);
     if (typed === undefined) return null;
-    out[name] = typed;
+    out.push([name, typed]);
   }
-  return out;
+  return Object.fromEntries(out);
 }
 
 /** The relay's answer: { values, model }. */
