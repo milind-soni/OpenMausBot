@@ -28,23 +28,26 @@ function manager(dataDir: string, now: () => number) {
 
 describe("the zone a Cloud home tells time in", () => {
   it("takes only IANA zone names the runtime knows", () => {
-    for (const zone of ["UTC", "Asia/Kolkata", "Europe/London", "America/Argentina/Buenos_Aires", "Etc/GMT+5"]) expect(knownTimeZone(zone), zone).toBe(zone);
+    for (const zone of ["UTC", "Asia/Kolkata", "Europe/London", "America/Argentina/Buenos_Aires", "Etc/GMT+5"]) {
+      expect(knownTimeZone(zone), zone).toBe(new Intl.DateTimeFormat("en-US", { timeZone: zone }).resolvedOptions().timeZone);
+    }
     for (const bad of ["+05:30", "IST", "Mars/Olympus_Mons", "../etc/passwd", "Asia/Kolkata\n", "", 330, null, "A".repeat(70)]) expect(knownTimeZone(bad), String(bad)).toBeNull();
   });
 
   it("saves the owner's zone, runs in it, and takes it back after a restart", () => {
+    const canonical = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata" }).resolvedOptions().timeZone;
     const dataDir = tempDir();
     const env: NodeJS.ProcessEnv = {};
     expect(adoptSavedTimeZone(dataDir, env)).toBeNull();
     expect(useTimeZone(dataDir, "Asia/Kolkata", env)).toBe(true);
     expect(env.TZ).toBe("Asia/Kolkata");
-    expect(currentTimeZone(env)).toBe("Asia/Kolkata");
+    expect(currentTimeZone(env)).toBe(canonical);
     expect(JSON.parse(readFileSync(join(dataDir, TIME_ZONE_FILE), "utf8"))).toEqual({ version: 1, timeZone: "Asia/Kolkata" });
     if (process.platform !== "win32") expect(statSync(join(dataDir, TIME_ZONE_FILE)).mode & 0o777).toBe(0o600);
     expect(useTimeZone(dataDir, "Asia/Kolkata", env)).toBe(false);
     const restarted: NodeJS.ProcessEnv = {};
-    expect(adoptSavedTimeZone(dataDir, restarted)).toBe("Asia/Kolkata");
-    expect(restarted.TZ).toBe("Asia/Kolkata");
+    expect(adoptSavedTimeZone(dataDir, restarted)).toBe(canonical);
+    expect(restarted.TZ).toBe(canonical);
   });
 
   it("moves this process's clock: a local hour reads in the new zone at once", () => {
