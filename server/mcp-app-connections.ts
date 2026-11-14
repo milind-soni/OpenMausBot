@@ -55,9 +55,17 @@ class StdioAppClient implements AppClient {
     });
     const splitter = createLineSplitter((line) => this.onLine(line, hooks));
     this.child.stdout.on("data", (chunk: Buffer) => {
+      if (this.closed) return;
       // A connection lives for minutes; the bound is per message, not total.
-      this.stdoutBytes += chunk.byteLength;
-      if (this.stdoutBytes > MAX_REMOTE_MCP_BYTES) { this.fail(new McpHttpError("protocol", "message too large")); return; }
+      let start = 0;
+      while (start < chunk.byteLength) {
+        const newline = chunk.indexOf(10, start);
+        const end = newline === -1 ? chunk.byteLength : newline + 1;
+        this.stdoutBytes += end - start;
+        if (this.stdoutBytes > MAX_REMOTE_MCP_BYTES) { this.fail(new McpHttpError("protocol", "message too large")); return; }
+        if (newline !== -1) this.stdoutBytes = 0;
+        start = end;
+      }
       splitter.push(chunk);
     });
     // Child stderr may carry secrets: drained, never kept.
@@ -67,7 +75,6 @@ class StdioAppClient implements AppClient {
   }
 
   private onLine(line: string, hooks: AppClientHooks): void {
-    this.stdoutBytes = 0;
     if (!line.trim()) return;
     let message: unknown;
     try { message = JSON.parse(line); } catch { return; }
