@@ -136,7 +136,7 @@ export function referencedFileName(href: string): string | null {
 }
 
 /** Lexical on purpose: `resolve` and `fileURLToPath` follow the runner OS, and `/C:/notes.md` is not `C:\\notes.md`. */
-function referencedPathIdentity(href: string, allowForwardSlashUNC = true): string {
+export function referencedPathIdentity(href: string, allowForwardSlashUNC = true): string {
   const path = referencedPath(href, true, allowForwardSlashUNC);
   if (/^[a-z]:[\\/]/i.test(path) || path.startsWith("\\\\") || path.startsWith("//")) {
     return `windows:${win32.resolve(path)}`;
