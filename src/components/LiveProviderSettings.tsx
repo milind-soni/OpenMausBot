@@ -51,6 +51,7 @@ export function LiveProviderSettings({ locked = false, onSaving }: { locked?: bo
           <option value="azure">{t("call.live.provider.azure")}</option>
           <option value="fish">{t("call.live.provider.fish")}</option>
           <option value="gemini">{t("call.live.provider.gemini")}</option>
+          <option value="elevenlabs">{t("call.live.provider.elevenlabs")}</option>
         </Select>
       </label>
       {provider === "azure" && (
@@ -100,6 +101,7 @@ export function LiveProviderSettings({ locked = false, onSaving }: { locked?: bo
       )}
       {provider === "fish" && <div className="text-[12px] leading-4 text-ink-secondary">{t("call.live.fishHint")}</div>}
       {provider === "gemini" && <div className="text-[12px] leading-4 text-ink-secondary">{t("call.live.geminiHint")}</div>}
+      {provider === "elevenlabs" && <div className="text-[12px] leading-4 text-ink-secondary">{t("call.live.elevenLabsHint")}</div>}
       {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
   );

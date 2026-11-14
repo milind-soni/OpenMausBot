@@ -13,7 +13,7 @@ export interface LiveRouteDeps {
   resolveTarget(botId: string, threadId: string | undefined): { botId: string; botName: string; threadId: string } | null;
   settings(): LiveSettings;
   saveSettings(patch: { provider?: LiveProvider; azureEndpoint?: string; azureDeployment?: string; voice?: string; geminiVoice?: string; readTypedReplies?: boolean; idleMinutes?: number }): Promise<LiveSettings>;
-  /** A running Fish Audio or Gemini call's relay, only for the token its start answered with. */
+  /** A running relayed (Fish Audio, Gemini or ElevenLabs) call's relay, only for the token its start answered with. */
   fishRelay(sessionId: string, token: string): { receive(events: LiveFishRelayEvent[], from?: number): void; poll(waitMs: number): Promise<{ commands: LiveFishRelayCommand[]; closed: boolean }> } | null;
 }
 
@@ -21,7 +21,7 @@ const id = z.string().regex(/^[\w-]{1,120}$/);
 const sessionBody = z.object({
   botId: id,
   threadId: id.optional(),
-  // Not trimmed: the SDP offer goes to OpenAI byte for byte. Absent on a Fish Audio or Gemini call, which has no offer.
+  // Not trimmed: the SDP offer goes to OpenAI byte for byte. Absent on a relayed call, which has no offer.
   sdp: z.string().min(1).refine((sdp) => Buffer.byteLength(sdp) <= MAX_SDP_BYTES).optional(),
   client: z.enum(["desktop", "web", "ios", "android"]),
 }).strict();
@@ -44,7 +44,7 @@ const relayBody = z.object({
 }).strict();
 // Strict, so `key` is refused rather than ignored: the key is saved only through the credential store or PUT /api/config.
 const settingsBody = z.object({
-  provider: z.enum(["openai", "azure", "fish", "gemini"]).optional(),
+  provider: z.enum(["openai", "azure", "fish", "gemini", "elevenlabs"]).optional(),
   // "" clears the field. Anything else must be an https Azure OpenAI host, since the key is sent there.
   azureEndpoint: z.string().trim().max(300).refine((url) => url === "" || azureOpenAiRoot(url) !== null).optional(),
   azureDeployment: z.string().trim().max(64).refine((name) => name === "" || azureLiveDeployment(name) === name).optional(),
@@ -84,7 +84,7 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
       try {
         const device = companionDevice(req);
         const started = await deps.calls.start({ auth, ...(device ? { device } : {}), ...target, client: parsed.data.client, ...(parsed.data.sdp ? { sdp: parsed.data.sdp } : {}) });
-        return json(res, 201, { call: started.call, transport: started.fish ?? started.gemini ?? { type: "webrtc", sdp: started.sdp } });
+        return json(res, 201, { call: started.call, transport: started.fish ?? started.gemini ?? started.elevenlabs ?? { type: "webrtc", sdp: started.sdp } });
       } catch (error) {
         if (error instanceof LiveCallBusyError) return json(res, 409, { error: error.message, activeCall: error.call });
         if (error instanceof LiveSessionError) {

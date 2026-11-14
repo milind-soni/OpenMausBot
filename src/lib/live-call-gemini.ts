@@ -59,12 +59,12 @@ export function geminiSessionStarter(deps: GeminiSessionDeps = browserDeps): Fis
 
 export const startGeminiLiveSession = geminiSessionStarter();
 
-function decodeBase64(data: string): ArrayBuffer {
+export function decodeBase64(data: string): ArrayBuffer {
   const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
   return bytes.buffer;
 }
 
-function encodeBase64(buffer: ArrayBuffer): string {
+export function encodeBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let text = "";
   for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
