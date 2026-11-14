@@ -139,9 +139,10 @@ export function closeNames(wanted: string, names: readonly string[], max = 5): s
   return names
     .map((name) => {
       const folded = name.toLowerCase();
-      const distance = levenshtein(target, folded);
       const prefix = folded.startsWith(target) || target.startsWith(folded);
       const related = prefix || folded.includes(target);
+      const lengthDifference = Math.abs(target.length - folded.length);
+      const distance = related ? lengthDifference : lengthDifference > budget ? budget + 1 : levenshtein(target, folded);
       return { name, distance, prefix, related };
     })
     .filter((entry) => entry.related || entry.distance <= budget)
