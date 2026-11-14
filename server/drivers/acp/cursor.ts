@@ -528,9 +528,6 @@ const support = (run: typeof execCli): AcpSupport => ({
     if (currentModelId !== modelId) {
       try {
         await request("session/set_model", { sessionId, modelId });
-        if (match && !match.exact) {
-          notice(`Cursor offers ${modelId} rather than ${turn.model} in this session, so this conversation uses ${modelId}.`);
-        }
       } catch (e) {
         const err = e as Error & { code?: unknown };
         // -32601: no set_model, so the argv pin holds. -32602: not in this namespace; current CLIs
@@ -550,6 +547,10 @@ const support = (run: typeof execCli): AcpSupport => ({
             `Check that \`cursor-agent\` is current and that this account can use that model.`,
         );
       }
+    }
+    // The sentence is about the model this conversation uses, including a later turn that does not call the setter.
+    if (match && !match.exact) {
+      notice(`Cursor offers ${modelId} rather than ${turn.model} in this session, so this conversation uses ${modelId}.`);
     }
     if (fastOption) await setCursorFast(request, sessionId, wantsFast);
   },
