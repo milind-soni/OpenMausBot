@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { createConnection } from "node:net";
@@ -12,7 +12,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { DATA_DIR, NATIVE_DIR } from "../config.ts";
 import { flushNativeLog } from "./native.ts";
+import { readStartupModelCacheEntry, writeStartupModelCache } from "../startup-model-catalog.ts";
+import { readCodexModelCatalog } from "./codex-catalog.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
+import { DeviceAuthController } from "./device-auth.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { publishedMessages, replyProblems } from "../harness/text-items.testkit.ts";
 import { caseTokens, LIVE_REPLY_CASES, liveReplyScripts } from "../testing/live-reply-cases.ts";
@@ -64,6 +67,12 @@ describe("CodexDriver.decodeConfig", () => {
     expect(codexUserError(refusal, "own")).toBe(refusal);
     expect(() => CodexDriver.decodeConfig({ authMode: "chatgpt-plan", managed: {} })).toThrow("cannot be combined");
   });
+  it("accepts only the device auth flow", () => {
+    expect(CodexDriver.decodeConfig({ authMode: "chatgpt-plan", authFlow: "device" }))
+      .toMatchObject({ authMode: "chatgpt-plan", authFlow: "device" });
+    expect(() => CodexDriver.decodeConfig({ authFlow: "pkce" })).toThrow("Unknown Codex sign-in flow.");
+  });
+
   it("keeps direct API configuration and refuses mixed authentication modes", () => {
     expect(CodexDriver.decodeConfig({ endpoint: { url: "https://gateway.example/v1", models: ["gateway-model"] } }))
       .toMatchObject({ endpoint: { url: "https://gateway.example/v1", models: ["gateway-model"] } });
@@ -71,6 +80,7 @@ describe("CodexDriver.decodeConfig", () => {
     expect(() => CodexDriver.decodeConfig({ authMode: "chatgpt-plan", endpoint: { url: "https://gateway.example", models: ["m"] } })).toThrow();
     expect(() => CodexDriver.decodeConfig({ managed: {}, endpoint: {} })).toThrow();
   });
+
   it("defaults to the codex binary with fullAuto off", () => {
     expect(CodexDriver.decodeConfig({})).toEqual({ cli: "codex", fullAuto: false });
     expect(CodexDriver.decodeConfig(undefined)).toEqual({ cli: "codex", fullAuto: false });
@@ -145,7 +155,7 @@ describe("CodexDriver turns (fake app-server)", () => {
   let scratch: string;
 
   const create = async (
-    opts: { mode?: string; fullAuto?: boolean; environment?: Record<string, string>; managed?: boolean; endpoint?: boolean; authMode?: "chatgpt-plan"; cli?: string } = {},
+    opts: { mode?: string; fullAuto?: boolean; environment?: Record<string, string>; managed?: boolean; endpoint?: boolean; authMode?: "chatgpt-plan"; authFlow?: "device"; cli?: string } = {},
   ) => {
     if (opts.mode) process.env.FAKE_CODEX_MODE = opts.mode;
     instance = await CodexDriver.create({
@@ -161,6 +171,7 @@ describe("CodexDriver turns (fake app-server)", () => {
         cli: opts.cli ?? FAKE_CLI,
         fullAuto: opts.fullAuto ?? false,
         ...(opts.authMode ? { authMode: opts.authMode } : {}),
+        ...(opts.authFlow ? { authFlow: opts.authFlow } : {}),
         ...(opts.endpoint ? { endpoint: { url: "http://127.0.0.1:1/v1", models: ["gateway-model"] } } : {}),
         ...(opts.managed ? { managed: { url: "http://127.0.0.1:1/v1", models: ["company-codex-model"] } } : {}),
       },
@@ -171,6 +182,8 @@ describe("CodexDriver turns (fake app-server)", () => {
   const record = (mount: string) => `OMB_REMOTE_MCP_CONFIG_${createHash("sha256").update(mount).digest("hex")}`;
 
   beforeEach(() => {
+    // create() opts.mode pins FAKE_CODEX_MODE globally; drop the previous test's mode.
+    delete process.env.FAKE_CODEX_MODE;
     chmodSync(FAKE_CLI, 0o755);
     scratch = mkdtempSync(join(tmpdir(), "omb-codex-test-"));
   });
@@ -2295,6 +2308,107 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(catalog).toHaveBeenCalledTimes("authMode" in opts ? 1 : 0);
   });
 
+  it("routes device-lane plan turns through Codex's own provider, not the plan bridge", async () => {
+    const token = vi.spyOn(ChatGptPlanAuthController.prototype, "accessToken").mockResolvedValue("synthetic-plan-token");
+    const catalog = vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] });
+    await create({ authMode: "chatgpt-plan", mode: "approval" });
+    // Codex owns its login on this instance: auth.json exists, maus's credential store does not.
+    const codexHome = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update("codex-test").digest("hex"), "codex");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: null, tokens: { access_token: "synthetic", refresh_token: "synthetic", account_id: "acc" }, last_refresh: "2026-01-01T00:00:00.000Z" }));
+    const dump = join(scratch, "device-lane-turn.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-device-lane", text: "Continue", model: "gpt-6.1-sol" });
+      // The point is the launch shape, not the turn outcome: the fake dumps as soon as turn/start lands.
+      await vi.waitFor(() => {
+        expect(JSON.parse(readFileSync(dump, "utf8")).calls.some((call: { method: string }) => call.method === "turn/start")).toBe(true);
+      });
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv.some((arg: string) => arg.includes("openai_chatgpt_plan") || arg.includes("OPENMAUSBOT_CHATGPT_TOKEN"))).toBe(false);
+      expect(seen.env.OPENMAUSBOT_CHATGPT_TOKEN).toBeUndefined();
+      expect(seen.env.CODEX_HOME.startsWith(join(DATA_DIR, "providers", "chatgpt-plan") + sep)).toBe(true);
+      const threadCalls = seen.calls.filter((call: { method: string }) => ["thread/start", "thread/resume"].includes(call.method));
+      expect(threadCalls[0]).toMatchObject({ method: "thread/start", params: { model: "gpt-6.1-sol", modelProvider: "openai" } });
+      expect(token).not.toHaveBeenCalled();
+      expect(catalog).toHaveBeenCalledTimes(1); // create-time refresh, while the instance was still maus-lane
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
+  });
+
+  it("does not count an API-key login as plan authentication on a device-lane instance", async () => {
+    vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] });
+    await create({ authMode: "chatgpt-plan", mode: "api-key-configured" });
+    const codexHome = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update("codex-test").digest("hex"), "codex");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-test" }));
+    try {
+      await expect(instance.snapshot()).resolves.toMatchObject({
+        state: "available", chatgptPlan: true, billing: "subscription", authenticated: false,
+        reason: expect.stringMatching(/API key/),
+      });
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
+  });
+
+  it("turns away API-key homes and resets one when the device sign-in starts", async () => {
+    vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] });
+    const deviceStart = vi.spyOn(DeviceAuthController.prototype, "start").mockResolvedValue({ phase: "waiting", flowId: "flow-1", authorizationUrl: null, expiresAt: null });
+    await create({ authMode: "chatgpt-plan", authFlow: "device", mode: "logged-out" });
+    const codexHome = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update("codex-test").digest("hex"), "codex");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-test" }));
+    try {
+      await expect(instance.adapter.sendTurn({ threadId: "t-device-apikey", text: "Continue", model: "gpt-6.1-sol" }))
+        .rejects.toThrow(/API key/);
+      await expect(instance.generateMemoryText!("Summarize this."))
+        .rejects.toThrow(/API key/);
+      await expect(instance.startAuthentication!()).resolves.toMatchObject({ phase: "waiting" });
+      expect(existsSync(join(codexHome, "auth.json"))).toBe(false);
+      expect(deviceStart).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
+  });
+
+  it("turns away a legacy home whose Codex reports an API key even with ChatGPT-shaped auth.json", async () => {
+    vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] });
+    await create({ authMode: "chatgpt-plan", mode: "api-key-configured" });
+    const codexHome = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update("codex-test").digest("hex"), "codex");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ tokens: { access_token: "t" } }));
+    try {
+      await expect(instance.adapter.sendTurn({ threadId: "t-device-shape", text: "Continue", model: "gpt-6.1-sol" }))
+        .rejects.toThrow(/API key/);
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the unconfirmed marker on an official-only catalog", async () => {
+    const broken = await readCodexModelCatalog({ HOME: scratch, USERPROFILE: scratch, CODEX_HOME: join(scratch, ".codex") }, fetch, "/bin/nonexistent-codex-cli", true);
+    writeStartupModelCache("catalog-marker-test", broken);
+    expect(readStartupModelCacheEntry("catalog-marker-test")?.checkedAt).toBe(0);
+  });
+
+  it("keeps custom Codex providers out of a device-lane plan turn", async () => {
+    const token = vi.spyOn(ChatGptPlanAuthController.prototype, "accessToken").mockResolvedValue("synthetic-plan-token");
+    vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] });
+    await create({ authMode: "chatgpt-plan", mode: "approval" });
+    const codexHome = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update("codex-test").digest("hex"), "codex");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: null, tokens: { access_token: "synthetic", refresh_token: "synthetic", account_id: "acc" }, last_refresh: "2026-01-01T00:00:00.000Z" }));
+    try {
+      await expect(instance.adapter.sendTurn({ threadId: "t-device-custom", text: "Continue", model: "fixture::local-model" }))
+        .rejects.toThrow(/not available to the selected ChatGPT plan/);
+      expect(token).not.toHaveBeenCalled();
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ["Cloud home", "OMB_CLOUD_ROLE", "home"],
     ["hosted enterprise", "OMB_ADMIN_URL", "https://admin.example.test"],
@@ -2379,6 +2493,11 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     process.env.FAKE_CODEX_INTERRUPT_SILENT = "1";
     process.env.FAKE_CODEX_INTERRUPT_GRACE_MS = "60";
     await create({ authMode: "chatgpt-plan", mode: "approval" });
+    // The store-presence lane discriminator needs the maus credential store to exist for a
+    // signed-in plan account; the mocked controller never writes one.
+    const planStore = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update("codex-test").digest("hex"));
+    mkdirSync(planStore, { recursive: true, mode: 0o700 });
+    writeFileSync(join(planStore, "credentials.json"), JSON.stringify({ clientId: "test-client", subject: "test", email: "test@example.test", hostId: "test-host" }));
     await instance.adapter.sendTurn({ threadId: "plan-running", text: "Continue", model: catalog.default });
     await recorder.until(event => event.type === "request.opened");
     const signingOut = instance.signOut!();

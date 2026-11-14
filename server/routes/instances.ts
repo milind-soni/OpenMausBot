@@ -1,8 +1,10 @@
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { agentEndpointAddress, discoverAgentEndpointModels, hasExplicitModel, isGatewayEndpoint } from "../agent-endpoint-models.ts";
 import { codexEndpointSchema, codexEndpointUpdateSchema, newCodexEndpoint, updateCodexEndpoint, withCodexEndpointInfo, isCodexEndpoint } from "../codex-endpoints.ts";
 import { userError, userErrorFields } from "../user-errors.ts";
 import { modelManifest } from "../model-manifest/manifest.ts";
-import { randomUUID } from "node:crypto";
 import { providerIconError } from "../../shared/provider-icon.ts";
 import {
   assertSeparateClaudeAccount,
@@ -27,7 +29,7 @@ import {
   withClaudeBedrockInfo,
 } from "../claude-bedrock.ts";
 import { updateClaudeCli } from "../claude-update.ts";
-import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
+import { DATA_DIR, persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
 import { addEndpoint, addEndpointSchema, endpointBaseUrl, isAddedEndpoint, withEndpointUrls } from "../openai-compat-endpoints.ts";
 import { findOllama, probeOllama } from "../drivers/ollama.ts";
 import type { InstanceConfigMap, ModelSelection, ProviderInstance } from "../contracts.ts";
@@ -356,6 +358,39 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         if (action === "auth/start") {
           const instance = registry.get(instanceId);
           if (!instance) return json(res, 404, { error: "unknown instance" });
+          // Opt-in device-code sign-in for ChatGPT plan accounts: Codex's own login, for
+          // workspace seats whose organization blocks third-party delegated access
+          // (`3p_delegated_access_policy_denied`). Persisted, so later sign-ins stay on this lane.
+          if (instance.authenticationMethod === "browser-pkce") {
+            let requestedMethod: unknown = null;
+            try { requestedMethod = (await readBody(req, 512) as Record<string, unknown> | undefined)?.method; } catch { /* no or unreadable body: keep the current method */ }
+            if (requestedMethod === "device") {
+              if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+              if (busyProviderSelections().some((selection) => selection.instanceId === instanceId)) {
+                return json(res, 409, { error: "A task is using this account. Wait for it to finish, then switch." });
+              }
+              const raw = cfg.instances?.[instanceId] as { driver?: unknown; config?: Record<string, unknown> } | undefined;
+              if (raw?.driver === "codex" && raw.config?.authMode === "chatgpt-plan" && raw.config.authFlow !== "device") {
+                // A maus-lane credential store, even an expired one, wins the lane until it is signed out.
+                if (existsSync(join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update(instanceId).digest("hex"), "credentials.json"))) {
+                  return json(res, 409, { error: "Sign out of this ChatGPT account first, then switch to a device code." });
+                }
+                providerConfigBusy.set(true);
+                providerInstancesChanging.add(instanceId);
+                try {
+                  const instances = persistableInstanceConfigs(cfg);
+                  const target = instances[instanceId] as { config?: Record<string, unknown> } | undefined;
+                  if (target) {
+                    target.config = { ...raw.config, authFlow: "device" };
+                    await persistProviderInstance(instanceId, instances);
+                    // Keep the in-memory config in step so repeat requests see the persisted lane.
+                    cfg.instances = instances;
+                    return json(res, 200, { instances: await describeInstances() });
+                  }
+                } finally { providerInstancesChanging.delete(instanceId); providerConfigBusy.set(false); }
+              }
+            }
+          }
           // The official local OAuth callback terminates on this machine, not a phone or a remote browser.
           if (instance.authenticationMethod === "browser-pkce" && (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress))) {
             return json(res, 403, { error: "Continue with ChatGPT on the computer running OpenMausBot. Hosted Pro sign-in requires OpenAI's hosted-app approval." });

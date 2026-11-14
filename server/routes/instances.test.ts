@@ -18,15 +18,15 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
 });
 
-async function serve(extra: Partial<InstanceRouteDeps> = {}, auth: RequestAuth = { kind: "loopback", scopes: ["admin"] }) {
+async function serve(extra: Partial<InstanceRouteDeps> = {}, auth: RequestAuth = { kind: "loopback", scopes: ["admin"] }, instanceId = "a") {
   const fake = makeFakeDriver();
   const registry = new ProviderRegistry([fake.driver]);
-  await registry.load({ a: { driver: "fake" } });
+  await registry.load({ [instanceId]: { driver: "fake" } });
   const sign = {
     start: { phase: "waiting", flowId: "flow-1", authorizationUrl: "https://example.test/sign-in", expiresAt: null } as ProviderAuthenticationStart,
     status: { phase: "waiting", flowId: "flow-1", authorizationUrl: null, expiresAt: null } as ProviderAuthenticationStatus,
   };
-  Object.assign(registry.get("a")!, {
+  Object.assign(registry.get(instanceId)!, {
     startAuthentication: async () => ({ ...sign.start }),
     getAuthentication: async () => ({ ...sign.status }),
     completeAuthentication: async () => {},
@@ -71,7 +71,7 @@ async function serve(extra: Partial<InstanceRouteDeps> = {}, auth: RequestAuth =
     await call("GET", "/api/instances");
     return fake.probes.length;
   };
-  return { sign, call, probesAfterList, base, fake };
+  return { sign, call, probesAfterList, base, fake, registry };
 }
 
 describe("engine sign-in routes", () => {
@@ -101,6 +101,28 @@ describe("engine sign-in routes", () => {
 
     await call("POST", "/api/instances/a/auth/sign-out", {});
     expect(await probesAfterList()).toBe(5);
+  });
+
+  it("a device request on a plan card persists the device lane instead of starting a flow", async () => {
+    const persisted: unknown[] = [];
+    const { call, registry } = await serve({
+      cfg: { instances: { p: { driver: "codex", config: { authMode: "chatgpt-plan" } } } } as unknown as AppConfig,
+      persistProviderInstance: async (id, instances) => { persisted.push(instances[id]); },
+    }, undefined, "p");
+    Object.assign(registry.get("p")!, { authenticationMethod: "browser-pkce" });
+
+    // The flip answers with the refreshed engine list and persists authFlow once.
+    const flipped = await call("POST", "/api/instances/p/auth/start", { method: "device" });
+    expect(flipped.instances).toBeDefined();
+    expect(flipped.auth).toBeUndefined();
+    expect(persisted).toEqual([{ driver: "codex", config: { authMode: "chatgpt-plan", authFlow: "device" } }]);
+
+    // A repeat device request is a no-op persist; a plain start never persists.
+    await call("POST", "/api/instances/p/auth/start", { method: "device" });
+    expect(persisted).toHaveLength(1);
+    const started = await call("POST", "/api/instances/p/auth/start", {});
+    expect(started.auth).toMatchObject({ phase: "waiting" });
+    expect(persisted).toHaveLength(1);
   });
 });
 

@@ -45,6 +45,19 @@ export async function codexLoginStatus(cli: string, env: Env): Promise<CodexLogi
   return (await readCodexLogin(cli, env)).status;
 }
 
+export type CodexLoginKind = "chatgpt" | "api-key" | "signed-out" | "unknown";
+
+/** The same probe as codexLoginStatus, but separates a ChatGPT login from an API-key one: a plan-labeled
+ * instance must never report plan authentication for a home Codex would bill through the API. */
+export function codexLoginKind(cli: string, env: Env): Promise<CodexLoginKind> {
+  return new Promise((resolve) => execCli(cli, ["login", "status"], { timeout: 8000, env }, (err, stdout, stderr) => {
+    const said = `${stdout}\n${stderr ?? ""}`;
+    resolve(/logged in using chatgpt/im.test(said) ? "chatgpt"
+      : /^api key configured\b/im.test(said) || /^logged in using (?!chatgpt)/im.test(said) ? "api-key"
+      : err && /^not logged in\b/im.test(said) ? "signed-out" : "unknown");
+  }));
+}
+
 /** Without a login Codex still runs a turn and fails only after a minute of reconnects. Only Codex's own "not
  * logged in" counts, and a login it reads from elsewhere is remembered so later turns skip the check, until
  * `forget` is called because a turn found that login gone. */
