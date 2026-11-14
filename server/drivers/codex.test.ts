@@ -3630,13 +3630,9 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     );
   });
 
-  it("offers no update command on My Cloud, whose Codex updates with the Cloud", async () => {
+  it("shows no update card on My Cloud, whose Codex updates with the Cloud", async () => {
     expect(await codexReleaseUpdate("0.150.0", "codex", false)).toMatchObject({ title: "Update Codex to 0.156.1", command: "codex update" });
-    const cloud = await codexReleaseUpdate("0.150.0", "codex", true);
-    expect(cloud).toEqual({
-      title: "Codex 0.156.1 is out",
-      message: expect.stringContaining("On My Cloud, Codex comes with the Cloud and updates with its next release"),
-    });
+    expect(await codexReleaseUpdate("0.150.0", "codex", true)).toBeUndefined();
     expect(await codexReleaseUpdate("0.156.1", "codex", true)).toBeUndefined();
   });
 

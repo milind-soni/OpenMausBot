@@ -22,11 +22,8 @@ export function codexUpdateCommand(cli: string, platform: NodeJS.Platform = proc
 export async function codexReleaseUpdate(version: string, cli: string, onCloud = cloudHomeConfigured()): Promise<ProviderSnapshot["update"] | undefined> {
   const latest = await readLatestCodexRelease();
   if (!latest || !codexVersionBehind(version, latest)) return undefined;
-  // My Cloud's Codex comes with the image, in a folder nobody can write to: `codex update` can only fail there.
-  if (onCloud) return {
-    title: `Codex ${latest} is out`,
-    message: `A newer stable Codex CLI is available (installed: ${version}). On My Cloud, Codex comes with the Cloud and updates with its next release; there is nothing to run here.`,
-  };
+  // My Cloud's Codex comes with the image, in a folder nobody can write to, and updates with the Cloud: nothing to offer there.
+  if (onCloud) return undefined;
   return {
     title: `Update Codex to ${latest}`,
     message: `A newer stable Codex CLI is available (installed: ${version}). Update it, then refresh models. Model availability also depends on your signed-in account.`,
