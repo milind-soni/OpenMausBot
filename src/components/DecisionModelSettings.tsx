@@ -14,7 +14,8 @@ const KEY_URL = { jev: "https://typesafe.ai", openrouter: "https://openrouter.ai
 const ROOM_BUDGET_MS = 1_500;
 
 type Provider = "jev" | "openrouter";
-type ModelList = { source: "openrouter" | "builtin"; models: Array<{ id: string; name: string; group: "recommended" | "more"; api?: "chat" | "decisions" }> };
+type ModelList = { source: "openrouter" | "builtin"; models: Array<{ id: string; name: string; group: "recommended" | "more" | "chat"; api?: "chat" | "decisions" }> };
+const MODEL_GROUP = { recommended: "decider.model.recommended", more: "decider.model.more", chat: "decider.model.geminiChat" } as const satisfies Record<string, LocaleKey>;
 type TestResult = { ok: true; latencyMs: number } | { ok: false; reason: string; status?: number };
 
 const FAILURES: Record<string, LocaleKey> = {
@@ -259,10 +260,10 @@ export function DecisionModelSettings() {
                 {decider?.model && !models?.models.some((model) => model.id === decider.model) && (
                   <option value={decider.model}>{decider.model}</option>
                 )}
-                {(["recommended", "more"] as const).map((group) => {
+                {(["recommended", "more", "chat"] as const).map((group) => {
                   const inGroup = models?.models.filter((model) => model.group === group) ?? [];
                   return inGroup.length > 0 && (
-                    <optgroup key={group} label={t(group === "recommended" ? "decider.model.recommended" : "decider.model.more")}>
+                    <optgroup key={group} label={t(MODEL_GROUP[group])}>
                       {inGroup.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
                     </optgroup>
                   );
