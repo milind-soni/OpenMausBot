@@ -24,6 +24,7 @@ import { AttachmentList } from "./AttachmentViewer";
 import { useHeaderCollapse } from "@/lib/useHeaderCollapse";
 import { HeaderMoreMenu } from "./HeaderMoreMenu";
 import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
+import { getStoredPanelWidth } from "@/lib/usePanelResize";
 
 function dayLabel(at: number): string {
   const d = new Date(at);
@@ -156,7 +157,7 @@ export function GroupView({ group }: { group: Group }) {
   const mainRef = useRef<HTMLElement>(null);
   const [mainWidth, setMainWidth] = useState<number>(() => {
     if (typeof window === "undefined") return 1180 - 320;
-    const sidebar = 320;
+    const sidebar = getStoredPanelWidth("sidebar", 320);
     return Math.max(0, window.innerWidth - sidebar);
   });
 
@@ -244,9 +245,10 @@ export function GroupView({ group }: { group: Group }) {
 
   const estimatedInitialWidth = useMemo(() => {
     if (typeof window === "undefined") return 1024;
-    const sidebarWidth = 320;
-    const previewWidth = isDualPanelWide && mobilePreviewOpen ? 380 : 0;
-    const tasksWidth = isDualPanelWide && tasksOpen ? 320 : 0;
+    const sidebarWidth = getStoredPanelWidth("sidebar", 320);
+    const defaultPreview = window.innerWidth >= 1536 ? 420 : 380;
+    const previewWidth = isDualPanelWide && mobilePreviewOpen ? getStoredPanelWidth("preview", defaultPreview) : 0;
+    const tasksWidth = isDualPanelWide && tasksOpen ? getStoredPanelWidth("tasks", 320) : 0;
     return Math.max(300, window.innerWidth - sidebarWidth - previewWidth - tasksWidth);
   }, [isDualPanelWide, mobilePreviewOpen, tasksOpen]);
 
@@ -624,7 +626,8 @@ export function GroupView({ group }: { group: Group }) {
         <MobilePreviewPanel
           onClose={closeAllDrawers}
           onScreenshot={setPreviewAttachment}
-          className="absolute inset-y-0 right-0 z-30 flex max-w-full w-[380px] shadow-2xl"
+          docked={false}
+          className="absolute inset-y-0 right-0 z-30 flex max-w-full shadow-2xl"
         />
       )}
 
@@ -635,7 +638,8 @@ export function GroupView({ group }: { group: Group }) {
           emptyLabel={group.projectId ? "No tasks in this project yet." : "Set a project above to see its tasks here."}
           headerExtra={tasksProjectPicker}
           onClose={closeAllDrawers}
-          className="absolute inset-y-0 right-0 z-30 flex max-w-full w-[320px] shadow-2xl"
+          docked={false}
+          className="absolute inset-y-0 right-0 z-30 flex max-w-full shadow-2xl"
         />
       )}
 
@@ -653,9 +657,10 @@ export function GroupView({ group }: { group: Group }) {
           <MobilePreviewPanel
             onClose={() => setMobilePreviewOpen(false)}
             onScreenshot={setPreviewAttachment}
+            docked={!previewAsDrawer}
             className={cn(
               previewAsDrawer
-                ? "absolute inset-y-0 right-0 z-30 flex max-w-full w-[380px] shadow-2xl"
+                ? "absolute inset-y-0 right-0 z-30 flex max-w-full shadow-2xl"
                 : "static inset-auto z-auto max-w-none shadow-none flex",
             )}
           />
@@ -669,6 +674,7 @@ export function GroupView({ group }: { group: Group }) {
           emptyLabel={group.projectId ? "No tasks in this project yet." : "Set a project above to see its tasks here."}
           headerExtra={tasksProjectPicker}
           onClose={() => setTasksOpen(false)}
+          docked={true}
           className="flex"
         />
       )}

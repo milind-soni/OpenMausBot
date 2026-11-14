@@ -559,3 +559,17 @@ body {
 
   .maus-eyes { transform: none; }
 }
+
+/* Resizable panels global drag styling */
+body.gbs-resizing,
+body.gbs-resizing * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  cursor: col-resize !important;
+}
+
+body.gbs-resizing iframe,
+body.gbs-resizing webview {
+  pointer-events: none !important;
+}
+

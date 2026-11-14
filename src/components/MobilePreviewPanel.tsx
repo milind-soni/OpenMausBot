@@ -48,6 +48,8 @@ import {
 import { PreviewFrame, type PreviewFrameHandle, type PreviewFrameStatus } from "@/components/PreviewFrame";
 import { PreviewFilePicker, usePreviewAutoRefreshWatcher } from "@/components/PreviewFilePicker";
 import { PreviewMoreMenu } from "@/components/PreviewMoreMenu";
+import { usePanelResize } from "@/lib/usePanelResize";
+import { ResizeHandle } from "./ResizeHandle";
 import { cn } from "@/lib/cn";
 import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
 import { isDeviceSource as isWebPreviewSource } from "@/lib/previewSource";
@@ -90,6 +92,8 @@ export interface MobilePreviewPanelProps {
   onScreenshot?: (attachment: Attachment) => void;
   onSendScreenshotToChat?: (attachment: Attachment, caption?: string) => void;
   className?: string;
+  style?: React.CSSProperties;
+  docked?: boolean;
 }
 
 export function MobilePreviewPanel({
@@ -98,9 +102,21 @@ export function MobilePreviewPanel({
   onScreenshot,
   onSendScreenshotToChat,
   className,
+  style,
+  docked = true,
 }: MobilePreviewPanelProps) {
   const { state, dispatch } = useStore();
   const initial = useMemo(() => loadMobilePreviewState(), []);
+
+  const { width: previewWidth, handleProps: previewHandleProps } = usePanelResize({
+    id: "preview",
+    defaultWidth: () => (typeof window !== "undefined" && window.innerWidth >= 1536 ? 420 : 380),
+    minWidth: 320,
+    maxWidth: () => (typeof window !== "undefined" ? Math.floor(window.innerWidth * 0.6) : 864),
+    edge: "left",
+    label: "Resize quick preview panel",
+    docked,
+  });
 
   const [inputUrl, setInputUrl] = useState(initial.input);
   const [activeSource, setActiveSource] = useState<PreviewSource | null>(() => {
@@ -469,12 +485,16 @@ export function MobilePreviewPanel({
 
   return (
     <aside
+      data-panel="preview"
+      data-docked={docked}
       aria-label="Quick preview panel"
       className={cn(
-        "flex h-full w-[380px] shrink-0 select-none flex-col border-l border-hairline/60 bg-panel 2xl:w-[420px] max-w-full overflow-hidden",
+        "relative flex h-full shrink-0 select-none flex-col border-l border-hairline/60 bg-panel max-w-full",
         className,
       )}
+      style={{ width: `${previewWidth}px`, ...style }}
     >
+      {docked && <ResizeHandle {...previewHandleProps} />}
       {/* Redesigned Single Header (h-[60px] aligned with Chat & Tasks headers) */}
       <header className={cn("flex shrink-0 items-center justify-between gap-1 border-b border-hairline/40 bg-panel px-2 min-w-0 max-w-full overflow-hidden", SHARED_HEADER_HEIGHT_CLASS)}>
         {isDeviceSource ? (

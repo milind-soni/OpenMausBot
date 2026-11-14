@@ -12,6 +12,8 @@ import {
 import { ModelPicker } from "./ModelPicker";
 import { cn } from "@/lib/cn";
 import { ProjectMentionTextarea } from "./ProjectMentionTextarea";
+import { usePanelResize } from "@/lib/usePanelResize";
+import { ResizeHandle } from "./ResizeHandle";
 
 function Field({
   label,
@@ -42,6 +44,16 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const triggerRef = useRef<HTMLElement | null>(null);
 
+  const { width: settingsWidth, handleProps: settingsHandleProps } = usePanelResize({
+    id: "settings",
+    defaultWidth: 400,
+    minWidth: 320,
+    maxWidth: 560,
+    edge: "left",
+    label: "Resize settings panel",
+    docked: true,
+  });
+
   useEffect(() => {
     triggerRef.current = (document.activeElement as HTMLElement) ?? null;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -58,7 +70,13 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   }, [dispatch]);
 
   return (
-    <aside className="animate-panel-in relative z-30 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
+    <aside
+      data-panel="settings"
+      data-docked="true"
+      className="animate-panel-in relative z-30 flex h-full shrink-0 flex-col border-l border-hairline/40 bg-panel"
+      style={{ width: `${settingsWidth}px` }}
+    >
+      <ResizeHandle {...settingsHandleProps} />
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <button

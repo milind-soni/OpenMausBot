@@ -6,6 +6,8 @@ import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
 import { STATUS_ICONS, STATUS_LABELS, PRIORITY_STYLES } from "./TaskBoardScreen";
 import type { TaskRecord, TaskStatus } from "@/lib/taskBoard";
 import { useStore } from "@/state/store";
+import { usePanelResize } from "@/lib/usePanelResize";
+import { ResizeHandle } from "./ResizeHandle";
 
 const STATUS_ORDER: TaskStatus[] = ["todo", "doing", "review", "done"];
 
@@ -55,18 +57,32 @@ export function TasksPanel({
   emptyLabel,
   onClose,
   className,
+  style,
   headerExtra,
+  docked = true,
 }: {
   tasks: TaskRecord[];
   emptyLabel: string;
   onClose?: () => void;
   className?: string;
+  style?: React.CSSProperties;
   /** e.g. the room's project picker, shown under the header */
   headerExtra?: React.ReactNode;
+  docked?: boolean;
 }) {
   const { dispatch } = useStore();
   const openTask = () => dispatch({ type: "toggleTaskBoard", open: true });
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  const { width: tasksWidth, handleProps: tasksHandleProps } = usePanelResize({
+    id: "tasks",
+    defaultWidth: 320,
+    minWidth: 260,
+    maxWidth: 520,
+    edge: "left",
+    label: "Resize tasks panel",
+    docked,
+  });
 
   const toggleStatus = (status: string) => {
     setCollapsed((prev) => ({ ...prev, [status]: !prev[status] }));
@@ -88,7 +104,14 @@ export function TasksPanel({
   }, [tasks]);
 
   return (
-    <aside className={cn("flex h-full w-[320px] max-w-full shrink-0 flex-col border-l border-hairline/40 bg-panel", className)} aria-label="Tasks">
+    <aside
+      data-panel="tasks"
+      data-docked={docked}
+      className={cn("relative flex h-full max-w-full shrink-0 flex-col border-l border-hairline/40 bg-panel", className)}
+      style={{ width: `${tasksWidth}px`, ...style }}
+      aria-label="Tasks"
+    >
+      {docked && <ResizeHandle {...tasksHandleProps} />}
       <div className="shrink-0">
         <div className={cn("flex items-center justify-between px-4 border-b border-hairline/40", SHARED_HEADER_HEIGHT_CLASS)}>
           <div className="flex items-center gap-2 text-[14px] font-semibold text-ink">

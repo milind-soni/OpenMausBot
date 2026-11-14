@@ -28,6 +28,8 @@ import { useStore, formatTime, visibleMessages, type Bot, type Group, type Messa
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
+import { usePanelResize } from "@/lib/usePanelResize";
+import { ResizeHandle } from "./ResizeHandle";
 
 const isElectron = navigator.userAgent.includes("Electron");
 
@@ -618,8 +620,23 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
     }
   };
 
+  const { width: sidebarWidth, handleProps: sidebarHandleProps } = usePanelResize({
+    id: "sidebar",
+    defaultWidth: 320,
+    minWidth: 240,
+    maxWidth: 480,
+    edge: "right",
+    label: "Resize sidebar",
+    docked: !collapsed,
+  });
+
   return (
-    <aside className={cn("flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel", collapsed ? "w-[68px] items-center" : "w-[320px]")}>
+    <aside
+      data-panel="sidebar"
+      data-docked={!collapsed}
+      className={cn("relative flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel", collapsed ? "w-[68px] items-center" : "")}
+      style={collapsed ? undefined : { width: `${sidebarWidth}px` }}
+    >
       {/* Titlebar: real traffic lights in Electron, faux ones in the browser */}
       <div
         className={cn("flex items-center pt-3.5 pb-1 px-4", collapsed ? "justify-center w-full" : "justify-between")}
@@ -856,6 +873,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
           }}
         />
       )}
+      {!collapsed && <ResizeHandle {...sidebarHandleProps} />}
     </aside>
   );
 }

@@ -36,6 +36,7 @@ import { MobilePreviewPanel } from "./MobilePreviewPanel";
 import { useHeaderCollapse } from "@/lib/useHeaderCollapse";
 import { HeaderMoreMenu } from "./HeaderMoreMenu";
 import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
+import { getStoredPanelWidth } from "@/lib/usePanelResize";
 import type { Attachment } from "@/state/store";
 
 /** Long user messages collapse behind a fade so pasted walls of text don't
@@ -625,8 +626,8 @@ export function ChatView({ bot }: { bot: Bot }) {
   const mainRef = useRef<HTMLElement>(null);
   const [mainWidth, setMainWidth] = useState<number>(() => {
     if (typeof window === "undefined") return 1180 - 320;
-    const sidebar = 320;
-    const rightPanel = (state.settingsOpen || state.computerOpen) ? 400 : 0;
+    const sidebar = getStoredPanelWidth("sidebar", 320);
+    const rightPanel = (state.settingsOpen || state.computerOpen) ? getStoredPanelWidth("settings", 400) : 0;
     return Math.max(0, window.innerWidth - sidebar - rightPanel);
   });
 
@@ -715,10 +716,11 @@ export function ChatView({ bot }: { bot: Bot }) {
 
   const estimatedInitialWidth = useMemo(() => {
     if (typeof window === "undefined") return 1024;
-    const sidebarWidth = 320;
-    const rightPanelWidth = (state.settingsOpen || state.computerOpen) ? 400 : 0;
-    const previewWidth = isDualPanelWide && mobilePreviewOpen ? 380 : 0;
-    const tasksWidth = isDualPanelWide && tasksOpen ? 320 : 0;
+    const sidebarWidth = getStoredPanelWidth("sidebar", 320);
+    const rightPanelWidth = (state.settingsOpen || state.computerOpen) ? getStoredPanelWidth("settings", 400) : 0;
+    const defaultPreview = window.innerWidth >= 1536 ? 420 : 380;
+    const previewWidth = isDualPanelWide && mobilePreviewOpen ? getStoredPanelWidth("preview", defaultPreview) : 0;
+    const tasksWidth = isDualPanelWide && tasksOpen ? getStoredPanelWidth("tasks", 320) : 0;
     return Math.max(300, window.innerWidth - sidebarWidth - rightPanelWidth - previewWidth - tasksWidth);
   }, [state.settingsOpen, state.computerOpen, isDualPanelWide, mobilePreviewOpen, tasksOpen]);
 
@@ -1005,7 +1007,8 @@ export function ChatView({ bot }: { bot: Bot }) {
         <MobilePreviewPanel
           onClose={closeAllDrawers}
           onScreenshot={setPreviewAttachment}
-          className="absolute inset-y-0 right-0 z-30 flex max-w-full w-[380px] shadow-2xl"
+          docked={false}
+          className="absolute inset-y-0 right-0 z-30 flex max-w-full shadow-2xl"
         />
       )}
 
@@ -1015,7 +1018,8 @@ export function ChatView({ bot }: { bot: Bot }) {
           tasks={botTasks}
           emptyLabel="No tasks assigned to this agent yet."
           onClose={closeAllDrawers}
-          className="absolute inset-y-0 right-0 z-30 flex max-w-full w-[320px] shadow-2xl"
+          docked={false}
+          className="absolute inset-y-0 right-0 z-30 flex max-w-full shadow-2xl"
         />
       )}
 
@@ -1033,9 +1037,10 @@ export function ChatView({ bot }: { bot: Bot }) {
           <MobilePreviewPanel
             onClose={() => setMobilePreviewOpen(false)}
             onScreenshot={setPreviewAttachment}
+            docked={!previewAsDrawer}
             className={cn(
               previewAsDrawer
-                ? "absolute inset-y-0 right-0 z-30 flex max-w-full w-[380px] shadow-2xl"
+                ? "absolute inset-y-0 right-0 z-30 flex max-w-full shadow-2xl"
                 : "static inset-auto z-auto max-w-none shadow-none flex",
             )}
           />
@@ -1048,6 +1053,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           tasks={botTasks}
           emptyLabel="No tasks assigned to this agent yet."
           onClose={() => setTasksOpen(false)}
+          docked={true}
           className="flex"
         />
       )}

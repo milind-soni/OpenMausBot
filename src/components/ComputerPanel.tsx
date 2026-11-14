@@ -9,10 +9,22 @@ import {
 } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { usePanelResize } from "@/lib/usePanelResize";
+import { ResizeHandle } from "./ResizeHandle";
 
 export function ComputerPanel({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
   const triggerRef = useRef<HTMLElement | null>(null);
+
+  const { width: computerWidth, handleProps: computerHandleProps } = usePanelResize({
+    id: "settings",
+    defaultWidth: 400,
+    minWidth: 320,
+    maxWidth: 560,
+    edge: "left",
+    label: "Resize computer panel",
+    docked: true,
+  });
 
   useEffect(() => {
     triggerRef.current = (document.activeElement as HTMLElement) ?? null;
@@ -62,7 +74,13 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
   const frameSrc = phase === "local" ? localFrame : null;
 
   return (
-    <aside className="animate-panel-in relative z-30 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
+    <aside
+      data-panel="settings"
+      data-docked="true"
+      className="animate-panel-in relative z-30 flex h-full shrink-0 flex-col border-l border-hairline/40 bg-panel"
+      style={{ width: `${computerWidth}px` }}
+    >
+      <ResizeHandle {...computerHandleProps} />
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <button
