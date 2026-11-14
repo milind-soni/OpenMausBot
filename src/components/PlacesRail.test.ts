@@ -285,6 +285,29 @@ it("Connect to a server says plainly that another computer's desktop app can't b
   expect(form.querySelector("[data-connect-problem]")?.textContent).toContain("That 6-digit code pairs a phone with a desktop app");
 });
 
+it("an address typed key by key stays in its box; a pasted one moves on to the code", async () => {
+  await mount(createElement(PlacesRail));
+  await click(host.querySelector("[data-rail-add]"));
+  await click(document.querySelector('[data-place-add-choice="server"]'));
+  const form = document.querySelector('[data-place-add="own-server"]')!;
+  const address = form.querySelector("[data-own-server-link]") as HTMLInputElement;
+  const afterTimers = () => act(async () => { await new Promise((done) => setTimeout(done, 0)); });
+  for (const key of "maus.local") {
+    const focused = document.activeElement as HTMLInputElement;
+    await type(focused, focused.value + key);
+    await afterTimers();
+  }
+  expect([address.value, (form.querySelector("[data-own-server-code]") as HTMLInputElement).value]).toEqual(["maus.local", ""]);
+  expect(document.activeElement).toBe(address);
+  await type(address, "");
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(address, "192.168.1.20:8799");
+    address.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste" }));
+  });
+  await afterTimers();
+  expect(document.activeElement).toBe(form.querySelector("[data-own-server-code]"));
+});
+
 it("Connect to a server takes an address and a code typed apart: a code pasted alone moves to its field, and main names the server it found", async () => {
   const probe = vi.fn(async (address: string): Promise<unknown> => (address.includes("192.168.1.20")
     ? { outcome: "found", origin: "http://192.168.1.20:8799", label: "kitchen-box", version: "0.1.147", transport: "private-http", code: null, credential: null }
