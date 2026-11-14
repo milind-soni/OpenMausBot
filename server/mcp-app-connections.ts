@@ -273,14 +273,23 @@ export class AppConnections {
 
   /** A connection that failed (not a JSON-RPC error answer) is closed, so the next request opens a new one. */
   async request(name: string, server: McpServerSpec, method: string, params: unknown, signal: AbortSignal, extension = true): Promise<unknown> {
+    if (signal.aborted) throw new McpHttpError("network", "aborted");
     const key = this.key(name, server);
     const slot = this.slot(name, server, extension);
     try {
-      const client = await slot.client;
+      const client = await new Promise<AppClient>((resolve, reject) => {
+        const abort = () => reject(new McpHttpError("network", "aborted"));
+        if (signal.aborted) abort();
+        else signal.addEventListener("abort", abort, { once: true });
+        void slot.client.then(
+          (opened) => { signal.removeEventListener("abort", abort); resolve(opened); },
+          (error) => { signal.removeEventListener("abort", abort); reject(error); },
+        );
+      });
       if (client.closed) throw new McpHttpError("network", "the server stopped");
       return await client.request(method, params, signal);
     } catch (error) {
-      if (connectionLost(error) && this.slots.get(key) === slot) this.drop(key);
+      if (!signal.aborted && connectionLost(error) && this.slots.get(key) === slot) this.drop(key);
       throw error;
     }
   }
