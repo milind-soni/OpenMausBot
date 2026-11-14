@@ -84,7 +84,7 @@ function slowDriver(gate: Promise<ModelCatalog>): {
   return { driver, seenByTurn: () => seen };
 }
 
-const acpSupport = (resolveModels: () => Promise<ModelCatalog>): AcpSupport => ({
+const acpSupport = (resolveModels: NonNullable<AcpSupport["resolveModels"]>): AcpSupport => ({
   driverKind: "startup-catalog-test",
   displayName: "Startup catalog",
   models: { default: "static-model", options: [{ id: "static-model", label: "Static" }] },
@@ -264,6 +264,44 @@ describe("startup model catalogs", () => {
     await turn;
     expect(finished).toBe(true);
     expect(seenByTurn()).toEqual(FRESH);
+  });
+
+  it("a saved catalog stands in without counting as confirmed, and Refresh drops ids the engine no longer returns", async () => {
+    writeStartupModelCache("saved-gone", {
+      default: "gone-model",
+      options: [{ id: "gone-model", label: "Gone" }, { id: "kept-model", label: "Kept" }],
+    });
+    let reads = 0;
+    const freshSeen: boolean[] = [];
+    const driver = createAcpDriver({
+      ...acpSupport((_env, _config, _id, fresh) => {
+        reads += 1;
+        freshSeen.push(fresh === true);
+        return { default: "kept-model", options: [{ id: "kept-model", label: "Kept" }] };
+      }),
+      // Not probed at startup, so a recent file is the only list until Refresh.
+      resolveModelsOnCreate: false,
+    });
+    const instance = await driver.create({
+      instanceId: "saved-gone",
+      displayName: "Saved gone",
+      environment: {},
+      enabled: true,
+      config: driver.defaultConfig(),
+    });
+    try {
+      expect(instance.models.options.map((option) => option.id)).toEqual(["gone-model", "kept-model"]);
+      expect(instance.modelsUnconfirmed).toBe(true);
+      expect(reads).toBe(0);
+      await instance.refreshModels?.();
+      expect(reads).toBe(1);
+      expect(freshSeen).toEqual([true]);
+      expect(instance.models).toEqual({ default: "kept-model", options: [{ id: "kept-model", label: "Kept" }] });
+      expect(instance.modelsUnconfirmed).toBe(false);
+      expect(readStartupModelCache("saved-gone")?.options.map((option) => option.id)).toEqual(["kept-model"]);
+    } finally {
+      await instance.dispose();
+    }
   });
 
   it("an ACP engine serves a saved catalog and lets the turn wait for the refresh", async () => {
