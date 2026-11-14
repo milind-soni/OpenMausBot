@@ -193,8 +193,11 @@ function trimCallResult(result: Json, tool: string): boolean {
     trimmed = true;
   }
 
-  // Trim structuredContent too, or the provider gets a second full copy; structurally only, so it stays valid against the output schema.
-  if (trimmed && result.structuredContent && typeof result.structuredContent === "object") {
+  // Claude Code prefers structuredContent over text, hiding the shaping note. Without an outputSchema,
+  // omit it so the model sees the note; schema-declaring tools retain the structural trim.
+  if (trimmed && !outputSchemas.get(tool)) {
+    delete result.structuredContent;
+  } else if (trimmed && result.structuredContent && typeof result.structuredContent === "object") {
     if (structuredIsText && keptValue && typeof keptValue === "object") {
       result.structuredContent = keptValue as Json;
     } else {
@@ -214,6 +217,7 @@ const observer = (() => {
   } catch { return fail("invalid MCP apps configuration"); }
 })();
 const appOnly = new Set<string>();
+const outputSchemas = new Map<string, boolean>();
 const spec = upstreamSpec();
 if (SPILL_DIR) sweepSpill(SPILL_DIR);
 
@@ -356,6 +360,7 @@ createInterface({ input: child.stdout }).on("line", (line) => {
     observer?.listed(result);
     for (const tool of result.tools) {
       if (!isRecord(tool) || typeof tool.name !== "string") continue;
+      outputSchemas.set(tool.name, tool.outputSchema !== undefined);
       if (modelVisible(tool)) appOnly.delete(tool.name);
       else appOnly.add(tool.name);
     }
