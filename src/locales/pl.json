@@ -1,4 +1,7 @@
 {
+  "settings.hoverThreads.title": "Pokazuj ostatnie rozmowy po najechaniu",
+  "settings.hoverThreads.subtitle": "Pokazuj ostatnie rozmowy obok bota zamiast rozwijać je na pasku bocznym. Wymaga włączonych wątków.",
+  "settings.hoverThreads.sessionOnly": "Nie udało się zapisać ustawienia, więc obowiązuje tylko w tej sesji.",
   "voice.gemini.keyPlaceholder": "Wklej swój klucz API Google AI Studio",
   "voice.gemini.model": "Model syntezy mowy Gemini",
   "keys.label.geminiTts": "Klucz API syntezy mowy Gemini",

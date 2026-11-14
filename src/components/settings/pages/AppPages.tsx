@@ -8,7 +8,7 @@ import { AboutDialog } from "../../AboutDialog";
 import { AnalyticsRow } from "../../AnalyticsRow";
 import { ChatWidthRow, FontRow, SidebarToolsLayoutRow } from "../../AppearanceSelectRows";
 import {
-  ColorUserBubblesRow, FollowUpRow, LanguageRow, PinnedCirclesRow, ReplayTourRow, RunCardRow, SendKeyRow, ShowThreadsRow,
+  ColorUserBubblesRow, FollowUpRow, HoverThreadsRow, LanguageRow, PinnedCirclesRow, ReplayTourRow, RunCardRow, SendKeyRow, ShowThreadsRow,
   ToolCallsRow, UniversalPinsRow, UpdatesRow,
 } from "../../AppSettingsRows";
 import { ChromeRailRow } from "../../ChromeRailToggle";
@@ -176,7 +176,7 @@ export function AppearancePage() {
       <SettingsRows>
         <ChromeRailRow />
         <WindowFrameRow />
-        {ctx.advanced && <ShowThreadsRow />}
+        {ctx.advanced && <><ShowThreadsRow /><HoverThreadsRow /></>}
         {ctx.advanced && <SidebarToolsLayoutRow />}
         {ctx.advanced && <PinnedCirclesRow />}
         {ctx.advanced && <UniversalPinsRow />}

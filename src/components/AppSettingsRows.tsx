@@ -14,6 +14,7 @@ import { LearnedSkillsSettings } from "./ShareLearnedSkillsSettings";
 import { effortLabel } from "./ModelPicker";
 import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
 import { setColorUserBubbles, useColorUserBubbles } from "@/lib/user-bubble-preference";
+import { setSidebarHoverThreads, useSidebarHoverThreads } from "@/lib/sidebar-hover-threads";
 import { setShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
@@ -304,6 +305,14 @@ export function ShowThreadsRow() {
       />
     </SettingRow>
   );
+}
+
+export function HoverThreadsRow() {
+  const enabled = useSidebarHoverThreads();
+  const [saved, setSaved] = useState(true);
+  return <SettingRow title={t("settings.hoverThreads.title")} subtitle={t("settings.hoverThreads.subtitle")} message={!saved ? <p role="status">{t("settings.hoverThreads.sessionOnly")}</p> : undefined}>
+    <Switch checked={enabled} aria-label={t("settings.hoverThreads.title")} onClick={() => setSaved(setSidebarHoverThreads(!enabled))} />
+  </SettingRow>;
 }
 
 export function PinnedCirclesRow() {

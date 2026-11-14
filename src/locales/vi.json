@@ -1,4 +1,7 @@
 {
+  "settings.hoverThreads.title": "Hiện cuộc trò chuyện gần đây khi di chuột",
+  "settings.hoverThreads.subtitle": "Hiện các cuộc trò chuyện gần đây bên cạnh bot thay vì mở rộng trong thanh bên. Cần bật luồng.",
+  "settings.hoverThreads.sessionOnly": "Không thể lưu nên cài đặt này chỉ áp dụng trong phiên hiện tại.",
   "voice.gemini.keyPlaceholder": "Dán khóa API Google AI Studio của bạn",
   "voice.gemini.model": "Mô hình giọng nói Gemini",
   "keys.label.geminiTts": "Khóa API giọng nói Gemini",

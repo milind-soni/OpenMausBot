@@ -167,6 +167,8 @@ describe("the Settings window", () => {
     const advanced = render("appearance");
     expect(simple).not.toContain("Chat width");
     expect(advanced).toContain("Chat width");
+    expect(simple).not.toContain("Show recent chats on hover");
+    expect(advanced).toContain("Show recent chats on hover");
     expect(simple).toContain("Light or dark");
     expect(simple).toContain("Browse themes");
   });

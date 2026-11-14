@@ -1,4 +1,7 @@
 {
+  "settings.hoverThreads.title": "Fareyle üzerine gelince son sohbetleri göster",
+  "settings.hoverThreads.subtitle": "Son sohbetleri kenar çubuğunda açmak yerine botun yanında göster. Konuların açık olması gerekir.",
+  "settings.hoverThreads.sessionOnly": "Ayar kaydedilemediği için yalnızca bu oturumda geçerlidir.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API anahtarınızı yapıştırın",
   "voice.gemini.model": "Gemini konuşma modeli",
   "keys.label.geminiTts": "Gemini konuşma API anahtarı",
