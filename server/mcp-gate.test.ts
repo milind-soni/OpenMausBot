@@ -22,6 +22,10 @@ const reply = JSON.parse(readFileSync(process.env.SCRIPT, "utf8"));
 createInterface({ input: process.stdin }).on("line", (line) => {
   if (!line.trim()) return;
   const msg = JSON.parse(line);
+  if (msg.method === "tools/list" && process.env.CATALOG) {
+    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: JSON.parse(readFileSync(process.env.CATALOG, "utf8")) }) + "\\n");
+    return;
+  }
   if (msg.method === "tools/call") {
     process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: reply }) + "\\n");
     return;
@@ -125,6 +129,12 @@ describe("mcp-gate", () => {
     return JSON.parse(await nextLine());
   };
 
+  const listTools = async (tools: unknown[], cursor?: string) => {
+    writeFileSync(join(scratch, "catalog.json"), JSON.stringify({ tools }));
+    send({ jsonrpc: "2.0", id: 7, method: "tools/list", params: { cursor } });
+    await nextLine();
+  };
+
   beforeEach(() => {
     scratch = mkdtempSync(join(tmpdir(), "omb-gate-test-"));
     lines = [];
@@ -157,7 +167,7 @@ describe("mcp-gate", () => {
   });
 
   it("leaves a small tool result exactly as the server sent it", async () => {
-    const result = { content: [{ type: "text", text: JSON.stringify({ cart: { total: 131 } }) }] };
+    const result = { content: [{ type: "text", text: JSON.stringify({ cart: { total: 131 } }) }], structuredContent: { cart: { total: 131 } } };
     start(result);
     expect((await call("get_food_cart")).result).toEqual(result);
     expect(existsSync(join(scratch, "spill"))).toBe(false);
@@ -184,12 +194,13 @@ describe("mcp-gate", () => {
     expect(kept.nextOffset).toBe("1");
   });
 
-  it("trims structuredContent alongside the text it duplicates", async () => {
+  it("trims structuredContent alongside the text it duplicates when an outputSchema is declared", async () => {
     const products = Array.from({ length: 300 }, (_, i) => ({ id: `p${i}`, blurb: "x".repeat(300) }));
     start({
       content: [{ type: "text", text: JSON.stringify({ products }) }],
       structuredContent: { products },
-    });
+    }, { CATALOG: join(scratch, "catalog.json") });
+    await listTools([{ name: "search_products", outputSchema: { type: "object" } }]);
 
     const answer = await call("search_products");
     expect(answer.result.structuredContent.products.length).toBeLessThan(300);
@@ -200,12 +211,35 @@ describe("mcp-gate", () => {
     expect(answer.result.structuredContent).toEqual(kept);
   });
 
+  it("omits trimmed structuredContent for unknown tools and updates schemas across listing pages and refreshes", async () => {
+    const products = Array.from({ length: 300 }, (_, i) => ({ id: `p${i}`, blurb: "x".repeat(300) }));
+    start({
+      content: [{ type: "text", text: JSON.stringify({ products }) }],
+      structuredContent: { products },
+    }, { CATALOG: join(scratch, "catalog.json") });
+
+    const unknown = (await call("search_products")).result;
+    expect(unknown).not.toHaveProperty("structuredContent");
+    expect(unknown.content[0].text).toContain("SHAPED by OpenMausBot");
+
+    await listTools([{ name: "search_products", outputSchema: { type: "object" } }]);
+    await listTools([{ name: "other_tool" }], "second");
+    expect((await call("search_products")).result.structuredContent.products.length).toBeLessThan(products.length);
+    expect((await call("other_tool")).result).not.toHaveProperty("structuredContent");
+
+    await listTools([{ name: "search_products" }]);
+    const refreshed = (await call("search_products")).result;
+    expect(refreshed).not.toHaveProperty("structuredContent");
+    expect(refreshed.content[0].text).toContain("SHAPED by OpenMausBot");
+  });
+
   it("matches structuredContent to the text whatever its key order", async () => {
     const products = Array.from({ length: 300 }, (_, i) => ({ id: `p${i}`, blurb: "x".repeat(300) }));
     start({
       content: [{ type: "text", text: JSON.stringify({ products, meta: "x" }) }],
       structuredContent: { meta: "x", products },
-    });
+    }, { CATALOG: join(scratch, "catalog.json") });
+    await listTools([{ name: "search_products", outputSchema: { type: "object" } }]);
 
     const answer = await call("search_products");
     const text: string = answer.result.content[0].text;
