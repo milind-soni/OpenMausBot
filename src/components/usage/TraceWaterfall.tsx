@@ -11,8 +11,9 @@ import { useStore, type InstanceInfo } from "@/state/store";
 import type { TraceDetail, TraceNode, TraceRootSummary, TraceTotals } from "../../../shared/usage-trace";
 import { appName, StepIcon, ToolIcon, TurnAvatar, useAppCards } from "./TraceIcon";
 
-export function modelName(model: string, instances: readonly InstanceInfo[]): string {
-  for (const instance of instances) {
+export function modelName(model: string, instances: readonly InstanceInfo[], driverKind?: string): string {
+  const own = instances.filter((instance) => instance.driverKind === driverKind);
+  for (const instance of [...own, ...instances]) {
     const label = instance.models?.options?.find((option) => option.id === model)?.label;
     if (label) return label;
   }
@@ -105,7 +106,7 @@ function RowName({ row, models }: { row: TraceRow; models: readonly InstanceInfo
       const bot = state.bots.find((entry) => entry.id === node.botId);
       icon = <TurnAvatar bot={bot} name={node.botName} />;
       name = (bot?.name ?? node.botName) || t("trace.unknownBot");
-      detail = modelName(node.model, models);
+      detail = modelName(node.model, models, node.driverKind);
       break;
     }
     case "step":

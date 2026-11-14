@@ -5085,6 +5085,7 @@
   "homeLine.profile": "{name} bắt đầu mới hoàn toàn, tách biệt với My Cloud. Các bot bạn từng có ở đây hiện ở My Cloud; để đưa một bản cũ hơn về, hãy nhập bản sao lưu của nó trong Cài đặt → Sao lưu.",
   "homeLine.local": "{name} bắt đầu mới hoàn toàn: một nơi riêng trên máy tính này, có bot, cuộc trò chuyện và tệp riêng.",
   "native.places.profileFailed": "Không mở được nơi riêng của máy tính này. Hãy thử lại sau giây lát.",
+  "chat.notice.devinAccountRefused": "Devin đã từ chối yêu cầu này cho tài khoản đã đăng nhập. Hãy kiểm tra gói và tín dụng Devin, rồi thử lại.",
   "rail.settingUp": "{name}: đang thiết lập",
   "rail.waiting": "{name}: đang chờ thanh toán",
   "rail.attention": "{name}: cần bạn",

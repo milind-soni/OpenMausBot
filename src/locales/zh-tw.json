@@ -9889,6 +9889,7 @@
   "native.lendTray.pauseUnsavedTitle": "已暫停，但尚未儲存",
   "native.lendTray.retryPause": "重試儲存暫停狀態",
   "chat.notice.kiroAccountRefused": "Kiro 拒絕了已登入帳號的這個請求。請檢查它的 Kiro 方案和額度，然後再試一次。",
+  "chat.notice.devinAccountRefused": "Devin 拒絕了已登入帳號的這個請求。請檢查它的 Devin 方案和額度，然後再試一次。",
   "serverError.instance.modelsUnsupported": "只有新增的與 OpenAI 相容的伺服器可以變更模型 ID。",
   "serverError.instance.defaultModelRemoved": "{model} 是預設模型。將它從這台伺服器移除之前，請先選擇其他預設模型。",
   "serverError.file.tooLarge": "這個檔案大小為 {size}，超過從聊天中開啟檔案的 {limit} 上限。檔案本身仍已儲存為 {name}。",
