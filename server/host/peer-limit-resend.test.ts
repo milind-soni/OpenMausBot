@@ -20,6 +20,8 @@ describe("nothingRan", () => {
     expect(nothingRan([toolCall, failure], 100, "turn-1")).toBe(false);
     expect(nothingRan([reply, failure], 100, "turn-1")).toBe(false);
     expect(nothingRan([{ ...reply, kind: "widget" } as Message], 100, "turn-1")).toBe(false);
+    // The digest written after the turn ends only sums it up.
+    expect(nothingRan([failure, { ...reply, kind: "digest", text: "[digest] · no tool activity observed in this turn" } as Message], 100, "turn-1")).toBe(true);
   });
 
   it("ignores rows from before the turn, from another turn, and the hand-off's request card", () => {
@@ -142,5 +144,41 @@ describe("peer limit resend", () => {
     expect(replaced.resend.resend("t1")).toBe(false);
     expect(replaced.settle).toHaveBeenCalledWith("gen-1", { ok: false, text: "limit" });
     expect(replaced.startTurn).not.toHaveBeenCalled();
+  });
+  it("resends a turn whose end came before its dispatch named it, whether the thread settled before or after the bind", async () => {
+    for (const settleFirst of [false, true]) {
+      const { resend, startTurn, settle, failed } = fixture([ask, failure]);
+      resend.track({ generation: "gen-1", botId: "helper", threadId: "t1", text: "Check the build", opts: peerOpts, userMessage: ask });
+      // turn.completed arrives with no bound owner: nothing is judged yet.
+      resend.endedUnbound(failed, false);
+      if (settleFirst) expect(resend.resend("t1", "gen-1")).toBe(false);
+      resend.bound("t1", "turn-1", "gen-1");
+      expect(resend.hold("gen-1", { ok: false, text: "limit" }), `settleFirst=${settleFirst}`).toBe(true);
+      if (!settleFirst) expect(resend.resend("t1", "gen-1")).toBe(true);
+      await flush(); await flush();
+      expect(startTurn, `settleFirst=${settleFirst}`).toHaveBeenCalledTimes(1);
+      expect(settle).not.toHaveBeenCalled();
+    }
+  });
+
+  it("ignores an early end for another turn id when the dispatch binds", () => {
+    const { resend, failed } = fixture([ask, failure]);
+    resend.track({ generation: "gen-1", botId: "helper", threadId: "t1", text: "x", opts: peerOpts, userMessage: ask });
+    resend.endedUnbound(failed, false);
+    resend.bound("t1", "turn-other", "gen-1");
+    expect(resend.hold("gen-1", { ok: false, text: "limit" })).toBe(false);
+  });
+
+  it("gives up when the turn's file landed after its end was judged", async () => {
+    const rows = [ask, failure];
+    const { resend, startTurn, settle, failed } = fixture(rows);
+    resend.track({ generation: "gen-1", botId: "helper", threadId: "t1", text: "x", opts: peerOpts, userMessage: ask });
+    resend.ended(failed, "gen-1", false);
+    resend.hold("gen-1", { ok: false, text: "limit" });
+    rows.push({ id: "img", at: LATER, role: "bot", kind: "image", turnId: "turn-1" } as unknown as Message);
+    expect(resend.resend("t1")).toBe(true);
+    await flush();
+    expect(startTurn).not.toHaveBeenCalled();
+    expect(settle).toHaveBeenCalledWith("gen-1", { ok: false, text: "limit" });
   });
 });
