@@ -76,6 +76,39 @@ describe("classifyError", () => {
     });
   });
 
+  it.each([
+    ["Internal error: Internal service failure (session/new, ServiceUnavailableError)", "server_error"],
+    ["ServiceUnavailableError: upstream unavailable", "server_error"],
+    ["Internal error: fetchAvailableModels failed: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1082) (session/new)", "connection_reset"],
+  ])("recognizes provider startup failures without an HTTP status: %s", (text, reason) => {
+    for (const error of [new Error(text), { text }, { exitCode: 1, stderr: text }]) {
+      expect(classifyError(error)).toEqual({ transient: true, reason });
+    }
+  });
+
+  it.each([
+    ["Internal service failure: 401 Unauthorized", "auth"],
+    ["ServiceUnavailableError: quota exceeded", "quota"],
+    ["UNEXPECTED_EOF_WHILE_READING: cancelled by user", "interrupted"],
+    ["Internal service failure: blocked by our safety systems", "provider_safety"],
+    ["SSL: CERTIFICATE_VERIFY_FAILED", "unknown"],
+    ["Internal error: OpenCode service failure", "unknown"],
+  ])("does not make a permanent or unknown failure retryable: %s", (text, reason) => {
+    expect(classifyError({ text })).toEqual({ transient: false, reason });
+  });
+
+  it.each([
+    "ServiceUnavailableError: SSL: CERTIFICATE_VERIFY_FAILED",
+    "Internal service failure: certificate verify failed",
+    "UNEXPECTED_EOF_WHILE_READING: [SSL: CERTIFICATE_VERIFY_FAILED]",
+  ])("keeps wrapped certificate-verification failures terminal: %s", (text) => {
+    for (const error of [new Error(text), { text }, { exitCode: 1, stderr: text }]) {
+      expect(classifyError(error)).toEqual({ transient: false, reason: "unknown" });
+    }
+    expect(classifyError(new Error("ServiceUnavailableError", { cause: new Error(text) })))
+      .toEqual({ transient: false, reason: "unknown" });
+  });
+
   it("never retries auth, quota, unknown model, or invalid request", () => {
     expect(classifyError(new Error("unexpected status 401 Unauthorized: Missing bearer"))).toEqual({
       transient: false,
