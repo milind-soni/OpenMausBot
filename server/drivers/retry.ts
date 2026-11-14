@@ -72,6 +72,7 @@ const TERMINAL_PATTERNS: Array<{ pattern: RegExp; reason: TerminalReason }> = [
   { pattern: /\b404\b|\bno such thread\b|\bthread gone\b/i, reason: "not_found" },
   // A turn the user stopped must never come back as an auto-retry.
   { pattern: /\b(?:interrupted|cancelled by user)\b/i, reason: "interrupted" },
+  { pattern: /\bcertificate[ _]verify[ _]failed\b/i, reason: "unknown" },
 ];
 
 interface CliExit {
