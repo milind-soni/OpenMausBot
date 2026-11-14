@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState, type Dispatch, type ReactNode } from
 import { createPortal } from "react-dom";
 import { Archive, ArchiveRestore, BellOff, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
 import type { Action, AppState, BotProject, Task } from "@/state/store";
+import { api } from "@/state/store";
 import type { RoutineRun } from "@/lib/routines";
 import { cn } from "@/lib/cn";
 import { MENU_SHEET } from "./menu-recipe";
@@ -10,7 +11,7 @@ import { intlLocale, t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
 import { imeComposing } from "@/lib/send-key";
 import { isTickable, opensRowMenuFromKey } from "@/lib/bulk-select";
-import { threadRefUrl } from "@/lib/thread-refs";
+import { threadRefUrl, threadWebRefUrl } from "@/lib/thread-refs";
 import { copyText } from "@/lib/copy-text";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { threadLinkLabel } from "../../shared/thread-link";
@@ -262,6 +263,16 @@ const sameThreadRow = ({ task: previousTask, ...previous }: ThreadRowProps, { ta
 export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, activityLabel: liveActivity, now, selectMode = false, checked = false, onToggleSelect, panel = false, preview }: ThreadRowProps) {
   const activityLabel = useHeldText(liveActivity);
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
+  const [webLink, setWebLink] = useState<string | null>(null);
+  useEffect(() => {
+    setWebLink(null);
+    if (!menu) return;
+    let active = true;
+    void api<{ publicUrl?: string | null }>("/api/settings/custom-domain", { background: true }).then((domain) => {
+      if (active) setWebLink(domain.publicUrl ? threadWebRefUrl({ botId: ownerId, threadId: task.threadId }, domain.publicUrl) : null);
+    }).catch(() => { if (active) setWebLink(null); });
+    return () => { active = false; };
+  }, [menu, ownerId, task.threadId]);
   const menuMotion = useHeldMenuMotion(menu);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(task.title);
@@ -374,6 +385,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
       className={cn("fixed z-50 max-h-[calc(100vh-16px)] w-[220px] overflow-y-auto", MENU_SHEET, menuMotion.className)} {...menuMotion.exitProps}
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMenu(null); actionRef.current?.focus(); } }}>
       <button type="button" onClick={copyLink} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2 size={16} />{t("task.copyLink")}</button>
+      {webLink && <button type="button" onClick={() => { setMenu(null); void copyText(webLink); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2 size={16} />{t("task.copyLink")} (HTTP{webLink.startsWith("https:") ? "S" : ""})</button>}
       {!task.sharedChat && <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Pencil size={16} />{t("task.renameAria")}</button>}
       <ShareRowItems botId={ownerId} task={task} onPicked={() => setMenu(null)} />
       {onRegenerateTitle && !task.sharedChat && <button type="button" disabled={regenerating} aria-busy={regenerating} onClick={regenerateTitle} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40">{regenerating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}{regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle")}</button>}
