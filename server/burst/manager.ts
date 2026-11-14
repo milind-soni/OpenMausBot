@@ -130,23 +130,28 @@ export function createBurstManager(deps: BurstManagerDeps) {
 
   function begin(burst: BurstRecord, child: BurstChild): void {
     let threadId = child.threadId;
-    if (!threadId) {
-      const opened = deps.openThread(burst, child);
-      if (!opened) { failStart(burst, child, "The bot is no longer here."); return; }
-      threadId = opened;
-      store.setThread(burst.id, child.seq, threadId);
-    }
-    ownThreads.add(threadId);
-    const running = { ...child, threadId };
     let ended = false;
-    const end = (outcome: BurstTurnOutcome) => { if (!ended) { ended = true; settle(burst.id, running, outcome); } };
-    deps.startChild(burst, running, childOpening(burst, child, burst.counts.queued + burst.counts.running + burst.counts.done + burst.counts.failed + burst.counts.cancelled), end).catch((error: unknown) => {
+    const failed = (error: unknown) => {
       if (ended) return;
       ended = true;
-      ownThreads.delete(threadId);
+      if (threadId) ownThreads.delete(threadId);
       if (startsLater(error) && child.attempts < START_ATTEMPTS) { store.requeue(burst.id, child.seq); enlist(burst.id); lane.release(); return; }
       failStart(burst, child, error instanceof Error ? error.message : String(error));
-    });
+    };
+    try {
+      if (!threadId) {
+        const opened = deps.openThread(burst, child);
+        if (!opened) { failed(new Error("The bot is no longer here.")); return; }
+        threadId = opened;
+        store.setThread(burst.id, child.seq, threadId);
+      }
+      ownThreads.add(threadId);
+      const running = { ...child, threadId };
+      const end = (outcome: BurstTurnOutcome) => { if (!ended) { ended = true; settle(burst.id, running, outcome); } };
+      deps.startChild(burst, running, childOpening(burst, child, burst.counts.queued + burst.counts.running + burst.counts.done + burst.counts.failed + burst.counts.cancelled), end).catch(failed);
+    } catch (error) {
+      failed(error);
+    }
   }
 
   function failStart(burst: BurstRecord, child: BurstChild, reason: string): void {
