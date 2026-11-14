@@ -199,6 +199,16 @@ describe("connecting a mailbox", () => {
     expect(sendingError(Object.assign(new Error("getaddrinfo ENOTFOUND"), { code: "EDNS" }), server).message).toBe("There is no mail server called smtp.shop.example.");
   });
 
+  it("temporary DNS errors stay retryable while a nonexistent name still needs correction", () => {
+    const server = { host: "smtp.shop.example", port: 587, secure: false };
+    for (const error of [{ code: "EAI_AGAIN" }, { code: "EDNS", originalCode: "EAI_AGAIN" }]) {
+      expect(sendingError(error, server)).toMatchObject({ fault: "no-answer", message: "smtp.shop.example didn't answer on port 587." });
+    }
+    for (const error of [{ code: "ENOTFOUND" }, { code: "EDNS", originalCode: "ENOTFOUND" }, { code: "EDNS", originalCode: "ENODATA" }]) {
+      expect(sendingError(error, server)).toMatchObject({ fault: "missing", message: "There is no mail server called smtp.shop.example." });
+    }
+  });
+
   it("a mailbox saved read-only, which said so as its problem, is not held back by it", async () => {
     const { email, dataDir } = service(() => ({ messages: 1 }), () => SILENT());
     await email.connect({ address: "me@shop.example", password: PASSWORD });
