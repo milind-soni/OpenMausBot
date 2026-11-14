@@ -28,6 +28,27 @@ pnpm exec vitest run shared/routine-schedule.test.ts server/routine-cron.e2e.tes
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/cron-routines-ui.e2e.test.ts
 ```
 
+## Editing long automation instructions
+
+`trigger_info action=list` keeps bounded instruction previews. Pass `trigger_id`
+to read one automation's complete instructions before editing; this applies to
+schedules, app events and webhooks. `instructionsTruncated` then reports false.
+Secrets remain redacted, and `instructionsRedacted` reports whether the saved
+text contains hidden content, including beyond a listing's preview. When true,
+a bot instruction replacement fails with HTTP 409 before any field or receipt
+changes. Ask the person to edit those instructions on the Automations page;
+other updates work when instructions are omitted.
+
+The disposable fake-engine fixture reads a long schedule and webhook through
+the real MCP tools, changes one sentence, and checks the full saved text and
+readback. It also checks hidden credentials, refused mixed-field replacements,
+and renames that preserve instructions. App-event coverage uses its real
+manager and a loopback broker stand-in; no real connected account is used.
+
+```sh
+pnpm exec vitest run server/trigger-instructions.e2e.test.ts server/trigger-tools.test.ts server/automation-instructions.test.ts server/routine-requests.test.ts server/webhook-requests.test.ts server/app-triggers.test.ts
+```
+
 ## Launch the isolated renderer
 
 Run the launcher directly so Ctrl-C reaches the fixture owner:

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AppTriggerRequestService } from "./app-trigger-requests.ts";
 import { appEventCatalog } from "./app-event-catalog.ts";
 import { eventCount } from "./app-events.ts";
 import { brokerClient } from "./app-trigger-broker.ts";
@@ -72,6 +73,24 @@ async function gmailTrigger(triggers: AppTriggerManager, filter = { from: "acme.
 }
 
 describe("AppTriggerManager", () => {
+  it("refuses replacing redacted app instructions before changing local or remote state", async () => {
+    const triggers = manager();
+    const prompt = "Review the queue.\n".repeat(180) + "Use token=fixture-secret-value.";
+    const saved = await triggers.create({ botId: "bot-1", name: "Private instructions", prompt, app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE" });
+    const store = { messagesFor: () => [], appendMessage: vi.fn(() => ({ id: "message-1" })), patchMessage: vi.fn() };
+    const service = new AppTriggerRequestService({ triggers, store, botName: () => "Fixture" });
+    const submit = (changes: unknown) => service.submit({ botId: "bot-1", threadId: "thread-a", operation: { action: "update", triggerId: saved.id, changes } });
+    const before = structuredClone(triggers.list());
+    const remote = structuredClone([...broker.harness.composio.instances.entries()]);
+    await expect(submit({ name: "Must not apply", instructions: "Only the visible text.", filter: { from: "changed.example" } }))
+      .rejects.toMatchObject({ status: 409 });
+    expect(triggers.list()).toEqual(before);
+    expect([...broker.harness.composio.instances.entries()]).toEqual(remote);
+    expect(store.appendMessage).not.toHaveBeenCalled();
+    await submit({ name: "Safe rename" });
+    expect(triggers.get(saved.id)).toMatchObject({ name: "Safe rename", prompt });
+  });
+
   it("creates the service copy with a Gmail filter folded into Gmail's own search", async () => {
     const triggers = manager();
     const trigger = await gmailTrigger(triggers);

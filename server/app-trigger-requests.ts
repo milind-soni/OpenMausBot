@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { AppTrigger, AppTriggerRequestCardData, AppTriggerRequestOperation } from "../shared/app-triggers.ts";
 import { appLabel } from "./app-event-catalog.ts";
 import { AppTriggerError, type AppTriggerManager } from "./app-triggers.ts";
+import { instructionsUpdateRefusal } from "./automation-instructions.ts";
 import { newId } from "./contracts.ts";
 import { UNDO_STALE } from "./direct-apply.ts";
 import { redactSecretsInText } from "./redact.ts";
@@ -48,7 +49,8 @@ const definitionSchema = z.object({
   runOn: z.enum(["maus", "cloud"]).optional(),
   sameConversation: z.boolean().optional(),
 }).strict();
-const changesSchema = definitionSchema.pick({ name: true, instructions: true, filter: true, config: true, runOn: true, sameConversation: true }).partial().strict()
+const changesSchema = definitionSchema.pick({ name: true, instructions: true, filter: true, config: true, runOn: true, sameConversation: true }).partial()
+  .extend({ instructions: definitionSchema.shape.instructions.removeDefault().optional() }).strict()
   .refine((changes) => Object.keys(changes).length > 0, "The update action needs at least one field in changes");
 const idSchema = z.string().trim().min(1).max(200);
 const targetSchema = z.object({ botId: z.string(), name: z.string() }).optional();
@@ -122,6 +124,10 @@ export class AppTriggerRequestService {
     const owner = operation.forBot?.botId ?? args.botId;
     const triggers = this.options.triggers;
     const before = operation.action === "create" ? undefined : this.owned(operation.triggerId, owner);
+    if (operation.action === "update") {
+      const refusal = instructionsUpdateRefusal(before!.prompt, operation.changes.instructions);
+      if (refusal) throw new AppTriggerError(refusal, 409);
+    }
     if (args.canCommit && !args.canCommit()) throw new AppTriggerError("The requesting turn ended before this change could be saved", 401);
     let after: AppTrigger | null = null;
     let runId: string | undefined;

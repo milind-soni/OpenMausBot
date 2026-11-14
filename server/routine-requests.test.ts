@@ -115,6 +115,20 @@ function cardFingerprint(card: RoutineRequestOptionCard, messageId: string): str
 }
 
 describe("RoutineRequestService", () => {
+  it("refuses instruction replacement after redaction without saving a card or changing other fields", async () => {
+    const { routines, service, store } = harness();
+    const prompt = "Review the queue.\n".repeat(180) + "Use sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789.";
+    const saved = routines.create({ name: "Private instructions", prompt, botId: "bot-a", target: "bot", runOn: "maus", enabled: false,
+      durationMinutes: 30, schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } });
+    const submit = (changes: unknown) => service.submit({ botId: "bot-a", threadId: "thread-a", proposal: { action: "update", routineId: saved.id, changes } });
+    const before = structuredClone(routines.listRoutines());
+    await expect(submit({ name: "Must not apply", instructions: "Only the visible text." })).rejects.toMatchObject({ status: 409 });
+    expect(routines.listRoutines()).toEqual(before);
+    expect(store.messagesFor("thread-a")).toHaveLength(0);
+    await submit({ name: "Safe rename" });
+    expect(routines.listRoutines()[0]).toMatchObject({ name: "Safe rename", prompt });
+  });
+
   describe("duplicate creation", () => {
     const existingInput: RoutineInput = {
       botId: "bot-a", name: "Already scheduled", prompt: "Summarize the overnight support queue.",
