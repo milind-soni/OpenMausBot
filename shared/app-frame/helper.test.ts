@@ -5,7 +5,7 @@ import { ROOM_VIEW_ONLY, type AppDocument } from "../app.ts";
 import { createAppBridge, type AppBridge } from "./bridge.ts";
 import { BOT_HTML_CSP, BOT_HTML_NETWORK } from "./csp.ts";
 import { ROOM_CAN } from "./document.ts";
-import { APP_HELPER_SOURCE, APP_ROOM_HELPER_SOURCE } from "./helper.ts";
+import { APP_HELPER_SOURCE, APP_ROOM_HELPER_SOURCE, APP_SELECTION_METHOD } from "./helper.ts";
 
 const DOC: AppDocument = {
   v: 1, messageId: "m1", rev: 0, srcdoc: "", csp: BOT_HTML_CSP,
@@ -42,6 +42,7 @@ function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?:
   const parent = {
     postMessage(data: unknown) {
       const copy = structuredClone(data);
+      if ((copy as { method?: string }).method === APP_SELECTION_METHOD) seen.selections.push((copy as { params: unknown }).params);
       task(() => bridge.handleMessage({ source: frame, data: copy }));
     },
   };
@@ -82,7 +83,7 @@ function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?:
     });
     (document as unknown as { elementsFromPoint(): Element[] }).elementsFromPoint = () => [...under, document.body, root];
   }
-  const seen = { messages: [] as string[], links: [] as string[], contexts: [] as unknown[], heights: [] as number[] };
+  const seen = { messages: [] as string[], links: [] as string[], contexts: [] as unknown[], heights: [] as number[], selections: [] as unknown[] };
   bridge = createAppBridge({
     doc: room ? { ...DOC, can: { ...ROOM_CAN }, room: true } : DOC,
     hostContext: { theme: "dark", styles: { variables: { "--color-text-primary": "#fafafa", "not-a-variable": "x" } } },
@@ -206,6 +207,53 @@ describe("the bot-page helper", () => {
     const original = page.mausbot();
     expect(() => { "use strict"; (page.frame as { mausbot: unknown }).mausbot = {}; }).toThrow();
     expect(page.mausbot()).toBe(original);
+  });
+});
+
+describe("the text the person selects in a bot page", () => {
+  const selectText = (page: ReturnType<typeof boot>, text: string) => {
+    const document = page.root.ownerDocument;
+    const paragraph = document.createElement("p");
+    paragraph.textContent = text;
+    document.body.appendChild(paragraph);
+    document.getSelection()!.selectAllChildren(paragraph);
+    document.dispatchEvent(new document.defaultView!.Event("selectionchange"));
+  };
+
+  it("is reported once it settles, and reported gone once, so the host can offer to cite it", async () => {
+    const page = boot();
+    await expect.poll(() => page.bridge.initialized).toBe(true);
+    selectText(page, "Total: 42");
+    await expect.poll(() => page.seen.selections.length).toBe(1);
+    expect(page.seen.selections[0]).toMatchObject({ text: "Total: 42", left: expect.any(Number), bottom: expect.any(Number) });
+    const document = page.root.ownerDocument;
+    document.getSelection()!.removeAllRanges();
+    document.dispatchEvent(new document.defaultView!.Event("selectionchange"));
+    await expect.poll(() => page.seen.selections.length).toBe(2);
+    expect(page.seen.selections[1]).toEqual({ text: "" });
+    document.dispatchEvent(new document.defaultView!.Event("selectionchange"));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(page.seen.selections).toHaveLength(2);
+  });
+
+  it("waits until the person stops changing it, so a selection still being made is not offered", async () => {
+    const page = boot();
+    await expect.poll(() => page.bridge.initialized).toBe(true);
+    for (const text of ["T", "To", "Tot", "Tota", "Total: 42"]) {
+      selectText(page, text);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    await expect.poll(() => page.seen.selections.length).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(page.seen.selections).toEqual([expect.objectContaining({ text: "Total: 42" })]);
+  });
+
+  it("is never reported from a room's page", async () => {
+    const page = boot(true, { room: true });
+    await expect.poll(() => page.bridge.initialized).toBe(true);
+    selectText(page, "Total: 42");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(page.seen.selections).toEqual([]);
   });
 });
 

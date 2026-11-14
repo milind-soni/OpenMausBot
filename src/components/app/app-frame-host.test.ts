@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { APP_SAMPLES } from "../../../shared/app-samples";
 import { botHtmlDocument } from "../../../shared/app-frame/document";
+import { APP_SELECTION_CHARS } from "../../../shared/app-frame/helper";
 import { APP_FRAME_SANDBOX, createAppIframe, mountAppFrame, trackAppEngagement, type AppFrameAdapter } from "./app-frame-host";
 
 const doc = botHtmlDocument({ messageId: "m1", rev: 0, html: APP_SAMPLES.counter!.html });
@@ -112,6 +113,66 @@ describe("the bridge on the desktop", () => {
     send({ jsonrpc: "2.0", id: request.id, result: {} });
     await done;
     expect(container.querySelector("iframe")).toBeNull();
+  });
+});
+
+describe("text the person selects in a page", () => {
+  const SELECTION = "mausbot/notifications/selection";
+
+  function page(over: { doc?: typeof doc } = {}) {
+    const onSelection = vi.fn();
+    const host = mountAppFrame({ container, doc: over.doc ?? doc, title: "Coffee counter", height: 200, hostContext: {}, hostVersion: "1", adapter: adapter(), onSelection });
+    const view = host.iframe.contentWindow!;
+    const send = (data: unknown, source: unknown = view) => window.dispatchEvent(new MessageEvent("message", { data, source: source as MessageEventSource }));
+    const select = (params: Record<string, unknown>, source?: unknown) => send({ jsonrpc: "2.0", method: SELECTION, params }, source);
+    const initialize = () => {
+      send({ jsonrpc: "2.0", id: 1, method: "ui/initialize", params: {} });
+      send({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+    };
+    const engage = async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
+      host.iframe.focus();
+      host.iframe.dispatchEvent(new Event("focus"));
+      await tick();
+    };
+    vi.spyOn(host.iframe, "getBoundingClientRect").mockReturnValue({ left: 100, top: 50, right: 700, bottom: 250, width: 600, height: 200, x: 100, y: 50, toJSON() {} } as DOMRect);
+    return { host, onSelection, select, initialize, engage };
+  }
+
+  it("is passed on in the window's coordinates, and as null once it is gone", async () => {
+    const { host, onSelection, select, initialize, engage } = page();
+    select({ text: "before it started", left: 1, bottom: 2 });
+    initialize();
+    await engage();
+    select({ text: "Total: 42", left: 12, bottom: 30 });
+    select({ text: "" });
+    expect(onSelection.mock.calls).toEqual([[{ text: "Total: 42", left: 112, bottom: 80 }], [null]]);
+    host.destroy();
+  });
+
+  it("is dropped when the person did not make it, it is malformed or too long, or it comes from another window", async () => {
+    const { host, onSelection, select, initialize, engage } = page();
+    initialize();
+    select({ text: "unprompted", left: 0, bottom: 0 });
+    await engage();
+    select({ text: "x".repeat(APP_SELECTION_CHARS + 1), left: 0, bottom: 0 });
+    select({ text: 42, left: 0, bottom: 0 });
+    select({ text: "ok", left: Number.NaN, bottom: 0 });
+    select({ text: "ok", left: 0 });
+    select({ text: "ok", left: 0, bottom: 0 }, window);
+    expect(onSelection).not.toHaveBeenCalled();
+    host.destroy();
+  });
+
+  it("is never offered in a room, where a page may not message", async () => {
+    const roomDoc = botHtmlDocument({ messageId: "m1", rev: 0, html: APP_SAMPLES.counter!.html, room: true });
+    const { host, onSelection, select, initialize, engage } = page({ doc: roomDoc });
+    initialize();
+    await engage();
+    select({ text: "Total: 42", left: 0, bottom: 0 });
+    select({ text: "" });
+    expect(onSelection).not.toHaveBeenCalled();
+    host.destroy();
   });
 });
 
