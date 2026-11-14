@@ -1,0 +1,150 @@
+// @vitest-environment happy-dom
+// The settings search keeps looking until every app-name source (connector inventory, app catalog, Email) has answered.
+import { createElement } from "react";
+import { flushSync } from "react-dom";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { setLocale } from "@/lib/i18n";
+import type { Bot } from "@/state/store";
+
+const fixture = vi.hoisted(() => ({
+  holdCatalog: false,
+  holdInventory: false,
+  answerInventory: null as null | (() => void),
+  answerCatalog: null as null | ((ok: boolean) => void),
+  answerEmail: null as null | ((ok: boolean) => void),
+}));
+vi.mock("@/lib/connected-apps", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/connected-apps")>()),
+  preloadConnectedApps: () => {
+    const inventory = { authoritative: true, services: { github: { connected: true } } };
+    if (!fixture.holdInventory) return Promise.resolve(inventory);
+    return new Promise((resolve) => {
+      fixture.answerInventory = () => resolve(inventory);
+    });
+  },
+}));
+vi.mock("@/state/store", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/state/store")>();
+  const api = (path: string) => {
+    if (path === "/api/connectors/catalog") {
+      if (!fixture.holdCatalog) return Promise.resolve({ cards: [] });
+      return new Promise((resolve, reject) => {
+        fixture.answerCatalog = (ok) => (ok ? resolve({ cards: [] }) : reject(new Error("down")));
+      });
+    }
+    if (path === "/api/email") {
+      return new Promise((resolve, reject) => {
+        fixture.answerEmail = (ok) => (ok ? resolve({ state: "connected", accounts: [{ address: "ana@example.test" }] }) : reject(new Error("down")));
+      });
+    }
+    return Promise.reject(new Error(`unexpected ${path}`));
+  };
+  return { ...original, api };
+});
+
+const { useBotApps } = await import("./useBotApps");
+const { appSearchPhase } = await import("./sections");
+
+let hook = useBotApps;
+function Probe({ bot, load }: { bot: Bot; load: boolean }) {
+  const apps = hook(bot, load);
+  return createElement("p", null, `${appSearchPhase(apps)}:${apps.apps.map((app) => app.slug).join(",")}`);
+}
+
+let host: HTMLDivElement | null = null;
+let root: Root | null = null;
+const bot = { id: "scout" } as Bot;
+const settle = async () => {
+  for (let i = 0; i < 3; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+};
+function render(load = true) {
+  if (!host) {
+    setLocale("en");
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+  }
+  flushSync(() => root!.render(createElement(Probe, { bot, load })));
+  return host;
+}
+
+afterEach(() => {
+  hook = useBotApps;
+  root?.unmount();
+  host?.remove();
+  host = null;
+  root = null;
+  fixture.holdCatalog = false;
+  fixture.holdInventory = false;
+  fixture.answerInventory = null;
+  fixture.answerCatalog = null;
+  fixture.answerEmail = null;
+});
+
+describe("app names for the settings search", () => {
+  it("stays loading while the app catalog has not answered, and stops when it fails", async () => {
+    // The app catalog is cached once it loads, so this test uses a fresh copy of the hook.
+    vi.resetModules();
+    hook = (await import("./useBotApps")).useBotApps;
+    fixture.holdCatalog = true;
+    const view = render();
+    await settle();
+    fixture.answerEmail?.(true);
+    await settle();
+    expect(view.textContent).toBe("loading:email,github");
+    fixture.answerCatalog?.(false);
+    await settle();
+    expect(view.textContent).toBe("ready:email,github");
+  });
+
+  it("stays loading while Email has not answered, even once the other apps are in", async () => {
+    const view = render();
+    await settle();
+    expect(view.textContent).toBe("loading:github");
+    fixture.answerEmail?.(true);
+    await settle();
+    expect(view.textContent).toBe("ready:email,github");
+  });
+
+  it("stops loading when the Email lookup fails", async () => {
+    const view = render();
+    await settle();
+    fixture.answerEmail?.(false);
+    await settle();
+    expect(view.textContent).toBe("ready:github");
+  });
+
+  it("is loading again while a new lookup runs after an earlier one failed", async () => {
+    const view = render();
+    await settle();
+    fixture.answerEmail?.(false);
+    await settle();
+    expect(view.textContent).toBe("ready:github");
+    render(false);
+    render(true);
+    await settle();
+    expect(view.textContent).toBe("loading:github");
+    fixture.answerEmail?.(true);
+    await settle();
+    expect(view.textContent).toBe("ready:email,github");
+  });
+
+  it("is loading while a new lookup's inventory is pending, even with an earlier inventory in hand", async () => {
+    const view = render();
+    await settle();
+    fixture.answerEmail?.(false);
+    await settle();
+    expect(view.textContent).toBe("ready:github");
+    fixture.holdInventory = true;
+    render(false);
+    render(true);
+    await settle();
+    fixture.answerEmail?.(false);
+    await settle();
+    expect(view.textContent).toBe("loading:github");
+    fixture.answerInventory?.();
+    await settle();
+    expect(view.textContent).toBe("ready:github");
+  });
+});

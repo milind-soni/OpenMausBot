@@ -6863,6 +6863,7 @@
   "botSettings.search": "搜尋",
   "botSettings.searchAria": "搜尋設定",
   "botSettings.searchNone": "沒有符合「{query}」的項目",
+  "botSettings.searchLoading": "正在查找已連接的應用程式…",
   "botSettings.sections.skills": "技能",
   "botSettings.sections.memory": "記憶",
   "botSettings.sections.routines": "例行工作",

@@ -73,24 +73,47 @@ export function botAppsFrom(
   return { phase: "ready", apps, connectedSlugs };
 }
 
-export function useBotApps(bot: Bot): BotApps {
+/** The apps plus whether this lookup's inventory, app catalog and Email requests have answered (or failed); the values alone
+ * can't tell pending from failed, and an inventory kept from an earlier lookup is not this lookup's answer. */
+export interface BotAppsState extends BotApps {
+  inventorySettled: boolean;
+  cardsSettled: boolean;
+  emailSettled: boolean;
+}
+
+/** `load` false skips the requests until it turns true (the settings search loads apps only once someone searches). */
+export function useBotApps(bot: Bot, load = true): BotAppsState {
   const [inventory, setInventory] = useState<ConnectorInventory | null>(null);
   const [cards, setCards] = useState<ReadonlyMap<string, ToolkitCard>>(() => new Map());
   const [email, setEmail] = useState<EmailStatus | null>(null);
+  const [inventorySettled, setInventorySettled] = useState(false);
+  const [cardsSettled, setCardsSettled] = useState(false);
+  const [emailSettled, setEmailSettled] = useState(false);
 
   useEffect(() => {
+    if (!load) return;
     let cancelled = false;
+    setInventorySettled(false);
+    setCardsSettled(false);
+    setEmailSettled(false);
     void preloadConnectedApps().then((result) => {
-      if (!cancelled) setInventory(result);
+      if (cancelled) return;
+      setInventory(result);
+      setInventorySettled(true);
     });
     void loadAppCards().then((result) => {
-      if (!cancelled) setCards(result);
+      if (cancelled) return;
+      setCards(result);
+      setCardsSettled(true);
     });
-    void api("/api/email").then((result: EmailStatus) => { if (!cancelled) setEmail(result); }).catch(() => {});
+    void api("/api/email")
+      .then((result: EmailStatus) => { if (!cancelled) setEmail(result); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setEmailSettled(true); });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [load]);
 
-  return botAppsFrom(bot, inventory, cards, email);
+  return { ...botAppsFrom(bot, inventory, cards, email), inventorySettled, cardsSettled, emailSettled };
 }

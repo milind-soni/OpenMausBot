@@ -7279,6 +7279,7 @@
   "botSettings.search": "Search",
   "botSettings.searchAria": "Search settings",
   "botSettings.searchNone": "Nothing matches “{query}”",
+  "botSettings.searchLoading": "Looking through connected apps…",
   "botSettings.sections.skills": "Skills",
   "botSettings.sections.memory": "Memory",
   "botSettings.sections.routines": "Routines",

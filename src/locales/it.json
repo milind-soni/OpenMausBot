@@ -5763,6 +5763,7 @@
   "botSettings.search": "Cerca",
   "botSettings.searchAria": "Cerca nelle impostazioni",
   "botSettings.searchNone": "Nessun risultato per “{query}”",
+  "botSettings.searchLoading": "Cerco tra le app collegate…",
   "botSettings.sections.skills": "Abilità",
   "botSettings.sections.memory": "Memoria",
   "botSettings.sections.routines": "Routine",
