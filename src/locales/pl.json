@@ -7264,5 +7264,8 @@
   "computer.recovery.restart": "Uruchom komputer ponownie",
   "computer.recovery.restartTitle": "Zatrzymuje i ponownie uruchamia ten komputer w chmurze. Otwarte programy zostaną zamknięte; pliki zostają.",
   "computer.recovery.replace": "Zastąp komputer",
-  "computer.recovery.replaceTitle": "Usuwa ten komputer w chmurze i daje botowi nowy. Pliki, które są tylko na nim, zostaną utracone."
+  "computer.recovery.replaceTitle": "Usuwa ten komputer w chmurze i daje botowi nowy. Pliki, które są tylko na nim, zostaną utracone.",
+  "devices.computers.pairButton": "Sparuj komputer",
+  "devices.computers.pairTitle": "Sparuj inny komputer",
+  "devices.computers.typeCode": "Na drugim komputerze otwórz Połącz z serwerem w {app} i wpisz ten kod."
 }

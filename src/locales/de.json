@@ -3978,5 +3978,8 @@
   "computer.recovery.restart": "Computer neu starten",
   "computer.recovery.restartTitle": "Diesen Cloud-Computer stoppen und wieder starten. Geöffnete Programme werden geschlossen; die Dateien bleiben.",
   "computer.recovery.replace": "Computer ersetzen",
-  "computer.recovery.replaceTitle": "Diesen Cloud-Computer löschen und dem Bot einen neuen geben. Dateien, die nur darauf liegen, gehen verloren."
+  "computer.recovery.replaceTitle": "Diesen Cloud-Computer löschen und dem Bot einen neuen geben. Dateien, die nur darauf liegen, gehen verloren.",
+  "devices.computers.pairButton": "Computer koppeln",
+  "devices.computers.pairTitle": "Anderen Computer koppeln",
+  "devices.computers.typeCode": "Öffne auf deinem anderen Computer in {app} „Mit einem Server verbinden“ und gib diesen Code ein."
 }

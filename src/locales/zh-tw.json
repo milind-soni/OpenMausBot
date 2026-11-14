@@ -10295,5 +10295,8 @@
   "computer.recovery.restart": "重新啟動電腦",
   "computer.recovery.restartTitle": "停止並重新啟動這台雲端電腦。開著的程式會被關閉；檔案會保留。",
   "computer.recovery.replace": "取代電腦",
-  "computer.recovery.replaceTitle": "刪除這台雲端電腦並給機器人一台新的。只存在上面的檔案會遺失。"
+  "computer.recovery.replaceTitle": "刪除這台雲端電腦並給機器人一台新的。只存在上面的檔案會遺失。",
+  "devices.computers.pairButton": "配對電腦",
+  "devices.computers.pairTitle": "配對另一台電腦",
+  "devices.computers.typeCode": "在另一台電腦上，於 {app} 開啟「連線到伺服器」並輸入這組代碼。"
 }

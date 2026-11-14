@@ -10133,5 +10133,8 @@
   "computer.recovery.restart": "重启电脑",
   "computer.recovery.restartTitle": "停止并重新启动这台云电脑。打开的程序会被关闭；文件会保留。",
   "computer.recovery.replace": "替换电脑",
-  "computer.recovery.replaceTitle": "删除这台云电脑并给机器人一台新的。只在上面的文件会丢失。"
+  "computer.recovery.replaceTitle": "删除这台云电脑并给机器人一台新的。只在上面的文件会丢失。",
+  "devices.computers.pairButton": "配对电脑",
+  "devices.computers.pairTitle": "配对另一台电脑",
+  "devices.computers.typeCode": "在另一台电脑上，在 {app} 中打开“连接到服务器”并输入此代码。"
 }

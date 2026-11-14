@@ -8094,5 +8094,8 @@
   "computer.recovery.restart": "コンピューターを再起動",
   "computer.recovery.restartTitle": "このクラウドコンピューターを停止して起動し直します。開いているプログラムは閉じられますが、ファイルは残ります。",
   "computer.recovery.replace": "コンピューターを置き換え",
-  "computer.recovery.replaceTitle": "このクラウドコンピューターを削除し、ボットに新しいものを用意します。ここにしかないファイルは失われます。"
+  "computer.recovery.replaceTitle": "このクラウドコンピューターを削除し、ボットに新しいものを用意します。ここにしかないファイルは失われます。",
+  "devices.computers.pairButton": "コンピュータをペアリング",
+  "devices.computers.pairTitle": "別のコンピュータをペアリング",
+  "devices.computers.typeCode": "もう一台のコンピュータで {app} の「サーバーに接続」を開き、このコードを入力してください。"
 }
