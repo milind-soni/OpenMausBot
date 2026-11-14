@@ -212,7 +212,7 @@ import {
 } from "./contracts.ts";
 import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
 import { recoveryCapabilityError, startupBackups } from "./automatic-recovery.ts";
-import { createQuotaSwitchHost } from "./host/quota-switch.ts"; import { quotaSwitchEnabled } from "./quota-switch.ts";
+import { createQuotaSwitchHost } from "./host/quota-switch.ts"; import { quotaSwitchEnabled } from "./quota-switch.ts"; import { createPeerLimitResend } from "./host/peer-limit-resend.ts";
 import { decodeGeneratedImage } from "./generated-image.ts";
 import { createMcpServersHost } from "./host/mcp-servers-host.ts"; import { createMcpKeys } from "./vault/mcp-keys.ts"; import { createLimitTakeover, signedOutStop } from "./host/limit-takeover.ts";
 import {
@@ -2011,7 +2011,7 @@ function hostTurnResult(node: HandoffView | undefined, generation: string, outco
 }
 
 function settleDirectCoordination(generation: string | undefined, settled: DirectTurnOutcome) {
-  if (!generation) return; const outcome = stoppedHandoffs.settle(generation, settled); // a hand-off given up before its outcome arrived
+  if (!generation || (directCoordinationSettlers.has(generation) && peerLimitResend.hold(generation, settled))) return; const outcome = stoppedHandoffs.settle(generation, settled); // a hand-off given up before its outcome arrived; a held one waits for its resend on the backup AI
   const moving = [...computerSelectionTurns.values()].find(turn => turn.generation === generation && turn.handoff && turn.selected); if (moving && directCoordinationSettlers.has(generation)) { moving.handoff!.outcome ??= outcome; return; } // kept for the turn continuing in the browser
   const settler = directCoordinationSettlers.get(generation);
   directCoordinationSettlers.delete(generation);
@@ -4980,7 +4980,7 @@ const TURN_STALL_MS = Math.max(60_000, stallLimitMs(process.env.OMB_TURN_STALL_M
 const TOOL_STALL_MS = Math.max(TURN_STALL_MS, stallLimitMs(process.env.OMB_TOOL_STALL_MS, 2 * 60 * 60_000));
 const COMPUTER_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_COMPUTER_WAIT_MAX_MS) || 30 * 60_000);
 const roomStallCompletions = new RoomTurnStallRegistry();
-const turnStops = new TurnStops();
+const turnStops = new TurnStops(); const peerLimitResend = createPeerLimitResend<NonNullable<Parameters<typeof startTurn>[2]>, DirectTurnOutcome>({ store, registry, takeover: () => limitTakeover, turnStops, hostedModels, providerConfigs, quotaSwitchEnabled: () => quotaSwitchEnabled(), policyModelRefusal, checkedTaskModelSwitch, assertWithinBudget: () => assertWithinBudget(cfg, DATA_DIR), handedOff: (id) => coordinator.node(id)?.parentId !== undefined, guest: (threadId) => guestDrivenTurns.has(threadId) || cloudGuestDriven(threadId), generation: (threadId) => directTurnGenerationByThread.get(threadId), blocked: (botId, threadId) => threadBusy(botId, threadId) || hasQueuedSteeredMessages(botId, threadId) || Boolean(directRequestOwners.get(threadId)?.stopped), settle: settleDirectCoordination, release: (generation) => directCoordinationSettlers.delete(generation), startTurn }); // bot-to-bot turns whose AI met its usage limit before anything ran go once to the backup AI
 function stoppedTurnText(threadId: string, turnId: string | undefined, cause?: string, stopReason?: string | null): string {
   const stop = turnStops.read(threadId, turnId);
   const reason = cause ?? stop?.cause ?? stop?.error ?? `The turn did not complete (${stopReason?.trim() || "no reason given"})`;
@@ -5085,7 +5085,7 @@ bus.subscribe((event: RuntimeEvent) => {
         ...(handoffPath ? { cap: { note: STEP_CAP_NOTE, handoffPath } } : {}) };
       const owner = directFollowupTurns.complete(event.threadId, event.turnId, outcome);
       if (owner) {
-        settleDirectCoordination(owner.generation, outcome);
+        peerLimitResend.ended(event, owner.generation, Boolean(handoffPath)); settleDirectCoordination(owner.generation, outcome);
         settleDirectFollowup(owner.generation);
       }
     }
@@ -6745,12 +6745,12 @@ bus.subscribe((event: RuntimeEvent) => {
             releaseLocalVmThread(event.threadId);
           }
           releaseTurnResources(resourceOwner);
-          if (!isCurrent()) return;
+          if (!isCurrent()) return void peerLimitResend.resend(event.threadId);
           if (store.taskByThread(bot.id, event.threadId)?.activity !== "dead") {
             store.setTaskActivity(bot.id, event.threadId, resourceOwner?.computerParkedOn !== undefined ? "parked.computer" : "idle");
           }
           directTurnBots.delete(event.threadId);
-          if (continueComputerSelection(event.threadId, generation, event.ok)) return;
+          if (continueComputerSelection(event.threadId, generation, event.ok) || peerLimitResend.resend(event.threadId)) return;
           // An asynchronous screenshot finishes after the bus subscribers that normally drain have run.
           if (resumeQueued) {
             drainQueuedSends();
@@ -7542,7 +7542,7 @@ async function beginTurn(
     onDispatchError?: (message: string) => void;
     compactOnly?: boolean;
     automaticRecoveryAttempted?: boolean;
-    automaticRecoveryIndex?: number;
+    automaticRecoveryIndex?: number; peerLimitResent?: boolean; // already the one resend of a bot-to-bot turn on the backup AI
     onTurnSettled?: () => void;
     /** The turn's outcome, for a caller that runs it outside any coordinated work. */
     onSettled?: (outcome: HostTurnResult) => void;
@@ -7743,7 +7743,7 @@ async function beginTurn(
   if (pendingSource) store.patchMessage(threadId, pendingSource, { requestPending: true });
   const settleOutcome = opts?.coordination?.settle ?? opts?.onSettled;
   if (settleOutcome) directCoordinationSettlers.set(dispatchClaimId, { nodeId: opts?.coordination?.id ?? dispatchClaimId, settle: settleOutcome });
-  directFollowupSettlers.set(dispatchClaimId, { threadId, settle: opts?.onTurnSettled });
+  directFollowupSettlers.set(dispatchClaimId, { threadId, settle: opts?.onTurnSettled }); peerLimitResend.track({ generation: dispatchClaimId, botId: bot.id, threadId, text, opts: opts ?? {}, userMessage, latestUser: recoveryUserMessageId });
   directTurnDispatchClaims.set(threadId, { id: dispatchClaimId, botId, threadId, phase: "setup" }); liveTurns.dispatchStarted(threadId);
   directTurnBots.set(threadId, bot);
   beginInternalCapabilityGeneration(threadId, dispatchClaimId);
