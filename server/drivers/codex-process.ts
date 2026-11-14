@@ -117,7 +117,7 @@ export function codexCliOverrides(cli: string): { cli: string; overrides: string
   }
   if (overrides.length === 0) return unchanged;
   // splitCliString has no escapes, so a word holding both quote kinds can't be written back.
-  const quoted = kept.map((token) => !/[\s"']/.test(token) ? token : !token.includes('"') ? `"${token}"` : !token.includes("'") ? `'${token}'` : null);
+  const quoted = kept.map((token) => token === "" ? '""' : !/[\s"']/.test(token) ? token : !token.includes('"') ? `"${token}"` : !token.includes("'") ? `'${token}'` : null);
   if (quoted.includes(null)) return unchanged;
   return { cli: quoted.join(" "), overrides };
 }
