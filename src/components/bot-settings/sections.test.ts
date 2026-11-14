@@ -41,9 +41,10 @@ describe("bot settings search", () => {
   });
 
   it("keeps looking until the Email lookup has answered too", () => {
-    expect(appSearchPhase({ phase: "ready", emailSettled: false })).toBe("loading");
-    expect(appSearchPhase({ phase: "unknown", emailSettled: false })).toBe("loading");
-    expect(appSearchPhase({ phase: "ready", emailSettled: true })).toBe("ready");
-    expect(appSearchPhase({ phase: "loading", emailSettled: true })).toBe("loading");
+    expect(appSearchPhase({ phase: "ready", cardsSettled: true, emailSettled: false })).toBe("loading");
+    expect(appSearchPhase({ phase: "unknown", cardsSettled: true, emailSettled: false })).toBe("loading");
+    expect(appSearchPhase({ phase: "ready", cardsSettled: false, emailSettled: true })).toBe("loading");
+    expect(appSearchPhase({ phase: "ready", cardsSettled: true, emailSettled: true })).toBe("ready");
+    expect(appSearchPhase({ phase: "loading", cardsSettled: true, emailSettled: true })).toBe("loading");
   });
 });

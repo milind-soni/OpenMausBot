@@ -73,8 +73,9 @@ export function botAppsFrom(
   return { phase: "ready", apps, connectedSlugs };
 }
 
-/** The apps plus whether the Email lookup has answered (or failed); `email` alone can't tell pending from failed. */
+/** The apps plus whether the app catalog and Email lookups have answered (or failed); the values alone can't tell pending from failed. */
 export interface BotAppsState extends BotApps {
+  cardsSettled: boolean;
   emailSettled: boolean;
 }
 
@@ -83,16 +84,21 @@ export function useBotApps(bot: Bot, load = true): BotAppsState {
   const [inventory, setInventory] = useState<ConnectorInventory | null>(null);
   const [cards, setCards] = useState<ReadonlyMap<string, ToolkitCard>>(() => new Map());
   const [email, setEmail] = useState<EmailStatus | null>(null);
+  const [cardsSettled, setCardsSettled] = useState(false);
   const [emailSettled, setEmailSettled] = useState(false);
 
   useEffect(() => {
     if (!load) return;
     let cancelled = false;
+    setCardsSettled(false);
+    setEmailSettled(false);
     void preloadConnectedApps().then((result) => {
       if (!cancelled) setInventory(result);
     });
     void loadAppCards().then((result) => {
-      if (!cancelled) setCards(result);
+      if (cancelled) return;
+      setCards(result);
+      setCardsSettled(true);
     });
     void api("/api/email")
       .then((result: EmailStatus) => { if (!cancelled) setEmail(result); })
@@ -103,5 +109,5 @@ export function useBotApps(bot: Bot, load = true): BotAppsState {
     };
   }, [load]);
 
-  return { ...botAppsFrom(bot, inventory, cards, email), emailSettled };
+  return { ...botAppsFrom(bot, inventory, cards, email), cardsSettled, emailSettled };
 }

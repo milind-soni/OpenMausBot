@@ -66,9 +66,9 @@ export function sectionMatches(entry: BotSectionEntry, query: string, appNames: 
     .some((part) => part.toLowerCase().includes(query));
 }
 
-/** App names come from the connector inventory and the Email lookup; search keeps looking until both have answered. */
-export function appSearchPhase(apps: Pick<BotAppsState, "phase" | "emailSettled">): BotApps["phase"] {
-  return apps.emailSettled ? apps.phase : "loading";
+/** App names come from the connector inventory, the app catalog and the Email lookup; search keeps looking until all have answered. */
+export function appSearchPhase(apps: Pick<BotAppsState, "phase" | "cardsSettled" | "emailSettled">): BotApps["phase"] {
+  return apps.cardsSettled && apps.emailSettled ? apps.phase : "loading";
 }
 
 /** The note shown when no section matches. Until the bot's connected apps have loaded, an app name may still match. */
