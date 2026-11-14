@@ -4,7 +4,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useStore, type Bot } from "@/state/store";
 import { useChatMoreItems } from "../ChatMoreMenu";
-import { ModelPicker } from "../ModelPicker";
+import { EffortRow, ModelPicker } from "../ModelPicker";
 import type { SidebarMenuItem } from "../SidebarPopoverMenu";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { BotConversations } from "./Conversations";
@@ -62,6 +62,14 @@ export function DetailsTab({ bot, derived, onOpen }: {
             label={<span className="flex shrink-0 items-center gap-2.5"><RowIcon icon={Sparkles} /><RowText title={t("model.simple.model")} /></span>}
           />
         </div>
+        {/* The picker hides its own reasoning row when contained, so this tab draws it as its own row. */}
+        <EffortRow
+          bot={bot}
+          threadId={bot.threadId}
+          compact
+          className={cn(rowCls, "min-w-0 flex-1 rounded-[8px]")}
+          label={<span className="flex shrink-0 items-center gap-2.5"><RowIcon icon={Sparkles} /><RowText title={t("model.simple.reasoning")} /></span>}
+        />
       </section>
 
       <BotConversations bot={bot} />
