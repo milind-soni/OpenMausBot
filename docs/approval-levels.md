@@ -147,8 +147,10 @@ The supported ways to have a bot act on your approval:
   run the deploy checklist"), runs *on their behalf at your level*: the
   instructions are your own set-up, and only the event it carries is
   information only (`server/webhooks.ts`). Keep the webhook's private address
-  secret, narrow the instructions to the work you mean, and use its event-type
-  or payload filter so other calls start nothing.
+  secret: anyone who has it can send a call. Narrow the instructions to the
+  work you mean, and use its event-type or payload filter so calls of another
+  type or shape start nothing. A filter only checks what a call says; it does
+  not prove that a person approved it.
 - **Hand the work over from your own request.** When you ask one bot and it
   hands the work on with `coordinate_bots`, the receiving bot gets it *on their
   behalf at your level*, because it traces back to your own line.
