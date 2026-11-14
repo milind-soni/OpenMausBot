@@ -14,7 +14,7 @@ import { MistralVibeAgentDriver, resolveMistralVibeModels, vibeSignedIn } from "
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
 const MODELS = "mistral-medium-3.5,zai-glm-5-3-flash,Mistral Large,Codestral";
 
-describe("Mistral Vibe ACP driver", () => {
+describe("Mistral (Vibe) ACP driver", () => {
   let scratch: string;
   let instance: ProviderInstance | undefined;
   let recorder: EventRecorder | undefined;
@@ -35,7 +35,7 @@ describe("Mistral Vibe ACP driver", () => {
   async function create(environment: Record<string, string> = {}) {
     instance = await MistralVibeAgentDriver.create({
       instanceId: `mistral-vibe-contract-${Math.random().toString(36).slice(2)}`,
-      displayName: "Mistral Vibe",
+      displayName: "Mistral (Vibe)",
       enabled: true,
       environment: {
         VIBE_HOME: join(scratch, "vibe-home"),
@@ -58,7 +58,7 @@ describe("Mistral Vibe ACP driver", () => {
     expect(BUILT_IN_DRIVERS.some((driver) => driver.driverKind === "mistralVibeAgent")).toBe(true);
     expect(instanceConfigs({}).mistralVibe?.driver).toBe("mistralVibeAgent");
     expect(instanceConfigs({ instances: { claude: { driver: "claudeAgent" } } }).mistralVibe?.driver).toBe("mistralVibeAgent");
-    expect(MistralVibeAgentDriver.metadata).toMatchObject({ displayName: "Mistral Vibe", access: "subscription" });
+    expect(MistralVibeAgentDriver.metadata).toMatchObject({ displayName: "Mistral (Vibe)", access: "subscription" });
   });
 
   it("treats a populated whoami_cache.json or MISTRAL_API_KEY as signed in", () => {

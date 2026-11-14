@@ -83,7 +83,7 @@ export async function resolveMistralVibeModels(
 
 export const mistralVibeSupport: AcpSupport = {
   driverKind: "mistralVibeAgent",
-  displayName: "Mistral Vibe",
+  displayName: "Mistral (Vibe)",
   models: MISTRAL_VIBE_MODELS,
   defaultCli: "vibe-acp",
   cliVersion: /^vibe-acp /u,

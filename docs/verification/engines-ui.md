@@ -48,7 +48,7 @@ recreating a removed fixture directory.
    **Update OpenCode on this server**. Click each and confirm the fixture error
    appears with its button usable again. Terminal commands remain under
    **Prefer a terminal?**. Check that OMP appears as a custom engine beside Pi, and
-   Mistral Vibe under Needs setup while `vibe-acp` is missing. These clicks never
+   Mistral (Vibe) under Needs setup while `vibe-acp` is missing. These clicks never
    perform a real installation.
 7. Expand Claude and use **Add another Claude account** inside its card. Enter
    an account name, collapse/reopen the card, and confirm the draft remains.

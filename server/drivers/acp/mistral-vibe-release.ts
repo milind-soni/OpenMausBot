@@ -2,11 +2,14 @@
 // github.com/mistralai/mistral-vibe ships for version 3.1.2 (releases/download/v3.1.2).
 // Mistral publishes no checksum file. Each archive SHA-256 below was measured on 2026-11-14 by downloading the asset
 // once and running `shasum -a 256`; each size is that download's byte count. Each program SHA-256 is `shasum -a 256` of
-// `vibe-acp` unpacked from the same archive (`tar -xzO` / `unzip -p`); the app checks it after unpacking, before
-// reusing an installed copy and at every start. The archive carries `vibe-acp` beside its `_internal/` PyInstaller
-// bundle, so the executable is run in place. The macOS builds' code signature is adhoc (no Team ID), so the pin sets
-// no `macTeamId`; Windows ships x64 only.
-// `mistral-vibe` is current on PyPI at 3.1.2 too; the vendor's `install.sh` installs that package through uv.
+// `vibe-acp` unpacked from the same archive (`tar -xzO`); the app checks it after unpacking, before reusing an
+// installed copy and at every start. The archive is a PyInstaller onedir bundle: `vibe-acp` runs against the
+// `_internal/` folder beside it, which it finds from where it really is (a `bin/` link resolves there), so the pin is a
+// launcher like Cursor's. The bundle's archives keep a few in-bounds symlinks (the macOS `Python.framework` keeps
+// the framework's `Current` links), which the installer accepts and keeps. macOS builds are signed adhoc (no team id).
+// `mistral-vibe` is current on PyPI at 3.1.2 too. All four runtime shapes are pinned here, the Windows one through the
+// launcher path (see engine-standalone's `winLauncher`: the exe runs from its version folder, since Windows cannot link
+// a file the way bin/ needs without developer mode).
 import type { StandaloneRelease } from "../../contracts.ts";
 
 const VERSION = "3.1.2";
@@ -18,6 +21,7 @@ export const MISTRAL_VIBE_STANDALONE: StandaloneRelease = {
   version: VERSION,
   // github.com answers with a redirect to GitHub's release-asset host.
   hosts: ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"],
+  launcher: true,
   assets: {
     "darwin-arm64": { url: `${RELEASE}/vibe-acp-darwin-aarch64-3.1.2.tar.gz`, archive: "tar.gz", executable: "vibe-acp", approxBytes: 68_858_580, sha256: "cff30ab96c08e77e3628160fb5dd7ebde78dd24cff624e03465c8618b9c05020", executableSha256: "bffbd823f7da50e4c499fe52abf3888a63874995795318c171081bb8878538b1" },
     "darwin-x64": { url: `${RELEASE}/vibe-acp-darwin-x86_64-3.1.2.tar.gz`, archive: "tar.gz", executable: "vibe-acp", approxBytes: 70_461_490, sha256: "8fc70f9dec996d2a8713005bd94d97ed53d145fdd503c00b3abf4807f15a66dd", executableSha256: "265ec8f7f5884561737541028a260e3738301ed5e401caa29b8628af1d522ee5" },

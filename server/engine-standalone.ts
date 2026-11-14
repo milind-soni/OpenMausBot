@@ -473,6 +473,15 @@ async function extractTarGz(archivePath: string, staging: string): Promise<boole
       const type = "type" in entry ? entry.type : undefined;
       const name = path.replace(/^(?:\.\/)+/u, "").replace(/\/$/u, "");
       if (name === "" && type === "Directory") return false;
+      if (type === "SymbolicLink") {
+        // A bundled runtime may link inside itself (PyInstaller's Python.framework does); a link out of the folder is
+        // what an unsafe archive hides behind.
+        if (!safeArchivePath(name) || !safeInboundLink(name, "linkpath" in entry ? String(entry.linkpath) : "")) {
+          unsafe = true;
+          return false;
+        }
+        return true;
+      }
       if ((type !== "File" && type !== "Directory") || !safeArchivePath(name)) {
         unsafe = true;
         return false;
@@ -481,6 +490,26 @@ async function extractTarGz(archivePath: string, staging: string): Promise<boole
     },
   });
   return !unsafe;
+}
+
+/** True when a link entry resolving to `link` from the entry's own `name` stays inside the unpacked folder: relative,
+ * safe characters, never reaching past the folder root, and never a link to the containing folder itself. */
+function safeInboundLink(name: string, link: string): boolean {
+  if (!link || link.startsWith("/") || link.includes("\\") || link.includes(":")) return false;
+  let depth = name.split("/").slice(0, -1).filter((segment) => segment !== ".").length;
+  let steps = 0;
+  for (const segment of link.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      depth -= 1;
+      if (depth < 0) return false;
+      continue;
+    }
+    if (!safeArchivePath(segment)) return false;
+    depth += 1;
+    steps += 1;
+  }
+  return steps > 0;
 }
 
 /** Folders 0755, files 0755 when the archive marked them executable and 0644 otherwise: no setuid, nothing writable by others. */
@@ -492,9 +521,8 @@ async function normaliseModes(directory: string): Promise<void> {
       await normaliseModes(path);
     } else if (entry.isFile()) {
       await chmod(path, ((await stat(path)).mode & 0o111) !== 0 ? 0o755 : 0o644);
-    } else {
-      throw Object.assign(new StandaloneInstallError("The archive contains an unexpected or unsafe file. Nothing was installed."), userErrorFields(userError("serverError.install.unsafeArchive")));
     }
+    // A link the archive kept (see extractTarGz) was already vetted as one that stays inside; its mode is its target's.
   }
 }
 
@@ -635,10 +663,15 @@ async function activate(engineDir: string, release: StandaloneRelease, asset: St
   await realFolder(binDir, release);
   const name = programName(asset.executable);
   const source = executableIn(versionDir, asset.executable);
-  const target = join(binDir, name);
+  // A launcher keeps finding its folder beside itself. POSIX can point bin/ at it with a link; Windows refuses a file
+  // symlink without Developer Mode, so there the version folder (the exe beside its bundle) takes bin/'s PATH slot.
+  const winLauncher = release.launcher && process.platform === "win32";
+  const target = winLauncher ? source : join(binDir, name);
   const fresh = join(binDir, `${NEW_PREFIX}${randomUUID()}${extname(name)}`);
   try {
-    if (release.launcher) {
+    if (winLauncher) {
+      // No bin entry to write; a folder check below keeps bin/ clean all the same.
+    } else if (release.launcher) {
       // A launcher finds the rest of its folder from where it really is, so bin/ links to it rather than holding a copy.
       await symlink(launcherLink(release.version, asset.executable), fresh);
     } else try {
@@ -661,7 +694,7 @@ async function activate(engineDir: string, release: StandaloneRelease, asset: St
   const pointer: CurrentPointer = { version: release.version, executable: asset.executable, sha256: asset.sha256, executableSha256: programSha256 };
   writeFileAtomic(join(engineDir, CURRENT), `${JSON.stringify(pointer)}\n`, { mode: 0o600 });
   activeVersions.add(versionDir);
-  registerFallbackPathDir(binDir);
+  registerFallbackPathDir(winLauncher ? versionDir : binDir);
   resetPathCache();
   return { version: release.version, executablePath: target, binDir };
 }
