@@ -8,6 +8,7 @@ import { appendDecision } from "../decision-log.ts";
 import { UNDO_STALE } from "../direct-apply.ts";
 import { serverLine } from "../server-lines.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
+import type { TakenPicture } from "./picture-file.ts";
 import { findSettings, personOnly, type SettingEntry, type WritableEntry } from "./registry.ts";
 
 export const TOOL = "app_settings";
@@ -65,6 +66,8 @@ export interface AppSettingsDeps {
   requestCredential(bot: BotRecord, threadId: string, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }>;
   connectorThread(botId: string, threadId: string): { group?: GroupRecord } | null;
   language(threadId: string): string | undefined;
+  /** For a setting that takes a picture file: stores the file the bot names, or says why not. */
+  pictures?: { take(turn: Turn, path: string): Promise<TakenPicture>; discard(avatarUrl: string): void };
 }
 
 export function createAppSettings(deps: AppSettingsDeps) {
@@ -130,7 +133,20 @@ export function createAppSettings(deps: AppSettingsDeps) {
     if (described && "refusal" in described) return refuse(409, described.refusal);
     const budget = spendWrite(turn);
     if (budget) return refuse(429, budget);
-    return apply(turn, bot, entry, parsed.data, described?.change);
+    const picture = entry.fromFile ? await takePicture(turn, parsed.data) : { value: parsed.data };
+    if ("refusal" in picture) return refuse(400, picture.refusal);
+    const applied = await apply(turn, bot, entry, picture.value, described?.change);
+    if (picture.stored && applied.status >= 300) deps.pictures?.discard(picture.stored);
+    return applied;
+  }
+
+  /** A value naming a picture file by `path` goes on as the stored picture's `avatarUrl`; an empty path stays, to remove it. */
+  async function takePicture(turn: Turn, value: unknown): Promise<{ value: unknown; stored?: string } | { refusal: string }> {
+    const { path, ...rest } = value as { path?: unknown };
+    if (typeof path !== "string" || !path) return { value };
+    if (!deps.pictures) return { refusal: "Pictures can't be set from a file here." };
+    const taken = await deps.pictures.take(turn, path);
+    return "refusal" in taken ? taken : { value: { ...rest, avatarUrl: taken.avatarUrl }, stored: taken.avatarUrl };
   }
 
   return {
