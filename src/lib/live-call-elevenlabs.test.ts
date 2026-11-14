@@ -36,9 +36,12 @@ class FakeAudio implements GeminiAudio {
   flushed = 0;
   closed = false;
   mic: ((pcm: ArrayBuffer) => void) | null = null;
-  constructor(readonly rate: number, readonly denied = false) {}
+  /** Set while the microphone permission prompt is still open; calling it answers the prompt. */
+  allowMic: (() => void) | null = null;
+  constructor(readonly rate: number, readonly denied = false, readonly held = false) {}
   async startMic(onChunk: (pcm: ArrayBuffer) => void) {
     if (this.denied) throw Object.assign(new Error("denied"), { name: "NotAllowedError" });
+    if (this.held) await new Promise<void>((resolve) => { this.allowMic = resolve; });
     this.mic = onChunk;
   }
   play(pcm: ArrayBuffer) { this.played.push(pcm.byteLength); this.playing += 1; }
@@ -48,12 +51,12 @@ class FakeAudio implements GeminiAudio {
   close() { this.closed = true; }
 }
 
-function harness({ denied = false } = {}) {
+function harness({ denied = false, held = false } = {}) {
   const sockets: FakeSocket[] = [];
   const audios: FakeAudio[] = [];
   const start = elevenLabsSessionStarter({
     openSocket: (url) => { const socket = new FakeSocket(url); sockets.push(socket); return socket; },
-    audio: (rate) => { const audio = new FakeAudio(rate, denied); audios.push(audio); return audio; },
+    audio: (rate) => { const audio = new FakeAudio(rate, denied, held); audios.push(audio); return audio; },
   });
   const callbacks = {
     onConnect: vi.fn(), onDisconnect: vi.fn(), onModeChange: vi.fn(), onUserTranscript: vi.fn(), onAgentResponseDelta: vi.fn(), onError: vi.fn(),
@@ -114,6 +117,17 @@ describe("an ElevenLabs Live session", () => {
     t.socket().open();
     t.socket().drop(1008);
     await expect(t.starting).rejects.toMatchObject({ code: "elevenlabs_1008" });
+  });
+
+  it("rejects at once when ElevenLabs closes while the microphone prompt is still open, and never reports a connection", async () => {
+    const t = harness({ held: true });
+    t.socket().open();
+    t.socket().receive(METADATA);
+    t.socket().drop(1011);
+    await expect(t.starting).rejects.toMatchObject({ code: "elevenlabs_1011" });
+    t.audio().allowMic?.();
+    await settle();
+    expect(t.callbacks.onConnect).not.toHaveBeenCalled();
   });
 
   it("answers ElevenLabs' pings so the conversation stays open", async () => {

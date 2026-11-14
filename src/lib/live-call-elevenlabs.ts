@@ -98,8 +98,9 @@ class ElevenLabsLiveSession implements FishAgentSession {
         if (this.socket !== socket) return;
         this.socket = null;
         if (this.ready) return this.lost();
+        // Also while the microphone prompt is open: the call can no longer start, and open() then reports no connection.
         this.shut();
-        if (!started) reject(Object.assign(new Error("ElevenLabs closed the call before it started."), { code: `elevenlabs_${event.code}` }));
+        reject(Object.assign(new Error("ElevenLabs closed the call before it started."), { code: `elevenlabs_${event.code}` }));
       };
     });
   }

@@ -159,6 +159,23 @@ describe("the keys page", () => {
     expect(field().value).toBe("");
   });
 
+  it("shows nothing of a key save that finishes after the Live calls service changed", async () => {
+    const live = { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live: { ...live, provider: "fish" } });
+    let answer: (value: unknown) => void = () => {};
+    fx.api.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    page();
+    const field = () => row("liveKey")!.querySelector<HTMLInputElement>('input[type="password"]')!;
+    paste(field(), "typed-for-fish-audio");
+    expect(fx.api).toHaveBeenCalledWith("/api/config", expect.objectContaining({ body: JSON.stringify({ tts: { fishKey: "typed-for-fish-audio" } }) }));
+
+    flushSync(() => setConfig({ ...fx.config, live: { ...live, provider: "elevenlabs" } }));
+    await answered(() => answer({ ...fx.config }));
+    expect(row("liveKey")!.textContent).toContain("ElevenLabs");
+    expect(row("liveKey")!.textContent).not.toContain("didn't stay saved");
+    expect(fx.api).toHaveBeenCalledTimes(1);
+  });
+
   it("opens a section that holds a saved key, and counts what is connected", () => {
     setConfig({ ...fx.config, box: { configured: true, last4: "c3d4" } });
     page();

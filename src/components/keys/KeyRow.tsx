@@ -141,6 +141,8 @@ export function KeyRow({
     setVerdict(null);
     setWorks(false);
   }
+  // A check or save still running for the previous service must not show its result on this one.
+  useEffect(() => () => { generation.current += 1; }, [entry.name]);
   const target = entry.target;
   if (!target) throw new Error(`${id} is not saved by a key row`);
   const pointer = row.id !== entry.id;
@@ -197,7 +199,7 @@ export function KeyRow({
       return;
     }
     busyRef.current = true;
-    generation.current += 1;
+    const mine = ++generation.current;
     const hadFocus = document.activeElement === inputRef.current;
     setBusy("saving");
     setProblem(null);
@@ -208,17 +210,20 @@ export function KeyRow({
       const status = await saveKey(target, value, !saved.configured);
       dispatch({ type: "configStatus", config: status });
       const now = target.saved(status);
-      setDraft("");
-      setShown(false);
-      setReplacing(false);
-      setOwnKey(false);
-      if (hadFocus) focusAfter.current = now.configured ? "replace" : "input";
-      if (!now.configured) setProblem(t("keys.row.notKept"));
+      const current = mine === generation.current;
+      if (current) {
+        setDraft("");
+        setShown(false);
+        setReplacing(false);
+        setOwnKey(false);
+        if (hadFocus) focusAfter.current = now.configured ? "replace" : "input";
+        if (!now.configured) setProblem(t("keys.row.notKept"));
+      }
       onSaved?.(now.configured);
       if (now.configured && via === "settings") target.settingsEvent?.("add_key");
-      keySaved(target.analytics, via, now.configured && target.test ? await runCheck() : savedKeyResult(target.analytics));
+      keySaved(target.analytics, via, current && now.configured && target.test ? await runCheck() : savedKeyResult(target.analytics));
     } catch (cause) {
-      setProblem(errorText(cause));
+      if (mine === generation.current) setProblem(errorText(cause));
       keySaved(target.analytics, via, keySaveFailure(cause));
     } finally {
       busyRef.current = false;
