@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // The real controller and view run against a fake preload bridge.
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -78,13 +78,13 @@ function desktop() {
     stopRetrying() {
       account = { available: true, status: "ready", email: "ada@example.com" };
     },
-    withTailscaleRoute() {
+    withTailscaleRoute(name: string | null = "ada-mac.tail1234.ts.net") {
       companion = {
         ...companion,
         routes: {
           wifi: { on: true, since: null },
           relay: { on: false, since: null },
-          tailscale: { on: true, since: Date.now(), name: "ada-mac.tail1234.ts.net" },
+          tailscale: { on: true, since: Date.now(), name },
           https: { on: false, since: null },
         },
       };
@@ -107,6 +107,7 @@ beforeEach(() => {
 
 afterEach(() => {
   flushSync(() => root.unmount());
+  vi.restoreAllMocks();
   host.remove();
   delete (globalThis as { ogb?: unknown }).ogb;
 });
@@ -195,6 +196,70 @@ describe("pairing on a computer that holds no HTTPS address yet", () => {
       () => expect(host.querySelector('[aria-label="Device pairing QR code"]')).not.toBeNull(),
       { timeout: 5_000 },
     );
+  });
+});
+
+describe("a hosted address request that never settles", () => {
+  it.each([
+    { route: "wifi", label: "Pair on this Wi-Fi instead", address: "192.168.1.34:8810", outcome: "ready" as const },
+    { route: "wifi", label: "Pair on this Wi-Fi instead", address: "192.168.1.34:8810", outcome: "full" as const },
+    { route: "tailscale", label: "Pair using Tailscale", address: "ada-mac.tail1234.ts.net:8810", outcome: "ready" as const },
+    { route: "tailscale", label: "Pair using Tailscale", address: "ada-mac.tail1234.ts.net:8810", outcome: "full" as const },
+  ])("keeps the $route QR when hosted HTTPS returns $outcome after timeout", async ({ route, label, address, outcome }) => {
+    const fake = desktop();
+    if (route === "tailscale") {
+      fake.withTailscaleRoute(null);
+      fake.bridge.companion.refreshTailscale.mockImplementation(async () => {
+        fake.withTailscaleRoute();
+        return fake.bridge.companion.state();
+      });
+    }
+    const timeouts = vi.spyOn(window, "setTimeout");
+    await startPairing(fake);
+    await vi.waitFor(() => expect(fake.bridge.companionAccount.prepare).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(timeouts).toHaveBeenCalledWith(expect.any(Function), 30_000));
+    const [timeout, , ...args] = timeouts.mock.calls.filter(([, delay]) => delay === 30_000).at(-1)!;
+    expect(fake.bridge.companion.refreshTailscale).not.toHaveBeenCalled();
+    flushSync(() => timeout(...args));
+    await vi.waitFor(() => expect(button(label)?.disabled).toBe(false));
+    flushSync(() => button(label)!.click());
+    await vi.waitFor(() => expect(host.querySelector('[aria-label="Device pairing QR code"]')).not.toBeNull());
+    expect(fake.bridge.companion.pairing).toHaveBeenCalledWith(true);
+    flushSync(() => button("Reveal")!.click());
+    expect(text()).toContain(address);
+    expect(fake.bridge.companion.refreshTailscale).toHaveBeenCalledTimes(route === "tailscale" ? 1 : 0);
+
+    await act(async () => fake.finishPrepare(outcome));
+    expect(fake.bridge.companionAccount.prepare).toHaveBeenCalledOnce();
+    expect(fake.bridge.companion.pairing).toHaveBeenCalledTimes(1);
+    expect(text()).toContain(address);
+  });
+});
+
+describe("unavailable pairing routes", () => {
+  it("does not open an invitation when an enabled Tailscale route still has no name after refresh", async () => {
+    const fake = desktop();
+    fake.withTailscaleRoute(null);
+    await startPairing(fake);
+    await vi.waitFor(() => expect(fake.bridge.companionAccount.prepare).toHaveBeenCalledOnce());
+    await act(async () => fake.finishPrepare("full"));
+    await vi.waitFor(() => expect(button("Pair using Tailscale")?.disabled).toBe(false));
+    expect(fake.bridge.companion.refreshTailscale).not.toHaveBeenCalled();
+    flushSync(() => button("Pair using Tailscale")!.click());
+    await vi.waitFor(() => expect(fake.bridge.companion.refreshTailscale).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(button("Pair a device")?.disabled).toBe(false));
+    expect(text()).toContain("Make sure Tailscale is connected and MagicDNS is on");
+    expect(fake.bridge.companion.pairing).not.toHaveBeenCalled();
+    expect(host.querySelector('[aria-label="Device pairing QR code"]')).toBeNull();
+  });
+
+  it("shows a rejected hosted preparation and permits another attempt", async () => {
+    const fake = desktop();
+    fake.bridge.companionAccount.prepare.mockRejectedValue(new Error("fixture preparation failed"));
+    await startPairing(fake);
+    await vi.waitFor(() => expect(text()).toContain("Device pairing could not be prepared."));
+    expect(button("Pair a device")?.disabled).toBe(false);
+    expect(fake.bridge.companion.pairing).not.toHaveBeenCalled();
   });
 });
 
