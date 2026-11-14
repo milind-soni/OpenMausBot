@@ -91,5 +91,6 @@ describe("clipRunOutput", () => {
     const cut = clipRunOutput(`${long}\nNEEDS INPUT:\n${"\n".repeat(2_000)}default: ${"wait ".repeat(500)}`, 2_000);
     expect(cut.length).toBe(2_000);
     expect(cut.startsWith("NEEDS INPUT:\ndefault: wait")).toBe(true);
+    expect(clipRunOutput(`${long}\nNEEDS INPUT:\n${" ".repeat(2_000)}default: wait`, 2_000)).toBe("NEEDS INPUT:\ndefault: wait…");
   });
 });

@@ -56,6 +56,9 @@ describe("routineRunNeedsReview", () => {
     const spaced = `${"Long report. ".repeat(300)}\nNEEDS INPUT:\n${"\n".repeat(2_000)}default: ${"wait ".repeat(500)}`;
     expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(spaced, 2_000) })).toBe(routineRunNeedsReview({ status: "completed" }, spaced));
     expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(spaced, 2_000) })).toBe(true);
+    const indented = `${"Long report. ".repeat(300)}\nNEEDS INPUT:\n${" ".repeat(2_000)}default: wait`;
+    expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(indented, 2_000) })).toBe(routineRunNeedsReview({ status: "completed" }, indented));
+    expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(indented, 2_000) })).toBe(true);
     expect(routineRunNeedsReview({ status: "cancelled" })).toBe(false);
   });
 });

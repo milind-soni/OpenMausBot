@@ -104,8 +104,8 @@ export function clipRunOutput(text: string, max: number): string {
   if (tail.length > max) {
     const question = lines[at]!.trim();
     // A bare NEEDS INPUT: line asks through its default: line, so that line is kept (cut) with it.
-    // Blank lines between them say nothing, so they go first; otherwise they could push the default: line out.
-    if (!question.replace(CLOSING_QUESTION, "").trim()) return `${[question, ...after].join("\n").slice(0, max - 1)}…`;
+    // Blank lines between them and the default: line's own indent say nothing, so they go first; otherwise they could push it out.
+    if (!question.replace(CLOSING_QUESTION, "").trim()) return `${[question, ...after.map((line) => line.trim())].join("\n").slice(0, max - 1)}…`;
     return question.length <= max ? question : `${question.slice(0, max - 1)}…`;
   }
   const room = max - tail.length - 3;
