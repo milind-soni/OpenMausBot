@@ -846,6 +846,48 @@
       }
     },
     {
+      "name": "an image with an incomplete base64 byte",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "input": {
+          "images": [
+            {
+              "mime": "image/png",
+              "data": "A"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "an image with incomplete base64 padding",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "input": {
+          "images": [
+            {
+              "mime": "image/png",
+              "data": "AA="
+            }
+          ]
+        }
+      }
+    },
+    {
       "name": "an image given by URL",
       "seam": "botExtract",
       "accepts": false,
