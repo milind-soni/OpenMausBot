@@ -49,6 +49,24 @@ describe.skipIf(process.platform === "win32")("AcpBrowserAuth", () => {
     await auth.dispose();
   });
 
+  it("holds the sign-in open past the startup window: the startup timer bounds the handshake, not the person's wait", async () => {
+    const home = tempHome();
+    homes.push(home);
+    const ready = join(home, "ready");
+    let failedMessage: string | null = null;
+    const auth = new AcpBrowserAuth(spec({ args: [fakeCli], failure: (stage) => { failedMessage = stage; return stage; } }), {
+      cli: process.execPath,
+      environment: () => ({ ...process.env, HOME: home, FAKE_VIBE_READY: ready }),
+      startupTimeoutMs: 8_000, lifetimeMs: 20_000,
+    });
+    const started = await auth.start();
+    await new Promise((resolve) => setTimeout(resolve, 9_500));
+    // The startup timer covers the handshake alone; authenticate keeps the flow open for the full window.
+    expect((await auth.get(started.flowId!)).phase).toBe("waiting");
+    expect(failedMessage).toBeNull();
+    await auth.dispose();
+  });
+
   it("cancel ends the held flow without success", async () => {
     const home = tempHome();
     homes.push(home);

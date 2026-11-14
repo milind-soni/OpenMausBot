@@ -64,10 +64,13 @@ describe("Mistral (Vibe) ACP driver", () => {
   it("treats a populated whoami_cache.json or MISTRAL_API_KEY as signed in", () => {
     const home = join(scratch, "vibe-home");
     mkdirSync(home, { recursive: true });
-    expect(vibeSignedIn({ VIBE_HOME: home, HOME: scratch })).toBe(false);
+    // A negative keychain probe: the entry (if any) is global to the machine, while this test's marker
+    // lives in a temporary VIBE_HOME — the two must not decide each other's answer.
+    const probe = () => false;
+    expect(vibeSignedIn({ VIBE_HOME: home, HOME: scratch }, probe)).toBe(false);
     writeFileSync(join(home, "whoami_cache.json"), JSON.stringify({ customer_id: "cus-fixture" }));
-    expect(vibeSignedIn({ VIBE_HOME: home, HOME: scratch })).toBe(true);
-    expect(vibeSignedIn({ VIBE_HOME: join(scratch, "absent"), MISTRAL_API_KEY: "fixture-key" })).toBe(true);
+    expect(vibeSignedIn({ VIBE_HOME: home, HOME: scratch }, probe)).toBe(true);
+    expect(vibeSignedIn({ VIBE_HOME: join(scratch, "absent"), MISTRAL_API_KEY: "fixture-key" }, probe)).toBe(true);
   });
 
   it("treats an injected keychain probe as a sign-in marker (orchestration of the fresh sign-in)", () => {

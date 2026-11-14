@@ -560,7 +560,7 @@ export function EngineSetup({
     : t("engineSetup.setupTitle", { name: engineDisplayName(instance) });
   const description = descriptionOverride ?? (signInOnly
     ? engineBrowserSignIn
-      ? t("engineSetup.engineBrowser.description")
+      ? t("engineSetup.engineBrowser.description", { name: engineDisplayName(instance) })
       : browserSignIn
       ? t("engineSetup.chatgpt.description")
       : deviceSignIn

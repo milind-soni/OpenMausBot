@@ -540,6 +540,20 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
     expect(readFileSync(join(engineDir(), VERSION, "lib", "Current"), "utf8")).toBe("dylib");
   });
 
+  it("refuses a link chain whose every entry alone stays inside, but composed leaves the folder", async () => {
+    // folder b, a -> b/.., c -> a/../outside: each link passes the per-entry check; followed as the kernel
+    // would, c lands outside the extracted folder.
+    const source = mkdtempSync(join(scratch, "tar-chain-"));
+    writeFileSync(join(source, "fake-engine"), script(), { mode: 0o755 });
+    mkdirSync(join(source, "b"), { recursive: true });
+    symlinkSync(join("b", ".."), join(source, "a"));
+    symlinkSync(join("a", "..", "outside"), join(source, "c"));
+    const file = join(scratch, `chain-${Math.random().toString(36).slice(2)}.tar.gz`);
+    await tar.c({ gzip: true, file, cwd: source, portable: true }, ["fake-engine", "b", "a", "c"]);
+    await expect(install(fixtureRelease({ [standalonePlatformKey()]: serve(readFileSync(file), "tar.gz", "fake-engine", script()) }))).rejects.toThrow(/unsafe/);
+    expect(leftovers()).toEqual([]);
+  });
+
   it("clears what an interrupted install left before it starts", async () => {
     mkdirSync(join(engineDir(), ".staging-old", "deep"), { recursive: true });
     mkdirSync(binDir(), { recursive: true });

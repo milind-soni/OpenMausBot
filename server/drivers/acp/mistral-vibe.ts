@@ -16,7 +16,7 @@
 //     item-specific thought levels prove nothing here, so variants stay off.
 //   - `vibe-acp --version` prints "vibe-acp 3.1.1".
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -85,15 +85,31 @@ function offeredModels(sessionConfig: unknown): { values: string[]; current?: st
   };
 }
 
-/** Sign-out removes what the engine's own browser sign-in wrote: the whoami cache everywhere, and the
- * macOS keychain entry it stores the token in. A pasted plan key in Connections is not touched. */
+/** Sign-out removes what the engine's own browser sign-in wrote: the whoami cache everywhere, the
+ * MISTRAL_API_KEY line of Vibe's fallback `$VIBE_HOME/.env` (its store when the OS keyring is
+ * unavailable), and the macOS keychain entries it keeps the token in (current and legacy service names —
+ * see vibe's utils/keyring.py). A keyring entry the CLI stored through its own backends on Linux or
+ * Windows has no portable command-line delete, so the marker files here are what this app can honestly
+ * clear there. A pasted plan key in Connections is not touched. */
 export async function removeMistralVibeSignIn(env: Record<string, string | undefined>): Promise<void> {
   const home = vibeHome(env);
   try { rmSync(join(home, "whoami_cache.json"), { force: true }); } catch {}
+  try {
+    const envFile = join(home, ".env");
+    if (existsSync(envFile)) {
+      const kept = readFileSync(envFile, { encoding: "utf8" }).split("\n").filter((line) => !/^export ?MISTRAL_API_KEY=/u.test(line));
+      writeFileSync(envFile, kept.join("\n"), { mode: 0o600 });
+    }
+  } catch {}
   if (process.platform !== "darwin") return;
-  await new Promise<void>((resolve) => {
-    execFile("security", ["delete-generic-password", "-s", "ai.mistral.vibe"], { timeout: 5_000, windowsHide: true }, () => resolve());
-  });
+  const service = env.VIBE_KEYCHAIN_SERVICE || MISTRAL_VIBE_KEYCHAIN_SERVICE;
+  await Promise.all([service, "vibe"].map((name) => new Promise<void>((resolve, reject) => {
+    execFile("security", ["delete-generic-password", "-s", name], { timeout: 5_000, windowsHide: true }, (error) => {
+      // "The specified item could not be found" is exit 44: already gone, which is the goal met.
+      if (!error || (error as NodeJS.ErrnoException & { code?: unknown }).code === 44) return resolve();
+      reject(Object.assign(new Error(`The macOS keychain refused to remove the ${name} entry: ${error.message}`), { cause: error }));
+    });
+  })));
 }
 
 

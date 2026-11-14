@@ -82,6 +82,9 @@ export class AcpBrowserAuth {
   private disposed = false;
   private readonly spec: AcpBrowserSignInSpec;
   private readonly options: AcpBrowserAuthOptions;
+  /** The finishing flow's termination, kept controller-level so a start, sign-out or dispose that arrives
+   * once `finish` cleared `flow` still waits for the old child to be down before touching credentials. */
+  private stopping: Promise<unknown> | null = null;
 
   constructor(spec: AcpBrowserSignInSpec, options: AcpBrowserAuthOptions) {
     this.spec = spec;
@@ -91,6 +94,7 @@ export class AcpBrowserAuth {
   async start(): Promise<ProviderAuthenticationStart> {
     if (this.disposed) throw new Error("This provider was removed. Refresh Settings before signing in.");
     if (this.flow) await this.flow.stopping;
+    if (this.stopping) await this.takeStopping();
     if (this.flow) throw new Error(`A ${this.spec.product} sign-in is already in progress. Finish or cancel it first.`);
     if (this.disposed) throw new Error("This provider was removed. Refresh Settings before signing in.");
     return new Promise<ProviderAuthenticationStart>((resolveStart, rejectStart) => {
@@ -181,6 +185,9 @@ export class AcpBrowserAuth {
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       }, INIT_TIMEOUT_MS).then((raw) => {
         if (this.flow !== flow) return;
+        // The handshake is the startup window's whole job; the authenticate wait is the person's, and it
+        // owns no timer but the expiry one (the person may take the full window to finish in the browser).
+        clearTimeout(flow.startupTimer);
         const methods = Array.isArray((raw as { authMethods?: unknown })?.authMethods)
           ? (raw as { authMethods: Array<{ id?: string }> }).authMethods : [];
         const methodId = this.spec.methodId(methods, env);
@@ -208,11 +215,13 @@ export class AcpBrowserAuth {
     const flow = this.flow;
     if (flow) this.finish(flow, "cancelled", `${this.spec.product} sign-in was cancelled.`);
     await flow?.stopping;
+    if (this.stopping) await this.takeStopping();
   }
 
   async dispose(): Promise<void> {
     this.disposed = true;
     await this.cancel();
+    if (this.stopping) await this.takeStopping();
     this.flow = null;
   }
 
@@ -220,7 +229,15 @@ export class AcpBrowserAuth {
   async signOut(): Promise<void> {
     if (!this.spec.removeCredentials) throw new Error(`Signing out of ${this.spec.product} is not available from here.`);
     if (this.flow) throw new Error(`Finish or cancel the ${this.spec.product} sign-in in progress before signing out.`);
+    if (this.stopping) await this.takeStopping();
     await this.spec.removeCredentials(this.options.environment());
+  }
+
+  /** One waiter takes the outstanding termination; later callers see null. */
+  private async takeStopping(): Promise<void> {
+    const stopping = this.stopping;
+    this.stopping = null;
+    await stopping;
   }
 
   /** Every request the engine raises is refused; a reply to this app's requests resolves or rejects its pending. */
@@ -265,7 +282,11 @@ export class AcpBrowserAuth {
     flow.resolve = null;
     const child = flow.child;
     flow.child = null;
-    if (child) flow.stopping = this.stopChild(child);
+    if (child) {
+      flow.stopping = this.stopChild(child);
+      this.stopping = flow.stopping;
+      void flow.stopping.then(() => { if (this.stopping === flow.stopping) this.stopping = null; });
+    }
   }
 
   private async stopChild(child: ChildProcess): Promise<boolean> {

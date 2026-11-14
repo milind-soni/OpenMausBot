@@ -16,7 +16,7 @@ import {
   closeSync, createReadStream, existsSync, lstatSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, realpathSync, renameSync, rmSync, unlinkSync,
 } from "node:fs";
 import { chmod, copyFile, link, lstat, mkdir, open, readdir, rename, rm, stat, symlink, unlink, writeFile, type FileHandle } from "node:fs/promises";
-import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import { writeFileAtomic } from "./atomic.ts";
@@ -278,15 +278,18 @@ function verifiedCurrent(engineDir: string, release: StandaloneRelease): Standal
   if (!realDirectory(binDir)) return null;
   // Nothing but the program goes on PATH; a rename Windows could not finish (.old-) is never a command anyone types.
   if (readdirSync(binDir).some((entry) => entry !== name && !entry.startsWith(OLD_PREFIX))) return null;
-  const executablePath = join(binDir, name);
-  const program = release.launcher ? launcherTarget(executablePath, pointer.version, asset.executable) : executablePath;
+  // A Windows launcher has no bin/ entry at all (see activate): the version folder itself is the PATH folder.
+  const isWinLauncher = release.launcher && process.platform === "win32";
+  const versionPath = isWinLauncher ? join(engineDir, pointer.version) : binDir;
+  const executablePath = isWinLauncher ? executableIn(versionPath, asset.executable) : join(binDir, name);
+  const program = release.launcher && !isWinLauncher ? launcherTarget(executablePath, pointer.version, asset.executable) : executablePath;
   if (!program || !realFile(program)) return null;
   try {
     if (hashFileSync(program) !== expected) return null;
   } catch {
     return null;
   }
-  return { version: pointer.version, executablePath, binDir };
+  return { version: pointer.version, executablePath, binDir: versionPath };
 }
 
 /** bin/'s entry for a launcher is a link to exactly this version's program, written relative to bin/: anything else is
@@ -489,6 +492,7 @@ async function extractTarGz(archivePath: string, staging: string): Promise<boole
       return true;
     },
   });
+  if (!unsafe && linkChainsEscape(staging)) unsafe = true;
   return !unsafe;
 }
 
@@ -510,6 +514,54 @@ function safeInboundLink(name: string, link: string): boolean {
     steps += 1;
   }
   return steps > 0;
+}
+
+/** The most splices one chain can make before cyclical links are given up on as dangling: nothing escapes behind them. */
+const MAX_LINK_HOPS = 64;
+
+/** True when a kept link, followed exactly as the kernel would (each component resolved, every link it crosses
+ * spliced), leaves the extracted folder. Each entry was vetted alone (see safeInboundLink), but a chain —
+ * folders `b`, `a -> b/..`, `c -> a/../out` — composes an way out no single entry shows. A link chain that
+ * ends before a real file (an in-root cycle, a missing hand-off name) stays dangling, and dangles are kept. */
+function linkChainsEscape(root: string): boolean {
+  const notInside = (path: string): boolean => path !== root && !path.startsWith(root + sep);
+  const follow = (path: string): string | null => {
+    try { return lstatSync(path).isSymbolicLink() ? readlinkSync(path) : null; }
+    catch { return null; }
+  };
+  // Components left to place, and where they hang from; a splice continues from the link's own directory.
+  const chain = (from: string, target: string): boolean => {
+    let queue: string[] = target.split("/");
+    let path = from;
+    let hops = 0;
+    while (queue.length) {
+      const segment = queue.shift()!;
+      if (segment === "" || segment === ".") continue;
+      if (segment === "..") {
+        path = dirname(path);
+        if (notInside(path)) return true;
+        continue;
+      }
+      path = join(path, segment);
+      if (notInside(path)) return true;
+      const next = follow(path);
+      if (next !== null) {
+        if (++hops > MAX_LINK_HOPS) return false;
+        queue = next.split("/").concat(queue);
+        path = dirname(path);
+      }
+    }
+    return false;
+  };
+  const walk = (dir: string): boolean => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) { if (walk(path)) return true; }
+      else if (entry.isSymbolicLink() && chain(path, readlinkSync(path))) return true;
+    }
+    return false;
+  };
+  return walk(root);
 }
 
 /** Folders 0755, files 0755 when the archive marked them executable and 0644 otherwise: no setuid, nothing writable by others. */
@@ -670,18 +722,22 @@ async function activate(engineDir: string, release: StandaloneRelease, asset: St
   const fresh = join(binDir, `${NEW_PREFIX}${randomUUID()}${extname(name)}`);
   try {
     if (winLauncher) {
-      // No bin entry to write; a folder check below keeps bin/ clean all the same.
+      // No bin entry to write; a folder check below keeps bin/ clean all the same, and the program already
+      // sits in the version folder from the extraction.
     } else if (release.launcher) {
       // A launcher finds the rest of its folder from where it really is, so bin/ links to it rather than holding a copy.
       await symlink(launcherLink(release.version, asset.executable), fresh);
-    } else try {
-      await link(source, fresh);
-    } catch {
-      // A file system without hard links gets a copy.
-      await copyFile(source, fresh);
-      if (process.platform !== "win32") await chmod(fresh, 0o755);
+      await replaceFile(fresh, target);
+    } else {
+      try {
+        await link(source, fresh);
+      } catch {
+        // A file system without hard links gets a copy.
+        await copyFile(source, fresh);
+        if (process.platform !== "win32") await chmod(fresh, 0o755);
+      }
+      await replaceFile(fresh, target);
     }
-    await replaceFile(fresh, target);
   } finally {
     // Renaming one hard link onto another of the same file leaves both names in place.
     await rm(fresh, { force: true }).catch(() => {});
