@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Desk ATS (demo)</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%228%22 fill=%22%23ffd166%22/%3E%3Ctext x=%2216%22 y=%2223%22 font-size=%2220%22 font-family=%22Arial%22 font-weight=%22800%22 text-anchor=%22middle%22 fill=%22%230f2a44%22%3ED%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="logo">D</span><b>Desk ATS</b><span class="demo-tag">demo</span></div>
+    <nav class="tabs" id="tabs"></nav>
+    <div class="clock-wrap" id="clockWrap" title="Time to submit for the selected requirement">
+      <span class="clock-label">Time to submit</span>
+      <span class="clock" id="clock">--:--</span>
+    </div>
+  </header>
+
+  <main id="view"></main>
+
+  <aside class="drawer" id="drawer" aria-hidden="true">
+    <button class="drawer-close" id="drawerClose" aria-label="Close">×</button>
+    <div id="drawerBody"></div>
+  </aside>
+
+  <div class="demo" id="demo">
+    <button class="demo-toggle" id="demoToggle">Demo</button>
+    <div class="demo-menu" id="demoMenu" hidden>
+      <button data-demo="client-email">Client email arrives</button>
+      <button data-demo="morning">Next morning</button>
+      <button data-demo="reset" class="danger">Reset</button>
+      <p class="demo-msg" id="demoMsg"></p>
+    </div>
+  </div>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+ats/node_modules
+ats/data/state.json
+ats/config.json
+ats/test
+ats/scripts
+.env
