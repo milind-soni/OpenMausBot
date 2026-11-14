@@ -2921,6 +2921,40 @@ describe("harness HTTP API", () => {
     }
   });
 
+  // Copying an .svg is refused with 415, so a 403 here shows each route refused on authority before it tried to copy.
+  it("refuses an unauthorized avatar proposal on every route before it reads the picture file", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    const plain = (await api("POST", "/api/bots")).body.bot;
+    const outsider = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const folder = mkdtempSync(join(tmpdir(), "omb-avatar-order-"));
+      writeFileSync(join(folder, "face.svg"), "<svg/>");
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask", cwd: folder, section: "Avatar order ops" })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${plain.id}`, { approvalMode: "ask", cwd: folder })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${outsider.id}`, { section: "Avatar order research" })).status).toBe(200);
+      const post = async (bot: { id: string; threadId: string }, path: string, body: Record<string, unknown>) => {
+        const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+        const response = await fetch(`${BASE}${path}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, ...body }),
+        });
+        return { status: response.status, error: ((await response.json()) as { error?: string }).error };
+      };
+      const svg = join(folder, "face.svg");
+      // The same picture is refused as a file type when the sender is allowed, so it is read only after authority.
+      expect((await post(chief, "/api/internal/profile-requests", { changes: { avatarUrl: svg }, reason: "you asked" })).status).toBe(415);
+
+      expect(await post(plain, "/api/internal/profile-requests", { forBotId: outsider.id, changes: { avatarUrl: svg }, reason: "you asked" })).toMatchObject({ status: 403 });
+      expect(await post(chief, "/api/internal/team-setup-requests", { plan: { reason: "you asked", operations: [
+        { action: "update", botId: outsider.id, fields: { avatarUrl: svg } },
+      ] } })).toMatchObject({ status: 403 });
+      expect(await post(plain, "/api/internal/create-bot", { name: `Unpainted ${plain.id}`, role: "Ops", instructions: "Work.", avatarUrl: svg })).toMatchObject({ status: 403 });
+    } finally {
+      for (const bot of [outsider, plain, chief]) await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("takes a created operator's role description up to 4000 characters, and says what to do with a longer one", async () => {
     const chief = (await api("POST", "/api/bots")).body.bot;
     let createdId: string | undefined;
