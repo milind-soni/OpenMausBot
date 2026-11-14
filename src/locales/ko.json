@@ -6136,6 +6136,7 @@
   "sidebar.nav.triggers": "트리거",
   "sidebar.nav.apps": "앱",
   "sidebar.nav.files": "파일",
+  "webPanels.bar.label": "사용자 지정 페이지",
   "webPanels.settings.title": "고정 패널",
   "webPanels.settings.subtitle": "로컬 대시보드 같은 웹 페이지 몇 개를 사이드바에서 클릭 한 번으로 열 수 있게 둬요(고급 모드).",
   "webPanels.settings.name": "이름",

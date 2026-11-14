@@ -6569,6 +6569,7 @@
   "sidebar.nav.triggers": "触发条件",
   "sidebar.nav.apps": "应用",
   "sidebar.nav.files": "文件",
+  "webPanels.bar.label": "自定义页面",
   "webPanels.settings.title": "固定的面板",
   "webPanels.settings.subtitle": "把几个网页（例如本地仪表盘）固定在侧栏，一键打开（高级模式）。",
   "webPanels.settings.name": "名称",

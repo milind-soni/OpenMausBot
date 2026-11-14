@@ -5823,6 +5823,7 @@
   "settings.threadDisplay.short": "Kenar çubuğunda konu listelerini gösterir. Gizlemek geçmişini korur.",
   "settings.pinnedCircles.short": "Sabitlenmiş botları kenar çubuğunun üstünde büyük avatarlar olarak gösterir.",
   "settings.toolCalls.short": "Botun sohbette çalıştırdığı her aracı gösterir. Hatalar her zaman görünür.",
+  "webPanels.bar.label": "Özel sayfalar",
   "webPanels.settings.short": "Yerel bir pano gibi birkaç web sayfasını kenar çubuğunda bir tık uzakta tut.",
   "webPanels.settings.addPage": "Sayfa ekle",
   "webPanels.settings.empty": "Henüz sabitlenmiş sayfa yok.",

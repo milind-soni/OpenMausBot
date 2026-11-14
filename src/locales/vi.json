@@ -5823,6 +5823,7 @@
   "settings.threadDisplay.short": "Hiện danh sách luồng ở thanh bên. Ẩn đi vẫn giữ lịch sử.",
   "settings.pinnedCircles.short": "Hiện bot đã ghim thành ảnh đại diện lớn ở đầu thanh bên.",
   "settings.toolCalls.short": "Hiện mỗi công cụ bot chạy trong cuộc trò chuyện. Lỗi luôn hiện.",
+  "webPanels.bar.label": "Trang tùy chỉnh",
   "webPanels.settings.short": "Giữ vài trang web, như bảng điều khiển cục bộ, cách một cú nhấp ở thanh bên.",
   "webPanels.settings.addPage": "Thêm trang",
   "webPanels.settings.empty": "Chưa có trang nào được ghim.",

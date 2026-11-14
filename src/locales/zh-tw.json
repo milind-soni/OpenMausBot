@@ -6599,6 +6599,7 @@
   "sidebar.nav.triggers": "觸發條件",
   "sidebar.nav.apps": "應用程式",
   "sidebar.nav.files": "檔案",
+  "webPanels.bar.label": "自訂頁面",
   "webPanels.settings.title": "已釘選的面板",
   "webPanels.settings.subtitle": "將幾個網頁（例如本機儀表板）放在側邊欄，一鍵即可開啟（進階模式）。",
   "webPanels.settings.name": "名稱",

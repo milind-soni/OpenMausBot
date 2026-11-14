@@ -7082,6 +7082,7 @@
   "settings.threadDisplay.short": "Pokazuje listy wątków na pasku bocznym. Ukrycie zachowuje historię.",
   "settings.pinnedCircles.short": "Pokazuje przypięte boty jako duże awatary u góry paska bocznego.",
   "settings.toolCalls.short": "Pokazuje każde narzędzie, którego bot używa w czacie. Błędy widać zawsze.",
+  "webPanels.bar.label": "Własne strony",
   "webPanels.settings.short": "Trzymaj kilka stron, np. lokalny pulpit, jedno kliknięcie od paska bocznego.",
   "webPanels.settings.addPage": "Dodaj stronę",
   "webPanels.settings.empty": "Brak przypiętych stron.",

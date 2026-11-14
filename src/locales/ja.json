@@ -6379,6 +6379,7 @@
   "sidebar.nav.triggers": "トリガー",
   "sidebar.nav.apps": "アプリ",
   "sidebar.nav.files": "ファイル",
+  "webPanels.bar.label": "カスタムページ",
   "webPanels.settings.title": "固定したパネル",
   "webPanels.settings.subtitle": "ローカルのダッシュボードなどの Web ページをいくつか、サイドバーからワンクリックで開けるようにします（詳細モード）。",
   "webPanels.settings.name": "名前",
