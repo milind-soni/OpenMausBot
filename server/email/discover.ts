@@ -108,9 +108,25 @@ export const liveDiscoverDeps = (allowed: (url: URL) => Promise<boolean>): Disco
     if (url.protocol !== "https:" || !await allowed(url).catch(() => false)) return null;
     try {
       const answer = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(FETCH_MS), headers: { accept: "text/xml,application/xml" } });
-      if (!answer.ok) return null;
-      const text = await answer.text();
-      return text.length > MAX_BODY ? null : text;
+      if (!answer.ok) {
+        await answer.body?.cancel().catch(() => {});
+        return null;
+      }
+      const reader = answer.body?.getReader();
+      if (!reader) return "";
+      const decoder = new TextDecoder();
+      const chunks: string[] = [];
+      let chars = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          const text = decoder.decode(value, { stream: !done });
+          chars += text.length;
+          if (chars > MAX_BODY) return null;
+          if (text) chunks.push(text);
+          if (done) return chunks.join("");
+        }
+      } finally { await reader.cancel().catch(() => {}); }
     } catch { return null; }
   },
   mx: async (domain) => (await resolveMx(domain).catch(() => [])).sort((a, b) => a.priority - b.priority).map((record) => record.exchange.toLowerCase()),
