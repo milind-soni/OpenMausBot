@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 import { describe, expect, it, vi } from "vitest";
 
 import { chatNotice, failedNoticeTool } from "./chat-notices.ts";
@@ -8,7 +8,7 @@ import type { ProviderAdapter, RuntimeEvent } from "./contracts.ts";
 import { EngineMemory } from "./engine-memory.ts";
 import type { Message } from "./store.ts";
 import { TurnStops, stoppedTurnOutcome } from "./turn-outcome.ts";
-import { engineProcessGone, stallLimitMs, TurnWatchdog, type WatchedTurn } from "./turn-watchdog.ts";
+import { engineCommandCpuMs, engineProcessGone, stallLimitMs, stallNotice, stuckCommand, TurnWatchdog, type TurnWatchdogOptions, type WatchedTurn } from "./turn-watchdog.ts";
 
 const STALL = 10_000;
 const TOOL_STALL = 50_000;
@@ -16,9 +16,10 @@ const PARKED_STALL = 1_000 * STALL;
 const base = { eventId: "e1", provider: "claudeAgent", threadId: "t1", createdAt: "2026-01-01T00:00:00.000Z" };
 const text: RuntimeEvent = { ...base, type: "content.delta", streamKind: "assistant_text", delta: "working" };
 const toolStarted = (itemId: string): RuntimeEvent => ({ ...base, type: "item.started", itemType: "tool", itemId });
+const shellStarted = (itemId: string, summary: string): RuntimeEvent => ({ ...base, type: "item.started", itemType: "tool", itemId, title: "Bash", summary });
 const toolEnded = (itemId: string): RuntimeEvent => ({ ...base, type: "item.completed", itemType: "tool", itemId, ok: true });
 
-function rig() {
+function rig(extra: Partial<TurnWatchdogOptions> = {}) {
   let now = 0;
   const stalls: WatchedTurn[] = [];
   const limits: number[] = [];
@@ -38,6 +39,7 @@ function rig() {
       free: (threadId) => { freed.push(threadId); working.splice(working.findIndex((thread) => thread.threadId === threadId), 1); },
     },
     now: () => now,
+    ...extra,
   });
   return { dog, stalls, limits, adapters, alive, working, freed, tick: (ms: number) => (now += ms) };
 }
@@ -366,6 +368,145 @@ describe("TurnWatchdog", () => {
   });
 });
 
+describe("a shell command that keeps working", () => {
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  /** Sweeps once a turn limit at a time for ms, letting each CPU read land before the next sweep. */
+  async function run(r: ReturnType<typeof rig>, ms: number) {
+    for (let left = ms; left > 0; left -= STALL) {
+      r.tick(Math.min(STALL, left));
+      r.dog.sweep();
+      await settle();
+    }
+  }
+
+  it("is never stopped while its processes keep using CPU, and is once they stop for the tool limit", async () => {
+    let cpuMs = 0, busy = true;
+    const reads: number[] = [];
+    const r = rig({ commandCpuMs: async (_turn, since) => { reads.push(since); if (busy) cpuMs += 1_000; return cpuMs; } });
+    r.dog.watch("t1", "bot1");
+    r.tick(5);
+    r.dog.observe(shellStarted("tool-1", "ffmpeg -i talk.mov talk.mp4"));
+    await run(r, 5 * TOOL_STALL);
+    expect(r.stalls).toHaveLength(0);
+    expect(new Set(reads)).toEqual(new Set([5]));
+    busy = false;
+    await run(r, TOOL_STALL - STALL);
+    expect(r.stalls).toHaveLength(0);
+    await run(r, 2 * STALL);
+    expect(r.stalls).toEqual([expect.objectContaining({ threadId: "t1" })]);
+    expect(r.limits).toEqual([TOOL_STALL]);
+    expect(stallNotice(r.stalls[0]!, TOOL_STALL, 6 * TOOL_STALL + 5).key).toBe("chat.notice.stalledCommand");
+  });
+
+  it("is stopped at the tool limit when its processes use no CPU, or their CPU time cannot be read", async () => {
+    for (const cpuMs of [500, null]) {
+      const r = rig({ commandCpuMs: async () => cpuMs });
+      r.dog.watch("t1", "bot1");
+      r.dog.observe(shellStarted("tool-1", "sleep 100000"));
+      await run(r, TOOL_STALL - 1);
+      expect(r.stalls).toHaveLength(0);
+      await run(r, 2);
+      expect(r.limits).toEqual([TOOL_STALL]);
+    }
+  });
+
+  it("reads nothing until the turn has been silent for the turn limit, nor for a tool that runs no shell command", async () => {
+    let reads = 0;
+    const r = rig({ commandCpuMs: async () => (reads += 1) });
+    r.dog.watch("t1", "bot1");
+    r.dog.observe(toolStarted("tool-1"));
+    await run(r, TOOL_STALL - 1);
+    expect(reads).toBe(0);
+    r.dog.observe(toolEnded("tool-1"));
+    r.dog.observe(shellStarted("tool-2", "make build"));
+    await run(r, STALL - 1);
+    expect(reads).toBe(0);
+    await run(r, 1);
+    expect(reads).toBe(1);
+  });
+
+  it("counts processes coming and going as work, and is not misled by a read that failed", async () => {
+    const seen = [300, null, 200, 400, null, 100];
+    let reads = 0;
+    const r = rig({ commandCpuMs: async () => seen[reads++ % seen.length] ?? null });
+    r.dog.watch("t1", "bot1");
+    r.dog.observe(shellStarted("tool-1", "make -j8"));
+    await run(r, 3 * TOOL_STALL);
+    expect(r.stalls).toHaveLength(0);
+  });
+
+  it("goes on with the next sweep when reading a command's CPU time throws", async () => {
+    const r = rig({ commandCpuMs: () => { throw new Error("thread gone"); } });
+    r.dog.watch("t1", "bot1");
+    r.dog.observe(shellStarted("tool-1", "make build"));
+    await run(r, TOOL_STALL);
+    expect(r.limits).toEqual([TOOL_STALL]);
+  });
+
+  it("never compares one command's CPU time with another's", async () => {
+    const r = rig({ commandCpuMs: async (_turn, since) => (since === 0 ? 100 : 5_000) });
+    r.dog.watch("t1", "bot1");
+    r.dog.observe(shellStarted("tool-1", "make build"));
+    await run(r, TOOL_STALL - STALL);
+    r.dog.observe(shellStarted("tool-2", "make test"));
+    r.dog.observe(toolEnded("tool-1"));
+    await run(r, TOOL_STALL);
+    expect(r.limits).toEqual([TOOL_STALL]);
+  });
+
+  it("reads the CPU time of what the engine started since the command did, and nothing for a driver with no process", async () => {
+    const sample = vi.fn(async () => ({ cpuMs: 1_234, connections: null }));
+    expect(await engineCommandCpuMs(tracked(ENGINE_PID), "t1", 99, sample)).toBe(1_234);
+    expect(sample).toHaveBeenCalledWith(ENGINE_PID, 99);
+    expect(await engineCommandCpuMs(tracked(undefined), "t1", 99, sample)).toBeNull();
+    expect(await engineCommandCpuMs({}, "t1", 99, sample)).toBeNull();
+    expect(await engineCommandCpuMs(undefined, "t1", 99, sample)).toBeNull();
+    expect(sample).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("stuckCommand", () => {
+  it("names the longest-running shell command still running when the turn is stopped", () => {
+    const { dog, stalls, tick } = rig();
+    dog.watch("t1", "bot1");
+    dog.observe(toolStarted("read"));
+    tick(1_000);
+    dog.observe(shellStarted("export", "ffmpeg -i talk.mov talk.mp4"));
+    tick(1_000);
+    dog.observe(shellStarted("done", "ls"));
+    dog.observe(toolEnded("done"));
+    tick(TOOL_STALL);
+    dog.sweep();
+    expect(stalls).toHaveLength(1);
+    expect(stuckCommand(stalls[0]!, 1_000 + 120 * 60_000)).toEqual({ command: "ffmpeg -i talk.mov talk.mp4", minutes: 120 });
+  });
+
+  it("scrubs a secret in the command it names", () => {
+    const { dog, stalls, tick } = rig();
+    const token = "sk-ant-api03-" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6";
+    dog.watch("t1", "bot1");
+    dog.observe(shellStarted("upload", `curl -H "Authorization: Bearer ${token}" https://example.com/upload`));
+    tick(TOOL_STALL);
+    dog.sweep();
+    const stuck = stuckCommand(stalls[0]!, TOOL_STALL);
+    expect(stuck?.command).toContain("curl -H");
+    expect(stuck?.command).not.toContain(token);
+    expect(JSON.stringify(stallNotice(stalls[0]!, TOOL_STALL, TOOL_STALL))).not.toContain(token);
+  });
+
+  it("names nothing when no running tool runs a shell command", () => {
+    const { dog, stalls, tick } = rig();
+    dog.watch("t1", "bot1");
+    dog.observe(toolStarted("fetch"));
+    dog.observe(shellStarted("ended", "make build"));
+    dog.observe(toolEnded("ended"));
+    tick(TOOL_STALL);
+    dog.sweep();
+    expect(stuckCommand(stalls[0]!, TOOL_STALL)).toBeNull();
+    expect(stuckCommand({}, 0)).toBeNull();
+  });
+});
+
 // The harness's stall handler (index.ts), run without starting a server.
 describe("the stall handler", () => {
   function load(engineMemory = new EngineMemory({ enabled: false }), env: Record<string, string> = {}) {
@@ -390,7 +531,7 @@ describe("the stall handler", () => {
       cancelDirectTurnDispatch() {}, revokeInternalCapabilitiesForThread() {}, repeats: { settle() {} },
       botForThread: () => ({ id: "eli" }), activeRoutineRunForThread: () => undefined,
       runningTurnInstance: () => ({ adapter: { interruptTurn: async () => {} } }),
-      failedTurnTool: (name: string) => ({ name, ok: false }), chatNotice, failedNoticeTool, reportIncident() {},
+      failedTurnTool: (name: string) => ({ name, ok: false }), chatNotice, failedNoticeTool, stallNotice, reportIncident() {},
       settleDirectFollowup: (generation: string | undefined, outcome: { text: string }) => settled.push({ generation, text: outcome.text }),
       finalizeDelegationWatch: (_threadId: string, _ok: boolean, _reply: string, why: string) => delegations.push(why),
       setTimeout: () => ({ unref() {} }),
@@ -412,6 +553,14 @@ describe("the stall handler", () => {
     const { context, settled } = load();
     context.watchdog.options.onStall({ threadId: "t1", botId: "eli" }, 120 * 60_000);
     expect(settled[0]!.text).toMatch(/^No activity for 120 minutes — the turn was stopped\. Before it stopped/);
+  });
+
+  it("names the shell command that was still running and how long it ran", () => {
+    const { context, settled } = load();
+    const startedAt = Date.now() - 120 * 60_000;
+    const runningTools = new Map([["i1", { startedAt, command: "ffmpeg -i talk.mov talk.mp4" }]]);
+    context.watchdog.options.onStall({ threadId: "t1", botId: "eli", runningTools }, 120 * 60_000);
+    expect(settled[0]!.text).toMatch(/^The command `ffmpeg -i talk\.mov talk\.mp4` ran for 120 minutes without finishing and looks stuck — the turn was stopped\. Before it stopped/);
   });
 
   it("never lets the environment switch the watchdog off", () => {

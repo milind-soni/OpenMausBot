@@ -31,7 +31,7 @@ describe("profiles", () => {
     expect(() => profileDir(data, "nonsense")).toThrow(/profile key/);
   });
 
-  it("writes the quiet preferences once, at creation", () => {
+  it("writes quiet preferences at creation and refreshes the language when reopening", () => {
     const data = scratch();
     const made = ensureProfile(data, "bot:alice", { acceptLanguages: "en-IN,en", now: () => new Date("2026-10-15T00:00:00Z") });
     expect(made.created).toBe(true);
@@ -47,10 +47,10 @@ describe("profiles", () => {
     });
     expect(made.record).toMatchObject({ key: "bot:alice", backend: "local", egress: "direct", chromeVersion: null, createdAt: "2026-10-15T00:00:00.000Z" });
     writeFileSync(join(made.dir, "Default", "Preferences"), JSON.stringify({ ...preferences, profile: { ...preferences.profile, exit_type: "Crashed" }, extra: 1 }));
-    expect(ensureProfile(data, "bot:alice").created).toBe(false);
+    expect(ensureProfile(data, "bot:alice", { acceptLanguages: "ko-KR,ko,en-US,en" }).created).toBe(false);
     markCleanExit(made.dir);
     const after = JSON.parse(readFileSync(join(made.dir, "Default", "Preferences"), "utf8"));
-    expect(after).toMatchObject({ extra: 1, profile: { exit_type: "Normal", exited_cleanly: true, password_manager_enabled: false } });
+    expect(after).toMatchObject({ extra: 1, profile: { exit_type: "Normal", exited_cleanly: true, password_manager_enabled: false }, intl: { accept_languages: "ko-KR,ko,en-US,en" } });
   });
 
   it("refuses to let an older Chrome open a profile a newer one wrote", () => {

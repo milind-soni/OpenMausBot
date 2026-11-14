@@ -243,6 +243,19 @@ posixOnly("admin activity log", () => {
     ].sort());
   });
 
+  it("records a new department a Chief in charge of every department got, put down to the admin who made it", async () => {
+    const chief = (await api("POST", "/api/bots", { name: "Wide Heron" }, BOSS)).body.bot as { id: string };
+    expect((await api("PATCH", `/api/bots/${chief.id}`, { section: "Heron desk" }, BOSS)).status).toBe(200);
+    const others = ((await api("GET", "/api/sidebar-sections", undefined, BOSS)).body.sections as string[]).filter((name) => name !== "Heron desk");
+    const ticked = ["", ...others];
+    expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, managedSections: ticked, acknowledgePeerScope: true }, BOSS)).status).toBe(200);
+    expect((await api("POST", "/api/sidebar-sections", { name: "Heron research", botIds: [] }, BOSS)).status).toBe(200);
+
+    const rows = (await activity("?what=bot")).filter((entry) => entry.action === "bot.update" && entry.target?.id === chief.id);
+    expect(rows[0]).toMatchObject({ who: BOSS, target: { kind: "bot", id: chief.id, name: "Wide Heron" }, changed: ["managedSections"],
+      before: { managedSections: ticked }, after: { managedSections: [...ticked, "Heron research"] } });
+  });
+
   it("records only while the workspace is shared, including the change that ends or starts sharing", async () => {
     expect((await api("PUT", "/api/config", { signIn: { admins: [BOSS], members: [] } }, BOSS)).status).toBe(200);
     expect((await activity("?what=people"))[0]).toMatchObject({ who: BOSS, changed: ["signIn.members"] });

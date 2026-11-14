@@ -139,6 +139,7 @@ export function WorkspaceBackupSettings({ layout = BOTH_ROWS }: { layout?: (rows
     document.body.append(link);
     link.click();
     link.remove();
+    setExporting(false);
   });
 
   const previewBackup = () => perform("preview", async () => {
@@ -204,7 +205,7 @@ export function WorkspaceBackupSettings({ layout = BOTH_ROWS }: { layout?: (rows
     })}
     {exporting && (
       <SettingsDialog title={t("backup.export")} onClose={closeExport}>
-        <form id="backup-export" className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); void exportBackup().then(() => { if (alive.current) setExporting(false); }); }}>
+        <form id="backup-export" className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); void exportBackup(); }}>
           <p className="text-[13px] leading-[18px] text-ink-secondary">{t("backup.passwordHint")}</p>
           <SettingsField label={t("backup.exportPassword")}>
             <input type="password" autoComplete="new-password" minLength={12} maxLength={1024} required disabled={disabled} value={exportPassword} onChange={(event) => setExportPassword(event.target.value)} className={SETTINGS_INPUT} />

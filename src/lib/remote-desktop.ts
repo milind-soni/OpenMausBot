@@ -26,6 +26,13 @@ export function remoteScreenshotSource(raw: unknown): string | null {
   return `data:${frame.format === "jpeg" ? "image/jpeg" : "image/png"};base64,${frame.png}`;
 }
 
+/** The host's Local VM preview answers `{ image }` as a PNG or JPEG data URL; anything else shows no frame. */
+export function localVmScreenshotSource(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const { image } = raw as { image?: unknown };
+  return typeof image === "string" && /^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(image) ? image : null;
+}
+
 export function cloudEngineOf(instance: InstanceInfo | undefined): CloudEngine {
   return { computerMcp: instance?.capabilities?.computerMcp };
 }

@@ -120,7 +120,8 @@ describe("the Vault routes", () => {
     await call("POST", "/api/vault/secrets", { name: "Stripe secret key", value: VALUE });
     const listed = await call("GET", "/api/vault");
     expect(listed.body.secrets.map((secret: { name: string; source: string }) => [secret.name, secret.source])).toEqual([["Stripe secret key", "settings"], ["Notion token", "linked"]]);
-    expect(listed.body.secrets[1]).toEqual({ id: "1password:v1:n1", name: "Notion token", fields: [], source: "linked", provider: "1password", bots: "all", readOnly: true });
+    expect(listed.body.secrets[1]).toEqual({ id: "1password:v1:n1", name: "Notion token", fields: [], source: "linked", provider: "1password", bots: "all", readOnly: true,
+      onePassword: { item: "v1:n1", ownBots: false } });
     expect((await call("DELETE", "/api/vault/secrets/1password:v1:n1")).status).toBe(404);
     expect((await call("PATCH", "/api/vault/secrets/1password:v1:n1", { name: "x" })).status).toBe(404);
     for (const answer of answers) expect(answer).not.toContain(LINKED_VALUE);

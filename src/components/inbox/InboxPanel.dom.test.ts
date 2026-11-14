@@ -10,13 +10,14 @@ vi.mock("../../state/api", () => ({
     server.calls.push({ path, method: init?.method ?? "GET", ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
     const done = /^\/api\/inbox\/([\w-]+)\/done$/.exec(path);
     if (done && server.view) server.view = { ...server.view, rows: server.view.rows.map((row) => (row.id === done[1] ? { ...row, tab: "done", unread: false } : row)) };
+    if (path === "/api/inbox/read-all" && server.view) server.view = { ...server.view, rows: server.view.rows.map((row) => ({ ...row, unread: false })) };
     return server.view;
   }),
 }));
 
 import { initialState, StoreContext, type AppState, type Bot } from "@/state/store";
 import { BOT_BUTTON, botButtonTone } from "@/lib/bot-button";
-import { closeInbox, currentInboxPanel, inboxVersion, openInbox, setInboxView, useInboxLoader } from "@/state/inbox";
+import { closeInbox, currentInbox, currentInboxPanel, inboxVersion, openInbox, setInboxView, useInboxLoader } from "@/state/inbox";
 import { approvalRow, inboxView, messageRow, questionRow, reportRow, settledRow } from "@/testing/inbox-fixture";
 import type { InboxView } from "../../../shared/inbox";
 import { InboxCardSlot } from "./InboxCard";
@@ -76,6 +77,32 @@ describe("the inbox panel", () => {
     await click(`[data-inbox-row="${reportRow.id}"] [data-inbox-action="done"]`);
     expect(server.calls).toContainEqual({ path: `/api/inbox/${reportRow.id}/done`, method: "POST" });
     expect(document.querySelector(`[data-inbox-row="${reportRow.id}"]`), "it leaves the list at once").toBeNull();
+  });
+
+  it("marks every unread line read from one control that only shows while something is unread, and answers no ask", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel));
+    const rowIds = () => [...document.querySelectorAll<HTMLElement>("[data-inbox-row]")].map((row) => row.dataset.inboxRow);
+    const unreadIds = () => [...document.querySelectorAll<HTMLElement>("[data-inbox-row][data-unread]")].map((row) => row.dataset.inboxRow);
+    expect(unreadIds()).toEqual([approvalRow.id, messageRow.id]);
+    expect(document.querySelector("[data-inbox-mark-all]")!.textContent).toBe("Mark all as read");
+    await click("[data-inbox-mark-all]");
+    expect(server.calls).toContainEqual({ path: "/api/inbox/read-all", method: "POST" });
+    expect(unreadIds()).toEqual([]);
+    expect(rowIds(), "every row is still listed").toEqual([approvalRow.id, questionRow.id, messageRow.id, reportRow.id]);
+    expect(document.querySelector(`[data-inbox-row="${approvalRow.id}"] [data-inbox-action="allow"]`), "the ask still waits on its answer").not.toBeNull();
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "decideRequest" }));
+    expect(server.calls.filter((call) => /\/(done)$/.test(call.path))).toEqual([]);
+    expect(currentInbox()!.rows.map((row) => [row.id, row.tab])).toEqual(inboxView().rows.map((row) => [row.id, row.tab]));
+    expect(document.querySelector("[data-inbox-mark-all]"), "nothing is unread").toBeNull();
+  });
+
+  it("keeps the control out of an inbox with nothing unread", async () => {
+    shown(inboxView([{ ...approvalRow, unread: false }, { ...messageRow, unread: false }]));
+    openInbox();
+    await mount(createElement(InboxPanel));
+    expect(document.querySelector("[data-inbox-row]")).not.toBeNull();
+    expect(document.querySelector("[data-inbox-mark-all]")).toBeNull();
   });
 
   it("is a sheet at phone width", async () => {

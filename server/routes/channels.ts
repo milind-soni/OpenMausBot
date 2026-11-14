@@ -17,6 +17,8 @@ import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { ProviderInstance, SteerOutcome } from "../contracts.ts";
 import { cancelledChatFollowup } from "../message-db.ts";
 import { messageTextRefusal } from "../message-text.ts";
+import { prepareRoomPointed, roomPickBots, type RoomPick } from "../room-pointed.ts";
+import { refusalBody } from "../user-errors.ts";
 import type { PhoneSecretSubmissionRegistry } from "../phone-secret.ts";
 import { promptWithReply, type PersonName } from "../replies.ts";
 import { clientGroupPatchViolation, requestSource, type RequestAuth } from "../request-auth.ts";
@@ -34,6 +36,7 @@ import { parseMentionPicks } from "../../shared/room-mentions.ts";
 import { sameNameRefusal, sameNameRefusalForBots } from "../same-name-mentions.ts";
 import { conversationLanguage } from "../server-lines.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
+import { forkMessageId } from "./fork-request.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
 import { readThreadNotifications, type NotificationListed } from "./notifications.ts";
@@ -45,8 +48,8 @@ export interface ChannelRouteDeps {
   runOwners?: RouteRunOwners;
   runActor?(auth: RequestAuth): Actor;
   store: Pick<Store,
-    | "group" | "groupTaskByThread" | "bot" | "switchGroupTask" | "patchGroupTask" | "patchGroup" | "messagesFor" | "groupTasks" | "deleteGroupTasks" | "deleteGroup"
-    | "createGroupTask" | "appendMessage">;
+    | "group" | "groupTaskByThread" | "bot" | "switchGroupTask" | "patchGroupTask" | "patchGroup" | "markGroupThreadUnread" | "messagesFor" | "groupTasks" | "deleteGroupTasks" | "deleteGroup"
+    | "createGroupTask" | "forkGroupTask" | "appendMessage">;
   cfg: Pick<AppConfig, "budgets">;
   /** What people's lines are called in this conversation (replies.ts PersonName). */
   userName(threadId: string): PersonName;
@@ -77,7 +80,7 @@ export interface ChannelRouteDeps {
   threadRead?(auth: RequestAuth, threadId: string): void;
   /** A Team Cloud: marks the room read or unread for this person alone and answers the room as they see it; null where a
    * room is read once for everyone. */
-  personMarkRoom?(auth: RequestAuth, room: GroupRecord, unread: boolean): WireGroup | null;
+  personMarkRoom?(auth: RequestAuth, room: GroupRecord, unread: boolean, threadId?: string): WireGroup | null;
   /** A room as this person has read it (a Team Cloud); the room itself anywhere else. */
   groupFor?(auth: RequestAuth, group: WireGroup): WireGroup;
   pageSize(raw: string | null): number | null | undefined;
@@ -92,7 +95,7 @@ export interface ChannelRouteDeps {
     sendId: string | undefined,
     channelMode: "chat" | "goal",
     queueId: undefined,
-    options: { via?: "api"; sender?: ResolvedSender; trigger?: UsageTrigger; threadId?: string; mentions?: string[] },
+    options: { via?: "api"; sender?: ResolvedSender; trigger?: UsageTrigger; threadId?: string; mentions?: string[]; pointed?: RoomPick },
   ): Message;
   applyRoomHoldsFromMessage(groupId: string, text: string, mentions?: readonly string[]): void;
   cancelGroupTurnOperations(groupId: string, threadId: string): void;
@@ -141,6 +144,22 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
     const own = (group: WireGroup) => deps.groupFor?.(auth, group) ?? group;
     let m: RegExpMatchArray | null = null;
     const routines = deps.routines();
+
+    m = path.match(/^\/api\/groups\/([\w-]+)\/tasks\/([\w-]+)\/forks$/);
+    if (m && method === "POST") {
+      const group = store.group(m[1]);
+      if (!group || group.dm || !store.groupTaskByThread(group.id, m[2])) return json(res, 404, { error: "no such conversation" });
+      const body = await readBody(req);
+      const messageId = forkMessageId(body);
+      if (messageId === null) return json(res, 400, { error: "messageId must be a string" });
+      const notYours = cloudThreadRefusal(auth, m[2]);
+      if (notYours) return json(res, 403, { error: notYours });
+      if (groupThreadIsWorking(group.id, m[2])) return json(res, 409, { error: "this conversation is running — wait for it to finish" });
+      const task = store.forkGroupTask(group.id, m[2], messageId);
+      if (!task) return json(res, 404, { error: "no such completed message in this conversation" });
+      if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
+      return json(res, 201, { group: own(groupWithThread(store.group(group.id)!)), task });
+    }
 
     m = path.match(/^\/api\/groups\/([\w-]+)\/tasks$/);
     if (m && method === "POST") {
@@ -199,7 +218,9 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!switched) return json(res, 404, { error: "no such channel task" });
       deps.threadRead?.(auth, switched.threadId);
       readThreadNotifications(switched.threadId, broadcast, notificationListed(auth));
-      const switchedSettings = own(publicGroupState(switched));
+      const personal = deps.personMarkRoom?.(auth, switched, false, switched.threadId);
+      const read = personal ? switched : store.markGroupThreadUnread(switched.id, switched.threadId, false, readCursor(switched.threadId).lastReadMessageId)!;
+      const switchedSettings = personal ?? own(publicGroupState(read));
       // "0": settings only (no `messages` key); a positive page: that tail; omitted: the whole transcript.
       const responseGroup = requestedMessages === "0"
         ? switchedSettings
@@ -283,15 +304,24 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
     if (m && method === "POST") {
       const room = store.group(m[1]);
       if (!room) return json(res, 404, { error: "no such room" });
-      sawThread(room.threadId);
-      deps.threadRead?.(auth, room.threadId);
-      const personal = deps.personMarkRoom?.(auth, room, false);
+      const body = await readBody(req);
+      const threadId = body?.threadId ?? room.threadId;
+      if (typeof threadId !== "string" || (room.dm
+        ? threadId !== room.threadId
+        : !store.groupTaskByThread(room.id, threadId))) {
+        return json(res, 404, { error: "no such channel task" });
+      }
+      sawThread(threadId);
+      deps.threadRead?.(auth, threadId);
+      const personal = deps.personMarkRoom?.(auth, room, false, threadId);
       if (personal) {
-        readThreadNotifications(room.threadId, broadcast, notificationListed(auth));
+        readThreadNotifications(threadId, broadcast, notificationListed(auth));
         return json(res, 200, { group: personal });
       }
-      const group = store.patchGroup(room.id, { unread: false, ...readCursor(room.threadId) })!;
-      readThreadNotifications(room.threadId, broadcast, notificationListed(auth));
+      const group = room.dm
+        ? store.patchGroup(room.id, { unread: false, ...readCursor(threadId) })!
+        : store.markGroupThreadUnread(room.id, threadId, false, readCursor(threadId).lastReadMessageId)!;
+      readThreadNotifications(threadId, broadcast, notificationListed(auth));
       broadcast({ kind: "group", group: publicGroupState(group) });
       return json(res, 200, { group: own(publicGroupState(group)) });
     }
@@ -354,6 +384,12 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!ownsThread) {
         return json(res, 409, { error: "the channel switched tasks before it could receive the message" });
       }
+      // What the person pointed at in a member's page: only a typed chat line carries it, and it goes to the page's bot.
+      const pointing = body.pointed !== undefined && body.pointed !== null;
+      if (pointing && channelMode === "goal") return json(res, 400, { error: "a goal is a plain typed message" });
+      const pointed = pointing ? prepareRoomPointed(store, threadId, body.pointed) : null;
+      if (pointed && !pointed.ok) return json(res, pointed.status, refusalBody(pointed));
+      const pick = pointed?.pick;
       const sendId = parseSendId(body.sendId);
       const replyTo = resolveReplyTarget(threadId, body.replyToId);
       // A bot's shell is a loopback caller too: with no paired session and no browser origin the message
@@ -400,6 +436,14 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
             });
           }
           const members = current.memberIds.map((id) => store.bot(id)).filter((bot): bot is BotRecord => Boolean(bot));
+          // A new pick only (a retry above keeps its receipt): every page bot must still be here and free to answer.
+          const pageBotIds = roomPickBots(pick);
+          if (!pageBotIds.every((id) => current.memberIds.includes(id) && store.bot(id))) {
+            throw Object.assign(new Error("the bot that made this page is no longer in this room"), { status: 409 });
+          }
+          if (!current.dm && pageBotIds.some((id) => current.holds?.[id])) {
+            throw Object.assign(new Error("the bot that made this page is on hold in this room; let it answer again first"), { status: 409 });
+          }
           // A program on this machine (a bot's shell, a script) reads the ids it can send again with; a person never sees them.
           const sameName = auth.kind === "loopback" && !browserOrigin
             ? sameNameRefusalForBots(text, members, mentions, current.name, "sent")
@@ -417,10 +461,11 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
               sender: messageSender(auth),
               trigger,
               mentions,
+              ...(pick ? { pointed: pick } : {}),
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth), trigger, threadId, mentions });
+          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth), trigger, threadId, mentions, ...(pick ? { pointed: pick } : {}) });
           return { ok: true as const, threadId, message };
         },
       );
@@ -488,7 +533,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
         restoreHeldChannelQueue(held);
         return json(res, 409, { error: "only the first queued message can steer" });
       }
-      if (decision.action === "queue" || !steerInput) {
+      if (decision.action === "queue" || !steerInput || headGroup.some((item) => item.pointed)) {
         restoreHeldChannelQueue(held);
         return json(res, 200, {
           ok: true,

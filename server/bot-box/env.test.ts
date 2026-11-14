@@ -18,7 +18,7 @@ const SERVER_ONLY_OMB: ReadonlySet<string> = new Set([
   "OMB_CLAUDE_INHERIT_USER_CONFIG", "OMB_CLAUDE_SESSION_IDLE_", "OMB_CLI_OWNER_STDIN", "OMB_CLI_PREFIX",
   "OMB_CLOUDFLARED_PATH", "OMB_CLOUD_", "OMB_CLOUD_ADMIN_URL", "OMB_CLOUD_AI_TOKEN", "OMB_CLOUD_AI_URL",
   "OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_BOAT_URL", "OMB_CLOUD_BOOTSTRAP_SECRET", "OMB_CLOUD_CAPS_DROPPED",
-  "OMB_CLOUD_CLIENT_IP_HEADER", "OMB_CLOUD_COMPUTER_IDLE_MS", "OMB_CLOUD_COMPUTER_START_BUDGET_MS",
+  "OMB_CLOUD_CLIENT_IP_HEADER", "OMB_CLOUD_COMPUTER_AUTO_REPLACE", "OMB_CLOUD_COMPUTER_DEAD_CONFIRM_MS", "OMB_CLOUD_COMPUTER_IDLE_MS", "OMB_CLOUD_COMPUTER_START_BUDGET_MS",
   "OMB_CLOUD_CONNECTED_APPS_GRANT", "OMB_CLOUD_DECIDER_TOKEN", "OMB_CLOUD_DECIDER_URL", "OMB_CLOUD_EDGE_ACME_EMAIL",
   "OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY", "OMB_CLOUD_EDGE_BIN", "OMB_CLOUD_EDGE_CERT_ISSUERS",
   "OMB_CLOUD_EDGE_CLIENT_IP_HEADER", "OMB_CLOUD_EDGE_CONFIG", "OMB_CLOUD_EDGE_HOLD", "OMB_CLOUD_EDGE_STORAGE",
@@ -62,7 +62,7 @@ const ROOT = new URL("../../", import.meta.url);
 
 /** The `OMB_` names in the code the server runs, and in what starts it (the desktop app). */
 function knownOmbNames(): string[] {
-  const files = execFileSync("git", ["ls-files", "server", "shared", "enterprise/server", "electron"], { cwd: ROOT, encoding: "utf8" })
+  const files = execFileSync("git", ["ls-files", "server", "shared", "packages", "enterprise/server", "electron"], { cwd: ROOT, encoding: "utf8" })
     .split("\n").filter((file) => /\.(?:ts|mts|mjs|cjs|js)$/.test(file) && !/\.test\.|\/testing\/|node-test/.test(file));
   const names = new Set<string>();
   for (const file of files) for (const match of readFileSync(new URL(file, ROOT), "utf8").matchAll(/\bOMB_[A-Z0-9_]+\b/g)) names.add(match[0]);

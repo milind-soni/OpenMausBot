@@ -379,3 +379,14 @@ describe("Boat's credit offer on the Boat card", () => {
     expect(row("box")).not.toBeNull(); expect(offer()).toBeNull();
   });
 });
+
+describe("Self-hosted VPS alias", () => {
+  it("says any Linux machine with Docker over SSH works, including one on a Tailscale network", async () => {
+    const { VpsConnection } = await import("./KeyPanels");
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    const field = host.querySelector<HTMLInputElement>('input[aria-label="Self-hosted VPS SSH config alias"]')!;
+    const text = field.closest("div.flex-col")!.textContent!;
+    expect(text).toContain("Any Linux machine with Docker that you reach over SSH works");
+    expect(text).toContain("Tailscale name as the alias's HostName");
+  });
+});

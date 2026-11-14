@@ -53,6 +53,15 @@ export async function grantVault(vaultId: string, bots: LoginBots): Promise<OneP
   })).onePassword;
 }
 
+/** Bots for one 1Password item (`<vault id>:<item id>`) ahead of its vault's; null hands it back to the vault's choice. */
+export async function grantOnePasswordItem(item: string, bots: LoginBots | null): Promise<void> {
+  const [vaultId = "", itemId = ""] = item.split(":");
+  await api(`/api/logins/1password/items/${encodeURIComponent(vaultId)}/${encodeURIComponent(itemId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ bots }),
+  });
+}
+
 export async function deleteLogin(id: string): Promise<void> {
   await api(`/api/logins/${encodeURIComponent(id)}`, { method: "DELETE" });
 }

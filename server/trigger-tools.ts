@@ -88,6 +88,7 @@ export function agentWebhook(webhook: WebhookTrigger, latestRun?: RoutineRun) {
     enabled: webhook.enabled,
     runOn: webhook.runOn,
     eventTypes: webhook.eventTypes ?? [],
+    ...(webhook.payloadFilter ? { payloadFilter: webhook.payloadFilter } : {}),
     calls: webhook.deliveryCount,
     lastCalledAt: timestamp(webhook.lastReceivedAt),
     latestRun: latestRun ? agentRun(latestRun) : null,
@@ -177,8 +178,8 @@ const triggerRequestSchema = z.union([
   z.object({ ...source, action: z.enum(["pause", "resume", "run_now", "delete"]), triggerId: z.string().min(1).max(200) }).strict(),
 ]);
 
-const WEBHOOK_FIELDS = new Set(["name", "instructions", "runOn", "eventTypes"]);
-const APP_FIELDS = new Set(["name", "instructions", "runOn", "filter", "config"]);
+const WEBHOOK_FIELDS = new Set(["name", "instructions", "runOn", "eventTypes", "payloadFilter", "sameConversation"]);
+const APP_FIELDS = new Set(["name", "instructions", "runOn", "filter", "config", "sameConversation"]);
 
 export type ParsedTriggerRequest =
   | { ok: false; error: string }
@@ -197,20 +198,25 @@ export function parseTriggerRequest(body: unknown, kindOf: (id: string) => "sche
       ? { ok: true, kind: "schedule", forBotId: request.forBotId, proposal: { action: "create", routine: request.routine } }
       : { ok: true, kind: "webhook", forBotId: request.forBotId, operation: { action: "create", webhook: request.webhook } };
   }
-  const changes = request.action === "update" ? request.changes : undefined;
   const kind = kindOf(request.triggerId);
+  const asked = request.action === "update" ? request.changes : undefined;
+  // A null payload filter clears a webhook's; on another kind it changes nothing.
+  const { payloadFilter, ...rest } = asked ?? {};
+  const changes = asked && kind !== "webhook" && payloadFilter === null ? rest : asked;
   if (kind === "app") {
     const misplaced = changes && Object.keys(changes).find((key) => !APP_FIELDS.has(key));
-    if (misplaced) return { ok: false, error: `An app-event trigger has no ${misplaced} to change. Change name, instructions, run_on, filter or event_config; to watch another app, event or account, delete it and create a new one.` };
+    if (misplaced) return { ok: false, error: `An app-event trigger has no ${misplaced} to change. Change name, instructions, run_on, filter, event_config or same_conversation; to watch another app, event or account, delete it and create a new one.` };
     return { ok: true, kind: "app", forBotId: request.forBotId, operation: { action: request.action, triggerId: request.triggerId, ...(changes ? { changes } : {}) } };
   }
   if (kind === "schedule") {
     if (changes && "eventTypes" in changes) return { ok: false, error: "webhook_event_types applies only to webhook triggers" };
+    if (changes && "payloadFilter" in changes) return { ok: false, error: "webhook_payload_filter applies only to webhook triggers" };
     if (changes && ("filter" in changes || "config" in changes)) return { ok: false, error: "filter and event_config apply only to app-event triggers" };
+    if (changes && "sameConversation" in changes) return { ok: false, error: "same_conversation applies only to app-event and webhook triggers" };
     return { ok: true, kind: "schedule", forBotId: request.forBotId, proposal: { action: request.action, routineId: request.triggerId, ...(changes ? { changes } : {}) } };
   }
   const misplaced = changes && Object.keys(changes).find((key) => !WEBHOOK_FIELDS.has(key));
-  if (misplaced) return { ok: false, error: `A webhook trigger has no ${misplaced}; it fires when its link is called. Change name, instructions, run_on or webhook_event_types.` };
+  if (misplaced) return { ok: false, error: `A webhook trigger has no ${misplaced}; it fires when its link is called. Change name, instructions, run_on, webhook_event_types, webhook_payload_filter or same_conversation.` };
   return { ok: true, kind: "webhook", forBotId: request.forBotId, operation: { action: request.action, webhookId: request.triggerId, ...(changes ? { changes } : {}) } };
 }
 

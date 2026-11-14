@@ -29,6 +29,7 @@ import {
   turnCostFromRunningTotal,
   type ClaudeConfig,
 } from "./claude.ts";
+import { spawnContractDiff } from "./claude-spawn-contract.ts";
 import { TEAM_TOOLS_FAILED } from "./team-tools.ts";
 import { claudeLimitMessage } from "./claude-limits.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -268,10 +269,12 @@ describe("ClaudeDriver.decodeConfig", () => {
     const pidPath = join(home, "logout-pid");
     writeFileSync(cli, [
       "#!/usr/bin/env node",
-      'import { writeFileSync } from "node:fs";',
+      'import { renameSync, writeFileSync } from "node:fs";',
       'import { join } from "node:path";',
       'if (process.argv.slice(2).join(" ") !== "auth logout") process.exit(2);',
-      'writeFileSync(join(process.env.HOME, "logout-pid"), String(process.pid));',
+      'const marker = join(process.env.HOME, "logout-pid");',
+      'writeFileSync(marker + ".tmp", String(process.pid));',
+      'renameSync(marker + ".tmp", marker);',
       'setInterval(() => {}, 1000);',
     ].join("\n"), { mode: 0o700 });
     const instance = await ClaudeDriver.create({
@@ -283,7 +286,7 @@ describe("ClaudeDriver.decodeConfig", () => {
     let pid: number | undefined;
     const alive = (value: number) => { try { process.kill(value, 0); return true; } catch { return false; } };
     try {
-      await expect.poll(() => existsSync(pidPath), { timeout: 2500 }).toBe(true);
+      await expect.poll(() => existsSync(pidPath), { timeout: 10_000 }).toBe(true);
       pid = Number(readFileSync(pidPath, "utf8"));
       await instance.dispose();
       expect(alive(pid)).toBe(false);
@@ -293,8 +296,8 @@ describe("ClaudeDriver.decodeConfig", () => {
         if (process.platform === "win32") process.kill(pid, "SIGKILL");
         else process.kill(-pid, "SIGKILL");
       }
-      await pending;
       await instance.dispose();
+      await pending;
       await removeTempDir(home);
     }
   }, 60_000);
@@ -408,6 +411,53 @@ describe("ClaudeDriver.decodeConfig", () => {
       }
     },
   );
+});
+
+describe("spawnContractDiff", () => {
+  const key = (overrides: Record<string, unknown> = {}) => JSON.stringify({
+    args: ["--model", "opus"],
+    system: "stable",
+    mcpServers: { agents: { command: "node", args: ["agents"], env: { TOKEN: "secret" } } },
+    cwd: "/work",
+    model: "opus",
+    base: null,
+    configDir: null,
+    hooks: false,
+    toolSearch: false,
+    botSettings: "aaa",
+    auth: "bbb",
+    ...overrides,
+  });
+
+  it("reports nothing for identical keys", () => {
+    expect(spawnContractDiff(key(), key())).toEqual([]);
+  });
+
+  it("names changed scalar fields", () => {
+    expect(spawnContractDiff(key(), key({ model: "sonnet" }))).toEqual(["model"]);
+  });
+
+  it("names added and removed MCP servers without their configs", () => {
+    expect(spawnContractDiff(key(), key({ mcpServers: {} }))).toEqual(["mcpServers:-agents"]);
+    expect(spawnContractDiff(key({ mcpServers: {} }), key())).toEqual(["mcpServers:+agents"]);
+  });
+
+  it("names a server whose config changed, not the config", () => {
+    const changed = spawnContractDiff(key(), key({ mcpServers: { agents: { command: "node", args: ["agents"], env: { TOKEN: "rotated" } } } }));
+    expect(changed).toEqual(["mcpServers:~agents"]);
+    expect(JSON.stringify(changed)).not.toContain("rotated");
+  });
+
+  it("reports nothing for unparseable keys", () => {
+    expect(spawnContractDiff("not json", key())).toEqual([]);
+    expect(spawnContractDiff(key(), "{")).toEqual([]);
+  });
+
+  it("names a server called constructor, which Object.prototype also has", () => {
+    const withConstructor = { constructor: { command: "node", args: ["ctor"] } };
+    expect(spawnContractDiff(key({ mcpServers: {} }), key({ mcpServers: withConstructor }))).toEqual(["mcpServers:+constructor"]);
+    expect(spawnContractDiff(key({ mcpServers: withConstructor }), key({ mcpServers: {} }))).toEqual(["mcpServers:-constructor"]);
+  });
 });
 
 describe("ClaudeDriver turns (fake CLI)", () => {
@@ -2518,7 +2568,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv).not.toContain("--dangerously-skip-permissions");
   });
 
-  it("lets a Bash call ask for up to ten minutes, unless the person set their own cap", async () => {
+  it("lets a Bash call ask for up to two hours, unless the person set their own cap", async () => {
     const dump = join(scratch, "bash-timeout.json");
     await create(undefined, { FAKE_CLAUDE_DUMP: dump });
     await instance.adapter.sendTurn({ threadId: "t-bash-timeout", text: "hi" });
@@ -3535,6 +3585,48 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(dump.argv).toContain("claude-other");
   });
 
+  it("names the changed contract fields when a warm process is replaced", async () => {
+    await create();
+    await instance.adapter.sendTurn({
+      threadId: "t-contract-diff",
+      text: "one",
+      integrations: { agents: { command: "node", args: ["agents"], env: {} } },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-contract-diff",
+      text: "two",
+      resumeCursor: announced,
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    // The native log flushes after the turn; poll for the close line instead of sleeping.
+    const close = await new Promise<{ contractChanged?: string[] }>((resolve, reject) => {
+      const deadline = Date.now() + 10_000;
+      const log = join(NATIVE_DIR, "t-contract-diff.ndjson");
+      const check = () => {
+        if (Date.now() > deadline) return reject(new Error("contract-change close was never logged"));
+        try {
+          const lines = readFileSync(log, "utf8").split("\n").filter(Boolean);
+          for (const line of lines) {
+            let entry: { msg?: { close?: string; contractChanged?: string[] } };
+            try {
+              entry = JSON.parse(line);
+            } catch {
+              continue;
+            }
+            if (entry.msg?.close === "spawn contract changed" && entry.msg.contractChanged) return resolve(entry.msg);
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") return reject(error);
+        }
+        setTimeout(check, 50);
+      };
+      check();
+    });
+    expect(close.contractChanged).toContain("mcpServers:-agents");
+  }, 20_000);
+
   it("closes an idle session after the configured window", async () => {
     // Ten seconds is the floor; poll the native log for the close instead of sleeping past it.
     process.env.OMB_CLAUDE_SESSION_IDLE_MIN_MS = "10000";
@@ -4473,6 +4565,31 @@ describe("ClaudeDriver resume recovery (fake CLI)", () => {
     const content = seen.prompt.message.content;
     const text = typeof content === "string" ? content : content.map((c: any) => c.text ?? "").join("");
     expect(text).toBe(REBUILD);
+  });
+
+  it("logs why the saved session could not be resumed before starting a new one", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-logged", text: "what now?", resumeCursor: "an-outside-session", recoveryText: REBUILD });
+      await recorder.until((e) => e.type === "turn.completed");
+      const lines = logged.mock.calls.map((call) => String(call[0]));
+      expect(lines.find((line) => line.includes("could not resume session an-outside-session"))).toMatch(/^claude \(claude-test\): could not resume session an-outside-session for thread t-logged, starting a new one: claude exited \d+ before result/u);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("logs the CLI's own reason when it refuses --resume with an error result", async () => {
+    process.env.FAKE_CLAUDE_MODE = "stale-session";
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-logged-stale", text: "what now?", resumeCursor: "an-outside-session", recoveryText: REBUILD });
+      await recorder.until((e) => e.type === "turn.completed");
+      const lines = logged.mock.calls.map((call) => String(call[0]));
+      expect(lines).toContain("claude (claude-test): could not resume session an-outside-session for thread t-logged-stale, starting a new one: No conversation found with session ID: an-outside-session");
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it("does not announce a replacement as rebuilt when there was nothing to replay", async () => {

@@ -2,7 +2,7 @@
 // live in the seam between them.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, request, type IncomingMessage, type Server } from "node:http";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,7 @@ import { workerPort } from "../../server/testing/worker-port.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
+const DESKTOP_VERSION = (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { version: string }).version;
 
 /** Candidates from a fixed range below every platform's ephemeral range
  * (`listen(0)` lands in the 49152+ churn on macOS and Windows), each verified
@@ -148,6 +149,7 @@ beforeAll(async () => {
           ? { token: TOKEN, device: { id: "d1", name: String(deviceName) } }
           : { error: "that code is not right" },
       serverName: () => "Test computer",
+      version: DESKTOP_VERSION,
       connected: connectedDevices.open,
     }),
   );
@@ -245,6 +247,13 @@ describe("the sidecar in front of an unmodified harness", () => {
     expect(health.headers.get("cdn-cache-control")).toBe("no-store");
     expect(JSON.stringify(health.body)).not.toContain("pid");
     expect(JSON.stringify(health.body)).not.toContain("static");
+  });
+
+  it("tells a paired device the desktop's version, and nobody else", async () => {
+    expect(await fetch(`${HARNESS}/api/health`).then((reply) => reply.json())).toMatchObject({ app: "openmausbot", version: DESKTOP_VERSION });
+    expect((await device("GET", "/api/health")).body).toEqual({ app: "openmausbot", version: DESKTOP_VERSION });
+    expect((await device("GET", "/api/health", { token: "omb_wrong" })).body).toEqual({ app: "openmausbot" });
+    expect((await device("GET", "/api/companion/endpoints")).body).toEqual({ serverName: "Test computer", endpoints: [], version: DESKTOP_VERSION });
   });
 
   it("refuses what a device has no business doing, by default", async () => {
@@ -1038,5 +1047,33 @@ describe("revoking a capability mid-stream", () => {
 
     relay.close();
     upstream.close();
+  });
+});
+
+describe("the desktop version the sidecar reports", () => {
+  it("is left out unless it is a release version", async () => {
+    const answer = async (version: string | undefined) => {
+      const server = createServer(createProxyHandler({
+        // No harness on port 1: the endpoint list is the sidecar's own answer.
+        harnessPort: 1,
+        authenticate: (token) => token === TOKEN ? { cloudDesktopAccess: false, browserControlAccess: false } : null,
+        redeem: () => ({ error: "not used" }),
+        serverName: () => "Test computer",
+        version,
+      }));
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      try {
+        const port = (server.address() as { port: number }).port;
+        const reply = await fetch(`http://127.0.0.1:${port}/api/companion/endpoints`, { headers: { authorization: `Bearer ${TOKEN}` } });
+        return (await reply.json()) as { version?: string };
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    };
+    expect((await answer("0.1.156")).version).toBe("0.1.156");
+    expect((await answer("0.1.156-beta.2")).version).toBe("0.1.156-beta.2");
+    for (const odd of [undefined, "", "unknown", "0.1", "0.1.156\n", `0.1.156-${"x".repeat(65)}`]) {
+      expect(await answer(odd)).not.toHaveProperty("version");
+    }
   });
 });
