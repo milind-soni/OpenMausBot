@@ -9133,6 +9133,7 @@
   "activity.tool.team.assignmentStatus": "Status da tarefa",
   "activity.tool.team.attachFile": "Anexar arquivo",
   "activity.tool.team.closeThread": "Fechar conversa",
+  "activity.tool.team.renameThread": "Renomear conversa",
   "activity.tool.team.coordinateBots": "Coordenar bots",
   "activity.tool.team.createBot": "Criar bot",
   "activity.tool.team.createRoom": "Criar grupo",
