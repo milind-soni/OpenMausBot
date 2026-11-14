@@ -841,9 +841,11 @@ describe("the prompt of a bridged turn", () => {
   });
 
   it("sits in the stable half, so a warm engine is not relaunched by it turn after turn", () => {
-    const first = buildSystemPrompt("You are Kiwi.", "Be brief.", parts, bridged);
-    const later = buildSystemPrompt("You are Kiwi.", "Be brief.", parts.map((part) => part.id === "memory" ? { ...part, text: "\nMEMORY: the deploy script moved to tools/." } : part), bridged);
+    const withRecent = [...parts, { id: "recent", label: "Recent work", text: "\nRecent: waiting on Ada." }];
+    const first = buildSystemPrompt("You are Kiwi.", "Be brief.", withRecent, bridged);
+    const later = buildSystemPrompt("You are Kiwi.", "Be brief.", withRecent.map((part) => part.id === "recent" ? { ...part, text: "\nRecent: Ada finished." } : part), bridged);
     expect(first.stable).toContain(AGENTS_TOOL_BRIDGE_PROMPT);
+    expect(first.stable).toContain("MEMORY: the deploy script lives in scripts/.");
     expect(first.volatile).not.toContain(FIND_TOOL);
     expect(later.stable).toBe(first.stable);
     expect(later.volatile).not.toBe(first.volatile);
