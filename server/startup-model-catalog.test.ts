@@ -15,6 +15,12 @@ const CACHED: ModelCatalog = {
   default: "cached-model",
   options: [{ id: "cached-model", label: "Cached" }],
 };
+
+it("keeps model effort restrictions, including an explicit empty list, through the startup cache", () => {
+  const catalog: ModelCatalog = { default: "limited", options: [{ id: "limited", label: "Limited", effortLevels: ["low", "high"] }, { id: "none", label: "None", effortLevels: [] }] };
+  writeStartupModelCache("effort-cache", catalog);
+  expect(readStartupModelCache("effort-cache")).toEqual(catalog);
+});
 /** Saved by a run long enough ago that a later start reads the list again. */
 const STALE = { checkedAt: Date.now() - STARTUP_MODEL_CACHE_FRESH_MS };
 const FRESH: ModelCatalog = {

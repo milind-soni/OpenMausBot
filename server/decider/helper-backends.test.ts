@@ -100,7 +100,7 @@ describe("the order: own Jev, own Workers AI, Cloud's included relay, OpenRouter
 
   it("Settings is told which provider is in use, never a key", () => {
     const status = describeDecider(without("key"));
-    expect(status).toEqual({ provider: "workersai", configured: true, enabled: true, jobs: { roomRouting: true } });
+    expect(status).toEqual({ turnEffortConfigured: true, provider: "workersai", configured: true, enabled: true, jobs: { turnEffort: false, roomRouting: true } });
     expect(JSON.stringify(status)).not.toContain(CF_TOKEN);
   });
 });

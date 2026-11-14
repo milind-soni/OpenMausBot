@@ -323,6 +323,8 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   speakReplies?: boolean;
   /** How replies are shaped. Absent = "default". */
   replyStyle?: ReplyStyle;
+  /** Limits apply only to automatic effort choices; automated turns require explicit opt-in. */
+  autoEffort?: { min?: EffortLevel; max?: EffortLevel; automated?: boolean } | null;
   /** This bot's own voice id, so a room of bots doesn't sound like one person. */
   voice?: string;
   /** Whether this bot may send voice notes. Absent/true = allowed; false
@@ -552,6 +554,8 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   routedBy?: { provider: "jev" | "workersai" | "openrouter" | "custom"; probability: number };
   /** On a conversational bot's user line: the picker label of the quick model its reply ran on. */
   quickModel?: string;
+  /** The automatic reasoning effort applied to this turn, absent on fallback. */
+  turnEffort?: EffortLevel;
   /** On a "Sent to" hand-off row: the done_when the sender set, redacted, so the chip can show what counts as finished. */
   doneWhen?: string;
   /** Set on the user-role line another bot delivered into this bot's own

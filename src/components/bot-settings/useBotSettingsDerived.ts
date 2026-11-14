@@ -32,6 +32,7 @@ export type BotPatch = Partial<
     | "fallback"
     | "speakReplies"
     | "replyStyle"
+    | "autoEffort"
     | "memoryEnabled"
     | "xResearch"
     | "voice"

@@ -94,7 +94,7 @@ import { DataResultChip } from "./DataResultChip"; import { PublishedPageCard } 
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
 import { dayLabel, localDay } from "@/lib/transcript-derivations";
 import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
-import { RoomQueueList, RoutedByLine } from "./RoomQueueList";
+import { RoomQueueList, RoomDecisionNotes } from "./RoomQueueList";
 import { JumpToLatestButton } from "./JumpToLatestButton";
 import { HandoffChip } from "./HandoffReply"; import { TeammateChip } from "./TeammateChip"; import { useTeammates } from "@/state/team-people";
 import { RoomWorkingFolder } from "./RoomWorkingFolder";
@@ -305,7 +305,7 @@ function RoomTextMessage({
       </div>
       <ReactionChips threadId={group.threadId} message={m} bots={members} align={user ? "end" : "start"} canReact={canReact} />
       <ForkLinks kind="group" ownerId={group.id} threadId={group.threadId} messageId={m.id} phone={phone} />
-      {!user && m.routedBy && <RoutedByLine routedBy={m.routedBy} />}
+      {!user && <RoomDecisionNotes message={m} />}
     </div>
   );
 }

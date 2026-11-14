@@ -12,6 +12,13 @@ const KEY = "tsk_config_secret_0123456789";
 const OR_KEY = "sk-or-v1-config-secret-0123456789";
 
 describe("decider config", () => {
+  it("keeps the rest of a stored config when its decision provider is unsupported, and enabling never picks a provider", () => {
+    const parsed = parseStoredConfig({ language: "pt-br", decider: { provider: "gemini", enabled: true, key: KEY, jobs: { turnEffort: true } } });
+    expect(parsed).toMatchObject({ language: "pt-br", decider: { provider: "off", key: KEY, jobs: { turnEffort: true } } });
+    expect(describeDecider(parsed).enabled).toBe(false);
+    expect(deciderSavePatch({ enabled: true }, parsed.decider)).toEqual({ ok: true, patch: { enabled: true } });
+    expect(() => parseConfigPatch({ decider: { provider: "gemini" } })).toThrow();
+  });
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
     mkdirSync(DATA_DIR, { recursive: true });
@@ -48,7 +55,7 @@ describe("decider config", () => {
       // the desktop hands the saved key over as env: now it is the one in use
       process.env.OMB_JEV_API_KEY = KEY;
       saveConfig({ decider: { enabled: true } });
-      expect(describeDecider(loadConfig())).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
+      expect(describeDecider(loadConfig())).toEqual({ turnEffortConfigured: true, provider: "jev", configured: true, enabled: true, jobs: { turnEffort: false, roomRouting: true } });
       await decider.testKey();
       const calls = fetchImpl.mock.calls.map(([url, init]) => [String(url), (init!.headers as Record<string, string>).authorization]);
       expect(calls).toEqual([[`${relay}/v1/systemone`, "Bearer omb_decide_included"], ["https://api.typesafe.ai/v1/systemone", `Bearer ${KEY}`]]);
@@ -75,7 +82,7 @@ describe("decider config", () => {
     saveConfig({ decider: planned.patch });
     const disk = JSON.parse(readFileSync(join(DATA_DIR, "config.json"), "utf8"));
     expect(disk.decider).toEqual({ key: KEY, enabled: true, jobs: { roomRouting: true } });
-    expect(describeDecider(loadConfig())).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
+    expect(describeDecider(loadConfig())).toEqual({ turnEffortConfigured: true, provider: "jev", configured: true, enabled: true, jobs: { turnEffort: false, roomRouting: true } });
   });
 
   it("the OpenRouter key is its own: env wins over the file, a save keeps env in step, the engine's key is untouched", () => {
@@ -99,8 +106,8 @@ describe("decider config", () => {
     expect(disk.decider).toEqual({
       provider: "openrouter", openrouterModel: "openai/gpt-4o-mini", openrouterApi: "chat", openrouterKey: OR_KEY, enabled: true, jobs: { roomRouting: true },
     });
-    expect(describeDecider(loadConfig())).toEqual({
-      provider: "openrouter", model: "openai/gpt-4o-mini", api: "chat", configured: true, keySource: "own", enabled: true, jobs: { roomRouting: true },
+    expect(describeDecider(loadConfig())).toEqual({ turnEffortConfigured: true,
+      provider: "openrouter", model: "openai/gpt-4o-mini", api: "chat", configured: true, keySource: "own", enabled: true, jobs: { turnEffort: false, roomRouting: true },
     });
   });
 
@@ -133,7 +140,7 @@ describe("decider config", () => {
 
   it("an existing Jev-only config file keeps resolving to Jev, and an old OpenRouter choice never moves it off the own Jev key", () => {
     writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ decider: { enabled: true, key: KEY } }));
-    expect(describeDecider(loadConfig())).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
+    expect(describeDecider(loadConfig())).toEqual({ turnEffortConfigured: true, provider: "jev", configured: true, enabled: true, jobs: { turnEffort: false, roomRouting: true } });
     saveConfig({ decider: { provider: "openrouter" } });
     expect(loadConfig().decider).toMatchObject({ provider: "openrouter", key: KEY, enabled: true });
     expect(describeDecider(loadConfig())).toMatchObject({ provider: "jev", configured: true, enabled: true });

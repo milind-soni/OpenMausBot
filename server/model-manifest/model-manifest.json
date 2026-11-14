@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-09T21:02:58Z",
+  "updatedAt": "2026-11-14T00:00:00Z",
   "engines": {
     "claude": {
       "default": "claude-sonnet-5",
@@ -10,50 +10,107 @@
           "name": "Claude Fable 5.2",
           "status": "current",
           "contextWindow": 1000000,
-          "minCliVersion": "2.1.321"
+          "minCliVersion": "2.1.321",
+          "effortLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
         },
         {
           "id": "claude-fable-5-1",
           "name": "Claude Fable 5.1",
-          "status": "current"
+          "status": "current",
+          "effortLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
         },
         {
           "id": "claude-fable-5",
           "name": "Claude Fable 5",
-          "status": "current"
+          "status": "current",
+          "effortLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
         },
         {
           "id": "claude-opus-5-5",
           "name": "Claude Opus 5.5",
           "status": "current",
-          "contextWindow": 1000000
+          "contextWindow": 1000000,
+          "effortLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
         },
         {
           "id": "claude-opus-5",
           "name": "Claude Opus 5",
-          "status": "current"
+          "status": "current",
+          "effortLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
         },
         {
           "id": "claude-sonnet-5-5",
           "name": "Claude Sonnet 5.5",
           "status": "current",
-          "contextWindow": 1000000
+          "contextWindow": 1000000,
+          "effortLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
         },
         {
           "id": "claude-sonnet-5",
           "name": "Claude Sonnet 5",
-          "status": "current"
+          "status": "current",
+          "effortLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
         },
         {
           "id": "claude-haiku-5-5",
           "name": "Claude Haiku 5.5",
           "status": "current",
-          "contextWindow": 1000000
+          "contextWindow": 1000000,
+          "effortLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
         },
         {
           "id": "claude-haiku-4-5",
           "name": "Claude Haiku 4.5",
-          "status": "current"
+          "status": "current",
+          "effortLevels": []
         }
       ]
     },

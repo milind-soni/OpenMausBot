@@ -146,8 +146,9 @@ describe("routeDirectTurn", () => {
     expect(routeDirectTurn(own, {}, [], hi, codex, false, new Set(["gpt-5.4-mini"])).quickModel).toBeUndefined();
   });
 
-  it("leaves a thread with its own model and an automated turn alone", () => {
+  it("leaves a thread with its own model, an automated turn and a turn whose effort the decider picks alone", () => {
     expect(routeDirectTurn(bot, { modelSelection: bot.modelSelection }, [], message, instance, false).tier).toBeNull();
     expect(routeDirectTurn(bot, {}, [], message, instance, true).tier).toBeNull();
+    expect(routeDirectTurn(bot, {}, [], message, instance, false, undefined, true).tier).toBeNull();
   });
 });

@@ -113,7 +113,7 @@ export type SecretRequestCardData = Omit<import("../../shared/wire").SecretReque
 
 export type ComputerControlState = { held: boolean; helpReason: string | null; help?: import("../../shared/wire").ComputerHelpRef | null };
 
-export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "pointed" | "routedBy" | "quickModel" | "automation" | "publishedPage" | "sender" | "setupSuggestion" | "helperIntro" | "helperFollowup" | "setupOffer" | "savedSteps" | "setupChoices" | "setupChoicesPending" | "setupChoicesUpdating" | "setupRequest" | "relay" | "inbox" | "sentDirectly" | "doneWhen" | "bugReport" | "engineCompaction" | "stoppedBy"> {
+export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "pointed" | "routedBy" | "quickModel" | "turnEffort" | "automation" | "publishedPage" | "sender" | "setupSuggestion" | "helperIntro" | "helperFollowup" | "setupOffer" | "savedSteps" | "setupChoices" | "setupChoicesPending" | "setupChoicesUpdating" | "setupRequest" | "relay" | "inbox" | "sentDirectly" | "doneWhen" | "bugReport" | "engineCompaction" | "stoppedBy"> {
   id: string;
   role: "bot" | "user";
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "burst" | "digest" | "compaction" | "call" | "widget" | "app";
@@ -271,7 +271,7 @@ export interface TaskUsage {
   context?: { tokens: number; window?: number };
 }
 
-export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" | "access" | "yourAccess" | "onlyPeopleAdded"> {
+export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" | "access" | "yourAccess" | "onlyPeopleAdded" | "autoEffort"> {
   toolScope?: ToolScope;
   waitingForTeammates?: boolean;
   id: string;
@@ -436,7 +436,7 @@ export interface InstanceInfo extends InstanceEndpointInfo {
   aiTest?: import("../../shared/ai-ranking").AiTestState;
   /** Why it didn't answer, in plain words, when it said (signed out, a used-up limit…). */
   aiTestError?: string;
-  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; provider?: string; variants?: ModelVariantOption[]; orgBlocked?: true; needsCliUpdate?: string; local?: import("../../shared/local-model").LocalModelFacts }> };
+  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; provider?: string; effortLevels?: readonly EffortLevel[]; variants?: ModelVariantOption[]; orgBlocked?: true; needsCliUpdate?: string; local?: import("../../shared/local-model").LocalModelFacts }> };
   capabilities?: {
     computerMcp?: boolean;
     agentsMcp?: boolean;

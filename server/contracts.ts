@@ -481,6 +481,8 @@ export interface ModelCatalog {
     provider?: string;
     /** Context window in tokens, when known; sizes the model-facing rebuild. */
     contextWindow?: number;
+    /** Model-specific effort support when reported; an empty list means no effort parameter. */
+    effortLevels?: readonly EffortLevel[];
     /** Discovery hints; the native session revalidates these before each turn. */
     variants?: ModelVariantOption[];
     /** The organization of the signed-in account turned this model off: the engine would answer with another. */

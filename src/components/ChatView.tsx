@@ -514,7 +514,7 @@ const Bubble = memo(function Bubble({
                   {t("chat.sentMidTurn")}
                 </div>
               )}
-              {message.quickModel && <QuickModelNote model={message.quickModel} />}
+              <QuickModelNote model={message.quickModel} effort={message.turnEffort} />
               <UserLineNote message={message} />
               {collapsible && (
                 <button onClick={() => setExpanded(true)} className="mt-1 text-[13px] text-ink-secondary hover:text-ink">

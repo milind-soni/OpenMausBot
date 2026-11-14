@@ -4,6 +4,12 @@ import { t } from "@/lib/i18n";
 import { splitConversationalReply } from "../../shared/reply-style";
 import { joinedCorners, SIMPLE_BOT_BUBBLE, type BubbleJoin } from "./chat-bubble";
 import { streamedReply } from "@/state/live-reply";
+import type { EffortLevel } from "../../shared/wire";
+import { effortLabel } from "./effort-label";
+
+export function TurnEffortNote({ effort }: { effort?: EffortLevel }) {
+  return effort ? <div data-turn-effort={effort} className="mt-1 text-[11px] text-ink-tertiary">{t("chat.turnEffort", { level: effortLabel(effort) })}</div> : null;
+}
 
 export { isConversational } from "../../shared/reply-style";
 
@@ -59,6 +65,6 @@ export function ConversationalReply({ segments, firstNew, citation, renderSegmen
   );
 }
 
-export function QuickModelNote({ model }: { model: string }) {
-  return <div data-quick-model className="mt-1 text-[11px] text-ink-tertiary">{t("chat.quickModel", { model })}</div>;
+export function QuickModelNote({ model, effort }: { model?: string; effort?: EffortLevel }) {
+  return <>{model && <div data-quick-model className="mt-1 text-[11px] text-ink-tertiary">{t("chat.quickModel", { model })}</div>}<TurnEffortNote effort={effort} /></>;
 }

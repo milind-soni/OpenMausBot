@@ -17,20 +17,22 @@ describe("readClaudeModelCatalog", () => {
   it("returns the official models when settings are missing", () => {
     expect(readClaudeModelCatalog({ HOME: join(tmpdir(), "omb-claude-missing-home") })).toEqual(STATIC_CLAUDE_MODELS);
     expect(STATIC_CLAUDE_MODELS.options).toEqual(expect.arrayContaining([
-      { id: "claude-fable-5-2", label: "Claude Fable 5.2", contextWindow: 1_000_000 },
-      { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
-      { id: "claude-fable-5", label: "Claude Fable 5" },
+      { id: "claude-fable-5-2", label: "Claude Fable 5.2", contextWindow: 1_000_000, effortLevels: ["low", "medium", "high", "xhigh", "max"] },
+      { id: "claude-fable-5-1", label: "Claude Fable 5.1", effortLevels: ["low", "medium", "high", "xhigh", "max"] },
+      { id: "claude-fable-5", label: "Claude Fable 5", effortLevels: ["low", "medium", "high", "xhigh", "max"] },
     ]));
     const ids = STATIC_CLAUDE_MODELS.options.map((option) => option.id);
     expect(STATIC_CLAUDE_MODELS.options[ids.indexOf("claude-opus-5-5")]).toEqual({
       id: "claude-opus-5-5",
       label: "Claude Opus 5.5",
+      effortLevels: ["low", "medium", "high", "xhigh", "max"],
       contextWindow: 1_000_000,
     });
     expect(ids.indexOf("claude-opus-5-5")).toBe(ids.indexOf("claude-opus-5") - 1);
     expect(STATIC_CLAUDE_MODELS.options[ids.indexOf("claude-sonnet-5-5")]).toEqual({
       id: "claude-sonnet-5-5",
       label: "Claude Sonnet 5.5",
+      effortLevels: ["low", "medium", "high", "xhigh", "max"],
       contextWindow: 1_000_000,
     });
     expect(ids.indexOf("claude-sonnet-5-5")).toBe(ids.indexOf("claude-sonnet-5") - 1);
@@ -187,7 +189,7 @@ describe("ClaudeDriver catalog", () => {
     try {
       await instance.startupModelRefresh;
       const haiku = instance.models.options.filter((option) => option.id === "claude-haiku-5-5");
-      expect(haiku).toEqual([{ id: "claude-haiku-5-5", label: "Claude Haiku 5.5", contextWindow: 1_000_000 }]);
+      expect(haiku).toEqual([{ id: "claude-haiku-5-5", label: "Claude Haiku 5.5", contextWindow: 1_000_000, effortLevels: ["low", "medium", "high", "xhigh", "max"] }]);
       expect(instance.models.options.some((option) => option.id === "claude-haiku-4-5")).toBe(true);
       expect(instance.models.default).toBe("claude-sonnet-5");
       expect(readStartupModelCache(instanceId)?.options).toContainEqual(haiku[0]);

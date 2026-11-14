@@ -177,7 +177,7 @@ describe("Auto rooms ask the decision model who answers", { timeout: 90_000 }, (
 
   it("reports only booleans in the config, and new rooms default to Auto", async () => {
     const config = await api("GET", "/api/config");
-    expect(config.body.decider).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
+    expect(config.body.decider).toEqual({ turnEffortConfigured: true, provider: "jev", configured: true, enabled: true, jobs: { turnEffort: false, roomRouting: true } });
     expect(config.text).not.toContain(KEY);
 
     for (const name of ["Maya", "Theo", "Ravi"]) {
@@ -301,7 +301,7 @@ describe("Auto rooms ask the decision model who answers", { timeout: 90_000 }, (
     // the desktop's path: the key goes to its encrypted store, config.json keeps an empty placeholder
     const saved = await api("PUT", "/api/config?secretStorage=external", { decider: { key: "tsk_new_valid_key" } });
     expect(saved.status).toBe(200);
-    expect(saved.body.decider).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
+    expect(saved.body.decider).toEqual({ turnEffortConfigured: true, provider: "jev", configured: true, enabled: true, jobs: { turnEffort: false, roomRouting: true } });
     expect(keyChecks().at(-1)?.auth).toBe("Bearer tsk_new_valid_key");
     expect(saved.text).not.toContain("tsk_new_valid_key");
     const disk = readFileSync(join(data, "config.json"), "utf8");
@@ -377,7 +377,7 @@ describe("Auto rooms ask the decision model who answers", { timeout: 90_000 }, (
 
       const saved = await api("PUT", "/api/config?secretStorage=external", { decider: { provider: "openrouter", openrouterModel: MODEL, openrouterKey: OR_KEY } });
       expect(saved.status).toBe(200);
-      expect(saved.body.decider).toEqual({ provider: "openrouter", model: MODEL, api: "chat", configured: true, keySource: "own", enabled: true, jobs: { roomRouting: true } });
+      expect(saved.body.decider).toEqual({ turnEffortConfigured: true, provider: "openrouter", model: MODEL, api: "chat", configured: true, keySource: "own", enabled: true, jobs: { turnEffort: false, roomRouting: true } });
       expect(saved.text).not.toContain(OR_KEY);
       const check = openrouterRequests.at(-1)!;
       expect(check.auth).toBe(`Bearer ${OR_KEY}`);
@@ -442,7 +442,7 @@ describe("Auto rooms ask the decision model who answers", { timeout: 90_000 }, (
       const keyed = await api("PUT", "/api/config", { openrouter: { key: SHARED } });
       expect(keyed.status).toBe(200);
       // OpenRouter stays the chosen provider in Settings, still with no key of its own.
-      expect(keyed.body.decider).toEqual({ provider: "openrouter", model: MODEL, api: "chat", configured: false, enabled: false, jobs: { roomRouting: true } });
+      expect(keyed.body.decider).toEqual({ turnEffortConfigured: false, provider: "openrouter", model: MODEL, api: "chat", configured: false, enabled: false, jobs: { turnEffort: false, roomRouting: true } });
       expect((await api("PUT", "/api/config", { decider: { enabled: true } })).status).toBe(400);
       expect(await api("POST", "/api/decider/test", {})).toMatchObject({ body: { ok: false, reason: "no_key" } });
 

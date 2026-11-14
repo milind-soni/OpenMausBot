@@ -25,6 +25,7 @@ export type BotUpdatePatch = Partial<
     | "fallback"
     | "speakReplies"
     | "replyStyle"
+    | "autoEffort"
     | "voice"
     | "voiceNotes"
     | "voiceNoteEveryReply"

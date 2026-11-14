@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.ts";
+import { assertModelVariantSupported, assertTurnSelectionSupported, memberTurnSelection } from "./member-turn.ts";
 
 describe("memberTurnSelection", () => {
+  it("rejects effort unsupported by the engine without changing variant validation", () => {
+    expect(() => assertTurnSelectionSupported({ effort: "high" }, { effortLevels: ["low"] })).toThrow("not offered");
+    expect(() => assertTurnSelectionSupported({ effort: "high" }, { effortLevels: ["high"] })).not.toThrow();
+    expect(() => assertTurnSelectionSupported({}, {})).not.toThrow();
+    expect(() => assertTurnSelectionSupported({ variant: "low" }, {})).toThrow("saved model variant");
+  });
   it("rejects a saved variant when the returning engine cannot apply it, including room turns", () => {
     expect(() => assertModelVariantSupported({ variant: "low" }, {})).toThrow("saved model variant");
     expect(() => assertModelVariantSupported({ variant: "" }, { modelVariants: true })).toThrow("saved model variant");

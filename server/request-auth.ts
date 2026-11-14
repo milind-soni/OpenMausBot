@@ -540,7 +540,7 @@ export function botProfileSettings(fields: Record<string, unknown>): Record<stri
  * the team's connected apps and MCP servers it uses. Never what it may do on its computer, where it runs, its department
  * or whom it answers to or directs: those stay an admin's. */
 const EDITOR_BOT_PATCH_FIELDS: ReadonlySet<string> = new Set([
-  ...BOT_PROFILE_SETTINGS, "threadId", "composio", "connectorTools", "connectorScopes", "mcpServers",
+  ...BOT_PROFILE_SETTINGS, "threadId", "composio", "connectorTools", "connectorScopes", "mcpServers", "autoEffort",
 ]);
 /** A member who can only view a bot marks it read, nothing else. */
 const VIEWER_BOT_PATCH_FIELDS: ReadonlySet<string> = new Set(["unread"]);

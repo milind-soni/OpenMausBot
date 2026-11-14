@@ -39,13 +39,12 @@ import { threadsOnOwnModel } from "../../shared/thread-model";
 import { ThreadModelsLine } from "./ThreadModelsLine";
 import { USAGE_WARN_WIDENS, UsageBars, UsageMenuRows } from "./EngineUsage";
 import { Select } from "./Select";
+import { effortLabel } from "./effort-label";
 
 const COMPACT_MODEL_COUNT = 5;
 
 
-export function effortLabel(level: EffortLevel): string {
-  return t(`model.effort.${level}` as Parameters<typeof t>[0]);
-}
+export { effortLabel } from "./effort-label";
 
 /**
  * Default (undefined) sends nothing and lets the engine decide; `none` is a level the engine is told to use. Only pi

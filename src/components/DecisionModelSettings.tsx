@@ -159,6 +159,7 @@ export function DecisionModelSettings() {
   const ownKey = configured && !included && !usingShared;
   const enabled = decider?.enabled ?? false;
   const roomRouting = decider?.jobs.roomRouting ?? true;
+  const turnEffort = decider?.jobs.turnEffort === true;
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -421,7 +422,11 @@ export function DecisionModelSettings() {
               className="cursor-pointer"
             />
           </SettingRow>
-          {/* Jobs that aren't built yet are not listed: a row nobody can use is noise (§6.5 Not applicable). */}
+          <SettingRow title={t("decider.jobs.turnEffort")} subtitle={t(decider?.turnEffortConfigured ? "decider.jobs.turnEffortDetail" : "decider.jobs.turnEffortKey")}>
+            <Switch data-testid="decider-job-turnEffort" aria-label={t("decider.jobs.turnEffort")}
+              checked={turnEffort} disabled={switching || (!turnEffort && (!enabled || !decider?.turnEffortConfigured))}
+              onClick={() => void patch({ jobs: { turnEffort: !turnEffort } })} className="cursor-pointer" />
+          </SettingRow>
         </SettingsRows>
       </SettingsGroup>
     </>
