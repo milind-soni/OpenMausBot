@@ -135,16 +135,29 @@ export function appReportBody(report: McpAppReport, maxBytes = APP_REPORT_MAX_BY
   smaller = { ...smaller, result: { ...result, content: texts } };
   body = JSON.stringify(smaller);
   if (bytes(body) <= maxBytes) return body;
-  const over = bytes(body) - maxBytes;
-  const total = texts.reduce((sum, block) => sum + bytes(block.text), 0);
-  if (total <= over) return null;
-  // JSON escaping can make a character cost more than its UTF-8 bytes, so shrink until it fits.
-  for (let keep = (total - over) / total; keep > 0.01; keep *= 0.8) {
-    const clipped = texts.map((block) => ({ type: "text" as const, text: `${block.text.slice(0, Math.floor(block.text.length * keep))}…` }));
-    body = JSON.stringify({ ...smaller, result: { ...result, content: clipped } });
-    if (bytes(body) <= maxBytes) return body;
+  const longest = texts.reduce((max, block) => Math.max(max, block.text.length), 0);
+  const clip = (keep: number) => {
+    const clipped = texts.map((block) => {
+      let end = Math.floor(block.text.length * keep / (longest || 1));
+      // Keeping whole characters makes the encoded prefix size monotone.
+      if (end > 0 && end < block.text.length && /[\ud800-\udbff]/.test(block.text[end - 1]!) && /[\udc00-\udfff]/.test(block.text[end]!)) end--;
+      return { type: "text" as const, text: `${block.text.slice(0, end)}…` };
+    });
+    return JSON.stringify({ ...smaller, result: { ...result, content: clipped } });
+  };
+  body = clip(0);
+  if (bytes(body) > maxBytes) return null;
+  let low = 0;
+  let high = longest;
+  while (low < high) {
+    const keep = Math.ceil((low + high) / 2);
+    const candidate = clip(keep);
+    if (bytes(candidate) <= maxBytes) {
+      low = keep;
+      body = candidate;
+    } else high = keep - 1;
   }
-  return null;
+  return body;
 }
 
 export function postAppReport(mount: Pick<AppMount, "harnessUrl" | "token">, body: string, log: (line: string) => void): Promise<void> {
