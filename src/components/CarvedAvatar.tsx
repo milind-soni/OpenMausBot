@@ -9,6 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
+import { avatarMarks, type AvatarKind } from "@/lib/avatar-marks";
 import { CARVED_BODIES, type CarvedBody, type CarvedBodyId } from "../../shared/carved-bodies";
 import type { CursorAvatarHandle } from "./CursorAvatar";
 import { mascotClock, usePrefersReducedMotion } from "./mascot-clock";
@@ -154,10 +155,11 @@ export type CarvedAvatarProps = {
   trackPointer?: boolean;
   animated?: boolean;
   label?: string;
+  kind?: AvatarKind;
 };
 
 function CarvedAvatarComponent(
-  { body: bodyId, color, faceColor, size = 44, state = "idle", motion = "none", motionKey = 0, gaze, trackPointer = true, animated = true, label }: CarvedAvatarProps,
+  { body: bodyId, color, faceColor, size = 44, state = "idle", motion = "none", motionKey = 0, gaze, trackPointer = true, animated = true, label, kind }: CarvedAvatarProps,
   ref: React.Ref<CursorAvatarHandle>,
 ) {
   const body = CARVED_BODIES[bodyId];
@@ -270,6 +272,7 @@ function CarvedAvatarComponent(
   const resolve = (fill: string) => (fill === "body" ? fills.body : fill === "accent" ? fills.accent : fill);
   return (
     <span
+      {...avatarMarks(kind, "mascot")}
       className="inline-flex shrink-0"
       onPointerMove={trackPointer && live ? onPointerMove : undefined}
       onPointerLeave={trackPointer && live ? onPointerLeave : undefined}
