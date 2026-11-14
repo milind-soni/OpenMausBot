@@ -269,7 +269,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         const name = message.role === "bot" && !botAttachment && !folderEntry && (code === "outside_workspace" || status === 404)
           ? referencedFileName(href)
           : null;
-        const copy = name ? deliveredCopy(store.messagesFor(threadId), message, name) : null;
+        const copy = name ? deliveredCopy(store.messagesFor(threadId), message, name, href) : null;
         if (copy) {
           file = await openMessageFile(copy.path, [ATTACHMENTS_DIR], maxBytes);
           downloadName = copy.name;
