@@ -20,7 +20,7 @@ import {
 import type { BotSettingsSection } from "@/state/store";
 import type { LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
-import type { BotApps } from "./useBotApps";
+import type { BotApps, BotAppsState } from "./useBotApps";
 
 export const BOT_SECTIONS: Array<{
   id: BotSettingsSection;
@@ -64,6 +64,11 @@ export function sectionMatches(entry: BotSectionEntry, query: string, appNames: 
   const apps = entry.id === "access" ? appNames : [];
   return [entry.label, sectionLabel(entry), ...entry.keywords, ...headings, ...apps]
     .some((part) => part.toLowerCase().includes(query));
+}
+
+/** App names come from the connector inventory and the Email lookup; search keeps looking until both have answered. */
+export function appSearchPhase(apps: Pick<BotAppsState, "phase" | "emailSettled">): BotApps["phase"] {
+  return apps.emailSettled ? apps.phase : "loading";
 }
 
 /** The note shown when no section matches. Until the bot's connected apps have loaded, an app name may still match. */

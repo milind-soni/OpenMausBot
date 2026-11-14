@@ -4,7 +4,7 @@ import { ChevronDown, Search, X } from "lucide-react";
 import { useStore, type Bot, type BotSettingsSection } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "./DesktopCapabilities";
-import { BOT_SECTIONS, searchEmptyText, sectionLabel, sectionMatches } from "./bot-settings/sections";
+import { BOT_SECTIONS, appSearchPhase, searchEmptyText, sectionLabel, sectionMatches } from "./bot-settings/sections";
 import { useBotApps } from "./bot-settings/useBotApps";
 import { useBotSettingsDerived } from "./bot-settings/useBotSettingsDerived";
 import { OverviewSection } from "./bot-settings/OverviewSection";
@@ -224,7 +224,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {visibleSections.length === 0 && (
             <div className="px-4 py-4 text-[13px] leading-relaxed text-ink-secondary">
-              {searchEmptyText(query.trim(), searchApps.phase)}
+              {searchEmptyText(query.trim(), appSearchPhase(searchApps))}
             </div>
           )}
           {sections.map((entry) => {

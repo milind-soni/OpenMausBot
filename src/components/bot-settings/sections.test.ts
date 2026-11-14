@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { setLocale } from "@/lib/i18n";
-import { BOT_SECTIONS, searchEmptyText, sectionMatches } from "./sections";
+import { BOT_SECTIONS, appSearchPhase, searchEmptyText, sectionMatches } from "./sections";
 
 const section = (id: string) => {
   const entry = BOT_SECTIONS.find((candidate) => candidate.id === id);
@@ -38,5 +38,12 @@ describe("bot settings search", () => {
     expect(searchEmptyText("github", "loading")).toBe("Looking through connected apps…");
     expect(searchEmptyText("github", "ready")).toBe("Nothing matches “github”");
     expect(searchEmptyText("github", "unknown")).toBe("Nothing matches “github”");
+  });
+
+  it("keeps looking until the Email lookup has answered too", () => {
+    expect(appSearchPhase({ phase: "ready", emailSettled: false })).toBe("loading");
+    expect(appSearchPhase({ phase: "unknown", emailSettled: false })).toBe("loading");
+    expect(appSearchPhase({ phase: "ready", emailSettled: true })).toBe("ready");
+    expect(appSearchPhase({ phase: "loading", emailSettled: true })).toBe("loading");
   });
 });
