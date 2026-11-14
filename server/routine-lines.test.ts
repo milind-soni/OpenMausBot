@@ -86,4 +86,10 @@ describe("clipRunOutput", () => {
     expect(cut.length).toBe(2_000);
     expect(cut.startsWith("NEEDS INPUT:\ndefault: wait")).toBe(true);
   });
+
+  it("keeps the default line of a bare NEEDS INPUT line when blank lines separate them", () => {
+    const cut = clipRunOutput(`${long}\nNEEDS INPUT:\n${"\n".repeat(2_000)}default: ${"wait ".repeat(500)}`, 2_000);
+    expect(cut.length).toBe(2_000);
+    expect(cut.startsWith("NEEDS INPUT:\ndefault: wait")).toBe(true);
+  });
 });
