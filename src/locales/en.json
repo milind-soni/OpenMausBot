@@ -434,6 +434,7 @@
   "server.teammates.briefCovers.one": "{bot}'s recent-work brief covers {count} private chat with you",
   "server.teammates.briefCovers.many": "{bot}'s recent-work brief covers {count} private chats with you",
   "server.teammates.closedBy": "Closed by @{bot}",
+  "server.peerResend.failed": "Could not resend this to the backup AI: {detail}",
   "server.teammates.sendFailed": "Send failed — {detail}",
   "server.teammates.resultWithheld": "Result withheld: {problem}",
   "server.teammates.replied": "{bot} replied",

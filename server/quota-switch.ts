@@ -71,6 +71,13 @@ export const NOT_NOW = "Not now";
 
 const ENDED: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
 
+/** Why a failed turn stopped, when it was its AI's usage limit or a sign-out. A tool call's failure names the tool,
+ * never the engine's own limit, whatever its words. */
+export function turnLimitScope(event: SettledTurn, flags: { limit?: TakeoverScope } | undefined, cause: string | undefined): TakeoverScope | undefined {
+  return signedOutStop(event.stopReason, cause) ? "signed-out"
+    : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
+}
+
 /** On unless OMB_QUOTA_SWITCH=0: a limited AI's work carries on with another AI by itself. Off, only the backups
  * Automatic recovery names take over, as before. */
 export function quotaSwitchEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -201,10 +208,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
       // Read before any await: the record is this turn's only now.
       const request = deps.request(threadId);
       const flags = deps.turnStops.read?.(threadId, event.turnId)?.flags;
-      const cause = deps.turnStops.failureCause(event);
-      // A tool call's failure names the tool, never the engine's own limit, whatever its words.
-      const scope: TakeoverScope | undefined = signedOutStop(event.stopReason, cause) ? "signed-out"
-        : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
+      const scope = turnLimitScope(event, flags, deps.turnStops.failureCause(event));
       if (!scope) return null;
       const thread = store.projectBotForTask(bot.id, threadId) ?? bot;
       const from = thread.modelSelection;
