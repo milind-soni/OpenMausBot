@@ -121,7 +121,7 @@ export class EmailStore {
     const kept = this.list().filter((account) => !same(account.address, address));
     if (kept.length === this.list().length) return false;
     if (kept.length) this.write(kept);
-    else { this.cache = EMPTY; rmSync(this.file, { force: true }); }
+    else { rmSync(this.file, { force: true }); this.cache = EMPTY; }
     return true;
   }
 
