@@ -8,9 +8,8 @@ import { decodeBase64, encodeBase64, type GeminiSocket } from "./live-call-gemin
 
 /** The agent is set up to answer with 16 kHz PCM; the first message names the format. */
 const DEFAULT_RATE = 16_000;
-/** An agent set up before `agent_response_complete` was sent ends its turn with a pause in its audio this long. */
-const IDLE_GRACE_MS = 300;
-/** Ends the agent's turn when its audio has stopped this long but no `agent_response_complete` came after it. */
+/** Ends the agent's turn when its audio has stopped this long but no `agent_response_complete` came after it, so a lost
+ * event cannot hold the bot's words back for the rest of the call. */
 const TURN_END_WAIT_MS = 3_000;
 
 export interface ElevenLabsSessionDeps {
@@ -32,6 +31,7 @@ type ServerMessage = {
   interruption_event?: { event_id?: number };
   user_transcription_event?: { user_transcript?: string };
   agent_response_event?: { agent_response?: string };
+  agent_response_correction_event?: { corrected_agent_response?: string };
   ping_event?: { event_id?: number };
   client_tool_call?: { tool_name?: string; tool_call_id?: string; parameters?: Record<string, unknown> };
 };
@@ -63,10 +63,10 @@ class ElevenLabsLiveSession implements FishAgentSession {
   private segment = 0;
   private speaking = false;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Audio came after the last `agent_response_complete`. */
+  /** Audio came after the last `agent_response_complete`: the agent's turn goes on through a pause in its audio. */
   private answering = false;
-  /** ElevenLabs sends `agent_response_complete`, so a pause in the audio no longer ends the agent's turn. */
-  private turnEnds = false;
+  /** The caption of the agent's latest answer. */
+  private answerSegment = "";
   /** Audio of an interrupted answer still on its way is not played. */
   private interruptedAt = -1;
 
@@ -203,11 +203,19 @@ class ElevenLabsLiveSession implements FishAgentSession {
       }
       case "agent_response": {
         const text = message.agent_response_event?.agent_response?.trim();
-        if (text) this.options.callbacks.onAgentResponseDelta({ segmentId: `a${this.segment}`, text });
+        if (!text) return;
+        this.answerSegment = `a${this.segment}`;
+        this.options.callbacks.onAgentResponseDelta({ segmentId: this.answerSegment, text });
+        return;
+      }
+      case "agent_response_correction": {
+        // After an interruption ElevenLabs cuts the answer down to what the person heard of it; the person's words may
+        // already be captioned after it, so the correction goes to the answer's own caption.
+        const text = message.agent_response_correction_event?.corrected_agent_response?.trim();
+        if (text && this.answerSegment) this.options.callbacks.onAgentResponseDelta({ segmentId: this.answerSegment, text });
         return;
       }
       case "agent_response_complete":
-        this.turnEnds = true;
         this.answering = false;
         if (this.audio?.idle() !== false) this.playbackPaused();
         return;
@@ -224,11 +232,11 @@ class ElevenLabsLiveSession implements FishAgentSession {
 
   private playbackPaused(): void {
     this.clearIdleTimer();
-    if (this.turnEnds && !this.answering) return this.playbackIdle();
+    if (!this.answering) return this.playbackIdle();
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
       this.playbackIdle();
-    }, this.turnEnds ? TURN_END_WAIT_MS : IDLE_GRACE_MS);
+    }, TURN_END_WAIT_MS);
   }
 
   private clearIdleTimer(): void {

@@ -77,8 +77,6 @@ function harness({ denied = false, held = false } = {}) {
 
 const AUDIO = btoa(String.fromCharCode(1, 0, 2, 0));
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
-/** Longer than the pause that ends the agent's turn. */
-const pause = () => new Promise((resolve) => setTimeout(resolve, 350));
 
 describe("an ElevenLabs Live session", () => {
   it("opens the signed URL, sends the call's instructions first, and joins once ElevenLabs and the microphone are ready", async () => {
@@ -150,7 +148,7 @@ describe("an ElevenLabs Live session", () => {
     expect(t.audio().played).toEqual([4]);
     expect(t.callbacks.onModeChange).toHaveBeenLastCalledWith("speaking");
     t.audio().finish();
-    await pause();
+    t.socket().receive({ type: "agent_response_complete" });
     expect(t.callbacks.onModeChange).toHaveBeenLastCalledWith("listening");
     t.socket().receive({ type: "audio", audio_event: { audio_base_64: AUDIO, event_id: 2 } });
     t.socket().receive({ type: "interruption", interruption_event: { event_id: 3 } });
@@ -163,20 +161,40 @@ describe("an ElevenLabs Live session", () => {
     expect(t.audio().played).toEqual([4, 4, 4]);
   });
 
-  it("keeps speaking through a short gap between the agent's audio chunks", async () => {
+  it("keeps speaking through a gap in the agent's first answer, before any agent_response_complete", async () => {
     const t = harness();
     const session = await t.connect();
-    t.socket().receive({ type: "audio", audio_event: { audio_base_64: AUDIO, event_id: 1 } });
-    session.sendUserMessage("[OpenMausBot] You have two new emails.");
-    t.audio().finish();
-    t.socket().receive({ type: "audio", audio_event: { audio_base_64: AUDIO, event_id: 1 } });
-    await pause();
-    expect(t.callbacks.onModeChange).not.toHaveBeenCalledWith("listening");
-    expect(t.socket().sent.map((m) => m.type)).not.toContain("user_message");
-    t.audio().finish();
-    await pause();
-    expect(t.callbacks.onModeChange).toHaveBeenLastCalledWith("listening");
-    expect(t.socket().sent.at(-1)).toEqual({ type: "user_message", text: "[OpenMausBot] You have two new emails." });
+    vi.useFakeTimers();
+    try {
+      t.socket().receive({ type: "audio", audio_event: { audio_base_64: AUDIO, event_id: 1 } });
+      session.sendUserMessage("[OpenMausBot] You have two new emails.");
+      t.audio().finish();
+      vi.advanceTimersByTime(1_000);
+      t.socket().receive({ type: "audio", audio_event: { audio_base_64: AUDIO, event_id: 1 } });
+      t.audio().finish();
+      vi.advanceTimersByTime(2_000);
+      expect(t.callbacks.onModeChange).not.toHaveBeenCalledWith("listening");
+      expect(t.socket().sent.map((m) => m.type)).not.toContain("user_message");
+      t.socket().receive({ type: "agent_response_complete" });
+      expect(t.callbacks.onModeChange).toHaveBeenLastCalledWith("listening");
+      expect(t.socket().sent.at(-1)).toEqual({ type: "user_message", text: "[OpenMausBot] You have two new emails." });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("corrects the agent's caption to what the person heard when they talk over it", async () => {
+    const t = harness();
+    await t.connect();
+    const full = "You have two emails, one from the bank and one from the school.";
+    t.socket().receive({ type: "agent_response", agent_response_event: { agent_response: full } });
+    t.socket().receive({ type: "interruption", interruption_event: { event_id: 2 } });
+    t.socket().receive({ type: "user_transcript", user_transcription_event: { user_transcript: "stop" } });
+    t.socket().receive({
+      type: "agent_response_correction",
+      agent_response_correction_event: { original_agent_response: full, corrected_agent_response: "You have two emails," },
+    });
+    expect(t.callbacks.onAgentResponseDelta).toHaveBeenLastCalledWith({ segmentId: "a0", text: "You have two emails," });
   });
 
   it("ends the agent's turn at agent_response_complete once ElevenLabs sends it, not at a long gap in its audio", async () => {
@@ -237,7 +255,7 @@ describe("an ElevenLabs Live session", () => {
     session.sendUserMessage("[OpenMausBot] still looking", { audio: false });
     expect(t.socket().sent.at(-1)).not.toHaveProperty("type", "contextual_update");
     t.audio().finish();
-    await pause();
+    t.socket().receive({ type: "agent_response_complete" });
     expect(t.socket().sent.slice(-2)).toEqual([
       { type: "user_message", text: "[OpenMausBot] You have two new emails." },
       { type: "contextual_update", text: "[OpenMausBot] still looking" },
