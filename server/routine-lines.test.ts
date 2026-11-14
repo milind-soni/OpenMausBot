@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import englishCatalog from "../src/locales/en.json" with { type: "json" };
-import { codedLine, fittedLine, ROUTINE_LINE, routineLine } from "./routine-lines.ts";
+import { clipRunOutput, codedLine, fittedLine, ROUTINE_LINE, routineLine } from "./routine-lines.ts";
 
 it("the catalog's routine lines are exactly the ones the server stores", () => {
   const catalog = Object.fromEntries(Object.entries(englishCatalog).filter(([key]) => key.startsWith("routines.server.")));
@@ -46,5 +46,32 @@ describe("a long line", () => {
     expect(codedLine("error", "routines.server.stillBusy", { minutes: 60, failure: "busy" })).toEqual({
       text: "Did not start: still busy after 60 minutes (busy)", codes: { errorCode: "routines.server.stillBusy", errorParams: { minutes: 60, failure: "busy" } },
     });
+  });
+});
+
+describe("clipRunOutput", () => {
+  const long = "Checked everything. ".repeat(200);
+
+  it("leaves a short reply alone and cuts a long one with no closing question", () => {
+    expect(clipRunOutput("Short.\nNEEDS INPUT: Go?", 2_000)).toBe("Short.\nNEEDS INPUT: Go?");
+    expect(clipRunOutput(long, 2_000)).toBe(long.slice(0, 2_000));
+  });
+
+  it("keeps a closing question, and its default line, whole at the end", () => {
+    const clipped = clipRunOutput(`${long}\nNEEDS INPUT: Send it?`, 2_000);
+    expect(clipped.length).toBeLessThanOrEqual(2_000);
+    expect(clipped.endsWith("\n…\nNEEDS INPUT: Send it?")).toBe(true);
+    expect(clipRunOutput(`${long}\nNEEDS INPUT: Send it?\n\ndefault: wait`, 2_000).endsWith("NEEDS INPUT: Send it?\n\ndefault: wait")).toBe(true);
+  });
+
+  it("does not move a question from the middle to the end", () => {
+    const text = `NEEDS INPUT: old?\n${long}`;
+    expect(clipRunOutput(text, 2_000)).toBe(text.slice(0, 2_000));
+    expect(clipRunOutput(`${long}\nNEEDS INPUT: Go?\nMore text after it.`, 2_000)).toBe(`${long}\nNEEDS INPUT: Go?\nMore text after it.`.slice(0, 2_000));
+  });
+
+  it("cuts plainly when the question alone is too long to keep", () => {
+    const text = `${long}\nNEEDS INPUT: ${"why ".repeat(400)}?`;
+    expect(clipRunOutput(text, 2_000)).toBe(text.slice(0, 2_000));
   });
 });

@@ -2950,6 +2950,22 @@ describe("RoutineManager", () => {
     });
   });
 
+  it("keeps a long reply's closing question in the stored output", async () => {
+    const h = harness();
+    const routine = h.manager.create({ name: "Inbox", prompt: "Check the inbox", botId: "maus-3", schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() } });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    const base = { eventId: "event-long", provider: "fake", threadId: "thread-1", createdAt: new Date(h.manager.listRuns()[0]!.startedAt!).toISOString() };
+    h.manager.handleRuntimeEvent({ ...base, type: "item.completed", itemType: "assistant_text", text: `${"Found a lot. ".repeat(300)}\nNEEDS INPUT: Send the draft?` });
+    h.manager.handleRuntimeEvent({ ...base, type: "turn.completed", ok: true });
+
+    const run = h.manager.listRuns()[0]!;
+    expect(run.status).toBe("completed");
+    expect(run.output!.length).toBeLessThanOrEqual(2_000);
+    expect(run.output).toMatch(/^Found a lot\./);
+    expect(run.output).toMatch(/\nNEEDS INPUT: Send the draft\?$/);
+  });
+
   it("ignores intermediate provider completions until the room goal reports its outcome", async () => {
     const h = harness();
     const routine = h.manager.create({

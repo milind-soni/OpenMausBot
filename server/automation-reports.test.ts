@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { ROUTINE_HANDOFF_WAIT, type RoutineRunReport } from "../shared/routines.ts";
 import "./server-line-packs.ts";
+import { clipRunOutput } from "./routine-lines.ts";
 import { automationContextText, createAutomationReports, newestAutomationLines, readRunReply, recoveredText, routineRunNeedsReview } from "./automation-reports.ts";
 import { DATA_DIR } from "./config.ts";
 import type { RoutineRun } from "./routines.ts";
@@ -42,6 +43,7 @@ describe("routineRunNeedsReview", () => {
     expect(routineRunNeedsReview({ status: "waiting", attention: "Approve: Bash" })).toBe(true);
     expect(routineRunNeedsReview({ status: "waiting", attention: ROUTINE_HANDOFF_WAIT })).toBe(false);
     expect(routineRunNeedsReview({ status: "running" })).toBe(false);
+    expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(`${"Long report. ".repeat(300)}\nNEEDS INPUT: Send it?`, 2_000) })).toBe(true);
     expect(routineRunNeedsReview({ status: "cancelled" })).toBe(false);
   });
 });
