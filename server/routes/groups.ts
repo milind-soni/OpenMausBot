@@ -1,4 +1,4 @@
-import type { WireGroup } from "../../shared/wire.ts";
+import type { RoomCreateResponse, RoomUpdateResponse, WireGroup } from "../../shared/wire.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import type { VisibleSet } from "../bot-visibility.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -55,7 +55,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): RouteHandler {
       const group = createChannel(body);
       // On a Cloud home whoever opens a room names it (cloudThreadRefusal).
       if (CLOUD_HOME && auth.kind === "session") threadStarters.set(group.threadId, actorKey(auth));
-      return json(res, 201, { group: { ...own(publicGroupState(group)), messages: [] } });
+      return json(res, 201, { group: { ...own(publicGroupState(group)), messages: [] } } satisfies RoomCreateResponse);
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/setup$/);
     if (m && method === "PATCH") {
@@ -67,7 +67,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): RouteHandler {
         return json(res, 400, { error: "action must be complete or skip" });
       }
       if (group.setupCompletedAt != null || group.setupSkippedAt != null) {
-        return json(res, 200, { group: own(publicGroupState(group)) });
+        return json(res, 200, { group: own(publicGroupState(group)) } satisfies RoomUpdateResponse);
       }
       if (store.messagesFor(group.threadId).length > 0) {
         return json(res, 409, { error: "room setup must be finished before the first message" });
@@ -90,7 +90,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): RouteHandler {
       }
       const updated = store.patchGroup(m[1], patch);
       if (!updated) return json(res, 404, { error: "no such room" });
-      return json(res, 200, { group: own(publicGroupState(updated)) });
+      return json(res, 200, { group: own(publicGroupState(updated)) } satisfies RoomUpdateResponse);
     }
     return PASS;
   };
