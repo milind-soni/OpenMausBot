@@ -7,6 +7,8 @@ const MIC_CHUNK = MIC_RATE / 10;
 export interface GeminiAudio {
   /** Opens the microphone; rejects as getUserMedia does, e.g. with NotAllowedError. */
   startMic(onChunk: (pcm: ArrayBuffer) => void): Promise<void>;
+  /** Drops microphone audio not yet sent as a chunk, e.g. what was captured while muted. */
+  dropMic(): void;
   play(pcm: ArrayBuffer): void;
   /** Stops what is playing and queued, when the person talks over the agent. */
   flush(): void;
@@ -53,6 +55,11 @@ export class MicResampler {
     }
     return chunks;
   }
+
+  /** Forgets the samples not yet sent as a chunk. */
+  drop(): void {
+    this.pending = [];
+  }
 }
 
 export function pcm16ToFloat(pcm: ArrayBuffer): Float32Array<ArrayBuffer> {
@@ -66,6 +73,7 @@ export function browserGeminiAudio(): GeminiAudio {
   let context: AudioContext | null = new AudioContext();
   let stream: MediaStream | null = null;
   let node: AudioWorkletNode | null = null;
+  let resampler: MicResampler | null = null;
   const playing = new Set<AudioBufferSourceNode>();
   let nextAt = 0;
   const audio: GeminiAudio = {
@@ -81,10 +89,14 @@ export function browserGeminiAudio(): GeminiAudio {
         URL.revokeObjectURL(url);
       }
       if (!context) return;
-      const resampler = new MicResampler(context.sampleRate);
+      const mic = new MicResampler(context.sampleRate);
+      resampler = mic;
       node = new AudioWorkletNode(context, "omb-mic");
-      node.port.onmessage = (event: MessageEvent<Float32Array>) => resampler.push(event.data).forEach(onChunk);
+      node.port.onmessage = (event: MessageEvent<Float32Array>) => mic.push(event.data).forEach(onChunk);
       context.createMediaStreamSource(stream).connect(node);
+    },
+    dropMic() {
+      resampler?.drop();
     },
     play(pcm) {
       if (!context) return;

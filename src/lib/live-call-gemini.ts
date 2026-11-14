@@ -3,11 +3,18 @@
 // the setup sent here only names the model and the session to resume.
 import type { LiveGeminiSession } from "../../shared/wire";
 import { browserGeminiAudio, type GeminiAudio } from "./live-call-gemini-audio";
-import type { FishAgentSession, FishSessionOptions, FishSessionStarter } from "./live-call-fish";
+import { FISH_UPDATE_PREFIX, type FishAgentSession, type FishSessionOptions, type FishSessionStarter } from "./live-call-fish";
 
 const MIC_MIME = "audio/pcm;rate=16000";
 /** Gemini ends each connection after about 10 minutes; the call goes on over a new one, this many times at most. */
 const MAX_RECONNECTS = 12;
+/** Gemini can call a tool before it sends what it heard; the call waits this long after the last words heard... */
+const HEARD_QUIET_MS = 400;
+/** ...and this long at most, since a call can come without words, e.g. on the bot's update. */
+const HEARD_WAIT_MS = 2_000;
+
+type ToolCall = { id?: string; name?: string; args?: Record<string, unknown> };
+type Outgoing = { toolResponse: unknown; callId: string; text: string } | { clientContent: unknown };
 
 /** The part of the browser WebSocket a call uses. */
 export interface GeminiSocket {
@@ -40,7 +47,7 @@ type ServerMessage = {
     interrupted?: boolean;
     turnComplete?: boolean;
   };
-  toolCall?: { functionCalls?: Array<{ id?: string; name?: string; args?: Record<string, unknown> }> };
+  toolCall?: { functionCalls?: ToolCall[] };
   goAway?: unknown;
   sessionResumptionUpdate?: { newHandle?: string; resumable?: boolean };
 };
@@ -80,13 +87,23 @@ class GeminiLiveSession implements FishAgentSession {
   private linked = false;
   /** Tool answers and the bot's words, in order, held while there is no connection or, for words, while the agent speaks:
    * client content interrupts what Gemini is saying. */
-  private outbox: Array<{ toolResponse: unknown } | { clientContent: unknown }> = [];
+  private outbox: Outgoing[] = [];
+  /** Tool calls made since the last resumption handle: a session resumed with that handle has never seen them. */
+  private callsAfterHandle = new Set<string>();
+  /** Tool calls the session on the current connection does not know; their answers go to Gemini as the bot's words. */
+  private unknownCalls = new Set<string>();
   private segment = 0;
   private heard = "";
   /** What the agent has said this turn: the caption shows the whole turn, Gemini sends it in pieces. */
   private said = "";
   private speaking = false;
   private turnDone = false;
+  /** What the person said for the current turn has been captioned as final. */
+  private heardThisTurn = false;
+  /** Tool calls waiting for what the person said, so the harness gets the request before the delegation. */
+  private heldCalls: ToolCall[] = [];
+  private heldQuiet: ReturnType<typeof setTimeout> | null = null;
+  private heldLimit: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: FishSessionOptions<LiveGeminiSession>, deps: GeminiSessionDeps) {
     this.options = options;
@@ -120,6 +137,8 @@ class GeminiLiveSession implements FishAgentSession {
 
   async setMicMuted(muted: boolean): Promise<void> {
     if (muted && !this.muted) this.send({ realtimeInput: { audioStreamEnd: true } });
+    // Audio captured while muted that has not made a whole chunk yet is never sent.
+    if (!muted && this.muted) this.audio?.dropMic();
     this.muted = muted;
   }
 
@@ -129,6 +148,7 @@ class GeminiLiveSession implements FishAgentSession {
   }
 
   private shut(): void {
+    this.clearHeldTimers();
     const socket = this.socket;
     this.socket = null;
     if (socket) {
@@ -180,6 +200,7 @@ class GeminiLiveSession implements FishAgentSession {
       this.reconnects += 1;
       this.resumingAfterGoAway = this.wentAway;
       this.wentAway = false;
+      this.forgetCallsAfterHandle();
       this.connect(() => undefined, () => undefined);
       return;
     }
@@ -206,6 +227,10 @@ class GeminiLiveSession implements FishAgentSession {
       if (heard) {
         this.heard += heard;
         this.options.callbacks.onUserTranscript({ segmentId: `s${this.segment}`, text: this.heard, final: false });
+        if (this.heldCalls.length) {
+          if (this.heldQuiet) clearTimeout(this.heldQuiet);
+          this.heldQuiet = setTimeout(() => this.releaseCalls(), HEARD_QUIET_MS);
+        }
       }
       for (const part of content.modelTurn?.parts ?? []) {
         if (!part.inlineData?.data || !part.inlineData.mimeType?.startsWith("audio/")) continue;
@@ -225,12 +250,14 @@ class GeminiLiveSession implements FishAgentSession {
       }
       if (content.interrupted || content.turnComplete) this.said = "";
       if (content.interrupted) {
+        this.heardThisTurn = false;
         this.audio?.flush();
         this.turnDone = true;
         this.playbackIdle();
       }
       if (content.turnComplete) {
         this.finishHeard();
+        this.heardThisTurn = false;
         this.turnDone = true;
         if (this.audio?.idle() !== false) this.playbackIdle();
       }
@@ -238,7 +265,10 @@ class GeminiLiveSession implements FishAgentSession {
     for (const call of message.toolCall?.functionCalls ?? []) this.onToolCall(call);
     if (message.goAway !== undefined) this.wentAway = true;
     const update = message.sessionResumptionUpdate;
-    if (update?.resumable && typeof update.newHandle === "string" && update.newHandle) this.handle = update.newHandle;
+    if (update?.resumable && typeof update.newHandle === "string" && update.newHandle) {
+      this.handle = update.newHandle;
+      this.callsAfterHandle.clear();
+    }
   }
 
   private finishHeard(): void {
@@ -247,6 +277,8 @@ class GeminiLiveSession implements FishAgentSession {
     this.heard = "";
     this.options.callbacks.onUserTranscript({ segmentId: `s${this.segment}`, text, final: true });
     this.segment += 1;
+    this.heardThisTurn = true;
+    this.releaseCalls();
   }
 
   private playbackIdle(): void {
@@ -256,16 +288,53 @@ class GeminiLiveSession implements FishAgentSession {
     this.flush();
   }
 
-  private onToolCall(call: { id?: string; name?: string; args?: Record<string, unknown> }): void {
-    // The harness reads the request from what it heard, so that goes first.
+  private onToolCall(call: ToolCall): void {
+    // The harness reads the request from what it heard, so that goes first; Gemini may send it after the call.
+    this.callsAfterHandle.add(call.id ?? "");
     this.finishHeard();
+    if (this.heardThisTurn && !this.heldCalls.length) return this.runToolCall(call);
+    this.heldCalls.push(call);
+    this.heldLimit ??= setTimeout(() => this.releaseCalls(), HEARD_WAIT_MS);
+  }
+
+  private releaseCalls(): void {
+    if (!this.heldCalls.length) return;
+    const calls = this.heldCalls;
+    this.heldCalls = [];
+    this.clearHeldTimers();
+    this.finishHeard();
+    calls.forEach((call) => this.runToolCall(call));
+  }
+
+  private clearHeldTimers(): void {
+    if (this.heldQuiet) clearTimeout(this.heldQuiet);
+    if (this.heldLimit) clearTimeout(this.heldLimit);
+    this.heldQuiet = null;
+    this.heldLimit = null;
+  }
+
+  private runToolCall(call: ToolCall): void {
+    if (this.ended) return;
     const id = call.id ?? "";
     const name = call.name ?? "";
     const tool = this.options.clientTools[name];
     const answer = tool ? tool(call.args ?? {}, { callId: id }) : Promise.resolve(`There is no tool named ${name}.`);
     void answer.then((result) => {
-      this.post({ toolResponse: { functionResponses: [{ id, name, response: { result: String(result), scheduling: "WHEN_IDLE" } }] } });
+      const text = String(result);
+      this.post({ toolResponse: { functionResponses: [{ id, name, response: { result: text, scheduling: "WHEN_IDLE" } }] }, callId: id, text });
     }, () => undefined);
+  }
+
+  /** On resuming with a handle older than some tool calls, their answers reach Gemini as the bot's words instead. */
+  private forgetCallsAfterHandle(): void {
+    for (const id of this.callsAfterHandle) this.unknownCalls.add(id);
+    this.callsAfterHandle.clear();
+    this.outbox = this.outbox.map((message) => this.forKnownCall(message));
+  }
+
+  private forKnownCall(message: Outgoing): Outgoing {
+    if (!("toolResponse" in message) || !this.unknownCalls.has(message.callId)) return message;
+    return { clientContent: { turns: [{ role: "user", parts: [{ text: `${FISH_UPDATE_PREFIX} ${message.text}` }] }], turnComplete: true } };
   }
 
   private sendAudio(pcm: ArrayBuffer): void {
@@ -274,15 +343,16 @@ class GeminiLiveSession implements FishAgentSession {
   }
 
   /** Sent now, or kept for the next connection and, for the bot's words, for when the agent stops speaking. */
-  private post(message: { toolResponse: unknown } | { clientContent: unknown }): void {
+  private post(message: Outgoing): void {
     if (this.ended) return;
-    this.outbox.push(message);
+    this.outbox.push(this.forKnownCall(message));
     this.flush();
   }
 
   private flush(): void {
     while (this.linked && this.socket?.readyState === 1 && this.outbox.length && !(this.speaking && "clientContent" in this.outbox[0])) {
-      this.send(this.outbox.shift());
+      const message = this.outbox.shift()!;
+      this.send("toolResponse" in message ? { toolResponse: message.toolResponse } : message);
     }
   }
 
