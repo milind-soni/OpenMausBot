@@ -323,6 +323,7 @@ const dumpEnv = Object.fromEntries(
     "GITHUB_TOKEN",
     "COMMAND_CODE_API_KEY",
     "KIRO_API_KEY",
+    "WINDSURF_API_KEY",
   ].flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]] as const)),
 );
 const dumpState: Record<string, unknown> = { argv, env: dumpEnv, pid: process.pid };
