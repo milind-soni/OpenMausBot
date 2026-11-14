@@ -9,7 +9,7 @@ import type { ProviderInstance } from "../../contracts.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import { BUILT_IN_DRIVERS } from "../builtIn.ts";
-import { MistralVibeAgentDriver, resolveMistralVibeModels, vibeSignedIn } from "./mistral-vibe.ts";
+import { MistralVibeAgentDriver, removeMistralVibeSignIn, resolveMistralVibeModels, vibeSignedIn } from "./mistral-vibe.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
 const MODELS = "mistral-medium-3.5,zai-glm-5-3-flash,Mistral Large,Codestral";
@@ -131,5 +131,25 @@ describe("Mistral (Vibe) ACP driver", () => {
     expect(await instance.adapter.respondToRequest("mistral-vibe-permission", ask.requestId!, { behavior: "deny" })).toBe("rejected");
     await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
     expect(readFileSync(answer, "utf8")).toBe("reject");
+  });
+
+  describe("sign-out cleanup of Vibe's fallback .env", () => {
+    it("strips bare and exported MISTRAL_API_KEY lines and keeps unrelated ones", async () => {
+      const home = join(scratch, "vibe-home");
+      mkdirSync(home, { recursive: true });
+      const envFile = join(home, ".env");
+      writeFileSync(envFile, ["ONE=1", "MISTRAL_API_KEY='fixture'", 'export MISTRAL_API_KEY="second"', "TWO=2"].join("\n"));
+      await removeMistralVibeSignIn({ VIBE_HOME: home });
+      expect(readFileSync(envFile, "utf8")).toBe(["ONE=1", "TWO=2"].join("\n"));
+    });
+
+    it("resolves without a .env and rejects when one cannot be rewritten", async () => {
+      const fresh = join(scratch, "no-env-home");
+      mkdirSync(fresh, { recursive: true });
+      await expect(removeMistralVibeSignIn({ VIBE_HOME: fresh })).resolves.toBeUndefined();
+      const blocked = join(scratch, "blocked-env-home");
+      mkdirSync(join(blocked, ".env"), { recursive: true });
+      await expect(removeMistralVibeSignIn({ VIBE_HOME: blocked })).rejects.toThrow();
+    });
   });
 });

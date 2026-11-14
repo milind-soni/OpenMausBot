@@ -557,7 +557,7 @@ function linkChainsEscape(root: string): boolean {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) { if (walk(path)) return true; }
-      else if (entry.isSymbolicLink() && chain(path, readlinkSync(path))) return true;
+      else if (entry.isSymbolicLink() && chain(dirname(path), readlinkSync(path))) return true;
     }
     return false;
   };

@@ -94,13 +94,12 @@ function offeredModels(sessionConfig: unknown): { values: string[]; current?: st
 export async function removeMistralVibeSignIn(env: Record<string, string | undefined>): Promise<void> {
   const home = vibeHome(env);
   try { rmSync(join(home, "whoami_cache.json"), { force: true }); } catch {}
-  try {
-    const envFile = join(home, ".env");
-    if (existsSync(envFile)) {
-      const kept = readFileSync(envFile, { encoding: "utf8" }).split("\n").filter((line) => !/^export ?MISTRAL_API_KEY=/u.test(line));
-      writeFileSync(envFile, kept.join("\n"), { mode: 0o600 });
-    }
-  } catch {}
+  const envFile = join(home, ".env");
+  if (existsSync(envFile)) {
+    // Vibe 3.1.2's fallback store writes the key bare or export-prefixed (vibe/setup/auth/api_key_persistence.py).
+    const kept = readFileSync(envFile, { encoding: "utf8" }).split("\n").filter((line) => !/^(?:export )?MISTRAL_API_KEY=/u.test(line));
+    writeFileSync(envFile, kept.join("\n"), { mode: 0o600 });
+  }
   if (process.platform !== "darwin") return;
   const service = env.VIBE_KEYCHAIN_SERVICE || MISTRAL_VIBE_KEYCHAIN_SERVICE;
   await Promise.all([service, "vibe"].map((name) => new Promise<void>((resolve, reject) => {

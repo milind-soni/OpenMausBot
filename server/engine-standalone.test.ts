@@ -554,6 +554,19 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
     expect(leftovers()).toEqual([]);
   });
 
+  it("resolves a nested link's .. from the link's own folder, not its full path", async () => {
+    // d/up -> ../../outside: measured from d (as the kernel resolves it) the chain leaves the folder;
+    // measured from d/up it would seem to stay inside.
+    const source = mkdtempSync(join(scratch, "tar-deep-chain-"));
+    writeFileSync(join(source, "fake-engine"), script(), { mode: 0o755 });
+    mkdirSync(join(source, "d"), { recursive: true });
+    symlinkSync(join("..", "..", "outside"), join(source, "d", "up"));
+    const file = join(scratch, `deep-chain-${Math.random().toString(36).slice(2)}.tar.gz`);
+    await tar.c({ gzip: true, file, cwd: source, portable: true }, ["fake-engine", "d"]);
+    await expect(install(fixtureRelease({ [standalonePlatformKey()]: serve(readFileSync(file), "tar.gz", "fake-engine", script()) }))).rejects.toThrow(/unsafe/);
+    expect(leftovers()).toEqual([]);
+  });
+
   it("clears what an interrupted install left before it starts", async () => {
     mkdirSync(join(engineDir(), ".staging-old", "deep"), { recursive: true });
     mkdirSync(binDir(), { recursive: true });
