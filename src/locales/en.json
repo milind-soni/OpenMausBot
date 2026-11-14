@@ -3261,6 +3261,8 @@
   "task.collapseNamed": "Collapse {name} threads",
   "task.expandNamed": "Expand {name} threads",
   "task.showAll": "Show all {count} threads",
+  "task.showFewer": "Show fewer threads",
+  "task.pinned": "Pinned",
   "task.bulk.select": "Select threads",
   "task.bulk.done": "Done",
   "task.bulk.selectAll": "Select all",

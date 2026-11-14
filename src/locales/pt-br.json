@@ -3087,6 +3087,8 @@
   "task.collapseNamed": "Recolher conversas: {name}",
   "task.expandNamed": "Expandir conversas: {name}",
   "task.showAll": "Ver todas as {count} conversas",
+  "task.showFewer": "Ver menos conversas",
+  "task.pinned": "Fixada",
   "task.bulk.select": "Selecionar conversas",
   "task.bulk.done": "Concluir",
   "task.bulk.selectAll": "Selecionar tudo",
