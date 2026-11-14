@@ -125,7 +125,10 @@ export function readAnswer(raw: string, name: string): string | null {
   if (!json) return null;
   let parsed: unknown;
   try { parsed = JSON.parse(json); } catch { return null; }
-  const answer = parsed && typeof parsed === "object" ? (parsed as { answer?: unknown }).answer : undefined;
+  if (!parsed || typeof parsed !== "object") return null;
+  const response = parsed as { answer?: unknown; wait?: unknown };
+  if (response.wait === true) return null;
+  const answer = response.answer;
   if (typeof answer !== "string") return null;
   const text = oneLine(answer, MAX_ANSWER);
   return text && !commits(text, name) ? text : null;
