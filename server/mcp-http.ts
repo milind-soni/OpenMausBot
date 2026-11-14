@@ -478,7 +478,7 @@ export function bypassesProxy(target: URL, noProxy: string): boolean {
 }
 
 function decodedProxyBody(response: IncomingMessage, headers: Headers): ReadableStream<Uint8Array> {
-  let body = Readable.toWeb(response) as ReadableStream<Uint8Array>;
+  let body = Readable.toWeb(response);
   const codings = (headers.get("content-encoding") ?? "").toLowerCase().split(",").map((coding) => coding.trim());
   if (codings.every((coding) => ["gzip", "x-gzip", "deflate", "x-deflate", "br"].includes(coding))) {
     for (const coding of codings.reverse()) {
@@ -487,7 +487,7 @@ function decodedProxyBody(response: IncomingMessage, headers: Headers): Readable
       body = body.pipeThrough(Duplex.toWeb(decoder));
     }
   }
-  return body;
+  return body as ReadableStream<Uint8Array>;
 }
 
 export function plainHttpProxyFetch(env: Record<string, string | undefined>, fallback: typeof fetch = fetch): typeof fetch | undefined {
