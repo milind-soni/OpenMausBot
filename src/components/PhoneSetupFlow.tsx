@@ -49,7 +49,7 @@ import {
   preparePhonePairingRoute,
   queuePhonePairingAttempt,
   releasePhonePairingAttempt,
-  relayServesPairing,
+  pairThroughRelayWithoutAddress,
   secureAddressRequestLapsed,
   shouldArmPhoneSetupProvisioningTimeout,
   shouldPrepareSecureAddress,
@@ -348,27 +348,15 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
           return;
         }
         const explicitRoute = routeMode !== "automatic";
-        const gateAccount = accountOverride ?? account;
-        const gate = phonePairingGate(gateAccount, started, explicitRoute);
+        const gate = phonePairingGate(accountOverride ?? account, started, explicitRoute);
         const remote = companionAccountBridge();
-        const prepare = remote?.prepare && shouldPrepareSecureAddress(routeMode, gate, gateAccount)
+        const prepare = remote?.prepare && shouldPrepareSecureAddress(routeMode, gate, accountOverride ?? account)
           ? remote.prepare
           : null;
         let mode = routeMode;
         if (gate !== "open") {
-          if (relayServesPairing(gateAccount, started)) {
-            // The relay carries the phone: nothing waits on an HTTPS address; any repair runs behind the code.
-            if (prepare) void mutateCompanionBridgeState(companionMutationEpoch, () => prepare())
-              .then((next) => { if (isCurrent()) setAccount(next); }, () => {});
-          } else {
-            setProvisioning(gate === "wait" || gate === "start");
-            if (!prepare) return;
-            const next = await mutateCompanionBridgeState(companionMutationEpoch, () => prepare());
-            if (!isCurrent()) return;
-            setAccount(next);
-            // Signed in only now (or the address request settled): the relay may carry it after all.
-            if (!relayServesPairing(next, started)) return;
-          }
+          const ask = prepare && (() => mutateCompanionBridgeState(companionMutationEpoch, () => prepare()));
+          if (!(await pairThroughRelayWithoutAddress(gate, accountOverride ?? account, started, { prepare: ask, isCurrent, setAccount, setProvisioning }))) return;
           mode = "local";
           dispatchFlow({ type: "use-local" });
         } else if (prepare) void Promise.resolve().then(() => prepare()).catch(() => {});

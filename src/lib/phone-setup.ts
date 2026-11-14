@@ -206,6 +206,33 @@ export function relayServesPairing(
     && companion.routes?.relay?.on === true;
 }
 
+/** An automatic pairing whose gate is not open. When the relay can carry the phone the code opens on the direct route
+ * at once (true) and any address repair (`prepare`) runs behind it. Otherwise the pairing waits on `prepare`, and
+ * opens through the relay only if the account it returns lets the relay carry it (signed in only now, or the address
+ * request settled). False: the pairing keeps waiting. A failing `prepare` rejects, as before. */
+export async function pairThroughRelayWithoutAddress(
+  gate: PhonePairingGate,
+  account: CompanionAccountState | null,
+  companion: Parameters<typeof relayServesPairing>[1],
+  actions: {
+    prepare: (() => Promise<CompanionAccountState>) | null;
+    isCurrent: () => boolean;
+    setAccount: (next: CompanionAccountState) => void;
+    setProvisioning: (on: boolean) => void;
+  },
+): Promise<boolean> {
+  if (relayServesPairing(account, companion)) {
+    if (actions.prepare) void actions.prepare().then((next) => { if (actions.isCurrent()) actions.setAccount(next); }, () => {});
+    return true;
+  }
+  actions.setProvisioning(gate === "wait" || gate === "start");
+  if (!actions.prepare) return false;
+  const next = await actions.prepare();
+  if (!actions.isCurrent()) return false;
+  actions.setAccount(next);
+  return relayServesPairing(next, companion);
+}
+
 export function secureAddressRequestLapsed(
   account: CompanionAccountState | null,
   companion: PhoneSetupCompanionSnapshot | null,

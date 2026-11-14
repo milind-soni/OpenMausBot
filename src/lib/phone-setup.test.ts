@@ -12,6 +12,7 @@ import {
   newlyPairedDevice,
   newlyPairedDeviceForFlow,
   normalizePhoneSetupActionError,
+  pairThroughRelayWithoutAddress,
   phonePairingGate,
   phoneSetupBaseline,
   phoneSetupReducer,
@@ -239,6 +240,41 @@ describe("phone setup flow", () => {
     }
     expect(relayServesPairing({ ...account("ready"), available: false }, relayOn)).toBe(false);
     expect(relayServesPairing(null, relayOn)).toBe(false);
+  });
+
+  it("opens through the relay at once, or after the address request, and otherwise keeps waiting", async () => {
+    const relayOn = { enabled: true, endpoints: [], routes: { relay: { on: true } } };
+    const relayOff = { enabled: true, endpoints: [], routes: { relay: { on: false } } };
+    const actions = (prepare: (() => Promise<CompanionAccountState>) | null) => ({
+      prepare, isCurrent: () => true, setAccount: vi.fn(), setProvisioning: vi.fn(),
+    });
+
+    // Signed in with Anywhere on: no spinner, and the address request does not hold the code.
+    let finish: (next: CompanionAccountState) => void = () => {};
+    const pending = actions(vi.fn(() => new Promise<CompanionAccountState>((resolve) => { finish = resolve; })));
+    await expect(pairThroughRelayWithoutAddress("wait", account("ready"), relayOn, pending)).resolves.toBe(true);
+    expect(pending.setProvisioning).not.toHaveBeenCalled();
+    finish(account("ready"));
+    await vi.waitFor(() => expect(pending.setAccount).toHaveBeenCalledWith(account("ready")));
+
+    // Anywhere off: it waits on the address request, as before.
+    const off = actions(vi.fn(async () => account("ready")));
+    await expect(pairThroughRelayWithoutAddress("wait", account("ready"), relayOff, off)).resolves.toBe(false);
+    expect(off.setProvisioning).toHaveBeenCalledWith(true);
+    expect(off.setAccount).toHaveBeenCalledWith(account("ready"));
+
+    // Signed in only by the request: the relay carries it after all.
+    const later = actions(vi.fn(async () => account("ready")));
+    await expect(pairThroughRelayWithoutAddress("wait", account("connecting"), relayOn, later)).resolves.toBe(true);
+    expect(later.setProvisioning).toHaveBeenCalledWith(true);
+
+    // Nothing to ask, or the request failed or was overtaken: it keeps waiting, and a failure reaches the caller.
+    await expect(pairThroughRelayWithoutAddress("wait", account("connecting"), relayOn, actions(null))).resolves.toBe(false);
+    const stale = { ...actions(vi.fn(async () => account("ready"))), isCurrent: () => false };
+    await expect(pairThroughRelayWithoutAddress("wait", account("connecting"), relayOn, stale)).resolves.toBe(false);
+    expect(stale.setAccount).not.toHaveBeenCalled();
+    const failing = actions(vi.fn(async () => Promise.reject(new Error("no route"))));
+    await expect(pairThroughRelayWithoutAddress("wait", account("connecting"), relayOn, failing)).rejects.toThrow("no route");
   });
 
   it("opens local pairing only after the explicit Wi-Fi fallback", () => {
