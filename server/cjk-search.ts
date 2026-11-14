@@ -57,7 +57,19 @@ export interface SearchIndexSpec {
 }
 
 /** The table's FTS5 index over `coalesce(search_text, text)`, built or migrated from the plain-text index. */
-export function ensureSearchIndex(db: DatabaseSync, { table, fts, view, triggerPrefix: t }: SearchIndexSpec): void {
+export function ensureSearchIndex(db: DatabaseSync, spec: SearchIndexSpec): void {
+  db.exec("SAVEPOINT omb_search_index");
+  try {
+    ensureSearchIndexInTransaction(db, spec);
+    db.exec("RELEASE omb_search_index");
+  } catch (error) {
+    db.exec("ROLLBACK TO omb_search_index");
+    db.exec("RELEASE omb_search_index");
+    throw error;
+  }
+}
+
+function ensureSearchIndexInTransaction(db: DatabaseSync, { table, fts, view, triggerPrefix: t }: SearchIndexSpec): void {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   if (!columns.some((column) => column.name === "search_text")) db.exec(`ALTER TABLE ${table} ADD COLUMN search_text TEXT`);
   const existing = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(fts) as { sql: string } | undefined;
@@ -65,16 +77,9 @@ export function ensureSearchIndex(db: DatabaseSync, { table, fts, view, triggerP
   if (!current) {
     db.exec(`DROP TRIGGER IF EXISTS ${t}_ai; DROP TRIGGER IF EXISTS ${t}_ad; DROP TRIGGER IF EXISTS ${t}_au; DROP TABLE IF EXISTS ${fts};`);
     const update = db.prepare(`UPDATE ${table} SET search_text = ? WHERE rowid = ?`);
-    db.exec("BEGIN");
-    try {
-      for (const row of db.prepare(`SELECT rowid, text FROM ${table} WHERE text IS NOT NULL AND search_text IS NULL`).iterate()) {
-        const searchText = cjkSearchText(row.text as string);
-        if (searchText) update.run(searchText, row.rowid as number);
-      }
-      db.exec("COMMIT");
-    } catch (error) {
-      db.exec("ROLLBACK");
-      throw error;
+    for (const row of db.prepare(`SELECT rowid, text FROM ${table} WHERE text IS NOT NULL AND search_text IS NULL`).iterate()) {
+      const searchText = cjkSearchText(row.text as string);
+      if (searchText) update.run(searchText, row.rowid as number);
     }
   }
   db.exec(`
