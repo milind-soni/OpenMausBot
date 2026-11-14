@@ -437,31 +437,33 @@ describe("whole-team export (package v2)", () => {
       expect(result.skipped).toContainEqual({ part: "skills[pricing]", reason: "skill_conflict" });
     });
 
-    it("keeps 60 per team and lists the rest", () => {
+    it("keeps 120 per team and lists the rest", () => {
       const input = fixture();
-      input.bots.push(bot("third", "Third"));
+      input.bots.push(bot("third", "Third"), bot("fourth", "Fourth"), bot("fifth", "Fifth"));
       const result = createTeamPackageExport({ ...input, skillSelection: "all",
-        skillsByBot: new Map([["lead", many("a", 30)], ["scout", many("b", 30)], ["third", many("c", 2)]]) });
-      expect(result.document.package.skills?.entries).toHaveLength(60);
+        skillsByBot: new Map([["lead", many("a", 30)], ["scout", many("b", 30)], ["third", many("c", 30)],
+          ["fourth", many("d", 30)], ["fifth", many("e", 2)]]) });
+      expect(result.document.package.skills?.entries).toHaveLength(120);
       expect(result.skipped.filter((skip) => skip.reason === "team_skill_limit")).toEqual([
-        { part: "skills[c-01]", reason: "team_skill_limit" }, { part: "skills[c-02]", reason: "team_skill_limit" },
+        { part: "skills[e-01]", reason: "team_skill_limit" }, { part: "skills[e-02]", reason: "team_skill_limit" },
       ]);
-      expect(result.document.package.agents.find((agent) => agent.key === "third")?.skills).toBeUndefined();
+      expect(result.document.package.agents.find((agent) => agent.key === "fifth")?.skills).toBeUndefined();
     });
 
-    it("keeps switched-on skills first when the team has more than 60, even one that sorts later by name", () => {
+    it("keeps switched-on skills first when the team has more than 120, even one that sorts later by name", () => {
       const input = fixture();
-      input.bots.push(bot("third", "Third"));
-      // "a-off" sorts first but is off on its only bot; "b-01" is off on Third but on for Morgan, so it counts as on.
+      input.bots.push(bot("third", "Third"), bot("fourth", "Fourth"), bot("fifth", "Fifth"));
+      // "a-off" sorts first but is off on its only bot; "b-01" is off on Fifth but on for Morgan, so it counts as on.
       const result = createTeamPackageExport({ ...input, skillSelection: "all",
         skillsByBot: new Map([["lead", many("b", 30, { enabled: true })], ["scout", many("c", 30, { enabled: true })],
-          ["third", [{ ...skill("a-off"), enabled: false }, { ...skill("b-01"), enabled: false }]]]) });
+          ["third", many("d", 30, { enabled: true })], ["fourth", many("e", 30, { enabled: true })],
+          ["fifth", [{ ...skill("a-off"), enabled: false }, { ...skill("b-01"), enabled: false }]]]) });
       const kept = result.document.package.skills?.entries.map((entry) => entry.name);
-      expect(kept).toHaveLength(60);
+      expect(kept).toHaveLength(120);
       expect(kept).not.toContain("a-off");
-      expect(kept).toContain("c-30");
+      expect(kept).toContain("e-30");
       expect(result.skipped.filter((skip) => skip.reason === "team_skill_limit")).toEqual([{ part: "skills[a-off]", reason: "team_skill_limit" }]);
-      expect(result.document.package.agents.find((agent) => agent.key === "third")?.skills).toEqual(["b-01"]);
+      expect(result.document.package.agents.find((agent) => agent.key === "fifth")?.skills).toEqual(["b-01"]);
     });
 
     it("starts the dialog's boxes on a choice that fits, so unticking any one box still fits", () => {
