@@ -73,10 +73,18 @@ export function shownDevices(devices: PairedDevice[], cloudHome: boolean): Paire
   return cloudHome ? devices.filter((device) => device.scopes.includes("admin")) : devices;
 }
 
+const CONFIG_TIMEOUT_MS = 10_000;
 
 export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0, team, teamPhoneBlocked = null, simple = false, reveal = true, placeName = "" }: { placeName?: string; initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number; team?: string; teamPhoneBlocked?: string | null; simple?: boolean; /** False where another pairing flow owns the page's focus. */ reveal?: boolean }) {
   const [session, setSession] = useState<SessionState | null>(initialSession);
   const [pairingCodes, setPairingCodes] = useState(initialPairingCodes);
+  const [codesLoaded, setCodesLoaded] = useState(false);
+  const [configFailed, setConfigFailed] = useState(false);
+  const [configLoading, setConfigLoading] = useState(false);
+  const configRequest = useRef(0);
+  const configPending = useRef(false);
+  const errorSource = useRef<"config" | "sessions" | "action" | null>(null);
+  const focusOrigin = useRef<{ request: number; element: Element | null } | null>(null);
   const [computerName, setComputerName] = useState<string | null>(null);
   const [scope, setScope] = useState<"admin" | "client">("admin");
   const [offer, setOffer] = useState<PairingOffer | null>(null);
@@ -94,31 +102,82 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       const body = await api("/api/auth/sessions");
       setDevices(Array.isArray(body?.sessions) ? body.sessions : []);
       setCurrent(typeof body?.current === "string" ? body.current : null);
+      if (errorSource.current === "sessions") {
+        errorSource.current = null;
+        setError(null);
+      }
     } catch (e) {
+      errorSource.current = "sessions";
       setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) }));
     }
+  }
+
+  async function loadConfig(state: SessionState) {
+    if (configPending.current) return;
+    configPending.current = true;
+    const request = ++configRequest.current;
+    const controller = new AbortController();
+    const deadline = setTimeout(() => controller.abort(), CONFIG_TIMEOUT_MS);
+    setConfigLoading(true);
+    try {
+      const config = await api("/api/config", { signal: controller.signal });
+      if (request !== configRequest.current) return;
+      setPairingCodes(readMembership(config).pairingCodes);
+      setCodesLoaded(true);
+      setConfigFailed(false);
+      if (errorSource.current === "config") {
+        errorSource.current = null;
+        setError(null);
+      }
+      if (canPairDevices(state)) setComputerName(typeof config?.computerName === "string" ? config.computerName : "");
+    } catch (e) {
+      if (request !== configRequest.current) return;
+      errorSource.current = "config";
+      setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) }));
+      setConfigFailed(true);
+    } finally {
+      clearTimeout(deadline);
+      if (request === configRequest.current) {
+        configPending.current = false;
+        setConfigLoading(false);
+      }
+    }
+  }
+
+  function retryConfig() {
+    if (!session || configPending.current) return;
+    void loadConfig(session);
   }
 
   useEffect(() => {
     void readSessionState().then((state) => {
       setSession(state);
       if (canPairDevices(state)) void loadDevices();
-      if (state.kind === "loopback" || state.kind === "session") {
-        void api("/api/config").then((config) => {
-          setPairingCodes(readMembership(config).pairingCodes);
-          if (canPairDevices(state)) setComputerName(typeof config?.computerName === "string" ? config.computerName : "");
-        }).catch(() => {});
-      }
+      if (state.kind === "loopback" || state.kind === "session") void loadConfig(state);
     });
   }, []);
 
   useEffect(() => {
-    if (!focusRequest) revealed.current = 0;
-    else if (revealed.current !== focusRequest && revealPhonePairing(root.current)) {
-      revealed.current = focusRequest;
-      if (canPairDevices(session) && takePairOnOpen()) void create();
+    if (!focusRequest) {
+      revealed.current = 0;
+      focusOrigin.current = null;
+    } else if (revealed.current !== focusRequest) {
+      // Without a document there is no focus to steal, so the request stands.
+      const activeElement = typeof document === "undefined" ? null : document.activeElement;
+      if (focusOrigin.current?.request !== focusRequest) {
+        focusOrigin.current = { request: focusRequest, element: activeElement };
+        if (typeof document !== "undefined" && activeElement === document.body) {
+          // document.body cannot tell whether the user moved focus while the request waited, so the request is dropped.
+          revealed.current = focusRequest;
+          focusOrigin.current = null;
+        }
+      }
+      if (focusOrigin.current && codesLoaded && activeElement === focusOrigin.current.element && revealPhonePairing(root.current)) {
+        revealed.current = focusRequest;
+        if (canPairDevices(session) && takePairOnOpen()) void create();
+      }
     }
-  }, [focusRequest, session]);
+  }, [focusRequest, session, codesLoaded]);
 
   useEffect(() => {
     if (!offer) return;
@@ -154,13 +213,17 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
 
   async function create() {
     setBusy(true);
-    setError(null);
+    if (errorSource.current === "action") {
+      errorSource.current = null;
+      setError(null);
+    }
     setCopied("idle");
     try {
       const body: PairingOffer = await api("/api/auth/pairing", { method: "POST", body: JSON.stringify({ scopes: scope === "admin" || cloudHome ? ["admin", "client"] : ["client"] }) });
       setOffer(body);
       setNow(Date.now());
     } catch (e) {
+      errorSource.current = "action";
       setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
@@ -168,11 +231,15 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   }
 
   async function signOut(id: string) {
-    setError(null);
+    if (errorSource.current === "action") {
+      errorSource.current = null;
+      setError(null);
+    }
     try {
       await api(`/api/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
       await loadDevices();
     } catch (e) {
+      errorSource.current = "action";
       setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) }));
     }
   }
@@ -232,7 +299,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   ) : null;
   const scopeName = (device: PairedDevice) => t(device.scopes.includes("admin") ? "remote.serverPairing.scope.admin" : "remote.serverPairing.scope.client");
   const pairButton = (
-    <button type="button" data-phone-pairing-action={reveal ? "" : undefined} data-settings-drop="" onClick={() => void create()} disabled={busy || !pairingCodes}
+    <button type="button" data-phone-pairing-action={reveal ? "" : undefined} data-settings-drop="" onClick={() => void create()} disabled={busy || !pairingCodes || !codesLoaded}
       className={cn("ui-button ui-button-primary", !pairingCodes && "opacity-40")}>
       {busy ? t("remote.serverPairing.creating") : t("phone.pair.button")}
     </button>
@@ -282,7 +349,12 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
             {!pairingCodes && <p data-server-pairing-portal className="px-4 text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
           </SettingsGroup>
       )}
-      {error ? <p className="px-4 text-[12px] leading-4 text-danger">{error}</p> : null}
+      {error || configFailed ? (
+        <div className="flex flex-wrap items-center gap-2 px-4">
+          {error ? <p className="text-[12px] leading-4 text-danger">{error}</p> : null}
+          {configFailed ? <button type="button" data-server-pairing-retry onClick={retryConfig} disabled={configLoading} className="ui-button">{t("remote.serverPairing.retry")}</button> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

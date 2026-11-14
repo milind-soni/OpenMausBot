@@ -5863,6 +5863,7 @@
   "remote.serverPairing.hoursAgo": "há {hours} h",
   "remote.serverPairing.daysAgo": "há {days} d",
   "remote.serverPairing.error": "Não foi possível conectar: {error}",
+  "remote.serverPairing.retry": "Tentar novamente",
   "remote.computerName.title": "Nome deste computador",
   "remote.computerName.help": "O nome deste computador no seu celular. Deixe em branco para usar o padrão.",
   "remote.computerName.placeholder": "Ex.: PC do escritório",

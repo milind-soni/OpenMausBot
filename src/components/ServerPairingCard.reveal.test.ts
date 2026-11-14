@@ -15,13 +15,17 @@ import { ServerPairingCard } from "./ServerPairingCard";
 
 const admin = { kind: "session" as const, id: "s", label: "Mac", scopes: ["admin", "client"], expiresAt: 1 };
 const REVEAL = 1; // the effect after the session read
+const CODES_LOADED = 2; // codesLoaded, the third useState in ServerPairingCard
 
 function render(props: Parameters<typeof ServerPairingCard>[0]) {
   f.index = 0; f.effects = [];
+  // These tests cover reveal bookkeeping, not the config gate (covered in
+  // ServerPairingCard.config.test.ts), so the config counts as loaded here.
+  f.values[CODES_LOADED] = true;
   renderToStaticMarkup(createElement(() => ServerPairingCard(props)));
   f.effects[REVEAL]!();
 }
-const root = () => f.values.find((value) => value && typeof value === "object" && "current" in value && (value as { current: unknown }).current === null) as { current: unknown } | undefined;
+const root = () => f.values.filter((value) => value && typeof value === "object" && "current" in value && (value as { current: unknown }).current === null).at(-1) as { current: unknown } | undefined;
 
 beforeEach(() => { f.values = []; f.index = 0; f.effects = []; f.revealed = []; });
 

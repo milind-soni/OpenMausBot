@@ -45,6 +45,11 @@ describe("Settings → Phone & devices: server pairing card visibility", () => {
     expect(render()).toContain("SERVER_PAIRING_CARD_MARKER");
   });
 
+  it("is offered on this computer, whose desktop owns the server being paired against", () => {
+    vi.stubGlobal("window", { ogb: { companion: {} } });
+    expect(render()).toContain("SERVER_PAIRING_CARD_MARKER");
+  });
+
   it("is not a page for a desktop that drives another computer: it opens This app's place of that connection instead", () => {
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
     const html = render();
@@ -63,12 +68,12 @@ describe("Settings → Phone & devices: server pairing card visibility", () => {
 });
 
 describe("Settings → Phone & devices opened by Connect your phone", () => {
-  it("on this computer, reveals the phone flow, not the server's pairing code", () => {
+  it("on this computer, reveals the phone flow and the server's pairing code", () => {
     fixture.phonePairing = 3;
     vi.stubGlobal("window", { ogb: { companion: {} } });
     const html = render();
     expect(html).toContain("COMPANION_SECTION focus=3");
-    expect(html).not.toContain("SERVER_PAIRING_CARD_MARKER");
+    expect(html).toContain("SERVER_PAIRING_CARD_MARKER focus=0");
   });
 
   it("on the person's own Cloud in this window, reveals the Cloud's own pairing code", () => {
@@ -80,6 +85,15 @@ describe("Settings → Phone & devices opened by Connect your phone", () => {
     expect(html).not.toContain("COMPANION_SECTION");
   });
 
+  it("on this computer's own Cloud, focuses the Cloud's pairing code and not the phone flow", () => {
+    fixture.phonePairing = 2;
+    fixture.config = { cloudHome: true };
+    vi.stubGlobal("window", { ogb: { companion: {} } });
+    const html = render();
+    expect(html).toContain("SERVER_PAIRING_CARD_MARKER cloud focus=2");
+    expect(html).toContain("COMPANION_SECTION focus=0");
+  });
+
   it("on another server in a browser, reveals that server's pairing code", () => {
     fixture.phonePairing = 1;
     vi.stubGlobal("window", {});
@@ -88,11 +102,11 @@ describe("Settings → Phone & devices opened by Connect your phone", () => {
     expect(html).not.toContain("COMPANION_SECTION");
   });
 
-  it("a plain visit reveals nothing", () => {
+  it("a plain visit offers the server pairing card but focuses neither section", () => {
     vi.stubGlobal("window", { ogb: { companion: {} } });
     const html = render();
     expect(html).toContain("COMPANION_SECTION focus=0");
-    expect(html).not.toContain("SERVER_PAIRING_CARD_MARKER");
+    expect(html).toContain("SERVER_PAIRING_CARD_MARKER focus=0");
   });
 
   it("is Phone & devices on this computer and on a server's own page alike", () => {

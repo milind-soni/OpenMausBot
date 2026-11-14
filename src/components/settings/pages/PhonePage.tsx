@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowUpRight } from "lucide-react";
 import { t } from "@/lib/i18n";
+import { currentPhonePairingTarget } from "@/lib/phone-pairing";
 import { useStore } from "@/state/store";
 import { PhoneDevicesSection } from "../../PhoneDevicesSection";
 import { PlaceMark } from "../../PlacesRail";
@@ -64,11 +65,16 @@ export function PhonePage() {
   const { ctx, place } = useSettingsShell();
   const { state } = useStore();
   const focus = state.appSettingsPhonePairing;
+  const computerPairs = currentPhonePairingTarget(ctx.cloud) === "computer";
+  const card = <ServerPairingCard cloudHome={ctx.cloud} focusRequest={computerPairs ? 0 : focus} team={state.config?.team?.name} placeName={place.name} simple={!ctx.advanced}
+    teamPhoneBlocked={state.config?.managedPolicy?.remoteAccess === false ? t("policy.teamRemoteBlocked", { organization: state.config.managedPolicy.organizationName }) : null} />;
   return <>
     {ctx.here
-      ? <PhoneDevicesSection profileEmail={state.config?.profile?.email} focusRequest={focus} simple={!ctx.advanced} placeName={place.name} top={<PairWithCloud />} />
-      : <ServerPairingCard cloudHome={ctx.cloud} focusRequest={focus} team={state.config?.team?.name} placeName={place.name} simple={!ctx.advanced}
-        teamPhoneBlocked={state.config?.managedPolicy?.remoteAccess === false ? t("policy.teamRemoteBlocked", { organization: state.config.managedPolicy.organizationName }) : null} />}
+      ? <>
+          <PhoneDevicesSection profileEmail={state.config?.profile?.email} focusRequest={computerPairs ? focus : 0} simple={!ctx.advanced} placeName={place.name} top={<PairWithCloud />} />
+          {card}
+        </>
+      : card}
     <OtherPlaces />
   </>;
 }
