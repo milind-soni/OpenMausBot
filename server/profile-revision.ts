@@ -4,7 +4,7 @@ import type { ProfileRequestChanges } from "../shared/profile-request.ts";
 
 export function profileSnapshot(
   bot: { name: string; title: string; description: string; soul?: string; cwd?: string; notifications?: boolean; speakReplies?: boolean },
-): Required<ProfileRequestChanges> {
+): Required<Omit<ProfileRequestChanges, "browserProfile">> {
   return {
     name: bot.name,
     title: bot.title,

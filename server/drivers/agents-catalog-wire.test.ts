@@ -85,36 +85,36 @@ const FULL = "skills+shared+voice+x+team+images+hosting";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 63245,
-  "voice": 64026,
-  "shared": 65462,
-  "shared+voice": 66243,
-  "skills": 66273,
-  "skills+voice": 67054,
-  "skills+shared": 68491,
-  "skills+shared+voice": 69224,
-  "non-chief": 54087,
-  "voice+non-chief": 54868,
-  "shared+non-chief": 56352,
-  "shared+voice+non-chief": 57133,
-  "skills+non-chief": 57163,
-  "skills+voice+non-chief": 57944,
-  "skills+shared+non-chief": 59428,
-  "skills+shared+voice+non-chief": 60209,
-  "skills+shared+voice+cloud-home": 68990,
-  "skills+shared+voice+non-chief+cloud-home": 59975,
-  "default+legacy-switches": 63245,
-  "default+mausbot": 63896,
-  "skills+shared+voice+mausbot": 69875,
-  "skills+shared+voice+x": 73048,
-  "skills+shared+voice+x+team": 73048,
-  "default+no-computer-pick": 62163,
-  "default+room": 59680,
-  "non-chief+room": 50526,
-  "skills+shared+voice+x+team+images": 73821,
-  "default+images": 64018,
-  "skills+shared+voice+x+team+images+hosting": 75660,
-  "default+hosting": 65205,
+  "default": 64748,
+  "voice": 65529,
+  "shared": 67013,
+  "shared+voice": 67794,
+  "skills": 67824,
+  "skills+voice": 68605,
+  "skills+shared": 70089,
+  "skills+shared+voice": 70870,
+  "non-chief": 55049,
+  "voice+non-chief": 55830,
+  "shared+non-chief": 57314,
+  "shared+voice+non-chief": 58095,
+  "skills+non-chief": 58125,
+  "skills+voice+non-chief": 58906,
+  "skills+shared+non-chief": 60390,
+  "skills+shared+voice+non-chief": 61171,
+  "skills+shared+voice+cloud-home": 70636,
+  "skills+shared+voice+non-chief+cloud-home": 60937,
+  "default+legacy-switches": 64748,
+  "default+mausbot": 65399,
+  "skills+shared+voice+mausbot": 71521,
+  "skills+shared+voice+x": 74709,
+  "skills+shared+voice+x+team": 74709,
+  "default+no-computer-pick": 63536,
+  "default+room": 61038,
+  "non-chief+room": 51339,
+  "skills+shared+voice+x+team+images": 75482,
+  "default+images": 65521,
+  "skills+shared+voice+x+team+images+hosting": 77345,
+  "default+hosting": 66611,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -322,14 +322,16 @@ describe("agents proxy tools/list golden", () => {
       for (const chiefTool of chiefTools.filter((tool) => tools.has(tool.name))) {
         let expected: SchemaTool = chiefTool;
         if (CHIEF_TARGET_TOOLS.includes(chiefTool.name)) {
-          const { for_bot_id: forBotId, ...properties } = chiefTool.inputSchema.properties;
+          const { for_bot_id: forBotId, browserProfile, ...properties } = chiefTool.inputSchema.properties;
           expect(forBotId, `${name}: ${chiefTool.name}`).toBeDefined();
+          expect(browserProfile !== undefined, `${name}: ${chiefTool.name}`).toBe(chiefTool.name === "propose_profile");
           expected = { ...chiefTool, description: chiefTool.description.replace(CHIEF_PROFILE_TARGET, ""), inputSchema: { ...chiefTool.inputSchema, properties } };
         }
         expect(JSON.stringify(tools.get(chiefTool.name)), `${name}: ${chiefTool.name}`).toBe(JSON.stringify(expected));
       }
       expect(chiefTools.find((tool) => tool.name === "propose_profile")!.description).toContain(CHIEF_PROFILE_TARGET);
       expect(JSON.stringify(CHIEF_TARGET_TOOLS.map((tool) => tools.get(tool)))).not.toContain("for_bot_id");
+      expect(JSON.stringify(tools.get("propose_profile"))).not.toContain("browserProfile");
       for (const trigger of ["trigger_info", "trigger", "delete_trigger"]) {
         expect(tools.get(trigger)!.inputSchema.properties, `${name}: ${trigger}`).toHaveProperty("for_bot_id");
       }

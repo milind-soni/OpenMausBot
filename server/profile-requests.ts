@@ -2,6 +2,10 @@
 import { soulDiffLines } from "../shared/line-diff.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 import { PROFILE_REQUEST_FIELDS, type ProfileRequestCardData, type ProfileRequestChanges } from "../shared/profile-request.ts";
+import {
+  browserProfileLabel, checkBrowserProfileChange, resolveBrowserProfile, settleBrowserChange,
+  type BrowserChangeCleanup, type BrowserProfileGuards,
+} from "./bot-browser-profile.ts";
 import { parseBotProfilePatch, type BotProfilePatchInput } from "./bot-profile.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { newId } from "./contracts.ts";
@@ -22,7 +26,10 @@ const LABELS: Record<Exclude<(typeof PROFILE_REQUEST_FIELDS)[number], "soul" | "
   speakReplies: "Speak replies",
 };
 const PRIVATE_WORKSPACE = "its private workspace";
-const CHOOSE_ONE = "Choose at least one of name, title, description, soul, cwd, notifications, speakReplies";
+const CHOOSE_ONE = "Choose at least one of name, title, description, soul, cwd, notifications, speakReplies, browserProfile";
+const BROWSER_PROFILE_FIELD = "browserProfile";
+const OWN_BROWSER_PROFILE_REFUSAL = (current: string) =>
+  `A bot can't switch its own browser profile: it is mid-turn, and the profile only changes while it is idle. It uses ${current} now. The person picks another one from the profile menu in this bot's Browser tab.`;
 const toggleText = (value: boolean | undefined): string => (value ? "on" : "off");
 const TEXT_FIELDS = ["name", "title", "description", "soul"] as const;
 
@@ -54,7 +61,7 @@ export interface ProfileRequestStore {
     },
   ): { id: string };
   patchMessage(threadId: string, messageId: string, patch: { card: OptionCardLike }): { id: string } | null;
-  patchBotProfile(id: string, patch: Partial<Pick<BotRecord, "name" | "title" | "description" | "cwd" | "soul" | "notifications" | "speakReplies" | "lastProfileRequestId">>): BotRecord | null;
+  patchBotProfile(id: string, patch: Partial<Pick<BotRecord, "name" | "title" | "description" | "cwd" | "soul" | "notifications" | "speakReplies" | "browserProfile" | "lastProfileRequestId">>): BotRecord | null;
 }
 
 export interface ProfileRequestServiceOptions {
@@ -65,6 +72,8 @@ export interface ProfileRequestServiceOptions {
   canPersist?: (botId: string, threadId: string, opensCard: boolean) => { ok: true } | { ok: false; status: number; error: string };
   /** Chief targeting another bot: returns a refusal sentence or null. Checked at propose AND confirm. */
   validateTarget?: (proposerBotId: string, targetBotId: string) => string | null;
+  /** Absent: browserProfile is refused. */
+  browserProfile?: { guards: BrowserProfileGuards; cleanup: BrowserChangeCleanup };
 }
 
 export class ProfileRequestError extends Error {
@@ -115,14 +124,17 @@ function parseChanges(input: unknown): ProfileRequestChanges {
   }
   const keys = Object.keys(input);
   for (const key of keys) {
-    if (!(PROFILE_REQUEST_FIELDS as readonly string[]).includes(key)) {
+    if (key !== BROWSER_PROFILE_FIELD && !(PROFILE_REQUEST_FIELDS as readonly string[]).includes(key)) {
       throw new ProfileRequestError(`unsupported profile field: ${key}`);
     }
   }
   if (keys.length === 0) {
     throw new ProfileRequestError(CHOOSE_ONE);
   }
-  const { cwd: rawCwd, ...profileInput } = input as Record<string, unknown>;
+  const { cwd: rawCwd, browserProfile: rawBrowserProfile, ...profileInput } = input as Record<string, unknown>;
+  if (rawBrowserProfile !== undefined && (typeof rawBrowserProfile !== "string" || rawBrowserProfile.length > 100)) {
+    throw new ProfileRequestError("browserProfile must be a profile name or id of at most 100 characters, or \"\"");
+  }
   let cwdChange: string | undefined;
   if (rawCwd !== undefined) {
     const checked = validateBotCwd(rawCwd);
@@ -135,6 +147,7 @@ function parseChanges(input: unknown): ProfileRequestChanges {
   if (!parsed.ok) throw new ProfileRequestError(parsed.error, 400);
   const changes: ProfileRequestChanges = {};
   if (cwdChange !== undefined) changes.cwd = cwdChange;
+  if (typeof rawBrowserProfile === "string") changes.browserProfile = rawBrowserProfile.trim();
   for (const field of PROFILE_REQUEST_FIELDS) {
     if (field === "cwd") continue;
     const value = parsed.patch[field];
@@ -161,12 +174,18 @@ function parseChanges(input: unknown): ProfileRequestChanges {
   return changes;
 }
 
+function changedFields(changes: ProfileRequestChanges): string[] {
+  const fields: string[] = PROFILE_REQUEST_FIELDS.filter((field) => changes[field] !== undefined);
+  return changes.browserProfile === undefined ? fields : [...fields, BROWSER_PROFILE_FIELD];
+}
+
 export function profileCardCopy(
   target: { name: string; crossBot: boolean },
   fullProfile: { title: string; description: string; soul: string },
   before: ProfileRequestChanges,
   changes: ProfileRequestChanges,
   reason: string,
+  browserLabel: (id: string) => string = (id) => id || "its own browser",
 ): ProfileCardCopy {
   const isSetup = !fullProfile.title && !fullProfile.description && !fullProfile.soul;
   const title = target.crossBot
@@ -188,6 +207,9 @@ export function profileCardCopy(
   if (changes.cwd !== undefined) {
     lines.push(`Working folder: ${before.cwd || PRIVATE_WORKSPACE} → ${changes.cwd || PRIVATE_WORKSPACE}`);
   }
+  if (changes.browserProfile !== undefined) {
+    lines.push(`Browser profile: ${browserLabel(before.browserProfile ?? "")} → ${browserLabel(changes.browserProfile)}`);
+  }
   if (changes.soul !== undefined) {
     lines.push(...soulDiffLines(before.soul ?? "", changes.soul));
   }
@@ -196,7 +218,7 @@ export function profileCardCopy(
   lines.push(changesText ? `Changes what ${target.name} is told on every turn. Nothing runs.` : "Nothing runs.");
   const detail = lines.join("\n");
 
-  const fields = PROFILE_REQUEST_FIELDS.filter((field) => changes[field] !== undefined);
+  const fields = changedFields(changes);
   const summary = `${title} · ${fields.join(", ")}`;
   return { title, summary, detail };
 }
@@ -207,6 +229,7 @@ export class ProfileRequestService {
   private readonly canPersist?: ProfileRequestServiceOptions["canPersist"];
   private readonly autoApply?: ProfileRequestServiceOptions["autoApply"];
   validateTarget?: ProfileRequestServiceOptions["validateTarget"];
+  private readonly browserProfile?: ProfileRequestServiceOptions["browserProfile"];
 
   constructor(options: ProfileRequestServiceOptions) {
     this.store = options.store;
@@ -214,6 +237,17 @@ export class ProfileRequestService {
     this.canPersist = options.canPersist;
     this.autoApply = options.autoApply;
     this.validateTarget = options.validateTarget;
+    this.browserProfile = options.browserProfile;
+  }
+
+  private browserRules(): NonNullable<ProfileRequestServiceOptions["browserProfile"]> {
+    if (!this.browserProfile) throw new ProfileRequestError("Browser profiles can't be changed here.", 400, { terminal: true });
+    return this.browserProfile;
+  }
+
+  private browserLabel(): (id: string) => string {
+    const profiles = this.browserProfile?.guards.profiles() ?? [];
+    return (id) => browserProfileLabel(id, profiles);
   }
 
   propose(args: {
@@ -267,6 +301,20 @@ export class ProfileRequestService {
         finalChanges[field] = value;
       }
     }
+    if (changes.browserProfile !== undefined) {
+      const rules = this.browserRules();
+      const profiles = rules.guards.profiles();
+      const current = target.browserProfile ?? "";
+      if (!crossBot) throw new ProfileRequestError(OWN_BROWSER_PROFILE_REFUSAL(browserProfileLabel(current, profiles)), 409);
+      const resolved = resolveBrowserProfile(changes.browserProfile, profiles);
+      if (!resolved.ok) throw new ProfileRequestError(resolved.error, 400);
+      if (resolved.id !== current) {
+        const checked = checkBrowserProfileChange(target, resolved.id, rules.guards);
+        if (!checked.ok) throw new ProfileRequestError(`@${redactSecretsInText(target.name)}: ${checked.error}`, checked.status);
+        before.browserProfile = current;
+        finalChanges.browserProfile = resolved.id;
+      }
+    }
     if (Object.keys(finalChanges).length === 0) {
       throw new ProfileRequestError("Nothing would change");
     }
@@ -287,7 +335,7 @@ export class ProfileRequestService {
       expectedRevision: profileRevision(target),
     };
 
-    const copy = profileCardCopy({ name: targetName, crossBot }, snapshot, before, finalChanges, reason);
+    const copy = profileCardCopy({ name: targetName, crossBot }, snapshot, before, finalChanges, reason, this.browserLabel());
     const grant = submitted ? this.autoApply?.(args.botId, args.threadId, targetBotId) ?? null : null;
     const automatic = grant !== null;
     const persistence = this.canPersist?.(args.botId, args.threadId, !automatic);
@@ -354,8 +402,18 @@ export class ProfileRequestService {
     if (!target || profileRevision(target) !== payload.undo.appliedRevision) {
       return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
     }
-    const { cwd, ...rest } = payload.before;
+    const { cwd, browserProfile: _browserProfile, ...rest } = payload.before;
     const patch: Parameters<ProfileRequestStore["patchBotProfile"]>[1] = {};
+    const browserBefore = { browserProfile: target.browserProfile, browser: target.browser };
+    if (payload.changes.browserProfile !== undefined) {
+      if (!this.browserProfile) return cannot("Browser profiles can't be changed here.");
+      if ((target.browserProfile ?? "") !== payload.changes.browserProfile) {
+        return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
+      }
+      const checked = checkBrowserProfileChange(target, payload.before.browserProfile ?? "", this.browserProfile.guards);
+      if (!checked.ok) return cannot(checked.error, checked.status);
+      patch.browserProfile = checked.profile;
+    }
     for (const field of PROFILE_REQUEST_FIELDS) {
       if (field === "cwd" || payload.changes[field] === undefined) continue;
       (patch as Record<string, unknown>)[field] = rest[field];
@@ -365,7 +423,9 @@ export class ProfileRequestService {
       if (!checked.ok) return cannot(checked.error);
       patch.cwd = checked.cwd ?? undefined;
     }
-    if (!this.store.patchBotProfile(target.id, patch)) return cannot(NO_SUCH_BOT, 404);
+    const undone = this.store.patchBotProfile(target.id, patch);
+    if (!undone) return cannot(NO_SUCH_BOT, 404);
+    if (this.browserProfile) settleBrowserChange(undone, browserBefore, this.browserProfile.cleanup);
     recordProfileChange(target.id, "user", `undo:${message.id}`, payload.changes, payload.before);
     this.store.patchMessage(args.threadId, message.id, { card: { ...card, undone: true } });
     return { claimed: true, state: "undone", targetBotId: target.id };
@@ -423,15 +483,26 @@ export class ProfileRequestService {
         throw new ProfileRequestError(STALE, 409, { terminal: true });
       }
 
-      const { cwd, ...rest } = payload.changes;
+      const { cwd, browserProfile, ...rest } = payload.changes;
       const validated = Object.keys(rest).length ? parseChanges(rest) : {};
       const patch: Parameters<ProfileRequestStore["patchBotProfile"]>[1] = { ...validated, lastProfileRequestId: payload.requestId };
+      const browserBefore = { browserProfile: target.browserProfile, browser: target.browser };
+      if (browserProfile !== undefined) {
+        const rules = this.browserRules();
+        if (!crossBot) throw new ProfileRequestError(OWN_BROWSER_PROFILE_REFUSAL(this.browserLabel()(target.browserProfile ?? "")), 409, { terminal: true });
+        if ((target.browserProfile ?? "") !== (payload.before.browserProfile ?? "")) throw new ProfileRequestError(STALE, 409, { terminal: true });
+        const checked = checkBrowserProfileChange(target, browserProfile, rules.guards);
+        if (!checked.ok) throw new ProfileRequestError(checked.error, checked.status, { terminal: checked.status === 400 });
+        patch.browserProfile = checked.profile;
+      }
       if (cwd !== undefined) {
         const checked = validateBotCwd(cwd || null);
         if (!checked.ok) throw new ProfileRequestError(checked.error, 409, { terminal: true });
         patch.cwd = checked.cwd ?? undefined;
       }
-      if (!this.store.patchBotProfile(target.id, patch)) throw new ProfileRequestError(NO_SUCH_BOT, 404);
+      const updated = this.store.patchBotProfile(target.id, patch);
+      if (!updated) throw new ProfileRequestError(NO_SUCH_BOT, 404);
+      if (this.browserProfile) settleBrowserChange(updated, browserBefore, this.browserProfile.cleanup);
       recordProfileChange(target.id, "bot", `card:${message.id}`, payload.before, payload.changes);
 
       const appliedAt = this.now();
@@ -439,8 +510,7 @@ export class ProfileRequestService {
         card: { ...card, answered: "allow", held: undefined, profileRequest: { ...payload, appliedAt } },
       });
       if (!settled) throw new ProfileRequestError("This profile confirmation card is no longer available", 409);
-      const fields = PROFILE_REQUEST_FIELDS.filter((field) => payload.changes[field] !== undefined);
-      return { claimed: true, state: "applied", targetBotId: target.id, fields };
+      return { claimed: true, state: "applied", targetBotId: target.id, fields: changedFields(payload.changes) };
     } catch (error) {
       const status = error instanceof ProfileRequestError ? error.status : 400;
       const detail = error instanceof Error ? error.message : String(error);
@@ -456,7 +526,7 @@ export class ProfileRequestService {
       } catch {}
       if (saved) return {
         claimed: true, state: "applied", targetBotId: payload.targetBotId,
-        fields: PROFILE_REQUEST_FIELDS.filter((field) => payload.changes[field] !== undefined),
+        fields: changedFields(payload.changes),
         settlementPending: true, message: notice,
       };
       return { claimed: true, state: "invalid", error: detail, status };
