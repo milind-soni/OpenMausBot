@@ -224,9 +224,13 @@ export function createCloudPower(options: {
     prepareSleep(activityMs = CLOUD_IDLE_ACTIVITY_MS): { ok: true; nextDueAt: number | null } | { ok: false; busy: CloudPowerBusy[] } {
       const busy = busyNow(activityMs);
       if (busy.length) return { ok: false, busy };
-      sleepingSince = now();
-      try { writeFileAtomic(join(options.dataDir, MARKER), JSON.stringify({ at: sleepingSince })); }
-      catch (error) { options.log?.(`cloud power: could not write the sleep marker: ${error instanceof Error ? error.message : String(error)}`); }
+      const since = now();
+      try { writeFileAtomic(join(options.dataDir, MARKER), JSON.stringify({ at: since })); }
+      catch (error) {
+        options.log?.(`cloud power: could not write the sleep marker: ${error instanceof Error ? error.message : String(error)}`);
+        return { ok: false, busy: ["maintenance"] };
+      }
+      sleepingSince = since;
       sleepAbort.abort();
       options.broadcast({ kind: "power", state: "sleeping" });
       return { ok: true, nextDueAt: options.probes.nextDueAt() };
