@@ -139,12 +139,15 @@ export class Downloads {
     }
     download.finishedAt = Date.now();
     const written = typeof params.filePath === "string" ? params.filePath : join(this.dir, download.guid);
-    if (params.state === "completed" && !download.canceledBecause) this.#keep(download, written);
-    else {
-      download.state = "canceled";
-      rmSync(written, { force: true });
+    try {
+      if (params.state === "completed" && !download.canceledBecause) this.#keep(download, written);
+      else {
+        download.state = "canceled";
+        rmSync(written, { force: true });
+      }
+    } finally {
+      this.#emit(download);
     }
-    this.#emit(download);
   }
 
   #keep(download: Download, written: string): void {
