@@ -1,4 +1,4 @@
-import { FolderOpen, LayoutGrid, Puzzle, Rocket, Search, UsersRound, X, Zap } from "lucide-react";
+import { FolderKanban, FolderOpen, LayoutGrid, Puzzle, Rocket, Search, UsersRound, X, Zap } from "lucide-react";
 
 import { useCloudFilesReady } from "@/lib/cloud-files";
 import { t } from "@/lib/i18n";
@@ -23,6 +23,13 @@ export function SidebarPhoneBar({ query, onQuery }: { query: string; onQuery: (q
       active: state.activeView === "routines",
       attention: automationsNeedYou,
       onSelect: () => dispatch({ type: "showRoutines", view: "list" }),
+    },
+    {
+      key: "project-board",
+      label: t("sidebar.nav.projectBoard"),
+      icon: <FolderKanban size={18} />,
+      active: state.activeView === "project-board",
+      onSelect: () => dispatch({ type: "showProjectBoard" }),
     },
     {
       key: "team-map",
