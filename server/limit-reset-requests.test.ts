@@ -60,7 +60,7 @@ describe("create_trigger when=limit_reset", () => {
         return { ok: true, status: 201, body: { resultId: "r-1", summary: "When Claude's usage limit resets" } };
       },
     };
-    return { calls, context: { botId: "scout", threadId: "thread-1", depth: 0, externalRuntime: false, sharedComputers: false, client } as unknown as ToolCallContext };
+    return { calls, context: { botId: "scout", threadId: "thread-1", externalRuntime: false, sharedComputers: false, client } as unknown as ToolCallContext };
   }
 
   it("sends a limit-reset schedule for the bot's own engine unless it names one", async () => {

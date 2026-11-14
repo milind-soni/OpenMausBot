@@ -1962,7 +1962,6 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
             OMB_BOT_ID: "captain",
             OMB_THREAD_ID: "t-agents",
             OMB_COMMS_TOKEN: "peer-comms-secret",
-            OMB_TURN_DEPTH: "0",
           },
         },
       },
