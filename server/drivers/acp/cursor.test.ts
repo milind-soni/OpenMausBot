@@ -765,7 +765,7 @@ describe("resolveCursorAcpModelId", () => {
 });
 
 describe("cursor ACP model namespace (NS: set_model wiring)", () => {
-  it("sends the session's parameterised id, not the argv slug", async () => {
+  it("does not reselect a session already on the parameterised id, and still spawns with the argv slug", async () => {
     ensureDirs();
     chmodSync(FAKE_CLI, 0o755);
     const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-acpid-"));
@@ -785,10 +785,8 @@ describe("cursor ACP model namespace (NS: set_model wiring)", () => {
     try {
       await instance.adapter.sendTurn({ threadId: "t-cursor-acpid", text: "hi", model: "auto" });
       await recorder.until((e) => e.type === "turn.completed");
-      const applied = JSON.parse(readFileSync(`${dump}.config.json`, "utf8"));
-      expect(applied).toEqual([
-        { method: "session/set_model", params: { sessionId: "fake-acp-session", modelId: "default[]" } },
-      ]);
+      // The session already reports currentModelId default[], which is what `auto` resolves to.
+      expect(existsSync(`${dump}.config.json`)).toBe(false);
       expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(["--approve-mcps", "--model", "auto", "acp"]);
     } finally {
       recorder.stop();
@@ -896,7 +894,7 @@ describe("cursor ACP model namespace (NS: set_model wiring)", () => {
     }
   });
 
-  it("reports the last accepted model when a pooled session rejects a later pin", async () => {
+  it("does not pin a model the session already accepted, so a repeated setter is not rejected", async () => {
     ensureDirs();
     chmodSync(FAKE_CLI, 0o755);
     process.env.FAKE_ACP_MODE = "set-model-invalid-after-first";
@@ -911,9 +909,7 @@ describe("cursor ACP model namespace (NS: set_model wiring)", () => {
         const turn = await instance.adapter.sendTurn({ threadId: "t-cursor-pooled-rejection", text, model: "grok-4.7-high-fast" });
         expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === turn.turnId)).toMatchObject({ ok: true });
       }
-      expect(recorder.events.filter((e) => e.type === "runtime.notice")).toEqual([
-        expect.objectContaining({ message: expect.stringContaining("did not accept grok-4.7-high-fast in this session, so it runs Grok") }),
-      ]);
+      expect(recorder.events.filter((e) => e.type === "runtime.notice")).toEqual([]);
     } finally {
       recorder.stop();
       await instance.dispose();
@@ -955,7 +951,7 @@ describe("cursor ACP model namespace (NS: set_model wiring)", () => {
       ]);
       const second = await instance.adapter.sendTurn({ threadId: "t-cursor-effort", text: "again", model: "grok-4.7-medium-fast" });
       expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId)).toMatchObject({ ok: true });
-      expect(JSON.parse(readFileSync(`${dump}.config.json`, "utf8"))).toEqual([...applied, ...applied]);
+      expect(JSON.parse(readFileSync(`${dump}.config.json`, "utf8"))).toEqual(applied);
       expect(recorder.events.filter((e) => e.type === "runtime.notice")).toHaveLength(1);
     } finally {
       recorder.stop();
