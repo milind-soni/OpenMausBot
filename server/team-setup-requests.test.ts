@@ -7,6 +7,7 @@ import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.t
 import { botFolder } from "./bot-folder.ts";
 import { flushProfileHistory, readHistory } from "./profile-versions.ts";
 import { hasTeamAuthority } from "./peer-roster.ts";
+import { ProposedAvatars } from "./proposed-avatars.ts";
 import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { DirectApply } from "./direct-apply.ts";
@@ -419,6 +420,21 @@ describe("reviewed Chief team setup", () => {
   it("keeps avatar changes inside the Chief's own team", () => {
     const h = harness(); h.peer.section = "Private";
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { avatarUrl: "/api/attachments/a1b2c3.png" } }])).toThrow(/not in charge of/);
+  });
+
+  it("refuses a plan outside the Chief's team before any picture file it names is copied", async () => {
+    const h = harness(); h.peer.section = "Private";
+    const save = vi.fn(async () => "/api/attachments/copied.png"), remove = vi.fn();
+    const plan = { reason: "asked", operations: [{ action: "update", botId: h.peer.id, fields: { avatarUrl: "face.png" } }] };
+    expect(() => h.service.checkAuthority(h.chief.id, plan)).toThrow(/not in charge of/);
+    expect(() => h.service.checkAuthority(h.chief.id, { reason: "asked", operations: [{ action: "update", botId: "nobody", fields: { avatarUrl: "face.png" } }] })).toThrow(/outside/);
+    expect(() => h.service.checkAuthority(h.chief.id, { reason: "asked", operations: [specialist("Ghost", "Private")] })).toThrow(/not in charge of/);
+    expect(() => h.service.checkAuthority(h.chief.id, { reason: "asked", operations: [specialist("Newcomer", "Engineering")] })).not.toThrow();
+    expect(() => h.service.checkAuthority(h.chief.id, { reason: "asked", newTeams: ["Lab"], operations: [specialist("Founder", "Lab")] })).not.toThrow();
+    // The route runs checkAuthority first, so a refused plan never reaches the copy.
+    const avatars = new ProposedAvatars(save, remove);
+    await expect((async () => { h.service.checkAuthority(h.chief.id, plan); await avatars.inPlan(plan); })()).rejects.toThrow(/not in charge of/);
+    expect(save).not.toHaveBeenCalled();
   });
 
   it("refuses an added rule on a new bot, beside replacement instructions, or where re-saving would redact existing text", () => {

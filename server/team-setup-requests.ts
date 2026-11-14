@@ -274,6 +274,23 @@ export class TeamSetupRequestService {
     return request;
   }
 
+  /** Before anything (a picture file) is copied for a plan: an active Chief, every bot it updates inside its
+   * authority, and every destination team one it may place bots in. The full checks still run on the prepared plan. */
+  checkAuthority(botId: string, plan: unknown): void {
+    const chief = this.chief(botId);
+    const parsed = z.object({ newTeams: z.array(z.unknown()).optional(), operations: z.array(z.unknown()) }).passthrough().safeParse(plan);
+    if (!parsed.success) return;
+    const newTeams = new Set((parsed.data.newTeams ?? []).filter((name) => typeof name === "string").map((name) => section(name as string)));
+    for (const operation of parsed.data.operations) {
+      const op = operation && typeof operation === "object" ? operation as { action?: unknown; botId?: unknown; fields?: { section?: unknown } } : {};
+      const target = op.action === "update" ? this.options.store.bot(String(op.botId ?? "")) : undefined;
+      if (op.action === "update" && (!target || target.hidden)) throw new TeamSetupError("A target bot is outside this Chief's authorized team", 403);
+      if (target && !this.options.hasTeamAuthority(chief, target.section)) throw new TeamSetupError(outsideDepartmentReason(chief, target), 403);
+      const destination = typeof op.fields?.section === "string" ? op.fields.section : target?.section ?? chief.section;
+      if (!newTeams.has(section(destination)) && !this.options.hasTeamAuthority(chief, destination)) throw new TeamSetupError(outsideDepartmentReason(chief, { section: destination }), 403);
+    }
+  }
+
   propose(args: SetupArgs) { return this.card(this.prepare(args), args.from); }
   proposeDeletion(args: DeletionArgs) { return this.card(this.prepareDeletion(args), args.from); }
 

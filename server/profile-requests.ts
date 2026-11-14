@@ -272,6 +272,17 @@ export class ProfileRequestService {
     return this.prepare(args);
   }
 
+  /** Whether this bot may change the target at all, before anything (such as a picture file) is copied for it. */
+  checkTarget(botId: string, targetBotId: string): BotRecord {
+    const target = this.store.bot(targetBotId);
+    if (!target) throw new ProfileRequestError(NO_SUCH_BOT, 404);
+    if (targetBotId !== botId && this.validateTarget) {
+      const refusal = this.validateTarget(botId, targetBotId);
+      if (refusal) throw new ProfileRequestError(refusal, 403);
+    }
+    return target;
+  }
+
   submit(args: Parameters<ProfileRequestService["propose"]>[0]) {
     const proposal = this.prepare(args, true);
     return { ...proposal, state: proposal.result ? "applied" as const : "pending" as const };
@@ -289,13 +300,7 @@ export class ProfileRequestService {
     }
 
     const targetBotId = args.targetBotId ?? args.botId;
-    const target = this.store.bot(targetBotId);
-    if (!target) throw new ProfileRequestError(NO_SUCH_BOT, 404);
-    const crossBot = targetBotId !== args.botId;
-    if (crossBot && this.validateTarget) {
-      const refusal = this.validateTarget(args.botId, targetBotId);
-      if (refusal) throw new ProfileRequestError(refusal, 403);
-    }
+    const target = this.checkTarget(args.botId, targetBotId);
 
     const snapshot = profileSnapshot(target);
     const before: ProfileRequestChanges = {};
@@ -350,7 +355,7 @@ export class ProfileRequestService {
       expectedRevision: profileRevision(target),
     };
 
-    const copy = profileCardCopy({ name: targetName, crossBot }, snapshot, before, finalChanges, reason);
+    const copy = profileCardCopy({ name: targetName, crossBot: targetBotId !== args.botId }, snapshot, before, finalChanges, reason);
     const grant = submitted ? this.autoApply?.(args.botId, args.threadId, targetBotId) ?? null : null;
     const automatic = grant !== null;
     const persistence = this.canPersist?.(args.botId, args.threadId, !automatic);

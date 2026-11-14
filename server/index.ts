@@ -146,6 +146,7 @@ import {
 } from "./container-computer.ts";
 import { containerComputerMcp } from "./local-vm-box.ts";
 import { attachedFileLine, attachForTurn, saveBotAttachment, saveBotAvatarImage } from "./bot-attachment.ts";
+import { pendingCardAvatarUrls, ProposedAvatars } from "./proposed-avatars.ts";
 import {
   cacheUntilConfigChanges,
   ensureDirs,
@@ -609,7 +610,7 @@ import { createTrustAnswers } from "./host/trust-answers.ts";
 import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
 import { createBrowserEvidenceRoutes } from "./routes/browser-evidence.ts";
 import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
-import { createInternalChiefTeamRoutes } from "./routes/internal-chief-team.ts"; import { createInternalModelRoutes } from "./routes/internal-models.ts"; import { createOwnThreads } from "./host/own-threads.ts"; import { burstDefaultModel, burstProposalRefusal, createBurstHost } from "./host/burst-host.ts"; import { expandBurstTurnText } from "./burst/command.ts"; import { createBurstProposalRoutes, createBurstRoutes } from "./routes/burst.ts";
+import { createInternalChiefTeamRoutes } from "./routes/internal-chief-team.ts"; import { createInternalModelRoutes } from "./routes/internal-models.ts"; import { createInternalProfileRequestRoutes } from "./routes/internal-profile-requests.ts"; import { createOwnThreads } from "./host/own-threads.ts"; import { burstDefaultModel, burstProposalRefusal, createBurstHost } from "./host/burst-host.ts"; import { expandBurstTurnText } from "./burst/command.ts"; import { createBurstProposalRoutes, createBurstRoutes } from "./routes/burst.ts";
 import { createRoomHoldRoutes } from "./routes/room-holds.ts";
 import { checkedGroupResponder, createGroupRoutes } from "./routes/groups.ts";
 import { createChannelRoutes } from "./routes/channels.ts";
@@ -9209,9 +9210,7 @@ const profileRequests = new ProfileRequestService({
   store,
   autoApply: appliesDirectly,
   canPersist: proposalPersistence,
-  // A proposed avatar is carried by reference; both the card and confirm
-  // re-check that the stored image still exists.
-  attachmentExists: storedAvatarExists,
+  attachmentExists: storedAvatarExists, // re-checked at confirm: a card can outlive its picture
   validateTarget: chiefPeerTargetRule("profile"),
 });
 const modelRequests = new ModelRequestService({
@@ -11081,17 +11080,10 @@ function messageFileRootsForThread(senderId: string, threadId: string): string[]
   });
 }
 
-/** An avatar a bot proposes: a stored attachment URL or "" (clear) passes through for the request's own checks; anything
- * else is a picture file in the requesting bot's own folders, copied into the attachment store as a stored URL. */
-async function avatarFromProposal(value: unknown, capability: InternalCapability): Promise<unknown> {
-  if (typeof value !== "string" || value.trim() === "" || value.startsWith("/api/attachments/")) return value;
-  const vm = await attachmentVmForTurn(capability);
-  return saveBotAvatarImage({
-    path: value,
-    roots: messageFileRootsForThread(capability.botId, capability.threadId).filter((root) => root !== ATTACHMENTS_DIR),
-    ...(vm ? { guest: { root: VM_WORKSPACE_GUEST, host: vm.workspaceDir } } : {}),
-  });
-}
+/** Picture files a bot proposes as avatars, read from its own folders (or its Local VM) and removed again on refusal. */
+const proposedAvatars = (capability: InternalCapability) => new ProposedAvatars(async (path) => { const vm = await attachmentVmForTurn(capability);
+  return saveBotAvatarImage({ path, roots: messageFileRootsForThread(capability.botId, capability.threadId).filter((root) => root !== ATTACHMENTS_DIR), ...(vm ? { guest: { root: VM_WORKSPACE_GUEST, host: vm.workspaceDir } } : {}) });
+}, (url) => deleteAttachment(join(ATTACHMENTS_DIR, url.slice("/api/attachments/".length))));
 
 async function attachmentVmForTurn(capability: InternalCapability): Promise<LocalVmTarget | undefined> {
   const slot = autoVmClaims.get(capability.threadId);
@@ -12100,7 +12092,7 @@ const { react } = createReactions({
 });
 const publishedPages = createPublishedPages({ dataDir: DATA_DIR, cloudHome: CLOUD_HOME, selfHosted: !CLOUD_HOME && !HOSTED_WORKSPACE && utilityParentPort === undefined, patch: (threadId, messageId, text, publishedPage) => void store.patchMessage(threadId, messageId, { text, publishedPage }), liveRoots: (botId, threadId) => liveRoots(threadId, botId), paused: () => workspaceMaintenance.active || moveFreeze.frozen(), apps: { chat: chatApps, store } }); ROUTES.push(createReactionRoutes({ react, reactorFor, cloudGuestSendRefusal }), publishedPages.routes, savedSteps.routes, createPlacesElsewhereRoutes({ elsewhere: placesElsewhere, owner: (auth) => !sharedMembership() && !HOSTED_WORKSPACE && (auth.kind === "loopback" || ownHome.owner(auth) || (CLOUD_PERSONAL && cloudOwnerSession(auth))) }));
 // `let` slots are read per request.
-const keptAttachments = () => { const routineFiles = routines?.attachmentPaths(); return routineFiles && calendarCalls ? keptAttachmentNames([...store.bots.map((bot) => bot.avatarUrl), cfg.profile?.avatarUrl], [workspaceBannerStore.current()?.name, ...routineFiles, ...calendarCalls.list().flatMap((call) => call.attachments?.map((file) => file.path) ?? []), ...[...turnAttachmentsByTurn.values()].flat().map((file) => file.path)]) : null; }; createDeleteLeftovers({ dataDir: DATA_DIR, store, threadsReferencing, keptAttachments, deleteAttachment: (name) => deleteAttachment(join(ATTACHMENTS_DIR, name)), engineFolders: () => engineSessionFolders(DATA_DIR, [process.env, ...Object.values(providerConfigs()).map((instance) => instanceEnvironment(process.env, instance))].flatMap((env) => engineHomes.everyHome(env))), layers: memoryLayerRecords });
+const keptAttachments = () => { const routineFiles = routines?.attachmentPaths(); return routineFiles && calendarCalls ? keptAttachmentNames([...store.bots.map((bot) => bot.avatarUrl), cfg.profile?.avatarUrl, ...pendingCardAvatarUrls(openCardRows().map((row) => row.card))], [workspaceBannerStore.current()?.name, ...routineFiles, ...calendarCalls.list().flatMap((call) => call.attachments?.map((file) => file.path) ?? []), ...[...turnAttachmentsByTurn.values()].flat().map((file) => file.path)]) : null; }; createDeleteLeftovers({ dataDir: DATA_DIR, store, threadsReferencing, keptAttachments, deleteAttachment: (name) => deleteAttachment(join(ATTACHMENTS_DIR, name)), engineFolders: () => engineSessionFolders(DATA_DIR, [process.env, ...Object.values(providerConfigs()).map((instance) => instanceEnvironment(process.env, instance))].flatMap((env) => engineHomes.everyHome(env))), layers: memoryLayerRecords });
 ROUTES.push(createThreadRoutes({
   groupFor: personRooms.groupForAuth, ...(botOrders ? { botOrderFor: (auth: RequestAuth, bots: readonly BotRecord[]) => { const person = botOrders.personOf(auth); return person ? botOrders.ordered(person, bots) : bots; } } : {}),
   store, userName: userNameFor, sessions, groupUsageReader, lendingEnabled,
@@ -13386,40 +13378,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
         }
       }
-      if (method === "POST" && path === "/api/internal/profile-requests") {
-        const parsed = z.object({
-          fromBotId: z.string().min(1).max(128),
-          fromThreadId: z.string().min(1).max(128),
-          forBotId: z.string().max(128).optional(),
-          changes: z.unknown(),
-          reason: z.unknown(),
-        }).strict().safeParse(await readInternalBody());
-        if (!parsed.success) return json(res, 400, { error: "invalid profile proposal" });
-        const body = parsed.data;
-        const from = store.bot(body.fromBotId);
-        if (!from) return json(res, 403, { error: "unknown sender" });
-        const owner = connectorThread(from.id, body.fromThreadId);
-        if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
-        const targetBotId = body.forBotId?.trim() || from.id;
-        let changes = body.changes;
-        if (changes && typeof changes === "object" && !Array.isArray(changes) && "avatarUrl" in changes) {
-          changes = { ...changes, avatarUrl: await avatarFromProposal((changes as Record<string, unknown>).avatarUrl, internalCapability) };
-        }
-        const proposed = profileRequests.submit({
-          botId: from.id,
-          threadId: body.fromThreadId,
-          targetBotId,
-          changes,
-          reason: body.reason,
-          from: owner.group ? { botId: from.id, name: from.name, color: from.color } : undefined,
-        });
-        appendDecision(DATA_DIR, {
-          threadId: body.fromThreadId, requestId: proposed.requestId, botId: from.id, botName: from.name,
-          tool: "update_profile", summary: proposed.detail, decision: proposed.state === "applied" ? "auto-approved" : "card-shown",
-          source: proposed.state === "applied" ? proposed.appliedBy ?? "full-access" : "profile",
-        });
-        return json(res, 201, proposed);
-      }
       if (method === "POST" && path === "/api/internal/model-requests") {
         const parsed = z.object({
           fromBotId: z.string().min(1).max(128),
@@ -13450,28 +13408,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 201, proposed);
       }
       if (await dispatchRoutes([createBurstProposalRoutes({ requireActive: requireActiveInternalCapability, readBody: readInternalBody, refusal: () => burstProposalRefusal({ owner: connectorThread(internalSender.id, internalCapability.threadId), outside: outsideWorkStaysHere(internalCapability.threadId), self: selfThreadRefusal({ handoff: Boolean(internalCapability.roomHandoffId), requestLine: store.activePath(internalCapability.threadId).findLast((line) => line.role === "user" && line.kind === "text") }) }), model: () => burst.model(internalSender, internalCapability.threadId), propose: (plan) => burst.propose({ ...plan, botId: internalSender.id, threadId: internalCapability.threadId }) }), createInternalChiefTeamRoutes({ bot: () => store.bot(internalCapability.botId), requireActive: requireActiveInternalCapability,
-        teams: teamSetupTeams, bots: () => store.bots, instances: () => registry.describe() }), createInternalModelRoutes({ requireActive: requireActiveInternalCapability, menu: (search) => ownThreads.menu(internalCapability.botId, internalCapability.threadId, search) })], { req, res, url, path, method, auth, json, readBody })) return;
+        teams: teamSetupTeams, bots: () => store.bots, instances: () => registry.describe() }), createInternalModelRoutes({ requireActive: requireActiveInternalCapability, menu: (search) => ownThreads.menu(internalCapability.botId, internalCapability.threadId, search) }),
+        createInternalProfileRequestRoutes({ readBody: readInternalBody, bot: (id) => store.bot(id), owner: connectorThread, requests: profileRequests, avatars: () => proposedAvatars(internalCapability), record: (from, threadId, proposed) => appendDecision(DATA_DIR, { threadId, requestId: proposed.requestId, botId: from.id, botName: from.name,
+          tool: "update_profile", summary: proposed.detail, decision: proposed.state === "applied" ? "auto-approved" : "card-shown", source: proposed.state === "applied" ? proposed.appliedBy ?? "full-access" : "profile" }) })], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/team-setup-requests") {
         const parsed = z.object({ fromBotId: z.string().optional(), fromThreadId: z.string().optional(), plan: z.unknown() }).strict().safeParse(await readInternalBody());
         if (!parsed.success) return json(res, 400, { error: "Invalid team setup request" });
         const chief = store.bot(internalCapability.botId)!;
         const owner = connectorThread(chief.id, internalCapability.threadId);
         if (!owner) return json(res, 403, { error: "Source conversation no longer belongs to the Chief" });
-        let plan = parsed.data.plan;
-        const operations = plan && typeof plan === "object" && !Array.isArray(plan) ? (plan as { operations?: unknown }).operations : undefined;
-        if (Array.isArray(operations) && operations.length <= 40) {
-          const withAvatars = [];
-          for (const operation of operations) {
-            const fields = operation && typeof operation === "object" ? (operation as { fields?: unknown }).fields : undefined;
-            withAvatars.push(fields && typeof fields === "object" && !Array.isArray(fields) && "avatarUrl" in fields
-              ? { ...operation, fields: { ...fields, avatarUrl: await avatarFromProposal((fields as Record<string, unknown>).avatarUrl, internalCapability) } }
-              : operation);
-          }
-          plan = { ...(plan as object), operations: withAvatars };
-        }
-        const proposed = await teamSetupRequests.submit({ botId: chief.id, threadId: internalCapability.threadId, plan,
+        teamSetupRequests.checkAuthority(chief.id, parsed.data.plan); // before any picture file is copied for it
+        const avatars = proposedAvatars(internalCapability), plan = await avatars.inPlan(parsed.data.plan);
+        const proposed = await avatars.submit(() => teamSetupRequests.submit({ botId: chief.id, threadId: internalCapability.threadId, plan,
           canCommit: () => internalCapabilityIsActive(internalCapability),
-          ...(owner.group ? { from: { botId: chief.id, name: chief.name, color: chief.color } } : {}) });
+          ...(owner.group ? { from: { botId: chief.id, name: chief.name, color: chief.color } } : {}) }));
         if (proposed.state === "applied" || proposed.state === "pending") appendDecision(DATA_DIR, { threadId: internalCapability.threadId, requestId: proposed.requestId, botId: chief.id,
           tool: "set_up_team", summary: proposed.detail, decision: proposed.state === "applied" ? "auto-approved" : "card-shown",
           source: "appliedBy" in proposed ? proposed.appliedBy : "profile" });
@@ -14140,7 +14090,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (!checkedCwd.ok) return json(res, 400, { error: checkedCwd.error });
           cwd = checkedCwd.cwd ?? undefined;
         }
-        const avatarUrl = body.avatarUrl === undefined ? undefined : await avatarFromProposal(body.avatarUrl, internalCapability);
         // Discovery can yield; check current authority and capacity again before writing.
         if (store.bot(chief.id) !== chief || chief.hidden || !chiefLevel(chief) || !connectorThread(chief.id, fromThreadId)) {
           return json(res, 403, { error: "only an active Chief of Staff can create operator bots" });
@@ -14159,6 +14108,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 409, { error: `@${duplicate.name} already exists in this section; use list_bots` });
         }
         const summary = soul.split("\n").find((line) => line.trim())?.trim() ?? "";
+        // Every check above ran first; only now is a picture file copied, and a refused setup removes it.
+        const avatars = proposedAvatars(internalCapability), avatarUrl = body.avatarUrl === undefined ? undefined : await avatars.resolve(body.avatarUrl);
         const setup = {
           botId: chief.id,
           threadId: fromThreadId,
@@ -14181,7 +14132,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             }],
           },
         };
-        const proposed = await teamSetupRequests.submit(setup);
+        const proposed = await avatars.submit(() => teamSetupRequests.submit(setup));
         if (proposed.state === "applied" || proposed.state === "pending") {
           internalCapability.createdBots += 1;
           appendDecision(DATA_DIR, { threadId: fromThreadId, requestId: proposed.requestId, botId: chief.id,

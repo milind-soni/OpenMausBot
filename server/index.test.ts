@@ -2893,6 +2893,34 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("copies no picture file for a proposal it refuses, and removes the copy when the request is refused after it", async () => {
+    const sender = (await api("POST", "/api/bots")).body.bot;
+    const other = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const folder = mkdtempSync(join(tmpdir(), "omb-avatar-refused-"));
+      writeFileSync(join(folder, "face.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]));
+      expect((await api("PATCH", `/api/bots/${sender.id}`, { approvalMode: "ask", cwd: folder })).status).toBe(200);
+      const token = await mintTestCapability(BASE, sender.id, sender.threadId);
+      const propose = async (body: Record<string, unknown>) => (await fetch(`${BASE}/api/internal/profile-requests`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: sender.id, fromThreadId: sender.threadId, reason: "you asked", ...body }),
+      })).status;
+      const store = join(home, ".openmausbot", "attachments");
+      const files = () => existsSync(store) ? readdirSync(store).sort() : [];
+      const before = files();
+
+      expect(await propose({ forBotId: other.id, changes: { avatarUrl: "face.png" } })).toBe(403);
+      expect(files()).toEqual(before);
+      expect(await propose({ changes: { avatarUrl: "face.png", color: "not-a-colour" } })).toBe(400);
+      expect(files()).toEqual(before);
+      expect(((await api("GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; avatarUrl?: string }>).find((bot) => bot.id === sender.id)?.avatarUrl ?? null).toBeNull();
+    } finally {
+      await api("DELETE", `/api/bots/${other.id}`);
+      await api("DELETE", `/api/bots/${sender.id}`);
+    }
+  });
+
   it("takes a created operator's role description up to 4000 characters, and says what to do with a longer one", async () => {
     const chief = (await api("POST", "/api/bots")).body.bot;
     let createdId: string | undefined;
