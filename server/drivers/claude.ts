@@ -149,7 +149,7 @@ export function claudeInheritWarning(env: NodeJS.ProcessEnv): ProviderSnapshot["
       "OMB_CLAUDE_INHERIT_USER_CONFIG=1 is set on the OpenMausBot process, so every Claude bot also loads this " +
       "computer's own MCP servers, connectors, skills, hooks and personal CLAUDE.md on every turn — often thousands " +
       "of extra tokens per model call, and tools nobody gave the bot. Unless a bot genuinely needs a server from " +
-      "your user-scope Claude config, remove the variable and restart; add the server under Settings → MCP servers " +
+      "your user-scope Claude config, remove the variable and restart; add the server under Apps → MCP servers " +
       "or the bot project's .mcp.json instead.",
   };
 }
