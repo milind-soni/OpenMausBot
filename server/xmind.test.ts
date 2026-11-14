@@ -140,6 +140,14 @@ describe("saveXmindUpload", () => {
     expect(readFileSync(saved.path, "utf8")).toBe(EXPECTED);
   });
 
+  it("rejects corrupt but parseable content instead of saving a changed outline", async () => {
+    const before = scratchDirs();
+    const bytes = buildZip([{ name: "content.json", data: CONTENT_JSON, method: 0 }]);
+    bytes[bytes.indexOf(Buffer.from("Risks"))] = "D".charCodeAt(0);
+    await expect(saveXmindUpload(body(bytes), "Corrupt.xmind")).rejects.toMatchObject({ status: 400, message: "not a readable XMind file" });
+    expect(scratchDirs()).toEqual(before);
+  });
+
   it("answers 400 for anything that is not a readable mind map, and leaves nothing behind", async () => {
     const before = scratchDirs();
     const unreadable = { status: 400, message: "not a readable XMind file" };
