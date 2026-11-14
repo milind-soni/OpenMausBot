@@ -35,7 +35,7 @@ import type {
   SteerOutcome,
   TextGenerationOptions,
 } from "../contracts.ts";
-import { appMountFor, customServerGate, gateQueryTools, gateServer } from "../mcp-gate-config.ts";
+import { appMountFor, customServerGate, gateQueryTools, gateServer, limitUngatedOutput } from "../mcp-gate-config.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { newEventId, newId } from "../contracts.ts";
@@ -1150,7 +1150,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       allowed.push("mcp__ogb", ...gateQueryTools(mcpServers));
       // A guest pre-allows only harness tools; anything else (the browser can open file:) asks.
       if (turn.guestConfined) allowed.splice(0, allowed.length, ...allowed.filter((name) => name === "mcp__ogb" || name === "mcp__agents"));
-      const env = withEndpointFolder(environment(config.endpointModels ? undefined : turnModel), config, () => retryState.delete(threadId)); env.PATH = turnEnvironment.PATH; // launch the copy this turn checked, not one a newer PATH finds
+      const env = withEndpointFolder(environment(config.endpointModels ? undefined : turnModel), config, () => retryState.delete(threadId)); env.PATH = turnEnvironment.PATH; limitUngatedOutput(env, mcpServers, botOwned, turn.integrations?.customResultBudgets); // PATH: launch the copy this turn checked, not one a newer PATH finds
       // The MCP config carries credentials and argv is readable via `ps`: a 0600 file, removed at settle.
       let mcpConfigPath: string | null = null;
       if (Object.keys(mcpServers).length) {

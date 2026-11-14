@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { customServerGate, gateQueryTools, gateServer, hasOwnResultBudget, mcpStdioServer, resultBudget, serverResultBudget } from "./mcp-gate-config.ts";
+import {
+  customServerGate, gateQueryTools, gateServer, hasOwnResultBudget, limitUngatedOutput, mcpStdioServer, resultBudget, serverResultBudget,
+  UNGATED_MCP_OUTPUT_TOKENS,
+} from "./mcp-gate-config.ts";
 import { DEFAULT_RESULT_BUDGET } from "./mcp-trim.ts";
 
 const server = { command: "example-mcp", args: ["--stdio"], env: { TOKEN: "disposable-test-token" } };
@@ -165,5 +168,22 @@ describe("the gate's own query tool", () => {
       lookalike: { ...server, env: { OMB_GATE_BUDGET: "8000" } } }))
       .toEqual(["mcp__shop__query_result"]);
     expect(gateQueryTools({ files: privateTrimming, broken: { args: trimming.args, env: {} } })).toEqual(["mcp__files__query_result"]);
+  });
+});
+
+describe("untrimmed bot servers", () => {
+  const gated = { command: "node", args: ["gate"], env: { OMB_GATE_BUDGET: "8000" } };
+  const limit = (env: NodeJS.ProcessEnv, mounted: Record<string, unknown>, perServer?: Record<string, number>) => {
+    limitUngatedOutput(env, mounted, Object.keys(mounted), perServer);
+    return env.MAX_MCP_OUTPUT_TOKENS;
+  };
+
+  it("has the CLI save big results to a file only when a bot server reaches it untrimmed", () => {
+    expect(limit({}, { docs: remote })).toBe(String(UNGATED_MCP_OUTPUT_TOKENS));
+    expect(limit({}, { docs: gated })).toBeUndefined();
+    expect(limit({}, {})).toBeUndefined();
+    expect(limit({}, { docs: remote }, { docs: 0 })).toBeUndefined();
+    expect(limit({ OMB_MCP_RESULT_BUDGET: "0" }, { docs: remote })).toBeUndefined();
+    expect(limit({ MAX_MCP_OUTPUT_TOKENS: "40000" }, { docs: remote })).toBe("40000");
   });
 });

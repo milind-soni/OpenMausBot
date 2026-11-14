@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR, ensureDirs, instanceConfigs, NATIVE_DIR, type AppConfig } from "../config.ts";
-import { TurnAuthenticationRefusedError, type ProviderInstance } from "../contracts.ts";
+import { TurnAuthenticationRefusedError, type ProviderInstance, type SendTurnInput } from "../contracts.ts";
+import { UNGATED_MCP_OUTPUT_TOKENS } from "../mcp-gate-config.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { BACKGROUND_CALL_TIMEOUT_MS, BACKGROUND_SETTINGS, backgroundCallArgs } from "./claude-background.ts";
 import {
@@ -1816,6 +1817,25 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.mcpConfig.mcpServers.legacy).toEqual({ type: "sse", url: "https://old.example/sse", headers: {} });
     expect(JSON.stringify(seen.mcpConfig)).not.toContain("mcp-remote-proxy");
     expect(JSON.stringify(seen.argv)).not.toContain("tok-docs");
+  });
+
+  it("has the CLI save a big result from a bot's URL server to a file instead of the thread", async () => {
+    await create();
+    const dump = join(scratch, "ungated-mcp.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const docs = { type: "http" as const, url: "https://docs.example/mcp", headers: {} };
+    const turn = async (threadId: string, integrations: SendTurnInput["integrations"]) => {
+      await instance.adapter.sendTurn({ threadId, text: "hi", integrations });
+      await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId);
+      return JSON.parse(readFileSync(dump, "utf8")).env.MAX_MCP_OUTPUT_TOKENS;
+    };
+
+    expect(await turn("t-ungated-url", { custom: { docs } })).toBe(String(UNGATED_MCP_OUTPUT_TOKENS));
+    // The gate already trims a command server and a URL server with a limit of its own; a limit of 0 asks for whole payloads.
+    expect(await turn("t-gated-cmd", { custom: { shop: { command: "npx", args: ["shop"], env: {} } } })).toBeUndefined();
+    expect(await turn("t-gated-url", { custom: { docs }, customResultBudgets: { docs: 4000 } })).toBeUndefined();
+    expect(await turn("t-whole-url", { custom: { docs }, customResultBudgets: { docs: 0 } })).toBeUndefined();
+    expect(await turn("t-no-custom", {})).toBeUndefined();
   });
 
   // Claude Code advertises no MCP Apps UI extension and keeps tool results to itself, so only OMB's
