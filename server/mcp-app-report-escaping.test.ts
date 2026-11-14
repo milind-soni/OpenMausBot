@@ -2,7 +2,7 @@ import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 
-import { APP_REPORT_MAX_BYTES, AppObserver, type McpAppReport } from "./mcp-app-observer.ts";
+import { APP_REPORT_MAX_BYTES, AppObserver, appReportBody, type McpAppReport } from "./mcp-app-observer.ts";
 
 async function observe(text: string, args: Record<string, unknown> = {}) {
   const reports: Array<{ body: string; headers: IncomingHttpHeaders }> = [];
@@ -61,6 +61,46 @@ describe("MCP app reports with JSON-escaped text", () => {
     const body = JSON.parse(reports[0]!.body) as McpAppReport;
     expect(body.oversized).toBeUndefined();
     expect(body.result.content).toEqual([{ type: "text", text }]);
+  });
+
+  it("retains a fitting escape-heavy prefix below one percent of the original text", async () => {
+    const text = "\u0001".repeat(154_000) + "a".repeat(14_846_000);
+    const { reports, logs } = await observe(text);
+    expect(logs).toEqual([]);
+    expect(reports).toHaveLength(1);
+    expect(Buffer.byteLength(reports[0]!.body)).toBeLessThanOrEqual(APP_REPORT_MAX_BYTES);
+    const sent = JSON.parse(reports[0]!.body) as McpAppReport;
+    const clipped = sent.result.content[0] as { text: string };
+    expect(clipped.text.endsWith("…")).toBe(true);
+    expect(clipped.text.length).toBeGreaterThan(147_000);
+    expect(text.startsWith(clipped.text.slice(0, -1))).toBe(true);
+  });
+
+  it.each([
+    "\u0001".repeat(20) + "a".repeat(100),
+    "a".repeat(100) + "\u0001".repeat(20),
+    "🐭".repeat(30) + "z".repeat(40),
+  ])("uses the available encoded budget without splitting a character (%#)", (text) => {
+    const original: McpAppReport = {
+      tool: "mcp_app", server: "fixture", definition: { name: "show", _meta: {} },
+      call: { arguments: {} }, result: { content: [{ type: "text", text }] },
+    };
+    const encode = (prefix: string) => JSON.stringify({ ...original, oversized: true, result: { content: [{ type: "text", text: `${prefix}…` }] } });
+    const characters = Array.from(text);
+    for (const available of [0, 1, 3, 6, 17, 32]) {
+      const cap = Buffer.byteLength(encode("")) + available;
+      let expected = "";
+      let prefix = "";
+      for (const character of characters) {
+        prefix += character;
+        if (Buffer.byteLength(encode(prefix)) <= cap) expected = prefix;
+      }
+      const body = appReportBody(original, cap);
+      expect(body).not.toBeNull();
+      expect(Buffer.byteLength(body!)).toBeLessThanOrEqual(cap);
+      expect(JSON.parse(body!).result.content).toEqual([{ type: "text", text: `${expected}…` }]);
+    }
+    expect(original.result.content).toEqual([{ type: "text", text }]);
   });
 
   it("still refuses a report whose arguments alone exceed the budget", async () => {
