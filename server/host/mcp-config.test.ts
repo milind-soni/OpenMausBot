@@ -172,3 +172,48 @@ describe("shared MCP config", () => {
     expect(forget).toHaveBeenCalledWith("warehouse");
   });
 });
+
+describe("how many MCP servers fit", () => {
+  const own = (bot: string): StoredMcpServer => ({ command: "linear-mcp", args: [], env: {}, enabled: false, bot }) as StoredMcpServer;
+  const fill = (cfg: { mcpServers?: Record<string, unknown> }, count: number, make: (i: number) => StoredMcpServer, prefix: string) => {
+    const next = { ...cfg.mcpServers };
+    for (let i = 0; i < count; i++) next[`${prefix}${i}`] = make(i);
+    cfg.mcpServers = next as never;
+  };
+
+  it("lets each bot have its own servers up to 20 with the shared ones, while other bots can still add theirs", () => {
+    const { cfg, config } = fixture();
+    fill(cfg, 2, () => remote(), "shared");
+    fill(cfg, 18, () => own("bot-a"), "a");
+    expect(config.add("a18", own("bot-a"))).toEqual({ status: 400, error: "A bot can use at most 20 MCP servers: the shared ones plus its own." });
+    expect(config.add("b0", own("bot-b"))).toMatchObject({ status: 201 });
+    fill(cfg, 17, () => own("bot-b"), "b-more");
+    expect(Object.keys(cfg.mcpServers ?? {})).toHaveLength(38);
+    expect(config.add("c0", own("bot-c"))).toMatchObject({ status: 201 });
+  });
+
+  it("refuses a shared server that would take any bot past 20, and keeps the old words when no bot has its own", () => {
+    const { cfg, config } = fixture();
+    fill(cfg, 20, () => remote(), "s");
+    expect(config.add("extra", remote())).toEqual({ status: 400, error: "You can add at most 20 MCP servers." });
+    cfg.mcpServers = {};
+    fill(cfg, 1, () => remote(), "s");
+    fill(cfg, 19, () => own("bot-a"), "a");
+    expect(config.add("extra", remote())).toEqual({ status: 400, error: "A bot can use at most 20 MCP servers: the shared ones plus its own." });
+  });
+
+  it("holds at most 100 servers in all", () => {
+    const { cfg, config } = fixture();
+    for (let bot = 0; bot < 5; bot++) fill(cfg, 20, () => own(`bot-${bot}`), `b${bot}-`);
+    expect(config.add("one-more", own("bot-new"))).toEqual({ status: 400, error: "You can add at most 100 MCP servers in all." });
+  });
+
+  it("an import counts each pasted server against the same limits", async () => {
+    const { cfg, config } = fixture();
+    fill(cfg, 15, () => own("bot-a"), "a");
+    const servers = Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`p${i}`, remote()]));
+    expect(await config.addMany(async () => ({ servers }))).toEqual({ status: 400, error: "A bot can use at most 20 MCP servers: the shared ones plus its own." });
+    const five = Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`p${i}`, remote()]));
+    expect(await config.addMany(async () => ({ servers: five }))).toMatchObject({ status: 201 });
+  });
+});

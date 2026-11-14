@@ -7,7 +7,7 @@ import { basename, delimiter, isAbsolute, join, relative, resolve, sep } from "n
 
 import type { StdioMcpSpec } from "./contracts.ts";
 import { engineInstallRoots } from "./engine-roots.ts";
-import { addDisabledMcpServer, isRemoteMcpServer, parseStoredMcpServer, type DisabledMcpServerAdd, type StoredStdioMcpServer } from "./mcp-registry.ts";
+import { addDisabledMcpServer, isRemoteMcpServer, parseStoredMcpServer, type DisabledMcpServerAdd, type StoredMcpServer, type StoredStdioMcpServer } from "./mcp-registry.ts";
 
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 /** What one server's files copied out of a conversation folder may add up to. */
@@ -161,9 +161,16 @@ export function keepForBot(server: StoredStdioMcpServer, botId: string, dataDir:
   return { ok: true, server: boxed ? { ...kept.server, bot: botId } : kept.server, moved: kept.moved };
 }
 
+/** The bot keepForBot will make this server's own: boxed, one whose files are in only this bot's folders. */
+function ownerFor(server: StoredMcpServer, botId: string, dataDir: string, boxed: boolean): string | undefined {
+  if (!boxed || isRemoteMcpServer(server)) return undefined;
+  const use = botFolderUse(server, dataDir);
+  return use && use !== "several" && use.botId === botId ? botId : undefined;
+}
+
 /** A bot's mcp_server add: saved off first, its files kept as keepForBot says. */
 export function addBotMcpServer(current: Record<string, unknown>, body: unknown, botId: string, dataDir: string, boxed: boolean): BotMcpServerAdd {
-  const added = addDisabledMcpServer(current, body);
+  const added = addDisabledMcpServer(current, body, (server) => ownerFor(server, botId, dataDir, boxed));
   if (!added.ok || isRemoteMcpServer(added.server)) return added;
   const kept = keepForBot(added.server, botId, dataDir, boxed);
   if (!kept.ok) return kept;
