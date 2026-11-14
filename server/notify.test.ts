@@ -122,6 +122,12 @@ describe("summarize", () => {
     expect(summarize("short")).toBe("short");
   });
 
+  it.each(["🙂", "e\u0301", "👩‍💻"])("keeps %s whole when truncating a notification preview", (grapheme) => {
+    const prefix = "x".repeat(138);
+    const frame = buildNotification("done", bot, bot.threadId, `${prefix}${grapheme} done`);
+    expect(frame?.body).toBe(`${prefix}…`);
+  });
+
   it("reads a bot's Markdown as the plain line a lock screen shows", () => {
     expect(summarize("**Facture reçue** — consulter le [document](https://example.com/facture)"))
       .toBe("Facture reçue — consulter le document");
