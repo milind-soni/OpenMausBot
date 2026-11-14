@@ -43,7 +43,7 @@ export async function openBlankTerminal(platform = process.platform, run = execF
     );
   }
   if (platform === "linux") {
-    for (const terminal of ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"]) {
+    for (const terminal of ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm", "foot", "ghostty", "kitty", "alacritty"]) {
       if (await launch(terminal, [], undefined, run)) return true;
     }
   }
