@@ -18,7 +18,6 @@ describe("bot visibility form", () => {
     expect(visibilityFromForm("everyone", "ignored")).toEqual({ ok: true, visibility: "everyone" });
     expect(visibilityFromForm("admins", "")).toEqual({ ok: true, visibility: "admins" });
     expect(visibilityFromForm("people", " Ada@Example.test,\n@acme.test ; ada@example.test ")).toEqual({ ok: true, visibility: { people: ["ada@example.test", "@acme.test"] } });
-    // an empty list is refused here rather than saved as "admins only" by surprise
     expect(visibilityFromForm("people", " \n ")).toEqual({ ok: false });
   });
 
@@ -32,7 +31,6 @@ describe("bot visibility form", () => {
       { id: "g1", name: "Pay questions", memberIds: ["b1", "b2"] },
       { id: "g2", name: "HR desk", memberIds: ["b1", "b3"] },
       { id: "g3", name: "b1 ⇄ b2", memberIds: ["b1", "b2"], dm: true },
-      // once narrower, still narrower: its floor outlived the bot that set it
       { id: "g4", name: "Old severance room", memberIds: ["b2"], audienceFloor: "admins" as const },
     ];
     expect(mixedRooms(bots[0]!, groups, bots)).toEqual([{ id: "g1", name: "Pay questions" }]);

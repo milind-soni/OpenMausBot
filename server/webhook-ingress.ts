@@ -1,8 +1,10 @@
+import { rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { z } from "zod";
 
 import { parseJson, type JsonValue } from "./schema.ts";
 import type { WebhookManager } from "./webhooks.ts";
+import { IDLE_HTTP_SERVER } from "./due-timer.ts";
 
 export const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
 const statusErrorSchema = z.object({ status: z.number().int().optional() });
@@ -10,12 +12,14 @@ const serverAddressSchema = z.object({ port: z.number().int().min(1).max(65_535)
 
 export interface WebhookIngress {
   server: Server;
+  /** The same receiver on a Unix socket (OMB_WEBHOOK_SOCKET), for a proxy in another container: the compose files' Caddy. */
+  socketServer?: Server;
   host: string;
   port: number;
   baseUrl: string;
 }
 
-function json(res: ServerResponse, status: number, body: JsonValue): void {
+export function json(res: ServerResponse, status: number, body: JsonValue): void {
   res.writeHead(status, {
     "content-type": "application/json",
     "cache-control": "no-store",
@@ -24,7 +28,7 @@ function json(res: ServerResponse, status: number, body: JsonValue): void {
   res.end(JSON.stringify(body));
 }
 
-async function readRawBody(req: IncomingMessage): Promise<string> {
+export async function readRawBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   try {
@@ -59,12 +63,12 @@ function parsePayload(raw: string, contentType: string): JsonValue {
   return raw;
 }
 
-function header(req: IncomingMessage, name: string): string | undefined {
+export function header(req: IncomingMessage, name: string): string | undefined {
   const value = req.headers[name];
   return Array.isArray(value) ? value[0] : value;
 }
 
-function bearerSecret(req: IncomingMessage): string {
+export function bearerSecret(req: IncomingMessage): string {
   const authorization = header(req, "authorization") ?? "";
   const match = authorization.match(/^Bearer\s+(.+)$/i);
   return match?.[1]?.trim() || header(req, "x-openmaus-secret")?.trim() || "";
@@ -88,12 +92,21 @@ function eventName(req: IncomingMessage): string | undefined {
   )?.trim() || undefined;
 }
 
-export function createWebhookIngressHandler(manager: WebhookManager, claimRequest?: () => () => void) {
+/** Another public door on this receiver (a bot's API): true when it answered the request. */
+export type IngressDoor = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<boolean>;
+
+export function createWebhookIngressHandler(manager: WebhookManager, claimRequest?: () => () => void, door?: IngressDoor) {
   return async (req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url ?? "/", "http://localhost");
+    let url: URL;
+    try {
+      url = new URL(req.url ?? "/", "http://localhost");
+    } catch {
+      return json(res, 400, { error: "Invalid request URL" });
+    }
     if (req.method === "GET" && url.pathname === "/health") {
       return json(res, 200, { app: "openmausbot-webhooks", ready: true });
     }
+    if (door && await door(req, res, url)) return;
     const match = url.pathname.match(/^\/hooks\/(wh_[A-Za-z0-9_-]+)(?:\/([^/]+))?$/);
     if (!match) return json(res, 404, { error: "Unknown webhook endpoint" });
     if (req.method !== "POST") return json(res, 405, { error: "Webhooks accept POST requests" });
@@ -101,11 +114,14 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
     let release: (() => void) | undefined;
     try {
       release = claimRequest?.();
-      const pathSecret = match[2] ? decodeURIComponent(match[2]) : "";
-      const secret = pathSecret || bearerSecret(req);
+      let secret = "";
+      try {
+        secret = (match[2] ? decodeURIComponent(match[2]) : "") || bearerSecret(req);
+      } catch {
+      }
       // Reject bad capability URLs before buffering or parsing attacker input.
       if (!manager.authorize(match[1], secret)) {
-        manager.recordRejected(match[1], 401, "Invalid webhook URL or secret", {
+        manager.recordUnauthorized(match[1], {
           contentType: header(req, "content-type"),
           eventName: eventName(req),
           deliveryId: deliveryId(req),
@@ -115,7 +131,7 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
       const raw = await readRawBody(req);
       const contentType = header(req, "content-type")?.split(";")[0]?.trim().toLowerCase() ?? "text/plain";
       const payload = parsePayload(raw, contentType);
-      const result = manager.receive(match[1], secret, {
+      const result = await manager.receive(match[1], secret, {
         payload,
         contentType,
         eventName: eventName(req),
@@ -127,9 +143,6 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
       const parsedError = statusErrorSchema.safeParse(error);
       const status = parsedError.success ? parsedError.data.status ?? 500 : 500;
       const message = error instanceof Error ? error.message : String(error);
-      // Manager-level validation records its own rejection with the parsed
-      // payload. Receiver-level failures happen earlier, so record metadata
-      // here without buffering untrusted data a second time.
       if (status === 400 || status === 413) {
         manager.recordRejected(match[1], status, message, {
           contentType: header(req, "content-type"),
@@ -144,9 +157,6 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
   };
 }
 
-/** The base senders are told to use. Behind a proxy or tunnel the listening
- * address is unreachable from outside, so the operator supplies the public
- * one; a trailing slash is tolerated because every hook path adds its own. */
 export function advertisedWebhookBase(raw: string): string {
   let parsed: URL | undefined;
   try {
@@ -162,28 +172,56 @@ export function advertisedWebhookBase(raw: string): string {
   return raw.replace(/\/+$/, "");
 }
 
+/** A TCP port on `host`, or a Unix socket's path when `host` is omitted. */
+function listenOn(server: Server, where: number | string, host?: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => reject(error);
+    const listening = () => {
+      server.off("error", onError);
+      resolve();
+    };
+    server.once("error", onError);
+    if (typeof where === "number") server.listen(where, host, listening);
+    else server.listen(where, listening);
+  });
+}
+
 export async function listenWebhookIngress(
   manager: WebhookManager,
-  options: { host?: string; port: number; publicBaseUrl?: string; claimRequest?: () => () => void },
+  options: { host?: string; port: number; socketPath?: string; publicBaseUrl?: string; claimRequest?: () => () => void; door?: IngressDoor },
 ): Promise<WebhookIngress> {
   const host = options.host ?? "127.0.0.1";
   const advertised = options.publicBaseUrl === undefined ? undefined : advertisedWebhookBase(options.publicBaseUrl);
-  const server = createServer(createWebhookIngressHandler(manager, options.claimRequest));
-  await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error) => reject(error);
-    server.once("error", onError);
-    server.listen(options.port, host, () => {
-      server.off("error", onError);
-      resolve();
+  const handle = createWebhookIngressHandler(manager, options.claimRequest, options.door);
+  const receive = (req: IncomingMessage, res: ServerResponse) => {
+    handle(req, res).catch((error: unknown) => {
+      console.error("webhooks: receiver failed", error);
+      if (res.headersSent) res.destroy();
+      else json(res, 500, { error: "Webhook receiver failed" });
     });
-  });
+  };
+  const server = createServer(IDLE_HTTP_SERVER, receive);
+  await listenOn(server, options.port, host);
   const address = serverAddressSchema.safeParse(server.address());
   if (!address.success) {
     server.close();
     throw new Error("Webhook receiver did not get a TCP address");
   }
+  let socketServer: Server | undefined;
+  if (options.socketPath) {
+    // A socket left by a server that stopped without closing it would refuse the listen.
+    if (process.platform !== "win32") rmSync(options.socketPath, { force: true });
+    socketServer = createServer(IDLE_HTTP_SERVER, receive);
+    try {
+      await listenOn(socketServer, options.socketPath);
+    } catch (error) {
+      server.close();
+      throw error;
+    }
+  }
   return {
     server,
+    ...(socketServer ? { socketServer } : {}),
     host,
     port: address.data.port,
     baseUrl: advertised ?? `http://${host}:${address.data.port}`,

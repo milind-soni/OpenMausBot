@@ -3,9 +3,14 @@
 // server. vite.config.ts is inherited on purpose (react, tailwind, the @ alias)
 // so the page renders exactly what the app renders; only the host, the port
 // and the /api target are pinned here.
+import { realpathSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
+import { removeTempDir } from "../../server/testing/cleanup.ts";
 
 export const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -30,6 +35,8 @@ export interface PreviewOptions {
   /** Vite's log level. Its default prints port and dependency notes on stdout,
    * ahead of anything the fixture prints there. */
   logLevel?: "info" | "warn" | "error" | "silent";
+  /** Set on every request the page sends the fixture, e.g. a Cloud home's edge headers and a paired device's token. */
+  proxyHeaders?: Record<string, string>;
 }
 
 export interface MountedPreview {
@@ -52,14 +59,17 @@ export async function mountPreview(
   fixture: { info: { url: string } },
   options: PreviewOptions,
 ): Promise<MountedPreview> {
-  const { entry, route, title, extraRoutes = [], viewport = "width=device-width, initial-scale=1", logLevel } = options;
+  const { entry, route, title, extraRoutes = [], viewport = "width=device-width, initial-scale=1", logLevel, proxyHeaders } = options;
   const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="${escapeHtml(viewport)}"><title>${escapeHtml(title)}</title></head><body><div id="root"></div><script type="module" src="${escapeHtml(entry)}"></script></body></html>`;
+  const cacheRoot = await mkdtemp(join(tmpdir(), "omb-preview-vite-"));
+  // The React plugin excludes node_modules from Babel transforms.
   const ui = await createServer({
-    root: REPO_ROOT,
+    root: REPO_ROOT, cacheDir: join(cacheRoot, "node_modules", ".vite"),
     ...(logLevel ? { logLevel } : {}),
-    server: { host: "127.0.0.1", port: 0, proxy: {
-      "/api": { target: fixture.info.url },
-      "/.well-known/openmausbot/environment": { target: fixture.info.url },
+    // A worktree's node_modules may be a link to another checkout's: its files (the fonts) are served from there.
+    server: { host: "127.0.0.1", port: 0, fs: { allow: [REPO_ROOT, realpathSync(join(REPO_ROOT, "node_modules"))] }, proxy: {
+      "/api": { target: fixture.info.url, ...(proxyHeaders ? { headers: proxyHeaders } : {}) },
+      "/.well-known/openmausbot/environment": { target: fixture.info.url, ...(proxyHeaders ? { headers: proxyHeaders } : {}) },
     } },
     plugins: [{
       name: "isolated-preview",
@@ -82,17 +92,20 @@ export async function mountPreview(
         });
       },
     }],
-  });
-  await ui.listen();
-  const base = ui.resolvedUrls?.local[0];
-  if (!base) {
-    await ui.close();
-    throw new Error("the preview server did not report a local URL");
-  }
-  return {
-    previewUrl: new URL(route, base).href,
-    close: () => ui.close(),
+  }).catch(async (error: unknown) => { await removeTempDir(cacheRoot); throw error; });
+  const close = async () => {
+    try { await ui.close(); }
+    finally { await removeTempDir(cacheRoot); }
   };
+  try {
+    await ui.listen();
+    const base = ui.resolvedUrls?.local[0];
+    if (!base) throw new Error("the preview server did not report a local URL");
+    return { previewUrl: new URL(route, base).href, close };
+  } catch (error) {
+    await close();
+    throw error;
+  }
 }
 
 /** Resolve on the first SIGINT or SIGTERM: the "print the URL and wait" ending. */

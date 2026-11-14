@@ -1,12 +1,7 @@
-// What a tool call is about to do, in words a chip or a permission card can
-// show. Redacted before it is cut: a command line is where credentials get
-// pasted, and a key sliced in half would slip past the shapes redaction knows.
+// Redacted before it is cut: a key sliced in half would slip past the shapes redaction knows.
 import { MAX_QUESTION_TEXT } from "../shared/ask-question.ts";
-import { redactSecrets, redactSecretsInText } from "./redact.ts";
+import { HELD_SECRET_MASK, redactSecrets, redactSecretsInText } from "./redact.ts";
 
-/** Display-only excerpt, never the raw protocol payload. Bound traversal and
- * omit binary bodies before redacting; truncate only AFTER redaction so a
- * credential cannot be cut in half and escape detection. */
 export function toolDetailPreview(value: unknown): string | undefined {
   if (value === undefined) return undefined;
   let budget = 200;
@@ -16,11 +11,9 @@ export function toolDetailPreview(value: unknown): string | undefined {
     if (typeof item === "string") {
       if (item.length > textBudget) return "[large content omitted]";
       if (/^data:[^,\s]+;base64,/i.test(item)) return "[binary content omitted]";
-      // MCP frequently puts JSON inside text content. Recover its field
-      // names so short credentials get the same masking as native objects.
       if (/^\s*[[{]/.test(item)) {
         try { return bounded(JSON.parse(item), depth + 1); }
-        catch { /* ordinary text/code: use the content redactor below */ }
+        catch {}
       }
       textBudget -= item.length;
       return item;
@@ -46,7 +39,15 @@ export function toolDetailPreview(value: unknown): string | undefined {
   return text.length > 6_000 ? `${text.slice(0, 6_000)}\n[… preview shortened]` : text;
 }
 
-const LIMIT = 200;
+export const COMMAND_SUMMARY_MAX = 200;
+const LIMIT = COMMAND_SUMMARY_MAX;
+
+const NOT_SHOWN = /\[(?:redacted|(?:binary|large) content omitted|additional (?:data|items|fields) omitted|… preview shortened)\]|«redacted \d+ chars»/;
+
+/** Two previews that read the same prove the same call only when neither masked, left out or cut a value. */
+export function previewIsPartial(preview: string): boolean {
+  return NOT_SHOWN.test(preview) || preview.includes(HELD_SECRET_MASK);
+}
 
 function fieldsOf(input: unknown): Record<string, unknown> | undefined {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return undefined;
@@ -55,20 +56,12 @@ function fieldsOf(input: unknown): Record<string, unknown> | undefined {
 
 const cut = (text: string, limit: number) => redactSecretsInText(text).trim().slice(0, limit);
 
-/** The shell command a tool call runs, on one redacted line of at most 200
- * characters — what rides beside the tool name on the chip and what the
- * Verify card reads as a step. Only a command: a Read's path or a fetch's
- * URL is not something the bot ran, so those calls carry no summary. */
 export function commandSummary(input: unknown): string | undefined {
   const command = fieldsOf(input)?.command;
   if (typeof command !== "string") return undefined;
   return cut(command.replace(/\s*[\r\n]+\s*/g, " "), LIMIT);
 }
 
-/** The permission card's subtitle: the question asked, else the command as
- * the bot wrote it (newlines kept — a multi-line command reads on the card
- * the way it will run), else the URL, else the arguments as JSON. Undefined
- * when there is nothing to say (no input, or an empty object). */
 export function askInputSummary(input: unknown): string | undefined {
   const fields = fieldsOf(input);
   if (!fields) return undefined;

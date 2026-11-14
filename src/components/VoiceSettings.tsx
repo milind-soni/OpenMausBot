@@ -1,14 +1,12 @@
-// Per-agent voice profile. The key is shared; the voice and autoplay choice
-// belong to the selected bot.
-//
-// The voice list comes from the harness, which holds cloud provider keys —
-// the renderer never talks to ElevenLabs or Fish Audio itself.
-import { useEffect, useState } from "react";
+// Security: the harness holds the cloud provider keys; the renderer never talks to ElevenLabs or Fish Audio itself.
+import { DEFAULT_OPENAI_VOICE, OPENAI_VOICES } from "../../shared/openai-voice";
+import { useEffect, useRef, useState } from "react";
 import { Check, Loader2, Volume2 } from "lucide-react";
 
 import { api, useStore, type Bot, type ConfigStatus } from "@/state/store";
 import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { speaker } from "@/lib/tts";
+import { useSpeech } from "@/lib/tts/useSpeech";
 import {
   listLocalSystemVoices,
   localSystemVoicesAvailable,
@@ -21,9 +19,16 @@ import {
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { voiceKeyDraftValue, type VoiceKeyDraft } from "@/lib/voice-key-draft";
+import { VoicePicker, type PickerVoice } from "./VoicePicker";
+import { Select } from "./Select";
 import { Switch } from "./SettingsPrimitives";
+import { KeysLink } from "./keys/KeysLink";
 
-const SAMPLE = "Morning. Overnight the tests went green, and I left two notes for you in the thread.";
+const FISH_MODELS = [
+  { value: "s2.1-pro", label: "voice.fish.modelPro" },
+  { value: "s2.1-pro-free", label: "voice.fish.modelFree" },
+] as const;
+type FishModel = (typeof FISH_MODELS)[number]["value"];
 
 export function VoiceSettings({
   bot,
@@ -31,7 +36,7 @@ export function VoiceSettings({
   workspaceConfigurationLocked = false,
 }: {
   bot: Bot;
-  onPatch: (patch: Partial<Pick<Bot, "voice" | "speakReplies" | "voiceNotes">>) => void;
+  onPatch: (patch: Partial<Pick<Bot, "voice" | "speakReplies" | "voiceNotes" | "voiceNoteEveryReply">>) => void;
   workspaceConfigurationLocked?: boolean;
 }) {
   const { state, dispatch } = useStore();
@@ -42,26 +47,39 @@ export function VoiceSettings({
   const [model, setModel] = useState("");
   const [saving, setSaving] = useState(false);
   const [savingServer, setSavingServer] = useState(false);
+  const [savingFishModel, setSavingFishModel] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [voices, setVoices] = useState<Array<{ id: string; label: string; description?: string }>>([]);
   const [loadingVoices, setLoadingVoices] = useState(false);
+  const [addingVoice, setAddingVoice] = useState<PickerVoice | null>(null);
+  const addGeneration = useRef(0);
+  const currentBot = useRef({ id: bot.id, voice: bot.voice });
+  const [addError, setAddError] = useState<string | null>(null);
+  const [voiceQuery, setVoiceQuery] = useState("");
+  const [searchedQuery, setSearchedQuery] = useState("");
 
   const { capabilities } = useDesktopCapabilities();
+  const speech = useSpeech();
+  const preparingSample = speech.status === "preparing" && speech.botId === bot.id && !speech.messageId;
   const localMacClient = workspaceConfigurationLocked && localSystemVoicesAvailable();
   const [deviceProvider, setDeviceProvider] = useState<RemoteVoiceProvider>(() => remoteVoiceProvider());
   const [deviceVoice, setDeviceVoice] = useState(() => remoteSystemVoice(bot.id));
   const usesLocalSystem = localMacClient && deviceProvider === "system";
-  // Host configuration still controls host-rendered cloud audio. A
-  // paired Mac owns its installed-voice choice locally.
   const provider = tts?.provider ?? "elevenlabs";
-  const cloudProvider = provider === "fish"
+  const searchable = (provider === "fish" || provider === "elevenlabs" || provider === "gemini") && !usesLocalSystem;
+  const voiceSearch = searchable && provider !== "gemini" ? searchedQuery : "";
+  const pickedVoice = searchable && provider !== "gemini" ? (bot.voice ?? "") : "";
+  const cloudProvider = provider === "gemini"
+    ? { id: "gemini" as const, name: "Gemini", credential: "geminiTtsKey" as const, configField: "geminiKey" as const,
+        placeholder: t("voice.gemini.keyPlaceholder"), keyUrl: "https://aistudio.google.com/api-keys" }
+    : provider === "fish"
     ? {
         id: "fish" as const,
         name: "Fish Audio",
         credential: "fishAudioKey" as const,
         configField: "fishKey" as const,
-        placeholder: "Paste your Fish Audio API key",
+        placeholder: t("voice.fish.keyPlaceholder"),
         keyUrl: "https://fish.audio/app/api-keys/",
       }
     : provider === "elevenlabs"
@@ -70,22 +88,21 @@ export function VoiceSettings({
           name: "ElevenLabs",
           credential: "ttsKey" as const,
           configField: "key" as const,
-          placeholder: "Paste your ElevenLabs API key",
+          placeholder: t("voice.elevenlabs.keyPlaceholder"),
           keyUrl: "https://elevenlabs.io/app/settings/api-keys",
         }
       : null;
   const key = cloudProvider ? voiceKeyDraftValue(keyDraft, cloudProvider.id) : "";
-  const hostProviderLabel = provider === "fish"
-    ? "Host · Fish Audio"
+  const hostProviderLabel = provider === "gemini" ? t("voice.hostLabel", { provider: "Gemini" }) : provider === "fish"
+    ? t("voice.hostLabel", { provider: t("voice.fish.label") })
     : provider === "elevenlabs"
-      ? "Host · ElevenLabs"
+      ? t("voice.hostLabel", { provider: t("voice.elevenlabs.label") })
       : provider === "chatterbox"
-        ? "Host · Chatterbox"
-        : provider === "xai" ? t("voice.grok.host") : "Host voice";
+        ? t("voice.hostLabel", { provider: t("voice.chatterboxLabel") })
+        : provider === "openai" ? t("voice.hostLabel", { provider: "OpenAI" })
+          : provider === "xai" ? t("voice.grok.host") : t("voice.host");
   const systemVoicesAvailable = capabilities.host.platform === "darwin";
   const hostConfigured = Boolean(tts?.configured);
-  // Cloud Pro's voice: it works with no saved key, and a key pasted here
-  // replaces it.
   const included = Boolean(tts?.included);
   const configured = usesLocalSystem || hostConfigured;
 
@@ -93,18 +110,33 @@ export function VoiceSettings({
     setDeviceVoice(remoteSystemVoice(bot.id));
   }, [bot.id]);
 
+  useEffect(() => { currentBot.current = { id: bot.id, voice: bot.voice }; }, [bot.id, bot.voice]);
+
+  const sampleVoice = usesLocalSystem ? deviceVoice : bot.voice;
+  useEffect(() => () => {
+    const playing = speaker.state;
+    if (playing.status !== "idle" && playing.botId === bot.id && !playing.messageId) speaker.stop();
+  }, [bot.id, sampleVoice, provider]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchedQuery(voiceQuery.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [voiceQuery]);
+
+  useEffect(() => setVoiceQuery(""), [provider]);
+
   useEffect(() => {
     setServerUrl(tts?.baseUrl ?? "");
     setModel(tts?.model ?? "");
   }, [tts?.baseUrl, tts?.model]);
 
-  // Provider selection can also change from a paired phone or another open
-  // client. Discard an unsaved draft on every transition, and keep the draft
-  // tagged below so a render that lands before this effect still cannot send
-  // one provider's credential to another service.
+  // Security: discard the draft on every provider change, and keep it tagged, so one provider's credential never goes
+  // to another service.
   useEffect(() => {
     setKeyDraft({ provider: null, value: "" });
   }, [provider]);
+
+  useEffect(() => setVoices([]), [provider, usesLocalSystem]);
 
   useEffect(() => {
     if (usesLocalSystem) {
@@ -119,7 +151,11 @@ export function VoiceSettings({
     }
     let alive = true;
     setLoadingVoices(true);
-    api("/api/tts/voices")
+    const params = new URLSearchParams();
+    if (voiceSearch) params.set("q", voiceSearch);
+    if (provider === "fish" && pickedVoice) params.set("current", pickedVoice);
+    const query = params.toString();
+    api(`/api/tts/voices${query ? `?${query}` : ""}`)
       .then((r: { voices?: typeof voices; error?: string }) => {
         if (!alive) return;
         setVoices(r.voices ?? []);
@@ -130,7 +166,7 @@ export function VoiceSettings({
     return () => {
       alive = false;
     };
-  }, [hostConfigured, provider, usesLocalSystem]);
+  }, [hostConfigured, provider, usesLocalSystem, voiceSearch, pickedVoice]);
 
   const chooseDeviceProvider = (next: RemoteVoiceProvider) => {
     setRemoteVoiceProvider(next);
@@ -144,18 +180,44 @@ export function VoiceSettings({
       setDeviceVoice(voiceId);
       return;
     }
+    currentBot.current = { id: bot.id, voice: voiceId };
     onPatch({ voice: voiceId });
   };
 
-  const setProvider = (next: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai") => {
+  // An add that settles after the bot or the provider changed belongs to neither: it must not set this voice.
+  useEffect(() => {
+    addGeneration.current += 1;
+    setAddingVoice(null);
+    setAddError(null);
+  }, [bot.id, provider]);
+
+  const pickVoice = (voice: PickerVoice) => {
+    setAddError(null);
+    if (!voice.publicOwnerId) return chooseVoice(voice.id);
+    const generation = ++addGeneration.current;
+    const current = () => generation === addGeneration.current;
+    setAddingVoice(voice);
+    api("/api/tts/voices/add", {
+      method: "POST",
+      body: JSON.stringify({ publicOwnerId: voice.publicOwnerId, voiceId: voice.id, name: voice.label }),
+    })
+      .then((r: { voiceId: string }) => current() && chooseVoice(r.voiceId))
+      .catch((e: Error) => current() && setAddError(e.message))
+      .finally(() => current() && setAddingVoice(null));
+  };
+
+  const setProvider = (next: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai") => {
     if (next === provider || switching || (next === "system" && !systemVoicesAvailable)) return;
     setSwitching(true);
     setKeyDraft({ provider: null, value: "" });
     setError(null);
-    // the provider is a setting, not a secret — it rides the ordinary
-    // config write, and the key row reappears or disappears with it
     api("/api/config", { method: "PUT", body: JSON.stringify({ tts: { provider: next } }) })
-      .then((status: ConfigStatus) => dispatch({ type: "configStatus", config: status }))
+      .then((status: ConfigStatus) => {
+        if (next === "openai" && currentBot.current.id === bot.id && !OPENAI_VOICES.some((voice) => voice === currentBot.current.voice)) {
+          onPatch({ voice: DEFAULT_OPENAI_VOICE });
+        }
+        dispatch({ type: "configStatus", config: status });
+      })
       .catch((e: Error) => setError(e.message))
       .finally(() => setSwitching(false));
   };
@@ -184,50 +246,61 @@ export function VoiceSettings({
     const next = serverUrl.trim();
     if (!next || savingServer) return Promise.resolve();
     if (!/^https?:\/\//i.test(next)) {
-      setError("The server address must start with http:// or https://");
+      setError(t("voice.serverAddressError"));
       return Promise.resolve();
     }
     setSavingServer(true);
     setError(null);
-    // both fields commit together: an address without its model id (or the
-    // reverse) is half a setting
     return api("/api/config", { method: "PUT", body: JSON.stringify({ tts: { baseUrl: next, model: model.trim() } }) })
       .then((status: ConfigStatus) => dispatch({ type: "configStatus", config: status }))
       .catch((e: Error) => setError(e.message))
       .finally(() => setSavingServer(false));
   };
 
+  const saveFishModel = (next: FishModel) => {
+    if (next === tts?.fishModel || savingFishModel) return;
+    setSavingFishModel(true);
+    setError(null);
+    api("/api/config", { method: "PUT", body: JSON.stringify({ tts: { fishModel: next } }) })
+      .then((status: ConfigStatus) => dispatch({ type: "configStatus", config: status }))
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setSavingFishModel(false));
+  };
+
   if (!tts) return null;
 
   const selectedVoice = usesLocalSystem ? deviceVoice : (bot.voice ?? "");
   const ready = usesLocalSystem || (hostConfigured && Boolean(selectedVoice || tts.voice));
+  const selectedDescription = voices.find((voice) => voice.id === selectedVoice)?.description;
+  const providerName = cloudProvider?.name ?? (provider === "xai" ? "Grok" : provider === "chatterbox" ? "Chatterbox" : t("voice.macBuiltIn"));
+  const everyReply = bot.voiceNoteEveryReply ?? tts?.everyReply === true;
 
   return (
     <div className="rounded-xl bg-card p-4">
-      <div className="text-[15px] font-medium text-ink">Voice</div>
+      <div className="text-[15px] font-medium text-ink">{t("voice.title")}</div>
       <div className="mt-0.5 text-[13px] text-ink-secondary">
         {localMacClient
-          ? "Choose whether this Mac speaks with its installed voices or audio generated by the host."
+          ? t("voice.macChoice")
           : workspaceConfigurationLocked
-            ? "Choose this agent’s voice and spoken-reply preference."
-            : <>Give this agent a voice for calls and spoken replies. The voice choice belongs to this agent;
+            ? t("voice.agentChoice")
+            : <>{t("voice.description")}
               {provider === "system"
                 ? systemVoicesAvailable
-                  ? " the voices are the ones already installed on this Mac."
-                  : " built-in Mac voices are unavailable here. Switch to a hosted voice provider to keep using voice."
+                  ? ` ${t("voice.macInstalled")}`
+                  : ` ${t("voice.macUnavailable")}`
                 : provider === "xai"
                   ? ` ${t("voice.grok.sharedKey")}`
                 : provider === "chatterbox"
-                  ? " the Chatterbox server address is shared by this installation."
-                  : ` the ${cloudProvider?.name ?? "voice provider"} key is shared by this installation.`}</>}
+                  ? ` ${t("voice.chatterboxShared")}`
+                  : ` ${t("voice.providerShared", { provider: cloudProvider?.name ?? t("voice.provider") })}`}</>}
       </div>
 
       {localMacClient && (
         <div className="mt-4">
-          <div className="mb-2 text-[13px] text-ink-secondary">Voice output on this Mac</div>
-          <div className="inline-flex rounded-xl bg-inset p-1" role="radiogroup" aria-label="Voice output on this Mac">
+          <div className="mb-2 text-[13px] text-ink-secondary">{t("voice.macOutput")}</div>
+          <div className="inline-flex rounded-xl bg-inset p-1" role="radiogroup" aria-label={t("voice.macOutput")}>
             {([
-              { value: "system", label: "Built-in Mac voices", available: true },
+              { value: "system", label: t("voice.macBuiltIn"), available: true },
               { value: "host", label: hostProviderLabel, available: hostConfigured },
             ] as const).map((option) => (
               <button
@@ -236,10 +309,10 @@ export function VoiceSettings({
                 role="radio"
                 aria-checked={deviceProvider === option.value}
                 disabled={!option.available}
-                title={!option.available ? "Voice output is not configured on the host" : undefined}
+                title={!option.available ? t("voice.hostNotConfigured") : undefined}
                 onClick={() => chooseDeviceProvider(option.value)}
                 className={cn(
-                  "rounded-lg px-3.5 py-1.5 text-[12.5px] transition-colors disabled:opacity-50",
+                  "rounded-lg px-3.5 py-1.5 text-[13px] transition-colors disabled:opacity-50",
                   deviceProvider === option.value ? "bg-raised text-ink shadow" : "text-ink-secondary hover:text-ink",
                 )}
               >
@@ -252,14 +325,16 @@ export function VoiceSettings({
 
       {!workspaceConfigurationLocked && (
         <div className="mt-4">
-          <div className="mb-2 text-[13px] text-ink-secondary">Voice engine</div>
-          <div className="grid grid-cols-2 gap-1 rounded-xl bg-inset p-1" role="radiogroup" aria-label="Voice engine">
+          <div className="mb-2 text-[13px] text-ink-secondary">{t("voice.engine")}</div>
+          <div className="grid grid-cols-4 gap-1 rounded-xl bg-inset p-1" role="radiogroup" aria-label={t("voice.engine")}>
             {([
-              { value: "elevenlabs", label: "ElevenLabs", available: true },
-              { value: "fish", label: "Fish Audio", available: true },
-              { value: "system", label: "Built-in Mac voices", available: systemVoicesAvailable },
-              { value: "chatterbox", label: "Chatterbox (local)", available: true },
-              { value: "xai", label: t("voice.grok.label"), available: true },
+              { value: "elevenlabs", label: t("voice.elevenlabs.label"), available: true, span: "col-span-1" },
+              { value: "fish", label: t("voice.fish.label"), available: true, span: "col-span-1" },
+              { value: "openai", label: "OpenAI", available: true, span: "col-span-1" },
+              { value: "xai", label: t("voice.grok.label"), available: true, span: "col-span-1" },
+              { value: "gemini", label: "Gemini", available: true, span: "col-span-1" },
+              { value: "system", label: t("voice.macBuiltIn"), available: systemVoicesAvailable, span: "col-span-1" },
+              { value: "chatterbox", label: t("voice.chatterboxLocal"), available: true, span: "col-span-1" },
             ] as const).map((option) => (
               <button
                 key={option.value}
@@ -267,10 +342,11 @@ export function VoiceSettings({
                 role="radio"
                 aria-checked={provider === option.value}
                 disabled={switching || !option.available}
-                title={!option.available ? "Built-in voices are available only on macOS" : undefined}
+                title={!option.available ? t("voice.macOnly") : undefined}
                 onClick={() => setProvider(option.value)}
                 className={cn(
-                  "rounded-lg px-3.5 py-1.5 text-[12.5px] transition-colors disabled:opacity-50",
+                  "min-w-0 rounded-lg px-2 py-1.5 text-[13px] leading-tight transition-colors disabled:opacity-50",
+                  option.span,
                   provider === option.value ? "bg-raised text-ink shadow" : "text-ink-secondary hover:text-ink",
                 )}
               >
@@ -285,8 +361,8 @@ export function VoiceSettings({
         <div className="mt-4">
         <div className="mb-1.5 flex items-center gap-2 text-[13px] text-ink-secondary">
           <span className={cn("size-1.5 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
-          <span>{cloudProvider.name} key</span>
-          {configured && <span className="text-[11px] text-success">{included ? t("keys.includedWithCloudPro") : "Connected"}</span>}
+          <span>{t("voice.providerKey", { provider: cloudProvider.name })}</span>
+          {configured && <span className="text-[11px] text-success">{included ? t("keys.includedWithCloudPro") : t("voice.connected")}</span>}
         </div>
         <div className="flex gap-2">
           <input
@@ -294,8 +370,8 @@ export function VoiceSettings({
             value={key}
             onChange={(e) => setKeyDraft({ provider: cloudProvider.id, value: e.target.value })}
             onKeyDown={(e) => e.key === "Enter" && key.trim() && void saveKey()}
-            placeholder={configured && !included ? "••••••••  (paste to replace)" : cloudProvider.placeholder}
-            aria-label={`${cloudProvider.name} key`}
+            placeholder={configured && !included ? t("voice.keySavedPlaceholder") : cloudProvider.placeholder}
+            aria-label={t("voice.keyLabel", { name: cloudProvider.name })}
             autoComplete="off"
             className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
           />
@@ -304,7 +380,7 @@ export function VoiceSettings({
             disabled={saving || !key.trim()}
             className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {saving ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />Save</>}
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />{t("common.save")}</>}
           </button>
         </div>
         {!configured && (
@@ -314,15 +390,42 @@ export function VoiceSettings({
             rel="noopener noreferrer"
             className="mt-1.5 inline-block text-[12px] font-medium text-accent hover:underline"
           >
-            Get a key from {cloudProvider.name}
+            {t("voice.getKey", { provider: cloudProvider.name })}
           </a>
         )}
         </div>
       )}
 
+      {!workspaceConfigurationLocked && provider === "fish" && (
+        <div className="mt-4">
+          <div className="mb-1.5 text-[13px] text-ink-secondary">{t("voice.fish.model")}</div>
+          <Select
+            value={tts.fishModel ?? "s2.1-pro"}
+            onChange={(e) => saveFishModel(e.target.value as FishModel)}
+            disabled={savingFishModel}
+            aria-label={t("voice.fish.model")}
+            className="w-full"
+          >
+            {FISH_MODELS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {t(option.label)}
+              </option>
+            ))}
+          </Select>
+          <div className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">{t("voice.fish.modelHint")}</div>
+        </div>
+      )}
+
+      {provider === "openai" && (
+        <div className="mt-4 space-y-1.5 text-[13px] leading-relaxed text-ink-secondary">
+          <p>{t("voice.openai.description")}</p>
+          {!hostConfigured && <p>{t("voice.openai.missingKey")} <KeysLink id="openai" /></p>}
+        </div>
+      )}
+
       {provider === "xai" && (
         <p className="mt-4 text-[13px] text-ink-secondary">
-          {hostConfigured ? t("voice.grok.ready") : t("voice.grok.missingKey")}
+          {hostConfigured ? t("voice.grok.ready") : <>{t("voice.grok.missingKey")} <KeysLink id="xai" /></>}
         </p>
       )}
 
@@ -330,8 +433,8 @@ export function VoiceSettings({
         <div className="mt-4">
         <div className="mb-1.5 flex items-center gap-2 text-[13px] text-ink-secondary">
           <span className={cn("size-1.5 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
-          <span>Chatterbox server</span>
-          {configured && <span className="text-[11px] text-success">Saved</span>}
+          <span>{t("voice.chatterboxServer")}</span>
+          {configured && <span className="text-[11px] text-success">{t("common.saved")}</span>}
         </div>
         <div className="flex gap-2">
           <input
@@ -340,7 +443,7 @@ export function VoiceSettings({
             onChange={(e) => setServerUrl(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void saveServer()}
             placeholder="http://127.0.0.1:4123"
-            aria-label="Chatterbox server address"
+            aria-label={t("voice.chatterboxAddress")}
             autoComplete="off"
             spellCheck={false}
             className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
@@ -350,7 +453,7 @@ export function VoiceSettings({
             disabled={savingServer || !serverUrl.trim()}
             className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {savingServer ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />Save</>}
+            {savingServer ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />{t("common.save")}</>}
           </button>
         </div>
         <input
@@ -358,94 +461,148 @@ export function VoiceSettings({
           value={model}
           onChange={(e) => setModel(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void saveServer()}
-          placeholder="Model id — default chatterbox-turbo"
-          aria-label="Chatterbox model"
+          placeholder={t("voice.chatterboxModelPlaceholder")}
+          aria-label={t("voice.chatterboxModel")}
           autoComplete="off"
           spellCheck={false}
           className="mt-2 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
         />
-        <div className="mt-1.5 text-[11.5px] leading-relaxed text-ink-secondary">
-          Any OpenAI-compatible server running Chatterbox works, no key needed.{" "}
+        <div className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">
+          {t("voice.chatterboxHelp")}{" "}
           <a
             href="https://github.com/resemble-ai/chatterbox"
             target="_blank"
             rel="noopener noreferrer"
             className="font-medium text-accent hover:underline"
           >
-            How to run one locally
+            {t("voice.chatterboxHowTo")}
           </a>
         </div>
         </div>
       )}
 
+      {!workspaceConfigurationLocked && provider === "gemini" && (
+        <label className="mt-4 block text-[13px] text-ink-secondary">
+          {t("voice.gemini.model")}
+          <Select value={tts.model || "gemini-3.8-flash-lite-tts"} className="mt-2 w-full" onChange={(event) => {
+            void api("/api/config", { method: "PUT", body: JSON.stringify({ tts: { model: event.target.value } }) })
+              .then((status: ConfigStatus) => dispatch({ type: "configStatus", config: status }))
+              .catch((error: Error) => setError(error.message));
+          }}>
+            <option value="gemini-3.8-flash-lite-tts">Gemini 3.8 Flash-Lite TTS</option>
+            <option value="gemini-3.8-flash-tts">Gemini 3.8 Flash TTS</option>
+          </Select>
+        </label>
+      )}
+
       {configured && (
         <div className="mt-4">
-          <div className="mb-1.5 text-[13px] text-ink-secondary">Voice</div>
+          <div className="mb-1.5 text-[13px] text-ink-secondary">{t("voice.title")}</div>
           <div className="flex gap-2">
-            <select
-              value={selectedVoice}
-              onChange={(e) => chooseVoice(e.target.value)}
-              aria-label={`${bot.name}'s voice`}
-              className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:outline-none"
-            >
-              <option value="">
-                {loadingVoices
-                  ? "Loading voices…"
-                  : usesLocalSystem
-                    ? "Mac system default"
-                    : tts.voice
-                      ? "Installation default"
-                      : "Pick a voice"}
-              </option>
-              {selectedVoice && !voices.some((voice) => voice.id === selectedVoice) && (
-                <option value={selectedVoice}>Current agent voice</option>
-              )}
-              {voices.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.label}
-                  {v.description ? ` — ${v.description}` : ""}
+            {searchable ? (
+              <VoicePicker
+                key={provider}
+                value={selectedVoice}
+                voices={provider === "gemini" ? voices.filter((voice) => voice.label.toLowerCase().includes(voiceQuery.trim().toLowerCase())) : voices}
+                loading={loadingVoices || (provider !== "gemini" && voiceQuery.trim() !== searchedQuery)}
+                query={voiceQuery}
+                onQuery={setVoiceQuery}
+                onPick={pickVoice}
+                pending={addingVoice ?? undefined}
+                defaultLabel={tts.voice ? t("voice.yourVoice", { provider: providerName }) : t("voice.pick")}
+                ariaLabel={t("voice.pickerLabel", { name: bot.name })}
+              />
+            ) : (
+              <Select
+                value={selectedVoice}
+                onChange={(e) => chooseVoice(e.target.value)}
+                aria-label={t("voice.pickerLabel", { name: bot.name })}
+                data-voice-picker
+                className="w-full"
+              >
+                <option value="">
+                  {loadingVoices
+                    ? t("voice.loading")
+                    : usesLocalSystem
+                      ? t("voice.macDefault")
+                      : tts.voice
+                        ? t("voice.yourVoice", { provider: providerName })
+                        : t("voice.pick")}
                 </option>
-              ))}
-            </select>
+                {selectedVoice && !voices.some((voice) => voice.id === selectedVoice) && (
+                  <option value={selectedVoice}>{t("voice.current")}</option>
+                )}
+                {voices.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                  </option>
+                ))}
+              </Select>
+            )}
             <button
-              onClick={() => void speaker.speak(SAMPLE, { voiceId: bot.voice, botId: bot.id })}
-              disabled={!ready}
-              title={ready ? "Hear this voice" : "Pick a voice first"}
-              aria-label="Hear this voice"
+              onClick={() => void speaker.speak(t("voice.sample"), { voiceId: bot.voice, botId: bot.id })}
+              disabled={!ready || preparingSample}
+              aria-busy={preparingSample}
+              title={ready ? t("voice.hear") : t("voice.pickFirst")}
+              aria-label={t("voice.hear")}
               className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Volume2 size={14} /> Try
+              {preparingSample ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />} {t("voice.try")}
             </button>
           </div>
+          {addError && <div role="alert" className="mt-1.5 text-[12px] text-danger">{addError}</div>}
+          {!searchable && selectedDescription && (
+            <div className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">{selectedDescription}</div>
+          )}
+          {!usesLocalSystem && (selectedVoice || tts.voice) && (
+            <div data-voice-whose className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">
+              {selectedVoice ? t("voice.usesOwn") : t("voice.usesYours", { provider: providerName })}
+            </div>
+          )}
         </div>
       )}
 
       <div className="mt-4 flex items-center justify-between gap-4 border-t border-hairline/40 pt-4">
         <div>
-          <div className="text-[13px] font-medium text-ink">Read replies aloud</div>
-          <div className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">
-            Speak this agent's answers as they arrive, even from another chat.
+          <div className="text-[13px] font-medium text-ink">{t("voice.readReplies")}</div>
+          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
+            {t("voice.readRepliesHelp")}
           </div>
         </div>
         <Switch
           checked={Boolean(bot.speakReplies)}
-          aria-label="Read this bot's replies aloud"
+          aria-label={t("voice.readReplies")}
           onClick={() => onPatch({ speakReplies: !bot.speakReplies })}
         />
       </div>
 
       <div className="mt-4 flex items-center justify-between gap-4">
         <div>
-          <div className="text-[13px] font-medium text-ink">Voice notes</div>
-          <div className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">
-            Let this agent send spoken notes; on unless switched off here.
+          <div className="text-[13px] font-medium text-ink">{t("voice.notes")}</div>
+          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
+            {t("voice.notesHelp")}
           </div>
         </div>
         <Switch
           checked={bot.voiceNotes !== false}
-          aria-label="Let this bot send voice notes"
+          aria-label={t("voice.notes")}
           onClick={() => onPatch({ voiceNotes: bot.voiceNotes === false })}
         />
+      </div>
+
+      <div data-voice-every-reply className="mt-4 flex items-center justify-between gap-4">
+        <div>
+          <div className="text-[13px] font-medium text-ink">{t("voice.everyReply")}</div>
+          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
+            {bot.voiceNoteEveryReply == null
+              ? t(tts?.everyReply ? "voice.everyReply.followsOn" : "voice.everyReply.followsOff")
+              : <>{t("voice.everyReply.own")}{" "}
+                  <button type="button" className="font-medium text-accent hover:underline" onClick={() => onPatch({ voiceNoteEveryReply: null })}>
+                    {t("voice.everyReply.follow")}
+                  </button></>}
+          </div>
+        </div>
+        <Switch checked={everyReply} aria-label={t("voice.everyReply")} onClick={() => onPatch({ voiceNoteEveryReply: !everyReply })} />
       </div>
 
       {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}

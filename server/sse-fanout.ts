@@ -1,60 +1,29 @@
-// Per-client delivery decision for the SSE broadcast fan-out in index.ts.
-// Pulled into its own file — not just its own function — because index.ts
-// starts the real HTTP server as an import-time side effect (see the bottom
-// of index.ts: `server.listen(...)` runs unconditionally on import), so it
-// can never be imported from a plain unit test. This one function has no
-// dependency on that module and can be driven directly with a fake response.
-
-/** Shape broadcast() needs from an SSE client: a writable response, and the
- * one flag that survives across frames — whether its socket already told us
- * it can't keep up. */
 export interface SseFanoutClient {
   res: {
     write(chunk: string): boolean;
-    end(): void;
     writableLength: number;
     once(event: "drain", listener: () => void): unknown;
   };
   backpressured: boolean;
+  /** The client's idempotent lifecycle owner: it leaves the fanout and stops the heartbeat before ending the response. */
+  close(): void;
 }
 
-/** Past this many buffered bytes, the client isn't draining on any useful
- * timeframe: cut it loose rather than let Node's per-connection write buffer
- * grow without bound. Its own EventSource reconnects and replays via
- * Last-Event-ID (server/index.ts's existing replayBuffer/cursorSeq). */
-// ponytail: fixed byte bound, not adaptive. Retune from real writableLength
-// telemetry (see the audit's validation step) if it trips too eager or late.
+/** Past this, cut the client loose; its EventSource reconnects and replays via Last-Event-ID. */
 export const SSE_MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
 
 export type SseFanoutOutcome = "sent" | "dropped" | "disconnected";
 
-/** One client's fate for one frame.
- *
- * Screen captures are replaceable: once a client is backpressured, skip them
- * until it drains, since the next capture supersedes whatever was dropped.
- * Durable events (messages, bot/group state, config, ...) are never
- * silently dropped here — they're written regardless of the backpressure
- * flag. The only way a durable event goes missing is the bound below, which
- * disconnects the client outright so its next reconnect replays what it
- * missed instead of silently losing it. */
+/** Only screen captures are skipped while backpressured; durable events are always written, or the client is disconnected to replay them. */
 export function deliverSseFrame(client: SseFanoutClient, kind: string, frame: string): SseFanoutOutcome {
   if (client.res.writableLength > SSE_MAX_BUFFERED_BYTES) {
-    try {
-      client.res.end();
-    } catch {
-      /* already gone */
-    }
+    client.close();
     return "disconnected";
   }
   if (client.backpressured && kind === "screen") return "dropped";
   try {
     if (!client.res.write(frame) && !client.backpressured) {
-      // write() returns false as soon as buffered bytes pass the socket's
-      // 16 KB highWaterMark, which a single screen frame clears on its own —
-      // so this says "hasn't drained yet", not "is a slow client". Without
-      // the drain listener the flag latches on for the life of the
-      // connection and screen streaming never resumes. One listener per
-      // transition into backpressure, never one per frame.
+      // write() returns false past the 16 KB highWaterMark, which one screen frame clears: it means "not drained yet", and without the drain listener the flag latches forever.
       client.backpressured = true;
       client.res.once("drain", () => {
         client.backpressured = false;
@@ -64,4 +33,37 @@ export function deliverSseFrame(client: SseFanoutClient, kind: string, frame: st
   } catch {
     return "disconnected";
   }
+}
+
+export interface SseHeartbeatStream {
+  write(chunk: string): boolean;
+  end(): void;
+  writableEnded: boolean;
+  destroyed: boolean;
+  on(event: "error", listener: (error: Error) => void): unknown;
+}
+
+const SSE_HEARTBEAT_FRAME = `: keepalive\n\ndata: ${JSON.stringify({ kind: "ping" })}\n\n`;
+
+/** Heartbeats `res` while `live()` holds. The returned close stops the heartbeat and runs `onClose` once, before the response ends; it runs by itself when the stream ends, errors or stops being live. */
+export function openSseHeartbeat(res: SseHeartbeatStream, options: { everyMs: number; live: () => boolean; onClose: () => void }): () => void {
+  let open = true;
+  const close = () => {
+    if (!open) return;
+    open = false;
+    clearInterval(timer);
+    options.onClose();
+    if (!res.writableEnded && !res.destroyed) res.end();
+  };
+  const timer = setInterval(() => {
+    if (res.writableEnded || res.destroyed || !options.live()) return close();
+    try {
+      res.write(SSE_HEARTBEAT_FRAME);
+    } catch {
+      close();
+    }
+  }, options.everyMs);
+  // Node reports a failed write, such as one after end, as an asynchronous 'error' event on the response; unhandled, it exits the process.
+  res.on("error", close);
+  return close;
 }

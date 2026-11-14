@@ -1,10 +1,7 @@
 import { z } from "zod";
 
-/** Tier-1 behavior eval fixtures. A scenario is pure data: the bots to
- * create (with the scripted model turns each one replays), the driver
- * steps that act on the real harness server, and the assertions checked
- * against the collected evidence. Scenarios never contain code, so a
- * fixture cannot reach around the harness under test. */
+/** Tier-1 behavior eval fixtures. Scenarios are pure data and never contain
+ * code, so a fixture cannot reach around the harness under test. */
 
 export const scriptedToolCallSchema = z.object({
   /** Defaults to coordinate_bots, the fixture's workhorse. */
@@ -26,11 +23,8 @@ export const scriptedTurnSchema = z.object({
   fail: z.boolean().optional(),
 });
 
-/** A fixture skill for the skill bench: the manifest shape the server's
- * user-skill loader reads (DATA_DIR/skills/<id>/manifest.json) plus the
- * SKILL.md body, as pure data. The installSkill step materializes it under
- * the booted world's data dir; user skills hot-load every turn, so later
- * sends in the same run see it without a server restart. */
+/** A fixture skill: the user-skill manifest plus the SKILL.md body. User skills
+ * hot-load every turn, so later sends in the same run see it. */
 export const fixtureSkillSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -67,14 +61,15 @@ export const stepSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshotRoutineRun"), routine: z.string(), saveAs: z.string() }),
   z.object({ kind: z.literal("waitForRoutineRun"), routine: z.string(), status: z.string(), timeoutMs: z.number().optional() }),
   z.object({ kind: z.literal("writeGate"), gate: z.string() }),
-  /** Materializes a fixture skill as a user skill under the world's data
-   * dir. The skill bench uses it to run the same prompt with the skill
-   * installed and without it; ordinary scenarios can pin skill-delivery
-   * behavior the same way. */
+  /** Materializes a fixture skill as a user skill under the world's data dir. */
   z.object({ kind: z.literal("installSkill"), skill: fixtureSkillSchema }),
   /** Applied before the first turn: pins admission preconditions (for
    * example threads.maxConcurrentPerBot) the scenario's behavior needs. */
   z.object({ kind: z.literal("setConfig"), config: z.record(z.string(), z.unknown()) }),
+  /** Replaces a bot's library skill assignments wholesale (the Skills
+   * surface's PUT), so a scenario can prove an assignment change alters
+   * what the next turn sees. */
+  z.object({ kind: z.literal("setSkillAssignment"), bot: z.string(), skills: z.array(z.string()) }),
   z.object({ kind: z.literal("setVmState"), state: z.record(z.string(), z.unknown()) }),
   z.object({ kind: z.literal("consumeDump"), timeoutMs: z.number().optional() }),
   z.object({ kind: z.literal("captureComputer"), bot: z.string() }),
@@ -88,7 +83,10 @@ export const assertionSchema = z.discriminatedUnion("kind", [
    * trace shape, and the live tier's argument-agnostic invariant. */
   z.object({ kind: z.literal("toolNames"), bot: z.string(), equals: z.array(z.string()) }),
   z.object({ kind: z.literal("turnOrder"), bots: z.array(z.string()) }),
+  /** Model-visible instructions, including Claude's leading volatile-update reminder. */
+  z.object({ kind: z.literal("instructionsInclude"), bot: z.string(), turn: z.number().int(), includes: z.string() }),
   z.object({ kind: z.literal("systemPromptIncludes"), bot: z.string(), turn: z.number().int(), includes: z.string() }),
+  z.object({ kind: z.literal("systemPromptOmits"), bot: z.string(), turn: z.number().int(), omits: z.string() }),
   z.object({ kind: z.literal("promptIncludes"), bot: z.string(), turn: z.number().int(), includes: z.string() }),
   z.object({
     kind: z.literal("handoffTree"),
@@ -109,11 +107,9 @@ export const assertionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("routineRunSnapshot"), of: z.string(), status: z.string(), deferred: z.boolean() }),
   z.object({ kind: z.literal("activitySeen"), bot: z.string(), namePrefix: z.string() }),
   z.object({ kind: z.literal("noActivityPrefix"), bot: z.string(), prefix: z.string() }),
-  /** Pins how many activities with a prefix were recorded, so a terminal
-   * error can be required to land exactly once, not merely at least once.
-   * The snapshot merges proven waitForActivity prefixes into the list, so
-   * a scenario pinning an exact count must not also waitForActivity on the
-   * same prefix (order steps off another observable instead). */
+  /** Pins how many activities with a prefix were recorded. The snapshot merges
+   * proven waitForActivity prefixes into the list, so a scenario pinning an
+   * exact count must not also waitForActivity on the same prefix. */
   z.object({ kind: z.literal("activityCount"), bot: z.string(), prefix: z.string(), count: z.number().int() }),
 ]);
 
@@ -126,6 +122,9 @@ export const scenarioSchema = z.object({
   world: z.enum(["coordination", "localVm"]),
   /** Gate keys the scenario uses; the runner materializes each as a file. */
   gates: z.array(z.string()).default([]),
+  /** Library skills the runner installs before any turn (approved, as a
+   * reviewed import would be), under features.skillsLibrary. */
+  librarySkills: z.array(z.object({ name: z.string(), instructions: z.string() })).default([]),
   bots: z.array(scenarioBotSchema),
   steps: z.array(stepSchema),
   assertions: z.array(assertionSchema),

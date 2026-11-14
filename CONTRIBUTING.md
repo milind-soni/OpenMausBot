@@ -12,8 +12,8 @@ makes a PR easy to merge. Read it once before opening anything; it's short on pu
   on the server, one store, one event bus. Don't introduce a dependency where thirty lines of code
   will do. New runtime dependencies need a reason in the PR description.
 - **Keep it green.** `pnpm typecheck && pnpm test` must pass. Server changes need tests (see below).
-- **UI changes need screenshots.** Before/after images in the PR body; video for anything animated.
-  Match the existing palette and tone in [`src/styles.css`](src/styles.css).
+- **UI changes follow [`DESIGN.md`](DESIGN.md).** Tokens, type, spacing, components, words and
+  states. Before/after screenshots in Midnight and Daylight go in the PR body; video for anything animated.
 
 ## Dev setup
 
@@ -33,12 +33,15 @@ pnpm dev:desktop   # Electron shell (macOS/Ubuntu; keep server + Vite running)
 pnpm typecheck     # app + server
 pnpm test          # vitest suite (server unit + driver contract + API smoke)
 pnpm test:watch    # same, in watch mode
-pnpm exec vitest run --shard=1/4   # one CI shard, exactly the files CI ran in it
 pnpm check:electron # syntax-check the plain JS Electron entrypoints
 
 pnpm package:mac   # DMG + ZIP; requires Swift/Xcode tools
 pnpm package:linux # Ubuntu x64 .deb + AppImage; no Swift required
 ```
+
+To reproduce a failing CI test job, follow [Vitest shards](docs/ci.md#vitest-shards).
+Use the job's checkout revision, OS, file filters, shard fraction, and
+`OMB_VITEST_E2E` value; the same shard number alone does not select the same files.
 
 `pnpm dev:desktop` downloads and verifies the pinned Cloudflare Tunnel connector for the current
 platform and architecture before Electron starts. Later launches re-verify and reuse the staged
@@ -103,6 +106,109 @@ House rules for tests:
   that way.
 - Fake CLI shebang scripts must be launched through `spawnCli`/`execCli`, which resolve them through
   Node on Windows. Only gate a test when the behavior itself is genuinely platform-specific.
+
+## Changing how data is stored
+
+**The rule: what version N writes, version N-1 can read.** A self-hosted server
+is updated with a way back: the updater keeps a copy of the data, and when the
+new version does not come up it puts the old version and the copy back. A
+server that was rolled back by hand, or a Cloud moved back one release, starts
+the old version on data the new one has already touched. That must work.
+
+The data folder says which format it is in: `data-format.json`
+(`{ "format": 1, "writtenBy": "0.1.152", … }`), written at start by
+[`server/data-format.ts`](server/data-format.ts). Two numbers in that file
+describe a version: `writes`, the format it leaves the folder in, and `reads`,
+the newest format it understands. A server whose `reads` is below the folder's
+format refuses to start, before it creates, migrates or locks anything, with
+one line that says which version wrote the data and what to do. A folder with
+no marker is format 1.
+
+Most changes need no new format. These are fine in one release, and are how
+every migration so far works:
+
+- a new file, table, index or nullable column; a new optional field in a JSON
+  file whose older readers ignore fields they do not know;
+- a one-time fill of a new field, guarded by a marker file or by the field
+  being absent.
+
+A change needs a new format when the previous release, started on the changed
+data, would fail, lose something, or quietly undo it. Typical cases: a file or
+folder moves or is renamed; a field older code relies on changes meaning or
+goes away; a value older code deletes because it does not recognise it (the
+store's start-up clean-up of `bots.json` does this); the `version` of a JSON
+store goes up (older code treats a higher version as unreadable and starts
+empty); a table changes in a way an older `INSERT` or `SELECT` breaks on.
+
+Such a change ships in **two releases**:
+
+1. **Read it first.** Add the code that reads the new format beside the old,
+   keep writing the old one, and raise `reads` by one. Release.
+2. **Write it one release later.** Start writing the new format and raise
+   `writes` to match. The release before can already read it.
+
+The rule is between one release and the next. The stable channel may skip
+releases, so going back from one stable version to the one before it can cross
+both steps; there the updater's copy of the data is the way back, and the
+marker makes the old version say so instead of running on data it would
+damage.
+
+`server/data-format.test.ts` fails the build on any other step. It compares
+the two numbers with `server/data-format-released.json`, the numbers of the
+last release, which **Prepare next release** records with the version bump
+(`scripts/record-data-format.mjs`); do not edit that file by hand. Raising
+`writes` past what the last release reads fails with the two steps spelled
+out.
+
+What exists today, all of it format 1: the server has no numbered migrations.
+Each store repairs or extends its own files when it opens them, and decides
+by looking (a column that is missing, a legacy file that is still there, a
+marker file such as `thread-model-copies-cleared`), so every one of them is
+safe to run twice. Most are additive: the SQLite `ADD COLUMN`s and
+`CREATE … IF NOT EXISTS` in `server/message-db.ts`, `server/cloud-sync-store.ts`
+and `server/runtime/store.ts`, and the field fills in `server/store.ts`. A few
+are one-way moves from formats that predate every supported version (JSON
+transcripts into `messages.db`, per-bot skills into the library, engine
+sessions into `engine-homes/`, the old data folder's rename). They stay as
+they are. The marker does not replace them; it adds the one thing they cannot
+do, which is to stop an older version at the door.
+
+**What the marker protects today: nothing yet.** Both numbers are 1 and no
+version writes format 2, so the marker has never stopped a server, and a
+rollback of one release can still lose data without it noticing:
+
+- Many JSON stores accept only `"version": 1` and throw, or start empty, on
+  anything else: among them `server/command-allowlist.ts`, `server/fleet.ts`,
+  `server/bot-directory.ts`, `server/data/sheet.ts`, `server/pages/store.ts`,
+  `server/sentinel/store.ts` and `server/boat-delete-journal.ts`. A release
+  that raised one of those versions without raising `writes` would pass every
+  check here, and the release before it would start on that data and drop it.
+- The SQLite databases (`messages.db`, `runtime.db`, the cloud-sync store)
+  have no `PRAGMA user_version`. Their schema is judged by looking for
+  columns, so a change an older `INSERT` or `SELECT` breaks on is not seen.
+- Nothing ties a store's `version` or a schema change to `DATA_FORMAT`. The
+  rule holds only when whoever makes the change raises the numbers; review is
+  the only check.
+- The marker is one number for the whole folder. A workspace backup does not
+  carry it (it describes the folder it is in), so a backup a newer version
+  made, restored into an older server, is not stopped by it.
+- A marker that cannot be read (empty or full of NULs after a power loss, not
+  readable by the server's user) counts as format 1 while `writes` is 1, and
+  a marker that cannot be written is said in the log and skipped: the check
+  must never be the reason a healthy install does not start.
+
+For the rule to hold by itself, these would have to change:
+
+1. A test that fails when a store's `version`, a JSON store's shape or a
+   database's tables change without a change to `DATA_FORMAT`: every store's
+   version and every table's columns, recorded in the tree and compared.
+2. A store that meets a `version` higher than it knows refuses to start, with
+   the same plain line, instead of starting empty, so a missed bump stops the
+   server rather than losing the data.
+3. `PRAGMA user_version` on each SQLite database, raised with its schema and
+   checked when it opens.
+4. A workspace backup that records the format it was made in, and a restore
+   that refuses it in a server whose `reads` is lower.
 
 ## Adding a provider driver
 
@@ -183,8 +289,9 @@ node scripts/generate-locale.mjs it "Italian"
 ```
 
 The helper runs the model without repository access, custom instructions, or
-write-capable tools. It accepts only one complete JSON object and tracks the
-English source hash for each reviewed translation. See
+write-capable tools. It accepts only one complete JSON object. Do not edit
+`src/locales/source-hashes.json` for new keys: the release records their
+English source hashes. See
 [`docs/localization.md`](docs/localization.md) for the workflow and safety rules.
 
 Only a slice of the UI is extracted so far. Move strings into the catalog
@@ -258,22 +365,24 @@ out of its commits and screenshots.
 
 ## CI, in one glance
 
-Every PR runs the same checks, each as its own job so a failure names itself.
-The quick static job runs first; only after it passes do the expensive test and
-build jobs enter the runner queue. This saves capacity on submissions with type,
-lint or build errors, without skipping any checks on mergeable PRs. The required
-gates still fail if preflight fails or a required test job is skipped. It adds
-the preflight duration to an otherwise idle runner pool; it does not cure a
-GitHub-wide scheduling backlog.
+Every PR runs locale validation (`pnpm i18n:check`), lint, CI-selection tests,
+verification-documentation checks, and the required `CI` gate. The changed files
+select the remaining checks; see [CI job selection](docs/ci.md). Documentation-only
+PRs run the docs tests, while translation-only PRs run the locale subset. Runtime
+changes select broader tests and smokes.
 
-- **typecheck + lint** — typecheck, lint, locale catalogs (`pnpm i18n:check`), Electron syntax check, production UI build. Once, on Ubuntu; none of it is platform-specific.
-- **vitest (os, shard n/4)** — the suite split into four shards per platform: Ubuntu and Windows on a PR; macOS as well on main, in the merge queue and on manual runs (macOS runners are scarce and only a couple of tests are macOS-only). The suite runs its files serially on purpose (fake CLIs and a real harness server), so one runner takes ~19 minutes; a shard takes 4–10. To reproduce a shard's failure locally, run the same `pnpm exec vitest run --shard=n/4`. Failures also appear as annotations on the PR.
-- **packaged server smoke (os)** — the server bundle copied out of the repo and started with no `node_modules` in reach.
-- **Windows CUA host smoke**, **macOS smokes (packaged server + Electron)** — real Electron utility processes against disposable homes; never the live app.
-- **Swift tests + iOS build**, **Kotlin tests + Android build** — only when `ios/` or `android/` (or the CI setup) changes. The iPhone/iPad simulator UI suite runs nightly in `ios-thread-ui.yml`.
-- **CI** — the one check the branch rules require. It only aggregates the jobs above; if it is red, the failing job is named in its log.
+- **preflight** — the static job always runs the checks above, in under a minute, before the dependent jobs.
+- **typecheck + build** — when selected, typecheck, Electron syntax checks and a production UI build, beside the shards.
+- **vitest (os, part)** — full platform suites use eight Linux or Windows shards and four macOS shards; subset jobs have their own file lists and shard counts. Windows jobs run on PRs whose changes can affect Windows or carry the `windows` label. macOS Vitest shards run in the nightly/manual full lane. Files run serially within each shard, balanced by recorded platform time. Use the [reproduction steps](docs/ci.md#vitest-shards) for the failing job.
+- **packaged server smoke (os)** — when selected, the server bundle is copied out of the repo and started with no `node_modules` in reach.
+- **Windows CUA host smoke**, **macOS smokes (packaged server + Electron)** — when selected, real Electron utility processes run against disposable homes; never the live app.
+- **CI** — the required aggregate gate checks that selected jobs passed and unselected jobs were skipped. Its log names any failing dependency.
 
-A `pre-push` hook installed by `pnpm install` runs lint, typecheck and the locale check before a push (about a minute). `git push --no-verify` skips it once; `OMB_SKIP_HOOKS=1` skips it for a session.
+For eligible owner runs on Boat, the static job also runs the selected Linux
+test lanes; their logs appear in groups named for each lane. Fork PRs use
+GitHub-hosted jobs. See [Linux on Boat](docs/ci.md#linux-on-boat).
+
+A `pre-push` hook installed by `pnpm install` checks the files a push changes, in seconds: lint, the locale check when a catalog changed, and the size and vocabulary guards when a source they read changed. Typecheck and the suite stay in CI. A checkout without dependencies checks nothing and lets the push go. `git push --no-verify` skips it once; `OMB_SKIP_HOOKS=1` skips it for a session.
 
 Provider fakes under `server/testing/fake-*.ts` must stay dependency-free: they run as bare subprocesses and at least one is copied out of the repo by a test, so a relative import from the repo dies at link time. `server/testing/fakes-self-contained.test.ts` enforces it.
 
@@ -287,7 +396,17 @@ Provider fakes under `server/testing/fake-*.ts` must stay dependency-free: they 
 - [ ] New server behavior has a test; driver changes keep the contract tests green
 - [ ] No `dist-server/` churn, no lockfile churn beyond your actual dependency change
 - [ ] macOS-only code is platform-gated; nothing breaks the packaged app
-- [ ] UI changes include before/after screenshots
+- [ ] UI changes follow [`DESIGN.md`](DESIGN.md) and include before/after screenshots
 
 By contributing you agree your contributions are licensed under the
 [Apache License, Version 2.0](LICENSE).
+
+## Moving code out of server/index.ts
+
+The host is being split into modules under `server/host/` (rules in
+`server/host/README.md`) and `server/routes/` (`server/routes/README.md`).
+Two tests keep it from growing back: `scripts/testing/file-size-ratchet.test.ts`
+lists every source file over 1,000 lines and only lets a count go down, and
+`scripts/testing/index-route-ratchet.test.ts` counts the route guards left in
+index.ts. A move changes no behaviour (review it with
+`git diff --color-moved=dimmed-zebra`); a behaviour change is its own PR.

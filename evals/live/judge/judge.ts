@@ -65,7 +65,6 @@ export function parseJudgeVerdict(reply: string): JudgeVerdict {
     try {
       return verdictSchema.parse(JSON.parse(candidate.slice(start, end + 1)));
     } catch {
-      // try the next candidate shape
     }
   }
   throw new Error("judge reply was not valid JSON matching the verdict contract");

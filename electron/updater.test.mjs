@@ -1,61 +1,459 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import vm from "node:vm";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { cloudTarget } from "./cloud-account.mjs";
+import { myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin } from "./cloud-home.mjs";
+import { cloudPageSenderAllowed } from "./cloud-home.mjs";
+import { otherOwnClouds, ownCloud } from "./cloud-list.mjs";
+import environments from "./environments.cjs";
 import localOriginModule from "./local-origin.cjs";
 
-// The updater channels answer only the local UI (electron/local-origin.cjs).
-localOriginModule.setLocalOrigin("http://127.0.0.1:8799");
-const localEvent = { senderFrame: { url: "http://127.0.0.1:8799/" } };
+const LOCAL = "http://127.0.0.1:8799";
+const CLOUD = "https://home-7f3k2.fly.dev";
+const OTHER = "https://bots.example.test";
+const OWN = "https://omb-c-a.fly.dev";
 
-const { updater, handlers } = vi.hoisted(() => ({
-  updater: { on: vi.fn(), downloadUpdate: vi.fn() },
-  handlers: new Map(),
-}));
+const fixture = vi.hoisted(() => ({ autoUpdater: null, handlers: new Map(), home: "" }));
 
 vi.mock("electron", () => ({
-  app: { isPackaged: true, getPath: () => "/unused-updater-test-log" },
+  app: { isPackaged: true, getPath: () => fixture.home, getVersion: () => "1.0.0", hide: vi.fn() },
   clipboard: { writeText: vi.fn() },
-  ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
+  ipcMain: { handle: (name, handler) => fixture.handlers.set(name, handler) },
 }));
 vi.mock("node:module", () => ({
-  createRequire: () => () => ({ autoUpdater: updater }),
+  createRequire: () => () => ({ autoUpdater: fixture.autoUpdater }),
 }));
 
-const { attachUpdaterWindow, registerUpdaterIpc, startUpdater } = await import("./updater.mjs");
+function page(origin) {
+  const mainFrame = { url: `${origin}/` };
+  const webContents = { mainFrame, send: vi.fn() };
+  return { webContents, event: { sender: webContents, senderFrame: mainFrame } };
+}
 
+function mainRule() {
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const start = source.indexOf("function myCloud() {"), end = source.indexOf("const savedWorkspace = id =>", start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  expect(source.includes("registerUpdaterIpc({ pageAllowed: updaterPageAllowed, serverPage: event => activePageOrigin(event), confirmRestart: "), "main.mjs wires the updater to updaterPageAllowed").toBe(true);
+  const signInStart = source.indexOf("function ensureCloudAccount() {"), signInEnd = source.indexOf("\n}\n", signInStart) + 3;
+  expect(signInStart).toBeGreaterThanOrEqual(0);
+  const window = { isDestroyed: () => false, webContents: null };
+  const listeners = new Map();
+  const signIn = { options: null, state: { status: "signed-out", message: "restoring" } };
+  const context = vm.createContext({
+    ipcMain: { handle: () => {}, on: (channel, listener) => listeners.set(channel, listener) },
+    senderIsLocal: localOriginModule.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed, cloudPageSenderAllowed, myCloudOrigin, otherOwnClouds,
+    activeEnvironment: environments.activeEnvironment, rendererOrigin: () => LOCAL, desktopRemoteAccess: false,
+    mainWindow: window,
+    environmentsState: { environments: [], activeId: environments.LOCAL_ID },
+    cloudAccount: { homeTarget: () => ({ origin: CLOUD }), state: () => ({ status: "connected", account: { id: "a1" } }), isOwnCloud: () => false },
+    rememberedHome: null, savedCloudHomeOrigin, cloudSignInRestored: true,
+    // ensureCloudAccount's world: a packaged app, and a sign-in client whose state the test sets.
+    app: { isPackaged: true, getPath: () => "/unused", getVersion: () => "1.0.0" }, process: { platform: "darwin", env: {} }, cloudTarget,
+    path: { join: (...parts) => parts.join("/") }, os: { hostname: () => "mac" }, shell: {}, safeStorage: {},
+    createCloudAccountStore: () => ({}), cloudEncryption: {}, cloudAccountStore: () => ({}), cloudSync: { accountChanged: () => {} }, accounts: { tell: () => {} }, rememberCloudHome: () => {}, rememberedCloudHome, computerSharing: null, updatesConsent: null,
+    sendUpdaterState: () => {}, refreshCloudMenus: () => {}, announceCloudReady: () => {}, installCloudPlanIpc: () => {},
+    includedX: { onState: async () => {} }, includedPages: { onState: async () => {} }, cloudPower: { changed: () => {}, awaiting: () => false }, cloudLogins: { kick: () => {} },
+    createCloudAccountClient: (options) => {
+      signIn.options = options;
+      return {
+        homeTarget: () => (signIn.state.status === "connected" ? { origin: signIn.state.machine.origin } : null),
+        state: () => signIn.state,
+        isOwnCloud: (origin) => signIn.state.status === "connected" && (signIn.state.clouds ?? []).some(cloud => ownCloud(cloud) && cloud.origin === origin),
+      };
+    },
+  });
+  vm.runInContext(`${source.slice(start, end)}\n${source.slice(signInStart, signInEnd)}`, context);
+  const show = (shown, activeId = environments.LOCAL_ID) => {
+    window.webContents = shown.webContents;
+    context.environmentsState = {
+      environments: [{ id: "cloud", name: "My Cloud", origin: CLOUD }, { id: "vps", name: "VPS", origin: OTHER },
+        { id: "own", name: "Client A", origin: OWN, cloud: { id: "c-a", role: "owner" } }],
+      activeId,
+    };
+  };
+  const offered = (event) => {
+    const asked = { ...event };
+    listeners.get("update:offered")(asked);
+    return asked.returnValue;
+  };
+  const launching = () => {
+    context.cloudAccount = null;
+    context.cloudSignInRestored = false;
+    vm.runInContext("ensureCloudAccount()", context);
+  };
+  const signedIn = (state) => {
+    signIn.state = state;
+    context.cloudSignInRestored = true;
+    signIn.options.onState(state);
+  };
+  return { context, window, show, offered, launching, signedIn, pageAllowed: vm.runInContext("updaterPageAllowed", context), serverPage: (event) => vm.runInContext("activePageOrigin", context)(event) ?? null };
+}
+
+async function load(pageAllowed, serverPage = undefined, confirmRestart = undefined) {
+  vi.resetModules();
+  fixture.handlers.clear();
+  const autoUpdater = new EventEmitter();
+  autoUpdater.checkForUpdates = vi.fn(async () => {
+    autoUpdater.emit("checking-for-update");
+    autoUpdater.emit("update-available", { version: "2.0.0" });
+    return { isUpdateAvailable: true };
+  });
+  autoUpdater.downloadUpdate = vi.fn(async () => {
+    autoUpdater.emit("download-progress", { percent: 50 });
+    autoUpdater.emit("update-downloaded", { version: "2.0.0" });
+    return ["/unused-staged-update.zip"];
+  });
+  autoUpdater.quitAndInstall = vi.fn();
+  fixture.autoUpdater = autoUpdater;
+  const updater = await import("./updater.mjs");
+  updater.registerUpdaterIpc({ pageAllowed, ...(serverPage ? { serverPage, confirmRestart } : {}) });
+  return { updater, autoUpdater, handlers: fixture.handlers };
+}
+
+const settle = async () => {
+  for (let index = 0; index < 10; index += 1) await Promise.resolve();
+};
+
+beforeEach(() => {
+  fixture.home = mkdtempSync(join(tmpdir(), "omb-updater-home-"));
+  localOriginModule.setLocalOrigin(LOCAL);
+  vi.useFakeTimers();
+});
 afterEach(() => {
   vi.clearAllTimers();
   vi.useRealTimers();
+  rmSync(fixture.home, { recursive: true, force: true });
+});
+
+function bridgeFor(origin, { clicked = false, rule = null } = {}) {
+  let bridge;
+  const invoked = [];
+  const asked = [];
+  const loading = page(origin);
+  if (rule) rule.window.webContents = loading.webContents;
+  vm.runInNewContext(readFileSync(new URL("./preload.cjs", import.meta.url), "utf8"), {
+    process: { platform: "darwin", argv: [`--omb-local-origin=${LOCAL}`] },
+    location: { origin }, navigator: { userActivation: { isActive: clicked } },
+    TextEncoder, localStorage: { getItem: () => null },
+    require: () => ({
+      webUtils: {},
+      contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } },
+      ipcRenderer: {
+        on() {}, removeListener() {}, send() {},
+        sendSync: (channel) => { asked.push(channel); return rule ? rule.offered(loading.event) : undefined; },
+        invoke: (...args) => { invoked.push(args); return Promise.resolve({ status: "idle" }); },
+      },
+    }),
+  });
+  return { bridge, invoked, asked };
+}
+
+it("My Cloud's page gets the update bridge, and it restarts the app only on the person's click", async () => {
+  const local = bridgeFor(LOCAL);
+  expect(Object.keys(local.bridge.updater).sort()).toEqual(["check", "install", "onState", "seen"]);
+  expect(local.asked, "this computer's page has the whole bridge without asking").toEqual([]);
+  await local.bridge.updater.install();
+  expect(local.invoked).toEqual([["update:install"]]);
+
+  const rule = mainRule();
+  rule.show(page(CLOUD), "cloud");
+  const cloud = bridgeFor(CLOUD, { rule });
+  expect(Object.keys(cloud.bridge.updater).sort()).toEqual(["check", "install", "onState", "seen"]);
+  await expect(cloud.bridge.updater.install()).rejects.toThrow(/Restart to update/);
+  await cloud.bridge.updater.check();
+  cloud.bridge.updater.onState(() => {});
+  expect(cloud.invoked).toEqual([["update:check"], ["update:get-state"]]);
+  const clicked = bridgeFor(CLOUD, { clicked: true, rule });
+  await clicked.bridge.updater.install();
+  expect(clicked.invoked).toEqual([["update:install"]]);
+});
+
+it("another server's page never gets the update bridge; My Cloud's does, even while the sign-in restores", () => {
+  const rule = mainRule();
+  const has = (origin, activeId) => {
+    rule.show(page(origin), activeId);
+    return "updater" in bridgeFor(origin, { rule }).bridge;
+  };
+  expect(has(OTHER, "vps")).toBe(false);
+  expect(has(CLOUD, "cloud")).toBe(true);
+  rule.show(page(CLOUD), "cloud");
+  expect(rule.offered({ sender: rule.window.webContents, senderFrame: { url: `${CLOUD}/` } })).toBe(false);
+
+  rule.launching();
+  expect(has(CLOUD, "cloud")).toBe(true);
+  expect(has(OTHER, "vps")).toBe(false);
+
+  rule.signedIn({ status: "signed-out" });
+  expect(has(CLOUD, "cloud")).toBe(false);
+
+  rule.signedIn({ status: "connected", account: { id: "a1" }, machine: { origin: CLOUD, status: "ready" } });
+  expect(has(CLOUD, "cloud")).toBe(true);
+  rule.context.desktopRemoteAccess = { endpoint: "https://companion.example.test" };
+  expect(has(CLOUD, "cloud")).toBe(false);
+  rule.context.cloudSignInRestored = false;
+  expect(has(CLOUD, "cloud")).toBe(false);
+
+  expect("updater" in bridgeFor(CLOUD).bridge).toBe(false);
+});
+
+it("another Cloud of the person's own gets the update bridge as My Cloud's page does; a server only signed in with their account does not", () => {
+  const rule = mainRule();
+  const has = (origin, activeId) => {
+    rule.show(page(origin), activeId);
+    return "updater" in bridgeFor(origin, { rule }).bridge;
+  };
+  rule.show(page(CLOUD), "cloud");
+  rule.launching();
+  const cloud = (over) => ({ id: "c-a", name: "Client A", color: null, role: "owner", tier: "pro", runsOn: "cloud", status: "ready", origin: OWN, teamId: null, primary: false, managed: true, ...over });
+  rule.signedIn({ status: "connected", account: { id: "a1" }, machine: { origin: CLOUD, status: "ready" }, clouds: [cloud({ id: "c-home", origin: CLOUD, primary: true }), cloud()] });
+  expect(has(OWN, "own")).toBe(true);
+  expect(has(OTHER, "vps")).toBe(false);
+  rule.signedIn({ status: "connected", account: { id: "a1" }, machine: { origin: CLOUD, status: "ready" }, clouds: [cloud({ id: "c-home", origin: CLOUD, primary: true }), cloud({ runsOn: "server", managed: false })] });
+  expect(has(OWN, "own")).toBe(false);
+});
+
+it("a downloaded update installs when the app quits, except a system package, which is the person's to install", async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const resourcesPath = process.resourcesPath;
+  const appImage = process.env.APPIMAGE;
+  const resources = mkdtempSync(join(tmpdir(), "omb-updater-package-"));
+  try {
+    for (const [os, marker, image, installsOnQuit] of [
+      ["darwin", null, null, true],
+      ["win32", null, null, true],
+      ["linux", null, "/home/a/OpenMausBot.AppImage", true],
+      ["linux", "deb", null, false],
+      ["linux", "rpm", null, false],
+    ]) {
+      Object.defineProperty(process, "platform", { ...platform, value: os });
+      process.resourcesPath = resources;
+      rmSync(join(resources, "package-type"), { force: true });
+      if (marker) writeFileSync(join(resources, "package-type"), marker);
+      if (image) process.env.APPIMAGE = image;
+      else delete process.env.APPIMAGE;
+      const { updater, autoUpdater } = await load(() => false);
+      updater.startUpdater();
+      expect(autoUpdater.autoInstallOnAppQuit, `${os} ${marker ?? image ?? ""}`).toBe(installsOnQuit);
+      expect(autoUpdater.autoDownload).toBe(false);
+    }
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    process.resourcesPath = resourcesPath;
+    if (appImage === undefined) delete process.env.APPIMAGE;
+    else process.env.APPIMAGE = appImage;
+    rmSync(resources, { recursive: true, force: true });
+  }
+});
+
+it("a downloaded update installs by itself at a quiet moment on macOS and Windows, and Linux installs stay the person's", async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const resourcesPath = process.resourcesPath;
+  const appImage = process.env.APPIMAGE;
+  const resources = mkdtempSync(join(tmpdir(), "omb-updater-quiet-"));
+  const quiet = { locked: () => true, idleMs: () => 0, typedAt: () => 0, shown: () => true, busy: () => null, work: async () => null, watch: () => {} };
+  try {
+    for (const [os, marker, image, installs] of [
+      ["darwin", null, null, true],
+      ["win32", null, null, true],
+      ["linux", null, "/home/a/OpenMausBot.AppImage", false],
+      ["linux", "deb", null, false],
+      ["linux", "rpm", null, false],
+    ]) {
+      Object.defineProperty(process, "platform", { ...platform, value: os });
+      process.resourcesPath = resources;
+      rmSync(join(resources, "package-type"), { force: true });
+      if (marker) writeFileSync(join(resources, "package-type"), marker);
+      if (image) process.env.APPIMAGE = image;
+      else delete process.env.APPIMAGE;
+      const { updater, autoUpdater, handlers } = await load(() => true);
+      updater.startUpdater(quiet);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await settle();
+      expect(autoUpdater.quitAndInstall, `${os} ${marker ?? image ?? ""} waits for a quiet moment`).not.toHaveBeenCalled();
+      expect((await handlers.get("update:get-state")({})).installsByItself, os).toBe(installs ? true : undefined);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await settle();
+      expect(autoUpdater.quitAndInstall.mock.calls, `${os} ${marker ?? image ?? ""}`).toEqual(installs ? [[true, true]] : []);
+    }
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    process.resourcesPath = resourcesPath;
+    if (appImage === undefined) delete process.env.APPIMAGE;
+    else process.env.APPIMAGE = appImage;
+    rmSync(resources, { recursive: true, force: true });
+  }
+});
+
+it("My Cloud's page hears \"Restart to update\" once the sign-in it loaded before is restored", async () => {
+  const rule = mainRule();
+  rule.launching();
+  const { updater, autoUpdater, handlers } = await load(rule.pageAllowed);
+  rule.context.sendUpdaterState = updater.sendUpdaterState;
+  const cloud = page(CLOUD);
+  rule.show(cloud, "cloud");
+  updater.attachUpdaterWindow(rule.window);
+  updater.startUpdater();
+
+  await vi.advanceTimersByTimeAsync(15_000);
+  await settle();
+  expect(autoUpdater.downloadUpdate).toHaveBeenCalledTimes(1);
+  expect(() => handlers.get("update:get-state")(cloud.event)).toThrow(/only available/);
+  expect(cloud.webContents.send).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+  // The staged 2.0.0 is still offered, so the hourly check looks again (quietly) for something newer; macOS stages
+  // natively and is not re-checked.
+  expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(process.platform === "darwin" ? 1 : 2);
+  expect(cloud.webContents.send).not.toHaveBeenCalled();
+
+  rule.signedIn({ status: "connected", account: { id: "a1" }, machine: { origin: CLOUD, status: "ready" } });
+  expect(cloud.webContents.send).toHaveBeenLastCalledWith("update:state", expect.objectContaining({ status: "downloaded", version: "2.0.0" }));
+
+  const other = page(OTHER);
+  rule.show(other, "vps");
+  rule.signedIn({ status: "connected", account: { id: "a1" }, machine: { origin: CLOUD, status: "ready" } });
+  expect(other.webContents.send).not.toHaveBeenCalled();
+});
+
+it("downloads an update by itself: the first check after launch starts it, and nothing restarts", async () => {
+  const rule = mainRule();
+  const local = page(LOCAL);
+  rule.show(local);
+  const { updater, autoUpdater } = await load(rule.pageAllowed);
+  updater.attachUpdaterWindow(rule.window);
+  updater.startUpdater();
+
+  await vi.advanceTimersByTimeAsync(15_000);
+  await settle();
+
+  expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1);
+  expect(autoUpdater.downloadUpdate).toHaveBeenCalledTimes(1);
+  expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+  const statuses = local.webContents.send.mock.calls.map(([, state]) => state.status);
+  expect(statuses).not.toContain("available");
+  expect(statuses.at(-1)).toBe("downloaded");
+});
+
+it("My Cloud's page reads and drives the update channels, and another server's page is refused", async () => {
+  const rule = mainRule();
+  const { handlers } = await load(rule.pageAllowed);
+  expect([...handlers.keys()].sort()).toEqual(["update:check", "update:for-server-page", "update:get-state", "update:install", "update:seen"]);
+
+  const cloud = page(CLOUD);
+  rule.show(cloud, "cloud");
+  const channels = [...handlers.keys()].filter((channel) => channel !== "update:for-server-page");
+  for (const channel of channels) expect(() => handlers.get(channel)(cloud.event), channel).not.toThrow();
+  rule.context.cloudAccount = { homeTarget: () => null, state: () => ({ status: "unavailable", account: { id: "a1" } }), isOwnCloud: () => false };
+  rule.context.rememberedHome = { accountId: "a1", origin: CLOUD };
+  expect(() => handlers.get("update:get-state")(cloud.event)).not.toThrow();
+  rule.context.rememberedHome = { accountId: "someone-else", origin: CLOUD };
+  expect(() => handlers.get("update:get-state")(cloud.event)).toThrow(/only available/);
+  rule.context.cloudAccount = { homeTarget: () => ({ origin: CLOUD }), state: () => ({ status: "connected", account: { id: "a1" } }), isOwnCloud: () => false };
+
+  rule.context.desktopRemoteAccess = { endpoint: "https://companion.example.test" };
+  for (const channel of channels) expect(() => handlers.get(channel)(cloud.event), channel).toThrow(/only available/);
+  rule.context.desktopRemoteAccess = false;
+
+  const other = page(OTHER);
+  rule.show(other, "vps");
+  for (const channel of channels) expect(() => handlers.get(channel)(other.event), channel).toThrow(/only available/);
+  expect(() => handlers.get("update:get-state")({ sender: other.webContents, senderFrame: { url: `${CLOUD}/` } })).toThrow(/only available/);
+  rule.show(cloud, "cloud");
+  expect(() => handlers.get("update:get-state")({ sender: cloud.webContents, senderFrame: { url: `${CLOUD}/` } })).toThrow(/only available/);
+
+  const local = page(LOCAL);
+  rule.show(local);
+  for (const channel of channels) expect(() => handlers.get(channel)(local.event), channel).not.toThrow();
+});
+
+it("sends update news only to a page allowed to read it", async () => {
+  const rule = mainRule();
+  const { updater, autoUpdater, handlers } = await load(rule.pageAllowed);
+  updater.attachUpdaterWindow(rule.window);
+  updater.startUpdater();
+
+  let finish;
+  autoUpdater.downloadUpdate = vi.fn(() => new Promise((resolve) => { finish = resolve; }).then(() => {
+    autoUpdater.emit("update-downloaded", { version: "2.0.0" });
+    return ["/unused-staged-update.zip"];
+  }));
+
+  const other = page(OTHER);
+  rule.show(other, "vps");
+  await vi.advanceTimersByTimeAsync(15_000);
+  await settle();
+  expect(autoUpdater.downloadUpdate).toHaveBeenCalledTimes(1);
+  expect(other.webContents.send).not.toHaveBeenCalled();
+  expect(() => handlers.get("update:get-state")(other.event)).toThrow(/only available/);
+
+  const cloud = page(CLOUD);
+  rule.show(cloud, "cloud");
+  expect(handlers.get("update:get-state")(cloud.event)).toMatchObject({ status: "downloading", version: "2.0.0" });
+  finish();
+  await settle();
+  expect(cloud.webContents.send).toHaveBeenLastCalledWith("update:state", expect.objectContaining({ status: "downloaded", version: "2.0.0" }));
+  expect(other.webContents.send).not.toHaveBeenCalled();
 });
 
 it("sends updater progress to a reopened window without restarting the updater", async () => {
-  vi.useFakeTimers();
-  const first = { webContents: { send: vi.fn() } };
-  const reopened = { webContents: { send: vi.fn() } };
-  attachUpdaterWindow(first);
-  registerUpdaterIpc();
-  startUpdater();
-  const listenerCount = updater.on.mock.calls.length;
+  const rule = mainRule();
+  const first = page(LOCAL);
+  rule.show(first);
+  const { updater, autoUpdater, handlers } = await load(rule.pageAllowed);
+  updater.attachUpdaterWindow({ webContents: first.webContents });
+  updater.startUpdater();
+  const listenerCount = autoUpdater.eventNames().reduce((count, name) => count + autoUpdater.listenerCount(name), 0);
   const timerCount = vi.getTimerCount();
 
   first.webContents.send.mockImplementation(() => { throw new Error("window destroyed"); });
   first.webContents.send.mockClear();
-  attachUpdaterWindow(reopened);
-  const emit = (name, payload) => {
-    for (const [event, listener] of updater.on.mock.calls) {
-      if (event === name) listener(payload);
-    }
-  };
-  updater.downloadUpdate.mockImplementation(async () => {
-    emit("download-progress", { percent: 50 });
-    emit("update-downloaded", { version: "2.0.0" });
-    return ["/unused-staged-update.zip"];
-  });
+  const reopened = page(LOCAL);
+  rule.show(reopened);
+  updater.attachUpdaterWindow(rule.window);
 
-  await handlers.get("update:download")(localEvent);
+  await handlers.get("update:check")(reopened.event);
+  await settle();
 
   expect(first.webContents.send).not.toHaveBeenCalled();
   expect(reopened.webContents.send.mock.calls.map(([, state]) => state.status))
-    .toEqual(["downloading", "downloading", ...(process.platform === "darwin" ? ["preparing"] : []), "downloaded"]);
-  expect(handlers.get("update:get-state")(localEvent)).toMatchObject({ status: "downloaded", version: "2.0.0" });
-  expect(updater.on.mock.calls).toHaveLength(listenerCount);
+    .toEqual(["checking", "downloading", "downloading", ...(process.platform === "darwin" ? ["preparing"] : []), "downloaded"]);
+  expect(autoUpdater.eventNames().reduce((count, name) => count + autoUpdater.listenerCount(name), 0)).toBe(listenerCount);
   expect(vi.getTimerCount()).toBe(timerCount);
+});
+
+it("a server's page the window shows may ask for the app's own update: it learns only what was done, and nothing restarts unless the person says so", async () => {
+  const rule = mainRule();
+  const other = page(OTHER);
+  rule.show(other, "vps");
+  expect(rule.serverPage(other.event)).toBe(OTHER);
+  expect(rule.serverPage({ sender: other.webContents, senderFrame: { url: `${CLOUD}/` } })).toBeNull();
+  expect(rule.serverPage({ sender: page(OTHER).webContents, senderFrame: { url: `${OTHER}/` } })).toBeNull();
+  const answers = [];
+  const confirmRestart = vi.fn(async (version) => { answers.push(version); return answers.length > 1; });
+  const { updater, autoUpdater, handlers } = await load(rule.pageAllowed, rule.serverPage, confirmRestart);
+  const ask = handlers.get("update:for-server-page");
+  await expect(Promise.resolve().then(() => ask({ sender: page(OTHER).webContents, senderFrame: { url: `${OTHER}/` } }))).rejects.toThrow(/only available/);
+  expect(await ask(other.event)).toBe("unavailable");
+  updater.attachUpdaterWindow(rule.window);
+  updater.startUpdater();
+  // Checked and downloaded at the page's request; the person said Not now. Five asks at once open one dialog, which
+  // names the asking server.
+  vi.advanceTimersByTime(updater.SERVER_PAGE_ASK_COOLDOWN_MS);
+  expect(await Promise.all([1, 2, 3, 4, 5].map(() => ask(other.event)))).toEqual(["later", "later", "later", "later", "later"]);
+  expect(confirmRestart).toHaveBeenCalledTimes(1);
+  expect(confirmRestart).toHaveBeenCalledWith("2.0.0", OTHER);
+  expect(await ask(other.event)).toBe("later");
+  expect(confirmRestart).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(updater.SERVER_PAGE_ASK_COOLDOWN_MS);
+  expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+  await settle();
+  // Not the updater's state: the page never hears it, only what its own request did.
+  expect(other.webContents.send).not.toHaveBeenCalled();
+  expect(await ask(other.event)).toBe("installing");
+  expect(confirmRestart).toHaveBeenLastCalledWith("2.0.0", OTHER);
+  expect(autoUpdater.quitAndInstall).toHaveBeenCalledTimes(1);
 });

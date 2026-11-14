@@ -1,20 +1,9 @@
-// Evict stale HTTP-cache entries once, when the app version changes.
-//
-// Attachment responses used to ship `cache-control: private, max-age=31536000,
-// immutable`. Switching the server to `no-store` stops new storage but cannot
-// recall what a profile already cached under that one-year policy, and the
-// desktop viewer authorizes attachment requests with a bearer header on
-// stable URLs — so a cached 200 could replay to a second identity in the
-// same profile without the visibility gate re-running. The bounded migration
-// for exactly that handoff is: the first launch of each new version empties
-// the default session's HTTP cache before any window opens.
+// Cache entries stored under an old one-year immutable policy outlive no-store and could replay to another identity in this profile.
 import fs from "node:fs";
 import path from "node:path";
 
 const versionFile = (userData) => path.join(userData, "last-run-version.json");
 
-/** The version this profile last ran. Unknown — missing, corrupt, or a
- * non-string record — reads as null, never as "same as this build". */
 export function readLastRunVersion(userData) {
   try {
     const parsed = JSON.parse(fs.readFileSync(versionFile(userData), "utf8"));
@@ -24,7 +13,6 @@ export function readLastRunVersion(userData) {
   }
 }
 
-/** Temp-and-rename, so a crash mid-write never leaves a truncated file. */
 export function rememberLastRunVersion(userData, version) {
   const file = versionFile(userData);
   const temporary = `${file}.${process.pid}.tmp`;
@@ -37,16 +25,12 @@ export function rememberLastRunVersion(userData, version) {
     try {
       fs.unlinkSync(temporary);
     } catch {
-      /* never created, or already renamed */
     }
     return false;
   }
 }
 
-/** Pure, so the eviction policy can be tested without Electron. Evict when
- * the persisted version is not exactly this build's: a null persisted value
- * (first run, or an unreadable record) evicts too, because an unknown prior
- * state must fail toward clearing once rather than trusting the old cache. */
+/** An unknown persisted version evicts too: fail toward clearing once rather than trusting the old cache. */
 export function startupCacheEvictionDecision({ currentVersion, persistedVersion }) {
   if (typeof currentVersion !== "string" || currentVersion === "") {
     return { evict: false, reason: "unknown-version" };
@@ -56,22 +40,7 @@ export function startupCacheEvictionDecision({ currentVersion, persistedVersion 
   return { evict: true, reason: "version-change" };
 }
 
-/**
- * The boot migration. `deps`:
- * - userData: string — the app's userData directory
- * - currentVersion: string — this build's version (app.getVersion())
- * - clearCache(): Promise — session.defaultSession.clearCache()
- * - readVersion(userData) / rememberVersion(userData, version) — optional persistence;
- *   defaults to the exported file-backed pair, overridable for tests
- * - log(line) — optional
- *
- * The new version is remembered only after a successful clear: if clearing
- * fails, the old record stands and the next launch retries the eviction.
- */
-// Persistence defaults to the file-backed pair above so a caller that wires
-// only userData/currentVersion/clearCache/log still boots: a call site that
-// once omitted it threw a TypeError before the cache cleared or any window
-// opened.
+/** The new version is remembered only after a successful clear, so a failed clear retries next launch. */
 export async function evictStartupCacheOnce({
   userData,
   currentVersion,

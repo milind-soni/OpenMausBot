@@ -12,7 +12,8 @@ describe("cloud computer provisioning cleanup", () => {
     | "rename-failure"
     | "rename-failure-delete-gone"
     | "existing-desktop-failure"
-    | "desktop-failure-delete-pending" = "rename-failure";
+    | "desktop-failure-delete-pending"
+    | "cancelled-create" = "rename-failure";
   let mutateConfigAfterCreate: (() => void) | null = null;
   let createdName = "";
   const requests: RequestRecord[] = [];
@@ -32,40 +33,39 @@ describe("cloud computer provisioning cleanup", () => {
         requests.push({ method: req.method ?? "GET", path: url.pathname, headers: req.headers, body });
         res.setHeader("content-type", "application/json");
 
-        if (url.pathname === "/api/box/v1/boxes" && req.method === "GET") {
+        if (url.pathname === "/api/v1/sandboxes" && req.method === "GET") {
           const boats =
             scenario === "existing-desktop-failure"
               ? [{ id: "bx_456789ab", name: nameFor("existing-bot"), state: "ready" }]
               : [];
-          // The provider list endpoint still answers with its historical "boxes" key.
-          res.writeHead(200).end(JSON.stringify({ ok: true, boxes: boats }));
-        } else if (url.pathname === "/api/box/v1/boxes" && req.method === "POST") {
+          res.writeHead(200).end(JSON.stringify({ ok: true, type: "sandbox.list", sandboxes: boats, pageInfo: { nextCursor: null } }));
+        } else if (url.pathname === "/api/v1/sandboxes" && req.method === "POST") {
           mutateConfigAfterCreate?.();
           createdName = "provider-created";
-          res.writeHead(201).end(JSON.stringify({ ok: true, box: { id: "bx_3456789a", state: "provisioning" } }));
-        } else if (url.pathname === "/api/box/v1/boxes/bx_3456789a" && req.method === "PATCH") {
-          if (scenario === "desktop-failure-delete-pending") {
+          res.writeHead(202).end(JSON.stringify({ ok: true, type: "sandbox.created", sandbox: { id: "bx_3456789a", state: "provisioning" } }));
+        } else if (url.pathname === "/api/v1/sandboxes/bx_3456789a" && req.method === "PATCH") {
+          if (scenario === "desktop-failure-delete-pending" || scenario === "cancelled-create") {
             createdName = JSON.parse(body).name;
             res.writeHead(200).end(JSON.stringify({ ok: true }));
           } else {
             res.writeHead(500).end(JSON.stringify({ ok: false, message: "rename rejected" }));
           }
-        } else if (url.pathname === "/api/box/v1/boxes/bx_3456789a" && req.method === "DELETE") {
+        } else if (url.pathname === "/api/v1/sandboxes/bx_3456789a" && req.method === "DELETE") {
           if (scenario === "rename-failure-delete-gone") {
             res.writeHead(404).end(JSON.stringify({ ok: false, message: "not found" }));
             return;
           }
           res.writeHead(202).end(JSON.stringify({
             ok: true,
-            type: "box.deleting",
+            type: "sandbox.deleting",
             operation: {
               id: deletionOperationId,
-              kind: "box",
+              kind: "sandbox",
               targetId: "bx_3456789a",
               status: "pending",
             },
           }));
-        } else if (url.pathname === `/api/box/v1/deletion-operations/${deletionOperationId}` && req.method === "GET") {
+        } else if (url.pathname === `/api/v1/deletion-operations/${deletionOperationId}` && req.method === "GET") {
           if (scenario === "desktop-failure-delete-pending") {
             res.writeHead(503).end(JSON.stringify({ ok: false, message: "deletion status unavailable" }));
           } else {
@@ -74,20 +74,23 @@ describe("cloud computer provisioning cleanup", () => {
               type: "deletion.operation",
               operation: {
                 id: deletionOperationId,
-                kind: "box",
+                kind: "sandbox",
                 targetId: "bx_3456789a",
                 status: "completed",
               },
             }));
           }
-        } else if (url.pathname === "/api/box/v1/boxes/bx_3456789a" && req.method === "GET") {
+        } else if (url.pathname === "/api/v1/sandboxes/bx_3456789a" && req.method === "GET" && scenario === "cancelled-create") {
+          // Boat reports a create that got no machine once, nameless, then answers 404.
+          res.writeHead(200).end(JSON.stringify({ ok: true, sandbox: { id: "bx_3456789a", state: "cancelled", error: "No machine was ready" } }));
+        } else if (url.pathname === "/api/v1/sandboxes/bx_3456789a" && req.method === "GET") {
           res.writeHead(200).end(JSON.stringify({
             ok: true,
-            box: { id: "bx_3456789a", name: createdName, state: "ready" },
+            sandbox: { id: "bx_3456789a", name: createdName, state: "ready" },
           }));
-        } else if (url.pathname === "/api/box/v1/boxes/bx_456789ab" && req.method === "GET") {
+        } else if (url.pathname === "/api/v1/sandboxes/bx_456789ab" && req.method === "GET") {
           res.writeHead(200).end(
-            JSON.stringify({ ok: true, box: { id: "bx_456789ab", name: nameFor("existing-bot"), state: "ready" } }),
+            JSON.stringify({ ok: true, sandbox: { id: "bx_456789ab", name: nameFor("existing-bot"), state: "ready" } }),
           );
         } else if (url.pathname.endsWith("/commands")) {
           res.writeHead(200).end(JSON.stringify({ ok: true, exitCode: 0, stdout: "bootstrapped", stderr: "" }));
@@ -100,7 +103,7 @@ describe("cloud computer provisioning cleanup", () => {
     });
     await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
     const port = (api.address() as any).port;
-    vi.stubEnv("OMB_BOX_API", `http://127.0.0.1:${port}/api/box/v1`);
+    vi.stubEnv("OMB_BOAT_API", `http://127.0.0.1:${port}/api/v1`);
     vi.resetModules();
     ({ provisionBoat } = await import("./boat.ts"));
   });
@@ -117,26 +120,26 @@ describe("cloud computer provisioning cleanup", () => {
     }
   });
 
-  it("permanently deletes a newly created box when naming fails", async () => {
+  it("permanently deletes a newly created sandbox when naming fails", async () => {
     scenario = "rename-failure";
     requests.length = 0;
 
     await expect(provisionBoat({ box: { token: "box_test" } } as any, "new-bot", "New Bot")).rejects.toThrow(
-      /box naming failed: rename rejected/,
+      /naming the cloud computer failed: rename rejected/,
     );
 
     const removal = requests.find((request) => request.method === "DELETE");
-    const creation = requests.find((request) => request.method === "POST" && request.path.endsWith("/boxes"));
+    const creation = requests.find((request) => request.method === "POST" && request.path.endsWith("/sandboxes"));
     expect(JSON.parse(creation?.body ?? "{}")).toMatchObject({ noEnv: true });
-    expect(removal?.path).toBe("/api/box/v1/boxes/bx_3456789a");
+    expect(removal?.path).toBe("/api/v1/sandboxes/bx_3456789a");
     expect(removal?.headers["x-ascii-confirm-delete"]).toBe("bx_3456789a");
     expect(requests).toContainEqual(expect.objectContaining({
       method: "GET",
-      path: `/api/box/v1/deletion-operations/${deletionOperationId}`,
+      path: `/api/v1/deletion-operations/${deletionOperationId}`,
     }));
   });
 
-  it("never deletes a pre-existing box when a later step fails", async () => {
+  it("never deletes a pre-existing sandbox when a later step fails", async () => {
     scenario = "existing-desktop-failure";
     requests.length = 0;
 
@@ -154,7 +157,7 @@ describe("cloud computer provisioning cleanup", () => {
     const botId = "pending-cleanup-bot";
 
     await expect(provisionBoat({ box: { token: "box_test" } } as any, botId, "Pending Cleanup")).rejects.toThrow(
-      /box desktop link could not be created.*accepted deletion.*still pending.*recovery record was kept/i,
+      /cloud computer's desktop link could not be created.*accepted deletion.*still pending.*recovery record was kept/i,
     );
 
     const journal = await import("./boat-create-idempotency.ts");
@@ -166,11 +169,24 @@ describe("cloud computer provisioning cleanup", () => {
     const deletionIndex = requests.findIndex((request) => request.method === "DELETE");
     expect(deletionIndex).toBeGreaterThan(-1);
     expect(requests.slice(deletionIndex + 1)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ method: "GET", path: `/api/box/v1/deletion-operations/${deletionOperationId}` }),
-      expect.objectContaining({ method: "GET", path: "/api/box/v1/boxes/bx_3456789a" }),
+      expect.objectContaining({ method: "GET", path: `/api/v1/deletion-operations/${deletionOperationId}` }),
+      expect.objectContaining({ method: "GET", path: "/api/v1/sandboxes/bx_3456789a" }),
     ]));
 
     journal.retireDeletedBoatCreate("bx_3456789a");
+  });
+
+  it("gives up at once on a create Boat cancelled for want of a machine, and deletes nothing", async () => {
+    scenario = "cancelled-create";
+    requests.length = 0;
+    const botId = "cancelled-create-bot";
+
+    await expect(provisionBoat({ box: { token: "box_test" } } as any, botId, "Cancelled")).rejects.toThrow(/did not become ready/);
+
+    expect(requests.filter((request) => request.method === "GET" && request.path === "/api/v1/sandboxes/bx_3456789a")).toHaveLength(2);
+    expect(requests.some((request) => request.method === "DELETE")).toBe(false);
+    const journal = await import("./boat-create-idempotency.ts");
+    expect(journal.boatCreateRecoverySnapshot().some((entry) => entry.botId === botId)).toBe(false);
   });
 
   it("retires a new-Boat create receipt when cleanup DELETE proves it already gone", async () => {
@@ -179,7 +195,7 @@ describe("cloud computer provisioning cleanup", () => {
     const botId = "gone-during-cleanup";
 
     await expect(provisionBoat({ box: { token: "box_test" } } as any, botId, "Gone Cleanup")).rejects.toThrow(
-      /box naming failed: rename rejected/,
+      /naming the cloud computer failed: rename rejected/,
     );
 
     const journal = await import("./boat-create-idempotency.ts");
@@ -194,12 +210,12 @@ describe("cloud computer provisioning cleanup", () => {
       config.box.token = "box_replacement";
     };
     try {
-      await expect(provisionBoat(config, "token-race-bot", "Token Race Bot")).rejects.toThrow(/box naming failed/);
+      await expect(provisionBoat(config, "token-race-bot", "Token Race Bot")).rejects.toThrow(/naming the cloud computer failed/);
     } finally {
       mutateConfigAfterCreate = null;
     }
 
-    const providerRequests = requests.filter((request) => request.path.includes("/boxes"));
+    const providerRequests = requests.filter((request) => request.path.includes("/sandboxes"));
     expect(providerRequests.some((request) => request.method === "PATCH")).toBe(true);
     expect(providerRequests.some((request) => request.method === "DELETE")).toBe(true);
     expect(providerRequests.every((request) => request.headers.authorization === "Bearer box_original")).toBe(true);

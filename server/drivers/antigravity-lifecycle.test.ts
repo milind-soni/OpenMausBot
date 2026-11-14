@@ -1,12 +1,15 @@
 import { EventEmitter } from "node:events";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { rm } from "node:fs/promises";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { DATA_DIR } from "../config.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { AntigravityAcpClient, validateAntigravityRuntime } from "./antigravity-acp.ts";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
+import { VERIFICATION_TEMP_KEY, antigravityTempDir, folderBytes } from "./antigravity-temp.ts";
 
 const scratch = vi.hoisted(() => [] as string[]);
 vi.mock("../procs.ts", () => ({ spawnCli: vi.fn(), killCliTree: vi.fn() }));
@@ -22,6 +25,11 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     },
   };
 });
+vi.mock("./antigravity-temp.ts", async (importOriginal) => {
+  const temp = await importOriginal<typeof import("./antigravity-temp.ts")>();
+  return { ...temp, folderBytes: vi.fn(temp.folderBytes) };
+});
+const realFolderBytes = (await vi.importActual<typeof import("./antigravity-temp.ts")>("./antigravity-temp.ts")).folderBytes;
 const realRm = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).rm;
 
 const runtime: AntigravityRuntime = {
@@ -37,31 +45,52 @@ const initialized = {
   authMethods: [{ id: "oauth-personal" }],
 };
 
-function fakeChild(reply: object | null = { result: initialized }) {
+/** Exits by itself once its input ends, like the real runtime, unless `exitsOnEof` is false. */
+function fakeChild(reply: object | null = { result: initialized }, { exitsOnEof = true } = {}) {
   const child = Object.assign(new EventEmitter(), {
     stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+    closed: false,
   });
+  child.once("close", () => { child.closed = true; });
   child.stdin.on("data", (line) => {
     if (reply === null) return;
     const request = JSON.parse(String(line));
     child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, ...reply })}\n`);
   });
+  child.stdin.on("end", () => { if (exitsOnEof) child.emit("close", 0); });
   vi.mocked(spawnCli).mockReturnValue(child as unknown as ReturnType<typeof spawnCli>);
   return child;
 }
 
-function client() {
-  return new AntigravityAcpClient(runtime, { directory: "/fixture", tokenPath: "/fixture/token", environment: {} }, "/fixture");
+/** A closed client gives the runtime five seconds to exit before forcing it; let that grace run out. */
+async function afterExitGrace(child: ReturnType<typeof fakeChild>) {
+  if (!child.stdin.writableFinished) await new Promise((resolve) => child.stdin.once("finish", resolve));
+  await vi.advanceTimersByTimeAsync(5_000);
+}
+
+function client(tempDirectory?: string) {
+  return new AntigravityAcpClient(
+    runtime,
+    { directory: "/fixture", tokenPath: "/fixture/token", environment: {}, ...(tempDirectory ? { tempDirectory } : {}) },
+    "/fixture",
+  );
+}
+
+/** Each count reports the next size; the last one repeats. */
+function unpackSizes(...sizes: number[]) {
+  vi.mocked(folderBytes).mockImplementation(async () => ({ bytes: sizes.length > 1 ? sizes.shift()! : sizes[0], complete: true }));
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.mocked(spawnCli).mockReset();
-  vi.mocked(killCliTree).mockReset().mockImplementation((child) => new Promise((resolve) => {
-    child.once("close", () => resolve(true));
-  }));
+  // Like the real one: a process that has already closed is stopped.
+  vi.mocked(killCliTree).mockReset().mockImplementation((child) => (child as unknown as { closed: boolean }).closed
+    ? Promise.resolve(true)
+    : new Promise((resolve) => { child.once("close", () => resolve(true)); }));
   vi.mocked(rm).mockReset().mockImplementation(realRm);
+  vi.mocked(folderBytes).mockReset().mockImplementation(realFolderBytes);
 });
 
 afterEach(() => {
@@ -105,6 +134,66 @@ describe("Antigravity initialization diagnostics", () => {
     acp.close();
   });
 
+  it("waits another window while the Windows runtime is still unpacking", async () => {
+    unpackSizes(0, 600_000_000, 950_000_000);
+    const child = fakeChild(null);
+    const acp = client("/fixture/tmp");
+    const result = acp.initialize();
+    let settled = false;
+    void result.then(() => { settled = true; }, () => { settled = true; });
+    await vi.advanceTimersByTimeAsync(170_000);
+    expect(settled).toBe(false);
+    child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: initialized })}
+`);
+    await expect(result).resolves.toEqual(initialized);
+    acp.close();
+  });
+
+  it("keeps waiting when a count runs out of time, since it proves no lack of progress", async () => {
+    vi.mocked(folderBytes)
+      .mockResolvedValueOnce({ bytes: 500_000_000, complete: true })
+      .mockResolvedValue({ bytes: 100_000_000, complete: false });
+    const child = fakeChild(null);
+    const acp = client("/fixture/tmp");
+    const result = acp.initialize();
+    let settled = false;
+    void result.then(() => { settled = true; }, () => { settled = true; });
+    await vi.advanceTimersByTimeAsync(170_000);
+    expect(settled).toBe(false);
+    child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: initialized })}\n`);
+    await expect(result).resolves.toEqual(initialized);
+    acp.close();
+  });
+
+  it("fails after one window when nothing was unpacked, and says so", async () => {
+    unpackSizes(0);
+    fakeChild(null);
+    const acp = client("/fixture/tmp");
+    const result = acp.initialize().catch((error: Error) => error);
+    await vi.advanceTimersByTimeAsync(90_000);
+    const error = await result;
+    expect(error.message).toContain("timed out after 90 seconds");
+    expect(error.message).toContain("Unpacked into temp: 0 MB");
+    acp.close();
+  });
+
+  it("gives up at the startup cap even while the folder keeps growing", async () => {
+    let size = 0;
+    vi.mocked(folderBytes).mockImplementation(async () => ({ bytes: size += 100_000_000, complete: true }));
+    fakeChild(null);
+    const acp = client("/fixture/tmp");
+    const result = acp.initialize().catch((error: Error) => error);
+    let settled = false;
+    void result.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(299_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const error = await result;
+    expect(error.message).toContain("timed out after 300 seconds");
+    expect(error.message).toMatch(/Unpacked into temp: [1-9]\d* MB/u);
+    acp.close();
+  });
+
   it("retains a fixed disk-space hint when the native process exits without a newline", async () => {
     const child = fakeChild(null);
     const acp = client();
@@ -112,6 +201,22 @@ describe("Antigravity initialization diagnostics", () => {
     child.stderr.write("No space left on device: user-private-directory");
     child.emit("close", 1);
     await rejected;
+    acp.close();
+  });
+
+  it("explains an exit with what the runtime last printed, masked, and never the sign-in link's query", async () => {
+    const child = fakeChild(null);
+    const acp = client();
+    const rejected = acp.initialize().catch((error: Error) => error);
+    child.stderr.write("private auth code: do-not-disclose\n");
+    child.stderr.write("https://accounts.google.com/o/oauth2/v2/auth?state=private-state&code=secret-code\n");
+    // Google's runtime in a box without /sys, measured on a Fly Cloud home; bubblewrap reports its SIGABRT as 134.
+    child.stderr.write("2 third_party/tcmalloc/internal/sysinfo.h:76] CHECK in NumCPUs: maybe_cpus.has_value() (false) ");
+    child.emit("close", 134, null);
+    const error = await rejected;
+    expect(error.message).toBe("Antigravity ACP exited 134: it stopped itself (abort). Last output: private auth code: «redacted 15 chars» | "
+      + "https://accounts.google.com/o/oauth2/v2/auth?«redacted 36 chars» | 2 third_party/tcmalloc/internal/sysinfo.h:76] CHECK in NumCPUs: maybe_cpus.has_value() (false).");
+    for (const secret of ["do-not-disclose", "private-state", "secret-code"]) expect(error.message).not.toContain(secret);
     acp.close();
   });
 
@@ -139,21 +244,55 @@ describe("Antigravity validation shutdown", () => {
     expect(existsSync(scratch[0])).toBe(true);
   });
 
-  it("contains Windows one-file extraction in the owned verification profile", async () => {
-    const child = fakeChild();
-    vi.mocked(killCliTree).mockImplementation(async () => { child.emit("close", 0); return true; });
-    await validateAntigravityRuntime(runtime, "1.1.1");
-    const environment = vi.mocked(spawnCli).mock.calls[0][2].env!;
-    if (process.platform === "win32") {
-      expect(environment.TEMP).toBe(scratch[0]);
-      expect(environment.TMP).toBe(scratch[0]);
+  it("unpacks the Windows verification run into one shared, swept folder and clears it after close", async () => {
+    fakeChild();
+    const shared = antigravityTempDir(DATA_DIR, VERIFICATION_TEMP_KEY);
+    // One left by a verification whose runtime would not stop and is now gone, and one still running.
+    const abandoned = join(shared, "_MEI7ffffff02");
+    const running = join(shared, `_MEI${process.pid.toString(16).padStart(8, "0")}2`);
+    for (const folder of [abandoned, running]) mkdirSync(join(folder, "google3"), { recursive: true });
+    // Nothing is spawned (spawnCli is a fake), so the Windows branch runs on every OS.
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+    try {
+      await validateAntigravityRuntime(runtime, "1.1.1");
+    } finally {
+      Object.defineProperty(process, "platform", platform);
     }
+    const environment = vi.mocked(spawnCli).mock.calls[0][2].env!;
+    expect(environment.TEMP).toBe(shared);
+    expect(environment.TMP).toBe(shared);
     expect(environment.GEMINI_HOME).toBe(scratch[0]);
     expect(existsSync(scratch[0])).toBe(false);
+    expect(existsSync(abandoned)).toBe(false);
+    expect(existsSync(running)).toBe(true);
+    rmSync(shared, { recursive: true, force: true });
+  });
+
+  it("ends the runtime's input first and stops it by force only after five seconds", async () => {
+    const child = fakeChild(undefined, { exitsOnEof: false });
+    const acp = client();
+    await acp.initialize();
+    acp.close();
+    expect(child.stdin.writableEnded).toBe(true);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(killCliTree).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(killCliTree).toHaveBeenCalledWith(child);
+    child.emit("close", 1);
+    await expect(acp.closeAndWait(100)).resolves.toBe(true);
+  });
+
+  it("stops at once when the runtime exits by itself", async () => {
+    const child = fakeChild();
+    const acp = client();
+    await acp.initialize();
+    await expect(acp.closeAndWait(100)).resolves.toBe(true);
+    expect(killCliTree).toHaveBeenCalledWith(child);
   });
 
   it.each(["kill EPERM", "spawn ENOENT"])("does not treat %s as close", async (message) => {
-    const child = fakeChild(null);
+    const child = fakeChild(null, { exitsOnEof: false });
     const acp = client();
     let exited = false;
     void acp.exited.then(() => { exited = true; });
@@ -172,7 +311,7 @@ describe("Antigravity validation shutdown", () => {
   });
 
   it("times out without close and still observes a later close", async () => {
-    const child = fakeChild();
+    const child = fakeChild(undefined, { exitsOnEof: false });
     const acp = client();
     const stopping = acp.closeAndWait(100);
     await vi.advanceTimersByTimeAsync(100);
@@ -183,12 +322,13 @@ describe("Antigravity validation shutdown", () => {
   });
 
   it("rejects a validated runtime that does not stop, leaving its profile intact", async () => {
-    fakeChild();
+    const child = fakeChild(undefined, { exitsOnEof: false });
     let killed!: () => void;
     const stopping = new Promise<void>((resolve) => { killed = resolve; });
     vi.mocked(killCliTree).mockImplementation(async () => { killed(); return false; });
     const validation = validateAntigravityRuntime(runtime, "1.1.1");
     const rejected = expect(validation).rejects.toThrow("did not shut down");
+    await afterExitGrace(child);
     await stopping;
     await vi.advanceTimersByTimeAsync(5_000);
     await rejected;
@@ -200,11 +340,12 @@ describe("Antigravity validation shutdown", () => {
     { reply: { error: { message: "initialize failed" } }, error: "initialize failed" },
     { reply: { result: {} }, error: "did not identify" },
   ])("preserves $error when shutdown times out", async ({ reply, error }) => {
-    fakeChild(reply);
+    const child = fakeChild(reply, { exitsOnEof: false });
     let killed!: () => void;
     const stopping = new Promise<void>((resolve) => { killed = resolve; });
     vi.mocked(killCliTree).mockImplementation(async () => { killed(); return false; });
     const rejected = expect(validateAntigravityRuntime(runtime, "1.1.1")).rejects.toThrow(error);
+    await afterExitGrace(child);
     await stopping;
     await vi.advanceTimersByTimeAsync(5_000);
     await rejected;
@@ -230,6 +371,6 @@ describe("Antigravity validation shutdown", () => {
     vi.mocked(rm).mockRejectedValueOnce(Object.assign(new Error("cleanup EPERM"), { code: "EPERM" }));
     await expect(validateAntigravityRuntime(runtime, "1.1.1")).resolves.toBeUndefined();
     expect(rm).toHaveBeenCalledWith(scratch[0], { recursive: true, force: true, maxRetries: 4, retryDelay: 250 });
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(`verification profile ${scratch[0]}: cleanup EPERM`));
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(`verification files ${scratch[0]}: cleanup EPERM`));
   });
 });

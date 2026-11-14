@@ -1,33 +1,19 @@
-// Who is driving a bot's computer — the person or the bot. One record per
-// bot, held in the harness because every consumer (the panel, the SSE
-// stream, and the per-turn computer proxies) already talks to the harness.
-//
-// The rules this module exists to enforce:
-//   - A bot can only ASK for hands (`requestHelp`); it can never take
-//     control, and it cannot clear a hold. Only the person takes and
-//     releases, from the computer panel.
-//   - While the person holds control, the bot's computer actions are
-//     REFUSED by the proxies, not queued. A queued click would land after
-//     the person has moved on, on whatever happens to be under it.
-//   - Releasing control also settles any open help request, so a bot
-//     waiting on `requestHelp` wakes up from the same state change the
-//     person made — there is no separate "done helping" step to forget.
-//
-// State is per-boot and in-memory on purpose: a hold is a live fact about
-// who is at the screen right now, and surviving a harness restart would
-// mean a stale hold silently bricking a bot's computer.
+// Who drives a bot's computer. A bot can only ask for hands (requestHelp); only the person takes and releases. While the
+// person holds control the bot's actions are refused, never queued: a queued click would land on whatever is under it later.
+// A plea is settled only by its sign-in card. In memory on purpose: a hold that survived a restart would brick the computer.
+
+import type { ComputerHelpRef } from "../shared/wire.ts";
 
 export interface ControlSnapshot {
   /** True while the person is driving; the bot's hands are refused. */
   held: boolean;
-  /** The bot's open plea for help, verbatim, or null when none is open. */
   helpReason: string | null;
   heldSinceMs: number | null;
+  help?: ComputerHelpRef;
 }
 
 export interface ControlLeaseResult {
   snapshot: ControlSnapshot;
-  /** True only when this lease currently owns the hold. */
   owned: boolean;
   /** True only when this call changed an unheld record into a held one. */
   acquired: boolean;
@@ -40,144 +26,185 @@ export interface ControlLeaseReleaseResult {
 }
 
 const NO_CONTROL: ControlSnapshot = { held: false, helpReason: null, heldSinceMs: null };
-/** Keep a shouted help reason card-sized; the transcript has the rest. */
 const MAX_REASON_CHARS = 280;
+const LEASE_GRACE_MS = 60_000;
 
 interface Entry {
   heldSinceMs: number | null;
-  helpReason: string | null;
-  helpRequestId: string | null;
+  /** Open pleas, oldest first; the newest whose card still waits is the one shown. */
+  pleas: Array<{ reason: string; ref: ComputerHelpRef }>;
   /** Opaque workspace lease. It is deliberately absent from every snapshot. */
   controlLeaseId: string | null;
+  expiry?: ReturnType<typeof setTimeout>;
 }
 
 export class ComputerControl {
   private entries = new Map<string, Entry>();
   private onChange: (botId: string, snapshot: ControlSnapshot) => void;
   private now: () => number;
-  private requestSequence = 0;
+  private waits: (ref: ComputerHelpRef) => boolean;
 
   constructor(
     onChange: (botId: string, snapshot: ControlSnapshot) => void = () => {},
     now: () => number = Date.now,
+    /** Whether a plea's sign-in card still waits for the person. A plea whose card stopped, left the active branch or lost its
+     * conversation is kept but neither shown nor counted, and counts again if its card waits again. */
+    waits: (ref: ComputerHelpRef) => boolean = () => true,
   ) {
     this.onChange = onChange;
     this.now = now;
+    this.waits = waits;
+  }
+
+  private waiting(entry: Entry): Entry["pleas"] {
+    return entry.pleas.filter((plea) => this.waits(plea.ref));
   }
 
   snapshot(botId: string): ControlSnapshot {
     const entry = this.entries.get(botId);
     if (!entry) return NO_CONTROL;
+    const plea = this.waiting(entry).at(-1);
     return {
       held: entry.heldSinceMs !== null,
-      helpReason: entry.helpReason,
+      helpReason: plea?.reason ?? null,
       heldSinceMs: entry.heldSinceMs,
+      ...(plea ? { help: plea.ref } : {}),
     };
   }
 
-  /** The person takes the wheel. Idempotent — a second click must not
-   * reset `heldSinceMs` and make the hold look newer than it is. */
+  /** Idempotent: a second click must not reset `heldSinceMs`. */
   take(botId: string): ControlSnapshot {
     const entry = this.entries.get(botId);
     if (entry?.heldSinceMs != null) return this.snapshot(botId);
-    this.entries.set(botId, {
-      heldSinceMs: this.now(),
-      helpReason: entry?.helpReason ?? null,
-      helpRequestId: entry?.helpRequestId ?? null,
-      controlLeaseId: null,
-    });
+    this.entries.set(botId, { heldSinceMs: this.now(), pleas: entry?.pleas ?? [], controlLeaseId: null });
     return this.changed(botId);
   }
 
-  /** Atomically take or re-check a workspace-owned hold. The opaque lease is
-   * never returned in a snapshot, broadcast, or API response. */
-  acquireLease(botId: string, controlLeaseId: string): ControlLeaseResult {
+  /**
+   * The opaque lease is never returned in a snapshot, broadcast or API response.
+   * `armed` starts the expiry clock at once, as a beat would, when the lease owns the hold.
+   */
+  acquireLease(botId: string, controlLeaseId: string, options: { armed?: boolean } = {}): ControlLeaseResult {
     const entry = this.entries.get(botId);
     if (entry?.heldSinceMs != null) {
-      return {
-        snapshot: this.snapshot(botId),
-        owned: entry.controlLeaseId === controlLeaseId,
-        acquired: false,
-      };
+      const owned = entry.controlLeaseId === controlLeaseId;
+      if (owned && options.armed) this.beat(botId, controlLeaseId);
+      return { snapshot: this.snapshot(botId), owned, acquired: false };
     }
-    this.entries.set(botId, {
-      heldSinceMs: this.now(),
-      helpReason: entry?.helpReason ?? null,
-      helpRequestId: entry?.helpRequestId ?? null,
-      controlLeaseId,
-    });
+    this.entries.set(botId, { heldSinceMs: this.now(), pleas: entry?.pleas ?? [], controlLeaseId });
+    if (options.armed) this.beat(botId, controlLeaseId);
     return { snapshot: this.changed(botId), owned: true, acquired: true };
   }
 
-  /** The person hands the wheel back. Also settles any open help request —
-   * the waiting bot resumes from this one state change. */
+  /** The key whose hold this lease owns: the first, should a client reuse one lease for several takes. */
+  heldBy(controlLeaseId: string): string | undefined {
+    for (const [key, entry] of this.entries) if (entry.heldSinceMs !== null && entry.controlLeaseId === controlLeaseId) return key;
+    return undefined;
+  }
+
+  ownsLease(botId: string, controlLeaseId: string): boolean {
+    const entry = this.entries.get(botId);
+    return entry?.heldSinceMs != null && entry.controlLeaseId === controlLeaseId;
+  }
+
+  /**
+   * Answers as `ownsLease`; when owned, the hold is released 60 s after the latest beat.
+   * A hold that never beats never expires.
+   */
+  beat(botId: string, controlLeaseId: string): boolean {
+    const entry = this.entries.get(botId);
+    if (!entry || !this.ownsLease(botId, controlLeaseId)) return false;
+    clearTimeout(entry.expiry);
+    entry.expiry = setTimeout(() => this.releaseLease(botId, controlLeaseId), LEASE_GRACE_MS);
+    entry.expiry.unref?.();
+    return true;
+  }
+
+  /** An open plea stays: handing back is not answering the card that asked. */
   release(botId: string): ControlSnapshot {
-    if (!this.entries.has(botId)) return NO_CONTROL;
-    this.entries.delete(botId);
+    const entry = this.entries.get(botId);
+    if (!entry || (entry.heldSinceMs === null && entry.pleas.length)) return this.snapshot(botId);
+    this.drop(botId, entry);
     return this.changed(botId);
   }
 
-  /** Release only the hold created by this workspace lease. A newer or legacy
-   * holder is observed but never disturbed. */
+  /** A newer or legacy holder is observed but never disturbed. */
   releaseLease(botId: string, controlLeaseId: string): ControlLeaseReleaseResult {
     const entry = this.entries.get(botId);
     if (!entry || entry.heldSinceMs === null || entry.controlLeaseId !== controlLeaseId) {
       return { snapshot: this.snapshot(botId), released: false };
     }
-    this.entries.delete(botId);
+    this.drop(botId, entry);
     return { snapshot: this.changed(botId), released: true };
   }
 
-  /** The bot asks the person to take over. Never grants anything by
-   * itself — it only surfaces the plea. A reason shouted while the person
-   * is already driving is kept, but must not clobber an earlier one they
-   * may still be reading. */
-  requestHelp(botId: string, reason: unknown): ControlSnapshot {
-    return this.requestHelpLease(botId, reason).snapshot;
+  /** Open pleas on this key whose cards still wait, oldest first. */
+  pleas(botId: string): ComputerHelpRef[] {
+    const entry = this.entries.get(botId);
+    return entry ? this.waiting(entry).map((plea) => plea.ref) : [];
   }
 
-  /** Open a help request and return the lease that owns it. A proxy uses
-   * this id to expire only its own unanswered plea when its wait ends. */
-  requestHelpLease(botId: string, reason: unknown): { snapshot: ControlSnapshot; requestId: string } {
+  /** Never grants anything by itself; the same card asking again replaces its own plea. */
+  requestHelp(botId: string, reason: unknown, ref: ComputerHelpRef): ControlSnapshot {
     const text = typeof reason === "string" ? reason.trim().slice(0, MAX_REASON_CHARS) : "";
-    const entry = this.entries.get(botId) ?? {
-      heldSinceMs: null,
-      helpReason: null,
-      helpRequestId: null,
-      controlLeaseId: null,
-    };
-    if (entry.helpReason === null) {
-      entry.helpReason = text || "the bot asked you to take over";
-      entry.helpRequestId = `${botId}-${++this.requestSequence}`;
-    }
+    const entry = this.entries.get(botId) ?? { heldSinceMs: null, pleas: [], controlLeaseId: null };
+    entry.pleas = [...entry.pleas.filter((plea) => plea.ref.messageId !== ref.messageId),
+      { reason: text || `sign in to ${ref.site}`, ref }];
     this.entries.set(botId, entry);
-    return { snapshot: this.changed(botId), requestId: entry.helpRequestId! };
-  }
-
-  /** The person declines without taking over; the waiting bot is told. */
-  dismissHelp(botId: string): ControlSnapshot {
-    const entry = this.entries.get(botId);
-    if (!entry || entry.helpReason === null) return this.snapshot(botId);
-    entry.helpReason = null;
-    entry.helpRequestId = null;
-    if (entry.heldSinceMs === null) this.entries.delete(botId);
     return this.changed(botId);
   }
 
-  /** Expire an unanswered plea. The id comparison prevents an old proxy's
-   * timeout from dismissing a newer request for the same bot. */
-  expireHelp(botId: string, requestId: unknown): ControlSnapshot {
-    const entry = this.entries.get(botId);
-    if (!entry || entry.helpRequestId !== requestId) return this.snapshot(botId);
-    entry.helpReason = null;
-    entry.helpRequestId = null;
-    if (entry.heldSinceMs === null) this.entries.delete(botId);
-    return this.changed(botId);
+  settleHelp(messageId: string): string[] {
+    const settled: string[] = [];
+    for (const [botId, entry] of this.entries) {
+      if (!entry.pleas.some((plea) => plea.ref.messageId === messageId)) continue;
+      entry.pleas = entry.pleas.filter((plea) => plea.ref.messageId !== messageId);
+      if (entry.heldSinceMs === null && !entry.pleas.length) this.entries.delete(botId);
+      settled.push(botId);
+      this.changed(botId);
+    }
+    return settled;
   }
 
-  /** The bot is gone; a hold on a deleted bot's computer means nothing. */
-  forget(botId: string): void {
-    if (this.entries.delete(botId)) this.onChange(botId, NO_CONTROL);
+  /** Removes the deleted bot's pleas from every key; holds stay. */
+  forgetBot(botId: string): void {
+    this.forgetPleas((ref) => ref.botId === botId);
+  }
+
+  /** Removes the pleas of a deleted conversation's sign-in cards from every key, and returns the bots that asked; holds stay. */
+  forgetThread(threadId: string): string[] {
+    return this.forgetPleas((ref) => ref.threadId === threadId);
+  }
+
+  /** Tells every key with a plea from these conversations that its cards may have stopped or started waiting, and returns the
+   * bots that asked. */
+  recheck(threadIds: Iterable<string>): string[] {
+    const threads = new Set(threadIds), askers = new Set<string>();
+    for (const [key, entry] of this.entries) {
+      const asked = entry.pleas.filter((plea) => threads.has(plea.ref.threadId));
+      for (const plea of asked) askers.add(plea.ref.botId);
+      if (asked.length) this.changed(key);
+    }
+    return [...askers];
+  }
+
+  private forgetPleas(gone: (ref: ComputerHelpRef) => boolean): string[] {
+    const askers = new Set<string>();
+    for (const [key, entry] of this.entries) {
+      const pleas = entry.pleas.filter((plea) => !gone(plea.ref));
+      if (pleas.length === entry.pleas.length) continue;
+      for (const plea of entry.pleas) if (gone(plea.ref)) askers.add(plea.ref.botId);
+      entry.pleas = pleas;
+      if (entry.heldSinceMs === null && !pleas.length) this.entries.delete(key);
+      this.changed(key);
+    }
+    return [...askers];
+  }
+
+  private drop(botId: string, entry: Entry): void {
+    clearTimeout(entry.expiry);
+    if (entry.pleas.length) this.entries.set(botId, { heldSinceMs: null, pleas: entry.pleas, controlLeaseId: null });
+    else this.entries.delete(botId);
   }
 
   private changed(botId: string): ControlSnapshot {
@@ -186,22 +213,3 @@ export class ComputerControl {
     return snapshot;
   }
 }
-
-/** Safely executes an async tool or desktop control call, catching runtime exceptions gracefully. */
-export async function executeToolSafely<T>(
-  toolName: string,
-  fn: () => Promise<T>
-): Promise<{ success: boolean; data?: T; error?: string }> {
-  try {
-    const data = await fn();
-    return { success: true, data };
-  } catch (err: any) {
-    const errorMessage = err?.message || String(err) || 'Unknown execution error';
-    console.error(`[Tool Execution Error] Name: ${toolName} | Details: ${errorMessage}`);
-    return {
-      success: false,
-      error: `Tool '${toolName}' failed to execute: ${errorMessage}`
-    };
-  }
-}
-

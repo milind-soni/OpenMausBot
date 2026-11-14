@@ -1,6 +1,3 @@
-// Per-bot profile history: one NDJSON row per changed field, full text only
-// for the soul, secrets scrubbed, and a revision token that moves when any
-// proposable field moves.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
@@ -12,14 +9,12 @@ import {
   historyFile,
   readHistory,
   recordProfileChange,
+  soulChanges,
 } from "./profile-versions.ts";
 
 const base = { name: "Scout", title: "", description: "", soul: "", notifications: true, speakReplies: false };
 
-/** A real bot's folder exists before any profile change can fire (it is
- * created at bot creation, via writeSoulMirror). Mirror that invariant here
- * so these tests exercise the same path recordProfileChange does in
- * production, instead of relying on writeRows to create the folder itself. */
+/** A real bot has its folder before any profile change (writeSoulMirror at creation), so the tests do too. */
 function withBotFolder(id: string): void {
   mkdirSync(botFolder(id), { recursive: true, mode: 0o700 });
 }
@@ -162,3 +157,26 @@ describe("profile history", () => {
     expect(readHistory(b)).toHaveLength(1);
   });
 });
+
+describe("instruction changes in the Changes list", () => {
+  it("says who changed them, with a diff, and offers Undo for each", async () => {
+    const id = "hist-soul-changes";
+    withBotFolder(id);
+    recordProfileChange(id, "user", "api", base, { ...base, soul: "Be brief." });
+    recordProfileChange(id, "bot", "card:m1", { ...base, soul: "Be brief." }, { ...base, soul: "Be brief.\nUse metric units." });
+    recordProfileChange(id, "file", "ui", { ...base, soul: "Be brief.\nUse metric units." }, { ...base, soul: "Use metric units." });
+    recordProfileChange(id, "user", "rollback", { ...base, soul: "Use metric units." }, { ...base, soul: "Be brief.\nUse metric units." });
+    recordProfileChange(id, "user", "api", base, { ...base, title: "Writer" });
+    await flushProfileHistory(id);
+    const rows = soulChanges(id, readHistory(id));
+    expect(rows.map((row) => [row.actor, row.via, row.added, row.removed])).toEqual([
+      ["person", "revert", 1, 0],
+      ["person", "disk", 0, 1],
+      ["bot", "card:m1", 1, 0],
+      ["person", "api", 1, 0],
+    ]);
+    expect(rows.every((row) => row.path === "SOUL.md" && row.botId === id && row.canRevert)).toBe(true);
+    expect(rows[2]!.diff).toContain("+Use metric units.");
+  });
+});
+

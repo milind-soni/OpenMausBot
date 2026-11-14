@@ -1,8 +1,3 @@
-// Why this exists: the panel is a modal, so its in-memory inventory dies the
-// moment it closes. Reopening then paints an empty list until the network
-// answers — and if the answer is "I could not read your key", it stays empty.
-// A user reads that as "my connections are gone". This remembers the last
-// thing we were SURE about, so the panel opens showing it.
 import { describe, expect, it, vi } from "vitest";
 
 import { CONNECTED_APPS_CACHE_KEY, readCachedInventory, writeCachedInventory } from "./connected-apps-cache";

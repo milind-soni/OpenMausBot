@@ -17,11 +17,9 @@ try {
   const current = execFileSync("git", ["config", "--get", "core.hooksPath"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   if (current === "scripts/git-hooks") process.exit(0);
 } catch {
-  // unset: fall through and set it
 }
 try {
   execFileSync("git", ["config", "core.hooksPath", "scripts/git-hooks"], { cwd: root, stdio: "ignore" });
-  console.log("git hooks: core.hooksPath -> scripts/git-hooks (pre-push runs lint, typecheck, i18n:check; OMB_SKIP_HOOKS=1 or --no-verify to skip)");
+  console.log("git hooks: core.hooksPath -> scripts/git-hooks (pre-push checks the changed files in seconds; OMB_SKIP_HOOKS=1 or --no-verify to skip)");
 } catch {
-  // a checkout we cannot configure: the hook is a convenience, not a gate
 }

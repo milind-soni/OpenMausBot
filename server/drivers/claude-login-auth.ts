@@ -1,25 +1,16 @@
-// Sign the server's Claude Code CLI in from Settings, with the user's own
-// Claude subscription, without a terminal on the server.
-//
-// The unmodified `claude auth login` is spawned with pipes. It prints the
-// sign-in link (Anthropic's own page, with this login's one-time PKCE
-// challenge in the query) and then waits on stdin for the code that page
-// shows once the user has signed in. We surface only that link, accept the
-// pasted code once, write it to the CLI's stdin, and confirm the result with
-// `claude auth status --json`. Nothing about the sign-in is stored here: the
-// credential lands where Claude Code keeps it for the account that will run
-// the bots. Anthropic permits exactly this — an end user signing in to the
-// unmodified binary with their own subscription, including where a platform
-// hosts it — and forbids any flow that intermediates claude.ai credentials
-// itself, which is why there is no OAuth client code in this repository.
+// Signs the server's Claude Code CLI in from Settings: the unmodified `claude auth login` runs with
+// pipes, only its sign-in link is shown, the pasted code goes to its stdin, and `claude auth status
+// --json` confirms. Anthropic permits an end user signing in to the unmodified binary with their own
+// subscription, even where a platform hosts it, and forbids flows that intermediate claude.ai
+// credentials: hence no OAuth client code in this repository.
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { ProviderAuthenticationStart, ProviderAuthenticationStatus } from "../contracts.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
+import { canonicalPath } from "./device-auth.ts";
 
 const MAX_OUTPUT = 32_768;
 /** Where Anthropic's sign-in lives. Anything else in the CLI's output is not a link we show. */
@@ -27,16 +18,6 @@ const SIGN_IN_HOSTS = ["claude.com", "claude.ai", "console.anthropic.com", "plat
 // One login per credential home at a time; turns are never blocked by this.
 const authenticatingHomes = new Set<string>();
 
-function canonicalPath(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    const parent = dirname(path);
-    return parent === path ? path : join(canonicalPath(parent), basename(path));
-  }
-}
-
-/** The sign-in link, or null for anything that is not Anthropic's own page over https. */
 export function claudeSignInLink(value: string | null | undefined): string | null {
   if (!value) return null;
   try {
@@ -49,7 +30,6 @@ export function claudeSignInLink(value: string | null | undefined): string | nul
   }
 }
 
-/** The link from the CLI's output, once its line is complete. */
 export function claudeLoginPrompt(output: string): { authorizationUrl: string } | null {
   const lines = stripVTControlCharacters(output).split(/\r?\n/).slice(0, -1);
   for (const line of lines) {
@@ -98,6 +78,7 @@ const NOT_AVAILABLE = "This sign-in is no longer available. Start sign-in again.
 export class ClaudeLoginController {
   private flow: Flow | null = null;
   private logoutChild: ChildProcess | null = null;
+  private signingOut: Promise<void> | null = null;
   private disposed = false;
   private readonly options: ClaudeLoginOptions;
 
@@ -160,7 +141,6 @@ export class ClaudeLoginController {
     });
   }
 
-  /** The pasted code goes to the CLI once; the CLI's exit decides the outcome. */
   async complete(flowId: string, pasted: string): Promise<void> {
     const flow = this.flow;
     if (!flowId || flow?.status.flowId !== flowId) throw new Error(NOT_AVAILABLE);
@@ -202,14 +182,24 @@ export class ClaudeLoginController {
   async dispose(): Promise<void> {
     this.disposed = true;
     await this.cancel();
+    // A stopped sign-out frees the account's lock once its pipes close, which can come after the exit cancel() waits for.
+    const signingOut = this.signingOut;
+    if (signingOut) await Promise.race([signingOut.catch(() => {}), new Promise((resolve) => setTimeout(resolve, 1_500).unref())]);
     this.flow = null;
   }
 
-  /** Remove the sign-in Claude Code stores for this server account (its
-   * configuration directory) so a different subscription can sign in. A
-   * sign-in in progress is never pulled away underneath the browser
-   * completing it, and the CLI's own status is the verdict, as for sign-in. */
+  /** A sign-in in progress is never pulled away underneath the browser completing it. */
   async signOut(): Promise<void> {
+    const run = this.signOutNow();
+    this.signingOut = run;
+    try {
+      await run;
+    } finally {
+      if (this.signingOut === run) this.signingOut = null;
+    }
+  }
+
+  private async signOutNow(): Promise<void> {
     if (this.disposed) throw new Error("This provider was removed. Refresh Settings before signing out.");
     if (this.flow?.status.phase === "waiting") throw new Error("Finish or cancel the Claude sign-in in progress before signing out.");
     await this.flow?.stopping;
@@ -231,8 +221,7 @@ export class ClaudeLoginController {
       if (status === "in") throw new Error("Claude Code still reports a sign-in on this server. Update Claude Code and check its auth status before trying again.");
       if (status === "unknown") throw new Error("Claude Code could not confirm the sign-out on this server. Update Claude Code and check its auth status before trying again.");
     } finally {
-      // A command the OS could not stop may still change credentials. Keep
-      // this home reserved until that exact child actually exits.
+      // A command the OS could not stop may still change credentials: keep the home reserved until it exits.
       const child = this.logoutChild;
       if (child && child.exitCode === null && child.signalCode === null) {
         child.once("close", () => authenticatingHomes.delete(homeKey));
@@ -240,8 +229,6 @@ export class ClaudeLoginController {
     }
   }
 
-  /** `claude auth logout`, bounded and non-interactive. Its output stays
-   * here; the status command afterwards decides whether it worked. */
   private logout(env: NodeJS.ProcessEnv): Promise<void> {
     return new Promise((resolveDone, rejectDone) => {
       if (this.disposed) {
@@ -284,7 +271,6 @@ export class ClaudeLoginController {
     return this.authStatus(env).then((status) => status === "in");
   }
 
-  /** `claude auth status --json`: signed in, signed out, or not answered. */
   private authStatus(env: NodeJS.ProcessEnv): Promise<"in" | "out" | "unknown"> {
     return new Promise((resolveStatus) => {
       let child: ReturnType<typeof spawnCli>;
@@ -364,7 +350,6 @@ export class ClaudeLoginController {
       if (flow.status.phase !== "waiting") return;
       const output = stripVTControlCharacters(flow.output);
       flow.output = "";
-      // The CLI's exit is the verdict; the login status command is the proof.
       void this.signedIn(flow.env).then((signedIn) => {
         if (flow.status.phase !== "waiting") return;
         if (signedIn) {

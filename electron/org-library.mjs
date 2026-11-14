@@ -3,17 +3,10 @@ import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 
-// The organization library channel in Electron main (contract 60 §5). Admin
-// advertises capabilities.library; the session carries a small pointer; the
-// catalog and each release's bytes come from fixed routes with their own caps.
-// Main verifies, caches and relays them. The local runtime (server/org-library.ts)
-// installs, and reports back what it holds. Nothing here asks anyone anything:
-// what an organization offers is decided in Admin, adding it is a person's click.
-
 export const LIBRARY_CATALOG_MAX_BYTES = 256 * 1024;
 export const LIBRARY_BLOB_MAX_BYTES = 4 * 1024 * 1024;
 export const LIBRARY_REPORT_MAX_BYTES = 64 * 1024;
-/** The newest package document version this desktop reads (shared/package-format.ts PACKAGE_VERSION). */
+/** Must track shared/package-format.ts PACKAGE_VERSION. */
 export const LIBRARY_FORMAT_SUPPORTED = 2;
 const LIBRARY_ROUTE = /^\/api\/desktop\/library(?:\/blobs\/[a-f0-9]{64}|\/report)?$/;
 const CATALOG_MAX_ENTRIES = 100, CATALOG_MAX_RELEASE_BYTES = 64 * 1024 * 1024, WITHDRAWN_MAX = 50, NOTES_MAX = 4_000, REPORT_MAX_ENTRIES = 100;
@@ -29,10 +22,8 @@ const STATES = new Set(["installed", "failed", "removed", "withdrawn"]);
 const REASONS = new Set(["blob_unavailable", "invalid_package", "import_failed", "newer_app_required", "connection_refused_by_policy", "removed_locally", "withdrawn_by_publisher"]);
 export const LIBRARY_STATE_MESSAGE = "openmausbot:managed-library-state";
 
-// The portal label rule of managed-desktop.mjs, and typed: a regex alone would accept ["…"].
 // oxlint-disable-next-line no-control-regex
 const safeText = (value, max) => typeof value === "string" && value.length > 0 && value.length <= max && !/[\x00-\x1f\x7f]/.test(value);
-// Release notes may hold newlines, nothing else below 0x20.
 // oxlint-disable-next-line no-control-regex
 const notesText = value => typeof value === "string" && value.length <= NOTES_MAX && !/[\x00-\x09\x0b-\x1f\x7f]/.test(value);
 const matches = (pattern, value) => typeof value === "string" && pattern.test(value);
@@ -41,16 +32,13 @@ const record = value => Boolean(value) && typeof value === "object" && !Array.is
 const oneOf = (values, value) => typeof value === "string" && values.includes(value);
 export const sha256Hex = bytes => createHash("sha256").update(bytes).digest("hex");
 
-/** capabilities.library from GET /api/public/config: an Admin without it never sees a library request. */
 export function libraryCapability(config) {
   const value = config?.capabilities?.library;
   return Number.isSafeInteger(value) && value >= 1;
 }
-/** The session's { version, digest } pointer, or null when missing or malformed (then ignored). */
 export function parseLibraryPointer(value) {
   return record(value) && count(value.version) && matches(HEX64, value.digest) ? { version: value.version, digest: value.digest } : null;
 }
-/** The fixed library routes and their own caps. None of them uses the session's 512 KiB request(). */
 export function libraryRouteLimits(route) {
   if (!matches(LIBRARY_ROUTE, route)) return null;
   if (route === "/api/desktop/library") return { method: "GET", maxBytes: LIBRARY_CATALOG_MAX_BYTES, timeoutMs: 20_000 };
@@ -80,11 +68,7 @@ function parseEntry(value) {
     contents: { bots: contents.bots, skills: contents.skills, presets: contents.presets, rooms: contents.rooms, routines: contents.routines, connections: contents.connections, botNames: [...contents.botNames] },
     scanFindings };
 }
-/** GET /api/desktop/library (contract §5.3). Takes the parsed JSON, its text or its bytes.
- * Unknown fields are ignored and a malformed entry is dropped; a malformed
- * envelope, or another organization's catalog, returns null so the caller keeps
- * the last good one. A formatVersion above 2 stays listed ("update the app") and
- * is never fetched. */
+/** null for a malformed envelope or another organization's catalog, so the caller keeps the last good one. */
 export function parseOrgLibraryCatalog(input, { organizationId } = {}) {
   let value = input;
   if (typeof input === "string" || input instanceof Uint8Array) {
@@ -101,7 +85,6 @@ export function parseOrgLibraryCatalog(input, { organizationId } = {}) {
   return { format: "openmaus.org-library", version: 1, libraryVersion: value.libraryVersion, organization: { id: value.organization.id, name: value.organization.name },
     ...(value.truncated === true ? { truncated: true } : {}), packages };
 }
-/** Install report entries (contract §5.5), each parsed on its own like Admin's: a bad one is dropped. */
 export function parseLibraryReportEntries(value) {
   if (!Array.isArray(value)) return null;
   const seen = new Set(), entries = [];
@@ -115,7 +98,7 @@ export function parseLibraryReportEntries(value) {
   }
   return entries;
 }
-/** The runtime's unsolicited { type, digest, packages } snapshot. undefined = another message type; null = ours but unusable. */
+/** undefined: another message type; null: ours but unusable. */
 export function parseLibraryStateMessage(raw) {
   const message = raw?.data ?? raw;
   if (message?.type !== LIBRARY_STATE_MESSAGE) return undefined;
@@ -132,7 +115,6 @@ async function readOwnedFile(file, maxBytes) {
     return await handle.readFile();
   } finally { await handle.close(); }
 }
-/** Temporary file, fsync, rename: a reader sees the old bytes or the new ones. Owner-only. */
 async function writeAtomic(file, bytes) {
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.${randomUUID()}.tmp`;
@@ -143,32 +125,18 @@ async function writeAtomic(file, bytes) {
   } finally { await fs.rm(temporary, { force: true }); }
 }
 
-/**
- * Electron main's half of the library (contract §5.6). `fetchBytes` is the
- * managed-desktop client's fetchLibraryBytes (fixed routes, the device token,
- * its caps); `relay` posts { type: "openmausbot:managed-library", library } to
- * the local runtime and resolves on its ack; `store` is a separate OS-encrypted
- * record (company-library.bin). `dataDir` is <data dir>/org-library, where the
- * runtime keeps its own state.json and presets.json: main owns catalog.json
- * and blobs/ there, nothing else.
- */
+/** In <data dir>/org-library main owns catalog.json and blobs/ only; the runtime owns the rest. */
 export function createOrgLibrary({ dataDir, store, fetchBytes, relay, appVersion, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, log = () => {} }) {
   const catalogFile = path.join(dataDir, "catalog.json"), blobsDir = path.join(dataDir, "blobs");
   const blobFile = sha => path.join(blobsDir, `${sha}.json`);
   const reportVersion = typeof appVersion === "string" && APP_VERSION.test(appVersion) ? appVersion : undefined;
   let closed = false, epoch = 0;
-  // `applied` is the verified catalog for `owner` (fetched, or restored from
-  // disk); `relayed` is the digest the current runtime acknowledged.
-  // `relayWarned` names the runtime and catalog a refused relay was last logged for.
   let owner = null, applied = null, relayed = null, capable = null, generation, runtimeEpoch = 0, relayWarned = null;
   const versions = new Map(), blobRetry = new Map();
   let blobsPausedUntil = 0, catalogRetry = null, prunedAt = 0;
-  // Reports: only the newest snapshot is sent, 5 s after it arrives.
   let latest = null, reportTimer = null, reporting = null, reportAgain = false, startReportDue = true, reportRetryDue = false;
 
-  // One job at a time, in order. A queued job is replaced by a newer one of
-  // its kind; a clear never is, and its deletes run after any write already in
-  // progress. Each job carries the epoch it was asked in: a sign-out in between voids it.
+  // One job at a time: a newer job replaces a queued one of its kind, never a clear; a sign-out voids older jobs.
   const queue = [];
   let draining = null;
   const enqueue = (kind, job) => {
@@ -195,7 +163,6 @@ export function createOrgLibrary({ dataDir, store, fetchBytes, relay, appVersion
     owner = { portalOrigin: identity.portalOrigin, organizationId: identity.organizationId, deviceId: identity.deviceId };
     applied = next;
   };
-  /** Hands the runtime the applied catalog unless it already has it. A refusal or a runtime that is not up yet is retried on the next check or restart. */
   async function deliver(stamp) {
     if (!applied || !owner || relayed === applied.digest || stamp !== epoch) return;
     const { digest, libraryVersion, catalog } = applied, runtime = runtimeEpoch;
@@ -204,7 +171,6 @@ export function createOrgLibrary({ dataDir, store, fetchBytes, relay, appVersion
     try {
       await relay({ adminOrigin: owner.portalOrigin, organizationId: owner.organizationId, organizationName: catalog.organization.name, digest, catalog: structuredClone(catalog) });
     } catch {
-      // Said once per runtime and catalog, not on every sync: a runtime without the handler never acknowledges.
       if (relayWarned !== `${runtime}:${digest}`) { relayWarned = `${runtime}:${digest}`; log("organization library: the local runtime did not take the catalog; it will be sent again"); }
       return;
     }
@@ -216,7 +182,6 @@ export function createOrgLibrary({ dataDir, store, fetchBytes, relay, appVersion
     const failures = catalogRetry?.digest === digest ? catalogRetry.failures + 1 : 1;
     catalogRetry = { digest, failures, at: now() + Math.min(RETRY_BASE_MS * 2 ** (failures - 1), CATALOG_RETRY_MAX_MS) };
   };
-  /** A cached blob counts when it is a regular file of the catalog's size; after a new catalog it is also re-hashed. */
   async function blobPresent(release, verify) {
     try {
       const stat = await fs.lstat(blobFile(release.sha256));
@@ -228,9 +193,6 @@ export function createOrgLibrary({ dataDir, store, fetchBytes, relay, appVersion
       return false;
     }
   }
-  /** Every entry that is not Off, has a release and a format this app reads,
-   * up to 64 MiB in catalog order. One download at a time; a failure leaves
-   * that entry unavailable and is retried later with a growing delay. */
   async function fetchBlobs(catalog, stamp, mine, verify) {
     let total = 0;
     for (const { mode, release } of catalog.packages) {
@@ -243,7 +205,6 @@ export function createOrgLibrary({ dataDir, store, fetchBytes, relay, appVersion
       if (blobsPausedUntil > now() || mine !== epoch) return;
       try {
         const bytes = await fetchBytes(`/api/desktop/library/blobs/${release.sha256}`, release.sizeBytes, { generation: stamp });
-        // Never written, never used: bytes that are not exactly the catalog's release.
         if (sha256Hex(bytes) !== release.sha256) throw new Error("A package download did not match its catalog entry.");
         if (mine !== epoch) return;
         await writeAtomic(blobFile(release.sha256), bytes);
@@ -257,8 +218,7 @@ export function createOrgLibrary({ dataDir, store, fetchBytes, relay, appVersion
       }
     }
   }
-  /** Blobs the catalog no longer names go 7 days after it stopped naming them:
-   * named ones are touched here, so their mtime is when they were last named. */
+  /** Named blobs are touched here, so their mtime is when the catalog last named them. */
   async function prune(catalog) {
     prunedAt = now();
     const keep = new Set(catalog.packages.flatMap(entry => entry.release ? [entry.release.sha256] : [])), touched = new Date(now());
@@ -280,8 +240,6 @@ export function createOrgLibrary({ dataDir, store, fetchBytes, relay, appVersion
     for (const name of names) if (OWNED_BLOB_FILE.test(name)) await fs.rm(path.join(blobsDir, name), { force: true }).catch(() => {});
   }
 
-  /** After a successful session sync with the capability: fetch the catalog when
-   * the pointer moved, the blobs it is missing, persist, relay. */
   async function refresh(identity, pointer, stamp, mine) {
     if (mine !== epoch) return;
     if (owner && identityKey(owner) !== identityKey(identity)) {
@@ -299,8 +257,6 @@ export function createOrgLibrary({ dataDir, store, fetchBytes, relay, appVersion
       const catalog = bytes && parseOrgLibraryCatalog(bytes, { organizationId: identity.organizationId });
       if (bytes && !catalog) { catalogFailed(pointer.digest); log("organization library: the catalog was not usable; keeping the last one"); }
       if (catalog) {
-        // The digest of the bytes actually applied, not the pointer's: a
-        // rebuild that raced this fetch converges on the next check.
         const digest = sha256Hex(bytes);
         if (digest === pointer.digest) catalogRetry = null; else catalogFailed(pointer.digest);
         if (digest !== applied?.digest) {
@@ -331,12 +287,10 @@ export function createOrgLibrary({ dataDir, store, fetchBytes, relay, appVersion
         saved.deviceId !== identity.deviceId || !(identity.expiresAt > now()) || !matches(HEX64, saved.digest)) return;
     let bytes;
     try { bytes = await readOwnedFile(catalogFile, LIBRARY_CATALOG_MAX_BYTES); } catch { return; }
-    // A catalog.json that is not exactly the recorded bytes is ignored; the first sync fetches again.
     if (sha256Hex(bytes) !== saved.digest) { log("organization library: the saved catalog did not match its record; ignoring it"); return; }
     const catalog = parseOrgLibraryCatalog(bytes, { organizationId: identity.organizationId });
     if (!catalog || mine !== epoch || applied) return;
     adopt(identity, { digest: saved.digest, libraryVersion: catalog.libraryVersion, catalog });
-    // Posted synchronously by deliver(); the start waits for that, never for the runtime's ack.
     const delivery = deliver(mine);
     posted();
     await delivery;
@@ -363,8 +317,6 @@ export function createOrgLibrary({ dataDir, store, fetchBytes, relay, appVersion
     if (reportAgain) { reportAgain = false; if (latest !== snapshot || reportRetryDue) scheduleReport(); }
   }
 
-  /** Sign-out, expiry or revocation: the runtime hides the shelf, and this
-   * desktop forgets the catalog and its cached release bytes. Installed copies stay. */
   function clear() {
     if (closed) return Promise.resolve();
     epoch++;
@@ -377,15 +329,10 @@ export function createOrgLibrary({ dataDir, store, fetchBytes, relay, appVersion
   }
 
   return {
-    /** At start, before any network call: the saved catalog for this exact
-     * enrollment, if its bytes still match the encrypted record. Resolves once
-     * it is handed to the runtime (or found unusable), not on the runtime's ack. */
     restore(identity) {
       const mine = epoch;
       return new Promise(resolve => { void enqueue("restore", () => restore(identity, mine, resolve).finally(resolve)).finally(resolve); });
     },
-    /** Every successful session sync. capable: true, false (this Admin has no
-     * library) or null (not known yet: keep what the runtime has). */
     synchronized({ identity, capable: isCapable, pointer, generation: stamp }) {
       if (closed) return Promise.resolve();
       generation = stamp;
@@ -398,18 +345,15 @@ export function createOrgLibrary({ dataDir, store, fetchBytes, relay, appVersion
       if (isCapable !== true) return enqueue("relay", () => deliver(mine));
       capable = true;
       const id = { portalOrigin: identity.portalOrigin, organizationId: identity.organizationId, deviceId: identity.deviceId };
-      // Once per app start, and until a failed report gets through.
       if ((startReportDue || reportRetryDue) && latest?.key === identityKey(id)) scheduleReport();
       return enqueue("sync", () => refresh(id, parseLibraryPointer(pointer), stamp, mine));
     },
     clear,
-    /** A (re)started runtime has no catalog: send the applied one again. */
     runtimeReady() {
       relayed = null; runtimeEpoch++;
       const mine = epoch;
       return enqueue("relay", () => deliver(mine));
     },
-    /** The runtime's unsolicited install snapshot. True when the message was this channel's. */
     receive(raw) {
       const parsed = parseLibraryStateMessage(raw);
       if (parsed === undefined) return false;
@@ -421,7 +365,6 @@ export function createOrgLibrary({ dataDir, store, fetchBytes, relay, appVersion
       scheduleReport();
       return true;
     },
-    /** Tests: resolves once queued work and a report in flight have finished. */
     async idle() { while (draining || reporting) await (draining ?? reporting); },
     close() { closed = true; epoch++; queue.length = 0; if (reportTimer) clearTimer(reportTimer); reportTimer = null; },
   };

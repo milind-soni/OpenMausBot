@@ -37,7 +37,6 @@ export function createConnectedDeviceTracker() {
       try {
         stream.terminate();
       } catch {
-        // One broken socket must not keep the other revoked streams alive.
       }
     }
     return true;

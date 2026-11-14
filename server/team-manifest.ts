@@ -2,41 +2,19 @@ import { z } from "zod";
 
 import { schemaIssue, type JsonValue } from "./schema.ts";
 import type { MausColor } from "./store.ts";
-import { botMascotBody, type MascotBodyId } from "../shared/mascot-bodies.ts";
+import { botBodyId, type BotBodyId } from "../shared/bot-body.ts";
 import { takeImportName } from "../shared/import-name.ts";
+import { MAUS_COLOR_NAMES } from "../shared/wire.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
+import { optionalText, requiredText } from "../shared/package-format.ts";
 
 export const TEAM_MANIFEST_FORMAT = "openmaus.team" as const;
 export const TEAM_MANIFEST_VERSION = 2 as const;
 export const LEGACY_TEAM_MANIFEST_VERSION = 1 as const;
 export const MAX_TEAM_MEMBERS = 200;
 
-const COLORS = [
-  "green",
-  "blue",
-  "red",
-  "orange",
-  "purple",
-  "cyan",
-  "pink",
-  "yellow",
-  "teal",
-  "coral",
-] as const satisfies readonly MausColor[];
-
-const requiredText = (max: number) =>
-  z.string({ error: "must be text" }).trim().min(1, { message: "is required" }).max(max, { message: "is too long" });
-
-const optionalText = (max: number) =>
-  z
-    .union([z.string({ error: "must be text" }), z.null(), z.undefined()])
-    .transform((value) => value?.trim() || undefined)
-    .refine((value) => value === undefined || value.length <= max, { message: "is too long" })
-    .optional();
-
 const RESPONDER_KINDS = new Set(["member", "everyone", "mentions", "auto"]);
-/** A responder kind from a newer release reads as "no responder": the room
- * is created with the default lead, never refused. */
+/** A responder kind from a newer release reads as "no responder": the room gets the default lead, never a refusal. */
 const responderSchema = z.preprocess(
   (value) => {
     const kind = value && typeof value === "object" ? (value as { kind?: unknown }).kind : undefined;
@@ -61,7 +39,7 @@ const memberSchema = z.object({
     error: "standing instructions must be at most 24000 bytes",
   }).optional(),
   appearance: z.object({
-    color: z.enum(COLORS, { error: "is not supported" }),
+    color: z.enum(MAUS_COLOR_NAMES, { error: "is not supported" }),
     mascotExpression: optionalText(80),
     mascotBody: optionalText(40),
   }),
@@ -130,7 +108,6 @@ export interface ParsedTeamManifest {
     name: string;
     description?: string;
     members: TeamManifestMember[];
-    /** Present on legacy v1 files. New imports intentionally do not create it. */
     room?: TeamManifestRoom;
   };
 }
@@ -163,7 +140,6 @@ interface ExportableTeam {
   memberIds: string[];
 }
 
-/** Parse an untrusted shared file into the small, portable subset we support. */
 export function parseTeamManifest(value: TeamManifestV2): TeamManifestV2;
 export function parseTeamManifest(value: TeamManifestInput): ParsedTeamManifest;
 export function parseTeamManifest(value: TeamManifestInput): ParsedTeamManifest {
@@ -219,7 +195,6 @@ export function parseTeamManifest(value: TeamManifestInput): ParsedTeamManifest 
   return result;
 }
 
-/** What one imported member is allowed to become: persona only. */
 export interface ImportedMemberProfile {
   name: string;
   title: string;
@@ -227,41 +202,14 @@ export interface ImportedMemberProfile {
   soul?: string;
   color: MausColor;
   mascotExpression?: string;
-  mascotBody?: MascotBodyId;
+  mascotBody?: BotBodyId;
 }
 
-/** Everything an untrusted manifest may seed into a brand-new bot — and
- * nothing else.
- *
- * A team file can come from the remote catalog, a GitHub repo, or a file
- * someone shared, so import is additive-only: a manifest is a persona
- * description, never a grant, and never a handle on records the user
- * already has. Two rules are enforced here, at the single point where a
- * member becomes bot fields:
- *
- * 1. Allowlist, not blocklist. The returned object is built field by field
- *    from the parsed member, so every privilege-bearing BotRecord field —
- *    approvalMode, autoApprove, alwaysAllow, chiefOfStaff, approvePeerComms, composio,
- *    connectorTools, computer, cloudBackend, cwd — is structurally absent, whatever the
- *    file claimed. parseTeamManifest already drops unknown member keys;
- *    this keeps the guarantee even if the schema grows a field later,
- *    because nothing new can reach a bot record without someone
- *    consciously widening this return type. The caller must still force
- *    composio: false (and connectorTools: {}) on the created record —
- *    composio is the one privilege where *absence* means allowed, so
- *    leaving it unset is not safe.
- *
- * 2. No name captures. Display names are identity wherever bots address
- *    each other — @mention resolution in rooms, the Chief of Staff roster,
- *    peer-approval prompts — so an imported member wearing an existing
- *    bot's name could be mentioned, granted, or listed as if it were that
- *    bot. A colliding name is therefore visibly numbered ("Scout" →
- *    "Scout 2"), the same convention the name generator uses when its pool
- *    runs out. Matching is case-insensitive because @mention matching is.
- *    `takenNames` (lowercased) is mutated as names are claimed, so one
- *    import batch also stays unique against itself; a suffixed name never
- *    exceeds the member-name cap.
- */
+/** Everything an untrusted manifest may seed into a new bot, and nothing else:
+ * - an allowlist built field by field, so privilege-bearing fields are structurally absent; the caller must still
+ *   force composio: false and connectorTools: {} (absence means allowed);
+ * - no name captures: names are identity for @mentions, rosters and approvals, so a collision is numbered
+ *   ("Scout 2"), case-insensitively; `takenNames` (lowercased) is mutated as names are claimed. */
 export function importedMemberProfile(
   member: TeamManifestMember,
   takenNames: Set<string>,
@@ -275,12 +223,8 @@ export function importedMemberProfile(
     color: member.appearance.color,
   };
   if (member.appearance.mascotExpression) profile.mascotExpression = member.appearance.mascotExpression;
-  // The manifest carries the body as free text (parseTeamManifest only
-  // bounds its length); an untrusted or stale value must never reach a
-  // BotRecord unvalidated, so it is safe-parsed here — the one point where
-  // an imported member becomes bot fields — falling back to the default
-  // body rather than rejecting the whole import over a cosmetic field.
-  if (member.appearance.mascotBody) profile.mascotBody = botMascotBody(member.appearance.mascotBody);
+  // Free text in the manifest: safe-parsed so an untrusted value never reaches a BotRecord unvalidated.
+  if (member.appearance.mascotBody) profile.mascotBody = botBodyId(member.appearance.mascotBody);
   return profile;
 }
 
@@ -329,7 +273,6 @@ export function createTeamManifest(team: ExportableTeam, bots: ExportableBot[]):
       members,
     },
   };
-  // Keep export and import in lockstep: a file produced here must satisfy
-  // the exact same limits and normalization as an untrusted shared file.
+  // Export and import share the parser, so a file produced here meets the same limits as an untrusted one.
   return parseTeamManifest(manifest);
 }

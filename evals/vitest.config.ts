@@ -1,8 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-// Issue #1503 tier 1 ships as pure addition: the root vite.config.ts include
-// list is untouched, so this dedicated config is what wires the evals in.
 // Root is pinned to the repo so server/testing/setup.ts and the include glob
 // resolve exactly as the root suite does.
 export default defineConfig({

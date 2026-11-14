@@ -78,7 +78,7 @@ describe("channel tasks", () => {
     const second = store.createGroupTask(channel.id)!;
     store.appendMessage(second.threadId, { role: "user", kind: "text", text: "private branch" });
 
-    expect(store.renameGroupTask(channel.id, second.threadId, "  Research  ")?.title).toBe("Research");
+    expect(store.patchGroupTask(channel.id, second.threadId, { title: "  Research  " })?.title).toBe("Research");
     expect(store.deleteGroupTask(channel.id, second.threadId)).toMatchObject({ threadId: first });
     expect(store.messagesFor(second.threadId)).toEqual([]);
     expect(store.deleteGroupTask(channel.id, first)).toBeNull();
@@ -161,6 +161,39 @@ describe("channel tasks", () => {
       .toBe("completed");
   });
 
+  it("keeps a longer turn limit on one conversation and reloads it", async () => {
+    const { store, Store } = await freshStore();
+    const bot = store.createBot();
+    const channel = store.createGroup("Product", [bot.id]);
+    const original = channel.threadId;
+    const sibling = store.createGroupTask(channel.id)!;
+    expect(store.patchGroupTask(channel.id, original, { turnTimeoutMinutes: 30 })?.turnTimeoutMinutes).toBe(30);
+    expect(store.groupTaskByThread(channel.id, sibling.threadId)?.turnTimeoutMinutes).toBeUndefined();
+    const dm = store.createGroup("DM", [bot.id], true);
+    expect(store.patchGroup(dm.id, { turnTimeoutMinutes: 30 })?.turnTimeoutMinutes).toBe(30);
+
+    const reloaded = new Store(() => ({ instanceId: "claude", model: "m" }));
+    expect(reloaded.groupTaskByThread(channel.id, original)?.turnTimeoutMinutes).toBe(30);
+    expect(reloaded.groupTaskByThread(channel.id, sibling.threadId)?.turnTimeoutMinutes).toBeUndefined();
+    expect(reloaded.group(dm.id)?.turnTimeoutMinutes).toBe(30);
+    expect(reloaded.patchGroupTask(channel.id, original, { turnTimeoutMinutes: null })?.turnTimeoutMinutes).toBeUndefined();
+    expect(reloaded.patchGroup(dm.id, { turnTimeoutMinutes: null })?.turnTimeoutMinutes).toBeUndefined();
+  });
+
+  it("archives a channel thread, keeps it on reload, and unarchives it", async () => {
+    const { store, Store } = await freshStore();
+    const bot = store.createBot();
+    const channel = store.createGroup("Product", [bot.id]);
+    const original = channel.threadId;
+    const sibling = store.createGroupTask(channel.id)!;
+    expect(store.patchGroupTask(channel.id, sibling.threadId, { archivedAt: 1234 })?.archivedAt).toBe(1234);
+    expect(store.groupTaskByThread(channel.id, original)?.archivedAt).toBeUndefined();
+
+    const reloaded = new Store(() => ({ instanceId: "claude", model: "m" }));
+    expect(reloaded.groupTaskByThread(channel.id, sibling.threadId)?.archivedAt).toBe(1234);
+    expect(reloaded.patchGroupTask(channel.id, sibling.threadId, { archivedAt: null })).not.toHaveProperty("archivedAt");
+  });
+
   it("adopts a legacy channel thread without losing its folder or pin", async () => {
     const { store, Store } = await freshStore();
     const bot = store.createBot();
@@ -181,5 +214,52 @@ describe("channel tasks", () => {
         pinnedMessageId: "legacy-pin",
       }),
     ]);
+  });
+
+  it("deleteGroupTasks removes several tasks in one pass with one group event", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    const channel = store.createGroup("Product", [bot.id]);
+    const first = channel.threadId;
+    const b = store.createGroupTask(channel.id)!;
+    const c = store.createGroupTask(channel.id)!;
+    const d = store.createGroupTask(channel.id)!;
+    for (const t of [b, c]) store.appendMessage(t.threadId, { role: "user", kind: "text", text: "x" });
+    const events: Array<{ type: string; threadId?: string }> = [];
+    store.onChange((change) => events.push(change as { type: string; threadId?: string }));
+
+    const result = store.deleteGroupTasks(channel.id, [b.threadId, c.threadId, c.threadId, "nope"])!;
+
+    expect(result.deleted).toEqual([b.threadId, c.threadId]);
+    expect(result.missing).toEqual(["nope"]);
+    expect(store.groupTasks(channel.id).map((t) => t.threadId)).toEqual([d.threadId, first]);
+    expect(store.messagesFor(b.threadId)).toEqual([]);
+    expect(store.group(channel.id)!.threadId).toBe(d.threadId);
+    expect(events.filter((e) => e.type === "group")).toHaveLength(1);
+    expect(events.filter((e) => e.type === "thread.deleted").map((e) => e.threadId)).toEqual([b.threadId, c.threadId]);
+  });
+
+  it("deleteGroupTasks moves the active conversation to a survivor and refuses to delete every task", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    const channel = store.createGroup("Product", [bot.id]);
+    const first = channel.threadId;
+    const second = store.createGroupTask(channel.id)!;
+    expect(store.group(channel.id)!.threadId).toBe(second.threadId);
+
+    expect(store.deleteGroupTasks(channel.id, [first, second.threadId])).toBeNull();
+    expect(store.groupTasks(channel.id)).toHaveLength(2);
+
+    const result = store.deleteGroupTasks(channel.id, [second.threadId])!;
+    expect(result.deleted).toEqual([second.threadId]);
+    expect(store.group(channel.id)!.threadId).toBe(first);
+  });
+
+  it("deleteGroupTasks ignores direct-message groups and unknown groups", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    const dm = store.createGroup("DM", [bot.id], true);
+    expect(store.deleteGroupTasks(dm.id, [dm.threadId])).toBeNull();
+    expect(store.deleteGroupTasks("no-such-group", ["a"])).toBeNull();
   });
 });

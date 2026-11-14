@@ -73,7 +73,7 @@ describe("Company models in the connected Organisation panel", () => {
     const html = render().html;
     expect(html).toContain("Approved models: 1");
     expect(html).toContain("Ready on this computer");
-    expect(html).toContain("Install Codex");
+    expect(html).toContain("Set up Codex");
     expect(html).toContain("npm i -g @openai/codex");
     expect(html).toContain("run through the Codex app on this computer");
     expect(html).toContain("you don’t need to sign in to a personal account");

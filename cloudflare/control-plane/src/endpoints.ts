@@ -1,18 +1,56 @@
+import { z } from "zod";
+
 import {
   CloudflareAPI,
   CloudflareAPIError,
   type CloudflareDNSRecord,
   type CloudflareFetch,
   type CloudflareTunnel,
+  TUNNEL_CONNECTED_CODE,
 } from "./cloudflare-api";
-import type { ControlPlaneConfig } from "./config";
-import { errorResponse, HTTPError, json } from "./http";
-import { requireInstallation } from "./installations";
+import type { ControlPlaneConfig, EndpointAccount } from "./config";
+import {
+  ACTED_ON_ENDPOINT_SQL,
+  actedOnAccounts,
+  chooseNewEndpointAccount,
+  endpointAccountFor,
+  neverReady,
+  rejectionActive,
+  relocationTarget,
+  scannedFull,
+  snapshotFresh,
+  type AccountSnapshot,
+} from "./endpoint-accounts";
+import { errorResponse, HTTPError, json, readOptionalBoundedJSON } from "./http";
+import {
+  printableVersion,
+  installationKindSchema,
+  type InstallationKind,
+  recordInstallationKind,
+  recordReportedAppVersion,
+  requireInstallation,
+  storedInstallationKind,
+  requireInstallationAndRead,
+} from "./installations";
+import { idleTunnelReason } from "./tunnel-activity";
+import {
+  accountSnapshots,
+  CAPACITY_RETRY_AFTER_SECONDS,
+  idlePolicy,
+  isCapacityErrorCode,
+  recordAccountRefusal,
+  releaseCleanedCapacity,
+  type AccountCleanup,
+} from "./tunnel-capacity";
+import { belowMinimum, readsTunnelReason, readTunnelPolicy, relayCapableVersion } from "./tunnel-release";
+import { relayStanding, type RelayStanding } from "./relay";
 
 type EndpointStatus = "pending" | "provisioning" | "ready" | "deleting" | "deleted" | "error";
 
 interface EndpointRow {
   installation_id: string;
+  /** The Cloudflare account that holds this endpoint, for life. */
+  provider_account: string;
   hostname: string;
   tunnel_name: string;
   tunnel_id: string | null;
@@ -26,6 +64,7 @@ interface EndpointRow {
   last_error_code: string | null;
   cleanup_attempts: number;
   last_cleanup_attempt_at: number | null;
+  reclaim_requested_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -39,19 +78,36 @@ const LEASE_MS = 60_000;
 const ENDPOINT_ACTION_WINDOW_MS = 60 * 60 * 1_000;
 const ENDPOINT_RECONCILE_LIMIT = 20;
 const ENDPOINT_DELETE_LIMIT = 30;
-// A cleanup can make at most ten external Cloudflare API calls when it must
-// rediscover both provider IDs. Four concurrent candidates stay below the
-// Workers Free plan's 50-external-subrequest ceiling and six-connection limit.
-const CLEANUP_SWEEP_LIMIT = 4;
+// A cleanup makes at most 14 Cloudflare API calls; five rows at a time stays
+// inside the Workers limit of six connections awaiting headers.
+const CLEANUP_CONCURRENCY = 5;
 const CLEANUP_BACKOFF_1_MS = 5 * 60 * 1_000;
 const CLEANUP_BACKOFF_2_MS = 15 * 60 * 1_000;
 const CLEANUP_BACKOFF_3_MS = 60 * 60 * 1_000;
 const CLEANUP_BACKOFF_4_MS = 6 * 60 * 60 * 1_000;
 const CLEANUP_BACKOFF_MAX_MS = 24 * 60 * 60 * 1_000;
+/** Connection cleanups, each followed at once by a delete, that a forced
+ * removal makes after Cloudflare answers that the tunnel is still connected. */
+const FORCED_TUNNEL_DELETE_ROUNDS = 2;
 const MANUAL_CLEANUP_THRESHOLD_MS = 24 * 60 * 60 * 1_000;
+/** Cloudflare blocks a rate-limited API token for up to five minutes. */
+const RATE_LIMIT_RETRY_AFTER_DEFAULT_SECONDS = 60;
+const RATE_LIMIT_RETRY_AFTER_MIN_SECONDS = 30;
+const RATE_LIMIT_RETRY_AFTER_MAX_SECONDS = 300;
+
+/** Codes Cloudflare uses to refuse an account a new tunnel. */
+const TUNNEL_QUOTA_CODES: ReadonlySet<string> = new Set(["cf_api_1045", "cf_tunnel_quota"]);
+/** Cloudflare's refusal of a new DNS record: the zone is at its record quota. */
+const DNS_RECORD_QUOTA_CODE = "cf_api_81045";
 
 class EndpointOperationError extends Error {
-  constructor(public readonly code: string) {
+  constructor(
+    public readonly code: string,
+    public readonly retryAfterSeconds: number | null = null,
+    /** An ID, never the account: the account carries its API token. */
+    public readonly accountId: string | null = null,
+    public readonly tokenRefused = false,
+  ) {
     super(code);
     this.name = "EndpointOperationError";
   }
@@ -60,6 +116,31 @@ class EndpointOperationError extends Error {
 function errorCode(error: unknown): string {
   if (error instanceof CloudflareAPIError || error instanceof EndpointOperationError) return error.code;
   return "endpoint_internal";
+}
+
+/** Cloudflare answered 401 or 403: the account's token is invalid, revoked, or
+ * lacks Tunnel or DNS Edit, for every request in the account until fixed. */
+function tokenRefused(error: unknown): boolean {
+  if (error instanceof EndpointOperationError) return error.tokenRefused;
+  return error instanceof CloudflareAPIError && (error.status === 401 || error.status === 403);
+}
+
+/** A stable `alert` field gives Workers Logs a single filter. */
+function tokenRefusedAlert(requestId: string, account: EndpointAccount, code: string): void {
+  console.error(JSON.stringify({
+    message: "managed endpoint account token refused",
+    alert: "managed_endpoint_account_refused",
+    requestId,
+    hostSuffix: account.companionHostSuffix,
+    errorCode: code,
+  }));
+}
+
+function retryAfterSeconds(error: unknown): number | null {
+  if (error instanceof CloudflareAPIError || error instanceof EndpointOperationError) {
+    return error.retryAfterSeconds;
+  }
+  return null;
 }
 
 function randomHex(byteLength: number): string {
@@ -80,34 +161,128 @@ function endpointJSON(row: EndpointRow) {
   };
 }
 
-async function endpointRow(env: Env, installationId: string): Promise<EndpointRow | null> {
+function endpointRowStatement(env: Env, installationId: string): D1PreparedStatement {
   return env.DB.prepare(
-    `SELECT installation_id, hostname, tunnel_name, tunnel_id, dns_record_id,
+    `SELECT installation_id, provider_account, hostname, tunnel_name, tunnel_id, dns_record_id,
             status, generation, lease_owner, lease_expires_at,
             last_reconciled_at, delete_requested_at, last_error_code,
-            cleanup_attempts, last_cleanup_attempt_at, created_at, updated_at
+            cleanup_attempts, last_cleanup_attempt_at, reclaim_requested_at,
+            created_at, updated_at
        FROM installation_endpoints
       WHERE installation_id = ?`,
-  ).bind(installationId).first<EndpointRow>();
+  ).bind(installationId);
+}
+
+async function endpointRow(env: Env, installationId: string): Promise<EndpointRow | null> {
+  return endpointRowStatement(env, installationId).first<EndpointRow>();
 }
 
 async function ensureEndpointRow(
   env: Env,
   installationId: string,
-  hostSuffix: string,
+  account: EndpointAccount,
 ): Promise<EndpointRow> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const opaque = randomHex(16);
     const now = Date.now();
     await env.DB.prepare(
       `INSERT OR IGNORE INTO installation_endpoints
-        (installation_id, hostname, tunnel_name, status, created_at, updated_at)
-       VALUES (?, ?, ?, 'pending', ?, ?)`,
-    ).bind(installationId, `c-${opaque}.${hostSuffix}`, `omb-c-${opaque}`, now, now).run();
+        (installation_id, provider_account, hostname, tunnel_name, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
+    ).bind(
+      installationId,
+      account.accountId,
+      `c-${opaque}.${account.companionHostSuffix}`,
+      `omb-c-${opaque}`,
+      now,
+      now,
+    ).run();
     const row = await endpointRow(env, installationId);
     if (row) return row;
   }
   throw new EndpointOperationError("endpoint_reservation_failed");
+}
+
+/** Read from D1 at most once per request. A failed read decides as if nothing
+ * were known: the primary, no move, no gate. */
+interface Allocation {
+  /** The version the app reported now, else the one it registered with. */
+  appVersion: string | null;
+  snapshots(): Promise<ReadonlyMap<string, AccountSnapshot>>;
+}
+
+function allocationFor(env: Env, config: ControlPlaneConfig, appVersion: string | null): Allocation {
+  let loaded: Promise<ReadonlyMap<string, AccountSnapshot>> | null = null;
+  return {
+    appVersion,
+    snapshots: () => (loaded ??= accountSnapshots(env, config).catch(() => new Map())),
+  };
+}
+
+async function newEndpointAccount(config: ControlPlaneConfig, allocation: Allocation): Promise<EndpointAccount> {
+  if (config.endpointAccounts.length === 1) return config.cloudflare;
+  return chooseNewEndpointAccount(config, await allocation.snapshots(), allocation.appVersion, Date.now());
+}
+
+async function relocationFor(
+  config: ControlPlaneConfig,
+  allocation: Allocation,
+  from: EndpointAccount,
+): Promise<EndpointAccount | null> {
+  if (config.endpointAccounts.length === 1) return null;
+  return relocationTarget(config, await allocation.snapshots(), allocation.appVersion, from, Date.now());
+}
+
+async function refusingNewTunnels(allocation: Allocation, account: EndpointAccount): Promise<boolean> {
+  return rejectionActive((await allocation.snapshots()).get(account.accountId), Date.now());
+}
+
+/** An account a row that never handed out its address leaves for one with
+ * room: Cloudflare refused it moments ago, or its last scan shows it full. */
+async function shouldLeave(allocation: Allocation, account: EndpointAccount): Promise<boolean> {
+  const snapshot = (await allocation.snapshots()).get(account.accountId);
+  const now = Date.now();
+  return rejectionActive(snapshot, now) || scannedFull(account, snapshot, now);
+}
+
+const provisionRequestSchema = z.strictObject({
+  appVersion: printableVersion.optional(),
+  /** Paired phones that can't use the encrypted connection yet; only they still need a tunnel. */
+  legacyDevices: z.number().int().min(0).max(100).optional(),
+  kind: installationKindSchema.optional(),
+});
+
+interface ProvisionRequest {
+  appVersion: string | null;
+  kind: InstallationKind | null;
+  legacyDevices: number | null;
+}
+
+/** POST may carry `{ "appVersion": "0.1.103", "legacyDevices": 1, "kind": "desktop" }`, or no body. */
+async function provisionRequest(request: Request): Promise<ProvisionRequest> {
+  const body = await readOptionalBoundedJSON(request);
+  if (body === undefined) return { appVersion: null, kind: null, legacyDevices: null };
+  const parsed = provisionRequestSchema.safeParse(body);
+  if (!parsed.success) throw new HTTPError(400, "invalid_request");
+  return {
+    appVersion: parsed.data.appVersion ?? null,
+    kind: parsed.data.kind ?? null,
+    legacyDevices: parsed.data.legacyDevices ?? null,
+  };
+}
+
+/** Why a relay-capable desktop goes without a tunnel. The code stays `relay_capable`, which every such desktop
+ * already takes as "carry on over the relay"; `tunnel` tells a newer one what to say about it:
+ * - absent: no old phone needs one;
+ * - `retired`: old phone apps no longer hold a tunnel (TUNNEL_LEGACY_PHONE_CUTOFF);
+ * - `full`: an old phone would have had one, but every account is at its limit. */
+function relayCapableResponse(tunnel?: "full" | "retired"): Response {
+  return json(tunnel ? { error: "relay_capable", tunnel } : { error: "relay_capable" }, 409);
+}
+
+/** The row holds a tunnel that works, as far as this Worker knows. */
+function holdsTunnel(row: EndpointRow | null): boolean {
+  return row !== null && row.tunnel_id !== null && row.status !== "deleting" && row.status !== "deleted";
 }
 
 async function enforceEndpointRateLimit(
@@ -141,10 +316,23 @@ async function claimEndpoint(
   env: Env,
   row: EndpointRow,
   nextStatus: "deleting" | "provisioning",
+  { keepReclaim = false }: { keepReclaim?: boolean } = {},
 ): Promise<ClaimedEndpoint | null> {
   const now = Date.now();
   const leaseOwner = crypto.randomUUID();
-  const deletingGuard = nextStatus === "provisioning" ? "AND status != 'deleting'" : "";
+  // An owner-requested deletion is final. An idle reclaim is not: the
+  // installation may take its row back by provisioning before the sweep acts.
+  const deletingGuard = nextStatus === "provisioning"
+    ? "AND (status != 'deleting' OR reclaim_requested_at IS NOT NULL)"
+    // Only a row still marked for deletion, or whose installation was revoked
+    // or removed; a row its owner took back is left alone.
+    : keepReclaim
+      ? `AND (status = 'deleting' OR NOT EXISTS (
+           SELECT 1 FROM installations i
+            WHERE i.id = installation_endpoints.installation_id
+              AND i.revoked_at IS NULL
+         ))`
+      : "";
   const result = await env.DB.prepare(
     `UPDATE installation_endpoints
         SET status = ?, generation = generation + 1,
@@ -152,7 +340,15 @@ async function claimEndpoint(
             delete_requested_at = CASE WHEN ? = 'deleting' THEN COALESCE(delete_requested_at, ?) ELSE NULL END,
             cleanup_attempts = CASE WHEN ? = 'deleting' THEN cleanup_attempts + 1 ELSE 0 END,
             last_cleanup_attempt_at = CASE WHEN ? = 'deleting' THEN ? ELSE NULL END,
-            last_error_code = NULL
+            last_error_code = NULL,
+            reclaim_requested_at = CASE
+              WHEN ? = 'deleting' AND ? = 1 AND EXISTS (
+                SELECT 1 FROM installations i
+                 WHERE i.id = installation_endpoints.installation_id
+                   AND i.revoked_at IS NULL
+              ) THEN reclaim_requested_at
+              ELSE NULL
+            END
       WHERE installation_id = ?
         AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
         ${deletingGuard}`,
@@ -166,6 +362,8 @@ async function claimEndpoint(
     nextStatus,
     nextStatus,
     now,
+    nextStatus,
+    keepReclaim ? 1 : 0,
     row.installation_id,
     now,
   ).run();
@@ -266,12 +464,15 @@ async function finishClaim(
   status: "deleted" | "ready",
 ): Promise<EndpointRow> {
   const now = Date.now();
+  // last_reconciled_at stays NULL until the row first hands out its address
+  // (see `neverReady`), so a row deleted before that may still move.
   const result = await env.DB.prepare(
     `UPDATE installation_endpoints
         SET status = ?, lease_owner = NULL, lease_expires_at = NULL,
-            last_reconciled_at = ?, last_error_code = NULL, updated_at = ?
+            last_reconciled_at = CASE WHEN ? = 'ready' OR last_reconciled_at IS NOT NULL THEN ? END,
+            last_error_code = NULL, updated_at = ?
       WHERE installation_id = ? AND generation = ? AND lease_owner = ?`,
-  ).bind(status, now, now, claim.row.installation_id, claim.row.generation, claim.leaseOwner).run();
+  ).bind(status, status, now, now, claim.row.installation_id, claim.row.generation, claim.leaseOwner).run();
   if (result.meta.changes === 0) throw new EndpointOperationError("lease_lost");
   const row = await endpointRow(env, claim.row.installation_id);
   if (!row) throw new EndpointOperationError("endpoint_state_missing");
@@ -299,10 +500,76 @@ async function failClaim(
   ).run();
 }
 
+/** Intact resources return to 'ready'; a row whose DNS record is already gone
+ * becomes a retryable 'error' that the next provisioning call repairs. */
+async function cancelReclaim(env: Env, claim: ClaimedEndpoint): Promise<void> {
+  const result = await env.DB.prepare(
+    `UPDATE installation_endpoints
+        SET status = CASE
+              WHEN tunnel_id IS NOT NULL AND dns_record_id IS NOT NULL THEN 'ready'
+              ELSE 'error'
+            END,
+            last_error_code = CASE
+              WHEN tunnel_id IS NOT NULL AND dns_record_id IS NOT NULL THEN NULL
+              ELSE 'reclaim_cancelled'
+            END,
+            reclaim_requested_at = NULL, delete_requested_at = NULL,
+            cleanup_attempts = 0, last_cleanup_attempt_at = NULL,
+            lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+      WHERE installation_id = ? AND generation = ? AND lease_owner = ?`,
+  ).bind(Date.now(), claim.row.installation_id, claim.row.generation, claim.leaseOwner).run();
+  if (result.meta.changes === 0) throw new EndpointOperationError("lease_lost");
+}
+
+/** Re-evaluated with fresh provider state before each destructive call of an
+ * idle reclaim. A revoked or vanished owner no longer protects its tunnel. */
+async function reclaimStillAllowed(
+  env: Env,
+  config: ControlPlaneConfig,
+  claim: ClaimedEndpoint,
+  tunnel: CloudflareTunnel,
+): Promise<boolean> {
+  const installation = await env.DB.prepare(
+    `SELECT revoked_at, last_seen_at FROM installations WHERE id = ?`,
+  ).bind(claim.row.installation_id).first<{ last_seen_at: number | null; revoked_at: number | null }>();
+  if (!installation || installation.revoked_at !== null) return true;
+  if (
+    installation.last_seen_at !== null
+    && installation.last_seen_at > (claim.row.reclaim_requested_at ?? 0)
+  ) {
+    return false;
+  }
+  return idleTunnelReason(tunnel.activity, Date.now(), idlePolicy(config)) !== null;
+}
+
 function busyResponse(): Response {
   const response = errorResponse(409, "endpoint_busy");
   const headers = new Headers(response.headers);
   headers.set("retry-after", "2");
+  return new Response(response.body, { status: response.status, headers });
+}
+
+/** Cloudflare's API limit is shared by every request this Worker makes, and a
+ * 429 can block it for minutes: honor its Retry-After, bounded. */
+function rateLimitedResponse(providerRetryAfterSeconds: number | null): Response {
+  const seconds = Math.min(
+    RATE_LIMIT_RETRY_AFTER_MAX_SECONDS,
+    Math.max(
+      RATE_LIMIT_RETRY_AFTER_MIN_SECONDS,
+      providerRetryAfterSeconds ?? RATE_LIMIT_RETRY_AFTER_DEFAULT_SECONDS,
+    ),
+  );
+  const response = errorResponse(503, "endpoint_rate_limited");
+  const headers = new Headers(response.headers);
+  headers.set("retry-after", String(seconds));
+  return new Response(response.body, { status: response.status, headers });
+}
+
+/** Distinct from `endpoint_unavailable` so the desktop can say so and retry later. */
+function capacityResponse(): Response {
+  const response = errorResponse(503, "endpoint_capacity");
+  const headers = new Headers(response.headers);
+  headers.set("retry-after", String(CAPACITY_RETRY_AFTER_SECONDS));
   return new Response(response.body, { status: response.status, headers });
 }
 
@@ -384,17 +651,60 @@ async function verifiedDNSForCleanup(
   return record;
 }
 
+/** What one reconcile holds in the account it is working in, and which of it
+ * this request created, for its rollback. */
+interface HeldResources {
+  createdDNSRecord: boolean;
+  createdTunnel: boolean;
+  dnsMayReferenceTunnel: boolean;
+  dnsRecordId: string | null;
+  tunnelId: string | null;
+}
+
+/** Re-fetched right before the destructive request: the stable name is our
+ * identity fence, and a renamed or repurposed tunnel is retained. */
+async function deleteVerifiedTunnel(
+  env: Env,
+  claim: ClaimedEndpoint,
+  api: CloudflareAPI,
+  tunnelId: string,
+): Promise<void> {
+  const tunnel = await verifiedTunnelForCleanup(env, claim, api, tunnelId);
+  if (tunnel) {
+    await renewClaim(env, claim);
+    await api.deleteTunnel(tunnelId);
+  }
+}
+
+/** Removes a tunnel taken on purpose (a release, the owner's delete, a revoked
+ * installation) even while its computer is online. Cloudflare refuses to delete
+ * a tunnel with active connections, and a running cloudflared reconnects within
+ * seconds of losing them, so each round drops the connections and deletes at
+ * once: first as documented, last with `cascade` as cloudflared's own forced
+ * delete sends it. Bounded: two calls per round. */
+async function forceDeleteTunnel(
+  env: Env,
+  claim: ClaimedEndpoint,
+  api: CloudflareAPI,
+  tunnelId: string,
+): Promise<void> {
+  for (let round = 0; ; round += 1) {
+    try {
+      await api.deleteTunnel(tunnelId, { cascade: round === FORCED_TUNNEL_DELETE_ROUNDS });
+      return;
+    } catch (error) {
+      if (errorCode(error) !== TUNNEL_CONNECTED_CODE || round >= FORCED_TUNNEL_DELETE_ROUNDS) throw error;
+    }
+    await renewClaim(env, claim);
+    await api.cleanupTunnelConnections(tunnelId);
+  }
+}
+
 async function rollbackCreatedResources(
   env: Env,
   claim: ClaimedEndpoint,
   api: CloudflareAPI,
-  state: {
-    createdDNSRecord: boolean;
-    createdTunnel: boolean;
-    dnsMayReferenceTunnel: boolean;
-    dnsRecordId: string | null;
-    tunnelId: string | null;
-  },
+  state: HeldResources,
 ): Promise<{ dnsRecordId: string | null; tunnelId: string | null }> {
   let { dnsRecordId, tunnelId } = state;
   if (!state.createdDNSRecord && !state.createdTunnel) return { dnsRecordId, tunnelId };
@@ -415,13 +725,7 @@ async function rollbackCreatedResources(
     && tunnelId
     && (!state.dnsMayReferenceTunnel || (state.createdDNSRecord && !dnsRecordId))
   ) {
-    // Re-fetch immediately before the destructive request. The stable name is
-    // our provider-side identity fence; a renamed/repurposed tunnel is retained.
-    const tunnel = await verifiedTunnelForCleanup(env, claim, api, tunnelId);
-    if (tunnel) {
-      await renewClaim(env, claim);
-      await api.deleteTunnel(tunnelId);
-    }
+    await deleteVerifiedTunnel(env, claim, api, tunnelId);
     tunnelId = null;
     await updateClaimedResources(env, claim, tunnelId, dnsRecordId);
   }
@@ -429,142 +733,323 @@ async function rollbackCreatedResources(
   return { dnsRecordId, tunnelId };
 }
 
-async function reconcileClaim(
+/** A row that never handed out its address keeps no tunnel in an account
+ * whose zone refused its DNS record, whether this request created the tunnel
+ * or adopted it, so its next request is answered by the account's refusal
+ * gate or may move. A provider failure here leaves `refusal` the outcome. */
+async function giveBackTunnel(
   env: Env,
-  config: ControlPlaneConfig,
   claim: ClaimedEndpoint,
-  fetcher: CloudflareFetch,
-): Promise<{ connectorToken: string; row: EndpointRow }> {
-  const api = new CloudflareAPI(config.cloudflare, fetcher);
-  let tunnelId = claim.row.tunnel_id;
-  let dnsRecordId = claim.row.dns_record_id;
-  let createdTunnel = false;
-  let createdDNSRecord = false;
-  let dnsMayReferenceTunnel = false;
-
+  api: CloudflareAPI,
+  held: HeldResources,
+  refusal: unknown,
+): Promise<void> {
+  const tunnelId = held.tunnelId;
+  if (!tunnelId) return;
   try {
-    const tunnels = await withClaimLease(
-      env,
-      claim,
-      () => api.listTunnels(claim.row.tunnel_name),
-    );
-    if (tunnels.length > 1) throw new EndpointOperationError("tunnel_name_conflict");
-    if (tunnels.length === 1) {
-      if (tunnelId && tunnelId !== tunnels[0]?.id) {
-        throw new EndpointOperationError("tunnel_id_conflict");
-      }
-      tunnelId = tunnels[0]?.id ?? null;
-    } else {
-      try {
-        const tunnel = await withClaimLease(
-          env,
-          claim,
-          () => api.createTunnel(claim.row.tunnel_name),
-        );
-        tunnelId = tunnel.id;
-        createdTunnel = true;
-      } catch (createError) {
-        // A timeout/network failure can arrive after Cloudflare committed the
-        // POST. Reconcile by the stable opaque name instead of creating a
-        // duplicate tunnel on the next request.
-        let created: CloudflareTunnel[];
-        try {
-          created = await withClaimLease(
-            env,
-            claim,
-            () => api.listTunnels(claim.row.tunnel_name),
-          );
-        } catch {
-          throw createError;
-        }
-        if (created.length > 1) throw new EndpointOperationError("tunnel_name_conflict");
-        if (created.length === 0) throw createError;
-        tunnelId = created[0]?.id ?? null;
-      }
-    }
-    if (!tunnelId) throw new EndpointOperationError("tunnel_missing");
-    const activeTunnelId = tunnelId;
-    await updateClaimedResources(env, claim, activeTunnelId, dnsRecordId);
-    await withClaimLease(
-      env,
-      claim,
-      () => api.configureTunnel(activeTunnelId, claim.row.hostname),
-    );
+    await deleteVerifiedTunnel(env, claim, api, tunnelId);
+  } catch (error) {
+    throw error instanceof EndpointOperationError ? error : refusal;
+  }
+  held.tunnelId = null;
+  held.createdTunnel = false;
+  await updateClaimedResources(env, claim, null, held.dnsRecordId);
+}
 
-    const target = expectedTunnelTarget(activeTunnelId);
-    const records = await withClaimLease(
+/** Cloudflare answers tunnel creation with 429 both for its API rate limit and,
+ * at an account's tunnel quota, instead of error 1045. Nothing was created
+ * either way. At or over the account's limit (by tunnel count, or else its last
+ * scan less what cleanup deleted since) it is the quota; otherwise a rate limit. */
+async function classifyCreate429(
+  env: Env,
+  claim: ClaimedEndpoint,
+  api: CloudflareAPI,
+  account: EndpointAccount,
+  allocation: Allocation,
+  rateLimited: CloudflareAPIError,
+): Promise<Error> {
+  let count: number | null = null;
+  try {
+    count = await withClaimLease(env, claim, () => api.countTunnels());
+  } catch (error) {
+    // A lost lease stops the request; a failed read falls back to the scan.
+    if (error instanceof EndpointOperationError) throw error;
+  }
+  if (count === null) {
+    const snapshot = (await allocation.snapshots()).get(account.accountId);
+    if (snapshotFresh(snapshot, Date.now())) count = snapshot?.tunnel_count ?? null;
+  }
+  return count !== null && count >= account.tunnelLimit
+    ? new EndpointOperationError("cf_tunnel_quota")
+    : rateLimited;
+}
+
+/** The row's tunnel in its account: adopted by its stable name, or created. */
+async function acquireTunnel(
+  env: Env,
+  claim: ClaimedEndpoint,
+  api: CloudflareAPI,
+  account: EndpointAccount,
+  allocation: Allocation,
+): Promise<{ created: boolean; tunnelId: string }> {
+  const tunnels = await withClaimLease(
+    env,
+    claim,
+    () => api.listTunnels(claim.row.tunnel_name),
+  );
+  if (tunnels.length > 1) throw new EndpointOperationError("tunnel_name_conflict");
+  const existing = tunnels[0];
+  if (existing) {
+    if (claim.row.tunnel_id && claim.row.tunnel_id !== existing.id) {
+      throw new EndpointOperationError("tunnel_id_conflict");
+    }
+    return { created: false, tunnelId: existing.id };
+  }
+  try {
+    const tunnel = await withClaimLease(
       env,
       claim,
-      () => api.listDNSRecords(claim.row.hostname),
+      () => api.createTunnel(claim.row.tunnel_name),
     );
-    if (records.length > 1) throw new EndpointOperationError("dns_record_conflict");
-    const existing = records[0];
-    if (existing) {
-      if (existing.content.toLowerCase() !== target && existing.id !== dnsRecordId) {
-        throw new EndpointOperationError("dns_record_conflict");
-      }
-      dnsMayReferenceTunnel = existing.content.toLowerCase() === target;
-      let record = existing;
-      if (!existing.proxied || existing.content.toLowerCase() !== target) {
-        dnsMayReferenceTunnel = true;
-        try {
-          record = await withClaimLease(
-            env,
-            claim,
-            () => api.updateDNSRecord(existing.id, claim.row.hostname, activeTunnelId),
-          );
-        } catch (writeError) {
-          try {
-            const reconciled = await reconcileDNSWriteResult(
-              env,
-              claim,
-              api,
-              activeTunnelId,
-              existing.id,
-            );
-            if (!reconciled) throw writeError;
-            record = reconciled;
-          } catch (reconcileError) {
-            if (reconcileError instanceof EndpointOperationError) throw reconcileError;
-            throw writeError;
-          }
-        }
-      }
-      dnsRecordId = record.id;
-    } else {
-      dnsMayReferenceTunnel = true;
+    return { created: true, tunnelId: tunnel.id };
+  } catch (createError) {
+    if (createError instanceof CloudflareAPIError && createError.code === "cf_rate_limited") {
+      throw await classifyCreate429(env, claim, api, account, allocation, createError);
+    }
+    // A timeout can arrive after Cloudflare committed the POST: reconcile by the
+    // stable name instead of creating a duplicate tunnel.
+    let created: CloudflareTunnel[];
+    try {
+      created = await withClaimLease(
+        env,
+        claim,
+        () => api.listTunnels(claim.row.tunnel_name),
+      );
+    } catch {
+      throw createError;
+    }
+    if (created.length > 1) throw new EndpointOperationError("tunnel_name_conflict");
+    const adopted = created[0];
+    if (!adopted) throw createError;
+    return { created: false, tunnelId: adopted.id };
+  }
+}
+
+/** Returns false, leaving the row where it is, when its current account already
+ * holds a tunnel or DNS record under its names: an interrupted earlier request
+ * committed there, and the row adopts it. */
+async function relocateClaim(
+  env: Env,
+  claim: ClaimedEndpoint,
+  api: CloudflareAPI,
+  from: EndpointAccount,
+  target: EndpointAccount,
+  requestId: string,
+): Promise<boolean> {
+  if (!neverReady(claim.row) || target.accountId === from.accountId) return false;
+  const tunnels = await withClaimLease(env, claim, () => api.listTunnels(claim.row.tunnel_name));
+  if (tunnels.length > 0) return false;
+  const records = await withClaimLease(env, claim, () => api.listDNSRecords(claim.row.hostname));
+  if (records.length > 0) return false;
+
+  const opaque = randomHex(16);
+  const hostname = `c-${opaque}.${target.companionHostSuffix}`;
+  const tunnelName = `omb-c-${opaque}`;
+  const result = await env.DB.prepare(
+    `UPDATE installation_endpoints
+        SET provider_account = ?, hostname = ?, tunnel_name = ?, updated_at = ?
+      WHERE installation_id = ? AND generation = ? AND lease_owner = ?
+        AND tunnel_id IS NULL AND dns_record_id IS NULL AND last_reconciled_at IS NULL`,
+  ).bind(
+    target.accountId,
+    hostname,
+    tunnelName,
+    Date.now(),
+    claim.row.installation_id,
+    claim.row.generation,
+    claim.leaseOwner,
+  ).run();
+  if (result.meta.changes === 0) throw new EndpointOperationError("lease_lost");
+  claim.row.provider_account = target.accountId;
+  claim.row.hostname = hostname;
+  claim.row.tunnel_name = tunnelName;
+  console.log(JSON.stringify({
+    message: "managed endpoint relocated",
+    requestId,
+    from: from.companionHostSuffix,
+    to: target.companionHostSuffix,
+  }));
+  return true;
+}
+
+/** Points the row's one DNS record at `tunnelId`: adopted, repaired, or
+ * created. `held` records what it may roll back, also when it throws. */
+async function pointDNSRecord(
+  env: Env,
+  claim: ClaimedEndpoint,
+  api: CloudflareAPI,
+  tunnelId: string,
+  held: HeldResources,
+): Promise<void> {
+  const target = expectedTunnelTarget(tunnelId);
+  const records = await withClaimLease(
+    env,
+    claim,
+    () => api.listDNSRecords(claim.row.hostname),
+  );
+  if (records.length > 1) throw new EndpointOperationError("dns_record_conflict");
+  const existing = records[0];
+  if (existing) {
+    if (existing.content.toLowerCase() !== target && existing.id !== held.dnsRecordId) {
+      throw new EndpointOperationError("dns_record_conflict");
+    }
+    held.dnsMayReferenceTunnel = existing.content.toLowerCase() === target;
+    let record = existing;
+    if (!existing.proxied || existing.content.toLowerCase() !== target) {
+      held.dnsMayReferenceTunnel = true;
       try {
-        const record = await withClaimLease(
+        record = await withClaimLease(
           env,
           claim,
-          () => api.createDNSRecord(claim.row.hostname, activeTunnelId),
+          () => api.updateDNSRecord(existing.id, claim.row.hostname, tunnelId),
         );
-        dnsRecordId = record.id;
-        createdDNSRecord = true;
       } catch (writeError) {
         try {
           const reconciled = await reconcileDNSWriteResult(
             env,
             claim,
             api,
-            activeTunnelId,
-            null,
+            tunnelId,
+            existing.id,
           );
-          if (!reconciled) {
-            dnsMayReferenceTunnel = false;
-            throw writeError;
-          }
-          // The write may have committed, but its response did not prove that
-          // this request created the record. Adopt and retain it on later
-          // failures instead of destructively guessing.
-          dnsRecordId = reconciled.id;
+          if (!reconciled) throw writeError;
+          record = reconciled;
         } catch (reconcileError) {
           if (reconcileError instanceof EndpointOperationError) throw reconcileError;
           throw writeError;
         }
       }
     }
-    await updateClaimedResources(env, claim, activeTunnelId, dnsRecordId);
+    held.dnsRecordId = record.id;
+    return;
+  }
+  held.dnsMayReferenceTunnel = true;
+  try {
+    const record = await withClaimLease(
+      env,
+      claim,
+      () => api.createDNSRecord(claim.row.hostname, tunnelId),
+    );
+    held.dnsRecordId = record.id;
+    held.createdDNSRecord = true;
+  } catch (writeError) {
+    try {
+      const reconciled = await reconcileDNSWriteResult(
+        env,
+        claim,
+        api,
+        tunnelId,
+        null,
+      );
+      if (!reconciled) {
+        held.dnsMayReferenceTunnel = false;
+        throw writeError;
+      }
+      // The response did not prove this request created the record: adopt
+      // and retain it instead of destructively guessing.
+      held.dnsRecordId = reconciled.id;
+    } catch (reconcileError) {
+      if (reconcileError instanceof EndpointOperationError) throw reconcileError;
+      throw writeError;
+    }
+  }
+}
+
+async function reconcileClaim(
+  env: Env,
+  config: ControlPlaneConfig,
+  claim: ClaimedEndpoint,
+  fetcher: CloudflareFetch,
+  allocation: Allocation,
+  requestId: string,
+): Promise<{ connectorToken: string; row: EndpointRow }> {
+  const own = endpointAccountFor(config, claim.row);
+  if (!own) {
+    await failClaim(env, claim, "endpoint_account_unavailable", false).catch(() => undefined);
+    throw new EndpointOperationError("endpoint_account_unavailable");
+  }
+  let account = own;
+  let api = new CloudflareAPI(account, fetcher);
+  const held: HeldResources = {
+    createdDNSRecord: false,
+    createdTunnel: false,
+    dnsMayReferenceTunnel: false,
+    dnsRecordId: claim.row.dns_record_id,
+    tunnelId: claim.row.tunnel_id,
+  };
+
+  try {
+    // A row that never handed out an address may move, at most once per request,
+    // to another account with room. Every other row stays for life.
+    let moved = false;
+    const moveTo = async (target: EndpointAccount | null): Promise<boolean> => {
+      if (!target || !(await relocateClaim(env, claim, api, account, target, requestId))) return false;
+      account = target;
+      api = new CloudflareAPI(target, fetcher);
+      moved = true;
+      return true;
+    };
+    // Cloudflare refused the account, not this request.
+    const leaveRefusedAccount = async (refusal: unknown): Promise<boolean> => {
+      if (moved || !neverReady(claim.row)) return false;
+      const target = await relocationFor(config, allocation, account);
+      if (!target) return false;
+      const refused = account;
+      const code = errorCode(refusal);
+      // Close the account to every other request before leaving it.
+      await recordAccountRefusal(env, config, refused, code).catch(() => undefined);
+      if (!(await moveTo(target))) return false;
+      // The refused token still needs an operator.
+      if (tokenRefused(refusal)) tokenRefusedAlert(requestId, refused, code);
+      return true;
+    };
+    if (neverReady(claim.row) && await shouldLeave(allocation, account)) {
+      await moveTo(await relocationFor(config, allocation, account));
+    }
+
+    let tunnelId: string | null = null;
+    while (tunnelId === null) {
+      let acquired: { created: boolean; tunnelId: string };
+      try {
+        acquired = await acquireTunnel(env, claim, api, account, allocation);
+      } catch (refusal) {
+        const accountRefused = TUNNEL_QUOTA_CODES.has(errorCode(refusal)) || tokenRefused(refusal);
+        if (accountRefused && await leaveRefusedAccount(refusal)) continue;
+        throw refusal;
+      }
+      const acquiredTunnelId = acquired.tunnelId;
+      held.tunnelId = acquiredTunnelId;
+      held.createdTunnel = acquired.created;
+      await updateClaimedResources(env, claim, acquiredTunnelId, held.dnsRecordId);
+      await withClaimLease(
+        env,
+        claim,
+        () => api.configureTunnel(acquiredTunnelId, claim.row.hostname),
+      );
+      try {
+        await pointDNSRecord(env, claim, api, acquiredTunnelId, held);
+      } catch (refusal) {
+        // An endpoint that handed out its address stays, with any tunnel it
+        // adopted: its desktop may be running that tunnel.
+        if (errorCode(refusal) !== DNS_RECORD_QUOTA_CODE || claim.row.last_reconciled_at !== null) throw refusal;
+        await giveBackTunnel(env, claim, api, held, refusal);
+        if (await leaveRefusedAccount(refusal)) continue;
+        throw refusal;
+      }
+      tunnelId = acquiredTunnelId;
+    }
+    const activeTunnelId = tunnelId;
+    await updateClaimedResources(env, claim, activeTunnelId, held.dnsRecordId);
 
     const connectorToken = await withClaimLease(
       env,
@@ -574,31 +1059,38 @@ async function reconcileClaim(
     const row = await finishClaim(env, claim, "ready");
     return { connectorToken, row };
   } catch (error) {
-    let operationCode = errorCode(error);
+    let failure: unknown = error;
 
     try {
-      const rolledBack = await rollbackCreatedResources(env, claim, api, {
-        createdDNSRecord,
-        createdTunnel,
-        dnsMayReferenceTunnel,
-        dnsRecordId,
-        tunnelId,
-      });
-      dnsRecordId = rolledBack.dnsRecordId;
-      tunnelId = rolledBack.tunnelId;
+      const rolledBack = await rollbackCreatedResources(env, claim, api, held);
+      held.dnsRecordId = rolledBack.dnsRecordId;
+      held.tunnelId = rolledBack.tunnelId;
     } catch (rollbackError) {
-      // A stale request must stop immediately: it no longer owns either the
-      // D1 generation or the provider resources that a successor may adopt.
-      operationCode = errorCode(rollbackError);
+      // A stale request no longer owns the D1 generation or the provider
+      // resources a successor may adopt.
+      failure = rollbackError;
     }
+    const operationCode = errorCode(failure);
     try {
-      await updateClaimedResources(env, claim, tunnelId, dnsRecordId);
+      await updateClaimedResources(env, claim, held.tunnelId, held.dnsRecordId);
       await failClaim(env, claim, operationCode, false);
     } catch {
-      // The original redacted failure is the useful client-facing result.
     }
-    throw new EndpointOperationError(operationCode);
+    throw new EndpointOperationError(
+      operationCode,
+      retryAfterSeconds(failure),
+      account.accountId,
+      tokenRefused(failure),
+    );
   }
+}
+
+type DeleteOutcome = "cancelled" | "deleted";
+
+/** Provider resources a cleanup deleted, whatever its outcome. */
+interface FreedResources {
+  dnsRecords: number;
+  tunnels: number;
 }
 
 async function deleteClaim(
@@ -606,12 +1098,17 @@ async function deleteClaim(
   config: ControlPlaneConfig,
   claim: ClaimedEndpoint,
   fetcher: CloudflareFetch,
-): Promise<void> {
-  const api = new CloudflareAPI(config.cloudflare, fetcher);
+  freed: FreedResources = { dnsRecords: 0, tunnels: 0 },
+): Promise<DeleteOutcome> {
   let tunnelId = claim.row.tunnel_id;
   let dnsRecordId = claim.row.dns_record_id;
+  const idleReclaim = claim.row.reclaim_requested_at !== null;
 
   try {
+    // Always the endpoint's own account; without it nothing is deleted.
+    const account = endpointAccountFor(config, claim.row);
+    if (!account) throw new EndpointOperationError("endpoint_account_unavailable");
+    const api = new CloudflareAPI(account, fetcher);
     if (!tunnelId) {
       const tunnels = await withClaimLease(
         env,
@@ -644,10 +1141,17 @@ async function deleteClaim(
       }
     }
 
-    // Validate the complete resource set before the first delete. Persisted
-    // provider IDs are only hints: the hostname/CNAME and stable tunnel name
-    // must still agree, otherwise cleanup retains metadata for an operator.
-    if (tunnelId) await verifiedTunnelForCleanup(env, claim, api, tunnelId);
+    // Persisted provider IDs are only hints: the hostname/CNAME and stable tunnel
+    // name must still agree before the first delete.
+    if (tunnelId) {
+      const tunnel = await verifiedTunnelForCleanup(env, claim, api, tunnelId);
+      // Never removes anything from a tunnel that reconnected, or whose
+      // installation checked in, since it was marked.
+      if (idleReclaim && tunnel && !(await reclaimStillAllowed(env, config, claim, tunnel))) {
+        await cancelReclaim(env, claim);
+        return "cancelled";
+      }
+    }
     const dnsRecord = dnsRecordId && tunnelId
       ? await verifiedDNSForCleanup(env, claim, api, tunnelId, dnsRecordId)
       : null;
@@ -657,8 +1161,17 @@ async function deleteClaim(
 
     if (dnsRecordId) {
       if (dnsRecord) {
+        // Again: the tunnel may have reconnected while DNS was being verified.
+        if (idleReclaim && tunnelId) {
+          const current = await verifiedTunnelForCleanup(env, claim, api, tunnelId);
+          if (current && !(await reclaimStillAllowed(env, config, claim, current))) {
+            await cancelReclaim(env, claim);
+            return "cancelled";
+          }
+        }
         await renewClaim(env, claim);
         await api.deleteDNSRecord(dnsRecordId);
+        freed.dnsRecords += 1;
       }
       dnsRecordId = null;
       await updateClaimedResources(env, claim, tunnelId, dnsRecordId);
@@ -666,28 +1179,39 @@ async function deleteClaim(
     if (tunnelId) {
       const tunnel = await verifiedTunnelForCleanup(env, claim, api, tunnelId);
       if (tunnel) {
+        if (idleReclaim && !(await reclaimStillAllowed(env, config, claim, tunnel))) {
+          await cancelReclaim(env, claim);
+          return "cancelled";
+        }
         await renewClaim(env, claim);
-        await api.deleteTunnel(tunnelId);
+        // An idle reclaim never forces: a tunnel that answers "still connected"
+        // is left to the next attempt, which finds it connected and cancels.
+        if (idleReclaim) await api.deleteTunnel(tunnelId);
+        else await forceDeleteTunnel(env, claim, api, tunnelId);
+        freed.tunnels += 1;
       }
       tunnelId = null;
       await updateClaimedResources(env, claim, tunnelId, dnsRecordId);
     }
     await finishClaim(env, claim, "deleted");
+    return "deleted";
   } catch (error) {
     const operationCode = errorCode(error);
     try {
       await updateClaimedResources(env, claim, tunnelId, dnsRecordId);
       await failClaim(env, claim, operationCode, true);
     } catch {
-      // Keep the original redacted error code.
     }
     throw new EndpointOperationError(operationCode);
   }
 }
 
 export async function getManagedEndpoint(request: Request, env: Env): Promise<Response> {
-  const installation = await requireInstallation(request, env);
-  const row = await endpointRow(env, installation.installation_id);
+  const { row } = await requireInstallationAndRead<EndpointRow>(
+    request,
+    env,
+    (installationId) => endpointRowStatement(env, installationId),
+  );
   if (!row || row.status === "deleted") return json({ endpoint: null });
   return json({ endpoint: endpointJSON(row) });
 }
@@ -701,23 +1225,108 @@ export async function provisionManagedEndpoint(
 ): Promise<Response> {
   const installation = await requireInstallation(request, env);
   await enforceEndpointRateLimit(env, installation.installation_id, "reconcile_endpoint");
-  const row = await ensureEndpointRow(
-    env,
-    installation.installation_id,
-    config.cloudflare.companionHostSuffix,
+  const { appVersion: reportedVersion, kind: reportedKind, legacyDevices } = await provisionRequest(request);
+  if (reportedVersion !== null && reportedVersion !== installation.app_version) {
+    await recordReportedAppVersion(env, installation.installation_id, reportedVersion);
+  }
+  if (reportedKind !== null) await recordInstallationKind(env, installation.installation_id, reportedKind);
+  const allocation = allocationFor(env, config, reportedVersion ?? installation.app_version);
+  const existing = await endpointRow(env, installation.installation_id);
+  const policy = readTunnelPolicy(env);
+  // Below the minimum version a desktop neither gets nor keeps a tunnel; the cron removes one it still holds.
+  if (belowMinimum(policy, reportedVersion ?? installation.app_version)) throw new HTTPError(426, "update_required");
+  // The relay first: a desktop it can carry gets a tunnel only for an old phone, and only while old phones may
+  // still hold one. A desktop the relay cannot carry (an older release, the relay off, outside the rollout,
+  // blocked) falls through to a tunnel, as before the relay existed. So does a self-hosted server: its tunnel is
+  // its public address, so it is never answered relay_capable. One that does not say what it is is known by what
+  // every released server does: it reports no phones and has never asked for a relay token.
+  let standing: RelayStanding | null = null;
+  let kind: InstallationKind | null | undefined = reportedKind ?? undefined;
+  const onRelay = async () => {
+    if (!relayCapableVersion(policy, reportedVersion)) return null;
+    if (kind === undefined) kind = await storedInstallationKind(env, installation.installation_id);
+    if (kind === "server") return null;
+    standing ??= await relayStanding(env, installation.installation_id);
+    if (!standing.serves) return null;
+    return kind === null && legacyDevices === null && !standing.asked ? null : standing;
+  };
+  if (policy.legacyCutoffPercent > 0) {
+    const relay = await onRelay();
+    // A tunnel that works is given up only by a computer the relay is known to be carrying (the cron's rule).
+    if (
+      relay && relay.bucket !== null && relay.bucket < policy.legacyCutoffPercent
+      && (relay.proven || !holdsTunnel(existing))
+    ) {
+      return relayCapableResponse(legacyDevices === 0 ? undefined : "retired");
+    }
+  }
+  if (legacyDevices === 0 && !holdsTunnel(existing) && await onRelay()) return relayCapableResponse();
+  // At the limit a desktop on the relay still pairs new phones over it, and only its old phones wait. Only a
+  // release that reads `tunnel` is told so: an earlier one takes any relay_capable as "nothing more to do" and
+  // would stop retrying, so it keeps the 503 it shows and retries on.
+  const atCapacity = async () => (
+    readsTunnelReason(policy, reportedVersion) && await onRelay() ? relayCapableResponse("full") : capacityResponse()
   );
+  // Only a new row chooses its account; an existing one keeps its own.
+  const row = existing
+    ?? await ensureEndpointRow(env, installation.installation_id, await newEndpointAccount(config, allocation));
+  const account = endpointAccountFor(config, row);
+  if (!account) {
+    // Its account is not configured: touching another could orphan or duplicate
+    // the endpoint.
+    console.error(JSON.stringify({
+      message: "managed endpoint reconcile failed",
+      requestId,
+      errorCode: "endpoint_account_unavailable",
+      capacity: false,
+    }));
+    throw new HTTPError(502, "endpoint_unavailable");
+  }
+  if (
+    row.tunnel_id === null
+    && await refusingNewTunnels(allocation, account)
+    && !(neverReady(row) && await relocationFor(config, allocation, account))
+  ) {
+    // Cloudflare refused this account moments ago and the row cannot move:
+    // answer locally rather than spend the shared API budget on a sure failure.
+    const refusal = (await allocation.snapshots()).get(account.accountId)?.capacity_rejected_code ?? null;
+    const capacity = refusal === null || isCapacityErrorCode(refusal);
+    console.log(JSON.stringify({
+      message: "managed endpoint allocation deferred",
+      requestId,
+      errorCode: capacity ? "endpoint_capacity" : "endpoint_unavailable",
+      hostSuffix: account.companionHostSuffix,
+    }));
+    if (capacity) return atCapacity();
+    throw new HTTPError(502, "endpoint_unavailable");
+  }
   const claim = await claimEndpoint(env, row, "provisioning");
   if (!claim) return busyResponse();
 
   try {
-    const result = await reconcileClaim(env, config, claim, fetcher);
+    const result = await reconcileClaim(env, config, claim, fetcher, allocation, requestId);
     return json({ endpoint: endpointJSON(result.row), connectorToken: result.connectorToken });
   } catch (error) {
+    const code = errorCode(error);
+    const capacity = isCapacityErrorCode(code);
+    const refused = tokenRefused(error);
+    const failedInId = error instanceof EndpointOperationError ? error.accountId : null;
+    const failedIn = config.endpointAccounts.find((each) => each.accountId === failedInId) ?? account;
     console.error(JSON.stringify({
       message: "managed endpoint reconcile failed",
       requestId,
-      errorCode: errorCode(error),
+      errorCode: code,
+      capacity,
+      hostSuffix: failedIn.companionHostSuffix,
     }));
+    if (refused) tokenRefusedAlert(requestId, failedIn, code);
+    // A refused token closes the account like a quota, but only where another
+    // account can take its new endpoints.
+    if (capacity || (refused && config.endpointAccounts.length > 1)) {
+      await recordAccountRefusal(env, config, failedIn, code).catch(() => undefined);
+    }
+    if (capacity) return atCapacity();
+    if (code === "cf_rate_limited") return rateLimitedResponse(retryAfterSeconds(error));
     throw new HTTPError(502, "endpoint_unavailable");
   }
 }
@@ -751,6 +1360,40 @@ export async function deleteManagedEndpoint(
   }
 }
 
+interface CleanupOutcome {
+  errorCode?: string;
+  /** What it deleted at Cloudflare, even when it then failed. */
+  freed?: FreedResources;
+  result: DeleteOutcome | "failed" | "skipped";
+}
+
+export async function cleanupEndpointRow(
+  env: Env,
+  config: ControlPlaneConfig,
+  installationId: string,
+  fetcher: CloudflareFetch,
+  requestId: string,
+  keepReclaim: boolean,
+): Promise<CleanupOutcome> {
+  const row = await endpointRow(env, installationId);
+  if (!row || row.status === "deleted") return { result: "skipped" };
+  const claim = await claimEndpoint(env, row, "deleting", { keepReclaim });
+  if (!claim) return { result: "skipped" };
+  const freed: FreedResources = { dnsRecords: 0, tunnels: 0 };
+  try {
+    return { freed, result: await deleteClaim(env, config, claim, fetcher, freed) };
+  } catch (error) {
+    const code = errorCode(error);
+    console.error(JSON.stringify({
+      message: "revoked installation endpoint cleanup pending",
+      requestId,
+      errorCode: code,
+    }));
+    return { errorCode: code, freed, result: "failed" };
+  }
+}
+
+/** Revocation always removes the endpoint: no idle-reclaim cancellation. */
 export async function cleanupEndpointForInstallation(
   env: Env,
   config: ControlPlaneConfig,
@@ -758,19 +1401,15 @@ export async function cleanupEndpointForInstallation(
   fetcher: CloudflareFetch,
   requestId: string,
 ): Promise<void> {
-  const row = await endpointRow(env, installationId);
-  if (!row || row.status === "deleted") return;
-  const claim = await claimEndpoint(env, row, "deleting");
-  if (!claim) return;
-  try {
-    await deleteClaim(env, config, claim, fetcher);
-  } catch (error) {
-    console.error(JSON.stringify({
-      message: "revoked installation endpoint cleanup pending",
-      requestId,
-      errorCode: errorCode(error),
-    }));
-  }
+  await cleanupEndpointRow(env, config, installationId, fetcher, requestId, false);
+}
+
+export interface CleanupSweepSummary {
+  cancelled: number;
+  candidates: number;
+  deleted: number;
+  failed: number;
+  rateLimited: boolean;
 }
 
 export async function sweepManagedEndpointCleanup(
@@ -778,13 +1417,16 @@ export async function sweepManagedEndpointCleanup(
   config: ControlPlaneConfig,
   fetcher: CloudflareFetch,
   requestId: string,
-): Promise<number> {
+): Promise<CleanupSweepSummary> {
   const now = Date.now();
+  // Rows no configured account acts on cannot be cleaned and must not crowd the LIMIT.
   const candidates = await env.DB.prepare(
-    `SELECT e.installation_id, e.cleanup_attempts, e.delete_requested_at, e.last_error_code
+    `SELECT e.installation_id, e.provider_account, e.cleanup_attempts, e.delete_requested_at,
+            e.last_error_code
        FROM installation_endpoints e
        LEFT JOIN installations i ON i.id = e.installation_id
       WHERE e.status != 'deleted'
+        AND ${ACTED_ON_ENDPOINT_SQL}
         AND (
           e.status = 'deleting'
           OR i.revoked_at IS NOT NULL
@@ -806,18 +1448,20 @@ export async function sweepManagedEndpointCleanup(
                e.installation_id ASC
       LIMIT ?`,
   ).bind(
+    actedOnAccounts(config),
     now,
     now - CLEANUP_BACKOFF_1_MS,
     now - CLEANUP_BACKOFF_2_MS,
     now - CLEANUP_BACKOFF_3_MS,
     now - CLEANUP_BACKOFF_4_MS,
     now - CLEANUP_BACKOFF_MAX_MS,
-    CLEANUP_SWEEP_LIMIT,
+    config.capacity.cleanupSweepLimit,
   ).all<{
     cleanup_attempts: number;
     delete_requested_at: number | null;
     installation_id: string;
     last_error_code: string | null;
+    provider_account: string;
   }>();
 
   const staleCandidates = candidates.results.filter((candidate) => (
@@ -836,22 +1480,71 @@ export async function sweepManagedEndpointCleanup(
     }));
   }
 
-  await Promise.all(candidates.results.map(async (candidate) => {
-    try {
-      await cleanupEndpointForInstallation(
-        env,
-        config,
-        candidate.installation_id,
-        fetcher,
-        requestId,
-      );
-    } catch {
-      console.error(JSON.stringify({
-        message: "managed endpoint cleanup candidate failed",
-        requestId,
-        errorCode: "endpoint_internal",
-      }));
+  const summary: CleanupSweepSummary = {
+    cancelled: 0,
+    candidates: candidates.results.length,
+    deleted: 0,
+    failed: 0,
+    rateLimited: false,
+  };
+  const rateLimited = new Set<string>();
+  const cleaned = new Map<string, AccountCleanup>();
+  const tally = (account: string, deleted: boolean, freed: FreedResources | undefined) => {
+    if (!deleted && !freed?.tunnels && !freed?.dnsRecords) return;
+    const each = cleaned.get(account) ?? { deleted: false, dnsRecords: 0, tunnels: 0 };
+    each.deleted ||= deleted;
+    each.dnsRecords += freed?.dnsRecords ?? 0;
+    each.tunnels += freed?.tunnels ?? 0;
+    cleaned.set(account, each);
+  };
+  let next = 0;
+  const worker = async () => {
+    while (next < candidates.results.length) {
+      const candidate = candidates.results[next];
+      next += 1;
+      if (!candidate) break;
+      // The API limit is shared with every desktop's provisioning in that
+      // account: stop starting its rows once Cloudflare pushes back.
+      if (rateLimited.has(candidate.provider_account)) continue;
+      try {
+        const outcome = await cleanupEndpointRow(
+          env,
+          config,
+          candidate.installation_id,
+          fetcher,
+          requestId,
+          true,
+        );
+        tally(candidate.provider_account, outcome.result === "deleted", outcome.freed);
+        if (outcome.result === "deleted") summary.deleted += 1;
+        else if (outcome.result === "cancelled") summary.cancelled += 1;
+        else if (outcome.result === "failed") summary.failed += 1;
+        if (outcome.errorCode === "cf_rate_limited") {
+          rateLimited.add(candidate.provider_account);
+          summary.rateLimited = true;
+        }
+      } catch {
+        summary.failed += 1;
+        console.error(JSON.stringify({
+          message: "managed endpoint cleanup candidate failed",
+          requestId,
+          errorCode: "endpoint_internal",
+        }));
+      }
     }
-  }));
-  return candidates.results.length;
+  };
+  await Promise.all(Array.from(
+    { length: Math.min(CLEANUP_CONCURRENCY, candidates.results.length) },
+    worker,
+  ));
+
+  await releaseCleanedCapacity(env, config, cleaned).catch(() => undefined);
+  if (summary.candidates > 0) {
+    console.log(JSON.stringify({
+      message: "managed endpoint cleanup sweep",
+      requestId,
+      ...summary,
+    }));
+  }
+  return summary;
 }

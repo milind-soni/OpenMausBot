@@ -136,7 +136,6 @@ describe("enterprise hook point", () => {
     expect(lapsed.expiresInDays).toBeUndefined();
     expect(lapsed.notice).toMatch(/expired on 2027-01-01; renew it/);
     expect(licenseWarning(lapsed)).toBeNull();
-    // members see what is entitled, not the countdown, grace date or notice
     expect(editionForMembers(grace)).toEqual({ edition: "enterprise", customer: "Acme", features: ["sso"], expiresAt: "2027-01-01" });
     expect(editionForMembers(lapsed)).toEqual({ edition: "oss", features: [] });
   });

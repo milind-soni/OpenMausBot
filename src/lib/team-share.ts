@@ -1,20 +1,12 @@
-// Share team…: the renderer half of a whole-team export (package format v2).
-// The server builds, redacts and validates the document; this side prepares
-// pictures (the server never re-encodes images), builds the request, turns
-// part paths into words, and saves the file. No confirm step anywhere.
 import { t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import type { PackageDocument, PackageSummary } from "../../shared/package-format";
 import { skillChoicesFrom, startingTicks } from "./team-share-skills";
 
-// The skill choices are pure and shared with the server's export tests.
 export { includedSkills, requestedSkills, skillChoicesFrom, startingTicks, tickedSkills } from "./team-share-skills";
 
-/** Pictures are downscaled to fit this square before they are shared. */
 export const PICTURE_EDGE = 256;
-/** Decoded bytes per picture; the file format refuses anything larger. */
 export const PICTURE_MAX_BYTES = 64 * 1024;
-/** Stop adding pictures once their base64 passes this, leaving room in the 4 MB file. */
 export const PICTURES_BASE64_BUDGET = 2 * 1024 * 1024;
 
 export type ShareSkipReason =
@@ -31,11 +23,9 @@ export interface ShareChoices {
   summary?: string;
   release?: string;
   notes?: string;
-  /** "all", or the chosen skill names. */
   skills: "all" | string[];
   includeMemory: boolean;
   avatars?: Record<string, string>;
-  /** "Include my New bot defaults as a preset", with its prepared picture. */
   includeDefaultsPreset?: boolean;
   presetAvatar?: string;
   dryRun?: boolean;
@@ -50,40 +40,26 @@ export interface ShareResponse {
   choices: { skills: string[] };
 }
 
-// ── the dialog's state ──────────────────────────────────────────────────────
 
-/** What the Share dialog starts with. Owner decision: a team is shared whole,
- * everything but chat history, so pictures and starter notes start ticked and
- * the line under the notes box says so. (The API default for notes stays
- * off: callers opt in.) */
 export const SHARE_DIALOG_DEFAULTS = { includePictures: true, includeMemory: true } as const;
 
-/** The line under the starter-notes box. */
 export function notesLine(includeMemory: boolean): string {
   return includeMemory ? t("teamShare.notesIncluded") : t("teamShare.notesExcluded");
 }
 
-/** What the dialog shows from the server's dry runs. */
 export interface ShareView {
-  /** The dry run of the current choice; null while it is refused (no counts, no Save). */
   preview: ShareResponse | null;
-  /** Every skill name on the team's bots, one box each; null until the server first answers. */
   available: string[] | null;
-  /** The boats ticked until the person changes one (startingTicks). */
   included: string[] | null;
   error: string;
 }
 
 export const SHARE_VIEW_START: ShareView = { preview: null, available: null, included: null, error: "" };
 
-/** A dry run answered. `all`: it asked for "all" (no boat changed yet). */
 export function shareAnswered(view: ShareView, result: ShareResponse, all: boolean): ShareView {
   return { preview: result, available: result.choices.skills, included: all ? startingTicks(result) : view.included, error: "" };
 }
 
-/** A dry run was refused. This choice cannot be saved: no counts and no Save
- * until it changes. The skill boxes stay, redrawn from the refusal when it
- * names the team's skills, so the choice can always be changed. */
 export function shareRefused(view: ShareView, cause: unknown): ShareView {
   const body = cause && typeof cause === "object" && "body" in cause ? (cause as { body?: unknown }).body : undefined;
   return {
@@ -94,7 +70,6 @@ export function shareRefused(view: ShareView, cause: unknown): ShareView {
   };
 }
 
-/** POST /api/teams/export body (package format v2). */
 export function shareRequestBody(choices: ShareChoices): Record<string, unknown> {
   const text = (value: string | undefined) => (value?.trim() ? value.trim() : undefined);
   return {
@@ -122,13 +97,10 @@ export interface PictureSource {
 
 export interface PictureTools {
   fetchBlob(url: string): Promise<Blob>;
-  /** Downscale to fit PICTURE_EDGE; WebP at 0.85, else PNG. Null when it cannot be drawn. */
   shrink(blob: Blob): Promise<Blob | null>;
   toDataUrl(blob: Blob): Promise<string>;
 }
 
-/** The pictures the dialog offers the server, per bot id, and the ones it
- * could not include. Only bots that show a picture (not the mascot) count. */
 export async function preparePictures(
   bots: readonly PictureSource[],
   tools: PictureTools = browserPictureTools,
@@ -210,11 +182,8 @@ const FIELD_WORDS: Record<string, LocaleKey> = {
   appearance: "teamShare.field.picture",
 };
 
-/** "agents[scout].soul" → "Scout · standing instructions"; unknown shapes
- * stay as their path (still readable, never a value). */
 export function describePart(part: string, document?: PackageDocument): string {
   const pkg = document?.package;
-  // A preset's bot fields read like a bot's: presets[x].bot.soul → presets[x].soul.
   part = part.replace(/^(presets\[[^\]]+\])\.bot\./, "$1.");
   const match = /^(agents|rooms|routines|skills|connections|presets|playbooks)\[([^\]]+)\](?:\.([a-zA-Z]+)(?:\[([^\]]+)\])?)?/.exec(part);
   if (match) {
@@ -225,7 +194,6 @@ export function describePart(part: string, document?: PackageDocument): string {
       : list === "connections" ? pkg?.connections?.find((connection) => connection.key === key)?.label
       : list === "presets" ? pkg?.presets?.find((preset) => preset.key === key)?.name
       : undefined;
-    // The defaults preset left out (empty) has no name in the file to show.
     const who = named ?? (list === "presets" ? t("teamShare.defaultsPreset") : key!);
     const words = field
       ? (FIELD_WORDS[field] ? t(FIELD_WORDS[field]) : field)
@@ -237,14 +205,12 @@ export function describePart(part: string, document?: PackageDocument): string {
   return part.replace(/^package\./, "");
 }
 
-/** A skip line: "Morgan · picture — picture is larger than 64 KB". */
 export function describeSkip(skip: ShareSkip, document?: PackageDocument, botNames?: ReadonlyMap<string, string>): string {
   const reason = tFromServer(`teamShare.skip.${skip.reason}`, skip.reason) ?? skip.reason;
   const who = botNames?.get(skip.part) ?? describePart(skip.part, document);
   return `${who} — ${reason}`;
 }
 
-/** Save the document as the file Admin and other apps read. */
 export function saveShareFile(filename: string, document: PackageDocument): void {
   const blob = new Blob([`${JSON.stringify(document, null, 2)}\n`], { type: "application/json" });
   const url = URL.createObjectURL(blob);

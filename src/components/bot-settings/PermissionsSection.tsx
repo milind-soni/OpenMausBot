@@ -1,16 +1,5 @@
-// Permissions: how autonomously this bot acts — the approval level (ask /
-// auto / full / custom), review-routine approvals, whether it asks before
-// contacting other bots, and whether it holds the section's Chief of Staff
-// role. Moved from SettingsPanel.tsx (Chief of Staff ~720-755,
-// Ask-before-contacting ~757-776, Approval level ~990-1010, Review routine
-// approvals ~1013-1050).
-//
-// The Auto branch of LocalComputerAutoWarning (choosing Auto while
-// bot.computer === "local") and the FullAccessWarning live here with their
-// triggers; the Works-on-picker branch (turning computer to "local" while
-// already on Auto) stays with AccessSection, next to that picker. The
-// warnings remember which bot they were opened for, so a bot switch while
-// one is up never applies the choice to the newly selected bot.
+// LocalComputerAutoWarning remembers its bot, so a bot switch while it is up never applies the choice to the new bot.
+import { useTeamPeople } from "@/state/team-people";
 import { useState } from "react";
 import { Crown } from "lucide-react";
 
@@ -19,9 +8,9 @@ import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useStore, type Bot } from "@/state/store";
 import type { ApprovalMode } from "../../../shared/approval-mode";
+import { DEFAULT_OUTBOUND_POLICY, type OutboundPolicy } from "../../../shared/outbound";
 import { ApprovalModeSelector } from "../ApprovalModeSelector";
 import { CommandAllowlistDialog } from "../CommandAllowlistDialog";
-import { FullAccessWarning } from "../FullAccessWarning";
 import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
 import { Switch } from "../SettingsPrimitives";
 import { ManagedTeamsSettings } from "./ManagedTeamsSettings";
@@ -29,26 +18,32 @@ import { ProposalStatus } from "./ProposalStatus";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 import { useBotEditor } from "./BotEditorContext";
 
+export type PermissionsPart = "chief" | "approval" | "outbound";
+
 export function PermissionsSection({
   bot,
   derived,
+  parts,
 }: {
   bot: Bot;
   derived: ReturnType<typeof useBotSettingsDerived>;
+  parts?: readonly PermissionsPart[];
 }) {
   const { patch, engine, canCoordinate, approvalMode, trustedModesAvailable, sectionName, currentChief } = derived;
+  const team = useTeamPeople();
   const { state, dispatch } = useStore();
   const ownerOrAdmin = useOwnerOrAdmin();
   const { draft } = useBotEditor();
+  const displaySectionName = sectionName === "General" ? t("botAccess.teams.general") : sectionName;
   const [localAutoWarning, setLocalAutoWarning] = useState<string | null>(null);
-  const [fullAccessTarget, setFullAccessTarget] = useState<string | null>(null);
-  const [allThreads, setAllThreads] = useState(true);
   const [commandAllowlistTarget, setCommandAllowlistTarget] = useState<{ botId: string; botName: string } | null>(null);
+  const shows = (part: PermissionsPart) => !parts || parts.includes(part);
+  const applyFullEverywhere = () =>
+    dispatch({ type: "updateBot", botId: bot.id, patch: { approvalMode: "full", applyToAllThreads: true } });
   const setApprovalMode = (mode: ApprovalMode) => {
-    if (bot.busy || mode === approvalMode) return;
+    if (mode === approvalMode) return;
     if (mode === "full") {
-      setAllThreads(true);
-      setFullAccessTarget(bot.id);
+      applyFullEverywhere();
       return;
     }
     if (mode === "auto" && bot.computer === "local") {
@@ -60,7 +55,7 @@ export function PermissionsSection({
 
   return (
     <div className="flex flex-col gap-4">
-      <div
+      {shows("chief") && !team && <div
         className={cn(
           "rounded-xl border p-4",
           bot.chiefOfStaff ? "border-accent/40 bg-accent/10" : "border-hairline/40 bg-card",
@@ -76,28 +71,28 @@ export function PermissionsSection({
             <Crown size={17} />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-[15px] font-medium text-ink">Chief of Staff</div>
-            <div className="text-[11.5px] text-ink-secondary">One for {sectionName}</div>
+            <div className="text-[15px] font-medium text-ink">{t("permissions.chief.title")}</div>
+            <div className="text-[12px] text-ink-secondary">{t("permissions.chief.oneFor", { section: displaySectionName })}</div>
           </div>
           <Switch
             checked={Boolean(bot.chiefOfStaff)}
-            aria-label="Chief of Staff"
+            aria-label={t("permissions.chief.title")}
             disabled={!bot.chiefOfStaff && !canCoordinate}
             onClick={() => patch({ chiefOfStaff: !bot.chiefOfStaff })}
-            title={!bot.chiefOfStaff && !canCoordinate ? "This engine cannot contact other bots" : undefined}
+            title={!bot.chiefOfStaff && !canCoordinate ? t("permissions.cannotCoordinate") : undefined}
             className="disabled:cursor-not-allowed"
           />
         </div>
         <div className="mt-3 text-[13px] leading-relaxed text-ink-secondary">
           {bot.chiefOfStaff && !canCoordinate
-            ? "This bot still holds the role, but its current provider cannot contact teammates. Choose a provider that supports bot coordination."
+            ? t("permissions.chief.unsupportedCurrent")
             : bot.chiefOfStaff
-              ? `This is the primary contact for ${sectionName}. It can create and coordinate specialists in this team, then combine their work into one answer.`
+              ? t("permissions.chief.active", { section: displaySectionName })
               : !canCoordinate
-                ? "Choose a provider that supports bot coordination."
+                ? t("permissions.chief.unsupported")
                 : currentChief
-                  ? `Make this bot the ${sectionName} Chief and hand the role over from ${currentChief.name}.`
-                  : `Make this bot the primary contact for the ${sectionName} team.`}
+                  ? t("permissions.chief.replace", { section: displaySectionName, current: currentChief.name })
+                  : t("permissions.chief.make", { section: displaySectionName })}
         </div>
         <ProposalStatus bot={bot} kind="chief" />
         {bot.chiefOfStaff && <ManagedTeamsSettings
@@ -108,32 +103,12 @@ export function PermissionsSection({
           onSave={managedSections => patch({ managedSections, acknowledgePeerScope: true })}
         />}
         {bot.chiefOfStaff && <ProposalStatus bot={bot} kind="owner" />}
-      </div>
+      </div>}
 
-      <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
-        <div>
-          <div className="text-[15px] font-medium text-ink">Ask me before contacting other bots</div>
-          <div className="mt-0.5 text-[13px] text-ink-secondary">
-            {bot.approvePeerComms
-              ? "This bot will stop and ask before it reaches out to another bot."
-              : "Let this bot talk to teammates on its own, without a confirmation step."}
-          </div>
-          <ProposalStatus bot={bot} kind="owner" />
-        </div>
-        <Switch
-          checked={Boolean(bot.approvePeerComms)}
-          aria-label="Ask me before contacting other bots"
-          disabled={!bot.approvePeerComms && !canCoordinate}
-          onClick={() => patch({ approvePeerComms: !bot.approvePeerComms })}
-          title={!bot.approvePeerComms && !canCoordinate ? "This engine cannot contact other bots" : undefined}
-          className="disabled:cursor-not-allowed"
-        />
-      </div>
-
-      <div className="rounded-xl bg-card p-4">
-        <div className="text-[15px] font-medium text-ink">Approval level</div>
+      {shows("approval") && <div className="rounded-xl bg-card p-4">
+        <div className="text-[15px] font-medium text-ink">{t("permissions.approval.title")}</div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">
-          {draft ? "Default for the new bot's threads, routines and delegated work." : "Default for new threads, routines and delegated work. When enabling Full access, you can also apply it to every existing thread."}
+          {draft ? t("permissions.approval.draftHanded") : t("permissions.approval.helpHanded")}
         </div>
         <ProposalStatus bot={bot} kind="owner" />
         <div className="mt-3">
@@ -145,28 +120,29 @@ export function PermissionsSection({
             onSelect={setApprovalMode}
             menuDirection="down"
             wide
-            disabled={Boolean(bot.busy)}
+            busy={Boolean(bot.busy)}
             trustedModesAvailable={trustedModesAvailable}
             onManageCommandAllowlist={!draft && ownerOrAdmin === true ? () => setCommandAllowlistTarget({ botId: bot.id, botName: bot.name }) : undefined}
           />
         </div>
-        {!draft && approvalMode === "full" && trustedModesAvailable && <button
-          type="button" disabled={Boolean(bot.busy)}
+        {!draft && approvalMode === "full" && <button
+          type="button"
           className="mt-3 text-[13px] text-accent hover:underline disabled:opacity-40"
-          onClick={() => { setAllThreads(true); setFullAccessTarget(bot.id); }}
-        >Apply Full access to all threads</button>}
+          onClick={applyFullEverywhere}
+        >{t("permissions.approval.applyFull")}</button>}
         {!draft && ownerOrAdmin === true && <button
           type="button"
           className="mt-3 block text-[13px] text-accent hover:underline"
           onClick={() => setCommandAllowlistTarget({ botId: bot.id, botName: bot.name })}
         >{t("commandAllowlist.manage")}</button>}
-      </div>
+      </div>}
 
       {commandAllowlistTarget && <CommandAllowlistDialog
-        key={commandAllowlistTarget.botId}
+        key={`command-allowlist:${commandAllowlistTarget.botId}`}
         {...commandAllowlistTarget}
         onClose={() => setCommandAllowlistTarget(null)}
       />}
+      {!draft && shows("outbound") && <OutboundControl bot={bot} onChange={(outbound) => patch({ outbound })} />}
       <LocalComputerAutoWarning
         open={localAutoWarning !== null}
         onCancel={() => setLocalAutoWarning(null)}
@@ -177,18 +153,43 @@ export function PermissionsSection({
           dispatch({ type: "updateBot", botId: target, patch: { approvalMode: "auto", acknowledgeLocalAuto: true } });
         }}
       />
-      <FullAccessWarning
-        open={fullAccessTarget !== null}
-        allThreads={allThreads}
-        onAllThreadsChange={draft ? undefined : setAllThreads}
-        onCancel={() => setFullAccessTarget(null)}
-        onConfirm={() => {
-          const target = fullAccessTarget;
-          setFullAccessTarget(null);
-          if (!target) return;
-          dispatch({ type: "updateBot", botId: target, patch: { approvalMode: "full", confirmFullAccess: true, applyToAllThreads: allThreads } });
-        }}
-      />
+    </div>
+  );
+}
+
+function OutboundControl({ bot, onChange }: { bot: Bot; onChange: (policy: OutboundPolicy) => void }) {
+  const policy = bot.outbound ?? DEFAULT_OUTBOUND_POLICY;
+
+  return (
+    <div className="rounded-xl bg-card p-4">
+      <div className="text-[15px] font-medium text-ink">{t("permissions.outbound.title")}</div>
+      <div className="mt-0.5 text-[13px] text-ink-secondary">
+        {t("permissions.outbound.help")}
+      </div>
+      <div className="mt-3 flex gap-1 rounded-lg bg-inset p-0.5">
+        {(
+          [
+            ["ask", t("permissions.outbound.ask"), t("permissions.outbound.askHint")],
+            ["allow", t("permissions.outbound.allow"), t("permissions.outbound.allowHint")],
+          ] as const
+        ).map(([value, label, hint]) => (
+          <button
+            key={value}
+            title={hint}
+            type="button"
+            aria-pressed={policy.policy === value}
+            onClick={() => {
+              if (value !== policy.policy) onChange({ policy: value });
+            }}
+            className={cn(
+              "flex-1 rounded-md px-2.5 py-1.5 text-[13px] font-medium",
+              policy.policy === value ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

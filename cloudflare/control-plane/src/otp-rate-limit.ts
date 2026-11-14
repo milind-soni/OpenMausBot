@@ -48,26 +48,29 @@ export async function limitedOTPResponse(request: Request, env: Env): Promise<Re
   const now = Date.now();
   const windowCutoff = now - RECIPIENT_WINDOW_MS;
   const key = await recipientKey(email, env.BETTER_AUTH_SECRET);
-  const result = await env.DB.prepare(
-    `INSERT INTO otp_recipient_rate_limits
-      (recipient_key, window_started_at, attempts, updated_at)
-     VALUES (?, ?, 1, ?)
-     ON CONFLICT(recipient_key) DO UPDATE SET
-       window_started_at = CASE
-         WHEN window_started_at <= ? THEN excluded.window_started_at
-         ELSE window_started_at
-       END,
-       attempts = CASE
-         WHEN window_started_at <= ? THEN 1
-         ELSE attempts + 1
-       END,
-       updated_at = excluded.updated_at
-     WHERE window_started_at <= ? OR attempts < ?`,
-  ).bind(key, now, now, windowCutoff, windowCutoff, windowCutoff, RECIPIENT_MAX_ATTEMPTS).run();
-
-  await env.DB.prepare(
-    "DELETE FROM otp_recipient_rate_limits WHERE updated_at < ?",
-  ).bind(now - RETENTION_MS).run();
+  // The limit and its retention sweep share one D1 batch: one round trip and
+  // one transaction. The sweep never removes a row this request just wrote.
+  const [result] = await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO otp_recipient_rate_limits
+        (recipient_key, window_started_at, attempts, updated_at)
+       VALUES (?, ?, 1, ?)
+       ON CONFLICT(recipient_key) DO UPDATE SET
+         window_started_at = CASE
+           WHEN window_started_at <= ? THEN excluded.window_started_at
+           ELSE window_started_at
+         END,
+         attempts = CASE
+           WHEN window_started_at <= ? THEN 1
+           ELSE attempts + 1
+         END,
+         updated_at = excluded.updated_at
+       WHERE window_started_at <= ? OR attempts < ?`,
+    ).bind(key, now, now, windowCutoff, windowCutoff, windowCutoff, RECIPIENT_MAX_ATTEMPTS),
+    env.DB.prepare(
+      "DELETE FROM otp_recipient_rate_limits WHERE updated_at < ?",
+    ).bind(now - RETENTION_MS),
+  ]);
 
   return result.meta.changes === 0 ? json({ success: true }) : null;
 }

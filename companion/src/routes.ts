@@ -1,48 +1,25 @@
-// What a paired device is allowed to ask for.
-//
-// The default is deny, and that direction is the whole point: the sidecar
-// sits in front of an API it does not own and cannot see the future of. A
-// route that appears in the harness later is closed to phones until someone
-// decides otherwise, because the alternative is that every upstream release
-// silently widens what a lost phone can reach.
-//
-// This file used to claim that and not do it — it listed refusals and let
-// everything else under `/api/` through. In the time between writing it and
-// noticing, upstream added webhook triggers, connected-app authorisation and
-// routines, all of which a paired phone could drive: minting an
-// internet-reachable trigger, rotating a signing secret out from under
-// whatever was sending to it, disconnecting a Google account. None of that
-// was a decision anyone made. It was the default.
-//
-// So the list below is the surface, derived from what the app actually
-// calls. Adding a feature to the phone means adding its route here, on
-// purpose, in a diff someone can read. That cost is the feature.
+// What a paired device may ask for. Default deny: a route the harness adds
+// later stays closed to phones until it is listed here.
 
-/** A refusal to send back, or null to let the request through. */
 export interface Denial {
   status: number;
   error: string;
 }
 
-/** One request, reduced to what the allowlist decides on. */
 export interface RouteRequest {
   path: string;
   method: string;
-  /** Whether the bearer token on the request matched a paired device. */
   authenticated: boolean;
 }
 
-/** The one companion route that crosses into full interactive desktop
- * control. Both the allowlist and capability gate consume this classifier so
- * their security decisions cannot drift apart. */
+/** The one companion route that crosses into full interactive desktop control. */
 export const CLOUD_DESKTOP_JOIN_ROUTE = {
   method: "POST",
   path: /^\/api\/bots\/[\w-]+\/computer\/join$/,
 } as const;
 
-/** A POST whose response is file bytes. Keep this exact classifier shared
- * with the proxy: a `.json` document must not enter the ordinary JSON
- * scrub/re-serialise path and come back as different bytes. */
+/** A POST whose response is file bytes: a `.json` document must not go through
+ * the JSON scrub and come back as different bytes. */
 export const MESSAGE_FILE_ROUTE = {
   method: "POST",
   path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/file$/,
@@ -53,6 +30,30 @@ export const CLOUD_DESKTOP_CONTROL_ROUTE = {
   path: /^\/api\/bots\/[\w-]+\/computer\/(?:control|screenshot|viewer-close)$/,
 } as const;
 
+/** A separate grant from the cloud desktop: a cloud desktop is a disposable VM,
+ * a bot's browser is normally signed into the person's real accounts. */
+export const BROWSER_LIVE_ROUTE = {
+  method: "GET",
+  path: /^\/api\/bots\/[\w-]+\/browser\/live$/,
+} as const;
+
+export const BROWSER_ACTION_ROUTE = {
+  method: "POST",
+  path: /^\/api\/bots\/[\w-]+\/browser\/action$/,
+} as const;
+
+/** The harness grants it only while a person holds that bot's computer. */
+export const LOCAL_VM_JOIN_ROUTE = {
+  method: "POST",
+  path: /^\/api\/bots\/[\w-]+\/local-computer\/join$/,
+} as const;
+
+/** A still of a bot's Local VM; its lifecycle stays on the host. */
+export const LOCAL_VM_SCREENSHOT_ROUTE = {
+  method: "POST",
+  path: /^\/api\/bots\/[\w-]+\/local-computer\/screenshot$/,
+} as const;
+
 export function isCloudDesktopJoin(method: string, path: string): boolean {
   return method === CLOUD_DESKTOP_JOIN_ROUTE.method && CLOUD_DESKTOP_JOIN_ROUTE.path.test(path);
 }
@@ -61,149 +62,200 @@ export function isMessageFileDownload(method: string, path: string): boolean {
   return method === MESSAGE_FILE_ROUTE.method && MESSAGE_FILE_ROUTE.path.test(path);
 }
 
+/** Needs the device's computer-access capability, not just a token. */
 export function isCloudDesktopAccess(method: string, path: string): boolean {
   return isCloudDesktopJoin(method, path)
-    || (method === CLOUD_DESKTOP_CONTROL_ROUTE.method && CLOUD_DESKTOP_CONTROL_ROUTE.path.test(path));
+    || (method === CLOUD_DESKTOP_CONTROL_ROUTE.method && CLOUD_DESKTOP_CONTROL_ROUTE.path.test(path))
+    || (method === LOCAL_VM_SCREENSHOT_ROUTE.method && LOCAL_VM_SCREENSHOT_ROUTE.path.test(path))
+    || (method === LOCAL_VM_JOIN_ROUTE.method && LOCAL_VM_JOIN_ROUTE.path.test(path));
 }
 
-/** Every request the iOS app makes, and nothing else.
- *
- * Ids are `[\w-]+`, matching the harness's own route patterns. The paths
- * arrive undecoded and are anchored at both ends, so an encoded traversal
- * fails to match and is denied rather than forwarded — the failure mode of
- * a strict pattern is a closed door, which is the one to have. */
+/** Watching and driving are one permission: seeing a logged-in session is
+ * already past the line. */
+export function isBrowserControlAccess(method: string, path: string): boolean {
+  return (method === BROWSER_LIVE_ROUTE.method && BROWSER_LIVE_ROUTE.path.test(path))
+    || (method === BROWSER_ACTION_ROUTE.method && BROWSER_ACTION_ROUTE.path.test(path));
+}
+
+/** Every request the iOS app makes, and nothing else. Paths arrive undecoded
+ * and are anchored at both ends, so an encoded traversal fails to match. */
 const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
-  // configured-or-not booleans. The write side is refused below: reading
-  // which providers are set up is not reading their keys.
+  // Configured-or-not booleans, never keys; the write side is refused below.
   { method: "GET", path: /^\/api\/config$/ },
   { method: "GET", path: /^\/api\/events$/ },
   { method: "GET", path: /^\/api\/instances$/ },
-  // Run Claude Code's own `claude update` on the host when a turn failed
-  // because it is too old for the model. A fixed command against the host's
-  // configured CLI; the harness refuses it while any Claude turn is running.
-  // Instance ids may carry dots, so a dots-only segment is refused outright.
+  // The harness refuses it while any Claude turn runs. Instance ids may carry
+  // dots, so a dots-only segment is refused outright.
   { method: "POST", path: /^\/api\/instances\/(?!\.+\/)[\w.-]+\/claude-update$/ },
   { method: "GET", path: /^\/api\/team-map$/ },
-  // Sidecar-owned, authenticated endpoint metadata. The proxy terminates it
-  // locally; it never becomes a newly exposed harness route.
+  // Sidecar-owned: the proxy answers it locally.
   { method: "GET", path: /^\/api\/companion\/endpoints$/ },
 
-  // the fleet, and making a bot
   { method: "GET", path: /^\/api\/bots$/ },
   { method: "POST", path: /^\/api\/bots$/ },
-  // One narrow, atomic organizer write. This can only file visible bots;
-  // unlike the desktop's broad PATCH it cannot alter execution policy.
+  { method: "PATCH", path: /^\/api\/bots\/[\w-]+$/ },
+  // The desktop's own delete. A paired phone can remove one bot it can see,
+  // including through a public tunnel. The harness still refuses the default bot.
+  { method: "DELETE", path: /^\/api\/bots\/[\w-]+$/ },
+  // Display order only; the harness accepts just the bots the device can see.
+  { method: "PUT", path: /^\/api\/bots\/order$/ },
+  // Can only file visible bots; cannot alter execution policy.
   { method: "POST", path: /^\/api\/sidebar-sections$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages$/ },
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/cards\/[\w-]+$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/respond$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/interrupt$/ },
   { method: "DELETE", path: /^\/api\/bots\/[\w-]+\/queue\/[\w-]+$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/queue\/[\w-]+\/steer$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/read$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/always-allow$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages\/[\w-]+\/edit$/ },
-  // A credential value crosses this one route only as an HPKE envelope. The
-  // server binds it to the authenticated device and exact pending card before
-  // Electron opens it into the OS-encrypted credential store.
+  // A credential value crosses only as an HPKE envelope, bound to the
+  // authenticated device and the exact pending card.
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/provide$/ },
+  // A typed custom secret: the harness checks thread visibility and that only
+  // the conversation's own person may answer it.
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/save$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/compact$/ },
+  // Set me up under a new bot's greeting and the x on its chip: no more than a typed /setup.
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/setup-request$/ },
+  { method: "DELETE", path: /^\/api\/bots\/[\w-]+\/setup-request$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
   { method: "DELETE", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
-  // Read-only summary: who the bot is, what it does and won't do, and its
-  // recent activity. No settings, no transcript — read on open and on
-  // pull-to-refresh.
+  // Read-only: no settings, no transcript.
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/overview$/ },
-  // Paired-safe profile subset. The harness route itself rejects fields
-  // outside identity, standing instructions (soul, byte-capped), avatar,
-  // notifications, and voice preferences.
+  // Read-only: no settings reachable through it.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/activity$/ },
+  // Names and on/off only. The MCP settings list, which carries commands and
+  // addresses, stays closed.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/mcp-servers$/ },
+  // The bot's Data, read-only: the sheet and tables, a page of rows (a POST
+  // only for its body), a chart card's picture. Running SQL stays on the host.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/data$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/data\/page$/ },
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/data\/cards\/c_\d+\/image$/ },
+  // Team memory edits are content, not execution policy. The section rides as
+  // a query string.
+  { method: "GET", path: /^\/api\/team-memory$/ },
+  { method: "POST", path: /^\/api\/team-memory$/ },
+  { method: "PATCH", path: /^\/api\/team-memory\/[\w-]+$/ },
+  { method: "DELETE", path: /^\/api\/team-memory\/[\w-]+$/ },
+  // The harness rejects fields outside identity, soul (byte-capped), avatar,
+  // notifications and voice preferences.
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/profile$/ },
-  // Full model selection, but no other bot settings. The harness validates
-  // the live catalog and refuses changes while the bot is working.
+  // The harness validates the live catalog and refuses changes mid-turn.
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/model$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/avatar\/generate$/ },
-  // Full cloud desktop access. The route is narrow and the proxy applies a
-  // second, per-device capability check before it reaches the harness.
+  // The proxy applies a second, per-device capability check.
   CLOUD_DESKTOP_JOIN_ROUTE,
 
   CLOUD_DESKTOP_CONTROL_ROUTE,
-  // rooms — making one, and talking in one
+  // Behind a second per-device capability check in the proxy.
+  BROWSER_LIVE_ROUTE,
+  BROWSER_ACTION_ROUTE,
+  // Behind the computer-access capability, like the cloud desktop.
+  LOCAL_VM_SCREENSHOT_ROUTE,
+  // Behind the same capability, while a person holds the computer.
+  LOCAL_VM_JOIN_ROUTE,
   { method: "POST", path: /^\/api\/groups$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/messages$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/interrupt$/ },
   { method: "DELETE", path: /^\/api\/groups\/[\w-]+\/queue\/[\w-]+$/ },
+  { method: "POST", path: /^\/api\/groups\/[\w-]+\/queue\/[\w-]+\/steer$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/read$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/tasks$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/tasks\/[\w-]+$/ },
   { method: "PATCH", path: /^\/api\/groups\/[\w-]+\/tasks\/[\w-]+$/ },
   { method: "DELETE", path: /^\/api\/groups\/[\w-]+\/tasks\/[\w-]+$/ },
 
-  // a transcript, its images, and answering an approval
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
+  { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/tool$/ },
+  // An app row's document is transcript data, scoped to its thread. `rpc` reaches only the app's own MCP
+  // server, under the bot's tool selection and approval rules; `context` is bounded text.
+  { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/app(?:\/download)?$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/apps\/[\w-]+\/rpc$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/apps\/[\w-]+\/context$/ },
   MESSAGE_FILE_ROUTE,
   { method: "POST", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/reactions$/ },
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/export$/ },
   { method: "POST", path: /^\/api\/threads\/[\w-]+\/respond$/ },
   { method: "GET", path: /^\/api\/search$/ },
 
-  // App-owned profile images. Upload is image-only and capped at 10 MB by
-  // the harness; GET is a single bare generated filename, never a path.
+  // Upload is image-only and capped by the harness; GET is a single generated
+  // filename, never a path.
   { method: "POST", path: /^\/api\/attachments$/ },
-  // Voice notes are served from the same dir as .mp3; the harness honors
-  // Range on them so a phone player can seek without the whole clip.
-  { method: "GET", path: /^\/api\/attachments\/[\w-]+\.(?:png|jpe?g|gif|webp|mp3)$/i },
-  // Share-sheet documents are raw, capped at 25 MiB, and stored under a
-  // generated filename by the harness. The display name stays in the query;
-  // only this exact upload route crosses the companion boundary.
+  // The harness honors Range on voice notes so a phone player can seek.
+  { method: "GET", path: /^\/api\/attachments\/[\w-]+\.(?:png|jpe?g|gif|webp|mp3|wav)$/i },
+  // Raw upload, capped and stored under a generated filename by the harness.
   { method: "POST", path: /^\/api\/files$/ },
 
-  // Renderer-neutral voice operations. These routes never expose or mutate
-  // the workspace ElevenLabs key; the client receives labels or audio only.
+  // Never expose or mutate the workspace ElevenLabs key.
   { method: "GET", path: /^\/api\/tts\/voices$/ },
   { method: "POST", path: /^\/api\/tts\/prepare$/ },
   { method: "POST", path: /^\/api\/tts\/speak$/ },
 
-  // Routines create ordinary tasks using an existing agent configuration.
-  // Webhook management remains explicitly denied below.
+  // The phone holds its own WebRTC audio; the Mac creates the session, so the
+  // key never leaves it.
+  { method: "POST", path: /^\/api\/live\/session$/ },
+  { method: "POST", path: /^\/api\/live\/call\/end$/ },
+  { method: "GET", path: /^\/api\/live\/call$/ },
+  { method: "PATCH", path: /^\/api\/live\/settings$/ },
+
+  // The phone's own apps as bot tools: it registers, long-polls for jobs, leases and answers them.
+  { method: "PUT", path: /^\/api\/phones\/self$/ },
+  { method: "GET", path: /^\/api\/phones\/self$/ },
+  { method: "DELETE", path: /^\/api\/phones\/self$/ },
+  { method: "GET", path: /^\/api\/phones\/self\/jobs$/ },
+  { method: "POST", path: /^\/api\/phones\/self\/jobs\/[\w-]+\/(?:lease|result)$/ },
+
+  // The harness records only the owner's activation; a guest's is answered and
+  // dropped.
+  { method: "POST", path: /^\/api\/presence\/active$/ },
+
+  // Webhook management stays denied below.
   { method: "GET", path: /^\/api\/routines$/ },
   { method: "POST", path: /^\/api\/routines$/ },
   { method: "PATCH", path: /^\/api\/routines\/[\w-]+$/ },
   { method: "DELETE", path: /^\/api\/routines\/[\w-]+$/ },
   { method: "POST", path: /^\/api\/routines\/[\w-]+\/run$/ },
   { method: "POST", path: /^\/api\/routine-runs\/[\w-]+\/(?:cancel|seen)$/ },
+  // The stopped turn's "Continue when your limit resets": a one-time automation in an existing
+  // conversation, less than POST /api/routines already allows.
+  { method: "POST", path: /^\/api\/limit-resets\/continue$/ },
 
-  // Multi-account Composio management exposes opaque ids and aliases only.
-  // Account-level removal is allowed: the handler still proves the account
-  // belongs to the host's own user before revoking, and a paired client can
-  // already add accounts — connectable but not disconnectable is the bug
-  // being fixed here. The whole-service DELETE stays denied: it belongs to
-  // the host.
+  // Opaque ids and aliases only. Account removal is allowed (the handler proves
+  // ownership first); the whole-service DELETE stays with the host.
   { method: "GET", path: /^\/api\/connectors\/catalog$/ },
   { method: "GET", path: /^\/api\/connectors\/connected$/ },
   { method: "GET", path: /^\/api\/connectors$/ },
   { method: "POST", path: /^\/api\/connectors\/[\w-]+\/authorize$/ },
   { method: "DELETE", path: /^\/api\/connectors\/[\w-]+\/accounts\/[\w-]+$/ },
-  // Inline connector cards are scoped by bot, transcript message, and
-  // thread. They expose the same opaque OAuth authorization already allowed
-  // above, then only poll, resume, or dismiss that exact pending card.
+  // Scoped to one pending card: poll, resume or dismiss it.
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/status$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/(?:authorize|resume|dismiss)$/ },
-  // A remote client may decline or retry a credential request, but never
-  // claim that it stored a host credential. Saving and `provided` stay local
-  // to the host's OS-backed credential store.
+  // Decline or retry only: a remote client never claims it stored a host
+  // credential.
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/(?:resume|dismiss)$/ },
+  // Nothing secret crosses this route, only "done" or "cancel".
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/sign-in-cards\/[\w-]+\/(?:done|cancel)$/ },
 ];
 
-/** Route families worth naming in the refusal.
- *
- * Everything not allowed is denied either way; this only decides whether the
- * person gets a sentence or a 404. These are the ones someone might
- * reasonably expect to work from the phone, where "no route" would read as a
- * bug in the companion rather than a decision about where host configuration
- * happens. Order matters only in that the first match wins. */
+/** Sent by the companion itself, never a device: not in ALLOWED, so a phone is
+ * refused, and the harness accepts them only with the relay token or from
+ * loopback. `device-revoked` ends the Live call an unpaired phone holds. */
+const COMPANION_NOTICES: ReadonlyArray<{ method: string; path: RegExp }> = [
+  { method: "POST", path: /^\/api\/live\/device-revoked$/ },
+];
+
+export function isCompanionNotice(method: string, path: string): boolean {
+  return COMPANION_NOTICES.some((route) => route.method === method && route.path.test(path));
+}
+
+/** Denied either way; these get a sentence instead of a 404. First match wins. */
 const EXPLAINED: ReadonlyArray<{ path: RegExp; error: string }> = [
   {
     path: /^\/api\/(companion|devices)(\/|$)/,
@@ -213,9 +265,7 @@ const EXPLAINED: ReadonlyArray<{ path: RegExp; error: string }> = [
   { path: /^\/api\/config$/, error: "API keys can only be changed on your computer" },
   { path: /^\/api\/local-computer(\/|$)/, error: "the Local VM is set up on your computer" },
   {
-    // Creating one exposes an endpoint to the internet, and rotating a
-    // secret breaks whatever was sending to it. Neither belongs on a device
-    // that lives in a pocket.
+    // Creating one exposes an endpoint to the internet.
     path: /^\/api\/webhooks(\/|$)/,
     error: "webhooks are set up on your computer",
   },
@@ -227,19 +277,13 @@ const EXPLAINED: ReadonlyArray<{ path: RegExp; error: string }> = [
   { path: /^\/api\/teams(\/|$)/, error: "teams are imported and exported on your computer" },
 ];
 
-/** Why this request may not go through, or null when it may.
- *
- * Default deny: the answer for anything not on the list is "no route", which
- * is what keeps a stolen token from mapping the API. An allowlist rather than
- * a blocklist is the property this whole module exists for, and the one that
- * quietly stopped being true once before. */
+/** Default deny: anything not listed is "no route", so a stolen token cannot
+ * map the API. */
 export function denyReason({ path, method, authenticated }: RouteRequest): Denial | null {
   // Pairing is the one thing a device does before it has a credential.
   if (method === "POST" && path === "/api/pair") return null;
-  // Liveness is the other: it exists to be the first thing anyone curls when
-  // pairing will not work, and behind the token check it answered 401 to
-  // exactly the person it was for — which reads as "broken" rather than
-  // "unpaired". It discloses nothing a port scan would not.
+  // Liveness is open too: the first thing anyone curls when pairing fails, and
+  // it discloses nothing a port scan would not.
   if (method === "GET" && path === "/api/health") return null;
 
   if (!authenticated) {
@@ -251,10 +295,7 @@ export function denyReason({ path, method, authenticated }: RouteRequest): Denia
   const explained = EXPLAINED.find((family) => family.path.test(path));
   if (explained) return { status: 403, error: explained.error };
 
-  // Everything else, including routes the harness really does have. Saying
-  // "no route" rather than "not allowed" keeps the sidecar from enumerating
-  // the API to anyone holding a stolen token — and it is what the peer-agent
-  // endpoints under /api/internal/ always got, since off this machine they
-  // genuinely do not exist.
+  // "No route" rather than "not allowed", so a stolen token cannot enumerate
+  // the API.
   return { status: 404, error: `no route: ${method} ${path}` };
 }

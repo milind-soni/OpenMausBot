@@ -11,19 +11,14 @@ const PROVIDERS = new Set(["anthropic", "openai", "openrouter"]);
 const ENGINE = /^[A-Za-z][A-Za-z0-9-]{0,63}$/;
 const APP_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/;
 const COMPUTERS = ["thisComputer", "localVm", "box", "vps"];
-// Renew on start and whenever fewer than seven days remain; retry hourly.
 const RENEW_WINDOW_MS = 7 * 86400_000, RENEW_RETRY_MS = 60 * 60_000;
-// An unanswered config read (offline at start) is retried this often, for the library capability only.
 const LIBRARY_PROBE_MS = 10 * 60_000;
 export const LICENSE_EXPIRED_CODE = "admin_license_expired";
-// Reject control characters in portal-supplied labels and identities.
 // oxlint-disable-next-line no-control-regex
 const safeText = (value, max) => typeof value === "string" && value.length > 0 && value.length <= max && !/[\x00-\x1f\x7f]/.test(value);
 const licenseExpired = error => error?.status === 503 && error?.apiCode === LICENSE_EXPIRED_CODE;
 
-/** The organisation's desktop policy from GET /api/desktop/session. Unknown
- * fields are ignored so a newer Admin stays compatible; a malformed known
- * field rejects the whole object rather than applying half of it. */
+/** Unknown fields are ignored so a newer Admin stays compatible; a malformed known field rejects the whole object. */
 export function parseDesktopPolicy(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const { version, companyModelsOnly, allowedEngines, mcp, computers, remoteAccess } = value;
@@ -56,11 +51,9 @@ export function createManagedDesktopRelay({ timeoutMs = 15_000 } = {}) {
       if (!proc) return connection ? Promise.reject(new Error("The local bot runtime is not available.")) : Promise.resolve();
       return post(proc, { type: "openmausbot:managed-desktop", connection });
     },
-    /** The runtime has no policy until it starts; its ready hook refreshes. */
     sendPolicy(proc, policy) {
       return proc ? post(proc, { type: "openmausbot:managed-desktop-policy", policy }) : Promise.resolve();
     },
-    /** A saved enrollment's identity (no token) so its old ids can migrate. */
     sendIdentity(proc, identity) {
       return proc ? post(proc, { type: "openmausbot:managed-desktop-identity", identity }) : Promise.resolve();
     },
@@ -70,8 +63,6 @@ export function createManagedDesktopRelay({ timeoutMs = 15_000 } = {}) {
       if (pending.get(message.requestId)?.proc === proc && typeof message.ok === "boolean") settle(message.requestId, !message.ok);
       return true;
     },
-    /** The organization library (org-library.mjs), or null to hide the shelf.
-     * The runtime acks before any install work; no runtime means not delivered. */
     sendLibrary(proc, library) {
       if (!proc) return library ? Promise.reject(new Error("The local bot runtime is not available.")) : Promise.resolve();
       return post(proc, { type: "openmausbot:managed-library", library });
@@ -88,8 +79,35 @@ export function managedPortalOrigin(value) {
   return url.origin;
 }
 
-/** A separate OS-encrypted record; never copy company tokens into config.json,
- * backups, renderer storage, environment variables or personal CLI homes. */
+/** Electron 43's safeStorage.decryptStringAsync resolves to { shouldReEncrypt, result }; test fakes resolve to the string. */
+export function decryptedText(decrypted) {
+  return typeof decrypted === "string" ? decrypted : decrypted?.result;
+}
+
+/** Never readable: not a small regular file, a key that no longer opens it (Windows reinstall), or not JSON. A locked keychain is never this. */
+export const unreadableRecord = error => error?.code === "unreadable_record";
+const unreadable = message => Object.assign(new Error(message), { code: "unreadable_record" });
+export const retryDelay = attempt => [15_000, 30_000, 60_000][Math.min(attempt, 3) - 1];
+
+export const MANAGED_TEXT = Object.freeze({
+  clearFailed: "The saved company sign-in could not be cleared. Unlock your system keychain and Disconnect again before reconnecting.",
+  disconnected: "Disconnected on this computer.",
+  runtimeRunning: "The local runtime did not confirm stopping Company tasks. Quit and reopen OpenMausBot before using Company models again.",
+  portalUnreachable: "The portal was unreachable; ask your administrator to revoke this device there too.",
+  confirmStopped: "Quit and reopen OpenMausBot to confirm Company tasks have stopped.",
+  expired: "Your company sign-in expired. Reconnect to continue using company models and backups.",
+  accessEnded: "Company access ended or needs a new sign-in. Your personal and local providers are unchanged.",
+  retrying: "Can't reach the Admin portal or apply company models. Personal and local providers are still available. We'll retry shortly.",
+  codeExpired: "The sign-in code expired. Start again.",
+  denied: "Sign-in was denied, expired or already used. Start again on this computer.",
+  completeFailed: "Could not complete sign-in. Check your Admin address and start again.",
+  removed: "This computer's company sign-in couldn't be read, so it was removed. Sign in again.",
+  restoreFailed: "The saved company sign-in can't be read right now. OpenMausBot tries again every minute.",
+  startFailed: "Could not start company sign-in. Check the Admin portal address and your connection.",
+});
+const said = (...codes) => ({ message: codes.map(code => MANAGED_TEXT[code]).join(" "), messageCodes: codes });
+
+/** OS-encrypted; company tokens never go into config.json, backups, renderer storage, environment variables or CLI homes. */
 export function createManagedDesktopStore({ file, encryption }) {
   let tail = Promise.resolve();
   const available = async () => {
@@ -101,16 +119,24 @@ export function createManagedDesktopStore({ file, encryption }) {
       try {
         handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
         const stat = await handle.stat();
-        if (!stat.isFile() || stat.size > 64 * 1024) throw new Error("Invalid company connection record.");
+        if (!stat.isFile() || stat.size > 64 * 1024) throw unreadable("Invalid company connection record.");
         await available();
-        return JSON.parse(await encryption.decrypt(await handle.readFile()));
-      } catch (error) { if (error?.code === "ENOENT") return null; throw new Error("Your company connection could not be read. Unlock your system keychain and try again."); }
+        const encrypted = await handle.readFile();
+        let text;
+        try { text = decryptedText(await encryption.decrypt(encrypted)); } catch { throw unreadable("This computer can no longer decrypt the record."); }
+        // Not unreadable(): an unknown decrypt shape is this app's mistake, and the record must not be removed.
+        if (typeof text !== "string") throw new Error("Unexpected decrypt result.");
+        try { return JSON.parse(text); } catch { throw unreadable("The record is not JSON."); }
+      } catch (error) {
+        if (error?.code === "ENOENT") return null;
+        throw Object.assign(new Error("Your company connection could not be read. Unlock your system keychain and try again."),
+          unreadableRecord(error) ? { code: error.code } : {});
+      }
       finally { await handle?.close(); }
     },
     write(value) {
       const operation = tail.catch(() => {}).then(async () => {
-        // Forgetting a capability must work even while the keychain is locked.
-        // This exact owned file is removed in the same queue as pending writes.
+        // Forgetting must work while the keychain is locked; the file is removed in the same queue as pending writes.
         if (value === null) {
           try { await fs.unlink(file); } catch (error) { if (error?.code !== "ENOENT") throw error; }
           return;
@@ -133,20 +159,14 @@ export function createManagedDesktopStore({ file, encryption }) {
 
 export function createManagedDesktopClient({ store, applyConnection, applyPolicy = async () => {}, migrateIdentity = async () => {}, openBrowser, platform, deviceName, appVersion,
   fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {}, library = null }) {
-  // Resolves once the saved enrollment (and its policy) has been read.
   let markRestored;
   const restored = new Promise(resolve => { markRestored = resolve; });
   let grant = null, connection = null, pending = null, state = { status: "signed-out" };
-  // Renewal is additive: only an Admin advertising deviceRenewal is asked.
   let renewalCheckedFor = null, lastRenewAttempt = 0, renewalSupported = false, reportedPolicyVersion = null;
-  // Revocation or expiry lifts the policy with company access, even though the
-  // saved grant stays until the person disconnects.
-  let policyLifted = false;
-  let issuedGrant = null, cleanupGrant = null, cleanupNeeded = false, clearing = null;
+  let policyLifted = false, policyRead = false;
+  let issuedGrant = null, cleanupGrant = null, cleanupNeeded = false, clearing = null, restoreFailures = 0;
   let generation = 0, timer = null, closed = false, controller = new AbortController(), refreshing = null;
   let branding = parseOrganizationBranding(null);
-  // capabilities.library, from the config renew() reads once per start. Until
-  // an answer for this device arrives it is unknown, and nothing is fetched.
   let libraryCapableFor = null, libraryCapable = false, lastLibraryProbe = -Infinity;
   const snapshot = () => structuredClone(state);
   const publish = (next) => { state = next; onState(snapshot()); return snapshot(); };
@@ -157,7 +177,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
   };
   const reset = () => { generation++; stopTimer(); controller.abort(); controller = new AbortController(); pending = null; return generation; };
   const current = stamp => !closed && stamp === generation;
-  const view = (status, message) => ({ status, ...(message ? { message } : {}), ...(connection ? {
+  const view = (status, ...codes) => ({ status, ...(codes.length ? said(...codes) : {}), ...(connection ? {
     organization: { id: connection.organizationId, name: connection.organizationName }, email: connection.email,
     deviceId: connection.deviceId, expiresAt: connection.expiresAt,
     branding,
@@ -186,8 +206,6 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
       code: typeof data?.error === "string" ? data.error : "request_failed", apiCode: typeof data?.code === "string" ? data.code : undefined, interval: data?.interval });
     return data;
   }
-  /** Raw bytes from a fixed library route, under that route's own cap and
-   * timeout (never the 512 KiB session cap above, which stays as it is). */
   async function requestBytes(origin, route, { method, body, token, maxBytes, timeoutMs }) {
     const response = await fetcher(`${origin}${route}`, {
       method, redirect: "error", credentials: "omit", cache: "no-store",
@@ -208,7 +226,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     finally { reader?.releaseLock(); }
     if (!response.ok) {
       let data;
-      try { data = overflow ? undefined : JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { /* not JSON */ }
+      try { data = overflow ? undefined : JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch {}
       const retryAfter = Number(response.headers.get("retry-after") ?? NaN);
       throw Object.assign(new Error("The Admin portal could not complete this request."), { status: response.status,
         apiCode: typeof data?.code === "string" ? data.code : undefined, ...(Number.isFinite(retryAfter) && retryAfter >= 0 ? { retryAfter } : {}) });
@@ -219,8 +237,6 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
   const validateGrant = value => {
     if (!value || managedPortalOrigin(value.portalOrigin) !== value.portalOrigin || !TOKEN.test(value.token) || !UUID.test(value.deviceId) ||
         !UUID.test(value.organizationId) || !safeText(value.email, 320) || !Number.isSafeInteger(value.expiresAt)) throw new Error("Invalid company connection.");
-    // The last applied policy is kept with the OS-encrypted grant so it still
-    // holds after an offline restart, until this credential expires.
     const policy = parseDesktopPolicy(value.policy), organizationName = value.policy?.organizationName;
     return { portalOrigin: value.portalOrigin, token: value.token, deviceId: value.deviceId, organizationId: value.organizationId, email: value.email, expiresAt: value.expiresAt,
       ...(policy && safeText(organizationName, 100) ? { policy: { ...policy, organizationName } } : {}) };
@@ -229,14 +245,11 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
   const policyMessage = value => value?.policy && value.expiresAt > now()
     ? { ...value.policy, organizationId: value.organizationId, expiresAt: value.expiresAt } : null;
   const sendPolicy = value => Promise.resolve().then(() => applyPolicy(policyMessage(value))).catch(() => {});
-  /** Lets the runtime move references to this enrollment's old device-scoped
-   * ids before the grant is cleared or after it expired. Never the token. */
+  /** Identity only, never the token. */
   const sendIdentity = value => value ? Promise.resolve().then(() => migrateIdentity({ portalOrigin: value.portalOrigin, organizationId: value.organizationId, email: value.email, deviceId: value.deviceId })).catch(() => {}) : Promise.resolve();
   const report = () => ({ platform, ...(typeof appVersion === "string" && APP_VERSION.test(appVersion) ? { appVersion } : {}),
     ...(grant?.policy ? { policyVersion: grant.policy.version } : {}) });
-  /** Persist a newer grant (renewal, adopted expiry, new policy) before using
-   * it. A rotated token is adopted only once it is safely stored: otherwise a
-   * restart would come back with a token the portal may no longer accept. */
+  /** A rotated token is adopted only once stored, or a restart would come back with a token the portal may reject. */
   const replaceGrant = async (stamp, previous, next) => {
     let persisted = true;
     try { await store.write(next); } catch { persisted = false; }
@@ -248,14 +261,11 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     libraryCapableFor = enrolled.deviceId; libraryCapable = libraryCapability(info);
     return info;
   };
-  /** The organization library hooks (org-library.mjs) run beside company
-   * access and never hold it up: a failure there changes nothing here. */
   const libraryIdentity = value => ({ portalOrigin: value.portalOrigin, organizationId: value.organizationId, deviceId: value.deviceId, expiresAt: value.expiresAt });
   const notifyLibrary = call => {
     if (!library) return;
-    try { void Promise.resolve(call(library)).catch(() => {}); } catch { /* ignored: see above */ }
+    try { void Promise.resolve(call(library)).catch(() => {}); } catch {}
   };
-  /** After a successful session sync: the pointer, but only for an Admin that advertises the library. */
   async function synchronizeLibrary(stamp, enrolled, pointer) {
     if (libraryCapableFor !== enrolled.deviceId && now() - lastLibraryProbe >= LIBRARY_PROBE_MS) {
       lastLibraryProbe = now();
@@ -269,7 +279,6 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     try {
       await request(previous.portalOrigin, "/api/desktop/session", { method: "DELETE", body: {}, token: previous.token, signal: AbortSignal.timeout(20_000) });
     } catch (error) {
-      // An expired or already revoked device is no longer usable either.
       if (error?.status !== 401) throw error;
     }
   };
@@ -281,8 +290,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     notifyLibrary(target => target.clear());
     const operation = (async () => {
       await sendIdentity(previous);
-      // These are independent cleanup obligations. A stopped/unresponsive
-      // runtime must not prevent durable sign-out or portal revocation.
+      // Independent obligations: a stopped runtime must not prevent durable sign-out or portal revocation.
       const [runtime, persisted, revoked] = await Promise.allSettled([
         Promise.resolve().then(() => Promise.all([applyConnection(null), Promise.resolve().then(() => applyPolicy(null)).catch(() => {})])),
         Promise.resolve().then(() => store.write(null)),
@@ -291,28 +299,24 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
       if (persisted.status === "fulfilled") { cleanupGrant = null; cleanupNeeded = false; }
       if (!current(stamp)) return snapshot();
       const warnings = [];
-      if (runtime.status === "rejected") warnings.push("The local runtime did not confirm stopping Company tasks. Quit and reopen OpenMausBot before using Company models again.");
-      if (revoked.status === "rejected") warnings.push("The portal was unreachable; ask your administrator to revoke this device there too.");
-      if (persisted.status === "rejected") return publish({ status: "unavailable", message: [
-        "The saved company sign-in could not be cleared. Unlock your system keychain and Disconnect again before reconnecting.", ...warnings,
-      ].join(" ") });
-      return publish({ status: "signed-out", ...(warnings.length ? { message: ["Disconnected on this computer.", ...warnings].join(" ") } : {}) });
+      if (runtime.status === "rejected") warnings.push("runtimeRunning");
+      if (revoked.status === "rejected") warnings.push("portalUnreachable");
+      if (persisted.status === "rejected") return publish({ status: "unavailable", ...said("clearFailed", ...warnings) });
+      return publish({ status: "signed-out", ...(warnings.length ? said("disconnected", ...warnings) : {}) });
     })().finally(() => { if (clearing === operation) clearing = null; });
     clearing = operation;
     return operation;
   }
-  async function endAccess(stamp, message) {
+  async function endAccess(stamp, code) {
+    const codes = [code];
     connection = null; policyLifted = true;
     notifyLibrary(target => target.clear());
     await sendIdentity(grant);
     await Promise.resolve().then(() => applyPolicy(null)).catch(() => {});
     try { await applyConnection(null); }
-    catch { message += " Quit and reopen OpenMausBot to confirm Company tasks have stopped."; }
-    return current(stamp) ? publish({ status: "reauth-required", message }) : snapshot();
+    catch { codes.push("confirmStopped"); }
+    return current(stamp) ? publish({ status: "reauth-required", ...said(...codes) }) : snapshot();
   }
-  /** Renew once per start and when fewer than seven days remain, only when
-   * the Admin advertises it. Same deviceId; a rotated token is stored
-   * OS-encrypted before use. Any failure leaves the current grant in place. */
   async function renew(stamp) {
     const enrolled = grant;
     const due = renewalCheckedFor !== enrolled.deviceId || (enrolled.expiresAt - now() < RENEW_WINDOW_MS && now() - lastRenewAttempt >= RENEW_RETRY_MS);
@@ -334,10 +338,9 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
   async function synchronize(stamp) {
     if (!grant || !current(stamp)) return snapshot();
     if (grant.expiresAt <= now()) {
-      return endAccess(stamp, "Your company sign-in expired. Reconnect to continue using company models and backups.");
+      return endAccess(stamp, "expired");
     }
-    // A restarted runtime has no policy: restore the saved one before any
-    // network call, which can take a while.
+    // A restarted runtime has no policy: restore the saved one before any network call.
     if (grant.policy && !policyLifted) await sendPolicy(grant);
     if (!current(stamp)) return snapshot();
     try {
@@ -345,7 +348,6 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
       if (!grant || !current(stamp)) return snapshot();
       const result = await request(grant.portalOrigin, "/api/desktop/session", { token: grant.token });
       if (!current(stamp)) return snapshot();
-      // A later expiry than ours means a renewal we did not get to save.
       if (result.desktopContractVersion !== 1 || !/^omg_[A-Za-z0-9_-]{43}$/.test(result.modelAccessToken) || result.device?.id !== grant.deviceId || result.device?.organizationId !== grant.organizationId ||
           result.device?.email !== grant.email || result.organization?.id !== grant.organizationId || !safeText(result.organization?.name, 100) ||
           result.device?.revokedAt !== null || !Number.isSafeInteger(result.device?.expiresAt) || result.device.expiresAt < grant.expiresAt || !Array.isArray(result.providers) || result.providers.length > 3 ||
@@ -353,8 +355,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
             !Array.isArray(row.models) || row.models.length > 500 || row.models.some(model => typeof model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,199}$/.test(model) || model.includes("::")))) {
         throw Object.assign(new Error("Company connection identity could not be verified."), { status: 401 });
       }
-      // An Admin without policies sends none: nothing is restricted. A policy
-      // that does not parse keeps the last one applied instead of widening.
+      // A policy that does not parse keeps the last one applied instead of widening.
       const policy = result.policy === undefined ? null : parseDesktopPolicy(result.policy) ?? grant.policy ?? null;
       const known = policy ? { ...policy, organizationName: result.organization.name } : undefined;
       if (result.device.expiresAt !== grant.expiresAt || JSON.stringify(known) !== JSON.stringify(grant.policy)) {
@@ -373,7 +374,6 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
       branding = parseOrganizationBranding(result.branding);
       publish({ ...view("connected"), cloudBackups: Boolean(result.cloudBackups) });
       if (library) void synchronizeLibrary(stamp, grant, result.library).catch(() => {});
-      // Tell Admin promptly which policy this desktop now applies.
       if (renewalSupported && grant.policy && reportedPolicyVersion !== grant.policy.version) {
         const reported = grant.policy.version, enrolled = grant;
         void request(enrolled.portalOrigin, "/api/desktop/heartbeat", { method: "POST", body: report(), token: enrolled.token })
@@ -382,9 +382,6 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     } catch (error) {
       if (!current(stamp)) return snapshot();
       if (licenseExpired(error)) {
-        // The operator's licence lapsed: not a revocation and not a reason to
-        // sign in again. Company models stay listed but unavailable; the last
-        // policy still holds; the heartbeat keeps checking for the renewal.
         if (connection && connection.expiresAt > now()) {
           connection = { ...connection, suspended: "license-expired" };
           await applyConnection(connection).catch(() => {});
@@ -393,15 +390,12 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
         if (!current(stamp)) return snapshot();
         publish(view("license-expired"));
       } else if ([401, 403].includes(error?.status)) {
-        return endAccess(stamp, "Company access ended or needs a new sign-in. Your personal and local providers are unchanged.");
+        return endAccess(stamp, "accessEnded");
       } else {
-        // The portal is unreachable, not revoking. A server process that restarted
-        // meanwhile has an empty overlay, so re-apply the cached, unexpired grant
-        // rather than leaving Company models missing until the next heartbeat.
         if (connection && connection.expiresAt > now()) await applyConnection(connection).catch(() => {});
         await sendPolicy(grant);
         if (!current(stamp)) return snapshot();
-        publish(view("unavailable", "Can't reach the Admin portal or apply company models. Personal and local providers are still available. We'll retry shortly."));
+        publish(view("unavailable", "retrying"));
       }
     }
     if (current(stamp)) schedule(() => refresh(), Math.max(1000, Math.min(60_000, grant.expiresAt - now())));
@@ -420,14 +414,13 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     if (!attempt || !current(stamp)) return;
     if (attempt.expiresAt <= now()) {
       pending = null;
-      return publish({ status: "signed-out", message: "The sign-in code expired. Start again." });
+      return publish({ status: "signed-out", ...said("codeExpired") });
     }
     try {
       const result = await request(attempt.portalOrigin, "/api/desktop/enrollment/token", { method: "POST", body: { deviceCode: attempt.deviceCode } });
       const next = validateGrant({ portalOrigin: attempt.portalOrigin, token: result.accessToken, expiresAt: result.expiresAt,
         deviceId: result.device?.id, organizationId: result.device?.organizationId, email: result.device?.email });
-      // If cancellation raced a consumed response, dispose of the exact new
-      // capability without ever persisting or applying it to a newer attempt.
+      // Cancellation raced a consumed response: revoke the new capability without persisting or applying it.
       if (!current(stamp)) { await revokeGrant(next).catch(() => {}); return; }
       if (next.expiresAt <= now()) throw new Error("Expired company connection.");
       issuedGrant = next;
@@ -439,32 +432,47 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
       if (!current(stamp)) return;
       if (issuedGrant) return clearConnection();
       if (error?.code === "slow_down" && Number.isSafeInteger(error.interval)) attempt.interval = Math.max(attempt.interval + 5000, Math.min(60_000, error.interval * 1000));
-      else if (error?.code === "authorization_pending") { /* Keep the browser consent screen open. */ }
+      else if (error?.code === "authorization_pending") {}
       else if (["access_denied", "expired_token", "invalid_grant"].includes(error?.code)) {
         pending = null;
-        return publish({ status: "signed-out", message: "Sign-in was denied, expired or already used. Start again on this computer." });
+        return publish({ status: "signed-out", ...said("denied") });
       } else if (error?.status && error.status !== 429) {
         pending = null;
-        return publish({ status: "signed-out", message: "Could not complete sign-in. Check your Admin address and start again." });
+        return publish({ status: "signed-out", ...said("completeFailed") });
       }
       schedule(poll, attempt.interval);
     }
   }
+  /** A record that may only be locked in the keychain is kept, never removed, and read again shortly. */
+  async function restoreFailed(stamp, unreadable) {
+    if (unreadable) {
+      const removed = await store.write(null).then(() => true, () => false);
+      if (!current(stamp)) return snapshot();
+      if (removed) { restoreFailures = 0; return publish({ status: "signed-out", ...said("removed") }); }
+    }
+    restoreFailures++;
+    if (state.message !== MANAGED_TEXT.restoreFailed) publish({ status: "unavailable", ...said("restoreFailed") });
+    schedule(start, retryDelay(restoreFailures));
+    return snapshot();
+  }
+  async function start() {
+    const stamp = generation;
+    let saved, failed = false, unreadable = false;
+    try { saved = await store.read(); } catch (error) { failed = true; unreadable = unreadableRecord(error); }
+    if (!failed && current(stamp)) try { grant = saved ? validateGrant(saved) : null; } catch { failed = unreadable = true; }
+    if (!current(stamp) || failed) { markRestored(); return current(stamp) ? restoreFailed(stamp, unreadable) : snapshot(); }
+    restoreFailures = 0;
+    // Restore the last policy before any network call.
+    if (grant?.policy && grant.expiresAt > now()) await sendPolicy(grant);
+    if (library && grant && grant.expiresAt > now()) await Promise.resolve().then(() => library.restore(libraryIdentity(grant))).catch(() => {});
+    policyRead = true;
+    markRestored();
+    await sendIdentity(grant);
+    return refresh();
+  }
   return {
     state: snapshot,
-    async start() {
-      const stamp = generation;
-      try { const saved = await store.read(); if (!current(stamp)) { markRestored(); return snapshot(); } grant = saved ? validateGrant(saved) : null; }
-      catch { markRestored(); return current(stamp) ? publish({ status: "unavailable", message: "Company sign-in could not be restored. Unlock your system keychain and restart OpenMausBot." }) : snapshot(); }
-      // Restore the organisation's last policy before any network call, and
-      // move references to this enrollment's old device-scoped ids.
-      if (grant?.policy && grant.expiresAt > now()) await sendPolicy(grant);
-      // The saved library catalog reaches the runtime before any network call too.
-      if (library && grant && grant.expiresAt > now()) await Promise.resolve().then(() => library.restore(libraryIdentity(grant))).catch(() => {});
-      markRestored();
-      await sendIdentity(grant);
-      return refresh();
-    },
+    start,
     async begin(input) {
       if (clearing) throw new Error("Wait for company sign-out to finish before starting another sign-in.");
       if (closed || grant || issuedGrant || cleanupNeeded) throw new Error("Disconnect your current organization before connecting another.");
@@ -488,13 +496,11 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
         await openBrowser(result.verificationUriComplete);
         if (current(stamp)) schedule(poll, pending.interval);
       } catch (error) {
-        if (current(stamp)) { pending = null; publish(licenseExpired(error) ? { status: "signed-out", notice: "license-expired" } : { status: "signed-out", message: "Could not start company sign-in. Check the Admin portal address and your connection." }); }
+        if (current(stamp)) { pending = null; publish(licenseExpired(error) ? { status: "signed-out", notice: "license-expired" } : { status: "signed-out", ...said("startFailed") }); }
       }
       return snapshot();
     },
-    /** Opens this attempt's own validated sign-in page again, for a closed
-     * browser tab. It takes nothing from the renderer, so it can never open
-     * another address, and does nothing once the attempt ends or expires. */
+    /** Takes nothing from the renderer, so it can never open another address. */
     async reopen() {
       const attempt = pending, stamp = generation;
       if (!attempt?.verificationUri || !current(stamp) || state.status !== "connecting" || attempt.expiresAt <= now()) return snapshot();
@@ -508,9 +514,9 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     disconnect: clearConnection,
     /** Main-process only. Never expose this method through the renderer bridge. */
     connection: () => connection ? structuredClone(connection) : null,
-    /** Resolves after start() has read the saved enrollment. */
     whenRestored: () => restored,
-    /** The organisation's applied policy while the credential lasts, else null. */
+    /** The saved policy has been read; until then, and while it can't be read, `policy()` is null without meaning "none". */
+    policyKnown: () => policyRead,
     policy: () => !policyLifted && grant?.policy && grant.expiresAt > now() ? structuredClone(grant.policy) : null,
     backupGeneration: () => generation,
     /** Fixed first-party backup API only; this function stays in Electron main. */
@@ -524,9 +530,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
       if (!current(stamp) || grant !== enrolled || enrolled.expiresAt <= now()) throw new Error("Your organization connection changed during the backup.");
       return result;
     },
-    /** Fixed organization library routes only (contract §5.6): the catalog
-     * (256 KiB, 20 s), a release's bytes (4 MiB, 60 s) and the install report
-     * (a JSON body up to 64 KiB). Raw bytes; the caller verifies them. Electron main only. */
+    /** Fixed library routes only; raw bytes the caller verifies. Electron main only. */
     async fetchLibraryBytes(route, maxBytes, options = {}) {
       const limits = libraryRouteLimits(route);
       if (!limits) throw new Error("Unsupported organization library operation.");

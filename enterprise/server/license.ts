@@ -74,7 +74,7 @@ export function verifyLicenseKey(
   return claims;
 }
 
-/** Issue a key. Used by scripts/issue-license.mjs and by tests; the private JWK never enters the repo. */
+/** Issue a key; the private JWK never enters the repo. */
 export function issueLicenseKey(claims: LicenseClaims, privateJwk: JsonWebKeyInput["key"]): string {
   const claimsPart = Buffer.from(JSON.stringify(claimsSchema.parse(claims)), "utf8").toString("base64url");
   const signature = sign(null, Buffer.from(claimsPart, "utf8"), createPrivateKey({ key: privateJwk, format: "jwk" }));

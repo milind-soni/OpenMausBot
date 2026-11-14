@@ -5,10 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createSecureCredentialState } from "./secure-credential-state.mjs";
 
 describe("serialized secure credential state", () => {
-  // A launch that could not READ credentials.bin starts from {}. Writing a
-  // document derived from {} would not "add a key" — it would replace every
-  // secret in the file with nothing, and orphan the connected-apps identity
-  // the user already authorized. So such a state does not write at all.
   it("refuses to persist when it was built from an unreadable store", async () => {
     const persist = vi.fn();
     const state = createSecureCredentialState({}, persist, { writable: false });

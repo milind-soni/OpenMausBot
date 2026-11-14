@@ -40,6 +40,14 @@ describe("cloud preview recovery in the real renderer", () => {
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", info.ui, ...args]) as Promise<Record<string, any>>;
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
     const click = (name: string) => ui("click", "--name", name);
+    // The selected panel shares its tab's name; pick the tab itself by role.
+    const clickTab = async (name: string) => {
+      const state = await ui("snapshot", "--interactive");
+      const target = Object.entries(state.refs as Record<string, { role: string; name: string }>)
+        .find(([, entry]) => entry.role === "tab" && entry.name === name);
+      expect(target).toBeDefined();
+      await ui("click", "--ref", `@${target![0]}`);
+    };
     const snapshot = async () => (await ui("snapshot")).snapshot as string;
     const select = (name: string, value: string) => evaluate(`(() => {
       const select = document.querySelector('select[aria-label=${JSON.stringify(name)}]');
@@ -89,16 +97,16 @@ describe("cloud preview recovery in the real renderer", () => {
     await click("Release desktop join");
     expect(await stat("opened")).toBe(0);
     await select("Conversation surface", "browser-pin");
-    await expect.poll(() => evaluate('document.querySelector("[data-tour=computer-browser]")?.getAttribute("aria-pressed")'), { timeout: 5000 }).toBe("true");
-    await click("Browser"); // Save it manually, as a real person can.
+    await expect.poll(() => evaluate('document.querySelector("[data-tour=computer-browser]")?.getAttribute("aria-selected")'), { timeout: 5000 }).toBe("true");
+    await clickTab("Browser"); // Save it manually, as a real person can.
     await select("Conversation surface", "vm-pin");
     await expect.poll(currentFrame, { timeout: 6000 }).toBe(await stat("vmScreenshot"));
-    expect(await evaluate('document.querySelector("[data-tour=computer-tabs] button")?.getAttribute("aria-pressed")')).toBe("true");
+    expect(await evaluate('document.querySelector("[data-tour=computer-tabs] button")?.getAttribute("aria-selected")')).toBe("true");
     await select("Conversation surface", "browser-pin");
-    await expect.poll(() => evaluate('document.querySelector("[data-tour=computer-browser]")?.getAttribute("aria-pressed")'), { timeout: 5000 }).toBe("true");
-    await click("Routines");
+    await expect.poll(() => evaluate('document.querySelector("[data-tour=computer-browser]")?.getAttribute("aria-selected")'), { timeout: 5000 }).toBe("true");
+    await clickTab("Routines");
     await pause(200);
-    expect(await evaluate('document.querySelector("[data-tour=computer-browser]")?.getAttribute("aria-pressed")')).toBe("false");
+    expect(await evaluate('document.querySelector("[data-tour=computer-browser]")?.getAttribute("aria-selected")')).toBe("false");
     await select("Conversation surface", "default");
     await evaluate('document.querySelector("[data-tour=computer-tabs] button")?.click(); true');
     await expect.poll(frameVisible, { timeout: 6000 }).toBe(true);
@@ -108,10 +116,10 @@ describe("cloud preview recovery in the real renderer", () => {
     await pause(200);
     expect(await frameVisible()).toBe(true);
     expect((await stat("paths") as string[]).filter((path) => path.endsWith("/computer/provision"))).toHaveLength(busyProvisions);
-    await click("Routines");
+    await clickTab("Routines");
     await click("Busy: true");
     await pause(200);
-    expect(await evaluate('Array.from(document.querySelectorAll("[data-tour=computer-tabs] button")).find(button => button.textContent.includes("Routines"))?.getAttribute("aria-pressed")')).toBe("true");
+    expect(await evaluate('Array.from(document.querySelectorAll("[data-tour=computer-tabs] button")).find(button => button.textContent.includes("Routines"))?.getAttribute("aria-selected")')).toBe("true");
     await evaluate('document.querySelector("[data-tour=computer-tabs] button")?.click(); true');
     await expect.poll(frameVisible, { timeout: 6000 }).toBe(true);
 
@@ -203,10 +211,47 @@ describe("cloud preview recovery in the real renderer", () => {
       await click("Release desktop join");
       await expect.poll(() => stat("joining")).toBe(false);
     }
+    // Keyboard entry and hand-off, on both panel shapes: the tab row when the
+    // panel has one, otherwise its close button.
+    const entryFocus = () => evaluate(`(() => {
+      const active = document.activeElement;
+      const tabs = document.querySelector('[data-testid="computer-tabs"]');
+      return {
+        tab: Boolean(active && tabs && tabs.contains(active) && active.getAttribute('aria-selected') === 'true'),
+        close: Boolean(active && active.hasAttribute('data-computer-panel-close')),
+        opener: Boolean(active && active.textContent.trim() === 'Open computer panel'),
+      };
+    })()`);
+    const panelIsOpen = () => evaluate("Boolean(document.querySelector('[data-computer-panel-close]'))");
+    const openFromItsButton = async () => {
+      await evaluate("(() => { Array.from(document.querySelectorAll('button')).find((button) => button.textContent.trim() === 'Open computer panel').focus(); return true; })()");
+      await ui("press", "--keys", "Enter");
+      await expect.poll(panelIsOpen, { timeout: 5000 }).toBe(true);
+    };
+    const closeFromItsX = async () => {
+      await evaluate("document.querySelector('[data-computer-panel-close]').focus(); true");
+      await ui("press", "--keys", "Enter");
+      await expect.poll(panelIsOpen, { timeout: 5000 }).toBe(false);
+    };
+    expect(await panelIsOpen()).toBe(true);
+    await closeFromItsX();
+    for (const panel of ["computer", "remote"]) {
+      await select("Panel", panel);
+      await openFromItsButton();
+      await expect.poll(entryFocus, { timeout: 5000 }).toMatchObject(panel === "remote" ? { tab: false, close: true } : { tab: true, close: false });
+      await closeFromItsX();
+      await expect.poll(entryFocus, { timeout: 5000 }).toMatchObject({ opener: true, tab: false, close: false });
+    }
+
     process.stdout.write(`${JSON.stringify({ fixture: info!, previewUrl: preview.previewUrl, transport: "simulated; panels and browser real" })}\n`);
     await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
-    expect(child.exitCode).toBe(0);
-    expect(existsSync(info!.dataDir)).toBe(false);
+    // Windows has no signals: kill() terminates the launcher before its own
+    // cleanup runs, so only the graceful platforms can pin the exit code and the
+    // removed data directory.
+    if (process.platform !== "win32") {
+      expect(child.exitCode).toBe(0);
+      expect(existsSync(info!.dataDir)).toBe(false);
+    }
     expect(existsSync(info!.logPath)).toBe(true);
   }, 720_000);
 });

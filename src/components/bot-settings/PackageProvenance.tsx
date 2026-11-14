@@ -1,7 +1,3 @@
-// The provenance line on a bot that came from the organization's library:
-// "From Sales desk 1.3.0 · Acme Partners", plus "Withdrawn by Acme Partners"
-// once the publisher withdraws that release. Nothing for a bot made here or
-// imported from a file.
 import { useEffect, useState } from "react";
 
 import type { Bot } from "@/state/store";
@@ -14,7 +10,6 @@ export function PackageProvenance({ bot }: { bot: Bot }) {
   const org = bot.installedPackage?.source === "org";
 
   useEffect(() => {
-    // Only a bot from the organization's library can have been withdrawn.
     if (!org || draft) return;
     let cancelled = false;
     request("/api/org-library")
@@ -23,7 +18,6 @@ export function PackageProvenance({ bot }: { bot: Bot }) {
     return () => {
       cancelled = true;
     };
-    // The editor transport is stable for a bot's dialog; refetch per bot only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bot.id, org, draft]);
 

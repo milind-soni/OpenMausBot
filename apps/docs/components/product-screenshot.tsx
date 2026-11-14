@@ -1,5 +1,6 @@
 const screenshotNames = [
   'hero',
+  'byo-vps-0.1.151',
   'model-picker',
   'computer-panel',
   'approval-card',
@@ -15,6 +16,9 @@ const screenshotNames = [
   'docs-computer-panel',
   'docs-connected-apps',
   'docs-automations',
+  'docs-my-cloud-compare',
+  'docs-my-cloud-strip',
+  'docs-my-cloud-switcher',
 ] as const;
 
 type ScreenshotName = (typeof screenshotNames)[number];

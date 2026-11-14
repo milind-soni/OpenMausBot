@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  advertisedGrants,
   CONNECTOR_ALLOWED_TOOLS_MAX_BYTES,
   connectorToolAdvertised,
   filterToolsListFrame,
@@ -52,11 +53,8 @@ describe("connector tool advertisement", () => {
     expect(connectorToolAdvertised("COMPOSIO_SEARCH_TOOLS", partial)).toBe(true);
     expect(connectorToolAdvertised("COMPOSIO_GET_TOOL_SCHEMAS", partial)).toBe(true);
     expect(connectorToolAdvertised("COMPOSIO_MULTI_EXECUTE_TOOL", partial)).toBe(true);
-    // Session-level connection meta-tools prefix as service "composio",
-    // which no grant names, so they ride the meta-tool list.
     expect(connectorToolAdvertised("COMPOSIO_MANAGE_CONNECTIONS", partial)).toBe(true);
     expect(connectorToolAdvertised("COMPOSIO_WAIT_FOR_CONNECTIONS", partial)).toBe(true);
-    // not granted: another tool on the granted service, another service
     expect(connectorToolAdvertised("GMAIL_GET_EMAIL", partial)).toBe(false);
     expect(connectorToolAdvertised("SLACK_POST_MESSAGE", partial)).toBe(false);
     expect(connectorToolAdvertised("SLACK_MANAGE_CONNECTIONS", partial)).toBe(false);
@@ -72,7 +70,6 @@ describe("connector tool advertisement", () => {
   it("resolves underscored service slugs from the connected-service catalog before splitting", () => {
     const record = grants({ bland: { tools: "*" }, bland_ai: { tools: ["BLAND_AI_MAKE_CALL"] } });
     expect(connectorToolAdvertised("BLAND_AI_MAKE_CALL", record, ["bland", "bland_ai"])).toBe(true);
-    // bland_ai claims BLAND_AI_* before bland's star grant can widen it.
     expect(connectorToolAdvertised("BLAND_AI_SEND_SMS", record, ["bland", "bland_ai"])).toBe(false);
     expect(connectorToolAdvertised("BLAND_SEND_SMS", record, ["bland", "bland_ai"])).toBe(true);
   });
@@ -81,10 +78,11 @@ describe("connector tool advertisement", () => {
     expect(connectorToolAdvertised("BLAND_AI_MAKE_CALL", grants({ bland: { tools: "*" } }), ["bland_ai"])).toBe(false);
   });
 
-  it("advertises nothing at all — not even the meta-tools — when no tools are granted", () => {
+  it("advertises only COMPOSIO_MANAGE_CONNECTIONS when no tools are granted, so the bot can still ask for a sign-in", () => {
     const none = grants({});
     expect(connectorToolAdvertised("COMPOSIO_SEARCH_TOOLS", none)).toBe(false);
-    expect(connectorToolAdvertised("COMPOSIO_MANAGE_CONNECTIONS", none)).toBe(false);
+    expect(connectorToolAdvertised("COMPOSIO_MULTI_EXECUTE_TOOL", none)).toBe(false);
+    expect(connectorToolAdvertised("COMPOSIO_MANAGE_CONNECTIONS", none)).toBe(true);
     expect(connectorToolAdvertised("COMPOSIO_WAIT_FOR_CONNECTIONS", none)).toBe(false);
     expect(connectorToolAdvertised("GMAIL_SEND_EMAIL", none)).toBe(false);
     expect(connectorToolAdvertised("GMAIL_MANAGE_CONNECTIONS", none)).toBe(false);
@@ -125,9 +123,9 @@ describe("tools/list frame filtering", () => {
     expect(JSON.stringify(filtered)).toContain('"description":"send"');
   });
 
-  it("filters to an empty list for a bot with no granted tools", () => {
+  it("keeps only the way to ask for a sign-in for a bot with no granted tools", () => {
     const filtered = filterToolsListFrame(structuredClone(frame), grants({}));
-    expect((filtered.result as { tools: unknown[] }).tools).toEqual([]);
+    expect((filtered.result as { tools: unknown[] }).tools).toEqual([{ name: "COMPOSIO_MANAGE_CONNECTIONS" }]);
   });
 
   it("passes frames it cannot read through unchanged instead of guessing", () => {
@@ -137,5 +135,20 @@ describe("tools/list frame filtering", () => {
     expect(filterToolsListFrame(noTools, grants({ gmail: { tools: "*" } }))).toBe(noTools);
     const nameless = { jsonrpc: "2.0" as const, id: 12, result: { tools: [{ description: "unnamed" }] } };
     expect(filterToolsListFrame(nameless, grants({ gmail: { tools: "*" } }))).toEqual(nameless);
+  });
+});
+
+describe("the apps' sandbox", () => {
+  it("is offered to a bot with app grants only while its turn runs at Full access", () => {
+    const gmail = grants({ gmail: { tools: "*" } });
+    expect(advertisedGrants(gmail, false)).toBe(gmail);
+    expect(advertisedGrants(undefined, true)).toBeUndefined();
+    const full = advertisedGrants(gmail, true)!;
+    expect(gmail).toEqual({ gmail: { tools: "*" } });
+    for (const tool of ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL", "GMAIL_SEND_EMAIL"]) {
+      expect(connectorToolAdvertised(tool, full)).toBe(true);
+      expect(connectorToolAdvertised(tool, gmail)).toBe(tool === "GMAIL_SEND_EMAIL");
+    }
+    expect(connectorToolAdvertised("SLACK_POST_MESSAGE", full)).toBe(false);
   });
 });

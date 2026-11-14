@@ -31,6 +31,7 @@ describe("durable accepted follow-ups", () => {
     const text = 'inspect this\n\n<attached-image path="/fixture/picture.png" name="picture.png" />';
     const first = queueSteeredMessage("bot", "thread", text, {
       prompt: `Reply context\n${text}`, replyToId: "reply", sendId: "first", reason: "capacity", unattended: true,
+      dataContext: { cardId: "c_1", draftSql: "select 1" },
       sender: { name: "ada@example.test" }, trigger: { kind: "user", email: "ada@example.test", label: "Ada's laptop" },
     });
     const second = queueSteeredMessage("bot", "thread", "then summarize", { sendId: "second" });
@@ -50,24 +51,19 @@ describe("durable accepted follow-ups", () => {
       expect(journal.chatFollowups().filter((row) => row.status === "dispatching").map((row) => row.id))
         .toEqual(dispatchingNow);
     });
-    // M2: the first line queued as the bot's own unattended work, the
-    // second as a person's words — different provenance never merges, so
-    // the first line starts its own turn alone
+    // The first line is the bot's own unattended work, the second a person's words: different provenance never merges.
     dispatchingNow = [first.id];
     drainSteeredMessages(store, run);
-    // the first waiting line starts the turn, and survived the restart with its sender
     expect(run.mock.calls[0]).toEqual([
       "bot", "thread", `Reply context\n${text}`, store.messages[0],
       ["message-0"], true,
       { trigger: { kind: "user", email: "ada@example.test", label: "Ada's laptop" }, sender: { name: "ada@example.test" }, peerAsk: undefined },
     ]);
     expect(store.messages).toEqual([
-      expect.objectContaining({ text, replyToId: "reply", sendId: "first", queueId: first.id }),
+      expect.objectContaining({ text, replyToId: "reply", sendId: "first", queueId: first.id, dataContext: { cardId: "c_1", draftSql: "select 1" } }),
     ]);
     // let the first turn's durable row settle before the next drain reads it
     await Promise.resolve();
-    // the person's line waits for that turn to finish, then runs as its own
-    // attended follow-up with its own receipts
     dispatchingNow = [second.id];
     drainSteeredMessages(store, run);
     expect(run.mock.calls[1]).toEqual([
@@ -79,6 +75,7 @@ describe("durable accepted follow-ups", () => {
       expect.objectContaining({ text, replyToId: "reply", sendId: "first", queueId: first.id }),
       expect.objectContaining({ text: "then summarize", sendId: "second", queueId: second.id }),
     ]);
+    expect(store.messages[1]).not.toHaveProperty("dataContext");
     await Promise.resolve();
     expect(journal.chatFollowups().map((row) => row.id)).toEqual([cancelled.id]);
     expect(journal.cancelledChatFollowup("bot", "bot", "thread", "cancelled")).toBe(true);
@@ -96,8 +93,6 @@ describe("durable accepted follow-ups", () => {
     journal.closeMessageDb();
     restoreChannelMessages();
     const run = vi.fn();
-    // M2: an API send never merges into anyone's burst, so the goal drains
-    // alone — one coalesced item, still carrying its target and provenance
     drainChannelMessages(() => false, run);
     expect(run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       groupId: "group", threadId: "old-thread",
@@ -115,6 +110,40 @@ describe("durable accepted follow-ups", () => {
     });
     await Promise.resolve();
     expect(journal.cancelledChatFollowup("channel", "group", "old-thread", "cancelled")).toBe(true);
+  });
+
+  it("runs the person's messages ahead of a teammate's, a steered row stopped before it was read as itself, and never shows that row as queued", async () => {
+    const store = storeFor("bot", "thread");
+    const handOn = queueSteeredMessage("bot", "thread", "Nightly note", { peerAsk: { botId: "chief", name: "Chief" } });
+    const steered = store.appendMessage("thread", { role: "user", kind: "text", text: "is the PR up?", steered: true });
+    // Sent a moment later, while the turn still ran: a runner can be slow enough for the clock to move.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const queued = queueSteeredMessage("bot", "thread", "and the docs?", { sendId: "later", first: true });
+    queueSteeredMessage("bot", "thread", steered.text!, { prompt: "is the PR up?\n\n[note]", rowId: steered.id, first: true, queuedAt: steered.at });
+    expect(queuedSteerSnapshot(() => true)).toEqual({ thread: [{ queueId: queued.id, text: "and the docs?" }, { queueId: handOn.id, text: "Nightly note" }] });
+    const run = vi.fn();
+    const messagesFor = () => store.messages;
+    drainSteeredMessages({ ...store, messagesFor }, run);
+    // Both are the person's words, so they run as one turn, the stopped one first and as its own row, before the teammate's.
+    expect(run.mock.calls[0]?.[2]).toBe("is the PR up?\n\n[note]\n\nand the docs?");
+    expect(run.mock.calls[0]?.[4]).toEqual([steered.id, "message-1"]);
+    expect(store.messages.map((message) => message.text)).toEqual(["is the PR up?", "and the docs?"]);
+    expect(store.messages[1]).toMatchObject({ queueId: queued.id });
+    await Promise.resolve();
+    drainSteeredMessages({ ...store, messagesFor }, run);
+    expect(run.mock.calls[1]?.[2]).toBe("Nightly note");
+  });
+
+  it("keeps running a stopped steered row as itself across a restart", () => {
+    const store = storeFor("bot", "thread");
+    const steered = store.appendMessage("thread", { role: "user", kind: "text", text: "is the PR up?", steered: true });
+    queueSteeredMessage("bot", "thread", steered.text!, { prompt: "is the PR up?\n\n[note]", rowId: steered.id, first: true });
+    journal.closeMessageDb();
+    restoreSteeredMessages();
+    const run = vi.fn();
+    drainSteeredMessages({ ...store, messagesFor: () => store.messages }, run);
+    expect(run.mock.calls[0]?.slice(2, 5)).toEqual(["is the PR up?\n\n[note]", steered, [steered.id]]);
+    expect(store.messages).toHaveLength(1);
   });
 
   it("does not publish or cancel in memory when its durable write fails", () => {
@@ -138,10 +167,10 @@ describe("durable accepted follow-ups", () => {
     settle.mockRestore();
   });
 
-  it("never restores a claim whose dispatch may have started", async () => {
+  it("settles failed dispatches before restoring durable follow-ups", async () => {
     const bot = queueSteeredMessage("bot", "thread", "possibly executed");
     const channel = queueChannelMessage("group", "channel", "possibly executed");
-    expect(() => drainSteeredMessages(storeFor("bot", "thread"), () => { throw new Error("lost dispatch"); })).toThrow();
+    expect(() => drainSteeredMessages(storeFor("bot", "thread"), () => { throw new Error("lost dispatch"); })).not.toThrow();
     drainChannelMessages(() => false, () => Promise.reject(new Error("lost channel dispatch")));
     await Promise.resolve();
     journal.closeMessageDb();
@@ -152,8 +181,28 @@ describe("durable accepted follow-ups", () => {
     drainChannelMessages(() => false, run);
     expect(run).not.toHaveBeenCalled();
     expect(journal.chatFollowups()).toEqual([
-      expect.objectContaining({ id: bot.id, status: "dispatching" }),
+      expect.objectContaining({ id: bot.id, status: "interrupted" }),
       expect.objectContaining({ id: channel.id, status: "interrupted" }),
+    ]);
+  });
+
+  it("never restores an unsettled claim whose dispatch may have started", async () => {
+    const bot = queueSteeredMessage("bot", "thread", "possibly executed");
+    const channel = queueChannelMessage("group", "channel", "possibly executed");
+    const stillRunning = () => new Promise<void>(() => {});
+    drainSteeredMessages(storeFor("bot", "thread"), stillRunning);
+    drainChannelMessages(() => false, stillRunning);
+    await Promise.resolve();
+    journal.closeMessageDb();
+    restoreSteeredMessages();
+    restoreChannelMessages();
+    const run = vi.fn();
+    drainSteeredMessages(storeFor("bot", "thread"), run);
+    drainChannelMessages(() => false, run);
+    expect(run).not.toHaveBeenCalled();
+    expect(journal.chatFollowups()).toEqual([
+      expect.objectContaining({ id: bot.id, status: "dispatching" }),
+      expect.objectContaining({ id: channel.id, status: "dispatching" }),
     ]);
   });
 

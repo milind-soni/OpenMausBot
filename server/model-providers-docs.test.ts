@@ -1,0 +1,223 @@
+// Pins each workaround the "Other model providers" docs page gives to the code it depends on: when one fails, update the page.
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { DATA_DIR, OPENCODE_PROVIDER_ENV, PROVIDER_CREDENTIAL_ENV, WORKSPACE_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "./config.ts";
+import { newClaudeEndpoint } from "./claude-endpoints.ts";
+import { discoverOpenCodeModels, ensureOpenCodeInjectModel, resetOpenCodeModelCache } from "./drivers/acp/opencode-go.ts";
+import { readClaudeAuthSettings, readClaudeModelCatalog } from "./drivers/claude.ts";
+import { OPENROUTER_FAILURES, freeLabel } from "./drivers/openrouter-free.ts";
+import { removeTempDir } from "./testing/cleanup.ts";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const PAGE = readFileSync(join(ROOT, "apps", "docs", "content", "docs", "providers", "model-providers.mdx"), "utf8");
+const EN = JSON.parse(readFileSync(join(ROOT, "src", "locales", "en.json"), "utf8")) as Record<string, string>;
+
+function section(heading: string): string {
+  const lines = PAGE.split(/\r?\n/u);
+  const start = lines.findIndex((line) => line === heading);
+  expect(start, `the page has no "${heading}" heading`).toBeGreaterThanOrEqual(0);
+  const level = heading.indexOf(" ");
+  const end = lines.findIndex((line, index) => index > start && /^#+ /u.test(line) && line.indexOf(" ") <= level);
+  return flat(lines.slice(start + 1, end < 0 ? undefined : end).join("\n"));
+}
+
+const flat = (text: string) => text.replace(/\s+/gu, " ");
+
+const scratchDirs: string[] = [];
+const scratch = (prefix: string) => {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  scratchDirs.push(dir);
+  return dir;
+};
+
+afterEach(async () => {
+  resetOpenCodeModelCache();
+  for (const dir of scratchDirs.splice(0)) await removeTempDir(dir);
+});
+
+describe("Claude Code section", () => {
+  // Shell exports as copied into the env block, plus FireConnect's header and model settings. Every value is fake.
+  const settingsHome = (env: Record<string, string>, extra: Record<string, unknown> = {}) => {
+    const home = scratch("omb-docs-claude-");
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ ...extra, env }));
+    return home;
+  };
+  const providerEnv = {
+    ANTHROPIC_BASE_URL: "https://openrouter.ai/api",
+    ANTHROPIC_AUTH_TOKEN: "sk-or-fake",
+    ANTHROPIC_CUSTOM_HEADERS: "X-Fireworks-Api-Key: fw_fake",
+    ANTHROPIC_MODEL: "deepseek/deepseek-chat",
+    ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek/deepseek-reasoner",
+    CLAUDE_CODE_SUBAGENT_MODEL: "deepseek/deepseek-subagent",
+  };
+
+  it("sends people to the settings.json env block, which Claude bots carry over", () => {
+    const home = settingsHome(providerEnv);
+
+    expect(readClaudeAuthSettings({ HOME: home }).env).toEqual({
+      ANTHROPIC_BASE_URL: providerEnv.ANTHROPIC_BASE_URL,
+      ANTHROPIC_AUTH_TOKEN: providerEnv.ANTHROPIC_AUTH_TOKEN,
+      ANTHROPIC_CUSTOM_HEADERS: providerEnv.ANTHROPIC_CUSTOM_HEADERS,
+    });
+
+    const text = section("### Claude Code");
+    expect(text).toContain("Put `ANTHROPIC_BASE_URL` and your key in the `env` block of `~/.claude/settings.json`.");
+    expect(text).toContain("OpenRouter's and DeepSeek's guides use shell exports, which the desktop app doesn't see, so copy those lines into the `env` block.");
+    expect(text).not.toMatch(/Those guides put/u);
+    expect(text).toContain("On a server, use the `env` block too, not exports in the terminal that starts the server.");
+  });
+
+  it("lists ANTHROPIC_MODEL and non-Claude tier models under the picker entry the page names, and nothing else from the file", () => {
+    const home = settingsHome(providerEnv, {
+      modelPicker: { options: [{ model: "glm-latest[1m]", label: "GLM" }] },
+    });
+    const catalog = readClaudeModelCatalog({ HOME: home });
+    const custom = catalog.options.filter((option) => option.custom).map((option) => option.id);
+
+    expect(custom).toEqual([providerEnv.ANTHROPIC_MODEL, providerEnv.ANTHROPIC_DEFAULT_SONNET_MODEL]);
+    expect(JSON.stringify(catalog)).not.toContain(providerEnv.CLAUDE_CODE_SUBAGENT_MODEL);
+    expect(JSON.stringify(catalog)).not.toContain("glm-latest");
+    const carried = Object.keys(readClaudeAuthSettings({ HOME: home }).env ?? {});
+    expect(carried.filter((key) => /MODEL/u.test(key))).toEqual([]);
+
+    const label = EN["model.useLocal"];
+    expect(label).toBe("Use a local model");
+    const text = section("### Claude Code");
+    expect(text).toContain(`If you also set \`ANTHROPIC_MODEL\` there, that model appears under **${label}** in the Claude model picker; pick it.`);
+    expect(text).toContain("FireConnect's model list doesn't show up in MausBot, so add `ANTHROPIC_MODEL` yourself.");
+    expect(text).toContain("So do `ANTHROPIC_CUSTOM_MODEL_OPTION` and each `ANTHROPIC_DEFAULT_*_MODEL` that isn't a Claude model.");
+    expect(text).toContain("`ANTHROPIC_DEFAULT_*_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL` aren't carried over.");
+    expect(text).not.toMatch(/such as `ANTHROPIC_MODEL`, aren't carried/u);
+  });
+
+  it("drops that setup while an Anthropic key is saved in Connections, as the page says", () => {
+    const home = settingsHome(providerEnv);
+    expect(readClaudeAuthSettings({ HOME: home }, { ANTHROPIC_API_KEY: "connections-fake-key" })).toEqual({});
+    expect(section("### Claude Code")).toContain("It applies only while no Anthropic API key is saved in Connections.");
+  });
+
+  it("runs a bot on a custom endpoint without this computer's Claude settings", () => {
+    const home = settingsHome(providerEnv);
+    const created = newClaudeEndpoint({ instances: {} } as never, {
+      displayName: "DeepSeek", baseUrl: "https://api.deepseek.com/anthropic", token: "sk-fake", model: "deepseek-chat",
+    });
+    const entry = created.instances[created.instanceId] as {
+      config: { configDir: string; endpointModels: string[] };
+      environment: Record<string, string>;
+    };
+    expect(entry.config.configDir).toBe(join(DATA_DIR, "providers", created.instanceId));
+    expect(readClaudeAuthSettings({ HOME: home }, entry.environment)).toEqual({});
+    expect(entry.environment.ANTHROPIC_MODEL).toBe("deepseek-chat");
+    expect(entry.config.endpointModels).toEqual(["deepseek-chat"]);
+
+    const text = section("### Claude Code");
+    expect(text).toContain("add a **custom endpoint** in Settings → Engines, in the Claude card");
+    expect(text).toContain("It never reads or writes this computer's `~/.claude`, and the Claude Code on this computer keeps its own sign-in.");
+    expect(text).toContain("Each bot can choose a different model from the endpoint's catalog.");
+    expect(text).toContain("The token is saved in MausBot's own `config.json` and sent only to the base URL you enter. Removing an endpoint removes only that entry.");
+  });
+});
+
+describe("OpenCode 2.x section", () => {
+  it("lists provider models from ACP even when OpenCode 2 rejects models --verbose", async () => {
+    const dir = scratch("omb-docs-opencode2-");
+    const catalog = await discoverOpenCodeModels({
+      ...process.env, HOME: dir, USERPROFILE: dir,
+      XDG_CONFIG_HOME: join(dir, "config"), XDG_DATA_HOME: join(dir, "data"),
+      FAKE_ACP_MODELS_LIST: "v2",
+      FAKE_ACP_MODELS: "openrouter/deepseek/deepseek-chat,opencode/longcat-2.5-preview-free",
+      FAKE_ACP_VARIANTS: JSON.stringify({ "openrouter/deepseek/deepseek-chat": { options: [{ value: "high", name: "High" }] } }),
+    }, join(ROOT, "server", "testing", "fake-acp-cli.ts"));
+    expect(catalog.options.map((option) => option.id)).toEqual([
+      "openrouter/deepseek/deepseek-chat", "opencode/longcat-2.5-preview-free",
+    ]);
+    expect(catalog.options.map((option) => option.variants)).toEqual([[{ id: "high", label: "High" }], undefined]);
+    expect(section("### OpenCode")).toContain("MausBot reads the model list from an ACP session on both OpenCode 1.x and 2.x, and each model's effort levels the same way");
+    expect(section("## OpenCode 2.x")).not.toContain("picker shows only OpenCode's free models");
+  });
+});
+
+describe("OpenCode config file", () => {
+  const example = (page = PAGE) => {
+    const block = /```json\r?\n([\s\S]*?)```/u.exec(page.slice(page.indexOf("### OpenCode")));
+    expect(block, "the OpenCode section has no json example").not.toBeNull();
+    return block![1]!.replace(/^ {3}/gmu, "");
+  };
+  const configHome = (content: string) => {
+    const home = scratch("omb-docs-opencode-json-");
+    const dir = join(home, ".config", "opencode");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "opencode.json"), content);
+    return { home, path: join(dir, "opencode.json") };
+  };
+  const addLocalModel = (home: string) => ensureOpenCodeInjectModel("omlx::GLM-5.2-fp8", { HOME: home });
+
+  it.each(["\n", "\r\n"])("keeps the page's plain-JSON provider with %j line endings", (lineEnding) => {
+    const source = example(PAGE.replace(/\r?\n/gu, lineEnding));
+    const pasted = JSON.parse(source) as { provider: Record<string, unknown> };
+    const { home, path } = configHome(source);
+
+    expect(addLocalModel(home)).toBe("omlx/GLM-5.2-fp8");
+    const after = JSON.parse(readFileSync(path, "utf8")) as { provider: Record<string, unknown> };
+    expect(after.provider.myrouter).toEqual(pasted.provider.myrouter);
+    expect(after.provider.omlx).toBeTruthy();
+  });
+
+  it("loses a provider written with a comment, which is why the page asks for plain JSON", () => {
+    const commented = example().replace("\"myrouter\": {", "// my router\n    \"myrouter\": {");
+    const { home, path } = configHome(commented);
+
+    addLocalModel(home);
+    const after = JSON.parse(readFileSync(path, "utf8")) as { provider: Record<string, unknown> };
+    expect(after.provider.myrouter).toBeUndefined();
+
+    expect(section("### OpenCode")).toContain(
+      "Keep this file plain JSON, with no comments or trailing commas. MausBot edits it when an OpenCode bot uses a model running on this computer.",
+    );
+  });
+});
+
+describe("Keys exported on a server", () => {
+  const exported = ["OPENROUTER_API_KEY", "FIREWORKS_API_KEY", "TOGETHER_API_KEY"];
+
+  it("reach every engine, as the page warns", () => {
+    // Every engine filters its inherited environment through these two lists (or stripWorkspaceCredentialEnv).
+    const filtered = new Set<string>([...PROVIDER_CREDENTIAL_ENV, ...WORKSPACE_CREDENTIAL_ENV]);
+    expect(exported.filter((name) => filtered.has(name))).toEqual([]);
+    const env: Record<string, string | undefined> = Object.fromEntries(exported.map((name) => [name, "fake"]));
+    stripWorkspaceCredentialEnv(env);
+    expect(Object.keys(env).sort()).toEqual([...exported].sort());
+
+    const text = section("### OpenCode");
+    for (const name of exported) expect(text).toContain(`\`${name}\``);
+    expect(text).toContain("Keys exported this way reach every engine on that server, and any bot that can run commands can read them.");
+  });
+
+  it("documents Cline's separate credential scope and native setup", () => {
+    expect(PROVIDER_CREDENTIAL_ENV).toContain("CLINE_API_KEY");
+    expect(OPENCODE_PROVIDER_ENV).toContain("CLINE_API_KEY");
+    expect(section("### OpenCode")).toContain("`CLINE_API_KEY` is scoped to the Cline and OpenCode engines.");
+    const cline = section("### Cline engine");
+    expect(cline).toContain("`cline auth`");
+    expect(cline).toContain("**Cline default (configured)**");
+    expect(cline).toContain("An unconfigured account remains unavailable.");
+  });
+
+});
+
+describe("Free OpenRouter models section", () => {
+  it("quotes the turn errors and the picker mark the chat engine shows", () => {
+    const text = section("### Free OpenRouter models");
+    expect(OPENROUTER_FAILURES.credits).toMatch(/^This model needs OpenRouter credit\b/u);
+    expect(text).toContain('"This model needs OpenRouter credit"');
+    expect(OPENROUTER_FAILURES.privacy).toMatch(/^OpenRouter's privacy settings block this free model\b/u);
+    expect(text).toContain(`"OpenRouter's privacy settings block this free model"`);
+    expect(freeLabel("Gemma 4 31B", { id: "google/gemma-4-31b-it:free" })).toBe("Gemma 4 31B (free)");
+    expect(text).toContain("**(free)**");
+  });
+});

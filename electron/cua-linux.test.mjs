@@ -37,7 +37,7 @@ function healthyDoctor() {
   return {
     ok: true,
     probes: [
-      { label: "binary", status: "ok", message: "cua-driver 0.19.3" },
+      { label: "binary", status: "ok", message: "cua-driver 0.41.3" },
       { label: "display server", status: "ok", message: "X11 (DISPLAY=:0)" },
       { label: "X11 connection", status: "ok", message: "connected, 1 visible top-level window" },
       { label: "AT-SPI", status: "ok", message: "org.a11y.Bus reachable via session bus" },
@@ -50,7 +50,7 @@ function healthyWaylandDoctor() {
   return {
     ok: true,
     probes: [
-      { label: "binary", status: "ok", message: "cua-driver 0.19.3" },
+      { label: "binary", status: "ok", message: "cua-driver 0.41.3" },
       {
         label: "display server",
         status: "ok",
@@ -66,13 +66,13 @@ function successfulRunner(binary, { doctor = healthyDoctor() } = {}) {
   return vi.fn(async (_command, args, options) => {
     expect(_command).toBe(binary);
     expect(options.env.OPENAI_API_KEY).toBeUndefined();
-    if (args[0] === "--version") return { exitCode: 0, stdout: "cua-driver 0.19.3\n", stderr: "" };
+    if (args[0] === "--version") return { exitCode: 0, stdout: "cua-driver 0.41.3\n", stderr: "" };
     if (args[0] === "manifest") {
       return {
         exitCode: 0,
         stdout: JSON.stringify({
           schema_version: "1",
-          binary_version: "0.19.3",
+          binary_version: "0.41.3",
           binary_path: binary,
           mcp_invocation: { command: binary, args: ["mcp"] },
         }),
@@ -89,8 +89,7 @@ afterEach(() => {
   }
 });
 
-// Windows does not expose the POSIX executable and ownership semantics used by
-// discovery. Canonical temp paths make the same contract useful on macOS.
+// Windows lacks the POSIX executable and ownership semantics discovery uses.
 describe.skipIf(process.platform === "win32")("Linux CUA discovery", () => {
   it("rejects an invalid explicit override without falling through", () => {
     const root = temporaryDirectory();
@@ -149,7 +148,7 @@ describe.skipIf(process.platform === "win32")("Linux CUA discovery", () => {
 
   it("resolves the official user-local symlink to its canonical executable", () => {
     const root = temporaryDirectory();
-    const release = executable(path.join(root, ".cua-driver", "packages", "releases", "0.19.3"));
+    const release = executable(path.join(root, ".cua-driver", "packages", "releases", "0.41.3"));
     const localBin = path.join(root, ".local", "bin");
     fs.mkdirSync(localBin, { recursive: true, mode: 0o700 });
     fs.symlinkSync(release, path.join(localBin, "cua-driver"));
@@ -184,7 +183,7 @@ describe.skipIf(process.platform === "win32")("Linux CUA discovery", () => {
     "accepts the official 0775 layout only for a proven user-private primary group",
     () => {
       const root = temporaryDirectory();
-      const releaseDirectory = path.join(root, ".cua-driver", "packages", "releases", "0.19.3");
+      const releaseDirectory = path.join(root, ".cua-driver", "packages", "releases", "0.41.3");
       const release = executable(releaseDirectory);
       const localBin = path.join(root, ".local", "bin");
       fs.mkdirSync(localBin, { recursive: true, mode: 0o775 });
@@ -422,7 +421,7 @@ describe.skipIf(process.platform === "win32")("Linux CUA diagnostics", () => {
       status: "ready",
       path: binary,
       fileIdentity: validateDriverCandidate(binary).fileIdentity,
-      driverVersion: "0.19.3",
+      driverVersion: "0.41.3",
       manifestSchema: "1",
       mcp: { command: binary, args: ["mcp"] },
     });
@@ -512,12 +511,12 @@ describe.skipIf(process.platform === "win32")("Linux CUA diagnostics", () => {
     const root = temporaryDirectory();
     const binary = executable(path.join(root, "bin"));
     const run = successfulRunner(binary);
-    run.mockImplementationOnce(async () => ({ exitCode: 0, stdout: "cua-driver 0.19.3", stderr: "" }));
+    run.mockImplementationOnce(async () => ({ exitCode: 0, stdout: "cua-driver 0.41.3", stderr: "" }));
     run.mockImplementationOnce(async () => ({
       exitCode: 0,
       stdout: JSON.stringify({
         schema_version: "1",
-        binary_version: "0.19.3",
+        binary_version: "0.41.3",
         mcp_invocation: { command: binary, args: ["mcp"] },
       }),
       stderr: "",
@@ -572,6 +571,158 @@ describe.skipIf(process.platform === "win32")("minimal child environment", () =>
       PATH: "/usr/bin",
       CUA_DRIVER_RS_UPDATE_CHECK: "false",
       CUA_DRIVER_RS_TELEMETRY_ENABLED: "false",
+    });
+  });
+});
+
+const HYPRLAND_ENV = {
+  XDG_SESSION_TYPE: "wayland",
+  XDG_CURRENT_DESKTOP: "Hyprland",
+  HYPRLAND_INSTANCE_SIGNATURE: "6f2a0c1e_1762560000_123456789",
+  WAYLAND_DISPLAY: "wayland-1",
+  DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
+  PATH: "/usr/bin",
+};
+
+/** Answers version, manifest and doctor for each fake binary, each reporting its own version. */
+function versionedRunner(versions) {
+  return vi.fn(async (command, args) => {
+    const version = versions.get(command);
+    if (!version) throw new Error(`unexpected binary ${command}`);
+    if (args[0] === "--version") return { exitCode: 0, stdout: `cua-driver ${version}\n`, stderr: "" };
+    if (args[0] === "manifest") {
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({ schema_version: "1", binary_version: version, mcp_invocation: { command, args: ["mcp"] } }),
+        stderr: "",
+      };
+    }
+    return { exitCode: 0, stdout: JSON.stringify(healthyWaylandDoctor()), stderr: "" };
+  });
+}
+
+describe.skipIf(process.platform === "win32")("Omarchy (Hyprland) local control", () => {
+  const {
+    compatibleSystemDriverVersion,
+    discoverSystemPackageDriver,
+  } = require("./cua-linux.cjs");
+
+  function omarchy({ systemVersion = "0.41.3", packageVersion = `${systemVersion}-1`, system = "found", plugin = "active" } = {}) {
+    const root = temporaryDirectory();
+    const bundled = executable(path.join(root, "resources"));
+    const systemBinary = executable(path.join(root, "usr-bin"));
+    const run = versionedRunner(new Map([[bundled, "0.41.3"], [systemBinary, systemVersion]]));
+    const discoverSystemDriver = vi.fn(async () =>
+      system === "found"
+        ? { ...validateDriverCandidate(systemBinary), source: "system-package", packageVersion }
+        : { status: "unavailable", reasonCode: system });
+    const probePlugin = vi.fn(async () => plugin);
+    const inspect = (env = HYPRLAND_ENV) =>
+      inspectLinuxCuaDriver({ platform: "linux", arch: "x64", homeDir: root, env, bundledDriverPath: bundled, run, probePlugin, discoverSystemDriver });
+    return { bundled, systemBinary, run, discoverSystemDriver, probePlugin, inspect };
+  }
+
+  it("prefers Omarchy's package-owned driver while the plugin is active", async () => {
+    const context = omarchy({ systemVersion: "0.41.5" });
+    const result = await context.inspect();
+    expect(result).toMatchObject({
+      status: "ready",
+      source: "system-package",
+      path: context.systemBinary,
+      driverVersion: "0.41.5",
+      packageVersion: "0.41.5-1",
+      session: "wayland",
+      compositor: "hyprland",
+      commandEnv: { CUA_DRIVER_RS_ENABLE_WAYLAND: "1", HYPRLAND_INSTANCE_SIGNATURE: HYPRLAND_ENV.HYPRLAND_INSTANCE_SIGNATURE },
+    });
+    expect(context.run.mock.calls.every(([command]) => command === context.systemBinary)).toBe(true);
+  });
+
+  it("gives plain plugin guidance and runs nothing when the plugin is off", async () => {
+    const context = omarchy({ plugin: "inactive" });
+    await expect(context.inspect()).resolves.toMatchObject({
+      status: "unavailable",
+      reasonCode: "linux-hyprland-plugin-required",
+      compositor: "hyprland",
+      message: expect.stringContaining("cua-hyprland-plugin"),
+    });
+    expect(context.run).not.toHaveBeenCalled();
+    expect(context.discoverSystemDriver).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["no package-owned driver", { system: "system-driver-unowned" }],
+    ["a driver from another minor line", { systemVersion: "0.42.0" }],
+    ["a driver older than the bundled patch release", { systemVersion: "0.41.2" }],
+    ["a binary that is not the version pacman installed", { systemVersion: "0.41.5", packageVersion: "0.41.4-1" }],
+  ])("falls back to the bundled driver with the native backend on for %s", async (_label, options) => {
+    const context = omarchy(options);
+    const result = await context.inspect();
+    expect(result).toMatchObject({ status: "ready", source: "bundled", path: context.bundled, driverVersion: "0.41.3", compositor: "hyprland" });
+    expect(result.commandEnv.CUA_DRIVER_RS_ENABLE_WAYLAND).toBe("1");
+  });
+
+  it("keeps an explicit CUA_DRIVER_PATH ahead of the system driver", async () => {
+    const context = omarchy();
+    const explicit = context.bundled;
+    const result = await context.inspect({ ...HYPRLAND_ENV, CUA_DRIVER_PATH: explicit });
+    expect(result).toMatchObject({ status: "ready", source: "environment" });
+    expect(context.discoverSystemDriver).not.toHaveBeenCalled();
+  });
+
+  it("never applies the system-driver exception outside Hyprland", async () => {
+    const context = omarchy();
+    const gnome = { ...HYPRLAND_ENV, XDG_CURRENT_DESKTOP: "ubuntu:GNOME", HYPRLAND_INSTANCE_SIGNATURE: "" };
+    await expect(context.inspect(gnome)).resolves.toMatchObject({ status: "ready", source: "bundled", compositor: "gnome-mutter" });
+    expect(context.discoverSystemDriver).not.toHaveBeenCalled();
+    expect(context.probePlugin).not.toHaveBeenCalled();
+    const sway = { ...HYPRLAND_ENV, XDG_CURRENT_DESKTOP: "sway", HYPRLAND_INSTANCE_SIGNATURE: "" };
+    await expect(context.inspect(sway)).resolves.toMatchObject({ status: "unavailable", reasonCode: "wayland-compositor-unsupported" });
+  });
+
+  it("accepts only the bundled minor line at or above the bundled patch release", () => {
+    expect(compatibleSystemDriverVersion("0.41.3")).toBe(true);
+    expect(compatibleSystemDriverVersion("0.41.12")).toBe(true);
+    for (const version of ["0.41.2", "0.42.0", "1.41.3", "0.41", "0.41.3-rc1", "", undefined]) {
+      expect(compatibleSystemDriverVersion(version), String(version)).toBe(false);
+    }
+  });
+
+  describe("the package-owned driver trust exception", () => {
+    const found = (file) => ({ status: "found", path: file, fileIdentity: {} });
+
+    it("trusts /usr/bin/cua-driver only when root owns it and pacman says cua-driver-bin installed it", async () => {
+      const packageVersion = vi.fn(async () => "0.41.3-1");
+      await expect(discoverSystemPackageDriver({ statFile: () => ({ uid: 0 }), validate: found, packageVersion })).resolves.toMatchObject({
+        status: "found",
+        path: "/usr/bin/cua-driver",
+        source: "system-package",
+        packageVersion: "0.41.3-1",
+      });
+      expect(packageVersion).toHaveBeenCalledWith("/usr/bin/cua-driver");
+    });
+
+    it("refuses a missing file, a non-root owner, a failed path check, or a file pacman does not attribute to the package", async () => {
+      const packageVersion = async () => "0.41.3-1";
+      await expect(discoverSystemPackageDriver({ statFile: () => { throw new Error("ENOENT"); }, validate: found, packageVersion }))
+        .resolves.toMatchObject({ reasonCode: "system-driver-missing" });
+      await expect(discoverSystemPackageDriver({ statFile: () => ({ uid: 1000 }), validate: found, packageVersion }))
+        .resolves.toMatchObject({ reasonCode: "system-driver-untrusted" });
+      await expect(discoverSystemPackageDriver({ statFile: () => ({ uid: 0 }), validate: () => ({ status: "unavailable" }), packageVersion }))
+        .resolves.toMatchObject({ reasonCode: "system-driver-untrusted" });
+      await expect(discoverSystemPackageDriver({ statFile: () => ({ uid: 0 }), validate: found, packageVersion: async () => null }))
+        .resolves.toMatchObject({ reasonCode: "system-driver-unowned" });
+    });
+
+    it("follows a packaged symlink only into a file the same package owns", async () => {
+      const target = "/opt/cua-driver/cua-driver";
+      const owners = new Map([["/usr/bin/cua-driver", "0.41.3-1"], [target, "0.41.3-1"]]);
+      const packageVersion = async (file) => owners.get(file) ?? null;
+      await expect(discoverSystemPackageDriver({ statFile: () => ({ uid: 0 }), validate: () => found(target), packageVersion }))
+        .resolves.toMatchObject({ status: "found", path: target });
+      owners.delete(target);
+      await expect(discoverSystemPackageDriver({ statFile: () => ({ uid: 0 }), validate: () => found(target), packageVersion }))
+        .resolves.toMatchObject({ reasonCode: "system-driver-unowned" });
     });
   });
 });

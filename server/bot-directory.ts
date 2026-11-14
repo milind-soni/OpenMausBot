@@ -12,15 +12,12 @@ export interface DirectoryBot {
   name: string;
   category: string;
   integrations: string[];
-  /** the community-written setup prompt — shown to the human, and only ever
-   * imported as a bot description through the same persona-only boundary as
-   * any shared team file */
+  /** Community-written: imported only as a bot description, through the persona-only boundary of any shared team file. */
   prompt: string;
   detailUrl: string;
 }
 
 export interface MatchedDirectoryBot extends DirectoryBot {
-  /** the profile terms this bot matched on, for the human reviewing it */
   matched: string[];
 }
 
@@ -35,9 +32,7 @@ function text(value: unknown, max: number): string | null {
   return normalized.length > max ? null : normalized;
 }
 
-/** Validate the community-maintained index before any of it reaches the
- * renderer. Entries that do not parse are dropped, not fatal — one bad
- * community submission must not blank the whole directory. */
+/** Entries that do not parse are dropped: one bad community submission must not blank the directory. */
 export function parseBotDirectory(value: unknown): DirectoryBot[] {
   if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.bots)) {
     throw new Error("The bot directory response is not supported");
@@ -68,8 +63,7 @@ export function parseBotDirectory(value: unknown): DirectoryBot[] {
   return bots;
 }
 
-/** Read the body in bounded chunks: an oversized or endless response is
- * rejected the moment it crosses the cap, never buffered whole first. */
+/** An oversized or endless body is rejected the moment it crosses the cap, never buffered whole. */
 async function readBounded(response: Response, maxBytes: number): Promise<string> {
   const oversized = () => new Error("The bot directory response is too large");
   const announced = Number(response.headers.get("content-length") ?? 0);
@@ -105,14 +99,7 @@ export async function fetchBotDirectory(fetcher: Fetcher = fetch): Promise<Direc
   return parseBotDirectory(parseJson(await readBounded(response, MAX_DIRECTORY_BYTES)));
 }
 
-/** Rank directory bots against a scouted project: overlap between the
- * project's stacks/summary words and a bot's name, category and
- * integrations. Purely lexical on purpose — deterministic, explainable,
- * and honest about being a hint rather than a verdict. */
-// Words that appear in nearly every project blurb and would match nearly
-// every directory entry. A match on one of these is noise, not affinity —
-// measured live: "Your own team of AI bots" matched a home-value tracker
-// purely on "your".
+// Words in nearly every project blurb: a match on one is noise ("Your own team of AI bots" matched a home-value tracker on "your").
 const STOPWORDS = new Set([
   "your", "with", "that", "this", "from", "have", "what", "when", "where", "will",
   "them", "then", "than", "only", "also", "into", "over", "about", "after", "before",
@@ -129,13 +116,11 @@ export function matchDirectoryBots(
   const terms = new Set<string>();
   for (const stack of profile.stacks) {
     const term = stack.toLowerCase();
-    // a two- or three-letter stack ("go", "php") substring-matches half the
-    // directory — "google", "django", "logo" are not Go affinity
+    // A two- or three-letter stack ("go", "php") substring-matches half the directory.
     if (term.length >= 4) terms.add(term);
   }
   for (const signal of profile.signals) terms.add(signal.role);
-  // "." and "#" stay word-internal for the likes of next.js and C#, but a
-  // sentence-final "payments." must still match "Payments"
+  // "." and "#" stay word-internal (next.js, C#), but a sentence-final "payments." still matches "Payments".
   for (const raw of `${profile.name} ${profile.summary}`.toLowerCase().split(/[^a-z0-9+.#-]+/)) {
     const word = raw.replace(/^[.#+-]+|[.#+-]+$/g, "");
     if (word.length >= 4 && !STOPWORDS.has(word)) terms.add(word);

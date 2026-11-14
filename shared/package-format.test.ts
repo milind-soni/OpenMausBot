@@ -250,6 +250,15 @@ describe("files for older apps", () => {
     expect(JSON.stringify(v1)).not.toMatch(/"avatar"|"seed"|"approval"|"connections"|"presets"|"brief"/);
   });
 
+  it("drops run on startup for an older app, and says so", () => {
+    const document: PackageDocument = parsePackageDocument(fixture("full-team.v2.json"));
+    document.package.routines!.find((routine) => routine.key === "daily-digest")!.runOnStartup = true;
+    const result = downgradeToV1(document);
+    if ("error" in result) throw new Error(result.error);
+    expect(result.dropped).toContain("routines[daily-digest].runOnStartup");
+    expect(JSON.stringify(parsePackageV1(result.document))).not.toContain("runOnStartup");
+  });
+
   it("refuses what v1 cannot represent", () => {
     expect(downgradeToV1(parsePackageDocument(fixture("library-only.v2.json")))).toEqual({ error: expect.stringContaining("without bots") });
     const document: PackageDocument = parsePackageDocument(fixture("full-team.v2.json"));

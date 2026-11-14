@@ -53,12 +53,9 @@ function requireExecutable(file) {
   }
 }
 
-// electron-updater picks its installer from resources/package-type: present
-// and reading "deb" routes to DebUpdater, absent falls back to AppImageUpdater.
-// electron/updater.mjs reads the same marker to decide whether the update is
-// applied in place or handed to the system package manager. If packaging ever
-// puts the marker in both artifacts (or neither), that routing silently
-// inverts, so pin it here where both trees are already extracted.
+// electron-updater picks its installer from resources/package-type ("deb" →
+// DebUpdater, absent → AppImageUpdater), and the app's updater reads the same
+// marker; a marker in both artifacts (or neither) silently inverts the routing.
 function requirePackageType(resources, label, expected) {
   const marker = path.join(resources, "package-type");
   const found = statSync(marker, { throwIfNoEntry: false })?.isFile()
@@ -125,8 +122,8 @@ function verifyCompliance(licenses, label) {
   const html = readFileSync(path.join(licenses, "THIRD_PARTY_LICENSES.html"), "utf8");
   const sbom = JSON.parse(readFileSync(path.join(licenses, "SBOM.cdx.json"), "utf8"));
   const components = sbom.components ?? [];
-  if (components.length !== 339) {
-    fail(`${label} SBOM must contain 330 registry packages, 8 Cua packages, and Inter`);
+  if (components.length !== 392) {
+    fail(`${label} SBOM must contain 381 registry packages, 10 Cua packages, and Inter`);
   }
   const componentRefs = new Set();
   for (const component of components) {
@@ -140,17 +137,19 @@ function verifyCompliance(licenses, label) {
   const registry = components.filter((component) => component.group === "crates.io");
   const trycua = components.filter((component) => component.group === "trycua");
   const fonts = components.filter((component) => component.group === "rsms");
-  if (registry.length !== 330 || trycua.length !== 8 || fonts.length !== 1) {
+  if (registry.length !== 381 || trycua.length !== 10 || fonts.length !== 1) {
     fail(`${label} SBOM component groups do not match the reviewed runtime graph`);
   }
   const trycuaNames = trycua.map((component) => component.name).sort();
   if (
     JSON.stringify(trycuaNames) !==
     JSON.stringify([
+      "cua-cursor-motion",
       "cua-driver",
       "cua-driver-contract",
       "cua-driver-core",
       "cua-driver-sdk",
+      "cua-telemetry",
       "cursor-overlay",
       "cursor-theme-cli",
       "pip-preview",
@@ -182,8 +181,8 @@ function verifyCompliance(licenses, label) {
   const attributed = new Set(
     [...html.matchAll(/<tr data-package-id="([^"]+)">/g)].map((match) => match[1]),
   );
-  if (attributed.size !== 330) {
-    fail(`${label} license report does not cover the reviewed 330 registry packages`);
+  if (attributed.size !== 381) {
+    fail(`${label} license report does not cover the reviewed 381 registry packages`);
   }
   for (const packageId of attributed) {
     if (!registryIds.has(packageId)) {
@@ -209,7 +208,7 @@ function verifyCompliance(licenses, label) {
     fail(`${label} MPL component set changed`);
   }
   const rootDependency = sbom.dependencies?.find(
-    (dependency) => dependency.ref === "pkg:generic/cua-driver-linux-x64@0.19.3",
+    (dependency) => dependency.ref === "pkg:generic/cua-driver-linux-x64@0.41.3",
   );
   const rootReferences = rootDependency?.dependsOn;
   const uniqueRootReferences = new Set(rootReferences ?? []);
@@ -262,8 +261,8 @@ function verifyCuaResources(resources, label, {
   requireContained(cuaRoot, driver);
   requireContained(cuaRoot, cursorTheme);
   const expectedHashes = new Map([
-    [driver, "ed5844fadf07b9b72c4a3b3802e1c47233c166d66d6198608d5991f807aab4ac"],
-    [cursorTheme, "e589b2b7521bbfeaf9e2bfce668a38e80ed1b9790b1327b13d374fc331d8312a"],
+    [driver, "83030028e7c9e3f4d753b3b27025135d44eb8d52f562cce0aaaf95777bc1b41f"],
+    [cursorTheme, "d39efb960d207e7328d7a9dd48e3b6565f74be073f9c2ca8dcba86a4d0f28312"],
   ]);
   for (const [file, expected] of expectedHashes) {
     const actual = sha256(file);
@@ -281,7 +280,7 @@ function verifyCuaResources(resources, label, {
     env: commandEnvironment,
     timeout: 5_000,
   }).trim();
-  if (version !== "cua-driver 0.19.3") fail(`${label} CUA version is ${JSON.stringify(version)}`);
+  if (version !== "cua-driver 0.41.3") fail(`${label} CUA version is ${JSON.stringify(version)}`);
   const manifest = JSON.parse(
     execFileSync(driver, ["manifest"], {
       encoding: "utf8",
@@ -299,7 +298,7 @@ function verifyCuaResources(resources, label, {
   }
   if (
     manifest.schema_version !== "1" ||
-    manifest.binary_version !== "0.19.3" ||
+    manifest.binary_version !== "0.41.3" ||
     invocationPath !== realpathSync(driver) ||
     JSON.stringify(manifest.mcp_invocation?.args) !== JSON.stringify(["mcp"])
   ) {
@@ -314,18 +313,18 @@ function verifyCuaResources(resources, label, {
   const release = JSON.parse(readFileSync(path.join(cuaRoot, "release.json"), "utf8"));
   const expectedRelease = {
     schemaVersion: 1,
-    version: "0.19.3",
+    version: "0.41.3",
     platform: "linux",
     arch: "x64",
     archive: {
-      name: "cua-driver-rs-0.19.3-linux-x86_64-binary.tar.gz",
+      name: "cua-driver-rs-0.41.3-linux-x86_64-binary.tar.gz",
       url:
-        "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.19.3/" +
-        "cua-driver-rs-0.19.3-linux-x86_64-binary.tar.gz",
-      size: 27_248_614,
-      sha256: "3db9d4257d84bacaf7eb104d225f85613ce67edbb20d6eeb83c1384b6d8a5b10",
+        "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.41.3/" +
+        "cua-driver-rs-0.41.3-linux-x86_64-binary.tar.gz",
+      size: 38_375_345,
+      sha256: "a00a7bc4a648adbcbc93bfbf5a058daf71ce8838ee172e33b197aaf649ecee14",
     },
-    sourceCommit: "a1672e7b11951275ecfba3384264d4530185d0db",
+    sourceCommit: "bd0e299c67dec6397b3d41a259452b2ea13a1cd5",
     files: {
       "cua-driver": { sha256: expectedHashes.get(driver), mode: "0755" },
       "cua-cursor-theme": { sha256: expectedHashes.get(cursorTheme), mode: "0755" },
@@ -405,7 +404,7 @@ const resources = path.join(unpacked, "resources");
 requireExecutable(appImage);
 requireExecutable(executable);
 requireDirectoryMode(unpacked, 0o755);
-for (const relative of ["app.asar", "ui/index.html", "server/index.js"]) {
+for (const relative of ["app.asar", "ui/index.html", "server/index.js", "server/desktop-entry.mjs"]) {
   requireFile(path.join(resources, relative));
 }
 for (const forbidden of ["speech-helper", "cua-driver", "cua-sdk"]) {

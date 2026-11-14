@@ -14,8 +14,6 @@ import {
 test("the cache is evicted when the persisted version is not this build's, and only then", () => {
   assert.deepEqual(startupCacheEvictionDecision({ currentVersion: "1.2.3", persistedVersion: "1.2.3" }), { evict: false, reason: "same-version" });
   assert.deepEqual(startupCacheEvictionDecision({ currentVersion: "1.2.3", persistedVersion: "1.2.2" }), { evict: true, reason: "version-change" });
-  // a profile with no record — first run after this ships, or an unreadable
-  // one — must not inherit the old cache's trust
   assert.deepEqual(startupCacheEvictionDecision({ currentVersion: "1.2.3", persistedVersion: null }), { evict: true, reason: "no-persisted-version" });
   assert.deepEqual(startupCacheEvictionDecision({ currentVersion: "", persistedVersion: null }), { evict: false, reason: "unknown-version" });
 });
@@ -47,12 +45,8 @@ test("the eviction runs once per version: first launch clears, relaunch does not
     log() {},
   });
   try {
-    // first launch of the fixed build: no record, so the old policy's
-    // entries are evicted before the first window opens
     assert.deepEqual(await evictStartupCacheOnce(deps("0.2.0")), { evict: true, reason: "no-persisted-version", cleared: true, remembered: true });
-    // same version again: no clear
     assert.deepEqual(await evictStartupCacheOnce(deps("0.2.0")), { evict: false, reason: "same-version", cleared: false, remembered: true });
-    // upgrade: exactly one more clear
     assert.deepEqual(await evictStartupCacheOnce(deps("0.2.1")), { evict: true, reason: "version-change", cleared: true, remembered: true });
     assert.deepEqual(await evictStartupCacheOnce(deps("0.2.1")), { evict: false, reason: "same-version", cleared: false, remembered: true });
     assert.deepEqual(clears, ["0.2.0", "0.2.1"]);
@@ -62,10 +56,7 @@ test("the eviction runs once per version: first launch clears, relaunch does not
 });
 
 test("the production wiring shape works without injected persistence (regression)", async () => {
-  // electron/main.mjs passes exactly userData, currentVersion, clearCache,
-  // and log. A call site that omits the persistence pair once threw a
-  // TypeError before the cache cleared or any window opened, so this shape
-  // must boot on the module's file-backed defaults, end to end.
+  // main.mjs passes only userData, currentVersion, clearCache and log, so this shape must boot on the file-backed defaults.
   const dir = mkdtempSync(join(tmpdir(), "omb-startup-cache-"));
   const clears = [];
   const productionShape = (currentVersion) => ({
@@ -76,7 +67,6 @@ test("the production wiring shape works without injected persistence (regression
   });
   try {
     assert.deepEqual(await evictStartupCacheOnce(productionShape("0.2.0")), { evict: true, reason: "no-persisted-version", cleared: true, remembered: true });
-    // the default persistence really wrote the record the next launch reads
     assert.equal(readLastRunVersion(dir), "0.2.0");
     assert.deepEqual(await evictStartupCacheOnce(productionShape("0.2.0")), { evict: false, reason: "same-version", cleared: false, remembered: true });
     assert.deepEqual(clears, ["0.2.0"]);

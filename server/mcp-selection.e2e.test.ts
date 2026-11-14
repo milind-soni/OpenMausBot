@@ -86,7 +86,6 @@ it("imports atomically and mounts the selected MCP servers in fresh direct and r
       expect((await control(["wait", "--bot", bot.id, "--timeout", "30"])).status).toBe("settled");
       return mounted;
     };
-    // Import alone grants nothing, even when the source requested enabled.
     await turn([]);
     for (const name of ["notes", "constructor"]) expect((await api("PATCH", `/api/mcp/servers/${name}`, { enabled: true })).status).toBe(200);
     await selected(["notes"]);
@@ -134,11 +133,9 @@ it("validates MCP grants, refuses live changes and client sessions, and rechecks
     expect((await api("PATCH", `/api/bots/${bot.id}`, { mcpServers: [] }, { origin: url })).status).toBe(409);
     expect((await api("PATCH", `/api/bots/${bot.id}`, { mcpServers: ["notes"] }, { origin: url })).status).toBe(200);
     expect((await api("PATCH", `/api/bots/${idle.id}`, { mcpServers: null })).status).toBe(409);
-    // The authenticated same-origin UI may grant an idle bot access.
     expect((await api("PATCH", `/api/bots/${idle.id}`, { mcpServers: ["notes"] }, { origin: url })).status).toBe(200);
     await control(["interrupt", "--bot", bot.id]);
-    // Stopping a deliberately hung provider can report failed rather than a
-    // completed reply; the permission boundary requires the turn to be idle.
+    // Stopping a deliberately hung provider can report failed; the permission boundary needs the turn idle.
     expect((await control(["wait", "--bot", bot.id, "--timeout", "30"])).target.busy).toBe(false);
     expect((await api("PATCH", `/api/bots/${bot.id}`, { mcpServers: [] })).status).toBe(200);
     const { channel } = await control(["new-channel", "--name", "Working room", "--members", bot.id]);
@@ -161,8 +158,7 @@ it("validates MCP grants, refuses live changes and client sessions, and rechecks
       finishBody = () => req.end(body.slice(1));
     });
     try {
-      // The import mutex proves the first request authenticated and entered
-      // its body reader before its session is revoked.
+      // The import mutex proves the first request authenticated and entered its body reader before revocation.
       await expect.poll(async () => (await api("POST", "/api/mcp/servers/import", { json: "{}" })).status).toBe(409);
       expect((await api("DELETE", `/api/auth/sessions/${admin.session.id}`)).status).toBe(200);
     } finally {

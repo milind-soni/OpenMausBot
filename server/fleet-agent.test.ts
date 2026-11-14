@@ -1,8 +1,10 @@
 import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { startFleetAgent } from "./fleet-agent.ts";
+import { readBody, startFleetAgent } from "./fleet-agent.ts";
 import { fleetAvailable, fleetRequest } from "./fleet-client.ts";
 import type { FleetDeps } from "./fleet-cli.ts";
 import { emptyRegistry, fleetLayout, MANAGED_OPENROUTER } from "./fleet.ts";
@@ -96,7 +98,6 @@ describe.skipIf(process.platform === "win32")("fleet agent over its socket", () 
     const logs = await boot(m);
     expect(logs[0]).toContain("fleet agent listening");
     expect(fleetAvailable(socketPath)).toBe(true);
-    // the socket itself is the authorisation: owner and group only
     if (process.platform !== "win32") expect(statSync(socketPath).mode & 0o777).toBe(0o660);
 
     const created = await fleetRequest(socketPath, "POST", "/workspaces", { slug: "acme", admins: ["ada@example.test"], members: ["@acme.test"], cap: 40, anthropicKey: "sk-ant-fixture", brandJson: '{"name":"Acme"}', portalUrl: "https://admin.example.test", anthropicUrl: "https://admin.example.test/api/gateway/acme/anthropic" });
@@ -196,7 +197,6 @@ describe.skipIf(process.platform === "win32")("fleet agent over its socket", () 
       await vi.waitFor(() => expect(m.calls.some((call) => call.endsWith("omb-alpha"))).toBe(true));
       expect(await fleetRequest(socketPath, "GET", "/workspaces")).toMatchObject({ status: 200, body: { workspaces: [{ slug: "alpha", status: "provisioning", accountCreated: false, live: "provisioning" }] } });
       const beta = fleetRequest(socketPath, "POST", "/workspaces", { slug: "beta", admins: ["b@example.test"] });
-      // A health request reaches the server while the second mutation is queued.
       expect((await fleetRequest(socketPath, "GET", "/health")).status).toBe(200);
       expect(m.calls.some((call) => call.endsWith("omb-beta"))).toBe(false);
       release();
@@ -258,5 +258,26 @@ describe.skipIf(process.platform === "win32")("fleet agent over its socket", () 
     ] } });
     expect(JSON.stringify(listed)).not.toContain("fixture-secret");
     expect((await fleetRequest(socketPath, "GET", "/health")).status).toBe(200);
+  });
+});
+
+describe("fleet agent request body", () => {
+  const request = (chunks: Buffer[]) => Readable.from(chunks) as unknown as IncomingMessage;
+
+  it("keeps a character whole when a chunk boundary splits it", async () => {
+    const bytes = Buffer.from(JSON.stringify({ email: "owner@example.test", note: "مرحبا 中文 😀" }));
+    const cut = bytes.indexOf("مرحبا") + 1; // inside the first two-byte letter
+    expect(bytes[cut]! & 0xc0).toBe(0x80);
+    const body = await readBody(request([bytes.subarray(0, cut), bytes.subarray(cut)]));
+    expect(body.note).toBe("مرحبا 中文 😀");
+  });
+
+  it("measures the limit in bytes, not characters", async () => {
+    // 100,000 three-byte characters: well under 256 KiB characters, but
+    // about 300 KB on the wire.
+    const bytes = Buffer.from(JSON.stringify({ note: "中".repeat(100_000) }));
+    const chunks: Buffer[] = [];
+    for (let at = 0; at < bytes.length; at += 64 * 1024) chunks.push(bytes.subarray(at, at + 64 * 1024));
+    await expect(readBody(request(chunks))).rejects.toMatchObject({ status: 413 });
   });
 });

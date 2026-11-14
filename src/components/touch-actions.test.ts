@@ -4,29 +4,29 @@ import { fileURLToPath } from "node:url";
 import { compile } from "tailwindcss";
 import { describe, expect, it } from "vitest";
 
-// Tailwind v4 wraps every `hover:`/`group-hover:` rule in
-// `@media (hover: hover)`, so on a phone or tablet a control that is
-// `opacity-0 group-hover:opacity-100` never becomes visible: it is either
-// invisible or only reachable by a lucky tap. Every hover-revealed action
-// therefore needs a `touch:` counterpart (the custom variant in styles.css)
-// and a keyboard-focus reveal.
+// Tailwind v4 wraps every hover:/group-hover: rule in @media (hover: hover), so on a touch screen a hover-revealed
+// control never shows: each needs a touch: counterpart and a keyboard-focus reveal.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const srcRoot = join(here, "..");
 const stylesPath = join(srcRoot, "styles.css");
 const styles = readFileSync(stylesPath, "utf8");
 
-// Hover-only details that are not actions. Keyed by file and a snippet of the
-// class string so a stale entry fails below instead of silently widening.
+// Keyed by file and a class-string snippet, so a stale entry fails instead of silently widening.
 const notActions: Array<{ file: string; snippet: string; why: string }> = [
   { file: "components/ChatView.tsx", snippet: "self-end pb-1 text-[11px] tabular-nums", why: "message timestamp, informational" },
   { file: "components/GroupView.tsx", snippet: "self-end pb-1 text-[11px] tabular-nums", why: "message timestamp, informational" },
   { file: "components/ScreenFrame.tsx", snippet: "group-hover/image:opacity-100", why: "aria-hidden zoom hint; the whole image is the tap target" },
   { file: "components/AttachmentPreview.tsx", snippet: "group-hover/image:opacity-100", why: "zoom hint; the whole image is the tap target" },
   { file: "components/remote-desktop-panel.tsx", snippet: "bg-black/65 py-2", why: "caption; the whole preview is the tap target" },
-  { file: "components/routines/CalendarSidebar.tsx", snippet: "text-[8.5px]", why: "'Drag' hint badge, not a control" },
-  { file: "components/RoutineCalendarPage.tsx", snippet: "cursor-ns-resize", why: "mouse drag-resize handle for call events" },
+  { file: "components/routines/CalendarSidebar.tsx", snippet: "text-[9px]", why: "'Drag' hint badge, not a control" },
+  { file: "components/routines/CalendarEventCard.tsx", snippet: "cursor-ns-resize", why: "mouse drag-resize handle for call events" },
   { file: "components/ComputerPanel.tsx", snippet: "opacity-80", why: "already visible at 80% without hover" },
+  { file: "components/bot-panel/PanelHero.tsx", snippet: "whitespace-nowrap rounded-md border border-hairline bg-menu", why: "\"Edit avatar\" tooltip; the avatar button itself is the tap target" },
+  { file: "components/ChatView.tsx", snippet: "-ml-2.5 w-0 shrink-0 text-ink-secondary", why: "decorative chevron in the Simple bot pill; the whole pill is the tap target" },
+  { file: "components/RoomHeader.tsx", snippet: "-ml-1 w-0 shrink-0 text-ink-secondary", why: "decorative chevron on the Simple room name; the whole name is the tap target" },
+  { file: "components/SidebarConnectApps.tsx", snippet: "opacity-60 grayscale", why: "decorative app logos, already visible at 60% without hover; the whole Apps row is the tap target" },
+  { file: "components/PlacesRail.tsx", snippet: "h-2 opacity-0 group-hover/tile:opacity-100", why: "decorative pill beside a rail tile on hover; the tile is the tap target and has its own focus ring" },
 ];
 
 function sourceFiles(dir: string): string[] {
@@ -56,7 +56,6 @@ function classLiterals(): Literal[] {
   return found;
 }
 
-// The utilities that hide or make room for a hover-revealed control.
 const revealUtility = /group-hover(?:\/[\w-]+)?:(opacity-\d+|pointer-events-auto|pr-\[[^\]]+\])/g;
 
 function missingTouchCounterparts(literal: Literal): string[] {
@@ -94,23 +93,19 @@ describe("hover-only actions on touch screens", () => {
       loadStylesheet: async (id, base) => {
         const path = id === "tailwindcss" ? join(tailwindRoot, "index.css") : id.startsWith("tailwindcss/")
           ? join(tailwindRoot, id.slice("tailwindcss/".length))
-          : join(base, id);
+          : id.startsWith(".") ? join(base, id) : fileURLToPath(import.meta.resolve(id));
         return { path, base: dirname(path), content: readFileSync(path, "utf8") };
       },
     });
     const css = compiler.build(["touch:opacity-100", "group-hover:opacity-100"]);
-    // one media query holding both conditions; a comma in the shorthand
-    // variant form would be read as a selector list and break the rule
+    // One media query holding both conditions: a comma in the shorthand variant would be read as a selector list.
     expect(css).toMatch(/@media \(hover: none\), \(pointer: coarse\) \{\s*\.touch\\:opacity-100 \{\s*opacity: 100%;/);
     expect(css).not.toMatch(/\.touch\\:opacity-\d+ \(pointer/);
-    // desktop keeps its hover-only rule: nothing about the mouse path changes
     expect(css).toMatch(/@media \(hover: hover\) \{\s*\.group-hover\\:opacity-100:is\(:where\(\.group\):hover \*\)/);
   });
 
   it("finds the hover-revealed controls it guards", () => {
     const literals = classLiterals().filter((literal) => !isNotAction(literal));
-    // copy/raw/speak/pin/reply/actions in chat and group chat, the composer
-    // chip remove, thread list buttons, and sidebar row buttons
     expect(literals.length).toBeGreaterThanOrEqual(19);
   });
 

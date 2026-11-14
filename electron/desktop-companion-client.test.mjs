@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
-import { createServer } from "node:http";
+import http, { createServer } from "node:http";
 import { createConnection } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import {
   DESKTOP_COMPANION_FIELD,
+  MANAGED_COMPANION_HOST_SUFFIXES,
+  NEXT_MANAGED_COMPANION_HOST_SUFFIX,
   desktopCompanionAccess,
   desktopCompanionRendererArguments,
   desktopCompanionProxyTarget,
@@ -20,6 +22,8 @@ import {
 } from "./desktop-companion-client.mjs";
 
 const token = `omb_${"a".repeat(43)}`;
+// The one opaque label the control plane puts in front of a managed domain.
+const LABEL = "c-0123456789abcdef0123456789abcdef";
 const deviceId = "123e4567-e89b-12d3-a456-426614174000";
 const access = {
   endpoint: "http://host.example-tailnet.ts.net:8810",
@@ -56,33 +60,90 @@ describe("desktop companion endpoint", () => {
     expect(normalizeTailscaleCompanionEndpoint("http://HOST.example-tailnet.ts.net:9910/")).toBe(
       "http://host.example-tailnet.ts.net:9910",
     );
-    expect(normalizeDesktopCompanionEndpoint("https://c-opaque.openmausbot.com")).toBe(
-      "https://c-opaque.openmausbot.com",
+    expect(normalizeDesktopCompanionEndpoint(`https://${LABEL}.openmausbot.com`)).toBe(
+      `https://${LABEL}.openmausbot.com`,
     );
-    expect(normalizeDesktopCompanionEndpoint("c-opaque.openmausbot.com")).toBe(
-      "https://c-opaque.openmausbot.com",
+    expect(normalizeDesktopCompanionEndpoint(`${LABEL}.openmausbot.com`)).toBe(
+      `https://${LABEL}.openmausbot.com`,
+    );
+    // The control plane's second Cloudflare account gives addresses here.
+    expect(normalizeDesktopCompanionEndpoint(`https://${LABEL}.mausbot.si`)).toBe(
+      `https://${LABEL}.mausbot.si`,
+    );
+    expect(normalizeDesktopCompanionEndpoint(` ${LABEL.toUpperCase()}.Mausbot.SI/ `)).toBe(
+      `https://${LABEL}.mausbot.si`,
     );
     for (const endpoint of [
       "https://unrelated.example.com",
-      "http://c-opaque.openmausbot.com",
+      `http://${LABEL}.openmausbot.com`,
       "http://10.0.0.4:8810",
       "http://host.local:8810",
       "https://10.0.0.4",
       "http://host.example-tailnet.ts.net/path",
-      "https://c-opaque.openmausbot.com/path",
+      `https://${LABEL}.openmausbot.com/path`,
       "http://user@host.example-tailnet.ts.net",
       "http://host.example-tailnet.ts.net.evil.test",
-      "https://c-opaque.openmausbot.com.evil.test",
+      `https://${LABEL}.openmausbot.com.evil.test`,
+      `http://${LABEL}.mausbot.si`,
+      `https://${LABEL}.mausbot.si/path`,
+      `https://${LABEL}.mausbot.si.evil.test`,
+      "https://mausbot.si",
+      "mausbot.si",
+      "https://evilmausbot.si",
+      `https://${LABEL}.evilmausbot.si`,
+      "https://www.mausbot.si",
+      "https://app.mausbot.si",
+      "https://accounts.openmausbot.com",
+      "https://c-opaque.openmausbot.com",
+      "https://c-opaque.mausbot.si",
+      `https://${LABEL.slice(0, -1)}.mausbot.si`,
+      `https://${LABEL}0.mausbot.si`,
+      `https://${LABEL.replace("c-", "d-")}.mausbot.si`,
+      `https://${LABEL}.extra.mausbot.si`,
+      `https://www.${LABEL}.mausbot.si`,
     ]) {
       expect(normalizeDesktopCompanionEndpoint(endpoint), endpoint).toBe("");
     }
   });
 
+  it("accepts one c-<32 hex> label under each listed domain, and only those", () => {
+    // The third domain is a one-line change; until the owner names it, nothing new is accepted.
+    expect(NEXT_MANAGED_COMPANION_HOST_SUFFIX).toBe("");
+    expect(MANAGED_COMPANION_HOST_SUFFIXES).toEqual(["openmausbot.com", "mausbot.si"]);
+    expect(Object.isFrozen(MANAGED_COMPANION_HOST_SUFFIXES)).toBe(true);
+    for (const suffix of MANAGED_COMPANION_HOST_SUFFIXES) {
+      expect(suffix).toMatch(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/);
+      expect(normalizeDesktopCompanionEndpoint(`https://${LABEL}.${suffix}`)).toBe(`https://${LABEL}.${suffix}`);
+      expect(normalizeDesktopCompanionEndpoint(`${LABEL.toUpperCase().replace("C-", "c-")}.${suffix}`))
+        .toBe(`https://${LABEL}.${suffix}`);
+      for (const near of [
+        `https://${LABEL}.${suffix}.`,
+        `https://${LABEL}.x${suffix}`,
+        `https://${LABEL}.sub.${suffix}`,
+        `https://${LABEL.slice(0, -1)}g.${suffix}`,
+        `https://${LABEL}.${suffix}.example.net`,
+        `https://c-.${suffix}`,
+      ]) {
+        expect(normalizeDesktopCompanionEndpoint(near), near).toBe("");
+      }
+    }
+    for (const unlisted of ["example.net", "openmausbot.net", "mausbot.com", "si", "com", ""]) {
+      expect(normalizeDesktopCompanionEndpoint(`https://${LABEL}.${unlisted}`), unlisted).toBe("");
+    }
+  });
+
   it("validates, adds, and removes the encrypted credential document field", () => {
-    const hostedAccess = { ...access, endpoint: "https://c-opaque.openmausbot.com" };
+    const hostedAccess = { ...access, endpoint: `https://${LABEL}.openmausbot.com` };
     expect(desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: hostedAccess })).toEqual(
       hostedAccess,
     );
+    const secondDomain = { ...access, endpoint: `https://${LABEL}.mausbot.si` };
+    expect(desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: secondDomain })).toEqual(
+      secondDomain,
+    );
+    expect(
+      desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: { ...access, endpoint: "https://app.mausbot.si" } }),
+    ).toBeNull();
 
     expect(desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: access })).toEqual(access);
     expect(desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: { ...access, token: "bad" } })).toBeNull();
@@ -132,17 +193,41 @@ describe("desktop companion pairing", () => {
       }),
     );
     const paired = await pairDesktopCompanion({
-      endpoint: "https://c-opaque.openmausbot.com",
+      endpoint: `https://${LABEL}.openmausbot.com`,
       code: "654321",
       deviceName: "Desktop client",
       requestId: "request-https-01",
       fetchImpl,
     });
-    expect(paired).toEqual({ ...access, endpoint: "https://c-opaque.openmausbot.com" });
+    expect(paired).toEqual({ ...access, endpoint: `https://${LABEL}.openmausbot.com` });
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://c-opaque.openmausbot.com/api/pair",
+      `https://${LABEL}.openmausbot.com/api/pair`,
       expect.objectContaining({ method: "POST" }),
     );
+
+    const secondDomain = await pairDesktopCompanion({
+      endpoint: `${LABEL}.mausbot.si`,
+      code: "654321",
+      deviceName: "Desktop client",
+      requestId: "request-https-02",
+      fetchImpl,
+    });
+    expect(secondDomain).toEqual({ ...access, endpoint: `https://${LABEL}.mausbot.si` });
+    expect(fetchImpl).toHaveBeenLastCalledWith(
+      `https://${LABEL}.mausbot.si/api/pair`,
+      expect.objectContaining({ method: "POST" }),
+    );
+
+    await expect(
+      pairDesktopCompanion({
+        endpoint: "https://app.mausbot.si",
+        code: "654321",
+        deviceName: "Desktop client",
+        requestId: "request-https-03",
+        fetchImpl,
+      }),
+    ).rejects.toThrow("OpenMausBot HTTPS companion address");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("rejects bad codes and surfaces a sidecar error without returning secrets", async () => {
@@ -289,5 +374,79 @@ describe("desktop companion loopback relay", () => {
       path: "/vps-viewer/session-id/websockify",
     });
     for (const socket of upgraded) socket.destroy();
+  });
+
+  it("answers a request target that is not a URL with 400 and keeps serving", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "omb-desktop-client-"));
+    tempDirs.push(directory);
+    fs.writeFileSync(path.join(directory, "index.html"), "<h1>Remote client</h1>");
+    const relay = await startDesktopCompanionRelay({ access, staticDir: directory, ports: [0] });
+    servers.push(relay.server);
+    const { port } = relay.server.address();
+    const status = await new Promise((resolve, reject) => {
+      const sent = http.request({ hostname: "127.0.0.1", port, path: "//[" }, (response) => {
+        response.resume();
+        resolve(response.statusCode);
+      });
+      sent.on("error", reject);
+      sent.end();
+    });
+    expect(status).toBe(400);
+    expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(200);
+  });
+
+  it("survives a reset on either end of a viewer WebSocket and closes the other end", async () => {
+    for (const reset of ["browser", "companion"]) {
+      let companionSocket;
+      const companion = createServer();
+      companion.on("upgrade", (_req, socket) => {
+        sockets.push(socket);
+        socket.on("error", () => {});
+        companionSocket = socket;
+        socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\nready");
+      });
+      servers.push(companion);
+      const companionPort = await new Promise((resolve) =>
+        companion.listen(0, "127.0.0.1", () => resolve(companion.address().port)));
+      const relay = createServer();
+      relay.on("upgrade", (req, socket, head) => proxyDesktopCompanionUpgrade(
+        req,
+        socket,
+        head,
+        { ...access, endpoint: `http://127.0.0.1:${companionPort}` },
+        new Set(),
+      ));
+      servers.push(relay);
+      const relayPort = await new Promise((resolve) =>
+        relay.listen(0, "127.0.0.1", () => resolve(relay.address().port)));
+
+      const browser = createConnection({ host: "127.0.0.1", port: relayPort });
+      sockets.push(browser);
+      browser.on("error", () => {});
+      await new Promise((resolve) => {
+        let text = "";
+        browser.setEncoding("utf8");
+        browser.on("data", (chunk) => {
+          text += chunk;
+          if (text.includes("ready")) resolve();
+        });
+        browser.once("connect", () => browser.write(
+          "GET /vps-viewer/session-id/websockify HTTP/1.1\r\n"
+            + `Host: 127.0.0.1:${relayPort}\r\n`
+            + "Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+        ));
+      });
+      const survivor = reset === "browser" ? companionSocket : browser;
+      // The companion's server socket is half-open by default: its peer going away shows as `end`.
+      const closed = new Promise((resolve) => {
+        survivor.once("end", resolve);
+        survivor.once("close", resolve);
+      });
+      (reset === "browser" ? browser : companionSocket).resetAndDestroy();
+      await expect(Promise.race([
+        closed,
+        new Promise((_, fail) => setTimeout(() => fail(new Error(`${reset} reset left the other end open`)), 2_000)),
+      ])).resolves.not.toBe("timeout");
+    }
   });
 });

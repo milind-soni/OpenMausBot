@@ -1,5 +1,3 @@
-// Contract test for the dweb MCP proxy: launch the real stdio entrypoint
-// against a scripted daemon and exercise its HTTP-to-MCP translation.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { dirname, join } from "node:path";

@@ -1,30 +1,17 @@
-// Kimi Code harness support — Moonshot's `kimi` CLI over ACP stdio
-// (`kimi acp`), on the Kimi Code subscription login
-// (~/.kimi-code/credentials/kimi-code.json), not a Moonshot API key.
-// The generic protocol runtime lives in acp/core.ts; this file is only the
-// per-harness quirks. Verified against kimi-code 0.29.1: initialize reports
-// loadSession:true (session/load resume works), mcpCapabilities http+sse,
-// and a full session/new → session/prompt roundtrip streams
-// agent_thought_chunk + agent_message_chunk and settles with end_turn.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+// Kimi Code: Moonshot's `kimi acp` on the Kimi Code subscription login
+// (~/.kimi-code/credentials), not a Moonshot API key. Verified on kimi-code 0.29.1.
+import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
 import { decodeInjectId, hostApiKey, LOCAL_HOSTS, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { currentEngineCatalog } from "../../model-manifest/manifest.ts";
+import { ENGINE_MODEL_ID } from "../../model-manifest/schema.ts";
 
-const STATIC_KIMI_MODELS: ModelCatalog = {
-  default: "kimi-code/k3",
-  options: [
-    { id: "kimi-code/k3", label: "Kimi K3" },
-    { id: "kimi-code/k3-256k", label: "Kimi K3 256K" },
-    { id: "kimi-code/kimi-for-coding", label: "Kimi for Coding" },
-    { id: "kimi-code/kimi-for-coding-highspeed", label: "Kimi for Coding Highspeed" },
-  ],
-};
-
-const SLUG = /^[a-z0-9][a-z0-9._:/-]*$/i;
+const SLUG = ENGINE_MODEL_ID.kimi;
 const LOCAL_PROVIDER_PREFIXES = LOCAL_HOSTS.map((host) => `${host.id}/`);
 
 function isLocalInjectAlias(slug: string): boolean {
@@ -35,22 +22,88 @@ function kimiDataRoot(env: Record<string, string | undefined>): string {
   return env.KIMI_CODE_HOME || join(env.HOME || env.USERPROFILE || homedir(), ".kimi-code");
 }
 
-function credentialsPath(env: Record<string, string | undefined>) {
-  return join(kimiDataRoot(env), "credentials", "kimi-code.json");
+/** kimi-code 2.4.1 (resolveKimiTokenStorageName) keeps a kimi.com login in credentials/kimi-code.json and a kimi.ai
+ * one, the region it picks outside China, in credentials/kimi-code-env-<hash>.json. */
+const KIMI_TOKEN_FILE = /^kimi-code(?:-env-[0-9a-f]+)?\.json$/;
+
+/** kimi-code 2.4.1 (revokedTombstone) keeps a sign-in the provider refused as a file with both tokens empty, and reads an
+ * unparseable file as no sign-in. */
+function kimiTokenHeld(path: string): boolean {
+  try {
+    const token: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (!token || typeof token !== "object") return false;
+    const { access_token: access, refresh_token: refresh } = token as Record<string, unknown>;
+    return !(access === "" && refresh === "");
+  } catch {
+    return false;
+  }
 }
 
-/** Quote a TOML string value. */
+/** Reads the child's own data root (a custom HOME or KIMI_CODE_HOME), never the server user's. */
+function kimiSignedIn(env: Record<string, string | undefined>): boolean {
+  const credentials = join(kimiDataRoot(env), "credentials");
+  try {
+    return readdirSync(credentials).some((name) => KIMI_TOKEN_FILE.test(name) && kimiTokenHeld(join(credentials, name)));
+  } catch {
+    return false;
+  }
+}
+
+/** The sign-out probe: a credential folder that cannot be read is `unknown`, so sign-out refuses instead of
+ * reporting a removal that never happened. `kimiSignedIn` keeps its boolean contract for turn gating. */
+function kimiSignInState(env: Record<string, string | undefined>): DeviceSignInState {
+  const credentials = join(kimiDataRoot(env), "credentials");
+  let names: string[];
+  try {
+    names = readdirSync(credentials);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "signed-out" : "unknown";
+  }
+  return names.some((name) => KIMI_TOKEN_FILE.test(name) && kimiTokenHeld(join(credentials, name))) ? "signed-in" : "signed-out";
+}
+
+/** Kimi Code 2.4.1 ships no logout command, so sign-out removes the credential files the login created — the same
+ * cleanup the sign-out flow confirms afterwards. */
+function kimiRemoveCredentials(env: Record<string, string | undefined>): void {
+  const credentials = join(kimiDataRoot(env), "credentials");
+  for (const name of readdirSync(credentials)) {
+    if (KIMI_TOKEN_FILE.test(name)) unlinkSync(join(credentials, name));
+  }
+}
+
+/** Never the CLI's own words, which may carry tokens (kimi-code 2.4.1 ends with "Login failed: …" or "Login cancelled: …",
+ * and after 900s with "Login failed: Device authorization timed out"). */
+function kimiLoginFailure(output: string): string {
+  if (/expired|timed out/i.test(output)) return "The Kimi sign-in code expired. Start sign-in again for a new code.";
+  if (/denied|login cancelled/i.test(output)) return "Kimi sign-in was declined in the browser. Start sign-in again to try once more.";
+  return "Kimi sign-in did not finish. Check the server's connection, then try again.";
+}
+
+/** `kimi login`, Kimi Code's device-code login (kimi-code 2.4.1). Kimi has no status or logout command, so the
+ * stored credential files are both the sign-in check and what sign-out removes. */
+export const KIMI_DEVICE_SIGN_IN: DeviceSignIn = {
+  provider: "kimi",
+  product: "Kimi",
+  account: "Kimi Code",
+  homeEnv: "KIMI_CODE_HOME",
+  homeDir: ".kimi-code",
+  loginArgs: ["login"],
+  install: "Install it with Moonshot's installer (https://code.kimi.com), or from Settings when this server has npm, then try again.",
+  failure: kimiLoginFailure,
+  signedIn: kimiSignedIn,
+  signInState: kimiSignInState,
+  removeCredentials: kimiRemoveCredentials,
+};
+
 function quoteToml(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-/** Quote a TOML key when it is not a bare identifier. */
 function quoteTomlKey(key: string): string {
   if (/^[A-Za-z0-9_-]+$/.test(key)) return key;
   return quoteToml(key);
 }
 
-/** Strip a `#` comment that is not inside a quoted string. */
 function stripTomlLineComment(line: string): string {
   let quote: '"' | "'" | null = null;
   for (let i = 0; i < line.length; i++) {
@@ -69,9 +122,8 @@ function stripTomlLineComment(line: string): string {
   return line;
 }
 
-/** Decode a TOML basic-string escape at `text[i]` (`i` points at the `\\`).
- *  Invalid / unknown / surrogate / out-of-range sequences return ok:false so
- *  the heading is not canonicalized to a colliding alias. */
+/** Invalid, unknown, surrogate or out-of-range escapes return ok:false, so a heading is never
+ *  canonicalized to a colliding alias. */
 function takeTomlBasicEscape(
   text: string,
   i: number,
@@ -105,7 +157,6 @@ function takeTomlBasicEscape(
   return { ok: true, value: named[code]!, next: i + 2 };
 }
 
-/** Canonical `a.b.c` form of a `[table]` heading, quotes and comments removed. */
 function canonicalizeTomlHeading(heading: string): string | null {
   const trimmed = stripTomlLineComment(heading).trim();
   const match = trimmed.match(/^\[([^[\]]+)\]$/);
@@ -150,7 +201,6 @@ function canonicalizeTomlHeading(heading: string): string | null {
   return parts.length ? parts.join(".") : null;
 }
 
-/** Unwrap `"key"` / `'key'` so a quoted assignment matches the bare name. */
 function unquoteTomlKey(raw: string): string {
   const key = raw.trim();
   if (key.length >= 2 && ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'")))) {
@@ -159,15 +209,13 @@ function unquoteTomlKey(raw: string): string {
   return key;
 }
 
-/** Bare key on the left of `key = value`. */
 function tomlRowKey(row: string): string {
   const eq = row.indexOf("=");
   return unquoteTomlKey(eq < 0 ? row : row.slice(0, eq));
 }
 
-/** Walk `text` and yield `[table]` spans. `[[array]]` headings bound a table
- *  but are not themselves patchable. `#` comments in `out` mode are skipped
- *  so an apostrophe in a comment cannot open a phantom string. */
+/** `[[array]]` headings bound a table but are not patchable; skipping `#` comments keeps an
+ *  apostrophe from opening a phantom string. */
 function tomlTables(text: string): Array<{ name: string; headingStart: number; bodyStart: number; end: number }> {
   type Mode = "out" | "basic" | "literal" | "mlbasic" | "mllit";
   const headings: Array<{ name: string | null; patchable: boolean; lineStart: number; lineEnd: number }> = [];
@@ -275,7 +323,6 @@ function tomlTables(text: string): Array<{ name: string; headingStart: number; b
     }));
 }
 
-/** Keys assigned at line start in a table body, including `"quoted"` keys. */
 function tomlKeys(block: string): Set<string> {
   const keys = new Set<string>();
   type Mode = "out" | "basic" | "literal" | "mlbasic" | "mllit";
@@ -330,13 +377,12 @@ function tomlKeys(block: string): Set<string> {
   return keys;
 }
 
-/** Whether `text` already has this table, ignoring quotes and trailing comments. */
 function hasTomlTable(text: string, heading: string): boolean {
   const name = canonicalizeTomlHeading(heading);
   return name !== null && tomlTables(text).some((table) => table.name === name);
 }
 
-/** Insert missing keys into an existing table. Does not overwrite set values. */
+/** Insert missing keys into an existing table, never overwriting set values. */
 function patchTomlTable(text: string, heading: string, rows: string[]): string {
   const name = canonicalizeTomlHeading(heading);
   if (!name) return text;
@@ -389,10 +435,7 @@ export function ensureKimiInjectAlias(
       ].join("\n"),
     );
   }
-  // Kimi 0.36+ refuses openai_legacy as a wire protocol; ACP then
-  // skips default-model binding and falls through to OAuth. Patch
-  // aliases written before those keys existed; do not overwrite a
-  // user's protocol or context size.
+  // Kimi 0.36+ refuses openai_legacy as a wire protocol (ACP then falls through to OAuth).
   if (hasTomlTable(text, modelHeading)) {
     text = patchTomlTable(text, modelHeading, [`protocol = "openai"`, `max_context_size = 262144`]);
   } else {
@@ -416,10 +459,8 @@ export function ensureKimiInjectAlias(
   return alias;
 }
 
-/** Env keys Kimi 0.36+ reads to synthesize an in-memory default model.
- *  ACP `session/new` runs auth readiness against `default_model`, not `-m`.
- *  Without a default, a missing/expired `kimi login` becomes
- *  "Authentication required" even when the picker is a local host. */
+/** Env keys Kimi 0.36+ reads to synthesize an in-memory default model. ACP `session/new` checks auth
+ *  against `default_model`, not `-m`, so without one an expired login fails even a local host. */
 const KIMI_MODEL_ENV = [
   "KIMI_MODEL_NAME",
   "KIMI_MODEL_API_KEY",
@@ -428,8 +469,7 @@ const KIMI_MODEL_ENV = [
   "KIMI_MODEL_DISPLAY_NAME",
 ] as const;
 
-/** Overlay a local inject as Kimi's in-memory default. Does not write
- *  config.toml — Kimi strips these reserved entries on persist. */
+/** Kimi strips these reserved entries when it persists config.toml, so they ride the env only. */
 export function applyKimiLocalModelEnv(
   env: Record<string, string | undefined>,
   modelId: string | undefined,
@@ -441,8 +481,7 @@ export function applyKimiLocalModelEnv(
   env.KIMI_MODEL_NAME = inject.model;
   env.KIMI_MODEL_API_KEY = hostApiKey(host, env);
   env.KIMI_MODEL_BASE_URL = host.baseUrl;
-  // Env overlay accepts openai | anthropic | kimi — not the toml
-  // openai_legacy type we write for the on-disk provider row.
+  // The env overlay accepts openai | anthropic | kimi, not the toml openai_legacy type.
   env.KIMI_MODEL_PROVIDER_TYPE = "openai";
   env.KIMI_MODEL_DISPLAY_NAME = `${inject.model} (${host.label})`;
 }
@@ -453,14 +492,15 @@ function stripKimiModelEnv(env: Record<string, string | undefined>): void {
 }
 
 function readKimiModelCatalog(env: Record<string, string | undefined>): ModelCatalog {
+  const fixed = currentEngineCatalog("kimi");
   const dataRoot = kimiDataRoot(env);
   let text = "";
   try {
     text = readFileSync(join(dataRoot, "config.toml"), "utf8");
   } catch {
-    return STATIC_KIMI_MODELS;
+    return fixed;
   }
-  const options = STATIC_KIMI_MODELS.options.map((o) => ({ ...o }));
+  const options = fixed.options.map((o) => ({ ...o }));
   const seen = new Set(options.map((o) => o.id));
   let current: { slug: string; name?: string } | null = null;
   const flush = () => {
@@ -493,62 +533,52 @@ function readKimiModelCatalog(env: Record<string, string | undefined>): ModelCat
     if (current && (key === "name" || key === "label") && value) current.name = value;
   }
   flush();
-  return { default: STATIC_KIMI_MODELS.default, options };
+  return { default: fixed.default, options };
 }
 
 const support: AcpSupport = {
   driverKind: "kimiAgent",
   displayName: "Kimi",
-  // Aliases from the CLI's own catalog (~/.kimi-code/config.toml
-  // [models."kimi-code/…"] — `kimi provider list` reports the same four).
-  models: STATIC_KIMI_MODELS,
+  // The CLI's own catalog aliases (~/.kimi-code/config.toml; `kimi provider list` reports the same four).
+  get models() { return currentEngineCatalog("kimi"); },
   resolveModels: (env) => mergeLocalInject(readKimiModelCatalog(env), env),
   defaultCli: "kimi",
   nativeSource: "kimi.acp",
-  loginNote: "Kimi Code CLI is not signed in — run `kimi login` in a terminal",
+  loginNote: "Kimi is not signed in to your Kimi Code account — choose Sign in to Kimi in engine setup",
 
-  // Official installers put the binary on PATH without requiring an existing
-  // Node install. Keep the commands platform-specific so Windows never gets a
-  // POSIX-only curl|bash instruction.
   install: {
     command: {
       darwin: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
       linux: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
       win32: "irm https://code.kimi.com/kimi-code/install.ps1 | iex",
     },
+    npmPackage: "@moonshot-ai/kimi-code",
     docsUrl: "https://moonshotai.github.io/kimi-code/en/guides/getting-started.html",
     signInCommand: "kimi login",
   },
+  deviceSignIn: KIMI_DEVICE_SIGN_IN,
 
-  // -m is a global commander option and must precede the `acp` subcommand
-  // (verified against 0.29.1).
+  // -m is a global commander option and must precede `acp` (0.29.1).
   resolveTurnModel: (model, env) => (model ? ensureKimiInjectAlias(model, env) : model),
   spawnArgs: (_config, turn) => {
     const model = turn.model;
     return [...(model ? ["-m", model] : []), "acp"];
   },
 
-  // Subscription CLI: a leaked Moonshot/Kimi API key must not flip billing
-  // to pay-as-you-go inside the spawned agent (mirrors claude/grok).
+  // A leaked Moonshot/Kimi API key must not flip billing to pay-as-you-go.
   transformEnv: (env) => {
     delete env.MOONSHOT_API_KEY;
     delete env.KIMI_API_KEY;
-    // A leftover shell overlay would steal every Kimi turn, including
-    // subscription models. applyTurnEnv puts the inject back per turn.
     stripKimiModelEnv(env);
   },
   applyTurnEnv: (env, { requestedModel }) => {
     applyKimiLocalModelEnv(env, requestedModel);
   },
 
-  // The only advertised authMethod is {id:"login", type:"terminal"} — a
-  // device-code flow that cannot be driven over ACP. Never pick it; ride
-  // the ambient login from a prior `kimi login` instead.
+  // The only authMethod is {id:"login", type:"terminal"}, a device-code flow ACP cannot drive.
   pickAuthMethod: () => null,
   authFailure: "continue",
-  // Match the child CLI's own data-root precedence. A custom instance HOME or
-  // KIMI_CODE_HOME must not be checked against the server user's home instead.
-  isAuthenticated: (env) => existsSync(credentialsPath(env)),
+  isAuthenticated: kimiSignedIn,
 
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };

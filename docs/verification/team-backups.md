@@ -3,7 +3,7 @@
 ## User path
 
 This is the legacy partial team-copy format. The sidebar no longer offers it;
-use **Settings → Backups** for a [full workspace backup](workspace-backups.md).
+use **Settings → Import & export** for a [full workspace backup](workspace-backups.md).
 Existing `.mausbackup.json` files remain importable through
 Teams → Import → choose the file → review → **Import backup**.
 Import always adds independent copies; existing bots, Chiefs, rooms and chats
@@ -53,6 +53,12 @@ imports legacy v1/v2 templates, a project and repeated Markdown packages into
 unique sections, checking that existing bots, section Chiefs, rooms and the
 original conversation remain unchanged after each import.
 Keep that JSON output and the printed persistent server log as evidence.
+
+A bot switched to never use the helper model (`helperModel: false`, see
+[the memory guide](../memory.md)) keeps that switch through backup and import:
+the file holds its notes and chats. Only "never" is written and only "never"
+is applied: a file that says a bot may use the helper imports like one that
+says nothing, so a file cannot put a bot on the helper.
 
 `server/team-backup.test.ts` additionally covers all-task/branch restoration,
 multi-section Chiefs, room-goal routines, repeat imports, restart persistence,

@@ -1,12 +1,15 @@
+import { t } from "./i18n";
+
 export type SidebarAttentionBot = {
   unread?: boolean;
   busy?: boolean;
-  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
+  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
 };
 
 export type SidebarAttentionGroup = {
   unread?: boolean;
   busyBotId?: string | null;
+  tasks?: Array<{ busyBotId?: string | null }>;
 };
 
 export type SidebarSectionAttention = {
@@ -15,7 +18,6 @@ export type SidebarSectionAttention = {
   working: number;
 };
 
-/** Summarize signals that would otherwise disappear when a section closes. */
 export function sidebarSectionAttention(
   bots: SidebarAttentionBot[],
   groups: SidebarAttentionGroup[],
@@ -30,20 +32,20 @@ export function sidebarSectionAttention(
         (bot) =>
           bot.activity === "working" ||
           (Boolean(bot.busy) && bot.activity !== "waiting-on-you"),
-      ).length + groups.filter((group) => Boolean(group.busyBotId)).length,
+      ).length + groups.filter((group) => Boolean(group.busyBotId) || Boolean(group.tasks?.some((task) => task.busyBotId))).length,
   };
 }
 
 export function sidebarAttentionLabel(attention: SidebarSectionAttention): string {
   const parts: string[] = [];
   if (attention.waiting > 0) {
-    parts.push(`${attention.waiting} waiting for you`);
+    parts.push(t("sidebar.attention.waiting", { count: attention.waiting }));
   }
   if (attention.unread > 0) {
-    parts.push(`${attention.unread} unread`);
+    parts.push(t("sidebar.attention.unread", { count: attention.unread }));
   }
   if (attention.working > 0) {
-    parts.push(`${attention.working} working`);
+    parts.push(t("sidebar.attention.working", { count: attention.working }));
   }
   return parts.join(", ");
 }

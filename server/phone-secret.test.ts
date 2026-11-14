@@ -110,6 +110,17 @@ describe("PhoneSecretBridge", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  it("opens a custom secret's envelope for this server alone, never sending the value to the private parent", async () => {
+    const material = await keyMaterial();
+    const send = vi.fn(() => true);
+    const bridge = new PhoneSecretBridge(send, 50);
+    bridge.receive(material.message);
+    const envelope = await seal({ ...baseContext(material.keyId), target: "customSecret" }, material.publicKey, "sk_live_phone_canary");
+    await expect(bridge.open(envelope)).resolves.toBe("sk_live_phone_canary");
+    await expect(bridge.open({ ...envelope, messageId: "message-2" })).rejects.toMatchObject({ message: "The encrypted credential could not be verified" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("opens the card-bound envelope and saves through the private parent", async () => {
     const material = await keyMaterial();
     let bridge!: PhoneSecretBridge;
@@ -162,6 +173,27 @@ describe("PhoneSecretBridge", () => {
       encapsulatedKey: "A".repeat(87),
       ciphertext: "A".repeat(24),
     })).rejects.toEqual(expect.objectContaining<Partial<PhoneSecretError>>({ status: 503 }));
+  });
+
+  it("tells a self-hosted server's phone to use the web, and is ready only once a desktop key arrives", async () => {
+    const context = { ...baseContext("AAAAAAAAAAAAAAAAAAAAAA"), encapsulatedKey: "A".repeat(87), ciphertext: "A".repeat(24) };
+    const selfHosted = new PhoneSecretBridge(() => true, 50, 8, false);
+    expect(selfHosted.ready).toBe(false);
+    await expect(selfHosted.provide(context)).rejects.toMatchObject({
+      status: 503,
+      message: "This server cannot take secrets from a phone. Enter it on the web or on your computer instead.",
+    });
+
+    const desktop = new PhoneSecretBridge(() => true, 50);
+    await expect(desktop.provide(context)).rejects.toMatchObject({ message: expect.stringContaining("Reopen OpenMausBot") });
+    const material = await keyMaterial();
+    desktop.receive(material.message);
+    await vi.waitFor(() => expect(desktop.ready).toBe(true));
+
+    desktop.receive({ ...material.message, version: 2 });
+    expect(desktop.ready).toBe(false);
+    await expect(desktop.provide(context)).rejects.toMatchObject({ status: 503 });
+    expect(desktop.ready).toBe(false);
   });
 
   it("rejects a private scalar that does not match the advertised public point", async () => {
@@ -258,6 +290,22 @@ describe("phoneSecretAAD", () => {
         requestKey: "credential-request-1",
       })).toThrow(expect.objectContaining({ status: 409 }));
     }
+  });
+
+  it("refuses an AI provider key from a phone, which only the computer's own app saves where Settings does", () => {
+    const context = { deviceId: "paired-device-1", target: "anthropicApiKey", requestKey: "credential-request-1" };
+    expect(() => assertPhoneSecretRequestMatches(context, "paired-device-1", { target: "anthropicApiKey", requestKey: "credential-request-1" }))
+      .toThrow("Paste this key in OpenMausBot on your computer, or in My Cloud: a phone cannot save it yet.");
+    for (const target of ["composioApiKey", "customSecret"]) {
+      expect(() => assertPhoneSecretRequestMatches({ ...context, target }, "paired-device-1", { target, requestKey: "credential-request-1" })).not.toThrow();
+    }
+  });
+
+  // The desktop's phone bridge saves settings keys; the 1Password token belongs to Logins, so a phone is told where to paste it.
+  it("refuses a 1Password token from a phone, saying where to paste it", () => {
+    const context = { ...baseContext("AAAAAAAAAAAAAAAAAAAAAA"), target: "onePasswordToken" };
+    expect(() => assertPhoneSecretRequestMatches(context, "paired-device-1", { target: "onePasswordToken", requestKey: "credential-request-1" }))
+      .toThrow(expect.objectContaining({ status: 409, message: expect.stringMatching(/^Paste the 1Password token in OpenMausBot on your computer, or in My Cloud/u) }));
   });
 
   it("gives an exact encrypted retry one stable desktop operation id", async () => {

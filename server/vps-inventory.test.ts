@@ -85,7 +85,7 @@ describe("managed VPS inventory", () => {
     await expect(listManagedVpsComputers({}, [OWNER], fake.runner)).resolves.toEqual({
       configured: false,
       available: false,
-      sshAlias: null,
+      vpsAliases: [],
       problem: null,
       instances: [],
     });
@@ -105,12 +105,13 @@ describe("managed VPS inventory", () => {
     expect(inventory).toEqual({
       configured: true,
       available: true,
-      sshAlias: "production-vps",
+      vpsAliases: ["production-vps"],
       problem: null,
       instances: [
         {
           name: ownedName,
           state: "running",
+          vpsAlias: "production-vps",
           ownerBotId: OWNER.botId,
           ownerName: OWNER.name,
           orphaned: false,
@@ -119,6 +120,7 @@ describe("managed VPS inventory", () => {
         {
           name: orphanName,
           state: "exited",
+          vpsAlias: "production-vps",
           ownerBotId: null,
           ownerName: null,
           orphaned: true,
@@ -155,6 +157,7 @@ describe("managed VPS inventory", () => {
     expect(inventory.instances).toEqual([{
       name: legacyName,
       state: "running",
+      vpsAlias: "production-vps",
       ownerBotId: legacyOwner.botId,
       ownerName: legacyOwner.name,
       orphaned: false,
@@ -166,6 +169,84 @@ describe("managed VPS inventory", () => {
     await expect(removeManagedVpsComputer(CONFIG, [legacyOwner, foreignOwner], legacyOrphanName, legacyOrphanName, fake.runner))
       .rejects.toMatchObject({ status: 404 });
     expect(fake.calls.some((call) => call[0] === "rm")).toBe(false);
+  });
+
+  it("lists every configured alias and tags each computer with its server", async () => {
+    const alphaName = vpsContainerName(OWNER.botId);
+    const betaName = vpsContainerName("second-bot");
+    const second: ManagedVpsOwner = { botId: "second-bot", name: "Second", inUse: false };
+    const fixtures: Record<string, ContainerFixture[]> = {
+      "alpha-vps": [{ id: "a".repeat(64), name: alphaName }],
+      "beta-vps": [{ id: "b".repeat(64), name: betaName }],
+    };
+    const runner: VpsCommandRunner = async (args) => {
+      const alias = String(args[1]).replace("ssh://", "");
+      const containers = fixtures[alias];
+      if (!containers) throw new Error(`unknown host ${alias}`);
+      const command = args.slice(2);
+      if (command[0] === "container" && command[1] === "ls") {
+        return { stdout: containers.map((container) => container.id.slice(0, 12)).join("\n"), stderr: "" };
+      }
+      if (command[0] === "container" && command[1] === "inspect") {
+        const requested = command.slice(2);
+        return {
+          stdout: JSON.stringify(containers
+            .filter((container) => requested.some((id) => container.id.startsWith(id)))
+            .map((container) => ({
+              Id: container.id,
+              Name: `/${container.name}`,
+              Config: { Labels: container.labels ?? labels(container.name) },
+              State: { Status: container.state ?? "running", Running: container.running ?? true },
+            }))),
+          stderr: "",
+        };
+      }
+      throw new Error(`unexpected command: ${command.join(" ")}`);
+    };
+
+    const inventory = await listManagedVpsComputers(CONFIG, [OWNER, second], runner, ["alpha-vps", "beta-vps"]);
+    expect(inventory.vpsAliases).toEqual(["alpha-vps", "beta-vps"]);
+    expect(inventory.available).toBe(true);
+    expect(inventory.instances.map((instance) => [instance.vpsAlias, instance.name, instance.ownerBotId]))
+      .toEqual([
+        ["alpha-vps", alphaName, OWNER.botId],
+        ["beta-vps", betaName, second.botId],
+      ]);
+
+    // One unreachable server names itself in the problem and does not hide the reachable one.
+    const partial = await listManagedVpsComputers(CONFIG, [OWNER], runner, ["alpha-vps", "missing-vps"]);
+    expect(partial.available).toBe(false);
+    expect(partial.problem).toMatch(/missing-vps/);
+    expect(partial.instances.map((instance) => instance.vpsAlias)).toEqual(["alpha-vps"]);
+
+    // Invalid aliases are never scanned.
+    const filtered = await listManagedVpsComputers(CONFIG, [OWNER], runner, ["bad alias", "-alpha"]);
+    expect(filtered.configured).toBe(false);
+    expect(filtered.instances).toEqual([]);
+  });
+
+  it("scans aliases concurrently so one slow host cannot stall the others", async () => {
+    // Alpha's first call waits until beta's scan has begun: a serial loop would deadlock here.
+    let betaStarted!: () => void;
+    const betaGate = new Promise<void>((resolve) => {
+      betaStarted = resolve;
+    });
+    const runner: VpsCommandRunner = async (args) => {
+      const alias = String(args[1]).replace("ssh://", "");
+      if (alias === "beta-vps") betaStarted();
+      else await betaGate;
+      return { stdout: "", stderr: "" };
+    };
+
+    const inventory = await Promise.race([
+      listManagedVpsComputers(CONFIG, [OWNER], runner, ["alpha-vps", "beta-vps"]),
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error("aliases were scanned serially: alpha never overlapped beta")), 5_000).unref?.();
+      }),
+    ]);
+    expect(inventory.available).toBe(true);
+    expect(inventory.vpsAliases).toEqual(["alpha-vps", "beta-vps"]);
+    expect(inventory.instances).toEqual([]);
   });
 
   it("fails closed for transport errors or unverifiable managed identities", async () => {

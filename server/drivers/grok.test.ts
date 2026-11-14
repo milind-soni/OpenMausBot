@@ -1,7 +1,4 @@
-// Grok driver contract tests — the API-backed driver rides fetch, so the
-// fake is a stubbed globalThis.fetch that scripts HTTP failures and SSE
-// bodies. Covers the auto-retry policy: transient (429/5xx) retried with
-// backoff, terminal (401/400) never, partial streamed output never.
+// The API driver rides fetch, so the fake is a stubbed globalThis.fetch scripting HTTP failures and SSE bodies.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -48,8 +45,6 @@ describe("GrokDriver turns (fake fetch)", () => {
     previousFetch = globalThis.fetch;
     calls = 0;
     requestedModels = [];
-    // SAFETY: the stub only returns real Response objects, the sole member
-    // of fetch's return type this driver consumes.
     globalThis.fetch = (async (_url, init) => {
       requestedModels.push((JSON.parse(String(init?.body)) as { model: string }).model);
       const step = script.shift();
@@ -76,7 +71,7 @@ describe("GrokDriver turns (fake fetch)", () => {
       "turn.started",
       "session.started",
       "content.delta",
-      "item.completed", // assistant_text
+      "item.completed",
       "turn.completed",
     ]);
     expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "grok")).toBe(true);
@@ -108,8 +103,6 @@ describe("GrokDriver turns (fake fetch)", () => {
       + '}}]}}]}\n\n'
       + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
     const bodies: string[] = [];
-    // SAFETY: the stub only returns real Response objects, the sole member
-    // of fetch's return type this driver consumes.
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
       calls++;
@@ -138,7 +131,6 @@ describe("GrokDriver turns (fake fetch)", () => {
     expect(retries.map((e) => e.attempt)).toEqual([1, 2]);
     expect(retries.every((e) => e.delayMs > 0)).toBe(true);
     expect(retries.map((e) => e.reason)).toEqual(["rate_limited", "server_error"]);
-    // exactly one settled reply across all three attempts
     expect(recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "assistant_text")).toHaveLength(1);
     expect(calls).toBe(3);
     expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true, turnId });
@@ -152,7 +144,6 @@ describe("GrokDriver turns (fake fetch)", () => {
 
     const retries = recorder.events.filter((e) => e.type === "turn.retrying");
     expect(retries.map((e) => e.attempt)).toEqual([1, 2]);
-    // original + two retries; the third failure is past the cap and fails
     expect(calls).toBe(3);
     expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(true);
   }, 20_000);
@@ -173,15 +164,12 @@ describe("GrokDriver turns (fake fetch)", () => {
   }, 20_000);
 
   it("never retries after assistant text already streamed (duplicate-text hazard)", async () => {
-    // an SSE body whose stream ERRORS after delivering a delta — the
-    // partial-output guard must forbid the retry that would duplicate it
     const failingStream = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content: "half an answer" } }] })}\n\n`));
         setTimeout(() => controller.error(new Error("connection reset by peer")), 10);
       },
     });
-    // SAFETY: a real Response built from a live stream, same as above.
     globalThis.fetch = (async () => {
       calls++;
       return new Response(failingStream, { status: 200, headers: { "content-type": "text/event-stream" } });
@@ -219,7 +207,6 @@ describe("GrokDriver turns (fake fetch)", () => {
     await expect(instance.adapter.respondToRequest("t-x", "r", { behavior: "allow" })).resolves.toBe("unavailable");
   });
 });
-
 
 it("grok preserves an explicit tools-off connection and rejects ambiguous flags", () => {
   expect(GrokDriver.decodeConfig({})).not.toHaveProperty("tools");

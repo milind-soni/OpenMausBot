@@ -1,7 +1,8 @@
-// Who hears about a broken run, how often, and in what words.
 import { describe, expect, it } from "vitest";
 
-import { chiefForBot, INCIDENT_HARD_LIMIT, INCIDENT_RETRY_LIMIT, IncidentLedger, incidentChip, incidentText, type Incident } from "./incidents.ts";
+import "./server-line-packs.ts";
+import { chiefForBot, INCIDENT_HARD_LIMIT, INCIDENT_RETRY_LIMIT, IncidentLedger, incidentChip, incidentRequest, incidentText, type Incident } from "./incidents.ts";
+import { withPeerProvenance } from "./peer-provenance.ts";
 
 const bots = [
   { id: "clive", name: "Clive", section: "Ops", chiefOfStaff: true },
@@ -34,12 +35,45 @@ describe("IncidentLedger", () => {
     expect(seen.map((entry) => entry.mayRetry)).toEqual([true, true, false, false, false, false]);
     expect(seen.map((entry) => entry.muted)).toEqual([false, false, false, false, false, true]);
     expect(INCIDENT_RETRY_LIMIT).toBe(2);
-    // another thread is its own count; an hour later the first is fresh again
     expect(ledger.note("t2")).toEqual({ count: 1, mayRetry: true, muted: false });
     now += 61 * 60_000;
     expect(ledger.note("t1")).toEqual({ count: 1, mayRetry: true, muted: false });
     ledger.forget("t2");
     expect(ledger.note("t2").count).toBe(1);
+  });
+
+  it("remembers when a thread was last reported, so a late retry can see the thread moved on", () => {
+    let now = 5_000;
+    const ledger = new IncidentLedger({ now: () => now });
+    expect(ledger.lastAt("t1")).toBeUndefined();
+    ledger.note("t1");
+    now = 9_000;
+    ledger.note("t1");
+    ledger.note("t2");
+    expect(ledger.lastAt("t1")).toBe(9_000);
+    now += 2 * 60 * 60_000;
+    expect(ledger.lastAt("t1")).toBe(9_000);
+    ledger.forget("t1");
+    expect(ledger.lastAt("t1")).toBeUndefined();
+  });
+});
+
+describe("incidentRequest", () => {
+  const peerAsk = { botId: "clive", name: "Clive" };
+  it("quotes a requester's words, not the note they were delivered under", () => {
+    const delivered = withPeerProvenance("Reconcile the September invoices.", { botName: "Clive", delivery: "delegate_bot",
+      origin: { kind: "user", request: "x".repeat(400) } });
+    expect(incidentRequest([{ role: "user", kind: "text", text: delivered, peerAsk }])).toBe("Reconcile the September invoices.");
+  });
+
+  it("reads past a line that is only a note to the request above it, and keeps the person's own words whole", () => {
+    const retry = "[Retry requested by Clive, your Chief of Staff, after this thread's last run stopped. Continue the request above.]";
+    expect(incidentRequest([
+      { role: "user", kind: "text", text: "[Delegated by @Ada] is how I'd label it" },
+      { role: "bot", kind: "text", text: "On it" },
+      { role: "user", kind: "text", text: retry, peerAsk },
+    ])).toBe("[Delegated by @Ada] is how I'd label it");
+    expect(incidentRequest([{ role: "bot", kind: "text", text: "hi" }])).toBeNull();
   });
 });
 
@@ -56,13 +90,13 @@ describe("incident wording", () => {
 
   it("names the bot, the thread and what happened, marks the quoted text as data, and tells the Chief what to do", () => {
     const text = incidentText(incident, { count: 1, mayRetry: true, muted: false });
-    expect(text.startsWith("[Incident report from OpenMausBot — not from the person.")).toBe(true);
+    expect(text.startsWith("[From OpenMausBot · incident report · information only — not from the person.")).toBe(true);
     expect(text).toContain("Ada's run in its thread #Invoice reconciliation failed: \"exit_before_result\".");
     expect(text).toContain('The request there was: "Reconcile the September invoices. Thanks"');
     expect(text).toContain('Ada last said: "Starting the reconciliation now"');
     expect(text).toContain('retry_thread with bot_id "ada" and thread_id "t-ada"');
     expect(text).not.toContain("incident on that thread");
-    expect(incidentChip(incident)).toBe('Incident: Ada\'s run in its thread #Invoice reconciliation failed: "exit_before_result"');
+    expect(incidentChip(incident)).toBe('Ada hit a problem: its run in its thread #Invoice reconciliation failed: "exit_before_result"');
   });
 
   it("counts repeats and, once retries are used up, asks for the person instead of another retry", () => {
@@ -75,9 +109,19 @@ describe("incident wording", () => {
   });
 
   it("words a stall, a start failure, a routine and a room each in their own terms", () => {
-    expect(incidentChip({ ...incident, kind: "stalled", detail: "" })).toBe("Incident: Ada's run in its thread #Invoice reconciliation stopped after showing no activity");
-    expect(incidentChip({ ...incident, kind: "could-not-start", title: null })).toContain("Ada's run in its main conversation could not start");
-    expect(incidentChip({ ...incident, kind: "routine-failed", title: "Inbox digest" })).toContain("Ada's scheduled routine in its thread #Inbox digest failed");
-    expect(incidentChip({ ...incident, room: "Standup" })).toContain('Ada\'s run in the room "Standup" failed');
+    expect(incidentChip({ ...incident, kind: "stalled", detail: "" })).toBe("Ada hit a problem: its run in its thread #Invoice reconciliation stopped after showing no activity");
+    expect(incidentChip({ ...incident, kind: "could-not-start", title: null })).toContain("Ada hit a problem: its run in its main conversation could not start");
+    expect(incidentChip({ ...incident, kind: "routine-failed", title: "Inbox digest" })).toContain("Ada hit a problem: its scheduled routine in its thread #Inbox digest failed");
+    expect(incidentChip({ ...incident, room: "Standup" })).toContain('Ada hit a problem: its run in the room "Standup" failed');
+  });
+
+  it("tells the person in their language, while the Chief's report stays English", () => {
+    expect(incidentChip(incident, "de")).toBe("Ada hatte ein Problem: Die Ausführung im Thread #Invoice reconciliation ist fehlgeschlagen: „exit_before_result“");
+    expect(incidentChip({ ...incident, kind: "stalled", detail: "" }, "de"))
+      .toBe("Ada hatte ein Problem: Die Ausführung im Thread #Invoice reconciliation wurde gestoppt, weil sie keine Aktivität mehr zeigte");
+    expect(incidentChip({ ...incident, kind: "routine-failed", title: null, room: "Standup" }, "de"))
+      .toBe("Ada hatte ein Problem: Die geplante Routine im Raum „Standup“ ist fehlgeschlagen: „exit_before_result“");
+    expect(incidentChip({ ...incident, kind: "could-not-start", title: null, detail: "" }, "de")).toBe("Ada hatte ein Problem: Die Ausführung in der Hauptunterhaltung konnte nicht starten");
+    expect(incidentText(incident, { count: 1, mayRetry: true, muted: false })).toContain("Ada's run in its thread #Invoice reconciliation failed");
   });
 });

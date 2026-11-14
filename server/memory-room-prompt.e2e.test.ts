@@ -1,7 +1,4 @@
-// A room turn mounts the same agents server as a 1:1 turn, memory_update
-// included — so its system prompt must give the same write guidance. Pinned
-// against the real server because the two prompts are assembled inline in
-// two different places, and only the assembled bytes prove they agree.
+// Against the real server: the two prompts are assembled in two places, and only the assembled bytes prove they agree.
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
@@ -35,7 +32,7 @@ it("gives a room turn the memory_update guidance, not the file-tools one", async
     await runControlOmb(["send", "--bot", lead.id, "--text", "Remember that the fixture garden is watered on Mondays."], { env });
     await runControlOmb(["wait", "--bot", lead.id, "--timeout", "30"], { env });
     const direct = dump()?.systemPrompt ?? "";
-    expect(direct).toContain("Use memory_update for every change to MEMORY.md");
+    expect(direct).toContain("Change MEMORY.md only with memory_update");
     expect(direct).not.toContain("update it with your file tools");
 
     // SAFETY: the groups route returns the created room under `group`
@@ -50,8 +47,7 @@ it("gives a room turn the memory_update guidance, not the file-tools one", async
     }, { timeout: 30_000 }).toBe(true);
     await runControlOmb(["wait", "--bot", lead.id, "--timeout", "30"], { env });
     const room = dump()?.systemPrompt ?? "";
-    expect(room).toContain("Use memory_update for every change to MEMORY.md");
-    expect(room).toContain("never direct file tools or whole-file overwrites");
+    expect(room).toContain("Change MEMORY.md only with memory_update");
     expect(room).not.toContain("update it with your file tools");
   } finally {
     await fixture.close();

@@ -31,17 +31,14 @@ export interface LocalVmInventoryEntry {
   inUse: boolean;
 }
 
-/** Idle cleanup is destructive. An exact derived name alone is not ownership:
- * a pre-existing container must also carry OpenMausBot's verified labels. */
+/** Idle cleanup is destructive: a derived name alone is not ownership without OpenMausBot's verified labels. */
 export function shouldArmLocalVmIdle(
   status: Pick<ContainerComputerStatus, "container" | "managed"> | null,
 ): boolean {
   return status?.container === "running" && status.managed;
 }
 
-/** Discover only exact, bot-derived container identities. Bot destination is
- * deliberately irrelevant: an existing VM must stay visible after its bot is
- * moved to Cloud, Browser, This computer, Auto, or Off. */
+/** Bot destination is deliberately irrelevant: a VM stays visible after its bot moves elsewhere. */
 export async function discoverExistingPerBotLocalVms(
   bots: LocalVmInventoryBot[],
   runtime: Runtime,
@@ -60,10 +57,6 @@ export async function discoverExistingPerBotLocalVms(
   return candidates.filter((_, index) => existing[index]);
 }
 
-/** Discover the pool-mode seats that actually have containers (issue #1654).
- * Same exactness rule as the per-bot walk above: a derived name alone is not
- * ownership, so a pre-existing container must also carry this target's
- * verified labels. */
 export async function discoverExistingPoolLocalVms(
   seatCount: number,
   runtime: Runtime,
@@ -78,9 +71,7 @@ export async function discoverExistingPoolLocalVms(
   return targets.filter((_, index) => existing[index]);
 }
 
-/** The public inventory is an explicit allow-list. In particular, it cannot
- * leak viewer passwords/URLs, host workspace paths, runtime commands, or
- * target hashes from the full Local VM status object. */
+/** An explicit allow-list: never viewer passwords or URLs, host paths, runtime commands or target hashes. */
 export function localVmInventoryEntry(
   bot: LocalVmInventoryBot,
   status: ContainerComputerStatus,

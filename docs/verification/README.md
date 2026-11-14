@@ -1,9 +1,10 @@
 # Verifying OpenMausBot
 
-OpenMausBot has one development control surface: `pnpm control:omb`. It is a
-thin command-line adapter over `scripts/mcp-server.ts`, so verification uses
-the same URL validation, task pinning, bounded transcripts, wait states, and
-redaction as external MCP clients.
+OpenMausBot has one development control surface: `pnpm control:omb`. It runs
+the published `openmausbot` verbs (docs/headless-cli.md), which call the MCP
+tools in `scripts/mcp-server.ts`, so verification uses the same URL
+validation, task pinning, bounded transcripts, wait states, and redaction as
+external MCP clients and scripts.
 
 ## Launch
 
@@ -22,7 +23,12 @@ the URL, PID, data directory, and persistent log path, then stays attached to
 that exact child. The parent shell and the user's OpenMausBot data are
 untouched. Only `FAKE_CLAUDE_*` variables cross from the launcher's
 environment into that child, so a recipe can script the fake engine's mode,
-replies and tool calls without writing a wrapper CLI.
+replies and tool calls without writing a wrapper CLI. Live calls add one
+exception: `OMB_OPENAI_LIVE_URL` crosses when it is a loopback
+`http://127.0.0.1:PORT` (the fake GPT-Live that
+`node --experimental-strip-types server/testing/fake-openai-live.ts` prints),
+and `OMB_OPENAI_LIVE_KEY` crosses only with it, so that key can only ever
+reach the fake.
 
 Pass the printed URL explicitly from a second terminal:
 
@@ -37,24 +43,47 @@ recipe from sending messages to the user's running app by accident.
 
 Use only mapped, tested commands:
 
+- [The headless command line](headless-cli.md)
 - [Chat turns](chat-turns.md)
+- [OpenAI reply readout](openai-readout.md)
 - [Conversation context compaction](context-compaction.md)
 - [Work summaries and engine hooks](digests.md)
 - [OpenAI-compatible structured tools](openai-tools.md)
+- [Per-bot tool selection and local-model checks](tool-selection.md)
 - [OpenCode model variants through ACP](opencode-variants.md)
 - [Bot setup, model scope, and file continuity](bot-continuity.md)
 - [Reviewed Chief team setup and scoped deletion](team-setup.md)
+- [MausBot, everyone's helper](mausbot.md)
 - [Profile proposal and credential-card lifecycle](proposal-cards.md)
 - [Full Access without duplicate approvals](full-access.md)
+- [Bots changing app settings, and the guards Full access cannot skip](app-settings.md)
+- [Gmail draft creation, send approval and revision](gmail-drafts.md)
 - [Exact command allowlist UI and saved rules](command-allowlist.md)
-- [Peer approval denial, expiry, and cancellation](peer-approvals.md)
+- [The safety floor: a never-list no grant can allow](safety-floor.md)
 - [Waiting for an occupied desktop](computer-wait.md)
 - [Chat UI, driven headlessly](chat-ui.md)
+- [Computer panel focus hand-off](computer-panel-focus.md)
+- [Taking control of a bot's computer](take-control.md)
+- [Saved steps: repeating a computer task without AI](saved-steps.md)
+- [Native dictation retention and send-to-stop](dictation.md)
+- [Proactive routines and the brief](proactive-routines.md)
+- [Waits: tell me when, with no AI while waiting](waits.md)
+- [A new Cloud's first hour](first-hour.md)
+- [Chat widgets](widgets.md)
+- [Pages and apps in a room](room-pages.md)
+- [Published apps](published-apps.md)
+- [Included app hosting](included-hosting.md)
+- [The Inbox on every plan](inbox.md)
+- [Reactions](reactions.md)
+- [Chat widgets: prompts to try with a real bot](widget-prompts.md)
+- [Phone web app installation and safe areas](phone-web-app.md)
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
 - [In-chat team coordination](room-coordination.md)
-- [Chief access to additional teams](team-access.md)
+- [Question cards: a teammate's question, in its chat and the person's inbox](question-cards.md)
+- [Chief authority over additional departments](team-access.md)
 - [Engines and Doctor](engines.md)
+- [Cline engine and native loopback qualification](cline.md)
 - [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
 - [Codex bot instructions](codex-instructions.md)
 - [Codex browser routing and native search](codex-browser-routing.md)
@@ -73,6 +102,7 @@ Use only mapped, tested commands:
 - [Hosted workspace sign-in and revocation](hosted-workspaces.md)
 - [Shared-workspace trust: loopback, card answerers, decision log](shared-workspace-trust.md)
 - [Shared-workspace governance: bot visibility and admin activity](shared-workspace-governance.md)
+- [Who can see, chat with and change each team bot](team-bot-access.md)
 - [Usage ledger](usage-ledger.md)
 - [Bounded built-in tool results](tool-results.md)
 - [Memory: recall, upkeep and the tidy-up](memory-layer.md)
@@ -87,6 +117,53 @@ built-in browser panel, and updater UI—is still not proven by the harness. Use
 the relevant Electron/package smoke test and state that limitation. Add a map
 entry only after the shared control surface can really drive it.
 
+The [switchable local environments recipe](local-environments.md) verifies
+creating, switching between and recovering named local environments by hand on
+a packaged desktop install; the control surface cannot drive it, so it is not
+in the map above.
+
+The [talk shortcut recipe](talk-shortcut.md) checks hold-to-talk from any app, the
+reply box and the Quick asks chat by hand on a packaged side-by-side build; the
+control surface cannot drive a global shortcut or the microphone, so it is not
+in the map above.
+
+The [move to My Cloud fixture](cloud-send.md) runs this computer's server and a
+Cloud home with the desktop's own wiring between them, and runs and checks the
+one-time move as main does.
+
+The [server of the person's own as home fixture](own-home.md) runs this
+computer's server and servers of the person's own with main's wiring for
+**Make <server> my home**: the move, routines that run once, this computer then
+lent to that server by itself, and none of it for a server shared with others.
+
+The [MCP sign-in fixture](mcp-sign-in.md) checks remote sign-in, callback URL
+paste-back, MCP tools and logout cancellation through the real settings panel
+and a synthetic OAuth provider in a disposable workspace.
+
+The [Whop fixture](whop.md) checks its one-click setup, cancellation, denied
+consent, discovery failures, reconnect and disconnect using that same registry
+and a synthetic provider, without accessing a real Whop account.
+
+The [bot contact cards fixture](bot-contact-cards.md) checks the AgentMail,
+AgentPhone, Vapi and Telnyx cards: a pasted key that is refused, replaced and
+deleted on Disconnect, kept in a header and out of every listing, against a
+loopback stand-in for Vapi.
+
+The [Postiz fixture](postiz.md) checks the Apps page's Postiz card in the Social
+category: Postiz Cloud's sign-in and an API key for a person's own Postiz, the
+bot's turn getting the `postiz` tools with the token kept out of every answer,
+transcript and log, plain refusals, revocation and disconnect, against loopback
+stand-ins for Postiz.
+
+The [X card fixture](x-connector.md) checks the Apps page's X card: a plan's
+included calls with the month's use, the person's own treg key (saved, tested,
+removed, used first) and a used-up month, against loopback stand-ins for treg
+and the relay.
+
+The [Connected Apps OAuth fixture](connected-apps-oauth.md) checks blocked-popup
+recovery, safe authorization links and abandoned-account retries through real
+renderer components and isolated HTTP routes.
+
 The [desktop server connection smoke](desktop-server-connection.md) mounts the
 real Settings connection component in disposable Electron windows.
 
@@ -100,6 +177,10 @@ Admin server, including cancellation, revocation and unchanged normal startup.
 The [personal Cloud account smoke](cloud-account.md) checks optional browser
 sign-in, server-verified Pro status and sign-out in a disposable Electron profile.
 
+The [rail of Clouds](cloud-rail.md) checks the session's list of Clouds, which
+pages may read the rail, opening a place by its id, hiding the rail, and buying
+another Cloud, with a loopback Admin and the real app in a disposable preview.
+
 The [embedded server recovery smoke](desktop-server-recovery.md) crashes real
 Electron-owned fixture servers, verifies bounded recovery and private access,
 and proves quit cancels recovery without replaying an interrupted fixture turn.
@@ -109,7 +190,8 @@ and HTTP tailnet endpoint refresh without touching a real Tailscale installation
 
 The [external runtimes recipe](external-runtime.md) proves a bot's standing
 comms capability from `external-runtimes.json` against a disposable server and
-the fake engine: scope, on-demand token reads, and immediate delegation drain.
+the fake engine: scope, on-demand token reads, `coordinate_bots` roots polled
+through `assignment_status`, and immediate dispatch to a free teammate.
 
 The [cloud preview fixture](cloud-preview.md) mounts the real Computer panel
 against an isolated server for image decoding, loading, and recovery UI checks.
@@ -121,9 +203,20 @@ The [live browser fixture](browser-live.md) mounts the real Browser panel with
 an explicitly selected native engine and Chrome in a disposable home, covering
 watching, takeover, input, and profile switching.
 
+The [page health and recorded browser steps check](browser-steps.md) drives the
+real engine against a fixture page with failing requests and page errors, and
+reads the recorded steps back through the server.
+
+The [Local VM resume fixture](local-vm-resume.md) checks idle stop, restart
+recovery, guarded resume and the stopped-to-ready Computer panel flow.
+
 The [local computer launch regression](local-computer-launch.md) starts the
 host CUA gate through real Electron in a disposable home, without opening the
 desktop app or controlling the user's computer.
+
+The [remote desktop viewer fixture](desktop-viewer.md) checks the bundled
+noVNC page, authenticated WebSocket proxy, desktop input, reconnect and logout
+against an isolated server, synthetic desktop and VPS SSH forward.
 
 The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.
@@ -136,23 +229,43 @@ The [chat and settings polish fixture](chat-polish.md) exercises attachment
 galleries, opt-in video playback, persisted tool details, and responsive settings
 through the real renderer in an isolated fake-engine workspace.
 
+The [rich tables fixture](rich-tables.md) checks Markdown tables and message-scoped
+CSV/TSV previews, large-file virtualization, sorting, search, export and keyboard
+interaction in a disposable workspace.
+
+The [recent files fixture](computer-files.md) mounts the Files panel with synthetic
+digest rows and real message-scoped downloads from a disposable workspace.
+
+The [Data viewer fixture](data.md) checks real DuckDB loading, querying, export,
+restart persistence, result history and the full renderer's 100,000-row grid
+in a disposable workspace with synthetic data.
+
 The [people invitation fixture](people.md) checks hosted workspace sign-in,
 roles and device revocation through the real HTTP API with a stubbed email
 service. It does not drive the People settings UI through `control-omb`.
 
 The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
-default focus, keyboard wrapping and focus return against two disposable bots.
+default focus, keyboard wrapping and focus return against two disposable bots;
+its departments recipe drags bots to reorder them and into new departments.
 
 The [sidebar attention geometry fixture](sidebar-attention.md) measures the
-Active Threads popover's width and inset at each expanded sidebar density in a
-headless Electron window, including the compact-density case where the menu
-used to cross the window's left edge and lose its title.
+Active Threads popover's width and inset in the open sidebar and its column of
+avatars in a headless Electron window, so the menu never crosses the window's
+left edge and loses its title.
 
 The [avatar provider fixture](avatar-providers.md) checks image-provider settings,
 keyless local generation, saved-key handling, and safe errors with a local fake API.
 
 The [independent threads fixture](threads.md) checks nested sidebar navigation,
 per-thread models, simultaneous direct conversations and thread-scoped Stop.
+
+The [custom ACP model fixture](custom-acp-models.md) checks native model and
+thinking choices, independent bot defaults and thread overrides, and retained
+settings and catalogs after restart with an offline ACP engine.
+
+The [GitHub Copilot engine checks](copilot-engine.md) cover its ACP catalog,
+model and effort selection, sign-in detection, and moving a bot or conversation
+between Claude, Copilot and a custom ACP agent with fake engines.
 
 The [mobile generated-image checks](mobile-generated-images.md) cover native image
 attachments and message-scoped download authorization using isolated fixtures.
@@ -163,23 +276,11 @@ steer messages from external interfaces. It also verifies bounded request
 lineage snapshots, Chief continuations and exact-execution Stop without
 interrupting a newer request.
 
-The [iOS thread checks](ios-threads.md) cover the native thread tree, folder
-search and draft isolation using disposable simulators and an offline fixture.
-
-The [Android stream recovery checks](android-stream-recovery.md) exercise early
-stream closure and fallback through disposable HTTP endpoints.
-
-The [iOS transcript checks](ios-transcript.md) cover completed-turn folds,
-Hidden activity, and compact webhook messages using bundled offline data.
-
-The [Android thread checks](android-threads.md) cover the Compose thread tree,
-local selection, draft isolation and installable preview APK.
-
-The [Android server pairing checks](android-server-pairing.md) cover server QR
-confirmation, manual codes, retries and saved-server identity validation.
-
-The [Android transcript checks](android-transcript.md) cover completed-turn
-folds, Hidden reasoning, and compact webhook messages through real Compose UI.
+The [Live calls fixture](live-calls.md) checks the call id on spoken requests,
+the one "call" row a finished call leaves, its generated title and the desktop's
+record row, against the fake GPT-Live in a disposable workspace. `control-omb`
+cannot start a call, so the recipe also calls the harness's own routes. It
+proves no real audio, OpenAI key or phone.
 
 The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
 and per-line direction in sent turns, with code pinned left-to-right.
@@ -191,6 +292,11 @@ using the real renderer and an isolated fake-engine server.
 The [interval restrictions recipe](interval-restrictions.md) checks weekday and
 time-window limits on scheduled routines in that same disposable fixture.
 
+The [automation reports recipe](automation-reports.md) checks that every run
+reports into the bot's chat as one captioned bot message, that quiet runs write
+nothing, that a run's question is answered in that chat, and the concurrency
+rule with the person's own turn, in the real renderer and end to end.
+
 The [server settings recipe](server-settings.md) checks browser provider sign-in
 with an offline CLI and custom-domain validation without touching live accounts.
 
@@ -199,6 +305,11 @@ responsive layouts, theme contrast, and status refreshes without losing drafts.
 
 The [Claude account recipe](claude-account.md) checks sign-out, cancellation and
 retry against an offline Claude CLI confined to a disposable home.
+
+The [Claude custom endpoints](claude-endpoint.md) checks a per-bot DeepSeek/GLM
+endpoint in Settings and its turn against the fake Claude CLI: its own
+directory, its model and routing, the token kept out of the engine list, and
+edits that keep the saved token.
 
 The [provider recovery recipe](provider-recovery.md) verifies real Grok image
 transport and Claude authentication against loopback APIs, plus scoped thread
@@ -215,6 +326,9 @@ including the surviving conversation and sending again without deleting the bot.
 The [Codex account recipe](codex-account.md) checks account switching against an
 offline Codex CLI whose identity is synthetic and whose credential directory is empty.
 
+The [ChatGPT plan recipe](chatgpt-plan.md) checks the separate official OAuth
+flow, credential rotation, account ownership, and native Responses routing.
+
 The [mention fixture](mentions.md) checks candidate selection, composer highlighting,
 sent mentions, multiline scrolling and responsive wrapping in real chat views.
 
@@ -222,6 +336,10 @@ The [Group and Goal Local VM recipe](group-local-vm.md) checks per-speaker
 desktop routing, cancellation, and computer authority cleanup.
 
 ## Evidence
+
+The [Gemini speech fixture](gemini-speech.md) checks write-only credentials,
+voice selection and WAV synthesis against an offline provider in an isolated
+server, with manual steps for real Google access and playback.
 
 The [persistence responsiveness benchmark](persistence-performance.md) measures
 synthetic message/log bursts and history scans, with isolated chat, visibility

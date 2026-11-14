@@ -1,20 +1,8 @@
-// Factory Droid harness support — the `droid` CLI over ACP stdio
-// (`droid exec -o acp`), on the Factory login (~/.factory/auth.v2.file) or a
-// FACTORY_API_KEY. The generic protocol runtime lives in acp/core.ts; this
-// file is only the per-harness quirks. Verified against droid 0.196.0:
-// initialize reports protocolVersion 1, loadSession:true (session/load resume
-// works), promptCapabilities image+embeddedContext, and authMethods
-// device-pairing + factory-api-key.
-//
-// UNLIKE every other ACP harness here, droid ignores argv for session
-// settings. `droid exec --help` says so under "Stream JSON-RPC Mode": "CLI
-// flags do not configure JSON-RPC sessions: -m/--model, --auto,
-// -r/--reasoning-effort, and --disable-builtin-skills are still validated,
-// but session settings come from JSON-RPC requests." So a `-m` that only
-// reaches argv is accepted and then ignored, and the session runs whatever
-// ~/.factory/settings.json selected. Model and autonomy are session config
-// options set over the wire (session/set_model, session/set_mode), which is
-// why both live in configureSession() below and NOT in spawnArgs.
+// Factory Droid: `droid exec -o acp` on the Factory login (~/.factory/auth.v2.*) or FACTORY_API_KEY.
+// droid ignores argv for session settings; `droid exec --help` ("Stream JSON-RPC Mode"): "CLI flags do
+// not configure JSON-RPC sessions: -m/--model, --auto, -r/--reasoning-effort, and
+// --disable-builtin-skills are still validated, but session settings come from JSON-RPC requests."
+// So model and autonomy are set over the wire in configureSession (verified on droid 0.196.0).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -22,18 +10,9 @@ import { userHome } from "../../env-path.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
-// FACTORY_HOME_OVERRIDE replaces the HOME the CLI resolves, NOT the data root:
-// droid builds every path as <home>/.factory/… (verified against 0.196.0 —
-// `FACTORY_HOME_OVERRIDE=/tmp/x droid exec -o acp` created /tmp/x/.factory/).
-// Kimi's KIMI_CODE_HOME is a data root; this one is not, so the `.factory`
-// segment stays on both branches.
-//
-// Which credential file exists depends on the `secure_auth_storage` feature
-// flag droid fetches for the account: with secure storage on it writes
-// auth.v2.loginkeychain (macOS) or auth.v2.keyring (keytar), and only falls
-// back to auth.v2.file when that write fails. droid's own check tries all of
-// them, so checking one name alone reports a fresh signed-in login as logged
-// out. Names read from the 0.196.0 binary.
+// FACTORY_HOME_OVERRIDE replaces the HOME the CLI resolves, not the data root: paths are
+// <home>/.factory/… (0.196.0). With the `secure_auth_storage` flag droid writes auth.v2.loginkeychain
+// (macOS) or auth.v2.keyring, falling back to auth.v2.file (names from the 0.196.0 binary).
 const AUTH_FILES = ["auth.v2.file", "auth.v2.loginkeychain", "auth.v2.keyring"];
 
 function authFilePaths(env: Record<string, string | undefined>) {
@@ -41,11 +20,7 @@ function authFilePaths(env: Record<string, string | undefined>) {
   return AUTH_FILES.map((name) => join(home, ".factory", name));
 }
 
-// droid's real catalog is half user-local: `custom:` providers (Azure, a
-// local LM Studio server, …) live in ~/.factory/settings.json, the user
-// orders the picker with modelFavorites, and sessionDefaultSettings.model is
-// the model the CLI itself starts on. None of that can be enumerated from a
-// static list, so read it and fall back to the built-in slice if unreadable.
+// `custom:` providers, modelFavorites and sessionDefaultSettings.model live in ~/.factory/settings.json.
 interface FactoryCustomModel {
   id?: string;
   model?: string;
@@ -114,20 +89,15 @@ export function ensureDroidInjectModel(
   return id;
 }
 
-/** ACP `session/new` throws "Authentication required" unless a Factory
- *  login or FACTORY_API_KEY is present — even for a BYOK custom model.
- *  Droid 0.198 only checks that the env var is set, then uses the
- *  custom row's own key for the local host. Do not invent a key for
- *  subscription models, and do not overwrite a real Factory key. */
+/** ACP `session/new` throws "Authentication required" without a Factory login or FACTORY_API_KEY, even
+ *  for a BYOK custom model; droid 0.198 only checks that the env var is set. */
 export function applyDroidLocalAuthEnv(
   env: Record<string, string | undefined>,
   modelId: string | undefined,
 ): void {
   if (!decodeInjectId(modelId)) return;
   if (env.FACTORY_API_KEY?.trim()) return;
-  // session/new already succeeds on a Factory login file. A placeholder
-  // FACTORY_API_KEY can take precedence over that login, so leave env
-  // alone when one of the auth files is present.
+  // A placeholder FACTORY_API_KEY can take precedence over a login file.
   if (authFilePaths(env).some(existsSync)) return;
   env.FACTORY_API_KEY = "openmausbot-local";
 }
@@ -141,8 +111,6 @@ async function resolveModels(env: Record<string, string | undefined>) {
   try {
     const settings = readSettings(env);
     const custom = (settings.customModels ?? []).flatMap((m) => {
-      // Live inject rows come from mergeLocalInject as host::model. Skip the
-      // BYOK copies we wrote so the picker does not list the same model twice.
       if (m.id?.startsWith(INJECT_ID_PREFIX)) return [];
       const id = m.id || (m.model ? `custom:${m.model}` : "");
       if (!id) return [];
@@ -150,8 +118,6 @@ async function resolveModels(env: Record<string, string | undefined>) {
     });
     const merged = [...custom, ...MODELS.options.filter((o) => !custom.some((c) => c.id === o.id))];
 
-    // Favourites first, in the user's own order; everything else keeps its
-    // existing order (Array.prototype.sort is stable).
     const rank = new Map((settings.modelFavorites ?? []).map((id, i) => [id, i]));
     const options = merged.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
 
@@ -161,15 +127,11 @@ async function resolveModels(env: Record<string, string | undefined>) {
       default: configured && options.some((o) => o.id === configured) ? configured : fallback,
       options,
     };
-  } catch {
-    // no settings file yet, or unreadable: ship the built-ins
-  }
+  } catch {}
   return mergeLocalInject(catalog, env);
 }
 
-// droid answers a rejected setting with a bare JSON-RPC message ("Model not
-// recognized", "Method not found") that reaches the error card verbatim,
-// naming neither the engine nor the setting that failed. Say what we asked for.
+// droid rejects a setting with a bare message ("Model not recognized") naming neither engine nor setting.
 async function applySetting(
   request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>,
   method: string,
@@ -186,17 +148,12 @@ async function applySetting(
   }
 }
 
-// Autonomy maps onto droid's session modes (session/new advertises
-// normal | spec | auto-low | auto-medium | auto-high). Always set it
-// explicitly: ~/.factory/settings.json can pin a mode, and inheriting it
-// would either make every session yolo or make fullAuto silently ask.
+// droid's session modes: normal | spec | auto-low | auto-medium | auto-high. Always set explicitly:
+// ~/.factory/settings.json can pin a mode.
 const MODE_DEFAULT = "normal"; // auto-approves reads only; everything else asks
 const MODE_FULL_AUTO = "auto-high";
 
-// A curated slice of `droid exec -m <bogus>`'s built-in catalog (0.196.0 lists
-// 43). Custom models from ~/.factory/settings.json are per-machine and carry a
-// `custom:` prefix, so they can't be enumerated statically; a bot can still be
-// switched onto one through the model picker (PATCH /api/bots/:id).
+// A curated slice of `droid exec -m <bogus>`'s built-in catalog (0.196.0 lists 43).
 const MODELS = {
   default: "claude-opus-5",
   options: [
@@ -231,19 +188,12 @@ const support: AcpSupport = {
     signInCommand: "droid",
   },
 
-  // No model/mode flags here on purpose: see the header note. `-o acp` is the
-  // ACP entry point; everything else is negotiated over the protocol.
   spawnArgs: () => ["exec", "-o", "acp"],
   credentialEnv: ["FACTORY_API_KEY"],
 
-  // The advertised methods are device-pairing (a browser flow that cannot be
-  // driven over ACP) and factory-api-key (read from the child env, no
-  // authenticate call needed). Ride the ambient login instead, like Kimi.
+  // device-pairing is a browser flow ACP cannot drive; factory-api-key is read from the env.
   pickAuthMethod: () => null,
   authFailure: "continue",
-  // The signed-in CLI is the primary source; FACTORY_API_KEY is the fallback
-  // droid itself advertises, and it is checked last so an ambient key can
-  // never be what makes an otherwise logged-out instance look ready.
   isAuthenticated: (env) => authFilePaths(env).some(existsSync) || Boolean(env.FACTORY_API_KEY),
   resolveModels,
   resolveTurnModel: (model, env) => (model ? ensureDroidInjectModel(model, env) : model),
@@ -254,15 +204,10 @@ const support: AcpSupport = {
   async configureSession({ request, sessionId, config, turn }) {
     const modeId = config.fullAuto ? MODE_FULL_AUTO : MODE_DEFAULT;
     await applySetting(request, "session/set_mode", { sessionId, modeId }, `autonomy mode "${modeId}"`);
-    // Pin the model for the same reason as the mode: with no set_model the
-    // session runs whatever ~/.factory/settings.json selected, which can be a
-    // `custom:` provider pointing at its own endpoint and key.
     const modelId = turn.model ?? MODELS.default;
     await applySetting(request, "session/set_model", { sessionId, modelId }, `model "${modelId}"`);
   },
 
-  // House convention for ACP harnesses (grok, gemini, kimi all do this): the
-  // persona rides in the prompt text rather than a CLI system-prompt flag.
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };
 

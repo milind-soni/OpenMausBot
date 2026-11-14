@@ -1,14 +1,10 @@
-// The memory routes through a real, isolated harness server: containment
-// at the HTTP boundary, the 409 that keeps a settings save from erasing
-// what the bot just wrote, the journal, revert, and the turn-boundary diff
-// that catches a bot writing memory with nothing but a file tool.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
+import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 import { hashMemoryText } from "./memory-store.ts";
 
 interface Reply {
@@ -33,9 +29,7 @@ describe("memory routes through an isolated HTTP fixture", () => {
 
   beforeAll(async () => {
     fixture = await launchVerificationServer();
-    // A CLI stand-in that behaves like a bot writing memory with a file
-    // tool: on a real turn (stream-json) it drops a topic file into the
-    // workspace named by memory-target.txt, then hands over to the fake.
+    // A CLI stand-in that, on a real turn, drops a topic file into the workspace named by memory-target.txt, as a file tool would.
     const target = join(fixture.info.dataDir, "memory-target.txt");
     const wrapper = join(fixture.info.dataDir, "memory-fixture.mjs");
     writeFileSync(wrapper, [
@@ -98,7 +92,6 @@ describe("memory routes through an isolated HTTP fixture", () => {
     expect(created.body.entry.before).toBeUndefined();
     expect(created.body.overview.topics.map((t: { path: string }) => t.path)).toEqual(["memory/clients.md"]);
 
-    // the bot writes in between, with a file tool
     writeFileSync(join(workspace(), "memory", "clients.md"), "# Clients\n- Acme (bot)\n");
     const stale = await api("PUT", `/api/bots/${botId}/memory/file`, {
       path: "memory/clients.md",
@@ -187,5 +180,27 @@ describe("memory routes through an isolated HTTP fixture", () => {
     }, { timeout: 5_000 }).toMatchObject({ kind: "created", actor: "bot", via: "turn", threadId, added: 1 });
     const overview = await api("GET", `/api/bots/${botId}/memory`);
     expect(overview.body.topics.map((t: { path: string }) => t.path)).toContain("memory/learned.md");
+  });
+
+  it("disables memory prompts and automatic logs for a bot without deleting existing files", async () => {
+    expect((await api("PATCH", `/api/bots/${botId}`, { memoryEnabled: "off" })).status).toBe(400);
+    const changed = await api("PATCH", `/api/bots/${botId}`, { memoryEnabled: false });
+    expect(changed.status).toBe(200);
+    expect(changed.body.bot.memoryEnabled).toBe(false);
+    expect((await api("GET", `/api/bots/${botId}/memory/upkeep`)).body.enabled).toBe(false);
+    expect((await api("POST", `/api/bots/${botId}/memory/tidy`)).status).toBe(409);
+    const before = (await api("GET", `/api/bots/${botId}/memory`)).body;
+    const logSizes = (overview: typeof before) => overview.logs.map((log: { path: string; bytes: number }) => [log.path, log.bytes]);
+    const target = join(fixture.info.dataDir, "memory-target.txt");
+    writeFileSync(target, join(fixture.info.dataDir, "scratch.txt"));
+
+    expect((await api("POST", `/api/bots/${botId}/messages`, { threadId, text: "Memory is off in this fixture." })).status).toBe(202);
+    await runControlOmb(["wait", "--bot", botId, "--timeout", "30"], { env: { OPENMAUSBOT_URL: fixture.info.url } });
+    const dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")) as { systemPrompt?: string };
+    expect(dump.systemPrompt).not.toContain("Your memory (MEMORY.md)");
+    expect(dump.systemPrompt).not.toContain("Use memory_update");
+    const after = (await api("GET", `/api/bots/${botId}/memory`)).body;
+    expect(logSizes(after)).toEqual(logSizes(before));
+    expect(readFileSync(join(workspace(), "MEMORY.md"), "utf8")).toBe("- legacy note\n");
   });
 });

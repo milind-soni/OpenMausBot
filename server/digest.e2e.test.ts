@@ -1,13 +1,3 @@
-// The work digest, end to end and across engines (Phase 0, item 0.1 with
-// the standing "every engine" rule): boots the real harness server with one
-// fake instance per engine family the repo has a fake for, runs one turn on
-// each, and asserts that exactly one `digest` row lands after the reply,
-// naming the tools that engine's protocol exposed. Then the "done when" of
-// the phase: a turn on one engine that changes a project file yields a
-// digest naming the file, and a different engine taking over the same
-// thread is shown that digest in its replay.
-//
-// Same POSIX gating as branching.test.ts (the fakes are shebang scripts).
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,10 +6,11 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const fake = (name: string) => join(SERVER_DIR, "testing", name);
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
+const PORT = workerPort(18800, 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
 
@@ -33,8 +24,7 @@ interface Msg {
   digest?: { turnId: string; tools: Array<{ name: string; count: number }>; files?: { added: string[]; changed: string[] }; hookCoverage: string };
 }
 
-/** One row per engine family with a fake in server/testing. `tools` is what
- * that fake's default turn is known to emit through its protocol. */
+/** One row per engine family with a fake in server/testing; `tools` is what that fake's default turn emits. */
 const ENGINES = [
   { id: "acp", driver: "grokAgent", cli: "fake-acp-cli.ts", env: {}, tools: ["run"] },
   { id: "claude", driver: "claudeAgent", cli: "fake-claude-cli.ts", env: {}, tools: ["Bash"] },
@@ -135,7 +125,6 @@ posixOnly("work digest e2e (every fake engine)", () => {
     const names = d!.digest!.tools.map((t) => t.name);
     if (engine.tools[0] === "*") expect(names.length).toBeGreaterThan(0);
     else for (const name of engine.tools) expect(names).toContain(name);
-    // every activity row of the turn is attributed to it
     const activities: Msg[] = bot.messages.filter((m: Msg) => m.kind === "activity" && m.tool);
     for (const a of activities) expect(a.turnId).toBe(d!.digest?.turnId);
     expect(d!.digest!.tools.reduce((n, t) => n + t.count, 0)).toBe(activities.length);
@@ -160,7 +149,6 @@ posixOnly("work digest e2e (every fake engine)", () => {
     const digest: Msg = (await getBot(created.id)).messages.find((m: Msg) => m.kind === "digest");
     expect(digest.digest?.files?.added).toEqual(["retry.ts"]);
 
-    // switch engines: the echoing instance replays the thread, digest included
     expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "echo", model: "fake-model" } })).status).toBe(200);
     expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "what did you change?" })).status).toBe(202);
     await waitFor(async () => {

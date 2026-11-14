@@ -54,11 +54,13 @@ Webhook/unattended status is thread-scoped, so typing in another thread does
 not grant an automated run attended permissions.
 
 New local-agent threads receive independent default working directories.
-Existing pinned directories and provider sessions are retained. Overlapping
-selected project folders are serialized, including symlink aliases. Managed
-browser and host-computer tools acquire a resource on first use and retain
-it for the turn. A competing thread receives a clear refusal rather than
-interleaving screen actions. Explicit Local VM/VPS work and cloud lifecycle
+Existing pinned directories and provider sessions are retained. A bot's
+threads work in one selected project folder side by side, like several
+agent sessions in one repo (the per-turn snapshot queues per folder on its
+own; the folder is never a turn-long claim). Managed browser and
+host-computer tools acquire a resource on first use and retain it for the
+turn. A competing thread receives a clear refusal rather than interleaving
+screen actions. Explicit Local VM/VPS work and cloud lifecycle
 operations remain conservative. File/folder coordination is **not** a sandbox
 against arbitrary commands issued by a Full-access provider.
 

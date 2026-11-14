@@ -1,9 +1,3 @@
-// The bot settings dialog's section rail — one entry per BotSettingsSection,
-// in the fixed order the rail renders them. Search filters against label
-// plus keywords, the same convention as the app SettingsModal's SECTIONS.
-// "slack" is listed here but shown only when the server offers a link to the
-// organisation's Admin (BotSettingsDialog filters it out otherwise), and
-// "visibility" only to an admin in a browser (never in the desktop app).
 import {
   BookOpen,
   Brain,
@@ -13,6 +7,7 @@ import {
   Eye,
   History,
   LayoutDashboard,
+  Library,
   type LucideIcon,
   Mic,
   Network,
@@ -25,8 +20,6 @@ import {
 import type { BotSettingsSection } from "@/state/store";
 import type { LocaleKey } from "@/locales";
 
-/** `labelKey`, when present, is the translated label (read at render time);
- * `label` stays the English fallback and search text. */
 export const BOT_SECTIONS: Array<{
   id: BotSettingsSection;
   label: string;
@@ -34,18 +27,19 @@ export const BOT_SECTIONS: Array<{
   icon: LucideIcon;
   keywords: string[];
 }> = [
-  { id: "overview", label: "Overview", icon: LayoutDashboard, keywords: ["summary", "status", "what it does", "won't", "prompt", "what the model sees"] },
-  { id: "identity", label: "Identity", icon: User, keywords: ["name", "title", "avatar", "blurb", "instructions"] },
+  { id: "overview", label: "Overview", labelKey: "botSettings.sections.overview", icon: LayoutDashboard, keywords: ["summary", "status", "what it does", "won't", "prompt", "what the model sees"] },
+  { id: "identity", label: "Identity", labelKey: "botSettings.sections.identity", icon: User, keywords: ["name", "title", "avatar", "blurb", "instructions"] },
   { id: "slack", label: "Slack", icon: Slack, keywords: ["slack", "slack app", "admin", "message", "direct messages", "mentions"] },
-  { id: "soul", label: "Soul", icon: Sparkles, keywords: ["standing instructions", "instructions", "persona", "rules", "soul.md"] },
-  { id: "skills", label: "Skills", icon: BookOpen, keywords: ["skills", "learned", "procedures", "teach"] },
-  { id: "memory", label: "Memory", icon: Brain, keywords: ["memory", "notes", "remember", "topics"] },
-  { id: "routines", label: "Routines", icon: CalendarClock, keywords: ["schedule", "routines", "cron", "tasks"] },
-  { id: "access", label: "Access", icon: Network, keywords: ["works on", "computer", "vm", "cloud", "vps", "folder", "workspace", "browser", "connected apps", "composio", "webhooks", "always allow", "grants"] },
-  { id: "model", label: "Model", icon: Cpu, keywords: ["engine", "model", "provider", "cli", "effort"] },
-  { id: "permissions", label: "Permissions", icon: ShieldCheck, keywords: ["auto mode", "approve", "auto approve", "review", "routine approvals", "peers", "contact", "coordination", "chief of staff", "section"] },
-  { id: "voice", label: "Voice & alerts", icon: Mic, keywords: ["voice", "alerts", "notifications", "speak"] },
+  { id: "soul", label: "Soul", labelKey: "botSettings.sections.soul", icon: Sparkles, keywords: ["standing instructions", "instructions", "persona", "rules", "soul.md"] },
+  { id: "skills", label: "Skills", labelKey: "botSettings.sections.skills", icon: BookOpen, keywords: ["skills", "learned", "procedures", "teach"] },
+  { id: "memory", label: "Memory", labelKey: "botSettings.sections.memory", icon: Brain, keywords: ["memory", "notes", "remember", "topics"] },
+  { id: "library", label: "Library", labelKey: "botPanel.tab.library", icon: Library, keywords: ["library", "made", "pages", "apps", "files", "published"] },
+  { id: "routines", label: "Routines", labelKey: "botSettings.sections.routines", icon: CalendarClock, keywords: ["schedule", "routines", "cron", "tasks"] },
+  { id: "access", label: "Access", labelKey: "botSettings.sections.access", icon: Network, keywords: ["works on", "computer", "vm", "cloud", "vps", "folder", "workspace", "browser", "connected apps", "composio", "webhooks", "always allow", "grants", "tool selection", "tools", "mcp", "allow", "exclude"] },
+  { id: "model", label: "Model", labelKey: "botSettings.sections.model", icon: Cpu, keywords: ["engine", "model", "provider", "cli", "effort"] },
+  { id: "permissions", label: "Permissions", labelKey: "botSettings.sections.permissions", icon: ShieldCheck, keywords: ["auto mode", "approve", "auto approve", "review", "routine approvals", "coordination", "chief of staff", "section"] },
+  { id: "voice", label: "Voice & alerts", labelKey: "botSettings.sections.voice", icon: Mic, keywords: ["voice", "alerts", "notifications", "speak"] },
   { id: "visibility", label: "Who can see it", labelKey: "botSettings.visibility.title", icon: Eye, keywords: ["visibility", "who can see", "private", "people", "admins", "members", "access", "hide"] },
-  { id: "history", label: "History", icon: History, keywords: ["history", "changes", "undo", "rollback", "log"] },
-  { id: "usage", label: "Usage", icon: Coins, keywords: ["tokens", "cost", "billing"] },
+  { id: "history", label: "History", labelKey: "botSettings.sections.history", icon: History, keywords: ["history", "changes", "undo", "rollback", "log"] },
+  { id: "usage", label: "Usage", labelKey: "botSettings.sections.usage", icon: Coins, keywords: ["tokens", "cost", "billing"] },
 ];

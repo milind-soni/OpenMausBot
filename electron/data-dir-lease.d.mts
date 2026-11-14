@@ -26,3 +26,11 @@ export declare function acquireDataDirLeaseForProcess(
   dataDir: string,
   environment?: NodeJS.ProcessEnv | Record<string, string | undefined>,
 ): OwnedDataDirLease | DelegatedDataDirLease;
+
+export declare function clearRecordsFromOtherMachines(
+  dataDir: string,
+): { path: string; host: string; pid: number }[];
+
+export declare function clearRecordsFromEarlierRunOfThisContainer(
+  dataDir: string,
+): { path: string; host: string; pid: number }[];

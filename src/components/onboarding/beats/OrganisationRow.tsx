@@ -1,13 +1,7 @@
-// Engines beat, first row: the optional way in for people who use the app
-// at work. It drives the same desktop bridge as Settings → Organisation, with
-// the default Admin address, and nothing starts until the person presses
-// Sign in. Another Admin address, disconnecting and every other decision stay
-// in Settings; this row only starts, follows and cancels one sign-in. It adds
-// no dialog and gates nothing: Continue works in every state.
 import { useEffect, useRef, useState } from "react";
 import { Building2, Check } from "lucide-react";
 import type { ManagedDesktopBridge, ManagedDesktopState } from "../../../../electron/managed-desktop.mjs";
-import { brand } from "@/lib/brand";
+import { productName } from "@/lib/brand";
 import { t } from "@/lib/i18n";
 import { companyModelCount, DEFAULT_ADMIN_ORIGIN } from "@/lib/onboarding";
 import { staggerIndex } from "./shared";
@@ -20,9 +14,7 @@ export function OrganisationRow({
   onConnected,
 }: {
   bridge: ManagedDesktopBridge;
-  /** Settings → Organisation: another Admin address and everything else. */
   onOpenSettings: () => void;
-  /** The Company models arrive with the connection; the beat counts again. */
   onConnected?: () => void;
 }) {
   const [connection, setConnection] = useState<ManagedDesktopState | null>(null);
@@ -40,14 +32,11 @@ export function OrganisationRow({
     const arrived = changed && next.status === "connected" && status.current !== undefined;
     status.current = next.status;
     setConnection(next);
-    // Heartbeats republish the same state; keep an error until it changes.
     if (changed) setFailed(false);
     if (arrived) connected.current?.();
   };
 
   useEffect(() => {
-    // Same guards as Settings: a push can land while the first snapshot or
-    // an action is in flight, and nothing from a closed beat may render.
     const current = ++generation.current;
     const initialRevision = revision.current;
     const receive = (next: ManagedDesktopState) => {
@@ -98,7 +87,7 @@ export function OrganisationRow({
     body = (
       <>
         <p className="text-[13px] leading-snug text-ink-secondary">
-          <span className="font-medium text-ink">{t("onboarding.org.title", { app: brand().name })}</span>{" "}
+          <span className="font-medium text-ink">{t("onboarding.org.title", { app: productName() })}</span>{" "}
           {t("onboarding.org.body")}
         </p>
         <button type="button" onClick={onOpenSettings} className={linkClass}>
@@ -111,7 +100,7 @@ export function OrganisationRow({
         type="button"
         disabled={busy}
         onClick={() => void perform(() => bridge.begin({ portalOrigin: DEFAULT_ADMIN_ORIGIN }))}
-        className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white transition-[filter] hover:brightness-110 disabled:opacity-50"
+        className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white transition-[filter] hover:brightness-110 disabled:opacity-50"
       >
         {busy ? t("organization.working") : t("onboarding.org.signIn")}
       </button>
@@ -151,8 +140,6 @@ export function OrganisationRow({
     );
     action = count > 0 ? <Check size={16} strokeWidth={2.5} className="shrink-0 text-success" aria-hidden="true" /> : null;
   } else {
-    // Needs a new sign-in, unavailable, or a state this build does not know:
-    // Settings says why and offers the way out; this row only points there.
     body = (
       <>
         {name && <p className="truncate text-[13px] font-medium text-ink">{name}</p>}

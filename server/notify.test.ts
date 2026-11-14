@@ -1,12 +1,17 @@
-// What is worth interrupting someone for. The policy is small, so the
-// tests are mostly about the cases where the answer is "stay quiet".
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { blockedTarget, buildNotification, buildSpendNotification, summarize } from "./notify.ts";
+import { buildNotification, buildSpendNotification, summarize, unaskedBotThread } from "./notify.ts";
+import { conversationLanguage, setConversationLanguage } from "./server-lines.ts";
+import "./server-line-packs.ts";
 
 const bot = { id: "bot-1", name: "Scout", threadId: "thread-1" };
 
 describe("buildNotification", () => {
+  it("words a room banner with the room's name", () => {
+    expect(buildNotification("question", bot, "thread-1", "Which file?", { group: { id: "g1", name: "Launch" } })?.title)
+      .toBe("Scout in Launch has a question");
+  });
+
   it("names the bot and carries the detail, per kind", () => {
     expect(buildNotification("approval", bot, "thread-1", "rm -rf ./build")).toMatchObject({
       kind: "approval",
@@ -33,16 +38,30 @@ describe("buildNotification", () => {
       title: "Scout resumed with results",
       body: "Results in from Atlas",
     });
-    // the toggle rules this frame like every other
     expect(buildNotification("delegation-settled", { ...bot, notifications: false }, "thread-1", "Results in from Atlas")).toBeNull();
+  });
+
+  it("says who mentioned the person, and where", () => {
+    const group = { id: "group-1", name: "Launch" };
+    expect(buildNotification("mention", bot, "room-thread", "@you three open questions\nare blocking Section 2", { group })).toEqual({
+      kind: "mention",
+      botId: "bot-1",
+      botName: "Scout",
+      threadId: "room-thread",
+      groupId: "group-1",
+      title: "Scout in Launch mentioned you",
+      body: "@you three open questions are blocking Section 2",
+    });
+    expect(buildNotification("mention", { ...bot, notifications: undefined }, "room-thread", "@you", { group })).not.toBeNull();
+    expect(buildNotification("mention", { ...bot, notifications: false }, "room-thread", "@you", { group })).toBeNull();
+    expect(buildNotification("mention", bot, "room-thread", "   ", { group })).toBeNull();
   });
 
   it("stays silent for a bot whose notifications are off", () => {
     const quiet = { ...bot, notifications: false };
-    for (const kind of ["approval", "question", "done", "routine-failed", "turn-failed"] as const) {
+    for (const kind of ["approval", "question", "done", "mention", "routine-failed", "turn-failed"] as const) {
       expect(buildNotification(kind, quiet, "thread-1", "anything")).toBeNull();
     }
-    // absent means "not turned off" — older bot records predate the flag
     expect(buildNotification("approval", { ...bot, notifications: undefined }, "thread-1", "x")).not.toBeNull();
     expect(buildNotification("approval", { ...bot, notifications: true }, "thread-1", "x")).not.toBeNull();
   });
@@ -50,14 +69,11 @@ describe("buildNotification", () => {
   it("does not buzz for a finish with nothing to say", () => {
     expect(buildNotification("done", bot, "thread-1", "   ")).toBeNull();
     expect(buildNotification("done", bot, "thread-1", "")).toBeNull();
-    // ...but a blocked bot is worth knowing about even with a thin summary
     expect(buildNotification("approval", bot, "thread-1", "")).not.toBeNull();
     expect(buildNotification("turn-failed", bot, "thread-1", "")).not.toBeNull();
   });
 
   it("uses the thread it was raised on, not the bot's current one", () => {
-    // a routine runs a bot in a detached task; the notification has to open
-    // that conversation, not whatever the bot happens to be showing
     expect(buildNotification("done", bot, "other-thread", "done")?.threadId).toBe("other-thread");
   });
 
@@ -66,43 +82,28 @@ describe("buildNotification", () => {
     const frame = buildNotification("done", bot, "thread-1", "pushed the branch", { avatarUrl });
     expect(frame).toMatchObject({ botId: "bot-1", body: "pushed the branch", avatarUrl });
 
-    // no profile image → the frame stays exactly as before
     expect(buildNotification("done", bot, "thread-1", "pushed")?.avatarUrl).toBeUndefined();
+  });
+  it("titles a finished wait and keeps its line as the body", () => {
+    expect(buildNotification("wait", { id: "b", name: "Pepper" }, "t", "the build: done. ci passed.")).toEqual({
+      kind: "wait", botId: "b", botName: "Pepper", threadId: "t", title: "Pepper's wait is over", body: "the build: done. ci passed.",
+    });
   });
 });
 
-describe("blockedTarget", () => {
-  const room = { id: "room-1", name: "Launch", threadId: "room-thread", busyBotId: "bot-1" };
-
-  it("opens the room a bot is speaking in, not the bot's own thread", () => {
-    // the turn, the screen and the card are all in the room; the 1:1 thread
-    // the notification used to open has nothing on it
-    expect(blockedTarget(bot, room)).toEqual({
-      threadId: "room-thread",
-      group: { id: "room-1", name: "Launch" },
-    });
-  });
-
-  it("stays on the bot's own thread for a room it is not holding", () => {
-    expect(blockedTarget(bot, { ...room, busyBotId: "someone-else" })).toEqual({ threadId: "thread-1" });
-    expect(blockedTarget(bot, { ...room, busyBotId: null })).toEqual({ threadId: "thread-1" });
-    expect(blockedTarget(bot, null)).toEqual({ threadId: "thread-1" });
-    expect(blockedTarget(bot)).toEqual({ threadId: "thread-1" });
-  });
-
+describe("sign-in requests", () => {
   it("names the room in the title and carries its id for grouping", () => {
-    const target = blockedTarget(bot, room);
-    expect(buildNotification("takeover", bot, target.threadId, "the login page wants a code", {
-      group: target.group,
+    expect(buildNotification("sign-in", bot, "room-thread", "the dashboard is behind a login", {
+      group: { id: "room-1", name: "Launch" }, site: "example.com",
     })).toMatchObject({
-      kind: "takeover",
+      kind: "sign-in",
       threadId: "room-thread",
       groupId: "room-1",
-      title: "Scout in Launch needs your hands",
+      title: "Scout in Launch needs you to sign in to example.com",
+      body: "the dashboard is behind a login",
     });
-    // a 1:1 takeover is untouched — no room to name, nothing to group under
-    const direct = buildNotification("takeover", bot, bot.threadId, "the login page wants a code");
-    expect(direct?.title).toBe("Scout needs your hands");
+    const direct = buildNotification("sign-in", bot, bot.threadId, "the dashboard is behind a login", { site: "example.com" });
+    expect(direct?.title).toBe("Scout needs you to sign in to example.com");
     expect(direct?.groupId).toBeUndefined();
   });
 });
@@ -120,6 +121,13 @@ describe("summarize", () => {
     expect(long.endsWith("…")).toBe(true);
     expect(summarize("short")).toBe("short");
   });
+
+  it("reads a bot's Markdown as the plain line a lock screen shows", () => {
+    expect(summarize("**Facture reçue** — consulter le [document](https://example.com/facture)"))
+      .toBe("Facture reçue — consulter le document");
+    expect(summarize("I added the **cover card** to the deck.")).toBe("I added the cover card to the deck.");
+    expect(summarize("Run `pnpm test` and *ship* it.")).toBe("Run pnpm test and ship it.");
+  });
 });
 
 describe("buildSpendNotification", () => {
@@ -129,5 +137,54 @@ describe("buildSpendNotification", () => {
       kind: "spend", botId: "bot-1", botName: "Scout", threadId: "thread-9",
       title: "Monthly spend limit reached", body: "$100.00 of $100.00 spent this month (2026-09).",
     });
+  });
+});
+
+describe("a notification's title", () => {
+  afterEach(() => setConversationLanguage(() => undefined));
+
+  it("uses Brazilian Portuguese once on the server and leaves other conversations in English", () => {
+    setConversationLanguage((threadId) => threadId === "thread-1" ? "pt-BR" : undefined);
+    expect(buildNotification("question", bot, "thread-1", "Which file?", { group: { id: "g1", name: "Launch" } })?.title)
+      .toBe("Scout em Launch tem uma pergunta");
+    expect(buildNotification("routine-failed", bot, "thread-1", "Signed out.")?.title).toBe("A rotina de Scout falhou");
+    expect(buildNotification("sign-in", bot, "thread-1", "", { site: "github.com" })?.title).toBe("Scout precisa que você faça login em github.com");
+    expect(buildNotification("done", bot, "thread-1", "Done.")?.title).toBe("Scout terminou");
+    expect(buildNotification("question", bot, "other", "Which file?")?.title).toBe("Scout has a question");
+  });
+
+  it("is in the language of the conversation's person", () => {
+    setConversationLanguage((threadId) => (threadId === "beaver-main" ? "de" : undefined));
+    const bot = { id: "beaver", name: "Biber", threadId: "beaver-main" };
+    expect(conversationLanguage("beaver-main")).toBe("de");
+    expect(buildNotification("routine-failed", bot, "beaver-main", "Nightly report: signed out")?.title).toBe("Routine von Biber ist fehlgeschlagen");
+    expect(buildNotification("question", bot, "beaver-main", "Send it?", { group: { id: "launch", name: "Launch" } })?.title).toBe("Biber in Launch hat eine Frage");
+    expect(buildNotification("sign-in", bot, "beaver-main", "", { site: "github.com" })?.title).toBe("Biber braucht deine Anmeldung bei github.com");
+    expect(buildNotification("sign-in", bot, "beaver-main", "")?.title).toBe("Biber braucht deine Anmeldung bei einer Website");
+    expect(buildNotification("done", bot, "beaver-main", "Done.")?.title).toBe("Biber ist fertig");
+    expect(buildNotification("routine-failed", bot, "other", "x")?.title).toBe("Biber's routine failed");
+  });
+});
+
+describe("unaskedBotThread", () => {
+  const opened = { openedBy: { botId: "chief" } };
+  const person = (at: number) => ({ role: "user", kind: "text", at });
+  const peer = (at: number) => ({ role: "user", kind: "text", at, peerAsk: {} });
+  const reply = (at: number) => ({ role: "bot", kind: "text", at });
+
+  it("is quiet while the newest request in a bot-opened thread is a bot's", () => {
+    expect(unaskedBotThread(opened, [])).toBe(true);
+    expect(unaskedBotThread(opened, [peer(1), reply(2)])).toBe(true);
+    expect(unaskedBotThread(opened, [peer(1), reply(2), person(3), reply(4), peer(5)])).toBe(true);
+    expect(unaskedBotThread(opened, [person(1), reply(2)], 3)).toBe(true);
+  });
+
+  it("speaks for the person's own request, a failure report, and any thread a person opened", () => {
+    expect(unaskedBotThread(opened, [peer(1), reply(2), person(3), reply(4)])).toBe(false);
+    expect(unaskedBotThread(opened, [reply(2), person(3)], 1)).toBe(false);
+    expect(unaskedBotThread(opened, [{ ...peer(1), peerAsk: { incident: {} } }])).toBe(false);
+    expect(unaskedBotThread({}, [peer(1)])).toBe(false);
+    expect(unaskedBotThread({}, [person(1)], 2)).toBe(false);
+    expect(unaskedBotThread(undefined, [])).toBe(false);
   });
 });

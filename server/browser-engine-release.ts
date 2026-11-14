@@ -1,14 +1,10 @@
-// The pinned agent-browser release the harness downloads for the bots'
-// browser (docs/plans/browser-engine.md). Digests were computed from the
-// official GitHub assets on 2026-09-08, except the explicitly versioned Windows
-// vendor build below. Update pins through a reviewed native end-to-end run.
-// The Dockerfile retains the official Linux version.
+// Digests computed from the official GitHub assets on 2026-09-08, except the versioned Windows vendor build; update pins
+// only through a reviewed native end-to-end run. The Dockerfile keeps the official Linux version.
 export const AGENT_BROWSER_VERSION = "0.37.0";
 
 export interface AgentBrowserReleaseAsset {
   /** `<platform>-<arch>`; Linux adds `-musl` on Alpine-style systems. */
   target: string;
-  /** File name on the GitHub release. */
   asset: string;
   sha256: string;
   bytes: number;
@@ -46,7 +42,7 @@ const RELEASES = new Map<string, AgentBrowserReleaseAsset>([
   [
     "win32-x64",
     {
-      // Upstream 0.37.0 still lacks PR #1781's Windows cold-start fix.
+      // Upstream 0.37.0 still lacks vercel-labs/agent-browser#1781's Windows cold-start fix.
       // Retain the native-verified revision until its replacement is tested.
       target: "win32-x64", version: "0.36.0-omb.1",
       asset: "agent-browser-win32-x64-0.36.0-omb.1.exe",
@@ -64,12 +60,27 @@ export function agentBrowserReleaseVersion(asset: AgentBrowserReleaseAsset | nul
   return asset?.version ?? AGENT_BROWSER_VERSION;
 }
 
+/**
+ * The Linux-family key for this platform, or null when Vercel publishes nothing usable.
+ *
+ * Android is not musl: Termux runs the platform's bionic loader, so neither
+ * `linux-<arch>` (glibc) nor `linux-musl-<arch>` describes it. What actually works
+ * there is the statically linked musl build, which carries its own libc and needs no
+ * interpreter at all. Keying Android to `linux-musl-<arch>` therefore picks the one
+ * asset that runs, instead of reporting a build that does exist as missing.
+ */
+function linuxFamilyKey(platform: NodeJS.Platform, arch: string, musl: boolean): string {
+  if (platform === "android") return `linux-musl-${arch}`;
+  if (platform === "linux" && musl) return `linux-musl-${arch}`;
+  return `${platform}-${arch}`;
+}
+
 /** The asset for this machine, or null where Vercel publishes none. */
 export function resolveAgentBrowserReleaseAsset(
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
   musl = false,
 ): AgentBrowserReleaseAsset | null {
-  const key = platform === "linux" && musl ? `linux-musl-${arch}` : `${platform}-${arch}`;
-  return RELEASES.get(key) ?? null;
+  return RELEASES.get(linuxFamilyKey(platform, arch, musl)) ?? null;
 }
+

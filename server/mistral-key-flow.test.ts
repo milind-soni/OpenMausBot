@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer } from "../scripts/control-omb.ts";
 import { fixtureApi } from "../scripts/testing/preview-fixture.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
 import { openSse } from "./testing/sse.ts";
 
 it("Mistral keys persist, rotate, clear and reach real HTTP turns without leaking into public state", async () => {
@@ -54,7 +55,7 @@ it("Mistral keys persist, rotate, clear and reach real HTTP turns without leakin
       const response = await fetch(`${fixture.info.url}/api/keys/test`, {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: "mistral", key }),
       });
-      expect(response.status).toBe(400); // An explicit empty draft must not test the saved key.
+      expect(response.status).toBe(400);
     }
     const { bot } = await api("POST", "/api/bots", {
       name: "Mistral fixture", modelSelection: { instanceId: "mistral", model: "fixture-model" },
@@ -63,17 +64,14 @@ it("Mistral keys persist, rotate, clear and reach real HTTP turns without leakin
       await api("POST", `/api/bots/${bot.id}/messages`, { text: "Reply briefly for the credential test." });
       const replyFrame = await sse.until((frame) => frame.kind === "message" && frame.threadId === bot.threadId
         && frame.message?.role === "bot" && frame.message?.text === expectedReply);
-      // Wait for idle after this reply before exercising the next config save.
       const { bots } = await api("GET", "/api/bots?messages=10");
       const current = bots.find((candidate: { id: string }) => candidate.id === bot.id);
-      // Bot SSE updates contain status, not messages. Tool cleanup may keep
-      // the turn busy after its reply; await a newer idle status before save.
+      // Tool cleanup may keep the turn busy after its reply: await a newer idle status before saving.
       if (current.busy) await sse.until((frame) => frame.kind === "bot" && frame.bot?.id === bot.id && !frame.bot.busy
         && frame.seq > replyFrame.seq);
     };
     await send("fixture reply 1");
-    // The first save installed an env value and created the runtime. A second
-    // save must replace both that env value and the runtime's captured key.
+    // The first save installed an env value and created the runtime; a second must replace both.
     await api("PUT", "/api/config", { mistral: { key: "fixture-replacement-key" } });
     await send("fixture reply 2");
     expect(received).toEqual(["Bearer fixture-first-key", "Bearer fixture-replacement-key"]);
@@ -94,4 +92,4 @@ it("Mistral keys persist, rotate, clear and reach real HTTP turns without leakin
     await fixture.close();
     await new Promise<void>((resolve) => provider.close(() => resolve()));
   }
-});
+}, hostTimeout(60_000));

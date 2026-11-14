@@ -9,8 +9,6 @@ const FIXTURES = join(import.meta.dirname, "..", "shared", "package-fixtures");
 const fixture = (name: string): any => JSON.parse(readFileSync(join(FIXTURES, name), "utf8"));
 let home: string;
 
-/** A real Store, RoutineManager, skill store, memory and section registry in
- * a throwaway home; MCP config and policy are in-memory stand-ins. */
 async function installation(options: { refuse?: (name: string) => string | undefined; servers?: Record<string, unknown> } = {}) {
   home = mkdtempSync(join(tmpdir(), "omb-package-import-"));
   vi.resetModules();
@@ -29,7 +27,7 @@ async function installation(options: { refuse?: (name: string) => string | undef
   const routines = new RoutineManager({
     file: join(home, "routines.json"),
     botState: (id) => (store.bot(id) && !store.bot(id)!.hidden ? "ready" : "missing"),
-    goalState: (groupId, botId) => (store.group(groupId)?.memberIds.includes(botId) ? "ready" : "missing"),
+    goalState: (groupId, botId) => (store.group(groupId ?? "")?.memberIds.includes(botId) ? "ready" : "missing"),
     createTask: () => null,
     startTurn: async () => {},
   });
@@ -81,7 +79,6 @@ describe("importing a whole team", () => {
         requiredApps: [expect.objectContaining({ slug: "hubspot" })] },
     });
     expect(lead.avatarUrl).toMatch(/^\/api\/attachments\/[\w-]+\.png$/);
-    // Approval is never taken from the file.
     expect(lead).not.toHaveProperty("approvalMode");
     expect(lead).not.toHaveProperty("autoApprove");
     expect(lead.installedPackage?.installId).toMatch(/^[0-9a-f-]{36}$/);
@@ -101,7 +98,6 @@ describe("importing a whole team", () => {
       expect.objectContaining({ name: "research-brief", enabled: false }),
     ]);
     expect(result.offeredSkills).toEqual(["objection-handling"]);
-    // The slot never binds to the credentialed server already called "crm".
     expect(result.connections).toEqual([{ key: "crm", name: "crm-2", label: "CRM" }]);
     expect(app.mcp.servers["crm-2"]).toEqual({ type: "http", url: "https://mcp.example.com/crm", headers: { Authorization: "" }, enabled: false });
     expect(app.mcp.servers.crm).toMatchObject({ headers: { Authorization: "Bearer mine" } });
@@ -113,6 +109,43 @@ describe("importing a whole team", () => {
     expect(result.brief).toBe(true);
     expect(result.skipped).toEqual([{ part: "presets[support]", reason: "presets_not_supported_yet" }]);
     expect(app.events.filter((kind) => kind === "bot")).toHaveLength(3);
+  });
+
+  it("brings a new install's chrome MausBot back in chrome from its own export", async () => {
+    const app = await installation();
+    app.store.seedIfEmpty();
+    const { createBotPackageExport } = await import("./package-export.ts");
+    const exported = createBotPackageExport({ name: "Mine", groups: [], routines: [], bots: app.store.bots });
+    const document: PackageDocument = app.parsePackageDocument(JSON.parse(JSON.stringify(exported)));
+    expect(document.package.agents.map((agent) => [agent.name, agent.appearance?.color])).toEqual([["MausBot", "chrome"]]);
+    const result = app.importer.importPackageDocument(document, { trust: "file", mode: "add" }, app.deps);
+    if (result.alreadyAdded) throw new Error("unexpected");
+    expect(result.bots.map((bot) => app.store.bot(bot.id)?.color)).toEqual(["chrome"]);
+  });
+
+  it("keeps a routine's run on startup, still arriving paused", async () => {
+    const app = await installation();
+    const document: PackageDocument = app.parsePackageDocument(fixture("full-team.v2.json"));
+    document.package.routines!.find((routine) => routine.key === "daily-digest")!.runOnStartup = true;
+    const result = app.importer.importPackageDocument(document, { trust: "file", mode: "add" }, app.deps);
+    if (result.alreadyAdded) throw new Error("unexpected");
+    expect(result.routines).toEqual([
+      expect.objectContaining({ name: "Daily digest", enabled: false, runOnStartup: true }),
+      expect.not.objectContaining({ runOnStartup: true }),
+    ]);
+  });
+
+  it("turns on Record browser steps for the bots the file asks it for, with no card", async () => {
+    const app = await installation();
+    const raw = fixture("full-team.v2.json");
+    raw.package.agents.find((agent: { key: string }) => agent.key === "scout").recordBrowserSteps = true;
+    const document: PackageDocument = app.parsePackageDocument(raw);
+    const result = app.importer.importPackageDocument(document, { trust: "file", mode: "add" }, app.deps);
+    if (result.alreadyAdded) throw new Error("unexpected");
+    const byKey = new Map(result.bots.map((bot) => [bot.installedPackage!.agentKey, app.store.bot(bot.id)!]));
+    expect(byKey.get("scout")!.recordBrowserSteps).toBe(true);
+    expect(byKey.get("lead")).not.toHaveProperty("recordBrowserSteps");
+    expect(() => app.parsePackageDocument({ ...raw, package: { ...raw.package, agents: [{ ...raw.package.agents[0], recordBrowserSteps: "yes" }] } })).toThrow();
   });
 
   it("imports the same file twice as two independent copies", async () => {
@@ -191,5 +224,47 @@ describe("importing a whole team", () => {
       .toThrow("install id");
     expect(() => app.importer.importPackageDocument(document, { trust: "org", mode: "add", org: { ...org, publisher: { ...org.publisher, slug: "other" } } }, app.deps))
       .toThrow("not published by the organization");
+  });
+});
+
+describe("importing past five bots, and the workspace's ceiling", () => {
+  const withBots = async (bots: number, maxBots?: number) => {
+    const app = await installation();
+    for (let i = 0; i < bots; i++) app.store.createBot({ name: `Bot ${i}` });
+    return { ...app, deps: { ...app.deps, ...(maxBots === undefined ? {} : { maxBots }) } };
+  };
+  const team = (app: { parsePackageDocument: (input: unknown) => PackageDocument }) => app.parsePackageDocument(fixture("full-team.v2.json"));
+
+  it("adds a whole team to a Cloud that already has five or more bots", async () => {
+    const app = await withBots(5, 100);
+    const result = app.importer.importPackageDocument(team(app), { trust: "file", mode: "add" }, app.deps);
+    if (result.alreadyAdded) throw new Error("unexpected");
+    expect(result.bots).toHaveLength(3);
+    expect(app.store.bots).toHaveLength(8);
+  });
+
+  it("adds a template's manifest past five bots", async () => {
+    const app = await withBots(19, 100);
+    const { parseTeamManifest } = await import("./team-manifest.ts");
+    const manifest = parseTeamManifest({ format: "openmaus.team", version: 2, team: { name: "Desk", members: [{ key: "helper", name: "Helper", appearance: { color: "blue" } }] } });
+    app.importer.importTeamManifest(manifest, { mode: "add", cwd: null }, app.deps);
+    expect(app.store.bots).toHaveLength(20);
+  });
+
+  it("refuses a team past the workspace's ceiling before writing anything, in words that name no plan", async () => {
+    const app = await withBots(98, 100);
+    const before = app.snapshot();
+    expect(() => app.importer.importPackageDocument(team(app), { trust: "file", mode: "add" }, app.deps))
+      .toThrow(expect.objectContaining({ code: "too_many_bots", status: 409, message: "This adds 3 bots, and this workspace is limited to 100 bots." }));
+    expect(app.snapshot()).toBe(before);
+    expect(app.events).toEqual([]);
+  });
+
+  it("registers a preset library at the ceiling: it makes no bot", async () => {
+    const app = await withBots(5, 5);
+    const library = app.parsePackageDocument(fixture("library-only.v2.json"));
+    const presets = { register: vi.fn(() => ({ added: [], existing: [], skipped: [] })) };
+    expect(() => app.importer.importPackageDocument(library, { trust: "file", mode: "add" }, { ...app.deps, presets: presets as never })).not.toThrow();
+    expect(presets.register).toHaveBeenCalledOnce();
   });
 });

@@ -1,0 +1,1 @@
+`background.svg` is the macOS install window art (720 × 440 pt, drawn around the `dmg.contents` icon centres in `electron-builder.yml`); after editing it, run `node build/dmg/render.mjs` to rewrite `build/background.png` and `build/background@2x.png`.

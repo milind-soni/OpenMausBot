@@ -93,8 +93,7 @@ describe("repairMarkdownTables", () => {
   });
 
   it("repairs the run-on research table verbatim from a bot message", () => {
-    // Nine headers, an eight-cell delimiter, every row welded onto one line —
-    // the shape that rendered as a wall of pipes in an Anchor report.
+    // Nine headers, an eight-cell delimiter, and every row welded onto one line.
     const text = [
       "India — core research / screener / filings",
       "| Company | What they sell | Round | Amount | Investors | Post-money if public | Date | India/G | Source |",
@@ -104,7 +103,6 @@ describe("repairMarkdownTables", () => {
     const repaired = lines(repairMarkdownTables(text));
     expect(repaired[0]).toBe("India — core research / screener / filings");
     expect(repaired[1]).toBe("");
-    // header and delimiter now agree at nine cells, so GFM builds a table
     expect(repaired[3]).toBe("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     expect(repaired[4]).toContain("**Kalpi**");
   });

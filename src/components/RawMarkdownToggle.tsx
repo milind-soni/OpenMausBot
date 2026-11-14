@@ -1,18 +1,14 @@
 import { Code, Eye } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { ACTION_ICON } from "@/components/MessageActions";
 
-/** Props for the {@link RawToggleAction} component. */
 export interface RawToggleActionProps {
-  /** Whether raw markdown mode is currently active. */
   active: boolean;
-  /** Callback fired when the toggle button is clicked. */
   onToggle: () => void;
-  /** Optional custom CSS class name. */
   className?: string;
 }
 
-/** Switch one bot message between rendered markdown and its original source. */
 export function RawToggleAction({ active, onToggle, className }: RawToggleActionProps) {
   const label = t(active ? "chat.showRenderedMarkdown" : "chat.showRawMarkdown");
   return (
@@ -30,27 +26,25 @@ export function RawToggleAction({ active, onToggle, className }: RawToggleAction
         className,
       )}
     >
-      {active ? <Eye size={14} aria-hidden="true" /> : <Code size={14} aria-hidden="true" />}
+      {active ? <Eye {...ACTION_ICON} aria-hidden="true" /> : <Code {...ACTION_ICON} aria-hidden="true" />}
     </button>
   );
 }
 
-/** Props for the {@link RawMarkdownView} component. */
 export interface RawMarkdownViewProps {
-  /** The raw markdown or plain text content. */
   text: string;
-  /** Optional custom CSS class name. */
   className?: string;
 }
 
-/** React escapes the source; long messages remain selectable and keyboard-scrollable. */
+/** Security: React escapes the source. */
 export function RawMarkdownView({ text, className }: RawMarkdownViewProps) {
   return (
     <pre
+      dir="auto"
       data-testid="raw-markdown-view"
       tabIndex={0}
       className={cn(
-        "max-h-[36rem] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-hairline/30 bg-inset/50 p-3 font-mono text-[12.5px] leading-relaxed text-ink select-text",
+        "max-h-[36rem] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-hairline/30 bg-inset/50 p-3 font-mono text-[13px] leading-relaxed text-ink select-text",
         className,
       )}
     >

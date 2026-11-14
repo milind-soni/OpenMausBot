@@ -53,7 +53,7 @@ describe("presets in New bot", () => {
   it("says where a preset came from and what it adds, switched on only from the organization", () => {
     expect(presetSummaryLines(preset())).toEqual([
       "From Sales skills 2.0.1", "Kind and precise.", "Skills, added switched off: objection-handling",
-      "Starter notes: MEMORY.md", "Playbooks: Qualify a lead", "The model, computer, approval level and connected apps stay as set here.",
+      "Starter notes: MEMORY.md", "Playbooks: Qualify a lead", "The model, where it works, approval level and connected apps stay as set here.",
     ]);
     expect(presetSummaryLines(preset({ source: "org", publisherName: "Acme Partners", skillsEnabled: true })).slice(0, 3)).toEqual([
       "From Sales skills 2.0.1 · Acme Partners", "Kind and precise.", "Skills, added switched on: objection-handling",
@@ -83,7 +83,6 @@ describe("presets in New bot", () => {
     expect(calls[0]).toMatchObject({ path: "POST /api/bots", body: { preset: "p1", name: "Sky", useDefaults: false } });
     expect(calls.filter((call) => call.path.endsWith("/memory/file")).map((call) => call.body.path)).toEqual(["memory/other.md"]);
     expect(calls.filter((call) => call.path.endsWith("/skill-template")).map((call) => call.body.name)).toEqual(["follow-up"]);
-    // Choosing a built-in role (or Custom) afterwards forgets the preset.
     draft.choosePreset(undefined);
     calls.length = 0;
     await createConfiguredBot(draft, request, persistBotUpdate);

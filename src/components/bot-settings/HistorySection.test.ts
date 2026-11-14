@@ -67,7 +67,6 @@ describe("HistorySection", () => {
   it("shows an Undo button only on soul rows", () => {
     const markup = render([soulRow, titleRow]);
     expect(markup).toContain("Undo this change");
-    // Only one Undo button should appear — the soul row's.
     expect(markup.match(/Undo this change/g)?.length).toBe(1);
   });
 

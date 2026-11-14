@@ -1,16 +1,20 @@
 import { createServer, type Server } from "node:http";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "./config.ts";
 import {
+  CURATED_SLUGS,
   applyManagedBrokerMessage,
   authorizeService,
   connectedServiceSlugs,
+  verifiedConnectedServiceSlugs,
   connectedServices,
+  connectedServicesInventory,
   connectionMode,
   connectionStatus,
   listConnectorTools,
   listToolkits,
+  toolkitCategories,
   mcpIntegration,
   normalizeAccountAlias,
   prepareProjectSession,
@@ -18,16 +22,39 @@ import {
   removeService,
   relayMcp,
   setManagedBrokerAccess,
+  trustedSessionMcpUrl,
   validateConnectorGrants,
 } from "./composio.ts";
+import { forgetProjectAuthConfigs } from "./composio-project.ts";
 import {
   CONNECTOR_ALLOWED_TOOLS_ENV,
   CONNECTOR_SERVICE_SLUGS_ENV,
   parseConnectorServiceSlugsEnv,
 } from "./connector-advertisement.ts";
 import type { ConnectorToolGrant } from "../shared/wire.ts";
+import { CURATED_CONNECTOR_SLUGS } from "../shared/connector-curated.ts";
+import { EMAIL_READ_TOOL_NAMES, EMAIL_SLUG } from "../shared/email.ts";
 
 let api: Server;
+it("lists exactly the curated apps product analytics may name, in the same order", () => {
+  expect(CURATED_SLUGS).toEqual([...CURATED_CONNECTOR_SLUGS]);
+});
+
+it("only sends Session MCP credentials over HTTPS or loopback HTTP", () => {
+  const old = process.env.OMB_COMPOSIO_API;
+  try {
+    process.env.OMB_COMPOSIO_API = "http://remote.example.test/api";
+    expect(trustedSessionMcpUrl("http://remote.example.test/mcp")).toBe(false);
+    process.env.OMB_COMPOSIO_API = "ftp://remote.example.test/api";
+    expect(trustedSessionMcpUrl("ftp://remote.example.test/mcp")).toBe(false);
+    process.env.OMB_COMPOSIO_API = "http://127.0.0.1:9876/api";
+    expect(trustedSessionMcpUrl("http://127.0.0.1:9876/mcp")).toBe(true);
+    expect(trustedSessionMcpUrl("https://app.composio.dev/mcp")).toBe(true);
+  } finally {
+    if (old === undefined) delete process.env.OMB_COMPOSIO_API;
+    else process.env.OMB_COMPOSIO_API = old;
+  }
+});
 let origin = "";
 let base = "";
 const calls: Array<{
@@ -41,18 +68,18 @@ const calls: Array<{
 let malformedConnectedAccounts = false;
 let connectedAccountsUnavailable = false;
 let emptyConnectedAccounts = false;
+let connectedAccountsOverride: Array<{ id: string; alias?: string; status?: string; toolkit: { slug: string } }> | null = null;
 // The grant editor's tools/list fixture: null keeps the legacy one-frame
 // {source:"broker"} answer the relayMcp tests assert on.
 let brokerMcpTools: Array<{ name: string; description?: string }> | null = null;
 let brokerToolsListFail = false;
 // What /broker/v1/connectors/connected serves; null falls back to github
 // only, the state the existing validation tests were written against.
-let brokerConnectedServicesBody: { services: Record<string, { connected: boolean; status: string }> } | null = null;
+let brokerConnectedServicesBody: { complete?: boolean; services: Record<string, { connected: boolean; status: string }> } | null = null;
+let brokerConnectedServicesFail = false;
 // What /broker/v1/catalog serves; null falls back to github only.
 let brokerCatalogBody: { items: Array<{ slug: string; name: string }> } | null = null;
-// The project's own auth configs, and the ones the stub Session was created
-// with — a Session only knows the configs named at its creation, which is
-// the whole reason #509 happened.
+// The project's own auth configs, and those the stub Session was created with: a Session knows only the configs named at creation.
 let customAuthConfigs: Array<Record<string, unknown>> = [];
 let sessionAuthConfigs: Record<string, string> = {};
 
@@ -72,9 +99,9 @@ beforeAll(async () => {
     });
 
     if (url.pathname.startsWith("/broker/")) {
-      // c/d/e/f back the cache-identity tests; b stays invalid so a token
+      // c/d/e/f/8/9 back the cache-identity tests; b stays invalid so a token
       // switch can be made to fail on purpose.
-      if (!/^[acdef]{64}$/.test(String(req.headers.authorization ?? "").replace(/^Bearer /, ""))) {
+      if (!/^[acdef89]{64}$/.test(String(req.headers.authorization ?? "").replace(/^Bearer /, ""))) {
         res.writeHead(401, { "content-type": "application/json" });
         return res.end(JSON.stringify({ error: "invalid broker token" }));
       }
@@ -89,6 +116,10 @@ beforeAll(async () => {
         return res.end(JSON.stringify({ services }));
       }
       if (req.method === "GET" && url.pathname === "/broker/v1/connectors/connected") {
+        if (brokerConnectedServicesFail) {
+          res.writeHead(503, { "content-type": "application/json" });
+          return res.end(JSON.stringify({ error: "unavailable" }));
+        }
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify(
           brokerConnectedServicesBody ?? { services: { github: { connected: true, status: "ACTIVE" } } },
@@ -165,13 +196,12 @@ beforeAll(async () => {
       )
     ) {
       if (apiKey === "ak_catalog_stuck") {
-        // A broker deployed before this fix ignores the cursor and replays page one.
+        // A broker deployed before cursor support ignores the cursor and replays page one.
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({ items: [{ slug: "gmail", name: "Gmail" }], next_cursor: "catalog-page-2" }));
       }
       if (apiKey === "ak_catalog_page_stuck") {
-        // Replays page one while minting a fresh cursor every time, so only
-        // current_page exposes the loop.
+        // Replays page one while minting a fresh cursor every time, so only current_page exposes the loop.
         const pageNumber = Number((url.searchParams.get("cursor") ?? "catalog-page-1").split("-").pop());
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({
@@ -200,8 +230,7 @@ beforeAll(async () => {
         }));
       }
       if (apiKey === "ak_catalog_stalled_total") {
-        // The live failure mode from #1614: upstream reports the full count
-        // but stops offering cursors after the first page.
+        // Upstream reports the full count but stops offering cursors after the first page.
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({
           items: [{ slug: "gmail", name: "Gmail" }],
@@ -211,8 +240,7 @@ beforeAll(async () => {
         }));
       }
       if (apiKey === "ak_catalog_end_short") {
-        // Page counts say more pages exist, but no cursor and no total_items
-        // arrive, so only the page metadata can flag the partial catalog.
+        // Page counts say more pages exist, but no cursor and no total_items arrive.
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({
           items: [{ slug: "gmail", name: "Gmail" }],
@@ -221,8 +249,7 @@ beforeAll(async () => {
         }));
       }
       if (apiKey === "ak_catalog_http_no_total") {
-        // Reports neither totals nor page counts, so a lost second page can
-        // only be caught by tracking walk completion, not by stalled.
+        // Reports neither totals nor page counts, so a lost second page is caught only by walk completion.
         if (url.searchParams.get("cursor") === "catalog-page-2") {
           res.writeHead(502, { "content-type": "application/json" });
           return res.end(JSON.stringify({ error: "catalog page unavailable" }));
@@ -237,8 +264,7 @@ beforeAll(async () => {
           next_cursor: "catalog-page-2",
         }));
       }
-      // Mirrors the real marketplace: a usage-sorted head, then an alphabetical
-      // tail only a second page reaches. ak_catalog_partial loses that page.
+      // Like the real marketplace: a usage-sorted head, then an alphabetical tail only page two reaches; ak_catalog_partial loses it.
       if (url.searchParams.get("cursor") === "catalog-page-2") {
         if (apiKey === "ak_catalog_partial") {
           res.writeHead(502, { "content-type": "application/json" });
@@ -268,7 +294,7 @@ beforeAll(async () => {
     if (req.method === "GET" && url.pathname === "/api/v3/toolkits") {
       res.writeHead(200, { "content-type": "application/json" });
       if (apiKey === "ak_catalog_a") {
-        return res.end(JSON.stringify({ items: [{ slug: "notion", name: "Catalog A" }] }));
+        return res.end(JSON.stringify({ items: [{ slug: "notion", name: "Catalog A", meta: { categories: [{ id: "productivity", name: "Productivity" }, { id: "documents", name: " Documents " }, { id: "productivity", name: "Productivity" }] } }] }));
       }
       if (apiKey === "ak_catalog_b") {
         return res.end(JSON.stringify({ items: [{ slug: "linear", name: "Catalog B" }] }));
@@ -317,8 +343,10 @@ beforeAll(async () => {
         items: [
           { slug: "github", connected_account: { id: "ca_github", status: "ACTIVE" } },
           { slug: "gmail", is_no_auth: true },
-          { slug: "slack" },
-          { slug: "unconnected", connected_account: null },
+          ...(url.searchParams.has("toolkits") ? [
+            { slug: "slack" },
+            { slug: "unconnected", connected_account: null },
+          ] : []),
         ],
         next_cursor: url.searchParams.has("toolkits") ? undefined : "toolkits-page-2",
       };
@@ -332,6 +360,7 @@ beforeAll(async () => {
       res.writeHead(200, { "content-type": "application/json" });
       if (malformedConnectedAccounts) return res.end(JSON.stringify({ items: {} }));
       if (emptyConnectedAccounts) return res.end(JSON.stringify({ items: [] }));
+      if (connectedAccountsOverride) return res.end(JSON.stringify({ items: connectedAccountsOverride }));
       if (url.searchParams.get("cursor") === "accounts-page-2") {
         return res.end(JSON.stringify({
           items: [
@@ -387,6 +416,9 @@ afterAll(async () => {
 });
 
 describe.sequential("Composio Sessions", () => {
+  // Fixtures change the project's auth configs from test to test; production reads them at most once a minute.
+  beforeEach(() => forgetProjectAuthConfigs());
+
   it("rejects broker URL components and invalid tokens from the environment", () => {
     process.env.OMB_COMPOSIO_BROKER_TOKEN = "a".repeat(64);
     try {
@@ -442,6 +474,8 @@ describe.sequential("Composio Sessions", () => {
     const second = await listToolkits({ composio: { apiKey: "ak_catalog_b" } });
 
     expect(first.cards).toEqual([expect.objectContaining({ slug: "notion", label: "Catalog A" })]);
+    expect(first.cards[0]?.categories).toEqual(["Productivity", "Documents"]);
+    expect(second.cards[0]).not.toHaveProperty("categories");
     expect(second.cards).toEqual([expect.objectContaining({ slug: "linear", label: "Catalog B" })]);
     expect(calls.slice(before).filter((call) => call.path === "/api/v3/toolkits").map((call) => call.apiKey)).toEqual([
       "ak_catalog_a",
@@ -453,7 +487,6 @@ describe.sequential("Composio Sessions", () => {
     const before = calls.length;
     const { cards, pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_pages" } });
 
-    // "Deepgram" only exists on page two: #634 saw the catalog stop at "CurrencyScoop".
     expect(cards.map((card) => card.slug)).toEqual(["gmail", "bland_ai", "currencyscoop", "deepgram", "zoom"]);
     expect(pagination).toEqual({ items: 5, totalItems: 5, stalled: false, complete: true });
     const pages = calls.slice(before).filter((call) => call.path === "/api/v3/toolkits");
@@ -769,10 +802,10 @@ describe.sequential("Composio Sessions", () => {
 
   it("names the project's own auth configs at creation and rebuilds a Session that predates them", async () => {
     customAuthConfigs = [
-      { id: "ac_twitter_old", toolkit: { slug: "twitter" }, is_composio_managed: false, status: "ENABLED", last_updated_at: "2026-08-20T00:00:00Z" },
+      { id: "ac_twitter_old", toolkit: { slug: "twitter" }, is_composio_managed: false, status: "ENABLED", is_enabled_for_tool_router: true, last_updated_at: "2026-08-20T00:00:00Z" },
       // newest wins, and the slug is matched case-insensitively
-      { id: "ac_twitter", toolkit: { slug: "TWITTER" }, is_composio_managed: false, status: "ENABLED", last_updated_at: "2026-08-25T00:00:00Z" },
-      // Composio-managed, disabled, and switched-off-for-Sessions configs are not the user's choice
+      { id: "ac_twitter", toolkit: { slug: "TWITTER" }, is_composio_managed: false, status: "ENABLED", is_enabled_for_tool_router: true, last_updated_at: "2026-08-25T00:00:00Z" },
+      // Composio-managed and disabled configs are not the person's; one off for Tool Router waits until its app connects
       { id: "ac_github_managed", toolkit: { slug: "github" }, is_composio_managed: true, status: "ENABLED" },
       { id: "ac_slack_disabled", toolkit: { slug: "slack" }, is_composio_managed: false, status: "DISABLED" },
       { id: "ac_notion_off", toolkit: { slug: "notion" }, is_composio_managed: false, is_enabled_for_tool_router: false },
@@ -785,7 +818,6 @@ describe.sequential("Composio Sessions", () => {
       const creates = calls.slice(before).filter((call) => call.method === "POST" && call.path.endsWith("/session"));
       expect(creates).toHaveLength(1);
       expect(creates[0].body).toMatchObject({ user_id: "openmausbot_existing", auth_configs: { twitter: "ac_twitter" } });
-      // the rebuilt Session now covers the configs, so the next check reuses it
       const after = calls.length;
       await prepareProjectSession("ak_test", current);
       expect(calls.slice(after).some((call) => call.method === "POST" && call.path.endsWith("/session"))).toBe(false);
@@ -795,25 +827,22 @@ describe.sequential("Composio Sessions", () => {
     }
   });
 
-  it("rebuilds the Session and retries when a toolkit needs the project's own auth config", async () => {
-    customAuthConfigs = [{ id: "ac_twitter", toolkit: { slug: "twitter" }, is_composio_managed: false, status: "ENABLED" }];
+  it("rebuilds the Session and retries when a toolkit needs an auth config made since the last lookup", async () => {
     sessionAuthConfigs = {};
     const cfg: AppConfig = {
-      // The live Session is authoritative. A stale local user ID must never
-      // move the rebuilt Session away from the existing connected accounts.
       composio: { apiKey: "ak_test", userId: "stale-local-user", sessionId: "trs_test" },
     };
     try {
+      await prepareProjectSession("ak_test", { userId: "openmausbot_existing" });
+      customAuthConfigs = [{ id: "ac_twitter_new", toolkit: { slug: "twitter" }, is_composio_managed: false, status: "ENABLED", is_enabled_for_tool_router: true }];
       const before = calls.length;
       await expect(authorizeService(cfg, "twitter")).resolves.toEqual({ url: "https://connect.composio.dev/link/twitter" });
       const since = calls.slice(before);
-      // once against the stale Session, once against the rebuilt one
       expect(since.filter((call) => call.method === "POST" && call.path.endsWith("/link"))).toHaveLength(2);
       expect(since.filter((call) => call.method === "POST" && call.path.endsWith("/session")).at(-1)?.body).toMatchObject({
         user_id: "openmausbot_existing",
-        auth_configs: { twitter: "ac_twitter" },
+        auth_configs: { twitter: "ac_twitter_new" },
       });
-      // the same Composio user keeps every existing connection
       expect(cfg.composio).toMatchObject({ userId: "openmausbot_existing", sessionId: "trs_test" });
     } finally {
       customAuthConfigs = [];
@@ -829,7 +858,6 @@ describe.sequential("Composio Sessions", () => {
     await expect(authorizeService(cfg, "twitter")).rejects.toThrow(/create an auth config for "twitter"/i);
     expect(calls.slice(before).some((call) => call.method === "POST" && call.path.endsWith("/session"))).toBe(false);
     expect(cfg.composio).toMatchObject({ userId: "openmausbot_existing", sessionId: "trs_test" });
-    // and a failure that is not about auth configs is passed through untouched
     await expect(authorizeService(cfg, "github", "personal-three")).resolves.toEqual({
       url: "https://connect.composio.dev/link/github",
     });
@@ -916,7 +944,6 @@ describe.sequential("Composio Sessions", () => {
         threadId: "thread-1",
         connectorTools: { gmail: { tools: names } },
       });
-      // The mount survives; only the advertisement filter is skipped.
       expect(oversized?.args[0]).toContain("connector-proxy");
       expect(oversized?.env[CONNECTOR_ALLOWED_TOOLS_ENV]).toBeUndefined();
       expect(warn).toHaveBeenCalledTimes(1);
@@ -953,9 +980,82 @@ describe.sequential("Composio Sessions", () => {
   });
 
   it("reads an unreachable connection inventory as no service slugs", async () => {
-    // No project key and no broker: the inventory cannot run, so the
-    // resolver degrades to the plain split instead of caching a failure.
     await expect(connectedServiceSlugs({})).resolves.toEqual([]);
+  });
+
+  it("rejects an unreachable connection inventory instead of reporting no service slugs", async () => {
+    await expect(verifiedConnectedServiceSlugs({})).rejects.toThrow(/unavailable/);
+  });
+
+  it("does not cache a failed inventory and retries discovery on the same backend", async () => {
+    setManagedBrokerAccess({ url: origin + "/broker", token: "9".repeat(64) });
+    const broken = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("synthetic inventory timeout"));
+    try {
+      await expect(verifiedConnectedServiceSlugs({})).rejects.toThrow(/synthetic inventory timeout/);
+      await expect(connectedServiceSlugs({})).resolves.toEqual(["github"]);
+    } finally {
+      broken.mockRestore();
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("rejects incomplete account discovery without caching its partial service slugs", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 61_000);
+    const cfg: AppConfig = { composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" } };
+    connectedAccountsUnavailable = true;
+    try {
+      await expect(verifiedConnectedServiceSlugs(cfg)).rejects.toThrow(/inventory.*incomplete/i);
+      connectedAccountsUnavailable = false;
+      await expect(connectedServiceSlugs(cfg)).resolves.toContain("toolkit_41");
+    } finally {
+      connectedAccountsUnavailable = false;
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a broker response without an inventory instead of caching an empty one", async () => {
+    setManagedBrokerAccess({ url: origin + "/broker", token: "b".repeat(64) });
+    const broken = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json({}));
+    try {
+      await expect(verifiedConnectedServiceSlugs({})).rejects.toThrow(/services/);
+    } finally {
+      broken.mockRestore();
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("reads a broker that sends no complete field as complete, and an explicit false as incomplete", async () => {
+    setManagedBrokerAccess({ url: origin + "/broker", token: "a".repeat(64) });
+    try {
+      brokerConnectedServicesBody = { services: { gmail: { connected: true, status: "ACTIVE" } } };
+      await expect(connectedServicesInventory({})).resolves.toMatchObject({ complete: true });
+      await expect(verifiedConnectedServiceSlugs({})).resolves.toEqual(["gmail"]);
+      brokerConnectedServicesBody = { complete: false, services: { gmail: { connected: true, status: "ACTIVE" } } };
+      await expect(connectedServicesInventory({})).resolves.toMatchObject({ complete: false });
+      await expect(verifiedConnectedServiceSlugs({})).rejects.toThrow(/inventory.*incomplete/i);
+    } finally {
+      brokerConnectedServicesBody = null;
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("keeps the last service slugs when a later read fails, so the bridge's tools stay as they were", async () => {
+    const access = { url: origin + "/broker", token: "e".repeat(64) };
+    brokerConnectedServicesBody = { services: { bland_ai: { connected: true, status: "ACTIVE" } } };
+    const start = Date.now();
+    const now = vi.spyOn(Date, "now");
+    try {
+      await expect(connectedServiceSlugs({}, access)).resolves.toEqual(["bland_ai"]);
+      brokerConnectedServicesFail = true;
+      now.mockReturnValue(start + 61_000);
+      await expect(connectedServiceSlugs({}, access)).resolves.toEqual(["bland_ai"]);
+      await expect(connectedServiceSlugs({}, { ...access, token: "d".repeat(64) })).resolves.toEqual([]);
+    } finally {
+      now.mockRestore();
+      brokerConnectedServicesFail = false;
+      brokerConnectedServicesBody = null;
+    }
   });
 
   it("validates grant patches against connected services and the catalog", async () => {
@@ -972,11 +1072,22 @@ describe.sequential("Composio Sessions", () => {
     await expect(validateConnectorGrants(cfg, { gmail: { tools: ["GMAIL_SEND_EMAIL"] } })).resolves.toMatch(/missing from the connected-apps catalog: gmail/);
   });
 
+  it("accepts the built-in Email app's grant, which is never in the connected-apps inventory", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    const email = { tools: [...EMAIL_READ_TOOL_NAMES] };
+    const before = calls.length;
+    await expect(validateConnectorGrants(cfg, { [EMAIL_SLUG]: email })).resolves.toBeNull();
+    // An Email-only grant never waits on the connected-apps catalog.
+    expect(calls.slice(before).filter((call) => call.path === "/api/v3/toolkits")).toHaveLength(0);
+    await expect(validateConnectorGrants(cfg, { [EMAIL_SLUG]: { tools: "*" }, github: { tools: "*" } })).resolves.toBeNull();
+    // Other services are still checked next to it.
+    await expect(validateConnectorGrants(cfg, { [EMAIL_SLUG]: email, slack: { tools: ["SLACK_POST_MESSAGE"] } })).resolves.toMatch(/not connected: slack$/);
+    await expect(validateConnectorGrants(cfg, { [EMAIL_SLUG]: { tools: ["GITHUB_CREATE_ISSUE"] } })).resolves.toMatch(/another service: GITHUB_CREATE_ISSUE/);
+  });
+
   it("never blocks a grant patch when the connection inventory is unreachable, but still checks prefixes", async () => {
-    // No project key and no broker: connectedServices cannot run, so the
-    // connection and catalog checks step aside and call-time enforcement
-    // stays the gate. The prefix check is purely local, so it still runs —
-    // a tool filed under the wrong service is broken no matter what.
     await expect(validateConnectorGrants({}, { anything: { tools: ["ANYTHING_DO_IT"] } })).resolves.toBeNull();
     await expect(validateConnectorGrants({}, { gmail: { tools: ["SLACK_POST_MESSAGE"] } })).resolves.toMatch(/another service/);
     setManagedBrokerAccess({ url: origin + "/broker", token: "a".repeat(64) });
@@ -990,10 +1101,6 @@ describe.sequential("Composio Sessions", () => {
   });
 
   it("accepts an underscored service's own tool names in its grant", async () => {
-    // The prefix check resolves against the connected-service slugs, so
-    // bland_ai keeps its BLAND_AI_* names instead of the first-segment
-    // split filing them under "bland" — and a bland grant cannot capture
-    // them while bland_ai is the connected service.
     setManagedBrokerAccess({ url: origin + "/broker", token: "f".repeat(64) });
     brokerConnectedServicesBody = {
       services: {
@@ -1018,9 +1125,6 @@ describe.sequential("Composio Sessions", () => {
     const cfg: AppConfig = {
       composio: { apiKey: "ak_catalog_http_no_total", userId: "openmausbot_existing", sessionId: "trs_test" },
     };
-    // github is connected, but the catalog lost its page mid-walk with no
-    // reported totals: the partial catalog cannot vouch for what it never
-    // saw, so the catalog check steps aside.
     await expect(validateConnectorGrants(cfg, { github: { tools: ["GITHUB_CREATE_ISSUE"] } })).resolves.toBeNull();
   });
 
@@ -1036,8 +1140,6 @@ describe.sequential("Composio Sessions", () => {
         accounts: [
           { id: "ca_github_personal", alias: "personal", status: "ACTIVE" },
           { id: "ca_github_work", alias: "work", status: "ACTIVE" },
-          // the Session-selected account is synthesized when the raw list
-          // omits it — same rule as the inventory path
           { id: "ca_github", status: "ACTIVE" },
         ],
       },
@@ -1126,7 +1228,9 @@ describe.sequential("Composio Sessions", () => {
     };
     connectedAccountsUnavailable = true;
     try {
-      await expect(connectedServices(cfg)).resolves.toMatchObject({
+      const inventory = await connectedServicesInventory(cfg);
+      expect(inventory.complete).toBe(false);
+      expect(inventory.services).toMatchObject({
         github: {
           connected: true,
           status: "ACTIVE",
@@ -1152,8 +1256,6 @@ describe.sequential("Composio Sessions", () => {
     malformedConnectedAccounts = true;
     try {
       await expect(connectionStatus(cfg, ["github", "slack"])).resolves.toEqual({
-        // the malformed list degrades to [], but the Session still names its
-        // selected account — synthesized so a poll never wipes the row
         github: { connected: true, pending: false, status: "ACTIVE", accounts: [{ id: "ca_github", status: "ACTIVE" }] },
         slack: { connected: false, pending: false, status: "not_connected", accounts: [] },
       });
@@ -1182,11 +1284,186 @@ describe.sequential("Composio Sessions", () => {
       emptyConnectedAccounts = false;
     }
   });
+
+  it("retries unfinished or expired flows with fresh aliases without replacing or deleting accounts", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "stale-local-user", sessionId: "trs_test" },
+    };
+    try {
+      for (const status of ["INITIALIZING", "INITIATED", "EXPIRED"]) {
+        connectedAccountsOverride = [
+          { id: "ca_unfinished", alias: "personal", status, toolkit: { slug: "slack" } },
+          { id: "ca_expired", status: "expired", toolkit: { slug: "SLACK" } },
+          { id: "ca_other_toolkit", status: "ACTIVE", toolkit: { slug: "github" } },
+        ];
+        const before = calls.length;
+        await expect(authorizeService(cfg, "SLACK")).resolves.toEqual({ url: "https://connect.composio.dev/link/slack" });
+        await expect(authorizeService(cfg, "slack")).resolves.toEqual({ url: "https://connect.composio.dev/link/slack" });
+        const since = calls.slice(before);
+        const links = since.filter((call) => call.method === "POST" && call.path.endsWith("/link"));
+        expect(links).toHaveLength(2);
+        for (const link of links) expect(link.body).toEqual({ toolkit: "slack", alias: expect.stringMatching(/^omb-retry-[0-9a-f-]{36}$/) });
+        expect(links[0].body.alias).not.toBe(links[1].body.alias);
+        expect(since.filter((call) => call.path.endsWith("/connected_accounts")).every((call) =>
+          new URLSearchParams(call.query).get("user_ids") === "openmausbot_existing"
+        )).toBe(true);
+        expect(since.some((call) => call.method === "DELETE" || call.method === "PATCH")).toBe(false);
+        expect(connectedAccountsOverride[0].alias).toBe("personal");
+      }
+    } finally {
+      connectedAccountsOverride = null;
+    }
+  });
+
+  it("requires a label only beside an account that may be working, and keeps that account's label", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    try {
+      for (const status of ["ACTIVE", undefined]) {
+        connectedAccountsOverride = [
+          { id: "ca_existing", alias: "Personal", status, toolkit: { slug: "slack" } },
+        ];
+        const before = calls.length;
+        await expect(authorizeService(cfg, "slack")).rejects.toThrow(/alias.*not replaced/i);
+        connectedAccountsOverride.push({ id: "ca_unfinished", status: "INITIALIZING", toolkit: { slug: "slack" } });
+        await expect(authorizeService(cfg, "slack")).rejects.toThrow(/alias.*not replaced/i);
+        await expect(authorizeService(cfg, "slack", "personal")).rejects.toThrow(/already in use/i);
+        const since = calls.slice(before);
+        expect(since.some((call) => call.method === "POST" && call.path.endsWith("/link"))).toBe(false);
+        expect(since.some((call) => call.method === "DELETE")).toBe(false);
+      }
+      await expect(authorizeService(cfg, "slack", "  team  ")).resolves.toEqual({ url: "https://connect.composio.dev/link/slack" });
+      expect(calls.filter((call) => call.method === "POST" && call.path.endsWith("/link")).at(-1)?.body).toEqual({
+        toolkit: "slack", alias: "team",
+      });
+    } finally {
+      connectedAccountsOverride = null;
+    }
+  });
+
+  it("links a toolkit whose only account failed to sign in", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    try {
+      for (const status of ["FAILED", "INACTIVE", "EXPIRED"]) {
+        connectedAccountsOverride = [{ id: "ca_dead", status, toolkit: { slug: "slack" } }];
+        const before = calls.length;
+        await expect(authorizeService(cfg, "slack")).resolves.toEqual({ url: "https://connect.composio.dev/link/slack" });
+        const since = calls.slice(before);
+        expect(since.filter((call) => call.method === "POST" && call.path.endsWith("/link"))).toHaveLength(1);
+        expect(since.some((call) => call.method === "DELETE")).toBe(false);
+      }
+    } finally {
+      connectedAccountsOverride = null;
+    }
+  });
+
+  it("replaces an account that is not active when its label is asked for again", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    try {
+      for (const status of ["INITIATED", "INITIALIZING", "FAILED", "EXPIRED", "INACTIVE"]) {
+        connectedAccountsOverride = [
+          { id: "ca_old_work", alias: "Work", status, toolkit: { slug: "slack" } },
+          { id: "ca_personal", alias: "personal", status: "ACTIVE", toolkit: { slug: "slack" } },
+        ];
+        const before = calls.length;
+        await expect(authorizeService(cfg, "slack", "work")).resolves.toEqual({ url: "https://connect.composio.dev/link/slack" });
+        const since = calls.slice(before).filter((call) => call.method === "DELETE" || call.path.endsWith("/link"));
+        expect(since.map((call) => [call.method, call.path, call.query])).toEqual([
+          ["DELETE", "/api/v3.1/connected_accounts/ca_old_work", "?revoke_on_delete=true"],
+          ["POST", "/api/v3.1/tool_router/session/trs_test/link", ""],
+        ]);
+        expect(since[1]!.body).toEqual({ toolkit: "slack", alias: "work" });
+      }
+      connectedAccountsOverride = [{ id: "ca_work", alias: "work", status: "ACTIVE", toolkit: { slug: "slack" } }];
+      const before = calls.length;
+      await expect(authorizeService(cfg, "slack", "work")).rejects.toThrow(/already in use/i);
+      expect(calls.slice(before).some((call) => call.method === "DELETE" || call.path.endsWith("/link"))).toBe(false);
+    } finally {
+      connectedAccountsOverride = null;
+    }
+  });
+
+  it("does not bypass the account cap when retrying pending connections", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    connectedAccountsOverride = Array.from({ length: 5 }, (_, index) => ({
+      id: `ca_pending_${index}`, status: "INITIALIZING", toolkit: { slug: "slack" },
+    }));
+    const before = calls.length;
+    try {
+      await expect(authorizeService(cfg, "slack")).rejects.toThrow(/maximum of 5 accounts/i);
+      await expect(authorizeService(cfg, "slack", "team")).rejects.toThrow(/maximum of 5 accounts/i);
+      expect(calls.slice(before).some((call) => call.method === "POST" && call.path.endsWith("/link"))).toBe(false);
+    } finally {
+      connectedAccountsOverride = null;
+    }
+  });
+});
+
+describe("a connector tools/list that fails", () => {
+  const list = async (id: number) => {
+    const relayed = await relayMcp({}, { jsonrpc: "2.0", id, method: "tools/list" });
+    return { status: relayed.status, body: JSON.parse(new TextDecoder().decode(relayed.bytes)) };
+  };
+
+  it("answers with the same backend's last good list", async () => {
+    setManagedBrokerAccess({ url: origin + "/broker", token: "9".repeat(64) });
+    brokerMcpTools = [{ name: "GMAIL_SEND_EMAIL" }, { name: "COMPOSIO_MANAGE_CONNECTIONS" }];
+    const realFetch = globalThis.fetch;
+    let offline = false;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (offline) throw new TypeError("fetch failed");
+      return realFetch(input, init);
+    });
+    try {
+      expect((await list(1)).status).toBe(200);
+      brokerToolsListFail = true;
+      await expect(list(2)).resolves.toEqual({
+        status: 200,
+        body: { jsonrpc: "2.0", id: 2, result: { tools: [{ name: "GMAIL_SEND_EMAIL" }, { name: "COMPOSIO_MANAGE_CONNECTIONS" }] } },
+      });
+      offline = true;
+      expect((await list(3)).body.id).toBe(3);
+      offline = false;
+
+      setManagedBrokerAccess({ url: origin + "/broker", token: "8".repeat(64) });
+      expect((await list(4)).status).toBe(500);
+    } finally {
+      fetchSpy.mockRestore();
+      brokerToolsListFail = false;
+      brokerMcpTools = null;
+      setManagedBrokerAccess(null);
+    }
+  });
 });
 
 describe("connector tool inventory", () => {
   const initializeCalls = () =>
     calls.filter((call) => call.path.endsWith("/v1/mcp") && call.body?.method === "initialize");
+
+  it("groups tools using the cached service inventory after a failed refresh", async () => {
+    setManagedBrokerAccess({ url: origin + "/broker", token: "8".repeat(64) });
+    brokerConnectedServicesBody = { services: { bland_ai: { connected: true, status: "ACTIVE" } } };
+    brokerMcpTools = [{ name: "BLAND_AI_MAKE_CALL" }];
+    await expect(connectedServiceSlugs({})).resolves.toEqual(["bland_ai"]);
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
+    const broken = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("synthetic inventory timeout"));
+    try {
+      await expect(listConnectorTools({})).resolves.toEqual({ bland_ai: [{ name: "BLAND_AI_MAKE_CALL" }] });
+    } finally {
+      broken.mockRestore();
+      now.mockRestore();
+      brokerMcpTools = null;
+      brokerConnectedServicesBody = null;
+      setManagedBrokerAccess(null);
+    }
+  });
 
   it("groups an underscored service under its own slug using the connected services", async () => {
     setManagedBrokerAccess({ url: origin + "/broker", token: "c".repeat(64) });
@@ -1198,8 +1475,6 @@ describe("connector tool inventory", () => {
       { name: "GITHUB_CREATE_ISSUE", description: "open an issue" },
     ];
     try {
-      // Without the connected-services candidates the first-segment split
-      // would file BLAND_AI_MAKE_CALL under "bland".
       await expect(listConnectorTools({})).resolves.toEqual({
         bland_ai: [{ name: "BLAND_AI_MAKE_CALL", description: "place a call" }],
         github: [{ name: "GITHUB_CREATE_ISSUE", description: "open an issue" }],
@@ -1242,5 +1517,15 @@ describe("connector tool inventory", () => {
       brokerMcpTools = null;
       setManagedBrokerAccess(null);
     }
+  });
+});
+
+describe("toolkitCategories", () => {
+  it("reads named objects and plain strings, and drops anything else", () => {
+    expect(toolkitCategories([{ id: "crm", name: "CRM" }, "Sales", { id: "x" }, 7, null, "  "])).toEqual(["CRM", "Sales"]);
+    expect(toolkitCategories(undefined)).toBeUndefined();
+    expect(toolkitCategories("CRM")).toBeUndefined();
+    expect(toolkitCategories([])).toBeUndefined();
+    expect(toolkitCategories(["a", "b", "c", "d", "e"])).toHaveLength(4);
   });
 });

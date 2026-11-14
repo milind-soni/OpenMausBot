@@ -1,26 +1,17 @@
-// Sign in with your email on a hosted server. The emailed code comes from the
-// OpenMausBot control plane (the account service the desktop companion and
-// `openmausbot login` already use), and this server decides who is welcome
-// with an allow-list its owner controls. The result is an ordinary local
-// session, the same thing a pairing code produces, so every gate applies.
-//
-// Why through the control plane rather than a mail provider per server: a
-// self-hoster then needs no email credentials at all; the code arrives from
-// accounts.openmausbot.com. The exchange happens server-side, so a browser
-// only ever talks to this server, and a server with an empty allow-list does
-// not expose the routes.
+// Email sign-in through the OpenMausBot control plane, or through the server's own mail server when OMB_SIGNIN_SMTP_URL is
+// set: the code exchange is server-side, so a browser only talks to this server, and a server with an empty allow-list
+// does not expose the routes. The result is an ordinary local session.
 import { resolveCompanionControlPlaneURL } from "../electron/companion-account-service.mjs";
 import { ControlPlaneError, createControlPlaneClient, normalizeAccountEmail, type ControlPlaneClient } from "../electron/control-plane-client.mjs";
 import type { Scope } from "./sessions.ts";
+import { createSignInMail, SignInMailError, type MailTransport, type SignInMail } from "./sign-in-mail.ts";
+import { userError, type UserError } from "./user-errors.ts";
 
 /** Who may sign in. `a@b.com` is that address; `@b.com` is everyone at b.com. */
 export interface SignInAllowList {
   admins: string[];
   members: string[];
 }
-
-export const ADMIN_EMAILS_ENV = "OMB_SIGNIN_EMAILS";
-export const MEMBER_EMAILS_ENV = "OMB_SIGNIN_MEMBER_EMAILS";
 
 /** Commas, spaces or newlines between entries; case does not matter. */
 export function parseAllowList(value: string | undefined | null): string[] {
@@ -43,24 +34,31 @@ export function signInEnabled(list: SignInAllowList): boolean {
   return list.admins.length + list.members.length > 0;
 }
 
-export type SignInFailure = { ok: false; status: number; error: string };
+export type SignInFailure = { ok: false; status: number } & UserError;
 
 export interface EmailSignIn {
   enabled(): boolean;
-  start(email: string): Promise<{ ok: true } | SignInFailure>;
+  /** `target`: the host the code signs in to, for the email's subject. */
+  start(email: string, target?: string | null): Promise<{ ok: true } | SignInFailure>;
   verify(email: string, code: string): Promise<{ ok: true; email: string; userId: string; scopes: Scope[] } | SignInFailure>;
 }
 
-const NOT_WELCOME: SignInFailure = { ok: false, status: 403, error: "this email is not on this server's sign-in list; ask the server's owner to add it" };
+const NOT_WELCOME: SignInFailure = { ok: false, status: 403, ...userError("serverError.email.notAllowed") };
 
 export function createEmailSignIn(options: {
   allow: SignInAllowList | (() => SignInAllowList);
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
   client?: ControlPlaneClient;
+  mailTransport?: MailTransport;
 }): EmailSignIn {
   const env = options.env ?? process.env;
   const allow = () => (typeof options.allow === "function" ? options.allow() : options.allow);
+  const smtpUrl = env.OMB_SIGNIN_SMTP_URL?.trim();
+  if (smtpUrl) {
+    return mailedSignIn(allow, createSignInMail({ url: smtpUrl, from: env.OMB_SIGNIN_SMTP_FROM,
+      ...(options.mailTransport ? { transport: options.mailTransport } : {}) }));
+  }
   let client: ControlPlaneClient | null = options.client ?? null;
   const controlPlane = (): ControlPlaneClient => {
     if (client) return client;
@@ -73,7 +71,7 @@ export function createEmailSignIn(options: {
     enabled: () => signInEnabled(allow()),
     async start(rawEmail) {
       const email = normalizeAccountEmail(rawEmail);
-      if (!email) return { ok: false, status: 400, error: "enter a valid email address" };
+      if (!email) return { ok: false, status: 400, ...userError("serverError.email.invalid") };
       if (!allowedScopes(email, allow())) return NOT_WELCOME;
       try {
         await controlPlane().requestOTP(email);
@@ -92,17 +90,16 @@ export function createEmailSignIn(options: {
         // The client refuses a malformed code before any request (status 0);
         // the control plane's own "invalid_otp" is a wrong or expired code.
         if (error instanceof ControlPlaneError && error.code === "invalid_otp" && !error.status) {
-          return { ok: false, status: 400, error: "enter the 8-digit code from the email" };
+          return { ok: false, status: 400, ...userError("serverError.email.codeFormat") };
         }
         if (error instanceof ControlPlaneError && error.status === 429) {
-          return { ok: false, status: 429, error: "too many attempts; wait a minute and request a new code" };
+          return { ok: false, status: 429, ...userError("serverError.email.tooMany") };
         }
         if (error instanceof ControlPlaneError && (error.status === 400 || error.status === 401 || error.status === 403)) {
-          return { ok: false, status: 401, error: "that code is wrong or has expired; request a new one" };
+          return { ok: false, status: 401, ...userError("serverError.email.codeWrong") };
         }
         return unavailable(error);
       }
-      // The account session on the control plane has done its job.
       void controlPlane()
         .signOut(verified.accountToken)
         .catch(() => undefined);
@@ -113,7 +110,35 @@ export function createEmailSignIn(options: {
   };
 }
 
+function mailedSignIn(allow: () => SignInAllowList, mail: SignInMail): EmailSignIn {
+  return {
+    enabled: () => signInEnabled(allow()),
+    async start(rawEmail, target) {
+      const email = normalizeAccountEmail(rawEmail);
+      if (!email) return { ok: false, status: 400, ...userError("serverError.email.invalid") };
+      if (!allowedScopes(email, allow())) return NOT_WELCOME;
+      try {
+        if ((await mail.send(email, target)) === "tooSoon") return { ok: false, status: 429, ...userError("serverError.email.tooMany") };
+      } catch (error) {
+        console.warn(`sign-in code not sent: ${error instanceof Error ? error.message : String(error)}`);
+        return { ok: false, status: 502, ...userError("serverError.email.unavailable", { detail: error instanceof SignInMailError ? error.message : "the mail server refused it" }) };
+      }
+      return { ok: true };
+    },
+    async verify(rawEmail, code) {
+      const email = normalizeAccountEmail(rawEmail);
+      if (!email || !allowedScopes(email, allow())) return NOT_WELCOME;
+      const checked = mail.check(email, code);
+      if (checked === "format") return { ok: false, status: 400, ...userError("serverError.email.codeFormat") };
+      if (checked === "tooMany") return { ok: false, status: 429, ...userError("serverError.email.tooMany") };
+      if (checked === "wrong") return { ok: false, status: 401, ...userError("serverError.email.codeWrong") };
+      const scopes = allowedScopes(email, allow());
+      return scopes ? { ok: true, email, userId: `email:${email}`, scopes } : NOT_WELCOME;
+    },
+  };
+}
+
 function unavailable(error: unknown): SignInFailure {
   const detail = error instanceof ControlPlaneError ? `${error.code}${error.status ? ` (${error.status})` : ""}` : error instanceof Error ? error.message : String(error);
-  return { ok: false, status: 502, error: `the sign-in service could not be reached (${detail}); try again in a moment` };
+  return { ok: false, status: 502, ...userError("serverError.email.unavailable", { detail }) };
 }

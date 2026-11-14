@@ -1,14 +1,3 @@
-// The nightly tidy-up of MEMORY.md, for a bot with Memory upkeep on. Three
-// steps, in order, each leaving a trace:
-//   1. expired  — a live entry past its `until` day moves to memory/archive.md
-//   2. duplicate — of two entries with the same fact identity (signs,
-//      symbols and case kept), the newest stays and older copies go
-//   3. contradicted — one strict-JSON model call over what is left names
-//      pairs that cannot both be true; the loser is struck through with a
-//      date, never deleted, and at most floor(live × 0.2) of them change in
-//      one pass — none at all below five entries.
-// Hand-written lines without a date are never touched. Pure here: the
-// caller reads, calls the model, writes and journals.
 import { factIdentity, isExpired, parseMemoryEntries, type MemoryEntryLine } from "./memory-entries.ts";
 
 export const CONTRADICTION_SHARE = 0.2;
@@ -16,12 +5,9 @@ export const TIDY_MARKER = "You are the TIDY step of a memory system";
 const PROMPT_ENTRIES = 200;
 
 export interface Contradiction {
-  /** Indexes into the entry list given to the prompt. */
   a: number;
   b: number;
   keep: "a" | "b";
-  /** What in the losing line is still true, when it held more than one
-   * fact ("lives in Pune and prefers short replies"): kept as its own entry. */
   remainder?: string;
 }
 
@@ -29,11 +15,9 @@ export interface TidyPlan {
   expired: MemoryEntryLine[];
   duplicates: MemoryEntryLine[];
   superseded: Array<{ loser: MemoryEntryLine; winner: MemoryEntryLine; remainder?: string }>;
-  /** Contradictions the share limit held back for another night. */
   deferred: number;
 }
 
-/** The newest-wins duplicates among live, unexpired entries. */
 function duplicatesOf(live: readonly MemoryEntryLine[]): MemoryEntryLine[] {
   const byKey = new Map<string, MemoryEntryLine[]>();
   for (const entry of live) {
@@ -44,33 +28,29 @@ function duplicatesOf(live: readonly MemoryEntryLine[]): MemoryEntryLine[] {
   const older: MemoryEntryLine[] = [];
   for (const group of byKey.values()) {
     if (group.length < 2) continue;
-    // newest date first; on the same day the later line wins
     const sorted = [...group].sort((x, y) => (x.date === y.date ? y.line - x.line : x.date < y.date ? 1 : -1));
     older.push(...sorted.slice(1));
   }
   return older;
 }
 
-/** What survives steps 1 and 2: the list the contradiction call is asked
- * about, so two copies of a fact beside its correction never confuse it. */
 export function contradictionCandidates(text: string, today: string): MemoryEntryLine[] {
   const live = parseMemoryEntries(text).filter((e) => !e.struck && !isExpired(e, today));
   const dupes = new Set(duplicatesOf(live).map((e) => e.line));
   return live.filter((e) => !dupes.has(e.line));
 }
 
-/** How many contradictions one pass may act on. */
 export function contradictionBudget(liveEntries: number): number {
   return Math.floor(liveEntries * CONTRADICTION_SHARE);
 }
 
-export function planTidy(text: string, today: string, contradictions: readonly Contradiction[] = []): TidyPlan {
+export function planTidy(text: string, today: string, contradictions: readonly Contradiction[] = [], minimumBudget = 0): TidyPlan {
   const entries = parseMemoryEntries(text);
   const expired = entries.filter((e) => isExpired(e, today));
   const live = entries.filter((e) => !e.struck && !isExpired(e, today));
   const duplicates = duplicatesOf(live);
   const candidates = contradictionCandidates(text, today);
-  const budget = contradictionBudget(live.length);
+  const budget = Math.max(minimumBudget, contradictionBudget(live.length));
   const touched = new Set<number>();
   const superseded: TidyPlan["superseded"] = [];
   let deferred = 0;
@@ -95,16 +75,17 @@ export function planChanges(plan: TidyPlan): number {
   return plan.expired.length + plan.duplicates.length + plan.superseded.length;
 }
 
-/** MEMORY.md after the plan, and the lines the archive gains. */
 export function applyTidy(text: string, plan: TidyPlan, today: string): { text: string; archived: string[] } {
   const lines = text.split("\n");
-  const drop = new Set<number>([...plan.expired, ...plan.duplicates].map((e) => e.line));
+  const drop = new Set<number>(plan.duplicates.map((e) => e.line));
+  for (const entry of plan.expired) {
+    for (let index = entry.line; index < entry.end; index += 1) drop.add(index);
+  }
   for (const { loser, remainder } of plan.superseded) {
     const struck = `${loser.prefix}~~${loser.body}~~ · superseded ${today}`;
-    // the still-true part of a mixed line lives on as its own dated entry
     lines[loser.line] = remainder ? `${struck}\n- ${today} · from tidy-up · ${remainder}` : struck;
   }
-  const archived = plan.expired.map((e) => `${e.raw} · expired ${today}`);
+  const archived = plan.expired.map((e) => [`${e.raw} · expired ${today}`, ...lines.slice(e.line + 1, e.end)].join("\n"));
   return { text: lines.filter((_, index) => !drop.has(index)).join("\n"), archived };
 }
 
@@ -147,7 +128,7 @@ export function parseContradictions(text: string, count: number): Contradiction[
     if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
     const ia = a as number;
     const ib = b as number;
-    if (ia < 0 || ib < 0 || ia >= count || ib >= count) continue;
+    if (ia < 0 || ib < 0 || ia >= Math.min(count, PROMPT_ENTRIES) || ib >= Math.min(count, PROMPT_ENTRIES)) continue;
     if (keep !== "a" && keep !== "b") continue;
     const key = `${Math.min(ia, ib)}:${Math.max(ia, ib)}`;
     if (seen.has(key)) continue;

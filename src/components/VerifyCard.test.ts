@@ -14,7 +14,7 @@ const steps: RunStep[] = [
 const TAG = `>${t("chat.verify.verifiedTag")}<`;
 const noop = () => undefined;
 const render = (props: Partial<Parameters<typeof VerifyCard>[0]> = {}) =>
-  renderToStaticMarkup(createElement(VerifyCard, { steps, canSave: true, staged: false, onDismiss: noop, onSave: noop, ...props }));
+  renderToStaticMarkup(createElement(VerifyCard, { steps, canSave: true, skill: null, onDismiss: noop, onSave: noop, ...props }));
 
 describe("VerifyCard", () => {
   it("renders nothing without steps", () => {
@@ -32,7 +32,6 @@ describe("VerifyCard", () => {
     expect(markup).toContain(">git push<");
     expect(markup).toContain('title="pnpm control:omb doctor --url http://127.0.0.1:8799"');
     expect(markup).toContain('title="git push origin main"');
-    // the tag sits between the label and the command, on verified steps only
     expect(markup.match(new RegExp(TAG, "g"))).toHaveLength(2);
     expect(markup).toMatch(new RegExp(`>doctor</span><span class="[^"]*text-success">${t("chat.verify.verifiedTag")}</span><code`));
     expect(markup).toMatch(/>git push<\/span><code/);
@@ -74,9 +73,16 @@ describe("VerifyCard", () => {
   });
 
   it("says the skill is staged instead of offering Save again", () => {
-    const markup = render({ staged: true });
+    const markup = render({ skill: "pending" });
     expect(markup).toContain(t("chat.verify.staged"));
     expect(markup).not.toContain(t("chat.verify.save"));
+    expect(markup).not.toContain(t("chat.verify.saveHint"));
+  });
+
+  it("says the skill is saved once it applied, with no review promised", () => {
+    const markup = render({ skill: "saved" });
+    expect(markup).toContain(t("chat.verify.saved"));
+    expect(markup).not.toContain(t("chat.verify.staged"));
     expect(markup).not.toContain(t("chat.verify.saveHint"));
   });
 
@@ -87,7 +93,6 @@ describe("VerifyCard", () => {
     expect(markup).toContain("1 step · 1 running");
     expect(markup).toContain(">git push<");
     expect(markup).not.toContain(TAG);
-    // ChatView asks this before mounting the card
     expect(showRun(one)).toBe(false);
     expect(showRun(steps)).toBe(true);
   });

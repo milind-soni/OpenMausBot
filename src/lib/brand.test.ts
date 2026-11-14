@@ -1,12 +1,12 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { accentInk, applyBrand, bootstrapBrand, brand, brandVars, DEFAULT_BRAND, iconType, luminance } from "./brand";
+import { accentInk, applyBrand, bootstrapBrand, brand, brandVars, DEFAULT_BRAND, iconType, luminance, PRODUCT_NAME, productName } from "./brand";
 
 describe("brand", () => {
   it("derives readable ink for light and dark accents", () => {
     expect(accentInk("#1D4ED8")).toBe("#ffffff");
     expect(accentInk("#C2510A")).toBe("#ffffff");
-    // a bright blue: white text only reaches 3.7:1 on it, dark ink reaches 5.8:1
     expect(accentInk("#1084fe")).toBe("#111111");
     expect(accentInk("#ffd400")).toBe("#111111");
     expect(accentInk("#ffffff")).toBe("#111111");
@@ -39,6 +39,15 @@ describe("brand", () => {
     expect(brand()).toEqual(DEFAULT_BRAND);
   });
 
+  it("names the product MausBot, or a white-label brand file by its own name", () => {
+    applyBrand({ brand: DEFAULT_BRAND, source: "default", file: "" });
+    expect(productName()).toBe("MausBot");
+    expect(brand().name).toBe("OpenMausBot");
+    applyBrand({ brand: { name: "Acme Bots" }, source: "file", file: "/data/brand.json" });
+    expect(productName()).toBe("Acme Bots");
+    applyBrand({ brand: DEFAULT_BRAND, source: "default", file: "" });
+  });
+
   it("applies a served brand without a DOM", async () => {
     const served = async () =>
       new Response(JSON.stringify({ brand: { name: "Reliable Platform", accent: "#1D4ED8" }, source: "file", file: "/data/brand.json" }), { status: 200 });
@@ -55,4 +64,10 @@ describe("the tab icon", () => {
     expect(iconType("data:image/svg+xml;base64,AAAA")).toBe("image/svg+xml");
     expect(iconType("https://agentada.cc/icon.png")).toBe("");
   });
+});
+
+// The title shows before /api/brand answers, and stays if that request fails.
+it.each(["index.html", "rail.html"])("%s starts with the product's name as its title", (page) => {
+  const html = readFileSync(new URL(`../../${page}`, import.meta.url), "utf8");
+  expect(html).toContain(`<title>${PRODUCT_NAME}</title>`);
 });

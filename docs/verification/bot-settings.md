@@ -79,31 +79,32 @@ load never shows another agent's link.
 
 ## Creation drafts and defaults
 
-The same isolated fixture also exposes **Configure new bot** and **New bot
-defaults → Edit**. Check that both open immediately, keep a fixed size while
+The same isolated fixture also exposes **New bot** and **New bot defaults →
+Edit**. **New bot** makes a bot at once from the saved defaults, with no
+dialog. The defaults editor must open immediately, keep a fixed size while
 switching sections, and retain edits between sections. Identity → View full
-must appear above the creation dialog; Escape closes only that inner layer.
+must appear above it; Escape closes only that inner layer.
 
-In a creation draft, click both random-name buttons repeatedly. Each suggestion
-must replace the editable name, avoid an immediate repeat and existing names,
-and survive switching away from Identity and back. Type a custom name, then
-randomize again. Cancelling must leave the server unchanged. These buttons
-also appear in defaults but not in an existing bot's profile. Dataset provenance
+In the defaults editor, click both random-name buttons repeatedly. Each
+suggestion must replace the editable name, avoid an immediate repeat and
+existing names, and survive switching away from Identity and back. Type a
+custom name, then randomize again. Cancelling must leave the server
+unchanged. These buttons also appear in a ready-made bot's review (Templates →
+Add) but not in an existing bot's profile. Dataset provenance
 and licenses are in `src/data/given-names/`; `src/lib/random-bot-name.test.ts`
 checks the pools and selection behavior without a network or model request.
 
 Save defaults containing a title, model, memory topic, skill, and paused
 routine. Read the fixture API to confirm no bot or live routine was created.
-Open a creation draft, confirm inheritance, clear selected values, and cancel:
-the server's bots and defaults must remain unchanged. Reopen and create;
-confirm only the explicitly retained settings and files were applied. Edit
-the existing bot afterward to verify that its settings still save normally.
+Press **New bot** and confirm the new bot carries those settings and files
+and its routine stays paused. Edit the bot afterward to verify that its
+settings still save normally.
 Use only the fixture's harmless skills and routines.
 
 Automated coverage:
 
 ```sh
-pnpm exec vitest run server/new-bot-defaults.test.ts server/new-bot-defaults.e2e.test.ts src/lib/bot-creation-draft.test.ts src/lib/create-configured-bot.test.ts src/components/NewBotDialog.test.ts
+pnpm exec vitest run server/new-bot-defaults.test.ts server/new-bot-defaults.e2e.test.ts src/lib/bot-creation-draft.test.ts src/lib/create-configured-bot.test.ts src/lib/new-bot.test.ts src/state/bot-creation.test.ts src/components/NewBotDialog.test.ts
 node --test electron/approval-trusted-mode.node-test.mjs
 ```
 
@@ -115,16 +116,20 @@ native permission rejection, cleanup, and post-creation activation warnings.
 Browser fixtures do not prove packaged operating-system grants or real model
 execution; those require the native approval verification separately.
 
-Companion connections retain the single-request Create bot flow: they cannot
-read host defaults or patch host settings. `companion/test/proxy.test.ts` checks
-creation succeeds while those routes remain blocked. The dialog tests also
-check that a caller's synchronous exception or rejected promise after creation
-is reported without leaving a retryable creation dialog open.
+Companion connections make the bot with a single request: they cannot read
+host defaults or patch host settings, so the host applies its defaults.
+`companion/test/proxy.test.ts` checks creation succeeds while those routes
+remain blocked, and `src/lib/new-bot.test.ts` that a paired device sends only
+that request. The dialog tests also check that a caller's synchronous
+exception or rejected promise after creation is reported without leaving a
+retryable creation dialog open.
 
 In the renderer fixture, open **App settings → General → Defaults for new bots → Edit**.
-The full creation dialog retains upstream's **Who can see it** selection for
-browser admins. `scripts/testing/bot-draft-visibility-ui.e2e.test.ts` selects
-**Admins only**, creates a bot, and verifies its stored audience. The initial
+A ready-made bot's review (Templates → Add) retains upstream's **Who can see
+it** selection for browser admins; **New bot** makes a bot everyone sees,
+changed later in its settings. `scripts/testing/bot-draft-visibility-ui.e2e.test.ts`
+selects **Admins only** in that review, creates the bot, and verifies its
+stored audience. The initial
 POST carries that audience; it is not widened temporarily during later setup.
 The fixture injects the native select's change event for cross-platform
 headless reliability; it does not verify the operating system's select popup.
@@ -142,6 +147,56 @@ the shared pending state prevents a second creation. Completion must not close
 a newer dialog. A rejected profile save must roll back the partial bot, retain
 the draft, and permit one successful retry. The launcher uses a test-only IPC
 stop request so Windows executes the same orderly cleanup as other platforms.
+
+## The Simple panel
+
+The steps above cover the full fold-out view. A fresh install opens the short
+tabbed panel instead, and that one is driven through
+[Chat UI, driven headlessly](chat-ui.md):
+
+```sh
+node --experimental-strip-types scripts/control-omb.ts ui launch
+H=/tmp/openmausbot-verify-data-XXXXXX/ui.json
+# The preview reads as an existing install, so it starts in Advanced mode.
+pnpm control:omb ui eval --ui $H --js "localStorage.setItem('omb-advanced-mode','0'); location.reload(); 'simple'"
+pnpm control:omb ui click --ui $H --name "Open Pepper's profile"
+pnpm control:omb ui snapshot --ui $H --interactive
+```
+
+Expected: six tabs (Details, Memory, Library, Skills, Routines, Vault), and on
+Details one row each for Look, Name and job, Instructions, Default model,
+Thinking, Before Pepper acts, Where Pepper works, Uses, Phone and Email. Each row's
+button says what it acts on (`Edit: Instructions`, `Open: Vault`), so every
+name in the snapshot is unique.
+
+Check these user paths:
+
+1. `ui click --name "Edit: Instructions"` opens the box in place; Done closes
+   it. Name and job opens its two fields the same way, and opening one row
+   closes the other. `ui click --name "Change how Pepper looks"` (the mascot
+   itself) opens the look editor from any tab: pick a color and a body, then
+   `GET /api/bots` reports that `color` and `mascotBody`.
+2. Pick a Thinking step, then `GET /api/bots` on the printed fixture URL: the
+   bot's `modelSelection.effort` is that step. Expand Default model: the
+   picker shows no second copy of the steps.
+3. Where Pepper works offers Auto, this computer and Cloud computer. Pick
+   one and read the bot back: `computer` is that place, and Auto clears it.
+   A place that cannot be used is held, with its reason on hover. Open the
+   Computer panel at its narrowest (360px) and widest: its tabs stay on one
+   row, without their icons while the panel is narrow.
+4. Create a routine for the bot (`POST /api/routines`), then click its
+   `Run … on its schedule` switch on Details. `GET /api/routines` reports
+   `enabled: false`, the row reads Paused, and a second click resumes it. The
+   Routines tab and the Routines page list carry the same switch.
+5. `ui click --name "Open: Vault"`. With no apps connected it offers
+   `Let Pepper use apps`, Add app and Add login, and says no app is connected.
+   With apps connected, switching one off writes the bot's `connectorScopes`
+   with every other connected app still on.
+
+Not proven by this run: real connected apps and real signed-in sites need a
+Composio account and a signed-in browser, which the fixture does not have.
+Their rows are covered by `src/components/BotSettingsDialog.simple.test.ts` and
+`src/lib/bot-app-access.test.ts`.
 
 ## Earlier settings verification
 

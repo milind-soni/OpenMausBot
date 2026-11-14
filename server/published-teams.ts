@@ -1,17 +1,4 @@
-// What this installation has shared, per team: the package id and the
-// release last exported, plus the key each bot, group chat and routine was
-// published under.
-//
-// Keys are a package's identity across releases (Admin refuses a release
-// that silently drops one, and later updates match on them). They must not
-// come from names once they exist: renaming a bot, a room, a routine or the
-// team would otherwise read as "everything removed, everything added". So
-// the first export records them here, keyed by record id, and every later
-// export of the same team reuses them. Teams are name strings in OMB, so the
-// team entry is renamed with the section (section-context.ts calls
-// renamePublishedTeam from the one function every rename goes through).
-//
-// Server-private: nothing here is on the wire, and nothing here is a secret.
+// Package keys never come from names once they exist: the first export records them and every later export reuses them.
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -42,8 +29,6 @@ function load(): Map<string, PublishedTeam> {
       if (entry.success) teams.set(section, entry.data);
     }
   } catch {
-    // An unreadable record only costs key stability on the next export,
-    // which then derives keys from names as a first export does.
   }
   return teams;
 }
@@ -65,7 +50,6 @@ export function writePublishedTeam(section: string, entry: PublishedTeam): void 
   save(teams);
 }
 
-/** Follow a team rename; null forgets the team (it was deleted). */
 export function renamePublishedTeam(name: string, nextName: string | null): void {
   const teams = load();
   const entry = teams.get(name);
@@ -75,7 +59,6 @@ export function renamePublishedTeam(name: string, nextName: string | null): void
   save(teams);
 }
 
-/** "1.2.3" → "1.2.4"; nothing published yet (or unreadable) starts at 1.0.0. */
 export function nextPatchRelease(release: string | undefined): string {
   const match = release?.match(/^(\d{1,6})\.(\d{1,6})\.(\d{1,6})$/);
   if (!match) return "1.0.0";

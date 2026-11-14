@@ -53,7 +53,6 @@ describe("usage ledger files", () => {
     const rows = readUsage(dataDir, { from: new Date("2026-09-01T00:00:00Z"), to: new Date("2026-10-31T23:59:59Z") });
     expect(rows.map((r) => r.botId)).toEqual(["b1", "b2", "b3"]);
     expect(rows[1]!.costUsd).toBeNull();
-    // a cost is labelled with where it came from; an unpriced row has no label
     expect(rows[0]!.costSource).toBe("reported");
     expect(rows[1]).not.toHaveProperty("costSource");
   });
@@ -147,6 +146,65 @@ describe("usage summaries", () => {
     expect(summarizeUsage([], "day")).toEqual({ groups: [], total: expect.objectContaining({ turns: 0, costUsd: null }) });
   });
 
+  it("splits any group by model, largest bar first, only when a different dimension is asked for", () => {
+    const mixed: UsageRow[] = [
+      rows[0]!,
+      { ...rows[0]!, model: "gpt-6.1-sol", driverKind: "codex", instanceId: "codex", input: 100, output: 20, cachedInput: 0, costUsd: 0.001 },
+      rows[1]!,
+    ];
+    const [scout, clerk] = summarizeUsage(mixed, "bot", null, "model").groups;
+    expect(scout!.segments?.map((piece) => [piece.key, piece.input, piece.output])).toEqual([
+      ["model:claudeAgent/claude-sonnet-5", 1200, 300],
+      ["model:codex/gpt-6.1-sol", 100, 20],
+    ]);
+    expect(clerk!.segments?.map((piece) => piece.key)).toEqual(["model:codex/gpt-5"]);
+    expect(summarizeUsage(mixed, "bot").groups[0]!.segments).toBeUndefined();
+    expect(summarizeUsage(mixed, "model", null, "model").groups[0]!.segments).toBeUndefined();
+    expect(summarizeUsage(mixed, "day", null, "model").groups[0]!.segments?.map((piece) => piece.key)).toEqual([
+      "model:claudeAgent/claude-sonnet-5",
+      "model:codex/gpt-5",
+      "model:codex/gpt-6.1-sol",
+    ]);
+  });
+
+  it("orders a group's segments by the fresh tokens its bar draws, not by cached input", () => {
+    const cached: UsageRow = {
+      ...rows[0]!,
+      model: "claude-sonnet-5",
+      input: 10_000,
+      cachedInput: 9_800,
+      output: 100,
+    };
+    const fresh: UsageRow = {
+      ...rows[0]!,
+      model: "gpt-6.1-sol",
+      driverKind: "codex",
+      instanceId: "codex",
+      input: 600,
+      output: 100,
+      cachedInput: 0,
+    };
+    expect(summarizeUsage([cached, fresh], "bot", null, "model").groups[0]!.segments?.map((piece) => piece.key)).toEqual([
+      "model:codex/gpt-6.1-sol",
+      "model:claudeAgent/claude-sonnet-5",
+    ]);
+  });
+
+  it("keeps the bar total additive when one row's cached input exceeds its input", () => {
+    const uneven: UsageRow[] = [
+      { ...row({ model: "claude-sonnet-5", input: 100, output: 10, cachedInput: 150 }), at: "2026-09-01T10:00:00.000Z" } as UsageRow,
+      { ...row({ model: "gpt-6.1-sol", driverKind: "codex", instanceId: "codex", input: 500, output: 50, cachedInput: 100 }), at: "2026-09-01T11:00:00.000Z" } as UsageRow,
+    ];
+    const [scout] = summarizeUsage(uneven, "bot", null, "model").groups;
+    const fresh = (entry: UsageRow) =>
+      Math.max(0, entry.input - Math.min(entry.cachedInput ?? 0, entry.input)) + entry.output;
+    const expected = uneven.reduce((sum, entry) => sum + fresh(entry), 0);
+    expect(scout!.barTokens).toBe(expected);
+    expect(scout!.segments!.reduce((sum, piece) => sum + (piece.barTokens ?? 0), 0)).toBe(expected);
+    expect(scout!.barTokens).toBe(460);
+    expect(scout!.input - Math.min(scout!.cachedInput, scout!.input) + scout!.output).toBe(410);
+  });
+
   it("groups by routine, with every non-routine turn in one manual bucket", () => {
     const summary = summarizeUsage(rows, "routine");
     expect(summary.groups.map((g) => [g.key, g.label, g.turns, g.costUsd])).toEqual([
@@ -170,11 +228,48 @@ describe("usage summaries", () => {
     expect(usageCsv([rows[0]!]).split("\n")[0]).not.toContain("billable_usd");
   });
 
+  it("groups by department as booked, and counts a routine's or a teammate's work for a person as theirs", () => {
+    const booked: UsageRow[] = [
+      { ...rows[0]!, section: "Finance" },
+      { ...rows[2]!, section: "Finance", trigger: { kind: "routine", routineId: "r1", label: "Morning digest", email: "ada@example.test" } },
+      { ...rows[3]!, trigger: { kind: "bot", botId: "b1", email: "bob@example.test" } },
+      rows[1]!,
+    ];
+    expect(summarizeUsage(booked, "department").groups.map((g) => [g.key, g.label, g.turns])).toEqual([
+      ["department:Finance", "Finance", 2],
+      ["department:", "", 2],
+    ]);
+    expect(summarizeUsage(booked, "user").groups.map((g) => [g.key, g.turns])).toEqual([
+      ["user:ada@example.test", 2],
+      ["user:bob@example.test", 1],
+      ["owner", 1],
+    ]);
+    expect(summarizeUsage(booked, "routine").groups[0]).toMatchObject({ key: "routine:r1", turns: 1 });
+    expect(usageCsv([booked[1]!]).split("\n")[1]).toMatch(/,Finance,ada@example\.test$/);
+  });
+
   it("names a person by email before device label and never throws on an empty trigger", () => {
     expect(triggerLabel({ kind: "user", label: "Phone" })).toBe("Phone");
     expect(triggerKey({ kind: "user", email: "Ada@Example.test" })).toBe("user:ada@example.test");
     expect(triggerKey({ kind: "user" })).toBe("user:unknown");
     expect(triggerLabel({ kind: "routine" })).toBe("Routine: unknown");
+  });
+
+  it("keeps helper-model calls in a group of their own, apart from bot-to-bot turns, and never as a routine", () => {
+    const helper: UsageRow = {
+      ...row({ botId: "b2", botName: "Clerk", threadId: "memory-1", instanceId: "claude", driverKind: "claudeAgent", model: "claude-haiku-4-5", costUsd: 0.002, trigger: { kind: "helper", botId: "b2", job: "memory" } }),
+      at: "2026-09-02T11:00:00.000Z",
+    };
+    expect(triggerKey(helper.trigger)).toBe("helper");
+    expect(triggerLabel(helper.trigger)).toBe("Helper model");
+    const byPerson = summarizeUsage([...rows, helper], "user").groups;
+    expect(byPerson.find((group) => group.key === "helper")).toMatchObject({ label: "Helper model", turns: 1, costUsd: 0.002 });
+    expect(byPerson.find((group) => group.key === "bot")).toMatchObject({ label: "Bot to bot", turns: 1, costUsd: 0.001 });
+    // still the bot's spend, on the helper's engine, and not a routine's
+    expect(summarizeUsage([helper], "bot").groups.map((group) => group.label)).toEqual(["Clerk"]);
+    expect(summarizeUsage([helper], "engine").groups.map((group) => group.label)).toEqual(["claudeAgent"]);
+    expect(summarizeUsage([helper], "routine").groups.map((group) => group.key)).toEqual(["manual"]);
+    expect(usageCsv([helper]).split("\n")[1]).toBe("2026-09-02T11:00:00.000Z,Clerk,claude-haiku-4-5,claudeAgent,Helper model,1200,300,900,0.002,reported,memory-1,,");
   });
 
   it("exports spreadsheet-safe CSV with one line per turn", () => {
@@ -183,11 +278,11 @@ describe("usage summaries", () => {
       { ...rows[1]!, botName: '=HYPERLINK("x")', trigger: { kind: "user", email: "a,b@example.test" } },
     ]);
     const lines = csv.trim().split("\n");
-    expect(lines[0]).toBe("time,bot,model,engine,triggered_by,input_tokens,output_tokens,cached_input_tokens,cost_usd,cost_source,thread");
-    expect(lines[1]).toBe("2026-09-01T10:00:00.000Z,Scout,claude-sonnet-5,claudeAgent,ada@example.test,1200,300,900,0.012,reported,t1");
+    expect(lines[0]).toBe("time,bot,model,engine,triggered_by,input_tokens,output_tokens,cached_input_tokens,cost_usd,cost_source,thread,department,person");
+    expect(lines[1]).toBe("2026-09-01T10:00:00.000Z,Scout,claude-sonnet-5,claudeAgent,ada@example.test,1200,300,900,0.012,reported,t1,,ada@example.test");
     expect(lines[2]).toContain("\"'=HYPERLINK(\"\"x\"\")\"");
     expect(lines[2]).toContain('"a,b@example.test"');
-    expect(lines[2]).toMatch(/,,,t1$/);
+    expect(lines[2]).toMatch(/,,,t1,,"a,b@example.test"$/);
     expect(usageCsv([{ ...rows[0]!, costSource: "estimated" }]).split("\n")[1]).toContain(",0.012,estimated,t1");
   });
 
@@ -201,7 +296,6 @@ describe("usage summaries", () => {
     const clerk = summary.groups.find((g) => g.label === "Clerk")!;
     expect(clerk).toMatchObject({ costUsd: 0.2, estimatedUsd: 0.2 });
     expect(summary.groups.find((g) => g.label === "Scout")!.estimatedUsd).toBeNull();
-    // an unpriced row is still counted as unpriced, never as a $0 estimate
     expect(summarizeUsage([rows[1]!], "bot").total).toMatchObject({ costUsd: null, estimatedUsd: null, unpriced: 1 });
   });
 });

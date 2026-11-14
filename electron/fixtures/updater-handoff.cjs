@@ -1,11 +1,6 @@
 "use strict";
 
-// Proves the two steps of the Ubuntu hand-off that only exist at runtime: the
-// command really reaches the system clipboard, and a terminal is really
-// spawned. The unit tests inject a fake runner and never spawn anything, so
-// this runs the production path with nothing stubbed — a recording script
-// placed on PATH stands in for the terminal emulator, and is discovered and
-// executed by the real child_process.
+// Runs the production hand-off with nothing stubbed: a recording script on PATH stands in for the terminal emulator.
 
 const { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
@@ -26,15 +21,13 @@ async function main() {
   const workspace = mkdtempSync(join(tmpdir(), "omb-handoff-fixture-"));
   const realPath = process.env.PATH;
   try {
-    // A real staged file: the hand-off now refuses a path that is gone, so
-    // the quoting case has to exist on disk rather than being a string.
+    // On disk, since the hand-off refuses a path that is gone.
     const pending = mkdtempSync(join(workspace, "o'brien "));
     const staged = join(pending, "pkg.deb");
     writeFileSync(staged, "x");
     const expected = packageInstallCommand("deb", staged);
 
-    // A terminal emulator that records being launched. openBlankTerminal tries
-    // x-terminal-emulator first on Linux, and resolves it through PATH.
+    // openBlankTerminal tries x-terminal-emulator first on Linux, resolved through PATH.
     const receipt = join(workspace, "launched");
     const terminal = join(workspace, "x-terminal-emulator");
     writeFileSync(terminal, `#!/bin/sh\necho "$@" > ${JSON.stringify(receipt)}\n`);
@@ -51,8 +44,6 @@ async function main() {
     if (result.terminalOpened === true) say("hand-off-reported-the-terminal");
     if (result.command === expected) say("hand-off-returned-the-command");
 
-    // Nothing on PATH: the terminal cannot open, but the command must still be
-    // on the clipboard — the docs tell the user to paste it themselves.
     const empty = mkdtempSync(join(tmpdir(), "omb-handoff-empty-"));
     clipboard.writeText("something else entirely");
     process.env.PATH = empty;
@@ -61,8 +52,6 @@ async function main() {
     if (clipboard.readText() === expected) say("clipboard-written-even-without-a-terminal");
     rmSync(empty, { recursive: true, force: true });
 
-    // A download that vanished must be reported, not turned into a command
-    // that installs nothing — empty list and a path that used to exist.
     process.env.PATH = realPath;
     await handOff([]).then(
       () => say("missing-download-was-not-reported"),

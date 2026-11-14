@@ -7,7 +7,6 @@ import { ChatMarkdown } from "./ChatMarkdown";
 
 it.each(["plain text", "Markdown"] as const)("keeps all ten bot colors independent in %s", (renderer) => {
   const peers = MAUS_COLOR_NAMES.map((color) => ({ name: `Bot ${color}`, color }));
-  // Render in both directions, repeat names, and place neutral mentions between colors.
   const ordered = [...peers, ...[...peers].reverse(), peers[0]];
   const text = ordered.map(({ name }) => `@${name} ordinary @everyone @Unknown`).join("\n\n");
   for (const roster of [peers, [...peers].reverse()]) {

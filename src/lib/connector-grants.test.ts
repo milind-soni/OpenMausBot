@@ -12,8 +12,6 @@ describe("connector grant shapes", () => {
   it("accepts the wildcard and explicit well-formed name lists only", () => {
     expect(isConnectorToolGrantShape({ tools: "*" })).toBe(true);
     expect(isConnectorToolGrantShape({ tools: ["GMAIL_SEND_EMAIL", "SLACK_POST_MESSAGE"] })).toBe(true);
-    // An empty list is not a shape the server persists; a renderer must not
-    // round-trip one back through a PATCH as if it were meaningful.
     expect(isConnectorToolGrantShape({ tools: [] })).toBe(false);
     expect(isConnectorToolGrantShape({ tools: ["gmail_send_email"] })).toBe(false);
     expect(isConnectorToolGrantShape({ tools: "GMAIL_SEND_EMAIL" })).toBe(false);
@@ -23,8 +21,6 @@ describe("connector grant shapes", () => {
 
 describe("verb classes for tool names", () => {
   it("lets the more privileged class win regardless of word order", () => {
-    // CREATE appears first, but SEND is the class a person grants
-    // deliberately, so the tool must not hide behind the gentler label.
     expect(classifyConnectorTool("GMAIL_CREATE_AND_SEND_EMAIL")).toBe("send");
     expect(classifyConnectorTool("SLACK_DELETE_MESSAGE")).toBe("delete");
     expect(classifyConnectorTool("NOTION_CREATE_PAGE")).toBe("draft");
@@ -51,8 +47,6 @@ describe("per-service access summaries", () => {
     };
     expect(connectorServiceAccess(record, "gmail")).toEqual({ level: "all", count: 0, editable: true });
     expect(connectorServiceAccess(record, "slack")).toEqual({ level: "partial", count: 2, editable: true });
-    // Inside an explicit record, a service with no entry has no tools — the
-    // summary must say so instead of implying the legacy default.
     expect(connectorServiceAccess(record, "notion")).toEqual({ level: "none", count: 0, editable: true });
   });
 
@@ -64,8 +58,6 @@ describe("per-service access summaries", () => {
   });
 
   it("rides the record-level editable flag even for a wildcard grant", () => {
-    // A wildcard beside an unrecognized sibling shape must not offer an
-    // edit withServiceGrant would silently drop.
     const record = { gmail: { tools: "*" }, notion: { tools: { prefix: "NOTION_" } } };
     expect(connectorServiceAccess(record, "gmail")).toEqual({ level: "all", count: 0, editable: false });
   });
@@ -82,6 +74,44 @@ describe("the Connected apps card state", () => {
     expect(connectorGrantsState({ connectorTools: { gmail: { tools: "*" } } })).toBe("partial");
     expect(connectorGrantsState({ connectorTools: ["gmail"] })).toBe("unreadable");
     expect(connectorGrantsState({ connectorTools: { gmail: { tools: 3 } } })).toBe("unreadable");
+  });
+});
+
+describe("saving a grant", () => {
+  const apps = ["gmail", "slack", "notion"] as const;
+
+  it("keeps the other connected apps at All tools when the record does not exist yet", () => {
+    // An absent record means every app keeps every tool. Restricting one app
+    // must not silently empty the rest.
+    expect(withServiceGrant(undefined, "gmail", { tools: ["GMAIL_SEND_EMAIL"] }, apps)).toEqual({
+      gmail: { tools: ["GMAIL_SEND_EMAIL"] },
+      slack: { tools: "*" },
+      notion: { tools: "*" },
+    });
+  });
+
+  it("keeps the other connected apps at All tools when the first grant is a wildcard", () => {
+    expect(withServiceGrant(null, "slack", { tools: "*" }, apps)).toEqual({
+      gmail: { tools: "*" },
+      slack: { tools: "*" },
+      notion: { tools: "*" },
+    });
+  });
+
+  it("leaves an existing record exactly as it was for the other apps", () => {
+    const current = { gmail: { tools: "*" }, slack: { tools: ["SLACK_POST_MESSAGE"] } };
+    expect(withServiceGrant(current, "gmail", { tools: ["GMAIL_FETCH_EMAILS"] }, apps)).toEqual({
+      gmail: { tools: ["GMAIL_FETCH_EMAILS"] },
+      slack: { tools: ["SLACK_POST_MESSAGE"] },
+    });
+  });
+
+  it("still removes a service the person turns off, even after seeding", () => {
+    const seeded = withServiceGrant(undefined, "gmail", { tools: "*" }, apps);
+    expect(withServiceGrant(seeded, "notion", null, apps)).toEqual({
+      gmail: { tools: "*" },
+      slack: { tools: "*" },
+    });
   });
 });
 

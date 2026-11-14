@@ -1,24 +1,26 @@
-// One-place setup for the isolated Local VM image and its shared/per-bot policy.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
+import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
 import type { LocaleKey } from "@/locales";
 import {
   AlertTriangle,
   Check,
-  Circle,
   Cloud,
-  ExternalLink,
   Loader2,
   Moon,
-  RefreshCw,
   RotateCcw,
-  Server,
   Square,
   Trash2,
 } from "lucide-react";
-import { Card, CommandLine } from "./SettingsPrimitives";
+import { SettingsSkeletonRows } from "./settings/SettingsStates";
+import { Card, CommandLine, LearnMore, SETTINGS_INLINE_INPUT, Segmented, StatusDot } from "./SettingsPrimitives";
 import { MacLocalControl } from "./MacLocalControl";
+import { Select } from "./Select";
 import { cn } from "@/lib/cn";
+import { localizeComputerProblem } from "@/lib/computer-messages";
+import { computerInventoryRequest, jsonPostRequest, type ComputerApiRequest } from "@/lib/computer-requests";
+import { useStore } from "@/state/store";
+import { VpsComputersCard } from "./VpsComputersCard"; import { KeysLink } from "./keys/KeysLink";
 
 type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate";
 
@@ -45,6 +47,7 @@ interface Status {
   workspace_guest_path: string;
   viewer_url: string;
   idle_timeout_ms: number;
+  stop_reason?: "idle" | null;
   mode: "shared" | "per-bot" | "pool";
   max_instances: number;
   commands: {
@@ -108,6 +111,8 @@ function waitForCloudDeleteRefresh(delayMs: number): Promise<void> {
 export interface VpsComputerInventoryInstance {
   name: string;
   state: "created" | "restarting" | "running" | "removing" | "paused" | "exited" | "dead" | "unknown";
+  /** The SSH alias whose host holds this computer. */
+  vpsAlias: string;
   ownerBotId: string | null;
   ownerName: string | null;
   orphaned: boolean;
@@ -117,22 +122,21 @@ export interface VpsComputerInventoryInstance {
 interface VpsComputerInventoryPayload {
   configured: boolean;
   available: boolean;
-  sshAlias: string | null;
+  /** The default alias first, then each bot's own. */
+  vpsAliases: string[];
   problem: string | null;
   instances: VpsComputerInventoryInstance[];
 }
 
 const destinationLabelKeys: Record<LocalVmInventoryInstance["destination"], LocaleKey> = {
   auto: "vm.dest.auto",
-  cloud: "vm.dest.cloud",
+  cloud: "place.cloud",
   vm: "vm.dest.vm",
   local: "vm.dest.local",
   browser: "vm.dest.browser",
   off: "vm.dest.off",
 };
 
-/** The badge's colour is decided by the kind, never by the label: a
- * translated label would silently stop matching `=== "Running"`. */
 export type ComputerStateKind =
   | "unmanaged"
   | "in-use"
@@ -181,10 +185,10 @@ export function cloudComputerInventoryStateKind(
 ): ComputerStateKind {
   if (instance.inUse) return "in-use";
   if (instance.state === "removing") return "removing";
-  if (["archived", "stopped"].includes(instance.state)) return "sleeping";
-  if (["archiving", "stopping"].includes(instance.state)) return "going-to-sleep";
+  if (instance.state === "archived") return "sleeping";
+  if (instance.state === "archiving") return "going-to-sleep";
   if (["idle", "ready", "running"].includes(instance.state)) return "running";
-  if (["init", "provisioning", "provisioned", "cloning", "starting"].includes(instance.state)) return "starting";
+  if (["init", "provisioning", "provisioned", "cloning"].includes(instance.state)) return "starting";
   return "attention";
 }
 
@@ -192,10 +196,7 @@ export function cloudComputerInventoryState(instance: CloudComputerInventoryInst
   return computerStateLabel(cloudComputerInventoryStateKind(instance));
 }
 
-/** Boat's account LIST is eventually consistent. Preserve the result of an
- * action the provider accepted instead of letting an older snapshot make a
- * confirmed deletion reappear, a pending deletion disappear, or a sleeping
- * computer look awake. */
+/** Boat's account LIST is eventually consistent: an older snapshot must not undo an action the provider accepted. */
 export function reconcileCloudInventorySnapshot(
   incoming: CloudComputerInventoryInstance[],
   previous: CloudComputerInventoryInstance[],
@@ -208,15 +209,14 @@ export function reconcileCloudInventorySnapshot(
     if (override === "deleted") return [];
     if (override === "deleting") return [{ ...instance, state: "removing" }];
     if (override !== "sleeping") return [instance];
-    if (["archived", "stopped"].includes(instance.state)) {
+    if (instance.state === "archived") {
       delete nextOverrides[instance.boxId];
       return [instance];
     }
     return [{ ...instance, state: "archived" }];
   });
 
-  // A transitioning Boat can briefly disappear from LIST. Keep the last safe
-  // row until LIST returns the terminal sleeping state.
+  // A transitioning Boat can briefly disappear from LIST.
   for (const instance of previous) {
     if (overrides[instance.boxId] !== "sleeping" || incomingIds.has(instance.boxId)) continue;
     instances.push({ ...instance, state: "archived" });
@@ -229,9 +229,7 @@ export function reconcileCloudInventorySnapshot(
   return { instances, overrides: nextOverrides };
 }
 
-/** An empty list proves deletion only when Boat says the inventory read was
- * authoritative. Provider outages and disconnected accounts must not erase
- * the last known row or settle a pending deletion as successful. */
+/** An empty list proves deletion only when Boat says the read was authoritative. */
 export function reconcileCloudInventoryPayload(
   payload: CloudComputerInventoryPayload,
   previous: CloudComputerInventoryInstance[],
@@ -272,35 +270,9 @@ export function vpsComputerShortId(name: string): string {
   return suffix ? suffix.slice(-8).toLowerCase() : "unknown";
 }
 
-type ComputerInventoryRequest = "status" | "local-vms" | "cloud" | "vps";
-type ComputerApiRequest = [url: string, init: RequestInit];
 export interface ComputerActionPlan {
   confirmation: string | null;
   request: ComputerApiRequest;
-}
-
-const computerInventoryPaths: Record<ComputerInventoryRequest, string> = {
-  status: "/api/local-computer",
-  "local-vms": "/api/local-computer/instances",
-  cloud: "/api/computers/boxes",
-  vps: "/api/computers/vps",
-};
-
-/** Keep the observation-only Settings reads explicit and independently
- * testable: opening Computers must never provision or wake anything. */
-export function computerInventoryRequest(
-  inventory: ComputerInventoryRequest,
-  signal?: AbortSignal,
-): ComputerApiRequest {
-  return [computerInventoryPaths[inventory], { signal }];
-}
-
-function jsonPostRequest(url: string, body: unknown): ComputerApiRequest {
-  return [url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  }];
 }
 
 export function perBotLocalVmDeletePlan(instance: LocalVmInventoryInstance): ComputerActionPlan {
@@ -339,6 +311,7 @@ export function vpsComputerRemovePlan(instance: VpsComputerInventoryInstance): C
     }),
     request: jsonPostRequest(`/api/computers/vps/${encodeURIComponent(instance.name)}/remove`, {
       confirmName: instance.name,
+      alias: instance.vpsAlias,
     }),
   };
 }
@@ -349,140 +322,6 @@ export function confirmComputerAction(
 ): ComputerApiRequest | null {
   if (plan.confirmation !== null && !confirm(plan.confirmation)) return null;
   return plan.request;
-}
-
-export function VpsComputersCard({
-  instances,
-  configured,
-  sshAlias,
-  loading,
-  removingName,
-  error,
-  unavailableReason,
-  onRefresh,
-  onRemove,
-}: {
-  instances: VpsComputerInventoryInstance[];
-  configured: boolean | null;
-  sshAlias: string | null;
-  loading: boolean;
-  removingName: string | null;
-  error: string | null;
-  unavailableReason: string | null;
-  onRefresh: () => void;
-  onRemove: (instance: VpsComputerInventoryInstance) => void;
-}) {
-  return (
-    <Card
-      title={t("vm.vps.title")}
-      subtitle={t("vm.vps.subtitle")}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-[12px] text-ink-secondary">
-          {configured === true
-            ? t("vm.vps.sshHost", { alias: sshAlias ?? t("vm.vps.configuredFallback") })
-            : configured === false
-              ? t("vm.vps.needsAlias")
-              : t("vm.vps.refreshHint")}
-        </div>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={loading || removingName !== null}
-          aria-label={t("vm.vps.refreshAria")}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"
-        >
-          <RefreshCw size={12} className={cn(loading && "animate-spin")} /> {t("vm.refresh")}
-        </button>
-      </div>
-
-      {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
-
-      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-        {loading
-          ? t("vm.vps.checking")
-          : unavailableReason
-            ? t("vm.vps.unavailable", { reason: unavailableReason })
-            : configured === false
-              ? t("vm.vps.notConfigured")
-              : instances.length === 1
-                ? t("vm.vps.foundOne")
-                : t("vm.vps.foundMany", { count: instances.length })}
-      </p>
-
-      <div
-        aria-busy={loading || removingName !== null}
-        className="mt-3 overflow-hidden rounded-xl border border-hairline/40"
-      >
-        {loading && instances.length === 0 ? (
-          <div className="flex items-center gap-2 px-3 py-4 text-[13px] text-ink-secondary">
-            <Loader2 size={13} className="animate-spin" /> {t("vm.vps.checkingList")}
-          </div>
-        ) : unavailableReason ? (
-          <div className="flex items-center gap-2 px-3 py-4 text-[13px] text-ink-secondary">
-            <AlertTriangle size={14} className="shrink-0 text-warning" /> {unavailableReason}
-          </div>
-        ) : configured === false ? (
-          <div className="flex items-center gap-2 px-3 py-4 text-[13px] text-ink-secondary">
-            <Server size={14} className="shrink-0" /> {t("vm.vps.notConfigured")}
-          </div>
-        ) : instances.length === 0 ? (
-          <div className="px-3 py-4 text-[13px] text-ink-secondary">{t("vm.vps.noneFound")}</div>
-        ) : instances.map((instance, index) => {
-          const kind = vpsComputerInventoryStateKind(instance);
-          const state = computerStateLabel(kind);
-          const removing = removingName === instance.name;
-          const shortId = vpsComputerShortId(instance.name);
-          return (
-            <div
-              key={instance.name}
-              className={cn(
-                "flex items-start justify-between gap-3 px-3 py-3",
-                index > 0 && "border-t border-hairline/35",
-              )}
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="truncate text-[13.5px] font-medium text-ink">
-                    {instance.orphaned ? t("vm.vps.orphan", { id: shortId }) : instance.ownerName}
-                  </span>
-                  <span
-                    className={cn(
-                      "rounded-full px-2 py-0.5 text-[11px]",
-                      instance.inUse || kind === "running"
-                        ? "bg-success/15 text-success"
-                        : kind === "stopped" || kind === "paused"
-                          ? "bg-control text-ink-secondary"
-                          : "bg-warning/15 text-warning",
-                    )}
-                  >
-                    {state}
-                  </span>
-                </div>
-                <div className="mt-1 text-[11.5px] text-ink-secondary">
-                  {instance.orphaned ? t("vm.owner.gone") : t("vm.owner.owned")}
-                </div>
-                {instance.inUse && (
-                  <div className="mt-1 text-[11.5px] text-ink-secondary">{t("vm.vps.stopFirst")}</div>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => onRemove(instance)}
-                disabled={loading || instance.inUse || removingName !== null}
-                aria-busy={removing || undefined}
-                title={t("vm.vps.removeTitle")}
-                className="flex shrink-0 items-center gap-1.5 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {removing ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                {t("vm.vps.remove")}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-    </Card>
-  );
 }
 
 export function CloudComputersCard({
@@ -516,7 +355,7 @@ export function CloudComputersCard({
           {configured === true
             ? t("vm.cloud.includesOrphans")
             : configured === false
-              ? t("vm.cloud.needsKey")
+              ? <>{t("vm.cloud.needsKey")} <KeysLink id="box" /></>
               : t("vm.cloud.refreshHint")}
         </div>
         <button
@@ -524,13 +363,13 @@ export function CloudComputersCard({
           onClick={onRefresh}
           disabled={loading || pending !== null}
           aria-label={t("vm.cloud.refreshAria")}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"
+          className="settings-quiet -me-1.5 flex shrink-0 cursor-pointer items-center disabled:opacity-40"
         >
-          <RefreshCw size={12} className={cn(loading && "animate-spin")} /> {t("vm.refresh")}
+          {t("vm.refresh")}
         </button>
       </div>
 
-      {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
+      {error && <div role="alert" className="mt-2 text-[12px] leading-4 text-danger">{error}</div>}
 
       <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
         {loading
@@ -544,14 +383,13 @@ export function CloudComputersCard({
                 : t("vm.cloud.foundMany", { count: instances.length })}
       </p>
 
-      <div
+      {!(configured === false && !loading && !unavailableReason) && <div
         aria-busy={loading || pending !== null}
         className="mt-3 overflow-hidden rounded-xl border border-hairline/40"
       >
         {loading && instances.length === 0 ? (
-          <div className="flex items-center gap-2 px-3 py-4 text-[13px] text-ink-secondary">
-            <Loader2 size={13} className="animate-spin" /> {t("vm.cloud.checkingList")}
-          </div>
+          // Loading is two skeleton rows at their final height (§6.11), never a spinner.
+          <div role="status" aria-label={t("vm.cloud.checkingList")} className="flex flex-col"><SettingsSkeletonRows /></div>
         ) : unavailableReason ? (
           <div className="flex items-center gap-2 px-3 py-4 text-[13px] text-ink-secondary">
             <AlertTriangle size={14} className="shrink-0 text-warning" /> {unavailableReason}
@@ -578,7 +416,7 @@ export function CloudComputersCard({
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="truncate text-[13.5px] font-medium text-ink">
+                  <span className="truncate text-[14px] font-medium text-ink">
                     {instance.orphaned ? t("vm.cloud.orphan") : instance.ownerName}
                   </span>
                   <span
@@ -594,11 +432,11 @@ export function CloudComputersCard({
                     {state}
                   </span>
                 </div>
-                <div className="mt-1 break-all text-[11.5px] text-ink-secondary">
+                <div className="mt-1 break-all text-[12px] text-ink-secondary">
                   {instance.orphaned ? t("vm.owner.gone") : t("vm.owner.owned")} · {instance.name}
                 </div>
                 {instance.inUse && (
-                  <div className="mt-1 text-[11.5px] text-ink-secondary">{t("vm.cloud.stopFirst")}</div>
+                  <div className="mt-1 text-[12px] text-ink-secondary">{t("vm.cloud.stopFirst")}</div>
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
@@ -628,7 +466,7 @@ export function CloudComputersCard({
             </div>
           );
         })}
-      </div>
+      </div>}
     </Card>
   );
 }
@@ -670,13 +508,13 @@ export function LocalVmInventoryCard({
           onClick={onRefresh}
           disabled={loading || deletingBotId !== null}
           aria-label={t("vm.perBot.refreshAria")}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"
+          className="settings-quiet flex shrink-0 cursor-pointer items-center disabled:opacity-40"
         >
-          <RefreshCw size={12} className={cn(loading && "animate-spin")} /> {t("vm.refresh")}
+          {t("vm.refresh")}
         </button>
       </div>
 
-      {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
+      {error && <div role="alert" className="mt-2 text-[12px] leading-4 text-danger">{error}</div>}
 
       <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
         {loading
@@ -693,9 +531,8 @@ export function LocalVmInventoryCard({
         className="mt-3 overflow-hidden rounded-xl border border-hairline/40"
       >
         {loading && instances.length === 0 ? (
-          <div className="flex items-center gap-2 px-3 py-4 text-[13px] text-ink-secondary">
-            <Loader2 size={13} className="animate-spin" /> {t("vm.perBot.checkingList")}
-          </div>
+          // Loading is two skeleton rows at their final height (§6.11), never a spinner.
+          <div role="status" aria-label={t("vm.perBot.checkingList")} className="flex flex-col"><SettingsSkeletonRows /></div>
         ) : unavailableReason ? (
           <div className="flex items-center gap-2 px-3 py-4 text-[13px] text-ink-secondary">
             <AlertTriangle size={14} className="shrink-0 text-warning" /> {unavailableReason}
@@ -716,7 +553,7 @@ export function LocalVmInventoryCard({
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="truncate text-[13.5px] font-medium text-ink">{instance.name}</span>
+                  <span className="truncate text-[14px] font-medium text-ink">{instance.name}</span>
                   <span
                     className={cn(
                       "rounded-full px-2 py-0.5 text-[11px]",
@@ -732,19 +569,19 @@ export function LocalVmInventoryCard({
                     {state}
                   </span>
                 </div>
-                <div className="mt-1 text-[11.5px] text-ink-secondary">
+                <div className="mt-1 text-[12px] text-ink-secondary">
                   {t("vm.perBot.destination", { destination: t(destinationLabelKeys[instance.destination]) })}
                 </div>
                 {!managed && (
-                  <div className="mt-1 text-[11.5px] text-warning">
+                  <div className="mt-1 text-[12px] text-warning">
                     {t("vm.perBot.unmanaged")}
                   </div>
                 )}
                 {managed && instance.problem && !instance.inUse && (
-                  <div className="mt-1 text-[11.5px] text-warning">{instance.problem}</div>
+                  <div className="mt-1 text-[12px] text-warning">{localizeComputerProblem(instance.problem)}</div>
                 )}
                 {managed && instance.inUse && (
-                  <div className="mt-1 text-[11.5px] text-ink-secondary">{t("vm.perBot.stopFirst")}</div>
+                  <div className="mt-1 text-[12px] text-ink-secondary">{t("vm.perBot.stopFirst")}</div>
                 )}
               </div>
               {managed && <button
@@ -770,19 +607,17 @@ export function LocalVmInventoryCard({
   );
 }
 
+/** A numbered step: the 20 px ink 6% circle centred in the 32 px leading slot, its text at the icon-card edge. */
 function Step({ n, title, done, children }: { n: number; title: string; done: boolean; children?: React.ReactNode }) {
   return (
-    <div className="flex gap-3">
-      <div
-        className={cn(
-          "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[11px]",
-          done ? "bg-success/20 text-success" : "border border-hairline/50 text-ink-secondary",
-        )}
-      >
-        {done ? <Check size={12} /> : n}
-      </div>
+    <div className="flex gap-3" data-vm-step={n}>
+      <span className="flex size-8 shrink-0 items-start justify-center pt-0.5">
+        <span aria-hidden="true" className="flex size-5 items-center justify-center rounded-full bg-ink/[0.06] text-[12px] font-medium leading-4 text-ink-secondary">
+          {done ? <Check size={12} /> : n}
+        </span>
+      </span>
       <div className="min-w-0 flex-1">
-        <div className={cn("text-[14px]", done ? "text-ink-secondary line-through" : "text-ink")}>{title}</div>
+        <div className={cn("text-[14px] leading-5", done ? "text-ink-secondary" : "text-ink")}>{title}</div>
         {!done && children && <div className="mt-2 flex flex-col items-start gap-2 [&>*]:max-w-full">{children}</div>}
       </div>
     </div>
@@ -805,11 +640,10 @@ function ActionButton({
   return (
     <button
       onClick={onClick}
+      aria-busy={pending === action}
       disabled={pending !== null}
-      className={cn(
-        "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-50",
-        danger ? "bg-danger/15 text-danger hover:bg-danger/20" : "bg-accent text-white hover:brightness-110",
-      )}
+      data-danger={danger ? "" : undefined}
+      className={cn(danger ? "settings-quiet flex cursor-pointer items-center gap-1.5" : "ui-button ui-button-md cursor-pointer rounded-full", "disabled:opacity-50")}
     >
       {pending === action && <Loader2 size={13} className="animate-spin" />}
       {children}
@@ -817,10 +651,123 @@ function ActionButton({
   );
 }
 
-export function LocalComputerSection() {
+// Mirrors localVm.idleTimeoutMinutes in server/config.ts; the server is the authority.
+const MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES = 5;
+const MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES = 1_440;
+const DEFAULT_LOCAL_VM_IDLE_TIMEOUT_MINUTES = 480;
+
+export function parseLocalVmIdleTimeoutMinutes(value: string): number | null {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const minutes = Number(trimmed);
+  return minutes >= MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES && minutes <= MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES ? minutes : null;
+}
+
+export function LocalVmIdleTimeoutSetting({
+  minutes,
+  disabled,
+  onSave,
+}: {
+  minutes: number;
+  disabled: boolean;
+  onSave: (minutes: number) => Promise<void>;
+}) {
+  const [value, setValue] = useState(String(minutes));
+  const [dirty, setDirty] = useState(false);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!dirty) setValue(String(minutes));
+  }, [minutes, dirty]);
+
+  const save = async () => {
+    if (!dirty || saving) return;
+    const parsed = parseLocalVmIdleTimeoutMinutes(value);
+    if (parsed === null) {
+      setError(t("vm.idle.range"));
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(parsed);
+      setValue(String(parsed));
+      setDirty(false);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("vm.idle.error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 flex flex-col gap-1">
+      <div className="flex items-center justify-between gap-6">
+        <div className="min-w-0">
+          <label htmlFor="local-vm-idle-timeout" className="text-[14px] leading-5 text-ink">{t("vm.idle.label")}</label>
+          <div id="local-vm-idle-timeout-help" className="text-[13px] leading-[18px] text-ink-secondary">{t("vm.idle.detail")}</div>
+        </div>
+        <span className="flex shrink-0 items-center gap-2">
+          <input
+            id="local-vm-idle-timeout"
+            type="number"
+            min={MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES}
+            max={MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES}
+            step={1}
+            inputMode="numeric"
+            value={value}
+            disabled={disabled || saving}
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? "local-vm-idle-timeout-error local-vm-idle-timeout-help" : "local-vm-idle-timeout-help"}
+            onChange={(event) => {
+              setValue(event.target.value);
+              setDirty(true);
+              setError("");
+            }}
+            onBlur={() => void save()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            className={cn(SETTINGS_INLINE_INPUT, "w-16 bg-transparent", error && "border-danger/60")}
+          />
+          <span className="text-[13px] leading-5 text-ink-secondary">{t("vm.idle.minutes")}</span>
+        </span>
+      </div>
+      {error ? (
+        <p id="local-vm-idle-timeout-error" role="alert" className="text-[12px] leading-4 text-danger">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** A command, behind a quiet Show (no native triangle). */
+function ShowCommand({ label, command }: { label: string; command: string }) {
+  const [open, setOpen] = useState(false);
+  return <div className="flex w-full flex-col gap-2">
+    <button type="button" aria-expanded={open} className="settings-quiet -ml-1.5 cursor-pointer self-start" onClick={() => setOpen((value) => !value)}>{label}</button>
+    {open && <CommandLine command={command} />}
+  </div>;
+}
+
+/** Safety and storage in two lines, the rest behind Learn more. */
+function SafetyLine({ perBot, path }: { perBot: boolean; path: string }) {
+  const [more, setMore] = useState(false);
+  return <div className="flex flex-col gap-1 text-[13px] leading-[18px] text-ink-secondary">
+    <p>{t(perBot ? "vm.safety.perBotShort" : "vm.safety.sharedShort", { path })}{" "}<LearnMore onClick={() => setMore((value) => !value)} /></p>
+    {more && <p className="text-[12px] leading-4">{t(perBot ? "vm.safety.perBot" : "vm.safety.shared", { path })}</p>}
+  </div>;
+}
+
+export function LocalComputerSection({ privateOnly = false }: { privateOnly?: boolean }) {
+  const cloudHome = useStore().state.config?.cloudHome === true;
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState<Action | null>(null);
+  const actionController = useRef<AbortController | null>(null);
+  useEffect(() => () => actionController.current?.abort(), []);
   const [error, setError] = useState<string | null>(null);
   const [policyPending, setPolicyPending] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -842,7 +789,7 @@ export function LocalComputerSection() {
   const cloudOverridesRef = useRef<CloudPostActionOverrides>({});
   const [vpsInventory, setVpsInventory] = useState<VpsComputerInventoryInstance[]>([]);
   const [vpsConfigured, setVpsConfigured] = useState<boolean | null>(null);
-  const [vpsSshAlias, setVpsSshAlias] = useState<string | null>(null);
+  const [vpsAliases, setVpsAliases] = useState<string[]>([]);
   const [vpsLoading, setVpsLoading] = useState(true);
   const [vpsError, setVpsError] = useState<string | null>(null);
   const [vpsUnavailableReason, setVpsUnavailableReason] = useState<string | null>(null);
@@ -853,12 +800,11 @@ export function LocalComputerSection() {
   const refresh = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch(...computerInventoryRequest("status", signal));
     const body = await response.json().catch(() => ({}));
-    // The poll loop can be cleaned up mid-flight; a resolved-but-stale read
-    // must never overwrite the state of whoever unmounted us.
     if (signal?.aborted) return;
     if (!response.ok) throw new Error(body.error ?? t("vm.err.status", { code: response.status }));
     setStatus(body as Status);
     setError(null);
+    return body as Status;
   }, []);
 
   const refreshInventory = useCallback(async (signal?: AbortSignal) => {
@@ -868,7 +814,7 @@ export function LocalComputerSection() {
     const payload = body as LocalVmInventoryPayload;
     setInventory(payload.instances);
     setInventoryMax(payload.maxInstances);
-    setInventoryUnavailableReason(payload.available ? null : (payload.problem ?? t("vm.err.runtimeUnavailable")));
+    setInventoryUnavailableReason(payload.available ? null : (localizeComputerProblem(payload.problem) ?? t("vm.err.runtimeUnavailable")));
     setInventoryError(null);
   }, []);
 
@@ -901,7 +847,7 @@ export function LocalComputerSection() {
     const payload = body as VpsComputerInventoryPayload;
     setVpsInventory(Array.isArray(payload.instances) ? payload.instances : []);
     setVpsConfigured(payload.configured === true);
-    setVpsSshAlias(typeof payload.sshAlias === "string" ? payload.sshAlias : null);
+    setVpsAliases(Array.isArray(payload.vpsAliases) ? payload.vpsAliases : []);
     setVpsUnavailableReason(
       payload.available || !payload.configured
         ? null
@@ -911,6 +857,7 @@ export function LocalComputerSection() {
   }, []);
 
   useEffect(() => {
+    if (cloudHome) return;
     let active = true;
     let timer: number | undefined;
     let controller: AbortController | undefined;
@@ -936,7 +883,7 @@ export function LocalComputerSection() {
       controller?.abort();
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [refresh, refreshKey]);
+  }, [cloudHome, refresh, refreshKey]);
 
   useEffect(() => {
     if (status?.mode !== "per-bot") {
@@ -960,10 +907,8 @@ export function LocalComputerSection() {
     return () => controller.abort();
   }, [inventoryRefreshKey, refreshInventory, status?.mode]);
 
-  // Boat account listing is deliberately not polled. It can be expensive and
-  // Settings must remain an observation-only surface until the person clicks
-  // Sleep or Delete.
   useEffect(() => {
+    if (privateOnly) return;
     const controller = new AbortController();
     setCloudLoading(true);
     void refreshCloudInventory(controller.signal)
@@ -976,11 +921,10 @@ export function LocalComputerSection() {
         if (!controller.signal.aborted) setCloudLoading(false);
       });
     return () => controller.abort();
-  }, [cloudRefreshKey, refreshCloudInventory]);
+  }, [cloudRefreshKey, privateOnly, refreshCloudInventory]);
 
-  // Docker-over-SSH inventory is also manual/mount-only. A Settings view
-  // must never become a hidden remote poller or wake a stopped container.
   useEffect(() => {
+    if (privateOnly) return;
     const controller = new AbortController();
     setVpsLoading(true);
     void refreshVpsInventory(controller.signal)
@@ -993,13 +937,14 @@ export function LocalComputerSection() {
         if (!controller.signal.aborted) setVpsLoading(false);
       });
     return () => controller.abort();
-  }, [refreshVpsInventory, vpsRefreshKey]);
+  }, [privateOnly, refreshVpsInventory, vpsRefreshKey]);
 
-  const post = async (action: Exclude<Action, "recreate">) => {
+  const post = async (action: Exclude<Action, "recreate">, signal: AbortSignal) => {
     const response = await fetch(`/api/local-computer/${action}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
+      signal,
     });
     const body = await response.json().catch(() => ({}));
     const errorKeys: Record<Exclude<Action, "recreate">, LocaleKey> = {
@@ -1010,26 +955,37 @@ export function LocalComputerSection() {
       remove: "vm.deleteError",
     };
     if (!response.ok) throw new Error(body.error ?? t(errorKeys[action]));
+    signal.throwIfAborted();
     setStatus(body as Status);
+    return body as Status;
   };
 
   const confirmAction = (message: string) => window.ogb?.confirm ? window.ogb.confirm(message) : window.confirm(message);
 
   const act = async (action: Action) => {
-    if (pending !== null) return;
+    if (pending !== null || actionController.current) return;
+    const controller = new AbortController();
+    actionController.current = controller;
     setPending(action);
     setError(null);
     try {
       if (action === "remove" && !(await confirmAction(t("vm.confirm.deleteShared")))) return;
       if (action === "recreate" && !(await confirmAction(t("vm.confirm.recreate")))) return;
+      let result: Status;
       if (action === "recreate") {
-        await post("remove");
-        await post("run");
+        await post("remove", controller.signal);
+        result = await post("run", controller.signal);
       } else {
-        await post(action);
+        result = await post(action, controller.signal);
       }
-      // The desktop starts after the container process; keep the progress
-      // state honest and let the regular poll mark it Ready a few seconds on.
+      if (action === "run" || action === "start" || action === "recreate") {
+        result = await waitForLocalVmReady(
+          result,
+          async () => (await refresh(controller.signal)) ?? result,
+          controller.signal,
+        );
+        if (!result.ready) throw new Error(result.problem ?? t("vm.err.start"));
+      }
       await refresh();
       setAnnouncement(
         action === "remove"
@@ -1039,9 +995,11 @@ export function LocalComputerSection() {
             : t("vm.announce.updated"),
       );
     } catch (e) {
+      if (controller.signal.aborted) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setPending(null);
+      actionController.current = null;
+      if (!controller.signal.aborted) setPending(null);
     }
   };
 
@@ -1063,6 +1021,17 @@ export function LocalComputerSection() {
     } finally {
       setPolicyPending(false);
     }
+  };
+
+  const saveIdleTimeout = async (idleTimeoutMinutes: number) => {
+    const response = await fetch("/api/config", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ localVm: { idleTimeoutMinutes } }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? t("vm.idle.error"));
+    setStatus((current) => current ? { ...current, idle_timeout_ms: idleTimeoutMinutes * 60_000 } : current);
   };
 
   const deletePerBotVm = async (instance: LocalVmInventoryInstance) => {
@@ -1129,15 +1098,11 @@ export function LocalComputerSection() {
 
       if (deletionPending) {
         // Boat may accept a background operation before the computer is gone.
-        // Keep the row visible as Removing while we check, then drop the
-        // optimistic state if the provider still lists it so the person can
-        // refresh or retry instead of being shown a false success forever.
         for (const delayMs of PENDING_CLOUD_DELETE_REFRESH_DELAYS_MS) {
           await waitForCloudDeleteRefresh(delayMs);
           try {
             await refreshCloudInventory();
           } catch {
-            // A later bounded attempt can still establish the final state.
           }
           if (cloudOverridesRef.current[instance.boxId] !== "deleting") {
             setAnnouncement(t("vm.announce.cloudDeleted", { subject }));
@@ -1211,8 +1176,7 @@ export function LocalComputerSection() {
   const existing = status?.container !== "missing";
   const needsRecreate = Boolean(
     existing &&
-      (status?.container === "stopped" ||
-        !status?.imageMatches ||
+      (!status?.imageMatches ||
         !status?.managed ||
         status?.network === "unsafe" ||
         status?.security === "unsafe" ||
@@ -1227,7 +1191,7 @@ export function LocalComputerSection() {
   return (
     <>
       <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</p>
-      <CloudComputersCard
+      {!privateOnly && <><CloudComputersCard
         instances={cloudInventory}
         configured={cloudConfigured}
         loading={cloudLoading}
@@ -1238,11 +1202,10 @@ export function LocalComputerSection() {
         onSleep={(instance) => void actOnCloudComputer("sleep", instance)}
         onDelete={(instance) => void actOnCloudComputer("delete", instance)}
       />
-
       <VpsComputersCard
         instances={vpsInventory}
         configured={vpsConfigured}
-        sshAlias={vpsSshAlias}
+        aliases={vpsAliases}
         loading={vpsLoading}
         removingName={vpsRemovingName}
         error={vpsError}
@@ -1250,9 +1213,9 @@ export function LocalComputerSection() {
         onRefresh={() => setVpsRefreshKey((key) => key + 1)}
         onRemove={(instance) => void removeVpsComputer(instance)}
       />
+      <MacLocalControl /></>}
 
-      <MacLocalControl />
-
+      {!cloudHome && <>
       <Card
         title={t("vm.main.title")}
         subtitle={perBot
@@ -1260,14 +1223,8 @@ export function LocalComputerSection() {
           : t("vm.main.sharedSubtitle", { host })}
       >
         <div className="flex flex-wrap items-center gap-2">
-          <span
-            aria-live="polite"
-            className={cn(
-              "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12.5px]",
-              headerReady ? "bg-success/15 text-success" : "bg-control text-ink-secondary",
-            )}
-          >
-            {loading ? <Loader2 size={12} className="animate-spin" /> : headerReady ? <Check size={12} /> : <Circle size={9} />}
+          <span aria-live="polite" className="mr-auto flex items-center text-[13px] leading-[18px] text-ink-secondary">
+            {loading ? <Loader2 size={12} className="mr-1.5 animate-spin" /> : <StatusDot tone={headerReady ? "success" : null} />}
             {loading
               ? t("common.checking")
               : unavailable
@@ -1287,63 +1244,54 @@ export function LocalComputerSection() {
               setInventoryRefreshKey((key) => key + 1);
             }}
             disabled={loading || pending !== null}
-            className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"
+            className="settings-quiet cursor-pointer last:-me-1.5 disabled:opacity-40"
           >
-            <RefreshCw size={12} /> {t("vm.main.recheck")}
+            {t("vm.main.recheck")}
           </button>
           {ready && !perBot && (
             <a
               href={status?.viewer_url ?? c?.view}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink hover:bg-control"
+              className="settings-quiet cursor-pointer"
             >
-              <ExternalLink size={12} /> {t("vm.main.watch")}
+              {t("vm.main.watch")}
             </a>
           )}
         </div>
-        {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
+        {error && <div role="alert" className="mt-2 text-[12px] leading-4 text-danger">{error}</div>}
       </Card>
 
       <Card
         title={t("vm.isolation.title")}
         subtitle={t("vm.isolation.subtitle")}
       >
-        <div className="flex overflow-hidden rounded-lg border border-hairline/40">
-          {(["shared", "per-bot"] as const).map((mode, index) => (
-            <button
-              key={mode}
-              type="button"
-              disabled={!status || policyPending}
-              onClick={() => void savePolicy(mode, status?.max_instances ?? 2)}
-              className={cn(
-                "flex-1 px-3 py-2 text-[13px] disabled:opacity-50",
-                index > 0 && "border-l border-hairline/40",
-                status?.mode === mode ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
-              )}
-            >
-              {mode === "shared" ? t("vm.isolation.shared") : t("vm.isolation.perBot")}
-            </button>
-          ))}
+        <div className="flex justify-end">
+          <Segmented label={t("vm.isolation.title")} value={status?.mode === "per-bot" ? "per-bot" : "shared"} disabled={!status || policyPending}
+            onChange={(mode) => { if (status) void savePolicy(mode, status.max_instances ?? 2); }}
+            options={[{ value: "shared" as const, label: t("vm.isolation.shared") }, { value: "per-bot" as const, label: t("vm.isolation.perBot") }]} />
         </div>
-        {/* The cap only applies to per-bot VMs; shared mode runs exactly one. */}
         {perBot && (
           <div className="mt-3 flex items-center justify-between gap-3">
             <div>
               <div className="text-[13px] text-ink">{t("vm.isolation.max")}</div>
-              <div className="text-[11.5px] text-ink-secondary">{t("vm.isolation.maxDetail")}</div>
+              <div className="text-[12px] text-ink-secondary">{t("vm.isolation.maxDetail")}</div>
             </div>
-            <select
+            <Select size="sm"
               aria-label={t("vm.isolation.maxAria")}
               value={status?.max_instances ?? 2}
               disabled={!status || policyPending}
               onChange={(event) => void savePolicy(status?.mode ?? "shared", Number(event.target.value))}
-              className="rounded-lg border border-hairline/40 bg-control px-2.5 py-1.5 text-[13px] text-ink disabled:opacity-50"
             >
               {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => <option key={value} value={value}>{value}</option>)}
-            </select>
+            </Select>
           </div>
         )}
+        <LocalVmIdleTimeoutSetting
+          minutes={status ? Math.round(status.idle_timeout_ms / 60_000) : DEFAULT_LOCAL_VM_IDLE_TIMEOUT_MINUTES}
+          disabled={!status || policyPending}
+          onSave={saveIdleTimeout}
+        />
         {policyPending && <div className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-secondary"><Loader2 size={12} className="animate-spin" /> {t("vm.saving")}</div>}
       </Card>
 
@@ -1382,7 +1330,7 @@ export function LocalComputerSection() {
             {status?.daemonUp && (
               <ActionButton action="pull" pending={pending} onClick={() => void act("pull")}>{t("vm.setup.prepare")}</ActionButton>
             )}
-            {c?.pull && <details className="text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("vm.setup.showPull")}</summary><div className="mt-2"><CommandLine command={c.pull} /></div></details>}
+            {c?.pull && <ShowCommand label={t("vm.setup.showPull")} command={c.pull} />}
           </Step>
 
           <Step
@@ -1417,7 +1365,10 @@ export function LocalComputerSection() {
                 )}
               </>
             ) : status?.container === "stopped" ? (
-              <ActionButton action="start" pending={pending} onClick={() => void act("start")}>{t("vm.setup.start")}</ActionButton>
+              <>
+                <p className="text-[13px] text-ink-secondary">{t(status.stop_reason === "idle" ? "vm.stopped.idle" : "vm.stopped.detail")}</p>
+                <ActionButton action="start" pending={pending} onClick={() => void act("start")}>{t("vm.setup.start")}</ActionButton>
+              </>
             ) : status?.container === "running" ? (
               <div className="flex items-center gap-2 text-[13px] text-ink-secondary"><Loader2 size={13} className="animate-spin" /> {t("vm.setup.waiting")}</div>
             ) : status?.image ? (
@@ -1426,7 +1377,7 @@ export function LocalComputerSection() {
                 <p className="text-[13px] leading-relaxed text-ink-secondary">{t("vm.setup.idleHint")}</p>
               </>
             ) : null}
-            {c?.run && <details className="text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("vm.setup.showCommand")}</summary><div className="mt-2"><CommandLine command={c.run} /></div></details>}
+            {c?.run && <ShowCommand label={t("vm.setup.showCommand")} command={c.run} />}
           </Step>
         </div>
       </Card>
@@ -1453,14 +1404,8 @@ export function LocalComputerSection() {
         </Card>
       )}
 
-      <Card
-        title={t("vm.safety.title")}
-        subtitle={
-          perBot
-            ? t("vm.safety.perBot", { path: status?.workspace_guest_path ?? "/home/cua/workspace" })
-            : t("vm.safety.shared", { path: status?.workspace_guest_path ?? "/home/cua/workspace" })
-        }
-      >
+      <Card title={t("vm.safety.title")}>
+        <SafetyLine perBot={perBot} path={status?.workspace_guest_path ?? "/home/cua/workspace"} />
         {existing && (
           <div className="flex flex-wrap gap-2">
             {status?.container === "running" && (
@@ -1473,15 +1418,20 @@ export function LocalComputerSection() {
             </ActionButton>
           </div>
         )}
-        <div className="mt-3 break-all text-[11px] text-ink-secondary">
-          {t("vm.safety.workspace", {
+        {/* One detail per line, "Label: value"; only an image's digest may break anywhere, never a word. */}
+        <div data-vm-folder="" className="flex flex-col font-mono text-[12px] leading-4 text-ink-secondary">
+          {[...t("vm.safety.workspace", {
             path: status?.workspace_path ?? t("vm.safety.notCreated"),
-            driver: status?.driver_version ?? "0.20.0",
+            driver: status?.driver_version ?? "0.37.0",
             image: status?.image_ref ?? t("vm.safety.notPrepared"),
+          }).split(" · "), ...(status?.base_image_ref ? [t("vm.safety.baseImage", { image: status.base_image_ref })] : [])].map((detail) => {
+            const at = detail.indexOf(": ");
+            const value = at < 0 ? detail : detail.slice(at + 2);
+            return <span key={detail} className="block">{at < 0 ? null : detail.slice(0, at + 2)}<span className={/[@:]sha256|^sha256|[0-9a-f]{24,}/.test(value) ? "[overflow-wrap:anywhere]" : "break-words"}>{value}</span></span>;
           })}
-          {status?.base_image_ref ? <> · {t("vm.safety.baseImage", { image: status.base_image_ref })}</> : null}
         </div>
       </Card>
+      </>}
     </>
   );
 }

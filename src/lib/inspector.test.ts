@@ -14,8 +14,14 @@ describe("summarizeRuntime", () => {
       summary: "turn ok · end_turn · $0.0123",
       tone: "boundary",
     });
+    expect(summarizeRuntime({ ...base, type: "turn.completed", ok: true, cost: 0.00005 }).summary).toBe("turn ok · $0.0001");
+    expect(summarizeRuntime({ ...base, type: "turn.completed", ok: true, cost: 1234.5 }).summary).toBe("turn ok · $1234.5000");
     expect(summarizeRuntime({ ...base, type: "turn.completed", ok: false }).tone).toBe("error");
     expect(summarizeRuntime({ ...base, type: "runtime.error", message: "boom", setup: true }).summary).toBe("setup: boom");
+    expect(summarizeRuntime({ ...base, type: "runtime.notice", message: "OpenCode no longer offers x" })).toEqual({
+      summary: "notice: OpenCode no longer offers x",
+      tone: "plain",
+    });
   });
 
   it("labels computer waits and their outcomes", () => {
@@ -38,6 +44,10 @@ describe("summarizeRuntime", () => {
     expect(summarizeRuntime({ ...base, type: "turn.wait_ended", resource: "computer:host", waitedMs: 120_000, outcome: "gave_up" })).toEqual({
       summary: "computer wait gave up after 120s",
       tone: "error",
+    });
+    expect(summarizeRuntime({ ...base, type: "turn.wait_ended", resource: "computer:host", waitedMs: 120_000, outcome: "parked" })).toEqual({
+      summary: "computer wait parked after 120s",
+      tone: "plain",
     });
     expect(summarizeRuntime({ ...base, type: "turn.wait_ended", resource: "computer:host", waitedMs: 800, outcome: "acquired" })).toEqual({
       summary: "computer acquired after under a second",

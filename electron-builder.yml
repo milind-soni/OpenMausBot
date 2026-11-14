@@ -45,6 +45,8 @@ files:
   - "!electron/resources/recorder-helper-Info.plist"
   - "!electron/resources/OpenMausBot Recorder.app/**"
   - "!**/node_modules/**"
+  - src/locales/*.json
+  - "!src/locales/source-hashes.json"
   - package.json
 
 asar: true
@@ -66,6 +68,19 @@ extraResources:
     to: licenses/hpke-core-LICENSE.txt
   - from: third_party/hpke-js/common-LICENSE.txt
     to: licenses/hpke-common-LICENSE.txt
+  # The model provider catalog: models.dev data and OpenCode's refresh logic.
+  - from: third_party/models-dev/LICENSE
+    to: licenses/models-dev-LICENSE.txt
+  - from: third_party/opencode/LICENSE
+    to: licenses/opencode-LICENSE.txt
+  # Code adapted from T3 Code (MIT): the bots' browser egress gate, the Antigravity runtime, citations.
+  - from: third_party/t3-code/LICENSE
+    to: licenses/t3-code-LICENSE.txt
+  # The 1Password SDK and its WebAssembly core (MIT; saved logins from
+  # 1Password, staged in the duckdb resource tree). Neither npm package
+  # carries its license text, so the upstream file travels here.
+  - from: third_party/onepassword-sdk/LICENSE
+    to: licenses/1password-sdk-LICENSE.txt
   - from: dist
     to: ui
   - from: dist-server
@@ -110,11 +125,22 @@ mac:
       to: cloudflared/cloudflared
     - from: dist-native/browser/darwin-${arch}
       to: browser-engine
+    # The Data engine's native modules (DuckDB, resvg; server/data/engine.ts)
+    # as a node_modules tree the server requires at runtime; prepare-duckdb
+    # stages this arch's slice. The copy names the node_modules directory
+    # itself: electron-builder's resource filter drops a root-level
+    # node_modules entry of any tree it copies (app-builder-lib util/filter).
+    - from: dist-native/duckdb/darwin-${arch}/node_modules
+      to: duckdb/node_modules
   extendInfo:
     NSMicrophoneUsageDescription: OpenMausBot uses the microphone for voice dictation into the composer.
     NSSpeechRecognitionUsageDescription: OpenMausBot transcribes your voice on-device to type messages for you.
     NSAccessibilityUsageDescription: OpenMausBot uses Accessibility when you let a bot control this Mac.
+    NSLocalNetworkUsageDescription: OpenMausBot connects to your phones and your other computers on this network and on Tailscale.
+    NSBonjourServices:
+      - _openmausbot._tcp
     NSScreenCaptureUsageDescription: OpenMausBot uses Screen Recording so bots can see this Mac before acting.
+    NSDownloadsFolderUsageDescription: OpenMausBot looks in Downloads for the file your Grok Bot saved when you move it here.
   # Notarization runs manually after the build (notarytool + staple),
   # mirroring the BlueyLite ship_release.sh flow.
   notarize: false
@@ -125,6 +151,17 @@ dmg:
   # the arm64 one when both arches build (this section overrides both the
   # top-level and mac-level artifactName, so it must carry the arch itself)
   artifactName: OpenMausBot-${version}-${arch}.dmg
+  # x/y are icon centres in points. electron-builder 26.15.3 sizes the window
+  # from build/background.png and ignores dmg.window whenever a background is set.
+  iconSize: 112
+  iconTextSize: 13
+  contents:
+    - x: 180
+      y: 206
+    - x: 540
+      y: 206
+      type: link
+      path: /Applications
 
 win:
   target:
@@ -138,6 +175,8 @@ win:
       to: cloudflared/cloudflared.exe
     - from: dist-native/browser/win32-x64
       to: browser-engine
+    - from: dist-native/duckdb/win32-x64/node_modules
+      to: duckdb/node_modules
     # CUA driver and SDK for Windows — must live outside ASAR for native modules
     - from: dist-native/cua-win32-x64/cua-driver.exe
       to: cua-driver.exe
@@ -189,6 +228,8 @@ linux:
       to: cloudflared/cloudflared
     - from: dist-native/browser/linux-x64
       to: browser-engine
+    - from: dist-native/duckdb/linux-x64/node_modules
+      to: duckdb/node_modules
     - from: build/linux-openmausbot-browser.apparmor
       to: openmausbot-browser.apparmor
   desktop:
@@ -205,6 +246,12 @@ deb:
   fpm: ["--depends", "apparmor"]
   # dpkg can preserve legacy directory modes during an upgrade. This
   # idempotent hook repairs only the exact package-owned CUA path.
+  afterInstall: build/linux-after-install.sh
+  afterRemove: build/linux-after-remove.sh
+
+pacman:
+  packageCategory: utils
+  fpm: ["--depends", "fuse3", "--depends", "gtk3", "--depends", "nss", "--depends", "alsa-lib", "--depends", "libcups", "--depends", "mesa"]
   afterInstall: build/linux-after-install.sh
   afterRemove: build/linux-after-remove.sh
 

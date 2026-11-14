@@ -81,10 +81,9 @@ Stop, provider failure, Off, a new queued request, and rejected in-flight manual
 surface changes have regression coverage. The VPS fixture separately proves
 starting a stopped container and creating a missing one only after selection.
 
-Two limits remain explicit: a stopped Local VM is not destructively rebuilt to
-make selection succeed, and the native Boat runner does not expose the local
-agents MCP. Switching back from an already Cloud-pinned native Boat conversation
-therefore uses the composer destination selector for now.
+One limit remains explicit: a stopped Local VM is not destructively rebuilt to
+make selection succeed. Every engine keeps its own model on Cloud, with the
+Boat as its computer tools; no engine runs a turn on Boat's own agent.
 
 Run the regression coverage without a container engine:
 

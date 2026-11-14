@@ -1,293 +1,301 @@
-// The question box: what the bot actually asked, and its own answers.
-//
-// This is the card for a structured ask — Claude's AskUserQuestion. The
-// provider routes it through the permission channel, so without this it
-// arrived as "Deny / Always allow / Allow once" over a question like "which
-// model should this bot run on?", which is not an answer to anything.
-//
-// One tab per question (the model names them), the model's options as rows
-// with their descriptions, an "Other" row for a reply it did not think of,
-// and a single submit that sends every answer back at once — the shape a
-// person can read at a glance and answer without scrolling back up.
+// A bot's question to the person, whatever asked it: a pick from its choices, its own words, or both. The same card
+// answers in the chat, in the inbox's copy of it and in the inbox panel.
 import { useMemo, useState } from "react";
-import { Check, MessageCircleQuestion } from "lucide-react";
-import { useStore, type Bot, type Message } from "@/state/store";
+import { Check } from "lucide-react";
+import { useStore, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import {
   answerWithoutPreamble,
   formatQuestionAnswers,
   MAX_CUSTOM_ANSWER,
+  questionAnswersByQuestion,
   type AskQuestion,
 } from "../../shared/ask-question";
+import {
+  AskCard,
+  AskChoices,
+  AskError,
+  AskHeader,
+  AskReply,
+  AskSettledLine,
+  ASK_QUIET_BUTTON,
+  ASK_SMALL_PILL,
+  askPrimary,
+  returnFocusToComposer,
+  settledAnswer,
+  type Asker,
+} from "./AskCard";
 import { ExpandableText } from "./ExpandableText";
+import { useInboxOrigin } from "./InboxLine";
+import { accessRequestWords, cardAnswerFor } from "./bot-access/access-card";
 
-/** What each question has been answered with so far. Option labels and the
- * free-text reply are kept apart so toggling "Other" off cannot silently
- * drop a choice the person already made. */
+export { isQuestionCard } from "@/lib/question-card";
+
 interface Draft {
   picked: string[];
   custom: string;
-  /** "Other" is open. An empty open field is not an answer. */
-  other: boolean;
 }
 
-const EMPTY: Draft = { picked: [], custom: "", other: false };
+const EMPTY: Draft = { picked: [], custom: "" };
+const TITLE_MAX = 160;
+
+/** The questions a card asks: a provider's structured set, or one question with the card's own choices. */
+export function cardQuestions(card: NonNullable<Message["card"]>): AskQuestion[] {
+  if (card.questionRequest?.questions.length) return card.questionRequest.questions;
+  if (!card.subtitle && !card.title) return [];
+  const words = accessRequestWords(card);
+  return [{ question: words?.question ?? (card.subtitle || card.title), options: (words?.options ?? card.options).map((label) => ({ label })), ...(card.fixedOptions && card.options.length ? { custom: false as const } : {}) }];
+}
+
+export function answersInOneTap(questions: readonly AskQuestion[]): boolean {
+  return questions.length === 1 && !questions[0]!.multiSelect && questions[0]!.options.length > 0;
+}
 
 function answersOf(draft: Draft): string[] {
-  const custom = draft.other ? draft.custom.trim() : "";
+  const custom = draft.custom.trim();
   return custom ? [...draft.picked, custom] : draft.picked;
 }
 
-/** The tab label: the model's own header, or a number when it gave none. */
 function tabLabel(question: AskQuestion, index: number): string {
   return question.header ?? t("question.tab.numbered", { index: index + 1 });
 }
 
+export function settledQuestionLine(
+  questions: readonly AskQuestion[],
+  answer: string | null | undefined,
+): { label: string; value: string } {
+  if (!answer) return { label: t("question.status.answered"), value: "" };
+  const byQuestion = questionAnswersByQuestion(answer, questions);
+  const flat = (text: string) => text.replace(/\s+/g, " ").trim();
+  if (questions.length === 1) {
+    const only = questions[0]!;
+    const value = byQuestion[only.question] ?? answerWithoutPreamble(answer);
+    return { label: only.header ?? only.question, value: flat(value) };
+  }
+  const parts = questions.flatMap((question, index) => {
+    const value = byQuestion[question.question];
+    return value ? [`${tabLabel(question, index)}: ${flat(value)}`] : [];
+  });
+  return {
+    label: t("question.status.answered"),
+    value: parts.length ? parts.join(" · ") : flat(answerWithoutPreamble(answer)),
+  };
+}
+
 export function QuestionCard({
   threadId,
-  bot,
+  asker,
   message,
+  typedPast = false,
 }: {
-  /** answered by THREAD, so a question raised inside a room settles the
-   * same way as one in a 1:1 chat */
   threadId: string;
-  /** who is asking, for the "Name has a question" line */
-  bot?: Bot;
+  asker?: Asker;
   message: Message;
+  /** The person has written in the chat since: the choices recede, and still answer. */
+  typedPast?: boolean;
 }) {
   const { dispatch } = useStore();
+  const origin = useInboxOrigin(message);
   const card = message.card;
-  const questions = card?.questionRequest?.questions ?? [];
+  const questions = useMemo(() => (card ? cardQuestions(card) : []), [card]);
   const [drafts, setDrafts] = useState<Record<number, Draft>>({});
   const [active, setActive] = useState(0);
-  // The server settles the card, but only after a round trip. Holding the
-  // sent answer here closes the window where the buttons are still live.
-  const [sent, setSent] = useState<string | null>(null);
+  const [sent, setSent] = useState<{ answer: string; label?: string } | null>(null);
+  const [failed, setFailed] = useState(false);
 
-  const answered = useMemo(
-    () => questions.map((_, index) => answersOf(drafts[index] ?? EMPTY).length > 0),
-    [questions, drafts],
-  );
+  if (!card?.requestId || !questions.length) return null;
+  if (decidedByBot(card)) return <DecidedQuestion threadId={threadId} asker={asker} card={card} questions={questions} />;
+  if (card.answered || card.expired || card.stopped) return <SettledQuestion card={card} questions={questions} />;
 
-  if (!card || !questions.length) return null;
-  const settled = Boolean(card.answered) || sent !== null;
-  const current = questions[Math.min(active, questions.length - 1)]!;
   const currentIndex = Math.min(active, questions.length - 1);
+  const current = questions[currentIndex]!;
   const draft = drafts[currentIndex] ?? EMPTY;
-  const answeredCount = answered.filter(Boolean).length;
-  const complete = answeredCount === questions.length;
-
+  const oneTap = answersInOneTap(questions);
+  const answered = questions.map((_, index) => answersOf(drafts[index] ?? EMPTY).length > 0);
+  const complete = answered.every(Boolean);
+  const sending = sent !== null && !failed;
+  const multi = Boolean(current.multiSelect);
+  const freeText = current.custom !== false;
+  const single = questions.length === 1;
+  const title = single && current.question.length <= TITLE_MAX ? current.question : single && current.header ? current.header : null;
   const update = (index: number, next: Partial<Draft>) =>
     setDrafts((previous) => ({ ...previous, [index]: { ...(previous[index] ?? EMPTY), ...next } }));
 
+  function send(final: Record<number, Draft>, label?: string) {
+    if (sending || !card?.requestId) return;
+    const answers = questions.map((_, index) => answersOf(final[index] ?? EMPTY));
+    if (answers.some((entry) => !entry.length)) return;
+    const message = card.questionRequest ? formatQuestionAnswers(questions, answers) : cardAnswerFor(card, answers[0]![0]!);
+    if (!message) return;
+    setFailed(false);
+    setSent({ answer: message, ...(label ? { label } : {}) });
+    returnFocusToComposer();
+    dispatch({ type: "decideRequest", threadId, requestId: card.requestId, behavior: "answer", message, onError: () => setFailed(true) });
+  }
+
   const choose = (label: string) => {
-    if (settled) return;
-    if (current.multiSelect) {
-      const picked = draft.picked.includes(label)
-        ? draft.picked.filter((entry) => entry !== label)
-        : [...draft.picked, label];
-      update(currentIndex, { picked });
+    if (sending) return;
+    if (multi) {
+      update(currentIndex, { picked: draft.picked.includes(label) ? draft.picked.filter((entry) => entry !== label) : [...draft.picked, label] });
       return;
     }
-    // Single-select is a radio group: picking replaces, and picking an
-    // option means the free-text answer was not the one they wanted.
-    update(currentIndex, { picked: [label], other: false });
-    // Move to the next question they still owe an answer to, the way the
-    // tabs would have been clicked anyway. The last one stays put so the
-    // submit button is under the cursor that just chose.
-    const next = questions.findIndex((_, index) => index !== currentIndex && !answered[index]);
-    if (next >= 0) setActive(next);
-  };
-
-  const toggleOther = () => {
-    if (settled) return;
-    if (draft.other) {
-      update(currentIndex, { other: false });
+    const next = { ...drafts, [currentIndex]: { picked: [label], custom: "" } };
+    setDrafts(next);
+    if (oneTap) {
+      send(next, label);
       return;
     }
-    update(currentIndex, { other: true, ...(current.multiSelect ? {} : { picked: [] }) });
+    const open = questions.findIndex((_, index) => index !== currentIndex && !answersOf(next[index] ?? EMPTY).length);
+    if (open >= 0) setActive(open);
   };
 
-  const submit = () => {
-    if (settled || !complete || !card.requestId) return;
-    const answer = formatQuestionAnswers(questions, questions.map((_, index) => answersOf(drafts[index] ?? EMPTY)));
-    if (!answer) return;
-    setSent(answer);
-    dispatch({
-      type: "decideRequest",
-      threadId,
-      requestId: card.requestId,
-      behavior: "answer",
-      message: answer,
-      // The answer never reached the bot, so the card must go back to
-      // being answerable rather than sitting there looking settled.
-      onError: () => setSent(null),
-    });
+  const typed = (text: string) => {
+    const next = { ...drafts, [currentIndex]: { picked: multi ? draft.picked : [], custom: text } };
+    setDrafts(next);
+    if (questions.every((_, index) => answersOf(next[index] ?? EMPTY).length > 0)) send(next);
   };
+
+  const header = asker
+    ? <AskHeader asker={asker} line={t("ask.header.asks", { name: asker.name })} origin={origin} />
+    : undefined;
+  const needsSubmit = !oneTap || multi || questions.length > 1;
 
   return (
-    <div
-      role="group"
-      aria-label={t("question.aria.card")}
-      className={cn(
-        "w-full max-w-[840px] rounded-2xl border bg-card p-4",
-        settled ? "border-hairline/30 opacity-70" : "border-accent/40",
-      )}
+    <AskCard
+      ariaLabel={t("question.aria.card")}
+      header={header}
+      title={title ?? (asker ? t("question.card.named", { name: asker.name }) : t("question.card.title"))}
+      meta={!single ? t("question.progress", { answered: answered.filter(Boolean).length, count: questions.length }) : undefined}
+      footer={needsSubmit && current.options.length > 0 ? (
+        <button type="button" onClick={() => send(drafts)} disabled={!complete || sending} {...askPrimary(asker?.color)}>
+          {multi && single ? t("question.done") : questions.length > 1 ? t("question.submitAll") : t("question.submit")}
+        </button>
+      ) : undefined}
     >
-      <div className="flex items-baseline justify-between gap-3">
-        <div className="text-[15px] font-semibold text-ink">
-          {bot ? t("question.card.named", { name: bot.name }) : t("question.card.title")}
-        </div>
-        {questions.length > 1 && !settled && (
-          <span className="shrink-0 text-[11px] tabular-nums text-ink-secondary">
-            {t("question.progress", { answered: answeredCount, count: questions.length })}
-          </span>
-        )}
-      </div>
-
-      {card.questionRequest?.origin === "output" && (
-        <div className="mt-1 text-[12px] text-ink-secondary">{t("question.origin.badge")}</div>
-      )}
-
+      {card.questionRequest?.origin === "output" && <p className="-mt-1 mb-2 text-[12px] text-ink-secondary">{t("question.origin.badge")}</p>}
       {questions.length > 1 && (
-        <div role="tablist" aria-label={t("question.aria.tabs")} className="mt-3 flex flex-wrap gap-1">
+        <div role="tablist" aria-label={t("question.aria.tabs")} className="-mt-1 mb-3 flex flex-wrap items-center gap-1.5">
           {questions.map((question, index) => (
             <button
               key={`${index}-${question.question}`}
+              type="button"
               role="tab"
               aria-selected={index === currentIndex}
               onClick={() => setActive(index)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] transition-colors",
-                index === currentIndex
-                  ? "bg-control text-ink"
-                  : "text-ink-secondary hover:bg-control/60 hover:text-ink",
-              )}
+              className={cn(ASK_SMALL_PILL, index === currentIndex ? "bg-ink/[0.08] text-ink" : "text-ink-secondary hover:bg-ink/[0.06] hover:text-ink")}
             >
-              {answered[index] && <Check size={12} className="text-success" />}
+              {answered[index] && <Check size={13} strokeWidth={2.4} className="text-success" />}
               {tabLabel(question, index)}
             </button>
           ))}
         </div>
       )}
-
-      <ExpandableText text={current.question} className="mt-3 text-[15px] leading-relaxed text-ink" />
-      {current.multiSelect && !settled && (
-        <div className="mt-1 text-[12.5px] text-ink-secondary">{t("question.multiHint")}</div>
-      )}
-
-      {!settled && (
-        <div
-          role={current.multiSelect ? "group" : "radiogroup"}
-          aria-label={current.question}
-          className="mt-3 overflow-hidden rounded-lg border border-hairline/40"
-        >
-          {current.options.map((option, index) => {
-            const picked = draft.picked.includes(option.label);
-            return (
-              <button
-                key={option.label}
-                role={current.multiSelect ? "checkbox" : "radio"}
-                aria-checked={picked}
-                onClick={() => choose(option.label)}
-                className={cn(
-                  "flex w-full items-start gap-3 px-3 py-2.5 text-left",
-                  index > 0 && "border-t border-hairline/40",
-                  // `raised` is the same value as the card in the light
-                  // skins; `raised-hover` is the one tone every skin
-                  // guarantees stands off a surface.
-                  picked ? "bg-raised-hover" : "hover:bg-raised-hover/60",
-                )}
-              >
-                <Marker checked={picked} multi={Boolean(current.multiSelect)} />
-                <span className="min-w-0">
-                  <span className="block text-[14.5px] font-medium text-ink">{option.label}</span>
-                  {option.description && (
-                    <span className="block text-[13px] leading-snug text-ink-secondary">{option.description}</span>
-                  )}
-                </span>
-              </button>
-            );
-          })}
-          <button
-            role={current.multiSelect ? "checkbox" : "radio"}
-            aria-checked={draft.other}
-            onClick={toggleOther}
-            className={cn(
-              "flex w-full items-center gap-3 px-3 py-2.5 text-left",
-              current.options.length > 0 && "border-t border-hairline/40",
-              draft.other ? "bg-raised-hover" : "hover:bg-raised-hover/60",
-            )}
-          >
-            <Marker checked={draft.other} multi={Boolean(current.multiSelect)} />
-            <span className="text-[14.5px] text-ink">{t("question.other")}</span>
-          </button>
-          {draft.other && (
-            <div className="border-t border-hairline/40 px-3 py-2.5">
-              <input
-                autoFocus
-                value={draft.custom}
-                maxLength={MAX_CUSTOM_ANSWER}
-                onChange={(event) => update(currentIndex, { custom: event.target.value })}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && complete) submit();
-                }}
-                placeholder={t("question.otherPlaceholder")}
-                className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14.5px] text-ink placeholder:text-ink-secondary focus:outline-none"
-              />
-            </div>
-          )}
+      {!title && <ExpandableText text={current.question} className="mb-3 text-[15px] leading-[22px] text-ink" />}
+      {multi && <p className="-mt-1 mb-2 text-[12px] text-ink-tertiary">{t("question.multiHint")}</p>}
+      {current.options.length > 0 && (
+        <div data-quiet={typedPast || undefined}>
+          <AskChoices
+            choices={current.options}
+            label={current.question}
+            multi={multi}
+            picked={draft.picked}
+            sending={sending && oneTap ? sent?.label ?? null : null}
+            disabled={sending && !oneTap}
+            quiet={typedPast}
+            onPick={choose}
+          />
         </div>
       )}
-
-      {settled ? (
-        <div className="mt-3 flex items-start gap-1.5 text-[13px] text-ink-secondary">
-          <Check size={14} className="mt-0.5 shrink-0 text-success" />
-          <span className="whitespace-pre-wrap break-words">
-            {(() => {
-              const answer = card.answeredText ?? sent;
-              return answer ? answerWithoutPreamble(answer) : t("question.status.answered");
-            })()}
-          </span>
+      {freeText && (
+        <div className={current.options.length > 0 ? "mt-2" : undefined}>
+          <AskReply
+            label={current.options.length ? t("question.somethingElse") : current.question}
+            placeholder={current.options.length ? t("question.somethingElse") : t("question.answerPlaceholder")}
+            color={asker?.color}
+            value={draft.custom}
+            onChange={(value) => update(currentIndex, { custom: value })}
+            onSend={typed}
+            sending={sending && !sent?.label}
+            maxLength={MAX_CUSTOM_ANSWER}
+            multiline={!current.options.length}
+          />
         </div>
-      ) : (
-        <div className="mt-3 flex items-center justify-end gap-3">
-          <span className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-            <MessageCircleQuestion size={14} className="text-accent" />
-            {t("question.status.waiting")}
-          </span>
-          <button
-            onClick={submit}
-            disabled={!complete}
-            className="rounded-full bg-accent px-3.5 py-1.5 text-[13.5px] font-medium text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {questions.length > 1 ? t("question.submitAll") : t("question.submit")}
-          </button>
+      )}
+      {failed && <AskError>{t("ask.error")}</AskError>}
+    </AskCard>
+  );
+}
+
+/** A bot answered the question instead of the person: it blocks nothing, and the person may still give their own answer. */
+export const decidedByBot = (card: NonNullable<Message["card"]>): boolean =>
+  card.answeredBy?.kind === "bot" && card.answered === "answer" && !card.dismissed && !card.expired && !card.stopped;
+
+function DecidedQuestion({ threadId, asker, card, questions }: { threadId: string; asker?: Asker; card: NonNullable<Message["card"]>; questions: readonly AskQuestion[] }) {
+  const { dispatch } = useStore();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [state, setState] = useState<"idle" | "sending" | "failed">("idle");
+  const name = card.answeredBy?.kind === "bot" ? card.answeredBy.name : "";
+  const picked = card.answeredText;
+  const question = questions[0]!.question;
+  const send = (text: string) => {
+    if (!card.requestId) return;
+    setState("sending");
+    returnFocusToComposer();
+    dispatch({ type: "decideRequest", threadId, requestId: card.requestId, behavior: "answer", message: text, onError: () => setState("failed") });
+  };
+  return (
+    <div className="w-full max-w-[560px]">
+      <AskSettledLine
+        ariaLabel={t("question.aria.card")}
+        action={!open ? (
+          <button type="button" onClick={() => setOpen(true)} className={ASK_QUIET_BUTTON}>{t(picked === undefined ? "question.decided.answer" : "question.decided.change")}</button>
+        ) : undefined}
+      >
+        {picked === undefined ? t("question.decided.deciding", { name })
+          : picked ? <><span>{t("question.decided.picked", { name })}</span> <span className="text-ink-secondary">{picked}</span></>
+            : t("question.decided.own", { name })}
+      </AskSettledLine>
+      {open && (
+        <div className="mt-2">
+          <p dir="auto" className="mb-2 text-[13px] leading-[18px] text-ink-secondary">{question}</p>
+          <AskReply label={question} placeholder={t("question.answerPlaceholder")} color={asker?.color} value={draft} onChange={setDraft}
+            onSend={send} sending={state === "sending"} maxLength={MAX_CUSTOM_ANSWER} />
+          {state === "failed" && <AskError>{t("ask.error")}</AskError>}
         </div>
       )}
     </div>
   );
 }
 
-/** The radio dot / checkbox tick. Drawn rather than an <input> so the whole
- * row stays one button and the hit target is the row, not the 16px circle. */
-function Marker({ checked, multi }: { checked: boolean; multi: boolean }) {
+function SettledQuestion({ card, questions }: { card: NonNullable<Message["card"]>; questions: readonly AskQuestion[] }) {
+  const [open, setOpen] = useState(false);
+  if (card.stopped) return <AskSettledLine tone="stopped" ariaLabel={t("question.aria.card")}>{t("ask.settled.stopped")}</AskSettledLine>;
+  if (card.expired) return <AskSettledLine tone="expired" ariaLabel={t("question.aria.card")}>{t("ask.settled.expired")}</AskSettledLine>;
+  const answer = card.answeredText ?? (card.answered === "answer" ? null : undefined);
+  if (answer === undefined || card.answered === "unavailable" || card.dismissed && !card.answeredText) {
+    return <AskSettledLine tone="closed" ariaLabel={t("question.aria.card")}>{t("question.status.closed")}</AskSettledLine>;
+  }
+  const line = settledQuestionLine(questions, answer);
+  const full = answer ? answerWithoutPreamble(answer) : "";
+  const choices = questions.length === 1 ? questions[0]!.options.map((option) => option.label) : [];
+  const many = questions.length > 1;
   return (
-    <span
-      aria-hidden
-      className={cn(
-        "mt-0.5 flex size-4 shrink-0 items-center justify-center border",
-        multi ? "rounded-[5px]" : "rounded-full",
-        checked ? "border-accent bg-accent" : "border-hairline",
+    <AskSettledLine
+      ariaLabel={t("question.aria.card")}
+      action={many && full ? (
+        <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className={ASK_QUIET_BUTTON}>
+          {open ? t("question.hideDetails") : t("question.details")}
+        </button>
+      ) : undefined}
+      detail={open && full && (
+        <div dir="auto" className="ms-[22px] mt-1.5 whitespace-pre-wrap break-words rounded-xl bg-ink/[0.045] px-3 py-2 text-[13px] leading-5 text-ink-secondary">
+          {full}
+        </div>
       )}
     >
-      {checked &&
-        (multi ? (
-          <Check size={11} className="text-white" strokeWidth={3} />
-        ) : (
-          <span className="size-1.5 rounded-full bg-white" />
-        ))}
-    </span>
+      {many || !line.value ? <span>{line.label}{line.value && <span className="text-ink-secondary"> · {line.value}</span>}</span> : settledAnswer(line.value, choices)}
+    </AskSettledLine>
   );
 }

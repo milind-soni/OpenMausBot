@@ -15,7 +15,7 @@ const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 /** The Local VM world: the real server with the container boundary replaced
  * by the in-repo VM fixture (no Podman, no network), exactly the proven
  * group-local-vm recipe. This is the only world where the lazy computer
- * claim seam (issue #1361) can be driven end to end. */
+ * claim seam can be driven end to end. */
 export class LocalVmWorld extends BaseWorld {
   private child: ChildProcess | undefined;
   private fixtureHome = "";
@@ -168,7 +168,6 @@ export class LocalVmWorld extends BaseWorld {
     try {
       this.vmState({});
     } catch {
-      /* the temp home may already be gone */
     }
     if (this.child !== undefined) await waitForExit(this.child, { signal: "SIGTERM" });
     await removeTempDir(this.fixtureHome);

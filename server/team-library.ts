@@ -1,5 +1,6 @@
 import { parseJson, type JsonValue } from "./schema.ts";
-import { isBotPackage, parseBotPackage, parsePackageDocument, type PackageDocument, type ParsedBotPackage } from "./bot-package.ts";
+import { isBotPackage, parseBotPackage, parsePackageDocument, upgradeV1, type PackageDocument, type ParsedBotPackage } from "./bot-package.ts";
+import { PACKAGE_V1_VERSION } from "../shared/package-format.ts";
 import { parseTeamManifest, type ParsedTeamManifest } from "./team-manifest.ts";
 
 export const TEAM_LIBRARY_REPOSITORY = "https://github.com/milind-soni/openmausbot-teams";
@@ -162,7 +163,6 @@ function parseShareable(value: JsonValue | string): ParsedShareableTeam {
   if (typeof value === "string") return parseBotPackage(value);
   if (!isBotPackage(value)) return parseTeamManifest(value);
   // A shared team (v2) is read as a file: it cannot claim a publisher.
-  // Version 1 keeps its original shape for older callers.
   return (value as { version?: unknown }).version === 1 ? parseBotPackage(value) : parsePackageDocument(value, { trust: "file" });
 }
 
@@ -180,12 +180,44 @@ export async function fetchLibraryTeam(slug: string, fetcher: Fetcher = fetch): 
   return fetchShareable(`${TEAM_LIBRARY_RAW_ROOT}/${entry.package ?? entry.manifest}`, fetcher);
 }
 
+const MAX_CHIEF_TEAMS = 30;
+const MAX_ROLE_TEXT = 280;
+
+export interface LibraryRole { name: string; title: string; does?: string; lead?: true }
+export interface LibraryTeamRoles { name: string; summary: string; roles: LibraryRole[] }
+
+const oneLine = (text: string, max: number): string => {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
+};
+
+function libraryRoles(team: ParsedShareableTeam): LibraryRole[] {
+  const role = (member: { name: string; title?: string; description?: string }, lead: boolean): LibraryRole => ({
+    name: member.name, title: member.title?.trim() || "Specialist",
+    ...(member.description?.trim() ? { does: oneLine(member.description, MAX_ROLE_TEXT) } : {}),
+    ...(lead ? { lead: true as const } : {}),
+  });
+  if (!("package" in team)) return team.team.members.map((member) => role(member, false));
+  const pkg = team.version === PACKAGE_V1_VERSION ? upgradeV1(team).package : team.package;
+  return pkg.agents.map((agent) => role(agent, agent.key === pkg.team?.leader));
+}
+
+/** Each ready-made team's name, one line and roles: enough for a Chief to create the team itself, one specialist at a
+ * time. A team whose file cannot be read keeps its name and summary with no roles. */
+export async function libraryTeamRoles(fetcher: Fetcher = fetch): Promise<LibraryTeamRoles[]> {
+  const catalog = await fetchTeamCatalog(fetcher);
+  return Promise.all(catalog.teams.slice(0, MAX_CHIEF_TEAMS).map(async (entry) => ({
+    name: entry.name,
+    summary: entry.summary,
+    roles: await fetchShareable(`${TEAM_LIBRARY_RAW_ROOT}/${entry.package ?? entry.manifest}`, fetcher).then(libraryRoles, () => []),
+  })));
+}
+
 function safeSegment(value: string): boolean {
   return /^[A-Za-z0-9._-]+$/.test(value) && value !== "." && value !== "..";
 }
 
-/** Resolve only public GitHub Markdown playbooks and legacy JSON team files.
- * Other hosts never reach server fetch. */
+/** Public GitHub Markdown playbooks and legacy JSON team files only; other hosts never reach server fetch. */
 export function githubManifestUrls(input: string): string[] {
   let url: URL;
   try {

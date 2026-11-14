@@ -1,26 +1,11 @@
-// What changed about what the bot believes — and a way back.
-//
-// Every change to a memory file that goes through the server becomes one
-// row here: the person's edits (routes), the bot's (memory_update or its
-// own file tools), imports, reverts. Bot writes have no hook to tap — a
-// file tool is a process writing to disk — so the turn boundary is the
-// hook: the last text this module saw of every memory file is kept as a
-// baseline, and at turn end whatever differs from it is the bot's work.
-//
-// The journal lives OUTSIDE the workspace on purpose, at
-// DATA_DIR/memory-journal/<botId>.ndjson. The workspace is the bot's desk —
-// it has file tools pointed at it and acceptEdits on. An audit trail the
-// audited party can rewrite is not an audit trail.
-//
-// Same discipline as profile-versions.ts: 0600, through redactSecrets,
-// serialized per bot, fire-and-forget — a journal write must never take
-// down the change it records, and a turn must never fail because an audit
-// line did.
+// Kept outside the workspace on purpose: an audit trail the audited bot can rewrite is not an audit trail.
+// A journal write must never fail the change it records.
 import { randomUUID } from "node:crypto";
-import { closeSync, fstatSync, mkdirSync, openSync, readSync } from "node:fs";
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import {
   MEMORY_INDEX,
@@ -28,36 +13,27 @@ import {
   type MemoryDoc,
   deleteMemoryDoc,
   hashMemoryText,
-  memoryOverview,
   readMemoryDoc,
   writeMemoryDoc,
 } from "./memory-store.ts";
 import { redactSecretsInText } from "./redact.ts";
+import { memoryFilesOnDisk, readMemoryText, workspaceDir } from "./workspace.ts";
 
-/** "upkeep" is the harness itself: background capture and the tidy-up
- * (server/memory-upkeep.ts) for a bot with Memory upkeep switched on. */
 export type MemoryActor = "bot" | "person" | "import" | "upkeep";
 export type MemoryChangeKind = "created" | "edited" | "deleted";
 
 export interface MemoryJournalEntry {
   id: string;
-  /** Milliseconds since the epoch, like every other history row the UI shows. */
   at: number;
   botId: string;
   path: string;
   actor: MemoryActor;
-  /** How it got there: "ui", "api", "turn", "disk" (changed outside the
-   * app between turns — an editor, Obsidian), "revert", "import", and for
-   * upkeep "capture", "organize" or "tidy". */
   via: string;
   threadId?: string;
   kind: MemoryChangeKind;
   beforeHash: string | null;
   afterHash: string | null;
-  /** The full prior text, redacted — a revert must not depend on replaying
-   * a capped diff. Null for a created file. */
   before: string | null;
-  /** Unified diff, capped at DIFF_CAP characters. */
   diff: string;
   added: number;
   removed: number;
@@ -66,16 +42,10 @@ export interface MemoryJournalEntry {
 }
 
 export const JOURNAL_DIR = join(DATA_DIR, "memory-journal");
-/** A diff is for reading in a list, not for replay; past this it is noise. */
 export const DIFF_CAP = 8_000;
-/** Past this the prior text is not kept, so the row cannot be reverted. Far
- * above what the store lets anyone write (256KB); only a bot's own file
- * tools can make a memory file this large. */
 export const BEFORE_CAP = 512 * 1024;
 const MAX_JOURNAL_READ_BYTES = 8 * 1024 * 1024;
 const MAX_ROWS = 500;
-/** Beyond this many line pairs the LCS table is not worth building; the
- * diff degrades to "everything removed, everything added". */
 const LCS_CELL_CAP = 4_000_000;
 const CONTEXT = 2;
 
@@ -83,15 +53,18 @@ export function journalFile(botId: string): string {
   return join(JOURNAL_DIR, `${botId}.ndjson`);
 }
 
-// ── unified diff ──────────────────────────────────────────────────────
 
 type Op = { tag: " " | "-" | "+"; line: string };
 
-function editScript(a: string[], b: string[]): Op[] {
-  if (a.length * b.length > LCS_CELL_CAP) {
-    return [...a.map((line) => ({ tag: "-" as const, line })), ...b.map((line) => ({ tag: "+" as const, line }))];
+function editScript(fullA: string[], fullB: string[]): Op[] {
+  if (fullA.length * fullB.length > LCS_CELL_CAP) {
+    return [...fullA.map((line) => ({ tag: "-" as const, line })), ...fullB.map((line) => ({ tag: "+" as const, line }))];
   }
-  // classic LCS lengths table, then walk back from the corner
+  let shared = 0;
+  while (shared < fullA.length && shared < fullB.length && fullA[shared] === fullB[shared]) shared++;
+  const ops: Op[] = fullA.slice(0, shared).map((line) => ({ tag: " ", line }));
+  const a = fullA.slice(shared);
+  const b = fullB.slice(shared);
   const rows = a.length + 1;
   const cols = b.length + 1;
   const table = new Uint32Array(rows * cols);
@@ -102,7 +75,6 @@ function editScript(a: string[], b: string[]): Op[] {
         : Math.max(table[(i + 1) * cols + j], table[i * cols + j + 1]);
     }
   }
-  const ops: Op[] = [];
   let i = 0;
   let j = 0;
   while (i < a.length && j < b.length) {
@@ -124,7 +96,6 @@ function editScript(a: string[], b: string[]): Op[] {
 function splitLines(text: string): string[] {
   if (text === "") return [];
   const lines = text.split("\n");
-  // a trailing newline is not an extra empty line for diff purposes
   if (lines[lines.length - 1] === "") lines.pop();
   return lines;
 }
@@ -136,8 +107,6 @@ export interface UnifiedDiff {
   truncated: boolean;
 }
 
-/** A plain unified diff with two lines of context, the shape every
- * developer tool renders. Exported so the row can be checked in tests. */
 export function unifiedDiff(before: string, after: string, path: string, cap = DIFF_CAP): UnifiedDiff {
   if (before === after) return { text: "", added: 0, removed: 0, truncated: false };
   const ops = editScript(splitLines(before), splitLines(after));
@@ -147,8 +116,6 @@ export function unifiedDiff(before: string, after: string, path: string, cap = D
     if (op.tag === "+") added++;
     else if (op.tag === "-") removed++;
   }
-  // hunks: runs of changes with CONTEXT equal lines on either side; two
-  // runs whose context would touch or overlap share one hunk
   const changes: number[] = [];
   ops.forEach((op, k) => {
     if (op.tag !== " ") changes.push(k);
@@ -191,7 +158,6 @@ export function unifiedDiff(before: string, after: string, path: string, cap = D
   return { text, added, removed, truncated };
 }
 
-// ── the append-only file ──────────────────────────────────────────────
 
 const writeQueues = new Map<string, Promise<void>>();
 
@@ -203,7 +169,6 @@ function enqueue(botId: string, entry: MemoryJournalEntry): void {
       await appendFile(journalFile(botId), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
     })
     .catch((error: unknown) => {
-      // fire-and-forget: the change this row records already happened
       console.error(`memory-journal: could not append for ${botId}:`, error instanceof Error ? error.message : error);
     });
   writeQueues.set(botId, queued);
@@ -212,13 +177,10 @@ function enqueue(botId: string, entry: MemoryJournalEntry): void {
   });
 }
 
-/** Test/route seam: a GET right after a write must see the row. */
 export async function flushMemoryJournal(botId: string): Promise<void> {
   await writeQueues.get(botId);
 }
 
-/** Shutdown seam. Each queued promise swallows its own error, so this
- * never rejects either. */
 export async function flushAllMemoryJournals(): Promise<void> {
   await Promise.allSettled(writeQueues.values());
 }
@@ -230,8 +192,24 @@ function isEntry(value: unknown): value is MemoryJournalEntry {
   return typeof row.id === "string" && typeof row.at === "number" && typeof row.path === "string" && typeof row.kind === "string";
 }
 
-/** Newest first, bounded to MAX_ROWS from the newest 8 MiB of the file, so
- * an old bot with a long history does not make the panel load all of it. */
+/** Another server's changes to this bot's memory, by id, in time order among this server's own: they describe that
+ * server's files, so none of them can be reverted here. How many were added. */
+export async function adoptMemoryJournal(botId: string, entries: readonly MemoryJournalEntry[]): Promise<number> {
+  await flushMemoryJournal(botId);
+  const held = readMemoryJournal(botId, MAX_ROWS);
+  const ids = new Set(held.map((entry) => entry.id));
+  const added = entries.filter((entry) => isEntry(entry) && !ids.has(entry.id)).map((entry): MemoryJournalEntry => ({ ...entry, botId, before: null, canRevert: false,
+    revertUnavailableReason: "This change was made on another computer, so it cannot be reverted here." }));
+  if (!added.length) return 0;
+  let kept = "";
+  try { kept = readFileSync(journalFile(botId), "utf8"); } catch {}
+  const rows = [...kept.split("\n").filter(Boolean), ...added.map((entry) => JSON.stringify(entry))];
+  const at = (line: string) => { try { return Number((JSON.parse(line) as { at?: unknown }).at) || 0; } catch { return 0; } };
+  mkdirSync(JOURNAL_DIR, { recursive: true, mode: 0o700 });
+  writeFileAtomic(journalFile(botId), `${rows.map((line, index) => ({ line, index, at: at(line) })).sort((a, b) => a.at - b.at || a.index - b.index).map((row) => row.line).join("\n")}\n`, { mode: 0o600 });
+  return added.length;
+}
+
 export function readMemoryJournal(botId: string, limit = 50): MemoryJournalEntry[] {
   let text: string;
   let offset: number;
@@ -257,7 +235,6 @@ export function readMemoryJournal(botId: string, limit = 50): MemoryJournalEntry
   const rows: MemoryJournalEntry[] = [];
   const lines = text.split("\n");
   const maxRows = Math.min(MAX_ROWS, Math.max(1, limit));
-  // when the window starts mid-file its first line is a fragment: skip it
   for (let index = lines.length - 1; index >= (offset > 0 ? 1 : 0) && rows.length < maxRows; index--) {
     const line = lines[index];
     if (!line) continue;
@@ -265,13 +242,11 @@ export function readMemoryJournal(botId: string, limit = 50): MemoryJournalEntry
       const value: unknown = JSON.parse(line);
       if (isEntry(value)) rows.push(value);
     } catch {
-      // a torn final line from a crash mid-append is skipped, not fatal
     }
   }
   return rows;
 }
 
-// ── recording a change ────────────────────────────────────────────────
 
 export interface MemoryChangeInput {
   path: string;
@@ -282,11 +257,9 @@ export interface MemoryChangeInput {
   after: string | null;
 }
 
-/** The last text this module saw for each memory file of each bot. What
- * the turn-boundary diff compares against, and what a route write
- * advances — so a person's save between two turns is never re-journaled
- * as the bot's work when the turn ends. */
 const baselines = new Map<string, Map<string, string>>();
+// Same trade as the search index: a same-size edit within the same millisecond of mtime is missed.
+const baselineStats = new Map<string, Map<string, { mtimeMs: number; bytes: number }>>();
 
 function baselineFor(botId: string): Map<string, string> {
   let baseline = baselines.get(botId);
@@ -303,9 +276,6 @@ function advanceBaseline(botId: string, path: string, after: string | null): voi
   else baseline.set(path, after);
 }
 
-/** Builds and queues one row. Never throws: hashing and diffing are pure,
- * and the append is queued behind a catch. Returns the row so a route can
- * answer with it. */
 export function recordMemoryChange(botId: string, change: MemoryChangeInput): MemoryJournalEntry | null {
   const { before, after } = change;
   if (before === after) return null;
@@ -322,8 +292,6 @@ export function recordMemoryChange(botId: string, change: MemoryChangeInput): Me
     } else {
       keptBefore = redactSecretsInText(before);
       if (keptBefore !== before) {
-        // a redacted body is not the body that was there; restoring it
-        // would write our marker into the bot's memory as if it were text
         canRevert = false;
         revertUnavailableReason = "The earlier version contained sensitive text that was hidden, so it cannot be restored exactly.";
       }
@@ -358,8 +326,6 @@ export interface JournaledWriteOptions {
   expectedHash?: string;
 }
 
-/** The write every route uses: store first (it may refuse — 409, 413,
- * containment), journal second. */
 export function journalMemoryWrite(
   botId: string,
   path: string,
@@ -387,19 +353,12 @@ export type RevertResult =
   | { ok: true; entry: MemoryJournalEntry | null; doc: MemoryDoc }
   | { ok: false; status: number; error: string };
 
-/** Puts the file back to the text the row recorded and journals that as
- * its own change, so a revert is itself revertible. Unconditional on
- * purpose: reverting an older row over newer ones is the person's call,
- * and the row this writes carries the newer text should they change their
- * mind. */
 export function revertMemoryChange(botId: string, entryId: string, opts: { threadId?: string } = {}): RevertResult {
   const entry = readMemoryJournal(botId, MAX_ROWS).find((row) => row.id === entryId);
   if (!entry) return { ok: false, status: 404, error: "no such memory change" };
   if (!entry.canRevert) return { ok: false, status: 400, error: entry.revertUnavailableReason ?? "this change cannot be reverted" };
   try {
     if (entry.kind === "created") {
-      // MEMORY.md is never deleted (the store refuses); emptying it is the
-      // same end state for the bot
       if (entry.path === MEMORY_INDEX) {
         const written = journalMemoryWrite(botId, entry.path, "", { actor: "person", via: "revert", threadId: opts.threadId });
         return { ok: true, entry: written.entry, doc: written.doc };
@@ -415,28 +374,48 @@ export function revertMemoryChange(botId: string, entryId: string, opts: { threa
   }
 }
 
-// ── the turn boundary ─────────────────────────────────────────────────
 
-/** Bots with a turn in flight on each thread. A set, not one id: a room
- * thread can have more than one member speaking on it. */
 const turnBots = new Map<string, Set<string>>();
+
+function statsFor(botId: string): Map<string, { mtimeMs: number; bytes: number }> {
+  let stats = baselineStats.get(botId);
+  if (!stats) {
+    stats = new Map();
+    baselineStats.set(botId, stats);
+  }
+  return stats;
+}
 
 function currentDocs(botId: string): Map<string, string> {
   const docs = new Map<string, string>();
-  const overview = memoryOverview(botId);
-  for (const path of [MEMORY_INDEX, ...overview.topics.map((t) => t.path), ...overview.logs.map((l) => l.path)]) {
-    const doc = readMemoryDoc(botId, path);
-    if (doc.exists) docs.set(path, doc.text);
+  const stats = statsFor(botId);
+  const baseline = baselines.get(botId);
+  const seen = new Set<string>();
+  for (const file of memoryFilesOnDisk(botId)) {
+    seen.add(file.path);
+    const mtimeMs = Math.trunc(file.mtimeMs);
+    const cached = stats.get(file.path);
+    const known = baseline?.get(file.path);
+    if (cached && known !== undefined && cached.bytes === file.bytes && cached.mtimeMs === mtimeMs) {
+      docs.set(file.path, known);
+      continue;
+    }
+    let text: string;
+    try {
+      text = readMemoryText(join(workspaceDir(botId), file.path));
+    } catch {
+      if (known !== undefined) docs.set(file.path, known);
+      continue;
+    }
+    docs.set(file.path, text);
+    stats.set(file.path, { mtimeMs, bytes: file.bytes });
+  }
+  for (const path of stats.keys()) {
+    if (!seen.has(path)) stats.delete(path);
   }
   return docs;
 }
 
-/** Everything on disk that differs from the baseline becomes a row under
- * `actor`/`via`, and the baseline moves up to match. A path the baseline
- * has never seen is a first sighting at turn start (the server may just
- * have booted; what is already there is nobody's change now) and a
- * creation at turn end (begin seeded everything, so anything new since
- * is the turn's) — `unknownIsNew` says which. */
 function reconcile(botId: string, actor: MemoryActor, via: string, threadId: string | undefined, unknownIsNew: boolean): MemoryJournalEntry[] {
   const baseline = baselineFor(botId);
   const docs = currentDocs(botId);
@@ -460,10 +439,6 @@ function reconcile(botId: string, actor: MemoryActor, via: string, threadId: str
   return rows;
 }
 
-/** Call at dispatch, after ensureWorkspace. A file seen for the first
- * time seeds the baseline silently; a file that changed since the last
- * look was edited outside the app between turns — an editor, Obsidian, a
- * sync client — and is journaled as the person's, via "disk". */
 export function beginMemoryTurn(botId: string, threadId: string): void {
   try {
     let bots = turnBots.get(threadId);
@@ -474,13 +449,10 @@ export function beginMemoryTurn(botId: string, threadId: string): void {
     bots.add(botId);
     reconcile(botId, "person", "disk", undefined, false);
   } catch (error) {
-    // a hashing or read failure must not stop the turn from dispatching
     console.error(`memory-journal: could not snapshot ${botId}:`, error instanceof Error ? error.message : error);
   }
 }
 
-/** Call at turn.completed (and session.exited — a turn that died may still
- * have written). Whatever moved since the baseline is the bot's work. */
 export function endMemoryTurn(threadId: string): MemoryJournalEntry[] {
   const bots = turnBots.get(threadId);
   if (!bots) return [];
@@ -496,8 +468,37 @@ export function endMemoryTurn(threadId: string): MemoryJournalEntry[] {
   return rows;
 }
 
-/** Test seam: forget every baseline and in-flight turn. */
+/** Lands after the turn's boundary diff, so without its own row the next turn would credit it to the person. */
+export function journalTurnWrite<T>(botId: string, path: string, threadId: string, write: () => T): T {
+  let before: string | null | undefined;
+  try {
+    const doc = readMemoryDoc(botId, path);
+    before = doc.exists ? doc.text : null;
+  } catch (error) {
+    console.error(`memory-journal: could not read ${path} for ${botId}:`, error instanceof Error ? error.message : error);
+  }
+  const result = write();
+  if (before === undefined) return result;
+  try {
+    const after = readMemoryDoc(botId, path);
+    if (after.exists) recordMemoryChange(botId, { path, actor: "bot", via: "turn", threadId, before, after: after.text });
+  } catch (error) {
+    console.error(`memory-journal: could not record ${path} for ${botId}:`, error instanceof Error ? error.message : error);
+  }
+  return result;
+}
+
 export function resetMemoryJournalState(): void {
   baselines.clear();
+  baselineStats.clear();
   turnBots.clear();
+}
+
+export function forgetBotMemoryJournal(botId: string): void {
+  baselines.delete(botId);
+  baselineStats.delete(botId);
+  for (const [threadId, bots] of turnBots) {
+    if (!bots.delete(botId)) continue;
+    if (bots.size === 0) turnBots.delete(threadId);
+  }
 }

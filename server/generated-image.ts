@@ -26,9 +26,7 @@ function sniffRaster(bytes: Buffer): DecodedGeneratedImage["mime"] | null {
   return null;
 }
 
-/** Decode an untrusted provider image without trusting its claimed MIME.
- * Codex normally sends raw base64, but accepting a raster data URL makes the
- * boundary resilient to app-server shape changes without widening formats. */
+/** Never trusts the provider's claimed MIME. */
 export function decodeGeneratedImage(input: string): DecodedGeneratedImage {
   const trimmed = input.trim();
   const comma = trimmed.startsWith("data:") ? trimmed.indexOf(",") : -1;

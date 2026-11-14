@@ -1,54 +1,39 @@
-// How much of one MCP tool result is allowed into a model's context.
-//
-// An MCP server answers for a machine, not for a context window: a single
-// Swiggy product search returns 60-140 KB of JSON, a restaurant menu 70-105 KB.
-// Whatever comes back is appended to the conversation the CLI keeps, and every
-// later model call in that session re-reads it. Four searches in one turn added
-// 67,000 tokens to a food-ordering thread that never needed them again.
-//
-// So the gate keeps a readable prefix and says, in the result itself, exactly
-// what it cut and where the whole thing is. Nothing is lost — the untrimmed
-// text is written to a file the bot can read or grep with its ordinary tools.
-//
-// This module is pure. The process that uses it is mcp-gate.ts.
-
-/** Characters of a single tool result that may enter the model's context.
- * ~4 chars per token, so ~2k tokens: enough for a page of results, far below
- * the 35k-token searches this exists to stop. */
 export const DEFAULT_RESULT_BUDGET = 8_000;
+/** The gate's own read-only query over a held result (mcp-shape.ts); named here so the banner and the tool never drift apart. */
+export const QUERY_TOOL_NAME = "query_result";
 
-/** Never cut below this, whatever the budget says: a result so short that it
- * cannot carry a single record is worse than no trimming at all. */
 const MIN_BUDGET = 512;
 
 export interface TrimOutcome {
-  /** the text to hand the model */
   text: string;
-  /** false when the original was already within budget and is untouched */
   trimmed: boolean;
   originalChars: number;
+  /** The payload as kept by a structural cut, so a matching `structuredContent` keeps the same records. */
+  value?: unknown;
+}
+
+/** The whole result is kept by the gate under `handle` for query_result (mcp-shape.ts). */
+export interface HeldResult {
+  handle: string;
+  /** describeShape() of the held value */
+  shape: string;
+  /** a query known to be valid against the held value */
+  example?: string;
+  /** the text being cut is itself a query_result answer */
+  queried?: boolean;
 }
 
 export interface TrimInput {
   text: string;
   budget?: number;
-  /** absolute path where the untrimmed text was saved, if it was */
   spillPath?: string;
-  /** Put that path in front of the model. Off by default, and measured:
-   * with the path offered, a model reading a 136 KB search result answered
-   * the same question for MORE context than no trimming at all (210,913 vs
-   * 196,183 tokens) — it read the file straight back in. An invitation to
-   * undo the trim is not a safety net, it is a slower way to pay. The file
-   * is still written; it is for the person and the harness, and this flag
-   * exists for debugging. */
   spillHint?: boolean;
-  /** for the marker's wording only */
   toolName?: string;
+  held?: HeldResult;
 }
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 
-/** JSON.stringify, or null for a value that cannot be serialized (a cycle). */
 function serialize(value: unknown): string | null {
   try {
     const json = JSON.stringify(value);
@@ -58,16 +43,13 @@ function serialize(value: unknown): string | null {
   }
 }
 
-/** The longest prefix of `items` whose serialized length fits `budget`.
- * Always returns at least one element when one exists, so a caller can tell
- * "one huge record" apart from "nothing fit" and fall back accordingly. */
 function fitArray(items: readonly unknown[], budget: number): unknown[] {
   const kept: unknown[] = [];
-  let used = 2; // the brackets
+  let used = 2;
   for (const item of items) {
     const json = serialize(item);
     if (json === null) break;
-    const cost = json.length + (kept.length ? 1 : 0); // the comma
+    const cost = json.length + (kept.length ? 1 : 0);
     if (kept.length && used + cost > budget) break;
     kept.push(item);
     used += cost;
@@ -75,8 +57,6 @@ function fitArray(items: readonly unknown[], budget: number): unknown[] {
   return kept;
 }
 
-/** Top-level array fields, in declaration order — where an MCP server puts
- * its bulk. A bare array root is reported as the single field "". */
 function arrayFields(value: unknown): Array<{ key: string; items: readonly unknown[] }> {
   if (Array.isArray(value)) return [{ key: "", items: value }];
   if (!value || typeof value !== "object") return [];
@@ -85,41 +65,72 @@ function arrayFields(value: unknown): Array<{ key: string; items: readonly unkno
     .map(([key, items]) => ({ key, items }));
 }
 
-/** Cut on a character boundary, never mid-surrogate-pair — half an emoji is
- * an invalid string that some providers reject outright. */
+/** Never mid-surrogate-pair: half an emoji is an invalid string some providers reject outright. */
 function cutAt(text: string, chars: number): string {
   const cut = text.slice(0, Math.max(0, chars));
   const last = cut.charCodeAt(cut.length - 1);
   return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
 }
 
-function marker(input: {
+/** At both ends: models read a quiet trailing note ("layers 5 of 110") as the whole result. */
+export function truncationBanner(input: {
   originalChars: number;
   keptChars: number;
   dropped: Array<{ key: string; kept: number; total: number }>;
   spillPath?: string;
   spillHint?: boolean;
   structural: boolean;
+  short?: boolean;
+  held?: HeldResult;
+  /** the closing banner of a held result: a reminder, not the whole note again */
+  footer?: boolean;
 }): string {
+  const size = `${fmt(input.keptChars)} of ${fmt(input.originalChars)} chars`;
+  if (input.held) return heldBanner(input, size);
+  if (input.short) return `⚠️ TRUNCATED by OpenMausBot: kept ${size}; the rest was NOT shown. Narrow the call or page.`;
   const counts = input.dropped
     .filter((d) => d.kept < d.total)
     .map((d) => `${d.key || "items"} ${fmt(d.kept)} of ${fmt(d.total)}`)
     .join(", ");
-  const what = input.structural
-    ? counts ? ` Kept ${counts}.` : ""
-    : " Cut mid-text, so what is above may be incomplete JSON.";
-  // What a model should do about it: ask the tool a better question. Never
-  // "go and read the whole thing", which costs more than not trimming.
+  const what = input.structural && counts
+    ? `kept ${counts} (${size}).`
+    : input.structural
+      ? `kept ${size}.`
+      : `kept the first ${size}; the text is cut mid-way, so it may be incomplete JSON.`;
+  // Never point at the spilled whole: reading it back costs more than not trimming.
+  const next = "If the tool supports paging (offset/limit/page) or a narrower query or filter, call it again for the remaining items; never assume you saw everything.";
   const where = input.spillHint && input.spillPath
     ? ` The whole result is at ${JSON.stringify(input.spillPath)}; reading it costs as much as not trimming, so narrow the call first.`
-    : " If you need more, call the tool again with a narrower query, a filter, or the next page.";
-  return `\n\n[OpenMausBot trimmed this tool result to fit the conversation: ${fmt(input.originalChars)} → ${fmt(input.keptChars)} characters.${what}${where}]`;
+    : "";
+  return `⚠️ TRUNCATED by OpenMausBot: ${what} The rest was NOT shown. ${next}${where}`;
 }
 
-/** The structural cut on its own, for a payload that is already parsed and
- * must stay valid JSON of the same shape (a tool's `structuredContent`).
- * Returns null when the bulk arrays cannot be made to fit — a caller holding
- * a schema-bound value must then leave it alone rather than mangle it. */
+/** The result lives on; the model fetches the rest by query, so the note never suggests a file or a narrower call. */
+function heldBanner(
+  input: { originalChars: number; keptChars: number; dropped: Array<{ key: string; kept: number; total: number }>; held?: HeldResult; short?: boolean; footer?: boolean; structural: boolean },
+  size: string,
+): string {
+  const held = input.held!;
+  const counts = input.dropped
+    .filter((d) => d.kept < d.total)
+    .map((d) => `${d.key || "items"} ${fmt(d.kept)} of ${fmt(d.total)}`)
+    .join(", ");
+  const kept = input.structural && counts ? `kept ${counts} (${size})` : `kept ${size}`;
+  const call = `${QUERY_TOOL_NAME} {"result":"${held.handle}","query":"<JMESPath>"}`;
+  if (held.queried) {
+    if (input.footer) return `⚠️ TRUNCATED by OpenMausBot: ${kept} of your query on "${held.handle}"; narrow it (see above).`;
+    return `⚠️ TRUNCATED by OpenMausBot: your query on "${held.handle}" returned ${fmt(input.originalChars)} chars; ${kept}. The rest was NOT shown. Narrow the query: pick fewer fields with {a: a, b: b}, slice with [0:20], or filter with [?cond]. The result is ${held.shape}.`;
+  }
+  if (input.footer) return `⚠️ SHAPED by OpenMausBot: ${kept}; the rest is held as "${held.handle}" for ${QUERY_TOOL_NAME} (see the note above).`;
+  if (input.short) return `⚠️ SHAPED by OpenMausBot: ${kept}; the rest is held as "${held.handle}": call ${call} for exactly what you need.`;
+  const example = held.example ? ` e.g. ${held.example} or length(@).` : "";
+  return `⚠️ SHAPED by OpenMausBot: result was ${fmt(input.originalChars)} chars; ${kept}. The whole result is held as "${held.handle}" (${held.shape}). For the rest call ${call} and select only the fields and rows you need,${example} Big answers are cut too; never ask for the whole thing.`;
+}
+
+function wrap(body: string, banner: string, footer = banner): string {
+  return `${banner}\n\n${body}\n\n${footer}`;
+}
+
 export function trimStructured(parsed: unknown, budget: number): { value: unknown; dropped: Array<{ key: string; kept: number; total: number }> } | null {
   const room = Math.max(MIN_BUDGET, budget);
   const current = serialize(parsed);
@@ -151,16 +162,10 @@ export function trimStructured(parsed: unknown, budget: number): { value: unknow
   return json !== null && json.length <= room ? { value, dropped } : null;
 }
 
-/** Trim one tool result's text down to the budget, keeping whole records
- * wherever the payload is JSON so the model is never handed a half-object. */
 export function trimResultText(input: TrimInput): TrimOutcome {
   const { text } = input;
   const budget = Math.max(MIN_BUDGET, input.budget ?? DEFAULT_RESULT_BUDGET);
   if (text.length <= budget) return { text, trimmed: false, originalChars: text.length };
-
-  // Reserve room for the marker so the trimmed result actually lands under
-  // the budget instead of just under it plus an explanation.
-  const room = Math.max(MIN_BUDGET, budget - 400);
 
   let parsed: unknown;
   try {
@@ -170,9 +175,21 @@ export function trimResultText(input: TrimInput): TrimOutcome {
   }
 
   const fields = parsed === undefined ? [] : arrayFields(parsed);
+  // Banners sized at their widest, so the whole result lands under the budget; the short form when full ones would eat half.
+  const held = input.held;
+  const banner = (opts: { dropped: Array<{ key: string; kept: number; total: number }>; structural: boolean; short: boolean; footer?: boolean; keptChars: number }) =>
+    truncationBanner({ originalChars: text.length, spillPath: input.spillPath, spillHint: input.spillHint, held, ...opts });
+  const widestOf = (short: boolean) => {
+    const variants = [
+      { dropped: fields.map((f) => ({ key: f.key, kept: Math.max(0, f.items.length - 1), total: f.items.length })), structural: true },
+      { dropped: [], structural: false },
+    ];
+    return Math.max(...variants.map((v) => banner({ ...v, short, keptChars: text.length }).length + banner({ ...v, short, keptChars: text.length, footer: Boolean(held) }).length));
+  };
+  const fullRoom = budget - (widestOf(false) + 4);
+  const short = fullRoom < budget / 2;
+  const room = Math.max(0, short ? budget - (widestOf(true) + 4) : fullRoom);
   if (fields.length) {
-    // What the payload costs with every bulk array emptied. Anything left is
-    // shared out between those arrays, in order, equally.
     const skeleton = Array.isArray(parsed)
       ? 2
       : (serialize({ ...(parsed as Record<string, unknown>), ...Object.fromEntries(fields.map((f) => [f.key, []])) })?.length ?? Infinity);
@@ -194,13 +211,12 @@ export function trimResultText(input: TrimInput): TrimOutcome {
         value = next;
       }
       const json = serialize(value);
-      // One record can be larger than the whole share; if the structural cut
-      // still overflows, the text cut below is the honest answer.
       if (json !== null && json.length <= room) {
         return {
-          text: json + marker({ originalChars: text.length, keptChars: json.length, dropped, spillPath: input.spillPath, spillHint: input.spillHint, structural: true }),
+          text: wrap(json, banner({ keptChars: json.length, dropped, structural: true, short }), banner({ keptChars: json.length, dropped, structural: true, short, footer: Boolean(held) })),
           trimmed: true,
           originalChars: text.length,
+          value,
         };
       }
     }
@@ -208,7 +224,7 @@ export function trimResultText(input: TrimInput): TrimOutcome {
 
   const cut = cutAt(text, room);
   return {
-    text: cut + marker({ originalChars: text.length, keptChars: cut.length, dropped: [], spillPath: input.spillPath, spillHint: input.spillHint, structural: false }),
+    text: wrap(cut, banner({ keptChars: cut.length, dropped: [], structural: false, short }), banner({ keptChars: cut.length, dropped: [], structural: false, short, footer: Boolean(held) })),
     trimmed: true,
     originalChars: text.length,
   };

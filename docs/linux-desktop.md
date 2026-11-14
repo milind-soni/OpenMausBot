@@ -21,7 +21,7 @@ of Linux desktop on your own server instead of this machine, see [byo-vps.md](by
 The local preview does **not** give the bot control of this computer by itself. On Xorg, local control requires both
 the global **Enable local control** choice and assigning a bot to **This computer**; every action still enters the
 approval flow. On Wayland, local control is disabled and legacy opt-ins are cleared automatically. Automatic Wayland
-helper installation, Linux dictation, and ARM64 remain unavailable and fail closed; follow their
+helper installation, native on-device dictation, and ARM64 remain unavailable and fail closed; follow their
 progress in [issue #29](https://github.com/milind-soni/OpenMausBot/issues/29) and the safety hold in
 [issue #345](https://github.com/milind-soni/OpenMausBot/issues/345). Bundled
 CUA supply-chain work is tracked in [issue #113](https://github.com/milind-soni/OpenMausBot/issues/113). Xorg is tracked in
@@ -84,6 +84,49 @@ chmod +x release/OpenMausBot-*-x86_64.AppImage
 ```
 
 For a downloaded release AppImage, use `OpenMausBot.AppImage` in place of the versioned path above.
+
+### Arch Linux and EndeavourOS
+
+Arch-based distributions are not an official target. The release AppImage runs there, or you can build a native
+`.pacman` package yourself.
+
+#### Native pacman package
+Releases and CI do not build this package and nothing tests it. Removing it cleans up the launcher and browser
+profile; whether a pacman upgrade re-applies the install steps has not been verified. Build it from source:
+
+```sh
+pnpm package:arch
+sudo pacman -U release/OpenMausBot-<version>-x64.pacman
+```
+
+Replace `<version>` with the built version (for example, `0.1.149`). Then launch `openmausbot` from the application launcher or command line.
+
+#### Portable AppImage
+A minimal Arch install lacks the FUSE helper and some desktop libraries the AppImage needs, so install them first:
+
+```sh
+sudo pacman -S --needed fuse3 gtk3 nss alsa-lib libcups mesa
+chmod +x OpenMausBot.AppImage
+./OpenMausBot.AppImage
+```
+
+A full desktop install (for example EndeavourOS with KDE or GNOME) usually has all of these already, and
+`--needed` skips the ones that are present. This was checked with the v0.1.138 AppImage on a current Arch
+Linux image (fuse3 3.18, gtk3 3.24, mesa 26.2): the app opens to the welcome screen.
+
+### Updating
+
+The app checks for updates in the background and downloads them by itself. Nothing restarts until you click
+**Restart to update**.
+
+- **Debian package.** The click asks for your password once, in the system's own prompt, installs the update with
+  `apt-get` (so new dependencies are resolved) and reopens OpenMausBot. The downloaded file is copied to a
+  root-only folder and checked against the checksum in the update feed first; a file that does not match is
+  refused and nothing is installed. Closing the prompt leaves the update ready to try again. If the session cannot
+  show a prompt (SSH, no desktop, no `pkexec`), the app falls back to copying the `sudo apt-get install` command
+  and opening a terminal, and says why. Set `OMB_UPDATE_INSTALL=terminal` to always use the terminal.
+- **AppImage.** The update replaces the AppImage when you restart; no password is needed.
+- **rpm and pacman packages** still use the terminal hand-off.
 
 ### Bundled bot browser on Ubuntu 24.04
 
@@ -164,12 +207,14 @@ fail-closed on Wayland. XWayland's `DISPLAY` never bypasses the Wayland safety g
 
 ## Enable local control
 
-Installed `.deb` and AppImage builds include the certified **Cua Driver 0.19.3** CLI and cursor-theme sidecar.
+Installed `.deb` and AppImage builds include the certified **Cua Driver 0.41.3** CLI and cursor-theme sidecar.
 On GNOME Xorg, open Settings, choose **Enable local control (Beta)**, wait for **Ready**, then explicitly assign a bot
 to **This computer**. No driver download, terminal command, `chmod`, or daemon setup is required. The owned daemon
 starts with `--no-overlay`, so Cua's decorative full-screen X11 cursor surface is never created. OpenMausBot also
-uses Electron software rendering on Linux to avoid the reproduced NVIDIA/libGLES GPU-process failure that could
-leave an invisible focused app window receiving input.
+uses Electron software rendering when the NVIDIA driver is loaded, to avoid the reproduced NVIDIA/libGLES
+GPU-process failure that could leave an invisible focused app window receiving input. Other GPUs keep hardware
+acceleration, because software rendering costs about a CPU core while the window animates. Set `OMB_LINUX_GPU=off`
+to force software rendering or `OMB_LINUX_GPU=on` to force the GPU.
 
 Cua actions use a private logical cursor. With the decorative overlay disabled, `move_cursor` does not move the
 user's physical pointer; approved click and typing actions still target the requested window, while the user's own
@@ -180,19 +225,19 @@ file permissions. Sign out and choose **Ubuntu on Xorg** from the login-screen s
 preview-only capture, Cloud, or Local VM. Wayland re-enablement requires its own real-seat evidence and will not be
 controlled by an environment override.
 
-The upstream release has no signature or GitHub artifact attestation and is not immutable, so the build uses an
-explicit reviewed digest as its trust anchor:
+Upstream release assets are mutable, so the build uses an explicit reviewed digest as its trust anchor (the release's
+own `checksums.txt` and Sigstore bundles were checked when the digest was reviewed, but the build does not depend on them):
 
-- source commit: `a1672e7b11951275ecfba3384264d4530185d0db`;
-- archive SHA-256: `3db9d4257d84bacaf7eb104d225f85613ce67edbb20d6eeb83c1384b6d8a5b10`;
-- packaged driver SHA-256: `ed5844fadf07b9b72c4a3b3802e1c47233c166d66d6198608d5991f807aab4ac`;
-- packaged cursor-theme SHA-256: `e589b2b7521bbfeaf9e2bfce668a38e80ed1b9790b1327b13d374fc331d8312a`.
+- source commit: `bd0e299c67dec6397b3d41a259452b2ea13a1cd5`;
+- archive SHA-256: `a00a7bc4a648adbcbc93bfbf5a058daf71ce8838ee172e33b197aaf649ecee14`;
+- packaged driver SHA-256: `83030028e7c9e3f4d753b3b27025135d44eb8d52f562cce0aaaf95777bc1b41f`;
+- packaged cursor-theme SHA-256: `d39efb960d207e7328d7a9dd48e3b6565f74be073f9c2ca8dcba86a4d0f28312`.
 
 Packaging verifies the exact archive size, checksum, member names/types/sizes, and inner hashes before extracting
 only those two executables. The app performs no runtime driver download or self-update. Cua's MIT license, the
 embedded Inter font's SIL OFL 1.1 notice, full dependency license texts, MPL source locations, and a CycloneDX
 inventory ship beside the binary; the reviewed source records live in [`third_party/cua-driver`](../third_party/cua-driver/).
-The reviewed native runtime adds roughly 11–13 MiB to a compressed Ubuntu artifact. The ELF
+The reviewed native runtime adds roughly 14–21 MiB to a compressed Ubuntu artifact. The ELF
 requires glibc 2.30 or newer plus the standard Ubuntu X11/XInput/xkbcommon libraries already present on the supported
 Ubuntu 24.04 desktop; the package verifier executes the exact binary from every artifact layout.
 
@@ -203,11 +248,62 @@ package-owned path to `root:root 0755` automatically.
 
 The packaged runtime remains outside ASAR for deterministic provenance and validation. In packaged builds neither a
 `CUA_DRIVER_PATH` value nor an ambient PATH candidate can replace it; on Wayland neither can bypass the safety gate.
+The one exception is Omarchy's package-owned `/usr/bin/cua-driver`, described in
+[Omarchy (Hyprland, experimental)](#omarchy-hyprland-experimental).
 
 The Xorg runtime uses private sockets, standard permission mode, per-action OpenMausBot approvals,
 telemetry/update-check suppression, strict driver identity, overlay-free startup, and lifecycle cleanup tests. Those
 defenses remain necessary, but none substitutes for the real-seat acceptance evidence required to enable Wayland. Linux
 **Auto** never routes to the user's desktop, and no Cloud or Local VM approval can authorize it.
+
+## Omarchy (Hyprland, experimental)
+
+[Omarchy](https://omarchy.org) is Arch Linux with the Hyprland compositor. **This computer** works there only with
+Cua's Hyprland plugin turned on. The plugin gives bots two seats of their own inside Hyprland (`Cua-Agent` and
+`Cua-Agent-2`), so the compositor delivers their input to the target window without touching your pointer or
+keyboard. Every other Wayland desktop (GNOME, KDE, Sway, or Hyprland without the plugin) keeps the safety gate above.
+Support is experimental, like the plugin itself, which Omarchy leaves off by default and outside its normal installer.
+
+1. Install and start the AppImage as in [Arch Linux and EndeavourOS](#arch-linux-and-endeavouros-appimage).
+2. Install Omarchy's Cua packages, `cua-driver-bin` and `cua-hyprland-plugin`, and turn the plugin on as
+   [Cua's Omarchy guide](https://cua.ai/docs/cua-sdk/guides/omarchy) describes. In Omarchy's Lua configuration that is
+   `hl.config({plugin = {cua = {enabled = true}}})`; in a legacy configuration, `plugin:cua:enabled = true`. Then run
+   `hyprctl reload`.
+3. Check it: `hyprctl -j cua:status` should report `"state":"input_v3_candidate"`, `"configured":true`, and an input
+   transport that is ready.
+4. In OpenMausBot, open **Local control**, choose **Enable local control (Beta)**, wait for **Ready**, then assign a bot
+   to **This computer**. Until the plugin is on, the card says how to turn it on, and **Try again** checks again.
+
+How OpenMausBot decides:
+
+- It treats the session as Hyprland only when `HYPRLAND_INSTANCE_SIGNATURE` is set and `XDG_CURRENT_DESKTOP` (or
+  `XDG_SESSION_DESKTOP`) names Hyprland.
+- It reads the plugin's status with the system `/usr/bin/hyprctl -j cua:status` (never a `hyprctl` from `PATH`), with a
+  two-second limit, and treats anything other than a loaded, configured input build with a ready transport and a
+  matching Hyprland ABI as off. It checks again every time local control starts, so a plugin left stale by a Hyprland
+  update turns local control off instead of failing halfway.
+- It prefers Omarchy's own driver. The plugin is built against the exact system Hyprland and ships beside the
+  `cua-driver-bin` package, so that pair matches. OpenMausBot never bundles the plugin, because plugins break on
+  Hyprland updates. This is the one exception to "only the bundled driver runs", and it is narrow:
+  - the driver must be the fixed path `/usr/bin/cua-driver`, owned by root and not writable by anyone else;
+  - `pacman -Qo` must say `cua-driver-bin` owns it (and owns its target, if it is a symlink);
+  - the package version must name the binary that answers `--version`, in the bundled driver's minor line at or above
+    the bundled patch release (0.41.3 or a later 0.41.x).
+
+  That is the same root-owned package trust you already give the compositor. A user-installed copy or a `PATH`
+  lookup never qualifies. If any check fails, OpenMausBot uses its bundled driver instead, started with
+  `CUA_DRIVER_RS_ENABLE_WAYLAND=1`.
+
+What works, and what doesn't:
+
+- Native Wayland apps that bind the agent seats (GTK 3 and 4, Qt 6) take background clicks, typing, scrolls and drags.
+  Qt 6 apps refuse background keys.
+- Chromium, Chrome and Electron apps bind only your seat, so the driver refuses background input to them. Bots are told
+  to open web pages in their own browser instead.
+- XWayland windows, Unicode and IME input, multiple keyboard layouts, and modified pointer gestures are outside
+  the plugin's input contract.
+- A foreground action you approve moves your keyboard focus and pointer, and does not put them back.
+- Every action still goes through OpenMausBot's approval flow, the same as on Xorg.
 
 ## Validate a package change
 
@@ -266,3 +362,8 @@ file OpenMausBot-*-x86_64.AppImage
 
 Run it from a terminal once to collect the startup output. Do not install `libfuse2` just for this AppImage; the
 package is built with the static runtime.
+
+If it prints `No suitable fusermount binary found on the $PATH` or `Cannot mount AppImage, please check your FUSE
+setup`, install the distribution's FUSE 3 package (`fuse3` on Ubuntu, Debian and Arch). If it then names a missing
+`lib*.so` file, install the desktop libraries listed under
+[Arch Linux and EndeavourOS](#arch-linux-and-endeavouros-appimage), or your distribution's packages for them.

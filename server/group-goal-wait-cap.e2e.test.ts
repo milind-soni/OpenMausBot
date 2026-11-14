@@ -9,14 +9,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
-// A room waits for a busy teammate, but not forever, and a goal survives one
-// transient provider failure. This server runs with a short wait cap so the
-// cap fires in seconds: a worker that never frees up comes back to the lead
-// as a reassign note, a lead that never frees up ends the run as blocked —
-// never as a provider failure — a lead whose provider dies is retried once
-// before the run gives up, and an ordinary chat round gives up on a member
-// that stays busy with a chip that says so, then moves on to the next one.
-
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
@@ -28,8 +20,7 @@ let stderr = "";
 
 const envelope = (payload: Record<string, string>) => `<openmaus-goal>${JSON.stringify(payload)}</openmaus-goal>`;
 
-// turn 1: assign the worker that never frees up; turn 2 (after the harness
-// note): reassign to the helper; turn 3: complete
+// turn 1 assigns the worker that never frees up; turn 2 (after the harness note) reassigns to the helper; turn 3 completes
 const reassignLeadReplies = [
   `Hang should start.\n${envelope({ status: "continue", next: "Hang", instruction: "Draft the summary", detail: "Assigning" })}`,
   `Reassigning to Helper.\n${envelope({ status: "continue", next: "Helper", instruction: "Draft the summary instead", detail: "Reassigned" })}`,
@@ -101,7 +92,6 @@ beforeAll(async () => {
     try {
       if ((await fetch(`${base}/api/health`)).status === 200) break;
     } catch {
-      // Still starting.
     }
     if (Date.now() >= deadline) throw new Error(`server never became healthy: ${stderr}`);
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -179,7 +169,6 @@ describe("goal wait cap and transient retry", () => {
       helperSpoke: true,
     });
 
-    // the stuck direct turn was never touched by the goal's wait
     const state = (await api("GET", "/api/bots?messages=0")).body;
     expect(state.bots.find((bot: { id: string }) => bot.id === hang.id)?.busy).toBe(true);
     expect((await api("POST", `/api/bots/${hang.id}/interrupt`)).status).toBe(200);
@@ -217,10 +206,8 @@ describe("goal wait cap and transient retry", () => {
       return { cards: cards.length, status: cards[0]?.goalRun?.status };
     }, { timeout: 20_000 }).toEqual({ cards: 1, status: "failed" });
 
-    // exactly one retry happened: the retry note is a progress patch on the
-    // single card, and the run still ended honestly as failed
     const state = (await api("GET", `/api/groups/${room.id}/goal-runs`)).body;
-    void state; // the card's terminal detail is the receipt; the retry itself is asserted below
+    void state;
     const { room: current } = await roomState(room.id);
     const activity = current?.messages.filter((message: { kind: string }) => message.kind === "activity") ?? [];
     const failures = activity.filter((message: { tool?: { name?: string } }) => /error:/i.test(message.tool?.name ?? ""));
@@ -250,7 +237,6 @@ describe("goal wait cap and transient retry", () => {
         working: current?.working,
         chip: chip?.tool?.name,
         chipOk: chip?.tool?.ok,
-        // the neutral promise is rewritten, not joined by a second chip
         waitChips: messages.filter((message) =>
           message.kind === "activity" && message.from?.botId === stuck.id && /another conversation/i.test(message.tool?.name ?? "")
         ).length,
@@ -266,11 +252,8 @@ describe("goal wait cap and transient retry", () => {
       helperSpoke: true,
     });
 
-    // the stuck direct turn was never touched by the room's wait
     const state = (await api("GET", "/api/bots?messages=0")).body;
     expect(state.bots.find((bot: { id: string }) => bot.id === stuck.id)?.busy).toBe(true);
     expect((await api("POST", `/api/bots/${stuck.id}/interrupt`)).status).toBe(200);
   });
-
-  it.todo("parks on a busy worker and leaves the room usable for chat while it waits (park-and-release)");
 });

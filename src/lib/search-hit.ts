@@ -1,4 +1,3 @@
-/** One /api/search hit, resolved to the bot or room that owns it. */
 export interface SearchHit {
   botId?: string;
   groupId?: string;

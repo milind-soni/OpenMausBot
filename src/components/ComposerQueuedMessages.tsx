@@ -2,6 +2,14 @@ import { CornerDownRight, Pencil, Trash2 } from "lucide-react";
 
 import type { SteerQueueReason } from "../../shared/wire";
 import { t } from "@/lib/i18n";
+import { replySnippet } from "@/lib/replies";
+import { splitTranscriptCitations } from "@/lib/citations";
+
+const ATTACHMENT_TAG = /<attached-(?:image|file)\s/;
+
+function queuedMessageLabel(text: string): string {
+  return splitTranscriptCitations(text).citations.length || ATTACHMENT_TAG.test(text) ? replySnippet(text, 500) : text;
+}
 
 export function composerCanSteerQueuedMessages(
   busy: boolean,
@@ -12,15 +20,8 @@ export function composerCanSteerQueuedMessages(
   return busy && !locked && !approvalPending && pendingCount > 0;
 }
 
-/** How long a just-queued chip accepts a second Enter as "steer it now". */
 export const DOUBLE_ENTER_STEER_WINDOW_MS = 1_500;
 
-/** A new chip on a busy steer-capable thread opens the double-Enter
- * window: the words queued because the live steer lost its race (or carried
- * an attachment) can still join the running turn without interrupting it.
- * Rooms and 1:1 threads share the gesture; capability, not the surface,
- * decides whether it applies.
- * Returns the window's expiry, or null when the gesture does not apply. */
 export function doubleEnterSteerWindowExpiresAt(
   prevPendingCount: number,
   pendingCount: number,
@@ -32,8 +33,6 @@ export function doubleEnterSteerWindowExpiresAt(
   return pendingCount > prevPendingCount ? now + DOUBLE_ENTER_STEER_WINDOW_MS : null;
 }
 
-/** Whether an Enter press is the second one: empty composer, a chip waiting,
- * and inside the window opened when that chip arrived. */
 export function doubleEnterSteersQueue(
   windowExpiresAt: number,
   now: number,
@@ -43,15 +42,6 @@ export function doubleEnterSteersQueue(
   return !hasContent && pendingCount > 0 && now < windowExpiresAt;
 }
 
-/** Messages held by the harness until the running turn settles.
- *
- * The queue sits directly above the composer rather than pretending these
- * words are already part of the transcript. Only its head owns Steer: room
- * queues drain one item at a time, while bot queues coalesce all waiting
- * items into one follow-up. Edit and Delete remain available on every exact
- * queue id: Edit takes the message out of the queue and hands its words back
- * to the composer, so nothing unsent is ever changed behind the harness.
- */
 export function QueuedComposerMessages({
   items,
   onSteer,
@@ -60,16 +50,17 @@ export function QueuedComposerMessages({
   steerInterrupts = false,
   onCancel,
   onEdit,
+  oneThreadPerBot = false,
+  onSeePlans,
 }: {
   items: Array<{ queueId: string; text: string; reason?: SteerQueueReason }>;
+  oneThreadPerBot?: boolean;
+  onSeePlans?: () => void;
   onSteer?: () => void;
   steerMode?: "all" | "next";
   steering?: boolean;
-  /** True when Steer is backed by an interrupt (engine without live steer):
-   * the hint must say what the click really does. */
   steerInterrupts?: boolean;
   onCancel: (queueId: string) => void;
-  /** Pull this queued message back into the composer to tweak or extend it. */
   onEdit?: (queueId: string) => void;
 }) {
   if (!items.length) return null;
@@ -77,11 +68,15 @@ export function QueuedComposerMessages({
   const multiple = items.length > 1;
   const steerLabel = steering
     ? t("composer.queued.steering")
-    : multiple
-      ? steerMode === "all"
-        ? t("composer.queued.steerAll")
-        : t("composer.queued.steerNext")
-      : t("composer.queued.steer");
+    : steerInterrupts
+      ? multiple
+        ? t(steerMode === "all" ? "composer.queued.stopAndSendAll" : "composer.queued.stopAndSendNext")
+        : t("composer.queued.stopAndSend")
+      : multiple
+        ? steerMode === "all"
+          ? t("composer.queued.steerAll")
+          : t("composer.queued.steerNext")
+        : t("composer.queued.steer");
   const steerDescription = steerInterrupts
     ? multiple
       ? steerMode === "all"
@@ -108,26 +103,30 @@ export function QueuedComposerMessages({
         <p className="px-3 pt-2 text-[12px] text-ink-secondary">{t("composer.queued.groupTurn")}</p>
       )}
       {items.some((item) => item.reason === "capacity") && (
-        <p className="px-3 pt-2 text-[12px] text-ink-secondary">{t("composer.queued.capacity")}</p>
+        <p className="px-3 pt-2 text-[12px] text-ink-secondary">
+          {t(oneThreadPerBot ? "composer.queued.capacityStarter" : "composer.queued.capacity")}
+          {oneThreadPerBot && onSeePlans && <>{" "}<button type="button" className="underline" onClick={onSeePlans}>{t("composer.queued.seePlans")}</button></>}
+        </p>
       )}
       <ul className="divide-y divide-hairline/25" aria-label={t("composer.queued.list")}>
-        {items.map((item, index) => (
-          <li key={item.queueId} className="flex min-h-10 min-w-0 items-center gap-2 px-2.5 py-1.5">
+        {items.map((item, index) => {
+          const label = queuedMessageLabel(item.text);
+          return <li key={item.queueId} className="flex min-h-10 min-w-0 items-center gap-2 px-2.5 py-1.5">
             <CornerDownRight
               size={14}
               strokeWidth={1.8}
               className="shrink-0 text-ink-secondary"
               aria-hidden="true"
             />
-            <span dir="auto" className="min-w-0 flex-1 truncate text-[14px] text-ink" title={item.text}>
-              {item.text}
+            <span dir="auto" className="min-w-0 flex-1 truncate text-[14px] text-ink" title={label}>
+              {label}
             </span>
             {index === 0 && onSteer && (
               <button
                 type="button"
                 onClick={onSteer}
                 disabled={steering}
-                aria-label={steering ? t("composer.queued.steeringAria") : steerDescription}
+                aria-label={steering ? t("composer.queued.steeringAria") : steerInterrupts ? steerLabel : steerDescription}
                 title={steerDescription}
                 className="flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-[13px] font-medium text-ink-secondary outline-none hover:bg-raised-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-wait disabled:opacity-60"
               >
@@ -160,8 +159,8 @@ export function QueuedComposerMessages({
             >
               <Trash2 size={14} aria-hidden="true" />
             </button>
-          </li>
-        ))}
+          </li>;
+        })}
       </ul>
     </div>
   );

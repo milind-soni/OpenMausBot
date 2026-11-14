@@ -1,0 +1,158 @@
+import { describe, expect, it } from "vitest";
+
+import { CLOUD_HOME_SECRET_KEYS, cloudRequestSignature as homeSignature } from "../../server/cloud-home.ts";
+import { CAPS_DROPPED_ENV, CLOUD_SECRETS_FILE, CLOUD_SECRETS_FILE_KEYS } from "../../server/cloud-home-start.ts";
+import { HOME_SECRET_ENV, HOME_SECRETS_FILE, HOME_SECRETS_TARGET } from "../src/settings.ts";
+import { cloudRequestSignature, summarizeHealth } from "../src/home-health.ts";
+import {
+  checkConfig, checkEnrollCode, checkEnrollResponse, checkHello, checkHomeEnv, checkJob, checkJobPayload, checkTransferUrl, JOB_LIFETIME_MS, JOB_TYPES, REQUIRED_HOME_ENV,
+} from "../src/protocol.ts";
+import { generateKeyPair, seal, unseal } from "../src/signed.ts";
+
+const HOME = `ghcr.io/milind-soni/openmausbot-cloud-home@sha256:${"a".repeat(64)}`;
+const CONNECTOR = `ghcr.io/milind-soni/mausbot-connector@sha256:${"b".repeat(64)}`;
+const env = {
+  OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
+  OMB_PUBLIC_URL: "https://acme.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: "S".repeat(43),
+};
+
+describe("the connector protocol", () => {
+  it("takes a job only with a valid id, a known type and exactly that type's arguments", () => {
+    expect(checkJob({ id: "j1", type: "start", args: { image: HOME, env } })).toMatchObject({ ok: true, job: { id: "j1", type: "start" } });
+    expect(checkJob({ id: "j2", type: "status" })).toEqual({ ok: true, job: { id: "j2", type: "status", args: {} } });
+    expect(checkJob({ id: "j3", type: "shell", args: { command: "id" } })).toMatchObject({ ok: false, id: "j3", code: "unknown_job" });
+    expect(checkJob({ id: "j4", type: "status", args: { verbose: true } })).toMatchObject({ ok: false, code: "invalid_args" });
+    expect(checkJob({ id: "j5", type: "update", args: { image: HOME, force: true } })).toMatchObject({ ok: false, code: "invalid_args", message: 'unknown argument "force"; this job takes image' });
+    for (const bad of [null, [], "status", { type: "status" }, { id: "", type: "status" }, { id: "x".repeat(65), type: "status" }, { id: "a b", type: "status" }]) {
+      expect(checkJob(bad)).toMatchObject({ ok: false, id: null, code: "invalid_job" });
+    }
+    expect(JOB_TYPES).toEqual(["start", "stop", "restart", "update", "status", "backup", "restore", "export-disk", "import-disk", "host-health", "self-update"]);
+  });
+
+  it("runs only our images, and only by digest: the home's for the home, the connector's for itself", () => {
+    const image = (type: "start" | "update" | "self-update", value: string) => checkJob({ id: "j", type, args: type === "start" ? { image: value, env } : { image: value } }).ok;
+    expect(image("start", HOME)).toBe(true);
+    expect(image("update", HOME)).toBe(true);
+    expect(image("self-update", CONNECTOR)).toBe(true);
+    for (const value of [
+      "ghcr.io/milind-soni/openmausbot-cloud-home:latest", "ghcr.io/milind-soni/openmausbot-cloud-home:v0.1.130",
+      `ghcr.io/someone-else/openmausbot-cloud-home@sha256:${"a".repeat(64)}`, `docker.io/library/ubuntu@sha256:${"a".repeat(64)}`,
+      `ghcr.io/milind-soni/openmausbot-cloud-home@sha256:${"A".repeat(64)}`, `ghcr.io/milind-soni/openmausbot-cloud-home@sha256:${"a".repeat(63)}`,
+      `ghcr.io/milind-soni/openmausbot-cloud-home@sha256:${"a".repeat(64)} --privileged`, `ghcr.io/milind-soni/openmausbot@sha256:${"a".repeat(64)}`,
+    ]) {
+      expect(image("start", value), value).toBe(false);
+      expect(image("update", value), value).toBe(false);
+    }
+    expect(image("update", CONNECTOR)).toBe(false);
+    expect(image("self-update", HOME)).toBe(false);
+  });
+
+  it("starts a home only with its contract, OMB_ settings the image does not own, and one-line values, and never echoes a value", () => {
+    expect(checkHomeEnv(env)).toEqual({ ok: true, value: env });
+    expect(checkHomeEnv({ ...env, OMB_COMPOSIO_BROKER_URL: "http://127.0.0.1:9", OMB_CLOUD_TEAM_ID: "t1" }).ok).toBe(true);
+    for (const name of REQUIRED_HOME_ENV) {
+      const { [name]: _dropped, ...rest } = env;
+      expect(checkHomeEnv(rest), name).toMatchObject({ ok: false, message: `env must set ${name}` });
+    }
+    const refused = (extra: Record<string, unknown>) => checkHomeEnv({ ...env, ...extra });
+    for (const name of ["FLY_APP_NAME", "PATH", "NODE_OPTIONS", "HOME", "LD_PRELOAD", "omb_lower", "OMB_"]) expect(refused({ [name]: "x" }).ok, name).toBe(false);
+    for (const name of ["OMB_CLOUD_EDGE_HOLD", "OMB_CLOUD_EDGE_BIN", "OMB_CLOUD_HARDEN", "OMB_DATA_DIR", "OMB_PORT", "OMB_CLOUD_SECRETS_FD", "OMB_CLOUD_CAPS_DROPPED"]) {
+      expect(refused({ [name]: "x" }), name).toMatchObject({ ok: false, message: `env name ${name} is the image's own setting` });
+    }
+    const secret = "T0P-SECRET-VALUE";
+    for (const value of [`${secret}\nOMB_CLOUD_HARDEN=0`, `${secret}\r`, `${secret}\0`, 42, null, "x".repeat(8193)]) {
+      const result = refused({ OMB_CLOUD_X_TOKEN: value });
+      expect(result.ok).toBe(false);
+      expect(JSON.stringify(result)).not.toContain(secret);
+    }
+    expect(refused({ OMB_CLOUD_ROLE: "admin" }).ok).toBe(false);
+    expect(refused({ OMB_PUBLIC_URL: "http://acme.example.test" }).ok).toBe(false);
+    expect(refused({ OMB_PUBLIC_URL: "https://acme.example.test/path" }).ok).toBe(false);
+    expect(checkHomeEnv(Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`OMB_X${i}`, "v"]))).ok).toBe(false);
+    expect(checkHomeEnv([]).ok).toBe(false);
+  });
+
+  it("keeps out of the home's environment exactly the secrets its launcher reads from the file, where it reads it", () => {
+    expect([...HOME_SECRET_ENV].sort()).toEqual([...CLOUD_SECRETS_FILE_KEYS].sort());
+    expect(CLOUD_SECRETS_FILE_KEYS).toEqual(expect.arrayContaining([...CLOUD_HOME_SECRET_KEYS]));
+    expect(`${HOME_SECRETS_TARGET}/${HOME_SECRETS_FILE}`).toBe(CLOUD_SECRETS_FILE);
+    expect(checkHomeEnv({ ...env, [CAPS_DROPPED_ENV]: "1" }).ok).toBe(false);
+  });
+
+  it("transfers only over https, or http to a test Admin on this machine, never with credentials in the address", () => {
+    expect(checkTransferUrl("https://storage.example.test/disk.tar.gz?sig=abc")).toEqual({ ok: true, value: "https://storage.example.test/disk.tar.gz?sig=abc" });
+    expect(checkTransferUrl("http://127.0.0.1:8123/disk").ok).toBe(true);
+    for (const url of ["http://storage.example.test/disk", "file:///etc/shadow", "https://user:pass@storage.example.test/", "not a url", "ftp://x/y", 7]) {
+      expect(checkTransferUrl(url).ok, String(url)).toBe(false);
+    }
+  });
+
+  it("keeps an enrolment answer only when every field is the Admin's shape, and a code only as MausBot shows it", () => {
+    const key = generateKeyPair().publicKey;
+    const good = { boxId: "box_1a2b3c4d5e6f", teamId: "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93", adminKeys: { k1: key }, state: "pending" };
+    expect(checkEnrollResponse(good)).toEqual({ ok: true, value: good });
+    expect(checkEnrollResponse({ ...good, extra: 1 })).toEqual({ ok: true, value: good });
+    for (const bad of [null, {}, { ...good, boxId: "a/b" }, { ...good, teamId: 3 }, { ...good, adminKeys: {} }, { ...good, adminKeys: { k1: key, k2: key, k3: key } },
+      { ...good, adminKeys: { k1: "short" } }, { ...good, adminKeys: { "K 1": key } }, { ...good, state: "revoked" }]) expect(checkEnrollResponse(bad).ok, JSON.stringify(bad)).toBe(false);
+    expect(checkEnrollCode("MB-1A2B-3C4D").ok).toBe(true);
+    for (const code of ["", "abc", "MB 1A2B", "MB-1A2B;rm -rf /", "x".repeat(200)]) expect(checkEnrollCode(code).ok, code).toBe(false);
+  });
+
+  it("signs a health read byte for byte as the Admin and the home do", () => {
+    const secret = "K".repeat(43);
+    for (const [method, target, body] of [["GET", "/api/cloud/health", ""], ["POST", "/api/cloud/pairing", "{\"label\":\"x\"}"], ["GET", "/api/cloud/box?x=1", ""]] as const) {
+      expect(cloudRequestSignature(secret, "1793183627", "nonce-0123456789ab", method, target, body)).toBe(homeSignature(secret, "1793183627", "nonce-0123456789ab", method, target, body));
+    }
+  });
+
+  it("reduces a health report to fixed fields, healthy only when it names the image the home should run", () => {
+    const report = { v: 1, version: "0.1.130", image: HOME, box: { box: "bwrap", reason: null, checks: "32/32", failed: [], boxed: 3 }, secretish: "x" };
+    expect(summarizeHealth(200, report, HOME, 5)).toEqual({ ok: true, version: "0.1.130", image: HOME, box: { box: "bwrap", checks: "32/32", failed: [] }, at: 5 });
+    expect(summarizeHealth(200, report, `${HOME.slice(0, -1)}b`, 5).ok).toBe(false);
+    expect(summarizeHealth(401, { error: "invalid_signature" }, HOME, 5)).toMatchObject({ ok: false, image: null, box: null });
+    expect(summarizeHealth(0, null, HOME, 5).ok).toBe(false);
+  });
+
+  it("takes a hello only for this box, this connection's two nonces and this count", () => {
+    const expected = { box: "box_1a2b3c4d5e6f", adminNonce: "a".repeat(43), boxNonce: "b".repeat(43), count: 7 };
+    const hello = { t: "hello", kid: "k1", ...expected, now: 1_793_000_000_000, state: "accepted" };
+    expect(checkHello(hello, expected).ok).toBe(true);
+    for (const [field, value] of [["box", "box_other0000000"], ["adminNonce", "c".repeat(43)], ["boxNonce", "c".repeat(43)], ["count", 6], ["state", "revoked"], ["now", -1], ["t", "job"], ["keys", { k1: "x" }]] as const) {
+      expect(checkHello({ ...hello, [field]: value }, expected).ok, field).toBe(false);
+    }
+  });
+
+  it("takes a signed job only for this box and within its lifetime by the Admin's clock", () => {
+    const iat = 1_793_000_000_000;
+    const payload = { t: "job", kid: "k1", box: "box_1a2b3c4d5e6f", iat, exp: iat + JOB_LIFETIME_MS, job: { id: "j", type: "status" } };
+    expect(checkJobPayload(payload, "box_1a2b3c4d5e6f", iat + 1000)).toEqual({ ok: true, job: { id: "j", type: "status" } });
+    expect(checkJobPayload(payload, "box_other0000000", iat)).toMatchObject({ ok: false, code: "wrong_box" });
+    expect(checkJobPayload(payload, "box_1a2b3c4d5e6f", iat + JOB_LIFETIME_MS + 1)).toMatchObject({ ok: false, code: "expired_job" });
+    expect(checkJobPayload({ ...payload, exp: iat + JOB_LIFETIME_MS + 1 }, "box_1a2b3c4d5e6f", iat)).toMatchObject({ ok: false, code: "expired_job" });
+    expect(checkJobPayload({ ...payload, t: "hello" }, "box_1a2b3c4d5e6f", iat)).toMatchObject({ ok: false, code: "unsigned_job" });
+  });
+
+  it("takes a config only for this box, with a window, ring, hold, image and offline hours in their shapes", () => {
+    const config = { t: "config", kid: "k1", box: "box_1a2b3c4d5e6f", iat: 1, version: 2, state: "accepted",
+      schedule: { window: { days: [0, 6], start: "22:00", end: "05:00", timeZone: "Europe/Berlin" }, ring: "late", holdUntil: null, image: HOME }, policy: { offlineHours: 72 } };
+    expect(checkConfig(config, "box_1a2b3c4d5e6f").ok).toBe(true);
+    expect(checkConfig(config, "box_other0000000").ok).toBe(false);
+    for (const change of [{ version: 0 }, { schedule: { ...config.schedule, ring: "fast" } }, { schedule: { ...config.schedule, image: "ubuntu:latest" } },
+      { schedule: { ...config.schedule, window: { ...config.schedule.window, start: "25:00" } } }, { schedule: { ...config.schedule, window: { ...config.schedule.window, days: [7] } } },
+      { schedule: { ...config.schedule, window: { ...config.schedule.window, timeZone: "../../etc" } } }, { policy: { offlineHours: 10_000 } }]) {
+      expect(checkConfig({ ...config, ...change }, "box_1a2b3c4d5e6f").ok, JSON.stringify(change)).toBe(false);
+    }
+  });
+
+  it("opens an envelope only with the key its kid names, and only as it was signed", () => {
+    const admin = generateKeyPair(), other = generateKeyPair();
+    const envelope = seal({ t: "job", box: "b" }, "k1", admin.privateKey);
+    expect(unseal(envelope, { k1: admin.publicKey })).toEqual({ ok: true, payload: { t: "job", box: "b", kid: "k1" } });
+    expect(unseal(envelope, { k1: other.publicKey })).toEqual({ ok: false, why: "the signature does not verify" });
+    expect(unseal(envelope, { k2: admin.publicKey })).toEqual({ ok: false, why: "signed by a key this side does not know" });
+    const [body, signature] = envelope.split(".");
+    const changed = Buffer.from(JSON.stringify({ t: "job", box: "c", kid: "k1" })).toString("base64url");
+    expect(unseal(`${changed}.${signature}`, { k1: admin.publicKey }).ok).toBe(false);
+    for (const bad of [`${body}`, `${body}.${signature}.x`, "", 7, `${"x".repeat(300_000)}.y`]) expect(unseal(bad, { k1: admin.publicKey }).ok).toBe(false);
+  });
+});

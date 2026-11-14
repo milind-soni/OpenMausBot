@@ -1,8 +1,4 @@
-// The Ubuntu hand-off ends in two side effects that only exist at runtime:
-// the command reaching the system clipboard, and a terminal being spawned.
-// terminal-launch.test.mjs injects a fake runner, so nothing is ever launched
-// there. This runs the production path inside a real Electron process, with a
-// recording script on PATH standing in for the terminal emulator.
+// Runs the hand-off in a real Electron process (terminal-launch.test.mjs fakes the runner); a recording script on PATH is the terminal.
 import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -46,16 +42,12 @@ it.runIf(canRun)(
     expect(result.code, diagnostics).toBe(0);
     expect(result.stdout, diagnostics).toContain("fixture-complete");
 
-    // The command the user pastes really is on the clipboard, quoting intact.
     expect(result.stdout, diagnostics).toContain("clipboard-holds-the-install-command");
     expect(result.stdout, diagnostics).toContain("hand-off-returned-the-command");
 
-    // A real child process was resolved through PATH and spawned.
     expect(result.stdout, diagnostics).toContain("terminal-really-launched");
     expect(result.stdout, diagnostics).toContain("hand-off-reported-the-terminal");
 
-    // With no terminal available the card must say so, and the clipboard must
-    // still hold the command — that is what the troubleshooting doc promises.
     expect(result.stdout, diagnostics).toContain("no-terminal-is-reported-honestly");
     expect(result.stdout, diagnostics).toContain("clipboard-written-even-without-a-terminal");
 

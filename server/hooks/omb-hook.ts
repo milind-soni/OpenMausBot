@@ -1,19 +1,7 @@
-// omb-hook — the one command OpenMausBot registers for Claude Code hooks
-// (PostToolUse, PreCompact, SessionStart, Stop). Claude Code runs it with the
-// hook's JSON on stdin and waits for it, so it obeys three rules learned
-// the hard way by other harnesses:
-//
-//   1. It ALWAYS exits 0. A hook that fails or times out can block the
-//      agent's next step; the harness observing is never worth that.
-//   2. It has a hard budget (OMB_HOOK_TIMEOUT_MS, default 4000) below Claude
-//      Code's own per-hook timeout, and speaks only to the loopback harness.
-//   3. It is dependency-free and does no work itself: it forwards the event
-//      to POST /api/internal/hook with the turn's capability token (read
-//      from OMB_HOOK_TOKEN_FILE at run time — the token rotates per turn
-//      while the CLI process, and its environment, live on) and prints the
-//      harness's `hookSpecificOutput`, if any, for Claude Code to apply.
-//
-// stdout is the hook channel — never console.log anything else here.
+// Claude Code runs this with the hook's JSON on stdin and waits for it, so it ALWAYS exits 0, stops within
+// OMB_HOOK_TIMEOUT_MS (default 4000, below Claude Code's own hook timeout) and only forwards to the loopback harness.
+// The token is read from OMB_HOOK_TOKEN_FILE at run time: it rotates per turn while the CLI lives on.
+// stdout is the hook channel: never console.log anything else here.
 import { readFileSync } from "node:fs";
 
 const CONTEXT_EVENTS = new Set(["SessionStart", "UserPromptSubmit"]);
@@ -28,7 +16,6 @@ const done = (out?: string) => {
   process.stdout.write(out, () => process.exit(0));
 };
 process.stdout.on("error", () => process.exit(0));
-// the outer fuse: whatever is still pending when this fires, we leave
 const fuse = setTimeout(() => done(), budgetMs);
 fuse.unref();
 
@@ -81,9 +68,7 @@ async function main(): Promise<void> {
     if (body && typeof body === "object" && body.hookSpecificOutput && typeof body.hookSpecificOutput === "object") {
       return done(JSON.stringify({ hookSpecificOutput: body.hookSpecificOutput }));
     }
-    // On SessionStart (and UserPromptSubmit) Claude Code reads plain-text
-    // stdout as context the model sees; on every other event stdout is
-    // only a debug line, so a context body is printed nowhere else.
+    // Claude Code reads plain-text stdout as model context only on SessionStart and UserPromptSubmit.
     if (body && typeof body === "object" && typeof body.context === "string" && body.context && CONTEXT_EVENTS.has(event)) {
       return done(body.context);
     }

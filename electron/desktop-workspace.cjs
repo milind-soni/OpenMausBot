@@ -7,12 +7,7 @@ function isLoopbackHostname(hostname) {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 }
 
-/**
- * Local VM viewers are stricter than the existing cloud viewer: their noVNC
- * endpoint must remain on this host. The view_only flag lives in noVNC's hash
- * parameters alongside its short-lived password, so preserve every other
- * field and change only that capability bit.
- */
+/** The noVNC endpoint must stay on this host. view_only sits in noVNC's hash beside its short-lived password: change only that bit. */
 function desktopWorkspaceUrl(rawUrl, interactive = false) {
   const url = desktopViewerUrl(rawUrl);
   if (!isLoopbackHostname(url.hostname)) {
@@ -25,8 +20,7 @@ function desktopWorkspaceUrl(rawUrl, interactive = false) {
 }
 
 function desktopWorkspaceIdentity(url) {
-  // Ports distinguish per-bot loopback viewers. Query/hash fields can contain
-  // credentials, so neither those fields nor a derivative of them is kept.
+  // Query and hash can carry credentials, so neither they nor a derivative is kept.
   return `${url.protocol}//${url.host}${url.pathname}`;
 }
 
@@ -141,8 +135,7 @@ function createDesktopWorkspaceManager({ owner, createView, notify, partitionPre
       emit(stateFor(entry, "opening"));
       await entry.view.webContents.loadURL(next.toString());
     } catch {
-      // A failed demotion must never leave an old interactive noVNC document
-      // receiving input. Remove the native view entirely and fail closed.
+        // A failed demotion must never leave an old interactive noVNC document receiving input: fail closed.
       removeEntry(entry, "error", "load-failed");
       throw new Error("The Local VM desktop did not load");
     }
@@ -182,9 +175,6 @@ function createDesktopWorkspaceManager({ owner, createView, notify, partitionPre
       entries.set(contextId, entry);
       secureView(entry, url.origin);
       view.setBounds(bounds);
-      // The renderer explicitly lays the view out after the DOM rectangle is
-      // stable. Keeping it hidden here also prevents a native view from
-      // flashing above a modal during setup.
       view.setVisible(false);
       owner.contentView.addChildView(view);
       emit(stateFor(entry, "opening"));
@@ -233,9 +223,7 @@ function createDesktopWorkspaceManager({ owner, createView, notify, partitionPre
         if (targetEntry && entries.get(contextId) !== targetEntry) {
           throw new Error("That desktop workspace slot is not open");
         }
-        // Always finish every demotion before promoting. The queue is part of
-        // this invariant: overlapping renderer IPC calls cannot observe a flag
-        // change while the old interactive noVNC document is still reloading.
+          // Finish every demotion before promoting; the queue keeps overlapping IPC from seeing a flag change mid-reload.
         for (const entry of entries.values()) {
           if (
             entries.get(entry.contextId) === entry &&

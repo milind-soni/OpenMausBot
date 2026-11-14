@@ -1,11 +1,11 @@
-// Exercises the actual guarded route under the prescribed disposable-home
-// launcher. The only provider is its fake CLI; each thread has its own gate.
+// The only provider is the launcher's fake CLI; each thread has its own gate.
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
+import { readHandoffs } from "./testing/handoff-rows.ts";
 
 type Bot = { id: string; activeTaskId: string };
 type Message = { id: string; role: string; kind: string; text?: string; sendId?: string; steered?: boolean; turnTerminal?: boolean; tool?: { name: string; ok?: boolean } };
@@ -46,9 +46,7 @@ describe("guarded external messages through an isolated runtime", () => {
     }, { timeout: 15_000 }).toBe(true);
   };
   const initialOutputProcessed = async (threadId: string) => {
-    // The launch dump precedes stdout. Wait for the initial tool result to
-    // reach the runtime before snapshotting the leaf; slow mode then emits
-    // no more messages until this thread's finish gate is released.
+    // The launch dump precedes stdout: wait for the first tool result before snapshotting the leaf.
     await expect.poll(async () => (await page(threadId)).messages.some(message =>
       message.kind === "activity" && message.tool?.name === "Bash" && message.tool.ok === true,
     ), { timeout: 15_000 }).toBe(true);
@@ -153,7 +151,7 @@ describe("guarded external messages through an isolated runtime", () => {
   it("does not steer an active normal turn or queue behind exhausted capacity", async () => {
     const bot = await newBot();
     expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 1 } })).status).toBe(200);
-    const sibling = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Guarded idle sibling" });
+    const sibling = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Guarded idle sibling", approvalMode: "ask" });
     expect(sibling.status).toBe(201);
     await control(["send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "NORMAL_TURN_OWNS_THE_THREAD"]);
     await launched(bot.activeTaskId);
@@ -205,8 +203,6 @@ describe("guarded external messages through an isolated runtime", () => {
     expect(typeof snapshot.executionId).toBe("string");
     const target = { threadId: bot.activeTaskId, messageId: snapshot.messageId, expectedActiveLeafId: snapshot.activeLeafId,
       expectedTurnId: snapshot.activeTurnId, expectedExecutionId: snapshot.executionId };
-    // A null/old setup lease must never match a newer generation, even if a
-    // provider has not assigned its own turn id yet.
     expect((await api("POST", `${route}/interrupt`, { ...target, expectedExecutionId: null })).status).toBe(409);
     expect((await api("POST", `${route}/interrupt`, { ...target, expectedTurnId: "foreign-turn" })).status).toBe(409);
     expect((await api("POST", `${route}/interrupt`, { ...target, extra: true })).status).toBe(400);
@@ -269,16 +265,16 @@ it("refuses a parked conversation after its own provider settles while its teamm
       [teammate.id]: { gateFile: gate, reply: "The gated check passed." },
     }));
     await control(["send", "--bot", chief.id, "--task", chief.activeTaskId, "--text", "Coordinate the gated fixture check."]);
-    const nodes = () => JSON.parse(readFileSync(join(fixture.info.dataDir, "room-handoffs.json"), "utf8")) as Array<{ botId: string; status: string }>;
+    const nodes = () => readHandoffs(fixture.info.dataDir);
     await expect.poll(() => { try { return nodes().find(node => node.botId === teammate.id)?.status; } catch { return undefined; } }, { timeout: 15_000 }).toBe("running");
-    // Unlike the public busy flag (which includes coordination), this no-op
-    // permission PATCH only succeeds after the exact task's raw busy flag
-    // AND its synchronous provider dispatch claim have both been released.
+    // This no-op PATCH succeeds only once the task's raw busy flag and its dispatch claim are both released.
     await expect.poll(async () => (await api("PATCH", `/api/bots/${chief.id}/tasks/${chief.activeTaskId}`, { approvalMode: "ask" })).status,
       { timeout: 15_000 }).toBe(200);
     const pagePath = `/api/threads/${chief.activeTaskId}/messages?limit=100`;
+    await expect.poll(async () => ((await api("GET", pagePath)).body as Page).messages.some(message =>
+      message.text === "The teammate owns the outstanding check." && message.turnTerminal,
+    ), { timeout: 15_000 }).toBe(true);
     const baseline = (await api("GET", pagePath)).body as Page;
-    expect(baseline.messages.some(message => message.text === "The teammate owns the outstanding check." && message.turnTerminal)).toBe(true);
     expect(nodes().find(node => node.botId === teammate.id)?.status).toBe("running");
     const refusal = await api("POST", `/api/bots/${chief.id}/messages/guarded`, {
       threadId: chief.activeTaskId, sendId: randomUUID(), text: "THIS_GUARDED_FOLLOWUP_MUST_NOT_RUN", expectedActiveLeafId: baseline.activeLeafId,

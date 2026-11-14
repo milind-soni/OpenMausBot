@@ -1,8 +1,3 @@
-// A lapsing license through the running server: the isolated fixture booted
-// with a stand-in enterprise layer whose key expires soon, or expired a few
-// days ago, read back from /api/edition, the startup log, and the config
-// Settings reads as an admin and as a chat-only device. No real licence is
-// involved; the fixture's home is disposable.
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,7 +53,6 @@ describe("license expiry through the running server", () => {
       edition: "enterprise", features: ["budgets"], license: { expiresAt, expiresInDays: edition.expiresInDays },
     });
     expect((await server.memberConfig()).edition).toEqual({ edition: "enterprise", features: ["budgets"] });
-    // a member's /api/edition says what is entitled, not when it lapses
     const member = await server.memberEdition();
     expect(member).toMatchObject({ edition: "enterprise", features: ["budgets"] });
     expect(member).not.toHaveProperty("expiresInDays");
@@ -66,12 +60,14 @@ describe("license expiry through the running server", () => {
 
   it("keeps the features working through the grace period and says until when", async () => {
     const expiresAt = day(-2);
+    // From the expiry date itself, not the clock again: a run that crosses midnight UTC would otherwise expect a day too many.
+    const graceEndsAt = new Date(Date.parse(expiresAt) + 7 * DAY_MS).toISOString().slice(0, 10);
     const server = await boot(expiresAt);
     const edition = await server.edition();
-    expect(edition).toMatchObject({ edition: "enterprise", features: ["budgets"], expiresAt, graceEndsAt: day(5) });
-    expect(edition.notice).toBe(`OMB_LICENSE_KEY expired on ${expiresAt}; enterprise features keep working until ${day(5)} while it is renewed`);
-    expect(server.log()).toContain(`enterprise features keep working until ${day(5)}`);
-    expect((await server.adminConfig()).edition.license).toMatchObject({ expiresAt, graceEndsAt: day(5) });
+    expect(edition).toMatchObject({ edition: "enterprise", features: ["budgets"], expiresAt, graceEndsAt });
+    expect(edition.notice).toBe(`OMB_LICENSE_KEY expired on ${expiresAt}; enterprise features keep working until ${graceEndsAt} while it is renewed`);
+    expect(server.log()).toContain(`enterprise features keep working until ${graceEndsAt}`);
+    expect((await server.adminConfig()).edition.license).toMatchObject({ expiresAt, graceEndsAt });
     expect((await server.memberConfig()).edition.license).toBeUndefined();
     const member = await server.memberEdition();
     expect(member).toMatchObject({ edition: "enterprise", features: ["budgets"] });

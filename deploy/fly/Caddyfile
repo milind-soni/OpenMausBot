@@ -1,54 +1,33 @@
-# Edge for one OMB Cloud Pro home machine (docs/cloud-pro.md). Fly's proxy
-# terminates TLS for <app>.fly.dev and reaches this machine on :8080. The
-# OpenMausBot server listens only on 127.0.0.1, and every request forwarded
-# to it carries X-Forwarded-*, so it is never the loopback owner
-# (server/request-auth.ts): a remote client needs a paired session.
+# Edge for one OMB Cloud home machine (docs/cloud-pro.md). Fly's proxy
+# terminates TLS for <app>.fly.dev and reaches this machine on :8080 (on an own
+# server, the connector does, or a proxy of the owner's). The OpenMausBot
+# server listens only on 127.0.0.1, and every request forwarded to it carries
+# X-Forwarded-*, so it is never the loopback owner (server/request-auth.ts): a
+# remote client needs a paired session.
+#
+# OMB_CLOUD_EDGE_HOLD (a duration, unset: 0s, as before): how long a request
+# waits for the server while it starts, instead of a 502. The Admin sets it
+# only for a plan whose home sleeps, so the first request after a cold wake
+# is answered (docs/cloud-pro.md, "Sleeping homes"). Caddy retries the dial
+# every lb_try_interval, so a held request reaches the server at most 50 ms
+# after it listens.
 {
 	admin off
 	auto_https off
 	persist_config off
 	servers {
-		# Fly's proxy connects from its private ranges and names the real
-		# client in Fly-Client-IP. Only those peers may name a client; the
-		# address feeds the pairing lockout, never authorization.
-		trusted_proxies static private_ranges
+		# Only these peers may name the real client, and only in this header:
+		# Fly's proxy from its private ranges in Fly-Client-IP, or on an own
+		# server the proxies its owner names (the launcher sets both:
+		# server/cloud-home-start.ts). Any other peer's header is ignored, and
+		# with none named, no peer may name one. The address feeds the pairing
+		# lockout, never authorization.
+		trusted_proxies static {$OMB_CLOUD_EDGE_TRUSTED_PROXIES}
 		trusted_proxies_strict
-		client_ip_headers Fly-Client-IP
+		client_ip_headers {$OMB_CLOUD_EDGE_CLIENT_IP_HEADER}
 	}
 }
 
 :8080 {
-	encode zstd gzip
-
-	# Fly's health check reaches the machine by address, not by name.
-	handle /api/health {
-		reverse_proxy 127.0.0.1:8799 {
-			header_up X-Forwarded-Proto https
-			header_up X-Forwarded-For {client_ip}
-		}
-	}
-
-	# Everything else answers only for this machine's own public name.
-	@home host {$OMB_CLOUD_PUBLIC_HOST}
-	handle @home {
-		# Webhook ingress has its own per-hook secrets.
-		handle /hooks/* {
-			reverse_proxy 127.0.0.1:8800 {
-				header_up X-Forwarded-Proto https
-				header_up X-Forwarded-For {client_ip}
-			}
-		}
-		handle {
-			reverse_proxy 127.0.0.1:8799 {
-				header_up X-Forwarded-Proto https
-				header_up X-Forwarded-For {client_ip}
-				# the event stream must not be buffered
-				flush_interval -1
-			}
-		}
-	}
-
-	handle {
-		respond 403
-	}
+	import edge-routes.caddy
 }

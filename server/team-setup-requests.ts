@@ -1,28 +1,30 @@
 import { createHash } from "node:crypto";
+import { botOwner, chiefScope } from "../shared/bot-owner.ts";
 import { z } from "zod";
 import { soulDiffLines } from "../shared/line-diff.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
 import { profileSnapshot } from "./profile-revision.ts";
+import { recordProfileChange, type HistoryActor } from "./profile-versions.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
+import { UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { harnessCapabilityLines, type DriverCapabilities } from "./harness-capabilities.ts";
-import { redactSecretsInText } from "./redact.ts";
-import type { BotRecord, OptionCardData } from "./store.ts";
-import type { TeamSetupFields, TeamSetupOperation, TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
+import { redactSecretsInText } from "./redact.ts"; import { chiefLevel } from "./chief-level.ts"; import { defaultBotRefusal } from "./default-bot.ts";
+import type { BotRecord, OptionCardData } from "./store.ts"; import { outsideDepartmentReason } from "./peer-roster.ts";
+import type { TeamSetupFields, TeamSetupOperation, TeamSetupRequest, TeamSetupResult, TeamSetupUndo } from "../shared/team-setup.ts";
 
 const section = (value?: string) => value?.trim() || "";
 const teamName = z.string().trim().min(1).max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials");
-const FIELD_LABELS: Record<string, string> = { name: "Name", title: "Title", description: "Description", section: "Section", cwd: "Working folder" };
-// The variant rides ModelSelection, and a proposal that omits it removes it,
-// so the review text says both states outright: set on the current
-// selection, explicitly absent on the proposed one. Otherwise a bot with a
-// configured variant shows a before value that hides the setting changing
-// under it.
+const FIELD_LABELS: Record<string, string> = { name: "Name", title: "Title", description: "Description", section: "Department", cwd: "Working folder" };
 const modelSelectionText = (selection: ModelSelection) =>
   `${selection.instanceId}/${selection.model}${selection.variant ? ` (variant ${selection.variant})` : " (no variant)"}${selection.effort ? ` (effort ${selection.effort})` : ""}`;
+/** One setup may edit a whole department at once (a model switch, an added rule), but each new bot still needs a close review. */
+const MAX_SETUP_BOTS = 40;
+const MAX_NEW_BOTS = 8;
 const fieldsSchema = z.object({
   chiefOfStaff: z.boolean().optional(),
   name: z.string().optional(), title: z.string().optional(), description: z.string().optional(), soul: z.string().optional(),
+  soulAppend: z.string().trim().min(1).optional(),
   cwd: z.string().optional(),
   section: z.string().trim().max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials").optional(),
   modelSelection: z.object({ instanceId: z.string().trim().min(1), model: z.string().trim().min(1), effort: z.string().optional(), variant: z.string().optional() }).strict().optional(),
@@ -33,30 +35,21 @@ const planSchema = z.object({
   operations: z.array(z.discriminatedUnion("action", [
     z.object({ action: z.literal("create"), key: z.string().trim().min(1).max(80), fields: fieldsSchema }).strict(),
     z.object({ action: z.literal("update"), botId: z.string().min(1).max(128), fields: fieldsSchema }).strict(),
-  ])).min(1).max(24),
+  ])).min(1).max(MAX_SETUP_BOTS, `Review at most ${MAX_SETUP_BOTS} bots in one setup`),
 }).strict();
 
 export class TeamSetupError extends Error {
   readonly status: number;
-  constructor(message: string, status = 400) { super(message); this.status = status; }
+  readonly code?: string;
+  constructor(message: string, status = 400, code?: string) { super(message); this.status = status; this.code = code; }
 }
 
-/**
- * The revision a team-setup card pins to. Without `fields` it hashes the
- * bot's whole state — any drift cancels — which the destructive deletion
- * path keeps on purpose. With `fields` (setup plans) it pins exactly the
- * before-values the card displayed for the fields the plan touches;
- * authority, team scope, peer scope, visibility, busyness, destination, and
- * name collisions are re-checked fresh at confirm time, so drift on
- * untouched fields no longer cancels a plan that never claimed to touch
- * them. Every update card renders a section line, so section stays pinned
- * even when the plan only carries it through unchanged.
- */
+/** Without `fields` (deletions) any drift cancels; with them it pins only the before-values the card showed, and authority is re-checked at confirm. */
 export function teamSetupRevision(bot: BotRecord, fields?: TeamSetupFields): string {
   if (fields === undefined) {
     return createHash("sha256").update(JSON.stringify({
       ...profileSnapshot(bot), section: section(bot.section), modelSelection: bot.modelSelection,
-      hidden: Boolean(bot.hidden), chiefOfStaff: Boolean(bot.chiefOfStaff), peers: bot.peers,
+      hidden: Boolean(bot.hidden), chiefOfStaff: Boolean(bot.chiefOfStaff),
       managedSections: bot.managedSections,
       approvalMode: bot.approvalMode, autoApprove: bot.autoApprove, approvalGrant: bot.approvalGrant,
       receipt: bot.lastTeamSetupReceipt?.requestId,
@@ -77,27 +70,30 @@ export function teamSetupRevision(bot: BotRecord, fields?: TeamSetupFields): str
 interface SetupStore {
   bots: BotRecord[];
   bot(id: string): BotRecord | null | undefined;
-  messagesFor(threadId: string): Array<{ id: string; card?: OptionCardData }>;
+  messagesFor(threadId: string): Array<{ id: string; role?: string; card?: OptionCardData }>;
   appendMessage(threadId: string, message: { role: "bot"; kind: "options"; card: OptionCardData; from?: { botId: string; name: string; color: string } }): { id: string };
   patchMessage(threadId: string, messageId: string, patch: { card: OptionCardData }): unknown;
   applyTeamSetup(request: TeamSetupRequest): TeamSetupResult;
+  patchBot(id: string, patch: Partial<BotRecord>): unknown;
 }
 
 interface Options {
   store: SetupStore;
   teams(): string[];
-  canAccessTeam(from: BotRecord, target?: string): boolean;
+  hasTeamAuthority(from: BotRecord, target?: string): boolean;
   canPersist(botId: string, threadId: string): { ok: true } | { ok: false; status: number; error: string };
   validateModel(selection: ModelSelection, current?: BotRecord): string | null;
   targetBusy(botId: string, sourceThreadId?: string): boolean;
-  /** The caller resolves the effective mode of this exact conversation. */
-  autoApply?(botId: string, threadId: string): boolean;
-  /** Per-driver capability resolver for engine-switch warnings on the card. */
+  /** Null only where the owner confirms on a card (direct-apply.ts). */
+  autoApply?(botId: string, threadId: string): DirectApply | null;
   driverCapabilities?(instanceId: string): DriverCapabilities | undefined;
   validateChange?(before: BotRecord, fields: TeamSetupFields): void;
   maxBots: number;
   ownsThread(botId: string, threadId: string): boolean;
-  deleteBot(botId: string, revalidate: () => void, request: TeamSetupRequest): Promise<void>;
+  /** `request` only for a reviewed deletion; Undo of a creation deletes without one. */
+  deleteBot(botId: string, revalidate: () => void, request?: TeamSetupRequest): Promise<void>;
+  /** Why deleting this bot would be refused now, as a person's hold reaches it; null when it would not. */
+  deletionRefusal(botId: string): string | null;
 }
 
 type RequestFrom = { botId: string; name: string; color: string };
@@ -113,16 +109,10 @@ export class TeamSetupRequestService {
 
   private chief(botId: string): BotRecord {
     const chief = this.options.store.bot(botId);
-    if (!chief || chief.hidden || !chief.chiefOfStaff) throw new TeamSetupError("Only an active Chief of Staff can propose team setup", 403);
+    if (!chief || chief.hidden || !chiefLevel(chief)) throw new TeamSetupError("Only an active Chief of Staff can propose team setup", 403);
     return chief;
   }
 
-  /**
-   * The Chief's own pinned state: the fields this plan's operations display
-   * about the Chief, or the whole state for deletions. A plan that never
-   * touches the Chief pins nothing of the Chief's — its authority is
-   * re-checked fresh at confirm time either way.
-   */
   private requesterScope(request: TeamSetupRequest): TeamSetupFields | undefined {
     if (request.deletion) return undefined;
     const scope: TeamSetupFields = {};
@@ -139,9 +129,6 @@ export class TeamSetupRequestService {
     if (targetSection !== undefined) result.section = targetSection;
     if (chiefOfStaff !== undefined) result.chiefOfStaff = chiefOfStaff;
     if (rawCwd !== undefined) {
-      // Create-only, and the exact check the profile path runs: absolute,
-      // exists, is a folder. An existing bot's folder keeps going through
-      // propose_profile, which re-checks the folder at confirm time.
       if (current) throw new TeamSetupError("A working folder can only be chosen when creating a bot; propose_profile changes it later");
       const checked = validateBotCwd(rawCwd);
       if (!checked.ok) throw new TeamSetupError(checked.error);
@@ -159,15 +146,15 @@ export class TeamSetupRequestService {
   private validate(request: TeamSetupRequest, confirming: boolean, immediate = false): void {
     const chief = this.chief(request.botId);
     if (!this.options.ownsThread(request.botId, request.threadId)) throw new TeamSetupError("The requesting conversation no longer exists", 409);
-    if (immediate && !this.options.autoApply?.(request.botId, request.threadId)) throw new TeamSetupError("Full Access is no longer enabled for this conversation", 409);
+    if (immediate && !this.options.autoApply?.(request.botId, request.threadId)) throw new TeamSetupError("This conversation can no longer apply team setup on its own; ask the owner", 409);
     if (confirming && !immediate && !this.options.store.messagesFor(request.threadId).some((message) => message.card?.requestId === request.requestId && !message.card.answered && !message.card.dismissed)) throw new TeamSetupError("This setup card is no longer pending", 409);
     if (confirming && teamSetupRevision(chief, this.requesterScope(request)) !== request.requesterRevision) throw new TeamSetupError("The Chief's settings changed. This setup was cancelled; review a new proposal.", 409);
     const existingTeams = new Set(this.options.teams().map(section));
     if (new Set([...(chief.managedSections ?? []), ...request.newTeams]).size > 100) throw new TeamSetupError("A Chief may coordinate at most 100 additional teams", 409);
     for (const name of request.newTeams) if (existingTeams.has(name)) throw new TeamSetupError(`Team ${JSON.stringify(name)} now exists. Review a new proposal.`, 409);
-    const allowed = (name?: string) => request.newTeams.includes(section(name)) || this.options.canAccessTeam(chief, name);
+    const allowed = (name?: string) => request.newTeams.includes(section(name)) || this.options.hasTeamAuthority(chief, name);
     const targets = new Set<string>();
-    const projected = this.options.store.bots.map((bot) => ({ id: bot.id, name: bot.name, section: section(bot.section), chiefOfStaff: bot.chiefOfStaff, hidden: bot.hidden }));
+    const projected = this.options.store.bots.map((bot) => ({ id: bot.id, name: bot.name, section: section(bot.section), chiefOfStaff: bot.chiefOfStaff, hidden: bot.hidden, createdBy: bot.createdBy, reportsTo: bot.reportsTo }));
     for (const operation of request.operations) {
       if (targets.has(operation.botId)) throw new TeamSetupError("A bot appears twice in the prepared setup");
       targets.add(operation.botId);
@@ -176,30 +163,36 @@ export class TeamSetupRequestService {
         if (target) throw new TeamSetupError("A proposed bot already exists. Review a new proposal.", 409);
         if (!operation.fields.name?.trim() || !operation.fields.title?.trim() || !operation.fields.soul?.trim() || !operation.fields.modelSelection) throw new TeamSetupError("Each new bot needs a name, title, soul instructions, and exact model selection");
       } else {
-        if (!target || target.hidden || !this.options.canAccessTeam(chief, target.section) || (target.id !== chief.id && Array.isArray(chief.peers) && !chief.peers.includes(target.id))) throw new TeamSetupError("A target bot is outside this Chief's authorized team and peer scope", 403);
+        if (!target || target.hidden) throw new TeamSetupError("A target bot is outside this Chief's authorized team", 403);
+        if (!this.options.hasTeamAuthority(chief, target.section)) throw new TeamSetupError(outsideDepartmentReason(chief, target), 403);
         if (teamSetupRevision(target, operation.fields) !== operation.expectedRevision) throw new TeamSetupError(`@${target.name} changed. This setup was cancelled; review a new proposal.`, 409);
         const sourceThreadId = immediate && target.id === chief.id ? request.threadId : undefined;
         if (this.options.targetBusy(target.id, sourceThreadId) && (confirming || target.id !== chief.id)) throw new TeamSetupError(`Stop @${target.name}'s work before changing its setup`, 409);
       }
       const fields = this.fields(operation.fields, target ?? undefined);
+      if (fields.chiefOfStaff !== undefined && !chief.chiefOfStaff) throw new TeamSetupError(`Only the Chief of Staff changes who the Chief is; ${chief.name} doesn't.`, 403);
       if (confirming && target) this.options.validateChange?.(target, fields);
       const destination = fields.section ?? target?.section ?? chief.section;
-      if (!allowed(destination)) throw new TeamSetupError("The destination team is outside this Chief's authorized scope", 403);
+      if (!allowed(destination)) throw new TeamSetupError(outsideDepartmentReason(chief, { section: destination }), 403);
       if (!request.newTeams.includes(section(destination)) && !existingTeams.has(section(destination))) throw new TeamSetupError("The destination team no longer exists", 409);
-      const next = { id: operation.botId, name: fields.name ?? target!.name, section: section(destination), chiefOfStaff: fields.chiefOfStaff ?? target?.chiefOfStaff, hidden: false };
+      const next = { id: operation.botId, name: fields.name ?? target!.name, section: section(destination), chiefOfStaff: fields.chiefOfStaff ?? target?.chiefOfStaff, hidden: false,
+        createdBy: target ? target.createdBy : botOwner(chief) ?? undefined, reportsTo: target?.reportsTo };
       const at = projected.findIndex((bot) => bot.id === operation.botId);
       if (at < 0) projected.push(next); else projected[at] = next;
     }
-    if (this.options.store.bots.length + request.operations.filter((op) => op.action === "create").length > this.options.maxBots) throw new TeamSetupError("This setup exceeds the workspace bot limit", 409);
+    const creating = request.operations.filter((op) => op.action === "create").length;
+    if (this.options.store.bots.length + creating > this.options.maxBots) throw new TeamSetupError("This setup exceeds the workspace bot limit", 409);
     for (const name of request.newTeams) if (!request.operations.some((op) => section(op.fields.section) === name)) throw new TeamSetupError(`New team ${JSON.stringify(name)} needs a specialist in this setup`);
     for (const operation of request.operations) {
       const candidate = projected.find((bot) => bot.id === operation.botId)!;
       if (projected.some((bot) => bot.id !== candidate.id && !bot.hidden && bot.section === candidate.section && bot.name.trim().toLowerCase() === candidate.name.trim().toLowerCase())) throw new TeamSetupError(`@${candidate.name} already exists in that team`, 409);
-      if (candidate.chiefOfStaff && projected.some((bot) => bot.id !== candidate.id && bot.chiefOfStaff && bot.section === candidate.section)) throw new TeamSetupError("Each team can have one Chief. Include the current Chief's demotion in this plan.", 409);
+      if (candidate.chiefOfStaff && projected.some((bot) => bot.id !== candidate.id && bot.chiefOfStaff && chiefScope(bot) === chiefScope(candidate))) throw new TeamSetupError("Each team can have one Chief. Include the current Chief's demotion in this plan.", 409);
     }
     if (request.deletion) {
       const target = this.options.store.bot(request.deletion.botId);
-      if (!target || target.hidden || target.id === chief.id || !this.options.canAccessTeam(chief, target.section) || (Array.isArray(chief.peers) && !chief.peers.includes(target.id))) throw new TeamSetupError("This deletion target is no longer an authorized teammate", 403);
+      if (!target || target.hidden || target.id === chief.id) throw new TeamSetupError("This deletion target is no longer an authorized teammate", 403);
+      if (!this.options.hasTeamAuthority(chief, target.section)) throw new TeamSetupError(outsideDepartmentReason(chief, target), 403);
+      if (target.defaultBot) throw new TeamSetupError(defaultBotRefusal(target.name), 409);
       if (teamSetupRevision(target) !== request.deletion.expectedRevision || this.options.targetBusy(target.id)) throw new TeamSetupError("The deletion target changed or is working. Review a new deletion proposal.", 409);
     }
   }
@@ -212,12 +205,30 @@ export class TeamSetupRequestService {
     for (const operation of parsed.data.operations) {
       const key = operation.action === "create" ? `create:${operation.key}` : `update:${operation.botId}`;
       const previous = combined.get(key);
-      combined.set(key, { ...operation, fields: { ...previous?.fields, ...operation.fields } });
+      if (operation.fields.soul !== undefined && operation.fields.soulAppend !== undefined) throw new TeamSetupError("Use either soul or soulAppend for a bot, not both");
+      // Repeated added rules for one bot all land, in order; any other repeated field keeps its last value.
+      const soulAppend = [previous?.fields.soulAppend, operation.fields.soulAppend].filter(Boolean).join("\n\n") || undefined;
+      combined.set(key, { ...operation, fields: { ...previous?.fields, ...operation.fields, soulAppend } });
     }
-    if (combined.size > 8) throw new TeamSetupError("Review at most eight bots in one setup");
-    const operations: TeamSetupOperation[] = [...combined.values()].map((operation) => {
+    const entries = [...combined.values()];
+    if (entries.filter((operation) => operation.action === "create").length > MAX_NEW_BOTS) throw new TeamSetupError(`Review at most ${MAX_NEW_BOTS} new bots in one setup`);
+    const operations: TeamSetupOperation[] = entries.map((operation) => {
       const target = operation.action === "update" ? this.options.store.bot(operation.botId) : undefined;
-      const fields = this.fields({ ...operation.fields, section: operation.fields.section ?? target?.section ?? chief.section ?? "" }, target ?? undefined);
+      const { soulAppend, ...requested } = operation.fields;
+      if (soulAppend !== undefined) {
+        if (operation.action === "create") throw new TeamSetupError("soulAppend only adds to an existing bot's instructions; give a new bot its full soul");
+        if (requested.soul !== undefined) throw new TeamSetupError("Use either soul or soulAppend for a bot, not both");
+        // A bot this Chief may not change is never read here; validate() refuses it.
+        if (target && !target.hidden && this.options.hasTeamAuthority(chief, target.section)) {
+          // Re-saving runs the whole text through redaction; never let an added rule rewrite what the bot already had.
+          // Check the joined text: an added rule can complete a pattern that starts in the existing instructions.
+          const kept = (target.soul ?? "").trimEnd();
+          const joined = kept ? `${kept}\n\n${soulAppend}` : soulAppend;
+          if (!redactSecretsInText(joined).startsWith(kept)) throw new TeamSetupError(`@${target.name}'s instructions hold credential-like text; change them with a full soul instead`);
+          requested.soul = joined;
+        }
+      }
+      const fields = this.fields({ ...requested, section: requested.section ?? target?.section ?? chief.section ?? "" }, target ?? undefined);
       return { action: operation.action, botId: operation.action === "create" ? newId() : operation.botId,
         ...(operation.action === "create" ? { threadId: newId() } : {}),
         fields,
@@ -249,12 +260,14 @@ export class TeamSetupRequestService {
   proposeDeletion(args: DeletionArgs) { return this.card(this.prepareDeletion(args), args.from); }
 
   async submit(args: SetupArgs & SubmitAuthority) {
-    if (this.options.autoApply?.(args.botId, args.threadId)) return this.applyImmediately(this.prepare(args), args.from, args.canCommit);
+    const grant = this.options.autoApply?.(args.botId, args.threadId) ?? null;
+    if (grant) return { ...await this.applyImmediately(this.prepare(args), args.from, args.canCommit), appliedBy: grant };
     return { ...this.propose(args), applied: false, state: "pending" as const };
   }
 
   async submitDeletion(args: DeletionArgs & SubmitAuthority) {
-    if (this.options.autoApply?.(args.botId, args.threadId)) return this.applyImmediately(this.prepareDeletion(args), args.from, args.canCommit);
+    const grant = this.options.autoApply?.(args.botId, args.threadId) ?? null;
+    if (grant) return { ...await this.applyImmediately(this.prepareDeletion(args), args.from, args.canCommit), appliedBy: grant };
     return { ...this.proposeDeletion(args), applied: false, state: "pending" as const };
   }
 
@@ -263,11 +276,11 @@ export class TeamSetupRequestService {
     if (!permission.ok) throw new TeamSetupError(permission.error, permission.status);
     const chief = this.chief(request.botId);
     const lines = [`Why: ${request.reason}`];
-    if (request.deletion) lines.push(`Delete @${request.deletion.name} (${request.deletion.botId}).`, "Permanently removes this bot, all its conversations, memory, instructions, skills, and any computer owned only by it. Generated project files and shared team computers remain. Active work or an unavailable provider can block deletion safely.");
+    if (request.deletion) lines.push(`Delete @${request.deletion.name} (${request.deletion.botId}).`, "Permanently removes this bot, all its conversations, memory, instructions, skills, and any computer owned only by it. Generated project files and shared department computers remain. Active work or an unavailable provider can block deletion safely.");
     if (request.newTeams.length) {
-      lines.push(`Create teams: ${request.newTeams.map((name) => JSON.stringify(name)).join(", ")}.`);
+      lines.push(`Create departments: ${request.newTeams.map((name) => JSON.stringify(name)).join(", ")}.`);
       if (!request.operations.some(op => op.botId === chief.id && op.fields.chiefOfStaff === false)) {
-        lines.push(`Authorize @${chief.name} to coordinate and propose setup changes in these new teams.`);
+        lines.push(`Authorize @${chief.name} to coordinate and propose setup changes in these new departments.`);
       }
     }
     for (const operation of request.operations) {
@@ -275,19 +288,13 @@ export class TeamSetupRequestService {
       lines.push(`\n${operation.action === "create" ? "Create" : "Update"} @${operation.fields.name ?? current?.name} (${operation.action === "create" ? "new bot" : operation.botId})`);
       for (const [key, value] of Object.entries(operation.fields)) {
         if (key === "chiefOfStaff") {
-          lines.push(`Chief of Staff: ${current?.chiefOfStaff ? "Yes" : "No"} → ${value ? "Yes" : "No"}.${value ? " May coordinate and configure bots in this team." : " Additional managed-team access is removed."}`);
+          lines.push(`Chief of Staff: ${current?.chiefOfStaff ? "Yes" : "No"} → ${value ? "Yes" : "No"}.${value ? " May coordinate and configure bots in this department." : " Access to additional departments is removed."}`);
           continue;
         }
-        // The same review shape the profile card uses: labeled before/after
-        // lines, and SOUL.md as a line diff with the shared large-change
-        // fallback — never a JSON.stringify blob of the instructions.
         if (key === "soul") {
           lines.push(...soulDiffLines(current?.soul ?? "", value as string));
         } else if (key === "modelSelection") {
-          lines.push(`Default engine/model: ${current ? `${modelSelectionText(current.modelSelection)} → ` : ""}${modelSelectionText(value as ModelSelection)}`);
-          // An engine switch changes what the bot can do, not just its label:
-          // show what the destination driver gains and loses. Same-instance
-          // model or effort changes render nothing extra.
+          lines.push(`Default AI and model: ${current ? `${modelSelectionText(current.modelSelection)} → ` : ""}${modelSelectionText(value as ModelSelection)}`);
           if (current && typeof value === "object" && value !== null &&
               (value as ModelSelection).instanceId !== current.modelSelection.instanceId && this.options.driverCapabilities) {
             lines.push(...harnessCapabilityLines(
@@ -304,18 +311,17 @@ export class TeamSetupRequestService {
     }
     if (!request.deletion) {
       lines.push("\nDefault models apply to groups and new threads. Every existing thread keeps its current model and permissions.");
-      // Informed consent: creation locks the new bot down, and the owner
-      // signs off on that whole state, not just the two facts named before.
       if (request.operations.some((operation) => operation.action === "create")) {
-        lines.push("New bots stay owner-owned after creation: connected apps off, approvals at Ask, a private workspace by default, avatar untouched.");
+        lines.push(`New bots stay owner-owned after creation: the same connected apps as @${chief.name}, the workspace's default access level, a private workspace by default, avatar untouched.`);
       }
       lines.push("Existing execution permissions are unchanged.");
     }
-    lines.push(immediate ? "Full Access applies this request in the current turn without another confirmation." : "After this decision the Chief continues once with the result.");
-    const title = request.deletion ? `Delete @${request.deletion.name}?` : `Apply setup for ${request.operations.length} ${request.operations.length === 1 ? "bot" : "bots"}?`;
+    if (!immediate) lines.push("After this decision the Chief continues once with the result.");
+    const title = request.deletion ? `Delete @${request.deletion.name}?`
+      : `Apply setup for ${request.operations.length} ${request.operations.length === 1 ? "bot" : "bots"}?`;
     const detail = lines.join("\n");
     return {
-      title, subtitle: detail, options: [request.deletion ? "Delete bot" : "Apply setup", "Cancel"], requestId: request.requestId,
+      title, subtitle: detail, options: request.deletion ? ["Delete bot", "Cancel"] : ["Apply setup", "Cancel"], requestId: request.requestId,
       tool: request.deletion ? "delete_bot" : "set_up_team", teamSetupRequest: request,
     };
   }
@@ -327,18 +333,30 @@ export class TeamSetupRequestService {
     return { requestId: request.requestId, messageId: message.id, title, summary: title, detail };
   }
 
+  private applySetup(request: TeamSetupRequest, actor: HistoryActor, via: string): TeamSetupResult {
+    const before = request.operations.flatMap((operation) => {
+      const bot = operation.action === "update" ? this.options.store.bot(operation.botId) : undefined;
+      return bot ? [{ id: bot.id, profile: profileSnapshot(bot) }] : [];
+    });
+    const result = this.options.store.applyTeamSetup(request);
+    for (const { id, profile } of before) {
+      const bot = this.options.store.bot(id);
+      if (bot) recordProfileChange(id, actor, via, profile, profileSnapshot(bot));
+    }
+    return result;
+  }
+
   private async apply(request: TeamSetupRequest, immediate = false, canCommit?: () => boolean): Promise<TeamSetupResult> {
     const receipt = this.options.store.bot(request.botId)?.lastTeamSetupReceipt;
     if (receipt?.requestId === request.requestId) return receipt.result;
     try {
       const revalidate = () => {
-        // Deletion awaits inventory and teardown. A still-Full conversation
-        // is not authority for an invocation that Stop/replacement revoked.
+        // A still-Full conversation is not authority for an invocation that Stop or replacement revoked.
         if (immediate && canCommit && !canCommit()) throw new TeamSetupError("The requesting turn has expired; this setup was cancelled", 409);
         this.validate(request, true, immediate);
       };
       revalidate();
-      if (!request.deletion) return this.options.store.applyTeamSetup(request);
+      if (!request.deletion) return this.applySetup(request, "bot", "team-setup");
       await this.options.deleteBot(request.deletion.botId, revalidate, request);
       return { state: "applied", bots: [{ id: request.deletion.botId, name: request.deletion.name, action: "deleted" }], newTeams: [] };
     } catch (error) {
@@ -351,23 +369,88 @@ export class TeamSetupRequestService {
   }
 
   private async applyImmediately(request: TeamSetupRequest, from?: RequestFrom, canCommit?: () => boolean) {
-    // Capture the before/after description before applying. Only a settled
-    // receipt is published, so no interactive card or second turn can start.
     const card = this.cardData(request, true);
+    const before = request.deletion ? undefined : this.undoBefore(request);
     let result = await this.apply(request, true, canCommit);
+    const undo = before && result.state === "applied" && !result.error ? this.undoRecord(result, before) : undefined;
     const title = result.state === "applied" ? (request.deletion ? `Deleted @${request.deletion.name}` : "Team setup applied") : "Team setup not applied";
     let messageId: string | undefined;
     try {
       messageId = this.options.store.appendMessage(request.threadId, { role: "bot", kind: "options", ...(from ? { from } : {}), card: {
-        ...card, title, options: [], ...(result.state === "applied" ? { answered: "allow" as const } : { expired: true }), held: result.error,
-        teamSetupRequest: { ...request, result, resumed: true },
+        ...card, title, options: [], ...(result.state === "applied" ? { answered: "allow" as const, autoApplied: true } : { expired: true }), held: result.error,
+        teamSetupRequest: { ...request, result, resumed: true, ...(undo ? { undo } : {}) },
       } }).id;
     } catch (error) {
-      // The atomic bot receipt remains authoritative if the chat write fails.
       const detail = redactSecretsInText(error instanceof Error ? error.message : String(error));
       result = { ...result, error: [result.error, `The result could not be added to the conversation: ${detail}`].filter(Boolean).join(" ") };
     }
     return { requestId: request.requestId, messageId, title, summary: title, detail: card.subtitle, applied: result.state === "applied", state: result.state, result };
+  }
+
+  private undoBefore(request: TeamSetupRequest): TeamSetupUndo["before"] {
+    const before: TeamSetupUndo["before"] = [];
+    for (const operation of request.operations) {
+      const bot = operation.action === "update" ? this.options.store.bot(operation.botId) : undefined;
+      if (!bot) continue;
+      const fields: Record<string, unknown> = {};
+      for (const key of Object.keys(operation.fields) as Array<keyof TeamSetupFields>) {
+        if (key !== "cwd") fields[key] = key === "section" ? section(bot.section) : key === "chiefOfStaff" ? Boolean(bot.chiefOfStaff) : structuredClone(bot[key]) ?? "";
+      }
+      const teams = operation.fields.chiefOfStaff !== undefined || (bot.id === request.botId && request.newTeams.length > 0);
+      before.push({ botId: bot.id, fields, ...(teams ? { managedSections: bot.managedSections ? [...bot.managedSections] : null } : {}) });
+    }
+    const chief = this.options.store.bot(request.botId);
+    if (request.newTeams.length && chief && !before.some((entry) => entry.botId === chief.id)) {
+      before.push({ botId: chief.id, fields: {}, managedSections: chief.managedSections ? [...chief.managedSections] : null });
+    }
+    return before;
+  }
+
+  private undoRecord(result: TeamSetupResult, before: TeamSetupUndo["before"]): TeamSetupUndo {
+    const created = result.bots.filter((bot) => bot.action === "created").map((bot) => bot.id);
+    const revisions: Record<string, string> = {};
+    for (const id of new Set([...created, ...before.map((entry) => entry.botId)])) {
+      const bot = this.options.store.bot(id);
+      if (bot) revisions[id] = teamSetupRevision(bot);
+    }
+    return { created, before, revisions };
+  }
+
+  /** Reverses a setup that applied on its own; changes nothing once a bot it touched changed since or a new bot was used. */
+  async undo(args: { botId: string; threadId: string; requestId: string }): Promise<{ claimed: false } | { claimed: true; state: "already_undone" | "undone" }
+    | { claimed: true; state: "invalid"; error: string; status: number; stale?: true }> {
+    const message = this.options.store.messagesFor(args.threadId).find((item) => item.card?.requestId === args.requestId && item.card.teamSetupRequest);
+    const card = message?.card, request = card?.teamSetupRequest;
+    if (!message || !card || !request) return { claimed: false };
+    if (card.undone) return { claimed: true, state: "already_undone" };
+    const cannot = (error: string, status = 409) => ({ claimed: true as const, state: "invalid" as const, error, status });
+    if (!card.autoApplied || card.answered !== "allow" || !request.undo) return cannot("This change can't be undone here.");
+    if (request.botId !== args.botId || request.threadId !== args.threadId) return cannot("This setup belongs to another conversation", 403);
+    const { created, before, revisions } = request.undo;
+    const changed = (ids: string[]) => ids.some((id) => {
+      const bot = this.options.store.bot(id);
+      return !bot || teamSetupRevision(bot) !== revisions[id] || (created.includes(id) &&
+        ((bot.tasks?.length ?? 1) > 1 || this.options.store.messagesFor(bot.threadId).some((line) => line.role === "user")));
+    });
+    const ids = Object.keys(revisions);
+    if (changed(ids)) return { ...cannot(UNDO_STALE), stale: true };
+    if (ids.some((id) => this.options.targetBusy(id))) return cannot("Wait for the bots this setup changed to finish their work, then undo.");
+    const refusal = created.map((id) => this.options.deletionRefusal(id)).find((reason) => reason !== null);
+    if (refusal) return cannot(refusal);
+    try {
+      for (const id of created) await this.options.deleteBot(id, () => { if (changed([id])) throw new TeamSetupError(UNDO_STALE, 409); });
+      const restore = before.filter((entry) => Object.keys(entry.fields).length);
+      if (restore.length) {
+        this.applySetup({ version: 1, requestId: newId(), botId: request.botId, threadId: request.threadId, reason: request.reason,
+          createdAt: Date.now(), requesterRevision: request.requesterRevision, newTeams: [],
+          operations: restore.map((entry) => ({ action: "update", botId: entry.botId, fields: entry.fields })) }, "user", "revert");
+      }
+      for (const entry of before) if (entry.managedSections !== undefined) this.options.store.patchBot(entry.botId, { managedSections: entry.managedSections ?? undefined });
+    } catch (error) {
+      return cannot(redactSecretsInText(error instanceof Error ? error.message : String(error)).slice(0, 500));
+    }
+    this.options.store.patchMessage(args.threadId, message.id, { card: { ...card, undone: true } });
+    return { claimed: true, state: "undone" };
   }
 
   async resolve(args: { botId: string; threadId: string; requestId: string; behavior: string }) {
@@ -376,8 +459,7 @@ export class TeamSetupRequestService {
     if (!message || !card || !request) return null;
     if (request.botId !== args.botId || request.threadId !== args.threadId || request.requestId !== args.requestId) throw new TeamSetupError("This setup belongs to another conversation", 403);
     if (args.behavior !== "allow" && args.behavior !== "deny") throw new TeamSetupError("Confirm or cancel this setup", 400);
-    // Stop/dismiss can close a card without a setup decision. It must never
-    // resurrect that review or wake the stopped conversation.
+    // A card closed by Stop/dismiss must never resurrect its review or wake the stopped conversation.
     if (card.answered || card.dismissed || card.expired) {
       const result = request.result ?? { state: "cancelled" as const, bots: [], newTeams: [], error: "This setup card was closed" };
       return { result, request: { ...request, result }, messageId: message.id, duplicate: true };
@@ -390,9 +472,6 @@ export class TeamSetupRequestService {
       if (receipt?.requestId === request.requestId) result = receipt.result;
       else if (args.behavior === "deny") result = { state: "denied", bots: [], newTeams: [] };
       else result = await this.apply(request);
-      // A setup that could not apply is dead, not denied: the card settles
-      // expired with its options removed, so it stops looking actionable and
-      // the one-line held note says to review a fresh proposal.
       const dead = result.state !== "applied" && result.state !== "denied";
       this.options.store.patchMessage(args.threadId, message.id, { card: { ...card, ...(dead ? { expired: true, options: [] } : { answered: result.state === "applied" ? "allow" : "deny" }), held: result.error, teamSetupRequest: { ...request, result } } });
       return { result, request: { ...request, result }, messageId: message.id, duplicate: false };

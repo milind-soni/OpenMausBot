@@ -34,7 +34,7 @@ describe("desktop window state", () => {
 
   it("uses safe default dimensions when there is no saved state", () => {
     expect(resolveWindowState(null, [primary])).toEqual({
-      bounds: { width: 1100, height: 780 },
+      bounds: { width: 1040, height: 760 },
       maximized: false,
     });
   });

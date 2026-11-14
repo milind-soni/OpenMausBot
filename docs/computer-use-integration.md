@@ -1,7 +1,7 @@
 # Computer use & browser use in OpenMausBot
 
 Decision doc, 2026-08-12. How bots in OpenMausBot get local computer use and
-browser use. macOS and packaged Ubuntu x64 builds use an out-of-the-box,
+browser use. macOS, Windows x64 and packaged Ubuntu x64 builds use an out-of-the-box,
 release-pinned provider; source/dev Ubuntu may use a separately installed provider. Based
 on a survey of OSS chat-app MCP hosts, macOS control servers,
 browser-automation stacks, and the local `cua` / `axstream` code on this
@@ -11,8 +11,8 @@ machine.
 
 ```text
 Electron main process
-├── CUA host  ──spawns──▶  cua-driver (bundled on macOS and packaged Ubuntu x64)
-│     platform permission boundary               │ unix socket (private)
+├── CUA host  ──spawns──▶  cua-driver (bundled on macOS, Windows x64 and packaged Ubuntu x64)
+│     platform permission boundary               │ private Unix socket / Windows named pipe
 ├── WebContentsView pool (embedded browser, persist: partitions per bot)
 │     driven via webContents.debugger (CDP) — zero-install browser use
 └── server/ harness (drivers spawn agent CLIs with --mcp-config)
@@ -24,9 +24,11 @@ Electron main process
   servers get injected into each bot's `--mcp-config`. Same pattern as Claude
   Desktop / Cherry Studio / LibreChat.
 - **Local desktop use = `cua-driver`**. macOS packages the Rust Mach-O in app
-  Resources; Ubuntu x64 packages the certified 0.19.3 ELF plus its cursor-theme
-  sidecar outside ASAR. Both remain paired with the application release. This
-  applies to the Ubuntu 24.04 GNOME/Xorg beta and guarded GNOME/Wayland beta;
+  Resources; Windows x64 packages `cua-driver.exe`, its background helper and the
+  matching UniFFI SDK outside ASAR; Ubuntu x64 packages the certified 0.41.3 ELF
+  plus its cursor-theme sidecar outside ASAR. Each remains paired with the
+  application release. The Linux support applies to the Ubuntu 24.04 GNOME/Xorg
+  beta and guarded GNOME/Wayland beta;
   remote/cloud Boat computers and the isolated Local VM remain separate providers.
   NOT Swift — the Swift file everyone remembers
   (`examples/embedded-host-macos/ExampleAgentHarness.swift`) is a 165-line
@@ -35,6 +37,18 @@ Electron main process
   embed pages in `WebContentsView` and drive them via the built-in
   `webContents.debugger` CDP transport. No Chrome dependency, no 281MB
   Playwright download, and the user watches the bot browse inside the chat.
+
+Windows supports **This computer** through the app-owned embedded
+CUA host. It uses a private named pipe and does not adopt a separately running
+Cua driver. The Windows packager checks the SHA-256 of newly downloaded upstream
+ZIPs and checks executable versions against the SDK before staging. Cached,
+native-package and `CUA_DRIVER_PATH` executables receive the version check,
+without that ZIP checksum check. See
+[`scripts/prepare-cua-win.mjs`](../scripts/prepare-cua-win.mjs) and the Windows
+`extraResources` in [`electron-builder.yml`](../electron-builder.yml). The
+Windows CUA host smoke job in [CI](../.github/workflows/ci.yml) exercises the
+staged host and read-only lending. Preview-only screen capture is a separate
+capability and is currently unavailable on Windows.
 
 ## Local desktop use: CUA only — Electron owns the driver lifecycle
 
@@ -120,9 +134,16 @@ So the harness just adds one entry to a bot's `--mcp-config`:
 } } }
 ```
 
-Electron main writes that descriptor to
-`<userData>/cua-connection.json` (see `electron/cua.mjs`); the harness reads
-it and injects the block. The driver's own non-idempotent-action safety and
+Electron main keeps that descriptor in `<userData>/cua-connection.json` (see
+`electron/cua.mjs`), but no server reads it from there: the app hands it to the
+one server it launched over that child's private utility-process port
+(`electron/local-computer-grant.mjs` → `server/desktop-computer.ts`), and sends
+it again on every change. Only that server injects the block, so a second
+OpenMausBot server on the same computer (a copy run from source, a demo) never
+finds this computer. Before a bot's first action on the person's own computer
+in a request, unless the person picked this computer as the place, the person
+is asked once in plain words (`server/your-computer-consent.ts`), at every
+approval level. The driver's own non-idempotent-action safety and
 the `ax → ax_fg → cgevent → cgevent_fg → cgevent_hid` delivery ladder
 (background pid-addressed input first — does not steal the user's cursor) are
 handled inside the binary; the host adds nothing.
@@ -137,10 +158,17 @@ coordinates and work on backgrounded/hidden windows.
 ### Policy: CUA is the only computer-use path
 
 No axstream, no cliclick, no robotjs/nut.js, no Python computer-server. If a
-capability is missing (e.g. OCR-anchored clicking, macro record/replay), it is
-added to cua-driver upstream or requested as a driver tool — never bolted on
-beside it. This keeps one TCC identity, one binary to sign/notarize, and one
-behavior contract.
+capability is missing (e.g. OCR-anchored clicking), it is added to cua-driver
+upstream or requested as a driver tool — never bolted on beside it. This keeps
+one TCC identity, one binary to sign/notarize, and one behavior contract.
+
+[Saved steps](superpowers/specs/2026-10-27-saved-steps-design.md) repeats a
+bot's earlier run on this computer by re-issuing the driver's own recorded tool
+calls through the same gated bridge (`server/local-computer-proxy.ts`), each
+target looked up fresh by app, window title and accessibility label, never by
+pixel: it adds no input route, binary or permission identity beside cua-driver.
+It replays only at Full access where the person picked this computer as the
+place, so a replay never skips the one-time question above.
 
 ## Browser use: three tiers
 
@@ -176,5 +204,5 @@ app doesn't embed it).
    click-ref / type / screenshot) exposed as the "Browser" plugin.
 4. Packaging: extraResources + re-sign + notarize; wire
    `EmbeddedCuaDriverHost` for production.
-5. Later: axstream-style macro teach/replay, extension bridge, playwright-mcp
-   tier.
+5. Later: extension bridge, playwright-mcp tier. (Macro record/replay shipped
+   as [saved steps](superpowers/specs/2026-10-27-saved-steps-design.md).)

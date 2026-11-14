@@ -1,74 +1,107 @@
-// Cursor Agent CLI harness support — Anysphere's `cursor-agent acp` over ACP
-// stdio, billed on the Cursor subscription (`cursor-agent login`,
-// CURSOR_API_KEY, or CURSOR_AUTH_TOKEN). The generic protocol runtime lives in
-// acp/core.ts; this file is only the per-harness quirks.
-//
-// Verified against the public CLI contract (cursor.com/docs/cli/acp,
-// …/reference/parameters): `cursor-agent acp` speaks JSON-RPC on stdio, advertises
-// `cursor_login`, and takes `--force` / `--model` as global flags before the
-// `acp` subcommand. `session/set_model` is attempted when the CLI supports it;
-// a missing method falls back to the argv `--model` pin.
+// Cursor Agent (`cursor-agent acp`) on the Cursor subscription (`cursor-agent login`, CURSOR_API_KEY or
+// CURSOR_AUTH_TOKEN). Per cursor.com/docs/cli/acp it advertises `cursor_login` and takes `--force` /
+// `--model` as global flags before `acp`.
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { CURSOR_STANDALONE } from "./cursor-release.ts";
+import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
+import { discoverAcpModels } from "./custom-model-catalog.ts";
+import { bundledEngineCatalog } from "../../model-manifest/bundled.ts";
+import { currentEngineCatalog } from "../../model-manifest/manifest.ts";
+import { ENGINE_MODEL_ID } from "../../model-manifest/schema.ts";
+import type { AcpQuestionRequest } from "./question-requests.ts";
+import {
+  capAnswerEcho, formatQuestionAnswers, MAX_QUESTIONS, parseChoices, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById,
+  repeatsQuestionText,
+} from "../../../shared/ask-question.ts";
 
-/** Translate an argv `--model` slug into the id this ACP session will accept.
- *
- * Cursor keeps two model namespaces and they do not match. `cursor-agent
- * models` and the `--model` flag speak flat slugs (`auto`, `gpt-5.3-codex`).
- * The ACP session advertises parameterised ids instead
- * (`default[]`, `gpt-5.3-codex[reasoning=medium,fast=false]`), and
- * `session/set_model` accepts *only* those. Sending the argv slug earns
- * `-32602 Invalid params` for every model, not merely unknown ones — which
- * read as "this account cannot use that model" and sent people to check their
- * subscription over a pure id-format mismatch.
- *
- * Matching walks from most to least specific, and `auto` is special-cased
- * because Cursor calls that entry `default[]` while naming it "Auto".
- *
- * Returns null when nothing matches, including when the agent advertised no
- * models at all. The caller then falls back to sending the slug unchanged,
- * which is what older CLIs that ignore the model list still expect.
- */
+/** Cursor keeps two model namespaces: `cursor-agent models` and `--model` use flat slugs (`auto`,
+ * `gpt-5.3-codex`), while the ACP session advertises parameterised ids (`default[]`,
+ * `grok-4.7[context=256k,reasoning_effort=high,fast=true]`) and set_model accepts only those (-32602
+ * otherwise). `auto` is `default[]`. Null when nothing matches. */
 export function resolveCursorAcpModelId(
   available: Array<{ modelId?: string; name?: string }>,
   wanted: string,
 ): string | null {
+  return matchCursorAcpModel(available, wanted)?.modelId ?? null;
+}
+
+const EFFORT_SLUG = /^(.+)-(minimal|low|medium|high|xhigh|max)$/;
+
+function cursorAcpParams(id: string): Map<string, string> {
+  const params = new Map<string, string>();
+  const body = /\[(.*)\]\s*$/.exec(id)?.[1] ?? "";
+  for (const pair of body.split(",")) {
+    const [key, value] = pair.split("=").map((part) => part?.trim().toLowerCase());
+    if (key && value !== undefined) params.set(key, value);
+  }
+  return params;
+}
+
+/** `exact` is false when an effort slug settled for another variant: the session advertises one per base. */
+export function matchCursorAcpModel(
+  available: Array<{ modelId?: string; name?: string }>,
+  wanted: string,
+): { modelId: string; exact: boolean } | null {
   const want = wanted.trim().toLowerCase();
   if (!want) return null;
   const ids = available.filter((m) => typeof m?.modelId === "string" && m.modelId);
   if (!ids.length) return null;
   const base = (id: string) => id.split("[")[0].trim().toLowerCase();
+  const found = (modelId: string, exact = true) => ({ modelId, exact });
 
   const exact = ids.find((m) => m.modelId!.toLowerCase() === want);
-  if (exact) return exact.modelId!;
+  if (exact) return found(exact.modelId!);
 
-  const byBase = ids.find((m) => base(m.modelId!) === want);
-  if (byBase) return byBase.modelId!;
+  // A plain slug means Standard (fast=false); a `-fast` slug is the fast=true variant of its base.
+  const isFast = (id: string) => cursorAcpParams(id).get("fast") === "true";
+  const sameBase = ids.filter((m) => base(m.modelId!) === want);
+  const byBase = sameBase.find((m) => !isFast(m.modelId!)) ?? sameBase[0];
+  if (byBase) return found(byBase.modelId!);
+
+  const fastSlug = want.endsWith("-fast");
+  const stem = fastSlug ? want.slice(0, -"-fast".length) : want;
+  if (fastSlug) {
+    const fast = ids.find((m) => base(m.modelId!) === stem && isFast(m.modelId!));
+    if (fast) return found(fast.modelId!);
+  }
+
+  // `cursor-agent models` puts effort in the slug (`grok-4.7-high-fast`); the session names it a
+  // parameter (`reasoning_effort=high`, or `effort=`/`reasoning=` on other bases).
+  const effortSlug = EFFORT_SLUG.exec(stem);
+  if (effortSlug) {
+    const [, effortBase, effort] = effortSlug;
+    const effortOf = (id: string) => {
+      const params = cursorAcpParams(id);
+      return params.get("reasoning_effort") ?? params.get("effort") ?? params.get("reasoning");
+    };
+    const variants = ids.filter((m) => base(m.modelId!) === effortBase && (!fastSlug || isFast(m.modelId!)));
+    const sameEffort = variants.find((m) => effortOf(m.modelId!) === effort && isFast(m.modelId!) === fastSlug);
+    if (sameEffort) return found(sameEffort.modelId!);
+    const closest = variants.find((m) => isFast(m.modelId!) === fastSlug) ?? variants[0];
+    if (closest) return found(closest.modelId!, false);
+  }
 
   const byName = ids.find((m) => (m.name ?? "").trim().toLowerCase() === want);
-  if (byName) return byName.modelId!;
+  if (byName) return found(byName.modelId!);
 
   if (want === "auto" || want === "default") {
     const dflt = ids.find((m) => base(m.modelId!) === "default");
-    if (dflt) return dflt.modelId!;
+    if (dflt) return found(dflt.modelId!);
   }
   return null;
 }
 
-export const STATIC_CURSOR_MODELS: ModelCatalog = {
-  default: "auto",
-  options: [
-    { id: "auto", label: "Auto" },
-    { id: "composer-2.5", label: "Composer 2.5" },
-    { id: "composer-2.5-fast", label: "Composer 2.5 Fast" },
-    { id: "gpt-5.3-codex", label: "Codex 5.3" },
-    { id: "claude-sonnet-5-thinking-high", label: "Claude Sonnet 5 1M Thinking" },
-  ],
-};
+export const STATIC_CURSOR_MODELS: ModelCatalog = bundledEngineCatalog("cursor");
+const currentCursorModels = () => currentEngineCatalog("cursor");
 
-const SLUG = /^[a-z0-9][a-z0-9._:+-]*$/i;
+/** Without parameterizedModelPicker Cursor (CLI 2026.10.19) offers only `composer-2.5[fast=true]`, so a
+ * `composer-2.5` bot bills as Fast; with it, Fast is a separate `fast` config option. */
+const CURSOR_CLIENT_META = { parameterizedModelPicker: true };
+
+const SLUG = ENGINE_MODEL_ID.cursor;
 const EXEC_TIMEOUT_MS = 8_000;
 
 const nonBlank = (value: string | undefined): boolean => Boolean(value?.trim());
@@ -79,8 +112,7 @@ function firstJsonValue(text: string): unknown {
   try {
     return JSON.parse(trimmed);
   } catch {
-    // CLIs sometimes print a banner before the payload. Take the first
-    // {...} or [...] span that parses, rather than requiring a clean stdout.
+    // CLIs sometimes print a banner before the payload.
   }
   const start = trimmed.search(/[{[]/);
   if (start < 0) return null;
@@ -89,9 +121,7 @@ function firstJsonValue(text: string): unknown {
     if (!slice.endsWith("}") && !slice.endsWith("]")) continue;
     try {
       return JSON.parse(slice);
-    } catch {
-      // keep shrinking
-    }
+    } catch {}
   }
   return null;
 }
@@ -117,8 +147,17 @@ function pushModel(
   options.push({ id, label: labelFor(id, label), ...(custom ? { custom: true as const } : {}) });
 }
 
-/** Turn `cursor-agent models` JSON (or a close cousin) into a picker catalog.
- *  Unknown shapes return null so the caller can try text / keep the fallback. */
+function withUnseen(first: ModelCatalog["options"], rest: ModelCatalog["options"]): ModelCatalog["options"] {
+  const merged = first.map((option) => ({ ...option }));
+  const seen = new Set(merged.map((option) => option.id));
+  for (const option of rest) {
+    if (seen.has(option.id)) continue;
+    seen.add(option.id);
+    merged.push(option);
+  }
+  return merged;
+}
+
 export function decodeCursorModelCatalog(payload: unknown): ModelCatalog | null {
   const records: unknown[] = Array.isArray(payload)
     ? payload
@@ -154,18 +193,9 @@ export function decodeCursorModelCatalog(payload: unknown): ModelCatalog | null 
     (typeof asRecord(payload)?.default === "string" && seen.has(asRecord(payload)!.default as string)
       ? (asRecord(payload)!.default as string)
       : undefined) ??
-    (seen.has(STATIC_CURSOR_MODELS.default) ? STATIC_CURSOR_MODELS.default : options[0]!.id);
+    (seen.has(currentCursorModels().default) ? currentCursorModels().default : options[0]!.id);
 
-  // Keep the static cloud set at the front (stable picker rail) and append
-  // live ids the static list does not already name.
-  const merged: ModelCatalog["options"] = STATIC_CURSOR_MODELS.options.map((option) => ({ ...option }));
-  const mergedSeen = new Set(merged.map((option) => option.id));
-  for (const option of options) {
-    if (mergedSeen.has(option.id)) continue;
-    mergedSeen.add(option.id);
-    merged.push(option);
-  }
-  return { default: defaultId, options: merged };
+  return { default: defaultId, options: withUnseen(currentCursorModels().options, options) };
 }
 
 function stripModelMarkers(label: string): { label: string; isDefault: boolean; isCurrent: boolean } {
@@ -185,8 +215,7 @@ function stripModelMarkers(label: string): { label: string; isDefault: boolean; 
   return { label: cleaned, isDefault, isCurrent };
 }
 
-/** Parse plain `cursor-agent models` text: one slug per line, optional `id - label`
- *  columns, and `(default)` / `(current)` markers on the label. */
+/** Plain `cursor-agent models` text: one slug per line, optional `id - label`, `(default)` / `(current)` markers. */
 export function decodeCursorModelText(text: string): ModelCatalog | null {
   const options: ModelCatalog["options"] = [];
   const seen = new Set<string>();
@@ -205,18 +234,11 @@ export function decodeCursorModelText(text: string): ModelCatalog | null {
     if (isCurrent) markedCurrent = id;
   }
   if (!options.length) return null;
-  const merged: ModelCatalog["options"] = STATIC_CURSOR_MODELS.options.map((option) => ({ ...option }));
-  const mergedSeen = new Set(merged.map((option) => option.id));
-  for (const option of options) {
-    if (mergedSeen.has(option.id)) continue;
-    mergedSeen.add(option.id);
-    merged.push(option);
-  }
   const defaultId =
     (markedDefault && seen.has(markedDefault) ? markedDefault : undefined) ??
     (markedCurrent && seen.has(markedCurrent) ? markedCurrent : undefined) ??
-    (seen.has(STATIC_CURSOR_MODELS.default) ? STATIC_CURSOR_MODELS.default : options[0]!.id);
-  return { default: defaultId, options: merged };
+    (seen.has(currentCursorModels().default) ? currentCursorModels().default : options[0]!.id);
+  return { default: defaultId, options: withUnseen(currentCursorModels().options, options) };
 }
 
 function truthyAuthFlag(value: unknown): boolean | null {
@@ -230,8 +252,6 @@ function truthyAuthFlag(value: unknown): boolean | null {
   return null;
 }
 
-/** Read `cursor-agent status --format json`.
- *  Returns null when the payload does not actually answer the question. */
 export function decodeCursorAuthStatus(payload: unknown): boolean | null {
   const rec = asRecord(payload);
   if (!rec) return null;
@@ -253,7 +273,6 @@ export function decodeCursorAuthStatus(payload: unknown): boolean | null {
   return null;
 }
 
-/** Parse the documented human-readable `cursor-agent status` fallback. */
 export function decodeCursorAuthText(text: string): boolean | null {
   const normalized = text.trim().toLowerCase();
   if (!normalized) return null;
@@ -291,11 +310,62 @@ export async function probeCursorAuth(
   return false;
 }
 
+/** `cursor-agent --version` prints its build alone (`2026.10.22-27dcf5f`); curl, run by an install command pasted as
+ * the CLI path, answers `curl 7.88.1 (x86_64-pc-linux-gnu) …`. */
+export const CURSOR_CLI_VERSION = /^\d{4}\.\d{1,2}\.\d{1,2}(?:-[0-9a-z]+)?\s*$/i;
+
+/** `cursor-agent status --format json` (2026.10.22): `{"status":"unauthenticated","isAuthenticated":false,…}`. */
+export function readCursorStatus(code: number | null, output: string): DeviceSignInState {
+  const signedIn = code === 0 ? decodeCursorAuthStatus(firstJsonValue(output)) : null;
+  return signedIn === true ? "signed-in" : signedIn === false ? "signed-out" : "unknown";
+}
+
+/** Never the CLI's own words: its output carries the sign-in request. */
+function cursorLoginFailure(output: string): string {
+  if (/expired|timed? ?out/i.test(output)) return "The Cursor sign-in link expired. Start sign-in again for a new link.";
+  return "Cursor sign-in did not finish. Check the server's connection, then try again.";
+}
+
+/** `cursor-agent login` where the bots run: on a server it cannot open a browser, so it prints the link that finishes
+ * the sign-in (NO_OPEN_BROWSER keeps it from trying) and waits; the person opens that link on any device. The login lands
+ * in the server account's own Cursor home, which turns read. */
+export const CURSOR_SIGN_IN: DeviceSignIn = {
+  provider: "cursor",
+  product: "Cursor",
+  account: "Cursor",
+  homeEnv: "CURSOR_CONFIG_DIR",
+  homeDir: ".cursor",
+  loginArgs: ["login"],
+  env: { NO_OPEN_BROWSER: "1" },
+  install: "Install Cursor's CLI (https://cursor.com/docs/cli/installation) for the user running OpenMausBot, then try again.",
+  failure: cursorLoginFailure,
+  status: { args: ["status", "--format", "json"], read: readCursorStatus },
+};
+
+export function cursorCatalogFromSession(advertised: ModelCatalog["options"]): ModelCatalog | null {
+  const discovered: ModelCatalog["options"] = [];
+  const bases = new Set<string>();
+  for (const model of advertised) {
+    const raw = model.id.split("[")[0]!.trim();
+    const id = raw.toLowerCase() === "default" ? currentCursorModels().default : raw;
+    pushModel(discovered, bases, id, model.label.trim().toLowerCase() === id.toLowerCase() ? titleCaseModelId(id, /[-_]+/) : model.label);
+  }
+  if (!discovered.length) return null;
+  const offered = currentCursorModels().options
+    .filter((option) => option.id === currentCursorModels().default || bases.has(option.id.replace(/-fast$/, "")));
+  return { default: currentCursorModels().default, options: withUnseen(offered, discovered) };
+}
+
+/** `cursor-agent models` (2026.10.22) lists only `auto` while session/new lists every model the account can use, so the
+ * session answers first; the text list stands in for a CLI that cannot open one. */
 export async function fetchCursorModels(
   cli: string,
   env: Record<string, string | undefined>,
   run: typeof execCli = execCli,
 ): Promise<ModelCatalog> {
+  const fromSession = await discoverAcpModels(env, cli, ["acp"], { variants: false, clientCapabilitiesMeta: CURSOR_CLIENT_META })
+    .then((catalog) => cursorCatalogFromSession(catalog.options), () => null);
+  if (fromSession) return fromSession;
   // Live CLI prints plain text (`slug - Label`); `--format json` is not supported yet.
   for (const args of [["models"], ["--list-models"]] as const) {
     const stdout = await execText(run, cli, [...args], env);
@@ -305,7 +375,7 @@ export async function fetchCursorModels(
     const fromJson = decodeCursorModelCatalog(firstJsonValue(stdout));
     if (fromJson) return fromJson;
   }
-  return STATIC_CURSOR_MODELS;
+  return currentCursorModels();
 }
 
 export function classifyCursorError(error: unknown): ProviderErrorCode | undefined {
@@ -326,15 +396,87 @@ export function classifyCursorError(error: unknown): ProviderErrorCode | undefin
   return undefined;
 }
 
+/** Cursor's AskQuestion blocks on `cursor/ask_question` (cursor.com/docs/cli/acp; cursor-agent 2026.10.01, no sessionId).
+ * Cursor answers by option id only, so a reply with any own words goes back whole as `skipped` with the answers as the
+ * reason, which Cursor hands the model verbatim: a typed answer is never forced onto an option. */
+export const CURSOR_ASK_QUESTION: AcpQuestionRequest = {
+  cancelled: { outcome: { outcome: "cancelled" } },
+  parse(params) {
+    const raw = (params as { questions?: unknown } | null)?.questions;
+    if (!Array.isArray(raw) || raw.length > MAX_QUESTIONS) return null;
+    const parsed = parseProtocolAskQuestions(raw.map((entry) =>
+      entry && typeof entry === "object"
+        ? { id: entry.id, question: entry.prompt, options: entry.options, multiSelect: entry.allowMultiple === true }
+        : entry));
+    if (!parsed || repeatsQuestionText(parsed)) return null;
+    const rawOptions = new Map<string, unknown[]>(raw.flatMap((entry) =>
+      entry && typeof entry.id === "string" && Array.isArray(entry.options) ? [[entry.id, entry.options]] : []));
+    // Card labels are trimmed and capped: never guess when two options normalize alike.
+    const optionId = (questionId: string, label: string): string | null => {
+      const matches = (rawOptions.get(questionId) ?? []).filter((option) => parseChoices([option], 1)?.[0] === label);
+      const id = matches.length === 1 ? (matches[0] as { id?: unknown }).id : null;
+      return typeof id === "string" ? id : null;
+    };
+    const questions = parsed.map(({ question }) => question);
+    return {
+      questions,
+      answered(message) {
+        const byId = questionAnswersById(message, parsed);
+        const answers: Array<{ questionId: string; selectedOptionIds: string[] }> = [];
+        let ownWords = false;
+        for (const { id, question } of parsed) {
+          const reply = byId[id];
+          if (reply === undefined) continue;
+          const { labels, other } = pickedOptionLabels(reply, question);
+          const selectedOptionIds = labels.map((label) => optionId(id, label));
+          if (other !== undefined || selectedOptionIds.some((selected) => selected === null)) ownWords = true;
+          else answers.push({ questionId: id, selectedOptionIds: selectedOptionIds as string[] });
+        }
+        if (ownWords) {
+          const reason = formatQuestionAnswers(questions, parsed.map(({ id }) => byId[id] ? [byId[id]] : []));
+          return { outcome: { outcome: "skipped", reason: capAnswerEcho(reason) } };
+        }
+        return answers.length ? { outcome: { outcome: "answered", answers } } : null;
+      },
+    };
+  },
+};
+
+async function setCursorFast(
+  request: (method: string, params: unknown) => Promise<unknown>,
+  sessionId: string,
+  fast: boolean,
+): Promise<void> {
+  let reply: { configOptions?: Array<{ id?: unknown; currentValue?: unknown }> } | undefined;
+  try {
+    reply = (await request("session/set_config_option", { sessionId, configId: "fast", value: String(fast) })) as typeof reply;
+  } catch (e) {
+    // -32602: the chosen model has no Fast variant, so there is nothing to switch.
+    if ((e as { code?: unknown }).code !== -32602) throw e;
+    return;
+  }
+  // Cursor can acknowledge the switch yet keep its default Fast variant, so only the echoed value counts.
+  const confirmed = reply?.configOptions?.find((option) => option?.id === "fast")?.currentValue;
+  if (confirmed !== String(fast)) {
+    throw new Error(
+      `Cursor did not confirm Fast ${fast ? "on" : "off"} (fast is ${confirmed === undefined ? "unreported" : JSON.stringify(confirmed)}), ` +
+        "so the turn was not sent. Check that `cursor-agent` is current.",
+    );
+  }
+}
+
 const support = (run: typeof execCli): AcpSupport => ({
   driverKind: "cursorAgent",
+  questionRequests: { "cursor/ask_question": CURSOR_ASK_QUESTION }, askTool: "AskQuestion",
   displayName: "Cursor",
-  models: STATIC_CURSOR_MODELS,
-  // Cursor and other coding agents can both install a generic `agent` shim.
-  // Cursor's compatibility alias is unambiguous and ships with the same CLI.
+  cliVersion: CURSOR_CLI_VERSION,
+  get models() { return currentCursorModels(); },
+  // Other coding agents can install a generic `agent` shim; `cursor-agent` is unambiguous.
   defaultCli: "cursor-agent",
   nativeSource: "cursor.acp",
-  loginNote: "Cursor CLI is not signed in — run `cursor-agent login` in a terminal, or set CURSOR_API_KEY",
+  // Turns read this too: the sign-in runs where the bots run, from the app, never on the person's own computer.
+  loginNote: "Cursor is not signed in where your bots run. Choose Cursor in the model picker and sign in from its card, or set CURSOR_API_KEY.",
+  deviceSignIn: CURSOR_SIGN_IN,
 
   install: {
     command: {
@@ -344,46 +486,69 @@ const support = (run: typeof execCli): AcpSupport => ({
     },
     docsUrl: "https://cursor.com/docs/cli/installation",
     signInCommand: "cursor-agent login",
+    // On Linux, Settings installs Cursor's own pinned build: a Cloud has no terminal for its installer.
+    standalone: CURSOR_STANDALONE,
   },
 
-  // Global flags must precede `acp` (cursor.com/docs/cli/reference/parameters).
-  // `--force` is the documented auto-approve switch (`--yolo` is an alias);
-  // `--model` is the reliable pin — ACP session/set_model is best-effort below.
+  // Global flags precede `acp`. `--approve-mcps` covers OpenMausBot's own servers from session/new.
+  // `--force` / `--auto-review` are the documented tool-permission switches only.
   spawnArgs: (config, turn) => [
     ...(config.fullAuto ? ["--force"] : turn.approvalMode === "auto" ? ["--auto-review"] : []),
+    "--approve-mcps",
     ...(turn.model ? ["--model", turn.model] : []),
     "acp",
   ],
+  // Cursor keeps the first MCP registration for a process's life; a new agents bearer must start fresh.
+  restartOnMcpChange: true,
+  // Cursor advertises http MCP; OpenMausBot's own servers as endpoints avoid a stdio proxy under Cursor's client.
+  ownMcpOverHttp: true,
   credentialEnv: ["CURSOR_API_KEY", "CURSOR_AUTH_TOKEN"],
 
   resolveModels: (environment, config) => fetchCursorModels(config.cli || "cursor-agent", environment, run),
 
-  // Prefer the advertised ACP method. An already-signed-in CLI should accept
-  // cursor_login without a browser; a missing method rides the ambient login
-  // (CURSOR_API_KEY / `cursor-agent login`) instead of failing the turn.
-  pickAuthMethod: (methods) => (methods.some((m) => m.id === "cursor_login") ? "cursor_login" : null),
+  // A key in the env already authenticates the session, and Cursor's cursor_login handler would then
+  // delete the saved login and open a browser once the token expired, so it is not sent.
+  pickAuthMethod: (methods, env) =>
+    nonBlank(env.CURSOR_API_KEY) || nonBlank(env.CURSOR_AUTH_TOKEN) ? null
+      : methods.some((m) => m.id === "cursor_login") ? "cursor_login" : null,
   authFailure: "continue",
   isAuthenticated: (env, config) => probeCursorAuth(config.cli || "cursor-agent", env, run),
   classifyError: classifyCursorError,
 
-  async configureSession({ request, sessionId, turn, sessionModels }) {
+  clientCapabilitiesMeta: CURSOR_CLIENT_META,
+
+  async configureSession({ request, sessionId, turn, sessionModels, currentModelId, configOptions, notice }) {
     if (!turn.model) return;
-    // Prefer the id this session actually advertised; fall back to the argv
-    // slug so a CLI that advertises nothing behaves exactly as before.
-    const modelId = resolveCursorAcpModelId(sessionModels ?? [], turn.model) ?? turn.model;
+    const fastOption = configOptions.some((option) => option?.id === "fast");
+    const wantsFast = /-fast$/i.test(turn.model);
+    const wanted = fastOption && wantsFast ? turn.model.slice(0, -"-fast".length) : turn.model;
+    const match = matchCursorAcpModel(sessionModels ?? [], wanted);
+    const modelId = match?.modelId ?? wanted;
     try {
       await request("session/set_model", { sessionId, modelId });
+      if (match && !match.exact) {
+        notice(`Cursor offers ${modelId} rather than ${turn.model} in this session, so this conversation uses ${modelId}.`);
+      }
     } catch (e) {
       const err = e as Error & { code?: unknown };
-      // -32601 method missing, -32602 id not in this session's namespace. In
-      // both cases spawnArgs already pinned `--model`, so the turn runs the
-      // right model anyway; failing it here would refuse a working request.
-      if (err.code === -32601 || err.code === -32602) return;
+        // -32601: no set_model, so the argv pin holds. -32602: not in this namespace; current CLIs
+        // ignore argv `--model` in ACP, so the session keeps its starting model.
+      if (err.code === -32601) return;
+      if (err.code === -32602) {
+        const current = sessionModels?.find((m) => m.modelId === currentModelId);
+        const running = current?.name ?? currentModelId;
+        notice(
+          `Cursor did not accept ${turn.model} in this session, so it runs ${running ?? "its default model"}. ` +
+            "Choose another model for this bot to stop seeing this.",
+        );
+        return;
+      }
       throw new Error(
         `Cursor rejected model "${turn.model}" (sent as "${modelId}") via session/set_model: ${err.message}. ` +
           `Check that \`cursor-agent\` is current and that this account can use that model.`,
       );
     }
+    if (fastOption) await setCursorFast(request, sessionId, wantsFast);
   },
 
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),

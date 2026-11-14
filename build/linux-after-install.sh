@@ -105,6 +105,19 @@ secure_browser_tree() {
   repair_executable "$BROWSER_ROOT/chrome/chrome-headless-shell-linux64/chrome-headless-shell"
 }
 
+in_container() {
+  if [ "$TEST_MODE" -eq 1 ]; then
+    [ -e "$APP_ROOT/test-system/container" ]
+    return
+  fi
+  if [ -x /usr/bin/systemd-detect-virt ] && /usr/bin/systemd-detect-virt --quiet --container; then
+    return 0
+  fi
+  # Only root can create these markers on the host, and the runtimes create
+  # them inside every container: Docker /.dockerenv, Podman /run/.containerenv.
+  [ -f /.dockerenv ] || [ -f /run/.containerenv ] || [ -s /run/systemd/container ]
+}
+
 install_browser_apparmor_profile() {
   profile=$APP_ROOT/resources/openmausbot-browser.apparmor
   if [ -L "$profile" ] || [ ! -f "$profile" ] || [ "$(stat -c '%h' -- "$profile")" != 1 ]; then
@@ -138,6 +151,13 @@ install_browser_apparmor_profile() {
     fi
     return
   fi
+  # Hosts without the AppArmor 4 ABI cannot parse this optional allowlist.
+  # Skip it only when the user-namespace restriction is also off, where
+  # Chrome's normal sandbox already works. A restricted host still fails
+  # closed below when the policy cannot be loaded.
+  if [ ! -f "$APPARMOR_DIR/abi/4.0" ] && [ "$restricted" != 1 ]; then
+    return
+  fi
   # The policy directory belongs to the OS: validate it, never chmod it.
   if [ -L "$APPARMOR_DIR" ] || [ "$(stat -c '%U:%G:%a' -- "$APPARMOR_DIR")" != "$EXPECTED_OWNER:755" ]; then
     echo "OpenMausBot AppArmor policy directory is unsafe: $APPARMOR_DIR" >&2
@@ -159,6 +179,14 @@ install_browser_apparmor_profile() {
   # policy for a future boot, but do not fail installation on an unrestricted
   # host booted with AppArmor disabled. A restricted host still fails closed.
   if [ ! -x "$APPARMOR_STATUS" ] || ! "$APPARMOR_STATUS" --enabled >/dev/null 2>&1; then
+    # A Docker or Podman container reads the host kernel's restriction but
+    # cannot reach the host's AppArmor, so no install inside it could load
+    # this policy. The host owns that setting: keep the staged policy, say
+    # so, and install. A container that can load policy (LXD) loads it below.
+    if [ "$restricted" = 1 ] && in_container; then
+      echo "OpenMausBot staged its browser AppArmor policy at $target but did not load it: AppArmor belongs to this container's host. The bot's browser needs the host to allow its user namespaces." >&2
+      return
+    fi
     if [ "$restricted" = 1 ]; then
       echo "OpenMausBot cannot load its browser sandbox policy while AppArmor restrictions are active but AppArmor is unavailable." >&2
       exit 1

@@ -1,0 +1,13 @@
+{
+  "messageId": "m-1", "threadId": "t-1", "messageTimestamp": "2026-10-21T02:00:00Z",
+  "sender": "Ada <ada@pin.example>", "subject": "Q3 numbers", "labelIds": ["INBOX", "UNREAD"],
+  "preview": { "subject": "Q3 numbers", "body": "Can you send the Q3 numbers today?" },
+  "payload": {
+    "mimeType": "multipart/alternative",
+    "headers": [
+      { "name": "From", "value": "Ada <ada@pin.example>" },
+      { "name": "Subject", "value": "Q3 numbers" },
+      { "name": "Message-ID", "value": "<q3@pin.example>" }
+    ]
+  }
+}

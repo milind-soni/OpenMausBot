@@ -7,8 +7,7 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 
-// Deliberate opt-in: never discover the user's CLI or install a dependency.
-// The supplied binary runs against synthetic config and an owned loopback API.
+// Deliberate opt-in: never discover the user's CLI; the supplied binary runs against synthetic config and an owned loopback API.
 const cli = process.env.OMB_OPENCODE_E2E_CLI;
 const test = cli ? it : it.skip;
 
@@ -125,8 +124,7 @@ test("persists per-conversation OpenCode efforts and sends them through ACP afte
       'child.on("exit", code => process.exit(code ?? 1));',
       'child.on("error", error => { console.error(error.message); process.exit(1); });',
     ].join("\n"), { mode: 0o700 });
-    // The shared launcher deliberately installs only Claude. Seed this owned
-    // fixture's optional instance while stopped, then exercise its real API.
+    // The shared launcher installs only Claude: seed this fixture's optional instance while stopped.
     await waitForExit(fixture.child, { signal: "SIGTERM" });
     const ombConfigPath = join(dataDir, "config.json");
     const ombConfig = JSON.parse(readFileSync(ombConfigPath, "utf8"));
@@ -159,8 +157,7 @@ test("persists per-conversation OpenCode efforts and sends them through ACP afte
       const captured = receipts.slice(before).filter((receipt) => receipt.marker === marker);
       expect(captured).toEqual(expect.arrayContaining([expect.objectContaining({ endpoint: "/v1/responses", model: "reasoning-fixture", effortPresent: effort !== undefined, ...(effort === undefined ? {} : { effort }) })]));
       expect(captured.some((receipt) => receipt.effort === "none")).toBe(false);
-      // Auxiliary calls (for example, native title generation) must not make
-      // an incorrect main-conversation effort look like a passing capture.
+      // Auxiliary calls (native title generation) must not make a wrong main-conversation effort look like a pass.
       const transcript = await control(["messages", "--bot", bot.id, "--task", taskId, "--limit", "20"]);
       const reply = transcript.messages.filter((message: any) => message.role === "bot" && message.kind === "text").at(-1);
       expect(reply?.text).toBe(`fixture-ok:${effort ?? "omitted"}`);

@@ -1,16 +1,6 @@
-// Contract test for permission-proxy — the MCP stdio server the claude CLI
-// spawns for --permission-prompt-tool. A fake broker on the socket stands in
-// for the harness, so these assert the two halves of the wire the proxy owns:
-// the ask it writes to the broker, and the JSON it hands back to the CLI.
-//
-// The case that matters most is the CLI's own AskUserQuestion. It arrives
-// through `approve` looking like a permission, and answering it as one is why
-// a multiple-choice question reached users as an Allow/Deny boat over a
-// truncated JSON blob. It has to leave here as a question, and come back as
-// the `answers` object the tool documents — a bare allow makes the CLI run
-// the tool, and a headless run has no dialog, so the click is discarded
-// ("The user did not answer the questions.").
+// A fake broker on the socket stands in for the harness.
 import { spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import { createServer, type Server, type Socket } from "node:net";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,11 +10,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { brokerSocketPath } from "./procs.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+import { formatQuestionAnswers } from "../shared/ask-question.ts";
 
 const PROXY = join(dirname(fileURLToPath(import.meta.url)), "permission-proxy.ts");
 
-/** A question with two labelled options and a per-option explanation — the
- * shape the real CLI sends (verified against claude 2.1.238). */
+/** The shape the real CLI sends (verified against claude 2.1.238). */
 const QUESTION = {
   questions: [
     {
@@ -43,12 +33,10 @@ describe("permission proxy", () => {
   let scratch: string;
   let broker: Server;
   let proxy: ChildProcess;
-  /** every ask the broker received, in order */
   let asks: any[];
-  /** how the fake broker answers ask N — set per test */
   let answerWith: (ask: any, index: number) => Record<string, unknown> | null;
-  /** live broker connections, so a test can drop one mid-ask */
   let conns: Socket[];
+  let listen: () => Promise<void>;
   const results = new Map<number, any>();
 
   const rpc = (msg: unknown) => proxy.stdin!.write(JSON.stringify(msg) + "\n");
@@ -68,8 +56,21 @@ describe("permission proxy", () => {
     }
     throw new Error(`only ${asks.length} of ${count} asks arrived`);
   };
-  /** The tool result the CLI would read, parsed. */
   const resultJson = (res: any) => JSON.parse(res.result.content[0].text);
+
+  const startProxy = (socketPath: string, env?: NodeJS.ProcessEnv) => {
+    proxy = spawn(process.execPath, ["--experimental-strip-types", PROXY, socketPath], { stdio: ["pipe", "pipe", "pipe"], env });
+    let out = "";
+    proxy.stdout!.setEncoding("utf8");
+    proxy.stdout!.on("data", (chunk) => {
+      out += chunk; let nl;
+      while ((nl = out.indexOf("\n")) !== -1) {
+        const line = out.slice(0, nl); out = out.slice(nl + 1);
+        if (!line.trim()) continue;
+        try { const msg = JSON.parse(line); if (msg.id != null) results.set(msg.id, msg); } catch {}
+      }
+    });
+  };
 
   beforeEach(async () => {
     scratch = mkdtempSync(join(tmpdir(), "omb-perm-proxy-"));
@@ -77,10 +78,15 @@ describe("permission proxy", () => {
     conns = [];
     answerWith = () => null;
     const socketPath = brokerSocketPath(scratch, "test");
-    broker = createServer((conn: Socket) => {
+    listen = async () => {
+      broker = createServer(onConnection);
+      await new Promise<void>((resolve) => broker.listen(socketPath, resolve));
+    };
+    const onConnection = (conn: Socket) => {
       conns.push(conn);
       let buf = "";
       conn.on("error", () => {});
+      conn.setEncoding("utf8");
       conn.on("data", (chunk) => {
         buf += chunk;
         let nl;
@@ -95,28 +101,10 @@ describe("permission proxy", () => {
           if (answer) conn.write(JSON.stringify({ t: "answer", id: ask.id, ...answer }) + "\n");
         }
       });
-    });
-    await new Promise<void>((resolve) => broker.listen(socketPath, resolve));
+    };
+    await listen();
 
-    proxy = spawn(process.execPath, ["--experimental-strip-types", PROXY, socketPath], {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let out = "";
-    proxy.stdout!.on("data", (chunk) => {
-      out += chunk;
-      let nl;
-      while ((nl = out.indexOf("\n")) !== -1) {
-        const line = out.slice(0, nl);
-        out = out.slice(nl + 1);
-        if (!line.trim()) continue;
-        try {
-          const msg = JSON.parse(line);
-          if (msg.id != null) results.set(msg.id, msg);
-        } catch {
-          /* not our frame */
-        }
-      }
-    });
+    startProxy(socketPath);
     rpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     await waitFor(1);
   }, 20_000);
@@ -124,8 +112,26 @@ describe("permission proxy", () => {
   afterEach(async () => {
     results.clear();
     proxy?.kill();
-    await new Promise<void>((resolve) => broker.close(() => resolve()));
+    if (broker.listening) await new Promise<void>((resolve) => broker.close(() => resolve()));
     removeTempDir(scratch);
+  });
+
+  /** The broker stops listening and drops every connection, as when the socket is gone or unreachable. */
+  const brokerGone = async () => {
+    for (const conn of conns.splice(0)) conn.destroy();
+    await new Promise<void>((resolve) => broker.close(() => resolve()));
+  };
+
+  it("withholds an excluded question without losing the CLI permission callback", async () => {
+    const exited = once(proxy, "exit"); proxy.kill(); await exited; results.clear();
+    startProxy(brokerSocketPath(scratch, "test"), { ...process.env, OMB_PERMISSION_TOOL_SCOPE: JSON.stringify({ allow: ["native:*"] }) });
+    rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    expect((await waitFor(2)).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["approve"]);
+    rpc({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "ask_user", arguments: { question: "Must not ask" } } });
+    expect((await waitFor(3)).result.content[0].text).toContain("excluded"); expect(asks).toEqual([]);
+    answerWith = () => ({ behavior: "allow" });
+    rpc({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "approve", arguments: { tool_name: "Read", input: {} } } });
+    expect(resultJson(await waitFor(4)).behavior).toBe("allow"); expect(asks).toHaveLength(1);
   });
 
   it("exposes approve and ask_user", async () => {
@@ -148,8 +154,6 @@ describe("permission proxy", () => {
     });
     const res = await waitFor(2);
 
-    // it left as a question — not a permission, so no card can ever offer
-    // an Allow the broker would refuse, and auto mode can never answer it
     expect(asks).toHaveLength(1);
     expect(asks[0]).toMatchObject({
       kind: "question",
@@ -167,8 +171,6 @@ describe("permission proxy", () => {
       },
     });
 
-    // and it comes back as the tool's own contract: the original questions,
-    // plus an answers object keyed by the question's text
     expect(resultJson(res)).toEqual({
       behavior: "allow",
       updatedInput: { ...QUESTION, answers: { "Which framework should we use?": "React" } },
@@ -196,8 +198,6 @@ describe("permission proxy", () => {
     });
     const res = await waitFor(2);
 
-    // one card for the set — a person sees what they are committing to before
-    // answering any of it — and never one answer copied over both questions
     expect(asks).toHaveLength(1);
     expect(asks[0].input.questions.map((q: { question: string }) => q.question))
       .toEqual(["Which framework?", "Which features?"]);
@@ -208,10 +208,21 @@ describe("permission proxy", () => {
     });
   });
 
+  it("delivers pasted Q/A text to Claude as one answer without overwriting another", async () => {
+    const input = { questions: [
+      { question: "Which framework?", options: [] },
+      { question: "Which features?", options: [] },
+    ] };
+    const pasted = "Notes\n\nQ: Which framework?\nA: Vue";
+    answerWith = () => ({ behavior: "answer", source: "user", message: formatQuestionAnswers(input.questions, [["React"], [pasted]]) });
+    rpc({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "approve", arguments: { tool_name: "AskUserQuestion", input } } });
+    expect(resultJson(await waitFor(2))).toEqual({
+      behavior: "allow", updatedInput: { ...input, answers: { "Which framework?": "React", "Which features?": pasted } },
+    });
+  });
+
   it("files a timeout's own note as unanswered, not as the user's choice", async () => {
-    // what the broker actually sends on a timeout: `answer`, source "timeout",
-    // and a full sentence. A blank-message stand-in never exercised this, which
-    // is how the note ended up recorded as the person's chosen option.
+    // What the broker actually sends on a timeout: `answer`, source "timeout", and a full sentence.
     answerWith = () => ({
       behavior: "answer",
       message: "OpenMausBot: nobody answered in time. Use your best judgment and continue.",
@@ -223,7 +234,6 @@ describe("permission proxy", () => {
       method: "tools/call",
       params: { name: "approve", arguments: { tool_name: "AskUserQuestion", input: QUESTION } },
     });
-    // Left out, the CLI reports the question as unanswered — which is true.
     expect(resultJson(await waitFor(2)).updatedInput.answers).toEqual({});
   });
 
@@ -243,9 +253,6 @@ describe("permission proxy", () => {
   });
 
   it("denies when the broker is gone, rather than reporting an empty answer", async () => {
-    // A question is only ever denied when nobody is there to be asked. Saying
-    // "allow, nothing answered" there would tell the model a person declined
-    // to choose, which is not what happened.
     answerWith = () => ({ behavior: "deny", message: "OpenMausBot: permission broker unavailable" });
     rpc({
       jsonrpc: "2.0",
@@ -257,12 +264,6 @@ describe("permission proxy", () => {
   });
 
   it("denies an unanswerable AskUserQuestion instead of carding it as a permission", async () => {
-    // No question text at all, so there is nothing to show. It must NOT become
-    // an Allow/Deny card over raw JSON: allowing that makes the CLI run the
-    // tool headless, where it collects nothing and reports "The user did not
-    // answer the questions." — the click thrown away, the original bug.
-    // (A question with no OPTIONS is a different case and is kept: the card
-    // always offers free text, so a person can still answer it.)
     answerWith = () => ({ behavior: "allow" });
     rpc({
       jsonrpc: "2.0",
@@ -274,7 +275,7 @@ describe("permission proxy", () => {
       },
     });
     const res = await waitFor(2);
-    expect(asks).toHaveLength(0); // nobody was interrupted for it
+    expect(asks).toHaveLength(0);
     expect(resultJson(res)).toMatchObject({ behavior: "deny" });
     expect(resultJson(res).message).toContain("no answerable question");
   });
@@ -298,7 +299,6 @@ describe("permission proxy", () => {
       params: { name: "approve", arguments: { tool_name: "AskUserQuestion", input } },
     });
     const res = await waitFor(2);
-    // the answerable one is still asked, and the bad entry costs it nothing
     expect(asks[0].input.questions.map((q: { question: string }) => q.question)).toEqual(["Which framework?"]);
     expect(resultJson(res).updatedInput.answers).toEqual({ "Which framework?": "React" });
   });
@@ -328,6 +328,23 @@ describe("permission proxy", () => {
     });
   });
 
+  it("hands a large non-ASCII tool input back to the CLI byte for byte", async () => {
+    // About 1.5 MB of three-byte characters: the line spans many pipe reads, most boundaries inside a character.
+    const content = "中文ok€".repeat(150_000);
+    answerWith = () => ({ behavior: "allow" });
+    rpc({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "approve", arguments: { tool_name: "Write", input: { file_path: "notes.md", content } } },
+    });
+    const res = await waitFor(2, 20_000);
+    expect(asks[0].input.content === content).toBe(true);
+    const updated = resultJson(res).updatedInput.content as string;
+    expect(updated.includes("\uFFFD")).toBe(false);
+    expect(updated === content).toBe(true);
+  }, 30_000);
+
   it("still asks ask_user as a question and returns the words verbatim", async () => {
     answerWith = () => ({ behavior: "answer", message: "ship it", source: "user" });
     rpc({
@@ -338,12 +355,43 @@ describe("permission proxy", () => {
     });
     const res = await waitFor(2);
     expect(asks[0]).toMatchObject({ kind: "question", tool: "ask_user", input: { question: "Ready?" } });
-    // a question's answer is text, never a permission envelope
     expect(res.result.content[0].text).toBe("ship it");
   });
 
+  it("asks a multiSelect ask_user as a checkbox question and returns the picks", async () => {
+    const card = [{ question: "Which fruits?", multiSelect: true, options: [{ label: "Apple" }, { label: "Banana" }, { label: "Cherry" }] }];
+    answerWith = () => ({ behavior: "answer", source: "user", message: formatQuestionAnswers(card, [["Apple", "Cherry"]]) });
+    rpc({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "ask_user", arguments: { question: "Which fruits?", choices: ["Apple", "Banana", "Cherry"], multiSelect: true } },
+    });
+    const res = await waitFor(2);
+    expect(asks[0]).toMatchObject({ kind: "question", tool: "ask_user", input: { question: "Which fruits?", questions: card } });
+    expect(res.result.content[0].text).toBe("Apple, Cherry");
+  });
+
+  it("keeps a multiSelect ask_user's system note as the note, not as picks", async () => {
+    answerWith = () => ({ behavior: "answer", source: "timeout", message: "Nobody answered in time." });
+    rpc({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "ask_user", arguments: { question: "Which fruits?", choices: ["Apple", "Banana"], multiSelect: true } },
+    });
+    expect((await waitFor(2)).result.content[0].text).toBe("Nobody answered in time.");
+  });
+
+  it("leaves a single-pick ask_user without a question card", async () => {
+    answerWith = () => ({ behavior: "answer", message: "wait", source: "user" });
+    rpc({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "ask_user", arguments: { question: "Ready?", choices: ["ship it", "wait"], multiSelect: false } } });
+    await waitFor(2);
+    expect(asks[0].input.questions).toBeUndefined();
+  });
+
   it("denies every waiting ask when the broker dies", async () => {
-    answerWith = () => null; // never answers
+    answerWith = () => null;
     rpc({
       jsonrpc: "2.0",
       id: 2,
@@ -355,4 +403,43 @@ describe("permission proxy", () => {
     const res = await waitFor(2);
     expect(resultJson(res)).toMatchObject({ behavior: "deny" });
   });
+
+  it("tells a waiting question what to do when its connection drops, and asks the next one on a new connection", async () => {
+    answerWith = () => null;
+    rpc({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "ask_user", arguments: { question: "One?" } } });
+    await waitForAsks(1);
+    for (const conn of conns.splice(0)) conn.destroy();
+    const dropped = await waitFor(2);
+    expect(dropped.result.isError).toBe(true);
+    expect(dropped.result.content[0].text).toContain("Ask in your reply instead");
+    answerWith = () => ({ behavior: "answer", message: "second", source: "user" });
+    rpc({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "ask_user", arguments: { question: "Two?" } } });
+    expect((await waitFor(3)).result.content[0].text).toBe("second");
+    expect(asks.map((ask) => ask.input.question)).toEqual(["One?", "Two?"]);
+    expect(conns).toHaveLength(1);
+  });
+
+  it("tells the bot what to do instead while nobody can be asked, and asks once the broker is back", async () => {
+    await brokerGone();
+    rpc({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "ask_user", arguments: { question: "Which account?" } } });
+    const question = await waitFor(2);
+    expect(question.result.isError).toBe(true);
+    expect(question.result.content[0].text).toMatch(/could not show this question to the person.*Ask in your reply instead: end it with the exact question/);
+    rpc({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "approve", arguments: { tool_name: "Bash", input: { command: "git push" } } } });
+    expect(resultJson(await waitFor(3))).toEqual({
+      behavior: "deny",
+      message: expect.stringMatching(/could not ask the person to approve this step.*Skip this step, and say in your reply what you wanted to do and why/),
+    });
+    rpc({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "approve", arguments: { tool_name: "AskUserQuestion", input: QUESTION } } });
+    expect(resultJson(await waitFor(4))).toMatchObject({ behavior: "deny", message: expect.stringContaining("Ask in your reply instead") });
+    expect(asks).toEqual([]);
+
+    await listen();
+    answerWith = () => ({ behavior: "answer", message: "Work", source: "user" });
+    rpc({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "ask_user", arguments: { question: "Which account?" } } });
+    const answered = await waitFor(5);
+    expect(answered.result.content[0].text).toBe("Work");
+    expect(answered.result.isError).toBeUndefined();
+    expect(asks).toHaveLength(1);
+  }, 20_000);
 });

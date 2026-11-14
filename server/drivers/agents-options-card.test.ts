@@ -2,16 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import { WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { callTool, type ToolCallContext } from "./agents-call.ts";
-import { availableTools, type CatalogProfile } from "./agents-catalog.ts";
+import { availableTools, fullInputSchema, type CatalogProfile } from "./agents-catalog.ts";
 
 function profile(overrides: Partial<CatalogProfile> = {}): CatalogProfile {
   return {
-    externalRuntime: false,
-    coordinating: false,
-    ownThreadCreation: false,
     skillAuthoring: false,
     sharedComputers: false,
     voiceNotes: false,
+    cloudHome: false,
+    chief: false,
     botId: WATCHER_OPTIONS_CARD_BOT_ID,
     ...overrides,
   };
@@ -23,35 +22,34 @@ function context(overrides: Partial<ToolCallContext> = {}): ToolCallContext {
     threadId: "thread-watcher",
     depth: 0,
     externalRuntime: false,
-    coordinating: false,
     sharedComputers: false,
     client: {
       api: async () => ({}),
       apiResponse: async () => ({ ok: true, status: 200, body: {} }),
-    },
-    turn: {
-      createdThisTurn: 0,
-      roomPostsThisTurn: 0,
-      threadsOpenedThisTurn: 0,
-      memoryRefusalsThisTurn: 0,
-      delegationTaskIdsThisTurn: new Set(),
     },
     ...overrides,
   };
 }
 
 describe("Watcher options-card tool", () => {
+  it("hides memory tools when native memory is off", () => {
+    const names = availableTools(profile({ memoryEnabled: false })).map((tool) => tool.name);
+    expect(names).not.toContain("memory_update");
+    expect(names).not.toContain("memory_log");
+    expect(names).toContain("session_search");
+  });
   it("is advertised only to Watcher interactive turns", () => {
     expect(availableTools(profile()).map((tool) => tool.name)).toContain("create_options_card");
     expect(availableTools(profile({ botId: "another-bot" })).map((tool) => tool.name)).not.toContain("create_options_card");
-    expect(availableTools(profile({ externalRuntime: true })).map((tool) => tool.name)).not.toContain("create_options_card");
   });
 
-  it("advertises the bounded two-through-six choice schema", () => {
+  it("holds calls to the bounded two-through-six choice schema it describes in words", () => {
     const tool = availableTools(profile()).find((candidate) => candidate.name === "create_options_card")!;
     const options = (tool.inputSchema.properties as any).options;
-    expect(options).toMatchObject({ type: "array", minItems: 2, maxItems: 6, uniqueItems: true });
-    expect(tool.inputSchema.required).toEqual(["title", "subtitle", "options"]);
+    expect(tool.description).toContain("2-6 choices");
+    expect(options).toMatchObject({ type: "array", items: { type: "string" } });
+    expect(fullInputSchema("create_options_card")).toMatchObject({ properties: { options: { type: "array", minItems: 2, maxItems: 6, uniqueItems: true } } });
+    expect((tool.inputSchema as { required?: string[] }).required).toEqual(["title", "subtitle", "options"]);
   });
 
   it("refuses direct calls from another bot before a server round trip", async () => {
@@ -68,7 +66,7 @@ describe("Watcher options-card tool", () => {
     const result = await callTool("create_options_card", {
       title: "Title", subtitle: "Subtitle", options: ["Only one"],
     }, context({ client: { api, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } }));
-    expect(result).toEqual({ text: "options must contain 2-6 items.", isError: true });
+    expect(result).toEqual({ text: "create_options_card was not run: options needs at least 2 items (it has 1). Fix these and call it again.", isError: true });
     expect(api).not.toHaveBeenCalled();
   });
 

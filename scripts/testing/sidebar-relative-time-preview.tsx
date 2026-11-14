@@ -1,8 +1,5 @@
-// Relative thread stamps at every label age, for before/after evidence. The
-// row is store-free, so the fixture stages six threads directly and pins one
-// clock: the same markup runs unchanged on main (absolute dates) and on this
-// branch (relative labels). Driven headlessly by a capture script through
-// mountPreview in preview-fixture.ts.
+// Relative thread stamps at every label age, for before/after evidence: six
+// staged threads and one pinned clock, driven headlessly through mountPreview.
 import { createRoot } from "react-dom/client";
 import { SidebarThreadRow } from "../../src/components/SidebarThreadRow";
 import { applySkin, readSkin } from "../../src/lib/skins";

@@ -1,12 +1,12 @@
-import { lanAddresses, tailnetName, tailscaleAddress } from "./listener.ts";
+import { tailnetName, tailscaleAddress } from "./listener.ts";
+import { directRoutes, routedAddresses } from "./direct-routes.ts";
 import { defaultHostName } from "./mdns.ts";
 
 export const COMPANION_ENDPOINT_KINDS = ["hosted", "tailnet", "lan", "bonjour"] as const;
 
 export type CompanionEndpointKind = (typeof COMPANION_ENDPOINT_KINDS)[number];
 
-/** A complete base URL the mobile app can dial, independent of the port and
- * transport assumptions made by the original `hosts` contract. */
+/** A complete base URL the mobile app can dial. */
 export interface CompanionEndpoint {
   url: string;
   kind: CompanionEndpointKind;
@@ -15,12 +15,8 @@ export interface CompanionEndpoint {
 
 export const MAX_COMPANION_ENDPOINTS = 8;
 
-/** Read the deliberately narrow hosted-route setting.
- *
- * A hosted endpoint is public internet infrastructure, so accepting a typo
- * as though it were a local route is worse than refusing to start. It must be
- * an HTTPS origin: paths, credentials, queries, and fragments have no place
- * in a base URL and make request construction ambiguous. */
+/** A hosted endpoint is public internet infrastructure, so a typo refuses to
+ * start rather than pass as a local route. It must be a bare HTTPS origin. */
 export function hostedCompanionUrl(value: string | undefined): string | null {
   const configured = value?.trim();
   if (!configured) return null;
@@ -51,19 +47,15 @@ const httpOrigin = (host: string, port: number): string => {
   return `http://${authority}:${port}`;
 };
 
-/** Every complete URL a new mobile build can dial, best first.
- *
- * The hosted HTTPS route wins when configured. Direct routes remain in the
- * same order as the legacy host list so the app can fall back without an
- * account, relay, or Tailscale dependency. The final cap bounds both QR size
- * and connection-walk latency; Bonjour is retained as the last fallback even
- * on a machine with an unusually large interface table. */
+/** Best first: the hosted HTTPS route when configured, then the direct routes
+ * in the host list's order, Bonjour last. The cap bounds QR size and the
+ * connection walk. */
 export function companionEndpointCandidates(
   port: number,
-  addresses: string[] = lanAddresses(),
+  addresses: string[] = routedAddresses(),
   magicDnsName: string | null = tailnetName(),
   hostedUrl: string | null = null,
-  bonjourHost: string = defaultHostName(),
+  bonjourHost: string | null = directRoutes().wifi ? defaultHostName() : null,
 ): CompanionEndpoint[] {
   const tailscale = tailscaleAddress(addresses);
   const candidates: CompanionEndpoint[] = [];
@@ -77,7 +69,7 @@ export function companionEndpointCandidates(
       candidates.push({ url: httpOrigin(address, port), kind: "lan", priority: 200 + index });
     }
   });
-  candidates.push({ url: httpOrigin(bonjourHost, port), kind: "bonjour", priority: 300 });
+  if (bonjourHost) candidates.push({ url: httpOrigin(bonjourHost, port), kind: "bonjour", priority: 300 });
 
   const seen = new Set<string>();
   const ordered = candidates

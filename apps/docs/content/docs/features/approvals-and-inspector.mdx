@@ -4,13 +4,21 @@ description: Stay in control when agents ask questions, request access, or perfo
 icon: ShieldCheck
 ---
 
-OpenMausBot renders structured agent events as native conversation cards. Questions, choices, permission requests, tool activity, and failures remain attached to the task that produced them.
+MausBot renders structured agent events as native conversation cards. Questions, choices, permission requests, tool activity, and failures remain attached to the task that produced them.
 
 ## Approval cards
 
-When an engine supports approvals, OpenMausBot surfaces the request instead of hiding it in terminal output. Read the requested action and scope before approving it. Denying an action sends control back to the agent so it can choose a safer path.
+When an engine supports approvals, MausBot surfaces the request instead of hiding it in terminal output. Read the requested action and scope before approving it. Denying an action sends control back to the agent so it can choose a safer path.
 
-<ProductScreenshot name="approval-card" alt="An OpenMausBot approval card shown inside a conversation" caption="Approvals stay in context with the request and the agent's explanation." />
+<ProductScreenshot name="approval-card" alt="A MausBot approval card shown inside a conversation" caption="Approvals stay in context with the request and the agent's explanation." />
+
+## Changes a bot makes
+
+MausBot adds no approvals of its own on top of the access level you chose. When a bot changes its own skills, profile, working folder, or default model, when a Chief changes a teammate's profile or model or sets up the team, or when a bot saves a fact to team memory, the change applies at once, at every approval level. Each change shows in the conversation as one plain line, for example "Clive set up the team: added @Mira", with **Details** for the full text and **Undo** to put it back. After you undo it, the line ends with "Undone". If the thing changed again since, or a bot the setup created has already been used, Undo says so and changes nothing. Deleting a bot has no Undo.
+
+The engine's own permission system (Claude's or Codex's approvals, for example) is the only thing that asks before a bot acts. One case still shows a card: on My Cloud, in a conversation a guest started or drove, or in a run of a routine that a webhook's run made, every change waits for the Cloud's owner. A webhook that runs one of your own routines is not such a case.
+
+Routines follow their own rules for now: a bot's own routines apply with Undo, and a routine for another bot asks unless the conversation has Full access.
 
 ## Inspector
 
@@ -18,4 +26,4 @@ Use **Inspector** when you need more detail than the conversation provides. It i
 
 ## When a run disconnects
 
-OpenMausBot retries transient streaming failures. If retries end in an authentication or configuration error, fix the underlying engine rather than repeatedly retrying the task. See [Agent engine troubleshooting](../providers/troubleshooting.mdx).
+MausBot retries transient streaming failures. If retries end in an authentication or configuration error, fix the underlying engine rather than repeatedly retrying the task. See [Agent engine troubleshooting](../providers/troubleshooting.mdx).

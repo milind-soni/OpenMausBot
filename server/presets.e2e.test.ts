@@ -12,10 +12,6 @@ const FIXTURES = join(import.meta.dirname, "..", "shared", "package-fixtures");
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 const skill = (name: string) => `---\nname: ${name}\ndescription: ${name} steps.\n---\n\n# ${name}\n`;
 
-// The recipe in docs/verification/presets.md: a disposable fake-engine
-// server. New bot defaults are shared as a preset file (skills and presets,
-// no team) and inside a team file, the file is imported back, and bots are
-// created from the imported preset and from an organization preset.
 it("shares New bot defaults as a preset, imports it, and creates bots from file and organization presets", async () => {
   const fixture = await launchVerificationServer();
   console.log(JSON.stringify({ fixture: fixture.info }));
@@ -33,9 +29,7 @@ it("shares New bot defaults as a preset, imports it, and creates bots from file 
   };
   const presetsFile = join(fixture.info.dataDir, "org-library", "presets.json");
   try {
-    // No presets yet: New bot offers only its built-in roles.
     expect(await ok("GET", "/api/bot-presets")).toEqual({ presets: [] });
-    // My New bot defaults, including everything a preset must never carry.
     await ok("PATCH", "/api/config", { newBotDefaults: {
       profile: { name: "Sky", title: "Support", soul: "Be kind. The portal password=Presets-Fixture-77 stays private.\n", color: "blue",
         approvalMode: "auto", composio: true, browser: true, mcpServers: [], alwaysAllow: ["Bash(*)"], parkDirectMessages: true },
@@ -44,7 +38,6 @@ it("shares New bot defaults as a preset, imports it, and creates bots from file 
       routines: [{ name: "Daily", prompt: "Check the inbox.", schedule: { type: "daily", time: "09:00", weekdays: [1] } }],
     } });
 
-    // Share as a preset file: a dry run records nothing; saving does.
     const body = { format: "package", version: 2, kind: "library", presetName: "Support agent", includeMemory: true, presetAvatar: `data:image/png;base64,${PNG}` };
     const published = join(fixture.info.dataDir, "published-library.json");
     const preview = await ok("POST", "/api/teams/export", { ...body, dryRun: true });
@@ -63,7 +56,6 @@ it("shares New bot defaults as a preset, imports it, and creates bots from file 
     expect(() => parsePackageDocument(saved.document)).not.toThrow();
     expect((await ok("POST", "/api/teams/export", body)).document.package.release).toBe("1.0.1");
 
-    // Inside a team file, only when asked.
     const lead = (await ok("POST", "/api/bots", { name: "Morgan", section: "Sales desk", useDefaults: false })).bot;
     const plain = await ok("POST", "/api/teams/export", { format: "package", version: 2, team: "Sales desk", dryRun: true });
     expect(plain.document.package).not.toHaveProperty("presets");
@@ -72,7 +64,6 @@ it("shares New bot defaults as a preset, imports it, and creates bots from file 
     expect(withPreset.document.package.presets[0]).not.toHaveProperty("seed");
     expect(lead.name).toBe("Morgan");
 
-    // Import the preset file. The body claims organization trust; it is a file.
     const imported = await call("POST", "/api/teams/import", { ...saved.document, trust: "org", org: { installId: "x" } });
     expect(imported.status).toBe(201);
     expect(imported.body).toMatchObject({ name: "Support agent", section: "", bots: [], groups: [], routines: [], offeredSkills: ["follow-up"],
@@ -83,7 +74,6 @@ it("shares New bot defaults as a preset, imports it, and creates bots from file 
       skillsEnabled: false, skills: [{ name: "follow-up", description: "follow-up steps." }], notes: ["MEMORY.md", "memory/tone.md"] })]);
     expect(listed[0]).not.toHaveProperty("publisherName");
 
-    // New bot from the file preset: its skill switched off, its notes, the stamp.
     const fromFile = await ok("POST", "/api/bots", { name: "Sky", title: "Support", useDefaults: false, preset: fileId });
     const fromFileSkills = (await ok("GET", `/api/bots/${fromFile.bot.id}/skills`)).skills;
     expect(fromFileSkills).toEqual([expect.objectContaining({ name: "follow-up", enabled: false })]);
@@ -91,12 +81,10 @@ it("shares New bot defaults as a preset, imports it, and creates bots from file 
     const bots = (await ok("GET", "/api/bots")).bots as Array<{ id: string; installedPackage?: Record<string, unknown>; approvalMode?: string }>;
     const created = bots.find((bot) => bot.id === fromFile.bot.id)!;
     expect(created.installedPackage).toMatchObject({ id: "support-agent", source: "file", presetKey: "new-bot-defaults" });
-    expect(created.approvalMode ?? "ask").toBe("ask");
-    // With the saved defaults on, the preset's skill and notes win over the defaults' own.
+    expect(created.approvalMode).toBe("full");
     const withDefaults = await ok("POST", "/api/bots", { name: "Sky 3", preset: fileId });
     expect((await ok("GET", `/api/bots/${withDefaults.bot.id}/skills`)).skills).toEqual([expect.objectContaining({ name: "follow-up", enabled: false })]);
 
-    // An organization preset (as the organization library stores one).
     const stored = JSON.parse(readFileSync(presetsFile, "utf8"));
     const orgRow = { ...stored.presets[0], id: "org-preset-1", source: "org", installId: "0123456789abcdef0123456789abcdef", publisherName: "Acme Partners",
       publisher: { organizationId: "org-acme", slug: "acme", name: "Acme Partners" }, ref: "acme/support-agent", sha256: "a".repeat(64) };
@@ -107,13 +95,9 @@ it("shares New bot defaults as a preset, imports it, and creates bots from file 
       .toEqual([["org", "Acme Partners"], ["file", undefined]]);
     const fromOrg = await ok("POST", "/api/bots", { name: "Sky 2", useDefaults: false, preset: "org-preset-1" });
     expect((await ok("GET", `/api/bots/${fromOrg.bot.id}/skills`)).skills).toEqual([expect.objectContaining({ name: "follow-up", enabled: true, source: "org:acme/support-agent@1.0.0" })]);
-    // Whether New bot still offers it is the organization library's state,
-    // not its file: writing state.json under a running app changes nothing.
-    // (A withdrawal through the library is the next test.)
     writeFileSync(join(fixture.info.dataDir, "org-library", "state.json"), JSON.stringify({ version: 1, installs: { [orgRow.installId]: { status: "withdrawn" } } }));
     expect((await ok("GET", "/api/bot-presets")).presets.map((entry: { source: string }) => entry.source)).toEqual(["org", "file"]);
 
-    // Refusals create nothing.
     const before = (await ok("GET", "/api/bots")).bots.length;
     expect(await call("POST", "/api/bots", { name: "Nobody", preset: "missing" })).toEqual({ status: 404, body: { error: PRESET_UNAVAILABLE_MESSAGE } });
     expect((await call("POST", "/api/bots", { name: "Nobody", preset: 5 })).status).toBe(400);
@@ -122,7 +106,6 @@ it("shares New bot defaults as a preset, imports it, and creates bots from file 
     expect(await call("POST", "/api/teams/import", skillsOnly)).toEqual({ status: 400, body: { error: NO_PRESETS_MESSAGE, code: "no_bots" } });
     expect((await ok("GET", "/api/bots")).bots.length).toBe(before);
 
-    // Removing: a file preset is the person's; an organization's is Admin's.
     expect(await call("DELETE", "/api/bot-presets/org-preset-1")).toEqual({ status: 409, body: { error: ORG_PRESET_REMOVE_MESSAGE } });
     expect(await ok("DELETE", `/api/bot-presets/${fileId}`)).toEqual({ ok: true });
     expect((await call("DELETE", `/api/bot-presets/${fileId}`)).status).toBe(404);
@@ -132,9 +115,6 @@ it("shares New bot defaults as a preset, imports it, and creates bots from file 
   }
 }, 120_000);
 
-// The same through the organization library (server/org-library.ts): a
-// catalog relayed the way Electron relays it, the library package added from
-// the shelf, its preset in New bot with skills on, then withdrawn.
 it("offers an organization library's presets in New bot until the publisher withdraws the release", async () => {
   const sha = (value: string) => createHash("sha256").update(value).digest("hex");
   const key = randomBytes(32).toString("hex");
@@ -183,11 +163,8 @@ it("offers an organization library's presets in New bot until the publisher with
     expect(created.status).toBe(201);
     expect((await call("GET", `/api/bots/${created.body.bot.id}/skills`)).body.skills)
       .toEqual([expect.objectContaining({ name: "objection-handling", enabled: true, source: "org:acme/sales-skills@2.0.1" })]);
-    // Adding it again is a no-op: the library's index already has it.
     expect((await call("POST", "/api/org-library/add", { packageId })).body).toEqual({ alreadyAdded: true, installId: added.body.installId });
 
-    // Withdrawn by the publisher: gone from New bot, and the bot made from it
-    // stays with the release's skills switched off (contract §5.7).
     expect((await relay(catalog(true))).status).toBe(200);
     await expect.poll(async () => (await call("GET", "/api/bot-presets")).body.presets, { timeout: 10_000 }).toEqual([]);
     expect((await call("POST", "/api/bots", { name: "Sky 2", useDefaults: false, preset: presetId })).status).toBe(404);

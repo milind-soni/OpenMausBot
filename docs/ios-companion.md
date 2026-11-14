@@ -3,14 +3,33 @@
 The iOS app is a thin, native client for the OpenMausBot instance running on
 your Mac. The Mac remains the only machine that persists agent processes,
 credentials, SQLite data, transcripts, and computers. The iPhone trusts a Mac
-by scanning the QR code shown in desktop **Settings → Remote access**; it does not need
+by scanning the QR code shown in desktop **Settings → Phone & devices**; it does not need
 an OpenMausBot account of its own.
+
+## Use My Cloud on your phone
+
+With MausBot Cloud, pair the phone with your Cloud instead of your computer, and
+it keeps working while the computer is off.
+
+1. Install MausBot on your phone from the App Store or Google Play.
+2. In the desktop app, open the menu under your name and choose **Connect
+   your phone · to your Cloud (always on)**. (**Settings → MausBot Cloud → Use
+   My Cloud on your phone** does the same.) The app opens your Cloud in its
+   window, at the Cloud's phone pairing.
+3. Choose **Create pairing code** and scan the QR code with the phone app.
+
+On your computer, **Connect your phone** offers your Cloud first and this
+computer second, once your plan is paid and your Cloud is Ready. Until the Cloud
+is Ready it offers only *to this computer*, with a note that the Cloud will show
+there. With the Cloud open in the app window, the entry reads *to your Cloud*
+and pairs with it directly. On another server it pairs with that server, and it
+is shown only to a session allowed to make pairing codes there.
 
 ## Current status
 
 The first version includes:
 
-- QR-first pairing from desktop **Settings → Remote access**, with the computer name
+- QR-first pairing from desktop **Settings → Phone & devices**, with the computer name
   confirmed on the iPhone before it connects.
 - Hosted HTTPS for the default QR after the desktop owner enables it, with
   dedicated Tailscale and trusted-local QR routes only after an explicit
@@ -25,6 +44,8 @@ The first version includes:
 - Approvals and questions, including narrow “always allow” grants.
 - Resumable SSE, streamed reply text, reconnect hydration, and an opt-in live
   Boat computer view. The loopback-only VPS SSH viewer remains desktop-only.
+- On-demand stills of a bot's Local VM, idle or working, for a phone the
+  computer owner has allowed computer access.
 - Markdown rendering and Keychain storage for the phone's pairing trust.
 - Secure completion of supported credential-request cards using iOS Password
   AutoFill and QR-pinned HPKE encryption. Apple Passwords/iCloud Keychain is
@@ -38,7 +59,7 @@ to the user's own computer; it is not a cloud transcript store and cannot wake
 a terminated iOS app.
 
 The Mac must be running OpenMausBot and must not be asleep. Desktop
-**Settings → Remote access** offers an off-by-default **Keep this computer awake**
+**Settings → Phone & devices** offers an off-by-default **Keep this computer awake**
 switch that prevents system sleep while device access is on; the display may
 still turn off. A sleeping or powered-off computer cannot receive phone
 requests or run its local routines, including through the optional hosted
@@ -101,7 +122,11 @@ There are three deliberately separate trust surfaces:
 
 The desktop app owns the sidecar lifecycle through
 `electron/companion.mjs`. The renderer only receives narrow IPC operations; it
-does not fetch the control port directly.
+does not fetch the control port directly. Every control route needs a token
+the app makes for each sidecar launch and hands over Electron's private port,
+so a page served from `127.0.0.1:8811` itself, as a bot's browser could open
+it, cannot start pairing or change a device's access. A standalone sidecar
+prints its pairing page link with that token.
 
 ## SQLite compatibility
 
@@ -128,7 +153,7 @@ not belong in the message database.
 
 The QR code is still the primary path on the same Wi-Fi. If it is unavailable,
 the user can open **Other ways to connect** and choose a nearby computer or
-enter the address shown in desktop Settings → Remote access. Nearby discovery does not
+enter the address shown in desktop Settings → Phone & devices. Nearby discovery does not
 run until the user opens that fallback.
 
 Nearby discovery uses Bonjour and direct LAN traffic. Use it only on a network
@@ -142,27 +167,39 @@ direct LAN requires choosing that computer or address again.
 ### Tailscale
 
 Tailscale is an optional route away from home and on Wi-Fi networks that
-isolate clients. In desktop **Settings → Remote access**, the primary card remains
-**Secure HTTPS pairing — Recommended**. The separate **Tailscale pairing**
-card is only for people who already use Tailscale. Install or open Tailscale
-on both devices, sign in to the same tailnet, leave MagicDNS enabled, and
-choose **Turn on device access & check** followed by **Pair over Tailscale**.
-That first action explicitly starts Remote access so the phone has a listener
-to reach. OpenMausBot then places the computer's MagicDNS name in that
-dedicated QR; it never silently replaces the default hosted HTTPS route.
-Manual entry remains available as a fallback.
+isolate clients. In desktop **Settings → Phone & devices**, open **More ways
+in** and turn **Tailscale** on: until you do, the app never runs Tailscale.
+Install or open Tailscale on both devices, sign in to the same tailnet and
+leave MagicDNS enabled, then choose **Pair a device**. OpenMausBot places the
+computer's tailnet name in the QR beside its other ways in; it never silently
+replaces the default route. Manual entry remains available as a fallback.
 
-The URL is still `http`, but the path is encrypted and authenticated by
-WireGuard inside the tailnet. Use the MagicDNS name rather than the
+With the switch on, the link also answers on this computer's tailnet address
+(found by Tailscale's own interface, never by a 100.64/10 address alone),
+and the app asks Tailscale for the computer's MagicDNS name once: when you turn
+the switch on, and again only when you choose **Check again**. It runs only
+Tailscale's command-line tool (`tailscale status --json`), never the macOS app's
+executable: with only the app installed it asks you to choose **Install CLI** in
+the Tailscale app's settings. It never opens the Tailscale app or signs it in. The
+URL is `http://<computer>.<tailnet>.ts.net:8810`, encrypted and authenticated
+by WireGuard inside the tailnet. Use the MagicDNS name rather than the
 `100.64.0.0/10` address: App Transport Security exceptions are domain-based,
 and `ios/project.yml` narrowly allows insecure HTTP for `ts.net` subdomains.
+Turning the switch off stops answering on the tailnet address; it never changes
+anything in your Tailscale.
+
+Each way in (Same Wi-Fi, Anywhere through MausBot, Tailscale, the HTTPS
+address) is its own switch and stays off until you turn it on. While nothing is
+paired and no code is open, the phone link sleeps: nothing listens and there is
+no relay connection. A desktop that is only a client of another computer starts
+none of it.
 
 Tailscale is optional. The direct path does not use an OpenMausBot-operated
 relay or create a cloud copy of local transcript data.
 
 ### Optional hosted HTTPS
 
-In desktop **Settings → Remote access**, **Use your phone anywhere** accepts a
+In desktop **Settings → Phone & devices**, **Use your phone anywhere** accepts a
 passwordless email code and provisions one HTTPS address for that computer.
 This desktop sign-in is only for hosted HTTPS. The iPhone never signs in; it
 trusts the computer through the same pairing QR. Nearby, manual, and Tailscale
@@ -173,6 +210,14 @@ configuration or Tailscale installation is required. The hosted address is
 included in a pairing invitation only after it is ready. The default setup
 waits for that HTTPS address instead of silently substituting Tailscale;
 Tailscale pairing remains an explicit choice in its own optional card.
+
+The address is held only while something needs it. The desktop creates it
+when you sign in, choose Retry, or start pairing (a few seconds under the
+"Creating secure remote access" spinner), keeps it while any phone or desktop
+is paired, and gives it back one to four hours after Phone & devices shows
+nothing paired and no pairing open. The next pairing gets the same address
+back. If no HTTPS address is free, the panel says when to try again, and
+Wi-Fi or Tailscale pairing still works.
 
 Cloudflare terminates and proxies the encrypted connection to the connector.
 The OpenMausBot control plane stores account and installation metadata plus
@@ -187,9 +232,14 @@ the guardian first makes forwarding unavailable, confirms the connector is
 dead, and only then releases the gateway. Another process that later binds a
 local port cannot inherit the public route.
 
+The hop from this computer to Cloudflare runs on the home upload,
+uncompressed, so the sidecar gzips JSON replies of 1 KB or more on that
+private socket when the phone accepts gzip. The event stream, file downloads
+and the LAN port are sent as they always were.
+
 ## Pairing and device security
 
-1. On the Mac, open **Settings → Remote access** and choose **Pair a phone**. The app
+1. On the Mac, open **Settings → Phone & devices** and choose **Pair a phone**. The app
    starts device access as part of setup.
 2. On the iPhone, choose **Connect my computer** and scan the QR.
 3. Confirm the computer name and the displayed transport — **HTTPS connection**,
@@ -279,6 +329,40 @@ Allowed in the first release:
 - Fetch settled screen images and opt into live screen frames.
 - Request a fresh interactive cloud-desktop viewer only when the computer
   owner has enabled that capability for this specific paired phone.
+- With the same capability, fetch a still of a bot's Local VM
+  (`POST /api/bots/:id/local-computer/screenshot`). The app always passes the
+  conversation's `threadId`, so the harness answers 409 for a conversation
+  that is not on the Local VM. This reads a picture; it cannot start, stop,
+  remove the VM. Like the desktop panel's preview, each capture
+  counts as use of the VM, so an open computer view keeps it from being
+  reclaimed as idle; leaving the view or backgrounding the app stops that.
+- With the same capability, drive the Local VM: take the bot's computer under
+  a device control lease (`POST /api/bots/:id/computer/control`), then
+  `POST /api/bots/:id/local-computer/join?controlLeaseId=…`. The harness answers
+  that only for a loopback caller, only for a conversation on the Local VM,
+  and only to the lease that holds the computer. The sidecar rewrites the
+  loopback noVNC address into its device-scoped relay path, then asks the
+  harness every few seconds, while a viewer socket is open, whether that
+  lease still holds (`action: "check"`, which also renews it) and closes the
+  relay when it does not. The
+  phone speaks RFB over the relay. Hand back closes the viewer and releases
+  the lease, and so does backgrounding the app.
+- A phone paired with the server directly (`openmausbot serve` behind
+  Tailscale Serve or a tunnel, no sidecar) drives the Local VM the same way,
+  but the join answers it with the server's own authenticated desktop proxy
+  (`/api/desktop-viewer/local/<target>/websockify`), bound to its control
+  lease, and the VNC password; never the loopback address. The proxy re-checks
+  the lease and the session every few seconds and closes the socket when
+  either lapses; hand back closes it at once. Computer access is the pairing's
+  scope: Full access (`openmausbot pair`) may, chat-only (`--client`) is
+  answered 403 and the app shows computer access as off.
+- Phone control works in shared and per-bot Local VM modes. In shared mode
+  the take holds the one shared desktop, so every bot working on it pauses
+  until the hand-back. A phone's hold on a Local VM is released 60 seconds
+  after its last sign of life: the take, the join, a `check`, or the server
+  proxy's re-check. Pool mode is refused on both connection paths, since a
+  take does not say which seat to hold. Stills remain available in every
+  mode.
 - Send messages, interrupt bots, answer approvals/questions, and mark chats
   read.
 - Create a basic bot.
@@ -328,6 +412,21 @@ cursor is committed only after a cold hydration succeeds; replayed streams
 advance it one folded frame at a time, so a disconnect during recovery cannot
 skip the remaining gap.
 
+## Phone apps as bot tools
+
+The phone registers the apps it allows with `PUT /api/phones/self`. Behind the sidecar it is identified by the companion header; on a Cloud home it uses its own session. It long-polls `GET /api/phones/self/jobs` (20 s), leases a job with `POST /api/phones/self/jobs/:id/lease`, and answers with `POST /api/phones/self/jobs/:id/result`, sending `{ ok: true, result }` or `{ ok: false, error, code }`. Results over 256 KB are refused as `too_large`. The SSE frame `{ kind: "device.job", phone, id }` tells an open app to poll now.
+
+Bots see these apps as `PHONE_*` tools through the `device` MCP kind. Reads run silently and writes show up as activity rows. A send opens a sheet on the phone and goes only when the person taps Send there; OpenMausBot adds no card of its own. A turn that came from the phone does phone things on the phone; a turn at the computer works the usual way and changes the phone only when the person names it. Only the owner's phone is reachable, so team Clouds never expose it. The contract fixture `server/testing/fixtures/phone-jobs.json` is what the phone apps copy into their own test fixtures.
+
+## A bot's MCP servers
+
+The bot panel's Apps page reads `GET /api/bots/:id/mcp-servers`. It answers `{ servers: [{ name, enabled, on, offFor? }] }`
+for every bot's servers and the bot's own, in the order MCP server settings list them. `enabled` is the switch in
+those settings. `on` is the bot's switch: the server is enabled and in the bot's `mcpServers` list (no list means
+every enabled server). `offFor: true` means the server doesn't start for this bot. A bot that doesn't exist is a 404.
+Like the bot's overview it needs the admin scope, so a Team Cloud member's session is refused whichever bot it names.
+`GET /api/mcp/servers` stays closed to phones, since it carries each server's command, arguments and address.
+
 ## Source layout
 
 ```text
@@ -338,12 +437,6 @@ companion/
   src/origin.ts       private per-launch hosted origin listener
   src/control.ts      loopback-only control plane
   src/mdns.ts         Bonjour advertisement
-
-ios/
-  Sources/CompanionCore/   models, HTTP, SSE, state fold
-  Tests/CompanionCoreTests/ captured-contract and core tests
-  App/                     SwiftUI, lifecycle, discovery, Keychain
-  project.yml              generated Xcode project specification
 ```
 
 ## Verification contract
@@ -355,15 +448,6 @@ pnpm typecheck
 pnpm test
 pnpm build:companion
 pnpm check:electron
-
-cd ios
-swift test
-xcodegen generate
-xcodebuild -project OpenMausCompanion.xcodeproj \
-  -scheme OpenMausCompanion \
-  -sdk iphonesimulator \
-  -destination 'generic/platform=iOS Simulator' \
-  CODE_SIGNING_ALLOWED=NO build
 ```
 
 The simulator validates compilation, launch, layout, manual address parsing,

@@ -16,6 +16,15 @@ export interface WorkspaceBackupSummary {
   warnings: string[];
 }
 
+/** What a restore from another kind of computer (Windows to Linux, say) could not bring: folders and files outside
+ * that computer's data folder. */
+export interface WorkspaceLeftBehind {
+  /** Bots whose working folder stayed there; they now start in their own folder. */
+  bots: number;
+  /** Up to 20 of those folders and of the files their instructions name, as written there. */
+  paths: string[];
+}
+
 export type WorkspaceBackupClientState = Record<string, string>;
 
 export interface WorkspaceBackupPrivateMetadata {

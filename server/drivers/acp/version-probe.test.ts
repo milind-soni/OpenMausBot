@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseVersionTriple, versionAtLeast, versionFromProbe } from "./core.ts";
+import { parseVersionTriple, versionAtLeast, versionFromProbe } from "./version-probe.ts";
 
 describe("versionFromProbe", () => {
   it("prefers stdout", () => {

@@ -11,9 +11,12 @@ import {
   generatePairingCredential,
   isPairingCredential,
   LOCKOUT,
+  PAIRING_LOCKOUT,
   normalizePairingCode,
   PAIRING_CODE_ALPHABET,
+  PAIRING_CODE_MAX_TTL_MS,
   PAIRING_CODE_TTL_MS,
+  pairingRequest,
   SESSION_TTL_MS,
   SessionRegistry,
   STREAM_TICKET_TTL_MS,
@@ -21,6 +24,7 @@ import {
   cookieMaxAgeSeconds,
   daysMs,
 } from "./sessions.ts";
+import { userError } from "./user-errors.ts";
 
 let dir: string;
 let clock: number;
@@ -37,33 +41,25 @@ afterEach(() => { vi.restoreAllMocks(); rmSync(dir, { recursive: true, force: tr
 describe("the native-app encoding of a pairing window", () => {
   it("redeems the same window as the typed code, and consumes it", () => {
     const { code, credential } = registry.openPairing({ label: "Pixel" });
-    // The shape the Android companion's parser demands: the 9-character
-    // prefix plus exactly 43 base64url characters (Connection.kt).
+    // The Android companion's parser demands the 9-character prefix plus exactly 43 base64url characters (Connection.kt).
     expect(credential.startsWith("omb_pair_")).toBe(true);
     expect(credential.length).toBe(52);
     expect(credential.slice("omb_pair_".length)).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
     const paired = registry.exchange({ code: credential, label: "Pixel", source: "10.0.0.9" });
     expect(paired.ok).toBe(true);
-    // One window, not two: the code cannot redeem it a second time.
     expect(registry.exchange({ code, label: "again", source: "10.0.0.9" }).ok).toBe(false);
     expect(registry.openPairings()).toEqual([]);
   });
 
   it("never normalizes a credential", () => {
-    // normalizePairingCode folds 0 to O and 1 to I and strips underscores
-    // and dashes. Running it over a base64url secret would both destroy the
-    // secret and map distinct secrets onto one digest, so a credential must
-    // be hashed exactly as presented. This is the trap the fix exists to
-    // avoid, so pin it with a credential that contains every folded symbol.
+    // A credential containing every symbol normalizePairingCode folds (0, 1, _ and -): it must be hashed exactly as presented.
     const trap = "omb_pair_0123456789-_abcdefghijklmnopqrstuvwxyzABCDE";
     expect(trap.length).toBe(52);
     expect(normalizePairingCode(trap)).not.toBe(trap);
     expect(isPairingCredential(trap)).toBe(true);
 
     const { credential } = registry.openPairing();
-    // A different credential that normalizes to the same thing must not open
-    // someone else's window.
     expect(registry.exchange({ code: trap, label: "", source: "attacker" }).ok).toBe(false);
     expect(registry.exchange({ code: credential, label: "", source: "friend" }).ok).toBe(true);
   });
@@ -74,7 +70,6 @@ describe("the native-app encoding of a pairing window", () => {
     const paired = registry.exchange({ code: second.credential, label: "", source: "10.0.0.4" });
     if (!paired.ok) throw new Error(paired.error);
     expect(paired.session.label).toBe("two");
-    // The first window is untouched and still redeemable by its own code.
     expect(registry.exchange({ code: first.code, label: "", source: "10.0.0.4" }).ok).toBe(true);
   });
 
@@ -83,7 +78,7 @@ describe("the native-app encoding of a pairing window", () => {
     clock += PAIRING_CODE_TTL_MS + 1;
     expect(registry.exchange({ code: credential, label: "", source: "b" }).ok).toBe(false);
 
-    for (let attempt = 0; attempt < LOCKOUT.failures; attempt += 1) {
+    for (let attempt = 0; attempt < PAIRING_LOCKOUT.failures; attempt += 1) {
       registry.exchange({ code: generatePairingCredential(), label: "", source: "attacker" });
     }
     const locked = registry.exchange({ code: registry.openPairing().credential, label: "", source: "attacker" });
@@ -95,6 +90,62 @@ describe("the native-app encoding of a pairing window", () => {
   it("mints a fresh credential for every window", () => {
     const seen = new Set([...Array(20)].map(() => registry.openPairing().credential));
     expect(seen.size).toBe(20);
+  });
+});
+
+describe("a browser sign-in window (an OMB Cloud page's \"Use in your browser\")", () => {
+  it("is redeemed only by a browser sign-in, only by its credential, and only once", () => {
+    const { code, credential } = registry.openPairing({ scopes: ["admin", "client"], label: "Web browser", browser: true });
+    expect(registry.exchange({ code: credential, label: "", source: "10.0.0.5" }).ok).toBe(false);
+    expect(registry.exchange({ code, label: "", source: "10.0.0.5", browser: true }).ok).toBe(false);
+    expect(registry.openPairings()).toHaveLength(1);
+    const signedIn = registry.exchange({ code: credential, label: "Safari on iPad", source: "10.0.0.5", browser: true });
+    expect(signedIn).toMatchObject({ ok: true, session: { label: "Safari on iPad", scopes: ["admin", "client"] } });
+    expect(registry.exchange({ code: credential, label: "", source: "10.0.0.6", browser: true }).ok).toBe(false);
+    expect(registry.exchange({ code: credential, label: "", source: "10.0.0.6" }).ok).toBe(false);
+  });
+
+  it("never redeems an ordinary window, and expires with its own term", () => {
+    const ordinary = registry.openPairing({ label: "Pixel" });
+    expect(registry.exchange({ code: ordinary.credential, label: "", source: "10.0.0.7", browser: true }).ok).toBe(false);
+    expect(registry.exchange({ code: ordinary.code, label: "", source: "10.0.0.7", browser: true }).ok).toBe(false);
+    expect(registry.exchange({ code: ordinary.credential, label: "", source: "10.0.0.7" }).ok).toBe(true);
+    const { credential } = registry.openPairing({ ttlMs: 120_000, browser: true });
+    clock += 120_000;
+    expect(registry.exchange({ code: credential, label: "", source: "10.0.0.7", browser: true }).ok).toBe(false);
+  });
+
+  it("answers a lost-response retry only as the same kind of sign-in", () => {
+    const { credential } = registry.openPairing({ browser: true });
+    const first = registry.exchange({ code: credential, label: "", source: "10.0.0.8", attemptId: "attempt-browser-1", browser: true });
+    expect(first.ok).toBe(true);
+    expect(registry.exchange({ code: credential, label: "", source: "10.0.0.8", attemptId: "attempt-browser-1", browser: true })).toEqual(first);
+    expect(registry.exchange({ code: credential, label: "", source: "10.0.0.8", attemptId: "attempt-browser-1" }).ok).toBe(false);
+  });
+
+  it("names its owner before anything is redeemed, and gives its session that owner and the cookie alone", () => {
+    const { credential } = registry.openPairing({ browser: true, owner: "ada@example.test", ttlMs: 120_000 });
+    expect(registry.previewBrowserSignIn(credential)).toEqual({ owner: "ada@example.test", expiresAt: clock + 120_000 });
+    expect(registry.previewBrowserSignIn(credential)).toEqual({ owner: "ada@example.test", expiresAt: clock + 120_000 });
+    const ordinary = registry.openPairing({ owner: "ignored@example.test" });
+    expect(registry.previewBrowserSignIn(ordinary.credential)).toBeNull();
+    expect(registry.previewBrowserSignIn(ordinary.code)).toBeNull();
+    const signedIn = registry.exchange({ code: credential, label: "", source: "10.0.0.9", browser: true });
+    if (!signedIn.ok) throw new Error(signedIn.error);
+    expect(signedIn.session.owner).toBe("ada@example.test");
+    expect(registry.authenticate(signedIn.token)).toMatchObject({ cookieOnly: true, owner: "ada@example.test" });
+    expect(registry.previewBrowserSignIn(credential)).toBeNull();
+    const app = registry.exchange({ code: ordinary.code, label: "", source: "10.0.0.9" });
+    if (!app.ok) throw new Error(app.error);
+    expect(registry.authenticate(app.token)).not.toHaveProperty("cookieOnly");
+    expect(app.session).not.toHaveProperty("owner");
+    const reloaded = new SessionRegistry({ file: file(), now: () => clock });
+    expect(reloaded.authenticate(signedIn.token)).toMatchObject({ cookieOnly: true, owner: "ada@example.test" });
+  });
+
+  it("is looked at without counting toward the lockout", () => {
+    for (let attempt = 0; attempt < LOCKOUT.failures * 2; attempt += 1) registry.previewBrowserSignIn(generatePairingCredential());
+    expect(registry.failureSources()).toEqual([]);
   });
 });
 
@@ -122,18 +173,37 @@ describe("pairing codes", () => {
     const first = registry.exchange({ code: formatPairingCode(code).toLowerCase(), label: "", source: "a" });
     expect(first.ok).toBe(true);
     if (first.ok) expect(first.session.label).toBe("phone");
-    // without an attempt id there is no replay: the same source asking again is refused too
     const again = registry.exchange({ code, label: "x", source: "a" });
     expect(again.ok).toBe(false);
     if (!again.ok) expect(again.error).toMatch(/wrong or has expired/);
+    expect(again).toMatchObject({ status: 401, errorKey: "serverError.pair.codeWrong" });
     const { code: stale } = registry.openPairing();
     clock += PAIRING_CODE_TTL_MS + 1;
     expect(registry.exchange({ code: stale, label: "x", source: "b" }).ok).toBe(false);
     expect(registry.openPairings()).toEqual([]);
   });
 
+  it("stay open as long as asked, up to a day, and still work once", () => {
+    const { code, expiresAt } = registry.openPairing({ label: "server", ttlMs: PAIRING_CODE_MAX_TTL_MS });
+    expect(expiresAt).toBe(clock + 24 * 3_600_000);
+    clock += 23 * 3_600_000;
+    expect(registry.exchange({ code, label: "", source: "a" }).ok).toBe(true);
+    expect(registry.exchange({ code, label: "", source: "a" }).ok).toBe(false);
+    const { code: late } = registry.openPairing({ ttlMs: PAIRING_CODE_MAX_TTL_MS });
+    clock += PAIRING_CODE_MAX_TTL_MS + 1;
+    expect(registry.exchange({ code: late, label: "", source: "b" }).ok).toBe(false);
+  });
+
+  it("takes a code's term and a token's from the request, and refuses either out of bounds", () => {
+    expect(pairingRequest({ label: "CI", scopes: ["client", "root"], ttlMs: 86_400_000 })).toEqual({ label: "CI", scopes: ["client"], ttlMs: 86_400_000 });
+    expect(pairingRequest({ tokenTtlMs: SESSION_MAX_AGE_MS })).toEqual({ tokenTtlMs: SESSION_MAX_AGE_MS });
+    expect(pairingRequest(null)).toEqual({});
+    for (const ttlMs of [86_400_001, 59_999, 1.5e6 + 0.5, "24h"]) expect(pairingRequest({ ttlMs }), String(ttlMs)).toMatchObject({ error: expect.stringContaining("24 hours") });
+    expect(pairingRequest({ tokenTtlMs: SESSION_MAX_AGE_MS + 1 })).toMatchObject({ error: expect.stringContaining("OMB_SESSION_MAX_DAYS") });
+  });
+
   it("locks a source out after repeated failures, and forgets on success", () => {
-    for (let i = 0; i < LOCKOUT.failures; i++) {
+    for (let i = 0; i < PAIRING_LOCKOUT.failures; i++) {
       expect(registry.exchange({ code: "AAAAAAAAAAAA", label: "", source: "attacker" }).ok).toBe(false);
     }
     const { code } = registry.openPairing();
@@ -141,26 +211,74 @@ describe("pairing codes", () => {
     expect(locked.ok).toBe(false);
     if (!locked.ok) {
       expect(locked.status).toBe(429);
-      expect(locked.error).toMatch(/from your address; try again in 60s/);
+      expect(locked.error).toMatch(/^Too many wrong codes\. Try again at \d{2}:\d{2} UTC\.$/);
+      expect(locked).toMatchObject({ errorKey: "serverError.pair.tooMany", errorParams: { seconds: 300, until: clock + 300_000 } });
     }
-    // a different source is unaffected, and the code is still unused
     expect(registry.exchange({ code, label: "", source: "friend" }).ok).toBe(true);
-    clock += LOCKOUT.lockMs + 1;
+    clock += PAIRING_LOCKOUT.lockMs + 1;
     const { code: fresh } = registry.openPairing();
     expect(registry.exchange({ code: fresh, label: "", source: "attacker" }).ok).toBe(true);
+  });
+
+  it("five wrong codes in five minutes lock that address for five minutes; a code lives ten minutes", () => {
+    expect(PAIRING_LOCKOUT).toEqual({ failures: 5, windowMs: 300_000, lockMs: 300_000 });
+    expect(PAIRING_CODE_TTL_MS).toBe(600_000);
+    for (let i = 0; i < 4; i++) registry.exchange({ code: "AAAAAAAAAAAA", label: "", source: "slow" });
+    clock += 299_000;
+    const fifth = registry.exchange({ code: "AAAAAAAAAAAA", label: "", source: "slow" });
+    expect(fifth.ok === false && fifth.status).toBe(401);
+    const { code } = registry.openPairing();
+    const locked = registry.exchange({ code, label: "", source: "slow" });
+    expect(locked.ok === false && locked.status).toBe(429);
+  });
+
+  it("never locks out the address a proxy that names no client gives everyone; wrong codes from it burn the open codes", () => {
+    const owners = registry.openPairing();
+    for (let i = 0; i < PAIRING_LOCKOUT.failures; i++) {
+      expect(registry.exchange({ code: "AAAAAAAAAAAA", label: "", source: "127.0.0.1" })).toMatchObject({ ok: false, status: 401 });
+    }
+    expect(registry.exchange({ code: owners.code, label: "", source: "127.0.0.1" })).toMatchObject({ ok: false, status: 401 });
+    const fresh = registry.openPairing();
+    expect(registry.exchange({ code: fresh.code, label: "", source: "127.0.0.1" }).ok).toBe(true);
+    for (const source of ["::1", "::ffff:127.0.0.1", "unknown"]) {
+      for (let i = 0; i < PAIRING_LOCKOUT.failures + 1; i++) registry.exchange({ code: "AAAAAAAAAAAA", label: "", source });
+      expect(registry.exchange({ code: registry.openPairing().code, label: "", source }).ok, source).toBe(true);
+    }
+  });
+
+  it("an email sign-in or a bad signature keeps its own, looser count", () => {
+    for (let i = 0; i < PAIRING_LOCKOUT.failures; i++) registry.noteFailure("mail");
+    expect(registry.attemptAllowed("mail")).toEqual({ ok: true });
+    for (let i = PAIRING_LOCKOUT.failures; i < LOCKOUT.failures; i++) registry.noteFailure("mail");
+    expect(registry.attemptAllowed("mail").ok).toBe(false);
+    expect(registry.exchange({ code: registry.openPairing().code, label: "", source: "mail" }).ok).toBe(true);
+  });
+
+  it("explains a code of the wrong kind and does not count it as a guess", () => {
+    for (const [input, key] of [["1234 5678", "serverError.pair.emailCode"], ["123456", "serverError.pair.oldCode"], [`omb_sess_${"a".repeat(43)}`, "serverError.pair.scriptKey"]] as const) {
+      for (let i = 0; i < PAIRING_LOCKOUT.failures + 1; i++) {
+        const refused = registry.exchange({ code: input, label: "", source: "mixed-up" });
+        expect(refused).toMatchObject({ ok: false, status: 400, errorKey: key });
+      }
+    }
+    expect(registry.failureSources()).not.toContain("mixed-up");
+  });
+
+  it("takes the code or the credential out of a pasted link", () => {
+    const a = registry.openPairing();
+    expect(registry.exchange({ code: `https://maus.example.com/pair#code=${formatPairingCode(a.code)}`, label: "", source: "s" }).ok).toBe(true);
+    const b = registry.openPairing();
+    expect(registry.exchange({ code: `openmausbot://pair?address=https%3A%2F%2Fmaus.example.com&token=${b.credential}`, label: "", source: "s" }).ok).toBe(true);
   });
 
   it("answers a lost-response retry with the same session for a minute, keyed on the client's attempt id", () => {
     const { code } = registry.openPairing();
     const first = registry.exchange({ code, label: "phone", source: "a", attemptId: "attempt-0001-abcd" });
     expect(first.ok).toBe(true);
-    // same attempt id: the same answer, even from another address (the phone changed networks)
     expect(registry.exchange({ code, label: "phone", source: "b", attemptId: "attempt-0001-abcd" })).toEqual(first);
     expect(registry.list()).toHaveLength(1);
-    // a different attempt id, or none, is a new attempt against a consumed code
     expect(registry.exchange({ code, label: "x", source: "a", attemptId: "attempt-0002-efgh" }).ok).toBe(false);
     expect(registry.exchange({ code, label: "x", source: "a" }).ok).toBe(false);
-    // malformed attempt ids never replay
     const { code: c2 } = registry.openPairing();
     expect(registry.exchange({ code: c2, label: "p", source: "a", attemptId: "no" }).ok).toBe(true);
     expect(registry.exchange({ code: c2, label: "p", source: "a", attemptId: "no" }).ok).toBe(false);
@@ -171,8 +289,8 @@ describe("pairing codes", () => {
   it("forgets a source's failures once its window and lock have passed", () => {
     registry.exchange({ code: "AAAAAAAAAAAA", label: "", source: "flaky" });
     expect(registry.failureSources()).toContain("flaky");
-    clock += LOCKOUT.windowMs + 1;
-    registry.openPairing(); // any registry activity prunes
+    clock += PAIRING_LOCKOUT.windowMs + 1;
+    registry.openPairing();
     expect(registry.failureSources()).not.toContain("flaky");
   });
 
@@ -189,6 +307,17 @@ describe("pairing codes", () => {
     const explicit = registry.exchange({ code: c.code, label: "Kitchen iPad", source: "s3", fallbackLabel: "Safari on iPad" });
     if (!explicit.ok) throw new Error(explicit.error);
     expect(explicit.session.label).toBe("Kitchen iPad");
+  });
+
+  it("drops control and bidirectional-formatting characters from a device's name", () => {
+    const { code } = registry.openPairing();
+    const named = registry.exchange({ code, label: "Safari\u202E on iPad\n\u0007\u2066", source: "s4" });
+    if (!named.ok) throw new Error(named.error);
+    expect(named.session.label).toBe("Safari on iPad");
+    const blank = registry.exchange({ code: registry.openPairing().code, label: "\u202E\u0000", source: "s5", fallbackLabel: "Chrome\u200F on Mac" });
+    if (!blank.ok) throw new Error(blank.error);
+    expect(blank.session.label).toBe("Chrome on Mac");
+    expect(registry.issue({ label: "Ada\u202Es phone\r", scopes: ["client"] }).session.label).toBe("Adas phone");
   });
 
   it("carries scopes from the code into the session, deduplicated", () => {
@@ -251,7 +380,7 @@ describe("sessions", () => {
     expect(revoked).toEqual([first.session.id, second.session.id]);
     expect(registry.authenticate(paired.token)?.scopes).toEqual(["admin", "client"]);
     expect(registry.authenticate(member.token)?.scopes).toEqual(["client"]);
-    scopes = ["admin", "client"]; // promotion never widens or revives a token
+    scopes = ["admin", "client"];
     expect(registry.authenticate(member.token)?.scopes).toEqual(["client"]);
     expect(registry.authenticate(first.token)).toBeNull();
     scopes = null;
@@ -276,6 +405,32 @@ describe("sessions", () => {
     const { ticket } = registry.issueStreamTicket(email.session.id);
     allowed = false;
     expect(registry.redeemStreamTicket(ticket)).toBeNull();
+    expect(registry.isLive(email.session.id)).toBe(false);
+  });
+
+  it("with recheckMs, reads membership at most that often, at once after membershipChanged(): a removal still ends access promptly", () => {
+    let allowed = true;
+    const resolve = vi.fn((_email: string) => allowed ? ["client" as const] : null);
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: resolve, recheckMs: 2_000 });
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    resolve.mockClear();
+    for (let i = 0; i < 1_000; i++) expect(registry.isLive(email.session.id)).toBe(true);
+    expect(resolve.mock.calls.length).toBeLessThanOrEqual(1);
+    allowed = false;
+    registry.membershipChanged();
+    expect(registry.isLive(email.session.id)).toBe(false);
+    expect(registry.authenticate(email.token)).toBeNull();
+  });
+
+  it("with recheckMs, a sign-in list edited outside the app ends access within that time", () => {
+    let allowed = true;
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => allowed ? ["client"] : null, recheckMs: 2_000 });
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    registry.recheckMembership();
+    allowed = false;
+    clock += 1_999;
+    expect(registry.isLive(email.session.id)).toBe(true);
+    clock += 1;
     expect(registry.isLive(email.session.id)).toBe(false);
   });
 
@@ -351,8 +506,7 @@ describe("sessions", () => {
     const { ticket } = registry.issueStreamTicket(email.session.id);
     const saved = readFileSync(file(), "utf8");
     const logger = vi.spyOn(console, "error").mockImplementation(() => {});
-    // The real pre-failure session file and boot marker remain on disk. Every
-    // attempted atomic write now fails, including any attempted clean close.
+    // The real session file and boot marker stay on disk; every atomic write, including a clean close, now fails.
     const writes = vi.spyOn(atomic, "writeFileAtomic").mockImplementation(() => { throw new Error("EIO: private-path-and-token"); });
     allowed = false;
     registry.revalidateEmailSessions();
@@ -395,6 +549,17 @@ describe("sessions", () => {
     expect(readFileSync(blocked, "utf8")).toContain(paired.session.id);
   });
 
+  it("still reduces the in-memory set when persisting a prune fails", () => {
+    pair();
+    clock += SESSION_TTL_MS + 1;
+    const logger = vi.spyOn(console, "error").mockImplementation(() => {});
+    const writes = vi.spyOn(atomic, "writeFileAtomic").mockImplementation(() => { throw new Error("EIO: the session file is unwritable"); });
+    expect(() => registry.list(), "the heartbeat prunes through isLive(), where a throw would exit the process").not.toThrow();
+    expect(registry.list()).toEqual([]);
+    expect(logger.mock.calls.flat().join(" ")).toContain("Could not persist session pruning.");
+    writes.mockRestore();
+  });
+
   it("stores only a hash, owner-only, and reloads from disk", () => {
     const { token, session } = pair();
     const onDisk = readFileSync(file(), "utf8");
@@ -431,20 +596,43 @@ describe("sessions", () => {
     expect(statSync(file()).mtimeMs).toBeGreaterThanOrEqual(before);
   });
 
+  it("opens an access token that lasts exactly its term, never renews, and stays one after a restart", () => {
+    const term = 90 * 24 * 3_600_000;
+    const { code } = registry.openPairing({ label: "Nightly CI", scopes: ["client"], tokenTtlMs: term });
+    const paired = registry.exchange({ code, label: "", source: "ci" });
+    if (!paired.ok) throw new Error(paired.error);
+    expect(paired.session).toMatchObject({ label: "Nightly CI", scopes: ["client"], token: true, expiresAt: clock + term });
+    clock += term - 60_000;
+    expect(registry.authenticate(paired.token)?.id).toBe(paired.session.id);
+    expect(registry.renew(paired.session.id)).toBe(false);
+    expect(new SessionRegistry({ file: file(), now: () => clock }).list()).toMatchObject([{ id: paired.session.id, token: true, expiresAt: paired.session.expiresAt }]);
+    clock += 60_001;
+    expect(registry.authenticate(paired.token)).toBeNull();
+  });
+
+  it("never makes a token of a browser sign-in, and caps a token at the longest session", () => {
+    const browser = registry.openPairing({ browser: true, tokenTtlMs: 3_600_000 });
+    const signedIn = registry.exchange({ code: browser.credential, label: "", source: "b", browser: true });
+    expect(signedIn.ok && signedIn.session.token).toBeFalsy();
+    const { code } = registry.openPairing({ tokenTtlMs: SESSION_MAX_AGE_MS * 2 });
+    const long = registry.exchange({ code, label: "", source: "c" });
+    expect(long.ok && long.session.expiresAt).toBe(clock + SESSION_MAX_AGE_MS);
+  });
+
   it("renews a session with half its term or less left, and never revives an expired one", () => {
     const { token, session } = pair();
     clock += SESSION_TTL_MS / 2 - 60_000;
-    expect(registry.renew(session.id)).toBe(false); // more than half left: untouched
+    expect(registry.renew(session.id)).toBe(false);
     expect(registry.list()[0]?.expiresAt).toBe(session.expiresAt);
     clock += 120_000;
     expect(registry.renew(session.id)).toBe(true);
     expect(registry.list()[0]?.expiresAt).toBe(clock + SESSION_TTL_MS);
-    expect(registry.renew(session.id)).toBe(false); // just renewed: nothing to do
+    expect(registry.renew(session.id)).toBe(false);
     clock += SESSION_TTL_MS - 1;
-    expect(registry.authenticate(token)?.id).toBe(session.id); // alive well past the original term
+    expect(registry.authenticate(token)?.id).toBe(session.id);
     expect(registry.renew(session.id)).toBe(true);
     const reloaded = new SessionRegistry({ file: file(), now: () => clock });
-    expect(reloaded.list()[0]?.expiresAt).toBe(clock + SESSION_TTL_MS); // the renewal reached disk
+    expect(reloaded.list()[0]?.expiresAt).toBe(clock + SESSION_TTL_MS);
     const quiet = pair("iPad");
     clock += SESSION_TTL_MS + 1;
     expect(registry.renew(quiet.session.id)).toBe(false);
@@ -456,7 +644,7 @@ describe("sessions", () => {
     const cap = session.createdAt + SESSION_MAX_AGE_MS;
     let last = session.expiresAt;
     for (let i = 0; i < 20; i += 1) {
-      clock = last - SESSION_TTL_MS / 2; // exactly at the halfway mark, each time
+      clock = last - SESSION_TTL_MS / 2;
       registry.renew(session.id);
       const now = registry.list()[0]?.expiresAt ?? 0;
       expect(now).toBeLessThanOrEqual(cap);
@@ -466,7 +654,7 @@ describe("sessions", () => {
     expect(last).toBe(cap);
     clock = cap - 1;
     expect(registry.authenticate(token)?.id).toBe(session.id);
-    expect(registry.renew(session.id)).toBe(false); // at the cap: no further extension
+    expect(registry.renew(session.id)).toBe(false);
     clock = cap + 1;
     expect(registry.authenticate(token)).toBeNull();
   });
@@ -480,10 +668,8 @@ describe("sessions", () => {
     const older = { ...old, id: "older-device", tokenHash: "1".repeat(64), createdAt: clock - 175 * day };
     writeFileSync(file(), JSON.stringify({ version: 1, sessions: [old, older] }));
     const loaded = new SessionRegistry({ file: file(), now: () => clock });
-    // 160 days in with 15 left: the cap allows 20, so the renewal reaches the cap, not a full term
     expect(loaded.renew("old-device")).toBe(true);
     expect(loaded.list()[0]?.expiresAt).toBe(old.createdAt + SESSION_MAX_AGE_MS);
-    // 175 days in with 15 left: the cap (5 days out) is already below the term it has; nothing is taken away
     expect(loaded.renew("older-device")).toBe(false);
     expect(loaded.list()[1]?.expiresAt).toBe(older.expiresAt);
   });
@@ -515,5 +701,130 @@ describe("stream tickets", () => {
     const { ticket: orphan } = registry.issueStreamTicket(session.id);
     registry.revoke(session.id);
     expect(registry.redeemStreamTicket(orphan)).toBeNull();
+  });
+});
+
+describe("admin scope only (an OMB Cloud home is personal: server/cloud-owner.ts)", () => {
+  const PERSONAL = "My Cloud is personal: only your own devices can connect.";
+  it("opens, redeems, issues and accepts nothing without admin scope; the owner's devices are unaffected", () => {
+    // Made before the rule applies (as a stored session is at boot).
+    const earlier = registry.openPairing({ scopes: ["client"], label: "Guest phone" });
+    const stored = registry.exchange({ code: earlier.credential, label: "Guest phone", source: "a" });
+    expect(stored.ok).toBe(true);
+    const ticket = stored.ok ? registry.issueStreamTicket(stored.session.id).ticket : "";
+    const openWindow = registry.openPairing({ scopes: ["client"] });
+    const owner = registry.exchange({ code: registry.openPairing().credential, label: "Mac", source: "a" });
+    registry.requireAdmin(userError("serverError.cloud.personal"));
+    expect(() => registry.openPairing({ scopes: ["client"] })).toThrow(PERSONAL);
+    expect(registry.exchange({ code: openWindow.credential, label: "Guest", source: "b" })).toEqual({ ok: false, status: 403, error: PERSONAL, errorKey: "serverError.cloud.personal" });
+    expect(() => registry.issue({ label: "Friend", scopes: ["client"], email: "friend@example.test" })).toThrow(PERSONAL);
+    expect(() => registry.issuePortal({ email: "friend@example.test", grant: "g".repeat(43), scopes: ["client"] })).toThrow(PERSONAL);
+    if (!stored.ok || !owner.ok) throw new Error("unreachable");
+    expect(registry.authenticate(stored.token)).toBeNull();
+    expect(registry.redeemStreamTicket(ticket)).toBeNull();
+    expect(registry.isLive(stored.session.id)).toBe(false);
+    expect(registry.authenticate(owner.token)?.id).toBe(owner.session.id);
+    expect(registry.isLive(owner.session.id)).toBe(true);
+    const next = registry.exchange({ code: registry.openPairing({ scopes: ["admin"] }).credential, label: "Phone", source: "c" });
+    expect(next.ok).toBe(true);
+  });
+});
+
+describe("telling the server a session opened", () => {
+  it("names every session opened by pairing or sign-in, with its scopes", () => {
+    const opened: string[][] = [];
+    registry.onSessionIssued((session) => opened.push(session.scopes));
+    const { code } = registry.openPairing({ label: "Phone", scopes: ["client"] });
+    expect(registry.exchange({ code, label: "Phone", source: "10.0.0.9" }).ok).toBe(true);
+    registry.issue({ label: "Laptop", scopes: ["admin", "client"] });
+    expect(opened).toEqual([["client"], ["admin", "client"]]);
+  });
+});
+
+describe("a member's own phone on a Team Cloud", () => {
+  const ADA = { email: "ada@acme.test", role: "member" as const };
+  const HOUR = 60 * 60_000;
+  /** Ada's session from the Admin's signed pairing, as the desktop gets it. */
+  const fromAdmin = (member: { email: string; role: "owner" | "admin" | "member" } = ADA) => {
+    const { code } = registry.openPairing({ scopes: ["client"], member });
+    const paired = registry.exchange({ code, label: "Desktop", source: "a" });
+    if (!paired.ok) throw new Error(paired.error);
+    return registry.authenticate(paired.token)!;
+  };
+  /** A code Ada made from that session, redeemed by her phone. */
+  const phoneOf = (session: { email?: string; teamRole?: "owner" | "admin" | "member"; createdAt: number; memberCheckedAt?: number }) => {
+    const { code } = registry.openPairing({ scopes: ["client"], member: { email: session.email!, role: session.teamRole! }, memberCheckedAt: session.memberCheckedAt ?? session.createdAt });
+    const paired = registry.exchange({ code, label: "Ada's phone", source: "p" });
+    if (!paired.ok) throw new Error(paired.error);
+    return paired;
+  };
+
+  it("opens a session with her address and role that ends within the hour of the Admin's last check, not of the scan", () => {
+    const desktop = fromAdmin();
+    clock += 40 * 60_000;
+    const phone = phoneOf(desktop);
+    const record = registry.authenticate(phone.token)!;
+    expect(record).toMatchObject({ email: ADA.email, teamRole: "member", membershipAuthority: "team", scopes: ["client"], memberCheckedAt: desktop.createdAt });
+    expect(record.expiresAt).toBe(desktop.createdAt + HOUR);
+    clock = record.expiresAt - 60_000;
+    expect(registry.renew(record.id), "renewing never moves past the Admin's check").toBe(false);
+    expect(registry.authenticate(phone.token)?.expiresAt).toBe(desktop.createdAt + HOUR);
+    clock = desktop.createdAt + HOUR;
+    expect(registry.authenticate(phone.token)).toBeNull();
+  });
+
+  it("lives on while the Admin keeps vouching for her in the same role, and ends after a removal or a role change", () => {
+    const desktop = fromAdmin();
+    const phone = phoneOf(desktop);
+    clock += 45 * 60_000;
+    fromAdmin();
+    expect(registry.authenticate(phone.token)?.expiresAt, "the desktop's silent renewal keeps the phone signed in").toBe(clock + HOUR);
+    clock += 45 * 60_000;
+    fromAdmin({ ...ADA, role: "admin" });
+    const end = registry.authenticate(phone.token)!.expiresAt;
+    expect(end, "a phone opened as a member never rides an admin's check").toBe(clock - 45 * 60_000 + HOUR);
+    fromAdmin({ email: "cleo@acme.test", role: "member" });
+    expect(registry.authenticate(phone.token)!.expiresAt, "someone else's check moves nothing").toBe(end);
+    clock = end;
+    expect(registry.authenticate(phone.token), "no check within the hour: removed from the team, the phone signs out").toBeNull();
+  });
+
+  it("ends every session of a removed member, one stored without a role too; a role change ends only the other roles", () => {
+    const desktop = fromAdmin();
+    registry.close();
+    const stored = JSON.parse(readFileSync(file(), "utf8"));
+    for (const session of stored.sessions) delete session.teamRole;
+    writeFileSync(file(), JSON.stringify(stored));
+    registry = new SessionRegistry({ file: file(), now: () => clock });
+    expect(registry.revokeMember(ADA.email)).toBe(1);
+    expect(registry.list().map((session) => session.id)).not.toContain(desktop.id);
+    const member = fromAdmin();
+    const admin = fromAdmin({ ...ADA, role: "admin" });
+    expect(registry.revokeMember(ADA.email, "admin")).toBe(1);
+    expect(registry.list().map((session) => session.id)).toEqual(expect.arrayContaining([admin.id]));
+    expect(registry.list().map((session) => session.id)).not.toContain(member.id);
+  });
+
+  it("never stretches a session the Admin opened itself", () => {
+    const desktop = fromAdmin();
+    clock += 30 * 60_000;
+    fromAdmin();
+    expect(registry.list().find((session) => session.id === desktop.id)?.expiresAt).toBe(desktop.createdAt + HOUR);
+  });
+
+  it("counts as her phone only a session her own code opened, while it lives, and signs it out when removed", () => {
+    const desktop = fromAdmin();
+    const phone = phoneOf(desktop);
+    registry.issue({ label: "Laptop", scopes: ["admin", "client"] });
+    const { code } = registry.openPairing({ label: "Phone", scopes: ["client"] });
+    expect(registry.exchange({ code, label: "Someone's phone", source: "q" }).ok).toBe(true);
+    expect(registry.memberPhones()).toEqual([expect.objectContaining({ id: phone.session.id, label: "Ada's phone", email: ADA.email, teamRole: "member" })]);
+    expect(registry.memberPhones().map((session) => session.id), "the app's own sign-in is not a phone").not.toContain(desktop.id);
+    expect(registry.revoke(phone.session.id)).toBe(true);
+    expect(registry.authenticate(phone.token)).toBeNull();
+    expect(registry.memberPhones()).toEqual([]);
+    const later = phoneOf(fromAdmin());
+    clock = registry.authenticate(later.token)!.expiresAt;
+    expect(registry.memberPhones(), "an ended phone is not listed").toEqual([]);
   });
 });

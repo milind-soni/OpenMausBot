@@ -1,32 +1,78 @@
-// `handOffInstall` swaps the terminal step: instead of quitting and letting
-// electron-updater run the installer, the downloaded file is handed to the
-// user. Ubuntu system packages use it — see electron/updater.mjs for why a
-// chat app must not run dpkg itself. Everything before the install is shared.
-// It receives the staged paths and resolves with an optional state patch
-// describing what is left to do, which the card renders.
-import { updateErrorMessage } from "./update-errors.mjs";
+import { UPDATE_TEXT, updateErrorCode, updateErrorMessage, updateErrorNeedsPerson } from "./update-errors.mjs";
+import { detailFields, updateWords } from "./update-words.mjs";
 
-export function createUpdaterCoordinator(updater, setState, { handOffInstall = null, nativeStaging = false } = {}) {
+const said = (error) => {
+  const code = updateErrorCode(error);
+  return code ? { messageCode: code } : error?.messageKey ? { messageKey: error.messageKey, ...(error.messageParams ? { messageParams: error.messageParams } : {}) } : {};
+};
+
+/** electron-updater's GitHub provider gives the release body (HTML); a multi-release feed gives [{ version, note }]. */
+export function releaseNotesText(notes) {
+  const text = typeof notes === "string"
+    ? notes
+    : Array.isArray(notes)
+      ? notes.map((entry) => (typeof entry?.note === "string" ? entry.note : "")).filter(Boolean).join("\n")
+      : "";
+  const trimmed = text.trim();
+  return trimmed ? trimmed.slice(0, 8000) : undefined;
+}
+
+/** True when `candidate` is a higher release than `base` (dotted numbers; a prerelease sorts below its release). */
+export function isNewerVersion(candidate, base) {
+  if (typeof candidate !== "string" || typeof base !== "string") return false;
+  const parse = (version) => {
+    const [core, pre] = version.trim().replace(/^v/, "").split("+")[0].split(/-(.*)/s);
+    return { nums: core.split(".").map((part) => Number.parseInt(part, 10) || 0), pre: pre ?? "" };
+  };
+  const a = parse(candidate);
+  const b = parse(base);
+  for (let i = 0; i < Math.max(a.nums.length, b.nums.length); i += 1) {
+    const diff = (a.nums[i] ?? 0) - (b.nums[i] ?? 0);
+    if (diff) return diff > 0;
+  }
+  if (a.pre === b.pre) return false;
+  if (!a.pre) return true;
+  if (!b.pre) return false;
+  return a.pre.localeCompare(b.pre, "en", { numeric: true }) > 0;
+}
+
+/** Three consecutive hourly failures: the app has gone about three hours without seeing the release feed. */
+export const QUIET_FAILURES_BEFORE_NOTICE = 3;
+
+// `elevatedInstall` (Ubuntu .deb, electron/elevated-install.mjs) resolves { ok } or { ok: false, reason, detail }; `relaunch` reopens the app after it.
+// Anything but a closed prompt or a checksum failure falls back to `handOffInstall`.
+export function createUpdaterCoordinator(
+  updater,
+  setState,
+  { handOffInstall = null, elevatedInstall = null, relaunch = null, nativeStaging = false } = {},
+) {
   let checkOperation = null;
-  // Set from downloadUpdate's resolution: the paths electron-updater staged.
-  // Only the hand-off needs them; quitAndInstall reads its own copy.
   let downloadedFiles = null;
   let downloadOperation = null;
   let installOperation = null;
   let nativeStagingStarted = false;
   let nativeReady = false;
-  // Squirrel has no cancellation or attempt ID. After a staging failure a
-  // second attempt could consume the first attempt's late ready event.
+  // Squirrel has no cancellation or attempt ID: a retry could consume a failed attempt's late ready event.
   let recoveryRequired = false;
-  // A staged update, install hand-off, or failed user action remains useful
-  // until the user acts again. Hourly checks must not replace its controls.
+  // A staged update, hand-off or failed action stays until the person acts; hourly checks must not replace it.
   let actionOwnsState = false;
+  // The downloaded or handed-off update the person has not acted on: { version, patch } (patch restores its card). Hourly checks look for a newer one.
+  let staged = null;
   const routedErrors = new WeakSet();
+  // Hourly checks fail quietly one at a time (offline laptop, a feed still uploading), but a feed that stays
+  // unreachable must not leave the app on an old version with no sign of it.
+  let quietFailures = 0;
 
   const routeError = (manual, error) => {
     if (recoveryRequired) return;
-    actionOwnsState = manual;
+    const shown = manual || updateErrorNeedsPerson(error);
+    actionOwnsState = shown;
     if (error instanceof Error) routedErrors.add(error);
+    // A failed replacement cannot fall back to the staged update: electron-updater empties its pending cache before
+    // downloading a newer file (DownloadedUpdateHelper), so the old one is gone. It is handled like any other failure;
+    // a quiet one goes idle and the next hourly check downloads the newest release again.
+    if (downloadOperation?.replacing) downloadedFiles = null;
+    staged = null;
     if (downloadOperation) {
       downloadOperation.failed = true;
       clearTimeout(downloadOperation.timer);
@@ -44,14 +90,21 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
         status: "error",
         retryable: false,
         message: `${updateErrorMessage(error)} Quit and reopen OpenMausBot before trying the update again.`,
+        ...said(error),
       });
       return;
     }
-    if (!manual) {
+    if (!shown) {
+      quietFailures += 1;
+      if (quietFailures >= QUIET_FAILURES_BEFORE_NOTICE) {
+        // The notice does not own the state: hourly checks go on, and the first one that reaches the feed clears it.
+        setState({ status: "error", ...updateWords("native.update.checkFailed", { error: updateErrorMessage(error) }), ...said(error) });
+        return;
+      }
       setState({ status: "idle" });
       return;
     }
-    setState({ status: "error", message: updateErrorMessage(error) });
+    setState({ status: "error", message: updateErrorMessage(error), ...said(error) });
   };
 
   function handleRejectedOperation(manual, error) {
@@ -64,25 +117,39 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
   }
 
   updater.on("checking-for-update", () => {
-    if (checkOwnsState()) setState({ status: "checking" });
+    // The banner shows nothing while checking, so a quiet check must not replace the notice; a manual retry still shows it.
+    if (checkOwnsState() && (checkOperation?.manual || quietFailures < QUIET_FAILURES_BEFORE_NOTICE)) setState({ status: "checking" });
   });
   updater.on("update-available", (info) => {
+    quietFailures = 0;
+    if (checkOperation?.recheck && !downloadOperation && !installOperation && !recoveryRequired && staged && isNewerVersion(info?.version, staged.version)) {
+      download(Boolean(checkOperation.manual), {
+        version: info?.version,
+        releaseNotes: releaseNotesText(info?.releaseNotes),
+        percent: undefined,
+        message: undefined,
+      }, true);
+      return;
+    }
     if (checkOwnsState()) {
-      setState({ status: "available", version: info?.version, message: undefined });
+      download(Boolean(checkOperation?.manual), {
+        version: info?.version,
+        releaseNotes: releaseNotesText(info?.releaseNotes),
+        percent: undefined,
+        message: undefined,
+      });
     }
   });
   updater.on("update-not-available", () => {
+    quietFailures = 0;
     if (checkOwnsState()) setState({ status: "idle" });
   });
-  // downloadUpdate/checkForUpdates reject after most updater errors, but the
-  // macOS native staging pass used by quitAndInstall is event-only. Without
-  // this listener a Squirrel.Mac failure leaves the renderer on "Restarting"
-  // forever because quitAndInstall itself returns void.
+  // macOS native staging (quitAndInstall) reports failure only through this event; quitAndInstall returns void.
   updater.on("error", (error) => {
-    // Shared error events do not identify their operation. If a download
-    // overtook a check, let their individual promises route failures instead.
+    // Shared error events do not identify their operation.
     if (checkOperation?.supersededByDownload && !installOperation) return;
-    const manual = Boolean(installOperation || downloadOperation || checkOperation?.manual || nativeStagingStarted);
+    if (checkOperation?.recheck && !checkOperation.manual && !downloadOperation && !installOperation && !nativeStagingStarted) return;
+    const manual = Boolean(installOperation || downloadOperation?.manual || checkOperation?.manual || nativeStagingStarted);
     routeError(manual, error);
   });
   updater.on("download-progress", (progress) => {
@@ -91,9 +158,7 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
   });
   updater.on("update-downloaded", (info) => {
     if (recoveryRequired || installOperation) return;
-    // On macOS electron-updater emits this before Squirrel.Mac has finished
-    // staging the ZIP. Our vendor patch resolves downloadUpdate only on the
-    // native ready event, not merely when the local ZIP transfer finishes.
+      // On macOS electron-updater emits this before Squirrel.Mac finishes staging; the vendor patch resolves downloadUpdate on the native ready event.
     if (downloadOperation) {
       downloadOperation.downloadedInfo = info;
       if (nativeStaging && !nativeStagingStarted) {
@@ -107,53 +172,49 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
       }
       return;
     }
-    // No native attempt may become actionable from an uncorrelated late event.
     if (nativeStaging) return;
     actionOwnsState = true;
+    staged = { version: info?.version, patch: { status: "downloaded", version: info?.version, message: undefined } };
     setState({ status: "downloaded", version: info?.version });
   });
 
   function check(manual = false) {
-    if (recoveryRequired || installOperation || (nativeStaging && (downloadOperation || nativeStagingStarted)) || (!manual && actionOwnsState)) return Promise.resolve();
+    if (manual && downloadOperation) downloadOperation.manual = true;
+    if (recoveryRequired || installOperation || (nativeStaging && (downloadOperation || nativeStagingStarted)) || (!manual && actionOwnsState && !(staged && !nativeStaging && !downloadOperation))) return Promise.resolve();
     if (checkOperation) {
-      // A manual caller upgrades the shared operation; a timer never downgrades it.
       if (manual) checkOperation.manual = true;
       return checkOperation.promise;
     }
 
     if (manual) actionOwnsState = false;
-    const operation = { manual, supersededByDownload: Boolean(downloadOperation), failed: false, promise: null };
+    const operation = { manual, recheck: !manual && actionOwnsState, supersededByDownload: Boolean(downloadOperation), failed: false, promise: null };
     checkOperation = operation;
     try {
       operation.promise = Promise.resolve(updater.checkForUpdates())
         .catch((error) => {
-          if (!operation.supersededByDownload) handleRejectedOperation(operation.manual, error);
+          if (!operation.failed && !operation.supersededByDownload && !(operation.recheck && !operation.manual)) handleRejectedOperation(operation.manual, error);
         })
         .finally(() => {
           if (checkOperation === operation) checkOperation = null;
         });
     } catch (error) {
-      if (!operation.supersededByDownload) handleRejectedOperation(operation.manual, error);
+      if (!operation.failed && !operation.supersededByDownload && !(operation.recheck && !operation.manual)) handleRejectedOperation(operation.manual, error);
       checkOperation = null;
       operation.promise = Promise.resolve();
     }
     return operation.promise;
   }
 
-  function download() {
-    if (recoveryRequired || installOperation || nativeStagingStarted) return Promise.resolve();
+  function download(manual, starting, replacing = false) {
+    if (recoveryRequired || installOperation || nativeStagingStarted) return;
     if (checkOperation) checkOperation.supersededByDownload = true;
-    if (downloadOperation) return downloadOperation.promise;
 
-    const operation = { downloadedInfo: null, failed: false, promise: null, timer: null };
+    const operation = { downloadedInfo: null, failed: false, manual, replacing, timer: null };
     downloadOperation = operation;
-    // Own the state before the request goes out: the first "download-progress"
-    // can be seconds away (connection setup, redirects), and until then the
-    // renderer would still show an untouched "Download" button. No percent yet
-    // — the UI reads a missing percent as "starting".
-    setState({ status: "downloading" });
+      // Own the state before the request: the first progress event can be seconds away, and no percent reads as "starting".
+    setState({ status: "downloading", ...starting });
     try {
-      operation.promise = Promise.resolve(updater.downloadUpdate())
+      void Promise.resolve(updater.downloadUpdate())
         .then((result) => {
           if (!operation.failed) {
             downloadedFiles = Array.isArray(result) ? result.filter((file) => typeof file === "string") : null;
@@ -161,26 +222,29 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
           if (!operation.failed && operation.downloadedInfo) {
             nativeReady = nativeStaging;
             actionOwnsState = true;
-            setState({ status: "downloaded", version: operation.downloadedInfo?.version });
+            const version = operation.downloadedInfo?.version;
+            staged = { version, patch: { status: "downloaded", version, message: undefined } };
+            setState({ status: "downloaded", version });
           }
-          return result;
         })
-        .catch((error) => handleRejectedOperation(true, error))
+        .catch((error) => handleRejectedOperation(operation.manual, error))
         .finally(() => {
           clearTimeout(operation.timer);
           if (downloadOperation === operation) downloadOperation = null;
         });
     } catch (error) {
-      handleRejectedOperation(true, error);
+      handleRejectedOperation(operation.manual, error);
       downloadOperation = null;
-      operation.promise = Promise.resolve();
     }
-    return operation.promise;
   }
 
   function install() {
     if (recoveryRequired || installOperation || downloadOperation || (nativeStaging && !nativeReady)) return;
     actionOwnsState = true;
+    if (elevatedInstall) {
+      elevate();
+      return;
+    }
     if (handOffInstall) {
       handOff();
       return;
@@ -194,31 +258,52 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
       routeError(true, error);
       return;
     }
-    // quitAndInstall is void and cannot be canceled. A slow handoff must stay
-    // busy: exposing Retry here used to arm another native quit callback.
-    if (installOperation === operation) {
-      operation.timer = setTimeout(() => {
-        if (installOperation !== operation) return;
-        updater.logger?.warn?.("Update restart handoff exceeded two minutes; keeping installation locked to prevent overlapping retries.");
-        setState({ status: "installing", message: "Restart is taking longer than expected. Quit and reopen OpenMausBot to finish the update." });
-      }, 2 * 60 * 1000);
-      operation.timer.unref?.();
-    }
+    watchSlowRestart(operation);
   }
 
-  // The platform owns the install from here: a terminal opens with the
-  // command on the clipboard and the user finishes there. No quit — the
-  // running app stays usable, and the new version is picked up next launch.
-  function handOff() {
+  // quitAndInstall is void and cannot be canceled: a Retry here would arm another native quit callback.
+  function watchSlowRestart(operation) {
+    if (installOperation !== operation) return;
+    operation.timer = setTimeout(() => {
+      if (installOperation !== operation) return;
+      updater.logger?.warn?.("Update restart handoff exceeded two minutes; keeping installation locked to prevent overlapping retries.");
+      setState({ status: "installing", message: UPDATE_TEXT.slowRestart, messageCode: "slowRestart" });
+    }, 2 * 60 * 1000);
+    operation.timer.unref?.();
+  }
+
+  function elevate() {
     const operation = { failed: false, timer: null };
     installOperation = operation;
-    setState({ status: "installing" });
+    setState({ status: "installing", ...updateWords("native.update.installing") });
     Promise.resolve()
-      .then(() => handOffInstall(downloadedFiles))
-      .then((patch) => {
+      .then(() => elevatedInstall(downloadedFiles, { sha512: updater.downloadedUpdateHelper?.downloadedFileInfo?.sha512 }))
+      .then((result) => {
         if (installOperation !== operation) return;
+        if (result?.ok) {
+          setState({ status: "installing", message: undefined });
+          try {
+            relaunch?.();
+          } catch (error) {
+            routeError(true, error);
+            return;
+          }
+          watchSlowRestart(operation);
+          return;
+        }
         installOperation = null;
-        setState({ status: "handed-off", ...patch });
+        updater.logger?.warn?.(`Elevated install did not finish (${result?.reason}): ${result?.detail}`);
+        if (result?.reason === "declined") {
+          if (staged) staged = { version: staged.version, patch: { status: "downloaded", version: staged.version, message: undefined } };
+          setState({ status: "downloaded", message: undefined });
+          return;
+        }
+        if (result?.reason === "checksum" || !handOffInstall) {
+          const words = result?.detail ? { message: result.detail, ...detailFields(result) } : updateWords("native.update.installFailedPlain");
+          routeError(true, Object.assign(new Error(words.message), words));
+          return;
+        }
+        handOff(result?.detail, detailFields(result));
       })
       .catch((error) => {
         if (installOperation !== operation) return;
@@ -226,5 +311,31 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
       });
   }
 
-  return { check, download, install };
+  // `note` says why the automatic install did not run, when that is why.
+  function handOff(note, words = {}) {
+    const operation = { failed: false, timer: null };
+    installOperation = operation;
+    setState({ status: "installing", message: undefined });
+    Promise.resolve()
+      .then(() => handOffInstall(downloadedFiles))
+      .then((patch) => {
+        if (installOperation !== operation) return;
+        installOperation = null;
+        if (staged) staged = { version: staged.version, patch: { status: "handed-off", version: staged.version, message: note, ...words, ...patch } };
+        setState({ status: "handed-off", message: note, ...words, ...patch });
+      })
+      .catch((error) => {
+        if (installOperation !== operation) return;
+        routeError(true, error);
+      });
+  }
+
+  /** The downloaded update that `install` would install now by quitting and reopening the app, or null: none is ready,
+   * another update action holds it, or it installs through a password prompt or a terminal. */
+  function installable() {
+    if (recoveryRequired || installOperation || downloadOperation || elevatedInstall || handOffInstall || (nativeStaging && !nativeReady)) return null;
+    return staged?.patch.status === "downloaded" && typeof staged.version === "string" ? { version: staged.version } : null;
+  }
+
+  return { check, install, installable };
 }

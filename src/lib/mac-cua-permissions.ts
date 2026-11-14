@@ -2,8 +2,6 @@ import { t } from "./i18n";
 
 export type MacCuaPermission = "screen" | "accessibility";
 
-/** Only the host's unavailable reason may name a missing grant. An absent or
- * unrelated status must not be presented as a permission diagnosis. */
 export function missingMacCuaPermissions(reason: unknown): MacCuaPermission[] {
   if (typeof reason !== "string" || reason.length > 2_000) return [];
   const missingList = reason.match(/(Accessibility(?: and Screen Recording)?|Screen Recording(?: and Accessibility)?) required\b/i)?.[1];

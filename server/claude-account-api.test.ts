@@ -48,6 +48,14 @@ async function addBot(instanceId: string) {
   return response.body.bot;
 }
 
+async function addBotOn(instanceId: string, model: string) {
+  const response = await api("POST", "/api/bots", {
+    name: "Endpoint bot", modelSelection: { instanceId, model }, requireAvailableModel: true,
+  });
+  expect(response.status, JSON.stringify(response.body)).toBe(201);
+  return response.body.bot;
+}
+
 async function bot(id: string) {
   return (await api("GET", "/api/bots?messages=30")).body.bots.find((row: any) => row.id === id);
 }
@@ -84,10 +92,11 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       ghost: { driver: "not-a-real-driver", displayName: "Preserved shadow" },
       // The `claude` product fleet auto-adds these IDs unless configured.
       // Pin shadows so this test never probes an installed provider CLI.
-      ...Object.fromEntries(["cursor", "openaiCompat", "qwen", "hermes", "pi"].map(id => [id, { driver: "not-a-real-driver" }])),
+      ...Object.fromEntries(["cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi"].map(id => [id, { driver: "not-a-real-driver" }])),
       "broken-account": {
         driver: "claudeAgent", displayName: "Repairable shadow", config: { cli, configDir: "relative/saved-directory" },
       },
+      codex: { driver: "codex", config: { cli: join(SERVER_DIR, "testing", "fake-codex-app-server.ts") } },
       claude: {
         driver: "claudeAgent", displayName: "Default fixture", config: { cli },
         environment: { ANTHROPIC_AUTH_TOKEN: "fixture-base-secret", BASE_ONLY_SENTINEL: "base-only" },
@@ -100,7 +109,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   clientToken = paired.token;
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
-  const offlinePrelude = `data:text/javascript,${encodeURIComponent('globalThis.fetch = async () => new Response("offline fixture", { status: 503 });')}`;
+  const offlinePrelude = `data:text/javascript,${encodeURIComponent('let refreshes = 0; globalThis.fetch = async (url) => String(url).startsWith("https://catalog-fixture.example/") ? Response.json({ data: [{ id: "model-a" }, { id: "model-b" }] }) : String(url).startsWith("https://growing-fixture.example/") ? Response.json({ data: [{ id: "model-a" }, ...(refreshes++ ? [{ id: "model-new" }] : [])] }) : new Response("offline fixture", { status: 503 });')}`;
   child = spawn(process.execPath, ["--import", offlinePrelude, join(SERVER_DIR, "index.ts")], {
     cwd: join(SERVER_DIR, ".."),
     env: {
@@ -117,7 +126,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const deadline = Date.now() + 20_000;
   for (;;) {
     if (child.exitCode !== null) throw new Error(`fixture exited: ${stderr}`);
-    try { if ((await api("GET", "/api/health")).body.pid === child.pid) break; } catch { /* Starting. */ }
+    try { if ((await api("GET", "/api/health")).body.pid === child.pid) break; } catch {}
     if (Date.now() > deadline) throw new Error(`fixture did not start: ${stderr}`);
     await new Promise(resolve => setTimeout(resolve, 100));
   }
@@ -130,6 +139,109 @@ afterAll(async () => {
 });
 
 describe("Claude account HTTP API", () => {
+  it.each(["claude", "codex"])("connects %s without a model and keeps independent bot choices", async engine => {
+    const created = await api("POST", `/api/instances/${engine}-endpoint`, { displayName: "Catalog fixture", baseUrl: "https://catalog-fixture.example/v1", token: "catalog-fixture-key" });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    const instance = created.body.instances.find((row: any) => row.instanceId === id);
+    expect(instance.models.options).toEqual(expect.arrayContaining([expect.objectContaining({ id: "model-a", custom: true }), expect.objectContaining({ id: "model-b", custom: true })]));
+    const first = await addBotOn(id, "model-a");
+    const second = await addBotOn(id, "model-b");
+    expect((await bot(first.id)).modelSelection.model).toBe("model-a");
+    expect((await bot(second.id)).modelSelection.model).toBe("model-b");
+    if (engine === "claude") {
+      for (const [launched, model] of [[first, "model-a"], [second, "model-b"]] as const) {
+        expect((await api("POST", `/api/bots/${launched.id}/messages`, { text: "which model" })).status).toBe(202);
+        await idle(launched.id);
+        const spawn = JSON.parse(readFileSync(join(saved().instances[id].config.configDir, "spawn.json"), "utf8"));
+        expect(spawn.argv[spawn.argv.indexOf("--model") + 1]).toBe(model);
+      }
+    }
+    expect((await api("PATCH", `/api/instances/${id}/${engine}-endpoint`, { displayName: "Renamed", baseUrl: "https://catalog-fixture.example/v1" })).status).toBe(200);
+    const configs = saved().instances[id].config;
+    expect(engine === "codex" ? configs.endpoint.models : configs.endpointModels).toEqual(["model-a", "model-b"]);
+  });
+
+  it.each([
+    ["claude", "https://api.anthropic.com"],
+    ["codex", "https://api.openai.com/v1"],
+  ])("connects official %s without choosing a provider-wide model", async (engine, baseUrl) => {
+    const result = await api("POST", `/api/instances/${engine}-endpoint`, { displayName: "Official fixture", baseUrl, token: "official-fixture-key" });
+    expect(result.status, JSON.stringify(result.body)).toBe(201);
+    const instance = result.body.instances.find((row: any) => row.instanceId === result.body.instanceId);
+    expect(instance.models.options.length).toBeGreaterThan(1);
+    expect(instance.models.options.every((option: any) => option.custom)).toBe(true);
+    expect(saved().instances[result.body.instanceId].environment).not.toHaveProperty("ANTHROPIC_MODEL");
+  });
+
+  it("does not persist an endpoint when gateway model discovery fails", async () => {
+    const before = Object.keys(saved().instances);
+    const result = await api("POST", "/api/instances/codex-endpoint", { displayName: "Failed fixture", baseUrl: "https://offline.example/v1", token: "failed-fixture-secret" });
+    expect(result.status).toBe(400);
+    expect(result.body.error).toContain("Could not discover gateway models");
+    expect(JSON.stringify(result.body)).not.toContain("failed-fixture-secret");
+    expect(Object.keys(saved().instances)).toEqual(before);
+  });
+
+  it("reads a gateway's model list again on Refresh models", async () => {
+    const created = await api("POST", "/api/instances/codex-endpoint", { displayName: "Growing fixture", baseUrl: "https://growing-fixture.example/v1", token: "growing-fixture-key" });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    expect(saved().instances[id].config.endpoint.models).toEqual(["model-a"]);
+    const refreshed = await api("POST", `/api/instances/${id}/refresh-models`, {});
+    expect(refreshed.status, JSON.stringify(refreshed.body)).toBe(200);
+    expect(saved().instances[id].config.endpoint.models).toEqual(["model-a", "model-new"]);
+    expect(refreshed.body.instances.find((row: any) => row.instanceId === id).models.options.map((option: any) => option.id)).toContain("model-new");
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
+  });
+
+  it("keeps a Codex endpoint's fixed model when its key changes on the official URL", async () => {
+    const created = await api("POST", "/api/instances/codex-endpoint", { displayName: "Fixed fixture", baseUrl: "https://api.openai.com/v1", token: "fixed-fixture-key", model: "fixed-model" });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { token: "fixed-rotated-key" })).status).toBe(200);
+    expect(saved().instances[id].config.endpoint.models).toEqual(["fixed-model"]);
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
+  });
+
+  it("rotates a legacy Claude endpoint's key without a model catalog", async () => {
+    const created = await api("POST", "/api/instances/claude-endpoint", { displayName: "Legacy fixture", baseUrl: "https://offline.example", token: "legacy-fixture-key", model: "legacy-model" });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    const rotated = await api("PATCH", `/api/instances/${id}/claude-endpoint`, { token: "legacy-rotated-key" });
+    expect(rotated.status, JSON.stringify(rotated.body)).toBe(200);
+    expect(saved().instances[id].environment).toMatchObject({ ANTHROPIC_API_KEY: "legacy-rotated-key", ANTHROPIC_MODEL: "legacy-model" });
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
+  });
+
+  it("creates, edits and removes an isolated Codex API endpoint without OAuth or key disclosure", async () => {
+    const fields = { displayName: "CLIProxyAPI", baseUrl: "https://gateway.example/v1", token: "codex-api-fixture-secret", model: "gateway-model" };
+    const created = await api("POST", "/api/instances/codex-endpoint", fields);
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    const instance = created.body.instances.find((row: any) => row.instanceId === id);
+    expect(instance.codexEndpoint).toEqual({ baseUrl: fields.baseUrl, models: ["gateway-model"], tokenSaved: true });
+    expect(instance.authentication).toBeUndefined();
+    expect(JSON.stringify(created.body)).not.toContain(fields.token);
+    expect(saved().instances[id].environment.CODEX_HOME).toContain(id);
+    expect(saved().instances[id].environment.OPENMAUSBOT_CODEX_API_KEY).toBe(fields.token);
+    expect((await api("POST", `/api/instances/${id}/auth/start`)).status).not.toBe(200);
+    expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { baseUrl: "https://other.example/v1" })).status).toBe(400);
+    expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { model: "another-model" })).status).toBe(200);
+    expect(saved().instances[id].config.endpoint.models).toEqual(["another-model"]);
+    expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { token: "codex-api-rotated-secret" })).status).toBe(200);
+    expect(saved().instances[id].config.endpoint.models).toEqual(["another-model"]);
+    const bot = await addBotOn(id, "another-model");
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(409);
+    expect((await api("PATCH", `/api/bots/${bot.id}/model`, { instanceId: "claude", model: MODEL })).status).toBe(200);
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
+    expect(saved().instances[id]).toBeUndefined();
+    for (const baseUrl of ["http://gateway.example/v1", "https://user:secret@gateway.example/v1", "invalid"]) {
+      expect((await api("POST", "/api/instances/codex-endpoint", { ...fields, baseUrl })).status).toBe(400);
+    }
+    expect((await api("POST", "/api/instances/codex-endpoint", fields, { authorization: `Bearer ${clientToken}` })).status).toBe(403);
+  });
+
   it("creates beside an invalid saved directory and repairs that unused shadow without accepting invalid replacements", async () => {
     const initial = (await api("GET", "/api/instances")).body.instances.find((row: any) => row.instanceId === "broken-account");
     expect(initial.snapshot.state).toBe("unavailable");
@@ -214,7 +326,7 @@ describe("Claude account HTTP API", () => {
     try {
       await stream.until(frame => frame.kind === "hello");
       expect((await api("POST", `/api/bots/${runningBot.id}/messages`, { text: "remain active" })).status).toBe(202);
-      await expect.poll(() => existsSync(join(active.dir, "spawn.json"))).toBe(true);
+      await expect.poll(() => existsSync(join(active.dir, "spawn.json")), { timeout: 10_000 }).toBe(true);
       const originalPid = JSON.parse(readFileSync(join(active.dir, "spawn.json"), "utf8")).pid;
       expect((await bot(runningBot.id)).busy).toBe(true);
       expect((await api("PATCH", `/api/instances/${active.id}`, { cli })).status).toBe(409);
@@ -235,6 +347,81 @@ describe("Claude account HTTP API", () => {
       stream.close();
       await api("POST", `/api/bots/${runningBot.id}/interrupt`, {});
     }
+  });
+
+  it("creates a custom endpoint as its own engine, keeps its token server-side, and runs its model against its host", async () => {
+    // A settings.json the person's own Claude Code uses: an endpoint must not inherit any of it.
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({
+      env: { ANTHROPIC_BASE_URL: "https://user-settings.test", ANTHROPIC_AUTH_TOKEN: "user-settings-secret", ANTHROPIC_MODEL: "claude-from-settings" },
+    }));
+    const endpoint = {
+      displayName: "DeepSeek", baseUrl: "https://api.deepseek.test/anthropic/", token: "sk-endpoint-secret",
+      model: "deepseek-chat", opusModel: "deepseek-reasoner",
+    };
+    const created = await api("POST", "/api/instances/claude-endpoint", endpoint);
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId as string;
+    const row = created.body.instances.find((candidate: any) => candidate.instanceId === id);
+    expect(row).toMatchObject({
+      displayName: "DeepSeek",
+      driverKind: "claudeAgent",
+      access: "custom",
+      url: "https://api.deepseek.test/anthropic",
+      claudeEndpoint: { baseUrl: "https://api.deepseek.test/anthropic", models: ["deepseek-chat", "deepseek-reasoner"], tokenSaved: true },
+    });
+    expect(JSON.stringify(created.body)).not.toContain("sk-endpoint-secret");
+    expect(JSON.stringify((await api("GET", "/api/instances")).body)).not.toContain("sk-endpoint-secret");
+    expect(saved().instances[id]).toMatchObject({
+      driver: "claudeAgent", access: "custom",
+      config: { cli, requireApiKey: true, endpointModels: ["deepseek-chat", "deepseek-reasoner"] },
+      environment: {
+        ANTHROPIC_BASE_URL: "https://api.deepseek.test/anthropic",
+        ANTHROPIC_AUTH_TOKEN: "sk-endpoint-secret", ANTHROPIC_API_KEY: "sk-endpoint-secret",
+        ANTHROPIC_MODEL: "deepseek-chat", ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-reasoner",
+      },
+    });
+
+    const endpointBot = await addBotOn(id, "deepseek-chat");
+    expect((await api("POST", `/api/bots/${endpointBot.id}/messages`, { text: "which host" })).status).toBe(202);
+    await idle(endpointBot.id);
+    const directory = saved().instances[id].config.configDir as string;
+    const spawn = JSON.parse(readFileSync(join(directory, "spawn.json"), "utf8"));
+    expect(spawn.env).toMatchObject({
+      ANTHROPIC_BASE_URL: "https://api.deepseek.test/anthropic",
+      ANTHROPIC_MODEL: "deepseek-chat",
+      ANTHROPIC_AUTH_TOKEN: "sk-endpoint-secret",
+    });
+    expect(spawn.env.ANTHROPIC_AUTH_TOKEN).not.toBe("user-settings-secret");
+    expect(spawn.env.ANTHROPIC_BASE_URL).not.toBe("https://user-settings.test");
+    const model = spawn.argv[spawn.argv.indexOf("--model") + 1];
+    expect(model).toBe("deepseek-chat");
+    expect((await bot(endpointBot.id)).messages.some((message: any) => message.text === `account:${basename(directory)}`)).toBe(true);
+
+    const edited = await api("PATCH", `/api/instances/${id}/claude-endpoint`, { model: "deepseek-reasoner", opusModel: "" });
+    expect(edited.status, JSON.stringify(edited.body)).toBe(200);
+    const afterEdit = saved().instances[id];
+    expect(afterEdit.environment).toMatchObject({
+      ANTHROPIC_AUTH_TOKEN: "sk-endpoint-secret",
+      ANTHROPIC_BASE_URL: "https://api.deepseek.test/anthropic",
+      ANTHROPIC_MODEL: "deepseek-reasoner",
+    });
+    expect(afterEdit.environment).not.toHaveProperty("ANTHROPIC_DEFAULT_OPUS_MODEL");
+    expect(afterEdit.config.endpointModels).toEqual(["deepseek-reasoner"]);
+    expect(edited.body.instances.find((candidate: any) => candidate.instanceId === id).claudeEndpoint.models).toEqual(["deepseek-reasoner"]);
+
+    expect((await api("PATCH", "/api/instances/claude/claude-endpoint", { model: "deepseek-chat" })).status).toBe(400);
+    expect((await api("PATCH", "/api/instances/missing/claude-endpoint", { model: "deepseek-chat" })).status).toBe(404);
+    for (const invalid of [{}, { displayName: "Only" }, { ...endpoint, baseUrl: "ftp://api.deepseek.test" }, { ...endpoint, model: "has space" }, { ...endpoint, token: "" }]) {
+      expect((await api("POST", "/api/instances/claude-endpoint", invalid)).status, JSON.stringify(invalid)).toBe(400);
+    }
+    mkdirSync(directory, { recursive: true });
+    const marker = join(directory, "user-owned-marker.txt");
+    writeFileSync(marker, "Keep the endpoint's own files");
+    expect((await api("PATCH", `/api/bots/${endpointBot.id}/model`, { instanceId: "claude", model: MODEL })).status).toBe(200);
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
+    expect(saved().instances).not.toHaveProperty(id);
+    expect(readFileSync(marker, "utf8")).toBe("Keep the endpoint's own files");
   });
 
   it("enforces JSON, validation, duplicate-directory and admin-only mutation gates", async () => {

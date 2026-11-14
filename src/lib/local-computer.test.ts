@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
+import en from "@/locales/en.json";
 import type { Bot, InstanceInfo } from "@/state/store";
 import {
   autoSelectsLocalComputer,
+  busyBoatView,
   instanceSupportsLocalComputer,
-  linuxAutoDescription,
   localComputerDisabledReason,
   localComputerSelectable,
   persistedComputerSelectionMatches,
@@ -55,6 +56,17 @@ describe("local computer UI eligibility", () => {
     ).toBe(false);
   });
 
+  it("never offers This computer on another server's page, whatever the platform", () => {
+    for (const platform of ["darwin", "win32", "linux"] as const) {
+      const capabilities = {
+        host: { platform },
+        localComputer: { available: false, reasonCode: "remote-server" },
+      } as DesktopCapabilities;
+      expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(false);
+      expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(en["computer.problem.localRemoteServer"]);
+    }
+  });
+
   it("keeps This computer selectable on Windows before the driver is live", () => {
     const capabilities = {
       host: { platform: "win32" as const, label: "Windows" },
@@ -62,13 +74,12 @@ describe("local computer UI eligibility", () => {
     } as DesktopCapabilities;
     expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(true);
     expect(localComputerSelectable({ capabilities, providerSupportsLocal: false })).toBe(false);
-    expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toContain(
-      "Cua Driver",
+    expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(
+      "Bots can't use this PC right now. Restart MausBot, and if that doesn't help, open Settings → Diagnostics.",
     );
   });
 
   it("states that Linux Auto never selects this computer", () => {
-    expect(linuxAutoDescription()).toContain("otherwise computer use stays off");
     expect(
       autoSelectsLocalComputer({
         platform: "linux",
@@ -92,7 +103,7 @@ describe("local computer UI eligibility", () => {
     expect(
       localComputerDisabledReason({ capabilities, providerSupportsLocal: true }),
     ).toBe(
-      "Local computer control is not available on Wayland yet. Sign out and choose Ubuntu on Xorg to use This computer.",
+      "Bots can't use this computer in this kind of desktop session yet. Sign out, choose “Ubuntu on Xorg” on the sign-in screen, and sign back in.",
     );
   });
 
@@ -125,7 +136,7 @@ describe("local computer UI eligibility", () => {
       }
     }
     expect(resolveBoatPanelAction({ computer: "cloud", configured: true, boatState: "idle",
-      canUseCloud: true, autoLocal: true, teamComputer: true })).toBe("ensure-boat");
+      canUseCloud: true, autoLocal: true, teamComputer: true })).toBe("attach-ready-boat");
   });
 
   it("never creates a missing Boat merely because an Auto panel opened", () => {
@@ -167,43 +178,43 @@ describe("local computer UI eligibility", () => {
     }
   });
 
-  it("provisions only after an explicit Cloud choice", () => {
-    expect(resolveBoatPanelAction({
-      computer: "cloud",
-      configured: true,
-      boatState: null,
-      canUseCloud: true,
-      autoLocal: true,
-    })).toBe("ensure-boat");
-    expect(resolveBoatPanelAction({
-      computer: "cloud",
-      configured: true,
-      boatState: "archived",
-      canUseCloud: true,
-      autoLocal: true,
-    })).toBe("ensure-boat");
+  it("never creates or wakes a Boat because Cloud computer was chosen or the panel opened", () => {
+    const cloud = { computer: "cloud" as const, configured: true, canUseCloud: true, autoLocal: true };
+    expect(resolveBoatPanelAction({ ...cloud, boatState: null })).toBe("cloud-new");
+    for (const boatState of ["archived", "stopped"]) {
+      expect(resolveBoatPanelAction({ ...cloud, boatState })).toBe("cloud-asleep");
+    }
+    for (const boatState of ["idle", "ready", "running"]) {
+      expect(resolveBoatPanelAction({ ...cloud, boatState })).toBe("attach-ready-boat");
+    }
+    expect(resolveBoatPanelAction({ ...cloud, boatState: "provisioning" })).toBe("busy-boat");
   });
 
   it("watches instead of provisioning while a turn owns the box", () => {
     const cloud = { computer: "cloud" as const, configured: true, canUseCloud: true, autoLocal: true, busy: true };
-    // a ready boat is shown as it is — its frames already stream in mid-turn
     for (const boatState of ["ready", "idle", "running"]) {
       expect(resolveBoatPanelAction({ ...cloud, boatState })).toBe("attach-ready-boat");
     }
-    // anything else is the turn's to create or wake; the panel waits
     for (const boatState of ["archived", "stopped", "provisioning", null]) {
       expect(resolveBoatPanelAction({ ...cloud, boatState })).toBe("busy-boat");
     }
-    // busy never unlocks the cloud when it is not available
     expect(resolveBoatPanelAction({ ...cloud, boatState: "ready", canUseCloud: false })).toBe("auto-unavailable");
-    // and Auto stays observation-only regardless of busy
     expect(resolveBoatPanelAction({ ...cloud, computer: undefined, boatState: "ready" })).toBe("show-ready-boat");
     expect(resolveBoatPanelAction({ ...cloud, computer: undefined, boatState: null, autoLocal: false })).toBe("auto-unavailable");
   });
 
-  it("never gives the box-native engine a passive Auto creation exception", () => {
-    // Engine kind intentionally is not an input: every engine follows the
-    // same read-only Auto rule, including boxAgent.
+  it("while it watches, spins only for a cloud computer that is really starting", () => {
+    expect(busyBoatView(null, true)).toEqual({ line: "computer.cloud.new", spinner: false });
+    expect(busyBoatView(null, false)).toEqual({ line: "computer.cloud.new", spinner: false });
+    for (const boatState of ["archived", "stopped"]) {
+      expect(busyBoatView(boatState, true)).toEqual({ line: "computer.cloud.asleep", spinner: false });
+      expect(busyBoatView(boatState, false)).toEqual({ line: "computer.cloud.asleep", spinner: false });
+    }
+    expect(busyBoatView("provisioning", true)).toEqual({ line: "computer.phase.busyBoat", spinner: true });
+    expect(busyBoatView("resuming", false)).toEqual({ line: "computer.phase.starting", spinner: true });
+  });
+
+  it("never gives any engine a passive Auto creation exception", () => {
     expect(resolveBoatPanelAction({
       computer: undefined,
       configured: true,
@@ -269,5 +280,35 @@ describe("local computer UI eligibility", () => {
       ...expected,
       persistedBot: { computer: undefined, cloudBackend: "box" },
     })).toBe(false);
+  });
+});
+
+describe("what the person reads about using this computer", () => {
+  const JARGON = /DevTools|CDP|profile[- ]access|grant\b|bind to|attach|endpoint|driver|\bCUA\b|Cua\b|Boat key|ACP|provider|Wayland|descriptor/i;
+  const host = (platform: DesktopCapabilities["host"]["platform"], label = "Desktop") => ({ platform, label }) as DesktopCapabilities["host"];
+  const reasons = [
+    localComputerDisabledReason({ capabilities: { host: host("darwin"), localComputer: { available: false } } as DesktopCapabilities, providerSupportsLocal: false }),
+    localComputerDisabledReason({ capabilities: { host: host("darwin"), localComputer: { available: false } } as DesktopCapabilities, providerSupportsLocal: true }),
+    localComputerDisabledReason({ capabilities: { host: host("win32"), localComputer: { available: false } } as DesktopCapabilities, providerSupportsLocal: true }),
+    localComputerDisabledReason({ capabilities: { host: host("other", "Browser"), localComputer: { available: false } } as DesktopCapabilities, providerSupportsLocal: true }),
+    ...["linux-wayland-seat-safety-blocked", "wayland-compositor-unsupported", "linux-hyprland-plugin-required", undefined].map((reasonCode) =>
+      localComputerDisabledReason({ capabilities: { host: host("linux"), localComputer: { available: false, enabled: reasonCode !== undefined, reasonCode } } as DesktopCapabilities, providerSupportsLocal: true })),
+    localComputerDisabledReason({ capabilities: { host: host("linux"), localComputer: { available: false, enabled: true } } as DesktopCapabilities, providerSupportsLocal: true }),
+  ];
+
+  it("says what to do in plain words, never the parts underneath", () => {
+    expect(reasons.every((reason) => typeof reason === "string" && reason.length > 0)).toBe(true);
+    for (const reason of reasons) expect(reason, reason!).not.toMatch(JARGON);
+    expect(reasons[3]).toBe("Only the MausBot app on this computer can let a bot use it. Open the app here to use it.");
+    expect(reasons[6]).toBe("Bots can use this computer on Omarchy once its Hyprland add-on is installed and turned on. Open Local control for the steps.");
+  });
+
+  it("keeps the same plain words in the questions and the place lines the app shows", () => {
+    const shown = Object.entries(en as Record<string, string>).filter(([key]) =>
+      key.startsWith("approval.yourComputer.") || key.startsWith("computer.problem.local") || key.startsWith("place.view.") || key.startsWith("place.action."));
+    expect(shown.length).toBeGreaterThan(40);
+    for (const [key, text] of shown) expect(text, key).not.toMatch(/DevTools|profile[- ]access|grant\b|bind to|\bCUA\b|Cua Driver|Boat key/i);
+    // Boat makes the cloud desktops, and is named where they are offered.
+    expect((en as Record<string, string>)["place.view.ccNeedsKey.line"]).toContain("from Boat");
   });
 });

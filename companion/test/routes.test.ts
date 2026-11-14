@@ -1,13 +1,6 @@
-// The allowlist.
-//
-// The proxy tests prove the app's own calls reach a real harness. These prove
-// the other half, which no end-to-end test can: that everything else does
-// not. The case worth caring about is the last one — a route nobody here has
-// heard of is denied, because that is the property the whole file exists for
-// and the one that quietly stopped being true once before.
 import { describe, expect, it } from "vitest";
 
-import { denyReason } from "../src/routes.ts";
+import { denyReason, isBrowserControlAccess, isCloudDesktopAccess, isCompanionNotice } from "../src/routes.ts";
 
 const ask = (method: string, path: string, authenticated = true) =>
   denyReason({ method, path, authenticated });
@@ -26,17 +19,18 @@ describe("credentials", () => {
 
   it("lets anyone curl liveness — it is the unauthenticated smoke test", () => {
     expect(ask("GET", "/api/health", false)).toBeNull();
-    // the bypass is one method on one path, not a family
     expect(ask("POST", "/api/health", false)?.status).toBe(401);
     expect(ask("GET", "/api/healthz", false)?.status).toBe(401);
   });
 });
 
 describe("what the app may do", () => {
-  // Every request in ios/Sources/CompanionCore/Client.swift. If one of these
-  // fails, a screen on the phone is broken.
+  // Every request the phone apps make: if one fails, a phone screen is broken.
   const calls: Array<[string, string]> = [
     ["GET", "/api/health"],
+    ["PUT", "/api/phones/self"],
+    ["GET", "/api/phones/self/jobs"],
+    ["POST", "/api/phones/self/jobs/j1/result"],
     ["GET", "/api/config"],
     ["GET", "/api/events"],
     ["GET", "/api/instances"],
@@ -46,18 +40,30 @@ describe("what the app may do", () => {
     ["GET", "/api/companion/endpoints"],
     ["GET", "/api/bots"],
     ["POST", "/api/bots"],
+    ["PATCH", "/api/bots/bot_123"],
+    ["DELETE", "/api/bots/bot_123"],
+    ["PUT", "/api/bots/order"],
     ["POST", "/api/sidebar-sections"],
     ["POST", "/api/bots/bot_123/messages"],
     ["PATCH", "/api/bots/bot_123/cards/msg_2"],
     ["POST", "/api/bots/bot_123/respond"],
     ["POST", "/api/bots/bot_123/interrupt"],
     ["DELETE", "/api/bots/bot_123/queue/queue_1"],
+    ["POST", "/api/bots/bot_123/queue/queue_1/steer"],
     ["POST", "/api/bots/bot_123/read"],
     ["POST", "/api/bots/bot_123/always-allow"],
     ["POST", "/api/bots/bot_123/messages/msg_2/edit"],
     ["GET", "/api/bots/bot_123/overview"],
+    ["GET", "/api/bots/bot_123/activity"],
+    ["GET", "/api/bots/bot_123/mcp-servers"],
+    ["GET", "/api/team-memory"],
+    ["POST", "/api/team-memory"],
+    ["PATCH", "/api/team-memory/entry_1"],
+    ["DELETE", "/api/team-memory/entry_1"],
     ["POST", "/api/bots/bot_123/active-branch"],
     ["POST", "/api/bots/bot_123/compact"],
+    ["POST", "/api/bots/bot_123/setup-request"],
+    ["DELETE", "/api/bots/bot_123/setup-request"],
     ["POST", "/api/bots/bot_123/tasks"],
     ["POST", "/api/bots/bot_123/tasks/th_1"],
     ["PATCH", "/api/bots/bot_123/tasks/th_1"],
@@ -70,9 +76,12 @@ describe("what the app may do", () => {
     ["POST", "/api/bots/bot_123/computer/control"],
     ["POST", "/api/bots/bot_123/computer/screenshot"],
     ["POST", "/api/bots/bot_123/computer/viewer-close"],
+    ["POST", "/api/bots/bot_123/local-computer/screenshot"],
+    ["POST", "/api/bots/bot_123/local-computer/join"],
     ["POST", "/api/groups/room-1/messages"],
     ["POST", "/api/groups/room-1/interrupt"],
     ["DELETE", "/api/groups/room-1/queue/queue_1"],
+    ["POST", "/api/groups/room-1/queue/queue_1/steer"],
     ["POST", "/api/groups/room-1/read"],
     ["POST", "/api/groups/room-1/tasks"],
     ["POST", "/api/groups/room-1/tasks/th_1"],
@@ -80,6 +89,11 @@ describe("what the app may do", () => {
     ["DELETE", "/api/groups/room-1/tasks/th_1"],
     ["GET", "/api/threads/th_1/messages"],
     ["GET", "/api/threads/th_1/messages/msg_2/image"],
+    ["GET", "/api/threads/th_1/messages/msg_2/tool"],
+    ["GET", "/api/threads/th_1/messages/msg_2/app"],
+    ["GET", "/api/threads/th_1/messages/msg_2/app/download"],
+    ["POST", "/api/bots/bot_123/apps/msg_2/rpc"],
+    ["POST", "/api/bots/bot_123/apps/msg_2/context"],
     ["POST", "/api/threads/th_1/messages/msg_2/file"],
     ["POST", "/api/threads/th_1/messages/msg_2/reactions"],
     ["GET", "/api/threads/th_1/export"],
@@ -88,10 +102,15 @@ describe("what the app may do", () => {
     ["POST", "/api/attachments"],
     ["GET", "/api/attachments/avatar-123.webp"],
     ["GET", "/api/attachments/voice-note-1.mp3"],
+    ["GET", "/api/attachments/voice-note-1.wav"],
     ["POST", "/api/files"],
     ["GET", "/api/tts/voices"],
     ["POST", "/api/tts/prepare"],
     ["POST", "/api/tts/speak"],
+    ["POST", "/api/live/session"],
+    ["POST", "/api/live/call/end"],
+    ["GET", "/api/live/call"],
+    ["PATCH", "/api/live/settings"],
     ["GET", "/api/routines"],
     ["POST", "/api/routines"],
     ["PATCH", "/api/routines/routine_1"],
@@ -99,6 +118,8 @@ describe("what the app may do", () => {
     ["POST", "/api/routines/routine_1/run"],
     ["POST", "/api/routine-runs/run_1/cancel"],
     ["POST", "/api/routine-runs/run_1/seen"],
+    // The stopped turn's "Continue when your limit resets" makes a one-time automation, like POST /api/routines.
+    ["POST", "/api/limit-resets/continue"],
     ["GET", "/api/connectors/catalog"],
     ["GET", "/api/connectors/connected"],
     ["GET", "/api/connectors"],
@@ -110,6 +131,9 @@ describe("what the app may do", () => {
     ["POST", "/api/bots/bot_123/connector-cards/msg_2/dismiss"],
     ["POST", "/api/bots/bot_123/secret-cards/msg_2/resume"],
     ["POST", "/api/bots/bot_123/secret-cards/msg_2/dismiss"],
+    ["POST", "/api/bots/bot_123/secret-cards/msg_2/save"],
+    ["POST", "/api/bots/bot_123/sign-in-cards/msg_3/done"],
+    ["POST", "/api/bots/bot_123/sign-in-cards/msg_3/cancel"],
   ];
 
   for (const [method, path] of calls) {
@@ -118,6 +142,11 @@ describe("what the app may do", () => {
 });
 
 describe("what it may not", () => {
+  it("does not list phones to a phone", () => {
+    expect(ask("GET", "/api/phones")?.status).toBe(404);
+    expect(ask("DELETE", "/api/phones/companion%3Ad1")?.status).toBe(404);
+  });
+
   it("refuses host configuration, and says where it happens", () => {
     for (const [method, path] of [
       ["PUT", "/api/config"],
@@ -144,6 +173,26 @@ describe("what it may not", () => {
     });
   });
 
+  it("reads a bot's MCP servers and nothing of MCP settings", () => {
+    expect(ask("GET", "/api/bots/bot_123/mcp-servers", false)?.status).toBe(401);
+    for (const [method, path] of [
+      ["POST", "/api/bots/bot_123/mcp-servers"],
+      ["PATCH", "/api/bots/bot_123/mcp-servers"],
+      ["PUT", "/api/bots/bot_123/mcp-servers"],
+      ["DELETE", "/api/bots/bot_123/mcp-servers"],
+      ["GET", "/api/bots/bot_123/mcp-servers/warehouse"],
+      ["GET", "/api/bots/bot_123/../mcp-servers"],
+      ["GET", "/api/mcp/servers"],
+      ["POST", "/api/mcp/servers"],
+      ["POST", "/api/mcp/servers/import"],
+      ["PATCH", "/api/mcp/servers/warehouse"],
+      ["POST", "/api/mcp/servers/warehouse/test"],
+      ["POST", "/api/mcp/servers/warehouse/sign-in"],
+    ] as Array<[string, string]>) {
+      expect(allowed(method, path), `${method} ${path}`).toBe(false);
+    }
+  });
+
   it("keeps endpoint refresh authenticated and exact-method only", () => {
     expect(ask("GET", "/api/companion/endpoints", false)?.status).toBe(401);
     expect(ask("GET", "/api/companion/endpoints")).toBeNull();
@@ -165,6 +214,15 @@ describe("what it may not", () => {
     }
     expect(ask("GET", "/api/routines")).toBeNull();
     expect(ask("POST", "/api/routines/routine_1/run")).toBeNull();
+  });
+
+  it("keeps the unpaired-phone notice for the companion alone", () => {
+    expect(ask("POST", "/api/live/device-revoked")?.status).toBe(404);
+    expect(ask("POST", "/api/live/device-revoked", false)?.status).toBe(401);
+    expect(isCompanionNotice("POST", "/api/live/device-revoked")).toBe(true);
+    expect(isCompanionNotice("GET", "/api/live/device-revoked")).toBe(false);
+    expect(isCompanionNotice("POST", "/api/live/device-revoked/x")).toBe(false);
+    expect(isCompanionNotice("POST", "/api/live/call/end")).toBe(false);
   });
 
   it("denies the peer-agent endpoints exist at all", () => {
@@ -190,6 +248,24 @@ describe("what it may not", () => {
     expect(allowed("POST", "/api/bots/bot_123/computer/exec")).toBe(false);
   });
 
+  it("previews a Local VM without reaching its lifecycle", () => {
+    expect(allowed("POST", "/api/bots/bot_123/local-computer/screenshot")).toBe(true);
+    expect(isCloudDesktopAccess("POST", "/api/bots/bot_123/local-computer/screenshot")).toBe(true);
+    expect(allowed("GET", "/api/bots/bot_123/local-computer/screenshot")).toBe(false);
+    expect(allowed("GET", "/api/bots/bot_123/local-computer")).toBe(false);
+    for (const action of ["run", "stop", "remove"]) {
+      expect(allowed("POST", `/api/bots/bot_123/local-computer/${action}`)).toBe(false);
+    }
+    expect(allowed("POST", "/api/local-computer/screenshot")).toBe(false);
+  });
+
+  it("joins a Local VM's live desktop only behind computer access", () => {
+    expect(allowed("POST", "/api/bots/bot_123/local-computer/join")).toBe(true);
+    expect(isCloudDesktopAccess("POST", "/api/bots/bot_123/local-computer/join")).toBe(true);
+    expect(allowed("GET", "/api/bots/bot_123/local-computer/join")).toBe(false);
+    expect(allowed("POST", "/api/local-computer/join")).toBe(false);
+  });
+
   it("allows only the exact encrypted credential submission verb", () => {
     expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/provide")).toBe(true);
     expect(allowed("GET", "/api/bots/bot_123/secret-cards/message_1/provide")).toBe(false);
@@ -197,16 +273,26 @@ describe("what it may not", () => {
     expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/provide/extra")).toBe(false);
   });
 
-  // The method is part of the allowance, not decoration: reading the fleet
-  // and deleting a bot are the same path.
+  it("allows a typed custom secret only through the exact save verb", () => {
+    expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/save")).toBe(true);
+    expect(allowed("GET", "/api/bots/bot_123/secret-cards/message_1/save")).toBe(false);
+    expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/save/extra")).toBe(false);
+    expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/saved")).toBe(false);
+  });
+
   it("allows a path only for the methods it was allowed for", () => {
     expect(allowed("GET", "/api/bots")).toBe(true);
-    expect(allowed("DELETE", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("DELETE", "/api/bots")).toBe(false);
     expect(allowed("POST", "/api/threads/th_1/messages")).toBe(false);
     expect(allowed("GET", "/api/threads/th_1/messages/msg_2/file")).toBe(false);
     expect(allowed("POST", "/api/threads/th_1/messages/msg_2/file/extra")).toBe(false);
     expect(allowed("GET", "/api/groups/room-1")).toBe(false);
-    expect(allowed("PATCH", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("GET", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("POST", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("PUT", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("PATCH", "/api/bots/bot_123/extra")).toBe(false);
+    expect(allowed("PATCH", "/api/bots/bot_123/../other")).toBe(false);
+    expect(ask("PATCH", "/api/bots/bot_123", false)?.status).toBe(401);
     expect(allowed("GET", "/api/bots/bot_123/model")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/model")).toBe(false);
     expect(allowed("PATCH", "/api/bots/bot_123/model/extra")).toBe(false);
@@ -224,16 +310,18 @@ describe("what it may not", () => {
     expect(allowed("POST", "/api/routine-runs/run_1/retry")).toBe(false);
     expect(allowed("DELETE", "/api/connectors/slack")).toBe(false);
     expect(allowed("GET", "/api/connectors/connected/all")).toBe(false);
-    // per-account removal is allowed (the server proves ownership before
-    // revoking); removing the whole service binding stays host-only
     expect(allowed("DELETE", "/api/connectors/slack/accounts/ca_123")).toBe(true);
     expect(allowed("DELETE", "/api/connectors/slack/accounts/../gmail")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/secret-cards/msg_2/provided")).toBe(false);
+    expect(allowed("POST", "/api/bots/bot_123/sign-in-cards/msg_3/resume")).toBe(false);
+    expect(allowed("GET", "/api/bots/bot_123/sign-in-cards/msg_3/done")).toBe(false);
     expect(allowed("PATCH", "/api/groups/room-1")).toBe(false);
+    expect(allowed("GET", "/api/limit-resets/continue")).toBe(false);
+    expect(allowed("DELETE", "/api/limit-resets/continue")).toBe(false);
+    expect(allowed("GET", "/api/limit-resets")).toBe(false);
+    expect(allowed("POST", "/api/limit-resets/after-reset")).toBe(false);
   });
 
-  // Patterns are anchored, so a path that merely starts right is still a
-  // path nobody allowed.
   it("lets a phone update Claude Code and change nothing else about engines", () => {
     for (const [method, path] of [
       ["GET", "/api/instances/claude/claude-update"],
@@ -246,6 +334,57 @@ describe("what it may not", () => {
     }
   });
 
+  it("allows only the four Live call routes, never the key", () => {
+    expect(ask("POST", "/api/live/summary")?.status).toBe(404);
+    expect(ask("PUT", "/api/config")?.status).toBe(403);
+    expect(allowed("PUT", "/api/live/settings")).toBe(false);
+    expect(allowed("GET", "/api/live/settings")).toBe(false);
+    expect(allowed("GET", "/api/live/session")).toBe(false);
+    expect(allowed("POST", "/api/live/call")).toBe(false);
+    expect(allowed("POST", "/api/live/call/end/extra")).toBe(false);
+  });
+
+  it("allows an app's document, rpc and context and nothing else of apps", () => {
+    for (const [method, path] of [
+      ["POST", "/api/threads/th_1/messages/msg_2/app"],
+      ["GET", "/api/bots/bot_123/apps/msg_2/rpc"],
+      ["GET", "/api/bots/bot_123/apps/msg_2/context"],
+      ["POST", "/api/bots/bot_123/apps/msg_2"],
+      ["POST", "/api/bots/bot_123/apps/msg_2/delete"],
+      ["POST", "/api/bots/bot_123/apps/msg_2/rpc/extra"],
+      ["POST", "/api/bots/bot_123/apps/../rpc"],
+      ["GET", "/api/threads/th_1/messages/msg_2/app/../../../config"],
+    ] as const) expect(allowed(method, path), `${method} ${path}`).toBe(false);
+  });
+
+  it("reads a bot's Data and nothing that runs, changes or exports it", () => {
+    expect(allowed("GET", "/api/bots/bot_123/data")).toBe(true);
+    expect(allowed("POST", "/api/bots/bot_123/data/page")).toBe(true);
+    expect(allowed("GET", "/api/bots/bot_123/data/cards/c_2/image")).toBe(true);
+    for (const [method, path] of [
+      ["POST", "/api/bots/bot_123/data/run"],
+      ["POST", "/api/bots/bot_123/data/cancel"],
+      ["POST", "/api/bots/bot_123/data/export"],
+      ["PATCH", "/api/bots/bot_123/data/cards/c_2"],
+      ["DELETE", "/api/bots/bot_123/data/cards/c_2"],
+      ["GET", "/api/bots/bot_123/data/tables/orders/stats"],
+      ["POST", "/api/bots/bot_123/data"],
+      ["GET", "/api/bots/bot_123/data/page"],
+      ["GET", "/api/bots/bot_123/data/cards/../../config"],
+      ["GET", "/api/bots/bot_123/data/cards/c_2/image/extra"],
+    ] as const) expect(ask(method, path)?.status, `${method} ${path}`).toBe(404);
+    expect(ask("GET", "/api/bots/bot_123/data", false)?.status).toBe(401);
+  });
+
+  it("lets a paired phone delete one bot, and nothing beside it", () => {
+    expect(allowed("DELETE", "/api/bots/bot_123")).toBe(true);
+    expect(allowed("DELETE", "/api/bots")).toBe(false);
+    expect(allowed("DELETE", "/api/bots/bot_123/extra")).toBe(false);
+    expect(allowed("DELETE", "/api/bots/../config")).toBe(false);
+    expect(allowed("GET", "/api/bots/bot_123")).toBe(false);
+    expect(ask("DELETE", "/api/bots/bot_123", false)?.status).toBe(401);
+  });
+
   it("is not fooled by a prefix", () => {
     expect(allowed("GET", "/api/bots/bot_123/computer")).toBe(false);
     expect(allowed("GET", "/api/botsandthensome")).toBe(false);
@@ -254,9 +393,6 @@ describe("what it may not", () => {
     expect(allowed("GET", "/api/bots%2f..%2fwebhooks")).toBe(false);
   });
 
-  // The one that matters. Upstream adds routes on its own schedule, and the
-  // sidecar must not carry them to a phone because nobody wrote a rule
-  // against a thing that did not exist yet.
   it("denies a route it has never heard of", () => {
     for (const path of [
       "/api/whatever-ships-next",
@@ -267,5 +403,30 @@ describe("what it may not", () => {
       expect(allowed("POST", path), path).toBe(false);
       expect(allowed("DELETE", path), path).toBe(false);
     }
+  });
+});
+
+describe("browser control", () => {
+  it("allows the live stream and the action channel, and nothing else under browser/", () => {
+    expect(allowed("GET", "/api/bots/b1/browser/live")).toBe(true);
+    expect(allowed("POST", "/api/bots/b1/browser/action")).toBe(true);
+    expect(allowed("POST", "/api/bots/b1/browser/live")).toBe(false);
+    expect(allowed("GET", "/api/bots/b1/browser/action")).toBe(false);
+    expect(allowed("POST", "/api/bots/b1/browser/restart")).toBe(false);
+    expect(allowed("GET", "/api/bots/b1/browser")).toBe(false);
+  });
+
+  it("classifies exactly the two routes as needing the browser capability", () => {
+    expect(isBrowserControlAccess("GET", "/api/bots/b1/browser/live")).toBe(true);
+    expect(isBrowserControlAccess("POST", "/api/bots/b1/browser/action")).toBe(true);
+    expect(isBrowserControlAccess("GET", "/api/bots/b1/messages")).toBe(false);
+    expect(isBrowserControlAccess("POST", "/api/bots/b1/computer/join")).toBe(false);
+    expect(isCloudDesktopAccess("GET", "/api/bots/b1/browser/live")).toBe(false);
+  });
+
+  it("anchors the bot id so a traversal cannot reach another route", () => {
+    expect(allowed("GET", "/api/bots/b1/browser/live/../../config")).toBe(false);
+    expect(allowed("GET", "/api/bots/b1/browser/live?x=1")).toBe(false);
+    expect(isBrowserControlAccess("GET", "/api/bots/b1/browser/live/extra")).toBe(false);
   });
 });

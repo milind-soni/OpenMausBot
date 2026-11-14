@@ -11,7 +11,10 @@ vi.mock("@/state/store", async (original) => ({
 }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
-import { DefaultResponderSelect, RoutedByLine, Transcript } from "./GroupView";
+import { Transcript } from "./GroupView";
+import { DefaultResponderSelect } from "./RoomHeader";
+import { Select } from "./Select";
+import { RoutedByLine } from "./RoomQueueList";
 
 const members = [
   { id: "maya", name: "Maya" },
@@ -50,7 +53,7 @@ describe("room responder selector", () => {
 
   it("switching a lead room to Auto keeps the lead as its fallback", () => {
     const tree = DefaultResponderSelect({ group: room({ kind: "member", botId: "theo" }), members });
-    const select = nodes(tree).find((node) => node.type === "select")!;
+    const select = nodes(tree).find((node) => node.type === Select)!;
     (select.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "auto" } });
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "patchGroup", groupId: "room", patch: { defaultResponder: { kind: "auto", fallbackBotId: "theo" } } });
   });
@@ -59,6 +62,10 @@ describe("room responder selector", () => {
 describe("routed-by line", () => {
   it("says Jev picked the speaker, with how sure it was", () => {
     expect(renderToStaticMarkup(createElement(RoutedByLine, { routedBy: { provider: "jev", probability: 0.94 } }))).toContain("Picked by Jev · 94%");
+  });
+
+  it("names OpenRouter when that provider picked the speaker", () => {
+    expect(renderToStaticMarkup(createElement(RoutedByLine, { routedBy: { provider: "openrouter", probability: 0.81 } }))).toContain("Picked by OpenRouter · 81%");
   });
 
   it("appears under a Jev-routed reply only", () => {

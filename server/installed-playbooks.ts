@@ -5,9 +5,6 @@ const MAX_RENDERED_CHARS = 24_000;
 
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
-/** Package playbooks are opt-in process guidance. Only playbooks whose
- * declared trigger appears in the current job are mounted; this keeps
- * unrelated package prose out of the bot's context. */
 export function selectInstalledPlaybooks(text: string, playbooks: InstalledPlaybook[] = []): InstalledPlaybook[] {
   const job = ` ${normalize(text)} `;
   return playbooks

@@ -4,8 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { StoreProvider, type Group, type Message } from "@/state/store";
 
-// Replaced whole: its context default reads window.ogb at import time. An
-// empty caption chrome is the non-Windows layout.
+const mode = vi.hoisted(() => ({ advanced: false }));
+vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => mode.advanced, setAdvancedMode: vi.fn() }));
+// Replaced whole: its context default reads window.ogb at import time.
 vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false } } }),
   useCaptionChrome: () => ({}),
@@ -71,19 +72,15 @@ describe("room header", () => {
     createdAt: 1, setupCompletedAt: 1, messages: [],
   };
 
-  it("wraps into a name line and a control line when the column is narrow", () => {
-    // On a phone, or with a panel beside the room, the control row cannot
-    // shrink: the room name truncated to nothing. Narrow, the header wraps
-    // instead, as the 1:1 chat header does; the room's controls never fold
-    // to icons, so it wraps below 48rem. The query lives on the
-    // container's child row: a container query never matches the container
-    // element itself.
+  it("wraps into a name line and a control line when the column is narrow in Advanced mode", () => {
     vi.stubGlobal("window", { ogb: undefined });
+    mode.advanced = true;
     let markup: string;
     try {
       markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(GroupView, { group: room })));
     } finally {
       vi.unstubAllGlobals();
+      mode.advanced = false;
     }
     expect(markup).toContain("@container/roomhead");
     const row = /data-roomhead-row="[^"]*" class="([^"]*)"/.exec(markup)!;

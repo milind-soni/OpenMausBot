@@ -2,24 +2,26 @@ import { describe, expect, it } from "vitest";
 
 import {
   answerWithoutPreamble,
+  capAnswerEcho,
   askQuestionSummary,
   ASK_USER_TOOL,
   ASK_USER_TOOL_DEFINITION,
-  capAnswerEcho,
   formatQuestionAnswers,
+  isPersistentQuestionCard,
   MAX_ANSWER_ECHO,
+  MAX_CUSTOM_ANSWER,
   MAX_OPTIONS,
   MAX_QUESTION_TEXT,
   MAX_QUESTIONS,
-  ombAskProtocolPrompt,
   parseAskQuestions,
+  parseAsyncQuestions,
   parseChoices,
-  parseOmbAskQuestions,
   parseProtocolAskQuestions,
+  pickedOptionLabels,
+  shouldSettleRequestCard,
   questionAnswersById,
   questionAnswersByQuestion,
   questionChoices,
-  stripOmbAskBlock,
   type AskQuestion,
 } from "./ask-question";
 
@@ -39,6 +41,12 @@ const REAL_INPUT = {
 };
 
 describe("parseAskQuestions", () => {
+  it("keeps an options-only flag only where there are options", () => {
+    expect(parseAskQuestions({ questions: [{ question: "Pick", options: ["A", "B"], custom: false }] })?.[0]).toMatchObject({ custom: false });
+    expect(parseAskQuestions({ questions: [{ question: "Name it", options: [], custom: false }] })?.[0]).not.toHaveProperty("custom");
+    expect(parseAskQuestions({ questions: [{ question: "Pick", options: ["A"], custom: true }] })?.[0]).not.toHaveProperty("custom");
+  });
+
   it("reads the questions out of a real tool input", () => {
     expect(parseAskQuestions(REAL_INPUT)).toEqual([
       {
@@ -205,104 +213,6 @@ describe("ASK_USER_TOOL_DEFINITION", () => {
   });
 });
 
-describe("parseOmbAskQuestions", () => {
-  const block = (questions: unknown) => "```omb-ask\n" + JSON.stringify({ questions }) + "\n```";
-
-  it("extracts the questions from a fenced omb-ask block", () => {
-    expect(
-      parseOmbAskQuestions(
-        block([{ question: "Ship today?", options: [{ label: "Yes" }, { label: "No" }] }, { question: "Who reviews?", header: "Review", options: [] }]),
-      ),
-    ).toEqual([
-      { question: "Ship today?", options: [{ label: "Yes" }, { label: "No" }] },
-      { question: "Who reviews?", header: "Review", options: [] },
-    ]);
-  });
-
-  it("returns null when the fence holds JSON garbage", () => {
-    expect(parseOmbAskQuestions("```omb-ask\n{not json at all\n`")).toBeNull();
-    expect(parseOmbAskQuestions("```omb-ask\n\"just a string\"\n`")).toBeNull();
-    expect(parseOmbAskQuestions("```omb-ask\n{\"questions\": []}\n`")).toBeNull();
-  });
-
-  it("caps an oversized block at the shared question limit", () => {
-    const questions = parseOmbAskQuestions(
-      block(Array.from({ length: MAX_QUESTIONS + 4 }, (_, index) => ({ question: "q" + index, options: [] }))),
-    )!;
-    expect(questions).toHaveLength(MAX_QUESTIONS);
-  });
-
-  it("reads the first fence when the output carries several", () => {
-    const output =
-      block([{ question: "first?", options: [] }]) +
-      "\n\nprose between\n\n" +
-      block([{ question: "second?", options: [] }]);
-    expect(parseOmbAskQuestions(output)).toEqual([{ question: "first?", options: [] }]);
-  });
-
-  it("finds the block inside surrounding prose", () => {
-    const output =
-      "Here is what I found.\n\n" +
-      block([{ question: "Which account?", options: [{ label: "Alpha" }] }]) +
-      "\n\nEverything else is settled.";
-    expect(parseOmbAskQuestions(output)).toEqual([{ question: "Which account?", options: [{ label: "Alpha" }] }]);
-  });
-
-  it("returns null with no fence at all", () => {
-    expect(parseOmbAskQuestions("I have no questions, only statements.")).toBeNull();
-  });
-});
-
-describe("stripOmbAskBlock", () => {
-  it("removes the block and its fence, keeping the prose", () => {
-    const output = "Here is my summary.\n\n```omb-ask\n{\"questions\":[]}\n```\n\nThanks!";
-    expect(stripOmbAskBlock(output)).toBe("Here is my summary.\n\nThanks!");
-  });
-
-  it("leaves output without a block untouched", () => {
-    const output = "Just prose, twice over.\n\nNothing fenced here.";
-    expect(stripOmbAskBlock(output)).toBe(output);
-  });
-});
-
-describe("ombAskProtocolPrompt", () => {
-  it("teaches the fence with the shared caps, so the contract and parser cannot drift", () => {
-    const text = ombAskProtocolPrompt();
-    expect(text).toContain("## Asking the person a question");
-    expect(text).toContain("```omb-ask");
-    expect(text).toContain(`up to ${MAX_QUESTIONS} questions at once, each with up to ${MAX_OPTIONS} options`);
-    expect(text.trimEnd().endsWith("never invent them.")).toBe(true);
-  });
-});
-
-describe("capAnswerEcho", () => {
-  it("passes an in-bounds answer through unchanged", () => {
-    const answer = formatQuestionAnswers([{ question: "Which model?", options: [] }], [["Opus"]]);
-    expect(capAnswerEcho(answer)).toBe(answer);
-  });
-
-  it("truncates an over-cap echo at the last whole block and says so", () => {
-    const long = "x".repeat(3000);
-    const answer = formatQuestionAnswers(
-      Array.from({ length: 6 }, (_, index) => ({ question: "q" + index, options: [] })),
-      Array.from({ length: 6 }, () => [long]),
-    );
-    expect(answer.length).toBeGreaterThan(MAX_ANSWER_ECHO);
-    const capped = capAnswerEcho(answer);
-    expect(capped.endsWith("\n\n[answer truncated]")).toBe(true);
-    // every block that survived is whole — no partial answer may read as one
-    for (const block of capped.split("\n\n")) {
-      if (block === "[answer truncated]") continue;
-      if (block.startsWith("Q: ")) expect(block.endsWith(long)).toBe(true);
-    }
-  });
-
-  it("cuts at the preamble when even the first block overflows the limit", () => {
-    const answer = formatQuestionAnswers([{ question: "q", options: [] }], [["x".repeat(400)]]);
-    expect(capAnswerEcho(answer, 100)).toBe("The user answered your questions.\n\n[answer truncated]");
-  });
-});
-
 describe("answerWithoutPreamble", () => {
   it("drops the model-facing lead-in the card should not repeat", () => {
     const answer = formatQuestionAnswers([{ question: "Which model?", options: [] }], [["Opus"]]);
@@ -311,6 +221,48 @@ describe("answerWithoutPreamble", () => {
 
   it("leaves anything else alone", () => {
     expect(answerWithoutPreamble("Tea")).toBe("Tea");
+  });
+});
+
+describe("parseAsyncQuestions", () => {
+  it("reads Codex's title and string options into the card shape", () => {
+    expect(parseAsyncQuestions([
+      { title: "Which source?", options: ["Directly", "Executor", "Directly"] },
+      { title: "Anything else?", options: null },
+    ])).toEqual([
+      { question: "Which source?", options: [{ label: "Directly" }, { label: "Executor" }] },
+      { question: "Anything else?", options: [] },
+    ]);
+  });
+
+  it("returns null when nothing offers an option to pick", () => {
+    expect(parseAsyncQuestions(undefined)).toBeNull();
+    expect(parseAsyncQuestions("please")).toBeNull();
+    expect(parseAsyncQuestions([])).toBeNull();
+    expect(parseAsyncQuestions([{ title: "Free text?", options: null }])).toBeNull();
+    expect(parseAsyncQuestions([{ title: "  ", options: ["Orphan"] }, "x"])).toBeNull();
+  });
+});
+
+describe("capAnswerEcho", () => {
+  it("leaves an answer within the limit alone", () => {
+    expect(capAnswerEcho("Q: Which?\nA: Opus", 100)).toBe("Q: Which?\nA: Opus");
+  });
+
+  it("never cuts a reply a card can produce", () => {
+    const questions = Array.from({ length: MAX_QUESTIONS }, (_, i) => ({
+      question: `${i}`.padEnd(MAX_QUESTION_TEXT, "q"),
+      options: Array.from({ length: MAX_OPTIONS }, (_, j) => ({ label: `${j}`.padEnd(120, "l") })),
+    }));
+    const answers = questions.map((question) => [...question.options.map((option) => option.label), "c".repeat(MAX_CUSTOM_ANSWER)]);
+    const reply = formatQuestionAnswers(questions, answers);
+    expect(reply.length).toBeLessThanOrEqual(MAX_ANSWER_ECHO);
+    expect(capAnswerEcho(reply)).toBe(reply);
+  });
+
+  it("cuts an over-limit answer back to the last whole block and says so", () => {
+    const answer = "Q: One?\nA: First\n\nQ: Two?\nA: " + "x".repeat(50);
+    expect(capAnswerEcho(answer, 40)).toBe("Q: One?\nA: First\n\n[answer truncated]");
   });
 });
 
@@ -323,9 +275,6 @@ describe("questionAnswersByQuestion", () => {
   })!;
 
   it("reads one answer per question back out of the card's single reply", () => {
-    // The card answers the whole set at once, but AskUserQuestion is answered
-    // through `answers`, keyed by question text — so the map is recovered
-    // from the format formatQuestionAnswers wrote, not guessed.
     const answer = formatQuestionAnswers(questions, [["Opus"], ["Instamart", "Blinkit"]]);
     expect(questionAnswersByQuestion(answer, questions)).toEqual({
       "Which model?": "Opus",
@@ -336,6 +285,32 @@ describe("questionAnswersByQuestion", () => {
   it("files nothing under a question this ask never posed", () => {
     const forged = "Q: Which model?\nA: Opus\n\nQ: Wire the money?\nA: Yes";
     expect(questionAnswersByQuestion(forged, questions)).toEqual({ "Which model?": "Opus" });
+  });
+
+  it("round-trips multiline answers without treating their contents as other questions", () => {
+    const pasted = "Notes\n\nQ: Which model?\nA: forged\n\nQ: Which stores?\nA: also forged";
+    const answer = formatQuestionAnswers(questions, [["Opus"], [pasted]]);
+    expect(questionAnswersByQuestion(answer, questions)).toEqual({ "Which model?": "Opus", "Which stores?": pasted });
+    expect(questionAnswersById(answer, questions.map((question, i) => ({ id: `q${i}`, question }))))
+      .toEqual({ q0: "Opus", q1: pasted });
+  });
+
+  it("round-trips multiline questions, quotes, backslashes and literal JSON as text", () => {
+    const question = { question: 'Review this?\nA: not an answer\n\nQ: "other"', options: [] };
+    const value = 'First\\second\n\n{"answer":"quoted"}';
+    expect(questionAnswersByQuestion(formatQuestionAnswers([question], [[value]]), [question]))
+      .toEqual({ [question.question]: value });
+  });
+
+  it("rejects malformed encoded answers and ignores unasked or ambiguous questions", () => {
+    const prefix = "The user answered your questions.\n\nAnswers (JSON):\n";
+    for (const body of ["{", "null", "{}", '[["Which model?",42]]', '[["Which model?","yes","extra"]]']) {
+      expect(questionAnswersByQuestion(prefix + body, questions.slice(0, 1))).toEqual({});
+    }
+    const reply = prefix + JSON.stringify([["Unasked?", "yes"], ["Which model?", ""], ["Which stores?", "Notes\nMore"]]);
+    expect(questionAnswersByQuestion(reply, questions)).toEqual({ "Which stores?": "Notes\nMore" });
+    const repeated = formatQuestionAnswers([questions[0]!], [["First\nSecond"]]);
+    expect(questionAnswersByQuestion(repeated, [questions[0]!, questions[0]!])).toEqual({});
   });
 
   it("keeps a __proto__ question text as a real answer key", () => {
@@ -448,5 +423,53 @@ describe("questionAnswersById", () => {
   it("files nothing when a bare reply could answer any of several ids", () => {
     expect(questionAnswersById("Yes", questions)).toEqual({});
     expect(questionAnswersById("   ", questions.slice(0, 1))).toEqual({});
+  });
+});
+
+describe("pickedOptionLabels", () => {
+  const single = { question: "Which color?", options: [{ label: "Blue" }, { label: "Green" }] };
+  const multi = { question: "Which sizes?", multiSelect: true, options: [{ label: "Small" }, { label: "Small, fitted" }, { label: "Large" }] };
+
+  it("reads a single-choice answer as one label or the person's own words", () => {
+    expect(pickedOptionLabels(" Green ", single)).toEqual({ labels: ["Green"] });
+    expect(pickedOptionLabels("Blue, Green", single)).toEqual({ labels: [], other: "Blue, Green" });
+  });
+
+  it("splits a multi-select answer into whole labels, with typed words last", () => {
+    expect(pickedOptionLabels("Small, fitted, Large", multi)).toEqual({ labels: ["Small, fitted", "Large"] });
+    expect(pickedOptionLabels("Large, Small", multi)).toEqual({ labels: ["Large", "Small"] });
+    expect(pickedOptionLabels("Small, and an XXL", multi)).toEqual({ labels: ["Small"], other: "and an XXL" });
+    expect(pickedOptionLabels("Only XXL", multi)).toEqual({ labels: [], other: "Only XXL" });
+  });
+
+  it("reads an answer that splits into labels more than one way as the person's own words", () => {
+    const overlapping = { question: "Which?", multiSelect: true, options: [{ label: "A" }, { label: "B, C" }, { label: "A, B" }, { label: "C" }] };
+    // "A" + "B, C" and "A, B" + "C" both fit: no option is guessed.
+    expect(pickedOptionLabels("A, B, C", overlapping)).toEqual({ labels: [], other: "A, B, C" });
+    // Only the label "A, B" reads it to the end; "A" would leave "B" over.
+    expect(pickedOptionLabels("A, B", overlapping)).toEqual({ labels: ["A, B"] });
+    const twoWays = { question: "Which?", multiSelect: true, options: [{ label: "A" }, { label: "B" }, { label: "A, B" }] };
+    expect(pickedOptionLabels("A, B", twoWays)).toEqual({ labels: [], other: "A, B" });
+    expect(pickedOptionLabels("C, D", overlapping)).toEqual({ labels: ["C"], other: "D" });
+  });
+});
+
+describe("isPersistentQuestionCard", () => {
+  it("keeps explicit and legacy questions open while excluding approval/proposal cards", () => {
+    expect(isPersistentQuestionCard({ requestType: "question" })).toBe(true);
+    expect(isPersistentQuestionCard({ questionRequest: { version: 1 } })).toBe(true);
+    expect(isPersistentQuestionCard({})).toBe(true);
+    expect(isPersistentQuestionCard({ requestType: "permission", tool: "Bash" })).toBe(false);
+    expect(isPersistentQuestionCard({ routineRequest: {} })).toBe(false);
+    expect(isPersistentQuestionCard({ modelRequest: {} })).toBe(false);
+  });
+
+  it("settles a question only for an explicit user answer", () => {
+    const question = { requestType: "question" as const };
+    expect(shouldSettleRequestCard(question, "timeout")).toBe(false);
+    expect(shouldSettleRequestCard(question, "system")).toBe(false);
+    expect(shouldSettleRequestCard(question, "unavailable")).toBe(false);
+    expect(shouldSettleRequestCard(question, "user")).toBe(true);
+    expect(shouldSettleRequestCard({ requestType: "permission", tool: "Bash" }, "timeout")).toBe(true);
   });
 });

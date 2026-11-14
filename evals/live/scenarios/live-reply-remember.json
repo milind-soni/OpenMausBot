@@ -1,0 +1,37 @@
+{
+  "id": "live-reply-remember",
+  "title": "Live: \"remember\" is confirmed at once in plain words",
+  "behavior": "Against a real model, a request to remember two preferences is saved and confirmed in one plain line, naming no file or tool.",
+  "bots": [
+    {
+      "key": "helper",
+      "name": "Helper"
+    }
+  ],
+  "steps": [
+    {
+      "kind": "send",
+      "bot": "helper",
+      "text": "Remember: I prefer short answers and I'm in India (IST)."
+    },
+    {
+      "kind": "waitForTurns",
+      "bot": "helper",
+      "count": 1
+    }
+  ],
+  "invariants": [
+    {
+      "kind": "sendNotQueued",
+      "bot": "helper"
+    },
+    {
+      "kind": "botReplied",
+      "bot": "helper",
+      "thread": "active"
+    }
+  ],
+  "judged": {
+    "prompt": "reply-habits-v1"
+  }
+}

@@ -1,0 +1,254 @@
+import { RuntimeCoordinator } from "./runtime-coordinator.ts";
+import type { WorkOrigin } from "./peer-provenance.ts";
+import type { LegacyThreadResolver } from "./runtime/import-legacy.ts";
+import type { Answerer, Assignment, EnvelopeNames, Level, Limits, Mode, Origin, Outcome, Owner, Reply, Requester, StatusView, TurnEvidence } from "./runtime/types.ts";
+import type { ModelSelection } from "../shared/wire.ts";
+
+/** One coordinate_bots call, as the internal route hands it to the server. */
+export type CoordinateBotsCall = {
+  groupId?: string;
+  botIds: string[];
+  message: string;
+  reason?: string;
+  rework: boolean;
+  /** "standing" (the conversation's one work thread with each teammate), "new", or the id of a thread the caller opened on
+   * that teammate. */
+  thread: string;
+  reply: "resume" | "none";
+  consult: boolean;
+  inMyFolder?: boolean;
+  doneWhen?: string;
+  title?: string;
+  projectId?: string;
+  /** The assignment whose question the message answers, instead of new work. */
+  answers?: string;
+  /** start_thread's report_back: the one target is the sender's own new thread, run on this model. */
+  ownThread?: { modelSelection?: ModelSelection; approvalMode?: "ask" };
+  /** post_to_thread: one message into this existing thread; wake starts a run there, else it waits for the next one. */
+  post?: { deliveryId: string; wake: boolean };
+};
+
+export type { LegacyThreadResolver };
+
+export type HandoffStatus = "source" | "queued" | "running" | "waiting" | "resume" | "completed" | "failed" | "cancelled";
+
+export interface HandoffView {
+  id: string;
+  rootId: string;
+  parentId?: string;
+  groupId?: string;
+  threadId: string;
+  botId: string;
+  key: string;
+  text: string;
+  createdAt: number;
+  requestBatchKey?: string;
+  /** Its reply only acknowledged (runtime/status-reply.ts). */
+  statusOnly?: boolean;
+  status: HandoffStatus;
+  result: string;
+  reported: boolean;
+  executions: number;
+  startedAt?: number;
+  lastProgressAt?: number;
+  kind: "work" | "assignment";
+  origin?: WorkOrigin;
+  restarts: number;
+  restart?: "rerun" | "cut" | "teammates";
+  /** work: do it; consult: answer, act on nothing; notify: one-way. */
+  mode: Mode;
+  /** resume: the requester is woken; poll: it reads its inbox; none: nothing comes back. */
+  reply: Reply;
+  outcome?: Outcome;
+  outcomeDetail?: string;
+  question?: string;
+  /** Parked at Full access on a question its requester answers, not the person (`Assignment.decide`). */
+  decide?: { default?: string };
+  /** The answer its next turn carries, and who gave it when the person did not. */
+  answer?: string;
+  answeredBy?: Answerer;
+  /** While its turn runs: the teammates' questions that turn was resumed with. */
+  carrying?: string[];
+  cards?: string[];
+  continuation?: { note: string; handoffPath?: string; count: number };
+  goalRunId?: string;
+}
+
+export interface BeginTurnRequest {
+  id: string;
+  address: RoomAddress;
+  brief: string;
+  level: Level;
+  opener?: HandoffOpener;
+  origin?: WorkOrigin;
+  goalRunId?: string;
+}
+
+/** `cap` continues the same node in place (a step cap, a seat it could not get); `cards` parks it on the person. */
+export interface HostTurnResult {
+  ok: boolean;
+  text: string;
+  evidence?: TurnEvidence;
+  cap?: { note: string; handoffPath?: string };
+  cards?: { question: string; ids: string[] };
+  /** The question it ends on stayed in one person's private chat: only that person can answer it. */
+  privateQuestion?: boolean;
+  /** An approval this turn asked for went unanswered: handed-off work a person started parks on this question. Never a grant. */
+  approvalAsk?: string;
+  /** The host's stall watchdog stopped the turn, including a room turn a stall ended during setup, before it had an
+   * outcome: it failed as `stalled`, not as a provider error. */
+  stalled?: boolean;
+}
+
+export interface HandoffOpener {
+  requester: Requester;
+  origin: Origin;
+}
+
+export interface HandoffOptions {
+  mode?: Mode;
+  reply?: Reply;
+  thread?: "standing" | "new";
+  rework?: boolean;
+  requestBatchKey?: string;
+  /** One call handing the same work to several teammates: it counts once against the request budget. */
+  fanOut?: string;
+  doneWhen?: string;
+  /** The target is a new thread of the requester's own bot (start_thread with report_back). */
+  ownThread?: boolean;
+}
+
+export type RoomAddress = Pick<HandoffView, "groupId" | "threadId" | "botId">;
+
+/** `note` is `text` without the brief, for a room whose transcript already has the words; `restartNote` already leads `text`. */
+export interface ComposedTurn {
+  text: string;
+  note: string;
+  restartNote: string;
+  turn: "first" | "resume" | "rerun" | "answered" | "continued";
+}
+
+export interface LiveHandoffEdge {
+  sourceBotId: string;
+  targetBotId: string;
+  state: "queued" | "running";
+  threadId: string;
+  groupId?: string;
+}
+
+/** Every method may throw; the runtime logs a throw and reads it as "not now". */
+export interface CoordinatorHost {
+  /** Recheck addresses and route permission immediately before every dispatch. */
+  validate(node: HandoffView, parent?: HandoffView): string | undefined;
+  busy(node: HandoffView): boolean;
+  /** Why a busy node waits, in words for the record. */
+  holdReason?(node: HandoffView): string;
+  /** For a root this is the person's own conversation continuing: person-visible, never internal. */
+  run(node: HandoffView, resumed: boolean, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult>;
+  report(child: HandoffView, parent?: HandoffView): void;
+  changed(groupIds: ReadonlySet<string>, directThreadIds: ReadonlySet<string>): void;
+  names(node: HandoffView, parent?: HandoffView): EnvelopeNames;
+  /** `restored` shows the question again only if the first showing never happened; a root parked on its own cards shows nothing more. */
+  park(node: HandoffView, question: string, restored?: boolean): void;
+  /** Handed-off work has waited a day on the person; it closes at `closesAt` if nobody answers. Called once for each wait. */
+  remind?(node: HandoffView, closesAt: number): void;
+  /** The level the target thread will really run with, so the envelope states the truth, and, when that came down a Chief's
+   * chain, the Chief conversation's level. A Chief's level flows into a room with the hand-off, never onto the shared thread,
+   * so it resolves from `source`, the requester's node, whose parents lead up the chain. */
+  levelOf(target: RoomAddress, source?: HandoffView): { level: Level; chief?: Level; driverKind?: string };
+  chiefOf(address: RoomAddress): boolean;
+  /** What the cut turn already did outward (sent, posted, paid): a turn that acted outward is not run again. */
+  outward?(node: HandoffView): string[];
+  /** Whether `joiner`'s requester may read the answer `first` gives its own (the same people see both conversations),
+   * so the same request from two teammates is answered once. Absent: never. */
+  shareAnswer?(first: HandoffView, joiner: HandoffView): boolean;
+  /** `node` waits for `first`'s answer instead of running its own turn (only ever a request outside a room). */
+  joined?(node: HandoffView, first: HandoffView): void;
+  /** One word from a small model about a teammate's reply (runtime/status-reply.ts), on `requesterBotId`'s own engine: the
+   * requester's turn is what the answer may save, and the teammate's engine is busy with the teammate's work. Absent,
+   * undefined or a throw: the requester wakes. */
+  statusReply?(requesterBotId: string, prompt: string, signal: AbortSignal): Promise<string | undefined>;
+}
+
+export interface Coordinator {
+  node(id: string): HandoffView | undefined;
+  /** The conversation the running assignment `id` may answer with a one-way notice: its requester, when it was handed
+   * with reply none outside rooms. */
+  answersTo(id: string): { botId: string; threadId: string } | undefined;
+  has(id: string): boolean;
+  all(): HandoffView[];
+  active(): HandoffView[];
+  children(id: string): HandoffView[];
+  /** A generation with no root is refused; throws an Error whose message is the typed refusal shown to the model. */
+  enqueue(source: RoomAddress, generation: string, parentId: string | undefined, target: RoomAddress, text: string,
+    options?: HandoffOptions): { node: HandoffView; duplicate: boolean };
+  status(id: string): StatusView | undefined;
+  /** Every assignment this conversation was given that was open at `since` or began after, with all handed out under it; rows oldest first. */
+  job(threadId: string, since: number, botId?: string): { scopes: string[]; rows: Assignment[] };
+  /** Undelivered inbox items for a polling requester, marked delivered. */
+  poll(owner: Owner): { items: StatusView["inbox"]; assignments: HandoffView[] };
+  /** Non-terminal work the conversation in this thread is waiting on, rooms included. */
+  outstandingFor(threadId: string): HandoffView[];
+  /** Running assignments whose turn happens in this thread; reads only that thread's rows, so it stays cheap to ask often. */
+  runningIn(threadId: string): HandoffView[];
+  beginTurn(req: BeginTurnRequest): HandoffView;
+  endTurn(id: string, result: HostTurnResult): void;
+  /** The parked node's next turn carries `text`, given by the person unless `by` says otherwise. */
+  answerNode(id: string, text: string, by?: Answerer): boolean;
+  answerRoot(id: string, text: string): boolean;
+  /** Live nodes assigned to this bot that are parked on the person or on their requester. */
+  parkedFor(botId: string): HandoffView[];
+  parkedDirect(threadId: string): HandoffView | undefined;
+  /** A newer card replaced `from`: work parked on it in this conversation waits on `to`. */
+  followCard(threadId: string, from: string, to: string): void;
+  /** Nothing can answer what this parked work waits on any more: it ends, and whoever waits on it hears why. */
+  releaseParked(id: string, reason: string): void;
+  prune(before: number): number;
+  sharedRequest(node: HandoffView): { id: string; botIds: string[] };
+  cancelRoom(groupId: string, threadId?: string, reason?: string, status?: "failed" | "cancelled"): void;
+  cancelDirect(threadId: string, reason?: string): void;
+  activeDirect(threadId: string): boolean;
+  assignerOf(threadId: string): HandoffView | undefined;
+  outstandingDirect(threadId: string): HandoffView[];
+  /** Direct conversations whose turn waits on teammates: an open handoff it made that owes a reply, or a root parked to resume with no question for the person. */
+  awaitingTeammateThreads(): Set<string>;
+  liveEdges(): LiveHandoffEdge[];
+  /** The conversation stopped: its work and everything that work handed out end, and nothing resumes it. */
+  stopAwaitingDirect(threadId: string, reason?: string): void;
+  /** The next start goes on with this thread's turn, so a shutdown's "cut" line would be false. */
+  continuesAfterRestart(threadId: string): boolean;
+  note(id: string): string | undefined;
+  tick(): void;
+  /** How soon the next tick() matters (Runtime.pace). */
+  pace(): "busy" | "parked" | "idle";
+  close(): void;
+  progress(threadId: string): void;
+  /** What the turn this thread is running waits for, for the record. */
+  held(threadId: string, why: string): void;
+  /** True when a parked assignment took the text as its answer: the host must not start an ordinary turn. */
+  answer(threadId: string, text: string): boolean;
+  awaitingAnswer(threadId: string): boolean;
+}
+
+/** A plan's limit on handing out work. */
+export interface HandoffLimit {
+  /** Why handing work to this bot is refused now, in words for the model that asked; null when it may go. `open` counts the
+   * hand-offs not yet ended. */
+  refusal(botId: string, open: () => number): string | null;
+}
+
+export interface CoordinatorOptions {
+  dataDir: string;
+  host: CoordinatorHost;
+  handoffLimit?: HandoffLimit;
+  now?: () => number;
+  runtimeLimits?: Partial<Limits>;
+  log?: (line: string) => void;
+  legacyThreads?: LegacyThreadResolver;
+  /** After every write to the assignment store, so a host that ticks only when work is due can tick again. */
+  wrote?: () => void;
+}
+
+export function createCoordinator(options: CoordinatorOptions): Coordinator {
+  return new RuntimeCoordinator(options);
+}

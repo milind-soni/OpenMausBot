@@ -1,7 +1,3 @@
-// Shared field styling and a labeled-field wrapper for the bot settings
-// dialog's sections — moved out of SettingsPanel so section files can be
-// verbatim moves. Plain .ts (no JSX) so createElement is used directly;
-// SoulField.tsx imports inputCls from here rather than keeping its own copy.
 import { createElement, type ReactNode } from "react";
 
 export const inputCls =

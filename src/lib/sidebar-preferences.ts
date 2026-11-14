@@ -1,21 +1,30 @@
+import { useSyncExternalStore } from "react";
 import { z } from "zod";
 
-export type SidebarDensity = "comfortable" | "compact" | "icons";
+/** The sidebar as it is, or "icons": the column of avatars the person dragged its edge down to. */
+export type SidebarDensity = "comfortable" | "icons";
+export type SidebarToolsLayout = "rows" | "toolbar";
+
+export const SIDEBAR_TOOLS_LAYOUTS: readonly SidebarToolsLayout[] = ["rows", "toolbar"];
 
 export const SIDEBAR_DENSITY_KEY = "openmausbot.sidebarDensity";
+export const SIDEBAR_TOOLS_LAYOUT_KEY = "openmausbot.sidebarToolsLayout";
+export const SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth";
+export const SIMPLE_SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth.simple";
 export const SIDEBAR_ATTENTION_PINNED_KEY = "openmausbot.sidebarAttentionPinned.v1";
 export const SIDEBAR_COLLAPSED_SECTIONS_KEY = "openmausbot.sidebarCollapsedSections.v1";
 export const SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.v1";
+export const SIMPLE_SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.simple.v1";
+export const PINNED_CIRCLES_KEY = "openmausbot.pinnedCircles";
+export const UNIVERSAL_PINS_KEY = "openmausbot.universalPins";
+export const PINNED_CIRCLE_ORDER_KEY = "openmausbot.pinnedCircleOrder.v1";
+
+/** What the sidebar's key keeps for the column of avatars. The values an older app kept there ("compact", "icons") open
+ * the sidebar as it is. */
+const AVATARS = "avatars";
 
 export function parseSidebarDensity(value: string | null): SidebarDensity {
-  switch (value) {
-    case "comfortable":
-    case "compact":
-    case "icons":
-      return value;
-    default:
-      return "comfortable";
-  }
+  return value === AVATARS ? "icons" : "comfortable";
 }
 
 export function loadSidebarDensity(storage?: Pick<Storage, "getItem"> | null): SidebarDensity {
@@ -33,10 +42,155 @@ export function saveSidebarDensity(
 ): void {
   try {
     const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
-    target?.setItem(SIDEBAR_DENSITY_KEY, density);
+    target?.setItem(SIDEBAR_DENSITY_KEY, density === "icons" ? AVATARS : density);
   } catch {
-    // Private browsing and locked-down webviews may reject localStorage.
-    // The in-memory React state still makes the control useful this session.
+  }
+}
+
+export function parseSidebarToolsLayout(value: string | null): SidebarToolsLayout {
+  switch (value) {
+    case "rows":
+    case "toolbar":
+      return value;
+    default:
+      return "rows";
+  }
+}
+
+export function loadSidebarToolsLayout(storage?: Pick<Storage, "getItem"> | null): SidebarToolsLayout {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    return parseSidebarToolsLayout(target?.getItem(SIDEBAR_TOOLS_LAYOUT_KEY) ?? null);
+  } catch {
+    return "rows";
+  }
+}
+
+export function saveSidebarToolsLayout(
+  layout: SidebarToolsLayout,
+  storage?: Pick<Storage, "setItem"> | null,
+): void {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    target?.setItem(SIDEBAR_TOOLS_LAYOUT_KEY, layout);
+  } catch {
+  }
+}
+
+let densitySessionChoice: SidebarDensity | undefined;
+const densityListeners = new Set<() => void>();
+
+function currentSidebarDensity(): SidebarDensity {
+  return densitySessionChoice ?? loadSidebarDensity();
+}
+
+function notifyDensity() {
+  for (const listener of densityListeners) listener();
+}
+
+function onDensityStorage(event: StorageEvent) {
+  if (event.key !== SIDEBAR_DENSITY_KEY && event.key !== null) return;
+  try {
+    if (event.storageArea && event.storageArea !== globalThis.localStorage) return;
+  } catch {
+    return;
+  }
+  densitySessionChoice = undefined;
+  notifyDensity();
+}
+
+function subscribeDensity(listener: () => void): () => void {
+  densityListeners.add(listener);
+  if (densityListeners.size === 1 && typeof window !== "undefined") {
+    window.addEventListener("storage", onDensityStorage);
+  }
+  return () => {
+    densityListeners.delete(listener);
+    if (densityListeners.size === 0 && typeof window !== "undefined") {
+      window.removeEventListener("storage", onDensityStorage);
+    }
+  };
+}
+
+export function setSidebarDensity(density: SidebarDensity): void {
+  densitySessionChoice = density;
+  saveSidebarDensity(density);
+  notifyDensity();
+}
+
+export function useSidebarDensity(): SidebarDensity {
+  return useSyncExternalStore(subscribeDensity, currentSidebarDensity, () => "comfortable");
+}
+
+let toolsLayoutSessionChoice: SidebarToolsLayout | undefined;
+const toolsLayoutListeners = new Set<() => void>();
+
+function currentSidebarToolsLayout(): SidebarToolsLayout {
+  return toolsLayoutSessionChoice ?? loadSidebarToolsLayout();
+}
+
+function notifyToolsLayout() {
+  for (const listener of toolsLayoutListeners) listener();
+}
+
+function onToolsLayoutStorage(event: StorageEvent) {
+  if (event.key !== SIDEBAR_TOOLS_LAYOUT_KEY && event.key !== null) return;
+  try {
+    if (event.storageArea && event.storageArea !== globalThis.localStorage) return;
+  } catch {
+    return;
+  }
+  toolsLayoutSessionChoice = undefined;
+  notifyToolsLayout();
+}
+
+export function subscribeSidebarToolsLayout(listener: () => void): () => void {
+  toolsLayoutListeners.add(listener);
+  if (toolsLayoutListeners.size === 1 && typeof window !== "undefined") {
+    window.addEventListener("storage", onToolsLayoutStorage);
+  }
+  return () => {
+    toolsLayoutListeners.delete(listener);
+    if (toolsLayoutListeners.size === 0 && typeof window !== "undefined") {
+      window.removeEventListener("storage", onToolsLayoutStorage);
+    }
+  };
+}
+
+export function setSidebarToolsLayout(layout: SidebarToolsLayout): void {
+  toolsLayoutSessionChoice = layout;
+  saveSidebarToolsLayout(layout);
+  notifyToolsLayout();
+}
+
+export function useSidebarToolsLayout(): SidebarToolsLayout {
+  return useSyncExternalStore(subscribeSidebarToolsLayout, currentSidebarToolsLayout, () => "rows");
+}
+
+/** The narrowest the open sidebar gets. */
+export const SIDEBAR_MIN_WIDTH = 240;
+
+export function clampSidebarWidth(width: number, viewportWidth: number, max = 480): number {
+  return Math.max(SIDEBAR_MIN_WIDTH, Math.min(max, viewportWidth - 320, Math.round(width)));
+}
+
+export function loadSidebarWidth(storage?: Pick<Storage, "getItem"> | null, key = SIDEBAR_WIDTH_KEY): number | null {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    const raw = target?.getItem(key);
+    if (raw === null || raw === undefined || !/^\d+$/.test(raw)) return null;
+    const width = Number(raw);
+    return width >= SIDEBAR_MIN_WIDTH && width <= 480 ? width : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSidebarWidth(width: number, storage?: Pick<Storage, "setItem"> | null, key = SIDEBAR_WIDTH_KEY): void {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    target?.setItem(key, String(width));
+  } catch {
   }
 }
 
@@ -61,10 +215,170 @@ export function saveSidebarAttentionPinned(
     const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
     target?.setItem(SIDEBAR_ATTENTION_PINNED_KEY, String(pinned));
   } catch {
-    // Private browsing and locked-down webviews may reject localStorage.
-    // The in-memory React state still makes the control useful this session.
   }
 }
+
+export function parsePinnedCircles(value: string | null): boolean {
+  return value === "true";
+}
+
+let sessionPinnedCircles: boolean | undefined;
+const pinnedCircleListeners = new Set<() => void>();
+
+function notifyPinnedCircles(): void {
+  for (const listener of pinnedCircleListeners) listener();
+}
+
+function onPinnedCirclesStorage(event: StorageEvent): void {
+  if (event.key !== PINNED_CIRCLES_KEY && event.key !== null) return;
+  sessionPinnedCircles = undefined;
+  notifyPinnedCircles();
+}
+
+export function subscribePinnedCircles(listener: () => void): () => void {
+  pinnedCircleListeners.add(listener);
+  if (
+    pinnedCircleListeners.size === 1 &&
+    typeof window !== "undefined" &&
+    typeof window.addEventListener === "function"
+  ) {
+    window.addEventListener("storage", onPinnedCirclesStorage);
+  }
+  return () => {
+    pinnedCircleListeners.delete(listener);
+    if (
+      pinnedCircleListeners.size === 0 &&
+      typeof window !== "undefined" &&
+      typeof window.removeEventListener === "function"
+    ) {
+      window.removeEventListener("storage", onPinnedCirclesStorage);
+    }
+  };
+}
+
+export function loadPinnedCircles(storage?: Pick<Storage, "getItem"> | null): boolean {
+  if (storage === undefined && sessionPinnedCircles !== undefined) return sessionPinnedCircles;
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    return parsePinnedCircles(target?.getItem(PINNED_CIRCLES_KEY) ?? null);
+  } catch {
+    return false;
+  }
+}
+
+export function savePinnedCircles(
+  enabled: boolean,
+  storage?: Pick<Storage, "setItem"> | null,
+): void {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    target?.setItem(PINNED_CIRCLES_KEY, enabled ? "true" : "false");
+  } catch {
+  }
+}
+
+export function setPinnedCircles(enabled: boolean): void {
+  sessionPinnedCircles = enabled;
+  savePinnedCircles(enabled);
+  notifyPinnedCircles();
+}
+
+export function usePinnedCircles(): boolean {
+  return useSyncExternalStore(subscribePinnedCircles, loadPinnedCircles, () => false);
+}
+
+let sessionPinnedCircleOrder: string[] | undefined;
+const pinnedCircleOrderListeners = new Set<() => void>();
+
+function subscribePinnedCircleOrder(listener: () => void): () => void {
+  pinnedCircleOrderListeners.add(listener);
+  return () => { pinnedCircleOrderListeners.delete(listener); };
+}
+
+export function loadPinnedCircleOrder(storage?: Pick<Storage, "getItem"> | null): string[] {
+  return loadStringList(PINNED_CIRCLE_ORDER_KEY, storage);
+}
+
+export function setPinnedCircleOrder(ids: string[], storage?: Pick<Storage, "setItem"> | null): void {
+  sessionPinnedCircleOrder = saveStringList(PINNED_CIRCLE_ORDER_KEY, ids, storage);
+  for (const listener of pinnedCircleOrderListeners) listener();
+}
+
+const currentPinnedCircleOrder = (): string[] => (sessionPinnedCircleOrder ??= loadPinnedCircleOrder());
+
+export function usePinnedCircleOrder(): string[] {
+  return useSyncExternalStore(subscribePinnedCircleOrder, currentPinnedCircleOrder, currentPinnedCircleOrder);
+}
+
+export function parseUniversalPins(value: string | null): boolean {
+  return value === "true";
+}
+
+let sessionUniversalPins: boolean | undefined;
+const universalPinListeners = new Set<() => void>();
+
+function notifyUniversalPins(): void {
+  for (const listener of universalPinListeners) listener();
+}
+
+function onUniversalPinsStorage(event: StorageEvent): void {
+  if (event.key !== UNIVERSAL_PINS_KEY && event.key !== null) return;
+  sessionUniversalPins = undefined;
+  notifyUniversalPins();
+}
+
+export function subscribeUniversalPins(listener: () => void): () => void {
+  universalPinListeners.add(listener);
+  if (
+    universalPinListeners.size === 1 &&
+    typeof window !== "undefined" &&
+    typeof window.addEventListener === "function"
+  ) {
+    window.addEventListener("storage", onUniversalPinsStorage);
+  }
+  return () => {
+    universalPinListeners.delete(listener);
+    if (
+      universalPinListeners.size === 0 &&
+      typeof window !== "undefined" &&
+      typeof window.removeEventListener === "function"
+    ) {
+      window.removeEventListener("storage", onUniversalPinsStorage);
+    }
+  };
+}
+
+export function loadUniversalPins(storage?: Pick<Storage, "getItem"> | null): boolean {
+  if (storage === undefined && sessionUniversalPins !== undefined) return sessionUniversalPins;
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    return parseUniversalPins(target?.getItem(UNIVERSAL_PINS_KEY) ?? null);
+  } catch {
+    return false;
+  }
+}
+
+export function saveUniversalPins(
+  enabled: boolean,
+  storage?: Pick<Storage, "setItem"> | null,
+): void {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    target?.setItem(UNIVERSAL_PINS_KEY, enabled ? "true" : "false");
+  } catch {
+  }
+}
+
+export function setUniversalPins(enabled: boolean): void {
+  sessionUniversalPins = enabled;
+  saveUniversalPins(enabled);
+  notifyUniversalPins();
+}
+
+export function useUniversalPins(): boolean {
+  return useSyncExternalStore(subscribeUniversalPins, loadUniversalPins, () => false);
+}
+
 
 const stringListSchema = z.array(z.string().min(1).max(240));
 
@@ -95,17 +409,16 @@ function saveStringList(
   key: string,
   values: string[],
   storage?: Pick<Storage, "setItem"> | null,
-): void {
+): string[] {
+  const safe = [
+    ...new Set(values.filter((value) => value.length > 0 && value.length <= 240)),
+  ].slice(0, 100);
   try {
     const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
-    const safe = [
-      ...new Set(values.filter((value) => value.length > 0 && value.length <= 240)),
-    ].slice(0, 100);
     target?.setItem(key, JSON.stringify(safe));
   } catch {
-    // Private browsing and locked-down webviews may reject localStorage.
-    // In-memory React state still keeps the interaction useful this session.
   }
+  return safe;
 }
 
 export function loadCollapsedSections(storage?: Pick<Storage, "getItem"> | null): string[] {
@@ -132,4 +445,15 @@ export function saveSectionOrder(
   storage?: Pick<Storage, "setItem"> | null,
 ): void {
   saveStringList(SIDEBAR_SECTION_ORDER_KEY, ids, storage);
+}
+
+export function loadSimpleSectionOrder(storage?: Pick<Storage, "getItem"> | null): string[] {
+  return loadStringList(SIMPLE_SIDEBAR_SECTION_ORDER_KEY, storage);
+}
+
+export function saveSimpleSectionOrder(
+  ids: string[],
+  storage?: Pick<Storage, "setItem"> | null,
+): void {
+  saveStringList(SIMPLE_SIDEBAR_SECTION_ORDER_KEY, ids, storage);
 }

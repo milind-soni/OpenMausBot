@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadBundledSkills, loadUserSkills, mergeSkills, parseSkillManifest, selectBundledSkills, skillInstructionsFor, type BundledSkill } from "./skill-library.ts";
+import { APP_LIMITS } from "../shared/app.ts";
+import { JSX_PAGE_LIBRARIES, JSX_PAGE_MODULES } from "../shared/app-frame/jsx-page.ts";
+import { BOT_HTML_CDNS } from "../shared/app-frame/csp.ts";
+import { loadBundledSkills, loadUserSkills, mergeSkills, parseSkillManifest, renderSkillInstructions, selectBundledSkills, type BundledSkill } from "./skill-library.ts";
+
+const instructionsFor = (text: string, capabilities: string[], skills: BundledSkill[], options?: { includeRoot?: boolean }) =>
+  renderSkillInstructions(selectBundledSkills(text, capabilities, skills), options);
 
 const phone: BundledSkill = {
   directory: "/skills/phone-harness",
@@ -21,13 +27,13 @@ const phone: BundledSkill = {
 
 describe("bundled skill library", () => {
   it("selects a skill only when both its trigger and capability are present", () => {
-    const rendered = skillInstructionsFor("Open Uber on my Android", ["phoneMcp"], [phone]);
+    const rendered = instructionsFor("Open Uber on my Android", ["phoneMcp"], [phone]);
     expect(rendered).toContain("Use phone tools");
     expect(rendered).not.toContain('root="/skills/phone-harness"');
-    expect(skillInstructionsFor("Open Uber on my Android", ["phoneMcp"], [phone], { includeRoot: true }))
+    expect(instructionsFor("Open Uber on my Android", ["phoneMcp"], [phone], { includeRoot: true }))
       .toContain('root="/skills/phone-harness"');
-    expect(skillInstructionsFor("Open Uber on my Android", [], [phone])).toBe("");
-    expect(skillInstructionsFor("Write a poem", ["phoneMcp"], [phone])).toBe("");
+    expect(instructionsFor("Open Uber on my Android", [], [phone])).toBe("");
+    expect(instructionsFor("Write a poem", ["phoneMcp"], [phone])).toBe("");
   });
 
   it("requires the manifest id to match its isolated folder", () => {
@@ -100,5 +106,74 @@ describe("bundled verification skill", () => {
     ]) {
       expect(selectBundledSkills(text, ["skillAuthoring"], skills)).toEqual([]);
     }
+  });
+});
+
+describe("bundled data-dashboards skill", () => {
+  const skills = loadBundledSkills(join(process.cwd(), "skills"));
+  const guide = skills.find((skill) => skill.manifest.id === "data-dashboards")?.instructions ?? "";
+  const template = readFileSync(join(process.cwd(), "skills", "data-dashboards", "dashboard.html"), "utf8");
+  const ids = (text: string) => selectBundledSkills(text, [], skills).map((skill) => skill.manifest.id);
+
+  it("mounts for dashboards and charts with no capability, and stays out of other turns", () => {
+    for (const text of ["Build me a sales dashboard", "Chart revenue by month", "can you visualise this?", "Show our KPIs on a page", "make a graph of signups", "graph it by week"]) {
+      expect(ids(text), text).toContain("data-dashboards");
+    }
+    for (const text of ["Write a paragraph about photography", "fix the typo in my biography", "summarize this email", "book a call for Friday"]) {
+      expect(ids(text), text).not.toContain("data-dashboards");
+    }
+  });
+
+  it("mounts for a page to look at, and its page guide names the shell's own building blocks and versions", () => {
+    for (const text of ["Make me a pricing page", "build a landing page for the bake sale", "Can you mock-up a signup form as a page?", "a quick prototype of the settings screen"]) {
+      expect(ids(text), text).toContain("data-dashboards");
+    }
+    for (const module of JSX_PAGE_MODULES.filter((name) => !name.includes("/"))) expect(guide, module).toContain(`\`${module}\``);
+    const minor = (version: string) => version.split(".").slice(0, 2).join(".");
+    expect(guide).toContain(`\`react\` (${minor(JSX_PAGE_LIBRARIES.react)})`);
+    expect(guide).toContain(`\`echarts\` (${minor(JSX_PAGE_LIBRARIES.echarts)})`);
+    expect(guide).toContain(`Tailwind classes (${minor(JSX_PAGE_LIBRARIES["@tailwindcss/browser"])})`);
+  });
+
+  it("keeps the guide short, in plain words, and pointing at its template", () => {
+    expect(guide.split("\n").length).toBeLessThanOrEqual(150);
+    expect(guide).not.toMatch(/\b(engines?|servers?)\b/i);
+    expect(guide).toContain("dashboard.html");
+  });
+
+  it("ships a template that loads exact versions from a CDN a chat page allows, with room left for embedded data", () => {
+    const urls = [...template.matchAll(/https:\/\/[^\s"'`)]+/g)].map((match) => match[0]);
+    expect(urls.length).toBeGreaterThan(0);
+    for (const url of urls) expect(BOT_HTML_CDNS.some((cdn) => url === cdn || url.startsWith(`${cdn}/`)), url).toBe(true);
+    for (const url of urls.filter((each) => each.includes("/npm/"))) expect(url, url).toMatch(/\/npm\/(@[\w-]+\/)?[\w.-]+@\d+\.\d+\.\d+\//);
+    expect(template).toContain('id="embedded-data"');
+    expect(Buffer.byteLength(template)).toBeLessThan(APP_LIMITS.htmlBytes / 4);
+  });
+});
+
+describe("bundled phone-connection skill", () => {
+  const skills = loadBundledSkills(join(process.cwd(), "skills"));
+  const guide = skills.find((skill) => skill.manifest.id === "phone-connection")?.instructions ?? "";
+  const ids = (text: string) => selectBundledSkills(text, [], skills).map((skill) => skill.manifest.id);
+
+  it("mounts when the phone can't reach the computer, with no capability, and stays out of other turns", () => {
+    for (const text of ["My phone stopped connecting when I'm away from Wi-Fi", "the app says No route to your computer at 192.168.1.20",
+      "Anywhere, through MausBot doesn't work", "why won't my phone connect on mobile data? my phone won't connect", "how do I pair my phone again?"]) {
+      expect(ids(text), text).toContain("phone-connection");
+    }
+    for (const text of ["call my phone at 5pm", "Write a paragraph about photography", "book a call for Friday", "summarize this email", "check the wifi password in my notes"]) {
+      expect(ids(text), text).not.toContain("phone-connection");
+    }
+  });
+
+  it("tells the cause only from the live Phone link line, gives the fix, and rules out what can't help", () => {
+    expect(guide).toContain("Same Wi-Fi"); expect(guide).toContain("Anywhere, through MausBot");
+    expect(guide).toContain('starts "Phone link:"');
+    expect(guide).toContain("update the MausBot app on that phone");
+    expect(guide).toMatch(/open it once\s+on the same Wi-Fi as this computer/);
+    expect(guide.indexOf("open it once"), "the easy way first").toBeLessThan(guide.indexOf("pair it again"));
+    expect(guide).toContain("never say the link ended or that their app is too old");
+    for (const futile of ["off and on", "Try reconnecting", "force-quitting", "VPN"]) expect(guide).toContain(futile);
+    expect(guide.split("\n").length).toBeLessThanOrEqual(60);
   });
 });

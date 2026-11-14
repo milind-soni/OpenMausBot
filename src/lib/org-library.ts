@@ -1,7 +1,3 @@
-// The organization library as the renderer sees it (server/org-library.ts):
-// the shelf under Templates → From {Organization}, the preview, the
-// provenance line on added bots, and the skills offered under Bot → Skills.
-// Pure helpers here; the components fetch.
 import { t } from "@/lib/i18n";
 import type { InstalledPackageMetadata } from "../../shared/wire";
 import type { PackageDocument } from "../../shared/package-format";
@@ -47,7 +43,6 @@ export interface OfferedOrgSkill {
   added: boolean;
 }
 
-/** What a shelf card offers. The person's click is the decision: no dialog. */
 export type OrgCardAction = "add" | "added" | "updateApp" | "notReady" | "noRelease";
 
 export function orgCardAction(entry: OrgLibraryPackage): OrgCardAction {
@@ -58,27 +53,23 @@ export function orgCardAction(entry: OrgLibraryPackage): OrgCardAction {
   return "add";
 }
 
-/** "From Acme Partners", or "Your organization" for its own packages. */
 export function orgPublisherLine(entry: Pick<OrgLibraryPackage, "publisher">): string {
   return entry.publisher.self ? t("orgLibrary.fromSelf") : t("orgLibrary.from", { name: entry.publisher.name });
 }
 
-/** Required is treated as Available in this version, with a badge. */
 export function orgModeBadge(entry: Pick<OrgLibraryPackage, "mode" | "publisher">): string | null {
   return entry.mode === "required" ? t("orgLibrary.recommended", { name: entry.publisher.name }) : null;
 }
 
-/** The small print under a card: withdrawn, or a newer release waiting. */
 export function orgCardNotes(entry: OrgLibraryPackage): string[] {
   const notes: string[] = [];
   if (entry.installed?.status === "withdrawn") notes.push(t("orgLibrary.withdrawn", { name: entry.publisher.name }));
-  if (entry.installed && entry.installed.status !== "removed" && entry.release && entry.release.version !== entry.installed.release) {
+  if (entry.installed?.status === "installed" && entry.release && entry.release.version !== entry.installed.release) {
     notes.push(t("orgLibrary.newerRelease", { version: entry.release.version }));
   }
   return notes;
 }
 
-/** "3 bots · 3 skills · 1 group chat · 2 routines" — only what it has. */
 export function orgContentsLine(contents: OrgLibraryPackage["contents"]): string {
   const parts: string[] = [];
   if (contents.bots) parts.push(t("orgLibrary.bots", { count: contents.bots }));
@@ -90,10 +81,6 @@ export function orgContentsLine(contents: OrgLibraryPackage["contents"]): string
   return parts.join(" · ");
 }
 
-/** The line under a bot that came from the organization's library: "From
- * Sales desk 1.3.0 · Acme Partners", "Withdrawn by Acme Partners" once its
- * publisher pulls it. A bot imported from a file shows nothing new, as before
- * (contract §5.7: the line is for organization packages). */
 export function packageProvenance(
   stamp: InstalledPackageMetadata | undefined,
   installs: readonly OrgLibraryInstall[] = [],
@@ -109,9 +96,6 @@ export function packageProvenance(
   };
 }
 
-/** The existing import preview, for a package from the organization. A
- * team reads exactly as a shared file does; a skills-only package has no
- * team, only what it offers. */
 export function orgPackagePreview(document: PackageDocument): PendingTeamImport {
   if (document.package.agents.length) return teamImportPreview(document);
   const pkg = document.package;

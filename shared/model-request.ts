@@ -1,9 +1,7 @@
 /**
- * Durable payload carried by a default-model confirmation card
- * (propose_model). Mirrors profile-request.ts: "before" is the exact
- * selection the user was shown, and a confirmation fails closed if the
- * target's default moved since — a per-field snapshot, not the team-setup
- * plan's whole-state revision hash.
+ * Durable payload carried by a default-model confirmation card (propose_model).
+ * "before" is the exact selection the user was shown; a confirmation fails
+ * closed if the target's default moved since.
  */
 import type { ModelSelection } from "./wire.ts";
 

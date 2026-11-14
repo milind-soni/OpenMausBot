@@ -1,9 +1,4 @@
-// Lifecycle for the remotely-managed Cloudflare Tunnel connector.
-//
-// This module deliberately knows nothing about account UI or Electron IPC.
-// Its only secret input is the connector token already held in Electron's OS
-// credential store. The token is handed to cloudflared through a private,
-// short-lived file; it is never put in argv, the environment, status, or logs.
+// The connector token reaches cloudflared only through a private short-lived file: never argv, the environment, status or logs.
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -20,6 +15,7 @@ export const MANAGED_COMPANION_ENDPOINT_FIELD = "managedCompanionEndpointUrl";
 export const MANAGED_COMPANION_TOKEN_FIELD = "managedCompanionConnectorToken";
 export const MANAGED_COMPANION_ORIGIN_VERSION_FIELD = "managedCompanionOriginVersion";
 export const MANAGED_COMPANION_ORIGIN_VERSION = 2;
+export const MANAGED_COMPANION_RELEASE_AT_FIELD = "managedCompanionReleaseAt";
 
 const TOKEN_FILE_PATTERN = /^connector-([1-9][0-9]*)-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.token$/;
 const TOKEN_MIN_BYTES = 40;
@@ -68,10 +64,7 @@ function normalizeManagedCompanionAccess(credentials) {
   return { endpoint, token };
 }
 
-/** Read the all-or-nothing tunnel credential from Electron's encrypted blob.
- * The version gate is fail-closed migration: an older tunnel still points at
- * the reusable LAN port, so it must be reconciled by the control plane before
- * its cached connector token may ever start again. */
+/** Fail-closed version gate: an older tunnel still points at the reusable LAN port and must be reconciled before its token starts again. */
 export function managedCompanionTunnelAccess(credentials) {
   if (credentials?.[MANAGED_COMPANION_ORIGIN_VERSION_FIELD] !== MANAGED_COMPANION_ORIGIN_VERSION) {
     return null;
@@ -79,19 +72,20 @@ export function managedCompanionTunnelAccess(credentials) {
   return normalizeManagedCompanionAccess(credentials);
 }
 
-/** Validate a control-plane provision response and return a copy to persist. */
 export function withManagedCompanionTunnelAccess(credentials, provision) {
   const endpoint = normalizeManagedCompanionEndpoint(provision?.endpoint?.url);
   const token = provision?.connectorToken;
   if (!endpoint || !validConnectorToken(token)) {
     throw new Error("The companion service returned an invalid managed endpoint");
   }
-  return {
+  const next = {
     ...credentials,
     [MANAGED_COMPANION_ENDPOINT_FIELD]: endpoint,
     [MANAGED_COMPANION_TOKEN_FIELD]: token,
     [MANAGED_COMPANION_ORIGIN_VERSION_FIELD]: MANAGED_COMPANION_ORIGIN_VERSION,
   };
+  delete next[MANAGED_COMPANION_RELEASE_AT_FIELD];
+  return next;
 }
 
 export function withoutManagedCompanionTunnelAccess(credentials) {
@@ -99,12 +93,16 @@ export function withoutManagedCompanionTunnelAccess(credentials) {
   delete next[MANAGED_COMPANION_ENDPOINT_FIELD];
   delete next[MANAGED_COMPANION_TOKEN_FIELD];
   delete next[MANAGED_COMPANION_ORIGIN_VERSION_FIELD];
+  delete next[MANAGED_COMPANION_RELEASE_AT_FIELD];
   return next;
 }
 
-/** Packaged apps only trust the connector shipped in Resources. Development
- * can opt into an absolute binary path, use a freshly-staged release, or fall
- * back to PATH for contributor convenience. */
+export function stagedCloudflaredPath({ appPath, platform = process.platform, arch = process.arch } = {}) {
+  const executable = platform === "win32" ? "cloudflared.exe" : "cloudflared";
+  return path.join(String(appPath ?? ""), "dist-native", "cloudflared", `${platform}-${arch}`, executable);
+}
+
+/** Packaged apps trust only the connector shipped in Resources. */
 export function resolveCloudflaredBinary({
   isPackaged,
   resourcesPath,
@@ -121,13 +119,7 @@ export function resolveCloudflaredBinary({
   const override = environment.OMB_CLOUDFLARED_PATH?.trim();
   if (override) return path.isAbsolute(override) && exists(override) ? override : null;
 
-  const staged = path.join(
-    String(appPath ?? ""),
-    "dist-native",
-    "cloudflared",
-    `${platform}-${arch}`,
-    executable,
-  );
+  const staged = stagedCloudflaredPath({ appPath, platform, arch });
   if (exists(staged)) return staged;
   const pathEntry = Object.entries(environment).find(([name]) => name.toLowerCase() === "path");
   const pathValue = pathEntry?.[1];
@@ -167,15 +159,11 @@ function processIsAlive(pid) {
   }
 }
 
-// Node reports synthetic, non-matching uid values for Windows directory
-// stats and os.userInfo(). ACLs on Electron's per-user data directory are the
-// ownership boundary there; applying the Unix uid comparison would reject
-// every valid Windows runtime directory.
+// Node reports synthetic uids on Windows; ACLs on the per-user data directory are the ownership boundary there.
 const currentUserId = () =>
   process.platform === "win32" ? undefined : (process.getuid?.() ?? os.userInfo().uid);
 
-/** Remove only token files created by a dead OpenMausBot process. Suspicious
- * paths are preserved instead of broadening cleanup around a secret. */
+/** Suspicious paths are preserved instead of broadening cleanup around a secret. */
 export function cleanupStaleManagedCompanionTokens(
   runtimeRoot,
   {
@@ -211,7 +199,6 @@ export function cleanupStaleManagedCompanionTokens(
       fileSystem.unlinkSync(file);
       removed += 1;
     } catch {
-      // Best effort. A concurrently changed file is safer left untouched.
     }
   }
   return removed;
@@ -260,9 +247,7 @@ async function waitForExit(child, milliseconds) {
 
 async function terminateChild(child, graceMs) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  // Closing the owner pipe asks the guardian to invalidate the gateway, kill
-  // cloudflared, wait for its exact exit, and only then release port 8812.
-  // Do this synchronously so stop intent preempts a hanging health probe.
+  // Synchronously, so stop intent preempts a hanging health probe; the guardian kills cloudflared before releasing 8812.
   try {
     child.stdin?.end();
   } catch {}
@@ -271,10 +256,7 @@ async function terminateChild(child, graceMs) {
   try {
     child.kill("SIGTERM");
   } catch {}
-  // Never SIGKILL the guardian. If cloudflared were wedged, killing its
-  // guardian would release the reserved origin port before the connector was
-  // confirmed dead — exactly the fail-open window this process exists to
-  // remove. A stuck guardian safely keeps 8812 unavailable.
+  // Never SIGKILL the guardian: a wedged cloudflared would outlive it while 8812 is released. A stuck guardian keeps 8812 closed.
   await waitForExit(child, Math.min(graceMs, 500));
 }
 
@@ -300,8 +282,7 @@ async function verifyHostedEndpoint(
   }
 }
 
-/** A single-owner, restartable connector lifecycle. Its public state is
- * intentionally secret-free so it is safe for diagnostics or future UI. */
+/** Its public state is secret-free, safe for diagnostics. */
 export function createManagedCompanionTunnel({
   binaryPath,
   guardianEntry,
@@ -431,8 +412,7 @@ export function createManagedCompanionTunnel({
           env: minimalGuardianEnvironment(environment),
           shell: false,
           windowsHide: true,
-          // This open pipe is the parent-death signal. The guardian owns both
-          // gateway and connector and tears them down on EOF.
+          // This open pipe is the parent-death signal: the guardian tears down gateway and connector on EOF.
           stdio: ["pipe", "ignore", "ignore"],
         },
       );
@@ -470,9 +450,7 @@ export function createManagedCompanionTunnel({
         }
       };
       spawned.once("exit", onTerminated);
-      // A child that fails before spawn emits `error` and then `close`, but
-      // not necessarily `exit`. Treat either as terminal so verification
-      // cannot sit out its whole deadline for a process that never existed.
+      // A child that fails before spawn emits `error` and `close`, not necessarily `exit`.
       spawned.once("error", onTerminated);
 
       const deadline = Date.now() + verifyTimeoutMs;
@@ -505,8 +483,7 @@ export function createManagedCompanionTunnel({
       }
 
       if (child === spawned) {
-        // Invalidate this exit before asking the child to stop, otherwise its
-        // handler and this failed attempt both schedule a retry.
+        // Invalidate this exit before asking the child to stop, or its handler and this attempt both schedule a retry.
         expectedStop = true;
         child = null;
         await terminateChild(spawned, stopGraceMs);
@@ -538,9 +515,7 @@ export function createManagedCompanionTunnel({
     start(rawAccess) {
       const requestedRevision = ++intentRevision;
       return serialize(async () => {
-        // A stop requested before this queued start began wins. This matters
-        // during app shutdown, when start and quit can land in one event-loop
-        // turn before either transition has acquired the queue.
+        // A stop requested before this queued start began wins (start and quit can land in one event-loop turn).
         if (requestedRevision !== intentRevision) return state;
         const normalized = normalizeManagedCompanionAccess({
           [MANAGED_COMPANION_ENDPOINT_FIELD]: rawAccess?.endpoint,
@@ -586,9 +561,7 @@ export function createManagedCompanionTunnel({
     },
 
     stop() {
-      // Stop intent must not wait behind a 15-second startup probe. Invalidate
-      // the attempt, wake its verification race, and signal cloudflared now;
-      // the serialized tail only publishes the final stable state.
+      // Stop intent must not wait behind the 15-second startup probe.
       const requestedRevision = ++intentRevision;
       desired = false;
       generation += 1;

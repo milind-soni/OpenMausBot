@@ -8,8 +8,9 @@ import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { waitForExit } from "./testing/cleanup.ts";
+import { readHandoffs } from "./testing/handoff-rows.ts";
 
-it("applies requested Full Access workflows through MCP without duplicate approvals, while exact Ask tasks still wait", async () => {
+it("applies requested Full Access workflows through MCP without duplicate approvals, and the same changes apply in an Ask task with Undo", async () => {
   const fixture = await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true });
   const { url, dataDir, logPath } = fixture.info;
   const planPath = join(dataDir, "room-plan.json");
@@ -97,9 +98,11 @@ it("applies requested Full Access workflows through MCP without duplicate approv
   };
   try {
     const chief = (await cli("new-bot", "--name", "Clive", "--section", "Operations")).bot;
-    await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvePeerComms: true });
+    await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true });
     const ask = (await api("POST", `/api/bots/${chief.id}/tasks`, { title: "Ask sibling" }, 201)).task;
     const peer = (await cli("new-bot", "--name", "Ada", "--section", "Operations")).bot;
+    // Ada's own level is an explicit Ask, so the Chief's Full has something to raise.
+    await api("PATCH", `/api/bots/${peer.id}`, { approvalMode: "ask" });
     const inverse = (await cli("new-bot", "--name", "Thread Full", "--section", "Private")).bot;
     const modelSelection = chief.modelSelection;
     await api("PATCH", "/api/config", { features: { skillAuthoring: true } });
@@ -139,27 +142,39 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     const created = await run(chief, chief.activeTaskId,
       "Set up my monthly reporting profile, save its reusable skill, schedule 9am New York time on the first of each month, and create Mira in Research.", [
         step("propose_profile", { title: "Monthly reporting Chief", soul: "Report only verified fixture results.", reason: "Requested reporting profile" }),
-        step("list_routines", {}),
-        step("propose_routine", { name: "Monthly fixture report", instructions: "Summarize fixture-only monthly results.", schedule }),
+        step("list_triggers", {}),
+        step("create_trigger", { when: "schedule", name: "Monthly fixture report", instructions: "Summarize fixture-only monthly results.", schedule }),
         step("skills_list", {}),
         step("skill_manage", { action: "create", skill_md: skill("monthly-fixture-review", "Read fixture notes and summarize the month."), source: "conversation" }),
         step("list_team_setup", {}),
         step("propose_team_setup", { reason: "Requested Research specialist and Chief description", newTeams: ["Research"], operations: [
           specialist("Mira", "Research"), { action: "update", botId: chief.id, fields: { description: "Coordinates monthly fixture reports" } },
         ] }),
+        step("create_bot", { name: "Theo", role: "Totals checker", instructions: "Check fixture totals before each report." }),
       ], { guarded: "full" });
     expect(created.permissionMode).toBe("bypassPermissions");
-    for (const entry of created.evidence.filter((item: any) => ["propose_profile", "propose_routine", "skill_manage", "propose_team_setup"].includes(item.step?.tool))) {
-      expect(entry.response.result.content[0].text).toContain("No additional confirmation is needed");
+    for (const entry of created.evidence.filter((item: any) => ["propose_profile", "create_trigger", "skill_manage", "propose_team_setup"].includes(item.step?.tool))) {
+      // Triggers never wait on anything: their tool says so in its own words.
+      expect(entry.response.result.content[0].text).toContain(entry.step.tool === "create_trigger" ? "Do not ask for confirmation" : "No additional confirmation is needed");
       expect(entry.response.result.content[0].text).not.toContain("End this turn and wait");
     }
     const updatedChief = (await bots()).find(bot => bot.id === chief.id);
-    expect(updatedChief).toMatchObject({ title: "Monthly reporting Chief", description: "Coordinates monthly fixture reports", soul: "Report only verified fixture results.", approvalMode: "full", approvePeerComms: true, managedSections: ["Research"] });
+    expect(updatedChief).toMatchObject({ title: "Monthly reporting Chief", description: "Coordinates monthly fixture reports", soul: "Report only verified fixture results.", approvalMode: "full", managedSections: ["Research"] });
+    const createdTheo = created.evidence.find((item: any) => item.step?.tool === "create_bot");
+    expect(createdTheo.response.result.content[0].text).toMatch(/^Created @Theo in Operations/);
+    expect((await bots()).find(bot => bot.name === "Theo")).toMatchObject({ section: "Operations", title: "Totals checker",
+      soul: "Check fixture totals before each report.", approvalMode: "full", autoApprove: false });
     const mira = (await bots()).find(bot => bot.name === "Mira");
-    expect(mira).toMatchObject({ section: "Research", approvalMode: "ask", autoApprove: false, composio: false });
+    expect(mira).toMatchObject({ section: "Research", approvalMode: "full", autoApprove: false });
+    const apps = (bot: any) => ({ composio: bot.composio, connectorTools: bot.connectorTools, connectorScopes: bot.connectorScopes, mcpServers: bot.mcpServers });
+    for (const made of [mira, (await bots()).find(bot => bot.name === "Theo")]) expect(apps(made)).toEqual(apps(updatedChief));
     const routine = (await api("GET", "/api/routines")).routines.find((item: any) => item.name === "Monthly fixture report");
     expect(routine).toMatchObject({ botId: chief.id, enabled: true, schedule });
     expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills).toEqual(expect.arrayContaining([expect.objectContaining({ name: "monthly-fixture-review", enabled: true })]));
+    await expect.poll(async () => (await api("GET", "/api/decisions")).decisions
+      .filter((row: any) => row.threadId === chief.activeTaskId && ["schedule_routine", "stage_skill", "update_profile"].includes(row.tool))
+      .map((row: any) => `${row.tool}:${row.decision}:${row.source}`).sort())
+      .toEqual(["schedule_routine:auto-approved:full-access", "stage_skill:auto-approved:full-access", "update_profile:auto-approved:full-access"]);
 
     const dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
     const lateToken = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
@@ -167,7 +182,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
 
     await run(chief, chief.activeTaskId, "Update the named monthly skill, pause the report, update Mira, then delete Mira as requested.", [
       step("skill_manage", { action: "update", skill_name: "monthly-fixture-review", skill_md: skill("monthly-fixture-review", "Read fixture notes, verify totals, and report missing data."), source: "conversation" }),
-      step("list_routines", {}), step("propose_routine_action", { action: "pause", routine_id: routine.id }),
+      step("list_triggers", {}), step("manage_trigger", { action: "pause", trigger_id: routine.id }),
       step("propose_team_setup", { reason: "Requested Mira update", operations: [{ action: "update", botId: mira.id, fields: { title: "Verified research specialist" } }] }),
       step("propose_bot_deletion", { bot_id: mira.id, reason: "User explicitly requested removal after the fixture check" }),
       step("propose_team_setup", { reason: "Out-of-scope fixture check", operations: [{ action: "update", botId: inverse.id, fields: { title: "Must not apply" } }] }, true),
@@ -183,31 +198,41 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     await run(chief, chief.activeTaskId, "Have Ada independently verify the fixture reporting instructions and return the result.", [
       step("coordinate_bots", { bot_ids: [peer.id], request_key: "verify-monthly", message: "Verify the fixture reporting instructions and state your result." }),
     ], { guarded: "full", resumeReply: "Ada verified the fixture reporting instructions; requested work is complete." });
-    const handoffs = JSON.parse(readFileSync(join(dataDir, "room-handoffs.json"), "utf8"));
+    const handoffs = readHandoffs(dataDir);
+    expect(handoffs.length).toBeGreaterThan(0);
     expect(handoffs.every((node: any) => node.status === "completed")).toBe(true);
     expect(providerTurns().filter(turn => turn.botId === peer.id)).toHaveLength(1);
-    // A Full-access Chief's delegation runs Full: Ada's own level is Ask,
-    // yet the work Clive handed her ran without a single card, her pair
-    // thread with Clive is now Full, and the thread says where that came from.
     const peerTurn = providerTurns().find(turn => turn.botId === peer.id)!;
     expect(peerTurn.permissionMode).toBe("bypassPermissions");
     expect((await bots()).find(bot => bot.id === peer.id).approvalMode ?? "ask").toBe("ask");
     expect(await unanswered(peerTurn.threadId)).toHaveLength(0);
-    expect((await messages(peerTurn.threadId)).some(message => message.kind === "activity" && /^Full access — delegated by Clive, a Chief of Staff with Full access$/.test(message.tool?.name ?? ""))).toBe(true);
+    expect((await messages(peerTurn.threadId)).some(message => message.kind === "activity" && /^Full access — handed on by Clive, a Chief of Staff on Full access$/.test(message.tool?.name ?? ""))).toBe(true);
     evidence.push({ delegatedFullAccess: { peerThreadId: peerTurn.threadId, permissionMode: peerTurn.permissionMode } });
 
-    const askTurn = await run(chief, ask.threadId, "Prepare a profile change, routine, named skill, and specialist for review in this Ask task.", [
-      step("propose_profile", { title: "Pending Ask title", reason: "Ask task requires review" }),
-      step("propose_routine", { name: "Pending Ask report", instructions: "Wait for review.", schedule }),
-      step("skill_manage", { action: "create", skill_md: skill("pending-ask-review", "Wait for review before using this skill."), source: "conversation" }),
-      step("propose_team_setup", { reason: "Ask task specialist review", operations: [specialist("Pending specialist", "Operations")] }),
-    ], { pending: true, guarded: "ask" });
+    const askTurn = await run(chief, ask.threadId, "Change my own profile, routine and named skill, and add a specialist in this Ask task.", [
+      step("propose_profile", { title: "Applied in Ask", reason: "Applies at every level" }),
+      step("create_trigger", { when: "schedule", name: "Own Ask report", instructions: "Report from the Ask task.", schedule }),
+      step("skill_manage", { action: "create", skill_md: skill("own-ask-review", "Applies at once as the bot's own skill."), source: "conversation" }),
+      step("propose_team_setup", { reason: "Ask task specialist", operations: [specialist("Ask specialist", "Operations")] }),
+    ], { guarded: "ask" });
     expect(askTurn.permissionMode).not.toBe("bypassPermissions");
-    expect(await unanswered(ask.threadId)).toHaveLength(4);
+    expect(await unanswered(ask.threadId)).toHaveLength(0);
+    expect((await bots()).find(bot => bot.id === chief.id).title).toBe("Applied in Ask");
+    expect((await bots()).some(bot => bot.name === "Ask specialist")).toBe(true);
+    expect((await api("GET", "/api/routines")).routines).toHaveLength(2);
+    expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills.some((item: any) => item.name === "own-ask-review" && item.enabled)).toBe(true);
+    const receipts = (await messages(ask.threadId)).filter(message => message.card?.autoApplied);
+    expect(receipts.map(message => Boolean(message.card.profileRequest || message.card.routineRequest || message.card.skillRequest || message.card.teamSetupRequest)))
+      .toEqual([true, true, true, true]);
+    for (const receipt of receipts) {
+      expect(await api("POST", `/api/threads/${ask.threadId}/undo`, { requestId: receipt.card.requestId })).toMatchObject({ ok: true, undone: true });
+      expect(await api("POST", `/api/threads/${ask.threadId}/undo`, { requestId: receipt.card.requestId })).toMatchObject({ alreadyUndone: true });
+    }
+    expect((await messages(ask.threadId)).filter(message => message.card?.autoApplied).every(message => message.card.undone)).toBe(true);
     expect((await bots()).find(bot => bot.id === chief.id).title).toBe("Monthly reporting Chief");
-    expect((await bots()).some(bot => bot.name === "Pending specialist")).toBe(false);
     expect((await api("GET", "/api/routines")).routines).toHaveLength(1);
-    expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills.some((item: any) => item.name === "pending-ask-review")).toBe(false);
+    expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills.some((item: any) => item.name === "own-ask-review")).toBe(false);
+    expect((await bots()).some(bot => bot.name === "Ask specialist")).toBe(false);
 
     const inverseTurn = await run(inverse, inverse.activeTaskId, "Apply my requested title in this Full Access task even though my bot default is Ask.", [
       step("propose_profile", { title: "Applied from Full task", reason: "User requested this title" }),
@@ -221,20 +246,18 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     expect(persisted.find((bot: any) => bot.id === chief.id).tasks.find((task: any) => task.threadId === ask.threadId).approvalMode).toBe("ask");
     expect(persisted.find((bot: any) => bot.id === inverse.id)).toMatchObject({ title: "Applied from Full task", approvalMode: "ask" });
     expect(persisted.find((bot: any) => bot.id === inverse.id).tasks.find((task: any) => task.threadId === inverse.activeTaskId).approvalMode).toBe("full");
-    // the delegated pair thread stays Full on disk; Ada's own default does not move
     expect(persisted.find((bot: any) => bot.id === peer.id).approvalMode).not.toBe("full");
     expect(persisted.find((bot: any) => bot.id === peer.id).tasks.find((task: any) => task.threadId === peerTurn.threadId)).toMatchObject({ approvalMode: "full", autoApprove: false, alwaysAllow: [] });
     expect(JSON.parse(readFileSync(join(dataDir, "routines.json"), "utf8")).routines[0]).toMatchObject({ enabled: false, schedule });
     evidence.push({ persistedBots: persisted, routines: await api("GET", "/api/routines"), handoffs,
       fullMessages: await messages(chief.activeTaskId), askMessages: await messages(ask.threadId), inverseMessages: await messages(inverse.activeTaskId) });
 
-    // A restart while the Chief awaits a teammate must not promote its
-    // earlier "assigned" terminal to a final. Completed requests survive.
     const interrupted = (await api("POST", `/api/bots/${chief.id}/tasks`, { title: "Restart while awaiting teammate" }, 201)).task;
     const gate = join(dataDir, "restart-peer.gate");
+    const peerWorking = join(dataDir, "restart-peer.ready");
     plans[chief.id].turns.push({ steps: [step("coordinate_bots", { bot_ids: [peer.id], request_key: "restart-proof", message: "Wait at the isolated fixture gate." })],
-      reply: "Assigned the restart check", resumeReply: "THIS_MUST_NOT_REPLAY_AFTER_RESTART" });
-    plans[peer.id].turns.push({ gateFile: gate, reply: "The gated check finished" });
+      reply: "Assigned the restart check" }, { reply: "Reviewed the resumed check" });
+    plans[peer.id].turns.push({ gateFile: gate, readyFile: peerWorking, reply: "The gated check finished" });
     writeFileSync(planPath, JSON.stringify(plans));
     const pendingInput = { threadId: interrupted.threadId, text: "Coordinate the gated restart check.", sendId: randomUUID(), expectedActiveLeafId: null, expectedApprovalMode: "full" };
     const pendingReceipt = await api("POST", `/api/bots/${chief.id}/messages/guarded`, pendingInput, 202);
@@ -243,17 +266,33 @@ it("applies requested Full Access workflows through MCP without duplicate approv
       const snapshot = await api("GET", pendingRoute);
       return snapshot.phase === "waiting" && snapshot.messages.some((message: any) => message.turnTerminal && message.turnSucceeded);
     }, { timeout: 25_000 }).toBe(true);
-    expect((await api("GET", pendingRoute)).messages[0]).toMatchObject({ id: pendingReceipt.message.id, requestPending: true });
+    const beforeSnapshot = await api("GET", pendingRoute);
+    expect(beforeSnapshot.messages[0]).toMatchObject({ id: pendingReceipt.message.id, requestPending: true });
+    expect(beforeSnapshot.executionId).toEqual(expect.any(String));
+    // Ada's turn is running in its engine. Ada's request can still be queued
+    // when the Chief's turn ends, and a restart then cuts nothing: it simply
+    // runs once afterwards, with nothing to say about a restart.
+    await expect.poll(() => existsSync(peerWorking), { timeout: 25_000 }).toBe(true);
     await waitForExit(restarted, { signal: "SIGTERM" });
     const beforeRestart = providerTurns().length;
     await restart();
+    writeFileSync(gate, "open");
+    await expect.poll(async () => (await messages(interrupted.threadId)).some(message => message.text === "Reviewed the resumed check"), { timeout: 25_000 }).toBe(true);
+    const [rerun, review] = providerTurns().slice(beforeRestart);
+    expect(providerTurns()).toHaveLength(beforeRestart + 2);
+    expect(rerun).toMatchObject({ botId: peer.id, resumed: false, permissionMode: "bypassPermissions" });
+    expect(JSON.stringify(rerun.prompt)).toContain("this turn continues it");
+    expect(review).toMatchObject({ botId: chief.id, threadId: interrupted.threadId, resumed: true });
+    expect(JSON.stringify(review.prompt)).toContain("A restart cut these teammates' turns: Ada (resumed once in place");
     const recovered = await api("GET", pendingRoute);
-    expect(recovered).toMatchObject({ phase: "untracked", activeTurnId: null, executionId: null });
+    expect(recovered).toMatchObject({ phase: "untracked", activeTurnId: null });
+    expect(recovered.executionId).not.toBe(beforeSnapshot.executionId);
+    expect(recovered.messages[0]).toMatchObject({ id: pendingReceipt.message.id, requestPending: true });
     expect(recovered.messages.some((message: any) => message.turnTerminal && message.text === "Assigned the restart check" && message.turnSucceeded)).toBe(true);
     expect((await api("GET", guardedRoutes.get(inverse.activeTaskId)!)).phase).toBe("settled");
     await new Promise(resolve => setTimeout(resolve, 250));
-    expect(providerTurns()).toHaveLength(beforeRestart);
-    evidence.push({ restartWhileAwaiting: { phase: recovered.phase, noProviderReplay: true, completedRequestStillSettled: true } });
+    expect(providerTurns()).toHaveLength(beforeRestart + 2);
+    evidence.push({ restartWhileAwaiting: { phase: recovered.phase, teammateRerunOnce: true, chiefResumedOnce: true, completedRequestStillSettled: true } });
     expect(readFileSync(logPath, "utf8")).not.toMatch(/ReferenceError|change listener threw|Unexpected extra fixture turn/);
   } finally {
     await waitForExit(restarted, { signal: "SIGTERM" });

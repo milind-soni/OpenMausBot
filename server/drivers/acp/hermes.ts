@@ -1,18 +1,14 @@
-// Hermes Agent — Nous Research's `hermes acp` CLI. Custom-only: Hermes is
-// a BYOK/local harness. ACP ignores `hermes -m` (cmd_acp does not forward
-// it), and setting OPENAI_API_KEY makes provider:auto resolve to OpenRouter
-// without an OpenRouter key — that is the "HTTP 401: Missing Authentication
-// header" failure. Inject writes providers.<host> and session/set_model
-// `custom:<host>:<model>` instead.
-import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+// Hermes Agent (Nous Research's `hermes acp`), custom-only. ACP ignores `hermes -m` (cmd_acp does not
+// forward it), and OPENAI_API_KEY makes provider:auto resolve to OpenRouter without its key ("HTTP 401:
+// Missing Authentication header"), so injects write providers.<host> and set_model `custom:<host>:<model>`.
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
-import { harnessHome } from "../../env-path.ts";
-import { resolveCli } from "../../procs.ts";
+import { findCliCandidates, harnessHome, resolveCliSpawn, splitCliString, whichWin } from "../../env-path.ts";
+import { resolveCli, spawnCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -21,7 +17,6 @@ const EMPTY: ModelCatalog = { default: "", options: [] };
 export const HERMES_OPENMAUS_SCREENSHOT_COMPAT = "HERMES_OPENMAUS_SCREENSHOT_COMPAT";
 export const HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL = "HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL";
 
-/** Bind screenshot pseudo-call compatibility to one exact injected model. */
 export function bindHermesScreenshotCompat(
   env: Record<string, string | undefined>,
   modelId: string | null | undefined,
@@ -67,7 +62,6 @@ function replaceHermesHostBlock(text: string, hostId: string, block: string): st
   return [...lines.slice(0, start), ...block.replace(/\n$/, "").split("\n"), ...lines.slice(end)].join("\n");
 }
 
-/** Register an OpenAI-compatible host so ACP can `session/set_model custom:host:model`. */
 export function ensureHermesInjectProvider(
   modelId: string,
   env: Record<string, string | undefined> = process.env,
@@ -91,26 +85,27 @@ export function ensureHermesInjectProvider(
   return hermesAcpModelId(modelId) ?? modelId;
 }
 
-/** ACP session/set_model id. Hermes parse_model_input treats `custom:name:model`. */
+/** ACP session/set_model id; Hermes parse_model_input reads `custom:name:model`. */
 export function hermesAcpModelId(modelId: string | null | undefined): string | null {
   const inject = decodeInjectId(modelId);
   if (inject) return `custom:${inject.host}:${inject.model}`;
-  // Hermes' own ACP ids are `<provider>:<model>` (`openrouter:qwen/qwen3.8-max`).
-  // They are not inject ids and must be forwarded untouched; returning null here
-  // is what limited the picker to locally injected hosts.
+  // Hermes' own ACP ids are `<provider>:<model>` (`openrouter:qwen/qwen3.8-max`), forwarded untouched.
   const native = typeof modelId === "string" ? modelId.trim() : "";
   if (native && !native.includes(INJECT_SEP) && /^[a-z0-9_-]+:[\w./:-]+$/i.test(native)) return native;
   return null;
 }
 
-/** The id used when Hermes should run on the provider its own config names.
- *
- * Deliberately not an inject id: `hermesAcpModelId` returns null for it, so
- * `configureSession` sends no `session/set_model` and Hermes falls through to
- * the model in its own `config.yaml`. `spawnArgs` passes no `-m` either (ACP
- * ignores it), so nothing overrides that choice.
- */
+/** Not an inject id: no session/set_model and no -m, so Hermes runs the model in its own config.yaml. */
 export const HERMES_CONFIG_MODEL_ID = "hermes-default";
+
+// `custom: true` is load-bearing: a custom-only agent's picker pane lists only options carrying it.
+function hermesConfigOption(model: string) {
+  return {
+    id: HERMES_CONFIG_MODEL_ID,
+    label: model ? `${model} (Hermes config)` : "Hermes default (config)",
+    custom: true as const,
+  };
+}
 
 function nonEmptyDotenvValue(text: string, name: string): string | null {
   const match = new RegExp(`^[ \\t]*(?:export[ \\t]+)?${name}[ \\t]*=[ \\t]*([^\\r\\n]*)$`, "m").exec(text);
@@ -141,14 +136,9 @@ function yamlString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-/**
- * Read the model/provider forms accepted by Hermes' `_normalize_root_model_keys`:
- * a scalar `model`, or a mapping whose id is `default`, `model`, or `name`.
- * Those id fields may themselves be `{ provider, model/default }` mappings.
- * An explicit outer provider wins, except `auto`, where the nested provider is
- * the more specific routing choice. Root-level `provider` is Hermes' legacy
- * fallback. YAML parsing also handles quotes and trailing comments correctly.
- */
+/** The forms Hermes' `_normalize_root_model_keys` accepts: a scalar `model`, or a mapping whose id is
+ * `default`, `model` or `name` (itself possibly `{ provider, model/default }`). An explicit outer provider
+ * wins except `auto`; root-level `provider` is Hermes' legacy fallback. */
 function hermesConfigDefault(text: string): { model: string; provider: string } | null {
   let raw: unknown;
   try {
@@ -182,25 +172,8 @@ function hermesConfigDefault(text: string): { model: string; provider: string } 
   return null;
 }
 
-/** Detect whether Hermes has a hosted provider configured.
- *
- * Hermes supports multiple auth methods:
- * - OpenRouter API key in `~/.hermes/.env` (OPENROUTER_API_KEY)
- * - Nous Portal OAuth (tokens stored in `~/.hermes/` — the default for
- *   `hermes setup` / `hermes login`)
- * - Z.AI / GLM keys in `~/.hermes/.env`
- *
- * Previously only OPENROUTER_API_KEY was checked, so a Nous Portal user
- * — logged in via OAuth, no OpenRouter key — saw "No local models found"
- * despite Hermes being installed, authenticated, and serving 100+ models.
- *
- * Read-only on purpose. `ensureHermesInjectProvider` writes `config.yaml`,
- * and doing that from a catalog probe would rewrite the user's real Hermes
- * config as a side effect of opening a menu.
- *
- * Returns null when no hosted provider is configured, which leaves the
- * catalog exactly as it was for local-only setups.
- */
+/** Whether Hermes has a hosted provider: an OpenRouter or Z.AI key in `~/.hermes/.env`, or Nous Portal
+ * OAuth. Read-only: a catalog probe must never rewrite the user's config.yaml. */
 export function hermesConfiguredModel(
   env: Record<string, string | undefined> = process.env,
 ): { id: string; label: string; custom: true } | null {
@@ -208,25 +181,17 @@ export function hermesConfiguredModel(
   let secrets = "";
   try {
     secrets = readFileSync(join(dir, ".env"), "utf8");
-  } catch {
-    /* .env may not exist — check OAuth below */
-  }
+  } catch {}
 
   const hasHostedProviderKey = HERMES_HOSTED_PROVIDER_KEYS.some((name) => nonEmptyDotenvValue(secrets, name));
 
-  // `hermes login` / `hermes setup` records the selected default in
-  // config.yaml while the OAuth token lives in Hermes' auth store. An explicit
-  // local/custom provider must not trigger the hosted catalog probe.
+  // `hermes login` / `hermes setup` record the default in config.yaml; the OAuth token lives in Hermes' auth store.
   let configuredDefault: { model: string; provider: string } | null = null;
   try {
     configuredDefault = hermesConfigDefault(readFileSync(join(dir, "config.yaml"), "utf8"));
-  } catch {
-    /* config may not exist or may be unreadable */
-  }
+  } catch {}
 
   const configuredProvider = configuredDefault?.provider.toLowerCase() ?? "";
-  // The model/provider selected in config.yaml is the user's explicit routing
-  // choice. A stale hosted key must not override an explicitly local setup.
   const configIsLocal =
     HERMES_LOCAL_CONFIG_PROVIDERS.has(configuredProvider) || configuredProvider.startsWith("custom:");
   if (configuredDefault && configIsLocal) return null;
@@ -234,36 +199,65 @@ export function hermesConfiguredModel(
   const configIsHosted = configuredDefault !== null;
   if (!hasHostedProviderKey && !configIsHosted) return null;
 
-  const model = configuredDefault?.model ?? "";
-  // `custom: true` is not cosmetic. ModelPicker renders a custom-only agent's
-  // *custom* pane exclusively, and that pane lists only options carrying this
-  // flag; anything without it lands in the "official" bucket the pane never
-  // shows. Omitting it puts the option in the API response while leaving the
-  // picker saying "No local models found" — present, but unselectable.
-  return {
-    id: HERMES_CONFIG_MODEL_ID,
-    label: model ? `${model} (Hermes config)` : "Hermes default (config)",
-    custom: true as const,
-  };
+  return hermesConfigOption(configuredDefault?.model ?? "");
 }
 
-/** Ask a short-lived `hermes acp` session what models it can actually run.
- *
- * Hermes advertises its full catalog on `session/new` — every model its
- * configured providers expose, ids shaped `openrouter:qwen/qwen3.8-max`. There
- * is no `hermes models` subcommand, so a throwaway session is the only way to
- * read it, and it is worth the spawn: without it the picker can only offer
- * locally injected hosts, which is a fraction of what the user is paying for.
- *
- * Failure is non-fatal and returns [] — a catalog probe must never be the
- * reason an agent becomes unselectable.
- */
+/** A runnable file, so the default entry never points at a directory or a file that can't start. A wrapper such as
+ * `wsl hermes` is looked up by its first word, as resolveCliSpawn launches it, and any runnable PATH match counts. */
+function hermesInstalled(cli: string): boolean {
+  const trimmed = cli.trim();
+  const head = trimmed.includes(" ") && existsSync(trimmed) ? trimmed : (splitCliString(trimmed)[0] ?? "");
+  // An unrecognized .cmd/.bat shim stays a shim after resolution, and Node can't spawn it without a shell.
+  if (process.platform === "win32") {
+    return whichWin(head) !== null && !/\.(cmd|bat)$/i.test(resolveCliSpawn(trimmed, []).command);
+  }
+  return findCliCandidates(head).some((found) => {
+    try {
+      if (!statSync(found).isFile()) return false;
+      accessSync(found, constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+const HERMES_PROBED_PROVIDERS = new Set(["ollama", "lmstudio"]);
+/** Hosts the IPv4 probe reaches; IPv6 loopback ([::1]) is not one of them. */
+const PROBED_LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost"]);
+
+function yamlMap(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function hermesUsesProbedProvider(env: Record<string, string | undefined>): boolean {
+  const dir = env.HERMES_HOME || harnessHome("hermes", env);
+  try {
+    const text = readFileSync(join(dir, "config.yaml"), "utf8");
+    const provider = hermesConfigDefault(text)?.provider.toLowerCase() ?? "";
+    const probe = HERMES_PROBED_PROVIDERS.has(provider) ? localHost(provider) : undefined;
+    if (!probe) return false;
+    const config = yamlMap(parseYaml(text));
+    const baseUrl =
+      yamlString(yamlMap(config.model).base_url) ||
+      yamlString(yamlMap(yamlMap(config.providers)[provider]).base_url) ||
+      yamlString(config.base_url);
+    if (!baseUrl) return true;
+    const configured = new URL(baseUrl);
+    const probed = new URL(probe.baseUrl);
+    return (
+      PROBED_LOOPBACK_HOSTS.has(configured.hostname) &&
+      configured.protocol === probed.protocol &&
+      configured.port === probed.port
+    );
+  } catch {
+    return false;
+  }
+}
+
 export const HERMES_ACP_MODELS_TIMEOUT_ENV = "HERMES_ACP_MODELS_TIMEOUT_MS";
-/** Overall deadline for the initialize + session/new catalog probe. A Hermes
- * install with several authenticated providers answers `initialize` in about
- * a second but needs ~6-7s for `session/new`, whose result carries the model
- * list — the old 5s cap killed the probe every time on exactly the installs
- * that have a catalog worth showing. */
+/** Hermes with several providers answers initialize in about a second but session/new, which carries
+ * the models, in ~6-7 s. */
 export const HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS = 15_000;
 
 function hermesAcpModelsTimeoutMs(env: Record<string, string | undefined>): number {
@@ -275,15 +269,20 @@ function hermesAcpModelsTimeoutMs(env: Record<string, string | undefined>): numb
     : HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS;
 }
 
+/** Hermes advertises its whole catalog on session/new and has no `hermes models` subcommand. Security: while the bot box
+ * is on, it runs in the box, as a bot's turn does, since Hermes reads its settings from a HOME a bot can write.
+ * `allowEnv`: the keys the instance's own settings put in `env`. */
 export async function fetchHermesAcpModels(
   cli: string,
   env: Record<string, string | undefined>,
+  allowEnv: readonly string[] = [],
 ): Promise<{ id: string; label: string; custom: true }[]> {
   return await new Promise((resolve) => {
-    let child: ReturnType<typeof spawn>;
+    let child: ReturnType<typeof spawnCli>;
     try {
-      const resolved = resolveCli(cli, ["acp"], env);
-      child = spawn(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, windowsHide: true });
+      // Resolved on the supplied PATH (Windows npm shims), then spawned by spawnCli, which resolves on the app's.
+      const resolved = resolveCli(cli, ["acp"], env as NodeJS.ProcessEnv);
+      child = spawnCli(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, box: { allowEnv } });
     } catch {
       return resolve([]);
     }
@@ -299,19 +298,17 @@ export async function fetchHermesAcpModels(
           hardKillTimer = setTimeout(() => {
             try {
               child.kill("SIGKILL");
-            } catch {
-              /* already gone */
-            }
+            } catch {}
           }, 1_000);
           hardKillTimer.unref?.();
         }
-      } catch {
-        /* already gone */
-      }
+      } catch {}
       resolve(out);
     };
     timer = setTimeout(() => done([]), hermesAcpModelsTimeoutMs(env));
     child.once("error", () => done([]));
+    // A child that already exited makes stdin emit EPIPE, and an unhandled stream 'error' crashes the server.
+    child.stdin?.on("error", () => done([]));
     child.once("close", () => {
       if (hardKillTimer) clearTimeout(hardKillTimer);
       done([]);
@@ -361,7 +358,6 @@ export async function fetchHermesAcpModels(
               .filter((m: any) => typeof m?.modelId === "string" && m.modelId)
               .map((m: any) => ({
                 id: m.modelId as string,
-                // Hermes labels these "OpenRouter · <model>"; keep its wording.
                 label: (typeof m.name === "string" && m.name.trim()) || (m.modelId as string),
                 custom: true as const,
               })),
@@ -376,21 +372,26 @@ export async function fetchHermesAcpModels(
   });
 }
 
-async function resolveModels(
+export async function resolveHermesModels(
   env: Record<string, string | undefined>,
   config?: { cli?: string },
+  allowEnv: readonly string[] = [],
 ): Promise<ModelCatalog> {
+  const cli = config?.cli || "hermes";
   const catalog = await mergeLocalInject(EMPTY, env);
   const configured = hermesConfiguredModel(env);
-  // Only probe when a hosted provider is configured; a local-only install has
-  // nothing to gain from the spawn.
-  const remote = configured ? await fetchHermesAcpModels(config?.cli || "hermes", env) : [];
+  const remote = configured ? await fetchHermesAcpModels(cli, env, allowEnv) : [];
   const seen = new Set<string>();
   const options = [...(configured ? [configured] : []), ...remote, ...catalog.options].filter((o) => {
     if (seen.has(o.id)) return false;
     seen.add(o.id);
     return true;
   });
+  // A custom endpoint or a config we can't read (another HERMES_HOME, WSL) would leave no choice and no way to
+  // create a Hermes bot: offer Hermes' own config.yaml model, which starts `hermes acp` without picking one.
+  if (!options.length && !hermesUsesProbedProvider(env) && hermesInstalled(cli)) {
+    options.push(hermesConfigOption(""));
+  }
   return { default: options[0]?.id ?? "", options };
 }
 
@@ -407,16 +408,28 @@ async function applySetting(
   }
 }
 
+/** hermes-agent's ACP `/steer` (acp_adapter/commands.py `_cmd_steer`; from 0.22.3 the gateway's `session.steer`,
+ * acp_adapter/gateway_commands.py) hands the text to the running turn, which reads it after its current tool batch or
+ * before its next model call, and answers with one of these lines. After "No active turn" Hermes runs the text as its
+ * next prompt before it answers the `/steer` prompt. */
+const HERMES_STEER_ANSWERS = [
+  ["⏩ Steer queued for the active turn:", "accepted"],
+  ["No active turn — queued for the next turn.", "accepted"],
+  ["⚠️ Steer failed:", "refused"],
+] as const;
+
+export function hermesSteerAnswer(chunk: string): "accepted" | "refused" | null {
+  return HERMES_STEER_ANSWERS.find(([line]) => chunk.startsWith(line))?.[1] ?? null;
+}
+
 const support: AcpSupport = {
   driverKind: "hermesAgent",
   displayName: "Hermes",
   access: "custom",
   models: EMPTY,
-  resolveModels: (env: Record<string, string | undefined>, config: any) => resolveModels(env, config),
+  resolveModels: (env: Record<string, string | undefined>, config: any, _instanceId: string, _fresh?: boolean, allowEnv?: readonly string[]) => resolveHermesModels(env, config, allowEnv),
   resolveTurnModel: (model, env) => {
-    // Never inherit a broad or stale compatibility grant from the parent.
-    // Only this OpenMaus driver binds one concrete local model; Hermes still
-    // requires the exact read-only screenshot MCP tool before activation.
+    // Never inherit a broad or stale compatibility grant from the parent; bind one concrete model.
     bindHermesScreenshotCompat(env, model);
     if (!model) return model;
     ensureHermesInjectProvider(model, env);
@@ -435,10 +448,12 @@ const support: AcpSupport = {
     signInCommand: "hermes setup",
   },
   spawnArgs: () => ["acp"],
+  // Hermes keeps the first MCP server it registers under a name for the process's life, so a new bearer needs a fresh process.
+  restartOnMcpChange: true,
+  resendsReasoningReply: true,
+  steer: { command: "steer", answer: hermesSteerAnswer },
   transformEnv: (env) => {
-    // A leftover OPENAI_API_KEY makes Hermes auto-resolve to OpenRouter and
-    // send no Authorization header. ACP also reloads ~/.hermes/.env, so the
-    // named custom provider + session/set_model is the real route.
+    // A leftover OPENAI_API_KEY makes Hermes auto-resolve to OpenRouter with no Authorization header.
     delete env.OPENAI_API_KEY;
     delete env.OPENROUTER_API_KEY;
   },
@@ -446,9 +461,7 @@ const support: AcpSupport = {
   authFailure: "continue",
   isAuthenticated: () => true,
   async configureSession({ request, sessionId, turn }) {
-    // Decode only — resolveTurnModel already wrote the named provider using
-    // the instance HOME. Calling ensure* again here would hit process.env
-    // and rewrite the user's real ~/.hermes/config.yaml.
+    // Decode only: ensure* here would read process.env and rewrite the user's real ~/.hermes/config.yaml.
     const native = hermesAcpModelId(turn.model);
     if (!native) return;
     await applySetting(

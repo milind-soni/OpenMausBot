@@ -1,14 +1,9 @@
-// The native window chrome that CSS cannot reach, per skin. Everything the
-// renderer paints follows `[data-skin]` in src/styles.css; the Windows
-// caption-button overlay and the window's own background are drawn by the
-// main process and have to be told the same colours. The values mirror each
-// skin's `--color-app` (the header strip is `bg-app`) and, for the symbols,
-// its `--color-ink-secondary` — flattened to opaque hex because the overlay
-// accepts no alpha. Keep in step with src/styles.css and src/lib/skins.ts.
+// The native chrome CSS cannot reach (the Windows caption-button overlay accepts no alpha, so opaque hex).
+// Keep in step with src/styles.css and src/lib/skins.ts.
 "use strict";
 
 const SKIN_CHROME = Object.freeze({
-  midnight: Object.freeze({ color: "#070707", symbolColor: "#b5b5b5" }),
+  midnight: Object.freeze({ color: "#121212", symbolColor: "#b5b5b5" }),
   atelier: Object.freeze({ color: "#f5f1eb", symbolColor: "#6b6559" }),
   foundry: Object.freeze({ color: "#100e0b", symbolColor: "#b0a696" }),
   lagoon: Object.freeze({ color: "#dfeceb", symbolColor: "#4d5c5b" }),
@@ -16,23 +11,28 @@ const SKIN_CHROME = Object.freeze({
   linen: Object.freeze({ color: "#eceff3", symbolColor: "#59616c" }),
   dusk: Object.freeze({ color: "#121014", symbolColor: "#b9afbd" }),
   daylight: Object.freeze({ color: "#fcfcfc", symbolColor: "#575757" }),
+  meadow: Object.freeze({ color: "#ffffff", symbolColor: "#4d5a52" }),
+  pop: Object.freeze({ color: "#fdf5ea", symbolColor: "#3a322d" }),
+  halloween: Object.freeze({ color: "#110d16", symbolColor: "#c2b3cc" }),
+  diwali: Object.freeze({ color: "#100d1f", symbolColor: "#cdbfdc" }),
+  aurora: Object.freeze({ color: "#0b0c0b", symbolColor: "#b4bab4" }),
 });
 
 const DEFAULT_SKIN = "midnight";
 
-/** The chrome colours for a skin id sent by the renderer. Anything that is
- * not a known skin — a renamed skin, a stale value, a non-string — falls
- * back to Midnight rather than throwing, because the renderer has already
- * painted and a wrong overlay is recoverable while a broken IPC is not. */
 function skinChrome(skin) {
   return Object.hasOwn(SKIN_CHROME, skin) ? SKIN_CHROME[skin] : SKIN_CHROME[DEFAULT_SKIN];
 }
 
-/** True when the id names a skin this module knows. A non-string coerces to a
- * property key that cannot match a skin id, so it answers false without a
- * separate type guard. */
 function isKnownSkin(skin) {
   return Object.hasOwn(SKIN_CHROME, skin);
 }
 
-module.exports = { SKIN_CHROME, DEFAULT_SKIN, skinChrome, isKnownSkin };
+/** A light skin: its page colour is nearer white than black. */
+function skinIsLight(skin) {
+  const hex = skinChrome(skin).color;
+  const [r, g, b] = [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 127.5;
+}
+
+module.exports = { SKIN_CHROME, DEFAULT_SKIN, skinChrome, isKnownSkin, skinIsLight };

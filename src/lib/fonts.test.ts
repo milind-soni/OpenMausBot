@@ -1,5 +1,3 @@
-// Registry and stylesheet are two halves of one contract: a font listed here
-// without a CSS block silently renders as the skin's font, so it gets a test.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -35,8 +33,24 @@ describe("fonts", () => {
   });
 
   it("registers every stylesheet block", () => {
-    // SAFETY: the assertion only fits toContain()'s parameter type.
     for (const id of blocks) expect(FONT_IDS).toContain(id as (typeof FONT_IDS)[number]);
+  });
+
+  it("leads every skin with the bundled Geist face, except the paper skins and Pop", () => {
+    const skins = [...css.matchAll(/\[data-skin="([a-z-]+)"\]\s*\{[^}]*?--font-sans:\s*([^;]+);/g)];
+    expect(skins.length).toBeGreaterThan(8);
+    for (const [, skin, stack] of skins) {
+      const first = stack.split(",")[0].trim();
+      if (["atelier", "lagoon", "linen"].includes(skin)) expect(first, skin).toBe("system-ui");
+      else if (skin === "pop") expect(first, skin).toBe('"Plus Jakarta Sans"');
+      else expect(first, skin).toBe('"Geist Variable"');
+    }
+    expect(css).toMatch(/@import "@fontsource-variable\/geist";/);
+    expect(css).toMatch(/--font-mono:\s*"Geist Mono Variable"/);
+  });
+
+  it("spells BlinkMacSystemFont exactly, since Chromium skips any other casing", () => {
+    for (const [match] of css.matchAll(/blinkmacsystemfont/gi)) expect(match).toBe("BlinkMacSystemFont");
   });
 
   it("stamps a chosen font and remembers it", () => {

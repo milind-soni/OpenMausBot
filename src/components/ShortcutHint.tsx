@@ -1,6 +1,5 @@
 import { SHORTCUT_GROUPS, shortcutKeysForPlatform } from "@/lib/keyboard-shortcuts";
 
-/** Display the real binding, without adding a second shortcut registry. */
 export function shortcutLabel(id: string): string | undefined {
   const item = SHORTCUT_GROUPS.flatMap((group) => group.items).find((entry) => entry.id === id);
   return item ? shortcutKeysForPlatform(item).join(" ") : undefined;

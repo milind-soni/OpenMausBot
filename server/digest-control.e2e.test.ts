@@ -7,9 +7,7 @@ import type { WireMessage } from "../shared/wire.ts";
 
 it("records independent turns and room speakers through the shared control fixture", async () => {
   const fixture = await launchVerificationServer({
-    // The launcher keeps only OS launch variables and FAKE_CLAUDE_* knobs.
-    // Windows shell hooks need COMSPEC/SYSTEMROOT; replacing the parent
-    // environment with just fake knobs made every hook fall back to preview.
+    // The launcher keeps only OS launch variables and FAKE_CLAUDE_* knobs; Windows shell hooks need COMSPEC/SYSTEMROOT.
     ...process.env,
     FAKE_CLAUDE_HOOKS: "1",
     FAKE_CLAUDE_TOOL_CALLS: JSON.stringify([{ name: "Bash", id: "reused-tool-id", input: { command: "echo receipt" }, output: "receipt", ok: true }]),

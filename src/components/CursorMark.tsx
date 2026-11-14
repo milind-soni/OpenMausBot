@@ -1,7 +1,4 @@
-// Official Cursor mark (cursor.com favicon / wordmark companion). The brand
-// asset is near-white because it is drawn for a dark UI; kept as a fixed
-// colour it vanished on every light skin. Monochrome marks take --color-ink
-// here, the way the Grok, Codex and Kimi marks already do.
+// Official Cursor mark (cursor.com favicon).
 import { cn } from "@/lib/cn";
 
 interface IconProps {

@@ -1,9 +1,5 @@
-// Identity: avatar, name, title, and the short blurb every roster and the
-// phone show. Long standing instructions belong in Soul (SoulSection) —
-// this section only keeps the "View full" dialog for the blurb itself.
-// Moved out of SettingsPanel.tsx (its header, avatar card, Name, Title,
-// and Instructions block) with only the label and helper text changed.
 import { useState } from "react";
+import { DefaultBotHideRow } from "../DefaultBotControls";
 import { BookOpen } from "lucide-react";
 
 import { useStore, type Bot } from "@/state/store";
@@ -18,7 +14,9 @@ import { useBotEditor } from "./BotEditorContext";
 import { PackageProvenance } from "./PackageProvenance";
 import { ProposalStatus } from "./ProposalStatus";
 import { randomBotName } from "@/lib/random-bot-name";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
+
+export type IdentityPart = "avatar" | "provenance" | "name" | "title" | "blurb";
 
 export function IdentitySection({
   bot,
@@ -26,25 +24,28 @@ export function IdentitySection({
   activeState,
   mascotMotion,
   namePlaceholder,
+  parts,
 }: {
   bot: Bot;
   patch: (patch: BotPatch) => void;
   activeState: MausState;
   mascotMotion: { kind: Exclude<MausMotion, "none">; nonce: number } | null;
   namePlaceholder?: string;
+  parts?: readonly IdentityPart[];
 }) {
   const [instructionsOpen, setInstructionsOpen] = useState(false);
   const { draft } = useBotEditor();
   const { state } = useStore();
+  const shows = (part: IdentityPart) => !parts || parts.includes(part);
 
   return (
     <div className="flex flex-col gap-4">
-      <BotProfileAvatarCard bot={bot} activeState={activeState} mascotMotion={mascotMotion} onPatch={patch} />
-      <PackageProvenance bot={bot} />
+      {shows("avatar") && <BotProfileAvatarCard bot={bot} activeState={activeState} mascotMotion={mascotMotion} onPatch={patch} />}
+      {shows("provenance") && <PackageProvenance bot={bot} />}
 
-      <div>
+      {shows("name") && <div>
         <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-          <label htmlFor={`bot-name-${bot.id}`} className="text-[13px] text-ink-secondary">Name</label>
+          <label htmlFor={`bot-name-${bot.id}`} className="text-[13px] text-ink-secondary">{t("botSettings.identity.name")}</label>
           {draft && <div className="flex flex-wrap gap-1">
             {(["female", "male"] as const).map(kind => <button
               key={kind}
@@ -63,28 +64,28 @@ export function IdentitySection({
           placeholder={namePlaceholder}
           onChange={(e) => patch({ name: e.target.value })}
         />
-      </div>
-      <Field label="Title">
+      </div>}
+      {shows("title") && <Field label={t("botSettings.identity.title")}>
         <ProposalStatus bot={bot} kind="chief" />
         <input
           className={inputCls}
           maxLength={BOT_PROFILE_LIMITS.title}
-          placeholder="Describe what your agent does"
+          placeholder={t("botSettings.identity.titlePlaceholder")}
           value={bot.title}
           onChange={(e) => patch({ title: e.target.value })}
         />
-      </Field>
-      <div className="block">
+      </Field>}
+      {shows("blurb") && <div className="block">
         <div className="mb-1.5 flex items-center justify-between gap-3">
           <label htmlFor={`bot-instructions-${bot.id}`} className="text-[13px] text-ink-secondary">
-            Blurb
+            {t("botSettings.identity.blurb")}
           </label>
           <button
             type="button"
             onClick={() => setInstructionsOpen(true)}
-            className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-accent-text hover:bg-accent/10"
+            className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] font-medium text-accent-text hover:bg-accent/10"
           >
-            <BookOpen size={12} /> View full
+            <BookOpen size={12} /> {t("botSettings.identity.viewFull")}
           </button>
         </div>
         <ProposalStatus bot={bot} kind="chief" />
@@ -92,23 +93,22 @@ export function IdentitySection({
           id={`bot-instructions-${bot.id}`}
           className={cn(inputCls, "min-h-[72px] resize-y leading-relaxed")}
           maxLength={BOT_PROFILE_LIMITS.description}
-          placeholder="One line on what this bot is for"
-          aria-label="Blurb"
+          placeholder={t("botSettings.identity.blurbPlaceholder")}
+          aria-label={t("botSettings.identity.blurb")}
           value={bot.description}
           onChange={(e) => patch({ description: e.target.value })}
         />
         <div className="mt-1.5 flex items-start justify-between gap-3 text-[11px] text-ink-secondary">
-          <span>Shown in rosters, on the phone, and to other bots. Standing instructions belong in Soul, which has room for a full document.</span>
-          {/* The cap only matters when someone is near it; a counter under a
-              one-line field otherwise reads as an invitation to fill it. */}
+          <span>{t("botSettings.identity.blurbHelp")}</span>
           {bot.description.length > 3_000 && (
             <span className="shrink-0 tabular-nums">
-              {bot.description.length.toLocaleString()} / {BOT_PROFILE_LIMITS.description.toLocaleString()}
+              {bot.description.length.toLocaleString(intlLocale())} / {BOT_PROFILE_LIMITS.description.toLocaleString(intlLocale())}
             </span>
           )}
         </div>
-      </div>
+      </div>}
 
+      <DefaultBotHideRow bot={bot} />
       {instructionsOpen && <BotInstructionsDialog bot={bot} inline={draft} onClose={() => setInstructionsOpen(false)} />}
     </div>
   );

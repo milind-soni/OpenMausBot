@@ -1,8 +1,13 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { removeTempDir } from "../testing/cleanup.ts";
+import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
+import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
+import { buildMcpServers } from "./pi-mcp-servers.ts";
+import { mcpStdioServer } from "../mcp-gate-config.ts";
 
 import extension, {
   allocateToolName,
@@ -49,10 +54,10 @@ function createClient(source: string, env: Record<string, string> = {}): StdioMc
   return client;
 }
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
   for (const client of clients.splice(0)) client.dispose();
-  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of tempDirs.splice(0)) await removeTempDir(dir);
   if (originalMcpConfig === undefined) delete process.env.OMB_MCP_CONFIG;
   else process.env.OMB_MCP_CONFIG = originalMcpConfig;
 });
@@ -83,8 +88,6 @@ describe("Pi MCP JSON Schema conversion", () => {
       },
       required: [],
     });
-    // SAFETY: toTypebox returns a TypeBox JSON Schema; this test reads only
-    // standard JSON Schema fields represented by SchemaNode.
     const inspected = schema as SchemaNode;
 
     expect(inspected.type).toBe("object");
@@ -105,8 +108,6 @@ describe("Pi MCP JSON Schema conversion", () => {
       },
       required: ["value"],
     });
-    // SAFETY: toTypebox returns a TypeBox JSON Schema; this test reads only
-    // standard JSON Schema fields represented by SchemaNode.
     const inspected = schema as SchemaNode;
 
     expect(inspected.type).toBe("object");
@@ -124,13 +125,10 @@ describe("Pi MCP JSON Schema conversion", () => {
         { type: "object", properties: { id: { type: "integer" } }, required: ["id"] },
       ],
     });
-    // SAFETY: toTypebox returns a TypeBox JSON Schema; this test reads only
-    // standard JSON Schema fields represented by SchemaNode.
     const inspected = schema as SchemaNode;
 
     expect(inspected.type).toBe("object");
     expect(Object.keys(inspected.properties ?? {})).toEqual(["query", "id"]);
-    // A field required by only one choice cannot be globally required.
     expect(inspected.required).toBeUndefined();
   });
 
@@ -230,7 +228,207 @@ describe("StdioMcp", () => {
   });
 });
 
+describe("Pi MCP startup budgets", () => {
+  /** Lets real I/O run, the faked clock standing still, until `condition`. */
+  async function untilReal(condition: () => boolean): Promise<void> {
+    const started = Date.now();
+    while (!condition() && Date.now() - started < 15_000) await new Promise((resolve) => setImmediate(resolve));
+    expect(condition()).toBe(true);
+  }
+  function watch<T>(pending: Promise<T>) {
+    const state: { done: boolean; value?: T; error?: unknown } = { done: false };
+    void pending.then((value) => { state.done = true; state.value = value; }, (error: unknown) => { state.done = true; state.error = error; });
+    return state;
+  }
+
+  it("gives a searched URL server 30 seconds to start, the same server mounted plainly 8", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(300), toolsDelayMs: 20_000 });
+    try {
+      const descriptor = mcpStdioServer({ type: "http", url: remote.url, headers: {} }, { directory: { name: "whop" } })!;
+      const server = { command: descriptor.command, args: descriptor.args, env: descriptor.env };
+      const searched = new StdioMcp({ ...server, directory: true });
+      clients.push(searched);
+      const listing = watch(searched.init().then(() => searched.listTools()));
+      await untilReal(() => remote.delayedToolsLists === 1);
+      await vi.advanceTimersByTimeAsync(20_000);
+      await untilReal(() => listing.done);
+      expect(listing.error).toBeUndefined();
+      expect(listing.value!.map((tool) => tool.name)).toEqual(["search_tools", "describe_tool", "call_tool"]);
+
+      const plain = new StdioMcp(server);
+      clients.push(plain);
+      const failing = watch(plain.init().then(() => plain.listTools()));
+      await untilReal(() => remote.delayedToolsLists === 2);
+      await vi.advanceTimersByTimeAsync(8_000);
+      await untilReal(() => failing.done);
+      expect(String(failing.error)).toMatch(/timed out/);
+    } finally {
+      vi.useRealTimers();
+      await remote.close();
+    }
+  });
+});
+
 describe("Pi MCP extension registration", () => {
+  const scopedApi = (initial: string[]) => {
+    let active = initial;
+    const tools: RegisteredTool[] = [];
+    const handlers = new Map<string, (event?: any) => any>();
+    return { tools, handlers, current: () => active, restore: (names: string[]) => { active = names; }, api: {
+      registerTool(tool: RegisteredTool) { tools.push(tool); },
+      on(event: string, handler: (event?: any) => any) { handlers.set(event, handler); },
+      getActiveTools: () => [...active], setActiveTools: (names: string[]) => { active = names; },
+    } };
+  };
+  const scopeConfig = (toolScope: unknown, other = {}) => {
+    const dir = tempDir();
+    process.env.OMB_MCP_CONFIG = join(dir, "scope.json");
+    writeFileSync(process.env.OMB_MCP_CONFIG, JSON.stringify({ toolScope, ...other }));
+    return dir;
+  };
+
+  it("intersects native and package tools before the first turn and after restoration", async () => {
+    scopeConfig({ allow: ["native:read", "native:edit", "native:write"] });
+    const f = scopedApi(["read", "write", "bash", "package_tool"]);
+    await extension(f.api);
+    await f.handlers.get("session_start")?.({});
+    expect(f.current()).toEqual(["read", "write"]);
+    f.restore(["read", "write", "bash", "late_package"]);
+    await f.handlers.get("before_agent_start")?.({});
+    expect(f.current()).toEqual(["read", "write"]);
+    f.restore(["edit", "bash"]);
+    await f.handlers.get("session_switch")?.({});
+    await f.handlers.get("model_select")?.({});
+    expect(f.current()).toEqual(["edit"]);
+    expect(await f.handlers.get("tool_call")?.({ toolName: "bash" })).toMatchObject({ block: true });
+    expect(await f.handlers.get("tool_call")?.({ toolName: "read" })).toBeUndefined();
+    f.restore(["read", "bash"]);
+    const payload = { tools: ["read", "bash", "late_package"].map((name) => ({ type: "function", function: { name, parameters: { type: "object" } } })) };
+    await f.handlers.get("before_provider_request")?.({ payload });
+    expect(payload.tools.map((tool) => tool.function.name)).toEqual(["read"]);
+  });
+
+  it("does not confirm a refused active-tool clamp or restore a tool another extension disabled", async () => {
+    const directory = scopeConfig({ allow: ["native:read", "native:write"] });
+    const readyPath = join(directory, "ready.json");
+    scopeConfig({ allow: ["native:read", "native:write"] }, { scopeReadyPath: readyPath });
+    const refused = scopedApi(["read", "bash"]);
+    refused.api.setActiveTools = () => {};
+    await extension(refused.api);
+    expect(() => refused.handlers.get("session_start")?.({})).toThrow(/enforcement/i);
+    expect(JSON.parse(readFileSync(readyPath, "utf8"))).toEqual({ ok: false });
+    const f = scopedApi(["write"]);
+    await extension(f.api);
+    const payload = { tools: ["read", "write"].map((name) => ({ name, input_schema: { type: "object" } })) };
+    await f.handlers.get("before_provider_request")?.({ payload });
+    expect(payload.tools.map((tool) => tool.name)).toEqual(["write"]);
+  });
+
+  it("makes no-tools explicit and refuses unavailable enforcement APIs or corrupt configuration", async () => {
+    scopeConfig({ allow: [] });
+    const f = scopedApi(["read", "bash"]);
+    await extension(f.api);
+    await f.handlers.get("session_start")?.({});
+    expect(f.current()).toEqual([]);
+    expect(await f.handlers.get("tool_call")?.({ toolName: "read" })).toMatchObject({ block: true });
+    await expect(extension({ registerTool() {}, on() {} })).rejects.toThrow(/enforcement/i);
+    writeFileSync(process.env.OMB_MCP_CONFIG!, "not json");
+    await expect(extension(f.api)).rejects.toThrow(/configuration/i);
+  });
+
+  it("removes declarations if enforcement becomes unavailable after startup", async () => {
+    scopeConfig({ allow: ["native:read"] });
+    const f = scopedApi(["read"]);
+    await extension(f.api);
+    await f.handlers.get("session_start")?.({});
+    f.api.setActiveTools = () => {};
+    f.restore(["read", "bash"]);
+    const payload = { tools: ["read", "bash"].map((name) => ({ type: "function", function: { name } })) };
+    // Pi catches extension exceptions and can keep sending the old payload: return deny-all, never throw.
+    await f.handlers.get("before_provider_request")?.({ payload });
+    expect(payload.tools).toEqual([]);
+  });
+
+  it("filters raw MCP identities and still asks before custom execution", async () => {
+    const receipt = join(tempDir(), "execution.txt");
+    const script = fakeMcpScript(`
+      import { createInterface } from "node:readline";
+      import { writeFileSync } from "node:fs";
+      createInterface({input:process.stdin}).on("line", line => {
+        const m = JSON.parse(line); if (m.id === undefined) return;
+        let result = {};
+        if (m.method === "tools/list") result = {tools:[{name:"read-notes",inputSchema:{type:"object"}},{name:"read_notes",inputSchema:{type:"object"}}]};
+        if (m.method === "tools/call") { writeFileSync(process.env.RECEIPT, m.params.name); result = {content:[{type:"text",text:"selected"}]}; }
+        process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:m.id,result}) + "\\n");
+      });
+    `);
+    scopeConfig({ allow: ["mcp:mail:read-notes"] }, { mcpServers: { mail: { command: process.execPath, args: [script], env: { RECEIPT: receipt }, scope: "custom" } } });
+    const f = scopedApi(["read", "mail_read_notes"]);
+    await extension(f.api);
+    try {
+      expect(f.tools.map((tool) => tool.name)).toEqual(["mail_read_notes"]);
+      const blocked = await f.tools[0].execute("denied", {}, undefined, undefined, { ui: { confirm: async () => false } });
+      expect(blocked.content).toMatchObject([{ text: "Blocked by the user." }]);
+      expect(existsSync(receipt)).toBe(false);
+      await f.tools[0].execute("allowed", {}, undefined, undefined, { ui: { confirm: async () => true } });
+      expect(readFileSync(receipt, "utf8")).toBe("read-notes");
+      expect(await f.handlers.get("tool_call")?.({ toolName: "mail_read_notes_2" })).toMatchObject({ block: true });
+    } finally { await f.handlers.get("session_shutdown")?.(); }
+  });
+  it("registers a big URL server as three tools, asking only about the tool call_tool runs", async () => {
+    const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(300) });
+    try {
+      const servers = buildMcpServers({ threadId: "pi-whop", text: "Go", integrations: { custom: { whop: { type: "http", url: remote.url, headers: {} } } } });
+      scopeConfig(undefined, { mcpServers: servers, approvalMode: "ask" });
+      const tools: RegisteredTool[] = [];
+      const handlers = new Map<string, ShutdownHandler>();
+      await extension({ registerTool(tool) { tools.push(tool); }, on(event, handler) { handlers.set(event, handler); } });
+      try {
+        expect(tools.map((tool) => tool.name)).toEqual(["whop_search_tools", "whop_describe_tool", "whop_call_tool"]);
+        const asked: string[] = [];
+        const ui = { confirm: async (title: string) => { asked.push(title); return true; } };
+        const search = await tools[0].execute("search", { query: "list payments" }, undefined, undefined, { ui });
+        expect(JSON.parse((search.content[0] as { text: string }).text).matches[0].name).toBe("payments_list");
+        await tools[1].execute("describe", { name: "payments_list" }, undefined, undefined, { ui });
+        expect(asked).toEqual([]);
+        await tools[2].execute("run", { name: "payments_list", arguments: { company_id: "biz_1" } }, undefined, undefined, { ui });
+        expect(asked).toEqual(["Allow whop:payments_list?"]);
+        expect(remote.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
+      } finally { await handlers.get("session_shutdown")?.(); }
+    } finally { await remote.close(); }
+  });
+
+  it("keeps a searched URL server to the bot's selection", async () => {
+    const catalog = whopLikeCatalog(300);
+    const selected = [...catalog.filter((tool) => tool.name.endsWith("_list")).map((tool) => tool.name), "payments_get", "stats_get"];
+    const toolScope = { allow: selected.map((name) => `mcp:whop:${name}`) };
+    const remote = await startFakeHttpMcp({ tools: catalog });
+    try {
+      const servers = buildMcpServers({ threadId: "pi-whop-scoped", text: "Go", toolScope, integrations: { custom: { whop: { type: "http", url: remote.url, headers: {} } } } });
+      scopeConfig(toolScope, { mcpServers: servers, approvalMode: "ask" });
+      const f = scopedApi(["read", "whop_search_tools", "whop_describe_tool", "whop_call_tool"]);
+      await extension(f.api);
+      try {
+        expect(f.tools.map((tool) => tool.name)).toEqual(["whop_search_tools", "whop_describe_tool", "whop_call_tool"]);
+        await f.handlers.get("session_start")?.({});
+        expect(f.current()).toEqual(["whop_search_tools", "whop_describe_tool", "whop_call_tool"]);
+        expect(await f.handlers.get("tool_call")?.({ toolName: "whop_call_tool" })).toBeUndefined();
+        const asked: string[] = [];
+        const ui = { confirm: async (title: string) => { asked.push(title); return true; } };
+        await expect(f.tools[2].execute("excluded", { name: "payments_create", arguments: {} }, undefined, undefined, { ui })).rejects.toThrow("Tool selection excludes this tool");
+        expect(asked).toEqual([]);
+        expect(remote.calls).toEqual([]);
+        const found = await f.tools[0].execute("search", { query: "create payments", limit: 20 }, undefined, undefined, { ui });
+        const names = JSON.parse((found.content[0] as { text: string }).text).matches.map((match: { name: string }) => match.name);
+        expect(names.every((name: string) => selected.includes(name))).toBe(true);
+        await f.tools[2].execute("selected", { name: "payments_list", arguments: { company_id: "biz_1" } }, undefined, undefined, { ui });
+        expect(asked).toEqual(["Allow whop:payments_list?"]);
+        expect(remote.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
+      } finally { await f.handlers.get("session_shutdown")?.(); }
+    } finally { await remote.close(); }
+  });
+
   it("keeps earlier tools alive when a later registration fails", async () => {
     const script = fakeMcpScript(`
       let buffer = "";
@@ -319,3 +517,80 @@ describe("Pi MCP extension registration", () => {
     await handlers.get("session_shutdown")?.();
   });
 });
+
+describe("Pi ask_user tool", () => {
+  const load = async (config: Record<string, unknown>, active = ["read", "ask_user"]) => {
+    const dir = tempDir();
+    process.env.OMB_MCP_CONFIG = join(dir, "mcp.json");
+    writeFileSync(process.env.OMB_MCP_CONFIG, JSON.stringify(config));
+    const tools: RegisteredTool[] = [];
+    let current = active;
+    await extension({
+      registerTool(tool) { tools.push(tool); },
+      on() {},
+      getActiveTools: () => [...current],
+      setActiveTools: (names) => { current = names; },
+    });
+    return tools.find((tool) => tool.name === "ask_user");
+  };
+  // What pi's RPC mode does with each dialog: the driver answers with the
+  // picked label, the person's typed words, or a cancel (undefined).
+  const dialogs = (replies: Array<string | undefined>) => {
+    const asked: Array<{ method: string; title: string; options?: string[] }> = [];
+    const next = async () => replies.shift();
+    return { asked, ctx: { ui: {
+      confirm: async () => false,
+      select: async (title: string, options: string[]) => { asked.push({ method: "select", title, options }); return next(); },
+      input: async (title: string) => { asked.push({ method: "input", title }); return next(); },
+    } } };
+  };
+  const QUESTIONS = { questions: [
+    { question: "Which color?", options: [{ label: "Blue" }, { label: "Green", description: "the calm one" }] },
+    { question: "Any notes?" },
+  ] };
+
+  it("registers only when the driver allows it and the selection includes native:ask_user", async () => {
+    expect(await load({})).toBeUndefined();
+    expect(await load({ askUser: true, toolScope: { allow: ["native:read"] } })).toBeUndefined();
+    const tool = await load({ askUser: true, toolScope: { allow: ["native:ask_user"] } });
+    expect(tool).toMatchObject({ name: "ask_user", exposure: "model-only" });
+  });
+
+  it("asks each question in turn and returns the answers in the shared Q:/A: form", async () => {
+    const tool = (await load({ askUser: true }))!;
+    const { asked, ctx } = dialogs(["Green", "Ship it on Friday"]);
+    const result = await tool.execute("call-1", QUESTIONS, undefined, undefined, ctx);
+    expect(asked).toEqual([
+      // the description shows under the question; the labels stay exact
+      { method: "select", title: "Which color?\n\nGreen: the calm one", options: ["Blue", "Green"] },
+      { method: "input", title: "Any notes?" },
+    ]);
+    expect(result.content).toEqual([{ type: "text", text:
+      "The user answered your questions.\n\nQ: Which color?\nA: Green\n\nQ: Any notes?\nA: Ship it on Friday" }]);
+  });
+
+  it("returns the person's own words when they answer a select in free text", async () => {
+    const tool = (await load({ askUser: true }))!;
+    const result = await tool.execute("call-2", { questions: [QUESTIONS.questions[0]] }, undefined, undefined, dialogs(["Purple, please"]).ctx);
+    expect(result.content).toEqual([{ type: "text", text: "The user answered your questions.\n\nQ: Which color?\nA: Purple, please" }]);
+  });
+
+  it("says plainly when nobody answered, and stops at the first unanswered question", async () => {
+    const tool = (await load({ askUser: true }))!;
+    await expect(tool.execute("call-3", QUESTIONS, undefined, undefined, dialogs([undefined]).ctx)).rejects.toThrow(/did not answer/);
+    const partial = dialogs(["Blue", undefined]);
+    const result = await tool.execute("call-4", QUESTIONS, undefined, undefined, partial.ctx);
+    expect(partial.asked).toHaveLength(2);
+    expect(result.content[0]).toMatchObject({ text: expect.stringContaining("Q: Which color?\nA: Blue\n\nThe person did not answer the other questions.") });
+  });
+
+  it("refuses multi-select and malformed calls with words the model can act on", async () => {
+    const tool = (await load({ askUser: true }))!;
+    const { asked, ctx } = dialogs([]);
+    await expect(tool.execute("call-5", { questions: [{ question: "Which?", multiSelect: true, options: [{ label: "A" }, { label: "B" }] }] }, undefined, undefined, ctx))
+      .rejects.toThrow(/one answer per question/);
+    await expect(tool.execute("call-6", { questions: [] }, undefined, undefined, ctx)).rejects.toThrow(/malformed/);
+    expect(asked).toEqual([]);
+  });
+});
+

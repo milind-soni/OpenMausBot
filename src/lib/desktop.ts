@@ -33,12 +33,13 @@ export function initialDesktopCapabilities(): DesktopCapabilities {
   const platform = typeof window === "undefined" ? undefined : window.ogb?.platform;
   if (!platform) return browserCapabilities;
   const isMac = platform === "darwin";
+  const fishListening = platform === "win32" || platform === "linux";
   const dictation: DesktopCapabilities["dictation"] = {
-    available: isMac,
-    engine: isMac ? "apple-speech" : "none",
+    available: isMac || fishListening,
+    engine: isMac ? "apple-speech" : fishListening ? "fish-audio" : "none",
     onDevice: isMac,
   };
-  if (!isMac) dictation.reasonCode = "unsupported-platform";
+  if (!dictation.available) dictation.reasonCode = "unsupported-platform";
   return {
     ...browserCapabilities,
     host: {
@@ -61,15 +62,24 @@ export async function loadDesktopCapabilities(): Promise<DesktopCapabilities> {
   } catch {
     loaded = browserCapabilities;
   }
-  // An IPC push may deliver newer runtime readiness while the initial query is
-  // still pending. Never let that older response replace the pushed state.
+  // An IPC push may have delivered newer readiness meanwhile; never let this older response replace it.
   if (cacheRevision !== revisionAtStart && cached) return cached;
   cached = loaded;
   return cached;
+}
+
+export function desktopCapabilitiesNow(): DesktopCapabilities {
+  return cached ?? initialDesktopCapabilities();
 }
 
 export function cacheDesktopCapabilities(capabilities: DesktopCapabilities): DesktopCapabilities {
   cacheRevision += 1;
   cached = capabilities;
   return capabilities;
+}
+
+/** The desktop bridge that saves a switch with its approval reset to Ask. A paired desktop has none: its own app runs no
+ * server behind that bridge, so the host takes the switch over HTTP. */
+export function askResetBridge() {
+  return typeof window === "undefined" || window.ogb?.remoteClient?.active ? undefined : window.ogb?.approvals;
 }

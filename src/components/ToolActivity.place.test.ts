@@ -9,7 +9,7 @@ describe("tool chip place icon", () => {
     expect(browser).toContain('data-testid="tool-place"');
     expect(browser).toContain('aria-label="Browser"');
     const cloud = renderToStaticMarkup(createElement(ToolActivity, { tool: { name: "screenshot", ok: true }, place: "cloud" }));
-    expect(cloud).toContain('aria-label="Cloud computer"');
+    expect(cloud).toContain('aria-label="Cloud desktop"');
     const shell = renderToStaticMarkup(createElement(ToolActivity, { tool: { name: "Bash", ok: true } }));
     expect(shell).not.toContain('data-testid="tool-place"');
   });

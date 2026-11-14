@@ -1,0 +1,12 @@
+{
+  "kind": "calendar#calendarList",
+  "items": [
+    { "kind": "calendar#calendarListEntry", "id": "admin@example.test", "summary": "admin@example.test", "primary": true, "accessRole": "owner", "selected": true },
+    { "kind": "calendar#calendarListEntry", "id": "team@group.calendar.google.com", "summary": "Team", "accessRole": "owner", "selected": true },
+    { "kind": "calendar#calendarListEntry", "id": "ada@example.test", "summary": "Ada", "accessRole": "reader", "selected": true },
+    { "kind": "calendar#calendarListEntry", "id": "boss@example.test", "summary": "Boss (free/busy)", "accessRole": "freeBusyReader", "selected": true },
+    { "kind": "calendar#calendarListEntry", "id": "en.indian#holiday@group.v.calendar.google.com", "summary": "Holidays in India", "accessRole": "reader" },
+    { "kind": "calendar#calendarListEntry", "id": "hidden@group.calendar.google.com", "summary": "Hidden", "accessRole": "owner", "selected": true, "hidden": true }
+  ],
+  "nextPageToken": null
+}

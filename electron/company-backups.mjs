@@ -37,6 +37,8 @@ const safeError = (error, signal) => {
   return new CompanyBackupError("transfer_failed", "The backup transfer could not be completed. Please try again.");
 };
 async function discard(response) { try { await response?.body?.cancel(); } catch {} }
+// Node opens a read stream lazily; an open that fails after the temp dir is removed must not be uncaught, since the request outcome decides.
+const bodyStream = (file, range) => createReadStream(file, { ...range, highWaterMark: 256 * 1024 }).on("error", () => {});
 
 function signedUrl(value, allowLoopbackForTests) {
   let url;
@@ -129,7 +131,7 @@ export function createCompanyBackups({ localRequest, portalRequest, tempRoot, fe
     const report = (phase, bytesTransferred = 0, totalBytes = 0) => {
       if (phase === lastPhase && bytesTransferred !== totalBytes && Date.now() - lastAt < 250) return;
       lastPhase = phase; lastAt = Date.now();
-      try { onProgress?.({ phase, bytesTransferred, totalBytes }); } catch { /* A view closing must not interrupt cleanup. */ }
+      try { onProgress?.({ phase, bytesTransferred, totalBytes }); } catch {}
     };
     try {
       operationSignal.throwIfAborted();
@@ -182,7 +184,7 @@ export function createCompanyBackups({ localRequest, portalRequest, tempRoot, fe
                 Object.keys(signed.headers).some(name => name.toLowerCase() !== "content-length") ||
                 new Headers(signed.headers).get("content-length") !== String(sizeBytes)) fail("invalid_response", "The backup service returned invalid upload instructions.");
             liveExpiry(signed.expiresAt);
-            const url = signedUrl(signed.url, allowLoopbackForTests), stream = createReadStream(file, { start, end: start + sizeBytes - 1, highWaterMark: 256 * 1024 });
+            const url = signedUrl(signed.url, allowLoopbackForTests), stream = bodyStream(file, { start, end: start + sizeBytes - 1 });
             let uploaded;
             try { uploaded = await storageRequest(url, { method: "PUT", headers: { "content-length": String(sizeBytes) }, body: stream, duplex: "half", signal: operationSignal }); }
             finally { stream.destroy(); }
@@ -198,7 +200,7 @@ export function createCompanyBackups({ localRequest, portalRequest, tempRoot, fe
           pendingId = null; report("ready", exported.bytes, exported.bytes); return result;
         } finally {
           if (pendingId) {
-            try { await portalRequest(`${CLOUD}/${pendingId}/abort`, { method: "POST", body: {}, signal: AbortSignal.timeout(10_000) }); } catch { /* Server expiry and durable cleanup remain the backstop. */ }
+            try { await portalRequest(`${CLOUD}/${pendingId}/abort`, { method: "POST", body: {}, signal: AbortSignal.timeout(10_000) }); } catch {}
           }
         }
       });
@@ -214,8 +216,7 @@ export function createCompanyBackups({ localRequest, portalRequest, tempRoot, fe
         if (backup.id !== input.id) fail("invalid_response", "The backup service returned a different archive.");
         liveExpiry(signed.expiresAt);
         const url = signedUrl(signed.url, allowLoopbackForTests);
-        // Version 1 is uncompressed tar: encrypted transfer, local upload,
-        // decrypted tar and extracted staging can coexist during preview.
+        // Version 1 is uncompressed tar: transfer, upload, decrypted tar and staging can coexist during preview.
         await checkSpace(directory, backup.sizeBytes * 4);
         report("downloading", 0, backup.sizeBytes);
         const downloaded = await storageRequest(url, { method: "GET", signal: operationSignal });
@@ -225,13 +226,11 @@ export function createCompanyBackups({ localRequest, portalRequest, tempRoot, fe
         if (sha256 !== backup.sha256) fail("checksum_mismatch", "The downloaded backup checksum did not match. Nothing was uploaded locally or restored.");
         await checkSpace(directory, backup.sizeBytes * 3); operationSignal.throwIfAborted();
         report("preparing", 0, backup.sizeBytes);
-        const stream = createReadStream(file, { highWaterMark: 256 * 1024 });
+        const stream = bodyStream(file);
         let response;
         try { response = await localRequest(`${LOCAL}/upload`, { method: "POST", headers: { "content-type": "application/octet-stream", "content-length": String(backup.sizeBytes) }, body: stream, duplex: "half", signal: operationSignal, redirect: "error" }); }
         finally { stream.destroy(); }
         if (!response.ok) { await discard(response); fail("local_backup_failed", "The verified archive could not be staged in this installation."); }
-        // The upload receipt is tiny; use the same bounded JSON reader without
-        // making another request or retaining an unbounded response body.
         const receipt = await readUploadReceipt(response, operationSignal);
         if (!identifier(receipt.id)) fail("invalid_response", "This installation returned an invalid upload receipt.");
         await checkSpace(directory, backup.sizeBytes * 2); operationSignal.throwIfAborted();

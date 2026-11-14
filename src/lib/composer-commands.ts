@@ -1,9 +1,26 @@
-export type ComposerSlashCommandId = "goal" | "learn" | "setup";
+import { blankCode, offersSkillCommand } from "../../shared/skill-command";
 
-export interface ComposerSlashCommand {
-  id: ComposerSlashCommandId;
-  label: `/${ComposerSlashCommandId}`;
+export type ComposerSlashCommandId = "goal" | "learn" | "setup" | "burst";
+
+export type ComposerSlashCommand =
+  | { kind: "command"; id: ComposerSlashCommandId; label: `/${ComposerSlashCommandId}`; description: string }
+  | { kind: "skill"; id: string; label: `/${string}`; description: string };
+
+export interface SlashSkill {
+  name: string;
   description: string;
+}
+
+export function skillSlashCommands(skills: readonly SlashSkill[]): ComposerSlashCommand[] {
+  return skills
+    .filter((skill) => offersSkillCommand(skill.name))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((skill) => ({ kind: "skill", id: skill.name, label: `/${skill.name}`, description: skill.description }));
+}
+
+export function slashCommandMatches(command: ComposerSlashCommand, query: string): boolean {
+  const needle = query.toLowerCase();
+  return !needle || command.id.startsWith(needle) || command.description.toLowerCase().includes(needle);
 }
 
 export interface ComposerSlashTrigger {
@@ -12,26 +29,26 @@ export interface ComposerSlashTrigger {
   end: number;
 }
 
-/** Slash commands configure the whole send, so they are offered only at the
- * beginning of a draft and only while the first token is being typed. */
 export function composerSlashTrigger(text: string, caretInput: number): ComposerSlashTrigger | null {
   const caret = Math.max(0, Math.min(text.length, Math.floor(caretInput)));
   const prefix = text.slice(0, caret);
-  const match = /^\/([a-z-]*)$/i.exec(prefix);
+  const match = /(?:^|\s)\/([\p{L}\p{N}\p{M}-]*)$/u.exec(prefix);
   if (!match) return null;
-  return { query: match[1] ?? "", start: 0, end: caret };
+  const query = match[1] ?? "";
+  const start = caret - query.length - 1;
+  return blankCode(text)[start] === "/" ? { query, start, end: caret } : null;
 }
 
-/** A typed `/goal …` is equivalent to selecting Goal mode from the menu.
- * null means this is an ordinary chat message; an empty string means the
- * command is present but still needs a goal description or attachment. */
 export function goalTextFromComposer(text: string): string | null {
   const match = /^\/goal(?:\s+([\s\S]*))?$/i.exec(text);
   return match ? (match[1] ?? "").trimStart() : null;
 }
 
-/** Replace the active slash token and return the caret position immediately
- * after the inserted text. */
+/** The text a picked built-in leaves in the composer; /goal only flips the composer's mode. */
+export function builtInCommandText(id: ComposerSlashCommandId): string {
+  return id === "goal" ? "" : `/${id} `;
+}
+
 export function replaceComposerSlashTrigger(
   text: string,
   trigger: ComposerSlashTrigger,

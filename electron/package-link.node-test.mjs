@@ -16,5 +16,6 @@ describe("BotMRR package deep links", () => {
     assert.equal(packageUrlFromDeepLink("openmausbot://install?url=http://raw.githubusercontent.com/a/b/main/bot.json"), null);
     assert.equal(packageUrlFromDeepLink("openmausbot://install?url=https://user@example.com/bot.json"), null);
     assert.equal(packageUrlFromDeepLink("openmausbot://install?url=https://github.com/acme/bot/run.sh"), null);
+    assert.equal(packageUrlFromDeepLink("openmausbot://install?url=https://x.ai/bot/d8OshqLZvtcKDcNluPuyo"), null);
   });
 });

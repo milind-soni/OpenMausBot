@@ -1,12 +1,5 @@
-// Neutral hook point for the source-available enterprise layer.
-//
-// The layer lives in enterprise/ (its own LICENSE) and is loaded only if that
-// folder is present: delete it and this file still compiles, the server still
-// starts, and /api/edition reports the open-source edition. Core never imports
-// the layer statically; a build ships it as its own bundled file beside the
-// server (see enterpriseLayerDirs for where it is looked up).
-// The layer's only obligation is `register()`, which turns OMB_LICENSE_KEY into
-// entitlements; core keeps the resulting status and answers `entitled()`.
+// Hook point for the source-available enterprise layer (enterprise/, under its own licence), loaded only when present:
+// core never imports it statically. Its one obligation is `register()`, turning OMB_LICENSE_KEY into entitlements.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -25,13 +18,11 @@ export interface EditionStatus {
   features: string[];
   /** Enterprise only: ISO date the license stops working, null for perpetual. */
   expiresAt?: string | null;
-  /** Enterprise with an expiry only: whole days until `expiresAt`, counted
-   * up; zero or negative once it has passed and the grace period runs. */
+  /** With an expiry only: whole days until `expiresAt`; zero or negative once the grace period runs. */
   expiresInDays?: number;
   /** Enterprise in its grace period only: when the features stop. */
   graceEndsAt?: string;
-  /** Why the server is not running the enterprise edition although something
-   * hinted it should, or, in the grace period, that the key needs renewing. */
+  /** Why this is not the enterprise edition although something hinted it should be, or that the key needs renewing. */
   notice?: string;
 }
 
@@ -42,26 +33,18 @@ const layerSchema = z.object({
   expiresAt: z.string().nullable(),
 });
 
-/** Days before expiry that the startup log, /api/edition and Settings start
- * saying so, and days after it that the features keep working while the
- * operator renews. The key and its verification are unchanged: the layer
- * accepts a key that expired less than the grace period ago. */
+/** The layer accepts a key that expired less than the grace period ago. */
 export const LICENSE_WARN_DAYS = 30;
 export const LICENSE_GRACE_DAYS = 7;
 const DAY_MS = 24 * 60 * 60_000;
 
-/** Where the layer may be, in order. An explicit OMB_ENTERPRISE_DIR is the
- * only place looked at when set. Otherwise: beside the server root (a
- * checkout, where server/ and enterprise/ are siblings, and the npm package,
- * which copies the bundled layer to <package>/enterprise), then inside it
- * (the Docker image and the packaged desktop ship dist-server/ alone, and
- * scripts/bundle-server.mjs writes the layer to dist-server/enterprise). */
+/** OMB_ENTERPRISE_DIR alone when set; else beside the server root (a checkout, the npm package), then inside it (the Docker
+ * image and the desktop ship dist-server/ alone). */
 export function enterpriseLayerDirs(env: NodeJS.ProcessEnv = process.env, serverRoot: string = SERVER_ROOT): string[] {
   if (env.OMB_ENTERPRISE_DIR) return [env.OMB_ENTERPRISE_DIR];
   return [join(serverRoot, "..", "enterprise"), join(serverRoot, "enterprise")];
 }
 
-/** Source in a checkout, a compiled bundle in an image: same convention as proxy-paths.ts. */
 function layerEntry(dir: string): string | undefined {
   return [join(dir, "server", "index.ts"), join(dir, "server", "index.js")].find((candidate) => existsSync(candidate));
 }
@@ -89,8 +72,7 @@ export function hostedWorkspaceConfigured(env: NodeJS.ProcessEnv = process.env):
   return env.OMB_ADMIN_URL !== undefined || env.OMB_ADMIN_WORKSPACE !== undefined || env.OMB_ADMIN_MEMBERSHIP !== undefined;
 }
 
-/** Validate the operator's complete hosted configuration before any session
- * can delegate membership authority. A partial setting is never standalone. */
+/** A partial setting is never standalone. */
 export function hostedWorkspaceConfiguration(env: NodeJS.ProcessEnv = process.env): { admin: URL; tenant: URL; workspace: string; portalMembership: boolean } | null {
   try {
     const origin = (raw: string | undefined) => {
@@ -105,11 +87,7 @@ export function hostedWorkspaceConfiguration(env: NodeJS.ProcessEnv = process.en
   } catch { return null; }
 }
 
-/** Who decides who may use this workspace, for Settings → People and
- * Remote access. On a portal-membership workspace the organisation's Admin
- * does, and `peopleUrl` opens its People page for this workspace (identifiers
- * only; Admin authorizes its own visitor). A hosted workspace never issues
- * pairing codes or email sign-in: people come in through the portal. */
+/** A hosted workspace never issues pairing codes or email sign-in: people come in through the portal. */
 export function workspaceMembership(env: NodeJS.ProcessEnv = process.env):
   { authority: "local" | "portal"; pairingCodes: boolean; peopleUrl?: string } {
   const hosted = hostedWorkspaceConfiguration(env);
@@ -120,16 +98,13 @@ export function workspaceMembership(env: NodeJS.ProcessEnv = process.env):
   return { authority: "portal", pairingCodes, peopleUrl: people.href };
 }
 
-/** An operator may authorize new Full tasks only on a dedicated,
- * portal-managed server. This is not an HTTP setting or a desktop grant. */
+/** Only on a dedicated, portal-managed server; never an HTTP setting or a desktop grant. */
 export function sharedWorkspaceFullAccessConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.OMB_SHARED_WORKSPACE_FULL_ACCESS === "1" && env.OMB_DESKTOP_PARENT !== "1" &&
     hostedWorkspaceConfiguration(env)?.portalMembership === true;
 }
 
-/** No enterprise import or portal dependency enters the core bundle. A
- * configured server without this hook must refuse hosted access, not fall
- * back to legacy email or QR credentials. */
+/** A configured server without this hook must refuse hosted access, never fall back to email or QR credentials. */
 export function createWorkspaceAccess(options: Omit<WorkspaceAccessOptions, "entitled">): WorkspaceAccess | null {
   if (!hostedWorkspaceConfigured(options.env)) return null;
   return workspaceAccessFactory?.({ ...options, entitled: () => entitled("admin") }) ?? null;
@@ -140,8 +115,7 @@ function oss(notice?: string): EditionStatus {
   return current;
 }
 
-/** Resolve the edition once at startup. Never throws: a broken layer or key
- * degrades to the open-source edition with a notice that says what to fix. */
+/** Never throws: a broken layer or key degrades to the open-source edition with a notice saying what to fix. */
 export async function loadEnterpriseLayer(
   options: { dir?: string; licenseKey?: string; env?: NodeJS.ProcessEnv; serverRoot?: string } = {},
 ): Promise<EditionStatus> {
@@ -161,8 +135,7 @@ export async function loadEnterpriseLayer(
     const register: unknown = Reflect.get(Object(loaded), "register");
     if (typeof register !== "function") throw new Error(`${entry} does not export register()`);
     if (!licenseKey) return oss("enterprise layer present but OMB_LICENSE_KEY is not set");
-    // graceDays is additive: a layer that ignores it refuses an expired key
-    // at startup exactly as before.
+    // A layer that ignores graceDays refuses an expired key at startup.
     const registered: unknown = await register({ licenseKey, graceDays: LICENSE_GRACE_DAYS });
     const layer = layerSchema.parse(registered);
     current = {
@@ -177,15 +150,13 @@ export async function loadEnterpriseLayer(
   }
 }
 
-/** When the key stops being valid, or null for perpetual / open-source. */
 function expiryAt(): number | null {
   if (current.edition !== "enterprise" || !current.expiresAt) return null;
   const at = new Date(current.expiresAt).getTime();
   return Number.isFinite(at) ? at : null;
 }
 
-/** A license that expires while the server keeps running stops granting
- * features once its grace period ends, at that moment, not at the next restart. */
+/** A license expiring while the server runs stops granting when its grace ends, not at the next restart. */
 function expired(now: number): boolean {
   const at = expiryAt();
   return at !== null && now >= at + LICENSE_GRACE_DAYS * DAY_MS;
@@ -212,21 +183,17 @@ export function editionStatus(now: number = Date.now()): EditionStatus {
   };
 }
 
-/** The edition as a non-admin session sees it: what is entitled, without
- * the license's countdown, grace date or operator notice. */
+/** No countdown, grace date or operator notice for a non-admin session. */
 export function editionForMembers(status: EditionStatus): EditionStatus {
   const { expiresInDays: _days, graceEndsAt: _grace, notice: _notice, ...shared } = status;
   return shared;
 }
 
-/** Feature gates in core ask this and nothing else. Unknown ids are simply not
- * granted, and the open-source edition always carries an empty feature list. */
+/** Core feature gates ask only this; unknown ids are never granted. */
 export function entitled(feature: string, now: number = Date.now()): boolean {
   return !expired(now) && current.features.includes(feature);
 }
 
-/** The startup warning for a key that is about to lapse or already in its
- * grace period; null when there is nothing to say. */
 export function licenseWarning(status: EditionStatus): string | null {
   if (status.edition !== "enterprise" || !status.expiresAt || status.expiresInDays === undefined) return null;
   if (status.graceEndsAt) {
@@ -237,11 +204,21 @@ export function licenseWarning(status: EditionStatus): string | null {
   return `OMB_LICENSE_KEY expires on ${status.expiresAt} (in ${days}); renew it before then to keep enterprise features`;
 }
 
-/** One line for the startup log. */
 export function describeEdition(status: EditionStatus): string {
   if (status.edition === "enterprise") {
     const until = status.expiresAt ? ` until ${status.expiresAt}` : "";
     return `openmausbot enterprise edition for ${status.customer}${until}: ${status.features.join(", ") || "no features"}`;
   }
   return `openmausbot open-source edition${status.notice ? ` (${status.notice})` : ""}`;
+}
+
+/** The edition as Settings shows it: a licence block only while an Enterprise licence is near or past expiry. */
+export function editionForSettings(status: EditionStatus) {
+  const expiring = status.edition === "enterprise" && status.expiresAt && status.expiresInDays !== undefined &&
+    (status.graceEndsAt !== undefined || status.expiresInDays <= LICENSE_WARN_DAYS);
+  return {
+    edition: status.edition,
+    features: status.features,
+    ...(expiring ? { license: { expiresAt: status.expiresAt!, expiresInDays: status.expiresInDays!, ...(status.graceEndsAt ? { graceEndsAt: status.graceEndsAt } : {}) } } : {}),
+  };
 }

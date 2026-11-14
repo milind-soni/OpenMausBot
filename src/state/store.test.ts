@@ -1,3 +1,7 @@
+// @vitest-environment happy-dom
+import { Component, createElement, type ReactNode } from "react";
+import { flushSync } from "react-dom";
+import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -5,18 +9,21 @@ import {
   ApiError,
   CLOUD_LINK_SETTINGS,
   configStatusFromFrame,
-  createStreamDeltaBuffer,
   currentTaskBot,
+  desktopApprovalBridge,
   initialState,
+  liveCallFromFrame,
   loadSnapshotBoundary,
-  messageVersions,
-  openNotificationTarget,
+  openBot,
   openThread,
   persistBotUpdate,
   persistTaskApproval,
   pinBotThreadAction,
   reducer,
   requestConfirmedBotDeletion,
+  runtimeFrameAction,
+  StoreProvider,
+  useStore,
   visibleMessages,
   visibleNotificationThread,
   type AppState,
@@ -27,6 +34,11 @@ import {
   type Message,
   type Action,
 } from "./store";
+import { LAST_CONVERSATION_KEY } from "@/lib/last-conversation";
+import { cacheDesktopCapabilities, desktopCapabilitiesNow } from "@/lib/desktop";
+import { LAST_BOT_SECTION_KEY } from "@/lib/last-bot-section";
+import { NOTIFICATION_TRAY_PINNED_KEY } from "@/lib/notification-preferences";
+import { transcriptLookups } from "@/lib/transcript-derivations";
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
 import type { ModelVariantState, RuntimeEvent } from "../../shared/runtime-events";
 import type { ConnectorToolGrant } from "../../shared/wire";
@@ -41,6 +53,27 @@ describe("api refusals", () => {
     const error = await api("/api/teams/export", { method: "POST", body: "{}" }).catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({ message: refusal.error, status: 400, body: refusal });
+  });
+
+  it("shows a structured Data error's message without losing its details", async () => {
+    const refusal = { error: { code: "sql_error", message: "Parser Error: syntax error at end of input", sql: "SELECT" } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(refusal), { status: 400 })));
+    await expect(api("/api/bots/fixture/data/run")).rejects.toMatchObject({ message: refusal.error.message, status: 400, body: refusal });
+  });
+
+  it.each([null, {}, { error: { code: "unavailable" } }, { error: 123 }])("falls back to the HTTP status for a malformed error body: %j", async body => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 503, statusText: "Service Unavailable" })));
+    await expect(api("/api/bots/fixture/data")).rejects.toThrow("503 Service Unavailable");
+  });
+});
+
+describe("mounted Data view context", () => {
+  it("stores and clears the active view independently from one-shot result navigation", () => {
+    const view = { botId: "pepper", threadId: "task", cardId: "c_1", draftSql: "select incomplete" };
+    const opened = reducer(initialState, { type: "dataView", view });
+    expect(opened.dataView).toEqual(view);
+    expect(opened.dataResultFocus).toBeNull();
+    expect(reducer(opened, { type: "dataView", view: null }).dataView).toBeNull();
   });
 });
 
@@ -57,86 +90,49 @@ describe("partial profile save responses", () => {
   });
 });
 
-describe("screen frame ownership", () => {
-  it("retains the source thread so a sibling's frame cannot masquerade as the selected screen", () => {
-    const first = reducer(initialState, { type: "screenFrame", botId: "bot", threadId: "vm-thread", png: "vm", mime: "image/png" });
-    const second = reducer(first, { type: "screenFrame", botId: "bot", threadId: "browser-thread", png: "browser", mime: "image/jpeg" });
-    expect(first.screens.bot).toMatchObject({ threadId: "vm-thread", png: "vm" });
-    expect(second.screens.bot).toMatchObject({ threadId: "browser-thread", png: "browser" });
-  });
-});
-
 describe("composer thread approval persistence", () => {
   it.each(["ask", "edits", "auto", "full", "custom"] as const)("saves %s through the scoped bridge and returns its committed state", async mode => {
     const bot = { id: "bot", approvalMode: "ask", tasks: [{ threadId: "thread", approvalMode: mode }] } as BotAnnouncement;
     const bridge = { setMode: vi.fn().mockResolvedValue(bot) };
     const request = vi.fn();
-    expect(await persistTaskApproval("bot", "thread", { approvalMode: mode, confirmFullAccess: true }, bridge, request)).toBe(bot);
+    expect(await persistTaskApproval("bot", "thread", { approvalMode: mode }, bridge, request)).toBe(bot);
     expect(bridge.setMode).toHaveBeenCalledExactlyOnceWith("bot", mode, { threadId: "thread", threadOnly: true, acknowledgeLocalAuto: false });
     expect(request).not.toHaveBeenCalled();
   });
-  it("never falls back to HTTP for Full or Custom, or grants Full without confirmation", async () => {
-    const request = vi.fn(), bridge = { setMode: vi.fn() };
-    await expect(persistTaskApproval("bot", "thread", { approvalMode: "full" }, bridge, request)).rejects.toThrow("Confirm Full");
-    for (const mode of ["full", "custom"] as const) await expect(persistTaskApproval("bot", "thread", { approvalMode: mode, confirmFullAccess: true }, undefined, request)).rejects.toThrow("packaged desktop");
-    expect(request).not.toHaveBeenCalled(); expect(bridge.setMode).not.toHaveBeenCalled();
+  it("sends Full over the thread settings route with no bridge and no consent field", async () => {
+    const bot = { id: "bot", approvalMode: "ask", tasks: [{ threadId: "thread", approvalMode: "full" }] } as BotAnnouncement;
+    const request = vi.fn().mockResolvedValue({ bot });
+    expect(await persistTaskApproval("bot", "thread", { approvalMode: "full" }, undefined, request)).toBe(bot);
+    expect(request).toHaveBeenCalledExactlyOnceWith("/api/bots/bot/tasks/thread", { method: "PATCH", body: JSON.stringify({ approvalMode: "full" }) });
   });
-  it("does not send local confirmation metadata over HTTP and propagates failed grants", async () => {
-    const request = vi.fn().mockResolvedValue({ bot: { id: "bot" } });
-    await persistTaskApproval("bot", "thread", { approvalMode: "ask", confirmFullAccess: true }, undefined, request);
-    expect(JSON.parse(request.mock.calls[0][1].body)).toEqual({ approvalMode: "ask" });
-    await expect(persistTaskApproval("bot", "thread", { approvalMode: "full", confirmFullAccess: true }, { setMode: vi.fn().mockRejectedValue(new Error("gone")) }, request)).rejects.toThrow("gone");
+  it("never falls back to HTTP for Custom", async () => {
+    const request = vi.fn();
+    await expect(persistTaskApproval("bot", "thread", { approvalMode: "custom" }, undefined, request)).rejects.toThrow("packaged desktop");
+    expect(request).not.toHaveBeenCalled();
   });
-});
-
-describe("stream delta flushing", () => {
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
-  const prepare = () => {
-    vi.useFakeTimers();
-    const frames = new Map<number, FrameRequestCallback>();
-    let next = 0;
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.set(++next, callback); return next; });
-    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
-    const flushed = vi.fn();
-    return { buffer: createStreamDeltaBuffer(flushed), frames, flushed };
-  };
-
-  it("drains a paused animation frame on the timer without duplication", () => {
-    const { buffer, frames, flushed } = prepare();
-    buffer.push("a", "assistant_text", "hello");
-    buffer.push("a", "assistant_text", " world");
-    buffer.push("b", "reasoning_text", "thinking");
-    expect(flushed).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(100);
-    expect(flushed).toHaveBeenCalledExactlyOnceWith([
-      ["a", { text: "hello world", reasoning: "" }], ["b", { text: "", reasoning: "thinking" }],
-    ]);
-    expect(frames.size).toBe(0);
-    vi.advanceTimersByTime(1_000);
-    expect(flushed).toHaveBeenCalledTimes(1);
+  it("uses the desktop bridge only where it works: the packaged app's own window", () => {
+    const approvals = { setMode: vi.fn() };
+    const packaged = (value: boolean) => {
+      const now = desktopCapabilitiesNow();
+      cacheDesktopCapabilities({ ...now, host: { ...now.host, packaged: value } });
+    };
+    window.ogb = { approvals } as unknown as NonNullable<Window["ogb"]>;
+    try {
+      packaged(false);
+      expect(desktopApprovalBridge()).toBeUndefined();
+      packaged(true);
+      expect(desktopApprovalBridge()).toBe(approvals);
+      delete window.ogb;
+      expect(desktopApprovalBridge()).toBeUndefined();
+    } finally {
+      delete window.ogb;
+      packaged(false);
+    }
   });
-
-  it("flushes oversized chunks in full even when timers and frames are paused", () => {
-    const { buffer, flushed } = prepare();
-    const text = "🙂".repeat(40_000);
-    buffer.push("a", "assistant_text", text);
-    expect(flushed).toHaveBeenCalledExactlyOnceWith([["a", { text, reasoning: "" }]]);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("clears only the settled task and cancels pending work on disposal", () => {
-    const { buffer, frames, flushed } = prepare();
-    buffer.push("a", "assistant_text", "already in transcript");
-    buffer.push("b", "assistant_text", "still streaming");
-    buffer.clear("a");
-    frames.values().next().value!(0);
-    expect(flushed).toHaveBeenCalledExactlyOnceWith([["b", { text: "still streaming", reasoning: "" }]]);
-    buffer.push("b", "reasoning_text", "unmounted");
-    buffer.dispose();
-    expect(frames.size).toBe(0);
-    expect(vi.getTimerCount()).toBe(0);
-    vi.advanceTimersByTime(1_000);
-    expect(flushed).toHaveBeenCalledTimes(1);
+  it("propagates failed bridge grants", async () => {
+    const request = vi.fn();
+    await expect(persistTaskApproval("bot", "thread", { approvalMode: "full" }, { setMode: vi.fn().mockRejectedValue(new Error("gone")) }, request)).rejects.toThrow("gone");
+    expect(request).not.toHaveBeenCalled();
   });
 });
 
@@ -195,6 +191,13 @@ describe("independent bot threads", () => {
     expect(pinBotThreadAction(pinned, [bot])).toBe(pinned);
   });
 
+  it("a frame without onlyPeopleAdded clears it: the bot is back to everyone", () => {
+    const limited = reducer(start(), { type: "botPatched", bot: { ...bot, onlyPeopleAdded: true } });
+    expect(limited.bots[0]?.onlyPeopleAdded).toBe(true);
+    const open = reducer(limited, { type: "botPatched", bot: { ...bot, onlyPeopleAdded: undefined } });
+    expect(open.bots[0]?.onlyPeopleAdded).toBeUndefined();
+  });
+
   it("keeps background bot frames from switching the visible transcript or clearing unread", () => {
     const patched = reducer(start(), { type: "botPatched", bot: { ...bot, threadId: "second", messages: [], activeLeafId: "other" } });
     expect(patched.bots[0]?.threadId).toBe("first");
@@ -223,7 +226,6 @@ describe("independent bot threads", () => {
     expect(state.bots[0]?.messages).toEqual([replacement]);
     expect(state.bots[0]?.activeLeafId).toBe(replacement.id);
     expect(state.bots[0]?.awaitingThreadSnapshot).toBe(false);
-    // A delayed HTTP duplicate must not undo a later server patch.
     const edited = { ...replacement, text: "Newer state" };
     state = reducer(state, { type: "messagePatched", threadId: "second", message: edited });
     state = reducer(state, { type: "botPatched", bot: response });
@@ -264,7 +266,6 @@ describe("independent bot threads", () => {
     expect(state.bots[0]).toMatchObject({ threadId: replacement.threadId, tasks: [replacement], messages: [], activeLeafId: null, awaitingThreadSnapshot: false });
     expect(state.selectedId).toBe(bot.id);
     expect(state.bots[1]).toBe(otherBot);
-    // A late event for the deleted thread cannot repopulate its replacement.
     expect(reducer(state, { type: "messageAdded", threadId: onlyThread.threadId, message: onlyThread.messages[0]! })).toBe(state);
   });
 
@@ -338,6 +339,19 @@ describe("independent bot threads", () => {
     expect(ungrouped.bots[0]?.tasks?.[1]).toEqual({ ...bot.tasks?.[1], projectId: undefined });
     expect(ungrouped.bots[0]?.tasks?.[0]).toEqual(bot.tasks?.[0]);
   });
+
+  it("drops the machine's mark the moment the person pins or unpins a thread's place", () => {
+    const autoPinned = { ...start(), bots: [{ ...bot, tasks: bot.tasks?.map((task) =>
+      task.threadId === "first" ? { ...task, surface: "browser" as const, surfaceAuto: true as const } : task) }] };
+    const pinned = reducer(autoPinned, { type: "updateTask", botId: bot.id, threadId: "first", patch: { surface: "cloud" } });
+    expect(pinned.bots[0]?.tasks?.[0]?.surface).toBe("cloud");
+    expect(pinned.bots[0]?.tasks?.[0]?.surfaceAuto).toBeUndefined();
+    const unpinned = reducer(autoPinned, { type: "updateTask", botId: bot.id, threadId: "first", patch: { surface: null } });
+    expect(unpinned.bots[0]?.tasks?.[0]?.surface).toBeUndefined();
+    expect(unpinned.bots[0]?.tasks?.[0]?.surfaceAuto).toBeUndefined();
+    const listPinned = reducer(autoPinned, { type: "updateTask", botId: bot.id, threadId: "first", patch: { pinned: true } });
+    expect(listPinned.bots[0]?.tasks?.[0]).toMatchObject({ surface: "browser", surfaceAuto: true });
+  });
 });
 
 describe("keyboard shortcuts dialog state", () => {
@@ -370,6 +384,19 @@ describe("Settings opened by the Cloud link", () => {
   });
 });
 
+describe("Settings opened on the phone pairing", () => {
+  it("counts each request, and clears on any other Settings navigation", () => {
+    expect(initialState.appSettingsPhonePairing).toBe(0);
+    const phone = { type: "toggleAppSettings", open: true, section: "companion", phonePairing: true } as const;
+    const opened = reducer(initialState, phone);
+    expect(opened).toMatchObject({ appSettingsOpen: true, appSettingsSection: "companion", appSettingsPhonePairing: 1 });
+    expect(reducer(opened, phone).appSettingsPhonePairing).toBe(2);
+    expect(reducer(opened, { type: "toggleAppSettings", open: true, section: "companion" }).appSettingsPhonePairing).toBe(0);
+    expect(reducer(opened, { type: "toggleAppSettings", open: false }).appSettingsPhonePairing).toBe(0);
+    expect(reducer(initialState, { ...phone, open: false }).appSettingsPhonePairing).toBe(0);
+  });
+});
+
 describe("connector grants persistence", () => {
   const announcement = () => ({
     id: "bot-1",
@@ -391,8 +418,6 @@ describe("connector grants persistence", () => {
       slack: { tools: "*" },
     };
     await persistBotUpdate("bot-1", { connectorTools: grants }, new AbortController().signal, request);
-    // Exact-set semantics: the wire body is the record verbatim, so a
-    // reload of what the server stored equals what the person picked.
     expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({ connectorTools: grants });
   });
 
@@ -430,7 +455,7 @@ describe("trusted approval-mode persistence", () => {
 
     await expect(persistBotUpdate(
       "bot-1",
-      { approvalMode: "full", confirmFullAccess: true, title: "Ops" },
+      { approvalMode: "full", title: "Ops" },
       new AbortController().signal,
       request,
       { setMode },
@@ -441,27 +466,52 @@ describe("trusted approval-mode persistence", () => {
     expect(setMode).toHaveBeenCalledWith("bot-1", "full", { acknowledgeLocalAuto: false });
   });
 
-  it("passes all-threads scope only through the private grant", async () => {
+  it("passes all-threads scope through the private grant when there is one", async () => {
     const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("ask") }));
     const setMode = vi.fn(async () => announcement("full"));
-    await persistBotUpdate("bot-1", { approvalMode: "full", confirmFullAccess: true, applyToAllThreads: true, title: "Chief" },
+    await persistBotUpdate("bot-1", { approvalMode: "full", applyToAllThreads: true, title: "Chief" },
       new AbortController().signal, request, { setMode });
     expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({ title: "Chief" });
     expect(setMode).toHaveBeenCalledWith("bot-1", "full", { acknowledgeLocalAuto: false, allThreads: true });
   });
 
-  it("never sends a Full confirmation over HTTP after a rapid switch back to Ask", async () => {
-    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("ask") }));
-    await persistBotUpdate(
-      "bot-1",
-      { approvalMode: "ask", confirmFullAccess: true, applyToAllThreads: true },
-      new AbortController().signal,
-      request,
-    );
-    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({ approvalMode: "ask" });
+  it("sends Full over the bot API with no bridge, all-threads scope included, and no consent field", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("full") }));
+    await expect(persistBotUpdate("bot-1", { approvalMode: "full", applyToAllThreads: true, title: "Chief" },
+      new AbortController().signal, request, undefined)).resolves.toMatchObject({ approvalMode: "full" });
+    await persistBotUpdate("bot-1", { approvalMode: "full" }, new AbortController().signal, request, undefined);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls.map(([path, init]) => [path, init?.method, JSON.parse(String(init?.body))])).toEqual([
+      ["/api/bots/bot-1", "PATCH", { title: "Chief", approvalMode: "full", applyToAllThreads: true }],
+      ["/api/bots/bot-1", "PATCH", { approvalMode: "full" }],
+    ]);
   });
 
-  it("fails closed when trusted modes have no packaged desktop bridge", async () => {
+  it("sends the all-threads scope with every level but Custom, the same way", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("ask") }));
+    for (const approvalMode of ["ask", "edits", "auto", "full"] as const) {
+      await persistBotUpdate("bot-1", { approvalMode, applyToAllThreads: true }, new AbortController().signal, request, undefined);
+    }
+    expect(request.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual(
+      ["ask", "edits", "auto", "full"].map((approvalMode) => ({ approvalMode, applyToAllThreads: true })));
+  });
+
+  it("leaves a thread's Custom through the private bridge when the level goes to every thread", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("auto") }));
+    const setMode = vi.fn(async () => announcement("auto"));
+    const current = { ...announcement("ask"), tasks: [
+      { threadId: "main", title: "Main", createdAt: 1 },
+      { threadId: "codex-rules", title: "Rules", createdAt: 2, approvalMode: "custom" as const },
+    ] };
+    await persistBotUpdate("bot-1", { approvalMode: "auto", applyToAllThreads: true }, new AbortController().signal, request, { setMode }, current);
+    expect(setMode).toHaveBeenCalledWith("bot-1", "auto", { acknowledgeLocalAuto: false, allThreads: true });
+    expect(request).not.toHaveBeenCalled();
+    await persistBotUpdate("bot-1", { approvalMode: "auto" }, new AbortController().signal, request, { setMode }, current);
+    expect(setMode).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({ approvalMode: "auto" });
+  });
+
+  it("fails closed when Custom has no packaged desktop bridge", async () => {
     const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("ask") }));
     await expect(persistBotUpdate(
       "bot-1",
@@ -503,7 +553,7 @@ describe("trusted approval-mode persistence", () => {
     const controller = new AbortController();
     const pending = persistBotUpdate(
       "bot-1",
-      { approvalMode: "full", confirmFullAccess: true },
+      { approvalMode: "full" },
       controller.signal,
       vi.fn(),
       { setMode },
@@ -531,7 +581,7 @@ describe("trusted approval-mode persistence", () => {
     const controller = new AbortController();
     const pending = persistBotUpdate(
       "bot-1",
-      { approvalMode: "full", confirmFullAccess: true },
+      { approvalMode: "full" },
       controller.signal,
       vi.fn(),
       { setMode },
@@ -596,7 +646,6 @@ describe("trusted approval-mode persistence", () => {
         computer: "local",
         acknowledgeLocalAuto: true,
         approvalMode: "full",
-        confirmFullAccess: true,
       },
       new AbortController().signal,
       request,
@@ -674,7 +723,16 @@ describe("server-authoritative bot deletion", () => {
     await Promise.all([first, second]);
 
     expect(onConfirmed).toHaveBeenCalledTimes(1);
-    expect(onConfirmed).toHaveBeenCalledWith(bot.id);
+    expect(onConfirmed).toHaveBeenCalledWith(bot.id, undefined);
+  });
+
+  it("hands the server's answer on, so a deletion that left something behind can say so", async () => {
+    const onConfirmed = vi.fn();
+    const answer = { ok: true, notice: "Deleted. gone-vps could not be reached." };
+
+    await requestConfirmedBotDeletion(bot.id, async () => answer, onConfirmed);
+
+    expect(onConfirmed).toHaveBeenCalledWith(bot.id, answer);
   });
 
   it("keeps a visible pending marker until deletion settles or fails", () => {
@@ -780,63 +838,38 @@ describe("notification routing", () => {
     ],
   }];
 
-  it("selects the bot and switches to the notification's exact task", () => {
-    const dispatch = vi.fn();
-
-    openNotificationTarget(dispatch, { botId: "bot-1", threadId: "detached-thread" }, { bots, groups });
-
-    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
-      { type: "select", id: "bot-1" },
-      { type: "switchTask", botId: "bot-1", threadId: "detached-thread" },
-    ]);
-  });
-
-  it("opens the room when the thread is a group's — never a bot task switch that would 404", () => {
-    // room approval/question notifications carry the asker bot with the
-    // GROUP's thread id; the exact destination is the room itself
-    const dispatch = vi.fn();
-
-    openNotificationTarget(dispatch, { botId: "bot-1", threadId: "room-thread" }, { bots, groups });
-
-    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "select", id: "room-1" }]);
-  });
-
-  it("opens the requesting conversation when a teammate's routine reports there", () => {
-    const dispatch = vi.fn();
-    openNotificationTarget(dispatch, { botId: "runner", threadId: "detached-thread" }, {
-      bots: [...bots, { id: "runner", threadId: "runner-thread", tasks: [] }], groups,
-    });
-    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
-      { type: "select", id: "bot-1" },
-      { type: "switchTask", botId: "bot-1", threadId: "detached-thread" },
-    ]);
-  });
-
-  it("opens the room and restores the exact inactive channel task", () => {
-    const dispatch = vi.fn();
-
-    openNotificationTarget(dispatch, { botId: "bot-1", threadId: "older-room-thread" }, { bots, groups });
-
-    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
-      { type: "select", id: "room-1" },
-      { type: "switchGroupTask", groupId: "room-1", threadId: "older-room-thread" },
-    ]);
-  });
-
-  it("lands on a plain bot select for a thread it cannot place, not an error", () => {
-    const dispatch = vi.fn();
-
-    openNotificationTarget(dispatch, { botId: "bot-1", threadId: "deleted-task-thread" }, { bots, groups });
-
-    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "select", id: "bot-1" }]);
-  });
-
   describe("openThread", () => {
     const named = bots.map((bot) => ({ ...bot, name: "Scout" }));
 
+    it("opens the room when a notification's thread is a group's, never a bot switch that would 404", () => {
+      const dispatch = vi.fn();
+      openThread(dispatch, { botId: "bot-1", threadId: "room-thread" }, { bots: named, groups }, true);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "select", id: "room-1" }, { type: "revealThread", threadId: "room-thread" }]);
+    });
+
+    it("opens the conversation that owns the thread when a teammate's routine reports there", () => {
+      const dispatch = vi.fn();
+      openThread(dispatch, { botId: "runner", threadId: "detached-thread" }, { bots: [...named, { id: "runner", name: "Runner", threadId: "runner-thread", tasks: [] }], groups }, true);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "select", id: "bot-1" },
+        { type: "switchTask", botId: "bot-1", threadId: "detached-thread" },
+        { type: "revealThread", threadId: "detached-thread" },
+      ]);
+    });
+
+    it("shows the thread in the sidebar whichever list a switch came from", () => {
+      const switched = reducer({ ...initialState, bots: named as never }, { type: "switchTask", botId: "bot-1", threadId: "detached-thread" });
+      expect(switched.revealThread?.threadId).toBe("detached-thread");
+    });
+
+    it("takes down what covers the chat, so the click is seen to land", () => {
+      const covered = { ...initialState, appSettingsOpen: true, shortcutsOpen: true, pluginsOpen: true };
+      expect(reducer(covered, { type: "revealThread", threadId: "t" })).toMatchObject({ appSettingsOpen: false, shortcutsOpen: false, pluginsOpen: false });
+    });
+
     it("selects the bot, switches the view to the thread and reveals its row", () => {
       const dispatch = vi.fn();
-      expect(openThread(dispatch, { botId: "bot-1", threadId: "detached-thread" }, { bots: named, groups })).toBe(true);
+      expect(openThread(dispatch, { botId: "bot-1", threadId: "detached-thread" }, { bots: named, groups }, true)).toBe(true);
       expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
         { type: "select", id: "bot-1" },
         { type: "switchTask", botId: "bot-1", threadId: "detached-thread" },
@@ -846,7 +879,7 @@ describe("notification routing", () => {
 
     it("opens a room thread through the room, not a bot switch", () => {
       const dispatch = vi.fn();
-      openThread(dispatch, { botId: "bot-1", threadId: "older-room-thread" }, { bots: named, groups });
+      openThread(dispatch, { botId: "bot-1", threadId: "older-room-thread" }, { bots: named, groups }, true);
       expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
         { type: "select", id: "room-1" },
         { type: "switchGroupTask", groupId: "room-1", threadId: "older-room-thread" },
@@ -856,17 +889,19 @@ describe("notification routing", () => {
 
     it("falls back to the bot with a quiet notice when the thread is gone, never a switch that would 404", () => {
       const dispatch = vi.fn();
-      expect(openThread(dispatch, { botId: "bot-1", threadId: "deleted-thread" }, { bots: named, groups })).toBe(false);
+      expect(openThread(dispatch, { botId: "bot-1", threadId: "deleted-thread" }, { bots: named, groups }, true)).toBe(false);
       expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
         { type: "select", id: "bot-1" },
+        { type: "revealThread", threadId: "deleted-thread" },
         { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } },
       ]);
     });
 
     it("only notices when even the bot is gone", () => {
       const dispatch = vi.fn();
-      expect(openThread(dispatch, { botId: "deleted-bot", threadId: "deleted-thread" }, { bots: named, groups })).toBe(false);
+      expect(openThread(dispatch, { botId: "deleted-bot", threadId: "deleted-thread" }, { bots: named, groups }, true)).toBe(false);
       expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "revealThread", threadId: "deleted-thread" },
         { type: "notice", notice: { kind: "thread-gone", botName: null } },
       ]);
     });
@@ -882,29 +917,135 @@ describe("notification routing", () => {
     });
   });
 
+  describe("openBot", () => {
+    const bot: Bot = {
+      id: "bot-1", threadId: "routine-report", mainThreadId: "later-chat", name: "Scout", title: "", description: "", color: "green",
+      notifications: true, unread: true, modelSelection: { instanceId: "test", model: "test" }, messages: [],
+      tasks: [
+        { threadId: "routine-report", title: "Reports", createdAt: 1, unread: true },
+        { threadId: "later-chat", title: "Later chat", createdAt: 2 },
+      ],
+    };
+    const opened = (target: Bot, threadsShown: boolean) => {
+      const dispatch = vi.fn();
+      openBot(dispatch, target, threadsShown);
+      return dispatch.mock.calls.map(([action]) => action);
+    };
+
+    it("opens the thread it was on while threads are shown", () => {
+      expect(opened(bot, true)).toEqual([{ type: "select", id: "bot-1" }]);
+    });
+
+    it("opens the bot's main thread while threads are hidden, the way its row would", () => {
+      expect(opened(bot, false)).toEqual([{ type: "switchTask", botId: "bot-1", threadId: "later-chat" }]);
+      expect(opened({ ...bot, threadId: "later-chat" }, false)).toEqual([{ type: "select", id: "bot-1" }]);
+      expect(opened({ ...bot, tasks: undefined }, false)).toEqual([{ type: "select", id: "bot-1" }]);
+      expect(opened({ ...bot, mainThreadId: undefined }, false)).toEqual([{ type: "select", id: "bot-1" }]);
+      const switched = reducer({ ...initialState, bots: [bot], selectedId: "other", activeView: "routines" }, opened(bot, false)[0] as Action);
+      expect(switched).toMatchObject({ selectedId: "bot-1", activeView: "chat" });
+      expect(switched.bots[0]!.tasks!.find((task) => task.threadId === "routine-report")!.unread).toBe(true);
+    });
+
+    const followed = (threadId: string, threadsShown: boolean) => {
+      const dispatch = vi.fn();
+      openThread(dispatch, { botId: "bot-1", threadId }, { bots: [bot], groups: [] }, threadsShown);
+      return dispatch.mock.calls.map(([action]) => action as Action).filter((action) => action.type !== "revealThread" && action.type !== "notice");
+    };
+
+    it("opens a thread a notification names without passing the reply the bot was left on as read, with threads hidden", () => {
+      const actions = followed("later-chat", false);
+      expect(actions).toEqual([{ type: "switchTask", botId: "bot-1", threadId: "later-chat" }]);
+      const opened = actions.reduce(reducer, { ...initialState, bots: [bot], selectedId: "other", activeView: "chat" });
+      expect(opened).toMatchObject({ selectedId: "bot-1", activeView: "chat" });
+      expect(opened.bots[0]!.tasks!.find((task) => task.threadId === "routine-report")!.unread).toBe(true);
+      expect(followed("routine-report", false)).toEqual([
+        { type: "select", id: "bot-1" },
+        { type: "switchTask", botId: "bot-1", threadId: "routine-report" },
+      ]);
+    });
+
+    it("opens a thread a notification names as before while threads are shown", () => {
+      expect(followed("later-chat", true)).toEqual([
+        { type: "select", id: "bot-1" },
+        { type: "switchTask", botId: "bot-1", threadId: "later-chat" },
+      ]);
+    });
+
+    it("falls back from a thread it cannot place to the bot itself, its main thread with threads hidden", () => {
+      expect(followed("deleted-thread", false)).toEqual([{ type: "switchTask", botId: "bot-1", threadId: "later-chat" }]);
+      expect(followed("deleted-thread", true)).toEqual([{ type: "select", id: "bot-1" }]);
+      const named = [{ ...bot, name: "Scout" }];
+      const dispatch = vi.fn();
+      expect(openThread(dispatch, { botId: "bot-1", threadId: "deleted-thread" }, { bots: named, groups: [] }, false)).toBe(false);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "switchTask", botId: "bot-1", threadId: "later-chat" },
+        { type: "revealThread", threadId: "deleted-thread" },
+        { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } },
+      ]);
+    });
+
+    it("opens a chip's or a link's thread the same way, then reveals it", () => {
+      const dispatch = vi.fn();
+      expect(openThread(dispatch, { botId: "bot-1", threadId: "later-chat" }, { bots: [{ ...bot, name: "Scout" }], groups: [] }, false)).toBe(true);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "switchTask", botId: "bot-1", threadId: "later-chat" },
+        { type: "revealThread", threadId: "later-chat" },
+      ]);
+    });
+  });
+
   it("identifies only the exact chat thread currently on screen", () => {
     expect(visibleNotificationThread({
       activeView: "chat",
       selectedId: "bot-1",
       bots,
       groups,
+      forkPanel: null,
     })).toBe("main-thread");
     expect(visibleNotificationThread({
       activeView: "chat",
       selectedId: "room-1",
       bots,
       groups,
+      forkPanel: null,
     })).toBe("room-thread");
+    expect(visibleNotificationThread({
+      activeView: "chat", selectedId: "room-1", bots, groups,
+      forkPanel: { kind: "group", ownerId: "room-1", threadId: "fork-thread" } as AppState["forkPanel"],
+    }, "fork-thread")).toBe("fork-thread");
     expect(visibleNotificationThread({
       activeView: "routines",
       selectedId: "bot-1",
       bots,
       groups,
+      forkPanel: null,
     })).toBeNull();
   });
 });
 
 describe("config status frames", () => {
+  it("keeps each provider's own key flag through a live config update", () => {
+    const status = configStatusFromFrame({
+      openai: { configured: true },
+      openrouter: { configured: false },
+      anthropic: { configured: true, everyClaudeBot: false },
+    } as ConfigStatusFrame);
+    expect(status.openai).toEqual({ configured: true });
+    expect(status.openrouter).toEqual({ configured: false });
+    expect(status.anthropic).toEqual({ configured: true, everyClaudeBot: false });
+  });
+
+  it("keeps every saved key's hint through a live config update, so a masked key never empties", () => {
+    const status = configStatusFromFrame({
+      openai: { configured: true, last4: "a1b2" },
+      box: { configured: true, last4: "c3d4" },
+      savedKeys: { ttsKey: { configured: true, last4: "e5f6" }, openaiLiveKey: { configured: false } },
+    } as ConfigStatusFrame);
+    expect(status.openai).toEqual({ configured: true, last4: "a1b2" });
+    expect(status.box).toEqual({ configured: true, last4: "c3d4" });
+    expect(status.savedKeys).toEqual({ ttsKey: { configured: true, last4: "e5f6" }, openaiLiveKey: { configured: false } });
+  });
+
   it("keeps thread capacity and room timeout with the existing config fields", () => {
     expect(
       configStatusFromFrame({
@@ -913,6 +1054,7 @@ describe("config status frames", () => {
         box: { configured: false },
         vps: { configured: true, sshAlias: "homelab" },
         rooms: { turnTimeoutMinutes: 20 },
+        mcp: { callTimeoutMinutes: 30 },
         threads: { maxConcurrentPerBot: 10 },
         localVm: { mode: "per-bot", maxInstances: 3 },
         opencodeGo: { configured: true },
@@ -926,6 +1068,7 @@ describe("config status frames", () => {
       box: { configured: false },
       vps: { configured: true, sshAlias: "homelab" },
       rooms: { turnTimeoutMinutes: 20 },
+      mcp: { callTimeoutMinutes: 30 },
       threads: { maxConcurrentPerBot: 10 },
       localVm: { mode: "per-bot", maxInstances: 3 },
       opencodeGo: { configured: true },
@@ -985,6 +1128,17 @@ describe("task rename", () => {
     expect(next.groups[0]?.tasks?.find((task) => task.threadId === "room-task-1")?.title).toBe("Renamed");
     expect(next.groups[0]?.tasks?.find((task) => task.threadId === "room-task-2")?.title).toBe("Other");
   });
+
+  it("archives and unarchives a channel task in local state immediately", () => {
+    const group = {
+      id: "room", threadId: "room-task-1", name: "Launch", memberIds: [], defaultResponder: { kind: "everyone" }, bulletin: "", unread: false, createdAt: 1, messages: [],
+      tasks: [{ threadId: "room-task-1", title: "Open", createdAt: 1 }, { threadId: "room-task-2", title: "Done", createdAt: 2 }],
+    } satisfies Group;
+    const archived = reducer({ ...initialState, groups: [group] }, { type: "archiveGroupTask", groupId: "room", threadId: "room-task-2", archivedAt: 1234 });
+    expect(archived.groups[0]?.tasks?.map((task) => task.archivedAt)).toEqual([undefined, 1234]);
+    const unarchived = reducer(archived, { type: "archiveGroupTask", groupId: "room", threadId: "room-task-2", archivedAt: null });
+    expect(unarchived.groups[0]?.tasks?.[1]?.archivedAt).toBeUndefined();
+  });
 });
 
 describe("config status", () => {
@@ -993,6 +1147,7 @@ describe("config status", () => {
     box: { configured: false },
     vps: { configured: false, sshAlias: "" },
     rooms: { turnTimeoutMinutes: 5 },
+    mcp: { callTimeoutMinutes: 10 },
     localVm: { mode: "shared", maxInstances: 2 },
     features: { skillAuthoring: true },
   });
@@ -1157,7 +1312,7 @@ describe("optimistic sent messages", () => {
       const visible = visibleMessages(edited.bots[0]!);
       expect(visible.map((message) => message.text)).toEqual(["Ready", "second try"]);
       expect(edited.bots[0]?.activeLeafId).toBe("optimistic-edit-1");
-      expect(messageVersions(edited.bots[0]!, question).map((message) => message.id)).toEqual([question.id, "optimistic-edit-1"]);
+      expect(transcriptLookups(edited.bots[0]!.messages, visible).editVersions(question)?.map((message) => message.id)).toEqual([question.id, "optimistic-edit-1"]);
     });
 
     it("hands the swap to the server fork and keeps its reply visible", () => {
@@ -1169,7 +1324,6 @@ describe("optimistic sent messages", () => {
       const confirmed = reducer(reconciled, { type: "threadActive", threadId: bot.threadId, activeLeafId: fork.id });
       const reply: Message = { id: "a2", role: "bot", kind: "text", text: "new answer", at: 5, parentId: fork.id };
       const answered = reducer(confirmed, { type: "messageAdded", threadId: bot.threadId, message: reply });
-      // the POST response for the same fork arrives last and must not rewind
       const late = reducer(answered, { type: "messageAdded", threadId: bot.threadId, message: fork });
       expect(visibleMessages(late.bots[0]!).map((message) => message.text)).toEqual(["Ready", "second try", "new answer"]);
       expect(late.bots[0]?.messages.some((message) => message.id.startsWith("optimistic-"))).toBe(false);
@@ -1184,6 +1338,14 @@ describe("optimistic sent messages", () => {
       });
       expect(visibleMessages(restored.bots[0]!).map((message) => message.text)).toEqual(["Ready", "first try", "old answer"]);
       expect(restored.bots[0]?.messages).toEqual([root, question, answer]);
+    });
+
+    it("hands back the same branch for the same transcript and leaf", () => {
+      const shown = conversation().bots[0]!;
+      const branch = visibleMessages(shown);
+      expect(visibleMessages({ messages: shown.messages, activeLeafId: answer.id })).toBe(branch);
+      expect(visibleMessages({ messages: shown.messages, activeLeafId: question.id }).map((message) => message.id)).toEqual([root.id, question.id]);
+      expect(visibleMessages({ messages: [...shown.messages], activeLeafId: answer.id })).not.toBe(branch);
     });
   });
 
@@ -1404,6 +1566,53 @@ describe("computer destination announcements", () => {
   });
 });
 
+describe("VPS alias announcements", () => {
+  it.each(["botPatched", "taskSwitched", "botPatchedSwitch"] as const)("clears the bot's own server when the frame omits it via %s", (kind) => {
+    const bot: Bot = {
+      id: "vps-bot", threadId: "vps-thread", name: "Ziggy", title: "", description: "",
+      notifications: true, color: "green", unread: false,
+      modelSelection: { instanceId: "codex", model: "default" }, vpsAlias: "alpha-vps",
+      messages: [{ id: "message", role: "user", kind: "text", at: 1, text: "Keep this conversation" }],
+    };
+    const { vpsAlias: _oldAlias, ...announcement } = bot;
+    const next = reducer({ ...initialState, bots: [bot] }, {
+      type: kind === "taskSwitched" ? "taskSwitched" : "botPatched",
+      bot: { ...announcement, threadId: kind === "botPatchedSwitch" ? "replacement-thread" : bot.threadId },
+    });
+    expect(next.bots[0]?.vpsAlias).toBeUndefined();
+    expect(next.bots[0]?.messages).toEqual(bot.messages);
+  });
+});
+
+describe("tool selection announcements", () => {
+  it.each(["botPatched", "taskSwitched", "botPatchedSwitch"] as const)("clears the saved restriction when the server returns to all tools via %s", kind => {
+    const bot: Bot = { id: "scoped", threadId: "old", name: "Scope fixture", title: "", description: "",
+      notifications: false, color: "green", unread: false, modelSelection: { instanceId: "pi", model: "local" },
+      toolScope: { allow: [] }, messages: [] };
+    const { toolScope: _scope, ...announcement } = bot;
+    const next = reducer({ ...initialState, bots: [bot] }, {
+      type: kind === "taskSwitched" ? "taskSwitched" : "botPatched",
+      bot: { ...announcement, threadId: kind === "botPatchedSwitch" ? "new" : bot.threadId },
+    });
+    expect(next.bots[0]?.toolScope).toBeUndefined();
+  });
+});
+
+describe("team access announcements", () => {
+  it.each(["botPatched", "taskSwitched", "botPatchedSwitch"] as const)("clears additional teams after a demote via %s", kind => {
+    const bot: Bot = { id: "chief", threadId: "old", name: "Chief fixture", title: "", description: "",
+      notifications: false, color: "green", unread: false, modelSelection: { instanceId: "pi", model: "local" },
+      chiefOfStaff: true, managedSections: ["Research", ""], messages: [] };
+    const { managedSections: _sections, ...demoted } = { ...bot, chiefOfStaff: false };
+    const next = reducer({ ...initialState, bots: [bot] }, {
+      type: kind === "taskSwitched" ? "taskSwitched" : "botPatched",
+      bot: { ...demoted, threadId: kind === "botPatchedSwitch" ? "new" : bot.threadId },
+    });
+    expect(next.bots[0]?.chiefOfStaff).toBe(false);
+    expect(next.bots[0]?.managedSections).toBeUndefined();
+  });
+});
+
 describe("teammate wait announcements", () => {
   const waiting: Bot = {
     id: "wait-bot", threadId: "wait-thread", name: "Scooter", title: "", description: "",
@@ -1411,7 +1620,6 @@ describe("teammate wait announcements", () => {
     modelSelection: { instanceId: "codex", model: "default" }, busy: true, activity: "working", waitingForTeammates: true,
     messages: [{ id: "message", role: "user", kind: "text", at: 1, text: "Keep this conversation" }],
   };
-  // The existing wire explicitly clears the coordination wait on settlement.
   it.each(["botPatched", "taskSwitched", "botPatchedSwitch"] as const)("clears the wait when a working frame reports settlement via %s", (kind) => {
     const announcement = { ...waiting, waitingForTeammates: false };
     const next = reducer({ ...initialState, bots: [waiting] }, {
@@ -1451,6 +1659,27 @@ describe("browser profile announcements", () => {
     });
     expect(next.bots[0]?.browserProfile).toBe(profile);
     expect(next.bots[0]?.messages).toBe(messages);
+  });
+});
+
+describe("phone grant announcements", () => {
+  const granted: Bot = {
+    id: "phone-bot", threadId: "phone-thread", name: "Pepper", title: "", description: "",
+    notifications: true, color: "green", unread: false,
+    modelSelection: { instanceId: "codex", model: "default" }, phoneApps: { location: "read" },
+    messages: [{ id: "message", role: "user", kind: "text", at: 1, text: "Keep this conversation" }],
+  };
+  const { messages, phoneApps: _old, ...announcement } = granted;
+
+  it("clears a stale grant when a complete frame omits it", () => {
+    const next = reducer({ ...initialState, bots: [granted] }, { type: "botPatched", bot: announcement });
+    expect(next.bots[0]?.phoneApps).toBeUndefined();
+    expect(next.bots[0]?.messages).toBe(messages);
+  });
+
+  it("clears it on the thread-snapshot path too", () => {
+    const next = reducer({ ...initialState, bots: [{ ...granted, awaitingThreadSnapshot: true }] }, { type: "botPatched", bot: { ...announcement, messages } });
+    expect(next.bots[0]?.phoneApps).toBeUndefined();
   });
 });
 
@@ -1855,7 +2084,6 @@ describe("scrollback pages", () => {
       type: "olderMessages",
       threadId: "thread-1",
       generation: loading.transcriptGeneration["thread-1"] ?? 0,
-      // m3 overlaps the page this client already holds
       messages: [message("m1", 1), message("m2", 2), message("m3", 3)],
       hasMore: false,
     });
@@ -1869,7 +2097,6 @@ describe("scrollback pages", () => {
     const loading = reducer({ ...initialState, bots: [withLeaf] }, { type: "loadOlderMessages", threadId: "thread-1" });
     const generation = loading.transcriptGeneration["thread-1"] ?? 0;
 
-    // an edit rewinds the visible branch while the page is on the wire
     const rewound = reducer(loading, { type: "threadActive", threadId: "thread-1", activeLeafId: "m3" });
     expect(rewound.transcriptGeneration["thread-1"]).not.toBe(generation);
 
@@ -1904,6 +2131,20 @@ describe("scrollback pages", () => {
     expect(landed.loadingOlder).toEqual({});
   });
 
+  it("keeps the open transcript's scrollback answer when a bot frame does not switch it", () => {
+    const open = { ...bot, tasks: [{ threadId: "thread-1", title: "Long", createdAt: 1 }] } as never as Bot;
+    const opened = reducer({ ...initialState, bots: [open] }, {
+      type: "botPatched",
+      bot: { ...open, threadId: "thread-2", tasks: [{ threadId: "thread-2", title: "New", createdAt: 2 }, ...open.tasks!], messages: [], hasMore: false } as never,
+    });
+    expect(opened.bots[0]).toMatchObject({ threadId: "thread-1", hasMore: true });
+    expect(opened.bots[0].messages.map((m) => m.id)).toEqual(["m3", "m4"]);
+    const loaded = { ...initialState, bots: [{ ...open, hasMore: false }] };
+    const replied = reducer(loaded, { type: "botPatched", bot: { ...open, messages: [message("m4", 4)], hasMore: true } as never });
+    expect(replied.bots[0].messages.map((m) => m.id)).toEqual(["m3", "m4"]);
+    expect(replied.bots[0].hasMore).toBe(false);
+  });
+
   it("answers the scrollback question from a payload that carries a transcript", () => {
     const group = {
       id: "room",
@@ -1918,13 +2159,11 @@ describe("scrollback pages", () => {
       hasMore: true,
     } as never as Group;
     const withRoom = { ...initialState, groups: [group] };
-    // a frame that carries the whole thread and no page marker IS the thread
     const complete = reducer(withRoom, {
       type: "groupPatched",
       group: { id: "room", threadId: "room-thread", messages: [message("m8", 8), message("m9", 9)] } as never as Group,
     });
     expect(complete.groups[0].hasMore).toBe(false);
-    // a patch with no transcript leaves the answer alone
     const renamed = reducer(withRoom, { type: "groupPatched", group: { id: "room", name: "Renamed" } });
     expect(renamed.groups[0].hasMore).toBe(true);
   });
@@ -1952,14 +2191,108 @@ describe("messageAdded leaf adoption", () => {
   });
 
   it("keeps the leaf when a late artifact is chain-inserted mid-branch", () => {
-    // the settle-time screenshot arrives parented to m1 while m2 is the leaf
     const next = reducer(state, {
       type: "messageAdded",
       threadId: "thread-1",
       message: { id: "shot", at: 3, parentId: "m1", role: "bot", kind: "screen", png: "x" } as never as Message,
     });
-    expect(next.bots[0].activeLeafId).toBe("m2"); // the user's message stays the tail
+    expect(next.bots[0].activeLeafId).toBe("m2");
     expect(next.bots[0].messages.map((m) => m.id)).toContain("shot");
+  });
+});
+
+describe("thread ordering stamps", () => {
+  it.each(["bot", "group"] as const)("restores overlapping %s sends in every failure order", owner => {
+    const orders = [[0, 1], [1, 0], [0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+    const clock = vi.spyOn(Date, "now");
+    try {
+      for (const order of orders) {
+        const task = { threadId: "first", createdAt: 1, lastThreadOrderAt: 25 };
+        const bot = { id: "b", threadId: "first", messages: [], hasMore: true, tasks: [task] } as never as Bot;
+        const group = { id: "g", threadId: "first", createdAt: 1, messages: [], hasMore: true, tasks: [task] } as never as Group;
+        let state = { ...initialState, bots: owner === "bot" ? [bot] : [], groups: owner === "group" ? [group] : [] };
+        for (let i = 0; i < order.length; i++) {
+          clock.mockReturnValue(100 + i * 10);
+          state = reducer(state, owner === "bot"
+            ? { type: "send", botId: "b", text: "Pending", sendId: String(i) }
+            : { type: "sendGroup", groupId: "g", text: "Pending", sendId: String(i) });
+        }
+        for (const i of order) state = reducer(state, { type: "optimisticMessageRemoved", threadId: "first", sendId: String(i) });
+        const result = owner === "bot" ? state.bots[0] : state.groups[0];
+        expect(result.messages, `${owner}: ${order}`).toEqual([]);
+        expect(result.tasks?.[0]?.lastThreadOrderAt, `${owner}: ${order}`).toBe(25);
+      }
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each(["accepted-send", "completed-reply"] as const)("retains %s while another optimistic send rolls back", event => {
+    const bot = { id: "b", threadId: "first", messages: [], hasMore: true, tasks: [
+      { threadId: "first", createdAt: 1, lastThreadOrderAt: 25 },
+    ] } as never as Bot;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(100);
+    try {
+      let state = reducer({ ...initialState, bots: [bot] }, { type: "send", botId: "b", text: "First", sendId: "first" });
+      clock.mockReturnValue(110);
+      state = reducer(state, { type: "send", botId: "b", text: "Second", sendId: "second" });
+      const message: Message = event === "accepted-send"
+        ? { id: "accepted", at: 120, role: "user", kind: "text", sendId: "first", parentId: null }
+        : { id: "reply", at: 80, role: "bot", kind: "text", turnId: "turn", turnTerminal: true, turnCompletedAt: 120 };
+      state = reducer(state, { type: "messageAdded", threadId: "first", message });
+      state = reducer(state, { type: "optimisticMessageRemoved", threadId: "first", sendId: "first" });
+      state = reducer(state, { type: "optimisticMessageRemoved", threadId: "first", sendId: "second" });
+      expect(state.bots[0].messages.map(row => row.id)).toEqual([message.id]);
+      expect(state.bots[0].tasks?.[0]?.lastThreadOrderAt).toBe(120);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+  it.each(["first", "second"])("orders terminal completion in active and background threads: %s", threadId => {
+    const bot = { id: "b", threadId: "first", messages: [], tasks: [
+      { threadId: "first", createdAt: 1, lastThreadOrderAt: 25 },
+      { threadId: "second", createdAt: 2, lastThreadOrderAt: 5 },
+    ] } as never as Bot;
+    const message = { id: "reply", at: 20, role: "bot", kind: "text", turnId: "turn", turnTerminal: true, turnCompletedAt: 30 } as Message;
+    const state = reducer({ ...initialState, bots: [bot] }, { type: "messagePatched", threadId, message });
+    expect(state.bots[0].tasks?.find(task => task.threadId === threadId)?.lastThreadOrderAt).toBe(30);
+  });
+
+  it.each([false, true])("restores unloaded ordering history and retains newer loaded events: %s", laterReply => {
+    const bot = { id: "b", threadId: "first", messages: [], hasMore: true, tasks: [
+      { threadId: "first", createdAt: 1, lastThreadOrderAt: 25 },
+    ] } as never as Bot;
+    let state = reducer({ ...initialState, bots: [bot] }, { type: "send", botId: "b", text: "Pending", sendId: "send" });
+    if (laterReply) state = reducer(state, { type: "messageAdded", threadId: "first", message: { id: "reply", at: Date.now() + 10, role: "bot", kind: "text" } });
+    const expected = laterReply ? state.bots[0].messages.at(-1)!.at : 25;
+    state = reducer(state, { type: "optimisticMessageRemoved", threadId: "first", sendId: "send" });
+    expect(state.bots[0].tasks?.[0]?.lastThreadOrderAt).toBe(expected);
+  });
+
+  it("restores a channel stamp when rollback history is incomplete", () => {
+    const group = { id: "g", threadId: "room", createdAt: 1, messages: [], hasMore: true,
+      tasks: [{ threadId: "room", createdAt: 1, lastThreadOrderAt: 25 }] } as never as Group;
+    let state = reducer({ ...initialState, groups: [group] }, { type: "sendGroup", groupId: "g", text: "Pending", sendId: "send" });
+    state = reducer(state, { type: "optimisticMessageRemoved", threadId: "room", sendId: "send" });
+    expect(state.groups[0].tasks?.[0]?.lastThreadOrderAt).toBe(25);
+  });
+
+  it("leaves running activity in place, then moves completed replies and person messages", () => {
+    const bot = { id: "b", threadId: "first", messages: [], tasks: [
+      { threadId: "first", createdAt: 1, lastThreadOrderAt: 10 },
+      { threadId: "second", createdAt: 2, lastThreadOrderAt: 5 },
+    ] } as never as Bot;
+    let state = { ...initialState, bots: [bot] };
+    const add = (message: Message) => { state = reducer(state, { type: "messageAdded", threadId: "second", message }); };
+    add({ id: "reply", at: 20, role: "bot", kind: "text", text: "Working", turnId: "turn-1" });
+    add({ id: "peer", at: 21, role: "user", kind: "text", text: "Peer", peerAsk: { botId: "p", name: "Peer" } });
+    expect(state.bots[0].tasks?.[1]?.lastThreadOrderAt).toBe(5);
+    state = reducer(state, { type: "messagePatched", threadId: "second", message: { id: "reply", at: 20, role: "bot", kind: "text", text: "Done", turnId: "turn-1", turnTerminal: true } });
+    expect(state.bots[0].tasks?.[1]?.lastThreadOrderAt).toBe(20);
+    add({ id: "person", at: 22, role: "user", kind: "text", text: "Hello" });
+    expect(state.bots[0].tasks?.[1]?.lastThreadOrderAt).toBe(22);
+    state = reducer(state, { type: "hydrate", bots: [bot], groups: [], computerControl: {} });
+    expect(state.bots[0].tasks?.[1]?.lastThreadOrderAt).toBe(22);
   });
 });
 
@@ -2019,7 +2352,6 @@ describe("bot settings section", () => {
       open: true,
     });
     expect(next.botSettingsSection).toBe("soul");
-    // Bare reopen (mascot) must not auto-expand a leftover section.
     expect(next.botSettingsExpandAccordion).toBe(false);
   });
 
@@ -2056,7 +2388,7 @@ describe("bot settings section", () => {
     expect(next.selectedId).toBe(other.id);
     expect(next.activeView).toBe("team-map");
     expect(next.settingsOpen).toBe(true);
-    expect(next.botSettingsSection).toBe("overview");
+    expect(next.botSettingsSection).toBe("soul");
     expect(next.botSettingsExpandAccordion).toBe(false);
 
     const model = reducer(next, { type: "toggleSettings", botId: bot.id, section: "model" });
@@ -2080,71 +2412,150 @@ describe("bot settings section", () => {
     expect(reducer(state, { type: "toggleSettings", botId, section: "identity" })).toBe(state);
   });
 
-  it("selecting a different bot resets botSettingsSection to overview", () => {
-    // Add bot A and select it
-    let state = reducer(initialState, {
-      type: "botAdded",
-      bot: { ...bot, id: "bot-a", threadId: "thread-a" },
-    });
-    // Add bot B (becomes selected automatically)
-    state = reducer(state, {
-      type: "botAdded",
-      bot: { ...bot, id: "bot-b", threadId: "thread-b" },
-    });
-    expect(state.selectedId).toBe("bot-b");
-
-    // Set section to "identity" while bot-b is selected
-    state = reducer(state, {
-      type: "toggleSettings",
-      open: true,
-      section: "identity",
-    });
-    expect(state.botSettingsSection).toBe("identity");
-
-    // Select bot A → should reset to "overview" because we're changing bots
-    const next = reducer(state, {
-      type: "select",
-      id: "bot-a",
-    });
-    expect(next.botSettingsSection).toBe("overview");
+  it("an open that names a section marks a choice stored", () => {
+    const next = reducer(initialState, { type: "toggleSettings", open: true, section: "identity" });
+    expect(next.botSettingsSectionStored).toBe(true);
+    expect(next.botSettingsExpandAccordion).toBe(true);
+    expect(next.botSettingsExpandRemembered).toBe(false);
   });
 
-  it("re-selecting the same bot keeps botSettingsSection, but selecting a different bot resets it", () => {
-    // Add bot A (becomes selected)
+  it("a fresh bare open with a stored choice expands the remembered section", () => {
+    const stored = { ...initialState, botSettingsSection: "model" as const, botSettingsSectionStored: true };
+    const next = reducer(stored, { type: "toggleSettings", open: true });
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe("model");
+    expect(next.botSettingsExpandAccordion).toBe(true);
+    expect(next.botSettingsExpandRemembered).toBe(true);
+  });
+
+  it("a bare open while the panel is open collapses the rail", () => {
+    const remembered = {
+      ...initialState,
+      settingsOpen: true,
+      botSettingsSection: "model" as const,
+      botSettingsExpandAccordion: true,
+      botSettingsExpandRemembered: true,
+      botSettingsSectionStored: true,
+    };
+    const collapsed = reducer(remembered, { type: "toggleSettings", open: true });
+    expect(collapsed.settingsOpen).toBe(true);
+    expect(collapsed.botSettingsSection).toBe("model");
+    expect(collapsed.botSettingsExpandAccordion).toBe(false);
+    expect(collapsed.botSettingsExpandRemembered).toBe(false);
+    expect(collapsed.botSettingsSectionStored).toBe(true);
+  });
+
+  it("a bare open with nothing stored keeps the rail collapsed", () => {
+    expect(initialState.botSettingsSection).toBe("overview");
+    expect(initialState.botSettingsExpandAccordion).toBe(false);
+    expect(initialState.botSettingsExpandRemembered).toBe(false);
+    expect(initialState.botSettingsSectionStored).toBe(false);
+    const next = reducer(initialState, { type: "toggleSettings", open: true });
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe("overview");
+    expect(next.botSettingsExpandAccordion).toBe(false);
+    expect(next.botSettingsExpandRemembered).toBe(false);
+    expect(next.botSettingsSectionStored).toBe(false);
+  });
+
+  it("opening another bot's profile keeps the current section", () => {
+    const other = { ...bot, id: "other-bot" };
+    const state = {
+      ...initialState,
+      selectedId: bot.id,
+      bots: [bot, other],
+      settingsOpen: true,
+      botSettingsSection: "soul" as const,
+      botSettingsExpandAccordion: true,
+      botSettingsSectionStored: true,
+    };
+    const next = reducer(state, { type: "toggleSettings", botId: other.id });
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe("soul");
+  });
+
+  it("selecting a different bot or room keeps the section pointer", () => {
     let state = reducer(initialState, {
       type: "botAdded",
       bot: { ...bot, id: "bot-a", threadId: "thread-a" },
     });
-    expect(state.selectedId).toBe("bot-a");
-
-    // Open settings with section "soul"
-    state = reducer(state, {
-      type: "toggleSettings",
-      open: true,
-      section: "soul",
-    });
-    expect(state.botSettingsSection).toBe("soul");
-
-    // Re-select bot A (same bot) → section should stay "soul"
-    state = reducer(state, {
-      type: "select",
-      id: "bot-a",
-    });
-    expect(state.botSettingsSection).toBe("soul");
-
-    // Add bot B (becomes selected)
     state = reducer(state, {
       type: "botAdded",
       bot: { ...bot, id: "bot-b", threadId: "thread-b" },
     });
-    expect(state.selectedId).toBe("bot-b");
+    const room = {
+      id: "room-1", name: "Room", threadId: "room-thread", memberIds: [], createdAt: 1,
+      defaultResponder: { kind: "everyone" }, bulletin: "", unread: false, messages: [],
+    } as Group;
+    state = {
+      ...state,
+      groups: [room],
+      settingsOpen: true,
+      botSettingsSection: "model" as const,
+      botSettingsExpandAccordion: true,
+      botSettingsExpandRemembered: true,
+      botSettingsSectionStored: true,
+    };
+    const kept = {
+      botSettingsSection: "model",
+      botSettingsExpandAccordion: true,
+      botSettingsExpandRemembered: true,
+      botSettingsSectionStored: true,
+    };
+    expect(reducer(state, { type: "select", id: "bot-a" })).toMatchObject(kept);
+    expect(reducer(state, { type: "select", id: room.id })).toMatchObject(kept);
+  });
+});
 
-    // Select bot A again → should reset to "overview" because we're changing from bot-b to bot-a
-    state = reducer(state, {
-      type: "select",
-      id: "bot-a",
-    });
-    expect(state.botSettingsSection).toBe("overview");
+describe("activity panel", () => {
+  it("starts closed", () => {
+    expect(initialState.activityOpen).toBe(false);
+  });
+
+  it("toggleActivity opens it and closes the other side panels", () => {
+    const withPanels = { ...initialState, computerOpen: true, inspectorOpen: true, appSettingsOpen: true };
+    const next = reducer(withPanels, { type: "toggleActivity" });
+    expect(next.activityOpen).toBe(true);
+    expect(next.computerOpen).toBe(false);
+    expect(next.inspectorOpen).toBe(false);
+    expect(next.appSettingsOpen).toBe(false);
+    expect(reducer(next, { type: "toggleActivity" }).activityOpen).toBe(false);
+  });
+
+  it("opening the inspector or the computer closes the activity panel", () => {
+    const open = { ...initialState, activityOpen: true };
+    expect(reducer(open, { type: "toggleInspector", open: true }).activityOpen).toBe(false);
+    expect(reducer(open, { type: "toggleComputer", open: true }).activityOpen).toBe(false);
+  });
+
+  it("opening bot settings closes activity without changing the other panels", () => {
+    const open = { ...initialState, activityOpen: true, computerOpen: true };
+    const next = reducer(open, { type: "toggleSettings", open: true });
+    expect(next.activityOpen).toBe(false);
+    expect(next.computerOpen).toBe(true);
+  });
+
+  it("switching to routines or the team map closes the activity panel", () => {
+    const open = { ...initialState, activityOpen: true };
+    expect(reducer(open, { type: "showRoutines" }).activityOpen).toBe(false);
+    expect(reducer(open, { type: "showTeamMap" }).activityOpen).toBe(false);
+  });
+
+  it("opens Files as its own page, carrying the folders it should offer to share only when asked", () => {
+    const open = { ...initialState, activityOpen: true, appSettingsOpen: true, settingsOpen: true };
+    const suggested = reducer(open, { type: "showFiles", suggest: ["/Users/ada/site"] });
+    expect(suggested).toMatchObject({ activeView: "files", filesSuggest: ["/Users/ada/site"], activityOpen: false, appSettingsOpen: false, settingsOpen: false });
+    expect(reducer(suggested, { type: "showFiles" })).toMatchObject({ activeView: "files", filesSuggest: null });
+    expect(reducer(suggested, { type: "showFiles", suggest: [] }).filesSuggest).toBeNull();
+    expect(reducer(suggested, { type: "showTeamMap" })).toMatchObject({ activeView: "team-map", filesSuggest: null });
+  });
+
+  it("a pinned web panel replaces the main view like the team map, and chat comes back", () => {
+    const open = { ...initialState, activityOpen: true, computerOpen: true, settingsOpen: true };
+    const panel = reducer(open, { type: "showWebPanel", id: "panel-1" });
+    expect(panel).toMatchObject({ activeView: "web-panel", webPanelId: "panel-1", activityOpen: false, computerOpen: false, settingsOpen: false });
+    expect(reducer(panel, { type: "showTeamMap" })).toMatchObject({ activeView: "team-map", webPanelId: "panel-1" });
+    expect(reducer(panel, { type: "showChat" }).activeView).toBe("chat");
   });
 });
 
@@ -2154,6 +2565,7 @@ describe("live config frames", () => {
     box: { configured: false },
     vps: { configured: false, sshAlias: "" },
     rooms: { turnTimeoutMinutes: 10 },
+    mcp: { callTimeoutMinutes: 10 },
     localVm: { mode: "shared", maxInstances: 1 },
   };
 
@@ -2161,6 +2573,19 @@ describe("live config frames", () => {
     const automaticRecovery = { enabled: true, backup: { instanceId: "backup", model: "fixture-model" } };
     expect(configStatusFromFrame({ ...baseFrame, automaticRecovery }).automaticRecovery).toEqual(automaticRecovery);
     expect(configStatusFromFrame({ ...baseFrame, automaticRecovery: { enabled: false } }).automaticRecovery).toEqual({ enabled: false });
+  });
+
+  it("keeps a Team Cloud's team through live config refreshes, so its people stay in the @ list", () => {
+    const team = { id: "team-acme", name: "Acme", cloudPage: "https://cloud.example.test/cloud" };
+    expect(configStatusFromFrame({ ...baseFrame, team }).team).toEqual(team);
+    expect(configStatusFromFrame(baseFrame)).not.toHaveProperty("team");
+  });
+
+  it("keeps an OMB Cloud home's flag through live config refreshes, and adds none elsewhere", () => {
+    expect(configStatusFromFrame({ ...baseFrame, cloudHome: true }).cloudHome).toBe(true);
+    expect(configStatusFromFrame({ ...baseFrame, awakeLimit: 3, pausedBots: ["scout"] })).toMatchObject({ awakeLimit: 3, pausedBots: ["scout"] });
+    expect(configStatusFromFrame(baseFrame)).not.toHaveProperty("pausedBots");
+    expect(configStatusFromFrame(baseFrame)).not.toHaveProperty("cloudHome");
   });
 
   it("preserves edition, budgets and billing through configStatusFromFrame", () => {
@@ -2185,6 +2610,8 @@ describe("live config frames", () => {
       ...baseFrame,
       anthropic: { configured: true },
       mistral: { configured: true },
+      groq: { configured: true },
+      meta: { configured: true },
       openaiCompat: { configured: true, url: "http://127.0.0.1:1/v1" },
       fleet: { available: true },
     };
@@ -2192,6 +2619,8 @@ describe("live config frames", () => {
     expect(state.config).toMatchObject({
       anthropic: { configured: true },
       mistral: { configured: true },
+      groq: { configured: true },
+      meta: { configured: true },
       openaiCompat: { configured: true, url: "http://127.0.0.1:1/v1" },
       fleet: { available: true },
     });
@@ -2218,6 +2647,14 @@ describe("live config frames", () => {
       billing: { currency: "USD" },
     });
   });
+
+  it("keeps live settings when a config frame arrives", () => {
+    const live = { configured: true, voice: "sol", readTypedReplies: false, idleMinutes: 7 };
+    const config = configStatusFromFrame({ ...baseFrame, live });
+    expect(config.live).toEqual(live);
+    const state = reducer(initialState, { type: "configStatus", config });
+    expect(state.config?.live).toEqual(live);
+  });
 });
 
 
@@ -2233,6 +2670,23 @@ describe("conversation model variant discoveries", () => {
   const run = (state: AppState, event: RuntimeEvent) => reducer(state, { type: "modelVariantRuntime", event });
   const discovery = (variants: ModelVariantState = { options: [{ id: "minimal", label: "Minimal" }], currentValue: "minimal" }, threadId = "first", turnId = "turn-1"): RuntimeEvent =>
     ({ ...base(threadId, turnId), type: "session.model-variants", model: selection.model, variants });
+
+  it("ignores reply and reasoning deltas but still folds model-variant frames", () => {
+    const apply = (state: AppState, event: RuntimeEvent) => {
+      const action = runtimeFrameAction(event);
+      return action ? reducer(state, action) : state;
+    };
+    let state = apply(start(), { ...base(), type: "turn.started" });
+    for (const streamKind of ["assistant_text", "reasoning_text"] as const) {
+      const delta: RuntimeEvent = { ...base(), type: "content.delta", streamKind, delta: "partial" };
+      expect(runtimeFrameAction(delta)).toBeNull();
+      expect(apply(state, delta)).toBe(state);
+    }
+    state = apply(state, discovery());
+    expect(state.modelVariantSessions.first.variants?.currentValue).toBe("minimal");
+    state = apply(state, { ...base(), type: "turn.completed", ok: true });
+    expect(state.modelVariantSessions.first.acceptingUpdates).toBe(false);
+  });
 
   it("keeps capabilities on their thread, separate from catalog and persisted choices", () => {
     let state = run(start(), { ...base(), type: "turn.started" });
@@ -2298,5 +2752,561 @@ describe("conversation model variant discoveries", () => {
     state = reducer(state, { type: "hydrate", bots: [owner], groups: [], computerControl: {} });
     expect(state.modelVariantSessions).toEqual({});
     expect(state.bots[0].tasks![0].modelSelection?.variant).toBe("minimal");
+  });
+});
+
+describe("live call state", () => {
+  const call = { callId: "c1", botId: "b1", threadId: "t1", client: "ios", voice: "marin", startedAt: 1, status: "live" } as const;
+  it("starts empty and follows live.call frames", () => {
+    expect(initialState.liveCall).toBeNull();
+    const live = reducer(initialState, { type: "liveCall", call });
+    expect(live.liveCall).toEqual(call);
+    const ended = reducer(live, { type: "liveCall", call: { ...call, status: "ended", endReason: "idle" } });
+    expect(ended.liveCall?.status).toBe("ended");
+    expect(reducer(ended, { type: "liveCall", call: null }).liveCall).toBeNull();
+  });
+
+  it("takes a lookup of the line only if no newer frame landed while it was out", () => {
+    const since = initialState.liveCallVersion;
+    const framed = reducer(initialState, { type: "liveCall", call });
+    expect(reducer(framed, { type: "liveCallLookup", call: null, since, seq: 1 })).toBe(framed);
+    const fresh = reducer(framed, { type: "liveCallLookup", call: { ...call, status: "ended", endReason: "idle" }, since: framed.liveCallVersion, seq: 2 });
+    expect(fresh.liveCall?.status).toBe("ended");
+    expect(fresh.liveCallVersion).toBe(framed.liveCallVersion);
+  });
+
+  it("never lets an earlier lookup's answer replace a later one's", () => {
+    const since = initialState.liveCallVersion;
+    const later = reducer(initialState, { type: "liveCallLookup", call, since, seq: 2 });
+    expect(later.liveCall).toEqual(call);
+    expect(reducer(later, { type: "liveCallLookup", call: null, since, seq: 1 })).toBe(later);
+    const inOrder = reducer(reducer(initialState, { type: "liveCallLookup", call: null, since, seq: 1 }), { type: "liveCallLookup", call, since, seq: 2 });
+    expect(inOrder.liveCall).toEqual(call);
+  });
+
+  it("reads a live.call frame's call, and ignores a frame without one", () => {
+    expect(liveCallFromFrame({ kind: "live.call", botId: "b1", threadId: "t1", call })).toEqual({ call });
+    expect(liveCallFromFrame({ kind: "live.call", botId: "b1", threadId: "t1", call: null })).toEqual({ call: null });
+    expect(liveCallFromFrame({ kind: "live.call", botId: "b1", threadId: "t1" })).toBeNull();
+    expect(liveCallFromFrame({ kind: "live.call", call: "c1" })).toBeNull();
+    expect(liveCallFromFrame({ kind: "live.call", call: { status: "live" } })).toBeNull();
+  });
+});
+
+describe("restoring the open conversation", () => {
+  const bot = (id: string, extra: Partial<Bot> = {}): Bot => ({
+    id,
+    threadId: `${id}-thread`,
+    name: id,
+    title: "",
+    description: "",
+    notifications: false,
+    color: "green",
+    unread: false,
+    modelSelection: { instanceId: "acp", model: "fake" },
+    messages: [],
+    ...extra,
+  });
+  const first = bot("bot-1");
+  const second = bot("bot-2");
+  const room: Group = {
+    id: "room-1", name: "Room", threadId: "room-thread", memberIds: [], createdAt: 1,
+    defaultResponder: { kind: "everyone" }, bulletin: "", unread: false, messages: [],
+  };
+  const hydrating = (state: AppState, resumeId?: string, bots: Bot[] = [first, second], groups: Group[] = [room]) =>
+    reducer(state, { type: "hydrate", bots, groups, computerControl: {}, resumeId });
+
+  it("hydrate keeps a known live selection", () => {
+    expect(hydrating({ ...initialState, selectedId: "bot-2" }, "room-1").selectedId).toBe("bot-2");
+    expect(hydrating({ ...initialState, selectedId: "room-1" }).selectedId).toBe("room-1");
+  });
+
+  it("hydrate resumes the remembered bot", () => {
+    expect(hydrating(initialState, "bot-2").selectedId).toBe("bot-2");
+  });
+
+  it("hydrate resumes the remembered room", () => {
+    expect(hydrating(initialState, "room-1").selectedId).toBe("room-1");
+  });
+
+  it("hydrate falls back to the first bot when the resume id is unknown", () => {
+    expect(hydrating(initialState, "deleted-bot").selectedId).toBe("bot-1");
+  });
+
+  it("hydrate falls back to the first bot when the resumed bot is hidden", () => {
+    expect(hydrating(initialState, "bot-9", [first, bot("bot-9", { hidden: true })], []).selectedId).toBe("bot-1");
+  });
+
+  it("hydrate without a resume id behaves as today", () => {
+    expect(hydrating(initialState).selectedId).toBe("bot-1");
+    expect(hydrating({ ...initialState, selectedId: "deleted" }).selectedId).toBe("bot-1");
+  });
+
+  describe("the provider's own effect", () => {
+    class TestErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+      state = { failed: false };
+      static getDerivedStateFromError() { return { failed: true }; }
+      render() { return this.state.failed ? createElement("div", { id: "snapshot-crash" }) : this.props.children; }
+    }
+    // The provider opens the one stream and pulls the snapshot itself, so the fixture answers both.
+    class FixtureEventSource {
+      static opened: FixtureEventSource[] = [];
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onmessage: ((event: { data: string; lastEventId?: string }) => void) | null = null;
+      constructor(readonly url: string) {
+        FixtureEventSource.opened.push(this);
+      }
+      close() {}
+      send(frame: object, id?: string) {
+        this.onmessage?.({ data: JSON.stringify(frame), lastEventId: id });
+      }
+    }
+
+    const settle = async () => {
+      for (let round = 0; round < 10; round++) await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+    let seen!: AppState;
+    let dispatch!: (action: Action) => void;
+    function Probe() {
+      const store = useStore();
+      seen = store.state;
+      dispatch = store.dispatch;
+      return null;
+    }
+    let root: Root | undefined;
+    let container: HTMLDivElement | undefined;
+
+    afterEach(() => {
+      root?.unmount();
+      container?.remove();
+      root = undefined;
+      container = undefined;
+      vi.unstubAllGlobals();
+      FixtureEventSource.opened.length = 0;
+    });
+
+    const boot = async (seed: Record<string, string> = {}, storage?: { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void }) => {
+      const stored = new Map<string, string>(Object.entries(seed));
+      const json = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body)));
+      const answers: Record<string, unknown> = {
+        "/api/instances": { instances: [] },
+        "/api/config": {},
+        "/api/routines": { routines: [], runs: [] },
+        "/api/webhooks": { webhooks: [], attempts: [], ingress: null },
+      };
+      vi.stubGlobal("localStorage", storage ?? {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => void stored.set(key, value),
+      });
+      vi.stubGlobal("EventSource", FixtureEventSource);
+      vi.stubGlobal("fetch", (path: string) =>
+        path.startsWith("/api/bots?") ? json({ bots: [first, second], groups: [room] }) : json(answers[path.replace(/\?since=[^&]*$/, "")] ?? {}),
+      );
+
+      container = document.createElement("div");
+      document.body.append(container);
+      root = createRoot(container);
+      flushSync(() => root!.render(createElement(TestErrorBoundary, null, createElement(StoreProvider, null, createElement(Probe)))));
+      await settle();
+      const [stream] = FixtureEventSource.opened;
+      expect(FixtureEventSource.opened).toHaveLength(1);
+      expect(seen.selectedId).toBe("");
+      return { stored, stream };
+    };
+    const hello = () => ({ kind: "hello", resumed: false, cursor: "run:0" });
+
+    it("keeps the UI mounted when a reconnect receives a malformed bots snapshot", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      expect(seen.selectedId).toBe("bot-1");
+      vi.stubGlobal("fetch", () => Promise.resolve(new Response("{}")));
+      stream.send(hello());
+      await settle();
+      expect(container?.querySelector("#snapshot-crash")).toBeNull();
+      expect(seen.selectedId).toBe("bot-1");
+    });
+
+    it("keeps the UI mounted when a reconnect receives a malformed routines snapshot", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(
+        path.startsWith("/api/bots?") ? { bots: [first, second], groups: [room] } : {},
+      ))));
+      stream.send(hello());
+      await settle();
+      expect(container?.querySelector("#snapshot-crash")).toBeNull();
+      expect(seen.routinesLoadState).toBe("error");
+    });
+
+    it("keeps the engines and webhooks it had when a reconnect receives empty answers for them", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(
+        path.startsWith("/api/bots?") ? { bots: [first, second], groups: [room] } : {},
+      ))));
+      stream.send(hello());
+      await settle();
+      expect(container?.querySelector("#snapshot-crash")).toBeNull();
+      expect(Array.isArray(seen.instances)).toBe(true);
+      expect(Array.isArray(seen.webhooks)).toBe(true);
+    });
+
+    it("the provider remembers each non-empty selection and never an empty one", async () => {
+      const { stored, stream } = await boot();
+
+      expect(stored.has(LAST_CONVERSATION_KEY)).toBe(false);
+
+      stream.send(hello());
+      await settle();
+      expect(seen.selectedId).toBe("bot-1");
+      expect(stored.get(LAST_CONVERSATION_KEY)).toBe("bot-1");
+
+      flushSync(() => dispatch({ type: "select", id: "bot-2" }));
+      await settle();
+      expect(seen.selectedId).toBe("bot-2");
+      expect(stored.get(LAST_CONVERSATION_KEY)).toBe("bot-2");
+    });
+
+    it("a pressed Steer that stays queued for its pictures says why, and a plain queued answer stays quiet", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      const answers: Record<string, unknown> = {
+        "/api/bots/bot-1/queue/q-image/steer": { ok: true, queued: true, threadId: "bot-1-thread", blockedBy: "images" },
+        "/api/groups/room-1/queue/q-room/steer": { ok: true, queued: true, threadId: "room-thread", blockedBy: "images" },
+        "/api/bots/bot-1/queue/q-plain/steer": { ok: true, queued: true, threadId: "bot-1-thread" },
+      };
+      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(answers[path.replace(/\?since=[^&]*$/, "")] ?? {}))));
+
+      const settled = vi.fn();
+      flushSync(() => dispatch({ type: "steerQueued", botId: "bot-1", queueId: "q-plain", onSettled: settled }));
+      await settle();
+      expect(settled).toHaveBeenCalledTimes(1);
+      expect(seen.notice).toBeNull();
+
+      flushSync(() => dispatch({ type: "steerQueued", botId: "bot-1", queueId: "q-image", onSettled: settled }));
+      await settle();
+      expect(settled).toHaveBeenCalledTimes(2);
+      expect(seen.notice).toEqual({ kind: "steer-images", botName: null });
+
+      flushSync(() => dispatch({ type: "notice", notice: null }));
+      flushSync(() => dispatch({ type: "steerGroupQueued", groupId: "room-1", queueId: "q-room", onSettled: settled }));
+      await settle();
+      expect(settled).toHaveBeenCalledTimes(3);
+      expect(seen.notice).toEqual({ kind: "steer-images", botName: null });
+    });
+
+    it("the provider restores the conversation remembered on this device", async () => {
+      const { stored, stream } = await boot({ [LAST_CONVERSATION_KEY]: "room-1" });
+      stream.send(hello());
+      await settle();
+      expect(seen.selectedId).toBe("room-1");
+      expect(stored.get(LAST_CONVERSATION_KEY)).toBe("room-1");
+    });
+
+    it("the provider restores the notification tray pin remembered on this device (email 1a1a4fb0)", async () => {
+      const { stream } = await boot({ [NOTIFICATION_TRAY_PINNED_KEY]: "1" });
+      stream.send(hello());
+      await settle();
+      expect(seen.notificationsPinned).toBe(true);
+    });
+
+    it("the provider remembers a section only while it is expanded", async () => {
+      const { stored, stream } = await boot({ [LAST_BOT_SECTION_KEY]: "model" });
+      stream.send(hello());
+      await settle();
+      expect(seen.botSettingsSection).toBe("model");
+      expect(seen.botSettingsSectionStored).toBe(true);
+      expect(stored.get(LAST_BOT_SECTION_KEY)).toBe("model");
+
+      flushSync(() => dispatch({ type: "toggleSettings", open: true }));
+      await settle();
+      expect(seen.botSettingsExpandRemembered).toBe(true);
+      expect(stored.get(LAST_BOT_SECTION_KEY)).toBe("model");
+
+      flushSync(() => dispatch({ type: "toggleSettings", open: true }));
+      await settle();
+      expect(seen.botSettingsExpandAccordion).toBe(false);
+      expect(stored.get(LAST_BOT_SECTION_KEY)).toBe("model");
+
+      flushSync(() => dispatch({ type: "toggleSettings", open: true, section: "usage" }));
+      await settle();
+      expect(stored.get(LAST_BOT_SECTION_KEY)).toBe("usage");
+
+      flushSync(() => dispatch({ type: "toggleSettings", open: false }));
+      await settle();
+      expect(stored.get(LAST_BOT_SECTION_KEY)).toBe("usage");
+    });
+
+    it("the provider remembers Overview like any other section", async () => {
+      const { stored, stream } = await boot();
+      stream.send(hello());
+      await settle();
+
+      flushSync(() => dispatch({ type: "toggleSettings", open: true, section: "overview" }));
+      await settle();
+      expect(stored.get(LAST_BOT_SECTION_KEY)).toBe("overview");
+
+      flushSync(() => dispatch({ type: "toggleSettings", open: false }));
+      await settle();
+      flushSync(() => dispatch({ type: "toggleSettings", open: true }));
+      await settle();
+      expect(seen.botSettingsSection).toBe("overview");
+      expect(seen.botSettingsExpandAccordion).toBe(true);
+      expect(seen.botSettingsExpandRemembered).toBe(true);
+    });
+
+    it("a throwing storage surface boots as if nothing were stored", async () => {
+      const { stream } = await boot({}, {
+        getItem: () => {
+          throw new Error("blocked");
+        },
+        setItem: () => {
+          throw new Error("blocked");
+        },
+      });
+      stream.send(hello());
+      await settle();
+      expect(seen.botSettingsSection).toBe("overview");
+      expect(seen.botSettingsSectionStored).toBe(false);
+      expect(seen.botSettingsExpandRemembered).toBe(false);
+
+      flushSync(() => dispatch({ type: "toggleSettings", open: true }));
+      await settle();
+      expect(seen.settingsOpen).toBe(true);
+      expect(seen.botSettingsSection).toBe("overview");
+      expect(seen.botSettingsExpandAccordion).toBe(false);
+      expect(seen.botSettingsExpandRemembered).toBe(false);
+    });
+  });
+});
+
+describe("notifications feed", () => {
+  const entry = (id: string, at: number) => ({
+    id, at, kind: "done" as const, botId: "b1", botName: "Scout", threadId: "t1", title: `${id} finished`, body: "", read: false,
+  });
+
+  it("hydrates, then grows on each push without duplicating a replayed id", () => {
+    let state = reducer(initialState, { type: "notificationsHydrated", notifications: [entry("n1", 1)] });
+    expect(state.notifications.map((n) => n.id)).toEqual(["n1"]);
+    state = reducer(state, { type: "notificationReceived", entry: entry("n2", 2) });
+    expect(state.notifications.map((n) => n.id)).toEqual(["n2", "n1"]);
+    // the same frame replayed (a resumed SSE stream) must not duplicate the row
+    state = reducer(state, { type: "notificationReceived", entry: entry("n2", 2) });
+    expect(state.notifications.map((n) => n.id)).toEqual(["n2", "n1"]);
+  });
+
+  it("hydration keeps a live entry that arrived while the request was in flight, newest first", () => {
+    let state = reducer(initialState, { type: "notificationReceived", entry: entry("live", 5) });
+    state = reducer(state, { type: "notificationsHydrated", notifications: [entry("n2", 2), entry("n1", 1)] });
+    expect(state.notifications.map((n) => n.id)).toEqual(["live", "n2", "n1"]);
+  });
+
+  it("hydration takes the server's copy for an id both sides have (a failed mark-read resyncs to unread)", () => {
+    let state = reducer(initialState, { type: "notificationsHydrated", notifications: [entry("n1", 1)] });
+    state = reducer(state, { type: "notificationRead", id: "n1" });
+    state = reducer(state, { type: "notificationsHydrated", notifications: [entry("n1", 1)] });
+    expect(state.notifications[0].read).toBe(false);
+  });
+
+  it("showRoutines closes the feed so its rail is reachable again", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    expect(reducer(open, { type: "showRoutines" }).notificationsOpen).toBe(false);
+  });
+
+  it("marks one or all read without touching the rest", () => {
+    let state = reducer(initialState, {
+      type: "notificationsHydrated",
+      notifications: [entry("n1", 1), entry("n2", 2)],
+    });
+    state = reducer(state, { type: "notificationRead", id: "n1" });
+    expect(state.notifications.find((n) => n.id === "n1")?.read).toBe(true);
+    expect(state.notifications.find((n) => n.id === "n2")?.read).toBe(false);
+    state = reducer(state, { type: "notificationsMarkAllRead" });
+    expect(state.notifications.every((n) => n.read)).toBe(true);
+  });
+
+  it("marks the entries a conversation read elsewhere, and only those", () => {
+    let state = reducer(initialState, {
+      type: "notificationsHydrated",
+      notifications: [entry("n1", 1), entry("n2", 2), entry("n3", 3)],
+    });
+    state = reducer(state, { type: "notificationsRead", ids: ["n1", "n3", "gone"] });
+    expect(state.notifications.filter((n) => n.read).map((n) => n.id)).toEqual(["n3", "n1"]);
+  });
+
+  it("toggleNotifications closes the other docked panels, and vice versa", () => {
+    let state = reducer(initialState, { type: "toggleComputer", open: true });
+    expect(state.computerOpen).toBe(true);
+    state = reducer(state, { type: "toggleNotifications", open: true });
+    expect(state).toMatchObject({ notificationsOpen: true, computerOpen: false });
+    state = reducer(state, { type: "toggleActivity", open: true });
+    expect(state).toMatchObject({ activityOpen: true, notificationsOpen: false });
+  });
+
+  it("toggleNotificationsPinned flips independently of notificationsOpen", () => {
+    const state = reducer(initialState, { type: "toggleNotificationsPinned" });
+    expect(state).toMatchObject({ notificationsPinned: true, notificationsOpen: false });
+  });
+
+  it("unpinned, switching chats closes it; pinned, it stays open (email 1a1a4fb0)", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1" };
+    const switches = [
+      { type: "select", id: "other-bot" } as const,
+      { type: "switchTask", botId: "other-bot", threadId: "other-thread" } as const,
+    ];
+    for (const action of switches) expect(reducer(open, action).notificationsOpen).toBe(false);
+    const pinned = reducer(open, { type: "toggleNotificationsPinned" });
+    for (const action of switches) expect(reducer(pinned, action).notificationsOpen).toBe(true);
+    const inRoom = { ...open, selectedId: "room-1", groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    const roomSwitch = { type: "switchGroupTask", groupId: "room-1", threadId: "room-thread" } as const;
+    expect(reducer(inRoom, roomSwitch).notificationsOpen).toBe(false);
+    expect(reducer({ ...inRoom, notificationsPinned: true }, roomSwitch).notificationsOpen).toBe(true);
+  });
+
+  it("unpinned, a new thread in the room on screen closes it; a background room leaves it", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "room-1",
+      groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    const action = { type: "newGroupTask", groupId: "room-1" } as const;
+    expect(reducer(open, action).notificationsOpen).toBe(false);
+    expect(reducer({ ...open, notificationsPinned: true }, action).notificationsOpen).toBe(true);
+    expect(reducer({ ...open, selectedId: "bot-1" }, action).notificationsOpen).toBe(true);
+    expect(reducer({ ...open, activeView: "team-map" as const }, action).notificationsOpen).toBe(true);
+  });
+
+  it("a thread switch in a room that is not on screen leaves the tray as it is", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1",
+      groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    expect(reducer(open, { type: "switchGroupTask", groupId: "room-1", threadId: "room-thread" }).notificationsOpen).toBe(true);
+  });
+
+  it("re-selecting a thread the bot is already switching to leaves the tray as it is", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1",
+      bots: [{ id: "bot-1", threadId: "t-1", switchingTo: "t-2" }] as AppState["bots"] };
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-2" }).notificationsOpen).toBe(true);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-3" }).notificationsOpen).toBe(false);
+  });
+
+  it("re-selecting the open chat or its open thread leaves the tray as it is", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1",
+      bots: [{ id: "bot-1", threadId: "t-1" }] as AppState["bots"], groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    expect(reducer(open, { type: "select", id: "bot-1" }).notificationsOpen).toBe(true);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-1" }).notificationsOpen).toBe(true);
+    expect(reducer({ ...open, selectedId: "room-1" }, { type: "switchGroupTask", groupId: "room-1", threadId: "room-t" }).notificationsOpen).toBe(true);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-2" }).notificationsOpen).toBe(false);
+  });
+
+  it("unpinned, re-selecting the open chat from another view closes it", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1", activeView: "team-map" as const,
+      bots: [{ id: "bot-1", threadId: "t-1" }] as AppState["bots"], groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    expect(reducer(open, { type: "select", id: "bot-1" }).notificationsOpen).toBe(false);
+    expect(reducer({ ...open, selectedId: "room-1" }, { type: "select", id: "room-1" }).notificationsOpen).toBe(false);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-1" }).notificationsOpen).toBe(false);
+    expect(reducer({ ...open, notificationsPinned: true }, { type: "select", id: "bot-1" }).notificationsOpen).toBe(true);
+  });
+
+  it("unpinned, starting a new chat closes it", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    expect(reducer(open, { type: "newTask", botId: "bot-1" }).notificationsOpen).toBe(false);
+  });
+
+  it("unpinned, adding a bot that takes the chat closes it; a background add keeps it", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    const bot = { id: "bot-new", threadId: "thread-new", name: "New", messages: [] } as never as Bot;
+    expect(reducer(open, { type: "botAdded", bot }).notificationsOpen).toBe(false);
+    expect(reducer(open, { type: "botAdded", bot, preserveSelection: true }).notificationsOpen).toBe(true);
+    const pinned = { ...open, notificationsPinned: true };
+    expect(reducer(pinned, { type: "botAdded", bot }).notificationsOpen).toBe(true);
+  });
+
+  it("pinned, the feed survives Computer/Inspector/Activity/AppSettings opening", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), notificationsPinned: true };
+    for (const action of [
+      { type: "toggleComputer", open: true } as const,
+      { type: "toggleInspector", open: true } as const,
+      { type: "toggleActivity", open: true } as const,
+      { type: "toggleAppSettings", open: true } as const,
+    ]) {
+      expect(reducer(open, action).notificationsOpen).toBe(true);
+    }
+  });
+
+  it("unpinned, the same four still close it exactly as before (regression guard)", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    expect(open.notificationsPinned).toBe(false);
+    for (const action of [
+      { type: "toggleComputer", open: true } as const,
+      { type: "toggleInspector", open: true } as const,
+      { type: "toggleActivity", open: true } as const,
+      { type: "toggleAppSettings", open: true } as const,
+    ]) {
+      expect(reducer(open, action).notificationsOpen).toBe(false);
+    }
+  });
+});
+
+describe("a routine's answer and its broadcast", () => {
+  it("applies whichever arrives first and never steps back to an older edit", () => {
+    const routine = { id: "r1", name: "Daily", prompt: "Summarize", target: "bot", botId: "b1", runOn: "maus", enabled: true,
+      schedule: { type: "daily", time: "09:00", weekdays: [1] }, durationMinutes: 30, nextRunAt: 5, createdAt: 1, updatedAt: 10 } as AppState["routines"][number];
+    const paused = { ...routine, enabled: false, nextRunAt: null, updatedAt: 11 };
+    const resumed = { ...routine, updatedAt: 12 };
+    let state = reducer({ ...initialState, routines: [routine] }, { type: "routinePatched", routine: paused });
+    state = reducer(state, { type: "routinePatched", routine: resumed });
+    state = reducer(state, { type: "routinePatched", routine: paused });
+    expect(state.routines).toEqual([resumed]);
+    expect(reducer(state, { type: "routinePatched", routine: { ...resumed, failureStreak: 1 } }).routines[0]).toMatchObject({ failureStreak: 1 });
+  });
+});
+
+describe("room order from the server", () => {
+  const room = (id: string): Group => ({ id, threadId: `${id}-thread`, name: id, memberIds: [], createdAt: 1, messages: [] } as unknown as Group);
+  const hydrated = reducer(initialState, { type: "hydrate", bots: [], groups: [room("a"), room("b"), room("c")], computerControl: {} });
+  const ids = (state: AppState) => state.groups.map((candidate) => candidate.id);
+
+  it("applies a groups.order frame as a stable partial reorder", () => {
+    expect(ids(reducer(hydrated, { type: "groupsOrdered", groupIds: ["c", "b", "a"] }))).toEqual(["c", "b", "a"]);
+    const partial = reducer(hydrated, { type: "groupsOrdered", groupIds: ["c", "a"] });
+    expect(ids(partial)).toEqual(["c", "b", "a"]);
+    expect(partial.groups[0]).toBe(hydrated.groups[2]);
+  });
+
+  it("ignores ids it does not know and leaves an unchanged order alone", () => {
+    expect(ids(reducer(hydrated, { type: "groupsOrdered", groupIds: ["ghost", "b", "a"] }))).toEqual(["b", "a", "c"]);
+    expect(reducer(hydrated, { type: "groupsOrdered", groupIds: ["a", "b", "c"] })).toBe(hydrated);
+  });
+});
+
+describe("fleet order from the server", () => {
+  const bot = (id: string): Bot => ({
+    id,
+    threadId: `${id}-thread`,
+    name: id,
+    title: "",
+    description: "",
+    notifications: false,
+    color: "green",
+    unread: false,
+    modelSelection: { instanceId: "acp", model: "fake" },
+    messages: [],
+  });
+  const hydrated = reducer(initialState, { type: "hydrate", bots: [bot("a"), bot("b"), bot("c"), bot("d")], groups: [], computerControl: {} });
+  const ids = (state: AppState) => state.bots.map((candidate) => candidate.id);
+
+  it("applies a bots.order frame as a stable partial reorder", () => {
+    expect(ids(reducer(hydrated, { type: "botsOrdered", botIds: ["d", "c", "b", "a"] }))).toEqual(["d", "c", "b", "a"]);
+    // Only c and a move, into the positions they already share; b and d stay put.
+    const partial = reducer(hydrated, { type: "botsOrdered", botIds: ["c", "a"] });
+    expect(ids(partial)).toEqual(["c", "b", "a", "d"]);
+    expect(partial.bots[0]).toBe(hydrated.bots[2]);
+  });
+
+  it("ignores ids it does not know and leaves an unchanged order alone", () => {
+    expect(ids(reducer(hydrated, { type: "botsOrdered", botIds: ["ghost", "b", "a"] }))).toEqual(["b", "a", "c", "d"]);
+    expect(reducer(hydrated, { type: "botsOrdered", botIds: ["a", "b", "c", "d"] })).toBe(hydrated);
   });
 });

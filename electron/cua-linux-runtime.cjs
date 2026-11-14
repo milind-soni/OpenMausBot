@@ -13,12 +13,10 @@ const {
 } = require("./cua-linux.cjs");
 
 const CONNECTION_SCHEMA_VERSION = 1;
-// Schema 2 is intentionally incompatible with early Linux desktop builds.
-// Those builds could start Cua without the Xorg seat-safety flags; keeping the
-// opt-in versioned makes a newer build unable to arm an older installed copy.
+// Schema 2 is deliberately incompatible with early builds that started Cua without the Xorg seat-safety flags.
 const SETTINGS_SCHEMA_VERSION = 2;
 const HOST_BUNDLE_ID = "com.openmausbot.app";
-const CERTIFIED_CONTRACT_VERSION = "0.6.0";
+const CERTIFIED_CONTRACT_VERSION = "0.8.0";
 const CERTIFIED_TOOLS_LIST_SCHEMA_VERSION = "1";
 const CERTIFIED_CAPABILITY_VERSION = "1";
 const CERTIFIED_MCP_PROTOCOL_VERSION = "2025-06-18";
@@ -101,8 +99,6 @@ function cleanupStaleRuntimeDirectories(root, {
       fileSystem.rmdirSync(directory);
       removed += 1;
     } catch {
-      // Runtime cleanup is best-effort and strictly scoped. A suspicious or
-      // concurrently changing entry is left untouched for manual inspection.
     }
   }
   return removed;
@@ -129,8 +125,7 @@ function writePrivateJson(file, value, {
       try {
         fileSystem.fsyncSync(directoryHandle);
       } catch {
-        // The file itself is already flushed and atomically renamed. Some
-        // otherwise-supported filesystems reject fsync on a directory.
+        // Some filesystems reject fsync on a directory.
       }
     } finally {
       fileSystem.closeSync(directoryHandle);
@@ -213,7 +208,7 @@ function requestSocket(socketPath, request, { timeoutMs = 1_000, maxBytes = 256 
   });
 }
 
-function validateDaemonMetadata(response, { childPid } = {}) {
+function validateDaemonMetadata(response, { childPid, driverVersion = CERTIFIED_DRIVER_VERSION } = {}) {
   const metadata = response?.ok === true ? response.result : null;
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
     throw Object.assign(new Error("Cua Driver daemon identity could not be verified."), {
@@ -221,7 +216,7 @@ function validateDaemonMetadata(response, { childPid } = {}) {
     });
   }
   const expected = {
-    driver_version: CERTIFIED_DRIVER_VERSION,
+    driver_version: driverVersion,
     contract_version: CERTIFIED_CONTRACT_VERSION,
     tools_list_schema_version: CERTIFIED_TOOLS_LIST_SCHEMA_VERSION,
     capability_version: CERTIFIED_CAPABILITY_VERSION,
@@ -269,7 +264,8 @@ function validateToolSurface(response) {
   return [...names].sort();
 }
 
-function healthFailure(check) {
+function healthFailure(check, { compositor = "gnome-mutter" } = {}) {
+  const hyprland = compositor === "hyprland";
   const detail = `${check?.message ?? ""} ${check?.hint ?? ""}`.toLowerCase();
   if (check?.name === "ax_capability") {
     return Object.assign(
@@ -281,6 +277,12 @@ function healthFailure(check) {
     return Object.assign(
       new Error("Cua Driver could not reach a supported screen capture backend in this Wayland session."),
       { code: "wayland-capture-unavailable" },
+    );
+  }
+  if (hyprland) {
+    return Object.assign(
+      new Error("Cua Driver could not verify the Hyprland control backend. Check that cua-hyprland-plugin is enabled, then try again."),
+      { code: "wayland-health-failed" },
     );
   }
   if (detail.includes("winrects") || detail.includes("target-activation")) {
@@ -301,7 +303,7 @@ function healthFailure(check) {
   );
 }
 
-function validateWaylandHealthReport(response) {
+function validateWaylandHealthReport(response, { driverVersion = CERTIFIED_DRIVER_VERSION, compositor } = {}) {
   const result = response?.ok === true ? response.result : null;
   const report = result?.structuredContent ?? result?.structured_content;
   if (
@@ -310,7 +312,7 @@ function validateWaylandHealthReport(response) {
     Array.isArray(report) ||
     report.schema_version !== "1" ||
     report.platform !== "linux" ||
-    report.driver_version !== CERTIFIED_DRIVER_VERSION ||
+    report.driver_version !== driverVersion ||
     !["ok", "degraded", "failed"].includes(report.overall) ||
     !Array.isArray(report.checks)
   ) {
@@ -338,11 +340,11 @@ function validateWaylandHealthReport(response) {
   }
   for (const name of REQUIRED_WAYLAND_HEALTH_CHECKS) {
     const check = checks.get(name);
-    if (check?.status !== "pass") throw healthFailure(check ?? { name });
+    if (check?.status !== "pass") throw healthFailure(check ?? { name }, { compositor });
   }
   if (report.overall !== "ok") {
     const failed = [...checks.values()].find((check) => check.status === "fail");
-    throw healthFailure(failed);
+    throw healthFailure(failed, { compositor });
   }
   return Object.freeze({
     schemaVersion: report.schema_version,
@@ -351,15 +353,18 @@ function validateWaylandHealthReport(response) {
   });
 }
 
-async function probeWaylandHealth(socketPath, { request = requestSocket } = {}) {
+async function probeWaylandHealth(socketPath, { request = requestSocket, driverVersion, compositor } = {}) {
   return validateWaylandHealthReport(
     await request(socketPath, { method: "call", name: "health_report", args: {} }),
+    { driverVersion, compositor },
   );
 }
 
 async function probePrivateDaemon(socketPath, {
   childPid,
   session = "x11",
+  driverVersion = CERTIFIED_DRIVER_VERSION,
+  compositor,
   timeoutMs = 10_000,
   request = requestSocket,
 } = {}) {
@@ -369,11 +374,13 @@ async function probePrivateDaemon(socketPath, {
     try {
       const metadata = validateDaemonMetadata(
         await request(socketPath, { method: "metadata" }),
-        { childPid },
+        { childPid, driverVersion },
       );
       const tools = validateToolSurface(await request(socketPath, { method: "list" }));
       const health =
-        session === "wayland" ? await probeWaylandHealth(socketPath, { request }) : undefined;
+        session === "wayland"
+          ? await probeWaylandHealth(socketPath, { request, driverVersion, compositor })
+          : undefined;
       return { metadata, tools, ...(health ? { health } : {}) };
     } catch (error) {
       lastError = error;
@@ -425,7 +432,7 @@ function publicRuntimeStatus(connection) {
     enabled: connection.enabled === true,
     status:
       connection.status ??
-      (["linux-x11-supervised", "linux-wayland-gnome-supervised"].includes(connection.mode)
+      (["linux-x11-supervised", "linux-wayland-gnome-supervised", "linux-wayland-hyprland-supervised"].includes(connection.mode)
         ? "ready"
         : "unavailable"),
     reasonCode: connection.reasonCode,
@@ -447,6 +454,7 @@ function createUnavailableLinuxRuntime({
   processId = process.pid,
   reasonCode = "bundled-driver-invalid",
   message = "The bundled Cua Driver failed integrity validation.",
+  compositor,
 } = {}) {
   if (clearPreference) {
     try {
@@ -463,6 +471,7 @@ function createUnavailableLinuxRuntime({
     status: "unavailable",
     reasonCode,
     message,
+    ...(compositor ? { compositor } : {}),
     ownerPid: processId,
   };
   try {
@@ -570,9 +579,7 @@ function createLinuxCuaRuntime({
         }
       } catch {}
     }
-    // Unix sockets have a short path limit. A private, uid-scoped directory
-    // directly under the system temp root keeps the fallback deterministic
-    // and short when XDG_RUNTIME_DIR is missing or unsafe.
+    // Unix sockets have a short path limit: a private uid-scoped dir under the temp root when XDG_RUNTIME_DIR is unusable.
     const currentUid = process.getuid?.() ?? os.userInfo().uid;
     const root = ensurePrivateDirectory(path.join(os.tmpdir(), `openmausbot-cua-${currentUid}`));
     cleanupStaleRuntimeDirectories(root);
@@ -589,7 +596,6 @@ function createLinuxCuaRuntime({
       try {
         fs.unlinkSync(file);
       } catch {
-        // A failure for one owned path must not prevent cleanup of the other.
       }
     }
     try {
@@ -620,7 +626,10 @@ function createLinuxCuaRuntime({
     unavailable(
       "error",
       error?.code ?? "wayland-health-lost",
-      error?.message ?? "The GNOME Wayland control backend is no longer available.",
+      error?.message ??
+        (owned.compositor === "hyprland"
+          ? "The Hyprland control backend is no longer available."
+          : "The GNOME Wayland control backend is no longer available."),
       { generation: owned.generation },
     );
     void stopOwnedChild(owned.child).finally(() => cleanupRuntimeFiles(owned));
@@ -631,7 +640,7 @@ function createLinuxCuaRuntime({
     owned.healthTimer = setRecurring(() => {
       if (active !== owned || owned.stopping || owned.healthChecking) return;
       owned.healthChecking = true;
-      void healthProbe(owned.socketPath)
+      void healthProbe(owned.socketPath, { driverVersion: owned.driverVersion, compositor: owned.compositor })
         .catch((error) => markWaylandHealthLost(owned, error))
         .finally(() => {
           owned.healthChecking = false;
@@ -669,6 +678,7 @@ function createLinuxCuaRuntime({
           ...(inspected.path
             ? { driver: { path: inspected.path, version: inspected.driverVersion } }
             : {}),
+          ...(inspected.compositor ? { compositor: inspected.compositor } : {}),
           doctorProbes: inspected.probes ?? [],
         });
       }
@@ -699,9 +709,7 @@ function createLinuxCuaRuntime({
       const args = [
         "serve",
         "--embedded",
-        // The driver's visual cursor is a full-screen X11 overlay. It is not
-        // needed for inspection or input delivery, and a compositor/renderer
-        // failure must never leave that surface between the user and desktop.
+          // The visual cursor is a full-screen X11 overlay; a compositor failure must never leave it over the desktop.
         "--no-overlay",
         "--socket",
         socketPath,
@@ -710,9 +718,7 @@ function createLinuxCuaRuntime({
         "--permission-mode",
         "standard",
       ];
-      // Pin the exact file inspected above, not merely its path. Keep this
-      // directly adjacent to spawn so an update/replacement during doctor or
-      // runtime preparation fails closed instead of launching uninspected code.
+      // Pin the exact inspected file, adjacent to spawn, so a replacement during preparation fails closed.
       const revalidated = validateDriverCandidate(inspected.path);
       if (
         revalidated.status !== "found" ||
@@ -742,6 +748,8 @@ function createLinuxCuaRuntime({
         stopping: false,
         healthTimer: null,
         healthChecking: false,
+        driverVersion: inspected.driverVersion,
+        compositor: inspected.compositor,
       };
       active = owned;
       child.stderr?.on("data", () => {});
@@ -756,6 +764,8 @@ function createLinuxCuaRuntime({
         const handshake = await probe(socketPath, {
           childPid: child.pid,
           session: runtimeSession,
+          driverVersion: inspected.driverVersion,
+          compositor: inspected.compositor,
         });
         if (active !== owned || owned.stopping || !enabled) {
           await stopOwnedChild(child);
@@ -766,9 +776,11 @@ function createLinuxCuaRuntime({
         const readyConnection = publish({
           schemaVersion: CONNECTION_SCHEMA_VERSION,
           mode:
-            runtimeSession === "wayland"
-              ? "linux-wayland-gnome-supervised"
-              : "linux-x11-supervised",
+            runtimeSession !== "wayland"
+              ? "linux-x11-supervised"
+              : inspected.compositor === "hyprland"
+                ? "linux-wayland-hyprland-supervised"
+                : "linux-wayland-gnome-supervised",
           platform: "linux",
           session: runtimeSession,
           ...(inspected.compositor ? { compositor: inspected.compositor } : {}),
@@ -781,8 +793,7 @@ function createLinuxCuaRuntime({
             version: inspected.driverVersion,
             source: inspected.source,
             manifestSchema: inspected.manifestSchema,
-            // Private descriptor-only pin. The renderer consumes getStatus(),
-            // which deliberately omits this internal file identity.
+            // Private pin: getStatus() deliberately omits this file identity.
             fileIdentity: inspected.fileIdentity,
           },
           daemon: {

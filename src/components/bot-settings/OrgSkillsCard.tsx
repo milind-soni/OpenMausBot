@@ -1,7 +1,3 @@
-// Bot → Skills → From {Organization}: skills the organization's packages
-// offer without putting them on a bot. Adding one puts it on this bot,
-// switched on — the organization's Admin published it. With no organization
-// (or nothing offered) the card is absent.
 import { Building2, Check } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -12,8 +8,7 @@ import { useBotEditor } from "./BotEditorContext";
 
 export function OrgSkillsCard({ bot, onAdded }: { bot: Bot; onAdded: () => void }) {
   const { request, draft } = useBotEditor();
-  // The editor's transport may be a new function each render; the fetch
-  // below must not re-run because of that, only when the bot changes.
+  // The editor's transport may be a new function each render; the fetch must re-run only when the bot changes.
   const api = useRef(request);
   api.current = request;
   const [organization, setOrganization] = useState<string | null>(null);
@@ -31,13 +26,11 @@ export function OrgSkillsCard({ bot, onAdded }: { bot: Bot; onAdded: () => void 
       setOrganization(result.organization?.name ?? null);
       setSkills(result.skills ?? []);
     } catch {
-      // No organization library is the same as nothing offered.
       if (!cancelled?.()) setOrganization(null);
     }
   }, [bot.id]);
 
   useEffect(() => {
-    // A bot still being created has no skills to add to.
     if (draft) return;
     let cancelled = false;
     void refresh(() => cancelled);
@@ -76,9 +69,9 @@ export function OrgSkillsCard({ bot, onAdded }: { bot: Bot; onAdded: () => void 
         {skills.map((skill) => (
           <div key={`${skill.installId}:${skill.name}`} className="flex items-center gap-2 px-3 py-2.5">
             <div className="min-w-0 flex-1">
-              <div className="truncate font-mono text-[12.5px] text-ink">{skill.name}</div>
-              <div className="mt-0.5 line-clamp-2 text-[11.5px] text-ink-secondary">{skill.description}</div>
-              <div className="mt-0.5 truncate text-[10.5px] text-ink-secondary">
+              <div className="truncate font-mono text-[13px] text-ink">{skill.name}</div>
+              <div className="mt-0.5 line-clamp-2 text-[12px] text-ink-secondary">{skill.description}</div>
+              <div className="mt-0.5 truncate text-[11px] text-ink-secondary">
                 {t("orgLibrary.skillFrom", { package: skill.packageName, release: skill.release, publisher: skill.publisher })}
               </div>
             </div>
@@ -92,7 +85,7 @@ export function OrgSkillsCard({ bot, onAdded }: { bot: Bot; onAdded: () => void 
                 disabled={working !== ""}
                 onClick={() => void add(skill)}
                 aria-label={t("orgLibrary.skillAddAria", { name: skill.name })}
-                className="shrink-0 rounded-lg bg-control px-3 py-1.5 text-[12.5px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="shrink-0 rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
               >
                 {working === `${skill.installId}:${skill.name}` ? t("orgLibrary.adding") : t("orgLibrary.add")}
               </button>

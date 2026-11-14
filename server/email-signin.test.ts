@@ -1,6 +1,3 @@
-// End to end: a hosted server with a sign-in allow-list lets a remote browser
-// sign in with an emailed code from the control plane (stubbed here) and
-// ends up with the same cookie session a pairing code would give.
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
@@ -12,10 +9,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startControlPlaneStub, type ControlPlaneStub } from "./testing/control-plane-stub.ts";
 import { openSse } from "./testing/sse.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
-const PORT = 24000 + Math.floor(Math.random() * 5000);
+const PORT = workerPort(24000, 5000);
 const HOST = "agentada.test";
 
 let home: string;
@@ -55,7 +53,6 @@ function call(path: string, init: { method?: string; body?: unknown; headers?: R
           try {
             body = JSON.parse(raw);
           } catch {
-            /* not json */
           }
           resolve({ status: res.statusCode ?? 0, headers: res.headers, body });
         });
@@ -124,7 +121,6 @@ beforeAll(async () => {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/health`);
       if (res.ok) return;
     } catch {
-      /* not up yet */
     }
     await new Promise((r) => setTimeout(r, 100));
   }
@@ -181,9 +177,7 @@ describe("sign in with your email on a hosted server", () => {
     const me = await call("/api/auth/session", { headers: { cookie, origin: `https://${HOST}` } });
     expect(me.status).toBe(200);
     expect(me.body).toMatchObject({ kind: "session", email: "her@example.test", scopes: ["admin", "client"], via: "cookie" });
-    // only a hosted team workspace says so; the web UI's first run reads it
     expect(me.body).not.toHaveProperty("hosted");
-    // admin scope: settings are hers to change
     const config = await call("/api/config", { method: "PUT", body: { language: "en" }, headers: { cookie, origin: `https://${HOST}` } });
     expect(config.status).toBe(200);
     const listed = await call("/api/auth/sessions", { headers: { cookie, origin: `https://${HOST}` } });
@@ -218,7 +212,6 @@ describe("sign in with your email on a hosted server", () => {
       if (last === 429) break;
     }
     expect(last).toBe(429);
-    // the lockout is per source: someone else still gets in
     const other = await call("/api/auth/email/verify", { body: { email: "her@example.test", code: stub.otp }, from: "198.51.100.43" });
     expect(other.status).toBe(200);
   });

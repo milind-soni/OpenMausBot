@@ -1,9 +1,3 @@
-// Access: where this bot runs, its working folder, connected apps and
-// browser toggles, its webhooks, and the standing "always allowed" grants.
-// Works on/cloud backend/auto-start VPS, Working folder, Connected apps, and
-// Browser are moved verbatim from SettingsPanel.tsx; the connected-service
-// list, webhooks list, and always-allowed list (the first read-only view of
-// standing grants) are new.
 import { useEffect, useState } from "react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
 import { ChevronDown, ChevronRight, FolderOpen, Plus } from "lucide-react";
@@ -13,15 +7,23 @@ import { useBotEditor } from "./BotEditorContext";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
+import { mcpServersForBot, mcpServersOfBot, mcpSwitch, useMcpServers } from "@/lib/mcp-servers";
+import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable } from "@/lib/local-computer";
+import { placeBlocked, placeFacts, placeHasIssue, placeViewFor, usePlaceSeat, type PlaceSeat } from "@/lib/place-view";
 import { shortPath } from "@/lib/short-path";
+import { isOwnThreadFolder } from "../../../shared/thread-folder";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { CloudBackendPicker } from "../CloudBackendPicker";
-import { ConfirmDialog } from "../ConfirmDialog";
-import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
+import { placeManagedBy, worksOnChoices, WorksOnGrid, worksOnSelected, type WorksOnMode } from "../WorksOnGrid";
 import { Switch } from "../SettingsPrimitives";
+import { PhoneAppsCard } from "./PhoneAppsCard";
 import { ProposalStatus } from "./ProposalStatus";
-import { preloadConnectedApps, type ConnectorInventory } from "../PluginsPanel";
+import { ToolSelectionCard } from "./ToolSelectionCard";
+import { BotApiCard } from "./BotApiCard";
+import { ToolBudgetLine } from "./ToolBudgetLine";
+import { useCloudPlan } from "../ProIntroduction";
+import { xResearchAction } from "@/lib/cloud-plan";
+import { useBotApps } from "./useBotApps";
 import {
   classifyConnectorTool,
   connectorServiceAccess,
@@ -29,24 +31,21 @@ import {
   type ConnectorVerb,
 } from "@/lib/connector-grants";
 import { inputCls } from "./field";
+import { openKeySettings } from "../keys/key-focus";
+import { KeysLink } from "../keys/KeysLink";
+import type { ConnectorScope, ConnectorScopes } from "../../../shared/connector-scopes";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 
-/** Where a bot's shell tools run. Set per bot; each task pins its own copy
- * on its first turn (the server does the pinning — Claude keeps sessions
- * per project folder, so a folder must not move under a live task). The
- * PATCH is made directly rather than through updateBot: the server
- * validates the path and a rejected folder must not stick in local state. */
-function WorkingFolder({ bot }: { bot: Bot }) {
+/**
+ * Claude keeps sessions per project folder, so the server pins each task's folder on its first turn. PATCHed directly,
+ * not via updateBot: the server validates the path, and a rejected folder must not stick in local state.
+ */
+export function useWorkingFolder(bot: Pick<Bot, "id" | "cwd">) {
   const { request: api } = useBotEditor();
-  const { capabilities } = useDesktopCapabilities();
-  const home = capabilities.host.homeDir;
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const canPick = Boolean(window.ogb?.pickFolder);
-  const task = bot.tasks?.find((t) => t.threadId === bot.threadId);
-  const pinned = task?.cwd; // undefined = not yet, null = legacy home, string = folder
-  const pinnedElsewhere = pinned !== undefined && (pinned ?? undefined) !== bot.cwd;
 
   const save = async (cwd: string | null) => {
     setSaving(true);
@@ -64,23 +63,33 @@ function WorkingFolder({ bot }: { bot: Bot }) {
     const chosen = await window.ogb?.pickFolder?.(bot.cwd);
     if (chosen) void save(chosen);
   };
+  return { draft, setDraft, error, saving, canPick, save, pick };
+}
+
+export function WorkingFolder({ bot }: { bot: Bot }) {
+  const { capabilities } = useDesktopCapabilities();
+  const home = capabilities.host.homeDir;
+  const { draft, setDraft, error, saving, canPick, save, pick } = useWorkingFolder(bot);
+  const task = bot.tasks?.find((t) => t.threadId === bot.threadId);
+  const pinned = task?.cwd;
+  const pinnedElsewhere = pinned !== undefined && (pinned ?? undefined) !== bot.cwd && !isOwnThreadFolder(pinned, bot.id, bot.threadId);
 
   return (
     <div className="rounded-xl bg-card p-4">
-      <div className="text-[15px] font-medium text-ink">Working folder</div>
-      <div className="mt-0.5 text-[13px] text-ink-secondary">Where this bot runs its shell and file tools.</div>
+      <div className="text-[15px] font-medium text-ink">{t("botAccess.folder.title")}</div>
+      <div className="mt-0.5 text-[13px] text-ink-secondary">{t("botAccess.folder.description")}</div>
       <ProposalStatus bot={bot} kind="chief" />
       {canPick ? (
         <div className="mt-3 flex items-center gap-2">
-          <div className="min-w-0 flex-1 truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12.5px] text-ink" title={bot.cwd}>
-            {bot.cwd ? shortPath(bot.cwd, home) : <span className="text-ink-secondary">Private bot folder</span>}
+          <div className="min-w-0 flex-1 truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[13px] text-ink" title={bot.cwd}>
+            {bot.cwd ? shortPath(bot.cwd, home) : <span className="text-ink-secondary">{t("botAccess.folder.private")}</span>}
           </div>
           <button onClick={() => void pick()} disabled={saving} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
-            <FolderOpen size={14} /> Choose…
+            <FolderOpen size={14} /> {t("botAccess.folder.choose")}
           </button>
           {bot.cwd && (
             <button onClick={() => void save(null)} disabled={saving} className="shrink-0 rounded-lg px-2 py-2 text-[13px] text-ink-secondary hover:text-ink disabled:opacity-50">
-              Clear
+              {t("botAccess.folder.clear")}
             </button>
           )}
         </div>
@@ -89,45 +98,45 @@ function WorkingFolder({ bot }: { bot: Bot }) {
           className="mt-3 flex items-center gap-2"
           onSubmit={(e) => {
             e.preventDefault();
-            // an emptied field clears the folder — the server wants null
             void save((draft ?? bot.cwd ?? "").trim() || null);
           }}
         >
           <input
-            className={cn(inputCls, "font-mono text-[12.5px]")}
-            placeholder="Private bot folder — or an absolute path"
+            className={cn(inputCls, "font-mono text-[13px]")}
+            aria-label={t("botAccess.folder.title")}
+            placeholder={t("botAccess.folder.placeholder")}
             value={draft ?? bot.cwd ?? ""}
             onChange={(e) => setDraft(e.target.value)}
           />
           <button type="submit" disabled={saving || draft === null} className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
-            Save
+            {t("botAccess.folder.save")}
           </button>
         </form>
       )}
       {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
       {pinnedElsewhere && (
         <div className="mt-2 text-[12px] text-ink-secondary">
-          New tasks start here. This task is pinned to {pinned ? <span className="font-mono">{shortPath(pinned, home)}</span> : "the home folder"} — start a new task to use the new folder.
+          {t("botAccess.folder.pinned", { path: pinned ? shortPath(pinned, home) : t("botAccess.folder.home") })}
         </div>
       )}
     </div>
   );
 }
 
-/** Which app-wide MCP servers this bot mounts. Absent list = all enabled
- * (the pre-existing behavior); the first switch flip writes an explicit
- * list so later additions in Plugins do not silently reach this bot. */
-function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpServers: string[] | null }) => void }) {
+/**
+ * Absent list = all enabled; the first flip writes an explicit list so servers added later never silently reach this
+ * bot.
+ */
+export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpServers: string[] | null }) => void }) {
   const { dispatch } = useStore();
-  const { servers, error, refresh } = useMcpServers();
-  const mounted = new Set((servers ? mcpServersForBot(servers, bot.mcpServers) : []).map((server) => server.name));
+  const { servers: all, error, refresh } = useMcpServers();
+  const servers = all ? mcpServersOfBot(all, bot.id) : null;
+  const mounted = new Set((servers ? mcpServersForBot(servers, bot.mcpServers, bot.id) : []).map((server) => server.name));
   const usesAll = bot.mcpServers == null;
 
   const toggle = (name: string) => {
     if (!servers || bot.busy || error) return;
-    const current = usesAll ? servers.filter((server) => server.enabled).map((server) => server.name) : [...(bot.mcpServers ?? [])];
-    const next = current.includes(name) ? current.filter((item) => item !== name) : [...current, name];
-    patch({ mcpServers: next });
+    patch({ mcpServers: mcpSwitch(servers, bot.mcpServers, name) });
   };
   const openPlugins = () => {
     dispatch({ type: "toggleSettings", open: false });
@@ -159,8 +168,9 @@ function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpServers:
           {servers.map((server) => (
             <div key={server.name} className="flex items-center justify-between gap-3 px-3 py-2">
               <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-[12.5px] text-ink">{server.name}</div>
-                {!server.enabled && <div className="text-[11.5px] text-ink-secondary">{t("botAccess.mcpDisabled")}</div>}
+                <div className="truncate font-mono text-[13px] text-ink">{server.name}</div>
+                {!server.enabled && <div className="text-[12px] text-ink-secondary">{t("botAccess.mcpDisabled")}</div>}
+                {server.enabled && server.offFor?.includes(bot.id) && <div className="text-[12px] text-ink-secondary">{t("mcp.offFor", { bots: bot.name })}</div>}
               </div>
               <Switch
                 checked={mounted.has(server.name)}
@@ -173,6 +183,7 @@ function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpServers:
           ))}
         </div>
       )}
+      <ToolBudgetLine botId={bot.id} busy={!!bot.busy} />
       <div className="mt-3 flex items-center gap-2">
         <button type="button" onClick={openPlugins} className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover">
           <Plus size={14} /> {t("botAccess.mcpAdd")}
@@ -193,10 +204,6 @@ interface ToolListing {
   description?: string;
 }
 
-/** Lazy, module-cached inventory of every grantable tool per service, read
- * from the same endpoint the bots' bridge relays through. Recent data
- * survives dialog reopens; a failed load degrades the per-tool editor to a
- * retry row while All-tools and remove keep working. */
 let connectorToolsCache: { at: number; services: Record<string, ToolListing[]> } | null = null;
 let connectorToolsRequest: Promise<Record<string, ToolListing[]>> | null = null;
 const CONNECTOR_TOOLS_CACHE_MS = 60_000;
@@ -227,12 +234,10 @@ const VERB_LABELS: Record<ConnectorVerb, LocaleKey> = {
   delete: "botAccess.grants.verb.delete",
 };
 
-/** Per-service tool grants under the Connected apps switch (issue #1738).
- * Each connected service row expands into the exact-name editor: search,
- * verb-class preset chips that expand to explicit names, and one-click All
- * tools per service or globally. A grants record this build cannot parse
- * renders as a read-only summary — never a guess that could destroy fields
- * a newer server understands. */
+/**
+ * A grants record this build cannot parse renders read-only, never a guess that could destroy fields a newer server
+ * understands.
+ */
 function ConnectorToolsGrants({
   bot,
   patch,
@@ -246,13 +251,7 @@ function ConnectorToolsGrants({
   const [search, setSearch] = useState("");
   const [tools, setTools] = useState<Record<string, ToolListing[]> | null>(null);
   const [toolsError, setToolsError] = useState<string | null>(null);
-  /** The explicit list a service had before "All tools", so the switch can
-   * toggle back and forth within one visit. */
   const [lastExplicit, setLastExplicit] = useState<Record<string, string[]>>({});
-  /** The first grant pending confirmation: saving it creates the grants
-   * record, which limits every other connected app to no tools, so the
-   * person confirms that transition before it lands. */
-  const [confirmFirstGrant, setConfirmFirstGrant] = useState<{ slug: string; tools: "*" | string[] } | null>(null);
 
   useEffect(() => {
     if (!openSlug || tools || toolsError) return;
@@ -277,7 +276,7 @@ function ConnectorToolsGrants({
   };
 
   const apply = (slug: string, next: { tools: "*" | string[] } | null) => {
-    const value = withServiceGrant(record, slug, next);
+    const value = withServiceGrant(record, slug, next, slugs);
     if (value === undefined) return;
     patch({ connectorTools: value });
   };
@@ -290,18 +289,10 @@ function ConnectorToolsGrants({
       return;
     }
     setLastExplicit((prev) => ({ ...prev, [slug]: next }));
-    if (!recordExists) {
-      setConfirmFirstGrant({ slug, tools: next });
-      return;
-    }
     apply(slug, { tools: next });
   };
 
   const allForService = (slug: string) => {
-    if (!recordExists) {
-      setConfirmFirstGrant({ slug, tools: "*" });
-      return;
-    }
     const selected = selectedFor(slug);
     if (selected.length) setLastExplicit((prev) => ({ ...prev, [slug]: selected }));
     apply(slug, { tools: "*" });
@@ -314,13 +305,13 @@ function ConnectorToolsGrants({
   };
 
   if (!slugs.length) {
-    return <div className="mt-3 text-[11.5px] text-ink-secondary">{t("botAccess.grants.noApps")}</div>;
+    return <div className="mt-3 text-[12px] text-ink-secondary">{t("botAccess.grants.noApps")}</div>;
   }
 
   return (
     <div className="mt-3">
       <div className="text-[12px] font-medium text-ink">{t("botAccess.grants.header")}</div>
-      <div className="mt-0.5 text-[11.5px] text-ink-secondary">{t("botAccess.grants.hint")}</div>
+      <div className="mt-0.5 text-[12px] text-ink-secondary">{t("botAccess.grants.hint")}</div>
       <div className="mt-2 divide-y divide-hairline/40 overflow-hidden rounded-lg border border-hairline/40">
         {slugs.map((slug) => {
           const access = connectorServiceAccess(record, slug);
@@ -354,8 +345,8 @@ function ConnectorToolsGrants({
                 className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-control/60"
               >
                 {open ? <ChevronDown size={14} className="shrink-0 text-ink-secondary" /> : <ChevronRight size={14} className="shrink-0 text-ink-secondary" />}
-                <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-ink">{slug}</span>
-                <span className="shrink-0 text-[11.5px] text-ink-secondary">
+                <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-ink">{slug}</span>
+                <span className="shrink-0 text-[12px] text-ink-secondary">
                   {!access.editable
                     ? t("botAccess.grants.custom")
                     : access.level === "all"
@@ -368,7 +359,7 @@ function ConnectorToolsGrants({
               {open && (
                 <div className="border-t border-hairline/40 bg-inset/40 px-3 py-3">
                   {!access.editable ? (
-                    <div className="text-[11.5px] leading-relaxed text-ink-secondary">
+                    <div className="text-[12px] leading-relaxed text-ink-secondary">
                       {t("botAccess.grants.uneditable")}
                     </div>
                   ) : (
@@ -378,7 +369,7 @@ function ConnectorToolsGrants({
                           type="button"
                           onClick={() => (isAll ? leaveAllForService(slug) : allForService(slug))}
                           className={cn(
-                            "rounded-full px-2.5 py-1 text-[11.5px] font-medium",
+                            "rounded-full px-2.5 py-1 text-[12px] font-medium",
                             isAll ? "bg-accent/15 text-accent-text" : "bg-control text-ink hover:bg-raised-hover",
                           )}
                         >
@@ -388,19 +379,14 @@ function ConnectorToolsGrants({
                           <button
                             type="button"
                             onClick={() => patch({ connectorTools: null })}
-                            className="rounded-full bg-control px-2.5 py-1 text-[11.5px] font-medium text-ink hover:bg-raised-hover"
+                            className="rounded-full bg-control px-2.5 py-1 text-[12px] font-medium text-ink hover:bg-raised-hover"
                           >
                             {t("botAccess.grants.allApps")}
                           </button>
                         )}
                       </div>
-                      {!recordExists && (
-                        <div className="mt-2 text-[11px] leading-relaxed text-ink-secondary">
-                          {t("botAccess.grants.firstGrantWarning")}
-                        </div>
-                      )}
                       {toolsError ? (
-                        <div className="mt-2 text-[11.5px] text-ink-secondary">
+                        <div className="mt-2 text-[12px] text-ink-secondary">
                           {t("botAccess.grants.loadError")}{" "}
                           <button
                             type="button"
@@ -415,9 +401,9 @@ function ConnectorToolsGrants({
                           </button>
                         </div>
                       ) : tools === null ? (
-                        <div className="mt-2 text-[11.5px] text-ink-secondary">{t("botAccess.grants.loading")}</div>
+                        <div className="mt-2 text-[12px] text-ink-secondary">{t("botAccess.grants.loading")}</div>
                       ) : serviceTools.length === 0 ? (
-                        <div className="mt-2 text-[11.5px] text-ink-secondary">{t("botAccess.grants.noListing")}</div>
+                        <div className="mt-2 text-[12px] text-ink-secondary">{t("botAccess.grants.noListing")}</div>
                       ) : (
                         <>
                           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -431,10 +417,6 @@ function ConnectorToolsGrants({
                                   onClick={() => {
                                     const next = [...new Set([...selected, ...names])];
                                     setLastExplicit((prev) => ({ ...prev, [slug]: next }));
-                                    if (!recordExists) {
-                                      setConfirmFirstGrant({ slug, tools: next });
-                                      return;
-                                    }
                                     apply(slug, { tools: next });
                                   }}
                                   className="rounded-full bg-control px-2.5 py-1 text-[11px] text-ink hover:bg-raised-hover"
@@ -464,7 +446,7 @@ function ConnectorToolsGrants({
                                     className="mt-0.5"
                                   />
                                   <span className="min-w-0 flex-1">
-                                    <span className="block truncate font-mono text-[11.5px] text-ink" title={tool.name}>{tool.name}</span>
+                                    <span className="block truncate font-mono text-[12px] text-ink" title={tool.name}>{tool.name}</span>
                                     {tool.description && (
                                       <span className="block truncate text-[11px] text-ink-secondary" title={tool.description}>
                                         {tool.description}
@@ -475,7 +457,7 @@ function ConnectorToolsGrants({
                               );
                             })}
                             {matches.length === 0 && (
-                              <div className="px-1.5 py-2 text-[11.5px] text-ink-secondary">{t("botAccess.grants.noMatches")}</div>
+                              <div className="px-1.5 py-2 text-[12px] text-ink-secondary">{t("botAccess.grants.noMatches")}</div>
                             )}
                           </div>
                         </>
@@ -488,35 +470,214 @@ function ConnectorToolsGrants({
           );
         })}
       </div>
-      <ConfirmDialog
-        open={confirmFirstGrant !== null}
-        title={t("botAccess.grants.firstGrantTitle", { service: confirmFirstGrant?.slug ?? "" })}
-        body={t("botAccess.grants.firstGrantBody", { service: confirmFirstGrant?.slug ?? "" })}
-        confirmLabel={t("botAccess.grants.saveGrant")}
-        onCancel={() => setConfirmFirstGrant(null)}
-        onConfirm={() => {
-          const pending = confirmFirstGrant;
-          setConfirmFirstGrant(null);
-          if (!pending) return;
-          apply(pending.slug, { tools: pending.tools });
-        }}
+    </div>
+  );
+}
+
+/** Research through treg (the X tools and the general research tools): on for every bot whenever this server holds a
+ * treg key or a Cloud plan's research credential, and switchable off per bot. */
+function ResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: boolean }) => void }) {
+  const { state, dispatch } = useStore();
+  const connecting = xResearchAction(useCloudPlan()?.view ?? null) === "connecting" && state.config?.xResearch?.unavailable !== true;
+  const ownKey = state.config?.treg?.configured === true, included = state.config?.xResearch?.included === true;
+  const available = ownKey || included;
+  const on = bot.xResearch !== false;
+  const line = !available ? t(connecting ? "research.connecting" : "research.addKey")
+    : !on ? t("research.off") : t(ownKey ? "research.ownOn" : "research.planOn");
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4" data-testid="access-x-research">
+      <div>
+        <div className="text-[15px] font-medium text-ink">{t("research.title")}</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">{line}</div>
+        {!available && !connecting && (
+          <button type="button" className="ui-button mt-2" onClick={() => dispatch(openKeySettings("treg"))}>
+            {t("research.openKeys")}
+          </button>
+        )}
+      </div>
+      <Switch
+        checked={available && on}
+        aria-label={t("research.switch")}
+        disabled={!available}
+        onClick={() => patch({ xResearch: !on })}
+        className="disabled:cursor-not-allowed"
       />
     </div>
   );
 }
 
+function RecordStepsRow({ on, browserOn, myChrome, onChange }: { on: boolean; browserOn: boolean; myChrome: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <div className="mt-3 flex items-center justify-between gap-4 border-t border-hairline/40 pt-3">
+      <div>
+        <div className="text-[14px] font-medium text-ink">{t("botAccess.recordSteps.title")}</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">
+          {!browserOn ? t("botAccess.recordSteps.needsBrowser") : on ? t("botAccess.recordSteps.on") : t("botAccess.recordSteps.off")}
+          {browserOn && on && myChrome ? ` ${t("botAccess.recordSteps.myChrome")}` : ""}
+        </div>
+      </div>
+      <Switch
+        checked={on && browserOn}
+        aria-label={t("botAccess.recordSteps.title")}
+        disabled={!browserOn}
+        onClick={() => onChange(!on)}
+        className="disabled:cursor-not-allowed"
+      />
+    </div>
+  );
+}
+
+export function cloudPreferenceShown(bot: Pick<Bot, "computer">, config: { cloudHome?: boolean } | null | undefined): boolean {
+  return (!bot.computer || bot.computer === "cloud") && !config?.cloudHome;
+}
+
+/**
+ * A bot's own VPS server. PATCHed directly, not via updateBot: the server refuses
+ * a move while the bot's computer still lives on the old host.
+ */
+export function VpsAliasField({ bot }: { bot: Bot }) {
+  const { request: api } = useBotEditor();
+  const { state } = useStore();
+  const defaultAlias = state.config?.vps?.sshAlias ?? "";
+  const [draft, setDraft] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Set when the old server could not be reached: the move went ahead, and this says what may be left there.
+  const [notice, setNotice] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const save = async (alias: string | null) => {
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const saved = await api<{ notice?: string }>(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ vpsAlias: alias }) });
+      setNotice(saved?.notice ?? null);
+      setDraft(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const value = draft ?? bot.vpsAlias ?? "";
+  return (
+    <div className="mt-3 rounded-lg bg-inset p-3">
+      <div className="text-[13px] text-ink">{t("botAccess.cloud.server")}</div>
+      <div className="mt-0.5 text-[12px] text-ink-secondary">
+        {defaultAlias
+          ? t("botAccess.cloud.serverDefault", { alias: defaultAlias })
+          : t("botAccess.cloud.serverNoDefault")} <KeysLink id="vps" />
+      </div>
+      <form
+        className="mt-2 flex items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save(value.trim() || null);
+        }}
+      >
+        <input
+          className={cn(inputCls, "font-mono text-[13px]")}
+          placeholder={defaultAlias || t("botAccess.cloud.serverPlaceholder")}
+          value={value}
+          aria-label={t("botAccess.cloud.server")}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <button
+          type="submit"
+          disabled={saving || draft === null}
+          className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+        >
+          {t("botAccess.cloud.serverSave")}
+        </button>
+      </form>
+      {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
+      {notice && <div role="status" className="mt-2 break-words text-[12px] text-ink-secondary">{notice}</div>}
+    </div>
+  );
+}
+
+export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<typeof useBotSettingsDerived>["patch"] }) {
+  const { state } = useStore();
+  const { draft } = useBotEditor();
+  if (!cloudPreferenceShown(bot, state.config)) return null;
+  return (
+    <>
+      {!bot.computer && !draft && (
+        <div className="mt-3 rounded-lg bg-inset px-3 py-2.5 text-[12px] leading-relaxed text-ink-secondary">
+          <span className="font-medium text-ink">{t("botAccess.cloud.autoTitle")}</span>{" "}
+          {t("botAccess.cloud.autoDescription")}
+        </div>
+      )}
+      <CloudBackendPicker
+        value={bot.cloudBackend ?? "box"}
+        onChange={(backend) => patch({ cloudBackend: backend })}
+      />
+      {/* A saved bot only: a new bot starts on the default server, and new-bot defaults never name one. */}
+      {bot.cloudBackend === "vps" && !draft && <VpsAliasField bot={bot} />}
+      {!bot.computer && bot.cloudBackend === "vps" && (
+        <div className="mt-3 flex items-center justify-between gap-4 rounded-lg bg-inset px-3 py-2.5">
+          <div className="min-w-0">
+            <div className="text-[13px] text-ink">{t("botAccess.cloud.startVps")}</div>
+            <div className="mt-0.5 text-[12px] text-ink-secondary">
+              {t("botAccess.cloud.startVpsDescription")}
+            </div>
+          </div>
+          <Switch
+            checked={Boolean(bot.autoStartVps)}
+            aria-label={t("botAccess.cloud.startVps")}
+            onClick={() => patch({ autoStartVps: !bot.autoStartVps })}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
+function DraftWorksOn({ bot, patch, seat }: { bot: Bot; patch: ReturnType<typeof useBotSettingsDerived>["patch"]; seat: PlaceSeat }) {
+  const { state } = useStore();
+  const { capabilities } = useDesktopCapabilities();
+  const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
+  const localReason = localComputerDisabledReason({ capabilities, providerSupportsLocal });
+  const named = { ...bot, name: bot.name || t("sidebar.newBotSimple") };
+  const options = worksOnChoices(state.config, capabilities).map(([mode, labelKey, descriptionKey, Icon]) => {
+    const view = placeViewFor(placeFacts({
+      bot: named, place: mode ?? "auto", seat, config: state.config, instances: state.instances,
+      local: {
+        ready: localComputerSelectable({ capabilities, providerSupportsLocal }),
+        reason: localReason ?? t("computer.unavailableLocal"),
+      },
+    }));
+    const managedBy = placeManagedBy(mode, bot.cloudBackend, state.config?.managedPolicy);
+    return {
+      mode, labelKey, descriptionKey, Icon, view, managedBy,
+      selected: worksOnSelected(mode, bot.computer, capabilities),
+      disabled: Boolean(managedBy) || placeBlocked(view),
+      issue: !managedBy && placeHasIssue(view),
+      note: placeHasIssue(view) ? view.line : mode === "local" ? localReason ?? undefined : undefined,
+    };
+  });
+  const choose = (mode: WorksOnMode) => patch(mode === "browser" ? { computer: mode, browser: true } : { computer: mode });
+  return <>
+    <div className="text-[15px] font-medium text-ink">{t("computer.worksOn")}</div>
+    <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{t(state.config?.cloudHome ? "computer.worksOnHintCloudHome" : "computer.worksOnHint")}</p>
+    <WorksOnGrid options={options} onSelect={choose} />
+  </>;
+}
+
+export type AccessPart = "worksOn" | "folder" | "apps" | "phone" | "xResearch" | "mcp" | "tools" | "browser" | "webhooks" | "always";
+
 export function AccessSection({
   bot,
   derived,
+  parts,
 }: {
   bot: Bot;
   derived: ReturnType<typeof useBotSettingsDerived>;
+  parts?: readonly AccessPart[];
 }) {
   const { draft } = useBotEditor();
   const { state, dispatch } = useStore();
   const {
     patch,
-    canUseVps,
     canUseConnectedApps,
     connectedAppsConfigured,
     connectedAppsEnabled,
@@ -527,162 +688,86 @@ export function AccessSection({
     browserFeature,
     browserAllowed,
     browserEnabled,
-    browserSelectable,
-    browserDisabledReason,
-    localSelectable,
-    localDisabledReason,
   } = derived;
   const browserInstallable = state.config?.browserEngine?.installable === true;
-  const [localAutoWarning, setLocalAutoWarning] = useState<string | null>(null);
-  const [inventory, setInventory] = useState<ConnectorInventory | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void preloadConnectedApps().then((result) => {
-      if (!cancelled) setInventory(result);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { capabilities } = useDesktopCapabilities();
+  const placeSeat = usePlaceSeat(state.config, capabilities);
+  const worksOn = placeViewFor(placeFacts({
+    bot, place: bot.computer ?? "auto", seat: placeSeat, config: state.config, instances: state.instances,
+  }));
+  // The same list the Vault tab shows: Composio's connected accounts plus the native Email connection.
+  const apps = useBotApps(bot);
+  const inventoryReady = apps.phase === "ready";
+  const connectedSlugs = apps.connectedSlugs;
+  const appLabels = Object.fromEntries(apps.apps.map((app) => [app.slug, app.label]));
 
   const webhooks = state.webhooks.filter((webhook) => webhook.botId === bot.id);
   const alwaysAllow = bot.alwaysAllow ?? [];
-  const connectedSlugs = inventory?.authoritative
-    ? Object.entries(inventory.services)
-        .filter(([, status]) => status.connected)
-        .map(([slug]) => slug)
-    : [];
+  const shows = (part: AccessPart) => !parts || parts.includes(part);
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-xl bg-card p-4">
-        <div className="text-[15px] font-medium text-ink">Works on</div>
-        <div className="mt-0.5 text-[13px] text-ink-secondary">
-          Where this bot works{bot.computer ? "" : " (currently: auto)"}. Browser is the built-in browser tab only; no desktop.
-        </div>
-        <ProposalStatus bot={bot} kind="owner" />
-        <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline/40">
-          {([
-            [null, "Auto"],
-            ["cloud", "Cloud"],
-            ["vm", "Local VM"],
-            ["local", "This computer"],
-            ["browser", "Browser"],
-            ["off", "Off"],
-          ] as const).map(([mode, label], i) => (
-            <button
-              key={mode ?? "auto"}
-              disabled={(mode === "local" && !localSelectable) || (mode === "browser" && !browserSelectable)}
-              title={
-                mode === "local" && !localSelectable
-                  ? localDisabledReason ?? undefined
-                  : mode === "browser"
-                    ? browserSelectable ? "The built-in browser tab only; no desktop" : browserDisabledReason
-                    : mode === "off"
-                      ? "No computer and no built-in browser"
-                      : undefined
-              }
-              onClick={() => {
-                if ((mode === null && bot.computer === undefined) || mode === bot.computer) return;
-                if (mode === "local" && derived.approvalMode === "auto") setLocalAutoWarning(bot.id);
-                // a browser-only bot must actually have its browser: flip
-                // the per-bot switch on with the destination
-                else if (mode === "browser") patch({ computer: mode, browser: true });
-                else patch({ computer: mode });
-              }}
-              className={cn(
-                "flex-1 py-1.5 text-[13px] capitalize",
-                i > 0 && "border-l border-hairline/40",
-                ((mode === "local" && !localSelectable) || (mode === "browser" && !browserSelectable)) && "cursor-not-allowed opacity-40",
-                (mode === null ? bot.computer === undefined : bot.computer === mode)
-                  ? "bg-control text-ink"
-                  : "text-ink-secondary hover:bg-control/60 hover:text-ink",
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {bot.computer === "off" && (
-          <div className="mt-3 rounded-lg bg-inset px-3 py-2.5 text-[11.5px] leading-relaxed text-ink-secondary">
-            <span className="font-medium text-ink">Off means no screen.</span>{" "}
-            This bot gets no computer and no built-in browser, so it cannot open a web page, click, or type
-            anywhere. Its connected apps, MCP servers, files and chat all still work.
-          </div>
-        )}
-        {(!bot.computer || bot.computer === "cloud") && (
-          <>
-            {!bot.computer && (
-              <div className="mt-3 rounded-lg bg-inset px-3 py-2.5 text-[11.5px] leading-relaxed text-ink-secondary">
-                <span className="font-medium text-ink">Auto cloud preference.</span>{" "}
-                This chooses what Auto may reuse during a task; viewing settings does not create or wake a computer.
-              </div>
-            )}
-            <CloudBackendPicker
-              value={bot.cloudBackend ?? "box"}
-              vpsSupported={canUseVps}
-              onChange={(backend) => patch({ cloudBackend: backend })}
-            />
-            {!bot.computer && bot.cloudBackend === "vps" && (
-              <div className="mt-3 flex items-center justify-between gap-4 rounded-lg bg-inset px-3 py-2.5">
-                <div className="min-w-0">
-                  <div className="text-[13px] text-ink">Start VPS automatically</div>
-                  <div className="mt-0.5 text-[11.5px] text-ink-secondary">
-                    Allow Auto to create or wake this bot's managed container when needed.
-                  </div>
-                </div>
-                <Switch
-                  checked={Boolean(bot.autoStartVps)}
-                  aria-label="Start VPS automatically"
-                  onClick={() => patch({ autoStartVps: !bot.autoStartVps })}
-                />
-              </div>
-            )}
-          </>
-        )}
-      </div>
+      {shows("worksOn") && <div className="rounded-xl bg-card p-4" data-testid="access-works-on">
+        {draft ? <DraftWorksOn bot={bot} patch={patch} seat={placeSeat} /> : <>
+          <div className="text-[15px] font-medium text-ink">{t("access.worksOn", { name: bot.name, short: worksOn.short })}</div>
+          <ProposalStatus bot={bot} kind="owner" />
+          <button
+            type="button"
+            onClick={() => {
+              dispatch({ type: "toggleSettings", open: false });
+              dispatch({ type: "toggleComputer", open: true });
+            }}
+            className="mt-3 rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
+          >
+            {t("place.action.openComputerPanel")}
+          </button>
+        </>}
+        <CloudPreference bot={bot} patch={patch} />
+      </div>}
 
-      <WorkingFolder bot={bot} />
+      {shows("folder") && <WorkingFolder bot={bot} />}
 
-      <div className="rounded-xl bg-card p-4">
+      {shows("apps") && <div className="rounded-xl bg-card p-4">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <div className="text-[15px] font-medium text-ink">Connected apps</div>
+            <div className="text-[15px] font-medium text-ink">{t("botAccess.apps.title")}</div>
             <div className="mt-0.5 text-[13px] text-ink-secondary">
               {!connectedAppsConfigured
-                ? "Connect apps in App Settings before giving this bot access."
+                ? t("botAccess.apps.connectInSettings")
                 : !canUseConnectedApps
-                  ? "This bot's current engine cannot use connected apps."
+                  ? t("botAccess.apps.modelUnsupported")
                   : connectedAppsEnabled
                     ? connectorGrantState === "partial"
-                      ? "Tool access is tailored per app. Expand an app below to edit its tools."
+                      ? t("botAccess.apps.partial")
                       : connectorGrantState === "none"
-                        ? "Every connected app is currently limited to no tools. Expand an app to grant tools."
-                        : "Let this bot use your connected Gmail, Calendar, Slack, and other apps."
-                    : "Keep your connected apps unavailable to this bot."}
+                        ? t("botAccess.apps.none")
+                        : t("botAccess.apps.enabled")
+                    : t("botAccess.apps.disabled")}
             </div>
             <ProposalStatus bot={bot} kind="owner" />
           </div>
           <Switch
             checked={connectedAppsEnabled}
-            aria-label="Allow this bot to use connected apps"
+            aria-label={t("botAccess.apps.allow")}
             disabled={
               !connectedAppsEnabled && (!connectedAppsConfigured || !canUseConnectedApps)
             }
             onClick={() => patch({ composio: !connectedAppsEnabled })}
             title={
               !connectedAppsEnabled && !connectedAppsConfigured
-                ? "Connect apps in App Settings first"
+                ? t("botAccess.apps.connectFirst")
                 : !connectedAppsEnabled && !canUseConnectedApps
-                  ? "This engine cannot use connected apps"
+                  ? t("botAccess.apps.modelUnsupportedShort")
                   : undefined
             }
             className="disabled:cursor-not-allowed"
           />
         </div>
-        {connectedAppsEnabled && inventory?.authoritative && (
-          <ConnectorToolsGrants bot={bot} patch={patch} slugs={connectedSlugs} />
+        {connectedAppsEnabled && inventoryReady && (
+          <>
+            {!draft && <ConnectorScopesControl connectedSlugs={connectedSlugs} labels={appLabels} scopes={bot.connectorScopes} onChange={(connectorScopes) => patch({ connectorScopes })} />}
+            <ConnectorToolsGrants bot={bot} patch={patch} slugs={connectedSlugs} />
+          </>
         )}
         {connectedAppsEnabled && connectedAppsConfigured && (
           <button
@@ -696,49 +781,65 @@ export function AccessSection({
             <Plus size={14} /> {t("botAccess.connectApp")}
           </button>
         )}
-      </div>
+      </div>}
 
-      <McpServersCard bot={bot} patch={patch} />
+      {shows("phone") && <PhoneAppsCard bot={bot} patch={patch} />}
+      {shows("mcp") && <McpServersCard bot={bot} patch={patch} />}
+      {shows("tools") && <ToolSelectionCard key={bot.id} bot={bot} engineKind={derived.engine?.driverKind} />}
 
-      <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
-        <div>
-          <div className="text-[15px] font-medium text-ink">Browser</div>
-          <div className="mt-0.5 text-[13px] text-ink-secondary">
-            {!desktopBrowser
-              ? browserBlockedOnWindows && !browserInstallable
-                ? "Not available on this Windows machine yet: install the browser engine with `openmausbot browser install`."
-                : browserUnavailableReason(state.config)
-              : !browserFeature
-                ? "The built-in browser is switched off under App Settings → Experimental."
-                : !canUseBrowser
-                  ? "This bot's current engine cannot use the built-in browser."
-                  : bot.computer === "off"
-                    ? "Works on is set to Off, so this bot has no browser. Pick another destination above to give it one."
-                    : browserEnabled
-                      ? "This bot has its own browser with its own logins."
-                      : "Keep the built-in browser unavailable to this bot."}
+      {shows("browser") && <div className="rounded-xl bg-card p-4">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="text-[15px] font-medium text-ink">{t("botAccess.browser.title")}</div>
+            <div className="mt-0.5 text-[13px] text-ink-secondary">
+              {!desktopBrowser
+                ? browserBlockedOnWindows && !browserInstallable
+                  ? t("botAccess.browser.windowsUnavailable")
+                  : browserUnavailableReason(state.config)
+                : !browserFeature
+                  ? t("botAccess.browser.disabledInSettings")
+                  : !canUseBrowser
+                    ? t("botAccess.browser.modelUnsupported")
+                    : bot.computer === "off"
+                      ? t("botAccess.browser.off")
+                      : browserEnabled
+                        ? t("botAccess.browser.enabled")
+                        : t("botAccess.browser.disabled")}
+            </div>
+            <ProposalStatus bot={bot} kind="owner" />
           </div>
-          <ProposalStatus bot={bot} kind="owner" />
+          <Switch
+            checked={browserEnabled && bot.computer !== "off"}
+            aria-label={t("botAccess.browser.allow")}
+            disabled={
+              bot.computer === "off" ||
+              (!browserEnabled && ((!desktopBrowser && !browserInstallable) || !browserFeature || !canUseBrowser))
+            }
+            onClick={() => patch({ browser: !browserAllowed })}
+            title={bot.computer === "off" ? t("botAccess.browser.offShort") : undefined}
+            className="disabled:cursor-not-allowed"
+          />
         </div>
-        <Switch
-          checked={browserEnabled && bot.computer !== "off"}
-          aria-label="Give this bot a built-in browser"
-          disabled={
-            bot.computer === "off" ||
-            (!browserEnabled && ((!desktopBrowser && !browserInstallable) || !browserFeature || !canUseBrowser))
-          }
-          onClick={() => patch({ browser: !browserAllowed })}
-          title={bot.computer === "off" ? "Works on is set to Off, so this bot has no browser" : undefined}
-          className="disabled:cursor-not-allowed"
-        />
-      </div>
+        {!draft && (
+          <RecordStepsRow
+            on={bot.recordBrowserSteps === true}
+            browserOn={browserEnabled && bot.computer !== "off"}
+            myChrome={state.config?.browserEngine?.myChrome === true && (state.config?.browserProfiles ?? []).some((profile) => profile.id === bot.browserProfile && profile.browser === "chrome")}
+            onChange={(recordBrowserSteps) => patch({ recordBrowserSteps })}
+          />
+        )}
+      </div>}
 
-      {!draft && <div className="rounded-xl bg-card p-4">
-        <div className="text-[15px] font-medium text-ink">Webhooks</div>
-        <div className="mt-0.5 text-[13px] text-ink-secondary">Inbound triggers wired to this bot.</div>
+      {!draft && shows("xResearch") && <ResearchCard bot={bot} patch={patch} />}
+
+      {!draft && shows("webhooks") && <BotApiCard bot={bot} />}
+
+      {!draft && shows("webhooks") && <div className="rounded-xl bg-card p-4">
+        <div className="text-[15px] font-medium text-ink">{t("botAccess.webhooks.title")}</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">{t("botAccess.webhooks.description")}</div>
         <ProposalStatus bot={bot} kind="owner" />
         {webhooks.length === 0 ? (
-          <div className="mt-3 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink-secondary">No webhooks for this bot.</div>
+          <div className="mt-3 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink-secondary">{t("botAccess.webhooks.empty")}</div>
         ) : (
           <div className="mt-3 divide-y divide-hairline/40 overflow-hidden rounded-lg border border-hairline/40">
             {webhooks.map((webhook) => (
@@ -750,10 +851,10 @@ export function AccessSection({
                     webhook.enabled ? "bg-accent/15 text-accent-text" : "bg-control text-ink-secondary",
                   )}
                 >
-                  {webhook.enabled ? "Active" : "Paused"}
+                  {webhook.enabled ? t("botAccess.webhooks.active") : t("botAccess.webhooks.paused")}
                 </span>
-                <span className="shrink-0 text-[11.5px] tabular-nums text-ink-secondary">
-                  {webhook.deliveryCount} deliveries
+                <span className="shrink-0 text-[12px] tabular-nums text-ink-secondary">
+                  {t("botAccess.webhooks.deliveries", { count: webhook.deliveryCount })}
                 </span>
               </div>
             ))}
@@ -761,24 +862,24 @@ export function AccessSection({
         )}
       </div>}
 
-      {!draft && <div className="rounded-xl bg-card p-4">
-        <div className="text-[15px] font-medium text-ink">Always allowed</div>
-        <div className="mt-0.5 text-[13px] text-ink-secondary">Tools this bot no longer asks about.</div>
+      {!draft && shows("always") && <div className="rounded-xl bg-card p-4">
+        <div className="text-[15px] font-medium text-ink">{t("botAccess.always.title")}</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">{t("botAccess.always.description")}</div>
         <ProposalStatus bot={bot} kind="owner" />
         {alwaysAllow.length === 0 ? (
-          <div className="mt-3 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink-secondary">Nothing standing yet.</div>
+          <div className="mt-3 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink-secondary">{t("botAccess.always.empty")}</div>
         ) : (
           <div className="mt-3 divide-y divide-hairline/40 overflow-hidden rounded-lg border border-hairline/40">
             {alwaysAllow.map((entry) => (
               <div key={entry} className="flex items-center justify-between gap-3 px-3 py-2">
-                <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-ink">{entry}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-ink">{entry}</span>
                 <button
                   type="button"
-                  aria-label={`Remove ${entry} from always allowed`}
+                  aria-label={t("botAccess.always.remove", { entry })}
                   onClick={() => patch({ alwaysAllow: alwaysAllow.filter((key) => key !== entry) })}
                   className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-danger/10 hover:text-danger"
                 >
-                  Remove
+                  {t("botAccess.always.removeButton")}
                 </button>
               </div>
             ))}
@@ -786,16 +887,42 @@ export function AccessSection({
         )}
       </div>}
 
-      <LocalComputerAutoWarning
-        open={localAutoWarning !== null}
-        onCancel={() => setLocalAutoWarning(null)}
-        onConfirm={() => {
-          const target = localAutoWarning;
-          setLocalAutoWarning(null);
-          if (!target) return;
-          dispatch({ type: "updateBot", botId: target, patch: { computer: "local", acknowledgeLocalAuto: true } });
-        }}
-      />
     </div>
   );
+}
+
+function ConnectorScopesControl({ connectedSlugs, labels = {}, scopes, onChange }: {
+  connectedSlugs: string[];
+  /** display names by slug; a slug without one shows as itself */
+  labels?: Record<string, string>;
+  scopes: ConnectorScopes | undefined;
+  onChange: (scopes: ConnectorScopes | null) => void;
+}) {
+  const limited = scopes !== undefined;
+  const slugs = [...new Set([...connectedSlugs, ...Object.keys(scopes?.apps ?? {})])].sort();
+  const setScope = (slug: string, scope: ConnectorScope | null) => {
+    const apps = { ...scopes?.apps };
+    if (scope) apps[slug] = scope;
+    else delete apps[slug];
+    onChange({ apps });
+  };
+  return <div className="mt-3">
+    <div className="flex items-center justify-between gap-4">
+      <div className="text-[13px] text-ink-secondary">
+        {limited ? t("botAccess.scopes.limited") : t("botAccess.scopes.unlimited")}
+      </div>
+      <Switch checked={limited} aria-label={t("botAccess.scopes.limitLabel")} onClick={() => onChange(limited ? null : { apps: {} })} />
+    </div>
+    {limited && <div className="mt-2 flex flex-col divide-y divide-hairline/20 rounded-lg bg-inset">
+      {!slugs.length && <div className="px-3 py-2 text-[12px] text-ink-secondary">{t("botAccess.scopes.empty")}</div>}
+      {slugs.map((slug) => <div key={slug} className="flex flex-wrap items-center justify-between gap-3 px-3 py-1.5">
+        <span className="min-w-0 text-[13px] text-ink">{labels[slug] ?? slug}{!connectedSlugs.includes(slug) && <span className="ml-2 text-[11px] text-ink-secondary">{t("botAccess.scopes.notConnected")}</span>}</span>
+        <div className="flex shrink-0 gap-0.5 rounded-md bg-card p-0.5" role="group" aria-label={t("botAccess.scopes.accessLabel", { app: slug })}>
+          {([[null, t("botAccess.scopes.off"), t("botAccess.scopes.offHint")], ["read", t("botAccess.scopes.read"), t("botAccess.scopes.readHint")], ["write", t("botAccess.scopes.readWrite"), t("botAccess.scopes.readWriteHint")]] as const).map(([value, label, hint]) =>
+            <button key={label} type="button" title={hint} aria-pressed={(scopes?.apps[slug] ?? null) === value} onClick={() => setScope(slug, value)}
+              className={cn("rounded px-2 py-0.5 text-[12px] font-medium", (scopes?.apps[slug] ?? null) === value ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink")}>{label}</button>)}
+        </div>
+      </div>)}
+    </div>}
+  </div>;
 }

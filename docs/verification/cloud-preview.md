@@ -15,10 +15,9 @@ and removes their temporary data; the printed harness log remains.
 
 Verify these transitions with computer use:
 
-1. On initial connection, **Cloud screen connected** appears. The fixture
-   deliberately injects an old blank SSE frame before mounting the connection;
-   that frame must not hide the new screenshot. The old implementation fails
-   this check by continuing to display a black rectangle.
+1. On initial connection, **Cloud screen connected** appears. The panel hears
+   live frames only while its preview is up, so a frame sent before it
+   connected cannot hide this screenshot.
 2. Select **corrupt**, then **Reconnect panel**. The panel must show an image
    error and **Retry preview**, rather than a blank image with an Open button.
 3. Select **slow**, then **Retry preview**. The panel immediately shows
@@ -56,6 +55,17 @@ Verify these transitions with computer use:
     **Panel → Remote desktop**. The viewer is simulated, never a native window.
 12. Select **unconfigured** while **Busy** is on. Its permanent HTTP409 must
     show **VPS is not configured** with Retry, not an endless connecting state.
+13. Focus the tab row with **Tab**: **Left**/**Right** and **Home**/**End**
+    move between tabs, the vertical arrows must leave the page's scrolling
+    alone, and the focused tab's ring must not be clipped by the row. Press
+    **Tab** again: focus lands on the selected panel itself before its first
+    control.
+14. Close the panel with **Enter** on its focused X, then open it again with
+    **Enter** on **Open computer panel**: the Computer panel focuses its active
+    tab, the **Remote desktop** panel focuses its own X, and closing either
+    returns focus to that opener button. By hand, a pointer click on the opener
+    must leave focus out of the panel entirely; the chat header's own button
+    covers that in the computer panel focus recipe.
 
 The automated browser regression runs these contention, cancellation, decoded
 frame retention, and join-pause checks against the same fixture:

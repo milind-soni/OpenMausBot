@@ -1,17 +1,6 @@
-// End-to-end proof that an AppImage update lands on the path the user
-// launches, run against the real release feed.
-//
-// The unit tests drive AppImageUpdater.doInstall with hand-made files. This
-// drives the whole thing: the shipped bundle, extracted from the packaged
-// AppImage, checking the real canonical release feed, downloading the real
-// asset, and installing it over a copy that carries a version in its name —
-// the exact shape that used to orphan the launcher.
-//
-// The current version is reported by the app adapter, not read from the file,
-// so a build newer than the latest release can still be told to update: we
-// claim an old version and let the published release be the newer one.
-//
-// Runs under Electron (electron-updater needs its net stack):
+// End-to-end proof that an AppImage update from the real release feed lands on
+// the path the user launches, using the shipped bundle. Runs under Electron
+// (electron-updater needs its net stack):
 //   xvfb-run -a pnpm exec electron scripts/smoke-linux-update.mjs
 import { createHash } from "node:crypto";
 import {
@@ -35,8 +24,7 @@ const { app } = require("electron");
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const releaseDir = path.join(root, "release");
 
-// A version older than the oldest release we would ever test against, so the
-// published feed is always an upgrade regardless of what is packaged here.
+// Older than any release, so the published feed is always an upgrade.
 const PRETEND_VERSION = "0.0.1";
 
 function fail(message) {
@@ -82,11 +70,8 @@ async function main() {
   process.env.APPIMAGE = launched;
   app.setPath("userData", path.join(workspace, "userdata"));
 
-  // The updater under test is the one that ships, not the one in the tree.
-  // Electron resolves paths inside an asar natively, so this loads the exact
-  // module the packaged app would require. An explicit path lets the same
-  // harness run against an unpatched bundle, which must fail — a smoke that
-  // cannot fail proves nothing.
+  // The updater that ships: Electron resolves paths inside an asar natively.
+  // An explicit path runs this against an unpatched bundle, which must fail.
   const bundle =
     process.argv.find((argument) => argument.startsWith("--updater="))?.slice("--updater=".length) ??
     path.join(root, "release/linux-unpacked/resources/app.asar/electron/vendor/electron-updater.cjs");

@@ -34,8 +34,7 @@ it("transfers only selected skills disabled, preserves originals, and rolls back
     const before = await request("/api/bots", {}, url);
     const workspaces = join(fixture.info.dataDir, "workspaces");
     const beforeWorkspaces = existsSync(workspaces) ? readdirSync(workspaces).sort() : [];
-    // Fail the protected skill write after bot creation, using only this
-    // fixture's disposable filesystem. The import must remove its new bot.
+    // Fail the protected skill write after bot creation, using only this fixture's disposable filesystem.
     const obstacle = join(fixture.info.dataDir, "skill-state");
     expect(existsSync(obstacle)).toBe(false);
     writeFileSync(obstacle, "fixture-only write failure", { mode: 0o600 });
@@ -79,7 +78,10 @@ it("transfers only selected skills disabled, preserves originals, and rolls back
     expect(JSON.stringify(messages)).toContain("hello from fake claude");
     expect(readFileSync(fixture.fixtureDumpPath, "utf8")).not.toContain("SKILL_FIXTURE_MARKER");
     const after = await request("/api/bots", {}, url);
-    for (const bot of before.bots) expect(after.bots.find((value: { id: string }) => value.id === bot.id)).toEqual(bot);
+    // The main Chief is in charge of every department, so each imported one became its too; nothing else changed.
+    expect(before.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff)).toHaveLength(1);
+    for (const bot of before.bots) expect(after.bots.find((value: { id: string }) => value.id === bot.id))
+      .toEqual(bot.chiefOfStaff ? { ...bot, managedSections: [...(bot.managedSections ?? []), imported.section, copied.section] } : bot);
     const backup = await post("/api/teams/export", { format: "backup" });
     expect(JSON.stringify(backup)).not.toContain("SKILL_FIXTURE_MARKER");
     console.log(JSON.stringify({ ok: true, rollback: true, explicitSelection: true, importedSkillsDisabled: true, messages, logPath: fixture.info.logPath }));

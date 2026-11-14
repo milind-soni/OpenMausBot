@@ -8,17 +8,41 @@ icon: CalendarClock
 
 A routine runs once, at a repeating interval, or on selected weekdays. Each run starts a fresh execution using the selected bot's model, permissions, tools, and computer configuration.
 
-<ProductScreenshot name="docs-automations" alt="An empty OpenMausBot automations calendar ready for its first schedule" caption="Review work across a day, three-day, or week view and filter by bot." />
+<ProductScreenshot name="docs-automations" alt="An empty MausBot automations calendar ready for its first schedule" caption="Review work across a day, three-day, or week view and filter by bot." />
 
-Run receipts distinguish queued, active, waiting, completed, missed, failed, and cancelled work. OpenMausBot must be running when a local routine becomes due.
+Run receipts distinguish queued, active, waiting, completed, missed, failed, and cancelled work. MausBot must be running when a local routine becomes due.
 
-### Keep reports in one thread
+### Results arrive in the bot's chat
 
-In a routine's editor, use **Post results to** to choose an existing thread or **Create a dedicated results thread**. You can move that results thread into a folder, such as **OMB management**, just like any other thread.
+Each run works in a conversation of its own, out of the way, and only its result comes to the bot's chat: one message from the bot, with a small line above it naming the automation and when it ran. Reply to it like any other message; the bot knows what its automation found. A run with nothing to tell you stays quiet: no message, no unread dot, no notification, and the automation's card says **Nothing new**.
 
-Each run gets its own execution context, while dated reports collect in the chosen thread. Background execution threads stay out of the normal sidebar and mobile thread pickers. Use **Open run** on a report for its conversation and any approvals, then **Back to results** to return. **Run logs** keeps the execution history, including failures and waiting runs.
+When a run needs you, it asks in that chat. A question in words shows **needs you** on the message; answer it there, or react 👍 or 👎. A choice or an approval the run waits on appears in the chat too, and answering it there, or reacting 👍 or 👎, carries the run on. A sign-in, a connection or a key it needs is named in the chat, with **See run** to it. When a run can't finish, the chat says so once, with what to fix.
 
-Routines created in chat keep reporting to that conversation unless you choose a different destination. Changing the destination affects future runs, not the report links for older runs. If you delete a results thread, its hidden execution threads become visible so you can still inspect their work and respond to approvals.
+Nothing lands in the middle of your own conversation: if you are chatting with the bot when a run finishes, its message waits and appears right after the bot's reply to you.
+
+Files a run links in its message open from the chat, just as they would in the run's own conversation. Use **See run** on a message for the run's full conversation, then **Back to results** to return. **Run logs** keeps the execution history, including failures and waiting runs. Background run conversations stay out of the normal sidebar and mobile thread pickers.
+
+In a routine's editor, use **Post results to** to choose an existing thread, or leave it on **The bot's main thread**: the conversation you last wrote in, which is also the one conversation you see with threads hidden. You can move a results thread into a folder, such as **OMB management**, just like any other thread. On My Cloud, an automation that an outside event starts, or that someone else wrote, reports into a chat of its own, so the chats you write in stay yours alone and can keep using a Mac you lend to My Cloud.
+
+A bot schedules, changes, pauses, resumes, and deletes its own routines from chat without asking, and each change shows as one line with **Undo** (see [Changes a bot makes](/docs/features/approvals-and-inspector#changes-a-bot-makes)). A routine for another bot asks first unless the conversation has Full access.
+
+Without a chosen thread, each run reports into the bot's main thread as it is when the run starts, wherever the routine was made, so results follow you to the conversation you are in. Changing the destination affects future runs, not the messages older runs left. If you delete a results thread, its hidden execution threads become visible so you can still inspect their work and respond to approvals.
+
+### Remember the last run
+
+Each run starts fresh by default. For work that builds on last time, such as a QA pass, monitoring or follow-ups, turn on **Remember the last run** under the routine's instructions. Each run then starts with the previous run's report (up to 2,000 characters), so the bot knows what it found before. It is available for repeating routines that one bot runs; team goals don't carry it yet. You can also ask the bot in chat to turn it on.
+
+### Run when the app starts
+
+If your computer is often off when a routine is due, open the routine's **Advanced** options and turn on **Also run when OpenMausBot starts**. The routine then runs once each time MausBot opens, as well as on its schedule. Its run logs show these runs as **On startup**. A routine that MausBot is already catching up on at startup runs once, not twice, and an occurrence missed by more than 12 hours is covered by the startup run instead of being reported as missed. Switching to another workspace and back, or MausBot recovering from a crash, doesn't count as opening the app again. Pausing a routine stops its startup runs too. It's available for repeating routines, and you can also ask the bot in chat to turn it on.
+
+### A routine's own model
+
+A routine runs on its bot's model unless it has its own. Give it one through the API with `modelSelection` (the same shape as a bot's: `instanceId`, `model`, and an optional `effort` or `variant`), for example a light hourly check on a smaller model while the bot chats on a stronger one: `PATCH /api/routines/<id>` with `{"modelSelection": {"instanceId": "claude", "model": "claude-haiku-4-5"}}`. Each run's thread then uses that model; if its AI isn't available, the thread falls back to the bot's model. The model has to keep the bot's permission level, as a bot's own model change does: with Custom approval it must run on the bot's own engine, and with Auto-accept edits on an engine that has that level. Other models are refused, and if the bot's permissions change later so the routine's model no longer fits, runs use the bot's model. Room goals always use their bots' own models, and a limit-reset routine stays on the model of the conversation it continues. Send `"modelSelection": null` to go back to the bot's model.
+
+### When the AI's usage limit stops a run
+
+If a bot's AI reaches its usage limit during a run and the limit resets within 12 hours, MausBot starts that run once more a minute after the reset, and tells you so. A repeating routine's scheduled run is the exception when the routine's next scheduled run comes no later than one of its intervals after the reset (an hour for an hourly routine, a day for a daily one): that next run does the same work, so the stopped run fails with the usual usage-limit notice instead. Runs you start with **Run now**, one-time routines and routines that run when a limit resets still start again at the reset, and a bot with a backup AI still switches to it at once.
 
 ### Clear a folder's unread dots
 
@@ -28,14 +52,20 @@ Right-click a folder or open its **…** menu, then choose **Mark folder as read
 
 Webhooks start the same queued task executor from an external HTTP request. They are independent from schedules and use a dedicated receiver on `127.0.0.1:8800` by default.
 
-The receiver exposes only health and secret hook routes. It does not expose the broader OpenMausBot API.
+The receiver exposes only health and secret hook routes. It does not expose the broader MausBot API.
 
 Bearer authentication is preferred because it keeps the secret out of URLs and most access logs. A capability URL is available for senders that cannot set headers.
 
+### A bot that sets up its own webhook
+
+When a bot creates a webhook automation from chat, it gets the private address in the result, and it can ask for it again later, so it can paste the address into the other app's setup itself instead of asking you to use **Copy address**. Only the bot the automation belongs to gets it, or a Chief of Staff that can reach that bot (bots with a different audience on a shared workspace cannot), and only in a conversation you drive: never in a run that a webhook or app event started, and never in a My Cloud conversation a guest drives. The address stays in that tool result; chat transcripts, step details and logs show it masked, and the Automations page keeps the secret hidden until you press **Show**. **Copy address** copies the same address the bot has, so copying never breaks a setup; **Replace address** makes a new one and the old one stops working.
+
 ## Reaching a local webhook
 
-To accept events from the public internet, proxy only the webhook receiver through a narrowly configured relay or tunnel. Do not expose the main harness port.
+On My Cloud there is nothing to set up: webhooks use the workspace's own address. The Webhooks panel shows `https://` plus the workspace's hostname followed by `/hooks/` and the endpoint, and only those hook paths are passed to the receiver. The same is true of a hosted workspace.
 
-<Callout type="warn" title="OpenMausBot must remain running">
-  Local routines and webhook deliveries are not hosted jobs. Closing the desktop app stops the local executor and receiver.
+On the desktop app the receiver listens only on this computer. To accept events from the public internet, proxy only the webhook receiver through a narrowly configured relay or tunnel. Do not expose the main harness port.
+
+<Callout type="warn" title="MausBot must remain running">
+  Local routines and webhook deliveries are not hosted jobs. Closing the desktop app stops the local executor and receiver. My Cloud keeps running them while your computer is off.
 </Callout>

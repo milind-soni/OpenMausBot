@@ -1,7 +1,3 @@
-// The spoken register is the half of voice that decides whether it is
-// pleasant, and it is the piece most likely to be tuned against real
-// transcripts — so its behaviour is pinned here rather than discovered in
-// the kitchen at 8am.
 import { describe, expect, it } from "vitest";
 
 import { narrateTool, speakable, toUtterances } from "./speech-text.ts";
@@ -89,7 +85,6 @@ describe("toUtterances", () => {
   });
 
   it("glues a fragment onto its neighbour", () => {
-    // two words handed to a synthesizer produce two words of flat prosody
     const out = toUtterances("Yes. The whole suite is green and nothing else changed.");
     expect(out).toHaveLength(1);
     expect(out[0]).toContain("Yes.");
@@ -100,7 +95,6 @@ describe("toUtterances", () => {
     const out = toUtterances(long, { maxChars: 120 });
     expect(out.length).toBeGreaterThan(1);
     for (const piece of out) expect(piece.length).toBeLessThanOrEqual(140);
-    // nothing lost, nothing cut in half
     expect(out.join(" ")).toContain("item 39");
   });
 
@@ -113,6 +107,87 @@ describe("toUtterances", () => {
     expect(toUtterances("```\ncode only\n```")).not.toContain("code only");
     expect(toUtterances("")).toEqual([]);
   });
+
+  it("caps a long first block at firstBlockMaxChars without losing or emptying text", () => {
+    const long = `I looked at ${Array.from({ length: 30 }, (_, i) => `item ${i}`).join(", ")} and finished.`;
+    const out = toUtterances(long, { firstBlockMaxChars: 90 });
+    expect(out.length).toBeGreaterThan(1);
+    expect(out[0]!.length).toBeLessThanOrEqual(90);
+    for (const piece of out) expect(piece.length).toBeGreaterThan(0);
+    expect(out.join(" ")).toBe(toUtterances(long).join(" "));
+  });
+
+  it("leaves a first block at exactly the cap untouched", () => {
+    const text = `${Array.from({ length: 18 }, () => "word").join(" ")}. Second sentence here.`;
+    const capped = toUtterances(text, { firstBlockMaxChars: 90 });
+    expect(capped[0]!.length).toBe(90);
+    expect(capped).toEqual(toUtterances(text));
+  });
+
+  it("leaves a short first block and every later block on today's rules", () => {
+    const tail = `${Array.from({ length: 63 }, () => "word").join(" ")}.`;
+    const text = `The tests pass now. ${tail}`;
+    const capped = toUtterances(text, { firstBlockMaxChars: 90 });
+    expect(capped[0]!.length).toBeLessThanOrEqual(90);
+    expect(capped.at(-1)!.length).toBe(315);
+    expect(capped).toEqual(toUtterances(text));
+  });
+
+  it("keeps a short remainder from the capped block as its own block", () => {
+    const text = `${Array.from({ length: 18 }, () => "word").join(" ")} plus.`;
+    const out = toUtterances(text, { firstBlockMaxChars: 90 });
+    expect(out).toEqual([Array.from({ length: 18 }, () => "word").join(" "), "plus."]);
+    expect(out.join(" ")).toBe(toUtterances(text).join(" "));
+  });
+
+  it("keeps an unbreakable first token whole rather than slicing mid-word", () => {
+    const text = `${"a".repeat(95)} and then more words here.`;
+    const capped = toUtterances(text, { firstBlockMaxChars: 90 });
+    expect(capped).toEqual(toUtterances(text));
+    expect(capped[0]).toContain("a".repeat(95));
+  });
+
+  it.each(["漢".repeat(325), "日本語の文章を読み上げます。".repeat(40)])("bounds unspaced speech without dropping text", (text) => {
+    const out = toUtterances(text, { maxChars: 320, firstBlockMaxChars: 90 });
+    expect(out.length).toBeGreaterThan(1);
+    expect(out[0]!.length).toBeLessThanOrEqual(90);
+    expect(out.every((piece) => piece.length > 0 && piece.length <= 320)).toBe(true);
+    expect(out.join("")).toBe(speakable(text));
+  });
+
+  it("keeps supplementary Unicode letters intact at an odd speech boundary", () => {
+    const text = "𠮷".repeat(95);
+    const out = toUtterances(text, { firstBlockMaxChars: 91 });
+    expect(out[0]!.length).toBeLessThanOrEqual(91);
+    expect(out.every((piece) => Buffer.from(piece).toString("utf8") === piece)).toBe(true);
+    expect(out.join("")).toBe(text);
+  });
+  it("keeps a terminal period attached to a word at either speech cap", () => {
+    const long = `${"a".repeat(320)}.`;
+    expect(toUtterances(long)).toEqual([long]);
+    const first = `${"a".repeat(90)}.`;
+    expect(toUtterances(first, { firstBlockMaxChars: 90 })).toEqual([first]);
+  });
+
+  it("does not turn punctuation around an indivisible word into an utterance", () => {
+    const text = `(${"a".repeat(320)}).`;
+    expect(toUtterances(text)).toEqual([text]);
+  });
+
+  it("caps a decomposed Katakana word without splitting its graphemes", () => {
+    const text = "カ\u3099".repeat(321);
+    const out = toUtterances(text, { maxChars: 320, firstBlockMaxChars: 91 });
+    expect(out.length).toBeGreaterThan(1);
+    expect(out[0]!.length).toBeLessThanOrEqual(91);
+    expect(out.every((piece) => piece.length > 0 && piece.length <= 320 && /^(?:カ\u3099)+$/u.test(piece))).toBe(true);
+    expect(out.join("")).toBe(speakable(text));
+  });
+
+  it("keeps Latin words with combining marks indivisible", () => {
+    const text = `${"e\u0301".repeat(200)}.`;
+    expect(toUtterances(text, { firstBlockMaxChars: 91 })).toEqual([text]);
+  });
+
 });
 
 describe("narrateTool", () => {

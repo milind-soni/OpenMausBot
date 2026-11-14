@@ -1,75 +1,110 @@
-import { createElement, type EffectCallback } from "react";
+import { Children, createElement, isValidElement, type EffectCallback, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
-import { EMPTY_ONBOARDING } from "@/lib/onboarding";
-import { withTourFinished, withTourReset } from "@/lib/guided-tour";
+import type { CloudOffer } from "../../electron/cloud-home.mjs";
 
-const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], state: {} as any, updater: null as any, streaming: {} }));
+const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], dispatch: null as any }));
 vi.mock("react", async original => ({ ...await original<typeof import("react")>(),
   useState: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = typeof initial === "function" ? initial() : initial;
     return [f.values[index], (next: unknown) => { f.values[index] = next; }]; },
   useEffect: (effect: EffectCallback) => { f.effects.push(effect); },
 }));
-vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: vi.fn() }), useStreaming: () => ({ streaming: f.streaming }), api: vi.fn().mockResolvedValue({}) }));
-vi.mock("@/lib/analytics", () => ({ emailGateDone: () => false }));
-vi.mock("@/lib/updater", () => ({ useUpdaterState: () => f.updater }));
-import { PRO_DISMISSED, ProIntroduction, ProSettingsCard, proOfferAvailable } from "./ProIntroduction";
-import { api } from "@/state/store";
+vi.mock("@/state/store", () => ({ useStore: () => ({ dispatch: f.dispatch }),
+  CLOUD_LINK_SETTINGS: { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } }));
+import { ProSettingsCard, proOfferAvailable } from "./ProIntroduction";
 
-let storage: Map<string, string>;
-let push: (value: CloudAccountState) => void;
-const render = () => { f.index = 0; f.effects = []; return renderToStaticMarkup(createElement(ProIntroduction)); };
+const PLANS = [{ tier: "starter", label: "Starter", amount: 1500, trialDays: 7 }, { tier: "pro", label: "Pro", amount: 4900, trialDays: 7 }];
+const TRIAL: CloudOffer = { plans: PLANS, recommended: "pro", creditUsd: 5, refundDays: 14 };
 const signedOut = { status: "signed-out" } as const;
-beforeEach(async () => {
-  vi.clearAllMocks(); storage = new Map(); f.index = 0; f.values = []; f.updater = null; f.streaming = {};
-  f.state = { connected: true, bots: [], groups: [], config: { onboarding: { ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen: withTourFinished(undefined) } } };
-  vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) });
-  vi.stubGlobal("window", { ogb: { cloudAccount: { state: () => Promise.resolve(signedOut), onState: (cb: typeof push) => { push = cb; return () => {}; } } } });
-  render(); f.effects.forEach(effect => effect()); await Promise.resolve();
+const plan = (extra: Partial<CloudAccountState> = {}): CloudAccountState => ({ status: "connected", account: { id: "a", email: "person@example.test" },
+  entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 1 }, ...extra });
+const paid = (tier?: string, status: "active" | "inactive" = "active") => ({ plan: "pro" as const, ...(tier ? { tier } : {}), status, expiresAt: status === "active" ? 1_900_000_000_000 : null, version: 2 });
+
+let offer: CloudOffer | null;
+let openExternal: ReturnType<typeof vi.fn>;
+let bridge: Record<string, ReturnType<typeof vi.fn>>;
+beforeEach(() => {
+  vi.clearAllMocks(); f.values = []; f.index = 0; f.effects = []; f.dispatch = vi.fn(); offer = TRIAL;
+  openExternal = vi.fn().mockResolvedValue(true);
+  bridge = { state: vi.fn(async () => signedOut), onState: vi.fn(() => () => {}), offer: vi.fn(async () => offer) };
+  vi.stubGlobal("window", { ogb: { cloudAccount: bridge, openExternal } });
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it("shows the live benefits without enrolling, charging or refreshing an account", () => {
-  const html = render();
-  for (const text of ["Get Pro", "New features first and priority support", "always-on", "Cloud computers and voice", "scheduled tasks", "Don’t show again"]) expect(html).toContain(text);
-  expect(html).not.toContain("Slack");
-  expect(html.indexOf("New features first")).toBeLessThan(html.indexOf("always-on"));
-  expect(html).not.toContain("bg-gradient"); expect(html).not.toContain("amber-");
-  expect(html).not.toContain("Coming soon"); expect(api).not.toHaveBeenCalled();
-  expect(html).not.toContain('aria-modal="true"');
+const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+async function card(state: CloudAccountState, Component = ProSettingsCard) {
+  f.values = []; bridge.state.mockResolvedValue(state);
+  for (let round = 0; round < 3; round++) { f.index = 0; f.effects = []; renderToStaticMarkup(createElement(Component)); f.effects.forEach(effect => effect()); await flush(); }
+  f.index = 0; f.effects = [];
+  return renderToStaticMarkup(createElement(Component));
+}
+type Node = ReactElement<{ children?: ReactNode; onClick?: () => void }>;
+const nodes = (value: ReactNode): Node[] => !isValidElement(value) ? [] : [value as Node, ...Children.toArray((value as Node).props.children).flatMap(nodes)];
+const press = (label: string, Component = ProSettingsCard) => {
+  f.index = 0; f.effects = [];
+  const button = nodes(Component()).find(node => node.type === "button" && renderToStaticMarkup(node).includes(`>${label}<`));
+  expect(button, label).toBeTruthy(); button!.props.onClick!();
+};
+
+it("for someone who may buy: what Cloud does, the Admin's lowest price and money-back; Start free trial and Compare plans both open the sheet, never the website", async () => {
+  const html = await card(signedOut);
+  for (const text of ["MausBot Cloud", "Keeps your bots and routines running 24/7, even when this computer is off.", "MausBot Cloud plans from $15/month + tax.",
+    "14-day money-back on every plan.", "OpenMausBot on this computer stays free and open source.", "Compare plans", "Start free trial", "Sign in to your Cloud plan"]) expect(html).toContain(text);
+  for (const gone of ["OMB", "$89", "launch price", "New features first", "Get Pro", "OpenMausBot Pro", "OpenMausBot Cloud"]) expect(html).not.toContain(gone);
+  press("Start free trial");
+  expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_settings" });
+  f.dispatch.mockClear();
+  press("Compare plans"); await flush();
+  expect(f.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "openCloudAdd", source: "app_settings" });
+  expect(openExternal).not.toHaveBeenCalled();
+  press("Sign in to your Cloud plan");
+  expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_settings", signIn: true });
+  expect(html).toMatch(/class="ui-button ui-button-primary"[^>]*>Start free trial</);
 });
-it("persists dismissal without a version and still offers Pro in Settings", async () => {
-  f.index = 0;
-  const card = ProIntroduction({})!;
-  card.props.onDismiss(); await Promise.resolve();
-  expect(storage.get(PRO_DISMISSED)).toBe("1");
-  expect(api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen: [...f.state.config.onboarding.hintsSeen, PRO_DISMISSED] } }) });
-  expect(render()).toBe("");
-  f.values = []; f.index = 0;
-  expect(render()).toBe(""); // New mount reads the saved preference.
-  f.values = [signedOut]; f.index = 0;
-  expect(renderToStaticMarkup(createElement(ProSettingsCard))).toContain("Get Pro");
+
+it("without a trial it says Add a Cloud; signed in, no sign-in link; without the Admin's numbers, no price and no money-back", async () => {
+  offer = { plans: PLANS.map(({ trialDays: _days, ...rest }) => rest), recommended: "pro" };
+  const html = await card(plan());
+  expect(html).toContain(">Add a Cloud<"); expect(html).not.toContain("Start free trial");
+  expect(html).not.toContain("Sign in to your Cloud plan"); expect(html).not.toContain("money-back");
+  offer = null;
+  const unknown = await card(plan());
+  expect(unknown).toContain(">Add a Cloud<"); expect(unknown).not.toContain("plans from");
 });
-it("honours workspace dismissal after browser storage is cleared and a tour is replayed", () => {
-  f.state.config.onboarding.hintsSeen.push(PRO_DISMISSED);
-  expect(withTourReset(f.state.config.onboarding)).toContain(PRO_DISMISSED);
-  expect(render()).toBe("");
+
+it("someone with a plan sees that plan and the way to it, never an offer, and Cloud is never asked", async () => {
+  for (const [state, text] of [
+    [plan({ entitlement: paid("max") }), "Max active · verified by MausBot Cloud"],
+    [plan({ entitlement: paid("pro", "inactive") }), "Pro · not active right now"],
+    [plan({ purchase: { state: "confirming", tier: "personal" } }), "Personal · payment received"],
+    [{ status: "unavailable", lastPlan: { tier: "personal", active: true } }, "Personal · checking with MausBot Cloud…"],
+    [{ status: "reauth-required", message: "expired", lastPlan: { tier: "max", active: true } }, "Sign in again to use the Cloud on this computer. Your plan is not affected."],
+  ] as const) {
+    const html = await card(state as CloudAccountState);
+    expect(html).toContain(text); expect(html).toContain("MausBot Cloud settings");
+    expect(html).not.toContain("Start free trial"); expect(html).not.toContain("$15");
+  }
+  expect(bridge.offer).not.toHaveBeenCalled();
+  for (const state of [{ status: "unavailable" }, { status: "connecting" }, { status: "signed-out", message: "restoring" }] as CloudAccountState[]) expect(await card(state)).toBe("");
+  await card(plan({ entitlement: paid("max") }));
+  press("MausBot Cloud settings");
+  expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
 });
-it.each(["appSettingsOpen", "settingsOpen", "newBotOpen", "pluginsOpen", "shortcutsOpen", "welcomeOpen", "tourOpen"])("does not interrupt %s", key => {
-  f.state[key] = true; expect(render()).toBe("");
-});
-it("waits for onboarding, connection and busy background threads", () => {
-  f.state.connected = false; expect(render()).toBe(""); f.state.connected = true;
-  f.state.bots = [{ tasks: [{ busy: true }] }]; expect(render()).toBe(""); f.state.bots = [];
-  f.state.config.onboarding = EMPTY_ONBOARDING; expect(render()).toBe("");
-});
-it("does not compete with updates", () => {
-  f.updater = { status: "available" }; expect(render()).toBe("");
-});
-it("suppresses Pro subscribers, unknown/failed account state, and remote clients", () => {
-  const pro = { status: "connected", entitlement: { plan: "pro", status: "active" } } as CloudAccountState;
-  push(pro); expect(render()).toBe("");
-  for (const state of [null, pro, { status: "unavailable" }, { status: "reauth-required" }, { status: "connecting" }] as Array<CloudAccountState | null>) expect(proOfferAvailable(state)).toBe(false);
-  push(signedOut); window.ogb!.remoteClient = { active: true } as any; expect(render()).toBe("");
+
+it("never offers a plan to anyone who pays, may pay, or whose state is unknown; and never in a browser or on another server", async () => {
+  const nobodyToSell: Array<CloudAccountState | null> = [
+    null, { status: "signed-out", message: "restoring" }, { status: "signed-out", message: "restore-removed" }, { status: "connecting" },
+    plan({ entitlement: paid("max") }), plan({ entitlement: paid("personal"), checking: true }), plan({ entitlement: paid("pro", "inactive") }),
+    plan({ machine: { status: "payment-problem", origin: "https://home.fly.dev" } }), plan({ machine: { status: "stopped" } }),
+    plan({ purchase: { state: "confirming", tier: "personal" } }), plan({ purchase: { state: "held" } }),
+    { status: "unavailable", lastPlan: { tier: "max", active: true } }, { status: "unavailable" },
+    { status: "reauth-required", message: "expired", lastPlan: { active: true } }, { status: "reauth-required" },
+  ];
+  for (const state of nobodyToSell) expect(proOfferAvailable(state), JSON.stringify(state)).toBe(false);
+  expect(proOfferAvailable(signedOut)).toBe(true); expect(proOfferAvailable(plan())).toBe(true);
+  vi.stubGlobal("window", { ogb: { remoteClient: { active: true }, cloudAccount: bridge } });
+  expect(await card(signedOut)).toBe("");
+  vi.stubGlobal("window", {});
+  expect(await card(signedOut)).toBe("");
 });

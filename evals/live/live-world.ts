@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runControlOmb } from "../../scripts/control-omb.ts";
+import { readHandoffs as readRuntimeHandoffs } from "../../server/testing/handoff-rows.ts";
 import type { Scenario, Step } from "../types.ts";
 import { BaseWorld, type WorldContext } from "../runners/base-world.ts";
 import { waitUntil } from "../runners/api.ts";
@@ -75,9 +75,9 @@ export class LiveWorld extends BaseWorld {
     throw new Error("step " + step.kind + " is not available in the live world");
   }
 
+  /** The coordinated turns in the server's runtime.db. */
   protected override readHandoffs(): Array<Record<string, any>> {
-    const path = join(this.dataDir, "room-handoffs.json");
-    return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Array<Record<string, any>>) : [];
+    return readRuntimeHandoffs(this.dataDir);
   }
 
   /** Derives scripted-engine-shaped evidence rows from each bot's real

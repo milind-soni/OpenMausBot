@@ -1,0 +1,123 @@
+---
+title: Move from Grok Bot
+description: Bring your Grok Bot Bots to MausBot, on your computer or on My Cloud. What comes over (instructions, skills, routines, memories, apps), what doesn't, and each step.
+---
+
+MausBot is an open-source alternative to Grok Bot, with no tie to xAI. You can bring each of your Grok Bot Bots over, with its instructions, skills, routines, memories and the list of apps it used. It takes a few minutes per Bot, and nothing changes in Grok Bot.
+
+Grok Bot has no export button. So MausBot gives you a message to send to each Bot, the Bot writes down its own setup, and MausBot reads what it wrote.
+
+## What comes over
+
+| From each Grok Bot Bot | In MausBot |
+| --- | --- |
+| Name, title and description | A new bot with that name. If you already have a bot with the name, the new one gets a number after it. |
+| Instructions (its role, job and lasting rules) | The bot's instructions, up to 24 KB. |
+| Skills, with their full text | The bot's skills, up to 30 per bot. Each one is switched on, unless a safety check keeps it off (see below). |
+| Routines on a schedule | Routines in the same time zone, **paused**, up to 50 per bot. |
+| Routines that start on an event (Slack, GitHub, email, a webhook) or whose schedule can't be read | Saved as a note in the bot's memory, `memory/grok-bot-event-routines.md`, with their trigger and full instruction, so you can set each one up again. |
+| What it remembers, and what it knows about you | The bot's memory (`MEMORY.md`), under *Notes from Grok Bot*. |
+| Connected apps and MCP servers | Listed as apps to connect again. Where the Bot gave a remote MCP server's `https` address, MausBot keeps that address with any key taken out. |
+
+## What doesn't come over
+
+- **Chats and their history.** The Bot writes its setup, not its conversations.
+- **Files on Grok Bot's computer.** Add any files your bot needs to its folder in MausBot.
+- **Passwords, API keys, tokens and sign-ins.** The message tells the Bot to leave them out. If what it writes still has a password or key field in it, MausBot refuses the whole thing and says which fields; ask the Bot to write it again without them. Token-shaped text anywhere else is redacted before anything is saved.
+- **App sign-ins.** Connect each app again under **Connected apps**.
+- **Group chats.** Put the moved bots in a group again in MausBot.
+- **The model.** Grok Bot runs on Grok only. In MausBot each bot runs on the engine you choose: Claude, Codex, Grok and others. See [Models and providers](../providers/index.mdx).
+
+## Before you start
+
+- Install MausBot and set up one engine: [Installation](./installation.mdx).
+- Keep Grok Bot open: you send each Bot one message there.
+- On a team, only an admin can import bots.
+
+## Move a Bot, step by step
+
+### 1. Open Move from Grok Bot
+
+In MausBot, open **Settings → Import & export** and choose **Move from Grok Bot**. You can also type *grok* in the Settings search.
+
+A new install shows a *Move from Grok Bot* popup once, after your first chat. **Let's start** opens the same thing. If you chose **Not now**, it stays in **Settings → Import & export**.
+
+### 2. Send your Bot the message
+
+Choose **Copy the message**, then paste it into your Bot's chat in Grok Bot and send it. Do this once per Bot.
+
+The message asks the Bot to write its whole setup as one file named `grok-bot-export-<its name>.json`: in your Downloads folder if it can write to your computer, otherwise attached to its reply, or as a JSON block in the reply. It also asks the Bot to change nothing, to leave out keys and passwords, and to say what it couldn't read instead of guessing.
+
+If the setup is too long for one message, the Bot splits it into several parts. Bring back all of them: MausBot puts them together.
+
+### 3. Bring back what it wrote
+
+Any of these works:
+
+- **Paste** the Bot's whole reply into the box. Text around the JSON is fine, and so are the curly quotes and trailing commas a chat window adds.
+- **Choose a file**, or drop it on the dialog: the `.json`, `.md` or `.txt` file the Bot made, up to 4 MB.
+- **On the desktop app, with your bots on this computer:** MausBot looks in your Downloads folder for files named `grok-bot-export…` and shows *Found in Downloads* with the Bots' names. Choose **Use these**. It looks again whenever you come back to the window, so you can send the message to several Bots, then bring them all in at once.
+
+Then choose **Continue**.
+
+### 4. Check what would come over
+
+*What would come over* shows each Bot with its number of skills, routines, memories and routines saved as notes, and says:
+
+- that routines come over paused,
+- how many apps need connecting again,
+- which Bots are already here (moved before) and won't be added twice,
+- which skills a safety check keeps off,
+- anything that couldn't be read.
+
+Choose **Back** to bring back a different reply, or **Import**.
+
+### 5. Import
+
+Each Bot becomes a bot in your sidebar, and MausBot opens the first one. The report names each Bot (*Bramble is here*, for a Bot called Bramble) with what came over. If one Bot can't be added, the others still are.
+
+Choose **Move another Bot** for the next one, or **Done**.
+
+## After you import
+
+1. **Choose the bot's engine and model** in the bot's settings, if it should not use your default.
+2. **Turn routines on.** Turn each one off in Grok Bot first, then on in MausBot, so it doesn't run twice.
+3. **Set up event routines again** from the note in the bot's memory (`memory/grok-bot-event-routines.md`). You can ask the bot to do it: for example, *"set up the routines in your Grok Bot notes"*.
+4. **Connect apps again** under **Connected apps**.
+5. **Check skills that stayed off.** A safety check keeps a skill off when its text has a long base64-looking blob, pipes a download straight into a shell (`curl | sh`), or has invisible Unicode characters. Read it, then switch it on in the bot's skills if you trust it.
+6. **Add files** the bot needs to its folder.
+
+## On My Cloud
+
+With MausBot Cloud, your bots live on My Cloud, and the desktop app opens My Cloud by itself (see [One assistant, everywhere](./using-the-desktop-app-with-my-cloud.mdx)). Moving from Grok Bot works the same way there, in **Settings → Import & export → Move from Grok Bot**, with one difference: My Cloud can't look in your computer's Downloads folder or at the Grok Bot app. So in step 3, paste the Bot's reply, or choose or drop the file it made.
+
+The moved bots live on My Cloud. Once you turn their routines on, they run with your computer off.
+
+If you moved Bots into MausBot on this computer before you had MausBot Cloud, you don't need to move them again: the desktop app brings everything on this computer to My Cloud by itself, once.
+
+## What MausBot reads on your computer
+
+Only while **Move from Grok Bot** is open in the desktop app, and only when your bots live on this computer:
+
+- files named `grok-bot-export…` (`.json`, `.md` or `.txt`) in your Downloads folder, up to 20 of them;
+- the names of your Bots, from the list the Grok Bot app keeps on this computer, to show *Your Bots on this computer*.
+
+It never opens Grok Bot's sign-in files, cookies or chats. A file you drop on the dialog is read by the dialog only: it is not attached to the chat behind it.
+
+## When something goes wrong
+
+| MausBot says | What to do |
+| --- | --- |
+| *That doesn't look like what your Bot writes.* | Copy the Bot's whole reply, or choose the file it made. |
+| *Your Bot's reply looks cut off.* | Ask the Bot to send the rest as another message in the same shape, then paste both. |
+| *That's larger than 4 MB.* | Ask the Bot to split it into several messages. |
+| *This has passwords or keys in it, so nothing was read.* | Ask the Bot to write it again without them. |
+| *This was written for a newer OpenMausBot.* | Update MausBot, then try again. |
+| *This couldn't be turned into a bot.* | Ask the Bot to write it again. |
+| *Already here* | That Bot was moved before. Delete the moved bot first if you want to move it again. |
+
+## Not the same as Backups
+
+**Settings → Import & export → Import backup** restores a MausBot backup (an encrypted `.ombbackup` file) and replaces everything in that installation. It does not read Grok Bot files: use **Move from Grok Bot** for those.
+
+If you do restore a MausBot backup, it finishes when MausBot's server starts again. On the desktop app, choose **Restart and restore**. On My Cloud, newer versions restart My Cloud by themselves: the page says it is restarting to finish, and carries on in a minute or two. If the page instead asks you to quit and reopen the app, your My Cloud doesn't have that update yet. The restore is saved and finishes the next time My Cloud's server starts, for example when My Cloud updates itself; if you can't wait, write to MausBot Cloud support. More: [Data and backups](../self-hosting/data-and-backups.mdx).

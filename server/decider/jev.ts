@@ -1,31 +1,19 @@
-// TypeSafe Jev over its HTTP API: POST {base}/v1/systemone with a Bearer
-// key and { state, model, questions }. Questions use `instructions` +
-// `criteria` (the older question/options shape is refused with a 422).
-// Answers come back as { answers: { id: { choice, probabilities } |
-// { score, probabilities } | { noul } }, usage: { input_tokens } }.
-//
-// Every answer is checked before anyone acts on it: a choice must be one of
-// the offered keys and the most likely one, every probability a number in
-// [0, 1]. Anything else is `malformed`, and the caller keeps today's rule.
-// Error bodies are never read into a message: they can echo the request.
+// Questions use `instructions` + `criteria`: Jev refuses the older question/options shape with a 422. Error bodies
+// are never read into a message: they can echo the request.
 import type {
   BackendRequest, BackendResult, ChoiceAnswer, DeciderAnswer, DeciderBackend, DeciderQuestion, ScoreAnswer, YesNoAnswer,
 } from "./types.ts";
+import { isLoopback } from "../provider-key-check.ts";
 
 export const JEV_DEFAULT_BASE_URL = "https://api.typesafe.ai";
 export const JEV_MODEL = "jev-latest";
 export const JEV_MAX_OPTIONS = 255;
 export const JEV_MIN_LEVELS = 2;
 export const JEV_MAX_LEVELS = 10;
+/** Sent only with Cloud's included token, to the Admin's relay. */
+export const RELAY_SEAM_HEADER = "x-omb-seam";
 
-function isLoopback(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, "");
-  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.startsWith("127.");
-}
-
-/** The endpoint for a base URL, or null when the key must not be sent there:
- * https anywhere, plain http only to this machine (a local Jev-compatible
- * server or a test double). */
+/** Null when the key must not be sent there: https anywhere, plain http only to this machine. */
 export function jevEndpoint(baseUrl?: string | null): URL | null {
   const root = (baseUrl?.trim() || JEV_DEFAULT_BASE_URL).replace(/\/+$/, "");
   let url: URL;
@@ -100,8 +88,7 @@ function parseChoice(raw: Record<string, unknown>, question: Extract<DeciderQues
   if (pTop === undefined) return null;
   const others = Object.entries(probabilities).filter(([key]) => key !== choice).map(([, value]) => value);
   const runnerUp = others.length ? Math.max(...others) : 0;
-  // Ties break to the first key on the vendor side; a choice that is not
-  // the most likely option means the answer is not what it claims to be.
+  // Ties break to the first key on the vendor side; a choice that is not the most likely option is not what it claims.
   if (runnerUp > pTop + EPSILON) return null;
   return { type: "choice", choice, pTop, margin: pTop - runnerUp, probabilities };
 }
@@ -129,7 +116,6 @@ function parseYesNo(raw: Record<string, unknown>): YesNoAnswer | null {
 
 const WIRE_TYPE = { choice: "choice", score: "score", yesno: "noul" } as const;
 
-/** Strictly decode one response body against the questions that were asked. */
 export function parseJevResponse(
   body: unknown,
   questions: Record<string, DeciderQuestion>,
@@ -152,7 +138,8 @@ export function parseJevResponse(
   return { ok: true, answers, ...(inputTokens !== undefined ? { inputTokens } : {}), ...(model ? { model } : {}) };
 }
 
-function refusal(status: number): BackendResult {
+export function refusal(status: number): BackendResult {
+  if (status === 413) return { ok: false, reason: "too_large", status };
   if (status === 401 || status === 403) return { ok: false, reason: "rejected", status };
   if (status === 429) return { ok: false, reason: "rate_limited", status };
   if (status === 529 || status === 503) return { ok: false, reason: "overloaded", status };
@@ -166,14 +153,17 @@ async function decide(request: BackendRequest): Promise<BackendResult> {
   try {
     response = await request.fetch(endpoint, {
       method: "POST",
-      headers: { authorization: `Bearer ${request.key}`, "content-type": "application/json", accept: "application/json" },
+      headers: {
+        authorization: `Bearer ${request.key}`, "content-type": "application/json", accept: "application/json",
+        // The relay checks the request against this seam's shape (server/decider/relay.ts); Jev itself never sees it.
+        ...(request.relaySeam ? { [RELAY_SEAM_HEADER]: request.relaySeam } : {}),
+      },
       body: JSON.stringify(jevRequestBody(request.state, request.questions)),
       signal: request.signal,
       // Never replay the key to wherever a redirect points.
       redirect: "error",
     });
   } catch {
-    // The caller tells a timeout or a Stop from a dead network by its own signals.
     return { ok: false, reason: "unreachable" };
   }
   if (!response.ok) {

@@ -58,8 +58,6 @@ describe("local computer routing", () => {
     ).toBe(false);
   });
 
-  // The Windows build ships the CUA driver and offers "This computer" in
-  // the UI; the server must not refuse what the app just offered.
   it("treats Windows like macOS: explicit selection and Auto both mount", () => {
     expect(
       shouldMountLocalComputer({

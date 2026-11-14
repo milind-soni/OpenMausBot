@@ -2,16 +2,16 @@ import type { AppConfig } from "../config.ts";
 import { voiceCredential } from "../included-services.ts";
 import * as chatterbox from "./chatterbox.ts";
 import * as elevenlabs from "./elevenlabs.ts";
+import * as openai from "./openai.ts";
 import * as grok from "./grok.ts";
 import * as fish from "./fish.ts";
+import * as gemini from "./gemini.ts";
 import * as systemVoices from "./system-voices.ts";
 
-export type VoiceProvider = "elevenlabs" | "fish" | "system" | "chatterbox" | "xai";
+export type VoiceProvider = "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai";
 
 export class NoVoiceConfigured extends Error {
-  // a plain field rather than a constructor parameter property: the harness
-  // runs under `node --experimental-strip-types`, which is strip-ONLY, so a
-  // parameter property is rejected at load time even though it typechecks
+  // Not a parameter property: the harness runs under strip-only `node --experimental-strip-types`, which rejects one at load.
   readonly reason: "key" | "voice";
 
   constructor(reason: "key" | "voice", hint?: string) {
@@ -25,20 +25,27 @@ export class NoVoiceConfigured extends Error {
   }
 }
 
-/** The ElevenLabs credential in use: the person's own key, else the one
- * included with Cloud Pro. Settings' own-key flows read cfg.tts.key instead. */
 const elevenLabs = (cfg: AppConfig) => voiceCredential(cfg.tts?.key);
 
+/**
+ * Resolves the active voice synthesis provider from configuration.
+ * @param cfg The application configuration.
+ * @returns The resolved VoiceProvider name.
+ */
 export function voiceProvider(cfg: AppConfig): VoiceProvider {
   const provider = cfg.tts?.provider;
-  return provider === "xai" || provider === "fish" || provider === "system" || provider === "chatterbox" ? provider : "elevenlabs";
+  return provider === "gemini" || provider === "openai" || provider === "xai" || provider === "fish" || provider === "system" || provider === "chatterbox" ? provider : "elevenlabs";
 }
 
-/** The system provider needs no credential — it is only ever offered where
- * the platform actually has it, so "configured" means "this engine can
- * speak", not "a key is on file". */
+/**
+ * Determines whether the credentials or requirements for the active voice provider are met.
+ * @param cfg The application configuration.
+ * @returns True if provider requirements are configured.
+ */
 export function providerConfigured(cfg: AppConfig): boolean {
   const provider = voiceProvider(cfg);
+  if (provider === "gemini") return Boolean(cfg.tts?.geminiKey);
+  if (provider === "openai") return Boolean(cfg.openai?.key);
   if (provider === "xai") return Boolean(cfg.xai?.key);
   if (provider === "system") return systemVoices.systemVoicesAvailable();
   if (provider === "chatterbox") return Boolean(cfg.tts?.baseUrl?.trim());
@@ -46,8 +53,15 @@ export function providerConfigured(cfg: AppConfig): boolean {
   return Boolean(elevenLabs(cfg));
 }
 
+/**
+ * Determines whether the active voice provider is fully configured with a valid voice selection.
+ * @param cfg The application configuration.
+ * @returns True if provider has both key and configured voice.
+ */
 export function voiceConfigured(cfg: AppConfig): boolean {
   const provider = voiceProvider(cfg);
+  if (provider === "gemini") return Boolean(cfg.tts?.geminiKey && gemini.isSupportedVoice(cfg.tts?.voice));
+  if (provider === "openai") return Boolean(cfg.openai?.key && cfg.tts?.voice);
   if (provider === "xai") return Boolean(cfg.xai?.key && cfg.tts?.voice);
   if (provider === "system") {
     return systemVoices.systemVoicesAvailable() && Boolean(cfg.tts?.voice);
@@ -57,10 +71,16 @@ export function voiceConfigured(cfg: AppConfig): boolean {
   return Boolean(elevenLabs(cfg) && cfg.tts?.voice);
 }
 
-/** A per-bot voice is a complete choice too; it should not be blocked just
- * because the app-wide fallback has not been selected yet. */
+/**
+ * Checks whether voice synthesis is ready to execute with an optional override voice.
+ * @param cfg The application configuration.
+ * @param voiceId Optional override voice ID.
+ * @returns True if ready to synthesize speech.
+ */
 export function voiceReady(cfg: AppConfig, voiceId?: string): boolean {
   const provider = voiceProvider(cfg);
+  if (provider === "gemini") return Boolean(cfg.tts?.geminiKey && gemini.isSupportedVoice(voiceId || cfg.tts?.voice));
+  if (provider === "openai") return Boolean(cfg.openai?.key && (voiceId || cfg.tts?.voice));
   if (provider === "xai") return Boolean(cfg.xai?.key && (voiceId || cfg.tts?.voice));
   if (provider === "system") {
     return systemVoices.systemVoicesAvailable() && Boolean(voiceId || cfg.tts?.voice);
@@ -70,10 +90,11 @@ export function voiceReady(cfg: AppConfig, voiceId?: string): boolean {
   return Boolean(elevenLabs(cfg) && (voiceId || cfg.tts?.voice));
 }
 
-/** What the settings panel needs. Never includes the key — same write-only
- * rule as every other credential. baseUrl and model are Chatterbox
- * settings, not credentials, so they come back in full. `included` says the
- * voice is Cloud Pro's, not a saved key. */
+/**
+ * Returns a redacted voice configuration descriptor for status and UI display. Never includes the key.
+ * @param cfg The application configuration.
+ * @returns An object describing the current voice configuration status.
+ */
 export function describeVoice(cfg: AppConfig) {
   const provider = voiceProvider(cfg);
   const included = provider === "elevenlabs" && elevenLabs(cfg)?.included === true;
@@ -83,17 +104,40 @@ export function describeVoice(cfg: AppConfig) {
     voice: cfg.tts?.voice ?? "",
     provider,
     baseUrl: provider === "chatterbox" ? (cfg.tts?.baseUrl ?? "") : "",
-    model: provider === "chatterbox" ? (cfg.tts?.model ?? "") : "",
+    model: provider === "gemini" ? (cfg.tts?.model || gemini.DEFAULT_GEMINI_MODEL) : provider === "chatterbox" ? (cfg.tts?.model ?? "") : "",
+    ...(provider === "fish" ? { fishModel: cfg.tts?.fishModel ?? fish.DEFAULT_FISH_MODEL } : {}),
     ...(included ? { included: true as const } : {}),
+    ...(cfg.tts?.everyReply ? { everyReply: true as const } : {}),
   };
 }
 
-export function verifyKey(provider: "elevenlabs" | "fish", key: string) {
-  return provider === "fish" ? fish.verifyKey(key) : elevenlabs.verifyKey(key);
+/**
+ * Verifies an API key with the corresponding speech provider before saving.
+ * @param provider The TTS provider name ("elevenlabs" | "fish" | "gemini").
+ * @param key The API key to test.
+ * @returns Result indicating whether the key is valid.
+ */
+export function verifyKey(provider: "elevenlabs" | "fish" | "gemini", key: string) {
+  if (provider === "fish") return fish.verifyKey(key);
+  if (provider === "gemini") return gemini.verifyKey(key);
+  return elevenlabs.verifyKey(key);
 }
 
-export async function listVoices(cfg: AppConfig, run?: systemVoices.Runner): Promise<elevenlabs.Voice[]> {
+/**
+ * Lists voices available for the configured TTS provider.
+ * @param cfg The application configuration.
+ * @param run Optional system runner for native system voices.
+ * @param search Optional fish voice search filter.
+ * @returns Array of available Voice descriptors.
+ */
+export async function listVoices(
+  cfg: AppConfig,
+  run?: systemVoices.Runner,
+  search?: fish.VoiceSearch,
+): Promise<elevenlabs.Voice[]> {
   const provider = voiceProvider(cfg);
+  if (provider === "gemini") return cfg.tts?.geminiKey ? gemini.listVoices() : [];
+  if (provider === "openai") return cfg.openai?.key ? openai.listVoices() : [];
   if (provider === "xai") return cfg.xai?.key ? grok.listVoices(cfg.xai.key) : [];
   if (provider === "system") return systemVoices.listSystemVoices(run);
   if (provider === "chatterbox") {
@@ -102,17 +146,45 @@ export async function listVoices(cfg: AppConfig, run?: systemVoices.Runner): Pro
   }
   if (provider === "fish") {
     const key = cfg.tts?.fishKey;
-    return key ? fish.listVoices(key) : [];
+    return key ? fish.listVoices(key, search) : [];
   }
   const credential = elevenLabs(cfg);
   if (!credential) return [];
-  return elevenlabs.listVoices(credential.token, credential.api);
+  return elevenlabs.listVoices(credential.token, credential.api, search);
 }
 
-/** Synthesize one utterance. Throws NoVoiceConfigured when there is nothing
- * to speak with, which the route turns into a 409 the client can explain. */
-export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: systemVoices.Runner) {
+/**
+ * Adds a shared community voice from the Voice Library to the user's account.
+ * @param cfg The application configuration.
+ * @param publicOwnerId Public owner ID of the shared voice.
+ * @param voiceId ID of the shared voice to add.
+ * @param name Display name for the added voice.
+ * @returns Added voice ID.
+ */
+export async function addSharedVoice(cfg: AppConfig, publicOwnerId: string, voiceId: string, name: string): Promise<string> {
+  const credential = voiceProvider(cfg) === "elevenlabs" ? elevenLabs(cfg) : null;
+  if (!credential) throw new NoVoiceConfigured("key");
+  return elevenlabs.addSharedVoice(credential.token, credential.api, publicOwnerId, voiceId, name);
+}
+
+/**
+ * Synthesizes text to speech using the currently configured provider.
+ * @param cfg The application configuration.
+ * @param text The plain text to synthesize into spoken audio.
+ * @param voiceId Optional override voice ID.
+ * @param run Optional runner for system voices.
+ * @returns Synthesized audio buffer or stream promise.
+ */
+export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: systemVoices.Runner, signal?: AbortSignal) {
   const provider = voiceProvider(cfg);
+  if (provider === "gemini") {
+    const key = cfg.tts?.geminiKey;
+    if (!key) throw new NoVoiceConfigured("key", "Add a Gemini API key in Settings to use Gemini voice.");
+    const voice = voiceId || cfg.tts?.voice;
+    if (!voice) throw new NoVoiceConfigured("voice");
+    return gemini.synthesize(text, voice, key, cfg.tts?.model);
+  }
+  if (provider === "openai") return openai.synthesize(text, voiceId || cfg.tts?.voice || "", cfg.openai?.key || "", signal);
   if (provider === "xai") {
     const key = cfg.xai?.key;
     if (!key) throw new NoVoiceConfigured("key", "Add an xAI key in Settings to use Grok voice.");
@@ -122,8 +194,6 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
   }
   if (provider === "system") {
     const voice = voiceId || cfg.tts?.voice;
-    // An injected runner is the cross-platform test seam for `/usr/bin/say`;
-    // production calls omit it and remain strictly Darwin-gated.
     if (!systemVoices.systemVoicesAvailable() && !run) throw new NoVoiceConfigured("key");
     if (!voice) throw new NoVoiceConfigured("voice");
     return systemVoices.synthesizeSystem(text, voice, run);
@@ -150,13 +220,13 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
     }
     const voice = voiceId || cfg.tts?.voice;
     if (!voice) throw new NoVoiceConfigured("voice");
-    return fish.synthesize(text, voice, key);
+    return fish.synthesize(text, voice, key, cfg.tts?.fishModel);
   }
   const credential = elevenLabs(cfg);
   if (!credential) throw new NoVoiceConfigured("key");
   const voice = voiceId || cfg.tts?.voice;
   if (!voice) throw new NoVoiceConfigured("voice");
-  return elevenlabs.synthesize(text, voice, credential.token, credential.api);
+  return elevenlabs.synthesize(text, voice, credential.token, credential.api, credential.included).audio;
 }
 
 export type { Voice } from "./elevenlabs.ts";

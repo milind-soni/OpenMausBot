@@ -7,7 +7,7 @@ import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import type { Routine } from "../../src/lib/routines.ts";
 import { runControlOmb } from "../control-omb.ts";
-import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { ENABLE_ADVANCED_UI, UI_TOOLS_DIR } from "./control-omb-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env }));
@@ -26,8 +26,12 @@ afterAll(() => waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }));
     try { fixture = JSON.parse(output); return Boolean(fixture.ui); } catch { return false; }
   }, { timeout: 600_000 }).toBe(true);
   const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", fixture.ui, ...args]) as Promise<Record<string, any>>;
+  await ui("eval", "--js", ENABLE_ADVANCED_UI);
   const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
-  const click = (name: string) => ui("click", "--name", name);
+  const click = async (name: string) => {
+    await evaluate(`[...document.querySelectorAll('button')].find(button => button.textContent === ${JSON.stringify(name)})?.scrollIntoView({ block: 'center' })`);
+    return ui("click", "--name", name);
+  };
   // The shared harness lacks select/fill verbs. Drive native controls through
   // DOM input/change events; all saves and reads still use the real renderer.
   const fill = (selector: string, value: string) => evaluate(`(() => { const field = document.querySelector(${JSON.stringify(selector)}); const prototype = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype, 'value').set.call(field, ${JSON.stringify(value)}); field.dispatchEvent(new Event('input', { bubbles: true })); return field.value; })()`);
@@ -42,22 +46,32 @@ afterAll(() => waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }));
     return field.getBoundingClientRect().height > 0;
   })()`);
 
-  await click("Tools"); await click("Automations");
-  await click("Create an automation"); await click("Create a scheduled task");
-  await fill('input[placeholder="Add title"]', "Monthly close");
-  await fill('textarea[placeholder="What should the bot do?"]', "Summarize this fixture only.");
+  const startupBox = `document.querySelector('input[aria-label="Also run when MausBot starts"]')`;
+
+  const title = 'input[placeholder="What should happen?"]';
+  const newButton = "[...document.querySelectorAll('main header button')].find(button => button.textContent === 'New')";
+  await click("Automations");
+  await expect.poll(() => evaluate(`Boolean(${newButton})`)).toBe(true);
+  await evaluate(`${newButton}.click()`);
+  await click("Set it up yourself"); await click("On a schedule"); await click("Continue");
+  await fill(title, "Monthly close");
+  await fill('textarea[placeholder="Tell the bot what to do each time"]', "Summarize this fixture only.");
   await click("More options");
-  expect(await evaluate('document.querySelector(\'input[placeholder="Add title"]\').value')).toBe("Monthly close");
+  expect(await evaluate(`document.querySelector('${title}').value`)).toBe("Monthly close");
   await click("Call");
   const callOptions = await repeatOptions();
   for (const choice of ["monthly", "yearly", "cron"]) expect(callOptions).not.toContain(choice);
   await click("Routine");
   expect(await evaluate("document.body.innerText")).toContain("Bot’s current setup");
-  expect(await evaluate("document.body.innerText")).toContain("Boat-hosted agent");
+  expect(await evaluate("document.body.innerText")).toContain("Runs the whole job on the bot's cloud desktop");
   expect(await evaluate("document.body.innerText")).toContain("including a self-hosted VPS");
   expect(await repeatOptions()).toEqual(expect.arrayContaining(["monthly", "yearly", "cron"]));
+  // A one-time routine has no schedule to run beside, so it isn't offered.
+  expect(await evaluate(`${startupBox} === null`)).toBe(true);
   await select("Repeat", "monthly");
   expect(await openOverlap()).toBe(true);
+  expect(await evaluate(`${startupBox}.checked`)).toBe(false);
+  expect(await evaluate(`(() => { ${startupBox}.click(); return ${startupBox}.checked; })()`)).toBe(true);
   expect(await evaluate('document.querySelector(\'select[aria-label="If the previous run is still working"]\').value')).toBe("skip");
   await select("If the previous run is still working", "queue");
   await select("Day of month", "L");
@@ -72,24 +86,25 @@ afterAll(() => waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }));
   expect(await evaluate('document.querySelector(\'input[placeholder="0 9 1 * *"]\').value')).toBe("0 9 L * *");
   await fill('input[placeholder="0 9 1 * *"]', "0 9 31 2 *");
   await expect.poll(() => evaluate('document.querySelector("[role=alert]")?.textContent')).toContain("no future runs");
-  expect(await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent === 'Schedule routine').disabled")).toBe(true);
+  expect(await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent === 'Save').disabled")).toBe(true);
   await select("Repeat", "monthly");
-  await click("Schedule routine");
+  await click("Save");
   await expect.poll(routines).toHaveLength(1);
   const monthly = (await routines())[0];
-  expect(monthly).toMatchObject({ name: "Monthly close", overlap: "queue", prompt: "Summarize this fixture only.", schedule: { type: "cron", expression: "0 9 L * *", timeZone: "UTC" } });
-  await click("List");
-  await evaluate("document.querySelector('article[aria-label=\"Monthly close\"] button').click()");
+  expect(monthly).toMatchObject({ name: "Monthly close", overlap: "queue", runOnStartup: true, prompt: "Summarize this fixture only.", schedule: { type: "cron", expression: "0 9 L * *", timeZone: "UTC" } });
+  await click("Monthly close");
   await click("Edit");
   expect(await evaluate("document.querySelector('select[aria-label=Repeat]').value")).toBe("monthly");
   expect(await evaluate('document.querySelector(\'select[aria-label="If the previous run is still working"]\').value')).toBe("queue");
   expect(await openOverlap()).toBe(true);
+  expect(await evaluate(`${startupBox}.checked`)).toBe(true);
   await select("If the previous run is still working", "skip");
   await select("Repeat", "yearly");
   await select("Month", "2"); await select("Day of month", "29");
   await click("Save");
   await expect.poll(async () => (await routines()).find(routine => routine.id === monthly.id)?.schedule).toEqual({ type: "cron", expression: "0 9 29 2 *", timeZone: "UTC" });
   expect((await routines()).find(routine => routine.id === monthly.id)?.overlap).toBeUndefined();
+  expect((await routines()).find(routine => routine.id === monthly.id)?.runOnStartup).toBe(true);
 
   // The API models a bot-created arbitrary schedule. Editing only its title
   // must not collapse its ranges, weekdays, or non-local timezone to a preset.
@@ -97,14 +112,12 @@ afterAll(() => waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }));
   const response = await fetch(`${fixture.url}/api/routines`, { method: "POST", headers: { "content-type": "application/json", origin: fixture.url }, body: JSON.stringify({ name: "Business-hours report", prompt: "Use only the fixture.", botId: monthly.botId, enabled: false, runOn: "maus", schedule: customSchedule }) });
   expect(response.status).toBe(201);
   const custom = (await response.json()).routine;
-  await click("List");
-  await expect.poll(() => evaluate("document.body.textContent")).toContain("Business-hours report");
-  await evaluate("[...document.querySelectorAll('article button')].find(button => button.textContent.includes('Business-hours report')).click()");
-  expect(await evaluate('document.querySelector(\'[aria-label="Paused schedule preview"]\')?.textContent')).toContain("Paused — schedule preview");
+  await expect.poll(() => evaluate(`document.querySelector('li[data-automation="${custom.id}"]')?.dataset.automationStatus`)).toBe("paused");
+  await click("Business-hours report");
   await click("Edit");
   expect(await evaluate("document.querySelector('select[aria-label=Repeat]').value")).toBe("cron");
   expect(await evaluate('document.querySelector(\'input[list="routine-time-zones"]\').value')).toBe("America/New_York");
-  await fill('input[placeholder="Add title"]', "Renamed report");
+  await fill(title, "Renamed report");
   await click("Save");
   await expect.poll(async () => (await routines()).find(routine => routine.id === custom.id)?.name).toBe("Renamed report");
   expect((await routines()).find(routine => routine.id === custom.id)?.schedule).toEqual(customSchedule);

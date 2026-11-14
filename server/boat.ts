@@ -1,20 +1,23 @@
-// Boat (boat.dev) provider — the bot's cloud computer. Ported from
-// agentcal-api src/providers/box.js, reshaped per-bot instead of
-// per-customer: every bot gets one persistent boat (deterministic name),
-// stop pauses billing while the disk survives, and Join always mints a
-// FRESH desktop URL (stream tokens rotate on every state change — never
-// persist one).
-//
-// Substrate facts (probed by agentcal 2026-07-24 on a live boat):
-//   - REST only: POST /boxes/{id}/commands runs shell synchronously.
-//   - stop→archived ~5s, resume→idle ~8s; disk persists, tmux does not.
-//   - X11 desktop with Chrome + Ghostty; passwordless sudo; node 24.
-//   - the dedicated IP rotates across archive/resume — never persist it.
+// Boat (boat.dev) public API v1: https://docs.boat.dev/api/v1 (OpenAPI https://docs.boat.dev/openapi/boat-v1.yaml).
+// Probed 2026-07-24, v1 2026-10-13: POST /sandboxes/{id}/commands runs shell synchronously (~0.2s); create answers 202
+// and is ready in ~2s; stop→archived ~5s, resume→idle ~8s; disk persists, tmux does not. Stream tokens rotate on every
+// state change and the dedicated IP across archive/resume, so never persist either.
 import { createHash } from "node:crypto";
 
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import { loadEnvironmentId } from "./environment.ts";
 import { boatCredential, boatProviderApi, type ServiceCredential } from "./included-services.ts";
+import { relayBody, relayPath } from "./boat-relay.ts";
+import { boatHealth, DEAD_COMPUTER, unansweredStatus } from "./boat-health.ts";
+import { CLOUD_COMPUTER_NO_ANSWER } from "../shared/cloud-computer-recovery.ts";
+import { cloudLimitFromBody, type CloudLimit } from "../shared/place-view.ts";
+import {
+  blockedUntilBoatFinishes,
+  boatDeletionOperation,
+  deletionBlockedError,
+  keptForNewerSnapshots,
+  type BoatDeletionOperation,
+} from "./boat-deletion.ts";
 import {
   adoptResolvedBoat,
   beginBoatCreate,
@@ -26,7 +29,7 @@ import {
   type BoatCreateRequest,
 } from "./boat-create-idempotency.ts";
 import {
-  boatDeletionSnapshot,
+  BOAT_DELETING, BOAT_DELETION_FINISHED, boatDeletionSnapshot,
   getBoatDeletion,
   hasPendingBoatDeletionForBot,
   markBoatDeletionAccepted,
@@ -40,8 +43,7 @@ const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'
 
 export const MAX_REMOTE_COMMAND_LENGTH = 4_000;
 
-/** Run an owner-supplied console command without inheriting provider or
- * account credentials from the boat's environment. */
+/** Runs an owner-supplied console command without the boat's provider or account credentials in its environment. */
 export function isolatedRemoteCommand(command: string): string {
   return [
     "exec env -i",
@@ -58,48 +60,28 @@ export function isolatedRemoteCommand(command: string): string {
   ].join(" ");
 }
 
-// Boat's provider surface keeps its historical Box-era names: env OMB_BOX_API,
-// base path /api/box/v1, REST paths /boxes/*, and the box_ token prefix.
 const READY = new Set(["idle", "ready", "running"]);
-const SLEEPING = new Set(["archived", "archiving", "stopped", "stopping"]);
+export const SLEEPING_BOAT_STATES = new Set(["archived", "archiving"]);
+/** Never usable again: `cancelled` is a create that got no machine; its GET answers 404 next. */
+const TERMINAL = new Set(["error", "cancelled"]);
 const DEFAULT_BOAT_TTL_SECONDS = 8 * 60 * 60;
 const TRIAL_BOAT_TTL_SECONDS = 2 * 60 * 60;
 const BOAT_CREATE_IN_PROGRESS_RETRY_DELAYS_MS = [250, 750, 1_500] as const;
 const BOAT_DELETE_OPERATION_POLL_DELAYS_MS = [0, 100, 250, 500, 1_000, 2_000] as const;
 const BOAT_INVENTORY_PAGE_SIZE = 200;
-// Current self-serve accounts top out below 2,000 boats. Keep the walk
-// bounded anyway: a broken or adversarial cursor must not hold Settings open.
+// Bounded: a broken or adversarial cursor must not hold Settings open.
 const MAX_BOAT_INVENTORY_PAGES = 10;
 const LEGACY_MANAGED_BOAT_NAME = /^ogb-[a-z0-9]{1,8}-[a-f0-9]{6}$/;
 const SCOPED_MANAGED_BOAT_NAME = /^ogb-[a-f0-9]{12}-[a-z0-9]{1,8}-[a-f0-9]{6}$/;
 const BOAT_ID = /^bx_[23456789abcdefghjkmnpqrstuvwxyz]{8}$/;
-const BOAT_DELETE_OPERATION_ID = /^bdop_[a-f0-9]{32}$/;
-const BOAT_DELETE_OPERATION_STATES = new Set(["pending", "processing", "blocked", "completed"]);
+/** Sandbox.state in v1, plus OpenMausBot's own `removing` for a sandbox whose deletion is under way. */
 const BOAT_STATES = new Set([
-  "init",
-  "idle",
-  "ready",
-  "running",
-  "archived",
-  "archiving",
-  "stopped",
-  "stopping",
-  "provisioning",
-  "provisioned",
-  "cloning",
-  "starting",
-  "removing",
-  "error",
+  "init", "provisioning", "provisioned", "cloning", "ready", "idle", "running", "archiving", "archived", "error", "cancelled", "removing",
 ]);
-// Provider listings are account-wide. Hash the durable local environment id
-// into every new name so another OpenMausBot installation using the same Boat
-// account cannot mistake this installation's computers for abandoned ones.
-// The environment UUID itself never leaves the local data directory.
+// Names carry a hash of the local environment id, so another installation on the same account never claims these computers.
 let scopedBoatPrefixCache: string | null = null;
 
-/** Resolve only after server startup has migrated the legacy data directory
- * and acquired its writer lease. A static-import side effect here used to
- * create the new directory too early and suppress that migration. */
+/** Call only after startup has migrated the data dir and taken its writer lease. */
 function scopedBoatPrefix(): string {
   if (scopedBoatPrefixCache) return scopedBoatPrefixCache;
   const scope = createHash("sha256")
@@ -140,43 +122,26 @@ export interface BoatIdentityInspection {
   problem: string | null;
 }
 
-export type BoatTurnLifecycleAction = "attach" | "provision" | "wake" | "none";
+export type BoatTurnLifecycleAction = "attach" | "provision" | "wake";
 
-/** Decide lifecycle work before a turn mounts Boat. Auto may observe and
- * attach an already-ready Boat, but only explicit Cloud may create or wake. */
-export function boatTurnLifecycleAction({
-  explicitCloud,
-  canMount,
-  state,
-}: {
-  explicitCloud: boolean;
-  canMount: boolean;
-  state: string | null;
-}): BoatTurnLifecycleAction {
-  if (!canMount) return "none";
+export function boatTurnLifecycleAction(state: string | null): BoatTurnLifecycleAction {
   if (state && READY.has(state)) return "attach";
-  if (!explicitCloud) return "none";
-  return state ? "wake" : "provision";
+  return state && !TERMINAL.has(state) ? "wake" : "provision";
 }
 
 export type ManagedBoatMutationClaim = (
   instance: ManagedBoatInventoryInstance,
 ) => (() => void) | void;
 
-/** Keep one provider account for the whole logical operation. Settings may
- * replace the shared config object after an async request has started; every
- * follow-up (rename, readiness, cleanup, etc.) must keep using the credential
- * that selected or created the Boat in the first place. */
+/** One credential for the whole operation, even if Settings swaps the config mid-request. */
 function snapshotBoatConfig(cfg: AppConfig): AppConfig {
   return { box: cfg.box ? { token: cfg.box.token } : undefined };
 }
 
-/** The base URL follows the credential in use (included-services.ts): an own
- * token goes to Boat (OMB_BOX_API points it at a stub in tests), Cloud Pro's
- * included token only to its relay. */
-function boatFetch(cfg: AppConfig, path: string, opts: RequestInit = {}) {
+/** An own token goes to Boat; Cloud Pro's included token only to its relay. */
+export function boatFetch(cfg: AppConfig, path: string, opts: RequestInit = {}) {
   const account = boatAccount(cfg);
-  return fetch(`${account?.api ?? boatProviderApi()}${path}`, {
+  return fetch(`${account?.api ?? boatProviderApi()}${relayPath(account, path)}`, {
     ...opts,
     headers: {
       authorization: `Bearer ${account?.token}`,
@@ -188,66 +153,41 @@ function boatFetch(cfg: AppConfig, path: string, opts: RequestInit = {}) {
 
 async function boatJson(cfg: AppConfig, path: string, opts: RequestInit = {}) {
   const res = await boatFetch(cfg, path, opts);
-  const body: any = await res.json().catch(() => null);
+  const body: any = relayBody(boatAccount(cfg), await res.json().catch(() => null));
   return { ok: res.ok && body?.ok !== false, status: res.status, body };
-}
-
-interface BoatDeletionOperation {
-  id: string;
-  kind: "box";
-  targetId: string;
-  status: "pending" | "processing" | "blocked" | "completed";
-}
-
-/** Accept only the immutable identity fields needed to follow a delete. Any
- * malformed success envelope falls back to a direct Boat read instead of
- * authorizing journal retirement. */
-function boatDeletionOperation(
-  body: any,
-  boxId: string,
-  expectedOperationId?: string,
-): BoatDeletionOperation | null {
-  const operation = body?.operation;
-  const id = typeof operation?.id === "string" ? operation.id : "";
-  const status = typeof operation?.status === "string" ? operation.status : "";
-  if (
-    !BOAT_DELETE_OPERATION_ID.test(id)
-    || (expectedOperationId !== undefined && id !== expectedOperationId)
-    || operation?.kind !== "box"
-    || operation?.targetId !== boxId
-    || !BOAT_DELETE_OPERATION_STATES.has(status)
-  ) return null;
-  return { id, kind: "box", targetId: boxId, status: status as BoatDeletionOperation["status"] };
-}
-
-function deletionBlockedError(boxId: string): Error & { status: number } {
-  return Object.assign(
-    new Error(`boat.dev accepted deletion of ${boxId}, but the deletion operation is blocked — check boat.dev and retry`),
-    { status: 409 },
-  );
 }
 
 function boatDeleteProvedAbsent(result: Awaited<ReturnType<typeof boatJson>>): boolean {
   return result.status === 404 || result.status === 410;
 }
 
-/** Retire the create receipt before the deletion fence. If that first durable
- * write fails, the fence remains and no caller can reuse a Boat whose ownership
- * recovery is uncertain. */
+/** Retire the create receipt before the deletion fence, so a failed write leaves the fence in place. */
 function finishRecordedBoatDeletion(boxId: string): void {
   retireDeletedBoatCreate(boxId);
   forgetBoatId(boxId);
   retireBoatDeletion(boxId);
 }
 
-type BoatDeletionReconciliation = "confirmed" | "pending" | "blocked";
+function recordBoatDeletionOperation(boxId: string, operation: BoatDeletionOperation): BoatDeletionRecord | "confirmed" {
+  if (operation.status === "blocked") {
+    if (!blockedUntilBoatFinishes(operation)) return markBoatDeletionBlocked(boxId, operation);
+  } else {
+    const record = markBoatDeletionAccepted(boxId, operation);
+    if (operation.status !== "completed") return record;
+  }
+  finishRecordedBoatDeletion(boxId);
+  return "confirmed";
+}
 
-/** Reconcile one durable deletion against the exact provider operation/Box.
- * Account LIST omission is never evidence: it is eventually consistent. */
+/** `kept`: blocked by data a fork or named snapshot still uses, reported only to the person's own delete. */
+type BoatDeletionReconciliation = "confirmed" | "pending" | "blocked" | "kept";
+
+/** Account LIST omission is never evidence: Boat's LIST is eventually consistent. */
 async function reconcileRecordedBoatDeletion(
   cfg: AppConfig,
   initial: BoatDeletionRecord,
   pollDelaysMs: readonly number[] = [],
+  reportKept = false,
 ): Promise<BoatDeletionReconciliation> {
   let record = initial;
   if (record.phase === "accepted" && record.status === "completed") {
@@ -269,20 +209,16 @@ async function reconcileRecordedBoatDeletion(
       if (!polled.ok) break;
       const operation = boatDeletionOperation(polled.body, record.boxId, record.operationId);
       if (!operation) break;
-      if (operation.status === "blocked") {
-        record = markBoatDeletionBlocked(record.boxId, operation);
-        break;
-      }
-      record = markBoatDeletionAccepted(record.boxId, operation);
-      if (operation.status === "completed") {
-        finishRecordedBoatDeletion(record.boxId);
-        return "confirmed";
-      }
+      const next = recordBoatDeletionOperation(record.boxId, operation);
+      if (next === "confirmed") return next;
+      record = next;
+      // Boat's own word decides: the sandbox leaves every list as soon as the delete is accepted.
+      if (reportKept && keptForNewerSnapshots(operation)) return "kept";
+      if (record.phase === "blocked") break;
     }
   }
 
-  // A direct immutable-id 404/410 is the only alternate completion proof.
-  // A live identity keeps the fence even when the operation endpoint is down.
+  // Only a direct 404/410 on the immutable id is alternate completion proof.
   const inspected = await inspectBoatIdentity(cfg, record.boxId);
   if (!inspected.available) return record.phase === "blocked" ? "blocked" : "pending";
   if (!inspected.identity) {
@@ -298,9 +234,7 @@ async function reconcileRecordedBoatDeletion(
   return record.phase === "blocked" ? "blocked" : "pending";
 }
 
-/** Prove that a replacement token can see every durable deletion target
- * before Settings swaps credentials. Unlike normal reconciliation, a bare
- * 404 is not completion proof here: it may simply be a different account. */
+/** Before Settings swaps credentials: here a bare 404 is no proof, it may be a different account. */
 export async function verifyBoatDeletionCredential(cfg: AppConfig): Promise<void> {
   cfg = snapshotBoatConfig(cfg);
   for (const initial of boatDeletionSnapshot()) {
@@ -313,19 +247,14 @@ export async function verifyBoatDeletionCredential(cfg: AppConfig): Promise<void
           signal: AbortSignal.timeout(20_000),
         });
       } catch {
-        // The exact Boat identity below can still prove account continuity.
       }
       if (polled?.ok) {
         const operation = boatDeletionOperation(polled.body, record.boxId, record.operationId);
         if (operation) {
           operationAuthorized = true;
-          record = operation.status === "blocked"
-            ? markBoatDeletionBlocked(record.boxId, operation)
-            : markBoatDeletionAccepted(record.boxId, operation);
-          if (operation.status === "completed") {
-            finishRecordedBoatDeletion(record.boxId);
-            continue;
-          }
+          const next = recordBoatDeletionOperation(record.boxId, operation);
+          if (next === "confirmed") continue;
+          record = next;
         }
       }
     }
@@ -347,8 +276,6 @@ export async function verifyBoatDeletionCredential(cfg: AppConfig): Promise<void
   }
 }
 
-/** Bind a successful DELETE response to the durable target before polling.
- * A malformed receipt leaves the prepared fence intact. */
 async function confirmAcceptedBoatDeletion(
   cfg: AppConfig,
   record: BoatDeletionRecord,
@@ -367,15 +294,18 @@ async function confirmAcceptedBoatDeletion(
       { status: 503 },
     );
   }
-  const next = operation.status === "blocked"
-    ? markBoatDeletionBlocked(record.boxId, operation)
-    : markBoatDeletionAccepted(record.boxId, operation);
-  return reconcileRecordedBoatDeletion(cfg, next, pollDelaysMs);
+  const next = recordBoatDeletionOperation(record.boxId, operation);
+  if (next === "confirmed") return next;
+  if (keptForNewerSnapshots(operation)) return "kept";
+  return reconcileRecordedBoatDeletion(cfg, next, pollDelaysMs, true);
 }
 
-/** Send (or explicitly retry) DELETE only after the immutable target is on
- * disk. The returned pending state always has a validated operation receipt. */
-async function requestRecordedBoatDeletion(
+/** One DELETE in flight per installation, whoever asked: a burst of deletes never reaches the provider at once. */
+let deletionInFlight: Promise<unknown> = Promise.resolve();
+const oneDeleteAtATime = <T>(send: () => Promise<T>): Promise<T> => { const run = deletionInFlight.then(send); deletionInFlight = run.catch(() => undefined); return run; };
+
+/** Send DELETE only after the immutable target is on disk. */
+export async function requestRecordedBoatDeletion(
   cfg: AppConfig,
   identity: { boxId: string; name: string; ownerBotId: string | null },
   pollDelaysMs: readonly number[] = BOAT_DELETE_OPERATION_POLL_DELAYS_MS,
@@ -383,10 +313,7 @@ async function requestRecordedBoatDeletion(
   const deletion = prepareBoatDeletion(identity);
   let removed: Awaited<ReturnType<typeof boatJson>>;
   try {
-    removed = await boatJson(cfg, `/boxes/${identity.boxId}`, {
-      method: "DELETE",
-      headers: { "X-Ascii-Confirm-Delete": identity.boxId },
-    });
+    removed = await oneDeleteAtATime(() => boatJson(cfg, `/sandboxes/${identity.boxId}`, { method: "DELETE", headers: { "X-Ascii-Confirm-Delete": identity.boxId }, signal: AbortSignal.timeout(60_000) }));
   } catch (error) {
     throw Object.assign(
       new Error("Could not confirm whether boat.dev accepted the delete. The computer was kept fenced; retry Delete to reconcile it"),
@@ -402,7 +329,7 @@ async function requestRecordedBoatDeletion(
     throw Object.assign(new Error(boatErrorMessage(removed.status, "boat delete", removed.body, usesIncludedBoat(cfg))), { status: removed.status });
   }
   const confirmation = await confirmAcceptedBoatDeletion(cfg, deletion, removed.body, pollDelaysMs);
-  if (confirmation === "blocked") throw deletionBlockedError(identity.boxId);
+  if (confirmation === "blocked" || confirmation === "kept") throw deletionBlockedError(identity.boxId, confirmation === "kept");
   return confirmation;
 }
 
@@ -412,104 +339,107 @@ function boatBotNameParts(botId: string): { prefix: string; hash: string } {
   return { prefix, hash };
 }
 
-function legacyBoatNameFor(botId: string): string {
-  const { prefix, hash } = boatBotNameParts(botId);
-  return `ogb-${prefix}-${hash}`;
-}
+function legacyBoatNameFor(botId: string): string { const { prefix, hash } = boatBotNameParts(botId); return `ogb-${prefix}-${hash}`; }
 
-// Deterministic per installation and bot. The bot hash kills truncated-id
-// collisions; the environment scope prevents cross-install ownership claims.
 export async function boatNameFor(botId: string) {
   const { prefix, hash } = boatBotNameParts(botId);
   return `${scopedBoatPrefix()}${prefix}-${hash}`;
 }
 
-/** Credential restoration must accept both current installation-scoped names
- * and durable pre-scope names that the ownership journal may have adopted. */
 export async function boatNameMatchesBot(botId: string, name: string): Promise<boolean> {
   return name === await boatNameFor(botId) || name === legacyBoatNameFor(botId);
 }
 
-export async function runCommand(cfg: AppConfig, boxId: string, command: string, { timeoutMs = 120_000, signal }: { timeoutMs?: number; signal?: AbortSignal } = {}) {
+/** `probe`: the health check itself, which records nothing; any other command that gets no answer starts one. */
+export async function runCommand(cfg: AppConfig, boxId: string, command: string, { timeoutMs = 120_000, signal, probe = false }: { timeoutMs?: number; signal?: AbortSignal; probe?: boolean } = {}) {
   assertBoatNotDeleting(boxId);
-  const res = await boatFetch(cfg, `/boxes/${boxId}/commands`, {
-    method: "POST",
-    body: JSON.stringify({ command }),
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
-  });
-  const body: any = await res.json().catch(() => null);
+  const suspect = () => { if (!probe && !signal?.aborted) boatHealth.suspect(boxId, () => probeBoat(cfg, boxId)); };
+  const res = await boatFetch(cfg, `/sandboxes/${boxId}/commands`, { method: "POST", body: JSON.stringify({ command }),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs) }).catch((error: unknown) => { suspect(); throw error; });
+  const body: any = await res.json().catch(() => null), unanswered = unansweredStatus(res.status);
+  // Only the computer's own answer counts: a refusal (404, 409, 429, 401, 402) says nothing about the machine.
+  if (unanswered) suspect(); else if (!probe && res.ok && typeof body?.exitCode === "number") boatHealth.answered(boxId);
   return {
-    ok: res.ok && body?.exitCode === 0,
-    exitCode: body?.exitCode ?? null,
-    stdout: body?.stdout ?? "",
-    stderr: body?.stderr ?? "",
+    ok: res.ok && body?.exitCode === 0, exitCode: body?.exitCode ?? null, stdout: body?.stdout ?? "",
+    stderr: body?.stderr ?? "", ...(body?.timedOut === true ? { timedOut: true as const } : {}), ...(unanswered ? { unanswered: true as const } : {}),
   };
 }
 
-// Desktop access, in the order that actually works (agentcal probing):
-//   1) VNC (POST /desktop?vnc=1) — plain WebSocket, survives P2P-blocking
-//      networks; answers {provisioning:true} first, so poll for the URL.
-//   2) WebRTC stream (POST /desktop) as fallback — STUN-only, can hang.
-// The desktopUrl stored on the boat object is NOT usable on its own.
-async function mintDesktopUrl(cfg: AppConfig, boxId: string, { vncBudgetMs = 60_000 } = {}) {
+export const probeBoat = (cfg: AppConfig, boxId: string): Promise<boolean | null> =>
+  runCommand(cfg, boxId, "true", { timeoutMs: DEAD_COMPUTER.probeTimeoutMs, probe: true }).then((out) => out.ok ? true : out.unanswered ? false : null, () => false);
+
+// Boat desktop access: VNC (POST /desktop?vnc=1) first, a plain WebSocket that survives P2P-blocking networks and answers
+// {provisioning:true} until ready; WebRTC (POST /desktop) is a STUN-only fallback that can hang. The sandbox's desktopUrl is not usable alone.
+async function mintDesktopUrl(cfg: AppConfig, boxId: string, { vncBudgetMs = 60_000, requestMs = 30_000 } = {}) {
   assertBoatNotDeleting(boxId);
   const t0 = Date.now();
   while (Date.now() - t0 < vncBudgetMs) {
     assertBoatNotDeleting(boxId);
-    const { body } = await boatJson(cfg, `/boxes/${boxId}/desktop?vnc=1`, { method: "POST" });
-    const url = body?.desktopUrl ?? body?.url;
-    if (url) return url;
+    const { body } = await boatJson(cfg, `/sandboxes/${boxId}/desktop?vnc=1`, { method: "POST", signal: AbortSignal.timeout(requestMs) });
+    if (body?.desktopUrl) return body.desktopUrl;
     if (!body?.provisioning) break;
     await new Promise((r) => setTimeout(r, 3000));
   }
-  const { body } = await boatJson(cfg, `/boxes/${boxId}/desktop`, { method: "POST" });
-  return body?.desktopUrl ?? body?.url ?? null;
+  const { body } = await boatJson(cfg, `/sandboxes/${boxId}/desktop`, { method: "POST", signal: AbortSignal.timeout(requestMs) });
+  return body?.desktopUrl ?? null;
 }
 
 async function waitReady(cfg: AppConfig, boxId: string, budgetMs = 90_000) {
   assertBoatNotDeleting(boxId);
-  const t0 = Date.now();
-  // Boat's words for the last failed resume, if the wait runs out on them.
-  let resumeFailure: string | null = null;
-  while (Date.now() - t0 < budgetMs) {
-    assertBoatNotDeleting(boxId);
-    const { body } = await boatJson(cfg, `/boxes/${boxId}`);
-    const state = body?.box?.state;
-    if (READY.has(state)) return body.box;
-    if (state === "error") return null;
-    // an archiving boat can't resume until the snapshot lands — nudge after.
-    // A refusal (a plan limit, say) is final: report it now. A server error
-    // is retried on the next poll, as Boat asks; 409 is a state race with a
-    // wake already under way.
-    if (state === "archived") {
-      const resumed = await boatJson(cfg, `/boxes/${boxId}/resume`, { method: "POST" });
-      if (resumed.ok) resumeFailure = null;
-      else if (resumed.status !== 409) {
-        const message = boatErrorMessage(resumed.status, "waking the cloud computer", resumed.body, usesIncludedBoat(cfg));
-        if (resumed.status < 500) throw new Error(message);
-        resumeFailure = message;
+  const deadline = Date.now() + budgetMs;
+  const untilDeadline = () => AbortSignal.timeout(Math.max(1, deadline - Date.now()));
+  const outOfTime = (error: unknown) => error instanceof Error && error.name === "TimeoutError";
+  let resumeFailure: Error | null = null;
+  try {
+    while (Date.now() < deadline) {
+      assertBoatNotDeleting(boxId);
+      const { body } = await boatJson(cfg, `/sandboxes/${boxId}`, { signal: untilDeadline() });
+      const state = body?.sandbox?.state;
+      if (READY.has(state)) return body.sandbox;
+      if (TERMINAL.has(state)) return null;
+      // Boat: an archiving sandbox resumes only after its snapshot lands; a 5xx is retried next poll; 409 races a wake under way.
+      if (state === "archived") {
+        const resumed = await boatJson(cfg, `/sandboxes/${boxId}/resume`, { method: "POST", signal: untilDeadline() });
+        if (resumed.ok) resumeFailure = null;
+        else if (resumed.status !== 409) {
+          const refusal = boatRefusal(resumed.status, "waking the cloud computer", resumed.body, usesIncludedBoat(cfg));
+          if (resumed.status < 500) throw refusal;
+          resumeFailure = refusal;
+        }
       }
+      await new Promise((r) => setTimeout(r, Math.min(2500, Math.max(0, deadline - Date.now()))));
     }
-    await new Promise((r) => setTimeout(r, 2500));
+  } catch (error) {
+    if (!outOfTime(error)) throw error;
   }
-  if (resumeFailure) throw new Error(resumeFailure);
+  if (resumeFailure) throw resumeFailure;
   return null;
 }
 
-// Resolving a bot's boat means LISTing every boat in the account, so it is
-// the most expensive thing on any hot path. The name is deterministic, so
-// once we know the id we can go straight at it — the cache is refreshed
-// whenever the direct read fails (deleted/renamed boat) and always carries
-// the live state so callers can still see "archived".
 const boatIdCache = new Map<string, string>();
+/** The bot's computer the provider reports in `error`: its machine is gone and it never runs again, but until it is
+ * deleted it still has the bot's name and may hold one of the plan's computers. */
+const deadBoats = new Map<string, { boxId: string; name: string }>();
+export type DeadBoatHandler = (cfg: AppConfig, owner: string, dead: { boxId: string; name: string }) => Promise<never>;
+let deadBoatHandler: DeadBoatHandler | null = null;
+export const onDeadBoat = (handler: DeadBoatHandler | null) => { deadBoatHandler = handler; };
+export const deadBoatOf = (owner: string) => deadBoats.get(owner) ?? null, boatIdOf = (owner: string) => boatIdCache.get(owner) ?? null,
+  boatOwnerOf = (boxId: string) => [...boatIdCache].find(([, id]) => id === boxId)?.[0] ?? null;
 
 function boatInventoryProblem(status: number, body: any, included = false): string {
   if (status === 401 || status === 403) {
-    return included ? INCLUDED_BOAT_UNAVAILABLE : "boat.dev rejected the Boat API key — update it in Settings → Connections";
+    return included ? INCLUDED_BOAT_UNAVAILABLE : "boat.dev rejected the Boat API key — update it in Settings → API keys";
   }
-  if (status === 429) return "boat.dev is rate-limiting this account — wait a minute and refresh";
+  const service = boatServiceName(included);
+  if (status === 429) return `${service} is rate-limiting this account — wait a minute and refresh`;
   const message = typeof body?.message === "string" ? body.message.trim() : "";
-  return message ? `boat.dev could not list cloud computers: ${message}` : `boat.dev could not list cloud computers (${status})`;
+  return message ? `${service} could not list cloud computers: ${message}` : `${service} could not list cloud computers (${status})`;
+}
+
+/** A read that fails on the network or times out is sent once more; any answer, even an error status, is final. */
+function boatRead(cfg: AppConfig, path: string) {
+  const read = () => boatJson(cfg, path, { signal: AbortSignal.timeout(20_000) });
+  return read().catch(async () => { await new Promise((resolve) => setTimeout(resolve, 1_000)); return read(); });
 }
 
 function safeBoatState(value: unknown): string {
@@ -520,27 +450,24 @@ function safeBoatState(value: unknown): string {
 
 async function listBoatPages(
   cfg: AppConfig,
-): Promise<{ ok: true; boats: any[] } | { ok: false; problem: string; credentialRejected?: boolean }> {
+): Promise<{ ok: true; boats: any[] } | { ok: false; problem: string; credentialRejected?: boolean; unreachable?: boolean }> {
   const boats: any[] = [];
   const seenCursors = new Set<string>();
   let cursor: string | null = null;
 
   for (let page = 0; page < MAX_BOAT_INVENTORY_PAGES; page += 1) {
-    const path = `/boxes?limit=${BOAT_INVENTORY_PAGE_SIZE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const path = `/sandboxes?limit=${BOAT_INVENTORY_PAGE_SIZE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
     let listed: Awaited<ReturnType<typeof boatJson>>;
     try {
-      listed = await boatJson(cfg, path, { signal: AbortSignal.timeout(20_000) });
+      listed = await boatRead(cfg, path);
     } catch {
-      return { ok: false, problem: "Could not reach boat.dev to list cloud computers — check your connection and refresh" };
+      return { ok: false, unreachable: true, problem: `Could not reach ${boatServiceName(usesIncludedBoat(cfg))} to list cloud computers — check your connection and refresh` };
     }
-    if (!listed.ok || !Array.isArray(listed.body?.boxes)) {
-      return {
-        ok: false,
-        problem: boatInventoryProblem(listed.status, listed.body, usesIncludedBoat(cfg)),
-        credentialRejected: listed.status === 401 || listed.status === 403,
-      };
+    if (!listed.ok || !Array.isArray(listed.body?.sandboxes)) {
+      const credentialRejected = listed.status === 401 || listed.status === 403;
+      return { ok: false, problem: boatInventoryProblem(listed.status, listed.body, usesIncludedBoat(cfg)), credentialRejected };
     }
-    boats.push(...listed.body.boxes);
+    boats.push(...listed.body.sandboxes);
 
     const next = listed.body?.pageInfo?.nextCursor;
     if (next === undefined || next === null || next === "") return { ok: true, boats };
@@ -557,15 +484,7 @@ async function listBoatPages(
   return { ok: false, problem: "boat.dev returned too many cloud computer pages — narrow the account inventory and refresh" };
 }
 
-/**
- * One account listing for Settings and deletion guards. Only boats
- * carrying OpenMausBot's exact deterministic name shape leave this boundary;
- * provider desktop links, IPs, environment details and other raw fields never
- * reach the renderer. Only names scoped to this installation may become
- * ownerless rows. Legacy names are accepted solely when a current bot proves
- * ownership; foreign-install and ownerless legacy rows remain invisible and
- * therefore cannot become deletion targets.
- */
+/** Only rows with this installation's name shape leave, without provider links, IPs or env; foreign rows never become deletion targets. */
 export async function listManagedBoats(
   cfg: AppConfig,
   owners: ManagedBoatOwner[],
@@ -577,15 +496,7 @@ export async function listManagedBoats(
   }
 
   const listed = await listBoatPages(cfg);
-  if (!listed.ok) {
-    return {
-      configured: true,
-      available: false,
-      problem: listed.problem,
-      credentialRejected: listed.credentialRejected,
-      instances: [],
-    };
-  }
+  if (!listed.ok) return { configured: true, available: false, problem: listed.problem, credentialRejected: listed.credentialRejected, instances: [] };
 
   const namedOwners = await Promise.all(owners.map(async (owner) => ({
     currentName: await boatNameFor(owner.botId),
@@ -599,11 +510,6 @@ export async function listManagedBoats(
     instances: [],
   });
 
-  // A successful create is journaled before the account-wide LIST is
-  // guaranteed to include it. Reconcile that durable identity with the
-  // authoritative direct endpoint so Settings can still display and delete
-  // the computer. Credential replacement probes deliberately opt out: their
-  // token must be judged only by the account inventory it can list.
   let candidates = [...listed.boats];
   if (options.adoptLegacy !== false) {
     const namedOwnerByBotId = new Map(namedOwners.map((entry) => [entry.owner.botId, entry] as const));
@@ -635,7 +541,6 @@ export async function listManagedBoats(
         return invalidInventory(inspected.problem ?? "A remembered cloud computer could not be verified");
       }
       if (!inspected.identity) {
-        // Direct 404/410 is stronger than an eventually-consistent LIST row.
         candidates = candidates.filter((candidate) => candidate?.id !== recovery.boxId);
         retireDeletedBoatCreate(recovery.boxId);
         continue;
@@ -668,8 +573,6 @@ export async function listManagedBoats(
         return invalidInventory(error instanceof Error ? error.message : "A cloud computer deletion could not be verified");
       }
       if (state === "confirmed") {
-        // LIST may still contain a stale row after the exact operation/direct
-        // endpoint proved deletion. Do not let it resurrect the computer.
         candidates = candidates.filter((candidate) => candidate?.id !== deletion.boxId);
         continue;
       }
@@ -695,8 +598,6 @@ export async function listManagedBoats(
         candidates.push({ id: current.boxId, name: current.name, state: "removing" });
         continue;
       }
-      // A prepared request may have lost its response, and a blocked request
-      // is retryable. Keep the exact row actionable only after a direct read.
       const inspected = await inspectBoatIdentity(cfg, current.boxId);
       if (!inspected.available || !inspected.identity || inspected.identity.name !== current.name) {
         return invalidInventory(inspected.problem ?? "A cloud computer deletion target could not be verified");
@@ -742,23 +643,16 @@ export async function listManagedBoats(
     let owner: ManagedBoatOwner | null = null;
     let legacyOwner = false;
     if (SCOPED_MANAGED_BOAT_NAME.test(name)) {
-      // A valid OMB name for another environment is account-visible but not
-      // ours to display or mutate.
       if (!name.startsWith(scopedPrefix)) continue;
       owner = ownerByCurrentName.get(name) ?? null;
     } else if (LEGACY_MANAGED_BOAT_NAME.test(name)) {
-      // Pre-scope names have no installation provenance. A live local bot is
-      // the only safe ownership proof; unmatched legacy rows stay provider-
-      // managed until the person handles them in boat.dev directly.
       owner = ownerByLegacyName.get(name) ?? null;
       if (!owner) continue;
       legacyOwner = true;
     } else {
       continue;
     }
-    // Once a row names this installation (or a live bot through its legacy
-    // deterministic name), silently skipping a malformed/duplicated identity
-    // could let bot deletion mistake provider corruption for absence.
+    // Throw, never skip: deletion must not mistake provider corruption for absence.
     if (!BOAT_ID.test(boxId)) {
       return invalidInventory("boat.dev returned an invalid id for an OpenMaus-managed cloud computer — refresh or repair it in boat.dev");
     }
@@ -790,10 +684,7 @@ export async function listManagedBoats(
   return { configured: true, available: true, problem: null, instances };
 }
 
-/** Direct identity proof for a Boat remembered in the local create journal.
- * Unlike account LIST, this endpoint is not eventually consistent. Only the
- * immutable id, provider name and allowlisted lifecycle state cross this
- * boundary. */
+/** A direct read, not eventually consistent like LIST; only id, name and allowlisted state cross this boundary. */
 export async function inspectBoatIdentity(cfg: AppConfig, boxId: string): Promise<BoatIdentityInspection> {
   cfg = snapshotBoatConfig(cfg);
   if (!BOAT_ID.test(boxId)) {
@@ -801,22 +692,23 @@ export async function inspectBoatIdentity(cfg: AppConfig, boxId: string): Promis
   }
   let inspected: Awaited<ReturnType<typeof boatJson>>;
   try {
-    inspected = await boatJson(cfg, `/boxes/${boxId}`, { signal: AbortSignal.timeout(20_000) });
+    inspected = await boatJson(cfg, `/sandboxes/${boxId}`, { signal: AbortSignal.timeout(20_000) });
   } catch {
     return {
       available: false,
       identity: null,
-      problem: "Could not reach boat.dev to verify a remembered cloud computer",
+      problem: `Could not reach ${boatServiceName(usesIncludedBoat(cfg))} to verify a remembered cloud computer`,
     };
   }
-  if (inspected.status === 404 || inspected.status === 410) {
+  const candidate = inspected.body?.sandbox;
+  const returnedId = typeof candidate?.id === "string" ? candidate.id : "";
+  // A cancelled create got no machine: Boat reports it once, nameless, then 404s.
+  if (inspected.status === 404 || inspected.status === 410 || (inspected.ok && returnedId === boxId && candidate.state === "cancelled")) {
     return { available: true, identity: null, problem: null };
   }
   if (!inspected.ok) {
     return { available: false, identity: null, problem: boatInventoryProblem(inspected.status, inspected.body, usesIncludedBoat(cfg)) };
   }
-  const candidate = inspected.body?.box;
-  const returnedId = typeof candidate?.id === "string" ? candidate.id : "";
   const name = typeof candidate?.name === "string" ? candidate.name : "";
   if (returnedId !== boxId || name.length === 0 || name.length > 100 || /[\r\n]/.test(name)) {
     return { available: false, identity: null, problem: "boat.dev returned an invalid cloud computer identity" };
@@ -824,30 +716,22 @@ export async function inspectBoatIdentity(cfg: AppConfig, boxId: string): Promis
   return { available: true, identity: { boxId, name, state: safeBoatState(candidate.state) }, problem: null };
 }
 
-function inventoryFailure(inventory: ManagedBoatInventory): Error & { status: number } {
+export function inventoryFailure(inventory: ManagedBoatInventory): Error & { status: number } {
   const error = new Error(
     inventory.configured
       ? (inventory.problem ?? "Cloud computer inventory is unavailable")
-      : "Boat is not configured — add its API key in Settings → Connections",
+      : "Boat is not configured — add its API key in Settings → API keys",
   ) as Error & { status: number };
   error.status = inventory.configured ? 503 : 409;
   return error;
 }
 
-function deletionFenceError(): Error & { status: number } {
-  return Object.assign(
-    new Error("this cloud computer is being deleted — wait for it to finish, or retry Delete if it needs attention"),
-    { status: 409 },
-  );
-}
+const deletionFenceError = (): Error & { status: number } => Object.assign(
+  new Error("this cloud computer is being deleted — wait for it to finish, or retry Delete if it needs attention"), { status: 409, code: BOAT_DELETING });
 
-function assertBoatNotDeleting(boxId: string): void {
-  if (getBoatDeletion(boxId)) throw deletionFenceError();
-}
+export function assertBoatNotDeleting(boxId: string): void { if (getBoatDeletion(boxId)) throw deletionFenceError(); }
 
-function assertBotBoatNotDeleting(botId: string): void {
-  if (hasPendingBoatDeletionForBot(botId)) throw deletionFenceError();
-}
+function assertBotBoatNotDeleting(botId: string): void { if (hasPendingBoatDeletionForBot(botId)) throw deletionFenceError(); }
 
 async function revalidateManagedBoat(
   cfg: AppConfig,
@@ -871,23 +755,19 @@ const QUIESCE_BROWSER = [
 
 async function stopBoat(cfg: AppConfig, boxId: string): Promise<void> {
   assertBoatNotDeleting(boxId);
-  // Browser shutdown is best-effort, but the provider stop is not: Settings
-  // must never say a computer is sleeping when boat.dev rejected the action.
   await runCommand(cfg, boxId, QUIESCE_BROWSER, { timeoutMs: 5_000 }).catch(() => null);
-  const stopped = await boatJson(cfg, `/boxes/${boxId}/stop`, { method: "POST" });
+  const stopped = await boatJson(cfg, `/sandboxes/${boxId}/stop`, { method: "POST" });
   if (!stopped.ok) {
     throw Object.assign(new Error(boatErrorMessage(stopped.status, "boat sleep", stopped.body, usesIncludedBoat(cfg))), { status: stopped.status });
   }
 }
 
-function forgetBoatId(boxId: string): void {
+export function forgetBoatId(boxId: string): void {
   for (const [botId, cachedId] of boatIdCache) {
     if (cachedId === boxId) boatIdCache.delete(botId);
   }
 }
 
-/** Explicit Settings action. Re-listing prevents a stale row from targeting a
- * renamed or foreign provider resource. This never wakes or joins a Boat. */
 export async function sleepManagedBoat(
   cfg: AppConfig,
   owners: ManagedBoatOwner[],
@@ -900,12 +780,12 @@ export async function sleepManagedBoat(
   if (instance.inUse) {
     throw Object.assign(new Error("this cloud computer is in use — stop its bot's work first"), { status: 409 });
   }
-  if (!SLEEPING.has(instance.state) && !READY.has(instance.state)) {
+  if (!SLEEPING_BOAT_STATES.has(instance.state) && !READY.has(instance.state)) {
     throw Object.assign(new Error(`this cloud computer cannot sleep while it is ${instance.state}`), { status: 409 });
   }
   const release = claim?.(instance);
   try {
-    if (!SLEEPING.has(instance.state)) await stopBoat(cfg, instance.boxId);
+    if (!SLEEPING_BOAT_STATES.has(instance.state)) await stopBoat(cfg, instance.boxId);
     forgetBoatId(instance.boxId);
     return { ok: true };
   } finally {
@@ -913,9 +793,7 @@ export async function sleepManagedBoat(
   }
 }
 
-/** Permanent Settings action. The caller must echo the exact freshly-listed
- * machine name as well as its id; boat.dev independently requires the id in
- * its confirmation header. */
+/** The caller must echo the freshly listed name as well as the id; boat.dev requires the id in its confirmation header. */
 export async function deleteManagedBoat(
   cfg: AppConfig,
   owners: ManagedBoatOwner[],
@@ -929,14 +807,11 @@ export async function deleteManagedBoat(
   if (remembered) {
     const reconciled = await reconcileRecordedBoatDeletion(cfg, remembered, [0]);
     if (reconciled === "confirmed") return { ok: true };
-    // A validated accepted operation owns this target. Retrying DELETE would
-    // create a second operation and weaken the only trustworthy receipt.
+    // Retrying DELETE would create a second operation and weaken the only trustworthy receipt.
     const current = getBoatDeletion(boxId);
     if (current?.phase === "accepted") {
       return { ok: true, pending: true as const };
     }
-    // Prepared (ambiguous request) and blocked records may be retried only by
-    // this explicit Settings/bot-deletion path after fresh identity checks.
   }
   const instance = await revalidateManagedBoat(cfg, owners, boxId);
   if (instance.inUse) {
@@ -969,33 +844,30 @@ export async function findBoat(cfg: AppConfig, botId: string) {
   if (cachedId) {
     let direct: Awaited<ReturnType<typeof boatJson>> | null = null;
     try {
-      direct = await boatJson(cfg, `/boxes/${cachedId}`);
+      direct = await boatJson(cfg, `/sandboxes/${cachedId}`, { signal: AbortSignal.timeout(20_000) });
     } catch {
-      // A direct read can fail while the account listing still succeeds.
-      // Fall through to the authoritative paginated lookup before deciding.
     }
-    const directBoat = direct?.body?.box;
-    if (direct?.ok && directBoat?.id === cachedId && directBoat.state !== "error") return directBoat;
+    const directBoat = direct?.body?.sandbox;
+    if (direct?.ok && directBoat?.id === cachedId && !TERMINAL.has(directBoat.state)) return directBoat;
     if (direct?.ok && directBoat?.id !== cachedId) {
       throw Object.assign(new Error("boat.dev returned an invalid cloud computer identity"), { status: 503 });
     }
-    boatIdCache.delete(botId); // gone or broken — fall back to the listing
+    boatIdCache.delete(botId);
   }
   const name = await boatNameFor(botId);
   const legacyName = legacyBoatNameFor(botId);
   const listed = await listBoatPages(cfg);
   if (!listed.ok) {
-    throw Object.assign(new Error(listed.problem), { status: 503 });
+    throw Object.assign(new Error(listed.problem), { status: 503, transient: listed.unreachable === true });
   }
-  // Prefer the installation-scoped identity. A legacy name remains
-  // discoverable only for this exact local bot id.
   const expected = listed.boats.filter((candidate: any) => candidate?.name === name || candidate?.name === legacyName);
   if (expected.some((candidate: any) => !BOAT_ID.test(candidate?.id))) {
     throw Object.assign(new Error("boat.dev returned an invalid cloud computer identity"), { status: 503 });
   }
-  const found = expected.find((candidate: any) => candidate.name === name && candidate.state !== "error")
-    ?? expected.find((candidate: any) => candidate.name === legacyName && candidate.state !== "error")
+  const found = expected.find((candidate: any) => candidate.name === name && !TERMINAL.has(candidate.state))
+    ?? expected.find((candidate: any) => candidate.name === legacyName && !TERMINAL.has(candidate.state))
     ?? null;
+  const dead = found ? undefined : expected.find((candidate: any) => candidate.state === "error"); if (dead) deadBoats.set(botId, { boxId: dead.id, name: dead.name }); else deadBoats.delete(botId);
   if (found) {
     const duplicateId = listed.boats.filter((candidate: any) => candidate?.id === found.id).length !== 1;
     if (duplicateId) {
@@ -1007,7 +879,6 @@ export async function findBoat(cfg: AppConfig, botId: string) {
   return found;
 }
 
-/** Ready-or-null without the LIST when we already know the boat. */
 export async function readyBoat(cfg: AppConfig, botId: string, budgetMs = 60_000) {
   cfg = snapshotBoatConfig(cfg);
   const boat = await findBoat(cfg, botId);
@@ -1016,46 +887,30 @@ export async function readyBoat(cfg: AppConfig, botId: string, budgetMs = 60_000
   return waitReady(cfg, boat.id, budgetMs);
 }
 
-/** The Boat credential a request uses: the person's own token, else Cloud
- * Pro's included one. Settings' own-key flows read cfg.box.token instead. */
-export function boatAccount(cfg: AppConfig): ServiceCredential | null {
-  return boatCredential(cfg.box?.token);
-}
+export const boatAccount = (cfg: AppConfig): ServiceCredential | null => boatCredential(cfg.box?.token);
 
-export function boatConfigured(cfg: AppConfig) {
-  return Boolean(boatAccount(cfg));
-}
+export const boatConfigured = (cfg: AppConfig) => Boolean(boatAccount(cfg));
 
-function usesIncludedBoat(cfg: AppConfig): boolean {
-  return boatAccount(cfg)?.included === true;
-}
+const usesIncludedBoat = (cfg: AppConfig): boolean => boatAccount(cfg)?.included === true;
 
-/** What Settings shows: configured-or-not, and whether that is Cloud Pro's
- * included account rather than a saved key. Never the token. */
-export function describeBoatAccount(cfg: AppConfig): { configured: boolean; included?: true } {
-  const account = boatAccount(cfg);
-  return { configured: Boolean(account), ...(account?.included ? { included: true as const } : {}) };
-}
+/** Configured-or-not for Settings, never the token. */
+export const describeBoatAccount = (cfg: AppConfig): { configured: boolean; included?: true } => {
+  const account = boatAccount(cfg); return { configured: Boolean(account), ...(account?.included ? { included: true as const } : {}) }; };
 
-/** Ask the provider whether a token is real, before we let someone save
- * it. Without this the paste "succeeds", and the first sign of trouble is
- * a 401 in a different panel minutes later, with nothing to act on. Only
- * ever an own token, so only ever Boat itself. */
-export async function verifyToken(token: string): Promise<{ ok: true } | { ok: false; message: string }> {
+export async function verifyToken(token: string): Promise<{ ok: true } | { ok: false; message: string; rejected?: true }> {
   try {
-    const res = await fetch(`${boatProviderApi()}/boxes`, {
+    const res = await fetch(`${boatProviderApi()}/sandboxes?limit=1`, {
       headers: { authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(20_000),
     });
     if (res.ok) return { ok: true };
     if (res.status === 401 || res.status === 403) {
-      // the common mistake is pasting some other credential entirely —
-      // boat API keys are prefixed, so say which thing is wrong
+      // Boat API keys are prefixed boat_ (box_ before v1).
       return {
-        ok: false,
-        message: token.startsWith("box_")
-          ? "boat.dev rejected that token — it may have been revoked or expired. Copy a fresh one from your boat.dev account."
-          : "That doesn't look like a box API key: they start with box_. Copy the API key from your boat.dev account (an account or session token won't work here).",
+        ok: false, rejected: true,
+        message: /^(boat|box)_/.test(token)
+          ? "boat.dev rejected that key — it may have been revoked or expired. Copy a fresh one from your boat.dev account."
+          : "That doesn't look like a Boat API key: they start with boat_ (older ones with box_). Copy the API key from your boat.dev account (an account or session token won't work here).",
       };
     }
     return { ok: false, message: `boat.dev returned ${res.status} for that token — try again in a moment.` };
@@ -1064,25 +919,18 @@ export async function verifyToken(token: string): Promise<{ ok: true } | { ok: f
   }
 }
 
-/** A rejected Cloud Pro relay token: nothing the person pasted, so nothing
- * for them to fix in Settings. */
-const INCLUDED_BOAT_UNAVAILABLE = "Cloud Pro's included cloud computers aren't available right now. Try again later.";
+const INCLUDED_BOAT_UNAVAILABLE = "The cloud computers included with your Cloud plan aren't available right now. Try again later.";
+const boatServiceName = (included: boolean) => included ? "MausBot Cloud's computer service" : "boat.dev";
 
-/** Turn a provider refusal into something a person can act on. The
- * provider's own message is better than anything we can invent — it knows
- * the plan, the limit and the link — so prefer it and only fall back to
- * our own wording when it says nothing useful. `included`: the request used
- * Cloud Pro's included token, not the person's own. */
 export function boatErrorMessage(status: number, what: string, body?: any, included = false): string {
   const theirs = typeof body?.message === "string" ? body.message.trim() : "";
   const link = typeof body?.error?.details?.billingUrl === "string" ? body.error.details.billingUrl : "";
   if (status === 402) {
-    // e.g. "Start the $20/month Boat plan to create sandboxes."
     return [theirs || "boat.dev needs a paid Boat plan before it will create a computer.", link].filter(Boolean).join(" ");
   }
   if (status === 401 || status === 403) {
     if (included) return INCLUDED_BOAT_UNAVAILABLE;
-    return "your box token was rejected by boat.dev — open App Settings and paste a current token (it starts with box_)";
+    return "boat.dev rejected your Boat API key — paste a current one in Settings → API keys";
   }
   if (status === 429) {
     return theirs || "boat.dev is rate-limiting this account — wait a minute and try again";
@@ -1090,10 +938,12 @@ export function boatErrorMessage(status: number, what: string, body?: any, inclu
   return theirs ? `${what} failed: ${theirs}` : `${what} failed (${status})`;
 }
 
-/** boat.dev trial accounts reject the normal eight-hour auto-stop with a
- * structured `trial_auto_stop_required` refusal. Retry that one condition
- * once at the provider's advertised maximum (or the documented two-hour
- * trial ceiling). Other create failures must retain their original error. */
+export function boatRefusal(status: number, what: string, body?: any, included = false): Error & { boatStatus: number; boatCode?: string; boatLimit?: CloudLimit } {
+  const code = body?.error?.code ?? body?.code, boatCode = typeof code === "string" && /^[a-z0-9_]{1,64}$/.test(code) ? code : undefined, boatLimit = cloudLimitFromBody(body);
+  return Object.assign(new Error(boatErrorMessage(status, what, body, included)), { boatStatus: status, ...(boatCode ? { boatCode } : {}), ...(boatLimit ? { boatLimit } : {}) });
+}
+
+/** boat.dev trial accounts refuse the eight-hour auto-stop with `trial_auto_stop_required`; retry once at the advertised maximum (documented: two hours). */
 function trialBoatTtlSeconds(body: any): number | null {
   const code = body?.error?.code ?? body?.code;
   if (code !== "trial_auto_stop_required") return null;
@@ -1106,8 +956,7 @@ function trialBoatTtlSeconds(body: any): number | null {
 
 type BoatCreateResult = Awaited<ReturnType<typeof boatJson>> & {
   request: BoatCreateRequest;
-  /** Automatic deletion is safe only for a Boat first created by this exact
-   * provisioning call. A journal recovery may point at durable user data. */
+  /** Auto-delete only a Boat this exact call created; a journal recovery may hold user data. */
   createdThisAttempt: boolean;
 };
 
@@ -1116,57 +965,18 @@ function idempotentCreateInProgress(result: Awaited<ReturnType<typeof boatJson>>
   return result.status === 409 && code === "idempotency_in_progress";
 }
 
-/** The keys this OpenMausBot already holds, as the environment its bots'
- * agents read on the boat. The boat is created with `noEnv: true`, so the
- * boat.dev account's own logins never land in the guest: the boat has exactly
- * these and nothing else (see "Whose keys" in the Boat integrated-agents docs). */
-export function boatCredentialEnv(cfg: AppConfig, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const out: Record<string, string> = {};
-  const put = (name: string, value: string | undefined) => {
-    if (typeof value === "string" && value.trim()) out[name] = value.trim();
-  };
-  // The workspace key only: an ANTHROPIC_API_KEY in the server's own env is
-  // never the workspace key (see loadConfig), so it is not forwarded either.
-  put("ANTHROPIC_API_KEY", cfg.anthropic?.key);
-  for (const name of BOAT_FORWARDED_CREDENTIAL_ENV) put(name, env[name]);
-  return out;
-}
-
-/** Names the boat's agents read (Claude Code, Codex, pi, OpenCode, Prime
- * Agent, Kimi), forwarded verbatim from this server's environment when set. */
-const BOAT_FORWARDED_CREDENTIAL_ENV = [
-  "CLAUDE_CODE_OAUTH_TOKEN",
-  "OPENAI_API_KEY",
-  "OPENROUTER_API_KEY",
-  "LLMGATEWAY_API_KEY",
-  "DEEPSEEK_API_KEY",
-  "MOONSHOT_API_KEY",
-  "KIMI_CODE_ACCESS_TOKEN",
-  "KIMI_CODE_REFRESH_TOKEN",
-] as const;
-
-async function requestBoatCreate(cfg: AppConfig, botId: string, ttlSeconds: number, env: Record<string, string>): Promise<BoatCreateResult> {
-  // The computer needs the user's desktop session, not the account owner's
-  // host credentials. Keep provider-side env injection off; the only keys the
-  // guest ever has are the ones this OpenMausBot forwards (`env`), which its
-  // agents need now that the turn runs on the boat. The idempotency identity
-  // stays the secret-free part: a trial-TTL retry must receive a different
-  // key, and the journal on disk never carries a credential.
+async function requestBoatCreate(cfg: AppConfig, botId: string, ttlSeconds: number): Promise<BoatCreateResult> {
+  // noEnv: no key this server holds ever reaches the computer. A trial-TTL retry needs a different idempotency key.
   const body = JSON.stringify({ ttlSeconds, noEnv: true });
-  const wireBody = JSON.stringify({ ttlSeconds, noEnv: true, ...(Object.keys(env).length ? { env } : {}) });
   let attempt = beginBoatCreate(botId, body);
   let request = attempt.request;
   let createdThisAttempt = attempt.startedNow;
 
-  // A previous process received the Boat but died before naming it. Resolve
-  // the durable identity directly; never issue a second create first.
+  // The previous process got the sandbox but died before naming it: never create again first; only proven absence frees the key.
   if (request.boxId) {
-    const recovered = await boatJson(cfg, `/boxes/${request.boxId}`, {
+    const recovered = await boatJson(cfg, `/sandboxes/${request.boxId}`, {
       signal: AbortSignal.timeout(20_000),
     });
-    if (recovered.ok && recovered.body?.box?.id === request.boxId) {
-      return { ...recovered, request, createdThisAttempt: false };
-    }
     if (recovered.status !== 404 && recovered.status !== 410) {
       return { ...recovered, request, createdThisAttempt: false };
     }
@@ -1181,19 +991,18 @@ async function requestBoatCreate(cfg: AppConfig, botId: string, ttlSeconds: numb
   let inProgressRetries = 0;
   for (;;) {
     try {
-      last = await boatJson(cfg, "/boxes", {
+      last = await boatJson(cfg, "/sandboxes", {
         method: "POST",
         headers: { "Idempotency-Key": request.idempotencyKey },
         signal: AbortSignal.timeout(45_000),
-        body: wireBody,
+        body,
       });
     } catch (error) {
-      // A dropped response is ambiguous: boat.dev may already have created
-      // the Boat. One retry with the same key recovers it safely.
+      // A dropped response is ambiguous: Boat may already have created the sandbox, and one retry with the same key recovers it.
       if (ambiguousRetries++ === 0) continue;
       throw error;
     }
-    const boxId = last.body?.box?.id;
+    const boxId = last.body?.sandbox?.id;
     if (last.ok && typeof boxId === "string" && boxId) {
       request = rememberCreatedBoat(request, boxId);
       return { ...last, request, createdThisAttempt };
@@ -1207,24 +1016,20 @@ async function requestBoatCreate(cfg: AppConfig, botId: string, ttlSeconds: numb
       return { ...last, request, createdThisAttempt };
     }
     if ((last.status >= 500 || last.ok) && ambiguousRetries++ === 0) continue;
-    // A 5xx or any idempotency conflict can follow a provider-side create;
-    // keep its key for recovery. Only a definitive client rejection proves
-    // this request did not create a Boat and may be replaced safely.
+    // A 5xx or idempotency conflict can follow a provider-side create, so the key is kept for recovery.
     if (last.status < 500 && last.status !== 409 && !last.ok) discardBoatCreate(request);
     return { ...last, request, createdThisAttempt };
   }
 }
 
-async function createBoat(cfg: AppConfig, botId: string, env: Record<string, string>) {
-  const first = await requestBoatCreate(cfg, botId, DEFAULT_BOAT_TTL_SECONDS, env);
+async function createBoat(cfg: AppConfig, botId: string) {
+  const first = await requestBoatCreate(cfg, botId, DEFAULT_BOAT_TTL_SECONDS);
   if (first.ok) return first;
   const trialTtl = trialBoatTtlSeconds(first.body);
-  return trialTtl === null ? first : requestBoatCreate(cfg, botId, trialTtl, env);
+  return trialTtl === null ? first : requestBoatCreate(cfg, botId, trialTtl);
 }
 
-/** A prior explicit delete always wins over provisioning. Reconcile/retry the
- * old immutable target, then require a fresh provision request so one click
- * can never both erase and silently recreate the same computer. */
+/** A prior delete always wins: one click must never both erase and recreate a computer. */
 async function finishPriorDeletionBeforeProvision(cfg: AppConfig, botId: string): Promise<void> {
   const remembered = boatDeletionSnapshot().filter((record) => record.ownerBotId === botId);
   if (!remembered.length) return;
@@ -1244,11 +1049,10 @@ async function finishPriorDeletionBeforeProvision(cfg: AppConfig, botId: string)
   }
   throw Object.assign(
     new Error("the previous cloud computer deletion finished — retry to create a new computer"),
-    { status: 409 },
+    { status: 409, code: BOAT_DELETION_FINISHED },
   );
 }
 
-/** Boat state for the Computer panel. */
 export async function boatStatus(cfg: AppConfig, botId: string) {
   cfg = snapshotBoatConfig(cfg);
   if (!boatConfigured(cfg)) return { configured: false, box: null };
@@ -1259,15 +1063,10 @@ export async function boatStatus(cfg: AppConfig, botId: string) {
   };
 }
 
-/**
- * Find-or-create the bot's persistent boat, wait for ready, and mint a fresh
- * desktop URL. The boat ships its own computer-use driver and agent runner.
- */
 export async function provisionBoat(cfg: AppConfig, botId: string, _botName: string) {
-  const credentialEnv = boatCredentialEnv(cfg);
   cfg = snapshotBoatConfig(cfg);
   if (!boatConfigured(cfg)) {
-    throw new Error('box provider not enabled — add {"box":{"token":"…"}} to ~/.openmausbot/config.json');
+    throw new Error("Boat is not configured — add its API key in Settings → API keys");
   }
   await finishPriorDeletionBeforeProvision(cfg, botId);
   const vmName = await boatNameFor(botId);
@@ -1276,40 +1075,35 @@ export async function provisionBoat(cfg: AppConfig, botId: string, _botName: str
   let createRequest: BoatCreateRequest | null = null;
   try {
     if (!boat) {
-      // Deletion can be prepared by another process after the initial lookup.
-      // Never create a replacement until the durable fence is reconciled.
+      const dead = deadBoats.get(botId); if (dead && deadBoatHandler) await deadBoatHandler(cfg, botId, dead);
+      // Another process may have prepared a deletion since the lookup; never create a replacement before the fence is reconciled.
       assertBotBoatNotDeleting(botId);
-      // Provider-side backstop: archives itself (billing pauses, disk
-      // survives) if every stop path dies. Trial accounts get one narrower
-      // retry when boat.dev reports their shorter TTL ceiling.
-      const createRes = await createBoat(cfg, botId, credentialEnv);
-      if (!createRes.ok || !createRes.body?.box?.id) {
-        throw new Error(boatErrorMessage(createRes.status, "boat create", createRes.body, usesIncludedBoat(cfg)));
+      // Boat's TTL archives the computer if every stop path dies.
+      const createRes = await createBoat(cfg, botId);
+      if (!createRes.ok || !createRes.body?.sandbox?.id) {
+        throw boatRefusal(createRes.status, "boat create", createRes.body, usesIncludedBoat(cfg));
       }
-      boat = createRes.body.box;
+      boat = createRes.body.sandbox;
       createRequest = createRes.request;
       created = createRes.createdThisAttempt;
-      const rename = await boatJson(cfg, `/boxes/${boat.id}`, {
+      // v1 create takes no name: the deterministic one is set right after.
+      const rename = await boatJson(cfg, `/sandboxes/${boat.id}`, {
         method: "PATCH",
         body: JSON.stringify({ name: vmName }),
       });
-      if (!rename.ok) throw new Error(boatErrorMessage(rename.status, "box naming", rename.body, usesIncludedBoat(cfg)));
+      if (!rename.ok) throw new Error(boatErrorMessage(rename.status, "naming the cloud computer", rename.body, usesIncludedBoat(cfg)));
       if (createRequest) createRequest = resolveBoatCreate(createRequest);
     }
     const ready = await waitReady(cfg, boat.id);
-    if (!ready) throw new Error("box did not become ready within 90s — retry in a minute");
+    if (!ready) throw new Error("the cloud computer did not become ready within 90s — retry in a minute");
 
-    // Nothing to install: every boat ships its own computer-use driver and
-    // registers it with every harness it runs.
+    // Nothing to install: every sandbox ships its own computer-use driver.
     const joinUrl = await mintDesktopUrl(cfg, boat.id);
-    if (!joinUrl) throw new Error("box desktop link could not be created");
+    if (!joinUrl) throw new Error("the cloud computer's desktop link could not be created");
     return { boxId: boat.id, machineName: vmName, reused: !created, state: ready.state, joinUrl };
   } catch (error) {
     if (!created || !boat?.id) throw error;
     const originalMessage = error instanceof Error ? error.message : String(error);
-    // Capture the provider's current name when possible. Naming may be the
-    // step that failed, so the desired deterministic name is only a fallback
-    // for the durable fence, never proof of a later live identity.
     const inspected = await inspectBoatIdentity(cfg, boat.id);
     if (inspected.available && !inspected.identity) {
       retireDeletedBoatCreate(boat.id);
@@ -1325,14 +1119,14 @@ export async function provisionBoat(cfg: AppConfig, botId: string, _botName: str
       });
     } catch (cleanupError) {
       const cleanupMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-      throw new Error(`${originalMessage}. The new computer's deletion was not confirmed: ${cleanupMessage}. Check box ${boat.id} in boat.dev.`);
+      throw new Error(`${originalMessage}. The new computer's deletion was not confirmed: ${cleanupMessage}. Check sandbox ${boat.id} in boat.dev.`);
     }
     if (cleanupConfirmation === "confirmed") throw error;
     boatIdCache.delete(botId);
     throw Object.assign(
       new Error(
         `${originalMessage}. boat.dev accepted deletion of the new computer, but it is still pending; `
-        + `its recovery record was kept, along with its deletion fence. Check box ${boat.id} in boat.dev.`,
+        + `its recovery record was kept, along with its deletion fence. Check sandbox ${boat.id} in boat.dev.`,
         { cause: error },
       ),
       { status: 503 },
@@ -1340,20 +1134,17 @@ export async function provisionBoat(cfg: AppConfig, botId: string, _botName: str
   }
 }
 
-/** Wake the bot's boat and return a FRESH desktop URL. */
 export async function joinBoat(cfg: AppConfig, botId: string) {
   cfg = snapshotBoatConfig(cfg);
   const boat = await findBoat(cfg, botId);
   if (!boat) throw new Error("no computer yet — provision it first");
   const ready = await waitReady(cfg, boat.id);
-  if (!ready) throw new Error("the box did not wake in time — try again");
-  // Provider archive/resume preserves disk but not processes; the boat brings
-  // its own driver daemon back up, so there is nothing to reattach here.
-  return { joinUrl: await mintDesktopUrl(cfg, boat.id), state: ready.state ?? null };
+  if (!ready) throw new Error("the cloud computer did not wake in time — try again");
+  // Archive/resume keeps disk but not processes; the sandbox restarts its own driver daemon.
+  boatHealth.personUsed(boat.id); return { joinUrl: await mintDesktopUrl(cfg, boat.id), state: ready.state ?? null };
 }
 
-/** Mint a human-control URL without changing provider lifecycle or guest
- * processes. This is the only join path allowed while a bot turn is active. */
+/** The only join path allowed while a bot turn is active: no lifecycle or guest-process change. */
 export async function joinReadyBoat(cfg: AppConfig, botId: string) {
   cfg = snapshotBoatConfig(cfg);
   const boat = await findBoat(cfg, botId);
@@ -1364,10 +1155,9 @@ export async function joinReadyBoat(cfg: AppConfig, botId: string) {
       { status: 409 },
     );
   }
-  return { joinUrl: await mintDesktopUrl(cfg, boat.id), state: boat.state ?? null };
+  boatHealth.personUsed(boat.id); return { joinUrl: await mintDesktopUrl(cfg, boat.id), state: boat.state ?? null };
 }
 
-/** Archive the bot's boat now (billing pauses, disk survives). */
 export async function sleepBoat(cfg: AppConfig, botId: string) {
   cfg = snapshotBoatConfig(cfg);
   const boat = await findBoat(cfg, botId);
@@ -1377,7 +1167,6 @@ export async function sleepBoat(cfg: AppConfig, botId: string) {
   return { ok: true };
 }
 
-/** Owner-scoped shell for the Computer panel's console. */
 export async function execOnBoat(cfg: AppConfig, botId: string, command: string) {
   cfg = snapshotBoatConfig(cfg);
   if (command.length > MAX_REMOTE_COMMAND_LENGTH) {
@@ -1386,40 +1175,23 @@ export async function execOnBoat(cfg: AppConfig, botId: string, command: string)
   const boat = await findBoat(cfg, botId);
   if (!boat) throw new Error("no computer for this bot yet");
   const ready = await waitReady(cfg, boat.id, 60_000);
-  if (!ready) throw new Error("box did not wake");
+  if (!ready) throw new Error("the cloud computer did not wake");
   const out = await runCommand(cfg, boat.id, isolatedRemoteCommand(command));
   return { exitCode: out.exitCode, stdout: out.stdout.slice(-4000), stderr: out.stderr.slice(-2000) };
 }
 
-// Screenshot for the Computer panel + screen-in-chat. Two hops: capture
-// to a file on the boat (scrot straight to JPEG — no ImageMagick startup
-// unless a downscale is actually needed), then read the bytes back.
-// Base64 over command stdout is NOT reliable for the panel's full-size
-// frames (probed 2026-08-12: an otherwise-complete payload came back with
-// a corrupted length), so the frame is always fetched over HTTP here.
-//
-// The frame is for a person: it fills the panel and opens in the chat's
-// image viewer, so it keeps the desktop's native size up to 1080p and a
-// quality where page text stays legible. (Sizing it is now the only say
-// OpenMausBot has over any frame off this box: the turn runs on the boat's
-// own agent, so the model's own captures never pass through here.) Only
-// wider displays are scaled down, with -resize rather than -thumbnail so
-// the resample is not the fast-and-blurry kind meant for icons. The
-// pointer is drawn into the frame (scrot --pointer, ffmpeg -draw_mouse):
-// watching the bot work means seeing where its cursor is, and X11
-// captures leave it out by default.
+// Base64 over command stdout is not reliable for full-size frames (probed 2026-08-12: corrupted length), so frames come over HTTP.
+// X11 captures leave the pointer out by default, hence scrot --pointer and ffmpeg -draw_mouse.
 const PANEL_PATH = "/tmp/ogb-panel.jpg";
 export const PANEL_FRAME_WIDTH = 1920;
 export const PANEL_FRAME_QUALITY = 85;
 // ffmpeg's -q:v runs 2 (best) to 31; 3 lands near JPEG quality 85.
 const PANEL_FRAME_FFMPEG_Q = 3;
 
-/** The shell that captures one panel frame on the boat. Exported for tests. */
 export function panelShotCommand({ width = PANEL_FRAME_WIDTH, quality = PANEL_FRAME_QUALITY, framePath = PANEL_PATH, nativeSize = false } = {}): string {
   return [
     "export DISPLAY=${DISPLAY:-:0}",
     `f=${shellQuote(framePath)}`,
-    // a stale frame must not pass `test -s` when every capture tool fails
     'rm -f "$f"',
     'w=$(xdotool getdisplaygeometry 2>/dev/null | cut -d" " -f1)',
     'case "$w" in ""|*[!0-9]*) w=0;; esac',
@@ -1430,33 +1202,28 @@ export function panelShotCommand({ width = PANEL_FRAME_WIDTH, quality = PANEL_FR
 }
 const SHOT_CMD = panelShotCommand();
 
-// A compromised boat can answer with an arbitrarily large "frame"; cap what
-// the server ever buffers for one (raw bytes, before base64) so a single
-// response cannot exhaust memory.
+// A compromised sandbox can answer with any size; cap what one frame may buffer.
 const MAX_FRAME_BYTES = 8 * 1024 * 1024;
-const FRAME_TOO_LARGE = "the box frame exceeds the 8 MB limit";
+const FRAME_TOO_LARGE = "the cloud computer's frame exceeds the 8 MB limit";
 
-/** Read a file off the boat as base64 — raw artifact bytes when the API
- * supports it (33% less transfer, no JSON envelope), else the files API. */
-async function readFileBase64(cfg: AppConfig, boxId: string, path: string, signal?: AbortSignal): Promise<string | null> {
+export async function readFileBase64(cfg: AppConfig, boxId: string, path: string, signal?: AbortSignal): Promise<string | null> {
   let bytes: Buffer | null = null;
   let tooLarge = false;
   try {
-    const res = await boatFetch(cfg, `/boxes/${boxId}/artifacts?path=${encodeURIComponent(path)}`, { signal });
+    const res = await boatFetch(cfg, `/sandboxes/${boxId}/artifacts?path=${encodeURIComponent(path)}`, { signal });
     if (res.ok) {
       const declaredLength = res.headers.get("content-length");
       if (declaredLength !== null && Number(declaredLength) > MAX_FRAME_BYTES) tooLarge = true;
       else bytes = Buffer.from(await res.arrayBuffer());
     }
   } catch {
-    /* fall through */
   }
   if (tooLarge || (bytes !== null && bytes.length > MAX_FRAME_BYTES)) {
     throw new Error(FRAME_TOO_LARGE);
   }
   if (bytes?.length) return bytes.toString("base64");
   signal?.throwIfAborted();
-  const { ok, body } = await boatJson(cfg, `/boxes/${boxId}/files?path=${encodeURIComponent(path)}&encoding=base64`, { signal });
+  const { ok, body } = await boatJson(cfg, `/sandboxes/${boxId}/files?path=${encodeURIComponent(path)}&encoding=base64`, { signal });
   const content = body?.content;
   if (ok && typeof content === "string" && content) {
     if (Buffer.byteLength(content, "base64") > MAX_FRAME_BYTES) throw new Error(FRAME_TOO_LARGE);
@@ -1465,24 +1232,22 @@ async function readFileBase64(cfg: AppConfig, boxId: string, path: string, signa
   return null;
 }
 
-/** `knownBoatId` skips boat resolution entirely — the screen poller holds
- * the id for the whole turn and must not re-resolve it every frame. */
 export async function screenshotBoat(cfg: AppConfig, botId: string, knownBoatId?: string, options?: { signal?: AbortSignal; nativeSize?: boolean }) {
   cfg = snapshotBoatConfig(cfg);
   let boxId = knownBoatId;
   if (!boxId) {
     const boat = await findBoat(cfg, botId);
     if (!boat) throw new Error("no computer for this bot yet");
-    if (!READY.has(boat.state)) throw new Error(`box is ${boat.state}`);
+    if (!READY.has(boat.state)) throw new Error(`the cloud computer is ${boat.state}`);
     boxId = boat.id as string;
   }
   const framePath = options?.nativeSize ? PANEL_PATH + ".model.jpg" : PANEL_PATH;
   const out = await runCommand(cfg, boxId, options?.nativeSize ? panelShotCommand({ framePath, nativeSize: true }) : SHOT_CMD,
     { timeoutMs: 60_000, signal: options?.signal });
   if (!/captured/.test(out.stdout)) {
-    throw new Error(out.stderr.slice(0, 200) || "screen capture failed on the box");
+    throw new Error(out.unanswered ? CLOUD_COMPUTER_NO_ANSWER : out.stderr.slice(0, 200) || "screen capture failed on the cloud computer");
   }
   const data = await readFileBase64(cfg, boxId, framePath, options?.signal);
-  if (!data) throw new Error("could not read the frame back from the box");
+  if (!data) throw new Error("could not read the frame back from the cloud computer");
   return { png: data, format: "jpeg" };
 }

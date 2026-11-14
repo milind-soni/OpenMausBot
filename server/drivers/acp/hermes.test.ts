@@ -1,7 +1,9 @@
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { resetPathCache } from "../../env-path.ts";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
 import {
@@ -14,6 +16,7 @@ import {
   fetchHermesAcpModels,
   hermesAcpModelId,
   hermesConfiguredModel,
+  resolveHermesModels,
 } from "./hermes.ts";
 
 describe("Hermes OpenMaus screenshot compatibility binding", () => {
@@ -66,7 +69,7 @@ describe("hermesConfiguredModel", () => {
     expect(hermesConfiguredModel(env)).toEqual({
       id: HERMES_CONFIG_MODEL_ID,
       label: "anthropic/claude-opus-4.6 (Hermes config)",
-      // ModelPicker shows a custom-only agent ONLY its custom-flagged options.
+      // A custom-only agent's picker shows only custom-flagged options.
       custom: true,
     });
   });
@@ -84,15 +87,12 @@ describe("hermesConfiguredModel", () => {
   );
 
   it("treats a commented-out key with no config.yaml as not configured", () => {
-    // The shipped .env carries `# OPENROUTER_API_KEY=`; without config.yaml
-    // there's no evidence of a working provider, so it must not read as configured.
+    // The shipped .env carries `# OPENROUTER_API_KEY=`; without config.yaml nothing proves a working provider.
     const env = home("# OPENROUTER_API_KEY=\n");
     expect(hermesConfiguredModel(env)).toBeNull();
   });
 
   it("treats a commented-out key with config.yaml as configured (Nous Portal)", () => {
-    // A Nous Portal user has OAuth tokens, not an OpenRouter API key.
-    // config.yaml existing is sufficient evidence of a working provider.
     const env = home("# OPENROUTER_API_KEY=\n", "model:\n  default: z-ai/glm-5.2\n");
     expect(hermesConfiguredModel(env)).toEqual({
       id: HERMES_CONFIG_MODEL_ID,
@@ -118,9 +118,6 @@ describe("hermesConfiguredModel", () => {
   });
 
   it("offers the configured model when only config.yaml exists (Nous Portal OAuth)", () => {
-    // A Nous Portal user logs in via OAuth — no API key in .env, but
-    // config.yaml exists with a default model. This is the most common
-    // setup for `hermes setup` / `hermes login` users.
     const root = mkdtempSync(join(tmpdir(), "omb-hermes-nous-"));
     dirs.push(root);
     const h = join(root, ".hermes");
@@ -193,15 +190,12 @@ describe("hermesConfiguredModel", () => {
   });
 
   it("does not map to an ACP model id, so no session/set_model is sent for it", () => {
-    // This is what makes Hermes fall through to its own configured provider.
     expect(hermesAcpModelId(HERMES_CONFIG_MODEL_ID)).toBeNull();
   });
 });
 
 describe("hermesAcpModelId", () => {
   it("forwards Hermes' own provider-scoped ids untouched", () => {
-    // These are what `session/new` advertises. Returning null for them is what
-    // confined the picker to locally injected hosts.
     expect(hermesAcpModelId("openrouter:qwen/qwen3.8-max")).toBe("openrouter:qwen/qwen3.8-max");
     expect(hermesAcpModelId("openrouter:deepseek/deepseek-v4-flash")).toBe(
       "openrouter:deepseek/deepseek-v4-flash",
@@ -227,9 +221,7 @@ describe("fetchHermesAcpModels probe deadline", () => {
     for (const d of dirs.splice(0)) await removeTempDir(d);
   });
 
-  // Minimal ACP CLI: answers initialize at once, then session/new after
-  // FAKE_SESSION_DELAY_MS with a two-model catalog. Plain JS in a .ts file so
-  // the node shebang runs it on every supported runtime.
+  // Minimal ACP CLI: initialize at once, session/new after FAKE_SESSION_DELAY_MS with a two-model catalog.
   const FAKE_CLI_SOURCE = `#!/usr/bin/env node
 let buf = "";
 const delay = Number(process.env.FAKE_SESSION_DELAY_MS || "0");
@@ -262,13 +254,12 @@ process.stdin.on("data", (chunk) => {
     { id: "openrouter:beta", label: "openrouter:beta", custom: true },
   ];
 
-  function fakeCli(env: Record<string, string>): { cli: string; env: Record<string, string> } {
+  function fakeCli(env: Record<string, string>, source = FAKE_CLI_SOURCE, name = "fake-hermes.ts"): { cli: string; env: Record<string, string> } {
     const home = mkdtempSync(join(tmpdir(), "omb-hermes-probe-"));
     dirs.push(home);
-    const cli = join(home, "fake-hermes.ts");
-    writeFileSync(cli, FAKE_CLI_SOURCE, { mode: 0o755 });
-    // The spawn gets exactly this env, so PATH has to survive for the
-    // script's /usr/bin/env node shebang to resolve.
+    const cli = join(home, name);
+    writeFileSync(cli, source, { mode: 0o755 });
+    // The spawn gets exactly this env, so PATH must survive for the `/usr/bin/env node` shebang.
     return { cli, env: { PATH: process.env.PATH ?? "", ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), HOME: home, USERPROFILE: home, ...env } };
   }
 
@@ -305,8 +296,182 @@ process.stdin.on("data", (chunk) => {
   it.each(["not-a-number", "0", "-1", "0.5", "Infinity", "2147483648"])("ignores invalid timeout %s and falls back to the 15s default", async (timeout) => {
     expect(HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS).toBe(15_000);
     const { cli, env } = fakeCli({ FAKE_SESSION_DELAY_MS: "150", [HERMES_ACP_MODELS_TIMEOUT_ENV]: timeout });
-    // Resolving at all before any realistic default proves the override was
-    // rejected; a 0/NaN deadline would have returned [] immediately.
+    // Resolving at all before a realistic default proves the override was rejected.
     await expect(fetchHermesAcpModels(cli, env)).resolves.toEqual(CATALOG);
+  });
+
+  // Answers initialize, closes its stdin, and stays alive: a child that exits makes Node destroy the
+  // parent's stdin socket, but with fd 0 closed and the child alive a write reports EPIPE and emits 'error'.
+  const CLOSES_STDIN_AND_LIVES = `#!/usr/bin/env node
+import { closeSync } from "node:fs";
+let buf = "";
+process.stdin.on("data", (chunk) => {
+  buf += String(chunk);
+  let nl;
+  while ((nl = buf.indexOf("\\n")) >= 0) {
+    const line = buf.slice(0, nl);
+    buf = buf.slice(nl + 1);
+    let msg;
+    try { msg = JSON.parse(line); } catch { continue; }
+    if (msg.method === "initialize") {
+      closeSync(0);
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: 1 } }) + "\\n");
+      // Outlive the probe's deadline: exiting would destroy the socket and
+      // hide the very write this reproduces.
+      setTimeout(() => process.exit(0), 5_000);
+    }
+  }
+});
+`;
+
+  it("resolves [] instead of crashing when the CLI closes its stdin mid-handshake", async () => {
+    const { cli, env } = fakeCli({ [HERMES_ACP_MODELS_TIMEOUT_ENV]: "2000" }, CLOSES_STDIN_AND_LIVES, "fake-hermes.mjs");
+    await expect(fetchHermesAcpModels(cli, env)).resolves.toEqual([]);
+    // An EPIPE emitted a tick after settling is still an uncaught exception: wait until it would fire.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  });
+});
+
+describe("resolveHermesModels when Hermes has no model to list", () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    for (const d of dirs.splice(0)) await removeTempDir(d);
+  });
+
+  const DEFAULT = { id: HERMES_CONFIG_MODEL_ID, label: "Hermes default (config)", custom: true };
+
+  // A Hermes home plus a stand-in `hermes` that never answers, so a catalog probe ends at its deadline.
+  function setup(dotenv: string, configYaml?: string): { cli: string; missing: string; env: Record<string, string> } {
+    const root = mkdtempSync(join(tmpdir(), "omb-hermes-models-"));
+    dirs.push(root);
+    const home = join(root, ".hermes");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, ".env"), dotenv);
+    if (configYaml !== undefined) writeFileSync(join(home, "config.yaml"), configYaml);
+    const cli = join(root, "fake-hermes.ts");
+    writeFileSync(cli, "#!/usr/bin/env node\nprocess.stdin.resume();\n", { mode: 0o755 });
+    return {
+      cli,
+      missing: join(root, "not-installed", "hermes"),
+      env: {
+        PATH: process.env.PATH ?? "", ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+        HOME: root, USERPROFILE: root, HERMES_HOME: home, [HERMES_ACP_MODELS_TIMEOUT_ENV]: "300",
+      },
+    };
+  }
+
+  it("offers Hermes' own default when config.yaml uses a custom endpoint and nothing local answers", async () => {
+    const { cli, env } = setup("", "model:\n  provider: custom\n  default: gpt-6.1-sol\n  base_url: http://127.0.0.1:9/v1\n");
+    await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+  });
+
+  it("offers Hermes' own default when there is no config.yaml and no key (Hermes set up elsewhere, e.g. WSL)", async () => {
+    const { cli, env } = setup("");
+    await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+  });
+
+  it("offers nothing when Hermes is not installed", async () => {
+    const { missing, env } = setup("");
+    await expect(resolveHermesModels(env, { cli: missing })).resolves.toEqual({ default: "", options: [] });
+  });
+
+  it("offers nothing when the Hermes path is a directory or can't run", async () => {
+    const { cli, env } = setup("");
+    await expect(resolveHermesModels(env, { cli: dirname(cli) })).resolves.toEqual({ default: "", options: [] });
+    if (process.platform === "win32") return;
+    const plain = join(dirname(cli), "plain-hermes");
+    writeFileSync(plain, "", { mode: 0o644 });
+    await expect(resolveHermesModels(env, { cli: plain })).resolves.toEqual({ default: "", options: [] });
+  });
+
+  it("answers empty for an Ollama or LM Studio setup whose server is down, so earlier models stay", async () => {
+    for (const provider of ["ollama", "lmstudio"]) {
+      const { cli, env } = setup("", `model:\n  provider: ${provider}\n  default: llama3\n`);
+      await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: "", options: [] });
+    }
+  });
+
+  it("offers the default for an Ollama base_url the local probe never checks (another host or port)", async () => {
+    for (const baseUrl of ["http://192.168.1.20:11434/v1", "http://127.0.0.1:11500/v1"]) {
+      const { cli, env } = setup("", `model:\n  provider: ollama\n  default: llama3\n  base_url: ${baseUrl}\n`);
+      await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+    }
+    const { cli, env } = setup("", "model:\n  provider: lmstudio\n  default: qwen\nproviders:\n  lmstudio:\n    base_url: http://localhost:1234/v1\n");
+    await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: "", options: [] });
+  });
+
+  it("finds Hermes behind a wrapper command, as it is launched", async () => {
+    const { cli, env } = setup("");
+    await expect(resolveHermesModels(env, { cli: `${cli} hermes` })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+  });
+
+  it("finds a Windows Hermes path given without its .exe, as it is launched", async () => {
+    const { cli, env } = setup("");
+    const bare = join(dirname(cli), "hermes");
+    writeFileSync(`${bare}.EXE`, "#!/usr/bin/env node\nprocess.stdin.resume();\n", { mode: 0o755 });
+    const platform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    vi.stubEnv("PATHEXT", ".EXE");
+    try {
+      await expect(resolveHermesModels(env, { cli: bare })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+    } finally {
+      Object.defineProperty(process, "platform", { value: platform });
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("offers the default for an https endpoint on the probe's port, which the http probe can't list", async () => {
+    const { cli, env } = setup("", "model:\n  provider: ollama\n  default: llama3\n  base_url: https://localhost:11434/v1\n");
+    await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+  });
+
+  it("offers the default for an Ollama on IPv6 loopback, which the 127.0.0.1 probe can't reach", async () => {
+    const { cli, env } = setup("", "model:\n  provider: ollama\n  default: llama3\n  base_url: http://[::1]:11434/v1\n");
+    await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+  });
+
+  it("does not offer the default for a Windows .cmd shim that can't launch without a shell", async () => {
+    const { cli, env } = setup("");
+    const bare = join(dirname(cli), "hermes");
+    writeFileSync(`${bare}.CMD`, "@echo off\r\nsomething-unknown %*\r\n");
+    const platform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    vi.stubEnv("PATHEXT", ".CMD");
+    try {
+      await expect(resolveHermesModels(env, { cli: bare })).resolves.toEqual({ default: "", options: [] });
+    } finally {
+      Object.defineProperty(process, "platform", { value: platform });
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("looks past a PATH entry that can't run to a later runnable hermes", async () => {
+    const { cli, env } = setup("");
+    const blocked = join(dirname(cli), "blocked");
+    const runnable = join(dirname(cli), "runnable");
+    mkdirSync(blocked);
+    mkdirSync(runnable);
+    writeFileSync(join(blocked, "hermes"), "", { mode: 0o644 });
+    writeFileSync(join(runnable, "hermes"), "#!/bin/sh\n", { mode: 0o755 });
+    vi.stubEnv("PATH", [blocked, runnable].join(delimiter));
+    resetPathCache();
+    try {
+      await expect(resolveHermesModels(env, { cli: "hermes" })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+    } finally {
+      vi.unstubAllEnvs();
+      resetPathCache();
+    }
+  });
+
+  it("keeps today's list when a hosted provider is configured", async () => {
+    const { cli, env } = setup("OPENROUTER_API_KEY=sk-or-v1-test\n", "model:\n  default: anthropic/claude-opus-4.6\n");
+    await expect(resolveHermesModels(env, { cli })).resolves.toEqual({
+      default: HERMES_CONFIG_MODEL_ID,
+      options: [{ id: HERMES_CONFIG_MODEL_ID, label: "anthropic/claude-opus-4.6 (Hermes config)", custom: true }],
+    });
+  });
+
+  it("starts Hermes without choosing a model for the default entry", () => {
+    expect(hermesAcpModelId(HERMES_CONFIG_MODEL_ID)).toBeNull();
   });
 });

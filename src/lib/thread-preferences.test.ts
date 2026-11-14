@@ -49,14 +49,14 @@ afterEach(() => {
 describe("local thread visibility", () => {
   it("defaults on and ignores malformed values without writing anything", async () => {
     const preference = await import("./thread-preferences");
-    expect(preference.useShowThreads()).toBe(true);
+    expect(preference.useShowThreadsChoice()).toBe(true);
     expect(hook.serverSnapshot!()).toBe(true);
     for (const value of ["", "false", "broken", "1"]) {
       local.setItem(preference.SHOW_THREADS_KEY, value);
-      expect(preference.useShowThreads()).toBe(true);
+      expect(preference.useShowThreadsChoice()).toBe(true);
     }
     local.setItem.mockClear();
-    preference.useShowThreads();
+    preference.useShowThreadsChoice();
     expect(local.setItem).not.toHaveBeenCalled();
   });
 
@@ -64,21 +64,21 @@ describe("local thread visibility", () => {
     let preference = await import("./thread-preferences");
     preference.setShowThreads(false);
     expect(local.getItem(preference.SHOW_THREADS_KEY)).toBe("0");
-    expect(preference.useShowThreads()).toBe(false);
+    expect(preference.useShowThreadsChoice()).toBe(false);
 
     vi.resetModules();
     preference = await import("./thread-preferences");
-    expect(preference.useShowThreads()).toBe(false);
+    expect(preference.useShowThreadsChoice()).toBe(false);
     preference.setShowThreads(true);
     expect(local.getItem(preference.SHOW_THREADS_KEY)).toBe("1");
     vi.resetModules();
     preference = await import("./thread-preferences");
-    expect(preference.useShowThreads()).toBe(true);
+    expect(preference.useShowThreadsChoice()).toBe(true);
   });
 
   it("notifies mounted consumers immediately and unsubscribes cleanly", async () => {
     const preference = await import("./thread-preferences");
-    preference.useShowThreads();
+    preference.useShowThreadsChoice();
     const first = vi.fn();
     const second = vi.fn();
     const unsubscribeFirst = hook.subscribe!(first);
@@ -99,7 +99,7 @@ describe("local thread visibility", () => {
 
   it("follows cross-window changes and clear, ignoring other storage", async () => {
     const preference = await import("./thread-preferences");
-    preference.useShowThreads();
+    preference.useShowThreadsChoice();
     const listener = vi.fn();
     const unsubscribe = hook.subscribe!(listener);
     local.setItem(preference.SHOW_THREADS_KEY, "0");
@@ -130,10 +130,36 @@ describe("local thread visibility", () => {
       if (failure === "read") local.getItem.mockImplementation(() => { throw new Error("blocked"); });
     }
     const preference = await import("./thread-preferences");
-    expect(preference.useShowThreads()).toBe(true);
+    expect(preference.useShowThreadsChoice()).toBe(true);
     preference.setShowThreads(false);
-    expect(preference.useShowThreads()).toBe(false);
+    expect(preference.useShowThreadsChoice()).toBe(false);
     preference.setShowThreads(true);
-    expect(preference.useShowThreads()).toBe(true);
+    expect(preference.useShowThreadsChoice()).toBe(true);
+  });
+});
+
+describe("threads in Simple mode", () => {
+  it.each([
+    [true, true, true],
+    [true, false, false],
+    [false, true, false],
+    [false, false, false],
+  ])("shows threads only when chosen and in Advanced mode (chosen %s, advanced %s → %s)", async (chosen, advanced, shown) => {
+    vi.doMock("./interface-mode", () => ({ useAdvancedMode: () => advanced }));
+    const preference = await import("./thread-preferences");
+    local.setItem(preference.SHOW_THREADS_KEY, chosen ? "1" : "0");
+    expect(preference.useShowThreads()).toBe(shown);
+    vi.doUnmock("./interface-mode");
+  });
+
+  it("leaves the stored choice alone, so Advanced mode gets the person's threads back", async () => {
+    vi.doMock("./interface-mode", () => ({ useAdvancedMode: () => false }));
+    const preference = await import("./thread-preferences");
+    local.setItem(preference.SHOW_THREADS_KEY, "1");
+    local.setItem.mockClear();
+    expect(preference.useShowThreads()).toBe(false);
+    expect(preference.useShowThreadsChoice()).toBe(true);
+    expect(local.setItem).not.toHaveBeenCalled();
+    vi.doUnmock("./interface-mode");
   });
 });

@@ -1,5 +1,4 @@
-// xAI API driver. Grok uses the OpenAI chat-completions wire contract and
-// adds the shared transient-failure retry policy.
+// xAI API driver over the OpenAI chat-completions contract, with the shared retry policy.
 import type { ProviderDriver } from "../contracts.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 
@@ -50,14 +49,14 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
       models: () => MODELS,
       requestBody: (model, messages, stream) => ({ model, messages, stream }),
       httpErrorLabel: "xAI",
-      missingKeyError: `no xAI key — set ${config.apiKeyEnv} or config.json xai.key`,
-      unavailableReason: `no xAI API key — add {"xai":{"key":"xai-…"}} to ~/.openmausbot/config.json or set ${config.apiKeyEnv}`,
+      missingKeyError: `Save an xAI API key in Settings → API keys, or set ${config.apiKeyEnv}.`,
+      unavailableReason: "No xAI API key — open Settings → API keys.",
       timeoutMs: 120_000,
       retryScale: Number(process.env.FAKE_GROK_RETRY_SCALE ?? "1"),
       generateModel: () => "grok-3-mini",
       nativeLog: {
         source: "xai.chat.completions",
-        outgoing: (_turn, messages, model) => ({ model, messages }),
+        outgoing: (_turn, messages, model) => ({ model, messageCount: messages.length }),
         incoming: ({ text, usage }) => ({ text, usage }),
       },
     });

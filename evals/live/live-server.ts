@@ -8,12 +8,10 @@ import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
 import { freePortBlock } from "../../server/testing/ports.ts";
 import type { LiveInstance } from "./types.ts";
 
-/** Boots the REAL harness server for the live tier: no fake engine, no
- * scripted room plan. The one engine instance comes from the developer's
- * opt-in configuration and lands in the data dir's config.json exactly the
- * way a user-configured instance would, so live smoke runs exercise the
- * product's real model path. Everything else stays hermetic: owned temp
- * data dir, loopback ports, only explicitly allowlisted environment. */
+/** Boots the REAL harness server for the live tier: no fake engine. The one
+ * engine instance comes from the developer's opt-in configuration and lands in
+ * config.json as a user-configured instance would. Everything else stays
+ * hermetic: owned temp data dir, loopback ports, allowlisted environment. */
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -82,7 +80,6 @@ export async function spawnLiveServer(
       const body = response.ok ? await response.json() as { app?: string } : null;
       if (body?.app === "openmausbot") break;
     } catch {
-      // still starting
     }
     if (Date.now() >= deadline) {
       await waitForExit(child, { signal: "SIGTERM" });

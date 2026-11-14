@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BACKOFF_BASE_MS, RETRY_MAX_ATTEMPTS, classifyError, computeBackoff } from "./retry.ts";
+import { BACKOFF_BASE_MS, RETRY_MAX_ATTEMPTS, classifyError, computeBackoff, mayResendTurn } from "./retry.ts";
 
 describe("classifyError", () => {
   it("does not retry a provider safety block even inside a 503 or rate-limit error", () => {
@@ -35,6 +35,36 @@ describe("classifyError", () => {
       transient: true,
       reason: "overloaded",
     });
+  });
+
+  it.each([
+    [429, "rate_limited"],
+    [500, "server_error"],
+    [502, "server_error"],
+    [503, "server_error"],
+    [504, "server_error"],
+  ])("retries unexpected status %s from both streamed errors and CLI exits", (status, reason) => {
+    const text = `unexpected status ${status}`;
+    expect(classifyError(new Error(text))).toEqual({ transient: true, reason });
+    expect(classifyError({ text })).toEqual({ transient: true, reason });
+    expect(classifyError({ exitCode: 1, stderr: text })).toEqual({ transient: true, reason });
+  });
+
+  it.each([
+    [400, "invalid_request"],
+    [401, "auth"],
+    [403, "auth"],
+    [404, "not_found"],
+    [422, "invalid_request"],
+  ])("keeps unexpected status %s terminal", (status, reason) => {
+    expect(classifyError({ text: `unexpected status ${status}` })).toEqual({ transient: false, reason });
+  });
+
+  it("calls Codex's failed workspace routing discovery transient, but not a refused sign-in", () => {
+    expect(classifyError({ text: "stream error: workspace routing discovery failed: error sending request" })).toEqual({ transient: true, reason: "server_error" });
+    expect(classifyError(new Error("workspace routing discovery timed out"))).toEqual({ transient: true, reason: "server_error" });
+    expect(classifyError({ exitCode: 1, stderr: "Error: workspace routing discovery failed" })).toEqual({ transient: true, reason: "server_error" });
+    expect(classifyError({ text: "workspace routing discovery unauthorized (401)" })).toEqual({ transient: false, reason: "auth" });
   });
 
   it("calls connection failures and timeouts transient", () => {
@@ -74,7 +104,6 @@ describe("classifyError", () => {
   });
 
   it("prefers the transient reading when stderr carries both shapes", () => {
-    // a crash whose stderr mentions throttling is worth one more try
     expect(classifyError({ exitCode: 1, stderr: "error: 429 too many requests" })).toEqual({
       transient: true,
       reason: "rate_limited",
@@ -84,6 +113,26 @@ describe("classifyError", () => {
   it("classifies unrecognizable input as terminal", () => {
     expect(classifyError(null)).toEqual({ transient: false, reason: "unknown" });
     expect(classifyError(new Error(""))).toEqual({ transient: false, reason: "unknown" });
+  });
+});
+
+describe("mayResendTurn", () => {
+  const failed = { endedBeforeTurn: false, exitCode: 5, transient: true, streamed: false, answered: false, attempt: 0 };
+
+  it("resends a launch that never took the prompt, and a transient failure before anything answered", () => {
+    expect(mayResendTurn({ ...failed, endedBeforeTurn: true, answered: true, transient: false })).toBe(true);
+    expect(mayResendTurn(failed)).toBe(true);
+  });
+
+  it("never resends once a model call answered or text streamed", () => {
+    expect(mayResendTurn({ ...failed, answered: true })).toBe(false);
+    expect(mayResendTurn({ ...failed, streamed: true })).toBe(false);
+  });
+
+  it("never resends a clean exit, a terminal failure, or past the attempt cap", () => {
+    expect(mayResendTurn({ ...failed, exitCode: 0 })).toBe(false);
+    expect(mayResendTurn({ ...failed, transient: false })).toBe(false);
+    expect(mayResendTurn({ ...failed, attempt: RETRY_MAX_ATTEMPTS - 1 })).toBe(false);
   });
 });
 
@@ -103,6 +152,40 @@ describe("computeBackoff", () => {
       const base = BACKOFF_BASE_MS[Math.min(attempt, BACKOFF_BASE_MS.length - 1)];
       expect(low).toBeGreaterThanOrEqual(base * 0.75);
       expect(high).toBeLessThanOrEqual(base * 1.25 + 1);
+    }
+  });
+});
+
+describe("classifyError — usage limits", () => {
+  it("keeps a generic short-lived 429 transient in both transport shapes", () => {
+    const text = "HTTP 429: rate limit reached; retry after 1s";
+    expect(classifyError({ text })).toEqual({ transient: true, reason: "rate_limited" });
+    expect(classifyError({ exitCode: 1, stderr: text })).toEqual({ transient: true, reason: "rate_limited" });
+    expect(classifyError({ exitCode: 1, stderr: "API Error: 429 Rate limit reached: weekly limit reached" })).toEqual({ transient: false, reason: "quota" });
+  });
+  it("calls a subscription usage limit a quota problem, not a retry", () => {
+    for (const text of [
+      "You've hit your usage limit for this session. Try again at 7pm.",
+      "Usage limit reached for Claude Max",
+      "Rate limit reached: weekly limit reached",
+      "You are out of credits",
+      // Claude Code 2.1.295 names what ran out; the first matched no pattern
+      "You've hit your weekly limit \u00b7 resets Oct 12 at 2:30pm (Asia/Calcutta)",
+      "You've hit your session limit \u00b7 resets 3pm",
+      "You've hit your Opus limit",
+      "You've hit your org's monthly spend limit.",
+      "You've hit your team's shared budget. /model to switch models.",
+      "You're out of usage credits. Contact your admin to add more.",
+      "You're out of extra usage",
+    ]) {
+      expect(classifyError({ text }), text).toEqual({ transient: false, reason: "quota" });
+      expect(classifyError({ exitCode: 1, stderr: text }), text).toEqual({ transient: false, reason: "quota" });
+    }
+  });
+
+  it("keeps a per-minute rate limit transient, however it is worded", () => {
+    for (const text of ["You've hit your rate limit, retry in 5s", "You hit your API rate limit"]) {
+      expect(classifyError({ text }), text).toEqual({ transient: true, reason: "rate_limited" });
     }
   });
 });

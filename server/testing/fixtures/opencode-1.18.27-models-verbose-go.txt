@@ -1,0 +1,273 @@
+opencode-go/glm-5.3
+{
+  "id": "glm-5.3",
+  "providerID": "opencode-go",
+  "name": "GLM-5.3",
+  "family": "glm",
+  "api": {
+    "id": "glm-5.3",
+    "url": "https://opencode.ai/inference/go/openai/v1",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 1.4,
+    "output": 4.4,
+    "cache": {
+      "read": 0.26,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 131072
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-08-14",
+  "variants": {
+    "low": {
+      "reasoningEffort": "low"
+    },
+    "high": {
+      "reasoningEffort": "high"
+    },
+    "max": {
+      "reasoningEffort": "max"
+    }
+  }
+}
+opencode-go/minimax-m3
+{
+  "id": "minimax-m3",
+  "providerID": "opencode-go",
+  "name": "MiniMax-M3",
+  "family": "minimax-m3",
+  "api": {
+    "id": "minimax-m3",
+    "url": "https://opencode.ai/inference/go/anthropic/v1",
+    "npm": "@ai-sdk/anthropic"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0.3,
+    "output": 1.2,
+    "cache": {
+      "read": 0.06,
+      "write": 0
+    },
+    "tiers": [
+      {
+        "input": 0.6,
+        "output": 2.4,
+        "cache": {
+          "read": 0.12,
+          "write": 0
+        },
+        "tier": {
+          "type": "context",
+          "size": 512000
+        }
+      }
+    ],
+    "experimentalOver200K": {
+      "cache": {
+        "read": 0.12,
+        "write": 0
+      },
+      "input": 0.6,
+      "output": 2.4
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 131072
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": true,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-06-01",
+  "variants": {
+    "none": {
+      "thinking": {
+        "type": "disabled"
+      }
+    },
+    "thinking": {
+      "thinking": {
+        "type": "adaptive"
+      }
+    }
+  }
+}
+opencode-go/minimax-m3.1-flash
+{
+  "id": "minimax-m3.1-flash",
+  "providerID": "opencode-go",
+  "name": "MiniMax M3.1 Flash",
+  "family": "minimax",
+  "api": {
+    "id": "minimax-m3.1-flash",
+    "url": "https://opencode.ai/inference/go/openai/v1",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0.15,
+    "output": 0.6,
+    "cache": {
+      "read": 0.015,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 512000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": true,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-10-19",
+  "variants": {
+    "low": {
+      "reasoningEffort": "low"
+    },
+    "medium": {
+      "reasoningEffort": "medium"
+    },
+    "high": {
+      "reasoningEffort": "high"
+    },
+    "xhigh": {
+      "reasoningEffort": "xhigh"
+    },
+    "max": {
+      "reasoningEffort": "max"
+    }
+  }
+}
+opencode-go/qwen3.8-flash
+{
+  "id": "qwen3.8-flash",
+  "providerID": "opencode-go",
+  "name": "Qwen3.8 Flash",
+  "family": "qwen",
+  "api": {
+    "id": "qwen3.8-flash",
+    "url": "https://opencode.ai/inference/go/anthropic/v1",
+    "npm": "@ai-sdk/anthropic"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0.15,
+    "output": 0.47,
+    "cache": {
+      "read": 0.016,
+      "write": 0.2
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 131072
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": true,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-08-26",
+  "variants": {
+    "low": {
+      "effort": "low"
+    },
+    "medium": {
+      "effort": "medium"
+    },
+    "xhigh": {
+      "effort": "xhigh"
+    }
+  }
+}

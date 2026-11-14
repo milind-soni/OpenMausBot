@@ -1,19 +1,10 @@
-// Who each thread is for, when a signed-in person can be named: the person
-// who opened it from a session, or — for a thread a bot opened while working
-// on someone's request — the person that request came from. One small
-// server-private file (<data>/thread-starters.json, 0600), never sent to a
-// client and never part of a bot or room record, so no wire projection can
-// leak it. It decides one thing only: on a workspace several people share,
-// whose session may answer the cards raised in that thread
-// (server/index.ts cardAnswerRefusal). A thread with no entry names nobody,
-// and then anyone who may chat may answer, as before.
+// Who each thread is for (server-private, 0600, never on the wire): decides whose session may answer its cards on a shared workspace.
 import { readFileSync } from "node:fs";
 
 import { writeFileAtomic } from "./atomic.ts";
 
 const KEY = /^p_[\w-]{22}$/;
 const THREAD = /^[\w-]{1,128}$/;
-/** Oldest entries go first past this; a thread that old has long settled. */
 const MAX_ENTRIES = 50_000;
 
 export class ThreadStarters {
@@ -26,7 +17,7 @@ export class ThreadStarters {
     try {
       raw = JSON.parse(readFileSync(file, "utf8"));
     } catch {
-      return; // absent or unreadable: nobody is named, which is today's behaviour
+      return;
     }
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
     for (const [threadId, person] of Object.entries(raw)) {
@@ -38,6 +29,39 @@ export class ThreadStarters {
     return this.starters.get(threadId);
   }
 
+  threadsOf(person: string, limit: number): string[] {
+    const threads: string[] = [];
+    for (const [threadId, starter] of [...this.starters].reverse()) {
+      if (starter !== person) continue;
+      threads.push(threadId);
+      if (threads.length >= limit) break;
+    }
+    return threads;
+  }
+
+  people(): Set<string> {
+    return new Set(this.starters.values());
+  }
+
+  reassign(move: (person: string) => boolean, to: string): string[] {
+    if (!KEY.test(to)) return [];
+    const moved: string[] = [];
+    for (const [threadId, person] of this.starters) {
+      if (person === to || !move(person)) continue;
+      this.starters.set(threadId, to);
+      moved.push(threadId);
+    }
+    if (moved.length) writeFileAtomic(this.file, JSON.stringify(Object.fromEntries(this.starters)) + "\n", { mode: 0o600 });
+    return moved;
+  }
+
+  /** A conversation whose person left the team, handed to the one it was shared with. */
+  handTo(threadId: string, person: string): void {
+    if (!KEY.test(person) || !this.starters.has(threadId)) return;
+    this.starters.set(threadId, person);
+    writeFileAtomic(this.file, JSON.stringify(Object.fromEntries(this.starters)) + "\n", { mode: 0o600 });
+  }
+
   /** Record once; a thread keeps the person it was first opened for. */
   set(threadId: string, person: string | undefined): void {
     if (!person || !KEY.test(person) || !THREAD.test(threadId) || this.starters.has(threadId)) return;
@@ -46,7 +70,6 @@ export class ThreadStarters {
     try {
       writeFileAtomic(this.file, JSON.stringify(Object.fromEntries(this.starters)) + "\n", { mode: 0o600 });
     } catch (error) {
-      // Kept in memory for this run; after a restart the thread names nobody.
       console.warn(`thread starters: could not save ${this.file}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }

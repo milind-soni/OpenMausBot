@@ -5,6 +5,8 @@
  * can see progress, results, and where to review an approval without hunting
  * through the routines calendar.
  */
+import type { RoutineRunTrigger } from "./routines.ts";
+
 export interface RoutineRunCardData {
   runId: string;
   routineId: string;
@@ -19,4 +21,29 @@ export interface RoutineRunCardData {
   executionThreadId?: string;
   summary?: string;
   error?: string;
+}
+
+/** A bot line one automation run wrote into the chat it reports to: the run's
+ * result, a copy of a card the run waits on (answering it there answers the
+ * run), or why the run failed. The run works in its own hidden conversation,
+ * `executionThreadId`, which keeps its full transcript. */
+export interface AutomationLine {
+  routineId: string;
+  runId: string;
+  name: string;
+  /** What started the run; "app" is a connected-app event, "wait" a wait's follow-up. A Bot API call starts a turn,
+   * never a run, so "api" is never seen here. */
+  trigger: RoutineRunTrigger | "app" | "wait";
+  executionThreadId: string;
+  scheduledFor: number;
+  /** The run needs the person: it asked them something or cannot go on without them. */
+  needsYou?: true;
+  failed?: true;
+  /** With `failed`: the run's reply came back; only a step it ran failed or wasn't allowed. */
+  partial?: true;
+  /** A run that had nothing new, posted only because this automation's line before it in the chat said a run failed. */
+  recovered?: true;
+  /** The card in the run's conversation this line stands for: an option card
+   * is copied whole, a sign-in, connection or credential card is named. */
+  copyOf?: string;
 }

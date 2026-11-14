@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { redactSecretsInText } from "./redact.ts";
 import { createBotPackageExport, createTeamPackageExport, shareableAddress, TEAM_TOO_LARGE_MESSAGE, TeamExportError } from "./package-export.ts";
 import { parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import type { Routine } from "./routines.ts";
@@ -271,7 +272,7 @@ describe("whole-team export (package v2)", () => {
       room("foreign-only", "Only outsiders", ["other"]),
     ];
     const routines = [
-      routine("digest", "Daily digest", "scout", { continuity: true, attachments: [{ id: "a", kind: "file", name: "x.txt", path: "/private/x.txt", size: 1 }] }),
+      routine("digest", "Daily digest", "scout", { continuity: true, runOnStartup: true, attachments: [{ id: "a", kind: "file", name: "x.txt", path: "/private/x.txt", size: 1 }] }),
       routine("review", "Weekly review", "lead", { target: "room-goal", groupId: "desk", enabled: false }),
       routine("elsewhere", "Support digest", "other"),
     ];
@@ -301,7 +302,7 @@ describe("whole-team export (package v2)", () => {
     expect(pkg.rooms).toEqual([{ key: "deal-desk", name: "Deal desk", members: ["morgan", "scout"], bulletin: "Cite sources.",
       defaultResponder: { kind: "agent", agent: "morgan" } }]);
     expect(pkg.routines).toEqual([
-      expect.objectContaining({ key: "daily-digest", agent: "scout", continuity: true, enabledAfterInstall: true }),
+      expect.objectContaining({ key: "daily-digest", agent: "scout", continuity: true, runOnStartup: true, enabledAfterInstall: true }),
       expect.objectContaining({ key: "weekly-review", agent: "morgan", room: "deal-desk", runOn: "maus", enabledAfterInstall: false }),
     ]);
     expect(pkg.connections).toEqual([{ key: "crm", label: "crm", reason: "Used by Morgan, Scout",
@@ -315,6 +316,13 @@ describe("whole-team export (package v2)", () => {
       { part: "routines[daily-digest].attachments", reason: "files_not_shared" },
     ]);
     expect(result.filename).toBe("sales-desk-1.0.0.openmaus.json");
+  });
+
+  it("carries Record browser steps for the bots that have it on, and nothing for the rest", () => {
+    const input = fixture();
+    input.bots[1] = { ...input.bots[1]!, recordBrowserSteps: true };
+    const agents = createTeamPackageExport(input).document.package.agents;
+    expect(agents.map((agent) => agent.recordBrowserSteps)).toEqual([undefined, true]);
   });
 
   it("adds starter notes only when asked, within the caps", () => {
@@ -388,18 +396,22 @@ describe("whole-team export (package v2)", () => {
   });
 
   it("refuses plainly when there is nothing to share, a bad version or too much", () => {
-    expect(() => createTeamPackageExport({ ...fixture(), team: "Empty" })).toThrow("Add a bot to this team before sharing it.");
+    expect(() => createTeamPackageExport({ ...fixture(), team: "Empty" })).toThrow("Add a bot to this department before sharing it.");
     expect(() => createTeamPackageExport({ ...fixture(), release: "one" })).toThrow("Use a version like 1.2.3.");
     const huge = fixture();
     huge.skillsByBot = new Map([["lead", Array.from({ length: 17 }, (_, index) => ({
       ...skill(`big-${index}`), instructions: `---\nname: big-${index}\ndescription: big-${index} description\n---\n${"a".repeat(250_000)}`,
     }))]]);
     expect(() => createTeamPackageExport(huge)).toThrow(TEAM_TOO_LARGE_MESSAGE);
+    expect(TEAM_TOO_LARGE_MESSAGE).toBe("This department is too large to share (4 MB). Leave out pictures, starter notes or some skills and try again.");
+    const caught = (run: () => unknown) => { try { run(); } catch (error) { return error; } throw new Error("expected a refusal"); };
+    expect(caught(() => createTeamPackageExport({ ...fixture(), team: "Empty" }))).toMatchObject({ errorKey: "serverError.department.shareNoBots" });
+    expect(caught(() => createTeamPackageExport(huge))).toMatchObject({ errorKey: "serverError.department.shareTooLarge" });
+    const badVersion = caught(() => createTeamPackageExport({ ...fixture(), release: "one" }));
+    expect(badVersion).toMatchObject({ errorKey: "serverError.share.version" });
+    expect(badVersion).not.toHaveProperty("errorParams");
   });
 
-  // The Share dialog's first look asks for "all". A team that cannot put
-  // every skill in one file must still get a preview (and its skill boxes),
-  // so "all" shares what fits and lists the rest instead of refusing.
   describe("skills that do not all fit", () => {
     const many = (prefix: string, count: number, extra: { enabled?: boolean } = {}) =>
       Array.from({ length: count }, (_, index) => ({ ...skill(`${prefix}-${String(index + 1).padStart(2, "0")}`), ...extra }));
@@ -440,8 +452,7 @@ describe("whole-team export (package v2)", () => {
     it("keeps switched-on skills first when the team has more than 60, even one that sorts later by name", () => {
       const input = fixture();
       input.bots.push(bot("third", "Third"));
-      // 61 names: "a-off" sorts first by name but is switched off on the only
-      // bot that has it; "b-01" is off on Third but on for Morgan, so it counts as on.
+      // "a-off" sorts first but is off on its only bot; "b-01" is off on Third but on for Morgan, so it counts as on.
       const result = createTeamPackageExport({ ...input, skillSelection: "all",
         skillsByBot: new Map([["lead", many("b", 30, { enabled: true })], ["scout", many("c", 30, { enabled: true })],
           ["third", [{ ...skill("a-off"), enabled: false }, { ...skill("b-01"), enabled: false }]]]) });
@@ -454,15 +465,13 @@ describe("whole-team export (package v2)", () => {
     });
 
     it("starts the dialog's boxes on a choice that fits, so unticking any one box still fits", () => {
-      // Morgan holds s-01…s-31; Scout holds the same s-31 plus z-only. "all"
-      // puts all 32 names in the file (s-31 for Scout only).
+      // Morgan holds s-01..s-31; Scout holds the same s-31 plus z-only, so "all" puts 32 names in the file.
       const shared = many("s", 31);
       const skillsByBot = new Map([["lead", shared], ["scout", [shared[30]!, skill("z-only")]]]);
       const all = createTeamPackageExport({ ...fixture(), skillSelection: "all", skillsByBot });
       expect(includedSkills(all.document)).toHaveLength(32);
       const exactly = (names: readonly string[]) => createTeamPackageExport({ ...fixture(),
         skillsByBot: new Map([...skillsByBot].map(([id, list]) => [id, list.filter((entry) => names.includes(entry.name))])) });
-      // Ticking what the file holds would refuse after unticking z-only.
       expect(() => exactly(includedSkills(all.document).filter((name) => name !== "z-only"))).toThrow("Morgan has more than 30 skills");
       const ticks = startingTicks(all);
       expect(ticks).not.toContain("s-31");
@@ -487,7 +496,15 @@ describe("whole-team export (package v2)", () => {
       expect((crowded as Error).message).toBe("Morgan has more than 30 skills. Choose fewer skills and try again.");
       const conflict = refusal(new Map([["lead", [skill("pricing")]], ["scout", [conflicting]]]));
       expect(conflict).toBeInstanceOf(TeamExportError);
-      expect((conflict as Error).message).toBe('Two bots in this team have different skills named "pricing". Leave that skill out and try again.');
+      expect((conflict as Error).message).toBe('Two bots in this department have different skills named "pricing". Leave that skill out and try again.');
+      expect(conflict).toMatchObject({ errorKey: "serverError.department.shareSkillClash", errorParams: { skill: "pricing" } });
+      expect(crowded).toMatchObject({ errorKey: "serverError.department.shareBotSkillLimit", errorParams: { name: "Morgan", count: "30" } });
+      const secret = `sk-${"a1B2c3D4".repeat(3)}`;
+      const leaked = refusal(new Map([["lead", [skill(secret)]], ["scout", [{ ...conflicting, name: secret }]]]));
+      expect(leaked).toBeInstanceOf(TeamExportError);
+      expect(JSON.stringify({ message: (leaked as Error).message, ...(leaked as object) })).not.toContain(secret);
+      expect((leaked as { errorParams?: { skill?: string } }).errorParams?.skill).toBe(redactSecretsInText(secret));
+      expect((leaked as Error).message).toBe(`Two bots in this department have different skills named "${redactSecretsInText(secret)}". Leave that skill out and try again.`);
     });
   });
 

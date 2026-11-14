@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 type Scenario = "lost-response" | "restart-after-5xx" | "in-progress" | "recovered-box";
 
@@ -58,6 +58,7 @@ describe("Boat create idempotency", () => {
   let createCount = 0;
   let failDesktop = false;
   const createKeys: string[] = [];
+  const createBodies: unknown[] = [];
   const renameBodies: unknown[] = [];
   const deletedBoats: string[] = [];
 
@@ -74,14 +75,14 @@ describe("Boat create idempotency", () => {
       req.on("data", (chunk) => (raw += chunk));
       req.on("end", () => {
         res.setHeader("content-type", "application/json");
-        if (url.pathname === "/api/box/v1/boxes" && req.method === "GET") {
-          return res.end(JSON.stringify({ ok: true, boxes: [] }));
+        if (url.pathname === "/api/v1/sandboxes" && req.method === "GET") {
+          return res.end(JSON.stringify({ ok: true, type: "sandbox.list", sandboxes: [], pageInfo: { nextCursor: null } }));
         }
-        if (url.pathname === "/api/box/v1/boxes" && req.method === "POST") {
+        if (url.pathname === "/api/v1/sandboxes" && req.method === "POST") {
           createCount += 1;
           const key = String(req.headers["idempotency-key"] ?? "");
           createKeys.push(key);
-          expect(JSON.parse(raw)).toEqual({ ttlSeconds: 8 * 60 * 60, noEnv: true });
+          createBodies.push(JSON.parse(raw));
           if (!acceptedKey) acceptedKey = key;
           if (key !== acceptedKey) {
             res.writeHead(409);
@@ -101,15 +102,15 @@ describe("Boat create idempotency", () => {
             res.writeHead(409);
             return res.end(JSON.stringify({ ok: false, code: "idempotency_in_progress" }));
           }
-          res.writeHead(201);
-          return res.end(JSON.stringify({ ok: true, box: { id: boxId(), state: "ready" } }));
+          res.writeHead(202);
+          return res.end(JSON.stringify({ ok: true, type: "sandbox.created", sandbox: { id: boxId(), state: "ready" } }));
         }
-        if (url.pathname === `/api/box/v1/boxes/${boxId()}` && req.method === "PATCH") {
+        if (url.pathname === `/api/v1/sandboxes/${boxId()}` && req.method === "PATCH") {
           renameBodies.push(JSON.parse(raw));
-          return res.end(JSON.stringify({ ok: true, box: { id: boxId(), state: "ready" } }));
+          return res.end(JSON.stringify({ ok: true, sandbox: { id: boxId(), state: "ready" } }));
         }
-        if (url.pathname === `/api/box/v1/boxes/${boxId()}` && req.method === "GET") {
-          return res.end(JSON.stringify({ ok: true, box: { id: boxId(), state: "ready" } }));
+        if (url.pathname === `/api/v1/sandboxes/${boxId()}` && req.method === "GET") {
+          return res.end(JSON.stringify({ ok: true, sandbox: { id: boxId(), state: "ready" } }));
         }
         if (url.pathname.endsWith("/commands") && req.method === "POST") {
           return res.end(JSON.stringify({ ok: true, exitCode: 0, stdout: "ready", stderr: "" }));
@@ -121,7 +122,7 @@ describe("Boat create idempotency", () => {
           }
           return res.end(JSON.stringify({ ok: true, desktopUrl: "https://desktop.example/session" }));
         }
-        if (url.pathname === `/api/box/v1/boxes/${boxId()}` && req.method === "DELETE") {
+        if (url.pathname === `/api/v1/sandboxes/${boxId()}` && req.method === "DELETE") {
           deletedBoats.push(boxId());
           res.writeHead(202);
           return res.end(JSON.stringify({ ok: true }));
@@ -131,7 +132,7 @@ describe("Boat create idempotency", () => {
     });
     await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
     const port = (api.address() as AddressInfo).port;
-    vi.stubEnv("OMB_BOX_API", `http://127.0.0.1:${port}/api/box/v1`);
+    vi.stubEnv("OMB_BOAT_API", `http://127.0.0.1:${port}/api/v1`);
   });
 
   beforeEach(() => {
@@ -140,6 +141,7 @@ describe("Boat create idempotency", () => {
     createCount = 0;
     failDesktop = false;
     createKeys.length = 0;
+    createBodies.length = 0;
     renameBodies.length = 0;
     deletedBoats.length = 0;
   });
@@ -149,13 +151,30 @@ describe("Boat create idempotency", () => {
     await new Promise<void>((resolve) => api.close(() => resolve()));
   });
 
+  afterEach(() => {
+    for (const body of createBodies) expect(body).toEqual({ ttlSeconds: 8 * 60 * 60, noEnv: true });
+  });
+
   it("retries a lost response with the same key and renames the recovered Boat", async () => {
     scenario = "lost-response";
     vi.resetModules();
     const { provisionBoat } = await import("./boat.ts");
+    // Keys this OpenMausBot holds stay here; the Boat gets none of them.
+    const held = { OPENAI_API_KEY: process.env.OPENAI_API_KEY, CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN };
+    process.env.OPENAI_API_KEY = "sk-openai-held-here";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "claude-oauth-held-here";
+    let result: Awaited<ReturnType<typeof provisionBoat>>;
+    try {
+      result = await provisionBoat({ box: { token: "box_test" }, anthropic: { key: "sk-ant-workspace" } } as any, "lost-response-bot", "Lost Response");
+    } finally {
+      for (const [name, value] of Object.entries(held)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
 
-    const result = await provisionBoat({ box: { token: "box_test" } } as any, "lost-response-bot", "Lost Response");
-
+    expect(createBodies).toHaveLength(2);
+    expect(JSON.stringify(createBodies)).not.toMatch(/sk-openai-held-here|claude-oauth-held-here|sk-ant-workspace/);
     expect(result.boxId).toBe("bx_23456789");
     expect(createKeys).toHaveLength(2);
     expect(createKeys[0]).toMatch(/^[0-9a-f-]{36}$/);
@@ -252,11 +271,12 @@ describe("Boat create idempotency", () => {
     const {
       beginBoatCreate,
       boatCreateRecoverySnapshot,
-      hasUnresolvedBoatCreate,
       rememberCreatedBoat,
       resolveBoatCreate,
       retireDeletedBoatCreate,
     } = await import("./boat-create-idempotency.ts");
+    const hasUnresolvedBoatCreate = (owner: string) =>
+      boatCreateRecoverySnapshot().some((record) => record.botId === owner && !record.resolved);
     const botId = "deletion-guard-bot";
     const attempt = beginBoatCreate(botId, JSON.stringify({ ttlSeconds: 7_200, noEnv: true }));
 
@@ -291,9 +311,10 @@ describe("Boat create idempotency", () => {
       adoptResolvedBoat,
       beginBoatCreate,
       boatCreateRecoverySnapshot,
-      hasUnresolvedBoatCreate,
       retireDeletedBoatCreate,
     } = await import("./boat-create-idempotency.ts");
+    const hasUnresolvedBoatCreate = (owner: string) =>
+      boatCreateRecoverySnapshot().some((record) => record.botId === owner && !record.resolved);
     const boxId = "bx_56789abc";
     const botId = "legacy-journal-owner";
     try {
@@ -325,7 +346,7 @@ describe("Boat create idempotency", () => {
     const requestBody = JSON.stringify({ ttlSeconds: 7_200, noEnv: true });
     const source = `
       const journal = await import(${JSON.stringify(JOURNAL_MODULE_URL)});
-      journal.hasUnresolvedBoatCreate("multiprocess-primer");
+      journal.boatCreateRecoverySnapshot();
       process.stdout.write("ready\\n");
       process.stdin.once("data", () => {
         const result = journal.beginBoatCreate("multiprocess-bot", ${JSON.stringify(requestBody)});
@@ -338,8 +359,7 @@ describe("Boat create idempotency", () => {
       expect(await workerLine(first, "first journal worker")).toBe("ready");
       expect(await workerLine(second, "second journal worker")).toBe("ready");
 
-      // Both long-lived processes loaded the empty journal before either
-      // mutation. The old in-memory cache deterministically minted two keys.
+      // Both long-lived processes loaded the empty journal before either mutation.
       first.child.stdin.end("begin\n");
       second.child.stdin.end("begin\n");
       const [firstResult, secondResult] = await Promise.all([

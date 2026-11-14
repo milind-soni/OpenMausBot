@@ -20,6 +20,7 @@ describe("independent bot task state", () => {
     const store = new Store(selection);
     const bot = store.createBot({}, { seedMessages: false });
     const other = store.createBot({}, { seedMessages: false });
+    store.patchBot(other.id, { approvalMode: "ask", autoApprove: false });
     const first = bot.threadId;
     store.appendMessage(first, { role: "user", kind: "text", text: "Keep this conversation" });
     const archived = store.createTask(bot.id, "Archived")!;
@@ -41,9 +42,49 @@ describe("independent bot task state", () => {
     expect(new Store(selection).tasks(bot.id).every(task => task.approvalMode === "ask")).toBe(true);
   });
 
+  it("refreshes one thread's permissions from the bot default and leaves the rest", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.patchBot(bot.id, { approvalMode: "ask", autoApprove: false });
+    const first = bot.threadId;
+    store.patchTask(bot.id, first, { approvalMode: "ask", autoApprove: false, alwaysAllow: ["Read"] });
+    const model = store.projectBotForTask(bot.id, first)?.modelSelection;
+    store.appendMessage(first, { role: "user", kind: "text", text: "Keep this conversation" });
+    const history = store.messagesFor(first);
+    const sibling = store.createTask(bot.id, "Sibling", false)!;
+    store.patchBot(bot.id, { approvalMode: "auto", autoApprove: true, alwaysAllow: ["Read", "Bash"] });
+    expect(store.taskByThread(bot.id, first)).toMatchObject({ approvalMode: "ask", autoApprove: false, alwaysAllow: ["Read"] });
+    expect(store.projectBotForTask(bot.id, first)?.modelSelection).toEqual(model);
+    expect(store.taskByThread(bot.id, sibling.threadId)).toMatchObject({ approvalMode: "ask", alwaysAllow: [] });
+
+    const refreshed = store.refreshTaskPermissions(bot.id, first);
+    expect(refreshed).toMatchObject({ approvalMode: "auto", autoApprove: true, alwaysAllow: ["Read", "Bash"] });
+    expect(store.projectBotForTask(bot.id, first)?.modelSelection).toEqual(model);
+    expect(store.taskByThread(bot.id, sibling.threadId)).toMatchObject({ approvalMode: "ask", autoApprove: false, alwaysAllow: [] });
+    expect(store.bot(bot.id)).toMatchObject({ approvalMode: "auto", autoApprove: true, alwaysAllow: ["Read", "Bash"] });
+    expect(store.messagesFor(first)).toEqual(history);
+    expect(store.refreshTaskPermissions(bot.id, "missing")).toBeNull();
+
+    const reloaded = new Store(selection);
+    expect(reloaded.taskByThread(bot.id, first)).toMatchObject({ approvalMode: "auto", autoApprove: true, alwaysAllow: ["Read", "Bash"] });
+    expect(reloaded.taskByThread(bot.id, sibling.threadId)).toMatchObject({ approvalMode: "ask", alwaysAllow: [] });
+    expect(reloaded.messagesFor(first)).toEqual(history);
+
+    reloaded.patchBot(bot.id, {
+      approvalMode: "full",
+      approvalGrant: { requestId: "grant-1", mode: "full", phase: "prepared", threadId: first, threadOnly: true, refreshPermissions: true },
+    });
+    expect(approvalModeFor(reloaded.bot(bot.id)!)).toBe("ask");
+    const caughtUp = reloaded.refreshTaskPermissions(bot.id, sibling.threadId);
+    expect(caughtUp).toMatchObject({ approvalMode: "full", autoApprove: false, alwaysAllow: ["Read", "Bash"] });
+    expect(reloaded.taskByThread(bot.id, first)?.approvalMode).toBe("auto");
+    expect(reloaded.bot(bot.id)?.approvalMode).toBe("full");
+  });
+
   it("does not partially elevate any thread when saving the all-threads change fails", () => {
     const store = new Store(selection);
     const bot = store.createBot({}, { seedMessages: false });
+    store.patchBot(bot.id, { approvalMode: "ask", autoApprove: false });
     store.createTask(bot.id, "Second thread");
     const before = JSON.stringify(bot);
     const save = vi.spyOn(store as unknown as { saveBots(): void }, "saveBots").mockImplementation(() => { throw new Error("fixture disk full"); });
@@ -53,6 +94,41 @@ describe("independent bot task state", () => {
       const restarted = new Store(selection);
       expect(restarted.tasks(bot.id).every(task => approvalModeFor(restarted.projectBotForTask(bot.id, task.threadId)!) === "ask")).toBe(true);
     } finally { save.mockRestore(); }
+  });
+
+  it("does not let a hidden routine execution hold the bot unread", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const visible = bot.threadId;
+    const execution = store.createTask(bot.id, "Execution", false)!;
+    store.patchTask(bot.id, execution.threadId, { routineRunId: "run-1", unread: true });
+    expect(store.taskByThread(bot.id, execution.threadId)).toMatchObject({ routineRunId: "run-1", unread: false });
+    expect(store.taskByThread(bot.id, visible)?.unread).toBe(false);
+    expect(bot.unread).toBe(false);
+
+    store.patchTask(bot.id, execution.threadId, { routineRunId: undefined, unread: true });
+    expect(store.taskByThread(bot.id, execution.threadId)?.routineRunId).toBeUndefined();
+    expect(store.taskByThread(bot.id, execution.threadId)?.unread).toBe(true);
+    expect(bot.unread).toBe(true);
+  });
+
+  it("heals a saved hidden routine execution that was left unread", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const execution = store.createTask(bot.id, "Execution", false)!;
+    store.patchTask(bot.id, execution.threadId, { routineRunId: "run-1" });
+    const raw = savedBots();
+    const saved = raw.find((row) => row.id === bot.id)!;
+    const hidden = saved.tasks!.find((task) => task.threadId === execution.threadId)!;
+    hidden.unread = true;
+    saved.unread = true;
+    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(raw));
+    const reloaded = new Store(selection);
+    expect(reloaded.taskByThread(bot.id, execution.threadId)).toMatchObject({ routineRunId: "run-1", unread: false });
+    expect(reloaded.bot(bot.id)?.unread).toBe(false);
+    const persisted = savedBots().find((row) => row.id === bot.id)!;
+    expect(persisted.unread).toBe(false);
+    expect(persisted.tasks!.find((task) => task.threadId === execution.threadId)?.unread).toBe(false);
   });
 
   it("persists routine execution identity without sharing context or approval settings", () => {
@@ -65,7 +141,7 @@ describe("independent bot task state", () => {
     store.setResumeCursor(bot.id, "claude", "first-session", first.threadId);
     const reloaded = new Store(selection);
     expect(reloaded.taskByThread(bot.id, first.threadId)).toMatchObject({ routineRunId: "run-1", resumeCursors: { claude: "first-session" } });
-    expect(reloaded.taskByThread(bot.id, second.threadId)).toMatchObject({ routineRunId: "run-2", resumeCursors: {}, approvalMode: "ask", autoApprove: false });
+    expect(reloaded.taskByThread(bot.id, second.threadId)).toMatchObject({ routineRunId: "run-2", resumeCursors: {}, approvalMode: "full", autoApprove: false });
     reloaded.patchTask(bot.id, first.threadId, { routineRunId: undefined });
     expect(new Store(selection).taskByThread(bot.id, first.threadId)?.routineRunId).toBeUndefined();
   });
@@ -125,7 +201,7 @@ describe("independent bot task state", () => {
     for (const folder of [first, second, chosen]) expect(readFileSync(join(folder, "result.txt"), "utf8")).toBe("Keep my project");
   });
 
-  it("keeps model, approvals, cursor, rewind and pin snapshots across navigation, deletion and reload", () => {
+  it("keeps own models, approvals, cursor, rewind and pin snapshots across navigation, deletion and reload; other threads follow the bot's model", () => {
     const store = new Store(selection);
     const bot = store.createBot({}, { seedMessages: false });
     const first = bot.threadId;
@@ -146,11 +222,12 @@ describe("independent bot task state", () => {
     });
     const second = store.createTask(bot.id)!;
     expect(second).toMatchObject({
-      modelSelection: { instanceId: "claude", model: "second-default" },
       approvalMode: "ask",
       alwaysAllow: ["Read"],
       resumeCursors: {},
     });
+    expect(second.modelSelection).toBeUndefined();
+    expect(store.projectBotForTask(bot.id, second.threadId)?.modelSelection).toEqual({ instanceId: "claude", model: "second-default" });
     expect(bot.rewound).toBeUndefined();
     expect(bot.pinnedMessageId).toBeUndefined();
     store.setResumeCursor(bot.id, "claude", "second-session");
@@ -172,7 +249,7 @@ describe("independent bot task state", () => {
       alwaysAllow: ["Bash:git"],
     });
     expect(store.projectBotForTask(bot.id, second.threadId)).toMatchObject({
-      modelSelection: { instanceId: "claude", model: "second-default" },
+      modelSelection: selection(),
       alwaysAllow: ["Read"],
     });
     store.deleteTask(bot.id, detached.threadId);
@@ -181,7 +258,7 @@ describe("independent bot task state", () => {
     expect(bot.rewound).toBeUndefined();
     const reloaded = new Store(selection);
     expect(reloaded.projectBotForTask(bot.id, second.threadId)).toMatchObject({
-      modelSelection: { instanceId: "claude", model: "second-default" },
+      modelSelection: selection(),
       approvalMode: "ask",
       alwaysAllow: ["Read"],
       resumeCursors: { claude: "second-session" },
@@ -264,24 +341,19 @@ describe("independent bot task state", () => {
     const group = store.createGroup("Timer group", [lead.id, other.id], false);
     expect(group.busyBotId).toBeNull();
     expect(group.turnStartedAt).toBeUndefined();
-    // Patches that never touch the speaker leave the stamp alone.
     store.patchGroup(group.id, { unread: true });
     expect(group.turnStartedAt).toBeUndefined();
     store.patchGroup(group.id, { busyBotId: lead.id });
     const started = group.turnStartedAt!;
     expect(started).toBeGreaterThan(0);
-    // An unrelated patch mid-turn, or re-claiming the same member, is the
-    // same turn: the stamp must not move.
     store.patchGroup(group.id, { bulletin: "changed" });
     store.patchGroup(group.id, { busyBotId: lead.id });
     expect(group.turnStartedAt).toBe(started);
-    // A different speaker is a new turn: the count restarts.
     await new Promise((done) => setTimeout(done, 3));
     store.patchGroup(group.id, { busyBotId: other.id });
     expect(group.turnStartedAt!).toBeGreaterThan(started);
     store.patchGroup(group.id, { busyBotId: null });
     expect(group.turnStartedAt).toBeUndefined();
-    // Neither the speaker nor the stamp survives persistence or a reload.
     const saved = savedGroups().find((row) => row.id === group.id)!;
     expect(saved).not.toHaveProperty("busyBotId");
     expect(saved).not.toHaveProperty("turnStartedAt");
@@ -338,11 +410,12 @@ describe("independent bot task state", () => {
       pinnedMessageId: "legacy-pin",
       unread: true,
     });
-    expect(migrated.taskByThread(bot.id, second.threadId)).toMatchObject({ modelSelection: raw.modelSelection, activity: "idle", busy: false });
+    expect(migrated.taskByThread(bot.id, second.threadId)).toMatchObject({ activity: "idle", busy: false });
+    expect(migrated.projectBotForTask(bot.id, second.threadId)?.modelSelection).toEqual(raw.modelSelection);
     expect(migrated.messagesFor(first).at(-1)?.text).toBe("Original conversation");
     expect(migrated.messagesFor(second.threadId).at(-1)?.text).toBe("Second conversation");
     expect(savedBots()[0]!.tasks).toHaveLength(2);
-    expect(savedBots()[0]!.tasks!.every((task) => task.modelSelection?.model === "legacy-model")).toBe(true);
+    expect(savedBots()[0]!.tasks!.every((task) => task.modelSelection === undefined)).toBe(true);
   });
 
   it("revokes elevated task snapshots along with a stale bot elevation grant", () => {
@@ -360,7 +433,7 @@ describe("independent bot task state", () => {
     expect(approvalModeFor(reloaded.projectBotForTask(bot.id, task.threadId)!)).toBe("ask");
   });
 
-  it("groups threads in folders without changing model snapshots or running state", () => {
+  it("groups threads in folders without changing models or running state", () => {
     const store = new Store(selection);
     const bot = store.createBot();
     const legacyThread = bot.threadId;
@@ -368,7 +441,8 @@ describe("independent bot task state", () => {
     const project = store.createProject(bot.id, "  Website  ")!;
     const other = store.createProject(bot.id, "Research")!;
     const task = store.createTask(bot.id, "Landing page", true, project.id)!;
-    expect(task).toMatchObject({ projectId: project.id, modelSelection: selection() });
+    expect(task).toMatchObject({ projectId: project.id });
+    expect(store.projectBotForTask(bot.id, task.threadId)?.modelSelection).toEqual(selection());
     store.patchTask(bot.id, task.threadId, { modelSelection: { instanceId: "codex", model: "thread-specific" } });
     store.setResumeCursor(bot.id, "codex", "project-session", task.threadId);
     store.appendMessage(task.threadId, { role: "user", kind: "text", text: "Keep this conversation" });
@@ -379,7 +453,7 @@ describe("independent bot task state", () => {
     store.patchTask(bot.id, task.threadId, { projectId: other.id });
     expect(task).toMatchObject({ projectId: other.id, modelSelection: running.modelSelection, busy: true, resumeCursors: { codex: "project-session" }, cwd: null });
     const next = store.createTask(bot.id, "Next project thread", false, project.id)!;
-    expect(next.modelSelection).toEqual(selection());
+    expect(next.modelSelection).toBeUndefined();
     expect(store.activeTask(bot.id)?.threadId).toBe(task.threadId);
     store.deleteProject(bot.id, other.id);
     expect(task.projectId).toBeUndefined();
@@ -461,7 +535,7 @@ describe("independent bot task state", () => {
     const sibling = store.createBot();
     const project = store.createProject(bot.id, "General", "⭐")!;
     store.patchTask(bot.id, bot.threadId, { modelSelection: { instanceId: "codex", model: "existing-thread" } });
-    expect(store.createTask(bot.id, undefined, false, project.id)?.modelSelection).toEqual(selection());
+    expect(store.createTask(bot.id, undefined, false, project.id)?.modelSelection).toBeUndefined();
     expect(store.createTask(sibling.id, undefined, false, project.id)).toBeNull();
     expect(store.patchTask(sibling.id, sibling.threadId, { projectId: project.id })).toBeNull();
     expect(store.deleteProject(sibling.id, project.id)).toBeNull();
@@ -472,7 +546,7 @@ describe("independent bot task state", () => {
     const reloaded = new Store(selection);
     expect(reloaded.project(bot.id, project.id)).toEqual({ id: project.id, name: "General", emoji: "⭐" });
     expect(reloaded.taskByThread(bot.id, bot.threadId)?.modelSelection).toEqual({ instanceId: "codex", model: "existing-thread" });
-    expect(reloaded.createTask(bot.id, undefined, false, project.id)?.modelSelection).toEqual(selection());
+    expect(reloaded.createTask(bot.id, undefined, false, project.id)?.modelSelection).toBeUndefined();
   });
 
   it("pins a thread without storing false, and advances updatedAt from a message without rewriting bots.json", () => {
@@ -489,11 +563,87 @@ describe("independent bot task state", () => {
     expect("pinned" in savedBots().find((entry) => entry.id === bot.id)!.tasks!.find((entry) => entry.threadId === task.threadId)!).toBe(false);
     const group = store.createGroup("Channel", [bot.id], false);
     const channel = store.createGroupTask(group.id, "Side")!;
-    expect(store.setGroupTaskPinned(group.id, channel.threadId, true)?.pinned).toBe(true);
+    expect(store.patchGroupTask(group.id, channel.threadId, { pinned: true })?.pinned).toBe(true);
     expect(savedGroups().find((entry) => entry.id === group.id)!.tasks!.find((entry) => entry.threadId === channel.threadId)!.pinned).toBe(true);
-    store.setGroupTaskPinned(group.id, channel.threadId, false);
+    store.patchGroupTask(group.id, channel.threadId, { pinned: false });
     expect("pinned" in savedGroups().find((entry) => entry.id === group.id)!.tasks!.find((entry) => entry.threadId === channel.threadId)!).toBe(false);
     const restarted = new Store(selection);
     expect(restarted.taskByThread(bot.id, task.threadId)?.updatedAt).toBe(message.at);
+  });
+
+  it("orders terminal completion after newer activity and repairs its persisted stamp", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const task = store.createTask(bot.id, "Running")!;
+    const other = store.createTask(bot.id, "Other")!;
+    const at = task.createdAt;
+    const reply = store.appendMessage(task.threadId, { role: "bot", kind: "text", text: "Working", turnId: "turn", at: at + 10 });
+    store.appendMessage(other.threadId, { role: "user", kind: "text", text: "New", at: at + 20 });
+    const clock = vi.spyOn(Date, "now").mockReturnValue(at + 30);
+    try {
+      const terminal = store.markTerminalAssistantMessage(task.threadId, "turn");
+      expect(terminal?.at).toBe(reply.at);
+      expect(store.taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 30);
+      expect(new Store(selection).taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 30);
+      clock.mockReturnValue(at + 40);
+      store.markTerminalAssistantMessage(task.threadId, "turn");
+      expect(store.taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 30);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each(["bot", "group"])("keeps %s completion time separate from its visible update time", (kind) => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const group = store.createGroup("Channel", [bot.id], false);
+    const task = kind === "bot" ? store.createTask(bot.id, "Running")! : store.createGroupTask(group.id, "Running")!;
+    const readTask = (current: Store) => kind === "bot" ? current.taskByThread(bot.id, task.threadId) : current.groupTaskByThread(group.id, task.threadId);
+    const at = task.createdAt;
+    store.appendMessage(task.threadId, { role: "bot", kind: "text", text: "Working", turnId: "turn", at: at + 10 });
+    const clock = vi.spyOn(Date, "now").mockReturnValue(at + 30);
+    try {
+      store.markTerminalAssistantMessage(task.threadId, "turn");
+      expect(readTask(store)).toMatchObject({ updatedAt: at + 10, lastThreadOrderAt: at + 30 });
+      expect(readTask(new Store(selection))).toMatchObject({ updatedAt: at + 10, lastThreadOrderAt: at + 30 });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each(["bot", "group"])("keeps imported %s completion time separate from its visible update time", (kind) => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const group = store.createGroup("Channel", [bot.id], false);
+    const task = kind === "bot" ? store.createTask(bot.id, "Imported")! : store.createGroupTask(group.id, "Imported")!;
+    const readTask = (current: Store) => kind === "bot" ? current.taskByThread(bot.id, task.threadId) : current.groupTaskByThread(group.id, task.threadId);
+    const at = task.createdAt;
+    store.importTranscript(task.threadId, [{ id: "reply", role: "bot", kind: "text", text: "Done", at: at + 10, turnId: "turn", turnTerminal: true, turnCompletedAt: at + 30, parentId: null }], "reply");
+    expect(readTask(store)).toMatchObject({ updatedAt: at + 10, lastThreadOrderAt: at + 30 });
+    expect(readTask(new Store(selection))).toMatchObject({ updatedAt: at + 10, lastThreadOrderAt: at + 30 });
+  });
+
+  it("tracks completed replies and person messages for thread ordering across restarts", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const task = store.createTask(bot.id, "Notes")!;
+    const at = task.createdAt;
+    store.appendMessage(task.threadId, { role: "bot", kind: "text", text: "Thinking", turnId: "turn-1", at: at + 10 });
+    store.appendMessage(task.threadId, { role: "user", kind: "text", text: "Peer", peerAsk: { botId: "peer", name: "Peer" }, at: at + 20 });
+    expect(store.taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBeUndefined();
+    const reply = store.appendMessage(task.threadId, { role: "bot", kind: "text", text: "Working", turnId: "turn-1", at: at + 25 });
+    expect(store.taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBeUndefined();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(at + 26);
+    try {
+      expect(store.markTerminalAssistantMessage(task.threadId, "turn-1")?.at).toBe(reply.at);
+      expect(store.taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 26);
+      expect(new Store(selection).taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 26);
+    } finally {
+      clock.mockRestore();
+    }
+    store.appendMessage(task.threadId, { role: "user", kind: "text", text: "Hello", at: at + 30 });
+    store.appendMessage(task.threadId, { role: "bot", kind: "activity", text: "Working", at: at + 40 });
+    expect(store.taskByThread(bot.id, task.threadId)).toMatchObject({ lastThreadOrderAt: at + 30, updatedAt: at + 40 });
+    expect(new Store(selection).taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 30);
   });
 });

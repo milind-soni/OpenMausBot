@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { setLocale } from "@/lib/i18n";
 
 import { botUsage, cachedInput, cachedUsageNote, headlineTokens, tokensColumnLabel, contextChip, contextDetail, contextShare, costCaption, formatTaskTokens, formatTokens, formatUsd, uncachedInput, lastTurnDetail, sumUsage, usageChip, usageDetail } from "./usage";
 
@@ -47,6 +48,23 @@ describe("usage formatting", () => {
     expect(formatUsd(0)).toBe("$0");
     expect(formatUsd(0.004)).toBe("$0.004");
     expect(formatUsd(0.31)).toBe("$0.31");
+    expect(formatUsd(1234.5)).toBe("$1234.50");
+    setLocale("pt-br");
+    expect([formatUsd(0.02), formatUsd(0.004), formatUsd(0)]).toEqual(["US$\u00a00,02", "US$\u00a00,004", "US$\u00a00"]);
+    setLocale("en");
+  });
+
+  describe("in English, the cost keeps its own rounding and symbol whatever the region", () => {
+    afterEach(() => { vi.unstubAllGlobals(); setLocale("en"); });
+    const english = () => [0.015, 0.005, 1234.5, 0.0009, 0, -0.5].map(formatUsd);
+    it("matches toFixed exactly, before and after an en-GB region", () => {
+      expect(english()).toEqual(["$0.01", "$0.005", "$1234.50", "$0.001", "$0", "$-0.500"]);
+      vi.stubGlobal("navigator", { language: "en-GB" });
+      setLocale("en");
+      expect(english()).toEqual(["$0.01", "$0.005", "$1234.50", "$0.001", "$0", "$-0.500"]);
+      setLocale("pt-br");
+      expect(formatUsd(1234.5)).toBe("US$\u00a01234,50");
+    });
   });
 
   it("does not throw on missing usage fields from older bots.json", () => {
@@ -73,15 +91,12 @@ describe("usage formatting", () => {
   });
 
   it("does not invent a cache split when some input has no cache report", () => {
-    // Missing reports make the combined cache split unknown.
     expect(sumUsage([{ input: 100, output: 10, costUsd: null, turns: 1 }, { input: 200, output: 20, cachedInput: 150, costUsd: null, turns: 1 }]))
       .toEqual({ input: 300, output: 30, costUsd: null, turns: 2 });
     expect(sumUsage([{ input: 100, output: 10, costUsd: null, turns: 1 }])).toEqual({ input: 100, output: 10, costUsd: null, turns: 1 });
-    // Zero cache is reported explicitly; missing cache is combined input.
     expect(usageDetail({ input: 88_200, output: 1_200, cachedInput: 79_000, costUsd: null, turns: 5 })).toBe("9.2k uncached input · 79k cached input · 1.2k output");
     expect(usageDetail({ input: 900, output: 50, costUsd: null, turns: 1 })).toBe("900 input (cached + uncached) · 50 output");
     expect(usageDetail({ input: 900, output: 50, cachedInput: 0, costUsd: null, turns: 1 })).toBe("900 uncached input · 0 cached input · 50 output");
-    // a cached figure can never exceed the input it is part of, or go negative
     expect(cachedInput({ input: 100, output: 0, cachedInput: 250, costUsd: null, turns: 1 })).toBe(100);
     expect(cachedInput({ input: 100, output: 0, cachedInput: -3, costUsd: null, turns: 1 })).toBe(0);
     expect(cachedInput({ input: 100, output: 0, cachedInput: Number.NaN, costUsd: null, turns: 1 })).toBe(0);
@@ -120,14 +135,10 @@ describe("usage formatting", () => {
   it("keeps aggregate token counters distinct from input-only chat chips", () => {
     const longThread = { input: 1_900_000, output: 12_000, cachedInput: 1_862_000, costUsd: null, turns: 12 };
     expect(headlineTokens(longThread)).toBe(50_000);
-    // an engine that never reported a cached share has only the raw total
     expect(headlineTokens({ input: 1_900_000, output: 12_000, costUsd: null, turns: 12 })).toBe(1_912_000);
   });
 
   it("labels a fresh-token total as new tokens and states the whole amount beside it", () => {
-    // MOCA-256: ~0.5B tokens through the model, nearly all of it the thread
-    // re-read from the prompt cache. The headline counts 2.1M; the note must
-    // not claim that figure is everything, and must give the 500M total.
     const total = sumUsage([
       { turns: 900, input: 300_000_000, cachedInput: 299_100_000, output: 400_000, costUsd: null },
       { turns: 700, input: 199_000_000, cachedInput: 198_400_000, output: 200_000, costUsd: null },
@@ -139,19 +150,16 @@ describe("usage formatting", () => {
     expect(note).toContain("500M went through the model");
     expect(note).not.toMatch(/count everything/i);
 
-    // without a cache split the headline is the raw total, so plain "Tokens"
     const uncached = { input: 1_900_000, output: 12_000, costUsd: null, turns: 12 };
     expect(tokensColumnLabel(uncached)).toBe("Tokens");
     expect(cachedUsageNote(uncached)).toBeNull();
   });
 
   it("headlines cost, otherwise input without mixing in output", () => {
-    // Input includes the full request, not only text typed by the person.
     const longThread = { input: 1_900_000, output: 12_000, cachedInput: 1_862_000, costUsd: null, turns: 12 };
     expect(uncachedInput(longThread)).toBe(38_000);
     expect(usageChip(longThread)).toBe("38k uncached");
     expect(usageChip({ ...longThread, costUsd: 4.2 })).toBe("$4.20");
-    // An engine without cache reports shows total input.
     expect(usageChip({ input: 1_900_000, output: 12_000, costUsd: null, turns: 12 })).toBe("1.9M input");
     expect(usageChip({ input: 0, output: 0, costUsd: null, turns: 0 })).toBe("");
   });
@@ -163,8 +171,8 @@ describe("usage formatting", () => {
     expect(contextShare({ ...base, context: { tokens: 142_000, window: 272_000 } })).toMatchObject({ percent: 52, tone: "warning" });
     expect(contextShare({ ...base, context: { tokens: 230_000, window: 272_000 } })).toMatchObject({ percent: 85, tone: "danger" });
     expect(contextShare({ ...base, context: { tokens: 40_000, window: 200_000 } })).toMatchObject({ percent: 20, tone: "quiet" });
-    expect(contextChip({ ...base, context: { tokens: 142_000, window: 272_000 } })).toBe("ctx 52%");
-    expect(contextChip({ ...base, context: { tokens: 142_000 } })).toBe("ctx 142k");
+    expect(contextChip({ ...base, context: { tokens: 142_000, window: 272_000 } })).toBe("52% context used");
+    expect(contextChip({ ...base, context: { tokens: 142_000 } })).toBe("142k context used");
     expect(contextDetail({ ...base, context: { tokens: 142_000, window: 272_000 } })).toBe("Context 142k (52% of 272k)");
     expect(contextDetail({ ...base, context: { tokens: 142_000 } })).toBe("Context 142k");
   });

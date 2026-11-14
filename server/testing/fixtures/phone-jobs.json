@@ -1,0 +1,878 @@
+{
+  "registration": {
+    "installId": "inst-fixture-0001",
+    "name": "Omkar's iPhone",
+    "platform": "ios",
+    "appVersion": "1.9.0",
+    "timeZone": "Asia/Kolkata",
+    "capabilities": {
+      "calendar": "full",
+      "reminders": "full",
+      "contacts": "limited",
+      "location": "when_in_use",
+      "home": "full",
+      "messages": "send"
+    }
+  },
+  "registerResponse": {
+    "phone": {
+      "key": "companion:fixture-device",
+      "registration": {
+        "installId": "inst-fixture-0001",
+        "name": "Omkar's iPhone",
+        "platform": "ios",
+        "appVersion": "1.9.0",
+        "timeZone": "Asia/Kolkata",
+        "capabilities": {
+          "calendar": "full",
+          "reminders": "full",
+          "contacts": "limited",
+          "location": "when_in_use",
+          "home": "full",
+          "messages": "send"
+        }
+      },
+      "registeredAt": 1760000000000,
+      "seen": 1760000000000,
+      "lastUsedAt": null,
+      "online": true,
+      "busy": false
+    }
+  },
+  "frames": [
+    {
+      "kind": "device.job",
+      "phone": "companion:fixture-device",
+      "id": "job-0001"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "job-0001",
+      "tool": "PHONE_LIST_EVENTS",
+      "arguments": {
+        "from": "2026-10-24T00:00:00+05:30",
+        "to": "2026-10-25T00:00:00+05:30"
+      },
+      "expiresAt": 1760000045000
+    },
+    {
+      "id": "job-0002",
+      "tool": "PHONE_SEND_MESSAGE",
+      "arguments": {
+        "to": "Rahul",
+        "text": "On my way"
+      },
+      "expiresAt": 1760000120000
+    }
+  ],
+  "outcomes": [
+    {
+      "ok": true,
+      "result": {
+        "events": [
+          {
+            "id": "evt-1",
+            "title": "Lunch with Priya",
+            "start": "2026-10-24T12:30:00+05:30",
+            "end": "2026-10-24T13:30:00+05:30",
+            "allDay": false
+          }
+        ]
+      }
+    },
+    {
+      "ok": false,
+      "error": "Open the app to finish sending.",
+      "code": "foreground_required"
+    }
+  ],
+  "toolsList": {
+    "tools": [
+      {
+        "name": "PHONE_LIST_EVENTS",
+        "description": "List calendar events on the phone between two times, optionally for one calendar. Read only.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "Range start, ISO 8601 with offset, e.g. 2026-10-24T12:00:00+05:30."
+            },
+            "to": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "Range end, ISO 8601 with offset, e.g. 2026-10-24T12:00:00+05:30."
+            },
+            "calendar": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Calendar name."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "from",
+            "to"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_GET_EVENT",
+        "description": "Read one calendar event by id. Read only.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "An id from an earlier result."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_FIND_FREE_TIME",
+        "description": "Find gaps of at least the given length in the person's calendar between two times. Read only.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "Range start, ISO 8601 with offset, e.g. 2026-10-24T12:00:00+05:30."
+            },
+            "to": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "Range end, ISO 8601 with offset, e.g. 2026-10-24T12:00:00+05:30."
+            },
+            "minutes": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 1440,
+              "description": "Shortest gap wanted, in minutes."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "from",
+            "to",
+            "minutes"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_CREATE_EVENT",
+        "description": "Add an event to the phone's calendar. Check for conflicts first with PHONE_LIST_EVENTS.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 500,
+              "description": "Event title."
+            },
+            "start": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "Start, ISO 8601 with offset, e.g. 2026-10-24T12:00:00+05:30."
+            },
+            "end": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "End, ISO 8601 with offset, e.g. 2026-10-24T12:00:00+05:30."
+            },
+            "allDay": {
+              "type": "boolean",
+              "description": "An all-day event."
+            },
+            "location": {
+              "type": "string",
+              "maxLength": 500,
+              "description": "Where it takes place."
+            },
+            "notes": {
+              "type": "string",
+              "maxLength": 5000,
+              "description": "Notes."
+            },
+            "attendees": {
+              "type": "array",
+              "maxItems": 20,
+              "description": "Attendee emails or names.",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 320
+              }
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "title",
+            "start",
+            "end"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_UPDATE_EVENT",
+        "description": "Change an existing event; only the fields given change.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "An id from an earlier result."
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 500,
+              "description": "Event title."
+            },
+            "start": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "Start, ISO 8601 with offset, e.g. 2026-10-24T12:00:00+05:30."
+            },
+            "end": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "End, ISO 8601 with offset, e.g. 2026-10-24T12:00:00+05:30."
+            },
+            "allDay": {
+              "type": "boolean",
+              "description": "An all-day event."
+            },
+            "location": {
+              "type": "string",
+              "maxLength": 500,
+              "description": "Where it takes place."
+            },
+            "notes": {
+              "type": "string",
+              "maxLength": 5000,
+              "description": "Notes."
+            },
+            "attendees": {
+              "type": "array",
+              "maxItems": 20,
+              "description": "Attendee emails or names.",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 320
+              }
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_DELETE_EVENT",
+        "description": "Delete a calendar event by id.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "An id from an earlier result."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_RESPOND_TO_INVITE",
+        "description": "Accept, decline or tentatively accept a calendar invitation.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "An id from an earlier result."
+            },
+            "response": {
+              "type": "string",
+              "enum": [
+                "accept",
+                "decline",
+                "tentative"
+              ]
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "id",
+            "response"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_LIST_REMINDERS",
+        "description": "List reminders, optionally for one list, a due date range, or only completed ones. Read only.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "list": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Reminder list name."
+            },
+            "from": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "Due on or after, ISO 8601 with offset, e.g. 2026-10-24T12:00:00+05:30."
+            },
+            "to": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "Due on or before, ISO 8601 with offset, e.g. 2026-10-24T12:00:00+05:30."
+            },
+            "completed": {
+              "type": "boolean",
+              "description": "True for completed reminders only; default is open ones."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_CREATE_REMINDER",
+        "description": "Add a reminder, optionally with a due time and a list.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 500,
+              "description": "What to be reminded of."
+            },
+            "due": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "Due, ISO 8601 with offset, e.g. 2026-10-24T12:00:00+05:30."
+            },
+            "notes": {
+              "type": "string",
+              "maxLength": 5000,
+              "description": "Notes."
+            },
+            "list": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Reminder list name."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_UPDATE_REMINDER",
+        "description": "Change a reminder's title, due time or notes; only the fields given change.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "An id from an earlier result."
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 500,
+              "description": "New title."
+            },
+            "due": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "New due time, ISO 8601 with offset, e.g. 2026-10-24T12:00:00+05:30."
+            },
+            "notes": {
+              "type": "string",
+              "maxLength": 5000,
+              "description": "New notes."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_COMPLETE_REMINDER",
+        "description": "Mark a reminder done.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "An id from an earlier result."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_DELETE_REMINDER",
+        "description": "Delete a reminder by id.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "An id from an earlier result."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_SEARCH_CONTACTS",
+        "description": "Search the phone's contacts by name, number, email or company. Returns contacts with ids. Read only.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Free text to match."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_GET_CONTACT",
+        "description": "Read one contact by id, with numbers and emails. Read only.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "An id from an earlier result."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_CREATE_CONTACT",
+        "description": "Add a contact. Search first so you do not create a duplicate.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "givenName": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "First name."
+            },
+            "familyName": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Last name."
+            },
+            "phones": {
+              "type": "array",
+              "maxItems": 20,
+              "description": "Phone numbers with country code.",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 320
+              }
+            },
+            "emails": {
+              "type": "array",
+              "maxItems": 20,
+              "description": "Email addresses.",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 320
+              }
+            },
+            "organization": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Company."
+            },
+            "notes": {
+              "type": "string",
+              "maxLength": 5000,
+              "description": "Notes."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "givenName"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_UPDATE_CONTACT",
+        "description": "Change a contact; only the fields given change.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "An id from an earlier result."
+            },
+            "givenName": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "First name."
+            },
+            "familyName": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Last name."
+            },
+            "phones": {
+              "type": "array",
+              "maxItems": 20,
+              "description": "Phone numbers with country code.",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 320
+              }
+            },
+            "emails": {
+              "type": "array",
+              "maxItems": 20,
+              "description": "Email addresses.",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 320
+              }
+            },
+            "organization": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Company."
+            },
+            "notes": {
+              "type": "string",
+              "maxLength": 5000,
+              "description": "Notes."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_GET_LOCATION",
+        "description": "Where the phone is right now: coordinates and a place name. Read only.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_FIND_PLACES_NEARBY",
+        "description": "Find places near the phone, such as a cafe or a pharmacy. Read only.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "What to look for."
+            },
+            "radiusMeters": {
+              "type": "integer",
+              "minimum": 50,
+              "maximum": 50000,
+              "description": "Search radius in meters."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_LIST_HOME",
+        "description": "List the home's accessories, their current state and the scenes. Read only.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_SET_ACCESSORY",
+        "description": "Set one characteristic of a home accessory, such as turning a light on or setting a thermostat.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "accessoryId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "An id from an earlier result."
+            },
+            "characteristic": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Characteristic name from PHONE_LIST_HOME, e.g. power."
+            },
+            "value": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ],
+              "description": "The new value."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "accessoryId",
+            "characteristic",
+            "value"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_RUN_SCENE",
+        "description": "Run a home scene by id.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sceneId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "An id from an earlier result."
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "sceneId"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_SEND_MESSAGE",
+        "description": "Prepare a text message. It opens a sheet on the phone and is sent only when the person taps Send.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Contact name or phone number."
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "to",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "PHONE_SEND_WHATSAPP",
+        "description": "Prepare a WhatsApp message. It opens a sheet on the phone and is sent only when the person taps Send.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Contact name or phone number."
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "phone": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Which phone, by name, when more than one is paired. Default: the one used most recently."
+            }
+          },
+          "required": [
+            "to",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ]
+  }
+}

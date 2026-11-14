@@ -1,5 +1,7 @@
+import type { CalendarCall } from "./calendar-calls";
 import type { Routine, RoutineRun, RoutineSchedule } from "./routines";
 import { nextCronRuns } from "../../shared/routine-schedule";
+import { intlLocale, t } from "@/lib/i18n";
 
 export const CALENDAR_SLOT_MINUTES = 5;
 const ROUTINE_MARKER_MINUTES = 30;
@@ -12,6 +14,8 @@ export type RoutineCalendarItem = {
   durationMinutes: number;
   routine: Routine | null;
   run: RoutineRun | null;
+  /** A future event of an automation that needs the person: shown in its status colour, not as working. */
+  needsYou?: boolean;
 };
 
 export type CalendarCollisionItem = {
@@ -61,14 +65,11 @@ export function toLocalTimeInput(at: number): string {
 }
 
 export function fromLocalDateAndTime(date: string, time: string, originalAt?: number): number {
-  // Date/time inputs display minutes, but agent-created schedules can carry
-  // seconds and milliseconds. A title-only save must not move the anchor or
-  // choose a different occurrence of a repeated local time at a DST boundary.
+  // Inputs show minutes but schedules carry seconds: a title-only save must not move the anchor, DST included.
   if (originalAt != null && date === toLocalDateInput(originalAt) && time === toLocalTimeInput(originalAt)) return originalAt;
   return new Date(`${date}T${time}`).getTime();
 }
 
-/** Start a new interval at least one full cadence from now, on a clean minute boundary. */
 export function nextIntervalAnchor(now: number, everyMinutes: number): number {
   return Math.ceil((now + everyMinutes * 60_000) / 60_000) * 60_000;
 }
@@ -83,7 +84,6 @@ export function intervalAnchorForSave(
     : nextIntervalAnchor(now, everyMinutes);
 }
 
-/** The next cadence point, retaining the original phase when editing. */
 export function nextIntervalForSave(
   now: number,
   everyMinutes: number,
@@ -99,16 +99,10 @@ export function snapMinutes(minutes: number, increment = CALENDAR_SLOT_MINUTES):
   return Math.max(0, Math.min(24 * 60 - increment, Math.round(minutes / increment) * increment));
 }
 
-/**
- * Assign overlapping events to stable, side-by-side columns. Adjacent events can
- * reuse a column, while overlap chains share one column count so cards never
- * cover each other as a cluster grows.
- */
 export function packCalendarCollisions(
   items: readonly CalendarCollisionItem[],
 ): Map<string, CalendarCollisionLayout> {
-  // Short events keep a 16px hit target in the renderer. Pack against that
-  // same visual footprint so adjacent five-minute cards never cover each other.
+  // Pack against the renderer's 16px minimum card height so short cards never overlap.
   const visualEnd = (item: CalendarCollisionItem) =>
     item.at + Math.max(15, item.durationMinutes) * 60_000;
   const sorted = [...items].sort((left, right) =>
@@ -145,7 +139,6 @@ export function packCalendarCollisions(
   return result;
 }
 
-/** Format a local UTC offset in the compact style used by calendar gutters. */
 export function formatGmtOffset(offsetMinutes: number): string {
   if (offsetMinutes === 0) return "GMT+0";
   const sign = offsetMinutes > 0 ? "+" : "-";
@@ -165,8 +158,8 @@ export function slotAt(day: number, clientY: number, top: number, hourHeight: nu
 export function scheduleAt(schedule: Exclude<RoutineSchedule, { type: "interval" | "cron" }>, occurrenceAt: number, nextAt: number): Exclude<RoutineSchedule, { type: "interval" | "cron" }>;
 export function scheduleAt(schedule: RoutineSchedule, occurrenceAt: number, nextAt: number): RoutineSchedule;
 export function scheduleAt(schedule: RoutineSchedule, occurrenceAt: number, nextAt: number): RoutineSchedule {
-  if (schedule.type === "cron") throw new Error("Edit this routine's schedule to change its cron timing.");
-  if (schedule.type === "once") return { type: "once", at: nextAt };
+  if (schedule.type === "cron") throw new Error(t("routines.cron.editToMove"));
+  if (schedule.type === "once" || schedule.type === "limit_reset") return { type: "once", at: nextAt };
   if (schedule.type === "interval") {
     return {
       ...schedule,
@@ -196,9 +189,6 @@ export function projectedRoutineItems(
       if (run.status === "queued" || run.status === "running" || run.status === "waiting") {
         return true;
       }
-      // A routine may later be edited or deleted, so the current definition
-      // cannot safely tell us whether its history came from a dense interval.
-      // Keep active receipts unbounded above, while trimming terminal history.
       const count = receiptCounts.get(run.routineId) ?? 0;
       if (count >= MAX_RECEIPTS_PER_ROUTINE_PER_RANGE) return false;
       receiptCounts.set(run.routineId, count + 1);
@@ -219,15 +209,12 @@ export function projectedRoutineItems(
   for (const routine of routines) {
     if (!routine.enabled) continue;
     if (routine.schedule.type === "cron") {
-      // Never reconstruct skipped work before the scheduler's next occurrence.
-      // Bound dense expressions per visible day, not per range: daily routines
-      // must still appear throughout a month, not vanish after the 12th.
+      // Never reconstruct work before nextRunAt; bound dense schedules per day so daily routines fill the month.
       if (routine.nextRunAt == null) continue;
       for (let day = startOfDay(Math.max(from, routine.nextRunAt)); day < to; day = addDays(day, 1)) {
         const after = Math.max(day, from, routine.createdAt, routine.nextRunAt) - 1;
         const upcoming = nextCronRuns(routine.schedule, after, MAX_CRON_PROJECTIONS_PER_DAY);
         if (!upcoming.length || upcoming[0]! >= to) break;
-        // Jump over empty days for sparse monthly/yearly schedules.
         day = startOfDay(upcoming[0]!);
         const end = Math.min(to, addDays(day, 1));
         for (const at of upcoming) {
@@ -252,10 +239,8 @@ export function projectedRoutineItems(
       }
       continue;
     }
-    if (routine.schedule.type === "interval") {
-      // The scheduler deliberately skips overlapping and stale interval ticks.
-      // Its persisted nextRunAt is the only future occurrence users can act on;
-      // reconstructing an unreceipted tick would resurrect work it skipped.
+    if (routine.schedule.type === "interval" || routine.schedule.type === "limit_reset") {
+      // The scheduler skips overlapping and stale ticks: reconstructing an unreceipted one would resurrect skipped work.
       const at = routine.nextRunAt;
       if (at != null && at >= from && at < to && !hasReceipt(routine.id, at)) {
         items.push({
@@ -290,10 +275,35 @@ export function calendarRangeLabel(from: number, days: number): string {
   const start = new Date(from);
   const end = new Date(to);
   if (days === 1) {
-    return start.toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" });
+    return start.toLocaleDateString(intlLocale(), { month: "long", day: "numeric", year: "numeric" });
   }
-  if (start.getMonth() === end.getMonth()) {
-    return `${start.toLocaleDateString([], { month: "long" })} ${start.getDate()} – ${end.getDate()}, ${end.getFullYear()}`;
+  const month = start.getMonth() === end.getMonth() ? "long" : "short";
+  return new Intl.DateTimeFormat(intlLocale(), { month, day: "numeric", year: "numeric" }).formatRange(start, end);
+}
+
+export type CallOccurrence = {
+  id: string;
+  at: number;
+  durationMinutes: number;
+  call: CalendarCall;
+};
+
+export function projectCalls(calls: CalendarCall[], from: number, to: number): CallOccurrence[] {
+  const items: CallOccurrence[] = [];
+  for (const call of calls) {
+    if (call.schedule.type === "once") {
+      if (call.schedule.at >= from && call.schedule.at < to) {
+        items.push({ id: `call-${call.id}-${call.schedule.at}`, at: call.schedule.at, durationMinutes: call.durationMinutes, call });
+      }
+      continue;
+    }
+    for (let day = startOfDay(from); day < to; day = addDays(day, 1)) {
+      if (!call.schedule.weekdays.includes(new Date(day).getDay())) continue;
+      const at = atLocalTime(day, call.schedule.time);
+      if (at >= from && at < to && at >= call.createdAt) {
+        items.push({ id: `call-${call.id}-${at}`, at, durationMinutes: call.durationMinutes, call });
+      }
+    }
   }
-  return `${start.toLocaleDateString([], { month: "short", day: "numeric" })} – ${end.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}`;
+  return items.sort((left, right) => left.at - right.at);
 }

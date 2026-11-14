@@ -1,5 +1,4 @@
-// Real HTTP + stdio MCP contract tests: a model's claim is never the receipt.
-// The only writes performed by tools are in a fresh temporary directory.
+// Real HTTP + stdio MCP contract tests; tools write only in a fresh temporary directory.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
@@ -9,10 +8,24 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
-import type { ProviderInstance, SendTurnInput } from "../contracts.ts";
+import { BUILT_IN_DATA_SYSTEM_PROMPT } from "../data/instructions.ts";
+import type { ProviderDriver, ProviderInstance, SendTurnInput } from "../contracts.ts";
+import { replyProblems } from "../harness/text-items.testkit.ts";
+import { caseTokens, LIVE_REPLY_CASES } from "../testing/live-reply-cases.ts";
+import type { StreamStep } from "../testing/stream-script.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
+import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
+import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
+import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
+import { toolBudgetOf } from "../tool-budgets.ts";
 import { GrokDriver } from "./grok.ts";
+import { GreenferenceDriver } from "./greenference.ts";
+import { GroqDriver } from "./groq.ts";
+import { MetaDriver } from "./meta.ts";
+import { MistralDriver } from "./mistral.ts";
+import { ModelgoDriver } from "./modelgo.ts";
+import { CerebrasDriver } from "./cerebras.ts";
 import { MinimaxDriver } from "./minimax.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
@@ -29,7 +42,15 @@ interface ChatRequest {
 }
 
 type Script = (body: ChatRequest, response: ServerResponse, round: number) => void;
-type Provider = "openai-compat" | "grok" | "minimax";
+type Provider = "openai-compat" | "grok" | "minimax" | "cerebras" | keyof typeof KEYED_DRIVERS;
+/** OpenAI-compatible providers configured by a URL and their own key variable. */
+const KEYED_DRIVERS = {
+  greenference: [GreenferenceDriver, "GREENFERENCE_API_KEY"],
+  groq: [GroqDriver, "GROQ_API_KEY"],
+  meta: [MetaDriver, "META_API_KEY"],
+  mistral: [MistralDriver, "MISTRAL_API_KEY"],
+  modelgo: [ModelgoDriver, "MODELGO_API_KEY"],
+} as const;
 const API_KEY_CANARY = "fixture-credential-cda00ee8d8384f54";
 
 function deferred<T = void>() {
@@ -53,8 +74,7 @@ function answer(response: ServerResponse, text = "The operation is complete.") {
   sse(response, [chunk({ content: text }, "stop")]);
 }
 
-// This fake implements MCP on the wire, without importing the production
-// transport or using a fake execution callback in the runtime under test.
+// MCP on the wire, without the production transport or a fake execution callback.
 const MCP_SCRIPT = `
 import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -99,6 +119,8 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
       return;
     }
     let data = "";
+    // Only a turn's POST carries a body; the Ollama probe GETs /api/version first (ollama-context.ts).
+    if (request.method !== "POST") { response.writeHead(404); response.end(); return; }
     for await (const part of request) data += part.toString();
     if (request.url === "/mcp-start") {
       rpcStarted.resolve(JSON.parse(data));
@@ -116,8 +138,13 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
   const helper = join(directory, "mcp.mjs");
   writeFileSync(helper, MCP_SCRIPT);
   const common = { instanceId: randomUUID(), displayName: "Tool contract fixture", enabled: true };
-  const instance: ProviderInstance = provider === "minimax"
+  const keyed = provider in KEYED_DRIVERS ? KEYED_DRIVERS[provider as keyof typeof KEYED_DRIVERS] : null;
+  const instance: ProviderInstance = keyed
+    ? await (keyed[0] as ProviderDriver<unknown>).create({ ...common, config: keyed[0].decodeConfig({ url: `${origin}/v1` }), environment: { [keyed[1]]: apiKey } })
+    : provider === "minimax"
     ? await MinimaxDriver.create({ ...common, config: { url: `${origin}/v1` }, environment: { MINIMAX_API_KEY: apiKey } })
+    : provider === "cerebras"
+    ? await CerebrasDriver.create({ ...common, config: CerebrasDriver.decodeConfig({ url: `${origin}/v1` }), environment: { CEREBRAS_API_KEY: apiKey } })
     : await (provider === "grok" ? GrokDriver : OpenAICompatDriver).create({
       ...common,
       config: { url: `${origin}/v1`, apiKeyEnv: "FIXTURE_CHAT_KEY" },
@@ -153,6 +180,340 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
   };
 }
 
+describe("streamed reply messages from an OpenAI-compatible API", () => {
+  /** A case's steps as the API's rounds: words and reasoning streamed in pieces, each tool ending its round. */
+  const rounds = (steps: StreamStep[]) => {
+    const out: Array<{ chunks: unknown[]; fail?: string }> = [{ chunks: [] }];
+    let calls = 0;
+    for (const step of steps) {
+      const round = out.at(-1)!;
+      if ("fail" in step) round.fail = step.fail;
+      else if ("tool" in step) {
+        round.chunks.push(chunk({ tool_calls: [toolCall("audit_write", JSON.stringify({ name: `step-${++calls}`, value: step.tool }), `call-${calls}`)] }, "tool_calls"));
+        out.push({ chunks: [] });
+      } else {
+        const text = "say" in step ? step.say : step.think;
+        for (let at = 0; at < text.length; at += 7) round.chunks.push(chunk("say" in step ? { content: text.slice(at, at + 7) } : { reasoning_content: text.slice(at, at + 7) }));
+      }
+    }
+    return out;
+  };
+
+  const PROVIDERS: Provider[] = ["openai-compat", "grok", "minimax", "cerebras", "greenference", "groq", "meta", "mistral", "modelgo"];
+  it.each(PROVIDERS.flatMap((provider) => LIVE_REPLY_CASES.filter((entry) => entry.action === undefined).map((entry) => ({ provider, entry, name: entry.name }))))(
+    "$provider streams the $name reply with one id per message and nothing doubled, lost or glued", async ({ provider, entry }) => {
+      const script = rounds(entry.steps);
+      const f = await fixture((_body, response, round) => {
+        const step = script[round - 1];
+        if (!step) return answer(response, "ok");
+        if (step.fail) {
+          sse(response, step.chunks, false);
+          response.destroy();
+          return;
+        }
+        sse(response, round === script.length ? [...step.chunks, chunk({}, "stop")] : step.chunks);
+      }, provider);
+      const { turnId } = await f.start({ approvalMode: "full", text: `Please answer ${entry.marker}` });
+      await f.recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId, 30_000);
+      const events = f.recorder.events.filter((event) => event.turnId === turnId);
+      expect(replyProblems(events, caseTokens(entry))).toEqual([]);
+    }, 60_000);
+});
+
+describe("bounded action announcement recovery", () => {
+  const later = `${"The terminal output is absent; the launch receipt only confirms the process. ".repeat(7)}\n\nLet me execute the commands to create the file and read it back.`;
+
+  it.each(["我会先运行命令，保存并核对回执。", "我會先執行命令，保存並核對回執。"])("continues a Chinese announcement into one real tool effect: %s", async (announcement) => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) answer(response, announcement);
+      else if (round === 2) sse(response, [chunk({ tool_calls: [toolCall()] }, "tool_calls")]);
+      else answer(response, "回执已保存并核对。");
+    });
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(3);
+    expect(f.effects()).toHaveLength(1);
+  });
+
+  it.each([
+    "我会先执行命令，你确认吗？…",
+    "我会在收到你的许可后发送邮件。",
+    "我先检查了文件，确认没有问题。",
+  ])("does not continue a Chinese clarification, approval wait, or completed report: %s", async (reply) => {
+    const f = await fixture((_body, response) => answer(response, reply));
+    await f.start({ approvalMode: "ask" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(1);
+    expect(f.effects()).toEqual([]);
+  });
+
+  it("recovers a later long announcement after the first nudge and preserves earlier results", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) answer(response, "I'll open the terminal.");
+      else if (round === 3) answer(response, later);
+      else if (round === 2 || round === 4) sse(response, [chunk({ tool_calls: [toolCall("audit_write", JSON.stringify({ name: `step-${round}`, value: "done" }), `call-${round}`)] }, "tool_calls")]);
+      else answer(response, "Both receipts are verified.");
+    });
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(5);
+    expect(f.effects().map(effect => effect.name)).toEqual(["step-2", "step-4"]);
+    expect(f.requests[3].messages).toContainEqual(expect.objectContaining({ role: "tool", tool_call_id: "call-2" }));
+    expect(f.requests[3].messages.at(-1)).toMatchObject({ content: expect.stringContaining("Never repeat") });
+  });
+
+  it("fails after three nudges even when each recovery makes tool progress", async () => {
+    const f = await fixture((_body, response, round) => round % 2
+      ? answer(response, "I'll inspect the next result.")
+      : sse(response, [chunk({ tool_calls: [toolCall("audit_write", JSON.stringify({ name: `step-${round}`, value: "done" }), `call-${round}`)] }, "tool_calls")]));
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(7);
+    expect(f.effects()).toHaveLength(3);
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.error", message: expect.stringContaining("3 announcement nudges") }));
+  });
+
+  it("stops on a second announcement without tool progress", async () => {
+    const f = await fixture((_body, response) => answer(response, "I'll inspect the terminal."));
+    await f.start();
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(2);
+    expect(f.effects()).toEqual([]);
+  });
+
+  it("does not nudge after a denied operation", async () => {
+    const f = await fixture((_body, response, round) => round === 1
+      ? sse(response, [chunk({ tool_calls: [toolCall()] }, "tool_calls")])
+      : answer(response, "I'll write the receipt now."));
+    await f.start();
+    await f.decide("deny");
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(2);
+    expect(f.effects()).toEqual([]);
+  });
+
+  it("does not use an announcement to bypass a failed operation", async () => {
+    const f = await fixture((_body, response, round) => round === 1
+      ? sse(response, [chunk({ tool_calls: [toolCall("audit_fail")] }, "tool_calls")])
+      : answer(response, "I'll write the receipt now."));
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: false });
+    // This fixture is on this machine, so the model is sent back twice to fix the call before the turn ends on it.
+    expect(f.requests).toHaveLength(4);
+    expect(f.effects()).toEqual([]);
+  });
+
+  it("marks a turn whose final reply came back after a failed step as partly done, and no other stop", async () => {
+    const run = async (reply: (response: Parameters<typeof answer>[0]) => void) => {
+      const f = await fixture((_body, response, round) => round === 1
+        ? sse(response, [chunk({ tool_calls: [toolCall("audit_fail")] }, "tool_calls")])
+        : reply(response));
+      await f.start({ approvalMode: "full" });
+      const completed = await f.completed();
+      return { completed, errors: f.recorder.events.filter((event) => event.type === "runtime.error") };
+    };
+    const done = await run((response) => answer(response, "Here is the summary; one file could not be read."));
+    expect(done.completed).toMatchObject({ ok: false, stopReason: "tool_error" });
+    expect(done.errors).toEqual([expect.objectContaining({ partial: true, terminal: true, message: expect.stringContaining("Stopped because the tool call") })]);
+    // A reply the provider cut off is not a finished one, even after a failed step.
+    const cut = await run((response) => sse(response, [chunk({ content: "Here is the sum" }, "length")]));
+    expect(cut.completed).toMatchObject({ ok: false, stopReason: "error" });
+    expect(cut.errors).toHaveLength(1);
+    expect(cut.errors[0]).not.toHaveProperty("partial");
+  });
+
+  // Whether to run an operation again is the model's call under the engine's own permissions: the nudge only asks it not to.
+  it("leaves a repeated operation after a nudge to the model and the turn's permissions", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 2) answer(response, "I'll write the receipt now.");
+      else if (round === 1 || round === 3) sse(response, [chunk({ tool_calls: [toolCall("audit_write", round === 1 ? '{"name":"receipt","value":"done"}' : '{"value":"done","name":"receipt"}', `call-${round}`)] }, "tool_calls")]);
+      else answer(response, "Receipt verified.");
+    });
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(4);
+    expect(f.effects()).toHaveLength(2);
+  });
+});
+
+describe("a searched MCP catalog", () => {
+  it("asks about the tool call_tool runs, and never about a search", async () => {
+    const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(300) });
+    cleanups.push(() => remote.close());
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ content: null, tool_calls: [toolCall("whop_search_tools", '{"query":"list payments"}', "call_search")] }, "tool_calls")]);
+      else if (round === 2) sse(response, [chunk({ content: null, tool_calls: [toolCall("whop_call_tool", '{"name":"payments_list","arguments":{"company_id":"biz_1"}}', "call_run")] }, "tool_calls")]);
+      else answer(response);
+    });
+    await f.start({ integrations: { custom: { whop: { type: "http", url: remote.url, headers: {} } } } });
+    const opened = await f.recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "permission", tool: "whop_payments_list", summary: expect.stringContaining("biz_1") });
+    expect(remote.calls).toEqual([]);
+    await f.instance.adapter.respondToRequest(f.threadId, opened.requestId!, { behavior: "allow" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.recorder.events.filter((event) => event.type === "request.opened")).toHaveLength(1);
+    expect(remote.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
+    expect(f.recorder.events.flatMap((event) => event.type === "item.started" && event.itemType === "tool" ? [event.title] : []))
+      .toEqual(["whop_search_tools", "whop_payments_list"]);
+    const names = f.requests[0].tools!.map((tool) => tool.function.name);
+    expect(names.filter((name) => name.startsWith("whop_"))).toEqual(["whop_search_tools", "whop_describe_tool", "whop_call_tool"]);
+    expect(f.requests[1].messages.at(-1)).toMatchObject({ role: "tool", tool_call_id: "call_search", content: expect.stringContaining("payments_list") });
+  });
+});
+
+describe("approvals that follow the other engines", () => {
+  it("runs OpenMausBot's own agents tools without a card, while a configured server's tool still asks", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ tool_calls: [toolCall("agents_write", '{"name":"peer","value":"sent"}', "call_agents")] }, "tool_calls")]);
+      else if (round === 2) sse(response, [chunk({ tool_calls: [toolCall("audit_write", '{"name":"receipt","value":"done"}', "call_audit")] }, "tool_calls")]);
+      else answer(response);
+    });
+    const agents = f.integrations!.custom!.audit as NonNullable<SendTurnInput["integrations"]>["agents"];
+    await f.start({ integrations: { ...f.integrations, agents } });
+    const opened = await f.recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "permission", tool: "audit_write" });
+    expect(f.effects()).toEqual([{ name: "peer", value: "sent" }]);
+    await f.instance.adapter.respondToRequest(f.threadId, opened.requestId!, { behavior: "allow" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.recorder.events.filter((event) => event.type === "request.opened")).toHaveLength(1);
+    expect(f.effects()).toEqual([{ name: "peer", value: "sent" }, { name: "receipt", value: "done" }]);
+  });
+
+  it("keeps \"Always allow this session\" for that exact tool for the rest of the conversation", async () => {
+    const calls = [
+      toolCall("audit_write", '{"name":"one","value":"1"}', "call_1"), toolCall("audit_write", '{"name":"two","value":"2"}', "call_2"), null,
+      toolCall("audit_write", '{"name":"three","value":"3"}', "call_3"), toolCall("audit_fail", '{"name":"four","value":"4"}', "call_4"), null,
+      toolCall("audit_write", '{"name":"guest","value":"g"}', "call_g"), toolCall("audit_write", '{"name":"guest2","value":"g"}', "call_g2"), null,
+      toolCall("audit_write", '{"name":"five","value":"5"}', "call_5"), null,
+    ];
+    const f = await fixture((_body, response, round) => {
+      const call = calls[round - 1];
+      if (call) sse(response, [chunk({ tool_calls: [call] }, "tool_calls")]);
+      else answer(response);
+    });
+    const opened = () => f.recorder.events.filter((event) => event.type === "request.opened");
+    await f.start();
+    const first = await f.recorder.until((event) => event.type === "request.opened");
+    expect(first).toMatchObject({ tool: "audit_write", allowSession: true });
+    expect(await f.instance.adapter.respondToRequest(f.threadId, first.requestId!, { behavior: "allow", always: true })).toBe("allowed-once");
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(opened()).toHaveLength(1);
+    expect(f.effects().map((effect) => effect.name)).toEqual(["one", "two"]);
+
+    f.recorder.events.splice(0);
+    await f.start();
+    const other = await f.recorder.until((event) => event.type === "request.opened");
+    expect(other).toMatchObject({ tool: "audit_fail", allowSession: true });
+    expect(f.effects().map((effect) => effect.name)).toEqual(["one", "two", "three"]);
+    await f.instance.adapter.respondToRequest(f.threadId, other.requestId!, { behavior: "deny" });
+    await f.completed();
+
+    f.recorder.events.splice(0);
+    await f.start({ guestConfined: true });
+    const guest = await f.recorder.until((event) => event.type === "request.opened");
+    expect(guest).toMatchObject({ tool: "audit_write", allowSession: false });
+    expect(await f.instance.adapter.respondToRequest(f.threadId, guest.requestId!, { behavior: "allow", always: true })).toBe("allowed-once");
+    const again = await f.recorder.until((event) => event.type === "request.opened" && event.requestId !== guest.requestId);
+    expect(again).toMatchObject({ tool: "audit_write", allowSession: false });
+    await f.instance.adapter.respondToRequest(f.threadId, again.requestId!, { behavior: "deny" });
+    await f.completed();
+    expect(f.effects().map((effect) => effect.name)).toEqual(["one", "two", "three", "guest"]);
+
+    f.recorder.events.splice(0);
+    await f.instance.adapter.sendTurn({ threadId: randomUUID(), text: "Store it here too.", model: "fixture-model", integrations: f.integrations });
+    const elsewhere = await f.recorder.until((event) => event.type === "request.opened");
+    expect(elsewhere).toMatchObject({ tool: "audit_write" });
+    await f.instance.adapter.respondToRequest(elsewhere.threadId, elsewhere.requestId!, { behavior: "deny" });
+    await f.completed();
+    expect(f.effects().map((effect) => effect.name)).toEqual(["one", "two", "three", "guest"]);
+  });
+});
+
+describe("whose allow \"Always allow this session\" keeps", () => {
+  it("keeps it for the bot it was given to on that server: not a roommate on the same thread, nor a changed server", async () => {
+    const calls = [
+      toolCall("audit_write", '{"name":"mira","value":"1"}', "call_1"), null,
+      toolCall("audit_write", '{"name":"clive","value":"2"}', "call_2"), null,
+      toolCall("audit_write", '{"name":"mira2","value":"3"}', "call_3"), null,
+      toolCall("audit_write", '{"name":"changed","value":"4"}', "call_4"), null,
+    ];
+    const f = await fixture((_body, response, round) => {
+      const call = calls[round - 1];
+      if (call) sse(response, [chunk({ tool_calls: [call] }, "tool_calls")]);
+      else answer(response);
+    });
+    const opened = () => f.recorder.events.filter((event) => event.type === "request.opened");
+    // a room runs each member's turn on the room's one thread
+    await f.start({ botId: "mira" });
+    const first = await f.recorder.until((event) => event.type === "request.opened");
+    expect(await f.instance.adapter.respondToRequest(f.threadId, first.requestId!, { behavior: "allow", always: true })).toBe("allowed-once");
+    await f.completed();
+
+    f.recorder.events.splice(0);
+    await f.start({ botId: "clive" });
+    const roommate = await f.recorder.until((event) => event.type === "request.opened");
+    expect(roommate).toMatchObject({ tool: "audit_write", allowSession: true });
+    await f.instance.adapter.respondToRequest(f.threadId, roommate.requestId!, { behavior: "deny" });
+    await f.completed();
+
+    f.recorder.events.splice(0);
+    await f.start({ botId: "mira" });
+    await f.completed();
+    expect(opened()).toHaveLength(0);
+
+    // the person pointed "audit" at another launch of the server
+    const audit = f.integrations!.custom!.audit as { command: string; args: string[]; env: Record<string, string> };
+    f.recorder.events.splice(0);
+    await f.start({ botId: "mira", integrations: { custom: { audit: { ...audit, env: { ...audit.env, AUDIT_PROFILE: "other" } } } } });
+    const changed = await f.recorder.until((event) => event.type === "request.opened");
+    expect(changed).toMatchObject({ tool: "audit_write", allowSession: true });
+    await f.instance.adapter.respondToRequest(f.threadId, changed.requestId!, { behavior: "deny" });
+    await f.completed();
+    expect(f.effects().map((effect) => effect.name)).toEqual(["mira", "mira2"]);
+  });
+});
+
+describe("built-in Data provider parity", () => {
+  it.each(["openai-compat", "grok", "minimax", "cerebras"] as const)("mounts and executes Data through %s with the shared instructions", async (provider) => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ tool_calls: [toolCall("data_write")] }, "tool_calls")]);
+      else answer(response);
+    }, provider);
+    const data = f.integrations!.custom!.audit as NonNullable<SendTurnInput["integrations"]>["data"];
+    expect(f.instance.adapter.capabilities.dataMcp).toBe(true);
+    await f.start({ integrations: { data }, system: BUILT_IN_DATA_SYSTEM_PROMPT });
+    await f.decide();
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests[0].tools?.map(tool => tool.function.name)).toContain("data_write");
+    expect(f.requests[0].messages).toContainEqual({ role: "system", content: BUILT_IN_DATA_SYSTEM_PROMPT });
+    expect(f.effects()).toEqual([{ name: "receipt", value: "done" }]);
+    expect(f.requests[1].messages).toContainEqual(expect.objectContaining({ role: "tool", tool_call_id: "call_write", content: expect.stringContaining("Stored receipt=done") }));
+  });
+});
+
+describe("a searched MCP catalog's misses", () => {
+  it("are guidance the model recovers from, so the turn still succeeds", async () => {
+    const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(300) });
+    cleanups.push(() => remote.close());
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ content: null, tool_calls: [
+        toolCall("whop_describe_tool", '{"name":"payments_teleport"}', "call_unknown"),
+        { ...toolCall("whop_search_tools", '{"limit":"eight"}', "call_empty"), index: 1 },
+      ] }, "tool_calls")]);
+      else answer(response, "There is no such tool; I searched for the right one instead.");
+    });
+    await f.start({ integrations: { custom: { whop: { type: "http", url: remote.url, headers: {} } } } });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.recorder.events.some((event) => event.type === "request.opened")).toBe(false);
+    const results = f.requests[1].messages.filter((message) => message.role === "tool").map((message) => JSON.parse(message.content as string));
+    expect(results).toEqual([
+      { ok: true, result: expect.stringContaining("No tool named") },
+      { ok: true, result: expect.stringContaining("search_tools needs") },
+    ]);
+    expect(remote.calls).toEqual([]);
+  });
+});
+
 describe("optional built-in question compatibility", () => {
   const unsupported = { error: { message: "This model does not support tools." } };
   it.each([
@@ -174,7 +535,6 @@ describe("optional built-in question compatibility", () => {
     expect(f.requests[1]).not.toHaveProperty("tools");
     expect(f.requests[1].messages).toEqual(f.requests[0].messages);
     expect(f.effects()).toEqual([]);
-    // A rejection for this turn is not a persisted provider setting.
     f.recorder.events.length = 0;
     await f.start({ integrations: undefined });
     expect(await f.completed()).toMatchObject({ ok: true });
@@ -197,11 +557,11 @@ describe("optional built-in question compatibility", () => {
     });
     await f.start({ integrations: undefined });
     expect(await f.completed()).toMatchObject({ ok: false });
-    expect(f.requests).toHaveLength(1);
-    expect(f.requests[0].tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
+    expect(f.requests).toHaveLength(status === 429 || status === 500 ? 3 : 1);
+    for (const request of f.requests) expect(request.tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
   });
 
-  it("does not retry network failures or strip tools mounted by the person", async () => {
+  it("retries a network failure as the same request, and never strips tools mounted by the person", async () => {
     for (const network of [false, true]) {
       const f = await fixture((_body, response) => {
         if (network) return response.destroy(new Error("tools are not supported"));
@@ -210,8 +570,8 @@ describe("optional built-in question compatibility", () => {
       });
       await f.start(network ? { integrations: undefined } : {});
       expect(await f.completed()).toMatchObject({ ok: false });
-      expect(f.requests).toHaveLength(1);
-      if (!network) expect(f.requests[0].tools?.some(tool => tool.function.name === "audit_write")).toBe(true);
+      expect(f.requests).toHaveLength(network ? 3 : 1);
+      for (const request of f.requests) expect(request.tools?.some(tool => tool.function.name === (network ? "ask_user" : "audit_write"))).toBe(true);
       expect(f.effects()).toEqual([]);
     }
   });
@@ -281,6 +641,75 @@ describe("OpenAI-compatible computer images", () => {
       { type: "image_url", image_url: { url: `data:image/png;base64,${png}` } },
     ] });
     expect(f.instance.adapter.capabilities).toMatchObject({ computerMcp: true, localComputerMcp: true, browserMcp: true, nativeImageInput: true });
+  });
+
+  it.each([
+    ["gpt-oss-120b", false],
+    ["qwen-3.8-27b", true],
+  ] as const)("Cerebras %s keeps the browser and receives screenshots only if it can see images", async (model, sees) => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ tool_calls: [{ ...toolCall(), function: { ...toolCall().function, name: "browser_write" } }] }, "tool_calls")]);
+      else answer(response, "Read the page.");
+    }, "cerebras");
+    writeFileSync(join(f.directory, "mcp.mjs"), MCP_SCRIPT.replace(
+      'text: "Stored " + args.name + "=" + args.value',
+      `text: "Screenshot captured" }, { type: "image", mimeType: "image/png", data: ${JSON.stringify(png)}`,
+    ));
+    const imagePath = join(f.directory, "input.png");
+    writeFileSync(imagePath, Buffer.from(png, "base64"));
+    const browser = f.integrations!.custom!.audit as { command: string; args: string[]; env: Record<string, string> };
+    await f.start({ model, integrations: { browser }, images: [{ path: imagePath, mime: "image/png", bytes: Buffer.from(png, "base64").length }] });
+    await f.decide();
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.effects()).toHaveLength(1);
+    expect(f.instance.adapter.capabilities).toMatchObject({ browserMcp: true });
+    const sent = JSON.stringify(f.requests);
+    expect(sent.includes("image_url")).toBe(sees);
+    const toolMessage = f.requests[1].messages.find((message) => message.role === "tool");
+    expect(String(toolMessage?.content).includes("this model cannot see images")).toBe(!sees);
+    if (!sees) {
+      expect(f.requests[0].messages.at(-1)?.content).toContain("cannot see images");
+      expect(f.requests[1].messages.at(-1)).toMatchObject({ role: "tool" });
+    }
+  });
+
+  it("resends a round the provider refuses as too large once, without the older screenshot and without running the tool again", async () => {
+    const screenshot = Buffer.concat([Buffer.from(png, "base64"), Buffer.alloc(150_000)]).toString("base64");
+    const limit = 100_000;
+    const sizes: number[] = [];
+    const f = await fixture((body, response, round) => {
+      sizes.push(Buffer.byteLength(JSON.stringify(body)));
+      if (sizes.at(-1)! > limit) {
+        response.writeHead(413, { "content-type": "text/html" });
+        response.end("<html><head><title>413 Request Entity Too Large</title></head><body>nginx</body></html>");
+      } else if (round === 1) sse(response, [chunk({ tool_calls: [{ ...toolCall(), function: { ...toolCall().function, name: "computer_write" } }] }, "tool_calls")]);
+      else answer(response, "Inspected the fixture screenshot.");
+    });
+    writeFileSync(join(f.directory, "mcp.mjs"), MCP_SCRIPT.replace(
+      'text: "Stored " + args.name + "=" + args.value',
+      `text: "Screenshot captured" }, { type: "image", mimeType: "image/png", data: ${JSON.stringify(screenshot)}`,
+    ));
+    const imagePath = join(f.directory, "input.png");
+    writeFileSync(imagePath, Buffer.from(png, "base64"));
+    const attached = [{ type: "text", text: "Store the synthetic receipt." }, { type: "image_url", image_url: { url: `data:image/png;base64,${png}` } }];
+    await f.start({
+      integrations: { localComputer: f.integrations!.custom!.audit as NonNullable<SendTurnInput["integrations"]>["localComputer"] },
+      images: [{ path: imagePath, mime: "image/png", bytes: Buffer.from(png, "base64").length }],
+    });
+    await f.decide();
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.effects()).toHaveLength(1);
+    expect(f.requests).toHaveLength(3);
+    expect(sizes[1]).toBeGreaterThan(limit);
+    expect(sizes[2]).toBeLessThanOrEqual(limit);
+    expect(f.requests[2].messages.slice(0, -1)).toEqual(f.requests[1].messages.slice(0, -1));
+    expect(f.requests[2].messages.find((message) => message.role === "user")?.content).toEqual(attached);
+    expect(f.requests[2].messages.at(-2)).toMatchObject({ role: "tool", tool_call_id: "call_write" });
+    expect(f.requests[2].messages.at(-1)).toEqual({ role: "user", content: [
+      { type: "text", text: "Screenshot result from tool call call_write:" },
+      { type: "text", text: "[image omitted to fit the provider's size limit]" },
+    ] });
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "turn.retrying", reason: "request_too_large" }));
   });
 
   it("keeps every tool response ahead of screenshots in a multiple-call batch", async () => {
@@ -379,12 +808,11 @@ describe.each<Provider>(["openai-compat", "grok", "minimax"])("%s structured too
 
   it("preserves ordinary transcript chat and leaves textual tool imitations as text", async () => {
     const imitation = '<tool_call>{"name":"audit_write","arguments":{"value":"pretend"}}</tool_call>';
-    const f = await fixture((_body, response) => answer(response, imitation), provider);
+    // Only a hosted model: a server on this machine counts as a local one, covered in openai-chat-local-model.test.ts.
+    const f = await fixture((_body, response) => answer(response, imitation), provider === "openai-compat" ? "grok" : provider);
     await f.start({ integrations: undefined, system: "Fixture persona", transcript: [{ role: "user", text: "Earlier question" }, { role: "assistant", text: "Earlier answer" }] });
     expect(await f.completed()).toMatchObject({ ok: true });
     expect(f.requests).toHaveLength(1);
-    // ask_user is the runtime's built-in, so it is offered even with no MCP
-    // server mounted — and nothing else is.
     expect(f.requests[0].tools?.map((tool) => tool.function.name)).toEqual(["ask_user"]);
     expect(f.requests[0].messages.map((message) => message.role)).toEqual(["system", "user", "assistant", "user"]);
     expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text: imitation }));
@@ -407,8 +835,6 @@ describe.each<Provider>(["openai-compat", "grok", "minimax"])("%s structured too
     const opened = await f.recorder.until((event) => event.type === "request.opened");
     if (opened.type !== "request.opened") throw new Error("expected a question card");
     expect(opened).toMatchObject({ requestType: "question", tool: "ask_user", questions });
-    // A multi-question card cannot flatten to one choice list without
-    // losing which question an answer belongs to.
     expect(opened.choices).toBeUndefined();
     expect(f.requests[0].tools).toContainEqual({
       type: "function",
@@ -421,18 +847,21 @@ describe.each<Provider>(["openai-compat", "grok", "minimax"])("%s structured too
     expect(f.effects()).toEqual([]);
   }, 20_000);
 
-  it("returns an unanswered ask_user as a denial the model must not paper over", async () => {
+  it("completes the turn when an ask_user goes unanswered, instead of ending it as a denial", async () => {
     const f = await fixture((_body, response, round) => {
       if (round === 1) sse(response, [chunk({ content: null, tool_calls: [toolCall("ask_user", JSON.stringify({ questions: [{ question: "Ship it?" }] }), "call_ask")] }, "tool_calls")]);
-      else answer(response, "I went ahead and shipped it.");
+      else answer(response, "I proceeded without the answer.");
     }, provider);
     await f.start();
     const opened = await f.recorder.until((event) => event.type === "request.opened");
     expect(await f.instance.adapter.respondToRequest(f.threadId, opened.requestId!, { behavior: "deny" })).toBe("rejected");
-    expect(await f.completed()).toMatchObject({ ok: false, denials: ["ask_user"] });
+    const completed = await f.completed();
+    expect(completed).toMatchObject({ ok: true });
+    expect((completed as any).stopReason).not.toBe("tool_error");
+    expect((completed as any).denials).toBeUndefined();
     expect(f.requests[1].messages.at(-1)).toMatchObject({ role: "tool", tool_call_id: "call_ask" });
     expect(JSON.parse(String(f.requests[1].messages.at(-1)?.content))).toMatchObject({
-      ok: false,
+      ok: true,
       result: expect.stringContaining("did not answer"),
     });
   }, 20_000);
@@ -505,6 +934,89 @@ describe("structured tool execution boundaries", () => {
     }
     expect(JSON.stringify(f.recorder.events)).not.toContain("synthetic-encrypted");
     expect(f.effects()).toEqual([{ name: "receipt", value: "done" }]);
+  });
+
+  it("finishes a turn whose streamed reasoning details pass 256 KB of JSON", async () => {
+    // OpenRouter streams reasoning a few characters per delta, each wrapped in a full block.
+    const deltas = Array.from({ length: 8_000 }, () => chunk({ reasoning_details: [{ type: "reasoning.text", text: "think", format: "unknown", index: 0 }] }));
+    const f = await fixture((_request, response, round) => {
+      if (round > 1) return answer(response);
+      sse(response, [...deltas, chunk({ content: null, tool_calls: [toolCall()] }, "tool_calls")]);
+    });
+    await f.start();
+    await f.decide();
+    expect(await f.recorder.until((event) => event.type === "turn.completed", 19_000)).toMatchObject({ ok: true });
+    const assistant = f.requests[1].messages.find((message) => message.role === "assistant");
+    expect(assistant?.reasoning_details).toHaveLength(8_000);
+  }, 20_000);
+
+  // Groq's wording, truncated in the runtime error but not in the body.
+  const reasoningRejection = { error: {
+    message: "'messages.2' : for 'role:assistant' the following must be satisfied[('messages.2' : property 'reasoning_content' is unsupported)]",
+    type: "invalid_request_error",
+  } };
+  const reasoningToolRound = (response: ServerResponse) => sse(response, [
+    chunk({ reasoning: "Synthetic reasoning." }),
+    chunk({ content: null, tool_calls: [toolCall()] }, "tool_calls"),
+  ]);
+
+  it("resends a tool continuation without reasoning_content once an endpoint rejects it, and omits it afterwards", async () => {
+    const f = await fixture((body, response) => {
+      if (body.messages.some((message) => "reasoning_content" in message)) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify(reasoningRejection));
+      } else if (body.messages.at(-1)?.role === "tool") answer(response);
+      else reasoningToolRound(response);
+    });
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(3);
+    expect(f.requests[1].messages.find((message) => message.role === "assistant")).toMatchObject({ reasoning_content: "Synthetic reasoning." });
+    const resent = f.requests[2].messages;
+    expect(resent.some((message) => "reasoning_content" in message)).toBe(false);
+    expect(resent).toEqual(f.requests[1].messages.map(({ reasoning_content: _omitted, ...message }) => message));
+    expect(f.effects()).toEqual([{ name: "receipt", value: "done" }]);
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+
+    f.recorder.events.length = 0;
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(5);
+    expect(f.requests[4].messages.at(-2)).toMatchObject({ role: "assistant", tool_calls: [expect.objectContaining({ id: "call_write" })] });
+    expect(f.requests[4].messages.some((message) => "reasoning_content" in message)).toBe(false);
+  });
+
+  it.each([
+    [400, { error: { message: "Invalid request body." } }],
+    [400, { error: { message: "reasoning_content is required for thinking-mode tool calls." } }],
+    [401, reasoningRejection],
+    [500, reasoningRejection],
+  ])("keeps reasoning_content and fails on unrelated HTTP %s error %j", async (status, error) => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) return reasoningToolRound(response);
+      response.writeHead(status as number, { "content-type": "application/json" });
+      response.end(JSON.stringify(error));
+    });
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(2);
+    expect(f.requests[1].messages.find((message) => message.role === "assistant")).toMatchObject({ reasoning_content: "Synthetic reasoning." });
+    expect(f.effects()).toEqual([{ name: "receipt", value: "done" }]);
+  });
+
+  it.each([
+    ["a steer", "The receipt is stored."],
+    ["an announcement nudge", "I'll write the receipt now."],
+  ])("keeps reasoning_content on an answer resent after %s", async (kind, text) => {
+    const first = deferred<ServerResponse>();
+    const f = await fixture((_body, response, round) => round === 1 ? first.resolve(response) : answer(response));
+    await f.start({ approvalMode: "full" });
+    const response = await first.promise;
+    if (kind === "a steer") await expect(f.instance.adapter.steer!(f.threadId, "One more thing.")).resolves.toBe("steered");
+    sse(response, [chunk({ reasoning: "Synthetic reasoning." }), chunk({ content: text }, "stop")]);
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests[1].messages.find((message) => message.role === "assistant"))
+      .toMatchObject({ content: text, reasoning_content: "Synthetic reasoning." });
   });
 
   it.each([
@@ -584,20 +1096,38 @@ describe("structured tool execution boundaries", () => {
   });
 
   it.each([
-    { scenario: "one chunk", pieces: ["abab"] },
-    { scenario: "split chunks", pieces: ["ab", "ab"] },
+    // Letters outside hex and the usual id alphabets, so a random id in the events can never contain the credential.
+    { scenario: "one chunk", pieces: ["zqxzqxzqx"] },
+    { scenario: "split chunks", pieces: ["zqxzqx", "zqx"] },
   ])("redacts an overlapping-prefix credential received in $scenario", async ({ pieces }) => {
     const f = await fixture((_request, response) => sse(response, [
       chunk({ content: "Before " }),
       ...pieces.map((piece) => chunk({ content: piece })),
       chunk({ content: " after." }, "stop"),
-    ]), "openai-compat", "abab");
+    ]), "openai-compat", "zqxzqxzqx");
     await f.start({ integrations: undefined });
     expect(await f.completed()).toMatchObject({ ok: true });
     const combined = f.recorder.events.filter((event) => event.type === "content.delta").map((event) => event.delta).join("");
     expect(combined).toBe("Before [redacted] after.");
     expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text: combined }));
-    expect(JSON.stringify(f.recorder.events)).not.toContain("abab");
+    expect(JSON.stringify(f.recorder.events)).not.toContain("zqxzqxzqx");
+  });
+
+  it.each([
+    { scenario: "the provider key", apiKey: "1", token: undefined },
+    { scenario: "an integration token", apiKey: undefined, token: "1" },
+  ])("leaves the reply alone when $scenario is a short placeholder like \"1\"", async ({ apiKey, token }) => {
+    const text = "1 12:00–13:00 123 8901 10 11 ID: 1A2B3C";
+    const f = await fixture((_request, response) => sse(response, [
+      ...text.match(/.{1,5}/gs)!.map((piece) => chunk({ content: piece })),
+      chunk({}, "stop"),
+    ]), "openai-compat", apiKey);
+    const audit = f.integrations!.custom!.audit as { command: string; args: string[]; env: Record<string, string> };
+    await f.start({ integrations: token ? { custom: { audit: { ...audit, env: { ...audit.env, AUDIT_TOKEN: token } } } } : undefined });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    const combined = f.recorder.events.filter((event) => event.type === "content.delta").map((event) => event.delta).join("");
+    expect(combined).toBe(text);
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text }));
   });
 
   it("redacts a configured credential echoed by a tool from events, diagnostics, and the returned tool result", async () => {
@@ -615,9 +1145,9 @@ describe("structured tool execution boundaries", () => {
     expect(readFileSync(join(NATIVE_DIR, `${f.threadId}.ndjson`), "utf8")).not.toContain(API_KEY_CANARY);
   });
 
-  it("never promotes textual tool syntax into execution, even when that tool is mounted", async () => {
+  it("never promotes a hosted model's textual tool syntax into execution, even when that tool is mounted", async () => {
     const imitation = '<tool_call>{"name":"audit_write","arguments":{"name":"receipt","value":"pretend"}}</tool_call>';
-    const f = await fixture((_body, response) => answer(response, imitation));
+    const f = await fixture((_body, response) => answer(response, imitation), "grok");
     await f.start();
     expect(await f.completed()).toMatchObject({ ok: true });
     expect(f.requests[0].tools?.some((tool) => tool.function.name === "audit_write")).toBe(true);
@@ -626,12 +1156,12 @@ describe("structured tool execution boundaries", () => {
     expect(f.requests).toHaveLength(1);
   });
 
-  it("accumulates interleaved argument fragments and pairs both results with their original call IDs", async () => {
+  it("accepts null continuation fields while accumulating interleaved calls", async () => {
     const f = await fixture((_body, response, round) => {
       if (round > 1) return answer(response);
       sse(response, [
         chunk({ tool_calls: [toolCall("audit_write", '{"name":"first",', "call_first"), { ...toolCall("audit_write", '{"name":"second",', "call_second"), index: 1 }] }),
-        chunk({ tool_calls: [{ index: 1, function: { arguments: '"value":"two"}' } }] }),
+        chunk({ tool_calls: [{ index: 1, id: null, type: null, function: { name: null, arguments: '"value":"two"}' } }] }),
         chunk({ tool_calls: [{ index: 0, function: { arguments: '"value":"one"}' } }] }, "tool_calls"),
       ]);
     });
@@ -770,6 +1300,25 @@ describe("structured tool execution boundaries", () => {
     expect(f.recorder.events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
   });
 
+  it("resends a refused tool call after a step ran without repeating it, and ends asking only for what's left", async () => {
+    const message = "Tool call validation failed: tool call validation failed: attempted to call tool 'json' which was not in request.tools";
+    const f = await fixture((_body, response, round) => round === 1
+      ? sse(response, [chunk({ tool_calls: [toolCall()] }, "tool_calls")])
+      : sse(response, [{ error: { message, type: "invalid_request_error", code: "tool_use_failed" } }]));
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: false, stopReason: "error" });
+    expect(f.effects()).toHaveLength(1);
+    expect(f.requests).toHaveLength(4);
+    expect(f.requests[1].messages.some((entry) => entry.role === "tool" && entry.tool_call_id === "call_write")).toBe(true);
+    expect(f.requests[2]).toEqual(f.requests[1]);
+    expect(f.requests[3]).toEqual(f.requests[1]);
+    expect(f.recorder.events.filter((event) => event.type === "turn.retrying")).toEqual([1, 2].map((attempt) =>
+      expect.objectContaining({ attempt, reason: "tool_use_failed" })));
+    expect(f.recorder.events.filter((event) => event.type === "runtime.error")).toEqual([expect.objectContaining({
+      message: `The model tried to use a tool it was not given ("json"). The steps before it already ran, so ask only for what's left. Provider: ${message}`,
+    })]);
+  });
+
   it("rejects a repeated call ID in a later model round before duplicating its effect", async () => {
     const f = await fixture((_body, response) => sse(response, [chunk({ tool_calls: [toolCall()] }, "tool_calls")]));
     await f.start();
@@ -781,20 +1330,90 @@ describe("structured tool execution boundaries", () => {
     expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.error", message: expect.stringMatching(/repeat|duplicate/i) }));
   });
 
-  it("stops a model that keeps requesting tools at the turn limit", async () => {
+  it("finishes a tool-heavy task that needs more than sixteen steps", async () => {
+    const f = await fixture((_body, response, round) => round <= 40
+      ? sse(response, [chunk({ tool_calls: [toolCall("audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
+      : answer(response));
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(41);
+    expect(f.effects()).toHaveLength(40);
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+  });
+
+  it("stops a model that keeps requesting tools after 64 steps, with one next action that does not repeat the steps that ran", async () => {
     const f = await fixture((_body, response, round) => sse(response, [
       chunk({ tool_calls: [toolCall("audit_write", '{"name":"receipt","value":"done"}', `call_${round}`)] }, "tool_calls"),
-    ]));
+    ]), "grok");
     const stop = f.instance.adapter.onEvent((event) => {
       if (event.type === "request.opened") void f.instance.adapter.respondToRequest(f.threadId, event.requestId!, { behavior: "allow" });
     });
     await f.start();
-    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(await f.completed()).toMatchObject({ ok: false, stopReason: "error" });
     stop();
-    expect(f.requests.length).toBeGreaterThan(1);
-    expect(f.requests.length).toBeLessThanOrEqual(16);
-    expect(f.effects().length).toBeLessThanOrEqual(16);
-    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.error", message: expect.stringMatching(/limit/i) }));
+    expect(f.requests).toHaveLength(64);
+    expect(f.effects()).toHaveLength(64);
+    expect(f.recorder.events.filter((event) => event.type === "runtime.error")).toEqual([expect.objectContaining({
+      message: "Stopped after 64 steps without a final answer. The steps so far already ran, so ask only for what's left.",
+      terminal: true,
+    })]);
+  });
+
+  it("answers in the last allowed step and leaves a message steered during it for the next turn", async () => {
+    const last = deferred<ServerResponse>();
+    const f = await fixture((_body, response, round) => round < 64
+      ? sse(response, [chunk({ tool_calls: [toolCall("audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
+      : last.resolve(response));
+    await f.start({ approvalMode: "full" });
+    const response = await last.promise;
+    await expect(f.instance.adapter.steer!(f.threadId, "One more thing.")).resolves.toBe("refused");
+    answer(response);
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(64);
+  });
+
+  it.each([
+    ["a failed tool call", "audit_fail", "The operation is complete.", "tool_error"],
+    ["an announced action", "audit_write", "I'll write the next receipt.", "incomplete_action"],
+  ])("ends on %s in the last allowed step without asking for another step", async (_, lastTool, text, stopReason) => {
+    const f = await fixture((_body, response, round) => round < 64
+      ? sse(response, [chunk({ tool_calls: [toolCall(round === 63 ? lastTool : "audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
+      : answer(response, text));
+    await f.start({ approvalMode: "full", toolErrorCorrectiveRounds: 1 });
+    expect(await f.completed()).toMatchObject({ ok: false, stopReason });
+    expect(f.requests).toHaveLength(64);
+  });
+
+  it("stops at 200 tool calls in one turn without running the batch that crosses it", async () => {
+    const f = await fixture((_body, response, round) => sse(response, [chunk({
+      tool_calls: Array.from({ length: 25 }, (_, index) => ({
+        ...toolCall("audit_write", `{"name":"r${round}","value":"${index}"}`, `call_${round}_${index}`), index,
+      })),
+    }, "tool_calls")]));
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: false, stopReason: "error" });
+    // Eight replies of 25 ran (exactly 200); the ninth would pass 200, so none of it ran.
+    expect(f.requests).toHaveLength(9);
+    expect(f.effects()).toHaveLength(200);
+    expect(f.recorder.events.filter((event) => event.type === "runtime.error")).toEqual([expect.objectContaining({
+      message: "Stopped after 200 tool calls without a final answer. The steps so far already ran, so ask only for what's left.",
+    })]);
+  });
+
+  it("keeps Grok's native log small on a long turn with large tool results", async () => {
+    ensureDirs();
+    const large = "note ".repeat(4_000);
+    const f = await fixture((_body, response, round) => round <= 20
+      ? sse(response, [chunk({ tool_calls: [toolCall("audit_write", JSON.stringify({ name: `step${round}`, value: large }), `call_${round}`)] }, "tool_calls")])
+      : answer(response), "grok");
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.effects()).toHaveLength(20);
+    const log = readFileSync(join(NATIVE_DIR, `${f.threadId}.ndjson`), "utf8");
+    expect(log.length).toBeLessThan(large.length);
+    const outgoing = log.trim().split("\n").map((line) => JSON.parse(line) as { dir: string; msg: unknown })
+      .filter((entry) => entry.dir === "out").map((entry) => entry.msg);
+    expect(outgoing).toEqual(f.requests.map((request) => ({ model: "fixture-model", messageCount: request.messages.length })));
   });
 
   it.each(["stream", "approval", "rpc", "continuation"] as const)("cancels during %s, closes execution authority, and settles exactly once", async (stage) => {
@@ -827,5 +1446,143 @@ describe("structured tool execution boundaries", () => {
     const pending = f.recorder.events.find((event) => event.type === "request.opened");
     if (pending) expect(await f.instance.adapter.respondToRequest(f.threadId, pending.requestId!, { behavior: "allow" })).toBe("unavailable");
     expect(f.recorder.events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+  });
+});
+
+describe("a configured MCP server that cannot mount", () => {
+  it("is skipped with a notice, and the turn runs with the remaining servers", async () => {
+    const f = await fixture((_body, response) => answer(response));
+    const broken = join(f.directory, "broken-mcp.mjs");
+    // Answers initialize with an error, as a server needing sign-in or refusing its credential (401) does.
+    writeFileSync(broken, `process.stdin.setEncoding("utf8");let b="";process.stdin.on("data",(c)=>{b+=c;let n;while((n=b.indexOf("\\n"))!==-1){const m=JSON.parse(b.slice(0,n));b=b.slice(n+1);if(m.id!==undefined)process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:m.id,error:{code:-32001,message:"401 Unauthorized"}})+"\\n");}});`);
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      await f.start({ integrations: { custom: { ...f.integrations!.custom, slack: { command: process.execPath, args: [broken], env: {} } } } });
+      expect(await f.completed()).toMatchObject({ ok: true });
+    } finally { console.warn = warn; }
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.notice", message: expect.stringContaining(`MCP server "slack" was skipped`) }));
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+    const names = f.requests[0].tools!.map((tool) => tool.function.name);
+    expect(names).toContain("audit_write");
+    expect(names.some((name) => name.startsWith("slack_"))).toBe(false);
+  });
+});
+
+describe("a turn with the person's Windows computer, the built-in browser and the agents server", () => {
+  function catalog(names: readonly string[]) {
+    const { dir, server } = catalogServer(names);
+    cleanups.push(() => removeTempDir(dir));
+    return server;
+  }
+  const integrations = (agents: number, more: SendTurnInput["integrations"] = {}): SendTurnInput["integrations"] => ({
+    localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" },
+    browser: catalog(syntheticToolNames("agent_browser", 32)),
+    agents: catalog(syntheticToolNames("agent", agents)),
+    composio: catalog(syntheticToolNames("router", 7)),
+    data: catalog(syntheticToolNames("table", 5)),
+    ...more,
+  });
+
+  it("sends at most 128 tools, ask_user and every agents tool among them", async () => {
+    const f = await fixture((_body, response) => answer(response));
+    await f.start({ integrations: integrations(42) });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    const names = f.requests[0].tools!.map((tool) => tool.function.name);
+    expect(names).toHaveLength(115);
+    expect(names).toContain("ask_user");
+    expect(names).toEqual(expect.arrayContaining(syntheticToolNames("agents_agent", 42)));
+    expect(names).toEqual(expect.arrayContaining(["computer_click", "computer_type_text", "computer_get_window_state"]));
+    expect(names.filter((name) => name.startsWith("computer_browser_"))).toEqual([]);
+    expect(f.recorder.events.filter((event) => event.type === "runtime.notice" || event.type === "runtime.error")).toEqual([]);
+  });
+
+  it("lists fewer built-in tools when they still overflow, says which, and runs the turn", async () => {
+    const f = await fixture((_body, response) => answer(response));
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      await f.start({ integrations: integrations(51, { composio: catalog(syntheticToolNames("router", 14)), device: catalog(syntheticToolNames("phone", 23)) }) });
+      expect(await f.completed()).toMatchObject({ ok: true });
+    } finally { console.warn = warn; }
+    const names = f.requests[0].tools!.map((tool) => tool.function.name);
+    expect(names).toHaveLength(128);
+    expect(names.at(-1)).toBe("ask_user");
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.notice",
+      message: `"data" listed 2 of 5 tools, "device" listed 0 of 23 tools to fit the model's 128-tool limit; the rest are left out of this turn.` }));
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+  });
+
+  it("reaches a configured server past the limit through the tool search, says so in one line, and keeps the bot's tool budget", async () => {
+    const f = await fixture((_body, response) => answer(response));
+    await f.start({ botId: "mira", integrations: integrations(42, { custom: { notes: catalog(syntheticToolNames("note", 14)) } }) });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    const names = f.requests[0].tools!.map((tool) => tool.function.name);
+    expect(names).toHaveLength(118);
+    expect(names.slice(-4)).toEqual(["mcp_search_tools", "mcp_describe_tool", "mcp_call_tool", "ask_user"]);
+    expect(f.recorder.events.filter((event) => event.type === "runtime.notice").map((event) => (event as { message: string }).message))
+      .toEqual([`To fit the model's 128-tool limit, the tools of "notes" are reached through the tool search this turn.`]);
+    expect(toolBudgetOf("mira")).toEqual({ limit: 128, listed: 117, servers: [{ name: "notes", tools: 14, direct: false }] });
+  });
+
+  it("lists fewer tools once when the provider names a lower limit, learns it for the next turn, and runs the turn", async () => {
+    const f = await fixture((body, response) => {
+      if ((body.tools?.length ?? 0) <= 110) return answer(response);
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: `Invalid 'tools': array too long. Expected an array with maximum length 110, but got an array with length ${body.tools!.length} instead.`, type: "invalid_request_error" } }));
+    });
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      await f.start({ botId: "ines", integrations: integrations(42, { custom: { notes: catalog(syntheticToolNames("note", 14)) } }) });
+      expect(await f.completed()).toMatchObject({ ok: true });
+    } finally { console.warn = warn; }
+    expect(f.requests.map((request) => request.tools!.length)).toEqual([118, 110]);
+    expect(f.requests[1].tools!.map((tool) => tool.function.name).slice(-4)).toEqual(["mcp_search_tools", "mcp_describe_tool", "mcp_call_tool", "ask_user"]);
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.notice",
+      message: `To fit the model's 110-tool limit, the tools of "notes" are reached through the tool search this turn.` }));
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+    expect(toolBudgetOf("ines")).toMatchObject({ limit: 110, servers: [{ name: "notes", tools: 14, direct: false }] });
+
+    await f.start({ botId: "ines", integrations: integrations(42, { custom: { notes: catalog(syntheticToolNames("note", 14)) } }) });
+    await f.recorder.until((event) => event.type === "turn.completed" && f.requests.length === 3);
+    expect(f.requests[2].tools).toHaveLength(110);
+  });
+});
+
+describe("a provider that streams whole tool calls without an index", () => {
+  it("sends Gemini's thought signature back with its call on the next round", async () => {
+    const signed = { google: { thought_signature: "c2lnbmF0dXJl" } };
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ tool_calls: [
+        { id: "function-call-1", type: "function", function: { name: "audit_write", arguments: '{"name":"first","value":"done"}' }, extra_content: signed },
+      ] }, "stop")]);
+      else answer(response);
+    });
+    await f.start();
+    await f.decide();
+    expect(await f.completed()).toMatchObject({ ok: true });
+    const replayed = f.requests[1].messages.find((message) => message.role === "assistant");
+    expect(replayed?.tool_calls).toEqual([
+      { id: "function-call-1", type: "function", function: { name: "audit_write", arguments: '{"name":"first","value":"done"}' }, extra_content: signed },
+    ]);
+  });
+
+  it("runs both of Gemini's calls from one chunk and answers each by its id", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ tool_calls: [
+        { id: "function-call-14076893379878918689", type: "function", function: { name: "audit_write", arguments: '{"name":"first","value":"done"}' } },
+        { id: "function-call-14076893379878916096", type: "function", function: { name: "audit_write", arguments: '{"name":"second","value":"done"}' } },
+      ] }, "stop")]);
+      else answer(response);
+    });
+    await f.start();
+    await f.decide();
+    const second = await f.recorder.until((event) => event.type === "request.opened" && f.recorder.events.filter((seen) => seen.type === "request.opened").indexOf(event) === 1);
+    await f.instance.adapter.respondToRequest(f.threadId, second.requestId!, { behavior: "allow" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.effects()).toEqual([{ name: "first", value: "done" }, { name: "second", value: "done" }]);
+    const results = f.requests[1].messages.filter((message) => message.role === "tool").map((message) => message.tool_call_id);
+    expect(results).toEqual(["function-call-14076893379878918689", "function-call-14076893379878916096"]);
   });
 });

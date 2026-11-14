@@ -1,4 +1,6 @@
 import type { WireMessage as Message } from "../shared/wire.ts";
+import { isPersistentQuestionCard } from "../shared/ask-question.ts";
+import { signInWaits } from "../shared/sign-in-request.ts";
 
 export function requestConflict(message = "The request no longer owns this conversation") {
   return Object.assign(new Error(message), { status: 409, code: "guarded_request_changed" });
@@ -34,8 +36,7 @@ export function guardedRequestPath(messages: Message[], activeLeafId: string | n
     id = message.parentId ?? null;
   }
   if (path[0]?.id !== source.id || path.slice(1).some(message => message.role === "user")) throw requestConflict();
-  // An abandoned sibling can hold a detached result or approval. A caller
-  // must never receive it as the answer to the current branch.
+  // An abandoned sibling can hold a detached result or approval that must never answer the current branch.
   const ancestors = new Set(path.map(message => message.id));
   if (messages.some(message => message.parentId && ancestors.has(message.parentId) && !seen.has(message.id))) throw requestConflict();
   return path;
@@ -55,7 +56,8 @@ export function requestSourceForCard(messages: Message[], messageId: string): st
 }
 
 export function requestNeedsInput(message: Message): boolean {
-  return Boolean((message.card?.requestId && !message.card.answered && !message.card.dismissed && !message.card.expired) ||
+  return Boolean((message.card?.requestId && !message.card.answered && !message.card.dismissed && !message.card.expired && !isPersistentQuestionCard(message.card)) ||
     (message.connector && !message.connector.dismissed && !message.connector.resumed && message.connector.status !== "connected") ||
-    (message.secret && !message.secret.provided && !message.secret.dismissed && !message.secret.superseded));
+    (message.secret && !message.secret.provided && !message.secret.dismissed && !message.secret.superseded) ||
+    (message.signIn && signInWaits(message.signIn)));
 }

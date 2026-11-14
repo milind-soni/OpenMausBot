@@ -9,7 +9,7 @@ function breakdown(usage: { input: number; output: number; cachedInput?: number 
   return `${t("room.usage.uncached", { tokens: formatTokens(usage.input - cached) })} · ${t("room.usage.cached", { tokens: formatTokens(cached) })} · ${output}`;
 }
 
-export function GroupUsageChip({ usage }: { usage?: GroupThreadUsage | null }) {
+export function groupUsageSummary(usage?: GroupThreadUsage | null): { short: string; title: string } | null {
   if (!usage?.turns) return null;
   const title = [
     t("room.usage.total", { details: breakdown(usage) }),
@@ -19,6 +19,12 @@ export function GroupUsageChip({ usage }: { usage?: GroupThreadUsage | null }) {
   const short = hasFiniteCost(usage.costUsd) ? formatUsd(usage.costUsd)
     : hasFiniteCost(usage.cachedInput) ? t("room.usage.uncached", { tokens: formatTokens(Math.max(0, usage.input - usage.cachedInput)) })
       : t("room.usage.input", { tokens: formatTokens(usage.input) });
-  return <span tabIndex={0} title={title} aria-label={title} data-testid="group-usage-chip"
-    className="shrink-0 rounded-full bg-raised px-2.5 py-1 text-[12px] tabular-nums text-ink-secondary">{short}</span>;
+  return { short, title };
+}
+
+export function GroupUsageChip({ usage }: { usage?: GroupThreadUsage | null }) {
+  const summary = groupUsageSummary(usage);
+  if (!summary) return null;
+  return <span tabIndex={0} title={summary.title} aria-label={summary.title} data-testid="group-usage-chip"
+    className="shrink-0 rounded-full bg-raised px-2.5 py-1 text-[12px] tabular-nums text-ink-secondary">{summary.short}</span>;
 }

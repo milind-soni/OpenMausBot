@@ -46,7 +46,6 @@ it("preserves conversations and scheduled work when deletion cannot save, then s
     const later = Date.now() + 86_400_000;
     const { routine } = await api("POST", "/api/routines", { name: "Retain this routine", botId: bot.id,
       prompt: "Prepare the fixture report.", enabled: true, schedule: { type: "interval", everyMinutes: 60, anchorAt: later } }, 201);
-    // The webhook's one-time credential is deliberately not retained in evidence.
     const { webhook } = await api("POST", "/api/webhooks", { name: "Retain this webhook", botId: bot.id,
       prompt: "Summarize the fixture event.", enabled: true }, 201);
     const { call: solo } = await api("POST", "/api/calendar-calls", { name: "Retain this solo call", botIds: [bot.id],
@@ -82,8 +81,9 @@ it("preserves conversations and scheduled work when deletion cannot save, then s
     expect(bots.some((item: any) => item.id === bot.id)).toBe(false);
     expect(bots.some((item: any) => item.id === guest.id)).toBe(true);
     const afterRetry = await schedules();
-    expect(afterRetry.routines.find((item: any) => item.id === routine.id)).toMatchObject({ enabled: false, nextRunAt: null });
-    expect(afterRetry.webhooks.find((item: any) => item.id === webhook.id)).toMatchObject({ enabled: false });
+    // A deleted bot's automations go with it.
+    expect(afterRetry.routines.some((item: any) => item.id === routine.id)).toBe(false);
+    expect(afterRetry.webhooks.some((item: any) => item.id === webhook.id)).toBe(false);
     expect(afterRetry.calls.some((item: any) => item.id === solo.id)).toBe(false);
     expect(afterRetry.calls.find((item: any) => item.id === shared.id)?.botIds).toEqual([guest.id]);
     evidence.push({ retryApplied: true, afterRetry, survivingGuest: guest.id });

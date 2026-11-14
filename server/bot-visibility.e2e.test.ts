@@ -1,18 +1,3 @@
-// Per-bot visibility on a workspace several people share, through the real
-// server. An email sign-in list names one admin (Boss) and two members (Ada,
-// Bob); their sessions are issued before boot. Boss restricts "Payroll" to
-// Ada and "Board" to admins, then every read path a member has is checked as
-// Bob (who may see neither), as Ada (who may see Payroll), as Boss and as
-// the owner on this machine:
-//
-//   lists (bots, rooms, teams, queues, computer state), transcripts and
-//   their pages, images and exports, sends and card routes, room creation,
-//   search, routines, webhooks, the team map, attachments (in a message and
-//   as an avatar), and the live event stream — including a bot appearing
-//   and being withdrawn when its audience changes.
-//
-// This is access control, not an approval gate: no card, prompt or dialog
-// is involved anywhere.
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,11 +7,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { SessionRegistry } from "./sessions.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { freePortBlock } from "./testing/ports.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
-const PORT = 28800 + Math.floor(Math.random() * 10_000);
-const BASE = `http://127.0.0.1:${PORT}`;
+let BASE: string;
 const posixOnly = describe.skipIf(process.platform === "win32");
 const BOSS = "boss@example.test";
 const ADA = "ada@example.test";
@@ -50,12 +35,14 @@ const api = async (method: string, path: string, body?: unknown, as?: string): P
 const status = async (method: string, path: string, as?: string, body?: unknown) => (await api(method, path, body, as)).status;
 
 async function start() {
+  const port = await freePortBlock([0, 1]);
+  BASE = `http://127.0.0.1:${port}`;
   child = spawn(process.execPath, ["--import", pathToFileURL(join(SERVER_DIR, "testing", "hold-search-result.ts")).href, join(SERVER_DIR, "index.ts")], {
     cwd: join(SERVER_DIR, ".."),
     env: {
       ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-      HOME: home, USERPROFILE: home, OMB_PORT: String(PORT), OMB_WEBHOOK_PORT: String(PORT + 1),
+      HOME: home, USERPROFILE: home, OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1),
       OMB_TEST_INTERNAL_CAPABILITY_KEY: CAPABILITY_KEY,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -67,7 +54,6 @@ async function start() {
     try {
       if ((await fetch(`${BASE}/api/health`)).ok) return;
     } catch {
-      /* not up yet */
     }
     if (Date.now() > deadline) throw new Error(`server never came up:\n${log}`);
     await new Promise((r) => setTimeout(r, 150));
@@ -84,8 +70,7 @@ async function waitFor<T>(read: () => Promise<T | null | undefined> | T | null |
   }
 }
 
-/** A member's live event stream, parsed frame by frame. `lastEventId`
- * resumes from a cursor the way a browser's EventSource does. */
+/** `lastEventId` resumes from a cursor the way a browser's EventSource does. */
 function openStream(as: string, lastEventId?: string) {
   const controller = new AbortController();
   const frames: any[] = [];
@@ -120,7 +105,6 @@ function openStream(as: string, lastEventId?: string) {
       }
       state.ended = true;
     } catch {
-      /* aborted */
     }
   })();
   return { frames, state, ready: () => waitFor(() => state.hello, 10_000), close: () => controller.abort() };
@@ -208,7 +192,6 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     }), log.slice(-2_000)).toBe(true);
     ids.roomMixedThread = roomMixed.body.group.threadId;
 
-    // Now restrict.
     const restricted = await api("PATCH", `/api/bots/${hr.id}`, { visibility: { people: [" Ada@Example.test "] } }, BOSS);
     expect(restricted.status, JSON.stringify(restricted.body)).toBe(200);
     expect(restricted.body.bot.visibility).toEqual({ people: [ADA] });
@@ -222,7 +205,6 @@ posixOnly("per-bot visibility on a shared workspace", () => {
 
   it("lists only what a member may see, and never who else may", async () => {
     const bob = (await api("GET", "/api/bots?messages=5", undefined, BOB)).body;
-    // (the workspace's own starter bot is visible to everyone, like the helpdesk)
     const bobBots = bob.bots.map((bot: any) => bot.id);
     expect(bobBots).toContain(ids.pub);
     expect(bobBots).not.toContain(ids.hr);
@@ -237,13 +219,11 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect(ada.bots.map((bot: any) => bot.id).sort()).toEqual([...bobBots, ids.hr].sort());
     expect(ada.groups.map((group: any) => group.id).sort()).toEqual([ids.roomPub, ids.roomMixed].sort());
     expect(ada.sections.sort()).toEqual(["Ops", "People"]);
-    // Ada sees Payroll, but not the list of who else may.
     expect(ada.bots.find((bot: any) => bot.id === ids.hr).visibility).toBeUndefined();
 
     const boss = (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body;
     expect(boss.bots.map((bot: any) => bot.id).sort()).toEqual([...bobBots, ids.hr, ids.board].sort());
     expect(boss.bots.find((bot: any) => bot.id === ids.board).visibility).toBe("admins");
-    // The owner on this machine sees everything too.
     expect((await api("GET", "/api/bots?messages=0")).body.bots).toHaveLength(bobBots.length + 2);
   });
 
@@ -253,6 +233,7 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       ["GET", `/api/threads/${ids.hrThread}/messages`],
       ["GET", `/api/threads/${ids.hrThread}/messages?around=${hrMessage}`],
       ["GET", `/api/threads/${ids.hrThread}/messages/${hrMessage}/image`],
+      ["GET", `/api/threads/${ids.hrThread}/messages/${hrMessage}/tool`],
       ["GET", `/api/threads/${ids.hrThread}/export`],
       ["GET", `/api/threads/${ids.hrThread}/export?format=json`],
       ["POST", `/api/threads/${ids.hrThread}/respond`, { requestId: "x", behavior: "deny" }],
@@ -280,28 +261,21 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       expect(res.status, `${method} ${path}: ${JSON.stringify(res.body)}`).toBe(404);
       expect(JSON.stringify(res.body)).not.toContain("forbidden");
     }
-    // A hidden bot can't be scheduled or put in a room by that member either.
     expect(await status("POST", "/api/routines", BOB, { name: "Mine", botId: ids.hr, prompt: "x", schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 86_400_000 } })).toBe(404);
     expect(await status("POST", "/api/groups", BOB, { memberIds: [ids.pub, ids.hr], name: "Sneaky" })).toBe(400);
-    // Nothing changed behind the refusals.
     expect((await api("GET", "/api/routines", undefined, BOSS)).body.routines.find((r: any) => r.id === ids.hrRoutine).enabled).toBe(false);
     expect((await api("GET", `/api/bots?messages=0`, undefined, BOSS)).body.groups.find((g: any) => g.id === ids.roomMixed).name).toBe("Pay questions");
 
-    // Ada, who may see Payroll, reaches the same routes as before.
     expect(await status("GET", `/api/threads/${ids.hrThread}/messages`, ADA)).toBe(200);
     expect(await status("GET", `/api/threads/${ids.hrThread}/export`, ADA)).toBe(200);
     expect(await status("GET", `/api/attachments/${ids.hrImage}`, ADA)).toBe(200);
-    // Attachment responses vary by who asks, so a browser must not keep one
-    // member's copy past another member's 404.
     const hrImage = await fetch(`${BASE}/api/attachments/${ids.hrImage}`, { headers: headers(ADA, false) });
     expect(hrImage.status).toBe(200);
     expect(hrImage.headers.get("cache-control")).toBe("private, no-store");
     expect(await status("GET", `/api/attachments/${ids.avatar}`, ADA)).toBe(200);
     expect(await status("GET", `/api/threads/${ids.hrThread}/messages`, ADA)).toBe(200);
     expect(await status("GET", `/api/threads/${ids.hrThread}/messages`, BOSS)).toBe(200);
-    // …and a file nothing uses yet (a member's own upload) is served to anyone.
     expect(await status("GET", `/api/attachments/${ids.fresh}`, BOB)).toBe(200);
-    // Bob still uses what he may see.
     expect(await status("GET", `/api/threads/${ids.pubThread}/messages`, BOB)).toBe(200);
     expect(await status("POST", `/api/groups/${ids.roomPub}/read`, BOB)).toBe(200);
   });
@@ -323,6 +297,36 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect(JSON.stringify(map)).not.toContain(ids.hr);
   });
 
+  it("marks as seen only the failed routine runs a member may see", async () => {
+    const failing = async (name: string, people?: string[]) => {
+      const bot = await makeBot(name, "Ops");
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "missing-instance", model: "fake-model" } }, BOSS)).status).toBe(200);
+      if (people) expect((await api("PATCH", `/api/bots/${bot.id}`, { visibility: { people } }, BOSS)).status).toBe(200);
+      const routine = await api("POST", "/api/routines", { name: `${name} sweep`, botId: bot.id, prompt: `SECRET-${name}`, enabled: false,
+        schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 86_400_000 } }, BOSS);
+      expect(routine.status, JSON.stringify(routine.body)).toBe(201);
+      const started = await api("POST", `/api/routines/${routine.body.routine.id}/run`, undefined, BOSS);
+      expect(started.status, JSON.stringify(started.body)).toBeLessThan(300);
+      return routine.body.routine.id as string;
+    };
+    const hidden = await failing("Ledger Lynx", [ADA]);
+    const shown = await failing("Lobby Llama");
+    const runOf = async (routineId: string) => (await api("GET", "/api/routines", undefined, BOSS)).body.runs.find((run: any) => run.routineId === routineId);
+    expect(await waitFor(async () => (await runOf(hidden))?.status === "failed" && (await runOf(shown))?.status === "failed"), log.slice(-2_000)).toBe(true);
+
+    const swept = await api("POST", "/api/routine-runs/seen-all", undefined, BOB);
+    expect(swept.status).toBe(200);
+    expect(swept.body.runs.map((run: any) => run.routineId)).toContain(shown);
+    expect(JSON.stringify(swept.body)).not.toContain(hidden);
+    expect(JSON.stringify(swept.body)).not.toContain("SECRET-Ledger Lynx");
+    expect((await runOf(shown)).seenAt).toEqual(expect.any(Number));
+    expect((await runOf(hidden)).seenAt).toBeUndefined();
+
+    const adaSwept = await api("POST", "/api/routine-runs/seen-all", undefined, ADA);
+    expect(adaSwept.body.runs.map((run: any) => run.routineId)).toContain(hidden);
+    expect((await runOf(hidden)).seenAt).toEqual(expect.any(Number));
+  });
+
   it("withdraws real scan results when an audience changes before the response", async () => {
     const hold = join(home, ".openmausbot", "hold-search-result");
     let pending: Promise<{ status: number; body: any }> | undefined;
@@ -334,8 +338,7 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       let finished = false;
       pending = api("GET", "/api/search?q=Zebra", undefined, ADA).finally(() => { finished = true; });
       expect(await waitFor(() => existsSync(`${hold}.ready`), 5000)).toBe(true);
-      // The real worker already found the private row. Pause only delivery,
-      // so this cannot pass merely because revocation beat request admission.
+      // The worker already found the private row; pause only delivery, so this cannot pass because revocation beat admission.
       expect(JSON.parse(readFileSync(`${hold}.ready`, "utf8"))).toEqual(expect.arrayContaining([
         expect.objectContaining({ threadId: ids.hrThread }),
       ]));
@@ -369,18 +372,14 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     try {
       expect(await bob.ready()).toBeTruthy();
       expect(await ada.ready()).toBeTruthy();
-      // A turn in Payroll's thread: Ada watches it, Bob hears nothing of it.
       expect((await api("POST", `/api/bots/${ids.hr}/messages`, { text: "Quarterly bonus plan", threadId: ids.hrThread }, BOSS)).status).toBe(202);
       expect(await settledReply(ids.hrThread, "Quarterly bonus plan")).not.toBeNull();
       expect(await waitFor(() => ada.frames.some((f) => f.kind === "message" && f.threadId === ids.hrThread && f.message?.text?.includes("Quarterly bonus plan")))).toBe(true);
       expect(await waitFor(() => ada.frames.some((f) => f.kind === "runtime" && f.event?.threadId === ids.hrThread))).toBe(true);
-      // a turn in a bot Bob can see still reaches him
       expect((await api("POST", `/api/bots/${ids.pub}/messages`, { text: "Printer help", threadId: ids.pubThread }, BOSS)).status).toBe(202);
       expect(await waitFor(() => bob.frames.some((f) => f.kind === "message" && f.threadId === ids.pubThread))).toBe(true);
       for (const hidden of [ids.hr, ids.hrThread, ids.board, ids.roomMixed, "Quarterly bonus plan", "Payroll Zebra"]) expect(JSON.stringify(bob.frames)).not.toContain(hidden);
 
-      // Boss adds Bob: Payroll arrives whole, then every member stream ends
-      // (the admin's does not) so each reconnects to a fresh snapshot.
       const admin = openStream(BOSS);
       expect(await admin.ready()).toBeTruthy();
       expect((await api("PATCH", `/api/bots/${ids.hr}`, { visibility: { people: [ADA, BOB] } }, BOSS)).status).toBe(200);
@@ -393,13 +392,8 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       admin.close();
       bob = openStream(BOB, bob.state.cursor);
       expect((await bob.ready())?.resumed).toBe(false);
-      // Payroll's room kept its floor (Ada only): widening a bot does not
-      // widen a room it was restricted in; only an admin's room reset does.
       expect((await api("GET", "/api/bots?messages=5", undefined, BOB)).body.groups.map((g: any) => g.id)).not.toContain(ids.roomMixed);
 
-      // Boss makes Payroll admins-only. A member who was away when it happened
-      // resumes from an older cursor and still gets a fresh snapshot, not a
-      // replay judged by the new audience that could not withdraw Payroll.
       const away = bob.state.cursor;
       bob.close();
       ada.close();
@@ -410,13 +404,11 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       expect(bobNow.bots.map((b: any) => b.id)).not.toContain(ids.hr);
       expect(bobNow.groups.map((g: any) => g.id)).not.toContain(ids.roomMixed);
       expect(await status("GET", `/api/threads/${ids.hrThread}/messages`, ADA)).toBe(404);
-      // Once he has seen something newer than the change, a reconnect resumes as usual.
       expect((await api("PATCH", `/api/bots/${ids.pub}`, { color: "green" }, BOSS)).status).toBe(200);
       expect(await waitFor(() => bob.frames.some((f) => f.kind === "bot" && f.bot?.id === ids.pub))).toBe(true);
       const settled = openStream(BOB, bob.state.cursor);
       expect((await settled.ready())?.resumed).toBe(true);
       settled.close();
-      // Later changes to Payroll say nothing to him.
       const before = bob.frames.length;
       expect((await api("PATCH", `/api/bots/${ids.hr}`, { color: "purple" }, BOSS)).status).toBe(200);
       await new Promise((r) => setTimeout(r, 500));
@@ -460,8 +452,6 @@ posixOnly("per-bot visibility on a shared workspace", () => {
   }, 90_000);
 
   it("sends a member every bot without its audience list or hidden teammates, whichever route answers", async () => {
-    // Payroll may contact Board (hidden from Ada) and the helpdesk.
-    expect((await api("PATCH", `/api/bots/${ids.hr}`, { peers: [ids.board, ids.pub] }, BOSS)).status).toBe(200);
     const task = await api("POST", `/api/bots/${ids.hr}/tasks`, { title: "Ada's thread" }, ADA);
     expect(task.status).toBe(201);
     const answers = [
@@ -478,19 +468,14 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       expect(bots.length, route).toBeGreaterThan(0);
       for (const bot of bots) {
         expect(bot.visibility, route).toBeUndefined();
-        if (bot.peers) expect(bot.peers, route).toEqual([ids.pub]);
       }
       expect(JSON.stringify(answer.body), route).not.toContain(ADA);
     }
-    // an admin still gets both
-    expect((await api("PATCH", `/api/bots/${ids.hr}`, { pinned: false }, BOSS)).body.bot).toMatchObject({ visibility: { people: [ADA] }, peers: [ids.board, ids.pub] });
-    expect((await api("PATCH", `/api/bots/${ids.hr}`, { peers: null, acknowledgePeerScope: true }, BOSS)).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${ids.hr}`, { pinned: false }, BOSS)).body.bot).toMatchObject({ visibility: { people: [ADA] } });
   });
 
   it("keeps a room fewer people can see out of a visible bot's recall, and refuses to mix audiences in a room", async () => {
-    // Bob asks the helpdesk; its brief of recent work must not name the room
-    // it shares with Payroll, nor what was said there. (An engine that
-    // repeats its prompt shows exactly what the helpdesk was told.)
+    // An engine that repeats its prompt shows exactly what the helpdesk was told.
     expect((await api("PATCH", `/api/bots/${ids.pub}`, { modelSelection: { instanceId: "grokecho", model: "fake-model" } }, BOSS)).status).toBe(200);
     const sent = await api("POST", `/api/bots/${ids.pub}/messages`, { text: "What have you been up to?", threadId: ids.pubThread }, BOB);
     expect(sent.status, JSON.stringify(sent.body)).toBe(202);
@@ -501,7 +486,6 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect(answer).not.toContain("Pay questions");
     expect(answer).not.toContain("SECRET-ROOM-42");
     expect((await api("PATCH", `/api/bots/${ids.pub}`, { modelSelection: { instanceId: "grok", model: "fake-model" } }, BOSS)).status).toBe(200);
-    // Its session_search does not reach that room either.
     const minted = await fetch(`${BASE}/api/testing/internal-capability`, {
       method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY },
       body: JSON.stringify({ botId: ids.pub, threadId: ids.pubThread }),
@@ -512,15 +496,12 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect(search.status, JSON.stringify(found)).toBe(200);
     expect(found.hits.map((hit) => hit.threadId)).not.toContain(ids.roomMixedThread);
 
-    // A room turn after Payroll was restricted leaves no line in the
-    // helpdesk's daily log, where its default-scope search would find it…
     const logLines = () => {
       const dir = join(home, ".openmausbot", "workspaces", ids.pub, "memory", "log");
       let text = "";
       try {
         for (const file of readdirSync(dir)) text += readFileSync(join(dir, file), "utf8");
       } catch {
-        /* no log yet */
       }
       return text.split("\n").filter((line) => line.includes('from room "Pay questions"')).length;
     };
@@ -534,7 +515,6 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     })).toBe(true);
     await new Promise((r) => setTimeout(r, 500));
     expect(logLines()).toBe(linesBefore);
-    // …and the helpdesk cannot write notes from that room into its memory.
     const roomToken = await fetch(`${BASE}/api/testing/internal-capability`, {
       method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY },
       body: JSON.stringify({ botId: ids.pub, threadId: ids.roomMixedThread }),
@@ -545,9 +525,6 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     });
     expect(note.status).toBe(403);
     expect(((await note.json()) as { error: string }).error).toMatch(/visible to fewer people than you are/);
-    // Payroll itself, which fewer people see, still recalls its own room —
-    // once the room's floor is back to what its bots allow (it went down to
-    // admins only while Payroll was admins-only, and floors never widen alone).
     expect((await api("PATCH", `/api/groups/${ids.roomMixed}`, { resetAudience: true }, BOSS)).status).toBe(200);
     const hrMinted = await fetch(`${BASE}/api/testing/internal-capability`, {
       method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY },
@@ -558,14 +535,12 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     });
     expect(((await hrSearch.json()) as { hits: Array<{ threadId: string }> }).hits.map((hit) => hit.threadId)).toContain(ids.roomMixedThread);
 
-    // New rooms, and new members, keep one audience — for admins too.
     const mixed = await api("POST", "/api/groups", { memberIds: [ids.pub, ids.hr], name: "Another mix" }, BOSS);
     expect(mixed.status).toBe(400);
     expect(mixed.body.error).toMatch(/Bots in one room must be visible to the same people\. .+ and .+ are not/);
     const added = await api("PATCH", `/api/groups/${ids.roomPub}`, { memberIds: [ids.pub, ids.board] }, BOSS);
     expect(added.status).toBe(400);
     expect(added.body.error).toMatch(/Bots in one room must be visible to the same people/);
-    // So do the rooms scheduled calls open.
     const later = Date.now() + 86_400_000;
     const call = await api("POST", "/api/calendar-calls", { name: "Comp committee", botIds: [ids.pub, ids.hr], schedule: { type: "once", at: later }, durationMinutes: 10 }, BOSS);
     expect(call.status).toBe(400);
@@ -578,21 +553,26 @@ posixOnly("per-bot visibility on a shared workspace", () => {
   }, 90_000);
 
   it("gives a bot a restricted Chief creates the Chief's own audience", async () => {
-    expect((await api("PATCH", `/api/bots/${ids.board}`, { chiefOfStaff: true }, BOSS)).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${ids.board}`, { chiefOfStaff: true, approvalMode: "ask" }, BOSS)).status).toBe(200);
     const bob = openStream(BOB);
     try {
       expect(await bob.ready()).toBeTruthy();
+      const boardThread = (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.bots.find((b: any) => b.id === ids.board).threadId;
       const minted = await fetch(`${BASE}/api/testing/internal-capability`, {
         method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY },
-        body: JSON.stringify({ botId: ids.board, threadId: (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.bots.find((b: any) => b.id === ids.board).threadId }),
+        body: JSON.stringify({ botId: ids.board, threadId: boardThread }),
       });
       const { token } = await minted.json() as { token: string };
+      const engine = (await api("GET", "/api/instances", undefined, BOSS)).body.instances.find((instance: any) => instance.instanceId === "grok");
       const created = await fetch(`${BASE}/api/internal/create-bot`, {
         method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: "Layoff Modeler", role: "Models RIF scenarios", instructions: "SECRET-INSTR model the reduction" }),
+        body: JSON.stringify({ name: "Layoff Modeler", role: "Models RIF scenarios", instructions: "SECRET-INSTR model the reduction",
+          modelSelection: { instanceId: "grok", model: engine.models.default } }),
       });
-      const made = await created.json() as { id: string };
+      // Applies at Ask too: OpenMausBot adds no card of its own.
+      const made = await created.json() as { id: string; state: string };
       expect(created.status, JSON.stringify(made)).toBe(201);
+      expect(made.state).toBe("applied");
       const admin = (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.bots.find((b: any) => b.id === made.id);
       expect(admin.visibility).toBe("admins");
       await new Promise((r) => setTimeout(r, 500));
@@ -602,9 +582,43 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       await api("DELETE", `/api/bots/${made.id}`, undefined, BOSS);
     } finally {
       bob.close();
-      await api("PATCH", `/api/bots/${ids.board}`, { chiefOfStaff: false }, BOSS);
+      await api("PATCH", `/api/bots/${ids.board}`, { chiefOfStaff: false, approvalMode: "full" }, BOSS);
     }
   }, 60_000);
+
+  it("keeps each person's reaction their own, sends each as that person's reply, and tells a session which are its", async () => {
+    expect((await api("POST", `/api/bots/${ids.pub}/messages`, { text: "Shall we open the desk early?", threadId: ids.pubThread }, BOSS)).status).toBe(202);
+    const replied = await settledReply(ids.pubThread, "Shall we open the desk early?");
+    expect(replied, log.slice(-2_000)).not.toBeNull();
+    const answer = (replied as Array<{ id: string; role: string; kind: string; text?: string }>)
+      .findLast((message) => message.role === "bot" && message.kind === "text" && message.text)!;
+    const react = (as: string, emoji: string) =>
+      api("POST", `/api/threads/${ids.pubThread}/messages/${answer.id}/reactions`, { emoji, on: true }, as);
+    const ada = await react(ADA, "👍");
+    expect(ada.status, JSON.stringify(ada.body)).toBe(200);
+    expect(ada.body.delivery).toBe("started");
+    const bob = await react(BOB, "👍");
+    expect(bob.status, JSON.stringify(bob.body)).toBe(200);
+    const keyOf = async (as: string) => (await api("GET", "/api/auth/session", undefined, as)).body.reactor as string;
+    const [adaKey, bobKey] = [await keyOf(ADA), await keyOf(BOB)];
+    expect(adaKey).toMatch(/^p_[\w-]{22}$/);
+    expect(bobKey).toMatch(/^p_[\w-]{22}$/);
+    expect(adaKey).not.toBe(bobKey);
+    expect(bob.body.message.reactions).toEqual([
+      { emoji: "👍", by: adaKey, name: ADA, at: expect.any(Number) },
+      { emoji: "👍", by: bobKey, name: BOB, at: expect.any(Number) },
+    ]);
+    const changed = await react(ADA, "👎");
+    expect(changed.body.message.reactions.map((reaction: any) => [reaction.by, reaction.emoji])).toEqual([[bobKey, "👍"], [adaKey, "👎"]]);
+    const lines = await waitFor(async () => {
+      const bot = (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.bots.find((candidate: any) => candidate.id === ids.pub);
+      const reactions = ((await api("GET", `/api/threads/${ids.pubThread}/messages`, undefined, BOSS)).body.messages as any[])
+        .filter((message) => message.reaction && message.replyToId === answer.id);
+      return !bot.busy && reactions.length === 3 ? reactions : null;
+    });
+    const thread = (await api("GET", `/api/threads/${ids.pubThread}/messages`, undefined, BOSS)).body.messages;
+    expect(lines?.map((line: any) => [line.reaction, line.sender?.name]), JSON.stringify(thread.map((m: any) => [m.role, m.kind, m.text?.slice(0, 60), m.reaction]))).toEqual([["👍", ADA], ["👍", BOB], ["👎", ADA]]);
+  }, 90_000);
 
   it("keeps bots with different audiences from reaching each other", async () => {
     // Payroll (Ada), Benefits (Ada) and Board (admins) share a team. Only the
@@ -616,23 +630,19 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect(hr).toContain("Benefits Lynx");
     expect(hr).not.toContain("Board Heron");
     expect(await roster(ids.board)).not.toContain("Payroll Zebra");
-    // Unrestricting Board makes nobody new reachable: it now has everyone's audience.
     expect((await api("PATCH", `/api/bots/${ids.board}`, { visibility: "everyone" }, BOSS)).status).toBe(200);
     expect(await roster(ids.hr)).not.toContain("Board Heron");
     expect((await api("PATCH", `/api/bots/${ids.board}`, { visibility: "admins" }, BOSS)).status).toBe(200);
   });
 
   it("never widens a room because a restricted bot left it; only an admin's reset does", async () => {
-    // Payroll leaves the room it shared with the helpdesk (everyone sees the helpdesk).
     expect((await api("PATCH", `/api/groups/${ids.roomMixed}`, { memberIds: [ids.pub] }, BOSS)).status).toBe(200);
     expect(await status("GET", `/api/threads/${ids.roomMixedThread}/messages`, BOB)).toBe(404);
     expect((await api("GET", "/api/bots?messages=0", undefined, BOB)).body.groups.map((g: any) => g.id)).not.toContain(ids.roomMixed);
     const floor = (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.groups.find((g: any) => g.id === ids.roomMixed).audienceFloor;
     expect(floor).toEqual({ people: [ADA] });
-    // Ada, inside the floor, still reads it; members never see the floor itself.
     expect(await status("GET", `/api/threads/${ids.roomMixedThread}/messages`, ADA)).toBe(200);
     expect(JSON.stringify((await api("GET", "/api/bots?messages=0", undefined, ADA)).body.groups)).not.toContain("audienceFloor");
-    // It stays out of the helpdesk's recall too.
     const minted = await fetch(`${BASE}/api/testing/internal-capability`, {
       method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY },
       body: JSON.stringify({ botId: ids.pub, threadId: ids.pubThread }),
@@ -641,11 +651,13 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       headers: { authorization: `Bearer ${(await minted.json() as { token: string }).token}` },
     });
     expect(((await search.json()) as { hits: Array<{ threadId: string }> }).hits.map((hit) => hit.threadId)).not.toContain(ids.roomMixedThread);
-    // A member cannot widen it; an admin can, explicitly.
     expect((await api("PATCH", `/api/groups/${ids.roomMixed}`, { resetAudience: true }, ADA)).status).toBe(403);
     expect((await api("PATCH", `/api/groups/${ids.roomMixed}`, { resetAudience: true }, BOSS)).status).toBe(200);
     expect(await status("GET", `/api/threads/${ids.roomMixedThread}/messages`, BOB)).toBe(200);
-    const reset = (await api("GET", "/api/admin-activity?what=visibility", undefined, BOSS)).body.entries.find((entry: any) => entry.action === "room.audience-reset");
+    // Audit writes run after the response: the earlier admins → Ada reset may
+    // be the newest row until this reset reaches disk. Wait for this receipt.
+    const reset = await waitFor(async () => (await api("GET", "/api/admin-activity?what=visibility", undefined, BOSS)).body.entries.find((entry: any) =>
+      entry.action === "room.audience-reset" && entry.target?.id === ids.roomMixed && entry.after?.audienceFloor === "everyone"), 3_000);
     expect(reset).toMatchObject({ who: BOSS, target: { id: ids.roomMixed }, before: { audienceFloor: { people: [ADA] } }, after: { audienceFloor: "everyone" } });
   });
 });

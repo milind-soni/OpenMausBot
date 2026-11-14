@@ -1,5 +1,3 @@
-// Actual mounted agents MCP -> live capability -> bounded cache -> paged read.
-// All profiles, turns and transcripts belong to the shared disposable fixture.
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -55,8 +53,7 @@ it("bounds a real roster, retrieves its tail, isolates owners and expires stoppe
     expect((await cli("doctor")).ok).toBe(true);
     const record = (await cli("new-bot", "--name", "Roster reader")).bot;
     const bot = { ...record, threadId: record.activeTaskId };
-    // A sufficiently large real roster, not a fake HTTP response. No turns
-    // are launched on these profiles, so this consumes no model capacity.
+    // A large real roster, not a fake HTTP response; no turns run on these profiles, so no model capacity is used.
     for (let i = 0; i < 70; i++) {
       expect((await api("/api/bots", { name: `Roster-${String(i).padStart(2, "0")} ${"n".repeat(80)}`,
         title: "t".repeat(190), description: "d".repeat(150), computer: "off" })).status).toBe(201);
@@ -98,8 +95,6 @@ it("bounds a real roster, retrieves its tail, isolates owners and expires stoppe
     await cli("messages", "--bot", bot.id, "--task", bot.threadId);
     await cli("interrupt", "--bot", bot.id, "--task", bot.threadId);
     await expect.poll(async () => (await api(`/api/internal/tool-result?id=${id}`, undefined, first.token)).status).toBe(401);
-    // New live authority on the SAME conversation can still page its own
-    // retained result. It does not inherit the stopped turn's authority.
     await expect.poll(async () => (await api("/api/bots")).body.bots.find((b: any) => b.id === bot.id)
       .tasks.find((t: any) => t.threadId === bot.threadId).busy).toBe(false);
     const resumed = await held(bot);
@@ -110,7 +105,6 @@ it("bounds a real roster, retrieves its tail, isolates owners and expires stoppe
     try {
       await Promise.all(proxies.map((proxy) => waitForExit(proxy, { signal: "SIGTERM" })));
       const path = `${fixture.info.logPath}.tool-results.json`;
-      // Never retain the provider launch dump or its short-lived capability.
       writeFileSync(path, JSON.stringify({ url: fixture.info.url, log: fixture.info.logPath, evidence }, null, 2), { mode: 0o600 });
       console.info(`Tool-result fixture evidence: ${path}`);
     } finally { await fixture.close(); }

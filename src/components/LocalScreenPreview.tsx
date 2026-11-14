@@ -15,8 +15,7 @@ type PreviewPhase =
   | "unavailable"
   | "error";
 
-// Keys, not sentences: the current message lives in state, so it has to
-// survive a language switch.
+// Keys, not sentences: the current message lives in state and must survive a language switch.
 const phaseCopy: Record<Exclude<PreviewPhase, "requesting" | "streaming">, LocaleKey> = {
   idle: "computer.screen.idle",
   cancelled: "computer.screen.cancelled",

@@ -1,9 +1,5 @@
-// Many client workspaces on one Linux server: each is its own OS user, its
-// own `openmausbot@<slug>` service on its own loopback ports, its own data
-// folder, brand, sign-in list and keys, reached at <slug>.<domain> through
-// the system Caddy. This module only PLANS: it renders files and fixed
-// argument lists as steps, so what the CLI does as root is inspectable and
-// testable, and nothing here ever builds a shell command string.
+// Many client workspaces on one Linux server, each its own OS user and `openmausbot@<slug>` service. This module only plans:
+// it renders files and fixed argument lists as steps, and never builds a shell command string.
 import { posix } from "node:path";
 
 const { join } = posix;
@@ -24,7 +20,6 @@ export interface FleetLayout {
   caddyDir: string;
   caddyfile: string;
   homesDir: string;
-  /** The root-run agent the operator workspace talks to (fleet-agent.ts). */
   agentUnitFile: string;
   socketPath: string;
   auditFile: string;
@@ -201,9 +196,7 @@ export function fenceUnit(layout = fleetLayout()): string {
   ].join("\n");
 }
 
-/** nftables rules: only a workspace's own user, Caddy and root may open its
- * loopback ports, so a shell-capable bot cannot reach a sibling's API.
- * Written whole each time, so `nft -f` is idempotent. */
+/** nftables: only a workspace's own user, Caddy and root may open its loopback ports, so a bot's shell cannot reach a sibling's API. */
 export function fenceRules(workspaces: FleetWorkspace[]): string {
   const lines = ["#!/usr/sbin/nft -f", "# Written by `openmausbot fleet`; regenerated on every create, suspend, resume and delete.", "add table inet openmausbot", "flush table inet openmausbot", "table inet openmausbot {", "\tchain output {", "\t\ttype filter hook output priority 0; policy accept;"];
   for (const workspace of [...workspaces].sort((a, b) => a.slug.localeCompare(b.slug))) {
@@ -280,8 +273,6 @@ export function managedOpenRouterModels(models: unknown): Record<string, { name:
   return Object.fromEntries(openRouterModelIds(models).map((id) => [id, { name: id }]));
 }
 
-/** The workspace's first config.json: who may sign in, the key it runs on,
- * and its cap. Everything else stays the server's defaults. */
 export function initialConfig(seed: WorkspaceSeed): string {
   const config: Record<string, unknown> = { signIn: { admins: seed.admins, members: seed.members } };
   if (seed.anthropicKey) config.anthropic = { key: seed.anthropicKey, ...(seed.anthropicUrl ? { url: seed.anthropicUrl } : {}) };
@@ -375,8 +366,7 @@ export function createPlan(input: {
   const home = workspaceHome(layout, workspace.slug);
   const dataDir = workspaceDataDir(layout, workspace.slug);
   const steps: FleetStep[] = [
-    // Reserve the identity and ports before any external resource is created.
-    // A crash leaves an inspectable reservation, never a silently reusable home.
+    // Reserve the identity and ports first: a crash leaves an inspectable reservation, never a silently reusable home.
     { kind: "write", path: layout.registryFile, content: `${JSON.stringify(reserved(false), null, 2)}\n`, mode: 0o600 },
     { kind: "run", argv: ["useradd", "--system", "--create-home", "--home-dir", home, "--shell", "/usr/sbin/nologin", "--user-group", user], why: `the workspace's own account` },
     { kind: "write", path: layout.registryFile, content: `${JSON.stringify(reserved(true), null, 2)}\n`, mode: 0o600 },
@@ -474,8 +464,7 @@ export function deletePlan(input: { registry: FleetRegistry; slug: string; keepD
       { kind: "remove", path: join(unitsDir, `openmausbot@${workspace.slug}.service.d`, "limits.conf") },
       { kind: "write", path: layout.fenceFile, content: fenceRules(Object.values(registry.workspaces)), mode: 0o600 },
       { kind: "run", argv: ["nft", "-f", layout.fenceFile], why: input.keepData ? "keep the retained account's fence" : "drop its fence rule" },
-      // Retain the nologin account too: recycling its UID would give a new
-      // workspace ownership of the preserved home, even under a different slug.
+      // Keep the nologin account too: recycling its UID would hand the preserved home to a new workspace.
       ...(input.keepData
         ? [{ kind: "note" as const, text: "keeping the disabled workspace's account, home and name reserved; operator recovery is required before reuse" }]
         : [{ kind: "run" as const, argv: ["userdel", "--remove", fleetUser(workspace.slug)], why: "remove the account and everything it owned" }]),
@@ -493,8 +482,7 @@ export function upgradePlan(input: { registry: FleetRegistry }): FleetStep[] {
   ];
 }
 
-/** A workspace's sign-in list edited from outside, the same shape
- * `openmausbot access` writes; the server reads it live. */
+/** The same shape `openmausbot access` writes; the server reads it live. */
 export function applySignIn(configText: string, action: "add" | "remove", email: string, chatOnly: boolean): { config: string; summary: string } {
   const entry = email.trim().toLowerCase();
   assertEmailOrDomain(entry);

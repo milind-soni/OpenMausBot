@@ -1,15 +1,11 @@
 import type { CompileContext, Extension, Token } from "mdast-util-from-markdown";
 
-// Markdown reads a backslash before punctuation as an escape, so a bot's link
-// to C:\Users\me\.openmausbot\report.md parsed as C:\Users\me.openmausbot\report.md:
-// the separator before ".openmausbot" (the default data folder on Windows),
-// "_drafts" or "-old" was dropped and the link named a file that isn't there.
-// In a link, image or definition destination that starts with a drive letter,
-// such a backslash stays a path separator. "\\" and the destination's own
-// delimiters "\(", "\)", "\<" and "\>" still escape, so a destination whose
-// backslashes were already escaped reads as before. The server authorizes a
-// file by the target it parses and the client sends the target it rendered,
-// so both parse with this extension.
+// Markdown reads a backslash before punctuation as an escape, so a link to
+// C:\Users\me\.openmausbot\report.md would lose the separator before
+// ".openmausbot". In a link, image or definition destination that starts with
+// a drive letter, such a backslash stays a separator; "\\" and the delimiters
+// "\(", "\)", "\<" and "\>" still escape. The server and the client both parse
+// with this extension, so the file authorized is the file rendered.
 
 const destinations = new WeakSet<object>();
 const DRIVE = /^[A-Za-z]:(?:[\\/]|$)/;

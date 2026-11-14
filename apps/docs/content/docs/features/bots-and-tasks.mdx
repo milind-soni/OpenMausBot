@@ -13,27 +13,45 @@ A bot keeps its identity, instructions, memory, approved skills, connected tools
 - An operations bot with Gmail, Calendar, and Slack
 - A local-model bot for private or offline work
 
-**New bot** opens an editable draft before anything is created. Review its profile, model, permissions, memory, skills, and routines, then select **Create bot**. **App settings → General → Defaults for new bots → Edit** sets the starting values for future creation dialogs without changing existing bots. See [Create your first bot](/docs/getting-started/first-bot) for the full flow.
+**New bot** makes a bot at once from your saved defaults and opens its chat; shape it afterwards with **Set me up** or in its **Bot settings**. A ready-made bot from **Templates** opens an editable draft first: review its profile, model, permissions, memory, skills, and routines, then select **Create bot**. **App settings → General → Defaults for new bots → Edit** sets the starting values for future bots without changing existing ones. See [Create your first bot](/docs/getting-started/first-bot) for the full flow.
 
 ## Threads are independent conversations
 
 The conversations previously called **Tasks** are now **Threads**. Expand a bot in the sidebar and choose **New thread**, or use **All threads** to find an older conversation. Existing history is preserved.
 
-Each thread remembers its own model and has its own progress, approvals, and Stop control. Start another thread while one is working; changing or stopping one does not redirect its siblings. Up to three direct threads can run per bot, including threads waiting for your approval.
+Each thread has its own progress, approvals, and Stop control. Start another thread while one is working; stopping one does not redirect its siblings. Up to three direct threads can run per bot, including threads waiting for your approval.
+
+## Threads use their bot's model
+
+In Simple mode there is nothing to pick: every bot uses the default AI, and a bot with no working AI says so in its panel with **Connect an AI**. Model choices are in Advanced mode.
+
+Every thread runs on its bot's model. Change the bot's model and its threads change with it, including old ones a routine, a delegation or a hand-off opens again. A thread keeps a model of its own only when you pick one in that thread; choose the bot's own model in that thread's model menu (for a bot named Ada, **Use Ada's model**) to put it back on the bot's. A thread that follows the bot shows **(bot's model)** beside that model.
+
+When some threads use their own model, the bot's model setting says how many, with **Switch them too**. That moves them all back onto the bot's model once; it is not a setting. A thread that is working keeps its model until it finishes.
+
+If a thread's own model can't run (its engine was removed, turned off, can't start, or isn't allowed), the turn runs on the bot's model instead, the thread uses the bot's model from then on, and one line in the thread says so. A thread whose engine is signed out does the same only when the bot's model is on another engine that can run; on the same engine you see the sign-in prompt.
 
 ## Folders keep related threads together
 
 Folders are optional organization under a bot. For example, Pepper can have an **Email** folder containing **Triage Gmail** and **Triage iCloud**, alongside a **Website** folder.
 
-A thread chooses its model in the chat header and its Ask/Auto setting inside the composer. Folders have no model or permission settings. Moving a thread does not change its model, account, or access, or interrupt it. Removing a folder leaves its conversations ungrouped; it does not delete their history.
+A thread can choose its own model in the chat header and its Ask/Auto setting inside the composer. Folders have no model or permission settings. Moving a thread does not change its model, account, or access, or interrupt it. Removing a folder leaves its conversations ungrouped; it does not delete their history.
 
 All the bot's threads share its saved memory and skills; they do not automatically receive every sibling transcript. Folders are not separate accounts or privacy boundaries. Bot profiles can carry different access preferences, but app organization is not an operating-system sandbox.
 
-Threads can converse independently, but a physical computer, browser session, or shared project folder cannot safely have two agents changing it at once. OpenMausBot reports contention instead of allowing overlapping managed actions. New local-agent threads use separate working folders by default; existing pinned folders are retained.
+Threads can converse independently, but a physical computer, browser session, or shared project folder cannot safely have two agents changing it at once. MausBot reports contention instead of allowing overlapping managed actions.
+
+A bot without a working folder gives each local-agent thread a folder of its own. Give the bot a working folder and its threads move there with their next message: each starts a new engine session that rereads the conversation, and files it already made stay in its old folder. A thread started in a folder you chose keeps that folder.
+
+A Claude bot has one settings file for all its threads: `.claude/settings.json` in its working folder, or in its own folder (`~/.openmausbot/workspaces/<bot id>/`) when it has none. Its hooks, plugins, permission rules and `env` apply in every thread, whatever folder the thread runs in; Claude Code reads the rest of the file only where the thread runs in that folder. A link in place of the file is not followed.
 
 ## Groups and teams
 
 Groups are the conversations previously called channels or rooms. They let multiple bots share context. Use a group when several specialists need the same brief or should hand work to one another. Membership, instructions and thread history are retained. The existing multi-bot turn-taking behavior is unchanged.
+
+To pause one bot without stopping the group, write **stop @Bot** (or *halt* / *pause* next to its name), or press **Stop Bot** under the bot that is working. A held bot's running turn ends, and it is skipped by @mentions, the lead, Everyone and Auto until you address it again (**@Bot …**), say **resume**, or press **Resume**. **@everyone stop** and **@everyone resume** act on the whole group. Messages addressed to a held bot are shown to it when it comes back. Holds are kept across restarts.
+
+In a group, each bot's reply is its final message. The notes it writes while working fold into a **Worked for…** row above that reply, and teammates read only the reply. If a bot finishes without a final message, the group shows **finished without a summary** and asks it once for a short result.
 
 Existing sections keep their Chief of Staff assignments and bot communication rules. They are not thread folders. A Chief remains a bot role: it receives requests, delegates focused tasks, and summarizes the results.
 

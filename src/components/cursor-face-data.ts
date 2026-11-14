@@ -1,24 +1,11 @@
-/**
- * The mascot's face tables — 25 expressions x 2 eye rings x 48 points, a mouth
- * per expression, and the face-space constants every coordinate is expressed in.
- *
- * Split out of CursorAvatar.tsx so `scripts/gen-mascot-bodies.ts` can import it
- * from plain Node: the renderer is JSX and `--experimental-strip-types` cannot
- * load it, but the generator needs exactly these numbers to solve where a face
- * fits inside a new silhouette. The phone already draws this line in the same
- * place (MausFaceData.swift vs MausAvatar.swift).
- */
+/** Plain TS, no JSX, so scripts/gen-mascot-bodies.ts can load it with Node's --experimental-strip-types. */
 
-/** The face box every coordinate in this file is expressed in. */
 export const FACE_BOX = 228.541
 
-/** Face-space centre the expressions are normalised around. */
 export const FACE_CENTRE: [number, number] = [120, 122.5]
 
-/** How far pointer gaze may pull the eyes, in face-space units. */
 export const GAZE_TRAVEL = { x: 13.2, y: 8.4 }
 
-/* ------------------------------------------------------------- expressions */
 
 export type Ring = [number, number][]
 
@@ -71,29 +58,18 @@ const ringCentre = (ring: Ring): [number, number] => {
   return [x / ring.length, y / ring.length]
 }
 
-/**
- * Each expression's look-direction: the eye-pair centroid relative to face centre.
- * Split out so the resting face can look straight ahead.
- */
 export const GAZE: [number, number][] = RAW.map(ex => {
   const a = ringCentre(ex[0])
   const b = ringCentre(ex[1])
   return [(a[0] + b[0]) / 2 - FACE_CENTRE[0], (a[1] + b[1]) / 2 - FACE_CENTRE[1]]
 })
 
-/** Expressions with their look-direction removed — every one looks straight ahead. */
 export const EXPRESSIONS: Ring[][] = RAW.map((ex, i) =>
   ex.map(ring => ring.map((p): [number, number] => [p[0] - GAZE[i][0], p[1] - GAZE[i][1]]))
 )
 
 export const EXPRESSION_COUNT = EXPRESSIONS.length
 
-/**
- * One mouth per expression: [halfWidth, curve, gap, skew].
- *   curve  + bows the middle down => smile (U);  - => frown
- *   gap    clearance below the lowest eye edge
- *   skew   extra tilt in degrees on top of the eye-pair tilt, for smirks
- */
 export const MOUTHS: number[][] = [
   [14,3,20,0],
   [13,1,20,0],
@@ -122,14 +98,8 @@ export const MOUTHS: number[][] = [
   [11,6,20,0],
 ]
 
-/** Mouth thickness, in face-space units. */
 export const MOUTH_STROKE = 7.5
 
-/**
- * The mouth hangs off the eyes: centred under the pair, tilted with them, and pushed clear
- * of whichever eye is tallest. It stays coherent for free as the eyes move, so only four
- * numbers per expression have to be authored.
- */
 export function mouthFrame(rings: Ring[], spec: number[]) {
   const c0 = ringCentre(rings[0])
   const c1 = ringCentre(rings[1])

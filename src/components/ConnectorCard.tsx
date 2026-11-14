@@ -1,76 +1,121 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Loader2, PlugZap, RefreshCw, X } from "lucide-react";
+import { Loader2, PlugZap, RefreshCw, X } from "lucide-react";
 
-import { api, type Message } from "@/state/store";
+import { FIRST_HOUR_OFFER_KEY } from "../../shared/person-wait";
+import { api, type Bot, type Message } from "@/state/store";
+import { ApiError } from "@/state/api";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
+import { AUTHORIZATION_LINK_MS, reserveConnectionPage, reusableConnectionUrl, type PendingAuthorization } from "@/lib/connector-oauth";
+import { accountAliasTaken, requiresAccountAlias } from "@/lib/connector-status";
+import { mcpSignInLink } from "@/lib/mcp-sign-in";
+import { cn } from "@/lib/cn";
+import { askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine } from "./AskCard";
+import { CardHint } from "./CardHint";
+import { ConnectorAlsoUseful } from "./ConnectorAlsoUseful";
 
-async function openConnectionPage(url: string) {
-  if (window.ogb?.openExternal) {
-    await window.ogb.openExternal(url);
-    return true;
-  }
-  const opened = window.open("", "_blank");
-  if (!opened) return false;
-  opened.opener = null;
-  opened.location.replace(url);
-  return true;
-}
+const STATUS_CHECK_MS = 4_000;
+/** Composio marks an unfinished account EXPIRED shortly after its link lapses; the card keeps asking until it can say so. */
+const STATUS_WATCH_MS = AUTHORIZATION_LINK_MS + 2 * 60 * 1_000;
 
-export function ConnectorCard({ botId, threadId, message }: { botId: string; threadId: string; message: Message }) {
+export function ConnectorCard({ botId, color, threadId, message }: { botId: string; color?: Bot["color"]; threadId: string; message: Message }) {
   const connector = message.connector!;
+  const gone = connector.dismissed || connector.superseded;
+  const isMcp = connector.source === "mcp";
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | { key: LocaleKey } | null>(null);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const [authorization, setAuthorization] = useState<(PendingAuthorization & { target: string }) | null>(null);
+  const [label, setLabel] = useState("");
   const polling = useRef(false);
+  const opening = useRef<ReturnType<typeof reserveConnectionPage> | null>(null);
 
   const endpoint = `/api/bots/${encodeURIComponent(botId)}/connector-cards/${encodeURIComponent(message.id)}`;
+  const target = `${endpoint}?threadId=${encodeURIComponent(threadId)}`;
+  const currentTarget = useRef(target);
+  currentTarget.current = target;
+  const pendingAuthorization = authorization?.target === target && connector.status !== "failed" && connector.status !== "connected" && !gone
+    ? authorization : null;
+  const authorizationUrl = reusableConnectionUrl(pendingAuthorization);
+  useEffect(() => {
+    setBusy(false);
+    setLocalError(null);
+    setRefusal(null);
+    setAuthorization(null);
+    setLabel("");
+    return () => {
+      opening.current?.cancel();
+      opening.current = null;
+    };
+  }, [target, gone]);
   const checkStatus = useCallback(async () => {
     const result = await api(`${endpoint}/status?threadId=${encodeURIComponent(threadId)}`);
     return Boolean(result.connected);
   }, [endpoint, threadId]);
 
   useEffect(() => {
-    if (connector.status !== "authorizing" || connector.dismissed) return;
+    if (connector.status !== "authorizing" || gone) return;
     polling.current = true;
-    let tries = 0;
-    const timer = setInterval(() => {
+    const startedAt = Date.now();
+    const check = () => {
       if (!polling.current) return;
       void checkStatus()
         .then((connected) => {
-          tries += 1;
-          if (connected || tries >= 75) {
-            polling.current = false;
-            clearInterval(timer);
-          }
+          if (connected) polling.current = false;
         })
-        .catch(() => {
-          tries += 1;
-          if (tries >= 75) clearInterval(timer);
-        });
-    }, 4_000);
+        .catch(() => {});
+    };
+    const timer = setInterval(() => {
+      if (Date.now() - startedAt >= STATUS_WATCH_MS) clearInterval(timer);
+      else check();
+    }, STATUS_CHECK_MS);
+    const onReturn = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
     return () => {
       polling.current = false;
       clearInterval(timer);
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
     };
-  }, [checkStatus, connector.dismissed, connector.status]);
+  }, [checkStatus, gone, connector.status]);
 
-  if (connector.dismissed) return null;
+  if (gone) return null;
 
-  const connect = async () => {
+  const connect = async (alias?: string) => {
+    if (busy || opening.current) return;
+    const launch = reserveConnectionPage();
+    opening.current = launch;
+    const isCurrent = () => opening.current === launch && currentTarget.current === target;
     setBusy(true);
     setLocalError(null);
+    setRefusal(null);
     try {
-      const result = await api(`${endpoint}/authorize`, {
-        method: "POST",
-        body: JSON.stringify({ threadId }),
-      });
-      if (!await openConnectionPage(String(result.url))) {
+      const reusableUrl = alias ? null : reusableConnectionUrl(pendingAuthorization);
+      const createdAt = reusableUrl ? pendingAuthorization!.createdAt : Date.now();
+      const result = reusableUrl ? { url: reusableUrl } : await api(`${endpoint}/authorize`, {
+          method: "POST",
+          body: JSON.stringify(alias ? { threadId, alias } : { threadId }),
+        });
+      if (!isCurrent()) return;
+      const url = mcpSignInLink(typeof result.url === "string" ? result.url : null);
+      if (!url) throw new Error(t("connectors.invalidAuthorizationUrl"));
+      setAuthorization({ target, url, createdAt });
+      if (!await launch.open(url) && isCurrent()) {
         setLocalError({ key: "connectors.card.popupBlocked" });
       }
     } catch (error) {
-      setLocalError(error instanceof Error ? error.message : String(error));
+      if (!isCurrent()) return;
+      if (isMcp && error instanceof ApiError && error.status === 409) setRefusal(error.message);
+      else setLocalError(error instanceof Error ? error.message : String(error));
     } finally {
-      setBusy(false);
+      launch.cancel();
+      if (isCurrent()) {
+        opening.current = null;
+        setBusy(false);
+      }
     }
   };
 
@@ -87,84 +132,116 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
   };
 
   const dismiss = () => {
+    opening.current?.cancel();
+    opening.current = null;
+    setBusy(false);
+    setAuthorization(null);
     void api(`${endpoint}/dismiss`, { method: "POST", body: JSON.stringify({ threadId }) }).catch(() => {});
   };
 
   const connected = connector.status === "connected";
   const authorizing = connector.status === "authorizing";
   const error = localError ?? connector.error;
+  const stopped = connector.stopped === true;
+  const errorText = typeof error === "string" ? error : "";
+  const labelNeeded = !authorizing && (requiresAccountAlias(errorText) || accountAliasTaken(errorText));
+
+  if (stopped && !connected) {
+    return (
+      <AskSettledLine icon={<X size={13} />} ariaLabel={connector.label}>
+        <span className="text-ink-secondary">{connector.label}</span>
+        <span> · {t("chat.turnStopped")}</span>
+      </AskSettledLine>
+    );
+  }
+
+  if (connected) {
+    return (
+      <AskSettledLine
+        ariaLabel={connector.label}
+        action={!connector.resumed && !stopped && (
+          <button type="button" onClick={() => void resume()} disabled={busy} className={cn(ASK_QUIET_BUTTON, "text-accent-text")}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            {t("connectors.card.continueTask")}
+          </button>
+        )}
+        detail={error && <p role="alert" className="ms-[19px] mt-1 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</p>}
+      >
+        <span className="text-ink-secondary" title={connector.resumed ? t("connectors.card.resumed") : t("connectors.card.paused")}>
+          {connector.label}
+        </span>
+        <span> · {t("connectors.card.connected")}{connector.resumed ? ` · ${t("connectors.card.continuing")}` : stopped ? ` · ${t("chat.turnStopped")}` : ""}</span>
+      </AskSettledLine>
+    );
+  }
 
   return (
-    <div className="flex w-full justify-start">
-      <div data-tour="connector" className="w-full max-w-[520px] overflow-hidden rounded-2xl border border-hairline/50 bg-card shadow-sm">
-        <div className="flex items-start gap-3 p-4">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-control text-[16px] font-semibold text-ink">
-            {connector.label.slice(0, 1).toUpperCase() || <PlugZap size={19} />}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate text-[14px] font-semibold text-ink">{connector.label}</span>
-              {connected && (
-                <span className="flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success">
-                  <Check size={11} /> {t("connectors.card.connected")}
-                </span>
-              )}
-            </div>
-            <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-secondary">
-              {connected
-                ? connector.resumed
-                  ? t("connectors.card.resumed")
-                  : t("connectors.card.paused")
-                : connector.description}
-            </p>
-            {!connected && (
-              <p className="mt-1 text-[11.5px] text-ink-tertiary">
-                {t("connectors.card.signInHint")}
-              </p>
-            )}
-            {error && <p className="mt-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</p>}
-          </div>
-          {!connected && (
-            <button onClick={dismiss} aria-label={t("connectors.card.notNow")} title={t("connectors.card.notNow")} className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink">
-              <X size={15} />
-            </button>
-          )}
-        </div>
-        <div className="flex items-center justify-between border-t border-hairline/40 bg-panel/40 px-4 py-2.5">
-          <div className="flex items-center gap-1.5 text-[11.5px] text-ink-secondary">
-            {authorizing ? <Loader2 size={12} className="animate-spin" /> : <PlugZap size={12} />}
+    <AskCard
+      tour="connector"
+      ariaLabel={connector.label}
+      stays={!connector.resumeKey.startsWith(FIRST_HOUR_OFFER_KEY)}
+      icon={<PlugZap size={15} />}
+      title={isMcp ? t("connectors.card.signInTo", { label: connector.label }) : connector.label}
+      explanation={connector.description}
+      onDismiss={dismiss}
+      dismissLabel={t("connectors.card.notNow")}
+      footer={
+        <>
+          <span className="me-auto flex min-w-0 items-center gap-1.5 text-[12px] text-ink-tertiary">
+            {authorizing && <Loader2 size={12} className="shrink-0 animate-spin" />}
+            {authorizing ? t("connectors.card.waiting") : t("connectors.card.requested")}
+          </span>
+          <button
+            type="button"
+            onClick={() => void connect(labelNeeded ? label.trim() : undefined)}
+            disabled={busy || (labelNeeded && !label.trim())}
+            {...askPrimary(color)}
+          >
+            {busy ? <Loader2 size={14} className="animate-spin" /> : authorizing ? <RefreshCw size={14} /> : <PlugZap size={14} />}
             {authorizing
-              ? t("connectors.card.waiting")
-              : connected
-                ? t("connectors.card.readyToUse")
-                : t("connectors.card.requested")}
-          </div>
-          {!connected ? (
-            <button
-              onClick={() => void connect()}
-              disabled={busy}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-50"
-            >
-              {busy || authorizing ? <Loader2 size={13} className="animate-spin" /> : <PlugZap size={13} />}
-              {authorizing
-                ? t("connectors.card.openAgain")
-                : connector.status === "failed"
-                  ? t("connectors.card.tryAgain")
-                  : t("connectors.card.connectSecurely")}
-            </button>
-          ) : !connector.resumed ? (
-            <button
-              onClick={() => void resume()}
-              disabled={busy}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-50"
-            >
-              {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {t("connectors.card.continueTask")}
-            </button>
-          ) : (
-            <span className="flex items-center gap-1 text-[12px] font-medium text-success"><Check size={13} /> {t("connectors.card.continuing")}</span>
-          )}
-        </div>
-      </div>
-    </div>
+              ? t("connectors.card.openAgain")
+              : connector.status === "failed"
+                ? t("connectors.card.tryAgain")
+                : t(isMcp ? "connectors.card.signIn" : "connectors.card.connectSecurely")}
+          </button>
+        </>
+      }
+    >
+      <CardHint id="spot.connector" />
+      <p className="text-[12px] text-ink-tertiary">{t(isMcp ? "connectors.card.mcpSignInHint" : "connectors.card.signInHint")}</p>
+      {refusal && <p role="status" className="mt-1.5 text-[12px] text-ink-secondary">{refusal}</p>}
+      {labelNeeded ? (
+        <form
+          className="mt-1.5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (label.trim()) void connect(label.trim());
+          }}
+        >
+          <p role="alert" className="text-[12px] text-danger">
+            {t(requiresAccountAlias(errorText) ? "connectors.aliasNeeded" : "connectors.aliasTaken")}
+          </p>
+          <input
+            value={label}
+            maxLength={64}
+            onChange={(event) => setLabel(event.target.value)}
+            placeholder={t("connectors.aliasPlaceholder")}
+            aria-label={t("connectors.aliasAriaAnother", { service: connector.label })}
+            className="mt-1.5 h-8 w-full rounded-full bg-inset px-3 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+        </form>
+      ) : error && <p role="alert" className="mt-1.5 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</p>}
+      {authorizationUrl && (
+        <a href={authorizationUrl} target="_blank" rel="noopener noreferrer" onClick={(event) => {
+          if (!reusableConnectionUrl(pendingAuthorization)) {
+            event.preventDefault();
+            void connect();
+          }
+        }} className="mt-1.5 inline-block text-[12px] text-accent-text underline underline-offset-2">
+          {t("connectors.openAuthorizationPage")}
+        </a>
+      )}
+      {!isMcp && <ConnectorAlsoUseful botId={botId} slug={connector.slug} />}
+    </AskCard>
   );
 }

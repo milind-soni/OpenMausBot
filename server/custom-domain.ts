@@ -61,8 +61,7 @@ export function isPublicDomainAddress(address: string): boolean {
   return family === 6 && globalIpv6.check(address, "ipv6") && !excludedAddresses.check(address, "ipv6");
 }
 
-/** Local interfaces only: a tunnel/CDN address or an external IP-echo service
- * does not identify the server where the customer's HTTPS proxy runs. */
+/** Local interfaces only: a tunnel/CDN address or an IP-echo service does not identify where the customer's HTTPS proxy runs. */
 export function customDomainIpv4(
   interfaces = networkInterfaces(),
   configured = process.env.OMB_PUBLIC_IPV4,
@@ -96,8 +95,7 @@ function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 
 function requestJson(url: URL, address: LookupAddress, signal: AbortSignal): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    // Pin the validated DNS result for both requests. TLS/SNI and Host still use
-    // the original domain, so a DNS rebind cannot reach a private IP afterwards.
+    // Pin the validated DNS result for both requests; TLS/SNI and Host keep the domain, so a DNS rebind cannot reach a private IP.
     const lookup: LookupFunction = (_hostname, options, callback) => {
       if (options.all) callback(null, [address]);
       else callback(null, address.address, address.family);
@@ -134,8 +132,7 @@ function requestJson(url: URL, address: LookupAddress, signal: AbortSignal): Pro
   });
 }
 
-/** Verification only: callers persist the returned origin after success. The
- * public challenge endpoint reveals no account credentials and grants no access. */
+/** Callers persist the returned origin after success; the public challenge endpoint reveals no credentials and grants no access. */
 export function createCustomDomainVerifier(dependencies: CustomDomainDependencies) {
   const lookup = dependencies.lookup ?? ((hostname: string) => dnsLookup(hostname, { all: true, verbatim: true }));
   const request = dependencies.request ?? requestJson;

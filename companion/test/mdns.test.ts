@@ -1,12 +1,11 @@
-// mDNS responder contract. The wire format is the part with no room for
-// "close enough" — a browser either parses the packet or the service is
-// invisible — so it is tested byte by byte, against packets built by hand
-// rather than by the encoder under test.
+// Packets are built and read by hand, so the wire format is tested against the
+// format rather than against our own encoder.
 import { createSocket } from "node:dgram";
 import { EventEmitter } from "node:events";
 import type { NetworkInterfaceInfoIPv4 } from "node:os";
 import { describe, expect, it } from "vitest";
 
+import { isPrivateLanAddress } from "../src/direct-routes.ts";
 import { lanAddresses, tailscaleAddress } from "../src/listener.ts";
 import {
   advertisableAddresses,
@@ -38,8 +37,6 @@ const service: ServiceInfo = {
 const INSTANCE = "Milind's computer._openmausbot._tcp.local";
 const SERVICE_NAME = "_openmausbot._tcp.local";
 
-/** A query packet, built by hand so the decoder is tested against the
- * format rather than against our own encoder. */
 function query(name: string, type: number, opts: { id?: number; unicast?: boolean } = {}): Buffer {
   const header = Buffer.alloc(12);
   header.writeUInt16BE(opts.id ?? 0, 0);
@@ -51,7 +48,6 @@ function query(name: string, type: number, opts: { id?: number; unicast?: boolea
   return Buffer.concat([header, encodeName(name), suffix]);
 }
 
-/** Read the records out of a response packet — again by hand. */
 function parseResponse(buf: Buffer) {
   const questionCount = buf.readUInt16BE(4);
   const answerCount = buf.readUInt16BE(6);
@@ -108,7 +104,6 @@ describe("wire format", () => {
   });
 
   it("follows a compression pointer without following it forever", () => {
-    // question name is a pointer to offset 12, where the real name sits
     const name = encodeName(SERVICE_NAME);
     const header = Buffer.alloc(12);
     header.writeUInt16BE(1, 4);
@@ -120,21 +115,17 @@ describe("wire format", () => {
     const packet = Buffer.concat([header, pointer, suffix, name]);
     expect(decodeMessage(packet)!.questions[0].name).toBe(SERVICE_NAME);
 
-    // a pointer to itself must not hang the socket handler
     const loop = Buffer.concat([header, Buffer.from([0xc0, 12]), suffix]);
     expect(decodeMessage(loop)).toBeNull();
   });
 
   it("returns null for anything it cannot read, rather than throwing", () => {
-    // these arrive unauthenticated from the local network
     expect(decodeMessage(Buffer.alloc(0))).toBeNull();
     expect(decodeMessage(Buffer.alloc(5))).toBeNull();
     expect(decodeMessage(Buffer.from([0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0]))).toBeNull();
-    // a label claiming more bytes than the packet holds
     const oneQuestion = Buffer.alloc(12);
     oneQuestion.writeUInt16BE(1, 4);
     expect(decodeMessage(Buffer.concat([oneQuestion, Buffer.from([40, 0x61])]))).toBeNull();
-    // a header promising questions that were never written
     const liar = Buffer.alloc(12);
     liar.writeUInt16BE(9, 4);
     expect(decodeMessage(liar)).toBeNull();
@@ -148,11 +139,7 @@ describe("wire format", () => {
     expect(parsed.answerCount).toBe(4);
 
     const [ptrRec, srvRec, txtRec, aRec] = parsed.records;
-    // Class IN throughout, but the cache-flush bit is not an invariant: the
-    // service PTR is a shared record and RFC 6762 §10.2 forbids the bit on
-    // one, because flushing it discards the instances *other* computers
-    // advertised under the same name. The records named after this machine
-    // are ours to replace.
+    // The service PTR is shared: RFC 6762 §10.2 forbids the cache-flush bit on it.
     expect(ptrRec.klass).toBe(0x0001);
     for (const record of [srvRec, txtRec, aRec]) expect(record.klass).toBe(0x8001);
 
@@ -175,8 +162,7 @@ describe("wire format", () => {
     const parsed = parseResponse(encodeResponse(announcement(service), [], { ttl: 0 }));
     expect(parsed.records).toHaveLength(4);
     for (const record of parsed.records) expect(record.ttl).toBe(0);
-    // TTL 0 is how a shared record is withdrawn (§10.1); the flush bit is
-    // still not the way to do it, and the goodbye uses the same encoder.
+    // TTL 0 withdraws a shared record (§10.1), not the flush bit.
     expect(parsed.records.find((r) => r.type === TYPE.PTR)!.klass).toBe(0x0001);
   });
 
@@ -185,9 +171,8 @@ describe("wire format", () => {
     const { id, questions } = decodeMessage(query(SERVICE_NAME, TYPE.PTR, { id: 42 }))!;
     const parsed = parseResponse(encodeResponse([ptr], [srv, txt, ...addresses], { id, questions, legacy: true }));
 
-    // RFC 6762 §6.7: the asker is a plain DNS resolver. It has no mDNS cache
-    // to invalidate, and it reads the top class bit as part of the class —
-    // so not one record here may set it, unique or shared.
+    // RFC 6762 §6.7: a legacy resolver has no mDNS cache and reads the top
+    // class bit as part of the class.
     expect(parsed.id).toBe(42);
     expect(parsed.questionCount).toBe(1);
     expect(parsed.records).toHaveLength(4);
@@ -197,7 +182,6 @@ describe("wire format", () => {
   it("leaves the enumeration PTR unflushed too — it is shared widest of all", () => {
     const { answers } = answersFor(decodeMessage(query(SERVICE_ENUMERATION, TYPE.PTR))!, service);
     const [record] = parseResponse(encodeResponse(answers)).records;
-    // every service type on the network answers this name, not just ours
     expect(record).toMatchObject({ name: SERVICE_ENUMERATION, type: TYPE.PTR, klass: 0x0001 });
   });
 
@@ -214,7 +198,6 @@ describe("answersFor", () => {
     const { answers, additionals } = ask(SERVICE_NAME, TYPE.PTR);
     expect(answers).toHaveLength(1);
     expect(answers[0]).toMatchObject({ type: TYPE.PTR, data: INSTANCE });
-    // SRV + TXT + A ride along so browsing resolves in one round trip
     expect(additionals.map((r) => r.type).sort()).toEqual([TYPE.A, TYPE.TXT, TYPE.SRV].sort());
   });
 
@@ -230,7 +213,6 @@ describe("answersFor", () => {
   it("answers ANY with everything about that name, and never twice", () => {
     const { answers, additionals } = ask(INSTANCE, TYPE.ANY);
     expect(answers.map((r) => r.type).sort()).toEqual([TYPE.TXT, TYPE.SRV].sort());
-    // the A record is an additional, so it must not also be an answer
     expect(additionals.map((r) => r.type)).toEqual([TYPE.A]);
   });
 
@@ -246,9 +228,7 @@ describe("answersFor", () => {
   it("stays silent about anything that is not ours", () => {
     expect(ask("_ssh._tcp.local", TYPE.PTR).answers).toEqual([]);
     expect(ask("someone-else.local", TYPE.A).answers).toEqual([]);
-    // right name, wrong type
     expect(ask(service.host, TYPE.SRV).answers).toEqual([]);
-    // and we answer questions, not other people's answers
     const response = decodeMessage(encodeResponse(announcement(service)))!;
     expect(answersFor({ ...response, response: true, questions: [] }, service).answers).toEqual([]);
   });
@@ -256,7 +236,6 @@ describe("answersFor", () => {
 
 describe("naming", () => {
   it("keeps an instance name to a single valid label", () => {
-    // a dot would silently split the name into two labels
     expect(dnsLabel("Dr. Smith's computer")).toBe("Dr  Smith's computer");
     expect(dnsLabel("x".repeat(200)).length).toBeLessThanOrEqual(63);
     expect(Buffer.byteLength(dnsLabel("é".repeat(60)), "utf8")).toBeLessThanOrEqual(63);
@@ -267,7 +246,6 @@ describe("naming", () => {
   it("claims a host name the system responder will not fight us for", () => {
     const name = defaultHostName("Milinds-MacBook-Pro");
     expect(name).toMatch(/^openmausbot-[0-9a-f]{8}\.local$/);
-    // stable across restarts, distinct per machine
     expect(defaultHostName("Milinds-MacBook-Pro")).toBe(name);
     expect(defaultHostName("another-machine")).not.toBe(name);
     expect(name).not.toContain("Milinds-MacBook-Pro");
@@ -282,9 +260,7 @@ describe("naming", () => {
   });
 });
 
-// The socket loop, over unicast on an ephemeral port: no multicast group is
-// needed to prove that a query in becomes a correct answer out, and CI
-// containers rarely route multicast at all.
+// Over unicast on an ephemeral port: CI containers rarely route multicast.
 describe("MdnsResponder", () => {
   const askResponder = (port: number, packet: Buffer) =>
     new Promise<Buffer>((resolve, reject) => {
@@ -313,8 +289,6 @@ describe("MdnsResponder", () => {
       const port = responder.address()!;
       const parsed = parseResponse(await askResponder(port, query(SERVICE_NAME, TYPE.PTR, { id: 42 })));
 
-      // a query from an ephemeral port is a legacy resolver: it gets its
-      // own id and question echoed back (RFC 6762 §6.7)
       expect(parsed.id).toBe(42);
       expect(parsed.questionCount).toBe(1);
       expect(parsed.answerCount).toBe(1);
@@ -332,13 +306,8 @@ describe("MdnsResponder", () => {
       const port = responder.address()!;
       const parsed = parseResponse(await askResponder(port, query(SERVICE_NAME, TYPE.PTR, { id: 42 })));
 
-      // The id/question echo is one of §6.7's requirements of a legacy reply
-      // and this is another — among others the responder does not yet meet,
-      // the section also caps a legacy reply's TTL at 10 s and this one still
-      // sends 120/4500. That is filed separately, not asserted here. What is
-      // asserted: the reply leaves through the same encoder as a multicast
-      // one, so the caller must pass the policy down rather than let the
-      // encoder decide on its own.
+      // §6.7 also caps a legacy reply's TTL at 10 s, which the responder does
+      // not yet meet; not asserted here.
       expect(parsed.records.length).toBeGreaterThan(1);
       for (const record of parsed.records) expect(record.klass).toBe(0x0001);
     } finally {
@@ -364,21 +333,15 @@ describe("MdnsResponder", () => {
     const port = responder.address()!;
     try {
       const noise = createSocket("udp4");
-      // An unhandled 'error' on a dgram socket is an uncaught exception, and
-      // it would surface as this file failing somewhere else entirely.
+      // An unhandled 'error' on a dgram socket is an uncaught exception.
       noise.on("error", () => {});
       await new Promise<void>((resolve) => noise.bind(0, "127.0.0.1", resolve));
-      // Await each send. `send` is asynchronous, so closing on the next line
-      // can beat the datagrams out of the socket — close() on a socket with
-      // datagrams still queued drops them, the responder then never sees the
-      // garbage, and this passes without exercising the path it is named
-      // after.
+      // close() drops datagrams still queued, so each send is awaited.
       for (const junk of [Buffer.alloc(0), Buffer.from("hello"), Buffer.alloc(600, 0xff)]) {
         await new Promise<void>((resolve) => noise.send(junk, port, "127.0.0.1", () => resolve()));
       }
       await new Promise<void>((resolve) => noise.close(() => resolve()));
 
-      // still answering afterwards is the assertion that matters
       const parsed = parseResponse(await askResponder(port, query(SERVICE_NAME, TYPE.PTR)));
       expect(parsed.answerCount).toBe(1);
     } finally {
@@ -390,7 +353,6 @@ describe("MdnsResponder", () => {
     const responder = new MdnsResponder({ port: 0, multicast: false });
     expect(await responder.advertise({ ...service, addresses: [] })).toBe(false);
     expect(responder.advertising).toBe(false);
-    // stopping something that never started is a no-op, not a crash
     await responder.stop();
 
     expect(await responder.advertise(service)).toBe(true);
@@ -401,20 +363,17 @@ describe("MdnsResponder", () => {
   });
 });
 
-/** A socket that logs what the responder does to it, and keeps the packets.
- * Satisfies `ResponderSocket` structurally — no casting required. Shared by
- * the two describes below: one reads `ops` to check interface pinning, the
- * other reads `packets` to check what went on the wire. */
 class FakeSocket extends EventEmitter {
   readonly ops: Array<{ op: "pin" | "send"; address: string; port?: number }> = [];
-  /** Kept beside `ops` rather than in it: the ops log is asserted with
-   * `toEqual` below, and a packet field would drown those assertions. */
   readonly packets: Buffer[] = [];
+  readonly memberships: Array<string | undefined> = [];
   bind(_port: number, callback?: () => void) {
     callback?.();
   }
   setMulticastTTL(_ttl: number) {}
-  addMembership(_group: string, _membershipInterface?: string) {}
+  addMembership(_group: string, membershipInterface?: string) {
+    this.memberships.push(membershipInterface);
+  }
   setMulticastInterface(multicastInterface: string) {
     this.ops.push({ op: "pin", address: multicastInterface });
   }
@@ -423,7 +382,9 @@ class FakeSocket extends EventEmitter {
     this.packets.push(packet);
     callback?.(null);
   }
+  closed = false;
   close(callback?: () => void) {
+    this.closed = true;
     callback?.();
   }
   address() {
@@ -433,19 +394,14 @@ class FakeSocket extends EventEmitter {
 
 const homes = ["192.168.1.42", "10.0.0.7"];
 
-// The fake's callbacks fire synchronously, so the first announcement (the
-// 0 ms timer) has fully drained once one later macrotask runs.
+// The fake's callbacks fire synchronously, so one later macrotask drains the
+// first announcement.
 const drained = () => new Promise((resolve) => setTimeout(resolve, 25));
 
-// The outbound half of multicast. Joining the group per interface only fixes
-// what we *hear*; every group send must also be pinned per interface, or the
-// kernel routes 224.0.0.251 out of exactly one interface of its choosing —
-// with a VPN or VM bridge up, a network the phone is not on. None of this
-// reaches the wire in CI, so a recording socket is where it gets asserted.
+// Pinning never reaches the wire in CI, so a recording socket is where it is asserted.
 describe("multicast interface pinning", () => {
-  /** One announcement burst, as the ops log should show it: pin, send, pin,
-   * send — the pin *before* each send, per advertised interface, because
-   * `setMulticastInterface` redirects the sends that come after it. */
+  /** `setMulticastInterface` redirects the sends after it, so the pin precedes
+   * each send. */
   const pinnedBurst = homes.flatMap((address) => [
     { op: "pin", address },
     { op: "send", address: "224.0.0.251", port: 5353 },
@@ -458,7 +414,6 @@ describe("multicast interface pinning", () => {
     await drained();
     expect(socket.ops).toEqual(pinnedBurst);
 
-    // the goodbye withdraws the records everywhere they were announced
     socket.ops.length = 0;
     await responder.stop();
     expect(socket.ops).toEqual(pinnedBurst);
@@ -471,7 +426,6 @@ describe("multicast interface pinning", () => {
     await drained();
     socket.ops.length = 0;
     try {
-      // port 5353, no QU bit: the answer goes back to the group
       socket.emit("message", query(SERVICE_NAME, TYPE.PTR), { address: "127.0.0.1", port: 5353 });
       await drained();
       expect(socket.ops).toEqual(pinnedBurst);
@@ -487,7 +441,6 @@ describe("multicast interface pinning", () => {
     await drained();
     socket.ops.length = 0;
     try {
-      // an ephemeral source port marks a legacy resolver (RFC 6762 §6.7)
       socket.emit("message", query(SERVICE_NAME, TYPE.PTR, { id: 9 }), { address: "127.0.0.1", port: 40404 });
       await drained();
       expect(socket.ops).toEqual([{ op: "send", address: "127.0.0.1", port: 40404 }]);
@@ -499,7 +452,6 @@ describe("multicast interface pinning", () => {
   it("skips an interface that vanished between enumeration and send", async () => {
     class VanishingSocket extends FakeSocket {
       setMulticastInterface(multicastInterface: string) {
-        // what a dropped VPN or pulled cable looks like from here
         if (multicastInterface === "10.0.0.7") throw new Error("EADDRNOTAVAIL");
         super.setMulticastInterface(multicastInterface);
       }
@@ -509,7 +461,6 @@ describe("multicast interface pinning", () => {
     await responder.advertise({ ...service, addresses: homes });
     await drained();
     try {
-      // the surviving interface still gets its packet, and nothing crashed
       expect(socket.ops).toEqual([
         { op: "pin", address: "192.168.1.42" },
         { op: "send", address: "224.0.0.251", port: 5353 },
@@ -521,10 +472,7 @@ describe("multicast interface pinning", () => {
   });
 });
 
-// Which records claim to replace a cache entry, read off the packets the
-// responder actually emitted. The policy is decided in `mayFlush` and carried
-// by the caller, so the encoder unit tests above cannot show that the caller
-// passed it — only a packet off the socket can.
+// Only a packet off the socket shows the caller passed mayFlush's policy down.
 describe("cache-flush policy on the wire", () => {
   it("flushes what this machine owns on multicast, and never the shared PTR", async () => {
     const socket = new FakeSocket();
@@ -534,8 +482,6 @@ describe("cache-flush policy on the wire", () => {
     try {
       const parsed = parseResponse(socket.packets[0]);
       const klassOf = (type: number) => parsed.records.find((r) => r.type === type)!.klass;
-      // the other half of the rule: dropping the bit everywhere would be a
-      // client holding a stale address for the whole 120 s of its TTL
       expect(klassOf(TYPE.PTR)).toBe(0x0001);
       for (const type of [TYPE.SRV, TYPE.TXT, TYPE.A]) expect(klassOf(type)).toBe(0x8001);
     } finally {
@@ -543,17 +489,11 @@ describe("cache-flush policy on the wire", () => {
     }
   });
 
-  // A QU query and a legacy query are both answered directly to the asker, so
-  // "went out unicast" is the wrong thing to hang the policy on. What splits
-  // them is the source port: §6.7 is about a resolver with no mDNS cache, and
-  // a QU asker on 5353 is a full mDNS client that has one — §5.4 leaves it
-  // under the same cache-flush rules as a multicast answer. The two cases
-  // below differ in nothing but that port.
+  // The source port splits QU from legacy: a QU asker on 5353 has an mDNS cache
+  // (§5.4), a legacy resolver does not (§6.7).
   const askDirectly = async (fromPort: number) => {
     const socket = new FakeSocket();
     const responder = new MdnsResponder({ socketFactory: () => socket });
-    // one address, so the reply is exactly SRV + its A and the classes below
-    // can be read as a pair rather than counted
     await responder.advertise(service);
     await drained();
     socket.packets.length = 0;
@@ -574,25 +514,76 @@ describe("cache-flush policy on the wire", () => {
   });
 
   it("drops the bit for the same QU question from a legacy port", async () => {
-    // QU set and all: the source port is what makes it legacy, not the bit
     expect(await askDirectly(40404)).toEqual([0x0001, 0x0001]);
   });
 });
 
-// Which address leads matters: callers print the first non-tailnet entry into
-// the pairing QR, and `networkInterfaces()` promises nothing about order — a
-// Mac with a VPN or a VM can enumerate utun or bridge100 first, and a QR
-// carrying one of those addresses points the phone at a network it is not on.
-describe("lanAddresses", () => {
-  const ipv4 = (address: string, internal = false): NetworkInterfaceInfoIPv4 => ({
-    address,
-    netmask: "255.255.255.0",
-    family: "IPv4",
-    mac: "00:00:00:00:00:00",
-    internal,
-    cidr: `${address}/24`,
+const ipv4 = (address: string, internal = false): NetworkInterfaceInfoIPv4 => ({
+  address,
+  netmask: "255.255.255.0",
+  family: "IPv4",
+  mac: "00:00:00:00:00:00",
+  internal,
+  cidr: `${address}/24`,
+});
+
+describe("advertisableAddresses", () => {
+  // A reported Mac: Wi-Fi plus a mesh VPN, Tailscale and a tun2socks device.
+  const mac = {
+    en0: [ipv4("192.168.1.42")],
+    utun3: [ipv4("10.20.30.40")],
+    utun4: [ipv4("100.102.178.88")],
+    utun5: [ipv4("198.18.0.1")],
+    ipsec0: [ipv4("10.9.0.2")],
+    ppp0: [ipv4("10.8.0.6")],
+    bridge100: [ipv4("192.168.64.1")],
+  };
+
+  it("joins no multicast group on a Mac's VPN tunnels", () => {
+    expect(advertisableAddresses(mac, "darwin")).toEqual(["192.168.1.42", "192.168.64.1"]);
   });
 
+  it("joins the multicast group only on a Mac's LAN interfaces", async () => {
+    const socket = new FakeSocket();
+    const responder = new MdnsResponder({ socketFactory: () => socket });
+    try {
+      expect(await responder.advertise({ ...service, addresses: advertisableAddresses(mac, "darwin") })).toBe(true);
+      expect(socket.memberships).toEqual(["192.168.1.42", "192.168.64.1"]);
+    } finally {
+      await responder.stop();
+    }
+  });
+
+  it("never falls back to the default-route membership on a Mac", async () => {
+    // The LAN address left before its join: the default route may be a utun.
+    for (const [platform, expected, advertised] of [["darwin", [], false], ["linux", [undefined], true]] as const) {
+      const socket = new FakeSocket();
+      const join = socket.addMembership.bind(socket);
+      socket.addMembership = (group, membershipInterface) => {
+        if (membershipInterface) throw new Error("EADDRNOTAVAIL");
+        join(group, membershipInterface);
+      };
+      const responder = new MdnsResponder({ socketFactory: () => socket, platform });
+      try {
+        expect(await responder.advertise({ ...service, addresses: ["192.168.1.42"] })).toBe(advertised);
+        expect(socket.memberships).toEqual(expected);
+        expect(responder.advertising).toBe(advertised);
+        expect(socket.closed).toBe(!advertised);
+      } finally {
+        await responder.stop();
+      }
+    }
+  });
+
+  it("keeps tunnel interfaces on other platforms, with the same private-LAN rule as a Mac", () => {
+    const kept = lanAddresses(mac).filter((address) => isPrivateLanAddress(address));
+    expect(kept).toEqual(expect.arrayContaining(["10.20.30.40", "10.9.0.2", "10.8.0.6"]));
+    expect(advertisableAddresses(mac, "linux")).toEqual(kept);
+    expect(advertisableAddresses(mac, "win32")).toEqual(kept);
+  });
+});
+
+describe("lanAddresses", () => {
   it("ranks en0 first however the interfaces enumerate", () => {
     // deliberately listed worst-first: insertion order must not win
     const addresses = lanAddresses({
@@ -602,8 +593,6 @@ describe("lanAddresses", () => {
       en0: [ipv4("192.168.1.42")],
     });
     expect(addresses[0]).toBe("192.168.1.42");
-    // the virtual interfaces are kept — the tailnet address is dialable
-    // from off-network — but only after everything real
     expect(addresses).toEqual(["192.168.1.42", "100.102.178.88", "192.168.64.1", "192.168.105.1"]);
   });
 
@@ -625,12 +614,61 @@ describe("lanAddresses", () => {
       }),
     ).toEqual([]);
   });
+
+  it("puts a Windows PC's Wi-Fi ahead of its WSL and Hyper-V adapters", () => {
+    expect(
+      lanAddresses({
+        "vEthernet (WSL (Hyper-V firewall))": [ipv4("172.19.96.1")],
+        "vEthernet (Default Switch)": [ipv4("172.27.208.1")],
+        "Wi-Fi": [ipv4("192.168.1.34")],
+        "Loopback Pseudo-Interface 1": [ipv4("127.0.0.1", true)],
+      }),
+    ).toEqual(["192.168.1.34", "172.19.96.1", "172.27.208.1"]);
+  });
+
+  it("puts wired Ethernet ahead of Docker Desktop, VirtualBox, VMware and a VPN", () => {
+    expect(
+      lanAddresses({
+        "vEthernet (WSL)": [ipv4("172.30.16.1")],
+        "VirtualBox Host-Only Network": [ipv4("192.168.56.1")],
+        "VMware Network Adapter VMnet8": [ipv4("192.168.80.1")],
+        "OpenVPN Data Channel Offload": [ipv4("10.8.0.6")],
+        Tailscale: [ipv4("100.101.102.103")],
+        "Ethernet 2": [ipv4("10.0.0.15")],
+      })[0],
+    ).toBe("10.0.0.15");
+  });
+
+  it("reads localized Windows names: German WLAN, and an unrecognized one still beats a virtual adapter", () => {
+    expect(
+      lanAddresses({
+        "vEthernet (Default Switch)": [ipv4("172.27.208.1")],
+        WLAN: [ipv4("192.168.178.20")],
+      }),
+    ).toEqual(["192.168.178.20", "172.27.208.1"]);
+    expect(
+      lanAddresses({
+        "vEthernet (WSL)": [ipv4("172.19.96.1")],
+        "以太网": [ipv4("192.168.0.9")],
+      }),
+    ).toEqual(["192.168.0.9", "172.19.96.1"]);
+  });
+
+  it("puts a Linux machine's real interface ahead of docker0, bridges, libvirt and the tailnet", () => {
+    expect(
+      lanAddresses({
+        docker0: [ipv4("172.17.0.1")],
+        "br-3f2a1b9c0d4e": [ipv4("172.18.0.1")],
+        virbr0: [ipv4("192.168.122.1")],
+        veth1a2b3c: [ipv4("172.17.0.9")],
+        tailscale0: [ipv4("100.101.1.2")],
+        wlp2s0: [ipv4("192.168.1.20")],
+        enp3s0: [ipv4("192.168.1.21")],
+      }).slice(0, 2),
+    ).toEqual(["192.168.1.20", "192.168.1.21"]);
+  });
 });
 
-// Tailscale hands out 100.64.0.0/10 (RFC 6598 shared address space), which
-// is what makes a tailnet address distinguishable from a LAN one — and
-// worth distinguishing, because it is the address that still works when the
-// phone is on a different network entirely.
 describe("tailscaleAddress", () => {
   it("picks the CGNAT address out of a mixed list", () => {
     expect(tailscaleAddress(["192.168.1.42", "100.102.178.88"])).toBe("100.102.178.88");
@@ -647,16 +685,7 @@ describe("tailscaleAddress", () => {
   });
 });
 
-// RFC 6762 §5.5: a multicast DNS responder answers link-local queries only.
-// A responder that replies to anything able to route to it is an off-link
-// discovery service for whoever asks — it names this computer, its addresses
-// and its owner — and a UDP reflector besides, since the reply goes wherever
-// the source address claims and that claim is free to make.
 describe("isOnLink", () => {
-  // SAFETY: the literal below carries exactly the four fields `isOnLink`
-  // reads — family, address, netmask, internal — for each interface; the
-  // assertion stands in for the rest of NetworkInterfaceInfo (cidr, mac,
-  // scopeid), which nothing on this path touches.
   const interfaces = {
     lo: [{ family: "IPv4", address: "127.0.0.1", netmask: "255.0.0.0", internal: true }],
     en0: [{ family: "IPv4", address: "192.168.1.42", netmask: "255.255.255.0", internal: false }],
@@ -667,7 +696,6 @@ describe("isOnLink", () => {
     expect(isOnLink("192.168.1.7", interfaces)).toBe(true);
     expect(isOnLink("192.168.1.42", interfaces)).toBe(true);
     expect(isOnLink("100.102.178.1", interfaces)).toBe(true);
-    // the test rig, and the desktop app, both speak to this over loopback
     expect(isOnLink("127.0.0.1", interfaces)).toBe(true);
   });
 
@@ -681,7 +709,7 @@ describe("isOnLink", () => {
     expect(isOnLink("", interfaces)).toBe(false);
     expect(isOnLink("not-an-address", interfaces)).toBe(false);
     expect(isOnLink("999.1.1.1", interfaces)).toBe(false);
-    // IPv6 does not reach a udp4 socket except in mapped form, which does
+    // IPv6 reaches a udp4 socket only in mapped form.
     expect(isOnLink("::1", interfaces)).toBe(false);
     expect(isOnLink("::ffff:192.168.1.7", interfaces)).toBe(true);
   });
@@ -693,9 +721,6 @@ describe("clampBytes", () => {
     expect(clampBytes("", 200)).toBe("");
   });
 
-  // The limit DNS-SD enforces is bytes, and `.slice()` counts UTF-16 code
-  // units — so a name in a non-Latin script overran the record rather than
-  // being truncated by it, and discovery failed silently for its owner.
   it("counts bytes, not characters", () => {
     const cjk = "小熊".repeat(60); // 2 chars, 6 bytes, x60
     expect(cjk.length).toBe(120);
@@ -705,12 +730,56 @@ describe("clampBytes", () => {
   });
 
   it("never cuts a character in half", () => {
-    // an emoji is one code point in four bytes: with three bytes left it has
-    // to be dropped whole, not turned into a replacement character
     const clamped = clampBytes("abc\u{1F600}", 6);
     expect(clamped).toBe("abc");
     expect(clamped).not.toContain("�");
     expect(clampBytes("\u{1F600}", 4)).toBe("\u{1F600}");
     expect(clampBytes("\u{1F600}", 3)).toBe("");
+  });
+});
+
+describe("stop while an advertisement is still binding", () => {
+  it("never publishes once stop() has returned", async () => {
+    const socket = new FakeSocket();
+    let bound: (() => void) | undefined;
+    let closed = false;
+    socket.bind = (_port: number, callback?: () => void) => {
+      bound = callback;
+    };
+    socket.close = (callback?: () => void) => {
+      closed = true;
+      callback?.();
+    };
+    const responder = new MdnsResponder({ socketFactory: () => socket });
+    const advertised = responder.advertise(service);
+    await drained();
+    expect(bound).toBeDefined();
+    await responder.stop();
+    bound?.();
+    expect(await advertised).toBe(false);
+    await drained();
+    expect(socket.packets).toHaveLength(0);
+    expect(responder.advertising).toBe(false);
+    expect(closed).toBe(true);
+  });
+
+  it("never publishes when stop() runs during a re-advertisement's goodbye wait", async () => {
+    const first = new FakeSocket();
+    const second = new FakeSocket();
+    const sockets = [first, second];
+    const responder = new MdnsResponder({ socketFactory: () => sockets.shift()! });
+    expect(await responder.advertise(service)).toBe(true);
+    await drained();
+    const held: Array<() => void> = [];
+    first.send = (_packet: Buffer, _port: number, _address: string, callback?: (error: Error | null) => void) => {
+      held.push(() => callback?.(null));
+    };
+    const readvertised = responder.advertise(service);
+    await responder.stop();
+    for (const release of held.splice(0)) release();
+    expect(await readvertised).toBe(false);
+    await drained();
+    expect(second.packets).toHaveLength(0);
+    expect(responder.advertising).toBe(false);
   });
 });

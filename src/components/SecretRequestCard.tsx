@@ -1,52 +1,87 @@
 import { useState, type FormEvent } from "react";
-import { Check, ExternalLink, KeyRound, Loader2, LockKeyhole, RefreshCw, X } from "lucide-react";
+import { ExternalLink, KeyRound, Loader2, LockKeyhole, RefreshCw, X } from "lucide-react";
 
-import { credentialConfigPatch, credentialResumeOutcome } from "../../shared/credential-request";
+import { CUSTOM_SECRET_TARGET, credentialResumeOutcome, credentialSaveRequest, desktopCredentialSlot, isConfigCredentialTarget, isProviderCredentialTarget } from "../../shared/credential-request";
+import { credentialProvider } from "@/lib/analytics-allowlist";
 import { cn } from "@/lib/cn";
-import { api, useStore, type ConfigStatus, type Message } from "@/state/store";
+import { activeLocale, t } from "@/lib/i18n";
+import { keySaved, keySaveFailure, savedKeyResult } from "@/lib/product-events";
+import { api, useStore, type Bot, type ConfigStatus, type Message } from "@/state/store";
+import { ASK_FIELD, askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
+import { EmailConnectForm, type EmailConnectRefusal } from "./EmailCard";
+import { EmailOutgoingRequestForm, EmailRequestSettled } from "./EmailRequestCard";
+import type { EmailConnectRequest, EmailOutgoingFields } from "../../shared/email";
+import { productName } from "@/lib/brand";
+import { VaultChoices } from "./VaultChoices";
+import { desktopStore } from "./keys/key-save";
+
+// Security: the value goes straight to the host's settings, never into the chat.
 
 export function SecretRequestCard({
   botId,
+  botName,
+  color,
   threadId,
   message,
 }: {
   botId: string;
+  botName?: string;
+  color?: Bot["color"];
   threadId: string;
   message: Message;
 }) {
   const { dispatch } = useStore();
   const secret = message.secret!;
-  const remoteClient = window.ogb?.remoteClient?.active === true;
+  const localize = activeLocale() !== "en";
+  const greenference = localize && secret.target === "greenferenceApiKey";
+  const modelgo = localize && secret.target === "modelgoApiKey";
+  const gemini = localize && secret.target === "geminiTtsKey";
+  const label = greenference ? t("keys.greenference.label") : modelgo ? t("keys.modelgo.label") : gemini ? t("keys.label.geminiTts") : secret.label;
+  const placeholder = greenference ? t("keys.greenference.placeholder") : modelgo ? t("keys.modelgo.placeholder") : gemini ? t("voice.gemini.keyPlaceholder") : secret.placeholder;
+  const parts = secret.descriptionParts;
+  const suppliedDescription = localize && parts
+    ? [t(parts.baseCode), parts.reason, t("server.connect.secretNeverRead", { bot: parts.bot })].filter(Boolean).join(" ")
+    : secret.description;
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedLocally, setSavedLocally] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const email = secret.delivery === "email";
   const endpoint = `/api/bots/${encodeURIComponent(botId)}/secret-cards/${encodeURIComponent(message.id)}`;
   const error = localError ?? secret.error;
+  const custom = secret.target === CUSTOM_SECRET_TARGET;
+  // A page reached through a desktop paired to another computer: a key that computer keeps in its own encrypted store can
+  // only be typed there. Anything its server keeps, a custom secret or a provider key, is typed here like on any page.
+  const onlyOnHost = window.ogb?.remoteClient?.active === true && secret.target !== CUSTOM_SECRET_TARGET && desktopCredentialSlot(secret.target) !== null && !isProviderCredentialTarget(secret.target);
   const outcome = credentialResumeOutcome(secret);
   const provided = outcome === "provided";
   const declined = outcome === "dismissed";
   const superseded = secret.superseded === true;
-  const pending = !provided && !declined && !superseded;
+  const stopped = secret.stopped === true;
+  const authorName = message.from?.name ?? botName;
+  const deliveryDescription = custom && !email && authorName ? t(secret.delivery === "file" ? "secretCard.delivery.fileNamed" : "secretCard.delivery.refNamed", { botName: authorName }) : null;
+  const customDescription = activeLocale() !== "en" && deliveryDescription ? [secret.reason, deliveryDescription].filter(Boolean).join(" ") : suppliedDescription;
   const description = superseded
-    ? "This request was replaced by a newer one for the same key. Use the newest card to provide it."
+    ? t("chat.secret.superseded")
     : provided
-    ? secret.resumed
-      ? "Saved securely. Your bot is continuing the task."
-      : "Saved securely. Your bot will continue when its current turn settles."
+    ? stopped
+      ? t("chat.secret.saved")
+      : secret.resumed
+      ? t("chat.secret.savedContinuing")
+      : t("chat.secret.savedWaiting")
     : declined
-      ? "You chose not to provide this credential. OpenMausBot could not resume the bot yet."
-      : secret.description;
-  const footerLabel = declined
-    ? "Continuing without this credential failed"
+      ? t("chat.secret.declined", { app: productName() })
+      : custom && secret.reason ? secret.reason : customDescription;
+  const footerLabel = stopped
+    ? t("chat.secret.stopped")
+    : declined
+    ? t("chat.secret.declinedFailed")
     : secret.resumed
-      ? "Bot resumed without seeing the key"
+      ? custom && (secret.delivery === "file" || email) ? t("secretCard.resumed") : t("chat.secret.resumedWithout")
       : error
-        ? "The key is safe; resuming failed"
-        : "Waiting to resume safely";
+        ? t("chat.secret.resumeFailed")
+        : t("chat.secret.waiting");
 
-  // A successful decline has no durable card to show. If its continuation
-  // failed, bring the card back with the same retry affordance as a saved key.
   if (declined && (secret.resumed || !error)) return null;
 
   const notifyProvided = async () => {
@@ -72,26 +107,73 @@ export function SecretRequestCard({
     }
   };
 
-  const save = async (event?: FormEvent) => {
-    event?.preventDefault();
-    if (saving || (!value.trim() && !savedLocally)) return;
+  // Kept behind the card on the server, never in Settings; saving it resumes the bot, and no product event names it.
+  const saveCustom = async () => {
+    if (saving || !value.trim()) return;
     setSaving(true);
     setLocalError(null);
     try {
-      if (!savedLocally) {
+      await api(`${endpoint}/save`, { method: "POST", body: JSON.stringify({ threadId, value: value.trim() }) });
+      setValue("");
+      returnFocusToComposer();
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveEmail = async ({ password, ...fields }: EmailConnectRequest): Promise<EmailConnectRefusal | null> => {
+    try {
+      await api(`${endpoint}/save`, { method: "POST", body: JSON.stringify({ threadId, value: password, ...fields }) });
+      returnFocusToComposer();
+      return null;
+    } catch (error) {
+      const body = (error as { body?: Partial<EmailConnectRefusal> }).body;
+      return { error: error instanceof Error ? error.message : String(error), ...(body?.needsServer === true ? { needsServer: true } : {}), ...(body?.signIn ? { signIn: body.signIn } : {}) };
+    }
+  };
+
+  const saveOutgoing = async (fields: EmailOutgoingFields): Promise<string | null> => {
+    try {
+      await api(`${endpoint}/save`, { method: "POST", body: JSON.stringify({ threadId, ...fields }) });
+      returnFocusToComposer();
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  };
+
+  const save = async (event?: FormEvent) => {
+    event?.preventDefault();
+    if (custom) return saveCustom();
+    if (saving || (!value.trim() && !savedLocally)) return;
+    setSaving(true);
+    setLocalError(null);
+    const provider = credentialProvider(secret.target);
+    let saved = savedLocally;
+    try {
+      if (!savedLocally && secret.target !== CUSTOM_SECRET_TARGET) {
         const next = value.trim();
-        const status: ConfigStatus = window.ogb?.setCredential
-          ? await window.ogb.setCredential(secret.target, next)
-          : await api("/api/config", {
-              method: "PUT",
-              body: JSON.stringify(credentialConfigPatch(secret.target, next)),
-            });
-        dispatch({ type: "configStatus", config: status });
+        const target = secret.target;
+        // The 1Password token goes to this server's Logins, which checks it with 1Password first, never the settings file.
+        const request = credentialSaveRequest(target, next);
+        const store = desktopStore(desktopCredentialSlot(target));
+        if (isConfigCredentialTarget(target)) {
+          const status: ConfigStatus = store
+            ? await store(next, target === "anthropicApiKey" ? { everyClaudeBot: false } : undefined)
+            : await api(request.path, { method: request.method, body: JSON.stringify(request.body) });
+          dispatch({ type: "configStatus", config: status });
+        } else await api(request.path, { method: request.method, body: JSON.stringify(request.body) });
+        saved = true;
+        keySaved(provider, "chat_request", savedKeyResult(provider));
         setValue("");
         setSavedLocally(true);
       }
       await notifyProvided();
+      returnFocusToComposer();
     } catch (error) {
+      if (!saved) keySaved(provider, "chat_request", keySaveFailure(error));
       setLocalError(error instanceof Error ? error.message : String(error));
     } finally {
       setSaving(false);
@@ -105,114 +187,125 @@ export function SecretRequestCard({
     }).catch(() => {});
   };
 
+  if (superseded) {
+    return (
+      <AskSettledLine icon={<X size={13} />} ariaLabel={label}>
+        <span className="text-ink-secondary" title={description}>{label}</span>
+        <span> · {t("chat.secret.supersededShort")}</span>
+      </AskSettledLine>
+    );
+  }
+
+  if (stopped && !provided) {
+    return (
+      <AskSettledLine icon={<X size={13} />} ariaLabel={label}>
+        <span className="text-ink-secondary" title={customDescription}>{label}</span>
+        <span> · {t("chat.secret.stopped")}</span>
+      </AskSettledLine>
+    );
+  }
+
+  if (provided || declined) {
+    const retry = !secret.resumed && !stopped && error ? (
+      <button type="button" onClick={() => void retryResume()} disabled={saving} className={cn(ASK_QUIET_BUTTON, "text-accent-text")}>
+        {saving ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+        {t("common.tryAgain")}
+      </button>
+    ) : undefined;
+    const line = (
+      <AskSettledLine
+        ariaLabel={label}
+        icon={secret.resumed || stopped
+          ? undefined
+          : declined
+            ? <X size={13} className="text-danger" />
+            : error
+              ? <KeyRound size={13} />
+              : <Loader2 size={13} className="animate-spin" />}
+        action={retry}
+        detail={error && <p role="alert" className="ms-[19px] mt-1 text-[12px] text-danger">{error}</p>}
+      >
+        <span className="text-ink-secondary" title={description}>{provided ? t("chat.secret.labelSaved", { label }) : label}</span>
+        <span className={declined ? "text-danger" : undefined}> · {footerLabel}</span>
+      </AskSettledLine>
+    );
+    if (email && provided && secret.address && !retry) return <EmailRequestSettled address={secret.address} label={label} settled={line} />;
+    return line;
+  }
+
   return (
-    <div className="flex w-full justify-start">
-      <div className="w-full max-w-[520px] overflow-hidden rounded-2xl border border-hairline/50 bg-card shadow-sm">
-        <div className="flex items-start gap-3 p-4">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-control text-ink">
-            <KeyRound size={19} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate text-[14px] font-semibold text-ink">{secret.label}</span>
-              {provided && (
-                <span className="flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success">
-                  <Check size={11} /> Saved
-                </span>
-              )}
-              {superseded && (
-                <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning">
-                  Superseded
-                </span>
-              )}
-            </div>
-            <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-secondary">
-              {description}
-            </p>
-            {pending && (
-              <p className="mt-1 flex items-center gap-1 text-[11.5px] text-ink-tertiary">
-                <LockKeyhole size={11} /> Stored securely by OpenMausBot and never added to chat.
-              </p>
-            )}
-            {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
-          </div>
-          {pending && (
-            <button
-              onClick={dismiss}
-              aria-label="Not now"
-              title="Not now"
-              className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
-            >
-              <X size={15} />
-            </button>
-          )}
+    <AskCard
+      ariaLabel={label}
+      icon={<KeyRound size={15} />}
+      title={label}
+      explanation={description}
+      onDismiss={dismiss}
+      dismissLabel={t("notice.notNow")}
+      stays
+    >
+      {onlyOnHost ? (
+        <div className="text-[13px] leading-relaxed text-ink-secondary">
+          {t("chat.secret.remoteClient")}
         </div>
-        {remoteClient && pending && (
-          <div className="border-t border-hairline/40 bg-panel/40 px-4 py-3 text-[12.5px] leading-relaxed text-ink-secondary">
-            This key must be saved on the host computer. Open this conversation on the host to continue securely.
+      ) : email && secret.emailOutgoing && secret.address ? (
+        <EmailOutgoingRequestForm
+          address={secret.address}
+          initial={secret.emailOutgoing}
+          submit={saveOutgoing}
+          fieldClassName={cn(ASK_FIELD, "w-full")}
+          submitClassName={askPrimary(color).className}
+          submitStyle={askPrimary(color).style}
+        />
+      ) : email ? (
+        <EmailConnectForm
+          initialAddress={secret.address ?? ""}
+          reading={secret.emailReading}
+          submit={saveEmail}
+          fieldClassName={cn(ASK_FIELD, "w-full")}
+          submitClassName={askPrimary(color).className}
+          submitStyle={askPrimary(color).style}
+          footer={<span className="flex items-center gap-1 text-[12px] text-ink-tertiary"><LockKeyhole size={11} /> {t("secretCard.email")}</span>}
+        />
+      ) : (<>
+        {custom && <VaultChoices kind="secret" botId={botId} botName={authorName} threadId={threadId} messageId={message.id} />}
+        <form onSubmit={(event) => void save(event)}>
+          <div className="flex flex-wrap gap-2">
+            <input
+              type="password"
+              autoComplete="new-password"
+              spellCheck={false}
+              dir="ltr"
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              placeholder={placeholder}
+              disabled={saving || savedLocally}
+              aria-label={label}
+              className={cn(ASK_FIELD, "min-w-[10rem] flex-1")}
+            />
+            <button type="submit" disabled={saving || (!value.trim() && !savedLocally)} {...askPrimary(color)}>
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <LockKeyhole size={14} />}
+              {t(savedLocally ? "chat.secret.continue" : "chat.secret.save")}
+            </button>
           </div>
-        )}
-        {!remoteClient && pending && (
-          <form onSubmit={(event) => void save(event)} className="border-t border-hairline/40 bg-panel/40 px-4 py-3">
-            <div className="flex gap-2">
-              <input
-                type="password"
-                autoComplete="new-password"
-                spellCheck={false}
-                value={value}
-                onChange={(event) => setValue(event.target.value)}
-                placeholder={secret.placeholder}
-                disabled={saving || savedLocally}
-                aria-label={secret.label}
-                className="min-w-0 flex-1 rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent disabled:opacity-60"
-              />
-              <button
-                type="submit"
-                disabled={saving || (!value.trim() && !savedLocally)}
-                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-50"
-              >
-                {saving ? <Loader2 size={13} className="animate-spin" /> : <LockKeyhole size={13} />}
-                {savedLocally ? "Continue task" : "Save securely"}
-              </button>
-            </div>
-            <a
-              href={secret.helpUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-2 inline-flex items-center gap-1 text-[11.5px] text-accent hover:underline"
-            >
-              Where to get this key <ExternalLink size={11} />
-            </a>
-          </form>
-        )}
-        {(provided || declined) && (
-          <div className={cn(
-            "flex items-center justify-between border-t border-hairline/40 bg-panel/40 px-4 py-2.5 text-[11.5px]",
-            declined ? "text-danger" : "text-success",
-          )}>
-            <span className="flex items-center gap-1.5">
-              {secret.resumed ? <Check size={12} /> : error ? <KeyRound size={12} /> : <Loader2 size={12} className="animate-spin" />}
-              {footerLabel}
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-tertiary">
+            <span className="flex items-center gap-1">
+              <LockKeyhole size={11} />{" "}
+              {!custom ? t("chat.secret.storedHint", { app: productName() }) : secret.delivery === "file" ? t("secretCard.file") : t("secretCard.ref")}
             </span>
-            {!secret.resumed && error && (
-              <button
-                onClick={() => void retryResume()}
-                disabled={saving}
-                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+            {secret.helpUrl && (
+              <a
+                href={secret.helpUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-accent-text hover:underline"
               >
-                {saving ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Try again
-              </button>
+                {t("chat.secret.whereToGet")} <ExternalLink size={11} />
+              </a>
             )}
           </div>
-        )}
-        {superseded && (
-          <div className="flex items-center border-t border-hairline/40 bg-panel/40 px-4 py-2.5 text-[11.5px] text-ink-secondary">
-            <span className="flex items-center gap-1.5">
-              <X size={12} /> Superseded by a newer request
-            </span>
-          </div>
-        )}
-      </div>
-    </div>
+        </form>
+      </>)}
+      {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
+    </AskCard>
   );
 }

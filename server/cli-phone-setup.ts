@@ -1,5 +1,4 @@
-// Optional phone onboarding only chooses a route. The caller owns starting,
-// verifying and stopping that route, and minting/cancelling its pairing code.
+// Phone onboarding only chooses a route; the caller starts, verifies and stops it, and mints or cancels its pairing code.
 import type { CliOptions } from "./cli.ts";
 import { SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 
@@ -11,12 +10,10 @@ export interface PhoneSetupResult {
 export interface PhoneSetupDependencies {
   /** May read saved tunnel credentials, but must not sign in or start a tunnel. */
   accountReady?(options: CliOptions): boolean | Promise<boolean>;
-  /** The caller supplies account sign-in; email uses ask, the emailed code secret. */
   login(options: CliOptions, io: SetupIo): Promise<number>;
 }
 
-/** A configured HTTPS origin, not proof that a phone can reach it. Never accept
- * a pasted invitation, password, query token, localhost or unspecified bind. */
+/** An HTTPS origin, not proof a phone can reach it; never a pasted invitation, password, query token, localhost or unspecified bind. */
 export function normalizePhoneOrigin(raw: string): string | null {
   const value = raw.trim();
   // Reject control characters before URL parsing can silently remove them.
@@ -53,8 +50,7 @@ export async function runPhoneSetup(
       if (await deps.login(options, io) === 0) return true;
     } catch (error) {
       if (error instanceof SetupCancelled) throw error;
-      // Account errors can contain credentials or URLs. Leave details to the
-      // account UI rather than echoing an arbitrary error into terminal logs.
+      // Account errors can carry credentials or URLs: never echo them into terminal logs.
     }
     io.log("Phone access could not be prepared. Your AI provider setup is still saved; you can try phone setup later.");
     return false;
@@ -115,8 +111,7 @@ export async function runPhoneSetup(
   }
 }
 
-/** Call after route verification, beside the separately minted QR. The URL
- * here is an origin, never the invitation containing its one-time credential. */
+/** The URL is an origin, never the invitation carrying its one-time credential. */
 export function phonePairingInstructions(
   phone: PhoneKind,
   input: { origin: string | null; ready: boolean },

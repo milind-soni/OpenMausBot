@@ -12,6 +12,8 @@ it("sends history once through the real OpenAI-compatible server route after a r
       res.end(JSON.stringify({ data: [{ id: "fixture-model" }] }));
       return;
     }
+    // The chat engine asks a local server whether it is Ollama (/api/version); this one is not.
+    if (req.method === "GET") { res.statusCode = 404; res.end(); return; }
     let body = "";
     for await (const chunk of req) body += chunk;
     requests.push(JSON.parse(body));

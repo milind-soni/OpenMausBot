@@ -184,15 +184,12 @@ describe("team manifests", () => {
             key: "mole",
             name: "Mole",
             appearance: { color: "red" },
-            // a persona file must never carry identity or authority — every
-            // one of these has to vanish in the parse, not downstream
             id: "bot-1",
             threadId: "thread-1",
             approvalMode: "full",
             autoApprove: true,
             alwaysAllow: ["Bash"],
             chiefOfStaff: true,
-            approvePeerComms: false,
             composio: true,
             computer: "local",
             cloudBackend: "vps",
@@ -203,7 +200,6 @@ describe("team manifests", () => {
         ],
       },
     });
-    // toEqual, not toMatchObject: nothing beyond the persona survives
     expect(manifest.team.members[0]).toEqual({
       key: "mole",
       name: "Mole",
@@ -222,8 +218,6 @@ describe("team manifests", () => {
       appearance: { color: "purple" as const, mascotExpression: "focused" },
     };
     const taken = new Set(["mira"]);
-    // toEqual: the profile is exactly the persona — no privileged field can
-    // ride along even if a future member type grows one
     expect(importedMemberProfile(member, taken)).toEqual({
       name: "Mira 2",
       title: "Lead",
@@ -231,12 +225,8 @@ describe("team manifests", () => {
       color: "purple",
       mascotExpression: "focused",
     });
-    // the claimed name counts as taken now, case-insensitively, so the next
-    // member of the same batch numbers forward instead of colliding
     expect(importedMemberProfile({ ...member, name: "MIRA" }, taken).name).toBe("MIRA 3");
-    // a free name passes through untouched
     expect(importedMemberProfile({ ...member, name: "Scout" }, taken).name).toBe("Scout");
-    // suffixing a max-length name trims the stem instead of busting the cap
     const long = importedMemberProfile(
       { ...member, name: "N".repeat(100) },
       new Set(["n".repeat(100)]),

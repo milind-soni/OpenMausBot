@@ -1,12 +1,12 @@
-> ⚠️ **No affiliation with any cryptocurrency.** OpenMausBot has no token. Any coin using the OpenMausBot, Maus, or SupaMaus name is not created, endorsed, or affiliated with this project or its maintainer. I have received no tokens, payment, or allocation from anyone, and I will not be endorsing any token.
-
 <div align="center">
 
 # OpenMausBot
 
-**Your own team of AI bots, in a chat app.**
+**The open-source Grok Bot alternative: your own team of AI bots, in a chat app.**
 
-<sub>An independent, open-source project inspired by **Grok Bot** — bring-your-own-agent, local-first, on the models you already have. Not affiliated with xAI.</sub>
+[**openmausbot.com**](https://www.openmausbot.com) &nbsp;·&nbsp; [Download](https://www.openmausbot.com/download) &nbsp;·&nbsp; [Open source Grok Bot alternative, compared](https://www.openmausbot.com/blog/grok-bot-vs-openmausbot)
+
+<sub>OpenMausBot is an open-source Grok Bot alternative: an independent project inspired by **Grok Bot**, and the open-source alternative to **Meta Muse**, **OpenAI dots** and **Cue by Manus** — bring-your-own-agent, local-first, on the models you already have. Also known as **MausBot**; formerly **OpenGrokBot**. Not affiliated with xAI, Meta, OpenAI or Manus.</sub>
 
 Every bot in the sidebar is a real agent — Claude or Codex running locally under the hood — with its own
 personality, its own model, its own cloud computer, and its own connected apps.
@@ -48,11 +48,37 @@ Talk to them like contacts. Watch them work. Approve what matters.
 <br>
 <br>
 
+<sub>Powered by <a href="https://boat.dev">boat.dev</a></sub>
+<br>
+<a href="https://boat.dev">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/sponsors/boat-logo-white.svg">
+    <img src="docs/assets/sponsors/boat-logo.svg" alt="Boat (boat.dev)" height="34">
+  </picture>
+</a>
+
+<br>
+<br>
+
+<sub>Inference provider sponsor</sub>
+<br>
+<a href="https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=readme&campaign_id=openmausbot&ad_group_id=readme">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/sponsors/modelgo-logo-white.svg">
+    <img src="docs/assets/sponsors/modelgo-logo.svg" alt="ModelGo (modelgo.ai)" height="22">
+  </picture>
+</a>
+
+<br>
+<br>
+
 <img src="docs/screenshots/hero.png" alt="OpenMausBot — a Telegram-style chat app where every chat is a real AI agent" width="900">
 
 </div>
 
 ---
+
+> ⚠️ **No affiliation with any cryptocurrency.** OpenMausBot has no token. Any coin using the OpenMausBot, Maus, or SupaMaus name is not created, endorsed, or affiliated with this project or its maintainer. I have received no tokens, payment, or allocation from anyone, and I will not be endorsing any token.
 
 ## Why
 
@@ -70,6 +96,25 @@ already have:
   safety boundary is currently certified—your own computer, plus 500+ apps through Composio. Host control is
   available on macOS and Ubuntu Xorg after explicit opt-in. Ubuntu Wayland host control remains disabled while
   issue #345 is resolved.
+
+## The open-source alternative to Grok Bot, Muse, dots and Cue
+
+Four closed personal-agent products shipped in seven weeks of 2026, and each one keeps the model, the
+computer and your data on its maker's side of the line. OpenMausBot is the open-source version of that
+shape: a team of agents in a chat app, each with its own model, its own computer and its own connected
+apps, running on your machine under Apache 2.0. If you searched for an *open Muse*, *open dots*, an
+*open-source Grok Bot*, an *open Instinct* or an *open Cue*, this is the repository.
+
+| Looking for | What it is | How OpenMausBot differs | Read more |
+| --- | --- | --- | --- |
+| **Open source Grok Bot** | xAI's roster of bots on one shared cloud computer, Grok only, from a SuperGrok or Cursor plan | Same roster shape; any model per bot; your own machine; approval cards | [Grok Bot vs OpenMausBot](https://www.openmausbot.com/blog/grok-bot-vs-openmausbot) |
+| **Open Muse** | Meta's single personal agent in a Meta cloud VM, US and Canada only | A team instead of one agent; runs anywhere; data in `~/.openmausbot` | [Meta Muse alternative](https://www.openmausbot.com/blog/open-source-alternative-to-meta-muse) |
+| **Open dots** | OpenAI's always-on agent inside ChatGPT, GPT only, Pro and Business Premium plans | Several agents; your Claude, ChatGPT or Grok login; no plan required | [OpenAI dots alternative](https://www.openmausbot.com/blog/openai-dots-alternative) |
+| **Open Cue** | Manus's invite-only agents with their own phone, email and wallet | No invite; OAuth instead of passwords; open source | [Cue by Manus alternative](https://www.openmausbot.com/blog/open-source-alternative-to-cue-by-manus) |
+| **Open Instinct** | Spear Street's invite-only agent that holds your passwords on a cloud computer | Ask for approval when you want it; signs in over OAuth; your machine | [Instinct AI alternative](https://www.openmausbot.com/blog/instinct-ai-alternative) |
+
+All five side by side: [Muse vs Grok Bot vs Dots vs Cue](https://www.openmausbot.com/blog/muse-vs-grok-bot-vs-dots-vs-cue),
+and a decision guide in five questions: [Which AI agent should I use?](https://www.openmausbot.com/blog/which-ai-agent-should-i-use)
 
 ## Features
 
@@ -150,8 +195,8 @@ channel and its bots under a named context, then rename it or change its members
 
 ### ⚡ Fast decisions with Jev
 
-Add a TypeSafe Jev key in **Settings → Decision model** and rooms set to **Auto** pick the bot that fits each
-un-mentioned message in a few hundred milliseconds, falling back to the room's lead whenever Jev is off or unsure.
+Add a Cloudflare Workers AI token with its account ID, a TypeSafe Jev key, or an OpenRouter key and model, in **Settings › AI › Routing and extraction** and rooms set to **Auto** pick the bot
+that fits each un-mentioned message in a few hundred milliseconds, falling back to the room's lead whenever the decision model is off or unsure.
 See [docs/decision-model.md](docs/decision-model.md).
 
 ### 📦 Install a complete team from one Markdown file
@@ -168,9 +213,9 @@ conversations, permissions, memory, or computer access. Browse the
 [open-source playbook repository](https://github.com/milind-soni/openmausbot-teams) or read its
 [portable format](https://github.com/milind-soni/openmausbot-teams/blob/main/FORMAT.md).
 
-### 🤝 Share a whole team
+### 🤝 Share a whole department
 
-Right-click a team and choose **Share team…** (or use **Templates → Share**) to save the whole team as one
+Right-click a department and choose **Share department…** (or use **Templates → Share**) to save the whole department as one
 file: its bots with their instructions, pictures and skills, group chats, routines, shared instructions,
 Chief of Staff, connection slots and each bot's starter notes (untick them to leave them out). The dialog
 shows exactly what the file holds before you save it. Chat history, keys and passwords, model choices and
@@ -197,8 +242,8 @@ audio for spoken replies and calls. Language is detected automatically from the 
 quality varies outside xAI’s [officially supported languages](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech).
 This adds speech synthesis to the existing call flow; microphone transcription remains unchanged.
 
-**Also in the box:** streaming replies with tool-run activity chips · native macOS dictation from the
-composer mic (on-device Apple speech recognition — desktop app) · SupaMaus cursor mascots with role-aware
+**Also in the box:** streaming replies with tool-run activity chips · dictation from the
+composer mic (on-device Apple speech recognition on macOS, Fish Audio speech-to-text on Windows and Linux, in the desktop app) · SupaMaus cursor mascots with role-aware
 expressions · screenshots of the bot's work folded into the transcript.
 
 ## Powered By
@@ -213,6 +258,7 @@ expressions · screenshots of the bot's work folded into the transcript.
 ![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-0F172A?logo=tailwindcss&logoColor=38BDF8)
 ![Composio](https://img.shields.io/badge/Composio-e6493a)
+![Boat](https://img.shields.io/badge/Boat-sponsor-111111)
 ![Cua](https://img.shields.io/badge/Cua%20Driver-1f2937)
 ![ElevenLabs](https://img.shields.io/badge/ElevenLabs-000000?logo=elevenlabs&logoColor=white)
 ![Fish Audio](https://img.shields.io/badge/Fish%20Audio-2563eb)
@@ -225,7 +271,8 @@ expressions · screenshots of the bot's work folded into the transcript.
 | **Claude · Codex · Grok** | The agents behind every bot, run through their local CLIs |
 | **Electron** | Desktop shells for macOS, Windows, and Ubuntu |
 | **React + Vite + Tailwind CSS** | The chat app UI and its build |
-| **Boat** ([boat.dev](https://boat.dev)) | Each bot's cloud computer |
+| **Boat** ([boat.dev](https://boat.dev)) | Each bot's cloud computer · our sponsor |
+| **ModelGo** ([modelgo.ai](https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=readme&campaign_id=openmausbot&ad_group_id=readme)) | One API key for every model · our inference provider sponsor |
 | **Composio** | Connected apps — Gmail, Slack, GitHub, and more |
 | **Cua Driver** | Native computer use on your own machine |
 | **ElevenLabs · Fish Audio** | Hosted voices for bots that talk back |
@@ -277,6 +324,20 @@ It does **not** expose approval grants, deletion, arbitrary settings, credential
 
 See [MCP server setup and tool reference](docs/mcp-server.md).
 
+### Run it from scripts and CI
+
+The `openmausbot` command drives a running workspace without a screen: set a
+team up from a file, give a bot one job, wait until it and every teammate it
+asked are done, and export what they made. One JSON document with `--json`,
+and exit codes a script can branch on.
+
+```sh
+openmausbot team apply team.yaml
+openmausbot run "Room Lead" "Rehearse the launch of https://example.com" --export ./out
+```
+
+See [Run OpenMausBot from scripts and CI](docs/headless-cli.md).
+
 ## Quick start
 
 **Released builds ([latest release](https://github.com/milind-soni/OpenMausBot/releases/latest)):** the harness server is embedded, so no separate server setup is required.
@@ -317,16 +378,21 @@ pnpm package:linux    # Ubuntu x64: .deb + AppImage + verified CUA runtime
 
 ### Desktop capability status
 
-| Capability | macOS | Ubuntu 24.04 Xorg | Ubuntu 24.04 Wayland |
-|---|---|---|---|
-| Packaged app, embedded harness, local agent CLIs | Supported | Beta | Beta |
-| Composio and Boat/cloud computers | Supported | Beta | Beta |
-| Explicit preview-only local screen capture | Supported | Beta | Beta |
-| Bot control of this computer | Supported | Beta, explicit opt-in | Disabled: Wayland safety gate |
-| Native on-device dictation | Supported | Planned | Planned |
+| Capability | macOS | Windows x64 | Ubuntu 24.04 Xorg | Ubuntu 24.04 Wayland |
+|---|---|---|---|---|
+| Packaged app, embedded harness, local agent CLIs | Supported | Supported | Beta | Beta |
+| Composio and Boat/cloud computers | Supported | Supported | Beta | Beta |
+| Explicit preview-only local screen capture | Supported | Unavailable | Beta | Beta |
+| Bot control of this computer | Supported | Supported | Beta, explicit opt-in | Disabled: Wayland safety gate (Omarchy with Cua's Hyprland plugin: experimental) |
+| Native on-device dictation | Supported | Unavailable | Planned | Planned |
+| Dictation and Take turns calls through Fish Audio (needs a Fish Audio key) | Not used, on-device instead | Supported | Supported | Supported |
+
+On Windows, choose **This computer** to let a bot control the local desktop. The packaged app includes its own
+CUA driver and SDK; a separate Cua installation is not required. Local bot control is available even though the
+preview-only screen capture above is unavailable. See [Computer use & browser use](docs/computer-use-integration.md).
 
 The Linux preview is user-initiated and never enables local bot control or Auto routing. On Xorg, the reviewed Cua
-Driver 0.19.3 runtime starts only after explicit opt-in and without its full-screen cursor overlay. On Wayland the
+Driver 0.41.3 runtime starts only after explicit opt-in and without its full-screen cursor overlay. On Wayland the
 app never starts it and clears legacy opt-ins while that real-seat safety gate remains unresolved. Chat, preview,
 Cloud, and Local VM remain available on both sessions. See the [Ubuntu Desktop guide](docs/linux-desktop.md) and tracking
 issues [#29](https://github.com/milind-soni/OpenMausBot/issues/29),
@@ -361,15 +427,31 @@ pnpm package:win   # Windows installer + zip → release/
 pnpm package:linux # Ubuntu x64 .deb + AppImage → release/
 ```
 
-### Routines and webhook triggers
+### Triggers: schedules and webhooks
 
-Routines can run once, on selected weekdays, or every 5–1,440 minutes, using either a MAUS's configured
+A trigger is "when something happens, a bot does something". Tell a bot "every weekday at 9, send me a summary
+of my inbox" or "whenever our form calls, draft a reply" and it sets the trigger up in that turn with
+its `trigger` tool (no confirmation; the chat shows a live card with Edit, Pause and Undo). **Triggers**, first in
+the sidebar, lists every schedule and webhook, with a calendar and the run history. Bots manage them with
+`trigger_info` (list, app events), `trigger` (create, update, pause, resume, run now) and `delete_trigger`; a webhook a bot makes never shows the bot its secret:
+the person copies the link from the card or the Triggers page.
+
+Schedules (routines) can run once, on selected weekdays, or every 5–1,440 minutes, using either a bot's configured
 model/computer or the Cloud VM runner. Interval schedules stay aligned to their chosen start time and skip
 an occurrence when the previous run is still active, so slow work cannot build an unbounded queue. A
 separate optional Advanced run limit can safely stop stuck work; no timeout is imposed unless one is chosen.
 The existing duration field remains calendar/display metadata. Webhook triggers are independent from schedules
 but reuse the same queued task executor and calendar
 receipts.
+
+**App events** start a bot when something happens in a connected app ("whenever I get an email from Acme, draft
+a reply"). The bot finds the app's events with `trigger_info` (`action: "events"`) and calls `trigger` with
+`action: "create"` and `when: "app_event"`; the person can also choose **New → Set it up yourself → When something happens in an app**.
+Composio sends each event to OpenMausBot's connected-apps service, which queues it; the app collects the queue
+with a long poll, so a desktop needs no public address and events wait while it is closed. Gmail is checked every
+15 minutes; Slack, GitHub and other push apps arrive at once. A desktop keeps up to 500 events a day and a paid
+Cloud 2,000; what is skipped shows on the automation. App events need the included connected apps: a server
+using its own Composio key cannot watch apps yet. Details: [docs/composio.md](docs/composio.md#app-events).
 
 OpenMausBot starts a webhook-only receiver on `127.0.0.1:8800` by default (or one port above `OMB_PORT`).
 Set `OMB_WEBHOOK_PORT` to choose another port. A webhook secret is shown once when the trigger is created
@@ -385,14 +467,22 @@ Early but real — the loop works end to end: message → agent → streamed rep
 computer use. macOS, Windows, and Ubuntu 24.04 x64 have released builds; Ubuntu remains a beta with the
 capability limits above. Rough edges to expect: hosted/mobile connectivity is still being built, and webhook
 triggers currently use the local receiver rather than an always-on hosted relay.
-Hosted voice needs an ElevenLabs, Fish Audio, or xAI key; built-in Mac and local Chatterbox voices need no cloud key. Calls are macOS-only for now (they ride the same on-device dictation as
-the composer mic) — see [`docs/voice-mode.md`](docs/voice-mode.md) for the design and the known gaps.
+Hosted voice needs an ElevenLabs, Fish Audio, or xAI key; built-in Mac and local Chatterbox voices need no cloud key. Take-turns calls and the composer mic listen on-device on macOS and through Fish Audio speech-to-text on Windows and Linux (the same Fish Audio key as voices). See [`docs/voice-mode.md`](docs/voice-mode.md) for the design and the known gaps.
 
 Contributions welcome — the driver SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately
 small; adding a provider is one file in [`server/drivers/`](server/drivers/) plus a one-line registration.
 No code needed at all for your own engines: any ACP-speaking CLI or OpenAI-compatible endpoint
 plugs in through config — see [`docs/custom-engines.md`](docs/custom-engines.md).
 Users can add their own MCP tool servers with zero code via [`docs/custom-mcp-servers.md`](docs/custom-mcp-servers.md).
+For configuration switches, defaults and model-call implications, see [Feature switches](docs/feature-flags.md).
+To run bots on OpenRouter, Fireworks AI, DeepSeek, Cline or your own OpenAI- or Anthropic-compatible provider,
+see [Other model providers](apps/docs/content/docs/providers/model-providers.mdx).
+
+## Privacy
+
+Usage analytics are optional and anonymous: product events and a once-a-day count of what is set up, never keys,
+names, addresses or conversations. Turn them off in Settings → General → Usage analytics;
+[`docs/analytics.md`](docs/analytics.md) lists every event and property.
 
 ## Support the project
 
@@ -425,20 +515,31 @@ cannot use a localhost link. `--local` ignores saved remote access for one launc
 `--no-pair` suppresses phone prompts and invitations but does not disable a saved
 remote connection.
 
+The web UI can also be installed from Safari or Chrome as a standalone phone
+app. See [Install the phone web app](docs/phone-web-app.md) for Home Screen
+installation and pairing.
+
 Run `openmausbot setup` to reconfigure without resetting bots or conversations;
 the saved model default applies only to new bots. Native setup confirms provider
-sign-in; API setup asks before a potentially billable test message. API keys are
-saved as plaintext, not encrypted, in private `config.json` (`0600` on Unix).
+sign-in; API setup asks before a potentially billable test message. API keys
+from `openmausbot setup` and the server are saved as plaintext, not encrypted,
+in private `config.json` (`0600` on Unix). The packaged desktop app keeps your
+AI provider and service keys encrypted through the operating system instead;
+its `config.json` still holds OpenCode provider keys, keys given to one engine,
+and MCP header values in plaintext (a key a bot set from a secret card is kept
+in the Vault, and `config.json` holds only a pointer to it).
 See the [short setup guide](docs/cli-onboarding.md) for account differences,
 phone choices, credential storage, and cancellation.
 
-For a background service on a VPS or an always-on computer, use
-`npx openmausbot serve` with explicit remote options: `--tunnel` after
-`npx openmausbot login` for a managed public address, `--tailscale` for your
-tailnet, or the Docker stack for your own domain. These are separate from
-AI-provider sign-in. Devices pair once with a short code. The deployment guide is
-[docs/deploy-vps.md](docs/deploy-vps.md); the reference is
-[docs/self-hosting.md](docs/self-hosting.md).
+For a server on a VPS or an always-on computer, run `npx openmausbot serve`
+with one way in: `--public-url` behind your own cloudflared, Caddy or nginx,
+`--domain` for a certificate on your own domain, `--tailscale` for your
+tailnet, `--lan` for this network only, or `--tunnel` (after
+`npx openmausbot login`) for a free MausBot web address. It prints one
+pairing link; paste it into the desktop app under **＋ → Connect to a
+server**. The short path for each install method (npx, Docker, a service) is
+at the top of [docs/self-hosting.md](docs/self-hosting.md); a server from
+scratch is [docs/deploy-vps.md](docs/deploy-vps.md).
 
 ## License
 

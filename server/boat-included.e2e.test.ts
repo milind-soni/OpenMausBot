@@ -1,10 +1,4 @@
-// The full server with Cloud Pro's included Boat computers, over its real
-// HTTP boundary, against one stub that plays Boat (/boat) and the Admin's
-// relay (/relay). Settings' Boat key rules hold across the two accounts:
-// an own key cannot be added while this installation still has computers on
-// the included account (the new account cannot reach them), and once they
-// are gone the own key wins and clearing it falls back to the included one.
-// Neither key is ever sent to the other side. Disposable home; no network.
+// One stub plays Boat (/boat) and the Admin's relay (/relay), so neither key is ever sent to the other side. Disposable home; no network.
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
@@ -53,13 +47,16 @@ beforeAll(async () => {
       };
       const expected = side === "relay" ? `Bearer ${INCLUDED}` : side === "boat" ? `Bearer ${OWN}` : "";
       if (!side || req.headers.authorization !== expected) return send(401, { ok: false, code: "unauthorized", message: "Unauthorized" });
-      const path = url.pathname.replace(/^\/(boat|relay)\/api\/box\/v1/, "");
+      // Boat speaks its public API v1; the Admin relay still speaks the old box dialect.
+      const legacy = side === "relay";
+      const path = url.pathname.replace(legacy ? /^\/relay\/api\/box\/v1/ : /^\/boat\/api\/v1/, "");
+      const [root, one, many] = legacy ? ["/boxes", "box", "boxes"] : ["/sandboxes", "sandbox", "sandboxes"];
       const rows = accounts[side]!;
-      if (path === "/boxes" && req.method === "GET") return send(200, { ok: true, boxes: rows, pageInfo: { nextCursor: null } });
-      const box = /^\/boxes\/([^/]+)$/.exec(path);
+      if (path === root && req.method === "GET") return send(200, { ok: true, [many]: rows, pageInfo: { nextCursor: null } });
+      const box = new RegExp(`^${root}/([^/]+)$`).exec(path);
       if (box && req.method === "GET") {
         const row = rows.find((candidate) => candidate.id === box[1]);
-        return row ? send(200, { ok: true, box: row }) : send(404, { ok: false, code: "not_found", message: "Not found" });
+        return row ? send(200, { ok: true, [one]: row }) : send(404, { ok: false, code: "not_found", message: "Not found" });
       }
       send(404, { ok: false, code: "not_found", message: "Not found" });
     });
@@ -89,7 +86,7 @@ beforeAll(async () => {
       ...(process.env.PATHEXT ? { PATHEXT: process.env.PATHEXT } : {}),
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       HOME: home, USERPROFILE: home, OMB_DATA_DIR: dataDir, OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1),
-      OMB_BOX_API: `${stubBase}/boat/api/box/v1`,
+      OMB_BOAT_API: `${stubBase}/boat/api/v1`,
       OMB_CLOUD_BOAT_URL: `${stubBase}/relay/api/box/v1`,
       OMB_CLOUD_BOAT_TOKEN: INCLUDED,
     },
@@ -100,7 +97,7 @@ beforeAll(async () => {
   const deadline = Date.now() + 20_000;
   for (;;) {
     if (child.exitCode !== null) throw new Error(`the server exited:\n${log}`);
-    try { if ((await api("GET", "/api/health")).body?.pid === child.pid) break; } catch { /* starting */ }
+    try { if ((await api("GET", "/api/health")).body?.pid === child.pid) break; } catch {}
     if (Date.now() > deadline) throw new Error(`the server did not start:\n${log}`);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -131,7 +128,7 @@ it("once they are gone, the own key wins; clearing it falls back to the included
   writeFileSync(journal, JSON.stringify({ version: 1, requests: [] }));
   const added = await api("PUT", "/api/config", { box: { token: OWN } });
   expect(added.status, JSON.stringify(added.body)).toBe(200);
-  expect(added.body.box).toEqual({ configured: true });
+  expect(added.body.box).toEqual({ configured: true, last4: OWN.slice(-4) });
   const cleared = await api("PUT", "/api/config", { box: { token: "" } });
   expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
   expect(cleared.body.box).toEqual({ configured: true, included: true });

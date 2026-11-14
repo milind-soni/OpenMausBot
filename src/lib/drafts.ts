@@ -1,25 +1,19 @@
-// Unsent composer input, kept per task. Switching tasks unmounts the Composer
-// and its local state. Drafts live in localStorage, so coming back to a task — in this
-// session or after a restart — finds what you were typing still there.
 import { useCallback, useEffect, useState, useSyncExternalStore, type SetStateAction } from "react";
+import type { FollowUp } from "../../shared/follow-up.js";
 import { isAttachment, type Attachment } from "./composer-attachments.js";
 
 const KEY = "omb-drafts";
 const ATTACHMENTS_KEY = "omb-draft-attachments";
 const SEND_IDS_KEY = "omb-draft-send-ids";
 const CHANNEL_MODES_KEY = "omb-draft-channel-modes";
-// A task can be unmounted and mounted again while its POST is still in
-// flight. Keep the edit generation outside React so a late failure from the
-// old component cannot overwrite a newer draft created by the new one.
+// Outside React, so a late failure from an unmounted composer cannot overwrite a newer draft.
 const draftRevisions = new Map<string, number>();
-// Reply targets already live in each transcript. Keep only their id in memory
-// so task navigation and a rejected send can resolve the original message
-// without duplicating message contents in storage.
 const replyDrafts = new Map<string, string>();
 type ChannelMode = "chat" | "goal";
 type DraftRestore = { text: string; attachments: Attachment[]; channelMode?: ChannelMode };
 type DraftRestoreListener = (draft: DraftRestore) => void;
 const restoreListeners = new Map<string, Set<DraftRestoreListener>>();
+const channelModeListeners = new Map<string, Set<() => void>>();
 const attachmentPendingCounts = new Map<string, number>();
 const attachmentPendingListeners = new Map<string, Set<() => void>>();
 export interface FailedComposerSend {
@@ -29,8 +23,10 @@ export interface FailedComposerSend {
   requestText: string;
   replyToId?: string;
   threadId: string;
-  /** Channel delivery mode; absent for 1:1 messages and legacy retries. */
   channelMode?: "chat" | "goal";
+  /** Bot ids picked from the @ list. */
+  mentions?: string[];
+  followUp?: FollowUp;
 }
 type FailedComposerSendInput = Omit<FailedComposerSend, "id">;
 export interface ComposerSendSnapshot extends FailedComposerSendInput {
@@ -40,16 +36,14 @@ export interface ComposerSendSnapshot extends FailedComposerSendInput {
 }
 const failedSends = new Map<string, FailedComposerSend[]>();
 const failedSendListeners = new Map<string, Set<(sends: FailedComposerSend[]) => void>>();
-const restoredSendIds = new Map<string, string>();
+type RestoredSend = { sendId: string; requestText?: string };
+const restoredSends = new Map<string, RestoredSend>();
 let failedSendSequence = 0;
 
 type Values = Record<string, unknown>;
 type Store = Pick<Storage, "getItem" | "setItem"> | undefined;
 
-// localStorage is normally authoritative, but it can be unavailable or reject
-// writes (private browsing, a full quota, hardened environments). Keep the
-// same per-store snapshot in memory so an upload completing outside React can
-// merge with the live draft instead of replacing it with an empty fallback.
+// localStorage can be unavailable or reject writes (private browsing, a full quota); memory answers every read.
 const fallbackTextDrafts = new Map<string, string>();
 const fallbackAttachmentDrafts = new Map<string, Attachment[]>();
 const textDraftsByStore = new WeakMap<object, Map<string, string>>();
@@ -71,8 +65,6 @@ function memoryFor<T>(
   return created;
 }
 
-// Storage is best-effort: a full quota, a locked-down origin, or a garbled
-// value must never cost a keystroke — every failure reads as "no drafts".
 function read(store: Store, key: string): Values {
   try {
     const raw = store?.getItem(key);
@@ -94,22 +86,45 @@ export function getDraft(store: Store, id: string): string {
 
 export function setDraft(store: Store, id: string, text: string): void {
   memoryFor(store, textDraftsByStore, fallbackTextDrafts).set(id, text);
-  const drafts = read(store, KEY);
-  // an emptied composer drops its entry rather than storing "" forever
-  if (text) drafts[id] = text;
-  else delete drafts[id];
-  try {
-    store?.setItem(KEY, JSON.stringify(drafts));
-  } catch {
-    /* quota / private mode — the draft just doesn't outlive the mount */
+  if (store) saveDraftLater(store, id);
+}
+
+const SAVE_DELAY_MS = 500;
+const unsavedDrafts = new Map<NonNullable<Store>, Set<string>>();
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+const page = (globalThis as { window?: Partial<EventTarget> }).window;
+page?.addEventListener?.("blur", saveDrafts);
+page?.addEventListener?.("pagehide", saveDrafts);
+
+function saveDraftLater(store: NonNullable<Store>, id: string): void {
+  const ids = unsavedDrafts.get(store) ?? new Set<string>();
+  ids.add(id);
+  unsavedDrafts.set(store, ids);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveDrafts, SAVE_DELAY_MS);
+}
+
+function saveDrafts(): void {
+  clearTimeout(saveTimer);
+  for (const [store, ids] of unsavedDrafts) {
+    const memory = memoryFor(store, textDraftsByStore, fallbackTextDrafts);
+    const drafts = read(store, KEY);
+    for (const id of ids) {
+      const text = memory.get(id);
+      if (text) drafts[id] = text;
+      else delete drafts[id];
+    }
+    try {
+      store.setItem(KEY, JSON.stringify(drafts));
+      unsavedDrafts.delete(store);
+    } catch {
+    }
   }
 }
 
 export function getDraftChannelMode(store: Store, id: string): ChannelMode {
   const memory = memoryFor(store, channelModesByStore, fallbackChannelModes);
   if (memory.has(id)) return memory.get(id)!;
-  // Existing drafts predate delivery-mode persistence and remain ordinary
-  // chat; a literal /goal is still interpreted by the composer as before.
   const mode = read(store, CHANNEL_MODES_KEY)[id] === "goal" ? "goal" : "chat";
   memory.set(id, mode);
   return mode;
@@ -123,7 +138,6 @@ export function setDraftChannelMode(store: Store, id: string, mode: ChannelMode)
   try {
     store?.setItem(CHANNEL_MODES_KEY, JSON.stringify(modes));
   } catch {
-    /* best-effort persistence; navigation still uses the in-memory mode */
   }
 }
 
@@ -139,9 +153,7 @@ export function getDraftAttachments(store: Store, id: string): Attachment[] {
 export function setDraftAttachments(store: Store, id: string, attachments: Attachment[]): void {
   memoryFor(store, attachmentDraftsByStore, fallbackAttachmentDrafts).set(id, [...attachments]);
   const drafts = read(store, ATTACHMENTS_KEY);
-  // Blob URLs exist only for this document, and an in-flight image has no
-  // durable path yet. Keep both in memory for task switching, but persist
-  // only upload-complete attachment metadata across an app restart.
+  // Blob URLs exist only for this document: persist only upload-complete attachments.
   const durable = attachments.flatMap((attachment): Attachment[] => {
     if (attachment.kind !== "image") return [attachment];
     if (!attachment.path || attachment.uploading) return [];
@@ -159,7 +171,6 @@ export function setDraftAttachments(store: Store, id: string, attachments: Attac
   try {
     store?.setItem(ATTACHMENTS_KEY, JSON.stringify(drafts));
   } catch {
-    /* quota / private mode — attachments remain in component state */
   }
 }
 
@@ -190,7 +201,6 @@ function resolveReplyMessage<T extends { id: string }>(threadId: string, message
   return replyId ? (messages.find((message) => message.id === replyId) ?? null) : null;
 }
 
-/** Keeps a reply target with its task across navigation and failed sends. */
 export function useReplyDraft<T extends { id: string }>(
   threadId: string,
   draftId: string,
@@ -200,8 +210,6 @@ export function useReplyDraft<T extends { id: string }>(
     threadId,
     message: resolveReplyMessage(threadId, messages),
   }));
-  // Resolve a switched task synchronously so the previous task's target never
-  // flashes while the effect below synchronizes the hook state.
   const replyTo =
     replyState.threadId === threadId
       ? replyState.message
@@ -232,8 +240,7 @@ export function useReplyDraft<T extends { id: string }>(
   const restoreReply = useCallback((message: T, targetThreadId: string) => {
     const currentId = replyDraft(targetThreadId);
     if (currentId && currentId !== message.id) return;
-    // Persist before touching React state: this callback can belong to a task
-    // view that unmounted while its request was still in flight.
+    // Persist before touching React state: this view may have unmounted mid-request.
     rememberReplyDraft(targetThreadId, message.id);
     if (threadId === targetThreadId) {
       setReplyState((current) =>
@@ -252,32 +259,41 @@ export function draftRevision(draftId: string): number {
 }
 
 export function markDraftEdited(draftId: string): void {
-  restoredSendIds.delete(draftId);
+  restoredSends.delete(draftId);
   setStoredSendId(getStore(), draftId, undefined);
   draftRevisions.set(draftId, draftRevision(draftId) + 1);
 }
 
 export function restoredSendId(draftId: string): string | undefined {
-  const memory = restoredSendIds.get(draftId);
-  if (memory) return memory;
-  const stored = read(getStore(), SEND_IDS_KEY)[draftId];
-  if (typeof stored !== "string") return undefined;
-  restoredSendIds.set(draftId, stored);
-  return stored;
+  return restoredSend(draftId)?.sendId;
 }
 
-function setStoredSendId(store: Store, draftId: string, sendId: string | undefined): void {
+export function restoredRequestText(draftId: string): string | undefined {
+  return restoredSend(draftId)?.requestText;
+}
+
+function restoredSend(draftId: string): RestoredSend | undefined {
+  const memory = restoredSends.get(draftId);
+  if (memory) return memory;
+  const stored = read(getStore(), SEND_IDS_KEY)[draftId];
+  if (!stored || (typeof stored !== "string" && typeof stored !== "object")) return undefined;
+  const value = typeof stored === "string" ? { sendId: stored } : stored as Record<string, unknown>;
+  if (typeof value.sendId !== "string" || (value.requestText !== undefined && typeof value.requestText !== "string")) return undefined;
+  const send = { sendId: value.sendId, requestText: value.requestText };
+  restoredSends.set(draftId, send);
+  return send;
+}
+
+function setStoredSendId(store: Store, draftId: string, send: RestoredSend | undefined): void {
   const ids = read(store, SEND_IDS_KEY);
-  if (sendId) ids[draftId] = sendId;
+  if (send) ids[draftId] = send;
   else delete ids[draftId];
   try {
     store?.setItem(SEND_IDS_KEY, JSON.stringify(ids));
   } catch {
-    /* best-effort persistence; the in-memory identity still protects this session */
   }
 }
 
-/** Restores a rejected send into storage and whichever task view is mounted. */
 export function restoreComposerDraft(id: string, draft: DraftRestore): void {
   const store = getStore();
   setDraft(store, id, draft.text);
@@ -286,11 +302,6 @@ export function restoreComposerDraft(id: string, draft: DraftRestore): void {
   for (const listener of restoreListeners.get(id) ?? []) listener(draft);
 }
 
-/** Puts prepared text into a thread's composer without sending it: after a
- * blank line when the person has already typed something, never in its
- * place. Attachments and channel mode stay. It writes through the restore
- * path, so a mounted Composer updates live and an unmounted one finds the
- * text on return; the edit mark keeps a late failed send from replacing it. */
 export function appendComposerDraft(id: string, text: string): void {
   const store = getStore();
   const current = getDraft(store, id);
@@ -302,10 +313,6 @@ export function appendComposerDraft(id: string, text: string): void {
   });
 }
 
-/** Hands a queued message's words back to a thread's composer for editing.
- * They lead — they were written first — and anything already typed stays
- * below them after a blank line. Same restore path as appendComposerDraft,
- * so it lands correctly even if the person switched threads meanwhile. */
 export function prependComposerDraft(id: string, text: string): void {
   const store = getStore();
   const current = getDraft(store, id);
@@ -317,8 +324,11 @@ export function prependComposerDraft(id: string, text: string): void {
   });
 }
 
-/** Append completed uploads directly to the keyed durable draft. This is
- * safe after the Composer that started the upload has unmounted. */
+/** Leads the draft with `text` once: asking again does not stack it. */
+export function leadComposerDraft(id: string, text: string): void {
+  if (!getDraft(getStore(), id).startsWith(text)) prependComposerDraft(id, text);
+}
+
 export function appendDraftAttachments(id: string, additions: Attachment[]): void {
   if (additions.length === 0) return;
   markDraftEdited(id);
@@ -331,8 +341,6 @@ export function appendDraftAttachments(id: string, additions: Attachment[]): voi
   for (const listener of restoreListeners.get(id) ?? []) listener(draft);
 }
 
-/** Replace an optimistic upload in the keyed draft even if the composer that
- * started it has unmounted. A missing id means the user already removed it. */
 export function replaceDraftAttachment(
   id: string,
   attachmentId: string,
@@ -351,8 +359,6 @@ export function replaceDraftAttachment(
   return true;
 }
 
-/** Track upload work outside the mounted composer so task navigation cannot
- * briefly unlock Send and detach a file that is still being persisted. */
 export function changeDraftAttachmentPending(id: string, pending: boolean): void {
   const previous = attachmentPendingCounts.get(id) ?? 0;
   const next = pending ? previous + 1 : Math.max(0, previous - 1);
@@ -414,7 +420,6 @@ export function rememberFailedComposerSend(
   return failed;
 }
 
-/** Recovers a rejected POST without ever replacing a newer draft. */
 export function recoverFailedComposerSend(sent: ComposerSendSnapshot): "restored" | "outbox" {
   if (draftRevision(sent.draftId) !== sent.revision) {
     rememberFailedComposerSend(sent.draftId, {
@@ -424,6 +429,8 @@ export function recoverFailedComposerSend(sent: ComposerSendSnapshot): "restored
       replyToId: sent.replyToId,
       threadId: sent.threadId,
       channelMode: sent.channelMode,
+      mentions: sent.mentions,
+      followUp: sent.followUp,
     });
     return "outbox";
   }
@@ -433,10 +440,10 @@ export function recoverFailedComposerSend(sent: ComposerSendSnapshot): "restored
     attachments: sent.attachments,
     channelMode: sent.channelMode,
   });
-  // If the response vanished after server acceptance, the next Send must
-  // reuse this identity instead of starting a duplicate turn.
-  restoredSendIds.set(sent.draftId, sent.sendId);
-  setStoredSendId(getStore(), sent.draftId, sent.sendId);
+  // The response may have vanished after the server accepted it: the next Send reuses this identity.
+  const retry = { sendId: sent.sendId, requestText: sent.requestText };
+  restoredSends.set(sent.draftId, retry);
+  setStoredSendId(getStore(), sent.draftId, retry);
   return "restored";
 }
 
@@ -462,8 +469,7 @@ export function useFailedComposerSends(id: string): FailedComposerSend[] {
   return sends;
 }
 
-// Reaching for localStorage is itself a failure point: on an origin with
-// storage blocked the getter throws, and `typeof` doesn't shield it.
+// With storage blocked the localStorage getter itself throws, and `typeof` doesn't shield it.
 function getStore(): Store {
   try {
     return typeof localStorage === "undefined" ? undefined : localStorage;
@@ -472,24 +478,32 @@ function getStore(): Store {
   }
 }
 
-/** Goal intent belongs to the same task and failed-send recovery as its text. */
+/** A draft's channel mode, the same in every place that shows it: the composer's chip and the bot panel's switch. */
 export function useComposerChannelMode(id: string): [ChannelMode, (next: SetStateAction<ChannelMode>) => void] {
   const store = getStore();
   const [mode, setMode] = useState(() => getDraftChannelMode(store, id));
   useEffect(() => {
-    const unsubscribe = subscribeToDraftRestores(id, () => setMode(getDraftChannelMode(store, id)));
-    setMode(getDraftChannelMode(store, id));
-    return unsubscribe;
+    const sync = () => setMode(getDraftChannelMode(store, id));
+    const unsubscribe = subscribeToDraftRestores(id, sync);
+    const listeners = channelModeListeners.get(id) ?? new Set<() => void>();
+    listeners.add(sync);
+    channelModeListeners.set(id, listeners);
+    sync();
+    return () => {
+      unsubscribe();
+      listeners.delete(sync);
+      if (listeners.size === 0 && channelModeListeners.get(id) === listeners) channelModeListeners.delete(id);
+    };
   }, [id, store]);
   const set = useCallback((next: SetStateAction<ChannelMode>) => {
     const value = typeof next === "function" ? next(getDraftChannelMode(store, id)) : next;
     setDraftChannelMode(store, id, value);
     setMode(value);
+    for (const listener of Array.from(channelModeListeners.get(id) ?? [])) listener();
   }, [id, store]);
   return [mode, set];
 }
 
-/** useState for the composer text, persisted under `id` (a bot or room). */
 export function useDraft(id: string, legacyId?: string): [string, (next: string) => void] {
   const store = getStore();
   const [text, setText] = useState(() => {
@@ -510,16 +524,16 @@ export function useDraft(id: string, legacyId?: string): [string, (next: string)
   );
   useEffect(() => {
     const unsubscribe = subscribeToDraftRestores(id, (draft) => setText(draft.text));
-    // Close the render-to-effect race: a rejected request may have restored
-    // storage after this mount initialized but before its listener attached.
+    // A rejected request may have restored storage between this mount's init and its listener attaching.
     setText(getDraft(store, id));
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      saveDrafts();
+    };
   }, [id, store]);
   return [text, set];
 }
 
-/** A conversation's complete composer draft. Attachment storage is separate
- * from text so typing does not stringify a large pasted payload per keypress. */
 export function useComposerDraft(
   id: string,
   legacyId?: string,
@@ -548,9 +562,7 @@ export function useComposerDraft(
   const setAttachments = useCallback(
     (next: SetStateAction<Attachment[]>) => {
       if (typeof next !== "function") {
-        // Persist literal restores before asking React to render. A failed
-        // request may complete after its task was switched away and this
-        // component unmounted; the draft must still be there on return.
+        // Persist before rendering: this component may have unmounted while the request ran.
         setDraftAttachments(store, id, next);
         setAttachmentState(next);
         return;

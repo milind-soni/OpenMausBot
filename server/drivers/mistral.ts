@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
+import { operatorEnvKey } from "../credential-env.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 
 const DEFAULT_URL = "https://api.mistral.ai/v1";
@@ -50,13 +51,14 @@ export const MistralDriver: ProviderDriver<MistralConfig> = {
   models: DEFAULT_MODELS,
   install: {
     docsUrl: "https://console.mistral.ai/api-keys",
-    signInCommand: "Save a Mistral API key in Settings → Connections, or set MISTRAL_API_KEY on the server.",
+    settings: "connections",
+    signInCommand: "Save a Mistral API key in Settings → API keys, or set MISTRAL_API_KEY on the server.",
   },
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
   async create(input) {
     const { config } = input;
-    const apiKey = (input.environment.MISTRAL_API_KEY ?? process.env.MISTRAL_API_KEY ?? "").trim();
+    const apiKey = (input.environment.MISTRAL_API_KEY ?? operatorEnvKey("MISTRAL_API_KEY") ?? "").trim();
     const withConfiguredModel = (options: ModelCatalog["options"]): ModelCatalog => {
       const preferred = config.model ?? DEFAULT_MODELS.default;
       if (config.model && !options.some((option) => option.id === config.model)) {
@@ -90,9 +92,7 @@ export const MistralDriver: ProviderDriver<MistralConfig> = {
           }
         }
         if (options.length) catalog = withConfiguredModel(options);
-      } catch {
-        // A failed refresh keeps the last usable catalog, including custom models.
-      }
+      } catch {}
     };
     if (apiKey) void refreshModels();
     return createOpenAIChatRuntime({
@@ -100,8 +100,8 @@ export const MistralDriver: ProviderDriver<MistralConfig> = {
       tools: config.tools, models: () => catalog, refreshModels, contentText,
       requestBody: (model, messages, stream) => ({ model, messages, stream }),
       httpErrorLabel: "Mistral",
-      missingKeyError: "Save a Mistral API key in Settings → Connections, or set MISTRAL_API_KEY.",
-      unavailableReason: "No Mistral API key — open Settings → Connections.",
+      missingKeyError: "Save a Mistral API key in Settings → API keys, or set MISTRAL_API_KEY.",
+      unavailableReason: "No Mistral API key — open Settings → API keys.",
       timeoutMs: 180_000, billing: "metered", includeUsageInCompleted: true,
       nativeLog: {
         source: "mistral.chat.completions",

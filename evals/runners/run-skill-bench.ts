@@ -13,11 +13,9 @@ import {
 import { scoreSkillBench } from "../scorers/skill-bench.ts";
 import { runScenario } from "./run-scenario.ts";
 
-/** The skill bench (alpha): runs one fixture skill's test prompts twice
- * each — with the skill installed as a user skill and without it — through
- * the same scripted-provider machinery as tier 1, then scores the contrast.
- * It evaluates the harness seam (skill selection, prompt delivery) against
- * scripted follower behavior; real models are out of scope. */
+/** The skill bench (alpha): runs one fixture skill's test prompts with and
+ * without the skill installed, through the scripted-provider machinery of tier
+ * 1, and scores the contrast. Real models are out of scope. */
 
 const BENCHES_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "skill-bench", "fixtures");
 export const DEFAULT_OUT = join(dirname(fileURLToPath(import.meta.url)), "..", "reports", "runs");
@@ -33,10 +31,8 @@ export const skillBenchSchema = z.object({
   /** Bots the with-skill arm may dispatch to; they replay their scripted
    * turns only when something actually dispatches to them. */
   targets: z.array(scenarioBotSchema).default([]),
-  /** A fixture must measure something: at least one prompt, at least one
-   * assertion per prompt, and unique prompt ids — duplicate ids would
-   * fold two prompts' runs into one scored bucket, and empty arrays
-   * would let a run that checked nothing report success. */
+  /** At least one prompt, one assertion per prompt, and unique prompt ids:
+   * duplicate ids would fold two prompts' runs into one bucket. */
   prompts: z.array(
     z.object({
       id: z.string(),
@@ -158,16 +154,11 @@ export function buildArmScenario(
     gates: [],
     bots: [{ ...bench.subject, turns }, ...bench.targets],
     steps: [
-      // Only the with-arm installs the skill; that difference is the whole
-      // treatment under test.
+      // Only the with-arm installs the skill: the treatment under test.
       ...(arm === "with" ? [{ kind: "installSkill", skill: bench.skill }] : []),
       { kind: "send", bot: bench.subject.key, text: prompt.text },
       { kind: "waitForTurns", bot: bench.subject.key, count: turns.length, timeoutMs: 20_000 },
-      // Targets only turn when this prompt's with-arm actually dispatched
-      // to them. The scripted steps carry the dispatches as coordinate_bots
-      // bot_ids ("@key"), so the waits follow the prompt's own script
-      // rather than assuming every configured target turns — a with-arm
-      // that correctly dispatches to nobody proceeds straight to its
+      // A with-arm that correctly dispatches to nobody goes straight to its
       // assertions instead of timing out.
       ...(arm === "with"
         ? bench.targets
@@ -254,10 +245,8 @@ export function writeSkillBenchReport(outDir: string, report: SkillBenchReport, 
   return { json, markdown };
 }
 
-/** Parsed CLI state for the bench runner. Kept pure so the validation
- * contract — every flag consumes a non-flag value, unknown options and
- * positional arguments are rejected, and --replicates must be a positive
- * integer — is testable without spawning the runner. */
+/** Every flag consumes a non-flag value, unknown options and positionals are
+ * rejected, and --replicates must be a positive integer. */
 export interface SkillBenchCliOptions {
   wanted: Set<string>;
   replicates: number | undefined;

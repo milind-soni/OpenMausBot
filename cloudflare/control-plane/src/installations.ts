@@ -45,13 +45,19 @@ function printableString(maxLength: number) {
 }
 
 const printableName = printableString(80);
-const printableVersion = printableString(64);
+export const printableVersion = printableString(64);
+
+/** The desktop app, or a self-hosted server (`openmausbot serve`, a fleet container). Optional on every request
+ * that carries it: accepted here before any client sends it, since the request schemas are strict. */
+export const installationKindSchema = z.enum(["desktop", "server"]);
+export type InstallationKind = z.infer<typeof installationKindSchema>;
 
 const createInstallationSchema = z.strictObject({
   name: printableName,
   clientInstanceId: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
   platform: z.enum(["darwin", "windows", "linux"]),
   appVersion: printableVersion.optional(),
+  kind: installationKindSchema.optional(),
 });
 
 const INSTALLATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -175,10 +181,11 @@ export async function createInstallation(request: Request, env: Env, auth: Contr
   const credential = await newCredential(now);
   try {
     await env.DB.batch([
+      // `kind` is written only when sent, so registration does not depend on migration 0016.
       env.DB.prepare(
         `INSERT INTO installations
-          (id, owner_user_id, client_instance_id, display_name, platform, app_version, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, owner_user_id, client_instance_id, display_name, platform, app_version, created_at, updated_at${parsed.data.kind ? ", kind" : ""})
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?${parsed.data.kind ? ", ?" : ""})`,
       ).bind(
         installationId,
         session.user.id,
@@ -188,6 +195,7 @@ export async function createInstallation(request: Request, env: Env, auth: Contr
         parsed.data.appVersion ?? null,
         now,
         now,
+        ...(parsed.data.kind ? [parsed.data.kind] : []),
       ),
       env.DB.prepare(
         `INSERT INTO installation_credentials
@@ -308,6 +316,7 @@ export async function revokeInstallation(
       env.DB.prepare(
         "UPDATE installation_credentials SET revoked_at = ? WHERE installation_id = ? AND revoked_at IS NULL",
       ).bind(now, installationId),
+      env.DB.prepare("DELETE FROM installation_push_devices WHERE installation_id = ?").bind(installationId),
     ]);
   }
   return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
@@ -343,11 +352,21 @@ export async function requireInstallation(
   request: Request,
   env: Env,
 ): Promise<InstallationCredentialRow> {
+  return (await requireInstallationAndRead(request, env, null)).installation;
+}
+
+/** Authenticates the installation and records that it was seen. An optional
+ * read of its own data rides in the same D1 batch, saving a round trip. */
+export async function requireInstallationAndRead<T>(
+  request: Request,
+  env: Env,
+  read: ((installationId: string) => D1PreparedStatement) | null,
+): Promise<{ installation: InstallationCredentialRow; row: T | null }> {
   const installation = await authenticateInstallation(request, env);
   if (!installation) throw new HTTPError(401, "unauthorized");
 
   const now = Date.now();
-  await env.DB.batch([
+  const statements = [
     env.DB.prepare(
       `UPDATE installation_credentials
           SET last_used_at = ?
@@ -358,9 +377,43 @@ export async function requireInstallation(
           SET last_seen_at = ?
         WHERE id = ? AND revoked_at IS NULL`,
     ).bind(now, installation.installation_id),
-  ]);
+  ];
+  // After the writes: a batch is one transaction, so a failed read rolls the
+  // check-in back with it.
+  if (read) statements.push(read(installation.installation_id));
+  const results = await env.DB.batch(statements);
   installation.last_seen_at = now;
-  return installation;
+  // The UPDATEs return no rows. When a read is batched, its result is last.
+  const row = read ? ((results.at(-1)?.results[0] as T | undefined) ?? null) : null;
+  return { installation, row };
+}
+
+/** Keeps `app_version` current: registration is not the only time an app
+ * says which release it runs, and endpoint allocation can depend on it. The
+ * caller has already compared it with the stored value. */
+export async function recordReportedAppVersion(
+  env: Env,
+  installationId: string,
+  appVersion: string,
+): Promise<void> {
+  await env.DB.prepare(
+    "UPDATE installations SET app_version = ? WHERE id = ? AND revoked_at IS NULL",
+  ).bind(appVersion, installationId).run();
+}
+
+/** Stores the kind a client reported. Best effort: without migration 0016 nothing is stored. */
+export async function recordInstallationKind(env: Env, installationId: string, kind: InstallationKind): Promise<void> {
+  await env.DB.prepare(
+    "UPDATE installations SET kind = ? WHERE id = ? AND revoked_at IS NULL AND kind IS NOT ?",
+  ).bind(kind, installationId, kind).run().catch(() => undefined);
+}
+
+/** The kind the installation last reported, or null: none reported, or no migration 0016. */
+export async function storedInstallationKind(env: Env, installationId: string): Promise<InstallationKind | null> {
+  const row = await env.DB.prepare("SELECT kind FROM installations WHERE id = ?")
+    .bind(installationId).first<{ kind: string | null }>().catch(() => null);
+  const parsed = installationKindSchema.safeParse(row?.kind);
+  return parsed.success ? parsed.data : null;
 }
 
 export async function installationSelf(request: Request, env: Env): Promise<Response> {

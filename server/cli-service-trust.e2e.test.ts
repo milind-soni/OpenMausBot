@@ -1,10 +1,4 @@
-// `openmausbot serve` on a server that trusts local requests only as a
-// service (OMB_LOOPBACK_TRUST=service). The real CLI starts the real server
-// in a disposable home: the server refuses session-less local admin requests,
-// yet the CLI that started it still prints a pairing code through the secret
-// it handed the server on stdin, and keeps running. Separate CLI commands
-// (and anything else on the machine, a bot's shell included) are refused
-// with an explanation instead of a misleading empty answer.
+// The real CLI starts the real server in a disposable home with OMB_LOOPBACK_TRUST=service.
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,13 +8,14 @@ import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { freePortBlock } from "./testing/ports.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ENTRY = join(SERVER_DIR, "openmausbot.ts");
-const PORT = 38800 + Math.floor(Math.random() * 5_000);
 const run = promisify(execFile);
 
 let home: string;
+let PORT: number;
 let serve: ChildProcess;
 let output = "";
 
@@ -42,13 +37,14 @@ const cli = async (args: string[]) => {
 describe.skipIf(process.platform === "win32")("openmausbot serve under service loopback trust", () => {
   beforeAll(async () => {
     home = mkdtempSync(join(tmpdir(), "omb-cli-service-"));
+    PORT = await freePortBlock([0, 1]);
     serve = spawn(process.execPath, ["--experimental-strip-types", ENTRY, "serve", "--port", String(PORT), "--data-dir", join(home, "data")], {
       env: environment(), stdio: ["ignore", "pipe", "pipe"],
     });
     serve.stdout!.on("data", (chunk) => (output += chunk));
     serve.stderr!.on("data", (chunk) => (output += chunk));
     const deadline = Date.now() + 40_000;
-    while (!output.includes("stop with Ctrl+C")) {
+    while (!output.includes("access add you@example.com")) {
       if (serve.exitCode !== null) throw new Error(`serve exited:\n${output}`);
       if (Date.now() > deadline) throw new Error(`serve never finished starting:\n${output}`);
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -60,10 +56,10 @@ describe.skipIf(process.platform === "win32")("openmausbot serve under service l
     await removeTempDir(home);
   });
 
-  it("prints a pairing code for the CLI that started the server and keeps running", async () => {
+  it("not in a terminal, prints no code into a log; points at email sign-in, and keeps running", async () => {
     expect(output).toContain("local requests: service trust (OMB_LOOPBACK_TRUST)");
-    expect(output).toMatch(/pairing code: {2}[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}/);
-    expect(output).not.toContain("no pairing code");
+    expect(output).not.toMatch(/Pairing code {3}[A-Z0-9]{4}-/);
+    expect(output).toContain("Let people sign in with their email: openmausbot access add you@example.com");
     expect(serve.exitCode).toBeNull();
     expect((await fetch(`http://127.0.0.1:${PORT}/api/health`)).status).toBe(200);
   });

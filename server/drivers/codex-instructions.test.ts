@@ -90,7 +90,6 @@ describe("Codex instruction receipts", () => {
     const key = randomUUID();
     const request = vi.fn().mockResolvedValue({});
     await syncCodexInstructions(key, "native", "rules", "", false, request);
-    // A receipt written before the split carries only the instruction digest.
     const path = receiptPath(key, "native");
     const fingerprint = JSON.parse(readFileSync(path, "utf8")).instructions;
     writeFileSync(path, fingerprint, { mode: 0o600 });
@@ -116,11 +115,9 @@ describe("Codex instruction receipts", () => {
     const request = vi.fn().mockResolvedValue({});
     const first = await syncCodexInstructions(key, "native", "rules", "memory v1", true, request);
     expect(first.deliverVolatile).toBe(true);
-    // the on-disk receipt does not yet claim the volatile half was carried
     const path = receiptPath(key, "native");
     const pending = JSON.parse(readFileSync(path, "utf8"));
     expect(pending).toEqual({ instructions: expect.any(String) });
-    // so a retry before acceptance still redelivers it
     const retry = await syncCodexInstructions(key, "native", "rules", "memory v1", true, request);
     expect(retry.deliverVolatile).toBe(true);
     expect(first.commitVolatile).toBeTypeOf("function");

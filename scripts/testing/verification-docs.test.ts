@@ -27,12 +27,15 @@ const target = (hit: string) => hit.slice(hit.indexOf(": ") + 2);
 const helpVerbs = new Set([...HELP.matchAll(/^ {2}([a-z][\w-]*)(?= |$)/gm)].map((match) => match[1]!).filter((verb) => verb !== "node"));
 helpVerbs.add("help");
 
-// Routes are registered in server/index.ts and, for anything newer, in the
-// modules under server/routes (server/routes/README.md). Tests there quote
-// paths without registering them, so they do not count.
+// Routes are registered in server/index.ts and in the modules under
+// server/routes; tests there quote paths without registering them.
 const ROUTES_DIR = join(ROOT, "server", "routes");
-const routeModules = readdirSync(ROUTES_DIR).filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts")).sort();
-const serverSource = [join(ROOT, "server", "index.ts"), ...routeModules.map((name) => join(ROUTES_DIR, name))]
+// Including subfolders and the factories that live beside their feature.
+const routeModules = readdirSync(ROUTES_DIR, { recursive: true, encoding: "utf8" })
+  .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts")).sort()
+  .map((name) => join(ROUTES_DIR, name));
+const featureRouteModules = ["data/routes.ts", "workspace-backup-http.ts", "cloud-move-http.ts"].map((name) => join(ROOT, "server", name));
+const serverSource = [join(ROOT, "server", "index.ts"), ...routeModules, ...featureRouteModules]
   .map((file) => readFileSync(file, "utf8")).join("\n");
 const hooksSource = readFileSync(join(ROOT, "server", "webhook-ingress.ts"), "utf8");
 const hostedSource = readFileSync(join(ROOT, "enterprise", "server", "workspace-access.ts"), "utf8");

@@ -1,6 +1,6 @@
 // Regenerate external electron-updater blockmaps after release artifacts have
 // been stapled or rebuilt. electron-builder 26 generates blockmaps in
-// app-builder-lib; the former app-builder-bin package is no longer installed.
+// app-builder-lib.
 import { access, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";

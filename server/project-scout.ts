@@ -10,8 +10,6 @@ import {
 } from "./team-manifest.ts";
 import type { MausColor } from "./store.ts";
 
-/** What the scout can recognize a project needing. One role becomes one
- * suggested team member; the lead is always added on top. */
 export type ScoutRole =
   | "frontend"
   | "backend"
@@ -23,18 +21,13 @@ export type ScoutRole =
 
 export interface ProjectSignal {
   role: ScoutRole;
-  /** the files and dependencies that argued for this role: shown to the
-   * human reviewing the suggestion, and quoted in the suggested member's
-   * description — which becomes persona text and reaches the provider */
+  /** Shown to the reviewer and quoted into the member's description, which reaches the provider. */
   evidence: string[];
 }
 
 export interface ProjectProfile {
-  /** README h1 > package name > folder name */
   name: string;
-  /** README first paragraph > package description > "" */
   summary: string;
-  /** display chips: languages, frameworks, notable tooling */
   stacks: string[];
   signals: ProjectSignal[];
 }
@@ -42,13 +35,10 @@ export interface ProjectProfile {
 export interface TeamSuggestion {
   roomName: string;
   manifest: TeamManifestV2;
-  /** member key → the one-line reason it was suggested */
   reasons: Record<string, string>;
 }
 
-// The scout reads, it never writes — and it reads bounded: a handful of
-// well-known files by name, top-level directory listings, and nothing
-// recursive. A folder full of surprises must cost milliseconds, not minutes.
+// Read-only and bounded: well-known files by name and top-level listings, nothing recursive.
 const MAX_FILE_BYTES = 256_000;
 const MAX_DIR_ENTRIES = 400;
 
@@ -101,8 +91,6 @@ function packageJson(cwd: string): { name?: string; description?: string; deps: 
   }
 }
 
-/** README h1 and the first prose paragraph after it. Badge rows and heading
- * lines are skipped so the summary reads like a sentence, not markup. */
 function readme(cwd: string): { title?: string; summary?: string } {
   const raw =
     readText(join(cwd, "README.md")) ?? readText(join(cwd, "readme.md")) ?? readText(join(cwd, "README"));
@@ -116,11 +104,7 @@ function readme(cwd: string): { title?: string; summary?: string } {
       if (!title) title = trimmed.replace(/^#+\s*/, "").trim() || undefined;
       continue;
     }
-    // badge rows, raw HTML, and blockquote callouts (warnings, notices) are
-    // not the sentence that says what the project is
     if (trimmed.startsWith("[![") || trimmed.startsWith("![") || trimmed.startsWith("<") || trimmed.startsWith(">")) continue;
-    // the summary is rendered as plain text; markdown emphasis would show
-    // its asterisks
     summary = trimmed.replace(/[*_`]/g, "").slice(0, 1_000);
     break;
   }
@@ -133,8 +117,7 @@ interface Detector {
   paths: string[];
 }
 
-// Order is priority: when a suggestion has to be trimmed, the roles that
-// define the project's shape survive over the ones that polish it.
+// Order is priority: when a suggestion is trimmed, earlier roles survive.
 const DETECTORS: Detector[] = [
   {
     role: "frontend",
@@ -190,16 +173,11 @@ const STACK_MARKERS: Array<{ stack: string; deps?: string[]; paths?: string[] }>
   { stack: "Docker", paths: ["Dockerfile", "docker-compose.yml", "compose.yaml"] },
 ];
 
-/** Read a folder and describe the project in it: name, one-line summary,
- * stack chips, and which team roles the contents argue for. Deterministic
- * and offline — the same folder always scouts to the same profile. */
 export function scoutProject(cwd: string): ProjectProfile {
   const pkg = packageJson(cwd);
   const md = readme(cwd);
   const entries = new Set(listNames(cwd));
 
-  // Python deps live in files, not a lockfile-adjacent field; a cheap
-  // substring scan of the two conventional files covers the common cases.
   const pythonDeps = `${readText(join(cwd, "requirements.txt")) ?? ""}\n${readText(join(cwd, "pyproject.toml")) ?? ""}`.toLowerCase();
   const hasDep = (dep: string) => pkg.deps.has(dep) || (pythonDeps.length > 1 && pythonDeps.includes(dep));
 
@@ -217,7 +195,6 @@ export function scoutProject(cwd: string): ProjectProfile {
       const found = pathEvidence(path);
       if (found) evidence.push(found);
     }
-    // docs need substance: a folder with no markdown in it is not a docs site
     if (detector.role === "docs" && evidence.length > 0) {
       const hasMkdocs = evidence.includes("mkdocs.yml");
       const hasMarkdown = listNames(join(cwd, "docs")).some((name) => name.endsWith(".md"));
@@ -311,14 +288,8 @@ const LEAD: RoleTemplate = {
     `You coordinate work on ${profile.name}: break briefs into tasks for the team, keep the room's bulletin current, and review results before they count as done.${stackLine(profile)}${profile.summary ? ` The project, in its own words: ${profile.summary}` : ""}`,
 };
 
-/** at most the lead plus this many specialists — a suggestion is a starting
- * lineup, not a payroll */
 const MAX_SUGGESTED_SPECIALISTS = 5;
 
-/** Turn a scouted profile into an importable team: a lead plus one member
- * per detected role, as a regular v2 manifest. Suggesting is all this does —
- * creating bots and the room stays behind the existing import endpoint and
- * its human click. */
 export function suggestTeam(profile: ProjectProfile): TeamSuggestion {
   const reasons: Record<string, string> = {
     lead: "Every project room needs one member who briefs, splits, and reviews.",
@@ -343,7 +314,6 @@ export function suggestTeam(profile: ProjectProfile): TeamSuggestion {
     });
     reasons[signal.role] = `Detected via ${signal.evidence.join(", ")}.`;
   }
-  // no signals at all → the room still gets a working pair of hands
   if (members.length === 1) {
     members.push({
       key: "builder",
@@ -365,7 +335,6 @@ export function suggestTeam(profile: ProjectProfile): TeamSuggestion {
   };
   if (profile.summary) manifest.team.description = profile.summary.slice(0, 2_000);
 
-  // Lockstep with import: a suggestion must be exactly as valid as a file
-  // someone shared — same parser, same limits, same normalization.
+  // Same parser as import, so a suggestion is exactly as valid as a shared file.
   return { roomName: profile.name, manifest: parseTeamManifest(manifest), reasons };
 }

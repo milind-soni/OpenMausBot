@@ -1,7 +1,3 @@
-// App settings → Usage → Budget and Prices: a monthly spend limit for the
-// workspace and the operator's own sell prices per model. Both are
-// enterprise entitlements (`budgets`, `billing`); the cards render only
-// when the server reports them, and edit the same config the server reads.
 import { useEffect, useState } from "react";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
@@ -30,7 +26,6 @@ export function entitledTo(config: ConfigStatus | null | undefined, feature: str
   return config?.edition?.features?.includes(feature) === true;
 }
 
-/** The bar's tone follows the state: quiet, warning at the threshold, danger at the cap. */
 export function budgetTone(state: BudgetState | null): "quiet" | "warning" | "danger" {
   if (!state) return "quiet";
   return state.exceeded ? "danger" : state.warn ? "warning" : "quiet";
@@ -95,11 +90,11 @@ export function BudgetCard({ budget }: { budget: BudgetState | null }) {
           {t("usage.budget.warnAt")}
           <input value={warnAt} onChange={(e) => setWarnAt(e.target.value)} inputMode="numeric" aria-label={t("usage.budget.warnAt")} disabled={saving} className="w-20 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] tabular-nums text-ink focus:outline-none disabled:opacity-50" />
         </label>
-        <button type="submit" disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[12.5px] text-ink hover:bg-raised-hover disabled:opacity-50">
+        <button type="submit" disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
           {saving && <Loader2 size={13} className="animate-spin" />}{t("common.save")}
         </button>
       </form>
-      <p className="mt-2 text-[11.5px] leading-relaxed text-ink-secondary">{t("usage.budget.hint")}</p>
+      <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("usage.budget.hint")}</p>
       {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
     </Card>
   );
@@ -160,16 +155,16 @@ export function PricesCard() {
     }
   };
 
-  const cell = "w-full rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12.5px] tabular-nums text-ink focus:outline-none disabled:opacity-50";
+  const cell = "w-full rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[13px] tabular-nums text-ink focus:outline-none disabled:opacity-50";
   return (
     <Card title={t("usage.prices.title")} subtitle={t("usage.prices.subtitle")}>
       <div className="mb-3 flex items-center gap-2 text-[12px] text-ink-secondary">
         <label className="flex items-center gap-2">
           {t("usage.prices.currency")}
-          <input value={currency} onChange={(e) => setCurrency(e.target.value)} maxLength={3} aria-label={t("usage.prices.currency")} disabled={saving} className="w-16 rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12.5px] uppercase text-ink focus:outline-none disabled:opacity-50" />
+          <input value={currency} onChange={(e) => setCurrency(e.target.value)} maxLength={3} aria-label={t("usage.prices.currency")} disabled={saving} className="w-16 rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[13px] uppercase text-ink focus:outline-none disabled:opacity-50" />
         </label>
       </div>
-      <div className="grid grid-cols-[1fr_5rem_5rem_5rem_auto] items-center gap-x-2 gap-y-1.5 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">
+      <div className="grid grid-cols-[1fr_5rem_5rem_5rem_auto] items-center gap-x-2 gap-y-1.5 text-[12px] font-medium uppercase tracking-wide text-ink-secondary">
         <span>{t("usage.prices.colModel")}</span>
         <span>{t("usage.prices.colInput")}</span>
         <span>{t("usage.prices.colOutput")}</span>
@@ -187,17 +182,16 @@ export function PricesCard() {
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button type="button" onClick={() => setRows((current) => [...current, { key: "", input: "", output: "", cached: "" }])} disabled={saving} className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50"><Plus size={13} />{t("usage.prices.add")}</button>
-        <button type="button" onClick={() => void save()} disabled={saving} className="ml-auto flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[12.5px] text-ink hover:bg-raised-hover disabled:opacity-50">
+        <button type="button" onClick={() => void save()} disabled={saving} className="ml-auto flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
           {saving && <Loader2 size={13} className="animate-spin" />}{t("common.save")}
         </button>
       </div>
-      <p className="mt-2 text-[11.5px] leading-relaxed text-ink-secondary">{t("usage.prices.hint")}</p>
+      <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("usage.prices.hint")}</p>
       {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
     </Card>
   );
 }
 
-/** Both cards, each only when the server is entitled to it. */
 export function UsageBudgetCards({ budget }: { budget: BudgetState | null }) {
   const { state } = useStore();
   const budgets = entitledTo(state.config, "budgets");

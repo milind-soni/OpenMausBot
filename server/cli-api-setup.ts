@@ -1,9 +1,9 @@
-// Small, stateless probes for CLI onboarding. The caller owns consent for the
-// metered completion and persistence; neither credentials nor replies are logged.
+// Stateless onboarding probes: the caller owns consent for the metered call; credentials and replies are never logged.
 export const API_ENDPOINTS = [
   { id: "openai", label: "OpenAI API", url: "https://api.openai.com/v1", keyUrl: "https://platform.openai.com/api-keys" },
   { id: "openrouter", label: "OpenRouter", url: "https://openrouter.ai/api/v1", keyUrl: "https://openrouter.ai/settings/keys" },
   { id: "groq", label: "Groq", url: "https://api.groq.com/openai/v1", keyUrl: "https://console.groq.com/keys" },
+  { id: "meta", label: "Meta Model API", url: "https://api.meta.ai/v1", keyUrl: "https://dev.meta.ai/" },
 ] as const;
 
 export function normalizeApiUrl(value: string): string {
@@ -38,8 +38,7 @@ function httpFailure(status: number, completion: boolean): SetupApiError {
 
 async function setupJson(url: string, key: string, body?: Record<string, unknown>): Promise<unknown> {
   const base = normalizeApiUrl(url);
-  // The wizard trims newly pasted keys. Existing credentials must be tested
-  // exactly as the runtime will send them, not silently repaired only here.
+  // Existing credentials are tested exactly as the runtime sends them, never silently repaired only here.
   const token = key;
   // Header credentials must not contain control characters or whitespace.
   // eslint-disable-next-line no-control-regex
@@ -50,7 +49,6 @@ async function setupJson(url: string, key: string, body?: Record<string, unknown
   const abort = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    // Include reading the response body in the deadline, not only headers.
     return await Promise.race([
       (async () => {
         const response = await fetch(`${base}${completion ? "/chat/completions" : "/models"}`, {
@@ -76,8 +74,7 @@ async function setupJson(url: string, key: string, body?: Record<string, unknown
     ]);
   } catch (error) {
     if (error instanceof SetupApiError) throw error;
-    // fetch errors can contain a URL, echoed credentials, or provider content.
-    // Deliberately expose neither their message nor their cause.
+    // fetch errors can carry a URL, echoed credentials or provider content: expose neither message nor cause.
     throw new SetupApiError("Could not reach the API. Check the network and direct API URL; redirects are not followed.");
   } finally {
     clearTimeout(timer);
@@ -111,8 +108,7 @@ export async function verifySetupCompletion(url: string, key: string, model: str
   // eslint-disable-next-line no-control-regex
   if (!id || /[\u0000-\u001f\u007f]/u.test(id)) throw new SetupApiError("Choose a non-empty model ID without control characters.");
   const host = new URL(normalizeApiUrl(url)).hostname.toLowerCase();
-  // Mirror OpenAICompatDriver's OpenRouter-only routing, without inheriting
-  // environment overrides that the caller may have deliberately disabled.
+  // The same OpenRouter-only provider pin as OpenAICompatDriver, without its environment overrides.
   const pinProvider = provider && (host === "openrouter.ai" || host.endsWith(".openrouter.ai"));
   const json = record(await setupJson(url, key, {
     model: id,

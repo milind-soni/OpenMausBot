@@ -1,6 +1,3 @@
-// A deep link, nothing more: the bot's Slack app is created and managed in
-// the organisation's Admin. Rendered only when the server offered a link
-// (see useSlackManagementUrl), so there are no loading or error states here.
 import { ExternalLink } from "lucide-react";
 
 import { t } from "@/lib/i18n";

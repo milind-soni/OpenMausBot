@@ -64,7 +64,6 @@ describe("thread snooze through an isolated HTTP fixture", () => {
     expect(patched.status).toBe(200);
     expect(patched.body.task.snoozedUntil).toBeUndefined();
     expect((await taskOf(bot.id, task.threadId)).snoozedUntil).toBeUndefined();
-    // the heal is on read, not a rewrite: the stale value sits until the next save
     expect(persistedTask(bot.id, task.threadId).snoozedUntil).toBe(past);
     await api("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { snoozedUntil: 0 });
     expect((await taskOf(bot.id, task.threadId)).snoozedUntil).toBe(0);

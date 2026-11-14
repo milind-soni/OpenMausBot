@@ -3,9 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initialState, MESSAGE_PAGE_SIZE, StoreProvider, useStore, type Action, type BotAnnouncement } from "./store";
 
-/** The snapshot path the store reconciles against: a bounded page, so a
- * settings recovery never pulls every transcript with it. */
-const SNAPSHOT = `/api/bots?messages=${MESSAGE_PAGE_SIZE}`;
+const SNAPSHOT = `/api/bots/bot?messages=${MESSAGE_PAGE_SIZE}`;
 
 const bot: BotAnnouncement = {
   id: "bot", threadId: "thread", name: "Fixture", title: "", description: "",
@@ -21,8 +19,7 @@ const deferred = () => {
 };
 const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 
-// Exercise the real StoreProvider dispatch and write promises. Server rendering
-// avoids mounting live event effects; every HTTP request is an offline fixture.
+// Server rendering avoids mounting live event effects; every HTTP request is an offline fixture.
 function mount(request: typeof fetch) {
   vi.useFakeTimers();
   vi.stubGlobal("fetch", request);
@@ -79,7 +76,7 @@ describe("thread setting save recovery", () => {
     controls.send();
     await flush();
     expect(requests.mock.calls.some(([path]) => path === "/api/bots/bot")).toBe(true);
-    reconciled.resolve(response({ bots: [bot] }));
+    reconciled.resolve(response({ bot }));
     await flush();
     profileSave.resolve(response({ bot }));
     await flush();
@@ -101,9 +98,8 @@ describe("thread setting save recovery", () => {
     controls.send();
     await flush();
     expect(requests.mock.calls.map(([path]) => path)).toEqual(["/api/bots/bot/tasks/thread", SNAPSHOT]);
-    reconcile.resolve(response({ bots: [bot] }));
+    reconcile.resolve(response({ bot }));
     await flush();
-    // The failed send is never silently retried using a different model.
     expect(requests).toHaveBeenCalledTimes(2);
     controls.send();
     await flush();
@@ -112,7 +108,7 @@ describe("thread setting save recovery", () => {
 
   it.each(["unreachable", "missing bot"])("stays blocked when reconciliation is %s", async (failure) => {
     const requests = vi.fn<typeof fetch>(async (path) => path === SNAPSHOT
-      ? response({ bots: [], error: "Offline" }, failure === "unreachable" ? 503 : 200)
+      ? response(failure === "unreachable" ? { error: "Offline" } : {}, failure === "unreachable" ? 503 : 200)
       : response({ error: "Save failed" }, 500));
     const controls = mount(requests);
     controls.update();
@@ -120,6 +116,30 @@ describe("thread setting save recovery", () => {
     controls.send();
     await flush();
     expect(requests.mock.calls.map(([path]) => path)).toEqual(["/api/bots/bot/tasks/thread", SNAPSHOT]);
+  });
+
+  it("asks again after a failed reconciliation, and permits a send once the server answers", async () => {
+    let reachable = false;
+    const requests = vi.fn<typeof fetch>(async (path) => {
+      if (path === SNAPSHOT) return reachable ? response({ bot }) : response({ error: "Offline" }, 503);
+      if (path === "/api/bots/bot/tasks/thread") return response({ error: "Save failed" }, 500);
+      return response({});
+    });
+    const controls = mount(requests);
+    controls.update();
+    await flush();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flush();
+    expect(requests.mock.calls.filter(([path]) => path === SNAPSHOT)).toHaveLength(2);
+    reachable = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flush();
+    expect(requests.mock.calls.filter(([path]) => path === SNAPSHOT)).toHaveLength(3);
+    controls.send();
+    await flush();
+    expect(requests).toHaveBeenLastCalledWith("/api/bots/bot/messages", expect.objectContaining({ method: "POST" }));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(requests.mock.calls.filter(([path]) => path === SNAPSHOT), "no more reads once reconciled").toHaveLength(3);
   });
 
   it("does not let an old reconciliation clear a newer write", async () => {
@@ -137,15 +157,13 @@ describe("thread setting save recovery", () => {
     await flush();
     controls.update();
     await flush();
-    reconcile.resolve(response({ bots: [bot] }));
+    reconcile.resolve(response({ bot }));
     await flush();
     controls.send();
     await flush();
     expect(requests.mock.calls.some(([path]) => path === "/api/bots/bot/messages")).toBe(false);
     nextWrite.resolve(response({ bot }));
     await flush();
-    // This send still belonged to the failed batch; only a fresh send after
-    // the newer settings settle may run.
     expect(requests.mock.calls.some(([path]) => path === "/api/bots/bot/messages")).toBe(false);
     controls.send();
     await flush();

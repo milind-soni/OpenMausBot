@@ -31,23 +31,31 @@ of a real provider's planning quality or authentication.
   Saved profiles, routines, skill content, scope grants, and deletion are
   checked independently of the scripted reply.
 - Immediate tool results say the change was applied. No unanswered review
-  card or extra setup continuation appears, and new specialists retain Ask.
-- Real peer coordination succeeds with `approvePeerComms` enabled. Its one
-  downstream summary is expected; unrelated setup continuations are not.
+  card or extra setup continuation appears, and new specialists start at the
+  default level, Full access.
+- Real peer coordination succeeds. Its one downstream summary is expected;
+  unrelated setup continuations are not.
 - An explicit Ask sibling retains four pending reviews even though the bot
   default is Full. Conversely, an explicit Full thread applies its profile
   change while the bot default remains Ask.
 - An expired turn token is refused, and Full does not authorize changes to
   an existing bot outside the Chief's team scope.
 
+Connected-app sends follow **Sending on your behalf** at Full access:
+**Ask every time** waits for consent, and **Send without asking** or no
+setting at all sends with no daily limit. The
+[Gmail and outbound fixture](gmail-drafts.md) verifies both policies, opaque
+execution, delegation and changes before dispatch.
+
 ## Evidence and limits
 
 The desktop smoke uses a disposable Electron utility-process server and the
-real private approval bridge. It covers one confirmed Full Access grant for
+real private approval bridge. It covers one Full Access grant for
 all existing, archived and future threads, including mixed Claude, Codex,
 Grok and Antigravity providers. Other bots and per-thread model choices stay
-unchanged. The real settings confirmation is driven in a hidden fixture
-window, including Cancel, the all-threads checkbox and the committed result.
+unchanged. The real composer and settings selectors are driven in a hidden
+fixture window: picking Full access applies at once, with no confirmation
+dialog, and the committed result is checked.
 Screenshots are saved under `.omb-scratch/verify-evidence/provider-fixes/`.
 Provider processes are fake; this does not test live account access.
 

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -218,7 +219,6 @@ beforeAll(async () => {
     try {
       if ((await fetch(`${base}/api/health`)).status === 200) break;
     } catch {
-      // Still starting.
     }
     if (Date.now() >= deadline) throw new Error(`server never became healthy: ${stderr}`);
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -260,7 +260,7 @@ describe("goal-driven channel runs", () => {
       const state = (await api("GET", "/api/bots?messages=30")).body;
       const current = state.groups.find((candidate: { id: string }) => candidate.id === room.id);
       return current?.messages.find((message: { kind: string }) => message.kind === "goal.run")?.goalRun;
-    }, { timeout: 10_000 }).toMatchObject({
+    }, { timeout: hostTimeout(10_000) }).toMatchObject({
       status: "completed",
       coordinatorBotId: lead.id,
       turnCount: 3,
@@ -324,8 +324,7 @@ describe("goal-driven channel runs", () => {
       const waitingState = (await api("GET", "/api/bots?messages=30")).body;
       const waitingRoom = waitingState.groups.find((group: { id: string }) => group.id === room.id);
       const cardId = waitingRoom.messages.find((message: { kind: string }) => message.kind === "goal.run").id;
-      // Release only after the wait card is observed; process startup on a
-      // slow runner must not consume the fake CLI's fixed completion window.
+      // Release only after the wait card is observed, so slow startup cannot use up the fake's completion window.
       writeFileSync(busyGoalFinishGate, "observed the waiting goal");
 
       await expect.poll(async () => {
@@ -340,7 +339,7 @@ describe("goal-driven channel runs", () => {
           detail: cards[0]?.goalRun?.detail,
           turnCount: cards[0]?.goalRun?.turnCount,
         };
-      }, { timeout: 10_000 }).toEqual({
+      }, { timeout: hostTimeout(10_000) }).toEqual({
         working: false,
         count: 1,
         id: cardId,
@@ -406,8 +405,7 @@ describe("goal-driven channel runs", () => {
         workerDirectBusy: true,
       });
 
-      // Keep the worker occupied until the waiting state is observed, even
-      // when CI takes longer than the fake driver's default 800 ms turn.
+      // Hold the worker until the waiting state is observed, even past the fake's default 800 ms turn.
       writeFileSync(busyWorkerFinishGate, "release");
 
       await expect.poll(async () => {
@@ -432,7 +430,7 @@ describe("goal-driven channel runs", () => {
             message.text?.includes("reply to:")
           ),
         };
-      }, { timeout: 10_000 }).toEqual({
+      }, { timeout: hostTimeout(10_000) }).toEqual({
         roomWorking: false,
         cards: 1,
         status: "completed",
@@ -481,8 +479,6 @@ describe("goal-driven channel runs", () => {
         return state.bots.find((bot: { id: string }) => bot.id === lead.id)?.busy;
       }).toBe(true);
 
-      // ordinary chat: the round parks on the busy lead — visibly working,
-      // nobody named as speaker, one neutral note, and no skip
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Ordinary room chat" })).status).toBe(202);
       await expect.poll(async () => {
         const state = (await api("GET", "/api/bots?messages=30")).body;
@@ -490,8 +486,6 @@ describe("goal-driven channel runs", () => {
         return { working: current?.working, busyBotId: current?.busyBotId, ...chips(current?.messages ?? []) };
       }).toEqual({ working: true, busyBotId: null, waiting: true, skipped: false, replies: 0 });
 
-      // Stop releases the parked chat round quietly: no reply, no skip chip,
-      // and the lead's unrelated direct turn is untouched
       expect((await api("POST", `/api/groups/${room.id}/interrupt`, { threadId: room.threadId })).status).toBe(200);
       await expect.poll(async () => {
         const state = (await api("GET", "/api/bots?messages=30")).body;
@@ -603,7 +597,7 @@ describe("goal-driven channel runs", () => {
           roomWorking: current?.working,
           leadBusy: state.bots.find((bot: { id: string }) => bot.id === lead.id)?.busy,
         };
-      }, { timeout: 10_000 }).toEqual({
+      }, { timeout: hostTimeout(10_000) }).toEqual({
         runStatus: "running",
         detached: true,
         activeThreadId: originalThreadId,
@@ -612,8 +606,6 @@ describe("goal-driven channel runs", () => {
         leadBusy: true,
       });
 
-      // No task switch and no explicit thread: the ordinary room Stop must
-      // discover the detached operation rather than targeting the visible task.
       expect((await api("POST", `/api/groups/${room.id}/interrupt`)).status).toBe(200);
 
       await expect.poll(async () => {
@@ -628,7 +620,7 @@ describe("goal-driven channel runs", () => {
           roomWorking: current?.working,
           leadBusy: state.bots.find((bot: { id: string }) => bot.id === lead.id)?.busy,
         };
-      }, { timeout: 10_000 }).toEqual({
+      }, { timeout: hostTimeout(10_000) }).toEqual({
         runStatus: "cancelled",
         runThreadId: backgroundThreadId,
         activeThreadId: originalThreadId,
@@ -695,7 +687,7 @@ describe("goal-driven channel runs", () => {
           roomWorking: current?.working,
           leadBusy: state.bots.find((bot: { id: string }) => bot.id === lead.id)?.busy,
         };
-      }, { timeout: 10_000 }).toEqual({
+      }, { timeout: hostTimeout(10_000) }).toEqual({
         runStatus: "running",
         detached: true,
         activeThreadId: originalThreadId,
@@ -703,8 +695,6 @@ describe("goal-driven channel runs", () => {
         leadBusy: true,
       });
 
-      // The visible room still points at originalThreadId. Bot Stop must use
-      // the detached operation's exact speaker thread, not that visible task.
       expect((await api("POST", `/api/bots/${lead.id}/interrupt`)).status).toBe(200);
 
       await expect.poll(async () => {
@@ -719,7 +709,7 @@ describe("goal-driven channel runs", () => {
           roomWorking: current?.working,
           leadBusy: state.bots.find((bot: { id: string }) => bot.id === lead.id)?.busy,
         };
-      }, { timeout: 10_000 }).toEqual({
+      }, { timeout: hostTimeout(10_000) }).toEqual({
         runStatus: "cancelled",
         runThreadId: backgroundThreadId,
         activeThreadId: originalThreadId,
@@ -790,7 +780,7 @@ describe("goal-driven channel runs", () => {
         const running = calendar.runs.find((run: { id: string }) => run.id === runId);
         backgroundThreadId = running?.threadId ?? "";
         return { status: running?.status, threadId: running?.threadId };
-      }, { timeout: 10_000 }).toMatchObject({ status: "running", threadId: expect.any(String) });
+      }, { timeout: hostTimeout(10_000) }).toMatchObject({ status: "running", threadId: expect.any(String) });
 
       const opened = await api("POST", `/api/groups/${room.id}/tasks/${backgroundThreadId}`);
       expect(opened.status).toBe(200);
@@ -807,7 +797,7 @@ describe("goal-driven channel runs", () => {
           leadBusy: state.bots.find((bot: { id: string }) => bot.id === lead.id)?.busy,
           workerBusy: state.bots.find((bot: { id: string }) => bot.id === worker.id)?.busy,
         };
-      }, { timeout: 10_000 }).toMatchObject({
+      }, { timeout: hostTimeout(10_000) }).toMatchObject({
         activeThreadId: backgroundThreadId,
         roomWorking: true,
         status: "working",
@@ -817,8 +807,7 @@ describe("goal-driven channel runs", () => {
         workerBusy: true,
       });
 
-      // Hold just this unrelated direct turn until Stop is observed. The
-      // initial goal delegation used the already-open gate above.
+      // Hold just this unrelated direct turn until Stop is observed.
       rmSync(stopScopedLeadFinishGate, { force: true });
       expect((await api("POST", `/api/bots/${lead.id}/messages`, {
         text: "Start unrelated coordinator work",
@@ -834,9 +823,6 @@ describe("goal-driven channel runs", () => {
         };
       }).toEqual({ busy: true, directReplyStarted: true });
 
-      // The ordinary bot Stop belongs to the direct claim made above. The
-      // coordinator is no longer an active participant in the waiting room
-      // operation, so this must not cancel the scheduled team goal.
       expect((await api("POST", `/api/bots/${lead.id}/interrupt`)).status).toBe(200);
       await expect.poll(async () => {
         const state = (await api("GET", "/api/bots?messages=30")).body;
@@ -844,9 +830,7 @@ describe("goal-driven channel runs", () => {
       }, { timeout: 5_000 }).toBe(false);
 
       writeFileSync(stopScopedLeadFinishGate, "allow the later goal continuation");
-      // The worker may settle and advance the room while Stop is in flight.
-      // Either in-progress or already-completed is valid; cancellation/stopped
-      // is the regression this snapshot must exclude.
+      // The worker may settle and advance the room while Stop is in flight: only cancellation is wrong.
       const afterStopCalendar = (await api("GET", "/api/routines")).body;
       const afterStopRun = afterStopCalendar.runs.find((run: { id: string }) => run.id === runId);
       const afterStopState = (await api("GET", "/api/bots?messages=30")).body;
@@ -962,7 +946,7 @@ describe("goal-driven channel runs", () => {
       await expect.poll(async () => {
         const calendar = (await api("GET", "/api/routines")).body;
         return calendar.runs.find((run: { id: string }) => run.id === runId);
-      }, { timeout: 10_000 }).toMatchObject({
+      }, { timeout: hostTimeout(10_000) }).toMatchObject({
         id: runId,
         status: "completed",
         target: "room-goal",
@@ -979,7 +963,7 @@ describe("goal-driven channel runs", () => {
       expect(backgroundRoom.threadId).toBe(completedRun.threadId);
       expect(backgroundRoom.tasks).toContainEqual(expect.objectContaining({
         threadId: completedRun.threadId,
-        title: "Daily team review",
+        title: expect.stringMatching(/^Daily team review · [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d{2} [AP]M$/),
       }));
 
       const switched = await api("POST", `/api/groups/${room.id}/tasks/${completedRun.threadId}`);
@@ -1019,17 +1003,21 @@ describe("goal-driven channel runs", () => {
       mode: "goal",
     });
     expect(started.status).toBe(202);
-    // Per-turn digests can push the original card out of a tail page.
-    // Anchor its identity beside this exact accepted user message, then
-    // observe that same receipt through the bounded scrollback endpoint.
+    // Per-turn digests can push the card out of a tail page, so read around the accepted message.
     const initial = await api("GET", `/api/threads/${started.body.threadId}/messages?around=${started.body.message.id}&limit=3`);
     const card = initial.body.messages.find((message: { kind: string }) => message.kind === "goal.run");
     expect(card).toMatchObject({ id: expect.any(String) });
 
-    await expect.poll(async () => {
-      const page = await api("GET", `/api/threads/${started.body.threadId}/messages?around=${card.id}&limit=1`);
-      return page.body.messages[0]?.goalRun;
-    }, { timeout: 15_000 }).toMatchObject({ status: "limit-reached", turnCount: 13, maxTurns: 13 });
+    const goalRun = async () => (await api("GET", `/api/threads/${started.body.threadId}/messages?around=${card.id}&limit=1`)).body.messages[0]?.goalRun;
+    let run = await goalRun();
+    let turn = run?.turnCount, movedAt = Date.now();
+    while (run?.status === "working") {
+      if (run.turnCount !== turn) [turn, movedAt] = [run.turnCount, Date.now()];
+      if (Date.now() - movedAt > hostTimeout(10_000)) throw new Error(`the run stopped at turn ${turn}: ${JSON.stringify(run)}`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      run = await goalRun();
+    }
+    expect(run).toMatchObject({ status: "limit-reached", turnCount: 13, maxTurns: 13 });
   });
 
   it("never treats a failed provider turn as a completed goal", async () => {
@@ -1053,9 +1041,8 @@ describe("goal-driven channel runs", () => {
       const state = (await api("GET", "/api/bots?messages=20")).body;
       const current = state.groups.find((candidate: { id: string }) => candidate.id === room.id);
       return current?.messages.find((message: { kind: string }) => message.kind === "goal.run")?.goalRun;
-    // the failed attempt is retried once, and a retry is a model call that
-    // costs a turn like any other — so the honest count is two, still failed
-    }, { timeout: 10_000 }).toMatchObject({ status: "failed", turnCount: 2 });
+      // the failed attempt is retried once, and a retry costs a turn, so the count is two
+    }, { timeout: hostTimeout(10_000) }).toMatchObject({ status: "failed", turnCount: 2 });
   });
 
   it("validates mode and binds it to the send id", async () => {
@@ -1119,7 +1106,7 @@ describe("goal-driven channel runs", () => {
         working: current?.working,
         sends: userLines.map((message: { sendId?: string }) => message.sendId),
       };
-    }, { timeout: 10_000 }).toEqual({ working: false, sends: [firstSendId, secondSendId] });
+    }, { timeout: hostTimeout(10_000) }).toEqual({ working: false, sends: [firstSendId, secondSendId] });
 
     const state = (await api("GET", "/api/bots?messages=30")).body;
     const current = state.groups.find((candidate: { id: string }) => candidate.id === room.id);

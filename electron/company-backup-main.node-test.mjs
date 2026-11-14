@@ -8,10 +8,7 @@ import environments from "./environments.cjs";
 import { randomUUID } from "node:crypto";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
 
-// Exercise the production main-process functions and IPC registrations without
-// importing Electron main (which would start the app). All IO, connection state,
-// and transfer results are synthetic; these tests do not prove archive transport,
-// OS keychain storage, or a renderer workflow.
+// Production main functions without importing Electron main (which would start the app); all IO is synthetic.
 // Windows checkouts can have CRLF line endings; the source checks below match "\n".
 const mainSource = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 function section(start, end) {
@@ -61,9 +58,10 @@ function fixture() {
       return store;
     },
     createManagedDesktopClient: options => { f.onState = options.onState; f.clientOptions = options; return client; },
-    // The organization library is wired beside company access; a recording stub.
+    tailnetShare: { recheck: () => { f.tailnetRechecks = (f.tailnetRechecks ?? 0) + 1; } },
     createOrgLibrary: options => { f.libraryOptions = options; return f.library; },
     managedDesktopRelay: { sendLibrary: async (proc, library) => { f.librarySent.push({ proc, library }); } },
+    installCloudPlanIpc: () => {},
     createCompanyBackupSchedule: options => {
       f.scheduleOptions = options;
       return createCompanyBackupSchedule({ ...options, now: () => f.now,
@@ -76,7 +74,7 @@ function fixture() {
     companyBackupState: { busy: false }, serverProc: {}, serverReady: true,
     desktopRemoteAccess: null, mainWindow: { webContents: contents, isDestroyed: () => false },
     rendererOrigin: () => ORIGIN, environmentsState: { environments: [], activeId: "local" },
-    activeEnvironment: environments.activeEnvironment, workspaceSenderAllowed: environments.workspaceSenderAllowed,
+    activeEnvironment: environments.activeEnvironment, activeRemote: environments.activeRemote, workspaceSenderAllowed: environments.workspaceSenderAllowed,
     localOnly: localOrigin.localOnly, ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), on: (channel, handler) => handlers.set(channel, handler) },
     SERVER_PORT: 48799, DESKTOP_MUTATION_HEADER: "x-fixture-desktop-mutation", desktopMutationToken: "synthetic-local-only",
     fetch: async (url, options) => {
@@ -114,7 +112,7 @@ test("ensureManagedDesktop gives the organization library its own record, the fi
 });
 
 test("main hands the library a restarted runtime, the runtime's own messages and the quit", () => {
-  // Outside ensureManagedDesktop(), so checked in the source like the recovery-window rule in server-supervisor.node-test.mjs.
+  // Outside ensureManagedDesktop(), so checked in the source.
   assert.match(section("onReady(proc) {", "routineWake.start();"), /\n\s*orgLibrary\?\.runtimeReady\(\);\n/);
   const messages = section('proc.on("message", (message) => {', 'proc.once("spawn"');
   assert.match(messages, /if \(!serverSupervisor\.isCurrent\(proc\)\) return;/, "a replaced runtime's messages are dropped first");
@@ -321,6 +319,13 @@ for (const state of [{ status: "signed-out" }, { status: "reauth-required" }, { 
     assert.equal(f.context.companyBackupState.busy, true, "Cleanup remains busy until the active operation settles");
   });
 }
+
+test("every change to the organization's state reaches the tailnet share, which follows its policy", () => {
+  const f = fixture();
+  f.onState({ status: "connected", cloudBackups: true });
+  f.onState({ status: "connected", cloudBackups: true });
+  assert.equal(f.tailnetRechecks, 2);
+});
 
 test("backup IPC requires the local main window's exact main frame", async () => {
   const f = fixture();

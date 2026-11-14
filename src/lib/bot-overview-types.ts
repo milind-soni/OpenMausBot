@@ -1,14 +1,13 @@
-// Web-side mirror of server/bot-overview.ts's response shape for
-// GET /api/bots/:id/overview. No logic lives here — the sentences are
-// built once, server-side, so the phones and this dialog can never
-// disagree about what a bot does.
+import type { RoutineSchedule } from "@/lib/routines";
+
 export interface BotOverview {
   who: { name: string; title: string; blurb: string; soulLead: string };
   does: string[];
+  doesRoutines?: OverviewRoutineLine[];
+  managedSections?: string[];
   reaches: string[];
   wont: string[];
   recent: Array<{ at: number; summary: string }>;
-  /** Setup checklist; absent from servers older than this field. */
   setup?: SetupStep[];
 }
 
@@ -17,4 +16,12 @@ export interface SetupStep {
   label: string;
   done: boolean;
   section?: "identity" | "soul" | "access" | "routines";
+}
+
+export interface OverviewRoutineLine {
+  name: string;
+  paused?: true;
+  schedule: RoutineSchedule;
+  nextRunAt?: number;
+  lastRun?: { status: string; at: number };
 }

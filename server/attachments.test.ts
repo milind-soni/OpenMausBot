@@ -1,5 +1,3 @@
-// attachments.ts: save + read-back, the mime allowlist, size ceiling, and
-// the name-lock that keeps the serving route inside the attachments dir.
 import {
   existsSync,
   mkdirSync,
@@ -14,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { link, unlink } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -45,10 +43,18 @@ process.env.OMB_DATA_DIR = join(DATA_ROOT, "data");
 const {
   ATTACHMENTS_DIR,
   ATTACHMENTS_MAX_BYTES,
+  ATTACHMENT_CLEAR_MIN_AGE_MS,
   ATTACHMENT_PARTIAL_MAX_AGE_MS,
+  DEFAULT_ATTACHMENTS_MAX_BYTES,
   FILE_MAX_BYTES,
   IMAGE_MAX_BYTES,
+  PREVIEW_MAX_BYTES,
   __resetAttachmentAccountingForTests,
+  attachmentStorageUsage,
+  attachmentsMaxBytes,
+  clearAttachments,
+  keptAttachmentNames,
+  offerAttachmentClear,
   cleanupStaleAttachmentPartials,
   deleteAttachment,
   extensionForFileMime,
@@ -63,10 +69,7 @@ const {
   validateAttachmentUploadId,
 } = await import("./attachments.ts");
 
-// The cache tracks committed bytes in memory; anything that mutates
-// ATTACHMENTS_DIR directly on disk (rmSync/truncateSync/writeFileSync, all
-// used below to force quota states without a real 512MiB file) must reset it
-// so the next quota check rescans instead of trusting stale counts.
+// Anything that mutates ATTACHMENTS_DIR on disk must reset the in-memory quota cache, or the next check trusts stale counts.
 function resetDir() {
   rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
   __resetAttachmentAccountingForTests();
@@ -184,10 +187,21 @@ describe("saveAudio", () => {
     expect(saved.path.endsWith(".mp3")).toBe(true);
   });
 
+  it("keeps a WAV note as .wav and serves it back as audio/wav", () => {
+    for (const mime of ["audio/wav", "audio/x-wav", "Audio/Wave"]) {
+      const saved = saveAudio(Buffer.from(`RIFF-${mime}`), mime);
+      expect(saved.mime).toBe("audio/wav");
+      expect(saved.path.endsWith(".wav")).toBe(true);
+      const back = readAttachment(saved.path.split(/[\\/]/).pop()!);
+      expect(back?.bytes.toString()).toBe(`RIFF-${mime}`);
+      expect(back?.mime).toBe("audio/wav");
+    }
+  });
+
   it("rejects other audio mimes, empty bodies, and oversize bodies", () => {
-    expect(() => saveAudio(Buffer.from("x"), "audio/wav")).toThrow(/unsupported audio type/);
+    expect(() => saveAudio(Buffer.from("x"), "audio/ogg")).toThrow(/unsupported audio type/);
     expect(() => saveAudio(Buffer.alloc(0), "audio/mpeg")).toThrow(/empty/);
-    expect(() => saveAudio(Buffer.alloc(FILE_MAX_BYTES + 1), "audio/mpeg")).toThrow(/exceeds/);
+    expect(() => saveAudio(Buffer.alloc(PREVIEW_MAX_BYTES + 1), "audio/mpeg")).toThrow(/exceeds/);
   });
 
   it("rejects at the aggregate ceiling without leaving partials and releases its reservation", () => {
@@ -220,6 +234,17 @@ describe("saveAudio", () => {
   });
 });
 
+describe("attachmentsMaxBytes", () => {
+  it("keeps 512 MB unless OMB_ATTACHMENTS_MAX_BYTES is a positive whole number of bytes", () => {
+    expect(ATTACHMENTS_MAX_BYTES).toBe(DEFAULT_ATTACHMENTS_MAX_BYTES);
+    expect(attachmentsMaxBytes({})).toBe(512 * 1024 * 1024);
+    expect(attachmentsMaxBytes({ OMB_ATTACHMENTS_MAX_BYTES: " 4294967296 " })).toBe(4 * 1024 * 1024 * 1024);
+    for (const bad of ["", "0", "-1", "2GB", "1.5", "NaN"]) {
+      expect(attachmentsMaxBytes({ OMB_ATTACHMENTS_MAX_BYTES: bad })).toBe(DEFAULT_ATTACHMENTS_MAX_BYTES);
+    }
+  });
+});
+
 describe("aggregate attachment storage", () => {
   beforeEach(() => {
     resetDir();
@@ -238,7 +263,7 @@ describe("aggregate attachment storage", () => {
       throw new Error("expected quota rejection");
     } catch (error) {
       expect(error).toMatchObject({ status: 507 });
-      expect(error).toHaveProperty("message", expect.stringMatching(/storage is full/));
+      expect(error).toHaveProperty("message", "attachments storage is full (512 MB limit). Clear old attachments in Settings → General.");
     }
     expect(existsSync(referenced.path)).toBe(true);
     expect(statSync(referenced.path).size).toBe(ATTACHMENTS_MAX_BYTES);
@@ -310,9 +335,6 @@ describe("aggregate attachment storage", () => {
     expect(() => saveImage(Buffer.from("y"), "image/png")).toThrow(/storage is full/);
     const old = new Date(Date.now() - ATTACHMENT_PARTIAL_MAX_AGE_MS - 1_000);
     utimesSync(orphan, old, old);
-    // Reservation checks no longer rescan the directory on every call (that
-    // was the PERF-03 hot loop); a stale partial is reclaimed by an explicit
-    // cleanup sweep, not automatically on the next quota check.
     expect(cleanupStaleAttachmentPartials()).toBe(1);
     expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
     expect(existsSync(orphan)).toBe(false);
@@ -343,6 +365,16 @@ describe("aggregate attachment storage", () => {
     const second = saveImage(Buffer.from("yyy"), "image/png");
     expect(second.bytes).toBe(3);
     expect(readdirSync(ATTACHMENTS_DIR)).toEqual([second.path.split(/[\\/]/).pop()!]);
+  });
+
+  it("frees quota for a file deleted outside the app once the store looks full", () => {
+    const first = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(first.path, ATTACHMENTS_MAX_BYTES - 2);
+    __resetAttachmentAccountingForTests();
+    expect(() => saveImage(Buffer.from("yyy"), "image/png")).toThrow(/storage is full/);
+
+    realUnlinkSync(first.path);
+    expect(saveImage(Buffer.from("yyy"), "image/png").bytes).toBe(3);
   });
 
   it.each([1, 2])("counts a committed upload after %i partial-cleanup failures and an idempotent retry", async (failures) => {
@@ -422,10 +454,7 @@ describe("aggregate attachment storage", () => {
   });
 
   it("initializes correctly on a fresh process against a directory that already has files", () => {
-    // No saveImage/saveFile call has happened yet in this test, so the cache
-    // is still cold (__resetAttachmentAccountingForTests in the previous
-    // test's afterEach already guaranteed that) — this mirrors a process
-    // restart that finds attachments already on disk from a prior run.
+    // No save has happened yet in this test, so the cache is cold, as after a restart that finds attachments on disk.
     mkdirSync(ATTACHMENTS_DIR, { recursive: true });
     const preexisting = join(ATTACHMENTS_DIR, "11111111-1111-4111-8111-111111111111.png");
     writeFileSync(preexisting, "x");
@@ -506,11 +535,12 @@ describe("shared files", () => {
     resetDir();
   });
 
-  it("allows useful document mimes but not executables, archives, or active markup", () => {
+  it("allows useful document and archive mimes but not executables or active markup", () => {
     expect(extensionForFileMime("text/plain; charset=utf-8")).toBe(".txt");
     expect(extensionForFileMime("application/pdf")).toBe(".pdf");
     expect(extensionForFileMime("application/vnd.openxmlformats-officedocument.wordprocessingml.document")).toBe(".docx");
-    expect(extensionForFileMime("application/zip")).toBeNull();
+    expect(extensionForFileMime("application/zip")).toBe(".zip");
+    expect(extensionForFileMime("application/x-compressed-tar")).toBe(".tgz");
     expect(extensionForFileMime("application/x-msdownload")).toBeNull();
     expect(extensionForFileMime("application/octet-stream")).toBeNull();
     expect(extensionForFileMime("text/html")).toBeNull();
@@ -523,7 +553,8 @@ describe("shared files", () => {
     expect(() => sanitizeSharedFileName("../../secret.txt", "text/plain")).toThrow(/filename, not a path/);
     expect(() => sanitizeSharedFileName("..\\..\\secret.txt", "text/plain")).toThrow(/filename, not a path/);
     expect(() => sanitizeSharedFileName("..%2F..%2Fsecret.txt", "text/plain")).toThrow(/filename, not a path/);
-    expect(() => sanitizeSharedFileName("notes.txt", "application/zip")).toThrow(/supported document/);
+    expect(sanitizeSharedFileName("logs.tar.gz", "application/gzip")).toBe("logs.tar.gz");
+    expect(() => sanitizeSharedFileName("notes.txt", "application/x-msdownload")).toThrow(/supported document/);
   });
 
   it("streams a file under a generated name with private permissions", async () => {
@@ -574,6 +605,18 @@ describe("shared files", () => {
     expect(readdirSync(ATTACHMENTS_DIR)).toEqual([]);
   });
 
+  it("keeps a file larger than a preview: only what is read whole stays at the preview size", async () => {
+    const bytes = PREVIEW_MAX_BYTES + 1;
+    async function* reel() {
+      yield Buffer.alloc(PREVIEW_MAX_BYTES);
+      yield Buffer.from("x");
+    }
+    const saved = await saveFile(reel(), "reel.mp4", "video/mp4", { expectedBytes: bytes });
+    expect(saved).toMatchObject({ name: "reel.mp4", mime: "video/mp4", bytes });
+    expect(statSync(saved.path).size).toBe(bytes);
+    expect(FILE_MAX_BYTES).toBeGreaterThan(PREVIEW_MAX_BYTES);
+  });
+
   it("deduplicates concurrent and later file retries by upload ID", async () => {
     const makeChunks = async function* () {
       yield Buffer.from("same ");
@@ -613,5 +656,114 @@ describe("shared files", () => {
     await expect(document).resolves.toMatchObject({ bytes: 11 });
     await expect(image).rejects.toMatchObject({ status: 409 });
     expect(readdirSync(ATTACHMENTS_DIR)).toEqual([`${UPLOAD_A}.pdf`]);
+  });
+});
+
+describe("clearing attachments from Settings", () => {
+  beforeEach(() => {
+    resetDir();
+  });
+  afterEach(() => {
+    resetDir();
+  });
+
+  const nameOf = (path: string) => path.split(/[\\/]/).pop()!;
+
+  it("keeps pictures by their url and files by their path, on any platform", () => {
+    const kept = keptAttachmentNames(
+      ["/api/attachments/bot.png", null, undefined, "https://example.com/face.png"],
+      ["banner.webp", "C:\\Users\\me\\data\\attachments\\routine.pdf", "/home/me/data/attachments/run.png", undefined],
+    );
+    expect([...kept].sort()).toEqual(["banner.webp", "bot.png", "routine.pdf", "run.png"]);
+  });
+
+  const age = (path: string, ms: number) => {
+    const at = new Date(Date.now() - ms);
+    utimesSync(path, at, at);
+  };
+
+  it("frees a full store so the next upload works, keeping pictures, routine files and fresh uploads", () => {
+    const old = saveImage(Buffer.from("old"), "image/png");
+    const picture = saveImage(Buffer.from("avatar"), "image/png");
+    const fresh = saveImage(Buffer.from("fresh"), "image/png");
+    truncateSync(old.path, ATTACHMENTS_MAX_BYTES - 64);
+    age(old.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    age(picture.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    __resetAttachmentAccountingForTests();
+    expect(() => saveImage(Buffer.from("x".repeat(100)), "image/png")).toThrow(/storage is full.*Settings/);
+
+    const cleared = clearAttachments(new Set([nameOf(picture.path)]));
+
+    expect(cleared).toEqual({ removed: 1, freedBytes: ATTACHMENTS_MAX_BYTES - 64, failed: 0 });
+    expect(existsSync(old.path)).toBe(false);
+    expect(existsSync(picture.path)).toBe(true);
+    expect(existsSync(fresh.path)).toBe(true);
+    expect(attachmentStorageUsage()).toEqual({ usedBytes: "avatar".length + "fresh".length, maxBytes: ATTACHMENTS_MAX_BYTES });
+    expect(() => saveImage(Buffer.from("x".repeat(100)), "image/png")).not.toThrow();
+  });
+
+  it("removes a deleted or cleared upload from every conversation's box uploads folder too, so no box can still read it", () => {
+    const deleted = saveImage(Buffer.from("deleted"), "image/png");
+    const cleared = saveImage(Buffer.from("cleared"), "image/png");
+    const kept = saveImage(Buffer.from("kept"), "image/png");
+    const boxUploads = join(dirname(ATTACHMENTS_DIR), "box-uploads");
+    const shown = [join(boxUploads, "bot-a", "thread-1"), join(boxUploads, "bot-b", "thread-2")];
+    for (const dir of shown) {
+      mkdirSync(dir, { recursive: true });
+      for (const upload of [deleted, cleared, kept]) writeFileSync(join(dir, nameOf(upload.path)), "copy");
+    }
+    deleteAttachment(deleted.path);
+    age(cleared.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    clearAttachments(new Set([nameOf(kept.path)]));
+    for (const dir of shown) expect(readdirSync(dir)).toEqual([nameOf(kept.path)]);
+    rmSync(boxUploads, { recursive: true, force: true });
+  });
+
+  it("keeps an upload's box copies while the upload itself could not be deleted", () => {
+    const busy = saveImage(Buffer.from("busy"), "image/png");
+    const dir = join(dirname(ATTACHMENTS_DIR), "box-uploads", "bot-a", "thread-1");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, nameOf(busy.path)), "copy");
+    vi.mocked(unlinkSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error("resource busy"), { code: "EBUSY" });
+    });
+    deleteAttachment(busy.path);
+    expect(existsSync(busy.path)).toBe(true);
+    expect(readdirSync(dir)).toEqual([nameOf(busy.path)]);
+    rmSync(join(dirname(ATTACHMENTS_DIR), "box-uploads"), { recursive: true, force: true });
+  });
+
+  it("does not point a Team Cloud, which has no clear, to Settings", () => {
+    const full = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(full.path, ATTACHMENTS_MAX_BYTES);
+    __resetAttachmentAccountingForTests();
+    offerAttachmentClear(false);
+    try {
+      expect(() => saveImage(Buffer.from("y"), "image/png")).toThrow(/^attachments storage is full \(512 MB limit\)$/);
+    } finally {
+      offerAttachmentClear(true);
+    }
+  });
+
+  it("counts files it could not remove instead of hiding them", () => {
+    const busy = saveImage(Buffer.from("busy"), "image/png");
+    const gone = saveImage(Buffer.from("gone"), "image/png");
+    age(busy.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    age(gone.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    vi.mocked(unlinkSync).mockImplementation((path) => {
+      throw Object.assign(new Error("failed"), { code: String(path) === busy.path ? "EBUSY" : "ENOENT" });
+    });
+
+    expect(clearAttachments(new Set())).toEqual({ removed: 0, freedBytes: 0, failed: 1 });
+  });
+
+  it("leaves upload partials to their own cleanup", () => {
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    const partial = join(ATTACHMENTS_DIR, `.openmaus-upload-${UPLOAD_A}-${UPLOAD_B}.partial`);
+    writeFileSync(partial, "part");
+    age(partial, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+
+    expect(clearAttachments(new Set())).toEqual({ removed: 0, freedBytes: 0, failed: 0 });
+    expect(existsSync(partial)).toBe(true);
   });
 });

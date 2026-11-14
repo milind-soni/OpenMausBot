@@ -1,15 +1,19 @@
-/**
- * Supervise one browser EventSource for `/api/events`.
- *
- * EventSource hides SSE comment keepalives, so a half-open proxy can leave the
- * UI looking connected forever. The server also sends a visible `ping` frame;
- * this supervisor uses it as liveness, owns reconnects itself, and carries an
- * explicit replay cursor whenever it replaces the native EventSource.
- */
+// EventSource hides SSE comment keepalives, so liveness comes from the server's visible `ping` frame.
+import type { ServerFrame } from "../../shared/wire";
+import { cloudAsleep, markCloudAsleep, onCloudPower, sleepingFrame } from "./cloud-power";
+import { recordBotTextMessage, recordRuntimeEvent } from "./voice-latency-probe";
+import { noteTurnEvent } from "@/state/turn-status";
+import { forgetLiveReplies, noteLiveReplyEvent, noteLiveReplyMessage } from "@/state/live-reply";
+
 export const LIVE_EVENTS_PATH = "/api/events";
 export const LIVE_EVENTS_STALE_MS = 40_000;
 export const LIVE_EVENTS_RETRY_MIN_MS = 500;
 export const LIVE_EVENTS_RETRY_MAX_MS = 10_000;
+const RETRY_LIVE_EVENTS = "omb:retry-live-events";
+
+export function retryLiveEvents(): void {
+  window.dispatchEvent(new Event(RETRY_LIVE_EVENTS));
+}
 
 export interface LiveFrame {
   kind: string;
@@ -46,25 +50,60 @@ export interface LiveEventsPlatform {
 
 export interface LiveEventsHandlers {
   onFrame: (frame: LiveFrame) => void;
-  /** Rebuild the consumer's complete snapshot after the server says its
-   * replay gap cannot be filled. The transport commits the new cursor only
-   * after this succeeds; false/rejection closes the stream and retries from
-   * the last known-good boundary. */
+  /** The transport commits the new cursor only after this resolves true. */
   onSnapshotRequired: () => Promise<boolean>;
   onOpen?: () => void;
   onError?: () => void;
-  screens?: boolean;
   staleMs?: number;
   retryMinMs?: number;
   retryMaxMs?: number;
 }
 
+/** `screens: false` asks the server to leave out live screen frames; `window=1` tells it an app window is open. */
 export function liveEventsUrl(options?: { since?: string | null; screens?: boolean }): string {
   const params = new URLSearchParams();
   if (options?.since) params.set("since", options.since);
   if (options?.screens === false) params.set("screens", "off");
-  const query = params.toString();
-  return query ? `${LIVE_EVENTS_PATH}?${query}` : LIVE_EVENTS_PATH;
+  params.set("window", "1");
+  return `${LIVE_EVENTS_PATH}?${params}`;
+}
+
+export interface LiveFrameListener {
+  onFrame: (frame: ServerFrame) => void;
+  onMissedFrames?: () => void;
+  /** Draws live screens: while a listener with this is registered the stream carries screen frames; with none it does not. */
+  screens?: boolean;
+}
+
+const liveFrameListeners = new Set<LiveFrameListener>();
+const screenWishListeners = new Set<() => void>();
+const screensWanted = () => [...liveFrameListeners].some((listener) => listener.screens);
+
+export function listenLiveFrames(listener: LiveFrameListener): () => void {
+  const before = screensWanted();
+  liveFrameListeners.add(listener);
+  if (screensWanted() !== before) for (const changed of screenWishListeners) changed();
+  return () => {
+    const wanted = screensWanted();
+    liveFrameListeners.delete(listener);
+    if (screensWanted() !== wanted) for (const changed of screenWishListeners) changed();
+  };
+}
+
+/** A frame kept for later (before the first snapshot is drawn) needs no pixels: viewers saw them as it arrived. */
+export function withoutScreenPixels(frame: ServerFrame): ServerFrame {
+  if (frame.kind !== "screen") return frame;
+  const { png: _png, ...rest } = frame;
+  return { ...rest, png: "" };
+}
+
+export function publishLiveFrame(frame: ServerFrame): void {
+  for (const listener of liveFrameListeners) listener.onFrame(frame);
+}
+
+export function publishMissedFrames(): void {
+  forgetLiveReplies();
+  for (const listener of liveFrameListeners) listener.onMissedFrames?.();
 }
 
 export function isLivePing(frame: Pick<LiveFrame, "kind">): boolean {
@@ -79,9 +118,6 @@ export function shouldReconnectLiveEvents(
   return now - lastHeardAt >= staleMs;
 }
 
-/** Parse only the transport envelope here. Payloads remain owned by their
- * consumers; cloning every token delta through a general schema would put
- * avoidable work on the hottest renderer path. */
 function parseLiveFrame(data: string): LiveFrame | null {
   let value: unknown;
   try {
@@ -90,8 +126,6 @@ function parseLiveFrame(data: string): LiveFrame | null {
     return null;
   }
   if (!value || Array.isArray(value) || Object(value) !== value) return null;
-  // SAFETY: the object guard above establishes an indexable JSON object; each
-  // transport-owned field is validated below before exposing LiveFrame.
   const candidate = value as {
     kind?: unknown;
     cursor?: unknown;
@@ -101,9 +135,19 @@ function parseLiveFrame(data: string): LiveFrame | null {
   if (candidate.kind !== String(candidate.kind)) return null;
   if (candidate.cursor !== undefined && candidate.cursor !== String(candidate.cursor)) return null;
   if (candidate.resumed !== undefined && candidate.resumed !== Boolean(candidate.resumed)) return null;
-  // SAFETY: kind is a string and the two optional transport fields were
-  // checked against their exact primitive representations above.
   return candidate as LiveFrame;
+}
+
+function tapLiveFrame(frame: ServerFrame): void {
+  if (frame.kind === "runtime") {
+    // The chat's status line reads every live runtime frame; none of them is stored.
+    noteTurnEvent(frame.event);
+    noteLiveReplyEvent(frame.event);
+    recordRuntimeEvent(frame.event);
+  } else if (frame.kind === "message" && frame.message?.role === "bot" && frame.message?.kind === "text") {
+    noteLiveReplyMessage(frame.threadId, frame.message);
+    recordBotTextMessage(frame.message, frame.threadId);
+  }
 }
 
 function browserPlatform(overrides: Partial<LiveEventsPlatform>): LiveEventsPlatform | null {
@@ -154,12 +198,6 @@ function browserPlatform(overrides: Partial<LiveEventsPlatform>): LiveEventsPlat
   };
 }
 
-/**
- * Open and supervise one live stream. The returned function owns all cleanup:
- * after it runs, no EventSource, reconnect timer, or browser listener remains.
- * The optional platform is intentionally narrow so connection behavior can be
- * tested without a browser or network.
- */
 export function openLiveEvents(
   handlers: LiveEventsHandlers,
   platformOverrides: Partial<LiveEventsPlatform> = {},
@@ -177,6 +215,7 @@ export function openLiveEvents(
 
   let stopped = false;
   let source: LiveEventSourceLike | null = null;
+  let sourceScreens = screensWanted();
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let retryAttempt = 0;
   let cursor: string | null = null;
@@ -211,7 +250,8 @@ export function openLiveEvents(
 
   let connect: () => void;
   const scheduleReconnect = () => {
-    if (stopped || retryTimer !== null || !platform.isOnline() || !platform.isVisible()) return;
+    // A Cloud home that went to sleep: reconnecting would wake it. The person's next action does (src/lib/cloud-power.ts).
+    if (stopped || retryTimer !== null || !platform.isOnline() || !platform.isVisible() || cloudAsleep()) return;
     const exponent = Math.min(retryAttempt, 20);
     const delay = Math.min(retryMaxMs, retryMinMs * 2 ** exponent);
     retryAttempt += 1;
@@ -230,12 +270,11 @@ export function openLiveEvents(
   };
 
   connect = () => {
-    if (stopped || source || !platform.isOnline()) return;
+    if (stopped || source || !platform.isOnline() || cloudAsleep()) return;
     let current: LiveEventSourceLike;
     try {
-      current = platform.createEventSource(
-        liveEventsUrl({ since: cursor, screens: handlers.screens }),
-      );
+      sourceScreens = screensWanted();
+      current = platform.createEventSource(liveEventsUrl({ since: cursor, screens: sourceScreens }));
     } catch {
       handlers.onError?.();
       scheduleReconnect();
@@ -257,20 +296,14 @@ export function openLiveEvents(
       const frame = parseLiveFrame(event.data);
       if (!frame) return;
 
-      // Heartbeats prove this socket is alive, but they are not application
-      // state and never establish a replay boundary of their own.
       if (isLivePing(frame)) {
-        // An open event only proves that a TCP handshake happened. A ping
-        // proves the stream stayed usable, so only now forgive prior flaps.
+        // An open event only proves a handshake; a ping proves the stream stayed usable.
         retryAttempt = 0;
         return;
       }
 
       if (frame.kind === "hello") {
-        // `resumed:true` is followed by replay frames. Advancing to hello's
-        // newest cursor here would skip any replay frame not yet delivered if
-        // this socket died mid-replay. A failed resume has no replay, but its
-        // cursor is safe only after the consumer's replacement snapshot loads.
+        // Replay frames follow `resumed:true`: advancing to hello's cursor now could skip one if the socket dies mid-replay.
         if (frame.resumed === false) {
           const generation = ++snapshotGeneration;
           pendingSnapshot = {
@@ -300,11 +333,9 @@ export function openLiveEvents(
               connectionLost(current);
               return;
             }
-            // The consumer resolved only after applying every frame it held
-            // behind the snapshot. Commit the newest delivered cursor, or the
-            // hello boundary when no application frame arrived meanwhile.
             cursor = pending.newestFrameCursor ?? pending.boundaryCursor;
             pendingSnapshot = null;
+            onScreenWish();
           })();
         }
       } else if (event.lastEventId) {
@@ -315,9 +346,19 @@ export function openLiveEvents(
         }
       }
 
-      // Hello is transport control, not application state. Consumers rebuild
-      // through onSnapshotRequired and receive only numbered application data.
-      if (frame.kind !== "hello") handlers.onFrame(frame);
+      if (sleepingFrame(frame as LiveFrame & { state?: unknown })) {
+        // The home agreed to sleep: close quietly (not a lost connection) and stay closed until the person is back. The
+        // cursor is past this frame by now, so waking never resumes before it: a Cloud that replays it would close us again.
+        clearRetry();
+        closeSource();
+        markCloudAsleep();
+        return;
+      }
+
+      if (frame.kind !== "hello") {
+        tapLiveFrame(frame as ServerFrame);
+        handlers.onFrame(frame);
+      }
     };
   };
 
@@ -332,9 +373,8 @@ export function openLiveEvents(
   };
 
   const recover = () => {
-    // Background tabs suspend timers and network delivery. Let visibility or
-    // focus perform one recovery on wake instead of churning hidden sockets.
-    if (stopped || !platform.isOnline() || !platform.isVisible()) return;
+    // Background tabs suspend timers and network delivery: recover once on wake.
+    if (stopped || !platform.isOnline() || !platform.isVisible() || cloudAsleep()) return;
     if (!source || shouldReconnectLiveEvents(lastHeardAt, platform.now(), staleMs)) {
       reconnectNow(source !== null);
     }
@@ -346,21 +386,34 @@ export function openLiveEvents(
   const onVisibilityChange = () => {
     if (platform.isVisible()) recover();
   };
+  const onRetry = () => {
+    if (platform.isVisible() && !cloudAsleep()) reconnectNow(true);
+  };
 
+  const onScreenWish = () => queueMicrotask(() => {
+    if (source && cursor && !pendingSnapshot && screensWanted() !== sourceScreens) reconnectNow(false);
+  });
+  screenWishListeners.add(onScreenWish);
   connect();
   const staleTimer = setInterval(recover, staleCheckMs);
+  // The person is back after the Cloud slept: reconnect at once, which wakes it.
+  const stopPower = onCloudPower((asleep) => { if (!asleep) reconnectNow(false); });
   platform.windowTarget?.addEventListener("online", onOnline);
   platform.windowTarget?.addEventListener("focus", onFocus);
+  platform.windowTarget?.addEventListener(RETRY_LIVE_EVENTS, onRetry);
   platform.documentTarget?.addEventListener("visibilitychange", onVisibilityChange);
 
   return () => {
     if (stopped) return;
     stopped = true;
+    screenWishListeners.delete(onScreenWish);
+    stopPower();
     clearInterval(staleTimer);
     clearRetry();
     closeSource();
     platform.windowTarget?.removeEventListener("online", onOnline);
     platform.windowTarget?.removeEventListener("focus", onFocus);
+    platform.windowTarget?.removeEventListener(RETRY_LIVE_EVENTS, onRetry);
     platform.documentTarget?.removeEventListener("visibilitychange", onVisibilityChange);
   };
 }

@@ -1,13 +1,7 @@
-// The control plane's own front door.
-//
-// This server binds loopback and serves the pairing page, which makes it feel
-// unreachable from outside. It is not: a browser on the victim's machine is
-// inside that boundary, and any page on the internet can aim a form at it.
-// These tests pin the rule that keeps that from mattering.
-import { type Server } from "node:http";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { request, type Server } from "node:http";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { createControlServer, hostCandidates, originIsLoopback } from "../src/control.ts";
+import { createControlServer, hostCandidates, initialControlToken, originIsLoopback } from "../src/control.ts";
 import { DeviceRegistry } from "../src/devices.ts";
 
 let control: Server;
@@ -15,16 +9,20 @@ let port = 0;
 let devices: DeviceRegistry;
 let connectedDeviceIds: string[] = [];
 let disconnectedDeviceIds: string[] = [];
-let tailscaleRefreshes = 0;
-let completedTailscaleRefreshes = 0;
+let revokedDeviceIds: string[] = [];
+const routeBodies: unknown[] = [];
+const CONTROL_TOKEN = "c".repeat(43);
+let controlToken: string | null = CONTROL_TOKEN;
+const withToken = { "x-openmausbot-control-token": CONTROL_TOKEN };
 
 const ask = async (
   method: string,
   path: string,
   headers: Record<string, string> = {},
   body?: string,
+  token: Record<string, string> = withToken,
 ): Promise<{ status: number; body: any }> => {
-  const res = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers, body });
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers: { ...token, ...headers }, body });
   const text = await res.text();
   try {
     return { status: res.status, body: JSON.parse(text) };
@@ -38,6 +36,7 @@ beforeAll(async () => {
   let hostedUrl: string | null = null;
   control = createControlServer({
     devices,
+    controlToken: () => controlToken,
     companionPort: 8810,
     secretPublicKey: () => "BIPBQ12_dWnF1DZLsTZO3Vg0NGjds5-jp9h3jhjr2To7bJelczS0LM82rfXV68PmSJhz2ePosj3fL974XckCpDU",
     hostedUrl: () => hostedUrl,
@@ -50,10 +49,12 @@ beforeAll(async () => {
       disconnectedDeviceIds.push(deviceId);
       connectedDeviceIds = connectedDeviceIds.filter((connectedId) => connectedId !== deviceId);
     },
-    refreshTailscale: async () => {
-      tailscaleRefreshes += 1;
-      await Promise.resolve();
-      completedTailscaleRefreshes += 1;
+    revoked: (deviceId) => {
+      revokedDeviceIds.push(deviceId);
+    },
+    setDirectRoutes: (body) => {
+      routeBodies.push(body);
+      return typeof (body as { wifi?: unknown })?.wifi === "boolean";
     },
   });
   port = await new Promise<number>((resolve) =>
@@ -63,6 +64,62 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => control.close(() => resolve()));
+});
+
+describe("the per-launch control token", () => {
+  it("refuses every route without it, so a page served from the control port cannot pair a device", async () => {
+    for (const [method, path] of [["POST", "/pairing"], ["GET", "/state"], ["DELETE", "/pairing"], ["PUT", "/routes"], ["POST", "/devices/x/browser-control"], ["DELETE", "/devices/x"]]) {
+      const tokenless = await ask(method, path, { origin: `http://127.0.0.1:${port}` }, undefined, {});
+      expect(tokenless.status, `${method} ${path}`).toBe(403);
+      expect(JSON.stringify(tokenless.body)).not.toMatch(/omb_pair_|"code"/);
+    }
+    expect((await ask("POST", "/pairing", {}, undefined, { "x-openmausbot-control-token": "d".repeat(43) })).status).toBe(403);
+    expect((await ask("POST", "/pairing", {}, undefined, { "x-openmausbot-control-token": CONTROL_TOKEN.slice(1) })).status).toBe(403);
+    expect(devices.pairing()).toBeNull();
+  });
+
+  it("serves the page itself, which holds no state, without one", async () => {
+    const page = await ask("GET", "/", {}, undefined, {});
+    expect(page.status).toBe(200);
+    expect(page.body).toContain("x-openmausbot-control-token");
+    expect(page.body).not.toContain(CONTROL_TOKEN);
+  });
+
+  it("waits for the app's token when the app launched the sidecar, and otherwise takes a script's or makes one", () => {
+    expect(initialControlToken({ OMB_CONTROL_TOKEN: CONTROL_TOKEN }, true)).toBeNull();
+    expect(initialControlToken({ OMB_CONTROL_TOKEN: CONTROL_TOKEN }, false)).toBe(CONTROL_TOKEN);
+    for (const env of [{}, { OMB_CONTROL_TOKEN: "short" }, { OMB_CONTROL_TOKEN: `${"c".repeat(42)}!` }]) {
+      const token = initialControlToken(env, false);
+      expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(token).not.toBe(CONTROL_TOKEN);
+    }
+  });
+
+  it("fails closed until the launching app has sent it", async () => {
+    controlToken = null;
+    try {
+      expect((await ask("GET", "/state")).status).toBe(403);
+      expect((await ask("POST", "/pairing")).status).toBe(403);
+    } finally {
+      controlToken = CONTROL_TOKEN;
+    }
+    expect(devices.pairing()).toBeNull();
+  });
+});
+
+describe("malformed requests", () => {
+  it("answers a request target that is not a URL with 400", async () => {
+    const status = await new Promise<number>((resolve, reject) => {
+      const sent = request({ hostname: "127.0.0.1", port, path: "//[", headers: withToken }, (response) => {
+        response.resume();
+        resolve(response.statusCode ?? 0);
+      });
+      sent.on("error", reject);
+      sent.end();
+    });
+    expect(status).toBe(400);
+    expect((await ask("GET", "/state")).status).toBe(200);
+  });
 });
 
 describe("origins the control server will change state for", () => {
@@ -104,65 +161,48 @@ describe("origins the control server will change state for", () => {
   });
 
   it("refuses a state change from a foreign page", async () => {
-    // The attack this exists for: a form POST needs no preflight, and the
-    // Host header on it is the loopback one this server already approves.
-    // Same-origin policy hides the reply, so the code is never read — but a
-    // pairing window opens on the victim's screen regardless.
+    // A form POST needs no preflight and carries the approved loopback Host.
     const { status, body } = await ask("POST", "/pairing", { origin: "https://evil.example" });
     expect(status).toBe(403);
     expect(body.error).toContain("cross-origin");
-    // and it did not happen anyway
     expect((await ask("GET", "/state")).body.pairing).toBeNull();
   });
 
   it("refuses an opaque origin", async () => {
-    // A sandboxed iframe and a file:// page both send the literal string
-    // "null". Treating that as absent would hand the hole straight back.
+    // Sandboxed iframes and file:// pages send the literal string "null".
     expect((await ask("POST", "/pairing", { origin: "null" })).status).toBe(403);
     expect((await ask("DELETE", "/pairing", { origin: "null" })).status).toBe(403);
   });
 
   it("allows the page it serves, and no other loopback origin", async () => {
-    // Exactly this server's origin, not merely a loopback one. The page below
-    // is served from here and its writes carry this authority, so nothing is
-    // lost by narrowing — while a loopback origin on another port is another
-    // program's page, which has no more business opening a pairing window
-    // than a page on the internet does.
     const { status } = await ask("POST", "/pairing", { origin: `http://127.0.0.1:${port}` });
     expect(status).toBe(201);
     expect((await ask("GET", "/state")).body.pairing).not.toBeNull();
     await ask("DELETE", "/pairing", { origin: `http://127.0.0.1:${port}` });
 
-    // A different loopback port is a different origin. So is the same port
-    // under a name that resolves to the same address: `Host` here is
-    // `127.0.0.1:<port>` — what the request was addressed to — and the match
-    // is on the string, because the alternative is a resolver in a CSRF check.
     expect((await ask("POST", "/pairing", { origin: `http://127.0.0.1:${port + 1}` })).status).toBe(403);
     expect((await ask("POST", "/pairing", { origin: `http://localhost:${port}` })).status).toBe(403);
     expect((await ask("GET", "/state")).body.pairing).toBeNull();
   });
 
   it("allows a client that sends no origin at all", async () => {
-    // The Electron main process, which is not a browser and is the normal
-    // desktop path. A CSRF check aimed at it would break the toggle.
+    // The Electron main process is not a browser and sends no Origin.
     expect((await ask("POST", "/pairing")).status).toBe(201);
     await ask("DELETE", "/pairing");
   });
 
-  it("refreshes Tailscale before returning state without opening pairing", async () => {
-    const before = tailscaleRefreshes;
-    const refreshed = await ask("POST", "/tailscale/refresh");
-
-    expect(refreshed.status).toBe(200);
-    expect(tailscaleRefreshes).toBe(before + 1);
-    expect(completedTailscaleRefreshes).toBe(tailscaleRefreshes);
-    expect(refreshed.body.pairing).toBeNull();
+  it("takes the desktop app's direct ways in, and runs no Tailscale route of its own", async () => {
+    const put = await ask("PUT", "/routes", { "content-type": "application/json" }, JSON.stringify({ wifi: false, tailscale: true, tailnetName: "mac.tail1.ts.net" }));
+    expect(put.status).toBe(200);
+    expect(routeBodies.at(-1)).toEqual({ wifi: false, tailscale: true, tailnetName: "mac.tail1.ts.net" });
+    expect((await ask("PUT", "/routes", { "content-type": "application/json" }, JSON.stringify({ wifi: "yes" }))).status).toBe(400);
+    expect((await ask("POST", "/tailscale/refresh")).status).toBe(404);
   });
 
-  it("refuses a Tailscale refresh from a foreign page", async () => {
-    const before = tailscaleRefreshes;
-    expect((await ask("POST", "/tailscale/refresh", { origin: "https://evil.example" })).status).toBe(403);
-    expect(tailscaleRefreshes).toBe(before);
+  it("refuses a routes change from a foreign page", async () => {
+    const before = routeBodies.length;
+    expect((await ask("PUT", "/routes", { origin: "https://evil.example", "content-type": "application/json" }, JSON.stringify({ wifi: true, tailscale: true }))).status).toBe(403);
+    expect(routeBodies.length).toBe(before);
   });
 
   it("does not let a stale conditional close cancel a replacement code", async () => {
@@ -176,16 +216,6 @@ describe("origins the control server will change state for", () => {
   });
 
   it("refuses a foreign origin on a safe method too", async () => {
-    // This line used to expect 200, on the argument that a GET changes
-    // nothing and the same-origin policy already hides the reply. The
-    // stricter rule won the reconciliation, and it is the right one twice
-    // over. Nothing legitimate reads this API cross-origin at all — the only
-    // browser client is the page this server serves itself — so allowing it
-    // buys nothing. And a check that has to decide which methods are "safe"
-    // is a check with a list in it, which is a list that goes stale: the day
-    // a read is added that leaks something (a pairing code, an address, the
-    // device list) the exemption is already in place and nobody revisits it.
-    // So: any cross-origin request, any method, is refused.
     const { status, body } = await ask("GET", "/state", { origin: "https://evil.example" });
     expect(status).toBe(403);
     expect(body.error).toContain("cross-origin");
@@ -194,10 +224,6 @@ describe("origins the control server will change state for", () => {
 
 describe("hostCandidates", () => {
   it("orders by reachability: tailnet name, then LAN, then the mDNS name last", () => {
-    // 100.121.5.6 is the bare tailnet address: excluded outright, because iOS
-    // refuses plain HTTP to 100.64/10 and a candidate that can never succeed
-    // only slows the walk down. The synthetic mDNS name is last — it resolves
-    // only while the sidecar runs.
     const hosts = hostCandidates(["100.121.5.6", "192.168.1.42", "10.0.0.7"], "macbook.tail1234.ts.net");
     expect(hosts.slice(0, 3)).toEqual(["macbook.tail1234.ts.net", "192.168.1.42", "10.0.0.7"]);
     expect(hosts.at(-1)).toMatch(/^openmausbot-[0-9a-f]{8}\.local$/);
@@ -205,8 +231,7 @@ describe("hostCandidates", () => {
   });
 
   it("skips the tailnet name when Tailscale is not part of the picture", () => {
-    // A MagicDNS name left over from a cached read is only dialable while a
-    // tailnet address exists; without one it would be a dead first candidate.
+    // A cached MagicDNS name is dialable only while a tailnet address exists.
     expect(hostCandidates(["192.168.1.42"], "stale.tail1234.ts.net")[0]).toBe("192.168.1.42");
     expect(hostCandidates(["100.121.5.6", "192.168.1.42"], null)[0]).toBe("192.168.1.42");
   });
@@ -217,11 +242,19 @@ describe("hostCandidates", () => {
     expect(Array.isArray(body.hosts)).toBe(true);
     expect(Array.isArray(body.endpoints)).toBe(true);
     expect(body.secretPublicKey).toBe("BIPBQ12_dWnF1DZLsTZO3Vg0NGjds5-jp9h3jhjr2To7bJelczS0LM82rfXV68PmSJhz2ePosj3fL974XckCpDU");
-    // Whatever this machine's interfaces are, the mDNS fallback is always
-    // present and always last.
     expect(body.hosts.at(-1)).toMatch(/^openmausbot-[0-9a-f]{8}\.local$/);
     expect(body.endpoints.at(-1)).toMatchObject({ kind: "bonjour", priority: 300 });
     expect(body.endpoints.at(-1).url).toMatch(/^http:\/\/openmausbot-[0-9a-f]{8}\.local:8810$/);
+  });
+
+  it("says when its device list is only an unreadable file", async () => {
+    expect((await ask("GET", "/state")).body).not.toHaveProperty("devicesUnreadable");
+    const unreadable = vi.spyOn(devices, "devicesUnreadable").mockReturnValue(true);
+    try {
+      expect((await ask("GET", "/state")).body.devicesUnreadable).toBe(true);
+    } finally {
+      unreadable.mockRestore();
+    }
   });
 
   it("reports only the device ids backed by live authenticated streams", async () => {
@@ -248,6 +281,49 @@ describe("hostCandidates", () => {
     expect(revoked.status).toBe(200);
     expect(disconnectedDeviceIds).toEqual([paired.device.id]);
     expect(revoked.body.connectedDeviceIds).toEqual([]);
+  });
+
+  it("keeps a device whose removal cannot be saved, says so, and removes it on retry", async () => {
+    const { code } = devices.openPairing();
+    const paired = devices.redeem(code, "Stubborn phone");
+    if ("error" in paired) throw new Error(paired.error);
+    disconnectedDeviceIds = [];
+    revokedDeviceIds = [];
+    const writable = devices as unknown as { persist: () => void };
+    const persist = writable.persist;
+    writable.persist = () => {
+      throw new Error("ENOSPC: no space left on device");
+    };
+    try {
+      expect(await ask("DELETE", `/devices/${paired.device.id}`)).toEqual({
+        status: 500,
+        body: { error: "could not save the device removal" },
+      });
+    } finally {
+      writable.persist = persist;
+    }
+    expect(devices.list().some((device) => device.id === paired.device.id)).toBe(true);
+    expect(disconnectedDeviceIds).toEqual([]);
+    expect(revokedDeviceIds).toEqual([]);
+
+    expect((await ask("DELETE", `/devices/${paired.device.id}`)).status).toBe(200);
+    expect(devices.authenticate(paired.token)).toBeNull();
+    expect(revokedDeviceIds).toEqual([paired.device.id]);
+  });
+
+  it("tells the harness about a revoked device, and only about a revoke", async () => {
+    const { code } = devices.openPairing();
+    const paired = devices.redeem(code, "Lost phone");
+    if ("error" in paired) throw new Error(paired.error);
+    revokedDeviceIds = [];
+
+    expect((await ask("DELETE", "/devices/missing-device")).status).toBe(404);
+    expect((await ask("POST", `/devices/${paired.device.id}/cloud-desktop`)).status).toBe(200);
+    expect((await ask("DELETE", `/devices/${paired.device.id}/cloud-desktop`)).status).toBe(200);
+    expect(revokedDeviceIds).toEqual([]);
+
+    expect((await ask("DELETE", `/devices/${paired.device.id}`)).status).toBe(200);
+    expect(revokedDeviceIds).toEqual([paired.device.id]);
   });
 });
 
@@ -307,9 +383,8 @@ describe("hosted endpoint advertisement", () => {
       { "content-type": "application/json" },
       JSON.stringify({ url: `https://${"a".repeat(4096)}.example` }),
     );
-    // The server deliberately tears down an oversized upload as soon as the
-    // byte limit is crossed, so native fetch reports a transport failure
-    // rather than waiting for (or parsing) the remainder of the body.
+    // The server tears an oversized upload down as soon as the limit is
+    // crossed, so fetch reports a transport failure.
     await expect(request).rejects.toThrow();
     expect((await ask("GET", "/state")).body.endpoints.some(
       (endpoint: { kind: string }) => endpoint.kind === "hosted",
@@ -326,7 +401,6 @@ describe("originIsLoopback", () => {
 
     expect(originIsLoopback("null")).toBe(false);
     expect(originIsLoopback("https://evil.example")).toBe(false);
-    // the prefix trick: a hostname that merely starts with the loopback one
     expect(originIsLoopback("https://127.0.0.1.evil.example")).toBe(false);
     expect(originIsLoopback("https://localhost.evil.example")).toBe(false);
   });

@@ -1,18 +1,4 @@
-// A webhook turn must not be able to un-webhook itself.
-//
-// unattended.test.ts pins that a webhook turn on an Auto-mode bot keeps
-// asking a human. This pins the door that was left beside it: a message
-// POSTed into that running turn is steered into it, and the harness used to
-// treat any steer as "a person is here now" and lift the unattended mark. On
-// a headless server the bot's own shell is a loopback caller, so one
-// `curl -d '{"text":"continue"}'` from inside the turn laundered the rest of
-// it into ordinary auto-approval. Only a request that proves a person — a
-// paired session, or the desktop — may lift the mark now.
-//
-// Boots the real harness with the fake Claude CLI in `slow` mode (the turn
-// stays open behind a gate file) and drives the permission broker directly,
-// the way the CLI's permission proxy does, so the ask is exactly what a tool
-// call would raise mid-turn. POSIX-gated like the other CLI e2es.
+// The fake Claude CLI in `slow` mode holds the turn behind a gate; the test drives the broker directly, as the permission proxy does. POSIX-gated.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -47,11 +33,7 @@ const getBot = async (id: string) => (await api("GET", "/api/bots?messages=0")).
 const threadMessages = async (threadId: string): Promise<Array<{ kind: string; card?: { requestId?: string; answered?: string } }>> =>
   (await api("GET", `/api/threads/${threadId}/messages`)).body.messages ?? [];
 
-/** The broker's bind candidates, as server/drivers/claude.ts derives them —
- * duplicated rather than imported because DATA_DIR there is fixed at import
- * time from this process's HOME, not the fixture's. botId is folded into
- * both the deterministic and fallback paths (#1017/#1102) so this must stay
- * in lockstep with permissionSocketPath/brokerSocketCandidates there. */
+/** Duplicated, not imported: DATA_DIR there is fixed at import time from this process's HOME. Keep in lockstep with claude.ts. */
 function brokerCandidates(threadId: string, botId: string): string[] {
   const dataDir = join(home, ".openmausbot");
   const prefix = threadId.replace(/[^\w-]/g, "").slice(0, 4);
@@ -74,7 +56,6 @@ async function connectBroker(threadId: string, botId: string): Promise<Socket> {
   throw new Error(`no broker socket among ${brokerCandidates(threadId, botId).join(", ")}`);
 }
 
-/** Raise one permission ask and report whether the harness answered it. */
 function ask(conn: Socket, id: string, command: string): { answered: () => boolean } {
   let answered = false;
   conn.on("data", (chunk: Buffer) => {
@@ -84,7 +65,6 @@ function ask(conn: Socket, id: string, command: string): { answered: () => boole
         const msg = JSON.parse(line);
         if (msg.t === "answer" && msg.id === id) answered = true;
       } catch {
-        /* partial line */
       }
     }
   });
@@ -104,8 +84,7 @@ posixOnly("a steered message does not lift the unattended mark on its own", () =
         claude: {
           driver: "claudeAgent",
           environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: finishGate },
-          // acceptEdits: permission asks reach the broker, which is where a
-          // real tool call's ask would arrive from
+          // acceptEdits: permission asks reach the broker, where a real tool call's ask would arrive.
           config: { cli: FAKE_CLAUDE, permissionMode: "acceptEdits" },
         },
       },
@@ -120,8 +99,7 @@ posixOnly("a steered message does not lift the unattended mark on its own", () =
         USERPROFILE: home,
         OMB_PORT: String(port),
         OMB_WEBHOOK_PORT: String(port + 1),
-        // the broker falls back to os.tmpdir() under a deep HOME; the child
-        // has to agree with this process about where that is
+        // Under a deep HOME the broker falls back to os.tmpdir(); the child has to agree with this process about where that is.
         TMPDIR: tmpdir(),
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -133,7 +111,6 @@ posixOnly("a steered message does not lift the unattended mark on its own", () =
       try {
         if ((await fetch(`${base}/api/health`)).ok) break;
       } catch {
-        /* not up yet */
       }
       if (Date.now() > deadline) throw new Error(`server never came up. stderr:\n${stderr}`);
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -168,29 +145,24 @@ posixOnly("a steered message does not lift the unattended mark on its own", () =
     expect(delivered.status).toBe(202);
     const { runId } = (await delivered.json()) as { runId: string };
 
-    // a webhook run activates its task, so the live turn and the default
-    // POST target are the same thread — the steer lands
+    // A webhook run works in a conversation of its own, out of the way: the turn names it when it POSTs into itself.
     let runThreadId = "";
     await expect.poll(async () => {
       const run = ((await api("GET", "/api/routines")).body.runs ?? []).find((r: { id: string }) => r.id === runId);
       runThreadId = run?.threadId ?? "";
       return Boolean(runThreadId);
     }, { timeout: 20_000 }).toBe(true);
-    await expect.poll(async () => (await getBot(bot.id))?.busy === true && (await getBot(bot.id))?.threadId === runThreadId, {
+    await expect.poll(async () => (await getBot(bot.id))?.busy === true && (await getBot(bot.id))?.threadId !== runThreadId, {
       timeout: 20_000,
     }).toBe(true);
 
     const conn = await connectBroker(runThreadId, bot.id);
     try {
-      // the bot's own loopback POST into its running turn — no session, no
-      // desktop capability, the way a shell inside the turn would send it
-      const steer = await api("POST", `/api/bots/${bot.id}/messages`, { text: "continue" });
+      const steer = await api("POST", `/api/bots/${bot.id}/messages`, { text: "continue", threadId: runThreadId });
       expect(steer.status).toBe(202);
       expect(steer.body.steered).toBe(true);
 
-      // the next ask must still reach a person: a live card, no answer. An
-      // ordinary command, deliberately — the destructive guard would card
-      // `rm -rf` whatever the mark said, and this is about the mark.
+      // An ordinary command on purpose: the destructive guard would card `rm -rf` whatever the mark said.
       const second = ask(conn, "ask-after-steer", "ls -la ./dist");
       await expect.poll(
         async () => (await threadMessages(runThreadId)).some((m) => m.kind === "options" && m.card?.requestId === "ask-after-steer"),

@@ -8,7 +8,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
-import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { ENABLE_ADVANCED_UI, UI_TOOLS_DIR } from "./control-omb-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const binary = resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env });
@@ -37,6 +37,7 @@ describe("Slack management in agent settings", () => {
     }, { timeout: launchTimeout, interval: 250 }).toBe(true);
     const fixture = info!;
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", fixture.ui, ...args]) as Promise<Record<string, any>>;
+    await ui("eval", "--js", ENABLE_ADVANCED_UI);
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
     const snapshot = async () => (await ui("snapshot")).snapshot as string;
     const click = (name: string) => ui("click", "--name", name);
@@ -124,7 +125,8 @@ describe("Slack management in agent settings", () => {
     await evaluate("window.slackFixture.mode = 'ready'; true");
     await openProfile();
     await expect.poll(row, { timeout: 10_000 }).toBe(true);
-    await click("Slack");
+    // Slack is still the open section from the first agent's settings.
+    await evaluate("document.querySelector('[data-bot-settings-section=slack] > button[aria-expanded=false]')?.click(); true");
     const expected = `https://admin.example.test/slack?workspace=acme&bot=${second.id}`;
     await expect.poll(link, { timeout: 10_000 }).toBe(expected);
     await evaluate("window.slackFixture.pending.forEach(resolve => resolve()); true");

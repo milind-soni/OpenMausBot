@@ -1,13 +1,7 @@
-// Which conversation is on a call, window-wide.
-//
-// It lives in lib rather than inside the call UI because two very
-// different places need it: the overlay that renders the call, and the SSE
-// fold that decides whether a settled reply should be read aloud. Call
-// mode does its own speaking, in order, around its own microphone — so
-// auto-speak has to stand down for the bot that is on the line, and the
-// two would deadlock over the speaker otherwise.
+// Read by the SSE fold too: auto-speak stands down for the bot on a call, or the two deadlock over the speaker.
 import { useSyncExternalStore } from "react";
 
+import { speechBridge } from "./speech";
 import { speaker } from "./tts";
 
 let current: string | null = null;
@@ -17,36 +11,31 @@ function notify() {
   for (const fn of Array.from(watchers)) fn();
 }
 
-/** The bot or room on a call, or null. Safe to read outside React. */
 export function currentCall(): string | null {
   return current;
 }
 
 export function startCall(targetId: string) {
   if (current === targetId) return;
-  // Switching calls must silence both halves before ownership changes; the
-  // old overlay may not unmount until React's next render.
+  // Silence both halves before ownership changes: the old overlay may not unmount until React's next render.
   speaker.stop();
-  void window.ogb?.speechStop();
+  void speechBridge()?.speechStop?.();
   current = targetId;
   notify();
 }
 
-/** End the current call. A targetId makes cleanup ownership-safe: an async
- * teardown from call A cannot hang up a newer call B. */
+/** A targetId keeps an async teardown from call A from hanging up a newer call B. */
 export function endCall(targetId?: string): boolean {
   if (targetId && current !== targetId) return false;
   if (current === null) return false;
   current = null;
   speaker.stop();
-  void window.ogb?.speechStop();
+  void speechBridge()?.speechStop?.();
   notify();
   return true;
 }
 
-/** React StrictMode probes effects with setup -> cleanup -> setup in
- * development. Defer ownership cleanup so that probe can remount first;
- * a genuine unmount remains inactive and releases the call. */
+/** Deferred: StrictMode probes effects setup -> cleanup -> setup in development. */
 export function deferCallCleanup(targetId: string, isMounted: () => boolean): void {
   queueMicrotask(() => {
     if (!isMounted()) endCall(targetId);

@@ -16,6 +16,8 @@
 #                                 bandwidth silently
 #   - assemble-then-publish    -> 0.1.24 sat as an invisible draft; a mac-only
 #                                 publish 404s the README's other buttons
+#   - module-scope gate        -> 0.1.108 would not start under a parent
+#                                 package.json saying "type": "commonjs" (#2770)
 #
 # One-time setup (repo secrets) is documented in docs/releasing.md.
 name: Release
@@ -104,55 +106,50 @@ jobs:
           fi
 
   ci:
-    # Ship only a commit whose own `CI` check (ci.yml's gate) passed. The wait
-    # overlaps the platform builds, so a green commit costs no time; a red,
-    # cancelled or missing check stops the release before any draft exists.
-    # 0.1.79 and 0.1.90 shipped commits whose main runs never finished.
+    # Ship only a commit whose code passed `CI` (ci.yml's gate, vitest really
+    # run): its own run, a run on a commit with the same tree, or, for a
+    # version-only bump, its parent's (scripts/release-ci.mjs, docs/ci.md).
+    # The wait overlaps the platform builds, so a green commit costs no time;
+    # a red or missing verdict stops the release before any draft exists. Main keeps
+    # one CI run going and one waiting, so a burst of merges can replace the
+    # release commit's own run: scripts/release-ci.mjs then runs CI on the
+    # commit in its own lane (a release-ci/v<version> branch no merge can
+    # touch) and deletes that branch afterwards.
     name: CI passed on the release commit
     needs: prepare
     if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     permissions:
-      actions: read
+      # read CI runs, start CI in the release lane, and re-run jobs that
+      # never got a runner
+      actions: write
+      # create and delete the release-ci/v<version> branch
+      contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/release-ci.mjs
+            scripts/ci-scope.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
       - name: Wait for the CI check on the pinned commit
         if: ${{ !inputs.ship_without_ci }}
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ needs.prepare.outputs.sha }}
-        run: |
-          # push = a merge on main; merge_group = the queue's commit that
-          # becomes main; workflow_dispatch = a manual CI run of this commit.
-          # A pull_request run tests a merge ref, not this exact commit.
-          started=$SECONDS
-          while :; do
-            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SHA&per_page=50" \
-              --jq '[.workflow_runs[] | select(.event == "push" or .event == "merge_group" or .event == "workflow_dispatch")] | sort_by(.created_at) | last | select(. != null) | "\(.id) \(.status)"')
-            if [ -z "$run" ]; then
-              if [ $((SECONDS - started)) -gt 900 ]; then
-                echo "::error::No CI run exists for $SHA. Run CI on it (Actions → CI → Run workflow on main while main is at this commit), then re-run this job."
-                exit 1
-              fi
-            else
-              set -- $run
-              if [ "$2" = completed ]; then
-                gate=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$1/jobs?per_page=100" --jq '.jobs[] | select(.name == "CI") | .conclusion')
-                echo "CI run $1 on $SHA: gate ${gate:-missing}"
-                [ "$gate" = success ] && exit 0
-                echo "::error::The CI check on $SHA did not pass (${gate:-no gate job}). Fix main or re-run CI ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$1), then re-run this job."
-                exit 1
-              fi
-              echo "CI run $1 on $SHA is $2; waiting"
-            fi
-            sleep 60
-          done
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: node scripts/release-ci.mjs
 
   mac:
     name: macOS arm64 + x64 (sign, notarize, staple)
     needs: prepare
     if: needs.prepare.outputs.should_release == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -186,6 +183,9 @@ jobs:
           rm "$RUNNER_TEMP/cert.p12"
 
       - name: Package both architectures
+        # macos-15 runners have 7 GB, so Node's default heap stops near 2 GB; the server typecheck now needs a little more.
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm package:mac
 
       - name: "Gate: both packaged apps use the canonical updater feed"
@@ -239,6 +239,7 @@ jobs:
             # regardless of the app binary's arch
             OMB_SMOKE_DIST="$res/server" node scripts/smoke-packaged-server.mjs \
               || { echo "::error::packaged server in $app failed to start"; exit 1; }
+            node scripts/check-module-scopes.mjs "$res" || exit 1
             node --input-type=module - "$res/server" <<'EOF'
           import { existsSync } from "node:fs";
           import { pathToFileURL } from "node:url";
@@ -251,17 +252,21 @@ jobs:
           }
           console.log(`ok: ${Object.keys(SPAWNED_PROXIES).length} proxies resolve in ${server}`);
           EOF
-            for bin in "$res/cua-driver" "$res/OpenMausBot Speech.app/Contents/MacOS/speech-helper"; do
-              lipo -archs "$bin" | grep -q "x86_64" || { echo "::error::$bin lacks x86_64"; exit 1; }
-              lipo -archs "$bin" | grep -q "arm64" || { echo "::error::$bin lacks arm64"; exit 1; }
-            done
-            cloudflared="$res/cloudflared/cloudflared"
+            # the speech helper is a nested signed .app and stays universal
+            speech="$res/OpenMausBot Speech.app/Contents/MacOS/speech-helper"
+            lipo -archs "$speech" | grep -q "x86_64" || { echo "::error::$speech lacks x86_64"; exit 1; }
+            lipo -archs "$speech" | grep -q "arm64" || { echo "::error::$speech lacks arm64"; exit 1; }
+            # every other native payload carries only this app's own CPU slice
             expected_arch=x86_64
             case "$app" in *mac-arm64*) expected_arch=arm64 ;; esac
-            test "$(lipo -archs "$cloudflared")" = "$expected_arch" || {
-              echo "::error::$cloudflared is not the expected $expected_arch executable"; exit 1; }
+            cloudflared="$res/cloudflared/cloudflared"
+            for bin in "$res/cua-driver" "$res/cua-sdk/native/libcua_driver_sdk.dylib" \
+              "$res/cua-sdk/native/cua_driver_node_runtime.node" "$res/android-platform-tools/darwin/adb" "$cloudflared"; do
+              test "$(lipo -archs "$bin")" = "$expected_arch" || {
+                echo "::error::$bin is not the expected $expected_arch executable"; exit 1; }
+            done
             if [ "$(uname -m)" = "$expected_arch" ]; then
-              "$cloudflared" version | grep -Fq "cloudflared version 2026.8.2 " || {
+              "$cloudflared" version | grep -Fq "cloudflared version 2026.10.3 " || {
                 echo "::error::$cloudflared has the wrong version"; exit 1; }
             fi
           done
@@ -286,10 +291,20 @@ jobs:
 
       - name: Staple, re-zip, regenerate blockmaps and the feed
         run: |
-          xcrun stapler staple release/OpenMausBot-*-arm64.dmg
-          xcrun stapler staple release/OpenMausBot-*-x64.dmg
-          xcrun stapler staple release/mac-arm64/OpenMausBot.app
-          xcrun stapler staple release/mac/OpenMausBot.app
+          # stapler fetches the ticket from Apple's CloudKit: the connection drops now and then (error 68), and a
+          # ticket can lag notarytool's Accepted verdict by a minute (error 65).
+          staple() {
+            for attempt in 1 2 3 4 5 6; do
+              xcrun stapler staple "$1" && return 0
+              echo "stapling $1 failed (attempt $attempt of 6); trying again in 30 s"
+              sleep 30
+            done
+            echo "::error::could not staple $1 after 6 attempts"
+            return 1
+          }
+          for f in release/OpenMausBot-*-arm64.dmg release/OpenMausBot-*-x64.dmg release/mac-arm64/OpenMausBot.app release/mac/OpenMausBot.app; do
+            staple "$f"
+          done
           v=$(node -p "require('./package.json').version")
           rm -f "release/OpenMausBot-$v-arm64.zip" "release/OpenMausBot-$v-x64.zip"
           ditto -c -k --sequesterRsrc --keepParent release/mac-arm64/OpenMausBot.app "release/OpenMausBot-$v-arm64.zip"
@@ -350,14 +365,16 @@ jobs:
         run: |
           res=release/win-unpacked/resources
           [ -f "$res/server/index.js" ] || { echo "::error::missing server/index.js"; exit 1; }
+          [ -f "$res/server/desktop-entry.mjs" ] || { echo "::error::missing server/desktop-entry.mjs"; exit 1; }
+          node scripts/check-module-scopes.mjs "$res"
           [ -f "$res/ui/index.html" ] || { echo "::error::missing ui/index.html"; exit 1; }
           [ -f "$res/cloudflared/cloudflared.exe" ] || { echo "::error::missing cloudflared.exe"; exit 1; }
           [ -f "$res/licenses/cloudflared-LICENSE.txt" ] || { echo "::error::missing cloudflared license"; exit 1; }
           [ -f "$res/licenses/cloudflared-README.md" ] || { echo "::error::missing cloudflared provenance"; exit 1; }
-          expected=c29eee2b121f5436a642eed69fd9767da7e7b8c510fa50aaa130337f931357b5
+          expected=$(node --input-type=module -e "import { CLOUDFLARED_ASSETS } from './scripts/prepare-cloudflared.mjs'; console.log(Object.values(CLOUDFLARED_ASSETS).find((asset) => asset.name === 'cloudflared-windows-amd64.exe').binarySha256)")
           actual=$(sha256sum "$res/cloudflared/cloudflared.exe" | cut -d' ' -f1)
           [ "$actual" = "$expected" ] || { echo "::error::cloudflared hash is $actual"; exit 1; }
-          "$res/cloudflared/cloudflared.exe" version | grep -Fq "cloudflared version 2026.8.2 " || {
+          "$res/cloudflared/cloudflared.exe" version | grep -Fq "cloudflared version 2026.10.3 " || {
             echo "::error::cloudflared has the wrong version"; exit 1; }
           [ -f "$res/app-update.yml" ] || { echo "::error::missing app-update.yml"; exit 1; }
           grep -Eq '^owner: milind-soni$' "$res/app-update.yml" || { echo "::error::wrong update owner"; exit 1; }
@@ -410,7 +427,7 @@ jobs:
       - name: Install package validation and native smoke tools
         run: >-
           sudo apt-get update && sudo apt-get install -y
-          at-spi2-core dbus-x11 desktop-file-utils libxi6 libxkbcommon0 squashfs-tools x11-utils xdotool xvfb
+          at-spi2-core dbus-x11 desktop-file-utils libxi6 libxkbcommon0 openbox squashfs-tools x11-utils xdotool xvfb
       - run: pnpm install --frozen-lockfile
       - name: Clean generated output
         run: pnpm clean
@@ -453,6 +470,8 @@ jobs:
         env:
           OMB_SMOKE_DIST: /opt/OpenMausBot/resources/server
         run: node scripts/smoke-packaged-server.mjs --browser-bundle /opt/OpenMausBot/resources/browser-engine
+      - name: "Gate: packaged server and phone helper load as ES modules"
+        run: node scripts/check-module-scopes.mjs /opt/OpenMausBot/resources
       - name: Smoke the packages
         env:
           OMB_KEEP_SMOKE_DIR: "1"
@@ -489,7 +508,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
-      # to dispatch the npm and Docker publishes on the new tag
+      # to dispatch the npm, Docker and connector publishes on the new tag
       actions: write
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -692,9 +711,9 @@ jobs:
             --repo milind-soni/openmausbot-releases --json isDraft --jq .isDraft | grep -q false
           echo "v$VERSION is live on the canonical feed and its legacy updater bridge"
           # Publishing created the tag with this workflow's token, and GitHub
-          # starts no workflow from events that token creates. Start the two
+          # starts no workflow from events that token creates. Start the
           # tag-driven publishes by hand, on the tag, so they see refs/tags/v*.
-          for workflow in npm-package.yml docker.yml; do
+          for workflow in npm-package.yml docker.yml connector-release.yml; do
             GH_TOKEN="$CANONICAL_TOKEN" gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "v$VERSION"
           done
-          echo "dispatched the npm package and Docker image publishes on v$VERSION"
+          echo "dispatched the npm package, Docker image and connector image publishes on v$VERSION"

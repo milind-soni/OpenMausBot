@@ -1,7 +1,5 @@
-// Duty-cycled activity indicators. A spinner repaints every vsync for its
-// whole lifetime; these dots step through a few opacity holds per cycle,
-// and the timer mutates its own text node once a second instead of
-// committing through React. Long-lived indicators must stay this cheap.
+// Duty-cycled: a spinner repaints every vsync, so these dots hold opacity steps and the timer writes its own text node
+// once a second instead of committing through React.
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/cn";
 import { formatElapsed } from "@/lib/working-time";
@@ -20,7 +18,6 @@ export function WorkingDots({ size = 4, className }: { size?: number; className?
   );
 }
 
-/** Self-ticking elapsed readout — counts up from `since` (epoch ms). */
 export function WorkingTimer({ since, className }: { since: number; className?: string }) {
   const node = useRef<HTMLSpanElement>(null);
   useEffect(() => {

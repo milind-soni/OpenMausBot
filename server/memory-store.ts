@@ -1,20 +1,3 @@
-// The person-facing half of bot memory: browse it, edit it, delete it.
-//
-// workspace.ts owns the files (MEMORY.md and memory/ under the bot's
-// workspace) and the load budget. This module owns the RULES for reaching
-// those files from outside the process. A `path` arrives from HTTP, so it
-// is matched against an allowlist of the three shapes memory actually has
-// rather than sanitised — a rejected name is a bug report, not a path to
-// be repaired. Anything else would be an arbitrary-file-read on the disk.
-//
-// Every write goes through writeFileAtomic at 0600 and through the secret
-// scrubber first: memory is agent-authored as often as person-authored,
-// and a bot that pastes a key into its own notes must not leave it on disk
-// in the clear. Writes also carry an optional expected hash so an editor
-// that opened the file a minute ago cannot silently overwrite an entry the
-// bot wrote in between — today's whole-file PUT races memory_update.
-//
-// No knowledge of turns or HTTP here; the journal and the routes sit on top.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
@@ -36,18 +19,13 @@ export const MEMORY_INDEX = "MEMORY.md";
 export type MemoryDocKind = "index" | "topic" | "log";
 
 export interface MemoryDocRef {
-  /** The workspace-relative path as the API spells it. */
   path: string;
   kind: MemoryDocKind;
-  /** File name without its directory. */
   name: string;
 }
 
 export type MemoryStoreErrorCode = "path" | "conflict" | "too-large" | "forbidden";
 
-/** Carries an HTTP status so the route can answer without a lookup table.
- * A conflict also carries what is on disk now, so an editor can show the
- * bot's version next to the person's draft instead of guessing. */
 export class MemoryStoreError extends Error {
   readonly status: number;
   readonly code: MemoryStoreErrorCode;
@@ -71,12 +49,7 @@ function pathError(path: string): MemoryStoreError {
   return new MemoryStoreError("path", 400, `not a memory file: ${JSON.stringify(path)} — use MEMORY.md, memory/<topic>.md or memory/log/<day>.md`);
 }
 
-/** Only three shapes exist: the index, one topic file directly under
- * memory/, or one daily log directly under memory/log/. The name gate is
- * the same one listing uses (workspace.ts isMemoryTopicName), so what the
- * API can reach and what the overview shows agree by construction. No
- * separators inside a name means no traversal; no leading dot means no
- * dotfiles and no bare "..". Backslashes and NUL never match. */
+/** An allowlist of three shapes, not a sanitiser: anything else would be an arbitrary file read. */
 export function parseMemoryPath(path: string): MemoryDocRef {
   if (typeof path !== "string" || !path) throw pathError(path);
   if (path === MEMORY_INDEX) return { path, kind: "index", name: MEMORY_INDEX };
@@ -100,13 +73,7 @@ function relativeSegments(ref: MemoryDocRef): string[] {
   return ["memory", "log", ref.name];
 }
 
-/** The absolute path a memory document lives at, after proving it stays
- * inside the workspace. The grammar already forbids traversal; this guards
- * the other escape — a symlink. A bot with file tools can turn memory/ or
- * a topic file into a link to anywhere, and the editor would then read or
- * overwrite that target. So the nearest existing ancestor is resolved
- * through realpath and must sit under the real workspace, and the file
- * itself, when present, must be a regular file rather than a link. */
+/** A bot can turn memory/ or a topic file into a symlink to anywhere, so the real path must stay inside the workspace. */
 export function resolveMemoryPath(botId: string, path: string): string {
   assertBotId(botId);
   const ref = parseMemoryPath(path);
@@ -116,7 +83,6 @@ export function resolveMemoryPath(botId: string, path: string): string {
   try {
     realRoot = realpathSync(root);
   } catch {
-    // no workspace yet — nothing to escape from, nothing to read either
     return absolute;
   }
   let ancestor = dirname(absolute);
@@ -131,7 +97,6 @@ export function resolveMemoryPath(botId: string, path: string): string {
     }
   } catch (error) {
     if (error instanceof MemoryStoreError) throw error;
-    // missing is fine: a topic the person is about to create
   }
   return absolute;
 }
@@ -141,13 +106,10 @@ export function hashMemoryText(text: string): string {
 }
 
 export interface MemoryCapacity {
-  /** Lines and bytes on disk. A trailing newline counts as a line, the
-   * same way the load budget counts it. */
   lines: number;
   bytes: number;
   maxLines: number;
   maxBytes: number;
-  /** What loadMemory() would actually put into the system prompt. */
   loadedLines: number;
   loadedBytes: number;
   truncated: boolean;
@@ -163,17 +125,13 @@ export interface MemoryFileInfo {
 
 export interface MemoryOverview {
   botId: string;
-  /** Where the folder is on the server's disk — plain markdown a person
-   * can open in any editor, which is why the panel says so. */
   workspacePath: string;
   index: MemoryCapacity;
   topics: MemoryFileInfo[];
   logs: MemoryFileInfo[];
 }
 
-/** Mirrors loadMemory()'s cut exactly so the gauge never claims something
- * loads that does not: first MEMORY_MAX_LINES lines, then MEMORY_MAX_BYTES
- * bytes, whichever cuts first. */
+/** Must cut exactly as loadMemory() does: MEMORY_MAX_LINES lines, then MEMORY_MAX_BYTES bytes. */
 export function memoryCapacity(raw: string): MemoryCapacity {
   const lines = raw === "" ? 0 : raw.split("\n").length;
   let loaded = raw;
@@ -209,21 +167,16 @@ function listMarkdown(dir: string, prefix: string): MemoryFileInfo[] {
   for (const name of names) {
     if (!isMemoryTopicName(name)) continue;
     try {
-      // lstat, not stat: a symlinked topic is not a memory file (see
-      // resolveMemoryPath) and must not be listed as one
+      // lstat, not stat: a symlinked topic is not a memory file.
       const info = lstatSync(join(dir, name));
       if (!info.isFile()) continue;
       files.push({ path: `${prefix}/${name}`, name, bytes: info.size, modifiedAt: Math.round(info.mtimeMs) });
     } catch {
-      // deleted between readdir and lstat: simply not listed
     }
   }
-  // newest first: the file the bot just touched is the one to look at
   return files.sort((a, b) => b.modifiedAt - a.modifiedAt || a.name.localeCompare(b.name));
 }
 
-/** Reads never create the workspace: a bot that has not run yet simply
- * has nothing to show, and an overview must not leave a folder behind. */
 export function memoryOverview(botId: string): MemoryOverview {
   assertBotId(botId);
   const root = workspaceDir(botId);
@@ -246,37 +199,29 @@ export function memoryOverview(botId: string): MemoryOverview {
 export interface MemoryDoc {
   path: string;
   text: string;
-  /** sha256 of `text`; an editor sends it back as expectedHash on save. */
   hash: string;
   exists: boolean;
 }
 
-/** A missing document reads as empty rather than as an error: the topic
- * the person is about to create has no file yet, and its hash is the hash
- * of "", which is what a save of a new file must present. */
 export function readMemoryDoc(botId: string, path: string): MemoryDoc {
   const absolute = resolveMemoryPath(botId, path);
   try {
     const text = readFileSync(absolute, "utf8");
     return { path, text, hash: hashMemoryText(text), exists: true };
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     return { path, text: "", hash: hashMemoryText(""), exists: false };
   }
 }
 
 export interface MemoryWriteResult {
   path: string;
-  /** What was on disk before, or null when the file did not exist. */
   before: string | null;
-  /** What is on disk now — redacted, so it can differ from the input. */
   after: string;
   hash: string;
 }
 
-/** Atomic, 0600, redacted. With `expectedHash`, the write is refused (409)
- * unless the file still hashes to what the caller last saw — the bot may
- * have written between the person's read and their save, and a whole-file
- * overwrite would erase that note without anyone noticing. */
+/** Atomic, 0600 and redacted; `expectedHash` refuses (409) a save over a write the caller has not seen. */
 export function writeMemoryDoc(
   botId: string,
   path: string,
@@ -309,9 +254,6 @@ export function writeMemoryDoc(
   return { path, before: current.exists ? current.text : null, after, hash: hashMemoryText(after) };
 }
 
-/** Topic and log files only. MEMORY.md is loaded unconditionally at turn
- * start and the next ensureWorkspace() would silently reseed it, which
- * reads as "delete did nothing" — clearing it is a write of "". */
 export function deleteMemoryDoc(botId: string, path: string): { path: string; before: string | null } {
   const ref = parseMemoryPath(path);
   if (ref.kind === "index") {
@@ -331,9 +273,7 @@ export function obsidianUrlFor(workspacePath: string): string {
 
 export type OpenerRunner = (command: string, args: string[]) => Promise<number | null>;
 
-/** Runs the platform URL/folder opener and resolves its exit code; null
- * when it could not be launched or did not exit in time. Same shape as
- * cli.ts openDashboard: no shell, fixed argv, nothing from the request. */
+/** No shell, fixed argv, nothing from the request. */
 const spawnOpener: OpenerRunner = (command, args) =>
   new Promise((done) => {
     let child: ReturnType<typeof spawn>;
@@ -357,12 +297,7 @@ const spawnOpener: OpenerRunner = (command, args) =>
     child.unref();
   });
 
-/** Opens the bot's memory folder on the machine running the server — in
- * Obsidian (obsidian://open?path=…) or in Finder/Explorer/the file manager.
- * The folder is on the server's disk, so this only makes sense from the
- * same machine; the route restricts it to loopback callers. The desktop
- * shell's own openExternal is http(s)-only, which is why the URL opener
- * lives here rather than going through the preload bridge. */
+/** Electron's openExternal is http(s)-only, so the obsidian:// opener lives here; the route allows loopback callers only. */
 export async function openMemoryLocation(
   botId: string,
   target: MemoryOpenTarget,
@@ -385,8 +320,7 @@ export async function openMemoryLocation(
     args = [location];
   }
   const code = await run(command, args);
-  // explorer.exe reports 1 even when it opened the window; only "could not
-  // launch" is a failure there
+  // explorer.exe exits 1 even when it opened the window.
   const ok = code === 0 || (platform === "win32" && target === "folder" && code !== null);
   if (ok) return { ok: true, workspacePath };
   const error =

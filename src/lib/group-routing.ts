@@ -1,15 +1,12 @@
 import type { Bot, ConfigStatus, Group, GroupDefaultResponder } from "@/state/store";
 import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
+import { resolveMentions } from "../../shared/room-mentions";
 import { t } from "./i18n";
 
-/** Whether an Auto room asks the decision model right now: the master switch
- * (off while no key is saved) and the room job both on. */
 export function jevRoomRoutingOn(config: ConfigStatus | null | undefined): boolean {
   return Boolean(config?.decider?.enabled && config.decider.jobs.roomRouting);
 }
 
-/** Be defensive around rooms loaded while an older server is still running,
- * and around a lead removed by another client before the group patch arrives. */
 export function effectiveDefaultResponder(
   group: Pick<Group, "defaultResponder">,
   members: Array<{ id: string }>,
@@ -17,15 +14,12 @@ export function effectiveDefaultResponder(
   const value = group.defaultResponder;
   if (value?.kind === "everyone" || value?.kind === "mentions") return value;
   if (value?.kind === "member" && members.some((member) => member.id === value.botId)) return value;
-  // Auto keeps its fallback only while that bot is still in the room.
   if (value?.kind === "auto") {
     return value.fallbackBotId && members.some((member) => member.id === value.fallbackBotId) ? value : { kind: "auto" };
   }
   return members[0] ? { kind: "member", botId: members[0].id } : { kind: "mentions" };
 }
 
-/** The member who answers a plain message: the lead, or an Auto room's
- * fallback (its chosen fallback, else the first member). */
 export function defaultResponderName(group: Group, members: Bot[]): string | null {
   const value = effectiveDefaultResponder(group, members);
   if (value.kind === "auto") return (members.find((member) => member.id === value.fallbackBotId) ?? members[0])?.name ?? null;
@@ -33,8 +27,6 @@ export function defaultResponderName(group: Group, members: Bot[]): string | nul
   return members.find((member) => member.id === value.botId)?.name ?? null;
 }
 
-/** `jevOn`: whether the decision model is on for rooms. An Auto room with it
- * off answers exactly like lead mode, so it reads like lead mode. */
 export function groupResponseHint(group: Group, members: Bot[], { jevOn = true }: { jevOn?: boolean } = {}): string {
   if (group.dm) return t("room.hint.dm");
   const value = effectiveDefaultResponder(group, members);
@@ -56,14 +48,19 @@ export function groupComposerHint(group: Group, members: Bot[], { jevOn = true }
   });
 }
 
-/** Same routing sendGroup uses: explicit @mentions win, otherwise the
- * room's default responder. Keep this aligned with server/store.ts
- * `roomResponders` / `mentionedBots`. */
-export function roomRespondersForComposer<T extends { id: string; name: string; hidden?: boolean }>(
+export function openTaskWorking(group: Pick<Group, "threadId" | "working" | "tasks">): boolean {
+  const task = group.tasks?.find((candidate) => candidate.threadId === group.threadId);
+  return task ? Boolean(task.working) : Boolean(group.working);
+}
+
+/** Who answers this line, as the room reads it. `ambiguous`: it @-tags a name several members share and none of them
+ * was picked from the @ list, so the room refuses it and nobody answers. */
+export function roomRouteForComposer<T extends { id: string; name: string; hidden?: boolean }>(
   text: string,
   members: T[],
   group: Pick<Group, "defaultResponder">,
-): T[] {
+  picked: readonly string[] = [],
+): { responders: T[]; ambiguous: boolean } {
   const available = members.filter((member) => !member.hidden);
   const everyone = "everyone";
   let everyoneAt = -1;
@@ -73,37 +70,41 @@ export function roomRespondersForComposer<T extends { id: string; name: string; 
       && text.slice(everyoneAt + 1, everyoneAt + 1 + everyone.length).toLowerCase() === everyone
       && !isMentionNameContinuation(text.slice(everyoneAt + 1 + everyone.length))
     ) {
-      return available;
+      return { responders: available, ambiguous: false };
     }
   }
-  const mentioned = mentionedMembers(text, available);
-  if (mentioned.length) return mentioned;
+  const mentioned = resolveMentions(text, available, picked);
+  if (mentioned.ambiguous.length) return { responders: [], ambiguous: true };
+  if (mentioned.bots.length) return { responders: mentioned.bots, ambiguous: false };
   const fallback = effectiveDefaultResponder(group, available);
-  if (fallback.kind === "everyone") return available;
-  // Any member may be picked, so image support is judged for all of them.
-  if (fallback.kind === "auto") return available;
-  if (fallback.kind === "member") {
-    const lead = available.find((member) => member.id === fallback.botId);
-    return lead ? [lead] : [];
-  }
-  return [];
+  if (fallback.kind === "everyone" || fallback.kind === "auto") return { responders: available, ambiguous: false };
+  const lead = fallback.kind === "member" ? available.find((member) => member.id === fallback.botId) : undefined;
+  return { responders: lead ? [lead] : [], ambiguous: false };
 }
 
-/** Goal mode always starts with one coordinator: an explicit mention, the
- * configured lead, an in-room Chief, or the first active member. Keep this
- * aligned with the server's selectGroupGoalCoordinator path. */
+export function roomRespondersForComposer<T extends { id: string; name: string; hidden?: boolean }>(
+  text: string,
+  members: T[],
+  group: Pick<Group, "defaultResponder">,
+  picked: readonly string[] = [],
+): T[] {
+  return roomRouteForComposer(text, members, group, picked).responders;
+}
+
 export function goalCoordinatorForComposer<
   T extends { id: string; name: string; hidden?: boolean; chiefOfStaff?: boolean },
 >(
   text: string,
   members: T[],
   group: Pick<Group, "defaultResponder">,
+  picked: readonly string[] = [],
 ): T | null {
   const available = members.filter((member) => !member.hidden);
   const explicitlyMentioned = roomRespondersForComposer(
     text,
     available,
     { defaultResponder: { kind: "mentions" } },
+    picked,
   )[0];
   if (explicitlyMentioned) return explicitlyMentioned;
   const configuredResponder = group.defaultResponder;
@@ -114,22 +115,4 @@ export function goalCoordinatorForComposer<
     if (configured) return configured;
   }
   return available.find((member) => member.chiefOfStaff) ?? available[0] ?? null;
-}
-
-function mentionedMembers<T extends { name: string; hidden?: boolean }>(text: string, peers: T[]): T[] {
-  const candidates = peers
-    .filter((p) => !p.hidden && p.name.trim())
-    .sort((a, b) => b.name.length - a.name.length);
-  const found: T[] = [];
-  let at = -1;
-  while ((at = text.indexOf("@", at + 1)) !== -1) {
-    if (!isMentionBoundary(text, at)) continue;
-    const hit = candidates.find((p) => {
-      const name = p.name.toLowerCase();
-      if (text.slice(at + 1, at + 1 + p.name.length).toLowerCase() !== name) return false;
-      return !isMentionNameContinuation(text.slice(at + 1 + p.name.length));
-    });
-    if (hit && !found.includes(hit)) found.push(hit);
-  }
-  return found;
 }

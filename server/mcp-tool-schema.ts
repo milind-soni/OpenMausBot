@@ -1,17 +1,7 @@
-// Provider-safe MCP tool input schemas.
-//
-// Every engine hands an MCP tool's inputSchema to its model provider as the
-// function's parameters. The strict providers (OpenAI, xAI, Bedrock, Kimi…)
-// require that root to be a plain `type: "object"` and refuse a root
-// anyOf/oneOf/allOf/not outright — and a refused schema fails the whole turn,
-// not just the one tool. The bundled cua-driver 0.22.1 ships exactly that
-// shape on browser_prepare, which is what broke "This computer" for OpenCode
-// once Windows started mounting the desktop in v0.1.83.
-//
-// The rewrite only relaxes what the model is TOLD. The MCP server still
-// validates every call against its own schema — upstream cua-driver made the
-// same move (#3311): a plain object root, with the conditional rules enforced
-// in the tool itself. Nested schemas are left exactly as written.
+// Strict providers (OpenAI, xAI, Bedrock, Kimi…) refuse a tool schema whose root is not a plain `type: "object"`, failing
+// the whole turn; cua-driver 0.22.1 ships such a root on browser_prepare. Servers still validate calls against their own.
+import { fitToolSchema, type ToolSchemaProfile } from "./tool-schema-profile.ts";
+
 type JsonObject = Record<string, unknown>;
 
 const ROOT_COMBINATORS = ["anyOf", "oneOf", "allOf", "not"] as const;
@@ -24,11 +14,6 @@ function branches(value: unknown): JsonObject[] {
   return Array.isArray(value) ? value.filter(isObject) : [];
 }
 
-/** The object shape a schema implies, gathered through its combinators.
- * Its own declarations win over a branch's narrower copy; a property that
- * only a branch declares is kept so the model still knows it exists. A name
- * is required when the schema or an allOf branch requires it, or when every
- * anyOf/oneOf choice does — a requirement of only one choice is not. */
 function objectShape(schema: JsonObject): { properties: JsonObject; required: string[] } {
   const properties: JsonObject = isObject(schema.properties) ? { ...schema.properties } : {};
   const required = new Set(Array.isArray(schema.required) ? schema.required.filter((key) => typeof key === "string") : []);
@@ -57,9 +42,6 @@ function describesObject(type: unknown): boolean {
   return type === undefined || type === "object" || (Array.isArray(type) && type.includes("object"));
 }
 
-/** A strict-provider-safe version of an MCP tool's inputSchema. A schema
- * that is already safe is returned as the same object, so callers can tell
- * whether anything changed. The input is never mutated. */
 export function providerSafeInputSchema(schema: unknown): JsonObject {
   if (!isObject(schema) || !describesObject(schema.type)) return { type: "object", properties: {} };
   if (schema.type === "object" && ROOT_COMBINATORS.every((keyword) => !(keyword in schema))) return schema;
@@ -72,13 +54,96 @@ export function providerSafeInputSchema(schema: unknown): JsonObject {
   return safe;
 }
 
-/** Rewrites tools/list responses on an MCP stdio stream. Only a response to
- * a tools/list the agent actually sent is touched; every other line — tool
- * results, notifications, errors, non-JSON — passes through byte-for-byte. */
-export function createToolListNormalizer(): {
-  /** Record an agent → server line. */
+const REFERENCES = new Set(["$ref", "$dynamicRef", "$recursiveRef"]);
+const VALUES = new Set(["const", "enum", "default", "examples", "example"]);
+const SCHEMA_MAPS = new Set(["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"]);
+
+function resolvesInside(root: JsonObject, ref: string): boolean {
+  if (ref === "#") return true;
+  if (!ref.startsWith("#/")) return false;
+  let node: unknown = root;
+  for (const token of ref.slice(2).split("/")) {
+    let key: string;
+    try { key = decodeURIComponent(token).replace(/~1/g, "/").replace(/~0/g, "~"); } catch { return false; }
+    if (!isObject(node) && !Array.isArray(node)) return false;
+    if (!Object.hasOwn(node, key)) return false;
+    node = (node as Record<string, unknown>)[key];
+  }
+  return true;
+}
+
+/** A tool's parameters as a Chat Completions provider is handed them when OpenMausBot could not compile its schema: a
+ * reference the schema does not hold itself is left out, since no provider fetches one and a strict one refuses the whole
+ * request over it. The server still checks the call. The same object when nothing dangles. */
+export function withoutDanglingReferences(schema: JsonObject): JsonObject {
+  let changed = false;
+  const visit = (node: unknown, depth: number): unknown => {
+    if (Array.isArray(node)) return node.map((child) => visit(child, depth + 1));
+    if (!isObject(node) || depth > 64) return node;
+    const copy: JsonObject = {};
+    for (const [key, value] of Object.entries(node)) {
+      if (REFERENCES.has(key) && typeof value === "string" && !resolvesInside(schema, value)) { changed = true; continue; }
+      if (SCHEMA_MAPS.has(key) && isObject(value)) copy[key] = Object.fromEntries(Object.entries(value).map(([name, child]) => [name, visit(child, depth + 1)]));
+      else copy[key] = VALUES.has(key) ? value : visit(value, depth + 1);
+    }
+    return copy;
+  };
+  const kept = visit(schema, 0) as JsonObject;
+  return changed ? kept : schema;
+}
+
+function toolName(tool: JsonObject): string {
+  return typeof tool.name === "string" && tool.name ? tool.name : "unnamed";
+}
+
+/** The note a shortened tool carries, so the model fills in what its schema no longer spells out. */
+export function shortenedToolNote(provider: string): string {
+  return `(OpenMausBot shortened this tool's parameters to fit ${provider}'s size limit for one tool: give any field it no longer lists `
+    + "as this description says. The tool still checks every call against its full schema.)";
+}
+
+/** A tool list under a provider's profile: each schema keeps a plain object root and fits, or the tool is left out.
+ * Every change is one line to `log`; a tool already within the limits is the same object. */
+export function fitToolList(tools: readonly unknown[], profile: ToolSchemaProfile, log: (line: string) => void = () => {}): unknown[] {
+  const fitted: unknown[] = [];
+  for (const tool of tools) {
+    if (!isObject(tool)) {
+      fitted.push(tool);
+      continue;
+    }
+    const rooted = providerSafeInputSchema(tool.inputSchema);
+    const fit = fitToolSchema(rooted, profile);
+    const name = toolName(tool);
+    const limit = `${profile.provider}'s ${profile.maxSchemaBytes}-byte limit for one tool`;
+    if (fit.outcome === "dropped") {
+      log(`left out tool "${name}": its parameters are ${fit.from} bytes and still ${fit.bytes} at their shortest, over ${limit}`);
+      continue;
+    }
+    if (fit.outcome === "kept") {
+      fitted.push(fit.schema === tool.inputSchema ? tool : { ...tool, inputSchema: fit.schema });
+      continue;
+    }
+    const what = { trimmed: "shortened the descriptions in", loosened: "left nested fields out of", minimal: "kept only the top-level fields of" }[fit.outcome];
+    log(`${what} tool "${name}"'s parameters (${fit.from} to ${fit.bytes} bytes) to fit ${limit}`);
+    if (fit.outcome === "trimmed") {
+      fitted.push({ ...tool, inputSchema: fit.schema });
+      continue;
+    }
+    const description = typeof tool.description === "string" && tool.description.trim() ? `${tool.description.trimEnd()}\n\n` : "";
+    fitted.push({ ...tool, description: description + shortenedToolNote(profile.provider), inputSchema: fit.schema });
+  }
+  return fitted;
+}
+
+/** A `tools/list` result with its tools fitted to `profile`; anything else as it came. */
+export function fitToolListResult(result: unknown, profile: ToolSchemaProfile | undefined, log?: (line: string) => void): unknown {
+  if (!profile || !isObject(result) || !Array.isArray(result.tools)) return result;
+  return { ...result, tools: fitToolList(result.tools, profile, log) };
+}
+
+/** Every listed schema gets a plain object root; under a profile each is also fitted to it. */
+export function createToolListNormalizer(profile?: ToolSchemaProfile, log?: (line: string) => void): {
   observeRequest: (line: string) => void;
-  /** Map a server → agent line to what the agent should receive. */
   rewriteResponse: (line: string) => string;
 } {
   // JSON-RPC ids may be numbers or strings, and 7 is not "7".
@@ -108,14 +173,13 @@ export function createToolListNormalizer(): {
       if (!isObject(frame) || "method" in frame || !pending.delete(idKey(frame.id))) return line;
       if (!isObject(frame.result) || !Array.isArray(frame.result.tools)) return line;
 
-      let changed = false;
-      const tools = frame.result.tools.map((tool: unknown) => {
+      const listed: unknown[] = frame.result.tools;
+      const tools = profile ? fitToolList(listed, profile, log) : listed.map((tool: unknown) => {
         if (!isObject(tool)) return tool;
         const inputSchema = providerSafeInputSchema(tool.inputSchema);
-        if (inputSchema === tool.inputSchema) return tool;
-        changed = true;
-        return { ...tool, inputSchema };
+        return inputSchema === tool.inputSchema ? tool : { ...tool, inputSchema };
       });
+      const changed = tools.length !== listed.length || tools.some((tool, index) => tool !== listed[index]);
       return changed ? JSON.stringify({ ...frame, result: { ...frame.result, tools } }) : line;
     },
   };

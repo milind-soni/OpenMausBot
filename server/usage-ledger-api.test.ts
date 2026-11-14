@@ -1,7 +1,3 @@
-// The usage ledger through real settled turns: the isolated fake-engine
-// fixture, the shared control surface for sends and waits, and the ledger
-// file plus /api/usage read back as the owner and as a paired device. It
-// never touches a live instance; the fixture's home is disposable.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -38,12 +34,9 @@ describe("usage ledger through real turns", () => {
     const created = await control(["new-bot", "--name", "Ledger probe"]);
     const botId = created.bot.id as string;
 
-    // Turn 1: this computer, through the control surface (loopback = owner).
     await control(["send", "--bot", botId, "--text", "hello from the owner"]);
     expect(JSON.stringify(await control(["wait", "--bot", botId, "--timeout", "30"]))).toContain("settled");
 
-    // Turn 2: a paired device. Without an email sign-in the ledger names it
-    // by its device label, which is still a person, not the machine.
     const phone = await pair("Ada's phone");
     const sent = await api(`/api/bots/${encodeURIComponent(botId)}/messages`, jsonRequest({ text: "hello from a phone" }, phone));
     expect([200, 201, 202]).toContain(sent.status);
@@ -59,7 +52,6 @@ describe("usage ledger through real turns", () => {
     expect(rows[0].output).toBeGreaterThanOrEqual(1);
     expect(rows[0].model).toBeTypeOf("string");
     expect(rows[1]).toMatchObject({ botId, costUsd: 0.01, trigger: { kind: "user", label: "Ada's phone" } });
-    // Bookkeeping, never transcript: no message text reaches the ledger.
     expect(readFileSync(file, "utf8")).not.toContain("hello from");
 
     const byUser = (await (await api("/api/usage?groupBy=user")).json()) as any;
@@ -75,7 +67,6 @@ describe("usage ledger through real turns", () => {
     expect(csv.headers.get("content-type")).toContain("text/csv");
     expect((await csv.text()).trim().split("\n")).toHaveLength(3);
 
-    // A chat-only device may spend but not audit.
     const client = await pair("Client phone", ["client"]);
     expect((await api("/api/usage", { headers: { authorization: `Bearer ${client}` } })).status).toBe(403);
     expect((await api("/api/usage.csv", { headers: { authorization: `Bearer ${client}` } })).status).toBe(403);

@@ -7,7 +7,7 @@ tool output.
 
 ## What is included
 
-- Better Auth 1.7.1 with email OTP, signed bearer sessions, hashed OTP storage,
+- Better Auth 1.7.7 with email OTP, signed bearer sessions, hashed OTP storage,
   and D1-backed IP plus recipient rate limits.
 - A Cloudflare Email Sending binding that produces both HTML and plain-text OTP
   messages. Authentication responses remain generic even when delivery fails;
@@ -25,6 +25,9 @@ tool output.
 - D1-backed generation/lease claims, recovery by stable opaque tunnel name, and
   retryable partial cleanup. Cloudflare API credentials and raw connector
   tokens are never written to D1 or logs.
+- Endpoints in one or more Cloudflare accounts (see **Several Cloudflare
+  accounts**). A new endpoint goes to the account with the most room; every
+  endpoint stays in the account it was created in for its whole life.
 
 The D1 schema is pinned in `migrations/`. `0001_better_auth_1_7_1.sql` was
 generated from the exact Better Auth configuration. `0002_installations.sql`
@@ -33,9 +36,25 @@ recipient-scoped OTP limiter whose keys are HMACs rather than email addresses,
 plus an authenticated installation-creation limiter. `0004` adds managed
 endpoint resource IDs, lifecycle state, generation leases, redacted error
 codes, and installation-scoped action limits. `0005` adds the cleanup-attempt
-counter used for scheduled retry backoff. Endpoint rows deliberately do not
-cascade away with a hard installation deletion: losing the tunnel and DNS IDs
-would make operator cleanup impossible.
+counter used for scheduled retry backoff. `0006` adds the idle-reclaim marker
+and a one-row capacity snapshot (counts and timestamps only), and gives rows
+an operator had already moved to `deleting` for active installations the same
+reconnect guard as automatic reclaims. `0007` ties every endpoint row to the
+Cloudflare account that holds it (`provider_account`, an account ID whose
+default is the account every earlier row lives in, so rows written before it,
+or by a Worker deployed before it, keep their account) and moves capacity
+state to one row per account (`managed_endpoint_account_capacity`, seeded from
+the `0006` row, which stays but is no longer written). Endpoint rows
+deliberately do not cascade away with a hard installation deletion: losing the
+tunnel and DNS IDs would make operator cleanup impossible. `0011` drops
+`account.issuer` and its unique index: `0001` created them for Better Auth
+1.7.1, and from 1.7.3 Better Auth never writes the column, so it would refuse
+any new account row. Apply `0011` before deploying a Worker on Better Auth
+1.7.7.
+`0013` drops `highlevel_flows` and `highlevel_ip_rate_limits`, the HighLevel
+OAuth relay's tables from `0009` and `0010`, with any sealed token payload still
+in them. Apply it after deploying a Worker without that relay: an older Worker
+still reads those tables.
 
 ## API surface
 
@@ -49,6 +68,10 @@ would make operator cleanup impossible.
 | `DELETE` | `/v1/installations/:id` | owning account bearer |
 | `GET` | `/v1/installations/self` | installation credential |
 | `GET`, `POST`, `DELETE` | `/v1/installations/self/endpoint` | installation credential |
+| `POST` | `/v1/installations/self/push/register` | installation credential |
+| `POST` | `/v1/installations/self/push/unregister` | installation credential |
+| `POST` | `/v1/installations/self/push/send` | installation credential |
+| `POST` | `/v1/installations/self/relay-token` | installation credential |
 
 Installation registration requires a stable `clientInstanceId`, a display
 `name`, and a `platform` of `darwin`, `windows`, or `linux`; `appVersion` is
@@ -76,22 +99,56 @@ Account bearer tokens are rejected.
   Otherwise it returns the HTTPS URL, hostname, lifecycle status, generation,
   timestamps, and a redacted `lastErrorCode`. It never returns a connector
   token.
-- `POST` has no required body. It idempotently reserves or reconciles the
-  endpoint, adopts a tunnel/DNS record created by an interrupted earlier run,
-  and returns `{ endpoint, connectorToken }`. The raw token is obtained only
+- `POST` has no required body. An app may send `{ "appVersion": "0.1.104" }`
+  (`application/json`, printable, at most 64 characters): the release it runs,
+  which is recorded on the installation and decides which accounts may hold a
+  new endpoint (see **Several Cloudflare accounts**). No body behaves exactly
+  as before; any other member, or a malformed body, is `400 invalid_request`,
+  and a body that is not JSON is `415 unsupported_media_type`. It
+  idempotently reserves or reconciles the endpoint, adopts a tunnel/DNS record
+  created by an interrupted earlier run, and returns
+  `{ endpoint, connectorToken }`. The raw token is obtained only
   after tunnel configuration and DNS are ready. The caller must place it
   directly in the operating system's secure credential store; it is not
-  recoverable from GET or D1.
+  recoverable from GET or D1. After an idle reclaim the same call allocates a
+  new tunnel behind the **same hostname**, so a paired phone keeps its
+  address; it may also take back an endpoint whose reclaim is still pending.
+  The desktop app (Remote access on) and `openmausbot serve --tunnel` ask
+  `GET` every 15 minutes, even while their connector reports ready, and make
+  this call when the endpoint is gone or in `error`; a `401` from `GET` (the
+  90-day installation credential expired) sends them through account
+  recovery, or to a "sign-in expired" prompt.
+- When Cloudflare's tunnel quota (`1045`) or the zone's DNS record quota
+  (`81045`) refuses an allocation, `POST` returns
+  `503 endpoint_capacity` with `Retry-After: 600`. A full account can also
+  answer tunnel creation with `429`: the control plane then reads the
+  account's tunnel count (or, when that read fails, its last scan if under 30
+  minutes old, less the tunnels scheduled cleanup has deleted since) and, at
+  or over the account's tunnel limit, treats the `429` as the quota
+  (`cf_tunnel_quota`). For the next ten minutes (or until scheduled
+  cleanup frees one of its resources) further allocations in that account
+  that would need a new tunnel are answered the same way without calling
+  Cloudflare, protecting the shared API budget. An endpoint that never
+  handed out an address moves to another configured account with room
+  instead, in the same request (see **Several Cloudflare accounts**). Any
+  other `429` from Cloudflare's API
+  rate limit (`cf_rate_limited`) returns `503 endpoint_rate_limited` with
+  Cloudflare's `Retry-After` clamped to 30–300 seconds (60 when Cloudflare
+  sent none) and closes nothing. Every other provider failure remains
+  `502 endpoint_unavailable`; with several accounts, one where Cloudflare
+  refused the account's token also closes that account (see **A refused
+  token**).
 - `DELETE` removes DNS first and then the tunnel. It returns `204` when done or
   when already deleted. A partial Cloudflare failure returns
   `503 endpoint_cleanup_pending` and retains only the IDs needed for a retry.
   A concurrent mutation returns `409 endpoint_busy` with `Retry-After: 2`.
 
-Hostnames have exactly one opaque label in front of the configured suffix:
-`c-<32-lowercase-hex>.<COMPANION_HOST_SUFFIX>`. Set the suffix to a zone name
-covered by the zone's edge certificate (normally the zone apex) so the endpoint
-does not depend on deep-subdomain TLS coverage. Tunnel names are stable opaque
-identifiers and contain no account email, display name, or client-supplied ID.
+Hostnames have exactly one opaque label in front of the suffix of the account
+that holds the endpoint: `c-<32-lowercase-hex>.<COMPANION_HOST_SUFFIX>` in the
+primary account. Set the suffix to a zone name covered by the zone's edge
+certificate (normally the zone apex) so the endpoint does not depend on
+deep-subdomain TLS coverage. Tunnel names are stable opaque identifiers and
+contain no account email, display name, or client-supplied ID.
 
 Endpoint provisioning is limited to 20 attempts per installation per hour;
 deletion is limited to 30. A 60-second D1 lease and monotonically increasing
@@ -110,15 +167,565 @@ Revoking an installation first revokes its local installation credentials, then
 schedules best-effort endpoint cleanup. Cloud cleanup failure cannot restore or
 delay credential revocation. Repeating the owner-scoped installation DELETE is
 safe and retries retained cleanup state. A five-minute cron also processes at
-most four expired-lease rows per run when they are already deleting, belong to
-a revoked installation, or outlive a hard-deleted installation. The four-row
-bound leaves the worst-case 40 external provider calls below the Workers Free
-plan's 50-subrequest ceiling. Failed scheduled cleanups back off from five
-minutes through 15 minutes, one hour, six hours, and then 24 hours. Once a
-deletion has been pending for 24 hours, each eligible sweep emits a distinct
-aggregate operator-attention log without installation or account identifiers.
-This bounded sweep prevents a transient provider failure from orphaning
-resources forever without creating an unbounded scheduled invocation.
+most `OMB_CLEANUP_SWEEP_LIMIT` (code default 20, which `wrangler.jsonc` ships;
+it needs Workers Paid, whose per-invocation subrequest and D1 limits the
+default relies on) expired-lease rows per run when
+they are already deleting, belong to a revoked installation, or outlive a
+hard-deleted installation. Each row is cleaned in its own account, and rows
+no configured account acts on (see **Several Cloudflare accounts**) are
+skipped. Rows run five at a time (the Workers limit is six connections
+awaiting headers), and a run stops
+starting new rows in an account as soon as that account's API answers `429`.
+At up to 14 provider calls per row (four of them only when a forced removal
+meets a tunnel that is still connected) the default is at most about 290 calls per
+run: under a quarter of the API token's 1,200 requests per five minutes, and far
+below the Workers Paid limit of 10,000 subrequests per invocation. On Workers
+Free (50 subrequests per invocation) set the limit to 3. Failed
+scheduled cleanups back off from five minutes through 15 minutes, one hour,
+six hours, and then 24 hours. Once a deletion has been pending for 24 hours,
+each eligible sweep emits a distinct aggregate operator-attention log without
+installation or account identifiers. This bounded sweep prevents a transient
+provider failure from orphaning resources forever without creating an
+unbounded scheduled invocation.
+
+### Phone push relay
+
+Closed-app alerts for the iOS app (harness side: `server/phone-push.ts`,
+wire contract version 1 in `shared/phone-push.ts`; app side:
+`docs/ios-companion.md`). Apple accepts pushes for an App Store or
+TestFlight build only when they are signed with the publishing team's key, and
+a harness may run on a VPS or in a container. So the project's key lives here,
+and a harness asks this Worker to push with the installation credential it
+already holds. Account bearer tokens are refused. All three routes take
+`application/json` and answer with the usual `{ "error": "<code>" }` shape.
+
+- `register` `{ "v": 1, "token": "<lowercase hex>", "environment": "production" | "sandbox" }`
+  stores the APNs device token for this installation (idempotent; it updates
+  the environment). At most 50 tokens per installation (`409
+  push_device_limit`) and 120 registrations per hour. An environment
+  `APNS_ENVIRONMENTS` does not list is `400 push_environment_not_allowed`.
+- `unregister` `{ "v": 1, "token": "…" }` deletes it. `204`.
+- `send` `{ "v": 1, "token": "…", "pairing"?: "…", "notification": { "kind",
+  "title", "botId", "botName", "threadId", "roomId"?, "roomName"? } }` pushes
+  to a token **this** installation registered, else `404
+  push_device_unknown` (the harness then registers and retries once). The
+  schema is strict: `kind` is `[a-z-]`, ids are `[\w-]{1,120}`, `title` is one
+  line of at most 200 characters, names at most 80. Any other field (a
+  `body`, a message) is `400 invalid_request`, never silently dropped, so no
+  message text can reach Apple through this route. `202 { "sent": true }` on
+  success. Limits: 600 sends per installation and 60 per token per hour (`429
+  rate_limited`, `Retry-After: 60`).
+
+The APNs request is `POST https://api.push.apple.com/3/device/<token>` (or
+`api.sandbox.push.apple.com` for a `sandbox` token) with `apns-push-type:
+alert`, `apns-priority: 10`, a 24-hour `apns-expiration`, `apns-topic` set to
+the bundle id, and an `apns-collapse-id` derived from the kind and thread, so
+a repeat replaces the older alert. The payload is
+`{ "aps": { "alert": { "title" }, "sound": "default", "thread-id",
+"interruption-level" }, "omb": { "v": 1, "kind", "botId", "botName",
+"threadId", "roomId"?, "roomName"?, "pairing"? } }`; `interruption-level` is
+`time-sensitive` for `approval`, `question`, `sign-in` and `mention`, else
+`active`.
+
+The provider token is an ES256 JWT signed with WebCrypto (no dependency):
+`{ "alg": "ES256", "kid": APNS_KEY_ID }`, `{ "iss": APNS_TEAM_ID, "iat" }`.
+Its `iat` is the start of the current 50-minute window, so every isolate
+signs for the same window and Apple's 20-to-60-minute refresh rule holds
+however many isolates send; each isolate caches its token for the window.
+
+APNs answers are mapped for the harness: `410 Unregistered`,
+`BadDeviceToken` and `DeviceTokenNotForTopic` delete the token for every
+installation that registered it in the same APNs environment (for a `410`,
+only registrations older than Apple's `timestamp`) and return `410
+push_device_unregistered` (the harness drops it too); an expired or invalid provider token is re-signed and retried once,
+then `503 push_unavailable`; APNs `429` is `429 rate_limited`; anything else
+is `502 push_failed`. Failures log the request id, APNs status and reason
+only, never the token or payload.
+
+Without all of the settings below every push route answers `503
+push_unavailable` and harnesses back off for an hour. Revoking an
+installation deletes its tokens. D1 stores, per row, the installation id, the
+token, its SHA-256, the environment and timestamps (`migrations/0008`).
+
+**Secrets the maintainer sets** (all with `wrangler secret put <NAME>
+--config wrangler.jsonc`; none belongs in `vars`, this file, or CI output):
+
+| Name | Value |
+| --- | --- |
+| `APNS_KEY_ID` | The 10-character Key ID of the APNs auth key (`.p8`) in the Apple Developer account. |
+| `APNS_TEAM_ID` | The 10-character Team ID that owns the app. |
+| `APNS_PRIVATE_KEY` | The whole `.p8` file, PEM, e.g. `wrangler secret put APNS_PRIVATE_KEY < AuthKey_XXXXXXXXXX.p8`. Escaped `\n` newlines are accepted too. |
+| `APNS_BUNDLE_ID` | The iOS app's bundle id, which is the APNs topic. |
+| `APNS_ENVIRONMENTS` | Optional. `production` (default), `sandbox`, or `production,sandbox` to also accept development builds' tokens. |
+
+They are deliberately not in `secrets.required`: the Worker is complete
+without them, with phone push off, until the Apple key exists. Apply `migrations/0008` before
+deploying the Worker that uses it. For a local trial with `wrangler dev`,
+`.dev.vars` is read only for declared names, so add these names to
+`secrets.required` in a local, uncommitted copy of the config.
+
+### Tunnel capacity and idle reclaim
+
+Cloudflare limits an account to 1,000 tunnels by default and a zone to a fixed
+number of DNS records. Each run of the same cron also performs one bounded
+capacity step per configured account, in configuration order, before cleanup.
+A failure in one account is logged and never stops the others:
+
+1. It reads one page of 100 undeleted tunnels for the whole account (the
+   account's page cursor walks and wraps across runs) and the zone's DNS
+   record count. The tunnel page's total is the account-wide usage.
+2. It reclaims idle tunnels by moving their endpoint rows to `deleting` with
+   `reclaim_requested_at`, at most 20 per run across all accounts. It never
+   deletes anything itself; cleanup does, through the same ownership-verified
+   path as an owner's DELETE. A tunnel is idle only when Cloudflare reports it
+   - `inactive` (never ran), with no activation time, created at least two
+     days ago; or
+   - `down` with its last connection ended at least
+     `OMB_TUNNEL_OFFLINE_RECLAIM_DAYS` (default 21, minimum 1) days ago and no
+     later activation.
+
+   `healthy` and `degraded` tunnels, any reported connection, an unknown
+   status, and any unparseable timestamp are never idle. The D1 side must also
+   be quiet for the same period: the installation is active (not revoked) and
+   has not called the control plane, the endpoint row belongs to this account
+   and has not been reconciled or updated, the stored tunnel ID still names
+   the listed tunnel, and no request holds the row's lease. The row is
+   `ready`, `error`, or `provisioning`: a request that stopped part-way (its
+   lease expired and nothing has touched the row since) still holds its
+   tunnel, and the same quiet period is the grace that keeps a provisioning
+   under way from being cut. Those guards live in the marking SQL itself, so
+   a check-in that races the scan wins. Tunnels with no endpoint row in that
+   account are only counted (`unmatched`), never touched.
+3. Before each destructive call of a reclaim, cleanup re-reads the tunnel
+   from Cloudflare. If it has reconnected, or the installation checked in after
+   the mark, the reclaim is cancelled and the row returns to `ready` (or to a
+   retryable `error` when its DNS record was already removed). An owner's
+   DELETE or revocation clears the reclaim marker and always deletes.
+4. It writes the account's capacity snapshot (counts, timestamps, pending
+   reclaims, and dormant endpoints: those of active installations whose tunnel
+   is gone, kept for operators; they hold nothing, so they take no room) and
+   logs one `managed endpoint tunnel scan` summary with the
+   account's `hostSuffix`. Until the next scan, scheduled cleanup lowers the
+   snapshot's tunnel and DNS record counts by what it deletes, so a slot it
+   freed is not counted as used. When usage reaches 90% of the account's
+   tunnel or DNS record limit it emits `console.error` with
+   `"alert": "managed_endpoint_capacity"`, the `hostSuffix`, resource, used,
+   limit, and percentage. Create a Workers Logs alert on that field. With more
+   than one account, a run whose pool status (below) is `high` or `full` also
+   emits `"alert": "managed_endpoint_pool_capacity"`: once an account fills it
+   reports `full` for good, so page on the pool alert instead.
+
+`OMB_TUNNEL_RECLAIM` is `observe` unless set to `on` (an unset or invalid value
+observes): it logs `idle`/`eligible` counts without marking anything. Deploy in
+`observe`, check one full scan cycle of real counts, then set it to `on`.
+
+`OMB_TUNNEL_LIMIT` and `OMB_DNS_RECORD_LIMIT` (default 1000 each) are the
+primary account's tunnel quota and its zone's DNS record quota; extra accounts
+carry their own. The limits drive the alerts and `/healthz`, rank accounts for
+new endpoints, and decide whether a tunnel-creation `429` is the quota. They
+never refuse an allocation on their own: only Cloudflare does. Keep them equal
+to Cloudflare's real quotas and raise them when Cloudflare raises a quota (a
+limit below the real quota turns a genuine rate limit at that count into a
+ten-minute capacity gate for that account and, with several accounts, makes
+the account look full, so new endpoints go elsewhere while it still has
+room). `wrangler.jsonc` sets `OMB_DNS_RECORD_LIMIT` to 3500 because the
+`openmausbot.com` zone is on Pro.
+
+`GET /healthz` keeps `ok` and `service` unchanged (desktops gate hosted sign-in
+on them; a full quota must not hide sign-in or recovery) and adds a
+`capacity` object with no identifiers or secrets. With one account it is that
+account's snapshot:
+
+```json
+{
+  "status": "ok | high | full | unknown",
+  "checkedAt": 1790000000000,
+  "tunnels": { "used": 950, "limit": 1000 },
+  "dnsRecords": { "used": 960, "limit": 1000 },
+  "providerRejectedAt": null,
+  "reclaim": { "mode": "on", "pending": 12 }
+}
+```
+
+`status` is `full` while a recent quota rejection (with several accounts,
+also a refused token) is gating allocations, `unknown` when the snapshot is
+more than 30 minutes old. With more than one account the same fields describe
+the pool a new installation sees (the accounts that take new endpoints), and
+`accounts` lists every account by its host suffix (never by account or zone
+ID):
+
+```json
+{
+  "status": "ok",
+  "checkedAt": 1790000000000,
+  "tunnels": { "used": 1010, "limit": 2000 },
+  "dnsRecords": { "used": 412, "limit": 1200 },
+  "providerRejectedAt": null,
+  "reclaim": { "mode": "on", "pending": 12 },
+  "accounts": [
+    {
+      "hostSuffix": "openmausbot.com",
+      "newEndpoints": true,
+      "status": "full",
+      "checkedAt": 1790000060000,
+      "tunnels": { "used": 1000, "limit": 1000 },
+      "dnsRecords": { "used": 400, "limit": 1000 },
+      "providerRejectedAt": 1790000030000,
+      "reclaimPending": 12
+    },
+    {
+      "hostSuffix": "mausbot.si",
+      "newEndpoints": true,
+      "status": "ok",
+      "checkedAt": 1790000000000,
+      "tunnels": { "used": 10, "limit": 1000 },
+      "dnsRecords": { "used": 12, "limit": 200 },
+      "providerRejectedAt": null,
+      "reclaimPending": 0
+    }
+  ]
+}
+```
+
+The pool is every account whose `newEndpoints` is not `false`; the primary
+always counts. Its `status` is the best known status among them (`ok`, then
+`high`, then `full`; an account refusing allocations counts as `full`).
+`used` is their sum, or `null` when any of their snapshots is unknown or
+stale; `limit` and `reclaim.pending` are sums; `checkedAt` is the oldest
+scan; and `providerRejectedAt` is set only while every one of them is
+refusing. The pool assumes the newest release, so an account's
+`minAppVersion` does not take it out: installations on older releases are
+refused there by design (see **Why `minAppVersion`**), and the pool alert does
+not page for them. Monitors that read the top-level numbers should read
+`accounts` once a second account is configured. Each Cloudflare data center
+reuses one read of the snapshots for up to two minutes, so `capacity` can
+trail D1 by that long; allocation gating always reads D1.
+
+### Several Cloudflare accounts
+
+The account configured by `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID`,
+`COMPANION_HOST_SUFFIX`, the `CLOUDFLARE_API_TOKEN` secret, `OMB_TUNNEL_LIMIT`,
+and `OMB_DNS_RECORD_LIMIT` is the primary. Without `CLOUDFLARE_ENDPOINT_ACCOUNTS`
+it is the only account, and endpoints behave exactly as described above.
+
+`CLOUDFLARE_ENDPOINT_ACCOUNTS` adds up to three more accounts. It is a JSON
+array, set either as a `wrangler.jsonc` JSON var (see the commented example
+there) or as a secret holding the same JSON
+(`wrangler secret put CLOUDFLARE_ENDPOINT_ACCOUNTS`) to keep the IDs out of the
+repository:
+
+```json
+[
+  {
+    "accountId": "<32-hex Cloudflare account ID>",
+    "zoneId": "<32-hex zone ID of mausbot.si in that account>",
+    "companionHostSuffix": "mausbot.si",
+    "apiTokenSecret": "CLOUDFLARE_API_TOKEN_MAUSBOT_SI",
+    "tunnelLimit": 1000,
+    "dnsRecordLimit": 200,
+    "minAppVersion": "0.1.104"
+  }
+]
+```
+
+| Field | Meaning |
+| --- | --- |
+| `accountId` | The account that holds the tunnels. |
+| `zoneId` | The zone of `companionHostSuffix` in that account; it holds the proxied CNAMEs. |
+| `companionHostSuffix` | The zone apex. Hostnames are `c-<32 hex>.<suffix>`: Universal SSL covers first-level names only. |
+| `apiTokenSecret` | The name of the Worker secret holding this account's API token: `CLOUDFLARE_API_TOKEN` (one token for both accounts) or `CLOUDFLARE_API_TOKEN_<NAME>` in uppercase letters, digits, and underscores. Any other name is refused, so a typo can never send another secret to Cloudflare. |
+| `tunnelLimit` | The account's tunnel quota. Default 1000. |
+| `dnsRecordLimit` | The zone's DNS record quota. Default 1000. |
+| `minAppVersion` | Optional `x.y.z`. Only installations that report at least this release get a new endpoint in this account. |
+| `newEndpoints` | Optional, default `true`. `false` closes the account to new endpoints and keeps the ones it holds working. |
+
+Account IDs, zone IDs, and suffixes must each be unique across all accounts,
+including the primary. An invalid entry never takes the Worker down: it is
+ignored, and every cron run logs `"alert": "managed_endpoint_account_config"`
+with redacted issue codes such as `entry_1_token` or `entry_2_duplicate`
+(never values) until it is fixed. A bad primary configuration still fails as
+before.
+
+**An endpoint never changes account.** Every endpoint row records the ID of
+its account (`provider_account`). Renewal, re-provisioning after an idle
+reclaim (same hostname, new tunnel), owner DELETE, revocation cleanup, the
+sweep, and the idle scan all act in that account, with that account's token,
+and nowhere else. An endpoint whose account is not configured, or whose
+hostname is not exactly one opaque label under that account's suffix, is
+never acted on: `POST` answers `502 endpoint_unavailable` without calling
+Cloudflare, `DELETE` and revocation keep the row with `503
+endpoint_cleanup_pending`, the idle scan never matches its tunnel, the sweep
+skips it, and each cron run logs their number with
+`"alert": "managed_endpoint_account_unconfigured"`. So:
+
+- Never edit an entry's `accountId`, `zoneId`, or `companionHostSuffix` once it
+  holds endpoints. To use another domain or account, add a new entry.
+- Removing an entry strands its endpoints until the same entry is added back.
+  To stop new endpoints going to an account while keeping its existing ones,
+  set its `"newEndpoints": false`: its endpoints keep renewing,
+  re-provisioning after a reclaim, and cleaning up there, no new endpoint and
+  no moving row is given to it, and it leaves the pool that `/healthz` and
+  the pool alert describe.
+- Do not roll the Worker back to a version from before migration `0007` once
+  an extra account holds endpoints. An older Worker ignores
+  `provider_account`: it would create tunnels for those rows in the primary
+  account, and its cleanup would mark them deleted after a `404` there,
+  leaving their real tunnel and DNS record behind.
+
+**Choosing an account.** Only a new endpoint row chooses. It goes to the
+eligible account with the most room, `min(tunnelLimit − tunnels,
+dnsRecordLimit − DNS records)` (never below zero), from that account's last
+scan (an unknown DNS count is left out; an unknown tunnel count ranks after
+every account whose room is known; ties go to configuration order). Dormant
+endpoints take no room: they hold no tunnel or record, so a returning owner
+competes for the same free slots as a new installation. An account whose
+scan shows no free tunnel or no free DNS record is never chosen while
+another eligible account has room. An account is eligible when it takes new
+endpoints, its last scan is under 30 minutes old (so a new account takes
+nothing before its first cron run), Cloudflare has not refused it a
+resource, or its token, in the last ten minutes, and the installation's
+version is at least its `minAppVersion`. When no eligible account has room
+the primary is used, exactly as with one account: it is tried, and only
+Cloudflare's refusal answers.
+
+A row that never handed out an address (no tunnel, no DNS record, never
+ready) may move, at most once per request, to the best other eligible account
+with room, under a new hostname: before calling Cloudflare when its account
+is refusing new endpoints or its last scan shows it full, or right after
+its account refuses the tunnel or, at DNS creation, the zone's record quota
+(`81045`). After that DNS refusal the row first deletes the tunnel it holds
+there, whether this request created it or adopted it from an interrupted
+earlier one, re-verified by ID and stable name as cleanup does, and closes
+the account for ten minutes; with nowhere to go it still gives the tunnel
+back, so its next requests are answered by that gate without calling
+Cloudflare. Its old account is checked first; a tunnel or record that an
+interrupted earlier request left there is adopted instead. Each move logs
+`managed endpoint relocated` with both host suffixes. Deleting a row that
+never handed out an address (an idle reclaim, an owner's DELETE) leaves it
+movable. A row that was ever ready never moves: a reclaimed endpoint waits
+for a slot in its own account and keeps its hostname, so a paired phone
+keeps working; a DNS refusal there deletes only a tunnel that request
+created.
+
+**A refused token.** A read-only check cannot show that an account's token
+may create tunnels and DNS records; the first new endpoint there does. With
+several accounts, Cloudflare answering a request in an endpoint's account
+with `401` or `403` (its token is invalid or revoked, or lacks Tunnel or DNS
+Edit) closes that account to new endpoints for ten minutes, as a quota
+refusal does: a row that never handed out an address moves to another
+eligible account (in the same request when tunnel creation was refused,
+otherwise on its next request), and the account's other endpoints that need a
+new tunnel are answered `502 endpoint_unavailable` without calling
+Cloudflare. Every such refusal, with one account too, logs
+`"alert": "managed_endpoint_account_refused"` with the account's `hostSuffix`
+and `errorCode`; only an operator can fix the token.
+
+**Why `minAppVersion`.** Desktop releases up to 0.1.103 accept only
+`openmausbot.com` names for **Remote computer → Desktop companion** pairing
+(phones, pairing links, and Tailscale have no domain rule). The desktop app
+accepts `mausbot.si` from the release that ships this change, and from the
+same release it reports its version with every endpoint request; older apps
+are judged by the version they registered with. Set `minAppVersion` to that
+release so a computer on an older release keeps an address every desktop can
+pair with. Leaving it out brings relief sooner, because computers on older
+releases get an address in the new account at once; desktop-companion
+pairing from an older desktop to those computers then fails (phones and
+Tailscale still work).
+
+**Adding an account.**
+
+1. Ship an app release whose desktop-companion allow-list
+   (`electron/desktop-companion-client.mjs`) includes the new domain.
+2. Apply migration `0007` to the production database before deploying a
+   Worker built from this code (an older Worker keeps working against it),
+   and deploy with only the primary account first. `/healthz` is unchanged;
+   a full account now answers `endpoint_capacity` instead of
+   `endpoint_rate_limited`.
+3. Add the domain to the other account as a zone and wait until it is active
+   and its Universal SSL certificate is issued (check that CAA records allow
+   Cloudflare's certificate authorities; the scan does not check TLS). Read
+   the zone's real record quota with
+   `GET zones/<zone id>/dns_records/usage` (`record_quota`): Free zones added
+   since September 2024 allow 200 records, older Free zones 1,000, Pro and
+   Business 3,500. Note the account's current tunnel count.
+4. Create an API token limited to that account and that zone, with Account →
+   Cloudflare Tunnel → Edit and Zone → DNS → Edit. Before relying on it, you
+   can prove it may write: with the token, create a tunnel
+   (`POST accounts/<account id>/cfd_tunnel` with
+   `{"name": "omb-token-check", "config_src": "cloudflare"}`) and a TXT record
+   in the zone, then delete both.
+5. `wrangler secret put CLOUDFLARE_API_TOKEN_MAUSBOT_SI` (or the name you
+   chose). Never put a token in `vars`, `.dev.vars.example`, logs, or CI output.
+6. Set `CLOUDFLARE_ENDPOINT_ACCOUNTS` with `dnsRecordLimit` equal to the
+   zone's real quota and `minAppVersion` as above. Add the token's secret name
+   (and `CLOUDFLARE_ENDPOINT_ACCOUNTS`, when it is a secret) to
+   `secrets.required` in `wrangler.jsonc`, then deploy. A deploy explicitly
+   keeps only the secrets listed there, and refuses to run while one of them
+   is missing, so a listed token can never be dropped or forgotten.
+7. After the next cron run, `/healthz` lists the new suffix in
+   `capacity.accounts` with a fresh `checkedAt` and both `tunnels.used` and
+   `dnsRecords.used` filled in (a `null` DNS count means the token cannot read
+   the zone: fix that before new endpoints fail there); new endpoints go there
+   from then on. Watch for `managed endpoint relocated`,
+   `managed endpoint DNS record count failed`,
+   `managed_endpoint_account_config`, and `managed_endpoint_account_refused`
+   in Workers Logs.
+8. Page on `managed_endpoint_pool_capacity` instead of
+   `managed_endpoint_capacity`, and on `managed_endpoint_account_refused`,
+   `managed_endpoint_account_config`, and
+   `managed_endpoint_account_unconfigured`.
+
+**Raising a zone's record quota.** After moving a zone to a plan with more
+DNS records (Free zones added since September 2024 allow 200, Pro 3,500),
+confirm the new quota with `GET zones/<zone id>/dns_records/usage`
+(`record_quota`), set the account's limit to it (`OMB_DNS_RECORD_LIMIT` for
+the primary, the entry's `dnsRecordLimit` in `CLOUDFLARE_ENDPOINT_ACCOUNTS`
+otherwise; with 3,500 records the account's 1,000 tunnels bind first), and
+deploy. Until that deploy the account looks full at its old limit and gets
+no new endpoint while another account has room.
+
+Each account adds two Cloudflare reads to every cron run (a tunnel page and a
+DNS count), and each move two lookups in the old account. Tokens created by
+the same Cloudflare user share its 1,200 requests per five minutes. On
+Workers Free, three accounts with `OMB_CLEANUP_SWEEP_LIMIT` 3 use the whole
+50-subrequest budget; a fourth needs the limit at 2.
+
+### MausBot Relay
+
+Phones reach a desktop through MausBot Relay, end-to-end encrypted: the relay passes sealed bytes and can't open them
+(`companion/src/e2e/README.md`). This Worker only lets a computer onto the relay. It mints a 12-hour host token signed
+with Ed25519; the relay holds only the public key and checks tokens offline, so it can't mint one itself.
+
+`POST /v1/installations/self/relay-token` with the installation credential and
+`{"appVersion":"0.1.150","devices":{"e2e":2,"legacy":1}}` (counts of paired phones on the encrypted connection and on the
+old one; no identifiers) answers:
+
+| Status | Body | When |
+| --- | --- | --- |
+| 200 | `{token, hostId, nodes, expiresAt, refreshAfter}` (times in ms) | this computer is in the rollout |
+| 503 | `relay_unavailable` | no signing key yet, `RELAY_DISABLED` on, outside the rollout, or blocked (`relay_blocked_at`). The desktop stays on Wi-Fi and Tailscale |
+| 401 | `unauthorized` | the installation credential is invalid or expired |
+| 429 | `rate_limited` | more than 60 an hour |
+
+- **Host id.** 16 random bytes made once per installation (`installations.relay_host_id`, unique). Phones learn it at
+  pairing; it never changes.
+- **Token.** `b64u(payload) "." b64u(Ed25519 signature over the first part)`, payload
+  `{"v":1,"kid","hid","iid","iat","exp"}` in that order, `exp = iat + 12 h`. The desktop refreshes after an hour.
+  Minted tokens match the V8 test vector byte for byte.
+- **Nodes.** Ordered by rendezvous hash, highest `SHA256(hostId ‖ node)[0:8]` first, so each computer prefers one node
+  and load splits evenly. A node listed in `RELAY_NODES_AMERICAS` goes first for a request whose `cf.continent` is NA or
+  SA.
+- **Rollout.** `RELAY_ROLLOUT_PERCENT` admits a computer when `SHA256(hostId)[0:2] mod 100` is below it, so a computer
+  stays in as the number grows; `RELAY_ALLOW_INSTALLATIONS` admits named installations (the team) at any percentage.
+- **Adoption.** Every request records its counts in `relay_adoption`, in the rollout or not; `/healthz` reports
+  `relayAdoption: {e2eDevices, legacyDevices, installs}` over the last 30 days. The tunnel path retires on these numbers.
+- **Usage per day** (`migrations/0014`). `relay_daily` counts installations once per UTC day and kind: `seen` (asked
+  for a token), `token` (got one), `e2e` (reported end-to-end phones), `new` (asked for the first time). It holds only
+  the day, the kind and a count; `relay_adoption.first_seen_at`, `token_at` and `e2e_at` tell a request whether its
+  installation was already counted today. The stats dashboard (stats.openmausbot.com) charts it. A Worker without the
+  migration keeps minting tokens and writing `relay_adoption`, and logs `relay_daily_schema` once per isolate.
+- **Tunnels.** From `RELAY_CAPABLE_MIN_VERSION`, a desktop at that version or later that the relay can carry (it is
+  on, the computer is inside the rollout and not blocked) and that reports `legacyDevices: 0` gets `409 relay_capable`
+  instead of a tunnel, whether it never had one or is coming back after a release or reclaim. An endpoint it already
+  holds keeps working. A desktop the relay cannot carry gets a tunnel as before. See **Releasing tunnels**.
+
+### Releasing tunnels
+
+A running desktop keeps its connector up, so idle reclaim never sees its tunnel as idle. These rules give tunnels back
+once the relay has replaced them. Each switch is off in `wrangler.jsonc`; all need migrations `0015` and `0016`. The cron only
+marks rows `deleting` (at most 20 a run, every reason together) and the cleanup sweep removes them; the row and its
+hostname stay, so a later provisioning call returns the same address.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `RELAY_TUNNEL_RELEASE_PERCENT` | `0` | Share of computers (the relay rollout's stable hash) whose tunnel is released once it is proven on the relay |
+| `RELAY_TUNNEL_RELEASE_DAYS` | `3` | The wait: no old phone reported for this long. Three days outlasts a weekend away, so a phone that still dials the tunnel has had working days to be counted and stop the wait |
+| `TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT` | `0` | Share of relay-served computers that give up their tunnel whatever phones are paired. Old phone apps stop connecting from outside the home network |
+| `TUNNEL_MIN_APP_VERSION` | empty | A desktop below it gets `426 update_required` and its tunnel is removed. A missing version counts as below |
+| `TUNNEL_REASON_MIN_VERSION` | empty | First desktop release that reads `tunnel` on `409 relay_capable` and keeps asking afterwards. Only from it is a full account answered with `relay_capable` |
+| `OMB_TUNNEL_RECLAIM_PREVIEW_DAYS` | empty | Dry run of idle reclaim at another offline period; counted, never acted on |
+
+- **Proven on the relay** means: a relay token in the last two days, a phone report in the last two days with at
+  least one phone on the encrypted connection and no old phone, and no old phone reported for the whole wait
+  (`relay_adoption.legacy_clear_at`, cleared by any report that counts an old phone). A phone that has used the
+  encrypted connection never dials the tunnel again, so such a tunnel carries nothing. The checks are repeated inside
+  the marking SQL, so a report that lands during the run wins.
+- **One rule for "on the relay".** The cron and provisioning both ask `relayAdmits` (`src/relay.ts`): the relay is
+  on, the computer is not blocked, and it is inside `RELAY_ROLLOUT_PERCENT` or named in `RELAY_ALLOW_INSTALLATIONS`.
+  So the cron never marks a tunnel that provisioning would hand straight back. To give up a tunnel that works, a
+  computer must also hold a relay token from the last two days: the cron always requires it, and under the cutoff
+  provisioning requires it whenever the row still holds a tunnel.
+- **The stored release.** `installations.app_version` is refreshed by every relay-token request (hourly on a
+  relay-capable desktop), as well as at registration and on `POST .../endpoint`. The cron applies
+  `TUNNEL_MIN_APP_VERSION` only to a computer that called in the last two days: had it updated to a relay-capable
+  release it would have said so. A computer that has been off is left to idle reclaim. One case is still judged by
+  a stale release: a desktop that updated with the relay route turned off. Its tunnel is removed, its next request
+  reports the real release and the same address comes back.
+- **Online computers.** Cloudflare refuses to delete a tunnel that has active connections (API error 1022, recorded as
+  `cf_tunnel_connected`), and a running desktop's cloudflared is connected. For a release, an owner's delete or a
+  revoked installation, the sweep then drops the tunnel's connections (`DELETE .../cfd_tunnel/{id}/connections`) and
+  deletes again at once, for at most two rounds, the last with `?cascade=true` (what `cloudflared tunnel delete
+  --force` sends; not in the public API reference); a deleted tunnel's connector token no longer connects. Idle reclaim never does this: a tunnel that answers
+  "still connected" is left, and its next attempt finds it connected and cancels.
+- **Backpressure.** A run marks at most what one cleanup sweep removes (`OMB_CLEANUP_SWEEP_LIMIT`, at most 20) minus
+  the rows already waiting for cleanup. While the sweep is failing or rate-limited nothing more is marked. A forced
+  removal still refused as connected after its rounds does not count as waiting: it backs off (5 minutes up to 24
+  hours) and retries while the sweep and the marking go on. A marked row is a final delete: its owner is answered
+  `409 endpoint_busy` until the sweep has removed it.
+- **Self-hosted servers.** A server (`openmausbot serve --tunnel`, a fleet container with `OMB_INSTALLATION_CREDENTIAL`)
+  has no phone relay of its own: its tunnel is its public address (web UI, the desktop app's connection to it,
+  webhooks). Provisioning never answers a server `relay_capable` (no `retired`, no `full`; at the limit it gets
+  `503 endpoint_capacity`), and the cron never marks a server's tunnel for `relay_proven` or `legacy_cutoff`. The
+  version cutoff still applies (`426`, and `min_version`). A server that uses the relay and does not ask for a tunnel
+  simply has none. An installation is a server when it says so: optional `kind: "desktop" | "server"` on
+  `POST /v1/installations`, `POST .../self/endpoint` and `POST .../self/relay-token`, stored in `installations.kind`
+  (migration `0016`; the latest report wins). The request schemas are strict, so this Worker must accept `kind` before
+  any client release sends it. An installation that has never said is judged by what every release up to 0.1.152
+  does: the desktop reports `legacyDevices` whenever its companion runs and asks for relay tokens, a server does
+  neither. So `POST .../endpoint` without `legacyDevices`, from an installation with no `relay_adoption` row, is
+  treated as a server. A desktop that has never asked for a relay token and provisions while its companion is off is
+  treated the same way, and gets a tunnel as before the cutoff.
+- **Coming back.** `POST /v1/installations/self/endpoint` creates a tunnel again, with the same hostname, when the
+  desktop reports an old phone (outside the cutoff), or the relay cannot carry it: `RELAY_DISABLED: "1"`, a lower
+  `RELAY_ROLLOUT_PERCENT`, or `relay_blocked_at`. With the relay switched off the cron releases nothing on the
+  relay's account either, so a relay outage is answered by that one switch.
+- **At the tunnel limit** a desktop the relay carries, at `TUNNEL_REASON_MIN_VERSION` or later, is answered
+  `409 {"error":"relay_capable","tunnel":"full"}` instead of `503 endpoint_capacity`: it pairs new phones over the
+  relay and keeps asking for its old phones. An earlier release takes any `relay_capable` as "nothing more to do"
+  and would stop retrying, so it keeps the 503. Under the old-phone cutoff the answer is `"tunnel":"retired"` for
+  every relay-capable release; the earlier ones carry on without a tunnel and say nothing.
+- **Reading before switching.** `/healthz` reports counts only:
+
+```json
+"tunnelRelease": {
+  "relayProven": { "percent": 0, "days": 3, "eligible": 41 },
+  "legacyPhoneCutoff": { "percent": 0, "eligible": 1630 },
+  "minAppVersion": { "on": false, "eligible": 212 }
+}
+```
+
+  `relayProven.eligible` is what the release clears at 100%; `legacyPhoneCutoff.eligible` what the cutoff clears
+  beyond that (both assume the relay rollout is at 100%); `minAppVersion.eligible` the tunnels of desktops seen in
+  the last two days below `TUNNEL_MIN_APP_VERSION`, or below `RELAY_CAPABLE_MIN_VERSION` while no minimum is set. `capacity.reclaim.preview` is
+  `{ "offlineDays": 1, "eligible": 37 }` once every account has finished a full pass at the preview period (about 50
+  minutes per 1,000 tunnels), and `eligible: null` until then.
+- **Order.** Apply migrations `0015` and `0016` and deploy with everything off. Read `tunnelRelease`. Raise
+  `RELAY_TUNNEL_RELEASE_PERCENT` 10, 50, 100. After the desktop release that explains the cutoff is out, set
+  `TUNNEL_REASON_MIN_VERSION` to that release, then raise `TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT` 10, then 100, and last
+  set `TUNNEL_MIN_APP_VERSION`.
+
+Setup, once:
+
+1. `wrangler d1 migrations apply DB --config wrangler.jsonc --remote` (0012, and 0014 for the daily counts; apply 0014
+   before deploying the Worker that writes it).
+2. Make a key pair: a 32-byte Ed25519 seed for this Worker, its public key for the relay's `RELAY_TOKEN_KEYS`
+   (`{"k1":"<b64u public key>"}`). `wrangler secret put RELAY_TOKEN_SIGNING_KEY --config wrangler.jsonc` with the seed as
+   base64url. Until it exists every request answers 503. Once it is set it is listed in `secrets.required`: a deploy
+   keeps only the secrets listed there, so an unlisted one is dropped. Set it before deploying a config that lists it.
+3. Admit the team with `RELAY_ALLOW_INSTALLATIONS`, then raise `RELAY_ROLLOUT_PERCENT` 10, 50, 100 while watching the
+   relay alerts. `RELAY_DISABLED: "1"` turns every token off at once; tokens already issued expire within 12 hours.
+4. To rotate, give the relay both public keys, set `RELAY_TOKEN_KID` and the new secret, deploy, then drop the old key
+   from the relay after 12 hours.
 
 ## Local checks
 
@@ -140,11 +747,27 @@ pnpm --filter @openmausbot/control-plane exec wrangler d1 migrations apply DB --
 pnpm --filter @openmausbot/control-plane exec wrangler dev --config wrangler.jsonc
 ```
 
-Do not commit `.dev.vars`.
+Do not commit `.dev.vars`. Because `wrangler.jsonc` declares
+`secrets.required`, `wrangler dev` reads from `.dev.vars` only the names it
+declares, so a second account cannot be configured there; the test suite
+covers several accounts, and `.dev.vars.example` says how to try one by hand.
 
 ## Troubleshooting managed HTTPS setup
 
-`endpoint_unavailable` comes from authenticated endpoint provisioning, before
+`endpoint_capacity` means Cloudflare refused a new tunnel or DNS record in
+the endpoint's account: `cf_api_1045` (the tunnel quota), `cf_tunnel_quota`
+(tunnel creation answered `429` while the account's tunnel count was at or
+over its `tunnelLimit`, which is how Cloudflare refuses a full account), or
+`cf_api_81045` (the zone's DNS record quota). See **Tunnel capacity and idle
+reclaim**, **Several Cloudflare accounts**, and the `capacity` object in
+`/healthz`. `endpoint_rate_limited` means Cloudflare's API rate limit (shared
+by every request this Worker makes) pushed back; it clears on its own within
+minutes. `endpoint_unavailable` is every other failure, including
+`endpoint_account_unavailable` in the logs: the endpoint's account is not
+configured, or its configuration entry was ignored (look for
+`managed_endpoint_account_config`), and a token Cloudflare refused (look for
+`managed_endpoint_account_refused`). All three come from authenticated
+endpoint provisioning, before
 the desktop starts its connector or a phone connects. A successful `/healthz`
 response only validates Worker configuration; it does **not** check provider
 capacity, API permissions, DNS writes, or tunnel creation. A reachable LAN
@@ -159,20 +782,24 @@ companion on port `8810` also does not prove managed HTTPS is ready.
 2. Check the scope of failures without exporting account or installation data:
 
    ```sh
-   pnpm --filter @openmausbot/control-plane exec wrangler d1 execute DB --remote --command "SELECT status, last_error_code, COUNT(*) AS endpoints FROM installation_endpoints GROUP BY status, last_error_code"
+   pnpm --filter @openmausbot/control-plane exec wrangler d1 execute DB --remote --command "SELECT provider_account, status, last_error_code, COUNT(*) AS endpoints FROM installation_endpoints GROUP BY provider_account, status, last_error_code"
    ```
 
-3. Check **account-wide** undeleted tunnel usage in Cloudflare, not just ready
-   D1 rows. Cloudflare's [documented default limit is 1,000 tunnels per
+3. Check **account-wide** undeleted tunnel usage in the endpoint's Cloudflare
+   account, not just ready D1 rows. Cloudflare's [documented default limit is 1,000 tunnels per
    account](https://developers.cloudflare.com/cloudflare-one/account-limits/#cloudflare-tunnel).
    Pending allocations and tunnels belonging to other services also consume
-   capacity. At the limit, request a capacity increase from Cloudflare. A new
-   desktop release cannot raise the provider's quota. Do not infer the meaning
+   capacity. At the limit, request a capacity increase from Cloudflare or add
+   an account (see **Several Cloudflare accounts**). A new desktop release
+   cannot raise the provider's quota. Do not infer the meaning
    of an API error code from similarly numbered Cloudflare edge error pages.
+   `GET /healthz` reports the last scanned usage.
 4. Review already-requested deletion and revoked-installation cleanup. Do not
-   delete a healthy installation's tunnel, or infer abandonment from a
-   disconnected connector: a sleeping laptop is normal. The existing cleanup
-   path validates ownership before deleting resources.
+   delete a healthy installation's tunnel by hand, or infer abandonment from a
+   disconnected connector: a sleeping laptop is normal. Idle reclaim already
+   uses week-scale thresholds and re-checks the connection before deleting;
+   search logs for `managed endpoint tunnel scan` and
+   `managed endpoint cleanup sweep`.
 5. After the service-side problem is resolved, the user can choose **Retry
    secure access** without signing out or reinstalling. The desktop retains
    the installation credential even when endpoint provisioning fails, avoiding
@@ -223,12 +850,16 @@ Before a production deployment, an operator must:
 6. Set `COMPANION_HOST_SUFFIX` to the certificate-covered DNS suffix where
    opaque `c-*` records may be created. The configured zone must contain that
    suffix. This change does not create the zone, certificate, or any remote
-   tunnel/DNS resources during build or tests.
+   tunnel/DNS resources during build or tests. Further accounts are optional
+   and added later (see **Several Cloudflare accounts**).
 7. Replace `ALLOWED_ORIGINS` with a comma-separated allow-list of exact HTTPS
    application origins. Wildcards are deliberately unsupported.
-8. Deploy the Worker and verify that `GET <BETTER_AUTH_URL>/healthz` returns
-   exactly `{ "ok": true, "service": "openmausbot-control-plane" }` over
-   HTTPS before shipping the desktop build. Electron probes this endpoint and
+8. Optional, for closed-app phone alerts: apply `migrations/0008`, then set
+   the APNs secrets listed under **Phone push relay**. Without them the push
+   routes answer `503 push_unavailable` and nothing else changes.
+9. Deploy the Worker and verify that `GET <BETTER_AUTH_URL>/healthz` returns
+   `"ok": true` and `"service": "openmausbot-control-plane"` over HTTPS
+   before shipping the desktop build. Electron probes this endpoint and
    keeps new hosted onboarding hidden until it is healthy; an already signed-in
    user remains visible so cleanup and recovery are not stranded.
 

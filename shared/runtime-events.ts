@@ -1,8 +1,8 @@
 /** Canonical runtime-event shapes, as they ride the live wire and the
- * inspector log. Single home in shared/ so the server contracts, the client
- * store, and the inspector panel cannot drift; server/contracts.ts and
- * server/thread-events.ts re-export these under their historical names. */
+ * inspector log. */
 import type { AskQuestion } from "./ask-question.ts";
+import type { ServerText, ServerTextParams } from "./server-text.ts";
+import type { LiveStep, TurnProgressFields } from "./turn-progress.ts";
 
 export type DriverKind = string;
 export type InstanceId = string;
@@ -19,10 +19,8 @@ export interface ModelVariantState {
   currentValue?: string;
 }
 
-// Subset of upstream's 49-member ProviderRuntimeEvent union — the ~12 types
-// the recipe says to start with, sharing one base. `raw` carries the
-// native protocol message when a consumer needs to see behind the
-// normalization.
+// A subset of upstream's ProviderRuntimeEvent union, sharing one base. `raw`
+// carries the native protocol message behind the normalization.
 export interface RuntimeEventBase {
   eventId: string;
   provider: DriverKind;
@@ -46,6 +44,8 @@ export type RuntimeEvent = RuntimeEventBase &
         /** the provider refused the turn's resumeCursor and this new session
          * was started from the turn's recoveryText */
         rebuilt?: boolean;
+        /** the turn's `custom` MCP servers the engine reported could not connect */
+        mcpFailed?: string[];
       }
     | { type: "session.model-variants"; model: string; variants: ModelVariantState }
     | { type: "session.exited"; reason?: string }
@@ -55,7 +55,7 @@ export type RuntimeEvent = RuntimeEventBase &
         /** 1-based: the retry about to be launched (1 = first relaunch). */
         attempt: number;
         delayMs: number;
-        /** Why this failure was judged retry-worthy (classifyError's reason). */
+        /** Why this failure was judged retry-worthy. */
         reason: string;
       }
     | {
@@ -64,16 +64,27 @@ export type RuntimeEvent = RuntimeEventBase &
         stopReason?: string | null;
         cost?: number | null;
         denials?: string[];
-        /** THIS turn's token total, as the provider reports it at the end.
-         * The one figure the harness accumulates — thread.token-usage.updated
-         * is a live indicator whose meaning differs per driver (a per-call
-         * delta, a thread total, a per-step figure) and must never be summed. */
+        /** THIS turn's token total, as the provider reports it at the end: the
+         * one figure the harness accumulates. thread.token-usage.updated means
+         * something different per driver and must never be summed. */
         usage?: { input: number; output: number; cachedInput?: number };
       }
     | {
+        /** A resumable terminal: the turn exhausted its model/tool budget and
+         * a structured handoff was persisted. */
+        type: "cap.exhausted";
+        /** Absolute path to the persisted handoff for the dead turn. */
+        handoffPath: string;
+        /** What stopped the turn without a final answer. */
+        reason: "cap";
+      }
+    | {
         type: "turn.wait_started";
-        /** The computer resource this turn queued behind (e.g. "computer:box:bx_…"). */
+        /** The computer or browser this turn queued behind (e.g. "computer:box:bx_…", "browser:bot-…"). */
         resource: string;
+        /** Where this turn sat in the resource's arrival-ordered waitlist when
+         * the wait began. */
+        position?: number;
         /** Who held the computer when the wait began, if the holder was known. */
         holder?: { name: string; task?: string };
       }
@@ -84,8 +95,9 @@ export type RuntimeEvent = RuntimeEventBase &
         /** How long the turn actually waited. */
         waitedMs: number;
         /** acquired: the claim landed; stopped: the turn was stopped or
-         * cancelled while waiting; gave_up: the wait ceiling fired. */
-        outcome: "acquired" | "gave_up" | "stopped";
+         * cancelled while waiting; parked: the wait ceiling settled the turn
+         * for resume; gave_up: only in older recorded logs. */
+        outcome: "acquired" | "gave_up" | "parked" | "stopped";
       }
     | {
         type: "item.started";
@@ -97,46 +109,59 @@ export type RuntimeEvent = RuntimeEventBase &
         summary?: string;
         /** Bounded, redacted display preview; never raw tool arguments. */
         input?: string;
+        /** What the call works on, read from `summary` and `input` as the event passes the bus. */
+        step?: LiveStep;
       }
     | { type: "item.updated"; itemType: "tool" | "reasoning"; tokens?: number | null }
+    /** Output a running call printed, as its engine streams it: a chunk to append, or with `whole` all of it so far.
+     * Live only: the bus folds it into the status line's `tail` and never logs or forwards it. */
+    | { type: "item.output"; itemType: "tool"; text: string; whole?: boolean }
+    /** What the engine is doing right now (a tool call being written or run), for the chat's status line. Live only:
+     * the bus coalesces it and never writes it to the event log; nothing stores it. */
+    | Omit<TurnProgressFields, "itemId">
     | { type: "item.completed"; itemType: "tool"; ok: boolean; output?: string }
     | { type: "item.completed"; itemType: "assistant_text"; text: string }
-    /** Provider-generated raster bytes. This event is folded into the
-     * private attachment store and is never forwarded to renderer SSE: a
-     * multi-megabyte base64 result belongs in one durable message URL, not
-     * duplicated through every connected window. */
-    | { type: "item.completed"; itemType: "assistant_image"; data: string; alt?: string }
-    | { type: "content.delta"; streamKind: "assistant_text" | "reasoning_text"; delta: string }
+    /** Provider-generated raster bytes, folded into the private attachment
+     * store and never forwarded to renderer SSE. `fromTool`: a tool's result
+     * returned the image to the engine; the bot did not make or send it. */
+    | { type: "item.completed"; itemType: "assistant_image"; data: string; alt?: string; fromTool?: true }
+    | { type: "content.delta"; streamKind: "assistant_text" | "reasoning_text"; delta: string; /** A room reply as it goes out: the member speaking. */ botId?: string }
     | {
         type: "request.opened";
         requestType: "permission" | "question";
         tool: string;
         summary: string;
+        /** Fixed `chat.notice.*` summary words beside their English fallback; absent for provider-authored text. */
+        summaryCode?: string;
+        summaryParams?: ServerTextParams;
         /** Complete native shell input and its effective working directory.
          * Used for exact-command grants; never reconstructed from a display
          * summary, tool title, or argv. Absent when either value is unknown. */
         command?: { command: string; cwd: string };
+        /** The shell command line exactly as the engine sent it, even when `command` is absent for want of a cwd.
+         * Read only by the safety floor; no grant is ever made from it, and like `command` it is never broadcast. */
+        commandLine?: string;
+        /** The files a read tool's ask reads (absolute): a request that reads only the bot's own files is answered
+         * without the person. Like `command`, never broadcast. */
+        reads?: string[];
         choices?: string[];
         /** A provider's structured ask (Claude's AskUserQuestion): the whole
          * set of questions, each with its own options, so the card can offer
          * them instead of an Allow/Deny a person cannot answer. */
         questions?: AskQuestion[];
-        /** Where the ask came from: a harness tool call ("tool" — the
-         * default, and what every event before this field implied), or a
-         * block parsed out of model-authored final output ("output", the
-         * turn-held transport). Cards and logs can badge the latter as
-         * agent-composed; untrusted-input rules apply either way. */
+        /** "tool" (or absent): a harness tool call; "output": a block parsed
+         * from model-authored final output. Untrusted-input rules apply either
+         * way. */
         origin?: "tool" | "output";
         approvalScope?: "local-computer";
         /** Provider asks to widen its configured sandbox. Only explicit Full
          * access may answer this automatically; Auto/remembered grants may not. */
         requiresExplicitApproval?: boolean;
         /** Whether the provider's own automatic reviewer was running when it
-         * raised this request. Only providers that can tell set it: Claude
-         * reports the effective permission mode in its init frame, and starts
-         * in Manual without a word when Auto is unavailable for the model.
-         * "inactive" means this ask is not a reviewer's verdict, so the app's
-         * own safe-Auto rules may answer it; unset means nobody knows. */
+         * raised this request. Claude reports its effective permission mode in
+         * its init frame and silently starts in Manual when Auto is unavailable
+         * for the model. "inactive": the app's own safe-Auto rules may answer;
+         * unset: nobody knows. */
         nativeReview?: "active" | "inactive";
         /** The provider can keep an allow for the rest of its session
          * ("Always allow this session"): Claude through its own suggested
@@ -159,14 +184,28 @@ export type RuntimeEvent = RuntimeEventBase &
          * whole prompt, cache reads included — and the window's size when the
          * driver knows it. The figure that predicts the next message's cost. */
         contextTokens?: number; contextWindow?: number;
+        /** The part of `output` spent reasoning, where the engine reports it. A per-call report carries the call's own
+         * message id in `itemId`, repeated on every frame of that call. */
+        reasoning?: number;
       }
-    // `setup: true` marks a failure the user fixes by installing or
-    // configuring something, not by retrying — the UI offers setup instead.
-    // `terminal: true` records failure of the complete turn, rather than a
-    // transient error or a legacy provider's diagnostic during cancellation.
-    // `claudeUpdate: true` narrows a setup failure to "this Claude Code is
-    // too old for the model": the UI offers to run `claude update` for them.
-    | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean }
+    // `setup`: fixed by installing or configuring something, not by retrying.
+    // `terminal`: the complete turn failed, not a transient error.
+    // `claudeUpdate`: this Claude Code is too old for the model.
+    // `trialCredit`: the trial's Claude credit refused the call.
+    // `stalled`: the engine went silent and the turn was stopped as stuck.
+    // `limitResetsAt`: epoch ms when the usage limit refusing this account resets, when the engine says.
+    // `limit`: a usage limit refused this turn: the account's on this engine ("engine"), one model's own window
+    // ("model"), or that model's extra usage credits ("credits"); the engine's other models still work for the last two.
+    // `limitModels`: the models a "model" limit holds, when one allowance is shared (OpenCode's free models).
+    | { type: "runtime.error"; message: string; partial?: boolean; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; trialCredit?: "used_up" | "ended" | "paused" | "too_low";
+        stalled?: boolean; limitResetsAt?: number; limit?: "engine" | "model" | "credits"; limitModels?: string[];
+        /** `message` as a `chat.notice.*` key and params, when it is one of the server's fixed sentences. */
+        text?: ServerText }
+    /** Something the person should know that did not fail the turn — for
+     * example, a saved model the engine no longer offers was replaced. */
+    | { type: "runtime.notice"; message: string; text?: ServerText }
+    /** The engine condensed the conversation into its own summary (Claude Code's compact_boundary); the chat marks it. */
+    | { type: "context.compacted" }
   );
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;

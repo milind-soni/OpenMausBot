@@ -1,5 +1,3 @@
-// Discrete Cloud / Local headings. Same split as the picker rail —
-// Cloud = subscription catalog + Custom; Local = inject only.
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 

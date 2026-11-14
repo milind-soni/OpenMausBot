@@ -1,13 +1,5 @@
-// The bot folder: ~/.openmausbot/bots/<botId>/, owned by the server.
-//
-// SOUL.md is a MIRROR of BotRecord.soul, never the source of truth. The
-// prompt is built from the record; the file exists so a person can read
-// and edit the bot in their editor and so a bot can export as a folder.
-// The folder sits outside the bot-writable workspace on purpose: a bot
-// that reads untrusted content (a Discord channel, a webhook payload)
-// must not be able to persist injected text into its own persona. A
-// mirror that no longer matches the record is surfaced to the user as
-// drift, with its text, and is never applied on its own.
+// SOUL.md mirrors BotRecord.soul and is never the source of truth. The folder sits outside the bot-writable workspace, so
+// a bot reading untrusted content cannot persist injected text into its own persona; drift is shown, never applied on its own.
 import { createHash } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -31,9 +23,7 @@ export function soulHash(soul: string): string {
   return createHash("sha256").update(soul, "utf8").digest("hex");
 }
 
-/** Rewrite the mirror from the canonical text. Always writes, even for an
- * empty soul, so the folder exists for the user to find. Private modes:
- * standing instructions can describe a person's work in detail. */
+/** Private modes: standing instructions can describe a person's work in detail. */
 export function writeSoulMirror(botId: string, soul: string): void {
   mkdirSync(botFolder(botId), { recursive: true, mode: 0o700 });
   writeFileAtomic(soulFile(botId), soul, { mode: 0o600 });
@@ -41,17 +31,13 @@ export function writeSoulMirror(botId: string, soul: string): void {
 
 export type SoulDrift = { drift: false } | { drift: true; fileText: string };
 
-/** Compare the mirror with the record's hash. A missing mirror is not
- * drift — it is re-created from the record. A differing one is reported
- * together with its text so the user can apply or discard it. Editor reads
- * surface filesystem failures instead of mistaking them for a clean mirror. */
+/** A missing mirror is not drift; editor reads surface filesystem failures instead of mistaking them for a clean mirror. */
 export function readSoulDrift(botId: string, soul: string, hash: string): SoulDrift {
   let fileText: string;
   try {
     const fd = openSync(soulFile(botId), "r");
     try {
-      // External edits are unbounded. Read at most the budget plus one byte,
-      // including if the file grows while the editor has it open.
+      // External edits are unbounded: read at most the budget plus one byte.
       const bytes = Buffer.alloc(BOT_PROFILE_LIMITS.soul + 1);
       let length = 0;
       while (length < bytes.length) {
@@ -73,8 +59,7 @@ export function readSoulDrift(botId: string, soul: string, hash: string): SoulDr
   return { drift: true, fileText };
 }
 
-/** Turn dispatch is best-effort; explicit editor actions use readSoulDrift
- * so an unreadable file is never presented as successfully discarded. */
+/** Turn dispatch is best-effort; editor actions use readSoulDrift, so an unreadable file never reads as discarded. */
 export function checkSoulDrift(botId: string, soul: string, hash: string): SoulDrift {
   try { return readSoulDrift(botId, soul, hash); } catch { return { drift: false }; }
 }
@@ -85,8 +70,7 @@ export function removeBotFolder(botId: string): void {
   } catch {}
 }
 
-/** The standing-instructions block of the system prompt. Empty soul,
- * empty block, so a bot without one gets today's prompt byte for byte. */
+/** An empty soul gives an empty block, so the prompt stays byte for byte. */
 export function soulSystemPrompt(soul: string): string {
   const text = soul.trim();
   if (!text) return "";

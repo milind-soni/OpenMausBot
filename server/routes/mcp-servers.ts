@@ -1,0 +1,246 @@
+import { userError, userErrorFields } from "../user-errors.ts";
+import { hostedWorkspaceConfiguration } from "../enterprise.ts";
+import { runsElsewhere, type McpConfig, type McpConfigDeps, type McpConfigResult } from "../host/mcp-config.ts";
+import { McpOAuthError, McpSignInError, mcpCallbackOrigin } from "../mcp-oauth.ts";
+import { isRemoteMcpServer, mcpServerBody, mcpServerNotFound, mcpServerServes, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "../mcp-registry.ts";
+import type { McpProbeResult } from "../mcp-probe.ts";
+import { isVaultItemId } from "../vault/mcp-keys.ts";
+import { personKey } from "../person-key.ts";
+import type { RequestAuth } from "../request-auth.ts";
+import { toolBudgetOf } from "../tool-budgets.ts";
+import { isLoopbackHost, isProxied, provesSameOrigin, requestOrigin } from "../request-auth.ts";
+import { PASS, type RouteHandler } from "./table.ts";
+import type { json } from "../harness/http.ts";
+import { sessionMember } from "./team-phone.ts";
+
+type ListedMcpServer = { name: string; enabled: boolean; bot?: string; offFor?: readonly string[] };
+
+// Security: built field by field, never spread. The settings list carries commands, arguments and addresses that can
+// hold secrets, so it stays closed to phones and this is what they get instead.
+function botMcpServers(listed: readonly ListedMcpServer[], bot: { id: string; mcpServers?: readonly string[] | null }) {
+  return listed.filter((server) => mcpServerServes(server, bot.id)).map((server) => ({
+    name: server.name,
+    enabled: server.enabled,
+    on: server.enabled && (!bot.mcpServers || bot.mcpServers.includes(server.name)),
+    ...(server.offFor?.includes(bot.id) ? { offFor: true as const } : {}),
+  }));
+}
+
+/** The Vault items a server arriving in a move may read its `vault:<id>` keys from.
+ * Security: only where whoever may change servers owns every Vault item; on a Team Cloud or a hosted workspace an admin
+ * could otherwise point a server of theirs at a member's saved secret. */
+const vaultKeysOf = (body: unknown, ownsVault: boolean): string[] | undefined => {
+  const keys = (body as { vaultKeys?: unknown } | null)?.vaultKeys;
+  return ownsVault && Array.isArray(keys) ? keys.filter(isVaultItemId) : undefined;
+};
+
+export interface McpServerRouteDeps extends Pick<McpConfigDeps, "cfg" | "sessions" | "mcpOAuth" | "teamConnections" | "cloudHome" | "fallbackPublicUrl" | "savedCustomDomain" | "appCatalog"> {
+  config: McpConfig;
+  bot(id: string): { id: string; mcpServers?: readonly string[] | null } | null;
+  /** Secrets as booleans, sign-in state attached. */
+  mcpServerResponse(): { servers: readonly ListedMcpServer[] };
+  /** Whose lent computers this request may test a server on; null: nobody's. */
+  lender?(auth: RequestAuth): string | null;
+  /** A server the person adds that needs their own computer, marked as running on the one of theirs lent now. */
+  place?(server: StoredMcpServer, auth: RequestAuth): Promise<{ ok: true; server: StoredMcpServer } | { ok: false; error: string }>;
+  /** Whoever may change servers here owns every Vault item (not a Team Cloud or a hosted workspace), so a server arriving
+   * in a move may be given the items its `vault:<id>` keys name. */
+  ownsVault?(): boolean;
+  /** Who added a server and what Test found, for the team's connections (server/host/connection-health-host.ts). */
+  connectionHealth?: {
+    added(kind: "mcp", name: string, email: string | null): void;
+    removed(kind: "mcp", name: string): void;
+    tested(name: string, result: McpProbeResult): Promise<void>;
+  };
+}
+
+export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
+  const withServerDetails = <T,>(body: T): T => {
+    const hasApps = deps.appCatalog?.hasApps;
+    const servers = (body as { servers?: unknown }).servers;
+    if (!Array.isArray(servers)) return body;
+    const personal = deps.teamConnections.personMcp();
+    return {
+      ...body,
+      servers: servers.map((server: { name?: unknown }) => {
+        const known = typeof server?.name === "string" ? hasApps?.(server.name) : undefined;
+        return { ...server, scope: typeof server.name === "string" && personal.includes(server.name) ? "person" : "team",
+          ...(known === undefined ? {} : { hasApps: known }) };
+      }),
+    };
+  };
+  const {
+    cfg, sessions, mcpOAuth, cloudHome: CLOUD_HOME, fallbackPublicUrl: FALLBACK_PUBLIC_URL,
+    mcpServerResponse, savedCustomDomain, config,
+  } = deps;
+  const ownsVault = () => deps.ownsVault?.() === true;
+  const answer = (res: Parameters<typeof json>[0], send: typeof json, result: McpConfigResult) => "body" in result
+    ? send(res, result.status, withServerDetails(result.body))
+    : send(res, result.status, { error: result.error, ...userErrorFields(result), ...(result.code ? { code: result.code } : {}) });
+  return async ({ req, res, path, method, auth, json, readBody }) => {
+    if (method === "GET" && path === "/api/mcp/servers") {
+      return json(res, 200, withServerDetails(mcpServerResponse()));
+    }
+
+    const budgetOf = /^\/api\/bots\/([\w-]+)\/tool-budget$/.exec(path);
+    if (method === "GET" && budgetOf) {
+      if (!deps.bot(budgetOf[1]!)) return json(res, 404, userError("serverError.bot.missing"));
+      return json(res, 200, { budget: toolBudgetOf(budgetOf[1]!) ?? null });
+    }
+
+    const ofBot = /^\/api\/bots\/([\w-]+)\/mcp-servers$/.exec(path);
+    if (method === "GET" && ofBot) {
+      const bot = deps.bot(ofBot[1]!);
+      if (!bot) return json(res, 404, userError("serverError.bot.missing"));
+      return json(res, 200, { servers: botMcpServers(mcpServerResponse().servers, bot) });
+    }
+
+    const mcpTest = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})\/test$/.exec(path);
+    if (method === "POST" && mcpTest) {
+      const controller = new AbortController();
+      const disconnect = () => {
+        if (!res.writableEnded) controller.abort();
+      };
+      res.once("close", disconnect);
+      try {
+        const name = mcpTest[1]!;
+        const result = await config.test(name, {
+          signal: controller.signal,
+          person: (url) => {
+            const member = auth.kind === "session" ? sessionMember(auth.session) : null;
+            return member ? deps.teamConnections.people.connection(personKey({ id: "", email: member.member.email }), name, url) : null;
+          },
+          lender: deps.lender?.(auth) ?? null,
+        });
+        if ("body" in result && result.status === 200) void deps.connectionHealth?.tested(name, result.body as McpProbeResult).catch(() => {});
+        return answer(res, json, result);
+      } finally {
+        res.off("close", disconnect);
+      }
+    }
+
+    const mcpSignIn = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})\/(sign-in|sign-out)(?:\/([0-9a-f-]{36}))?$/.exec(path);
+    if (mcpSignIn) {
+      const [, name, action, flowId] = mcpSignIn;
+      const raw = cfg.mcpServers?.[name!];
+      const parsed = raw === undefined ? null : parseStoredMcpServer(name!, raw);
+      if (!parsed?.ok) return json(res, 404, { error: mcpServerNotFound(name!) });
+      if (!isRemoteMcpServer(parsed.server)) return json(res, 400, { error: "Only servers reached by URL can be signed in to." });
+      if (parsed.server.runsOn) return json(res, 409, { error: runsElsewhere(parsed.server.runsOn) });
+      const url = parsed.server.url;
+      if (action === "sign-out" && method === "POST" && !flowId) {
+        await mcpOAuth.signOut(name!, url);
+        return json(res, 200, withServerDetails(mcpServerResponse()));
+      }
+      const owner = auth.kind === "session" ? auth.session.id : "loopback";
+      res.setHeader("Cache-Control", "no-store");
+      try {
+        if (action === "sign-in" && method === "GET" && flowId) {
+          const status = mcpOAuth.status(name!, flowId, owner);
+          return status ? json(res, 200, { auth: status }) : json(res, 404, { error: "This sign-in is no longer available in this browser. Start again." });
+        }
+        if (action === "sign-in" && method === "DELETE") {
+          mcpOAuth.cancelFlow(name!, owner, flowId);
+          return json(res, 200, { ok: true });
+        }
+        if (action === "sign-in" && method === "POST" && flowId) {
+          if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+            return json(res, 415, { error: "content-type must be application/json" });
+          }
+          const body = await readBody(req, 20_480);
+          if (typeof body?.callbackUrl !== "string") return json(res, 400, { error: "A complete callbackUrl is required." });
+          return json(res, 200, { auth: await mcpOAuth.completeCallback(name!, flowId, body.callbackUrl, owner) });
+        }
+        if (action === "sign-in" && method === "POST" && !flowId) {
+          // A browser on another computer comes back to the https address it uses now, when this server vouches for it.
+          const remote = auth.kind === "session" && (isProxied(req) || !isLoopbackHost(req.headers.host));
+          const origin = remote
+            ? mcpCallbackOrigin(provesSameOrigin(req) ? requestOrigin(req) : null,
+              [CLOUD_HOME?.publicOrigin, hostedWorkspaceConfiguration()?.tenant.origin, savedCustomDomain(), FALLBACK_PUBLIC_URL])
+            : null;
+          const started = await mcpOAuth.start(name!, url, undefined, owner, { remote, origin });
+          if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
+            mcpOAuth.revokeOwner(owner);
+            return json(res, 401, { error: "Your session ended. Start a new sign-in." });
+          }
+          return json(res, 200, { auth: started });
+        }
+      } catch (error) {
+        if (error instanceof McpSignInError) return json(res, error.status, { error: error.message });
+        if (error instanceof McpOAuthError) return json(res, 400, { error: error.message, code: error.code });
+        if (method === "POST" && !flowId) return json(res, 502, { error: error instanceof Error ? error.message : "Sign-in could not start." });
+        throw error;
+      }
+      return json(res, 405, { error: "method not allowed" });
+    }
+
+    if (method === "POST" && path === "/api/mcp/servers") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const body = await readBody(req);
+      const name = typeof body?.name === "string" ? body.name : "";
+      const parsed = parseMcpServerMutation(name, mcpServerBody(body));
+      if (!parsed.ok) return json(res, 400, { error: parsed.error });
+      const placed = deps.place ? await deps.place(parsed.server, auth) : { ok: true as const, server: parsed.server };
+      if (!placed.ok) return json(res, 409, { error: placed.error });
+      const added = config.add(name, placed.server, vaultKeysOf(body, ownsVault()));
+      if (added.status < 300) deps.connectionHealth?.added("mcp", name, auth.kind === "session" ? auth.session.email ?? null : null);
+      return answer(res, json, added);
+    }
+
+    // The {"mcpServers": {...}} block other agent tools write; imported servers stay disabled until enabled.
+    if (method === "POST" && path === "/api/mcp/servers/import") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      return answer(res, json, await config.addMany(async () => {
+        const body = await readBody(req);
+        const text = typeof body?.json === "string" ? body.json : "";
+        if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
+          return { status: 401, error: "unauthorized: this session has expired or was revoked" };
+        }
+        if (!text.trim()) return { status: 400, error: "Paste the JSON block first." };
+        const parsed = parseMcpServersImport(text);
+        if (!parsed.ok) return { status: 400, error: parsed.error };
+        const servers: Record<string, StoredMcpServer> = {};
+        for (const [name, server] of Object.entries(parsed.servers)) {
+          const placed = deps.place ? await deps.place(server, auth) : { ok: true as const, server };
+          if (!placed.ok) return { status: 409, error: placed.error };
+          servers[name] = placed.server;
+        }
+        return { servers };
+      }));
+    }
+
+    const mcpServerRoute = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})$/.exec(path);
+    if (mcpServerRoute && ["PUT", "PATCH", "DELETE"].includes(method)) {
+      if (method !== "DELETE" && !String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const name = mcpServerRoute[1]!;
+      if (method === "DELETE") {
+        const removed = config.remove(name);
+        if (removed.status < 300) deps.connectionHealth?.removed("mcp", name);
+        return answer(res, json, removed);
+      }
+      const body = await readBody(req);
+      const current = cfg.mcpServers ?? {};
+      if (!Object.hasOwn(current, name)) return json(res, 404, { error: mcpServerNotFound(name) });
+      const existing = parseStoredMcpServer(name, current[name]);
+      if (!existing.ok) return json(res, 400, { error: existing.error });
+      if (method === "PATCH") {
+        const key = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === 1 ? Object.keys(body)[0] : undefined;
+        if ((key !== "enabled" && key !== "apps") || typeof body[key] !== "boolean") {
+          return json(res, 400, { error: "Only an enabled or apps boolean can be changed here." });
+        }
+        return answer(res, json, key === "enabled" ? config.setEnabled(name, body.enabled) : config.setApps(name, body.apps));
+      }
+      const { vaultKeys: _keys, ...fields } = (body ?? {}) as Record<string, unknown>;
+      const parsed = parseMcpServerMutation(name, fields, existing.server);
+      if (!parsed.ok) return json(res, 400, { error: parsed.error });
+      return answer(res, json, config.replace(name, parsed.server, vaultKeysOf(body, ownsVault())));
+    }
+    return PASS;
+  };
+}

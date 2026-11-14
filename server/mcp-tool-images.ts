@@ -12,10 +12,8 @@ const asMcpImage = (c: unknown): McpImageContent | null =>
     ? (c as McpImageContent)
     : null;
 
-// Claude CLI reformats MCP image content into Anthropic Messages API shape
-// before drivers ever see it — {type:"image", source:{type:"base64",
-// media_type, data}} — rather than the MCP-native {type, data, mimeType}.
-// Other drivers (codex/acp) pass the MCP-native shape through unchanged.
+// Claude CLI hands MCP images over in Anthropic Messages shape ({type:"image", source:{type:"base64", media_type, data}});
+// codex/acp pass the MCP-native {type, data, mimeType} through.
 const asAnthropicImage = (c: unknown): McpImageContent | null => {
   const source = (c as { type?: unknown; source?: unknown } | null)?.type === "image"
     ? (c as { source?: unknown }).source
@@ -29,12 +27,6 @@ const asAnthropicImage = (c: unknown): McpImageContent | null => {
 
 const asImageBlock = (c: unknown): McpImageContent | null => asMcpImage(c) ?? asAnthropicImage(c);
 
-/** MCP tool_result content mixes text/image blocks. toolDetailPreview redacts
- * the image bytes for the activity-log line (by design — that preview is
- * never meant to carry raw base64); this pulls the images out separately so
- * a caller can fold them into the message as attachments instead of losing
- * them. Accepts either a raw MCP content array or a `{ content: [...] }`
- * wrapper, since drivers hand this differently-shaped payloads. */
 export function extractMcpImages(value: unknown): McpImageContent[] {
   const arr = Array.isArray(value)
     ? value

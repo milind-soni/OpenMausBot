@@ -1,0 +1,37 @@
+{
+  "id": "live-reply-research",
+  "title": "Live: a current-facts question is answered first, with where the numbers came from, and no closing offer",
+  "behavior": "Against a real model, a bot answers a research question with its pick first, a one-line source, prices in the person's frame, and no closing question or offer.",
+  "bots": [
+    {
+      "key": "helper",
+      "name": "Helper"
+    }
+  ],
+  "steps": [
+    {
+      "kind": "send",
+      "bot": "helper",
+      "text": "What are the 3 best AI meeting note-takers for a 10-person startup right now? Price and a one-line verdict each."
+    },
+    {
+      "kind": "waitForTurns",
+      "bot": "helper",
+      "count": 1
+    }
+  ],
+  "invariants": [
+    {
+      "kind": "sendNotQueued",
+      "bot": "helper"
+    },
+    {
+      "kind": "botReplied",
+      "bot": "helper",
+      "thread": "active"
+    }
+  ],
+  "judged": {
+    "prompt": "reply-habits-v1"
+  }
+}

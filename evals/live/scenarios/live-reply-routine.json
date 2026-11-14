@@ -1,0 +1,37 @@
+{
+  "id": "live-reply-routine",
+  "title": "Live: a routine is confirmed with its assumptions in plain words",
+  "behavior": "Against a real model, a weekday routine is set up and confirmed with the time zone as people say it, where results appear, what it covers and the first run, never a zone id.",
+  "bots": [
+    {
+      "key": "helper",
+      "name": "Helper"
+    }
+  ],
+  "steps": [
+    {
+      "kind": "send",
+      "bot": "helper",
+      "text": "Every weekday at 9am, send me a 5-bullet AI news brief."
+    },
+    {
+      "kind": "waitForTurns",
+      "bot": "helper",
+      "count": 1
+    }
+  ],
+  "invariants": [
+    {
+      "kind": "sendNotQueued",
+      "bot": "helper"
+    },
+    {
+      "kind": "botReplied",
+      "bot": "helper",
+      "thread": "active"
+    }
+  ],
+  "judged": {
+    "prompt": "reply-habits-v1"
+  }
+}

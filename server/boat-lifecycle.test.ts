@@ -21,10 +21,10 @@ describe("cloud computer lifecycle", () => {
         const parsed = body ? JSON.parse(body) : {};
         requests.push({ method: req.method ?? "GET", path: url.pathname, command: parsed.command });
         res.writeHead(200, { "content-type": "application/json" });
-        if (url.pathname === "/api/box/v1/boxes") {
-          res.end(JSON.stringify({ boxes: [{ id: "bx_23456789", name: machineName, state: "ready" }] }));
-        } else if (url.pathname === "/api/box/v1/boxes/bx_23456789" && req.method === "GET") {
-          res.end(JSON.stringify({ ok: true, box: { id: "bx_23456789", name: machineName, state: "ready" } }));
+        if (url.pathname === "/api/v1/sandboxes") {
+          res.end(JSON.stringify({ ok: true, type: "sandbox.list", sandboxes: [{ id: "bx_23456789", name: machineName, state: "ready" }] }));
+        } else if (url.pathname === "/api/v1/sandboxes/bx_23456789" && req.method === "GET") {
+          res.end(JSON.stringify({ ok: true, sandbox: { id: "bx_23456789", name: machineName, state: "ready" } }));
         } else if (url.pathname.endsWith("/commands")) {
           res.end(JSON.stringify({ exitCode: 0, stdout: "", stderr: "" }));
         } else {
@@ -34,7 +34,7 @@ describe("cloud computer lifecycle", () => {
     });
     await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
     const port = (api.address() as any).port;
-    vi.stubEnv("OMB_BOX_API", `http://127.0.0.1:${port}/api/box/v1`);
+    vi.stubEnv("OMB_BOAT_API", `http://127.0.0.1:${port}/api/v1`);
     vi.resetModules();
     ({ execOnBoat, sleepBoat } = await import("./boat.ts"));
   });

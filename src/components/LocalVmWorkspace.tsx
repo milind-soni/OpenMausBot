@@ -15,8 +15,10 @@ import {
   type RefObject,
 } from "react";
 import { api, useStore, type Action, type Bot } from "@/state/store";
+import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { cn } from "@/lib/cn";
-import { transitionComputerControlLease } from "@/lib/computer-control";
+import { t } from "@/lib/i18n";
+import { parseComputerHelp, transitionComputerControlLease } from "@/lib/computer-control";
 import {
   initialLocalVmWorkspaceSlots,
   nativeViewOverlayIntersects,
@@ -32,6 +34,9 @@ import {
   type LocalVmWorkspaceStatus,
 } from "@/lib/local-vm-workspace";
 import { z } from "zod";
+import { Select } from "./Select";
+import { productName } from "@/lib/brand";
+import { randomUuid } from "@/lib/random-uuid";
 
 const SLOT_CONTEXTS = ["local-vm-workspace:left", "local-vm-workspace:right"] as const;
 
@@ -40,6 +45,7 @@ type WorkspaceDispatch = (action: Action) => void;
 const controlSnapshotSchema = z.object({
   held: z.boolean(),
   helpReason: z.string().nullable(),
+  help: z.unknown().optional().transform(parseComputerHelp),
   owned: z.boolean().optional(),
   acquired: z.boolean().optional(),
   released: z.boolean().optional(),
@@ -82,13 +88,11 @@ function bestEffortRelease(botId: string, controlLeaseId: string) {
     keepalive: true,
   }).then(async (response) => {
     if (!response.ok) return;
-    // The server lease is the source of truth; only clear Electron after the
-    // workspace-owned release was actually accepted.
+    // The server lease is the source of truth: clear Electron only after the workspace-owned release was accepted.
   }).catch(() => {});
 }
 
 async function setNativeBrowserControl(_botId: string, _held: boolean): Promise<boolean> {
-  // The engine owns its browser; there is no native surface to hold.
   return true;
 }
 
@@ -102,6 +106,7 @@ function dispatchControl(
     botId,
     held: snapshot.held,
     helpReason: snapshot.helpReason,
+    help: snapshot.help ?? null,
   });
 }
 
@@ -126,9 +131,10 @@ const NATIVE_VIEW_OVERLAY_SELECTOR = [
   ".absolute",
 ].join(",");
 
-/** Native views always paint above the renderer. Detect every visible
- * positioned overlay or popover that intersects a pane, including portal
- * content such as sidebar menus and the update banner. */
+/**
+ * Electron's native views always paint above the renderer, so any intersecting overlay or popover counts, portals
+ * included.
+ */
 function rendererOverlayIntersectsNativeView() {
   const hosts = [...document.querySelectorAll<HTMLElement>("[data-native-view-host]")];
   const hostRects = hosts
@@ -215,13 +221,13 @@ function useNativeViewObscured(explicit: boolean) {
 }
 
 function statusLabel(status: LocalVmWorkspaceStatus | null, nativeStatus: DesktopWorkspaceState["status"]) {
-  if (!status) return "Checking VM";
-  if (status.container === "missing") return "VM not created";
-  if (status.container === "stopped") return "VM stopped";
-  if (!status.ready) return "VM unavailable";
-  if (nativeStatus === "error") return "Viewer unavailable";
-  if (nativeStatus !== "ready") return "Connecting viewer";
-  return "Live · watch-only";
+  if (!status) return t("vm.workspace.status.checking");
+  if (status.container === "missing") return t("vm.workspace.status.missing");
+  if (status.container === "stopped") return t("vm.workspace.status.stopped");
+  if (!status.ready) return t("vm.workspace.status.unavailable");
+  if (nativeStatus === "error") return t("vm.workspace.status.viewerUnavailable");
+  if (nativeStatus !== "ready") return t("vm.workspace.status.connecting");
+  return t("vm.workspace.status.live");
 }
 
 interface LocalVmPaneProps {
@@ -255,7 +261,7 @@ function LocalVmPane({
 }: LocalVmPaneProps) {
   const contextId = SLOT_CONTEXTS[index];
   const botId = bot?.id ?? null;
-  const botName = bot?.name ?? "Local VM";
+  const botName = bot?.name ?? t("vm.workspace.localVm");
   const viewportRef = useRef<HTMLDivElement>(null);
   const operationRef = useRef<Promise<void>>(Promise.resolve());
   const obscuredRef = useRef(obscured);
@@ -269,16 +275,12 @@ function LocalVmPane({
   });
   const [error, setError] = useState<string | null>(null);
 
-  // The open flow below reads status once per selection, but a ready desktop
-  // can still be stopped or reaped server-side; every later re-check writes
-  // through this same sanitized setStatus path.
   const refreshStatus = useCallback(async (signal?: AbortSignal) => {
     if (!botId) return;
     try {
       const raw = await api(`/api/bots/${botId}/local-computer`, { signal });
       if (!signal?.aborted) setStatus(sanitizeLocalVmWorkspaceStatus(raw));
     } catch {
-      /* transient read; the slow interval or Retry re-checks */
     }
   }, [botId]);
   const refreshStatusRef = useRef(refreshStatus);
@@ -295,7 +297,6 @@ function LocalVmPane({
     return bridge?.onState((next) => {
       if (next.contextId !== contextId) return;
       setNativeState(next);
-      // A dead native view may mean the VM itself went away; re-read it.
       if (next.status === "error" || next.status === "closed") void refreshStatusRef.current();
     });
   }, [contextId]);
@@ -312,7 +313,7 @@ function LocalVmPane({
       if (bridge) await bridge.close(contextId).catch(() => {});
       if (!alive || !botId) return;
       if (!bridge) {
-        setError("The two-desktop view requires the OpenMausBot desktop app.");
+        setError(t("vm.workspace.desktopRequired"));
         return;
       }
       try {
@@ -326,8 +327,6 @@ function LocalVmPane({
         if (!safeStatus.ready || !viewerUrl) return;
 
         // Hidden or minimized Electron windows may suspend animation frames.
-        // Keep the layout read ordered after a paint when possible, but never
-        // let this serialized operation block viewer cleanup indefinitely.
         await new Promise<void>((resolve) => {
           let settled = false;
           const finish = () => {
@@ -347,7 +346,7 @@ function LocalVmPane({
         const next = await bridge.open({
           contextId,
           url: viewerUrl,
-          title: `${botName}'s Local VM`,
+          title: t("vm.workspace.windowTitle", { name: botName }),
           bounds,
         });
         if (!alive) {
@@ -362,8 +361,8 @@ function LocalVmPane({
         if (!alive || controller.signal.aborted) return;
         setError(
           cause instanceof Error && cause.message === "layout-unavailable"
-            ? "The viewer area is not laid out yet. Retry after resizing the window."
-            : "OpenMausBot could not connect this Local VM viewer.",
+            ? t("vm.workspace.layoutUnavailable")
+            : t("vm.workspace.connectFailed"),
         );
       }
     };
@@ -396,7 +395,7 @@ function LocalVmPane({
     if (!bridge || !bounds || !nativeState.open) return;
     void bridge
       .layout([{ contextId, bounds, visible: !obscured }])
-      .catch(() => setError("OpenMausBot could not position this Local VM viewer."));
+      .catch(() => setError(t("vm.workspace.positionFailed")));
   }, [contextId, nativeState.open, obscured]);
 
   useEffect(() => {
@@ -426,22 +425,21 @@ function LocalVmPane({
       <div className="flex min-h-[68px] items-center gap-3 border-b border-hairline/40 px-3 py-2.5">
         <div className="min-w-0 flex-1">
           <label className="sr-only" htmlFor={`local-vm-slot-${index}`}>
-            Local VM for pane {index + 1}
+            {t("vm.workspace.paneLabel", { number: index + 1 })}
           </label>
-          <select
+          <Select size="sm" className="w-full"
             id={`local-vm-slot-${index}`}
             value={bot?.id ?? ""}
             onChange={(event) => onSelect(event.target.value || null)}
             disabled={controlPending}
-            className="w-full truncate rounded-lg border border-hairline/50 bg-card px-2.5 py-1.5 text-[13px] font-medium text-ink outline-none focus:border-accent/70"
           >
-            <option value="">Choose a Local VM bot</option>
+            <option value="">{t("vm.workspace.chooseBot")}</option>
             {bots.map((candidate) => (
               <option key={candidate.id} value={candidate.id} disabled={candidate.id === otherBotId}>
                 {candidate.name}
               </option>
             ))}
-          </select>
+          </Select>
           <div className="mt-1 flex items-center gap-1.5 text-[11px] text-ink-secondary">
             <span
               className={cn(
@@ -455,7 +453,7 @@ function LocalVmPane({
                       : "bg-ink-secondary/50",
               )}
             />
-            {active ? "You have control" : heldElsewhere ? "Control held elsewhere" : label}
+            {active ? t("vm.workspace.youHaveControl") : heldElsewhere ? t("vm.workspace.controlElsewhere") : label}
           </div>
         </div>
         {bot && active ? (
@@ -466,7 +464,7 @@ function LocalVmPane({
             className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-2.5 py-2 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-50"
           >
             {controlPending ? <Loader2 size={13} className="animate-spin" /> : <Hand size={13} />}
-            Hand back
+            {t("vm.workspace.handBack")}
           </button>
         ) : bot ? (
           <button
@@ -474,10 +472,10 @@ function LocalVmPane({
             onClick={() => onTake(bot.id)}
             disabled={!canDrive || controlPending || heldElsewhere}
             className="flex shrink-0 items-center gap-1.5 rounded-lg bg-raised px-2.5 py-2 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-45"
-            title="Pause only this bot and enable keyboard and pointer input in this pane"
+            title={t("vm.workspace.takeControlTitle")}
           >
             {controlPending ? <Loader2 size={13} className="animate-spin" /> : <Hand size={13} />}
-            {heldElsewhere ? "Held elsewhere" : "Take control"}
+            {heldElsewhere ? t("vm.workspace.heldElsewhere") : t("vm.workspace.takeControl")}
           </button>
         ) : null}
       </div>
@@ -491,15 +489,15 @@ function LocalVmPane({
           {!bot ? (
             <div className="flex max-w-[260px] flex-col items-center gap-2 text-ink-secondary">
               <Monitor size={22} />
-              <span className="text-[12px]">Choose another bot configured for a Local VM.</span>
+              <span className="text-[12px]">{t("vm.workspace.chooseAnother")}</span>
             </div>
           ) : !status && !error ? (
             <div className="flex items-center gap-2 text-[12px] text-ink-secondary">
-              <Loader2 size={15} className="animate-spin" /> Checking {bot.name}'s VM…
+              <Loader2 size={15} className="animate-spin" /> {t("vm.workspace.checking", { name: bot.name })}
             </div>
           ) : status?.ready && nativeState.status !== "error" && !error ? (
             <div className="flex items-center gap-2 text-[12px] text-ink-secondary">
-              <Loader2 size={15} className="animate-spin" /> Connecting live view…
+              <Loader2 size={15} className="animate-spin" /> {t("vm.workspace.connecting")}
             </div>
           ) : (
             <div className="flex max-w-[300px] flex-col items-center gap-3 text-ink-secondary">
@@ -507,10 +505,10 @@ function LocalVmPane({
               <div className="text-[12px] leading-relaxed">
                 {error ??
                   (status?.container === "missing"
-                    ? `${bot.name}'s Local VM has not been created.`
+                    ? t("vm.workspace.notCreated", { name: bot.name })
                     : status?.container === "stopped"
-                      ? `${bot.name}'s Local VM is stopped.`
-                      : `${bot.name}'s Local VM is not ready for a live view.`)}
+                      ? t("vm.workspace.stopped", { name: bot.name })
+                      : t("vm.workspace.notReady", { name: bot.name }))}
               </div>
               <div className="flex gap-2">
                 <button
@@ -518,14 +516,14 @@ function LocalVmPane({
                   onClick={() => setRetry((value) => value + 1)}
                   className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[12px] text-ink hover:bg-raised-hover"
                 >
-                  <RefreshCw size={13} /> Retry status
+                  <RefreshCw size={13} /> {t("vm.workspace.retryStatus")}
                 </button>
                 <button
                   type="button"
                   onClick={() => onOpenComputer(bot.id)}
                   className="rounded-lg bg-raised px-3 py-2 text-[12px] text-ink hover:bg-raised-hover"
                 >
-                  Open Computer
+                  {t("vm.workspace.openComputer")}
                 </button>
               </div>
             </div>
@@ -543,6 +541,7 @@ export function LocalVmWorkspace({
   onOpenComputer,
 }: LocalVmWorkspaceProps) {
   const { state, dispatch } = useStore();
+  const { dragProps } = useCaptionChrome();
   const eligibleBots = useMemo(
     () => state.bots.filter((bot) => bot.computer === "vm" && !bot.hidden),
     [state.bots],
@@ -554,11 +553,9 @@ export function LocalVmWorkspace({
   const [controlledBotId, setControlledBotId] = useState<string | null>(null);
   const controlledBotIdRef = useRef<string | null>(null);
   const controlLeaseIdRef = useRef<string | null>(null);
-  const controlLeaseId = controlLeaseIdRef.current ?? crypto.randomUUID();
+  const controlLeaseId = controlLeaseIdRef.current ?? randomUuid();
   controlLeaseIdRef.current = controlLeaseId;
-  // React disables both buttons after the state update commits, but a second
-  // discrete event can arrive before that render. Guard the mutation itself
-  // so two panes can never acquire overlapping workspace leases.
+  // A second discrete event can arrive before React commits the disabled buttons, so the mutation itself is guarded.
   const controlBusyRef = useRef(false);
   const mountedRef = useRef(true);
   const [controlPending, setControlPending] = useState(false);
@@ -596,7 +593,7 @@ export function LocalVmWorkspace({
       },
       async setInteractive(contextId) {
         const bridge = window.ogb?.desktopWorkspace;
-        if (!bridge) throw new Error("The two-desktop view bridge is unavailable");
+        if (!bridge) throw new Error(t("vm.workspace.bridgeUnavailable"));
         return bridge.setInteractive(contextId);
       },
     }),
@@ -610,8 +607,8 @@ export function LocalVmWorkspace({
     });
   }, [state.bots]);
 
-  // Opening is read-only. A hold may belong to the legacy viewer or another
-  // surface, so observe it and surface it without silently releasing it.
+  // Opening is read-only: a hold may belong to the legacy viewer or another surface, so observe it, never silently
+  // release it.
   useEffect(() => {
     let alive = true;
     const readSelected = async () => {
@@ -621,7 +618,6 @@ export function LocalVmWorkspace({
           const snapshot = await readComputerControl(botId);
           if (alive) dispatchControl(dispatch, botId, snapshot);
         } catch {
-          // SSE can still supply the state; taking control rechecks it.
         }
       }
     };
@@ -639,7 +635,7 @@ export function LocalVmWorkspace({
         setControlledBotId(null);
       })
       .catch(() => {
-        setControlError("The removed pane could not hand control back safely.");
+        setControlError(t("vm.workspace.handoffFailed"));
       });
   }, [controlPort, slots]);
 
@@ -684,7 +680,7 @@ export function LocalVmWorkspace({
       setControlledBotId(null);
       return true;
     } catch {
-      setControlError("OpenMausBot could not hand control back. The view stayed open.");
+      setControlError(t("vm.workspace.handBackFailed", { app: productName() }));
       return false;
     } finally {
       controlBusyRef.current = false;
@@ -706,7 +702,7 @@ export function LocalVmWorkspace({
           ...controlPort,
           async setInteractive(nextContextId) {
             if (nextContextId && contextForBot(botId) !== nextContextId) {
-              throw new Error("The Local VM pane changed during control acquisition");
+              throw new Error(t("vm.workspace.paneChanged"));
             }
             return controlPort.setInteractive(nextContextId);
           },
@@ -719,7 +715,7 @@ export function LocalVmWorkspace({
         );
         setControlledBotId(null);
         if (result.status === "held-elsewhere") {
-          setControlError("This VM is already controlled in another viewer. Hand it back there first.");
+          setControlError(t("vm.workspace.alreadyControlled"));
           return;
         }
         if (!mountedRef.current) {
@@ -729,7 +725,7 @@ export function LocalVmWorkspace({
         setControlledBotId(botId);
       } catch {
         setControlledBotId(controlledBotIdRef.current);
-        setControlError("Control could not switch safely. Any remaining hold stayed paused.");
+        setControlError(t("vm.workspace.switchFailed"));
       } finally {
         controlBusyRef.current = false;
         setControlPending(false);
@@ -767,14 +763,14 @@ export function LocalVmWorkspace({
 
   return (
     <main className="flex h-full min-w-0 flex-1 flex-col bg-app">
-      <header className="flex min-h-[60px] items-center gap-3 border-b border-hairline/40 px-5 py-3">
+      <header {...dragProps} className="flex min-h-[60px] items-center gap-3 border-b border-hairline/40 px-5 py-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent">
           <Monitor size={18} />
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-[14px] font-semibold text-ink">Local VM view</h1>
-          <p className="truncate text-[11.5px] text-ink-secondary">
-            Two live desktops · one active controller · watch-only by default
+          <h1 className="truncate text-[14px] font-semibold text-ink">{t("vm.workspace.viewTitle")}</h1>
+          <p className="truncate text-[12px] text-ink-secondary">
+            {t("vm.workspace.viewSubtitle")}
           </p>
         </div>
         <button
@@ -782,7 +778,7 @@ export function LocalVmWorkspace({
           onClick={() => void closeWorkspace()}
           disabled={controlPending}
           className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
-          aria-label="Close Local VM view"
+          aria-label={t("vm.workspace.closeView")}
         >
           <X size={18} />
         </button>

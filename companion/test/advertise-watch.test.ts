@@ -1,8 +1,4 @@
-// The re-advertise contract. What matters is *when* the watcher moves — on a
-// change to the address set and never otherwise — because every advertise is
-// a socket rebind plus a network-wide announcement, and every missed one is a
-// phone holding stale A records. No sockets here: the watcher takes its
-// addresses and its two moves as functions, and these tests hand it fakes.
+// The watcher takes its addresses and its two moves as functions, so no sockets.
 import { describe, expect, it } from "vitest";
 
 import { createAddressWatcher, type AddressWatchOptions } from "../src/advertise-watch.ts";
@@ -37,8 +33,6 @@ describe("address watcher", () => {
   it("advertises when the network appears after startup", async () => {
     const { watcher, calls, logs, set } = rig([]);
     await watcher.check();
-    // The original bug was silence here: no addresses meant no advertise and
-    // no record of why. The first check must say so out loud.
     expect(calls).toEqual(["withdraw"]);
     expect(logs.join("\n")).toMatch(/no LAN addresses/);
 
@@ -76,7 +70,6 @@ describe("address watcher", () => {
     await watcher.check();
     set([]);
     await watcher.check();
-    // withdrawn, not left rotting in caches pointing at a dead address
     expect(calls).toEqual(["advertise 192.168.1.42", "withdraw"]);
     set(["192.168.1.42"]);
     await watcher.check();
@@ -92,13 +85,81 @@ describe("address watcher", () => {
     });
     await watcher.check();
     await watcher.check();
-    // Port 5353 busy is tied to this network state — one attempt per state,
-    // or the log repeats the same sentence every five seconds forever.
+    // Tied to this network state: one attempt per state.
     expect(calls).toEqual(["advertise"]);
     expect(logs.join("\n")).toMatch(/could not advertise/);
     set(["10.0.0.7"]);
     await watcher.check();
     expect(calls).toEqual(["advertise", "advertise"]);
+  });
+
+  it("retries a failed advertise a bounded number of ticks when asked to", async () => {
+    let attempts = 0;
+    const { watcher, calls, set } = rig(["192.168.1.42"], {
+      failureRetries: 2,
+      advertise: async () => {
+        attempts += 1;
+        calls.push("advertise");
+        return false;
+      },
+    });
+    for (let i = 0; i < 5; i += 1) await watcher.check();
+    expect(attempts).toBe(3);
+    set(["10.0.0.7"]);
+    for (let i = 0; i < 5; i += 1) await watcher.check();
+    expect(attempts).toBe(6);
+    expect(calls).toHaveLength(6);
+  });
+
+  it("gives a network fresh retries when it returns after going away", async () => {
+    let attempts = 0;
+    const { watcher, set } = rig(["192.168.1.42"], {
+      failureRetries: 2,
+      advertise: async () => {
+        attempts += 1;
+        return false;
+      },
+    });
+    for (let i = 0; i < 5; i += 1) await watcher.check();
+    expect(attempts).toBe(3);
+    set([]);
+    await watcher.check();
+    set(["192.168.1.42"]);
+    for (let i = 0; i < 5; i += 1) await watcher.check();
+    expect(attempts).toBe(6);
+  });
+
+  it("gives fresh retries when the network returns to a state with no addresses already seen", async () => {
+    let attempts = 0;
+    const { watcher, set } = rig([], {
+      failureRetries: 2,
+      advertise: async () => {
+        attempts += 1;
+        return false;
+      },
+    });
+    await watcher.check();
+    set(["192.168.1.42"]);
+    for (let i = 0; i < 5; i += 1) await watcher.check();
+    expect(attempts).toBe(3);
+    set([]);
+    await watcher.check();
+    set(["192.168.1.42"]);
+    for (let i = 0; i < 5; i += 1) await watcher.check();
+    expect(attempts).toBe(6);
+  });
+
+  it("stops retrying once a retried advertise succeeds", async () => {
+    let attempts = 0;
+    const { watcher } = rig(["192.168.1.42"], {
+      failureRetries: 3,
+      advertise: async () => {
+        attempts += 1;
+        return attempts >= 2;
+      },
+    });
+    for (let i = 0; i < 5; i += 1) await watcher.check();
+    expect(attempts).toBe(2);
   });
 
   it("survives an advertise that throws, and tries again next tick", async () => {
@@ -137,5 +198,15 @@ describe("address watcher", () => {
     release();
     await Promise.all([first, second]);
     expect(advertises).toBe(1);
+  });
+
+  it("re-advertises when the computer is renamed", async () => {
+    let name = "OpenMausBot";
+    const { watcher, calls } = rig(["192.168.1.42"], { name: () => name });
+    await watcher.check();
+    await watcher.check();
+    name = "AdamPC";
+    await watcher.check();
+    expect(calls).toEqual(["advertise 192.168.1.42", "advertise 192.168.1.42"]);
   });
 });

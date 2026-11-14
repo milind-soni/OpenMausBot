@@ -3,8 +3,6 @@ import { beforeEach, expect, it } from "vitest";
 import { DATA_DIR } from "./config.ts";
 import { Store } from "./store.ts";
 
-// Company instance ids became stable across re-enrolment. Saved references
-// to the old device-scoped id move over once and survive a restart.
 beforeEach(() => { rmSync(DATA_DIR, { recursive: true, force: true }); });
 const legacy = "company.aaaaaaaaaaaaaaaaaaaaaaaa.anthropic", stable = "company.bbbbbbbbbbbbbbbbbbbbbbbb.anthropic";
 
@@ -26,7 +24,6 @@ it("moves model choices, native resume cursors and handed-message records to the
   expect(task.lastInstanceId).toBe(stable);
   expect(task.handedMessages).toEqual({ [stable]: { session: "native-session-1", through: "m1" } });
   expect(reloaded.bot(other.id)?.modelSelection.instanceId).toBe("personal");
-  // Idempotent: nothing left to move.
   expect(reloaded.renameInstances(new Map([[legacy, stable]]))).toBe(0);
 });
 

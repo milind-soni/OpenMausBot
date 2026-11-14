@@ -1,52 +1,64 @@
-// One-click bug-report bundle: app facts, a safe config summary and the
-// server/updater log tails, formatted for pasting into a public issue. Formatting and
-// bounded log reads live here so redaction and path safety stay unit-testable
-// without Electron; main.mjs owns the dialog plumbing. Safety is layered: the
-// collector never reads secret fields at all (only the server's booleans-only config status),
-// and everything that does get in is scrubbed again here before it lands on
-// disk — so a future collector mistake still cannot leak a credential.
-//
+// The bundle is pasted into public issues: the collector never reads secrets, and everything is scrubbed again here.
 import fs from "node:fs";
+import path from "node:path";
 
-// CREDENTIAL_ENV_NAMES mirrors WORKSPACE_CREDENTIAL_ENV (server/config.ts).
-// Duplicated because the desktop shell cannot import TypeScript; a test
-// asserts the two lists never drift apart.
+// Mirrors WORKSPACE_CREDENTIAL_ENV in server/credential-env.ts; a test asserts the two lists never drift apart.
 export const CREDENTIAL_ENV_NAMES = [
   "XAI_API_KEY",
   "MISTRAL_API_KEY",
+  "CEREBRAS_API_KEY",
+  "OMB_GROQ_API_KEY",
+  "OMB_GREENFERENCE_API_KEY",
+  "OMB_MODELGO_API_KEY",
+  "OMB_META_API_KEY",
+  "OMB_DEEPSEEK_API_KEY",
   "OMB_ANTHROPIC_API_KEY",
   "OMB_ANTHROPIC_API_URL",
   "OMB_HOSTED_MODEL_TOKEN",
   "OMB_HOSTED_MODELS",
   "OPENAI_COMPAT_API_KEY",
   "OPENAI_COMPAT_URL",
+  "OMB_OPENAI_API_KEY",
+  "OMB_OPENROUTER_API_KEY",
   "BOX_TOKEN",
   "OPENCODE_API_KEY",
   "OMB_TTS_KEY",
   "OMB_FISH_AUDIO_API_KEY",
+  "OMB_GEMINI_API_KEY",
   "OMB_JEV_API_KEY",
+  "OMB_OPENROUTER_DECIDER_KEY",
+  "OMB_WORKERS_AI_TOKEN",
   "OMB_OPENAI_IMAGE_KEY",
   "OMB_CUSTOM_IMAGE_KEY",
+  "OMB_GEMINI_IMAGE_KEY",
+  "OMB_OPENAI_LIVE_KEY",
+  "OMB_TREG_KEY",
+  "OMB_POSTIZ_API_KEY",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
   "OMB_CLOUD_BOAT_TOKEN",
   "OMB_CLOUD_VOICE_TOKEN",
-  // Browser capability files and app-owned state paths are private even
-  // though they are not traditional API credentials.
+  "OMB_CLOUD_DECIDER_TOKEN",
+  "OMB_CLOUD_AI_TOKEN",
+  "OMB_CLOUD_X_TOKEN",
+  "OMB_CLOUD_HOSTING_TOKEN",
+  "OMB_CLOUD_CONNECTED_APPS_GRANT",
+  // Private even though they are not traditional API credentials.
   "OMB_BROWSER_CONNECTION",
   "OMB_USER_DATA",
+  "OMB_BOAT_API",
 ];
 
-// Credential-shaped tokens (server/redact.ts parity): unmistakable formats
-// are masked wherever they appear, keyed or not.
+// Kept in parity with server/redact.ts: unmistakable token formats are masked wherever they appear, keyed or not.
 const CREDENTIAL_TOKEN_FORMATS = [
   /\bsk-[A-Za-z0-9_-]{16,}/g,
   /\bxai-[A-Za-z0-9]{16,}/g,
+  /\bgsk_[A-Za-z0-9]{40,}/g,
   /\bak_[A-Za-z0-9_-]{16,}/g,
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g,
   /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
   /\bxox[abposr]-[A-Za-z0-9-]{20,}/g,
-  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
   /\bAIza[0-9A-Za-z_-]{30,}/g,
   /\bnpm_[A-Za-z0-9]{20,}/g,
 ];
@@ -62,15 +74,12 @@ const PEM_BLOCK =
 const mask = (value) => `«redacted ${value.length} chars»`;
 const unquote = (value) => value.replace(/^["']|["']$/g, "");
 
-// Shared value grammar; String.raw keeps \s and \] intact when the pattern
-// is embedded into the dynamically built env-name regexes below.
+// String.raw keeps \s and \] intact when embedded in the env-name regexes below.
 const VALUE_PART = String.raw`("[^"]*"|'[^']*'|[^\s"',;)\]}]+)`;
 
 export function redactSecretsInLine(line) {
   let out = String(line ?? "");
-  // Updater HTTP errors include signed redirect URLs. Keep the host/path for
-  // diagnosis, but never export userinfo or any query/fragment, even when a
-  // provider gives its capability an unfamiliar or percent-encoded name.
+  // Updater errors include signed redirect URLs: keep host and path, never userinfo, query or fragment.
   out = out.replace(/\bhttps?:\/\/[^\s"'<>]+/gi, (url) => {
     const query = url.search(/[?#]/);
     const address = query < 0 ? url : url.slice(0, query);
@@ -95,8 +104,6 @@ export function redactSecretsInLine(line) {
   return out;
 }
 
-/** Decode a bounded log buffer without exporting the partial first line that
- * may begin before the read boundary. */
 export function decodeLogTail(buffer, truncated = false) {
   if (!Buffer.isBuffer(buffer)) return { tail: "", bytes: 0 };
   let complete = buffer;
@@ -107,9 +114,7 @@ export function decodeLogTail(buffer, truncated = false) {
   return { tail: complete.toString("utf8"), bytes: complete.length };
 }
 
-/** Read a bounded regular-file tail without following a replaced log-path
- * symlink into unrelated user data. The pre/post-open identity check closes
- * the Windows gap where O_NOFOLLOW is unavailable; POSIX uses both. */
+/** The pre/post-open identity check closes the Windows gap where O_NOFOLLOW is unavailable. */
 export function readSafeLogTail(logPath, maxBytes = 256 * 1024, platform = process.platform) {
   let handle = null;
   try {
@@ -135,12 +140,7 @@ export function readSafeLogTail(logPath, maxBytes = 256 * 1024, platform = proce
   }
 }
 
-// Desktop crash records are written synchronously from Electron's main
-// process, including from uncaughtExceptionMonitor where an async stream may
-// never flush. Keep them deliberately metadata-only: no URL, title, error
-// message, command line or absolute path can reach the public diagnostics
-// export. Main-process failures retain only their origin and standard error
-// class, enough to distinguish a genuine fatal path without exposing content.
+// Metadata only: no URL, title, error message, command line or absolute path reaches the public export.
 const PROCESS_GONE_REASONS = new Set([
   "abnormal-exit",
   "clean-exit",
@@ -187,9 +187,7 @@ function safeErrorName(error) {
   }
 }
 
-/** Build one privacy-safe line for desktop-crashes.log. Unknown event shapes
- * are dropped rather than serialised, so new Electron fields cannot leak by
- * accident. clean-exit is normal lifecycle noise and is not a crash record. */
+/** Unknown event shapes are dropped, not serialised, so new Electron fields cannot leak. */
 export function formatDesktopCrashRecord(event = {}) {
   try {
     if (event.kind === "renderer") {
@@ -209,15 +207,10 @@ export function formatDesktopCrashRecord(event = {}) {
       return `event=main-process-failure origin=${origin} error=${safeErrorName(event.error)}`;
     }
   } catch {
-    // Crash reporting must be safer than the failure it is trying to record.
   }
   return null;
 }
 
-/** Register Electron/Node crash observers without changing their lifecycle.
- * Dependencies are injected so the exact event wiring stays unit-testable
- * without importing Electron. The returned disposer is primarily for tests;
- * production keeps these observers for the lifetime of the app. */
 export function installDesktopCrashListeners({
   appTarget,
   processTarget,
@@ -257,11 +250,7 @@ export function installDesktopCrashListeners({
 
 const APP_INFO_KEYS = ["version", "platform", "arch", "electron", "node", "packaged", "uptimeSeconds"];
 
-// A config summary entry is publishable only when it carries no credential:
-// Only booleans and finite numbers pass. Strings can contain names, paths,
-// account identifiers, or other personal data even when the field name is
-// not credential-shaped, so they never reach the file. Everything else
-// (objects beyond flattening, arrays, nulls) is dropped too.
+// Only booleans and finite numbers pass: strings can carry names, paths or account identifiers.
 const isFiniteNumber = (value) => Number.isFinite(value) && Object.prototype.toString.call(value) === "[object Number]";
 
 function summaryAllows(value) {
@@ -340,4 +329,37 @@ export function diagnosticsFileName(date = new Date()) {
     `openmausbot-diagnostics-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
     `-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}.txt`
   );
+}
+
+/** One line in the desktop crash log: refuses a link or a hard-linked target, starts over past maxBytes, owner-only. */
+export function appendDesktopCrashRecord(file, maxBytes, record) {
+  if (!record) return;
+  let handle = null;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const win = process.platform === "win32";
+    // On Windows an O_APPEND handle has no plain write access, so it cannot be truncated: write at an explicit offset there.
+    const flags = fs.constants.O_WRONLY | (win ? 0 : fs.constants.O_APPEND | fs.constants.O_NOFOLLOW);
+    let before = null;
+    try {
+      before = fs.lstatSync(file);
+      if (!before.isFile() || before.nlink !== 1) return;
+      handle = fs.openSync(file, flags);
+    } catch (error) {
+      if (error?.code !== "ENOENT") return;
+      // O_EXCL makes first creation race-safe on Windows, which has no O_NOFOLLOW.
+      try { handle = fs.openSync(file, flags | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600); } catch { return; }
+    }
+    const stats = fs.fstatSync(handle);
+    if (!stats.isFile() || stats.nlink !== 1) return;
+    if (before && (before.dev !== stats.dev || before.ino !== stats.ino)) return;
+    let offset = stats.size;
+    if (stats.size >= maxBytes) { fs.ftruncateSync(handle, 0); offset = 0; }
+    if (!win) fs.fchmodSync(handle, 0o600);
+    const line = Buffer.from(`[${new Date().toISOString()}] ${record}\n`, "utf8");
+    fs.writeSync(handle, line, 0, line.length, win ? offset : null);
+  } catch {
+  } finally {
+    if (handle !== null) { try { fs.closeSync(handle); } catch {} }
+  }
 }

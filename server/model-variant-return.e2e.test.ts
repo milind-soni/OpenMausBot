@@ -23,8 +23,7 @@ it("blocks direct and group turns when an offline engine returns without support
     expect(created.status).toBe(201);
     const bot = created.body.bot;
     const selection = { instanceId: "returning-fixture", model: "claude-sonnet-5", variant: "low" };
-    // The normal API supports saving an intentional choice while its engine is
-    // unavailable. This is the actual offline-to-online transition under test.
+    // Saving a choice while its engine is unavailable is supported: this is the offline-to-online transition under test.
     expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: selection })).status).toBe(200);
     const peer = await api("POST", "/api/bots", { name: "Idle peer fixture" });
     expect(peer.status).toBe(201);

@@ -1,3 +1,4 @@
+import { EXCERPT_SUMMARY_HEADER } from "../shared/wire.ts";
 import { boundedContextText, MAX_SUMMARY_BYTES, type ReplayEntry } from "./context-rebuild.ts";
 
 /** Preserve recent exchanges verbatim. The caller excludes the incoming
@@ -10,14 +11,10 @@ export function foldPoint(history: readonly ReplayEntry[], keepExchanges = 2): {
   return cut > 0 ? { folded: history.slice(0, cut), firstKeptId: history[cut]!.id } : null;
 }
 
-/** A provider-independent fallback, not a claim that the first request is
- * still the goal. Keep the newest source excerpts with provenance, including
- * assistant outcomes and previously summarized context. Never normalize
- * punctuation, operators or whitespace inside the quoted source text. */
+/** A provider-independent fallback: the newest source excerpts with provenance; never normalize text inside the quotes. */
 export function deterministicSummary(history: readonly ReplayEntry[], maxBytes = MAX_SUMMARY_BYTES): string {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 512) throw new Error("invalid summary budget");
-  const header = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
-  let available = maxBytes - Buffer.byteLength(header) - 96;
+  let available = maxBytes - Buffer.byteLength(EXCERPT_SUMMARY_HEADER) - 96;
   const lines: string[] = [];
   let omitted = 0;
   for (let i = history.length - 1; i >= 0; i--) {
@@ -29,7 +26,7 @@ export function deterministicSummary(history: readonly ReplayEntry[], maxBytes =
     lines.unshift(line);
     available -= Buffer.byteLength(line) + 1;
   }
-  return [header, ...(omitted ? [`[${omitted} earlier excerpts omitted]`] : []), ...lines].join("\n");
+  return [EXCERPT_SUMMARY_HEADER, ...(omitted ? [`[${omitted} earlier excerpts omitted]`] : []), ...lines].join("\n");
 }
 
 export function summaryPrompt(history: readonly ReplayEntry[]): string {
@@ -42,8 +39,7 @@ export function summaryPrompt(history: readonly ReplayEntry[]): string {
   ].join("\n\n");
 }
 
-/** The selected account's tool-free helper is optional. Timeout aborts it,
- * and Stop aborts the whole operation instead of committing a late summary. */
+/** Timeout aborts the helper; Stop aborts the whole operation rather than commit a late summary. */
 export async function draftSummary(history: readonly ReplayEntry[], options: {
   generateText?: (prompt: string, options?: { signal?: AbortSignal }) => Promise<string>;
   signal: AbortSignal;
@@ -57,15 +53,14 @@ export async function draftSummary(history: readonly ReplayEntry[], options: {
   let model: string | undefined;
   let abort: (() => void) | undefined;
   try {
-    // Race even a provider that incorrectly ignores cancellation. Its result
-    // is never applied after the signal aborts; compliant drivers stop work.
+    // Race even a provider that ignores cancellation: its result is never applied after the abort.
     model = await new Promise<string>((resolve, reject) => {
       abort = () => reject(signal.reason);
       signal.addEventListener("abort", abort, { once: true });
       Promise.resolve().then(() => options.generateText!(summaryPrompt(history), { signal }))
         .then(resolve, reject);
     });
-  } catch { /* bounded, source-labelled fallback */ }
+  } catch {}
   finally { if (abort) signal.removeEventListener("abort", abort); }
   options.signal.throwIfAborted();
   if (!model?.trim()) return fallback;

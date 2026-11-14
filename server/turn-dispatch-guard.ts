@@ -1,14 +1,13 @@
-/** These admission failures can resume after another thread frees a slot.
- * Keep control flow independent of the user-facing error wording. */
+export const TURN_ENDED_REFUSAL = "This bot turn has already ended (it finished or was stopped), so this call was refused. " +
+  "Anything the call started before the turn ended may still have run.";
+
+/** Admission failures that can resume once a slot frees; never matched on error wording. */
 export function isTurnAdmissionBlocked(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error &&
     (error.code === "thread_busy" || error.code === "thread_limit");
 }
 
-/** Close the Stop-vs-provider-handshake race shared by direct and room turns.
- * An adapter may not publish its active process until sendTurn resolves, so
- * an interrupt during that await can be an honest no-op. Re-check once setup
- * completes and issue a second interrupt only when cancellation won. */
+/** An adapter may publish its process only after sendTurn resolves, so a Stop during that await can be a no-op: re-check and interrupt again. */
 export async function guardTurnDispatch<T>(
   started: Promise<T>,
   cancelled: () => boolean,
@@ -20,9 +19,7 @@ export async function guardTurnDispatch<T>(
   return { value, cancelled: true };
 }
 
-/** Bounded tombstones for provider turns cancelled during asynchronous
- * startup. Their late completion/session events must not settle a newer turn
- * that reused the same conversation thread. */
+/** Turns cancelled during async startup: their late events must not settle a newer turn on the same thread. */
 export class RetiredTurnRegistry {
   readonly #turnIds = new Set<string>();
   readonly #limit: number;
@@ -47,10 +44,7 @@ export class RetiredTurnRegistry {
 
 export type ProviderTurnGenerationOwner = { threadId: string; generation: string };
 
-/** Correlate an internal capability generation with its provider turn without
- * leaving a bearer alive when a very fast provider completes before
- * sendTurn() returns its id. Completed ids are kept in a bounded tombstone
- * registry, so a late bind fails closed instead of publishing stale ownership. */
+/** A late bind for a completed provider id fails closed instead of publishing stale ownership or leaving a bearer alive. */
 export class ProviderTurnGenerationRegistry<Outcome = never> {
   readonly #owners = new Map<string, ProviderTurnGenerationOwner>();
   readonly #completed: RetiredTurnRegistry;
@@ -74,7 +68,6 @@ export class ProviderTurnGenerationRegistry<Outcome = never> {
     if (owner && owner.threadId !== threadId) return null;
     this.#completed.retire(turnId);
     if (!owner) {
-      // Only a later ACK for this exact provider id may consume the result.
       // Never attribute an unbound event to the thread's current generation.
       if (outcome !== undefined) {
         this.#earlyCompletions.set(turnId, { threadId, outcome });
@@ -113,14 +106,7 @@ export class ProviderTurnGenerationRegistry<Outcome = never> {
   }
 }
 
-/** Thread gate for the narrow interval after Stop wins but before an async
- * adapter returns the provider turn id that can be retired. Multiple queued
- * room operations may share a thread, so ownership is reference-counted.
- *
- * A broken adapter is allowed to leave its sendTurn promise pending forever.
- * The gate therefore expires each owner independently: by then any turn id
- * observed during the vulnerable handshake has been moved to the longer-lived
- * RetiredTurnRegistry, while a replacement turn's new id can flow normally. */
+/** Gates a thread between a winning Stop and the async provider turn id; reference-counted, and each owner expires so a hung adapter cannot hold it. */
 export class PendingTurnCancellations {
   readonly #ownersByThread = new Map<
     string,
@@ -138,8 +124,7 @@ export class PendingTurnCancellations {
     const previous = owners.get(ownerId);
     if (previous) clearTimeout(previous);
     const expiry = setTimeout(() => {
-      // A clear + re-mark may have installed a newer timer for the same
-      // owner. The stale callback must not clear that renewed quarantine.
+      // A clear + re-mark may have installed a newer timer: a stale callback must not clear it.
       if (this.#ownersByThread.get(threadId)?.get(ownerId) !== expiry) return;
       this.clear(threadId, ownerId);
     }, this.#ttlMs);
@@ -160,19 +145,13 @@ export class PendingTurnCancellations {
     for (const resolve of waiters ?? []) resolve();
   }
 
-  /** Do not overlap a replacement dispatch with the ambiguous pre-id window.
-   * Re-check after every wake: a cancellation can be renewed in the same
-   * microtask turn that clears an older owner. Each owner has its own bounded
-   * expiry, so a broken adapter cannot strand this await forever. */
+  /** Re-check after every wake: a cancellation can be renewed in the same microtask turn that clears an older owner. */
   async waitForClear(threadId: string): Promise<void> {
     while (this.has(threadId)) {
       await new Promise<void>((resolve) => {
         const waiters = this.#clearWaitersByThread.get(threadId) ?? new Set<() => void>();
         waiters.add(resolve);
         this.#clearWaitersByThread.set(threadId, waiters);
-        // clear() cannot interleave with this synchronous block, but keeping
-        // the second check makes the registration safe if the implementation
-        // later gains an externally supplied scheduler.
         if (!this.has(threadId)) {
           waiters.delete(resolve);
           if (waiters.size === 0) this.#clearWaitersByThread.delete(threadId);
@@ -187,10 +166,6 @@ export class PendingTurnCancellations {
   }
 }
 
-/** Apply the two-stage cancellation quarantine. While the unresolved
- * handshake owns the thread, every event is ignored and any stable provider
- * turn id it reveals is retired. After the bounded gate expires, that old id
- * remains ignored but an unrelated replacement id is admitted. */
 export function isTurnEventQuarantined(
   pending: PendingTurnCancellations,
   retired: RetiredTurnRegistry,

@@ -1,6 +1,3 @@
-// The preset routes are exercised the way a request reaches them: through
-// the table, on a real HTTP server, with a stand-in for index.ts's inline
-// routes behind it, over a real preset store in a throwaway folder.
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -10,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { json, readBody } from "../harness/http.ts";
 import { createPresetStore, type OrgInstallStatus } from "../presets.ts";
-import { requiredScope } from "../request-auth.ts";
+import { memberBotCreateViolation, requiredScope } from "../request-auth.ts";
 import { parsePackageDocument } from "../../shared/package-format.ts";
 import { createBotPresetRoutes } from "./bot-presets.ts";
 import { dispatchRoutes } from "./table.ts";
@@ -71,7 +68,7 @@ describe("/api/bot-presets through the route table", () => {
   it("is for admins only, like the New bot defaults, and so is creating a bot from a preset", () => {
     expect(requiredScope("GET", "/api/bot-presets")).toBe("admin");
     expect(requiredScope("DELETE", "/api/bot-presets/p1")).toBe("admin");
-    expect(requiredScope("POST", "/api/bots")).toBe("admin");
+    expect(memberBotCreateViolation({ name: "Sky", preset: "p1" }), "a Team Cloud member's own new bot takes no preset").toBe("preset");
     expect(requiredScope("POST", "/api/teams/export")).toBe("admin");
   });
 });

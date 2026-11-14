@@ -1,13 +1,6 @@
-// Preset bots in the New bot dialog: presets from the organization and from
-// imported files, above the built-in roles (server/presets.ts has the store
-// and the allowlist). Choosing one fills the draft's name, look and standing
-// instructions, which the person can still change. What the preset brings
-// besides (skills, starter notes, playbooks) the server adds when the bot is
-// created, switched on for an organization preset and off for a file's.
 import { t } from "@/lib/i18n";
 import type { BotDefaultsProfile } from "../../shared/new-bot-defaults";
 
-/** GET /api/bot-presets, one entry (server/presets.ts WireBotPreset). */
 export interface BotPreset {
   id: string;
   source: "file" | "org";
@@ -35,7 +28,6 @@ export interface BotPreset {
   notes: string[];
 }
 
-/** What the draft remembers of a chosen preset, for creation. */
 export interface ChosenPreset {
   id: string;
   skills: string[];
@@ -47,8 +39,6 @@ export interface PresetGroup {
   presets: BotPreset[];
 }
 
-/** Organization presets under "From {publisher}", then imported ones, in
- * the server's order. Pure, for tests. */
 export function presetGroups(presets: readonly BotPreset[]): PresetGroup[] {
   const groups: PresetGroup[] = [];
   for (const preset of presets) {
@@ -62,9 +52,7 @@ export function presetGroups(presets: readonly BotPreset[]): PresetGroup[] {
   return groups;
 }
 
-/** The draft fields a preset fills: name, title, description, standing
- * instructions and look. Never a model, computer, folder, approval level or
- * connected apps: the preset has none, and the draft keeps its own. */
+/** Never a model, computer, folder, approval level or connected apps: the draft keeps its own. */
 export function presetDraftPatch(preset: BotPreset): Partial<BotDefaultsProfile> {
   const patch: Partial<BotDefaultsProfile> = {
     name: preset.bot.name ?? preset.name,
@@ -81,7 +69,6 @@ export function presetDraftPatch(preset: BotPreset): Partial<BotDefaultsProfile>
   return patch;
 }
 
-/** The preset's picture as a file the draft uploads like any chosen picture. */
 export function presetPictureFile(preset: BotPreset): File | null {
   const avatar = preset.bot.appearance?.avatar;
   if (!avatar) return null;
@@ -96,7 +83,6 @@ export function presetPictureFile(preset: BotPreset): File | null {
   return new File([bytes], `preset.${avatar.mime.slice(6)}`, { type: avatar.mime });
 }
 
-/** The lines under the picker: where it came from and what it adds. */
 export function presetSummaryLines(preset: BotPreset): string[] {
   const lines = [preset.source === "org" && preset.publisherName
     ? t("newBot.presetFromOrg", { package: preset.packageName, release: preset.release, publisher: preset.publisherName })

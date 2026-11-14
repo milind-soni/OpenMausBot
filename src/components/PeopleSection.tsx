@@ -1,23 +1,17 @@
-// App settings → People, on a hosted server: who may sign in to this
-// workspace with an emailed code, their role, when they were last seen,
-// what each person spent this month, and an invite link that opens the
-// sign-in page with their address filled in. The link is convenience, not
-// a second door: the one-time code still goes to the address itself.
-//
-// On a workspace whose members the organisation's Admin decides (portal
-// membership), this list decides nothing, so the section turns read-only:
-// who has signed in, what they spent, and a link to Admin → People.
+// Security: the invite link is convenience, not a second door; the one-time code still goes to the address itself.
 import { useCallback, useEffect, useState } from "react";
-import { Check, Copy, ExternalLink, Link2, Loader2, Plus, RefreshCw } from "lucide-react";
+import { Check, Copy, ExternalLink, Link2, Loader2, Plus, RefreshCw, Users, X } from "lucide-react";
 import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { useCopyFeedback } from "@/lib/copy-text";
 import { formatUsd, hasFiniteCost } from "@/lib/usage";
 import { readMembership, type Membership } from "../lib/membership";
 import { readSessionState, type SessionState } from "../lib/session";
 import { canPairDevices } from "./ServerPairingCard";
 import { normalizeAccessEntry, withEntry, withoutEntry, type SignInLists } from "./SignInAccessCard";
 import { Card } from "./SettingsPrimitives";
+import { Select } from "./Select";
 
 export type Role = "admin" | "member";
 
@@ -25,24 +19,19 @@ export type Role = "admin" | "member";
 export interface Person {
   entry: string;
   role: Role;
-  /** `@domain`: everyone at a company, not one person. */
   isDomain: boolean;
   lastSeenAt: number | null;
   devices: number;
   turns: number;
   costUsd: number | null;
-  /** part of costUsd is estimated from list prices (see Usage → History) */
   estimated?: boolean;
 }
 
-/** The sign-in page with the invited address filled in; a domain entry gets the plain page. */
 export function inviteLink(base: string, entry: string): string {
   const origin = base.replace(/\/+$/, "");
   return entry.startsWith("@") ? `${origin}/pair` : `${origin}/pair?email=${encodeURIComponent(entry)}`;
 }
 
-/** One row per list entry, joined with the devices that signed in as that
- * address and the month's usage the ledger attributed to it. */
 export function mergePeople(
   lists: SignInLists,
   sessions: Array<{ email?: string; lastSeenAt: number }>,
@@ -72,8 +61,6 @@ export function mergePeople(
   return people;
 }
 
-/** One row per address that has signed in, for a workspace whose members
- * Admin manages: role from what their sessions may do, nothing to edit. */
 export function peopleFromSessions(
   sessions: Array<{ email?: string; lastSeenAt: number; scopes?: string[] }>,
   usage: Array<{ key: string; turns: number; costUsd: number | null }>,
@@ -103,21 +90,19 @@ export function lastSeenLabel(lastSeenAt: number | null, now = Date.now()): stri
   return new Date(lastSeenAt).toISOString().slice(0, 10);
 }
 
-/** The table alone, so it renders the same from a fetch or a fixture. */
 export function PeopleTable({ people, busy, onRole, onRemove, onLink, readOnly = false }: {
   people: Person[];
   busy: boolean;
   onRole: (person: Person, role: Role) => void;
   onRemove: (person: Person) => void;
   onLink: (person: Person) => void;
-  /** Admin decides membership: show the rows, offer nothing to change. */
   readOnly?: boolean;
 }) {
   if (people.length === 0) return <p className="text-[13px] text-ink-secondary">{t(readOnly ? "people.portal.empty" : "people.empty")}</p>;
   const columns = "grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-4";
   return (
     <div className="flex flex-col">
-      <div className={cn(columns, "border-b border-hairline/40 pb-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary")}>
+      <div className={cn(columns, "border-b border-hairline/40 pb-2 text-[12px] font-medium uppercase tracking-wide text-ink-secondary")}>
         <span>{t("people.colPerson")}</span>
         <span>{t("people.colRole")}</span>
         <span className="text-right">{t("people.colLastSeen")}</span>
@@ -128,7 +113,7 @@ export function PeopleTable({ people, busy, onRole, onRemove, onLink, readOnly =
         <div key={person.entry} className={cn(columns, "border-b border-hairline/20 py-2 text-[13px]")}>
           <span className="min-w-0">
             <span className="block truncate text-ink">{person.isDomain ? t("people.everyoneAt", { domain: person.entry.slice(1) }) : person.entry}</span>
-            {person.devices > 0 && <span className="block text-[11.5px] text-ink-secondary">{t("people.devices", { count: String(person.devices) })}</span>}
+            {person.devices > 0 && <span className="block text-[12px] text-ink-secondary">{t("people.devices", { count: String(person.devices) })}</span>}
           </span>
           <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", person.role === "admin" ? "bg-accent/15 text-accent" : "bg-control text-ink-secondary")}>
             {person.role === "admin" ? t("people.roleAdmin") : t("people.roleMember")}
@@ -151,36 +136,22 @@ export function PeopleTable({ people, busy, onRole, onRemove, onLink, readOnly =
 }
 
 export function CopyLink({ link }: { link: string }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), 2000);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopied(true);
-    } catch {
-      /* the link stays selectable when clipboard access is blocked */
-    }
-  };
+  const { state, copy } = useCopyFeedback(link);
   return (
-    <div className="mt-3 rounded-lg border border-hairline/40 bg-inset p-3 text-[12.5px]">
+    <div className="mt-3 rounded-lg border border-hairline/40 bg-inset p-3 text-[13px]">
       <div className="mb-1 text-ink-secondary">{t("people.link")}</div>
       <div className="flex items-center gap-2">
         <code className="min-w-0 flex-1 select-all break-all text-ink">{link}</code>
-        <button type="button" onClick={() => void copy()} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-ink">
-          {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}{copied ? t("people.copied") : t("people.copy")}
+        <button type="button" onClick={copy} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-ink">
+          {state === "copied" ? <Check size={13} className="text-success" /> : state === "failed" ? <X size={13} className="text-danger" /> : <Copy size={13} />}
+          {t(state === "copied" ? "people.copied" : state === "failed" ? "common.copyFailed" : "people.copy")}
         </button>
       </div>
-      <p className="mt-2 text-[11.5px] leading-relaxed text-ink-secondary">{t("people.linkHint")}</p>
+      <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("people.linkHint")}</p>
     </div>
   );
 }
 
-/** Portal membership: this server's list decides nothing, so say where
- * people are managed and show, read-only, who has signed in here. */
 export function PortalPeople({ peopleUrl, people }: { peopleUrl: string | null; people: Person[] }) {
   const noop = () => {};
   return (
@@ -201,12 +172,14 @@ export function PortalPeople({ peopleUrl, people }: { peopleUrl: string | null; 
       <div className="mt-4">
         <PeopleTable people={people} busy={false} readOnly onRole={noop} onRemove={noop} onLink={noop} />
       </div>
-      <p className="mt-3 text-[11.5px] leading-relaxed text-ink-secondary">{t("people.portal.note")}</p>
+      <p className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("people.portal.note")}</p>
     </Card>
   );
 }
 
-export function PeopleSection() {
+export function PeopleSection({ simple = false, startOpen = false }: { simple?: boolean; startOpen?: boolean }) {
+  const [open, setOpen] = useState(startOpen);
+  const [tried, setTried] = useState(false);
   const [session, setSession] = useState<SessionState | null>(null);
   const [membership, setMembership] = useState<Membership | null>(null);
   const [lists, setLists] = useState<SignInLists | null>(null);
@@ -271,6 +244,7 @@ export function PeopleSection() {
   };
 
   const invite = async () => {
+    setTried(true);
     if (!lists || busy) return;
     const entry = normalizeAccessEntry(draft);
     if (!entry) {
@@ -283,10 +257,10 @@ export function PeopleSection() {
   };
 
   if (!canPairDevices(session)) return null;
-  if (membership?.authority === "portal") return <PortalPeople peopleUrl={membership.peopleUrl} people={people} />;
-  return (
-    <Card title={t("people.title")} subtitle={t("people.subtitle")}>
-      {emailOffered === false && <p className="mb-3 rounded-lg border border-warning/25 bg-warning/5 px-3 py-2 text-[12.5px] text-ink-secondary">{t(membership?.pairingCodes === false ? "people.portalSignIn" : "people.notHosted")}</p>}
+  const portal = membership?.authority === "portal" ? <PortalPeople peopleUrl={membership.peopleUrl} people={people} /> : null;
+  const content = (
+    <>
+      {emailOffered === false && (!simple || tried) && <p className="mb-3 rounded-lg border border-warning/25 bg-warning/5 px-3 py-2 text-[13px] text-ink-secondary">{t(membership?.pairingCodes === false ? "people.portalSignIn" : "people.notHosted")}</p>}
       <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); void invite(); }}>
         <input
           value={draft}
@@ -296,16 +270,16 @@ export function PeopleSection() {
           disabled={busy}
           className="min-w-[16rem] flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none disabled:opacity-50"
         />
-        <select value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label={t("people.colRole")} disabled={busy} className="rounded-lg border border-hairline/40 bg-inset px-2 py-2 text-[12.5px] text-ink focus:outline-none">
+        <Select value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label={t("people.colRole")} disabled={busy}>
           <option value="member">{t("people.roleMember")}</option>
           <option value="admin">{t("people.roleAdmin")}</option>
-        </select>
-        <button type="submit" disabled={busy || !draft.trim()} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-semibold text-white hover:brightness-110 disabled:opacity-60">
+        </Select>
+        <button type="submit" disabled={busy || !draft.trim()} className="ui-button ui-button-primary">
           {busy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}{t("people.invite")}
         </button>
         <button type="button" onClick={() => void load()} disabled={loading || busy} aria-label={t("people.refresh")} title={t("people.refresh")} className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"><RefreshCw size={13} className={cn(loading && "animate-spin")} /></button>
       </form>
-      <p className="mt-2 text-[11.5px] leading-relaxed text-ink-secondary">{t("people.inviteHint")}</p>
+      <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("people.inviteHint")}</p>
       {link && <CopyLink link={link} />}
       {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
       <div className="mt-4">
@@ -317,7 +291,26 @@ export function PeopleSection() {
           onLink={(person) => setLink(inviteLink(base, person.entry))}
         />
       </div>
-      <p className="mt-3 text-[11.5px] leading-relaxed text-ink-secondary">{t("people.note")}</p>
-    </Card>
+      {!simple && <p className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("people.note")}</p>}
+    </>
   );
+  if (simple) {
+    return (
+      <div data-people-summary="">
+        {/* Drawn like the name row above it, a round mark then two lines, so the Account card has one text edge. */}
+        <div role="group" aria-label={t("people.title")} className="flex min-w-0 items-center gap-3 px-4 py-[13px]">
+          <span aria-hidden="true" className="flex size-11 shrink-0 items-center justify-center rounded-full bg-ink/[0.06] text-ink-secondary"><Users size={20} /></span>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[14px] leading-5 text-ink">{t("people.title")}</div>
+            <div className="text-[13px] leading-[18px] text-ink-secondary">{t("settings.simple.people")}</div>
+          </div>
+          <button type="button" aria-expanded={open} className="ui-button shrink-0" onClick={() => setOpen(!open)}>
+            {open ? t("common.done") : t("settings.simple.people.invite")}
+          </button>
+        </div>
+        {open && <div className="px-3.5 pb-3.5 pt-1">{portal ?? content}</div>}
+      </div>
+    );
+  }
+  return portal ?? <Card title={t("people.title")} subtitle={t("people.subtitle")}>{content}</Card>;
 }

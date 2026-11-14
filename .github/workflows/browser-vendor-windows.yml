@@ -66,6 +66,11 @@ jobs:
         with:
           name: windows-browser-vendor
           path: ${{ runner.temp }}/browser-vendor
+      - name: Prove Chrome children do not acquire a Windows console
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP/browser-vendor/agent-browser-tests.exe" --exact native::cdp::chrome::tests::test_chrome_child_has_no_console --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Stage the pinned Chromium and notices
         run: node scripts/prepare-browser.mjs --current
       - name: Prove cold start and close/reopen with captured MCP output

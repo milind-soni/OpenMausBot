@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 
-// Persisted journal filenames keep their historical box-* names.
 const FILE = join(DATA_DIR, "box-create-requests.json");
 const LOCK_FILE = join(DATA_DIR, "box-create-requests.lock");
 const KEY_RETENTION_MS = 24 * 60 * 60 * 1_000;
@@ -23,16 +22,13 @@ export interface BoatCreateRequest {
   idempotencyKey: string;
   createdAt: number;
   boxId?: string;
-  /** The provider Boat has its deterministic OpenMaus name. Until this is
-   * true, deleting the bot would make an ambiguous or unnamed Boat orphaned. */
+  /** The Boat carries its deterministic name; until then deleting the bot would orphan an ambiguous Boat. */
   resolved?: true;
 }
 
 export interface BoatCreateAttempt {
   request: BoatCreateRequest;
-  /** True only when this call wrote a brand-new provider key. This is
-   * deliberately process-local provenance: a resumed key may resolve a Boat
-   * created by an earlier app run and must never authorize automatic cleanup. */
+  /** Process-local on purpose: a resumed key may resolve an earlier run's Boat and must never authorize automatic cleanup. */
   startedNow: boolean;
 }
 
@@ -176,9 +172,6 @@ function readReaperOwner(
     throw recoveryStateError("stale-lock recovery record is unreadable", error);
   }
 
-  // Versions before the successor chain wrote only the elected reaper's PID.
-  // Treat that immutable record as generation zero so an interrupted upgrade
-  // remains recoverable without deleting another contender's authority.
   if (/^[1-9][0-9]*\n?$/.test(raw)) {
     const pid = Number(raw.trim());
     if (Number.isInteger(pid) && pid <= 0x7fffffff) return { legacy: true, pid };
@@ -245,10 +238,7 @@ function successorReaperPath(targetToken: string, reaperIdentity: string): strin
   return `${LOCK_FILE}.reap-${targetToken}-${digest}`;
 }
 
-/** Elect exactly one live process to retire this immutable lock owner. A
- * reaper can itself crash, so each dead reaper deterministically names the
- * next election. Election records are never removed: no contender can delete
- * a successor's authority between checking it and publishing its own. */
+/** Each dead reaper names the next election, and election records are never removed, so no contender can delete a successor's authority. */
 function claimReaperAuthority(expected: JournalLockOwner): boolean {
   let reaperPath = `${LOCK_FILE}.reap-${expected.token}`;
   for (let generation = 0; generation < MAX_REAPER_GENERATIONS; generation += 1) {
@@ -297,9 +287,7 @@ function acquireJournalLock(): JournalLockOwner {
     token: randomUUID(),
     createdAt: Date.now(),
   };
-  // The fully-written candidate exists before link(2) publishes it at the
-  // fixed lock path. Unlike open-then-write, contenders can never observe an
-  // ownerless lock after a crash between those two operations.
+  // Fully written before link(2) publishes it, so a crash never leaves an ownerless lock (unlike open-then-write).
   const candidate = `${LOCK_FILE}.candidate-${owner.pid}-${owner.token}`;
   try {
     writeFileSync(candidate, `${JSON.stringify(owner)}\n`, { flag: "wx", mode: 0o600, flush: true });
@@ -321,9 +309,7 @@ function acquireJournalLock(): JournalLockOwner {
 
       const current = readLockOwner();
       const reaped = current !== null && !processIsAlive(current.pid) && reapDeadLock(current);
-      // Every retry path is bounded. In particular, an adversarially changing
-      // lock can disappear between link(EEXIST) and read, or replace each
-      // successfully reaped owner before the next link attempt.
+      // Every retry path is bounded: an adversarially changing lock can vanish or be replaced between steps.
       if (performance.now() >= deadline) {
         throw recoveryStateError("locked by another OpenMausBot process");
       }
@@ -356,9 +342,7 @@ function withJournalLock<T>(operation: (requests: BoatCreateRequest[]) => T): T 
   }
 }
 
-/** Record the exact provider request before it leaves the process. A known
- * Boat wins over a changed body: once a provider resource exists, recovering
- * and naming it is safer than issuing any second create request. */
+/** Recorded before the request leaves the process; a known Boat wins over a changed body, never a second create. */
 export function beginBoatCreate(botId: string, requestBody: string): BoatCreateAttempt {
   if (!BOT_ID.test(botId)) throw new Error("invalid bot id for cloud computer creation");
   if (!requestBody || requestBody.length > 1_024) throw new Error("invalid cloud computer create request");
@@ -373,9 +357,7 @@ export function beginBoatCreate(botId: string, requestBody: string): BoatCreateA
         throw recoveryStateError("waiting for an earlier cloud computer request to be reconciled");
       }
       if (now - pending.createdAt >= KEY_RETENTION_MS) {
-        // Once the provider forgets the idempotency key, retrying it (or using
-        // a new key) may create a second billable Boat. Absence cannot be
-        // inferred from a lost response, so stop for manual reconciliation.
+        // Past boat.dev's 24-hour idempotency window a retry or new key may create a second billable Boat; stop for manual reconciliation.
         throw recoveryStateError("older than boat.dev's 24-hour retry window");
       }
       return { request: { ...pending }, startedNow: false };
@@ -406,16 +388,12 @@ export function rememberCreatedBoat(request: BoatCreateRequest, boxId: string): 
       throw recoveryStateError("out of date");
     }
     const completed = { ...current, boxId };
-    // There can be an older rejected-TTL request for this bot. Once a Boat is
-    // known, it is the only recovery authority we need to retain.
     save([...requests.filter((candidate) => candidate.botId !== request.botId), completed]);
     return { ...completed };
   });
 }
 
-/** Mark the recovery record safe only after the deterministic provider rename
- * succeeds. Keeping the resolved Boat ID still lets a later retry recover from
- * an eventually-consistent account listing without blocking bot deletion. */
+/** Only after the deterministic rename succeeds. */
 export function resolveBoatCreate(request: BoatCreateRequest): BoatCreateRequest {
   return withJournalLock((requests) => {
     const current = requests.find((candidate) => (
@@ -431,19 +409,7 @@ export function resolveBoatCreate(request: BoatCreateRequest): BoatCreateRequest
   });
 }
 
-/** Read-only deletion guard. Both a key-only request with an ambiguous
- * provider outcome and a known-but-not-yet-named Boat must keep its bot owner. */
-export function hasUnresolvedBoatCreate(botId: string): boolean {
-  if (!BOT_ID.test(botId)) throw new Error("invalid bot id for cloud computer creation");
-  return withJournalLock((requests) => (
-    requests.some((request) => request.botId === botId && request.resolved !== true)
-  ));
-}
-
-/** Sanitized local recovery authority for configuration guards. The fresh,
- * lock-protected read can prove a remembered provider id even while the
- * account-wide LIST endpoint is eventually consistent. Provider request
- * bodies and idempotency keys never cross this boundary. */
+/** Provider request bodies and idempotency keys never cross this boundary. */
 export function boatCreateRecoverySnapshot(): BoatCreateRecoverySnapshot[] {
   return withJournalLock((requests) => requests.map((request) => ({
     botId: request.botId,
@@ -452,11 +418,7 @@ export function boatCreateRecoverySnapshot(): BoatCreateRecoverySnapshot[] {
   })));
 }
 
-/** Persist ownership discovered from a pre-journal deterministic Boat name.
- * The provider listing proves which live bot owns the exact immutable id, but
- * it must never steal an identity remembered for another bot. It supersedes
- * stale attempts for the same bot, is idempotent, and fails closed on a true
- * cross-bot conflict. */
+/** Never steals an identity remembered for another bot; fails closed on a cross-bot conflict. */
 export function adoptResolvedBoat(botId: string, boxId: string): void {
   if (!BOT_ID.test(botId)) throw new Error("invalid bot id for cloud computer ownership");
   if (!BOAT_ID.test(boxId)) throw new Error("invalid cloud computer id for ownership");
@@ -482,15 +444,11 @@ export function adoptResolvedBoat(botId: string, boxId: string): void {
       && sameBoat?.resolved === true
       && sameBoat.botId === botId
     ) return;
-    // A successfully listed deterministic legacy name resolves any older
-    // key-only/remembered attempt for this bot. Keeping those stale rows would
-    // leave deletion permanently blocked after the adopted Boat is removed.
     save([...retained, adopted]);
   });
 }
 
-/** Retire only the durable identity for a Boat the provider has confirmed was
- * deleted. Callers must never use this for a failed or ambiguous deletion. */
+/** Only for a Boat the provider confirmed deleted, never a failed or ambiguous deletion. */
 export function retireDeletedBoatCreate(boxId: string): void {
   if (!BOAT_ID.test(boxId)) throw new Error("invalid deleted cloud computer id");
   withJournalLock((requests) => {

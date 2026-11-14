@@ -1,17 +1,7 @@
 #!/usr/bin/env node
-// Fake of the Antigravity `agy` CLI's print-mode stdio surface, for driver
-// tests of drivers/antigravity.ts. On `--version` it prints a version; in
-// stream-json input mode it reads one user event from stdin, then emits a
-// canned NDJSON turn: init → tool
-// step (ACTIVE then DONE) → agent_response step with usage → result with
-// status SUCCESS. Deterministic, no network.
-//
-//   FAKE_AGY_MODE=ask-peer
-//     reads OpenMausBot's temporary `openmausbot-agents` entry from agy's
-//     global MCP config, calls list_bots then ask_bot, and returns the peer's
-//     real reply. This pins the Antigravity/Gemini comms path end to end.
-//
-// Keep this file dependency-free — it runs as a bare `node` subprocess.
+// Fake of the Antigravity `agy` CLI's print-mode stdio surface for antigravity.ts tests: `--version`,
+// or one stream-json user event in and a canned NDJSON turn out. Env knobs:
+//   FAKE_AGY_MODE=ask-peer  call list_bots then coordinate_bots(consult: true) via agy's global MCP config
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -44,7 +34,6 @@ function agentsMcpEntry(): McpEntry | null {
   }
 }
 
-/** Minimal MCP stdio client matching the real config shape used by agy. */
 function driveMcp(
   entry: McpEntry,
   calls: Array<{ name: string; args: (previous: string) => object }>,
@@ -175,7 +164,6 @@ if (streamInput) {
         : undefined;
   } catch {}
 } else {
-  // Retained for tests of old callers; production prompt paths use stdin.
   const printIdx = Math.max(argv.indexOf("--print"), argv.indexOf("-p"));
   prompt = printIdx !== -1 ? argv[printIdx + 1] : undefined;
 }
@@ -184,8 +172,8 @@ if (process.env.FAKE_AGY_DUMP) {
   writeFileSync(process.env.FAKE_AGY_DUMP, JSON.stringify({ argv, env: process.env, prompt }, null, 2));
 }
 
-const toolName = mode === "ask-peer" ? "ask_bot" : "write_to_file";
-out({ event: "init", conversation_id: CONV, init: { cwd: process.cwd(), tools: ["run_command", "write_to_file", ...(mode === "ask-peer" ? ["list_bots", "ask_bot"] : [])], permission_mode: "accept-edits" } });
+const toolName = mode === "ask-peer" ? "coordinate_bots" : "write_to_file";
+out({ event: "init", conversation_id: CONV, init: { cwd: process.cwd(), tools: ["run_command", "write_to_file", ...(mode === "ask-peer" ? ["list_bots", "coordinate_bots"] : [])], permission_mode: "accept-edits" } });
 out({ event: "step_update", conversation_id: CONV, step_update: { conversation_id: CONV, step_index: 0, state: "ACTIVE", step_type: "tool", tool_name: toolName, tool_info: { name: toolName, parameters: {} } } });
 
 let response = "done from fake agy";
@@ -198,10 +186,11 @@ if (mode === "ask-peer") {
       const reply = await driveMcp(agents, [
         { name: "list_bots", args: () => ({}) },
         {
-          name: "ask_bot",
+          name: "coordinate_bots",
           args: (list) => ({
-            bot_id: /id: ([\w-]+)/.exec(list)?.[1] ?? "",
+            bot_ids: [/id: ([\w-]+)/.exec(list)?.[1] ?? ""],
             message: "ping from fake Gemini",
+            consult: true,
           }),
         },
       ]);

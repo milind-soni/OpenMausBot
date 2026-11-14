@@ -34,6 +34,15 @@ describe("browser profile partition routing", () => {
     ]);
   });
 
+  it("carries the My Chrome choice in the payload and in the compare-and-swap base, in the server's key order", () => {
+    const mine = [{ id: "mine", name: "Mine", browser: "chrome" as const, partitionId: "Mine" }];
+    expect(JSON.stringify(browserProfilesForPatch(mine))).toBe('[{"id":"mine","name":"Mine","browser":"chrome"}]');
+    expect(browserProfilesMutation(mine, [{ ...mine[0]!, browser: undefined }])).toEqual({
+      browserProfiles: [{ id: "mine", name: "Mine" }],
+      expectedBrowserProfiles: [{ id: "mine", name: "Mine", browser: "chrome" }],
+    });
+  });
+
   it("sends the exact edited list as a compare-and-swap base without internal metadata", () => {
     const next = [{ ...profiles[0]!, name: "Renamed" }, { id: "new", name: "New" }];
     const mutation = browserProfilesMutation(profiles, next);

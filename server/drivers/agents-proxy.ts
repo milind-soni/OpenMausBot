@@ -1,99 +1,21 @@
-// Agent-to-agent comms MCP proxy — spawned as an MCP server inside a bot's
-// agent process (via the "agents" integration). Exposes peer, routine, and
-// skill tools routed back through the harness so the harness stays the
-// single owner of turns, permissions, and recursion limits. The coordination
-// tools are:
-//
-//   list_bots()                          → the other bots in this section + their status
-//   list_rooms()                         → the shared rooms this bot may post into
-//   post_to_room(group_id, message)      → put ONE message in a room; nobody's
-//                                          turn starts, so nobody replies
-//   ask_bot(bot_id, msg)                 → send msg to that bot, wait, return its reply
-//   delegate_bot(bot_id, msg, reason?)   → hand the task to a peer ASYNC: returns
-//                                          immediately, the peer runs after your
-//                                          current turn finishes, the result is
-//                                          delivered to the source conversation
-//   start_thread(title, msg, bot_id?)    → open a real thread — on yourself for
-//                                          separate work, or on a teammate as a
-//                                          handoff that runs on its own
-//   create_bot(name, role, instructions) → Chiefs can add a specialist to
-//                                          their own section
-//   create_room / manage_room            → Chiefs manage own-section rooms,
-//                                          never move bots or sections
-//   request_credential(id, reason?)       → show a secure, allowlisted key card
-//   list_routines()                       → inspect this bot's scheduled work
-//   propose_routine(...)                  → apply or request confirmation for a new routine
-//   propose_routine_action(...)           → apply or request confirmation for a routine change
-//   propose_profile(...)                  → apply or request confirmation for a profile change
-//
-// Speaks raw JSON-RPC 2.0 over stdio (no MCP SDK — house style, matches
-// computer-proxy / permission-proxy). All state comes from env, injected by
-// the harness when it builds the integration:
+// The "agents" MCP server inside a bot's agent process: stdio JSON-RPC 2.0 (no MCP SDK), every tool
+// routed through the harness. Env, set by the harness:
 //   OMB_HARNESS_URL  base URL of the harness (http://127.0.0.1:8799)
-//   OMB_BOT_ID       the calling bot's id (excluded from list_bots; sender)
+//   OMB_BOT_ID  the calling bot's id
 //   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
-//   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
-//   OMB_EXTERNAL_RUNTIME  "1" for a standing process: peer tools and polling only
-//
-// This file is the stdio front end only. What the tools are and which a turn
-// sees: agents-catalog.ts. What a call does: agents-call.ts. How the harness
-// is reached: agents-client.ts. The harness spawns THIS file as its own
-// process (server/proxy-paths.ts), and scripts/bundle-server.mjs inlines the
-// other three into it, so a packaged build still ships one agents-proxy.js.
+//   OMB_TURN_DEPTH  this turn's comms depth (the harness refuses recursion)
+//   OMB_EXTERNAL_RUNTIME  "1" for a standing process: oversized results are cut instead of cached
+//   OMB_CHIEF_OF_STAFF  "1" for a Chief of Staff, the only bot shown the Chief-only tools
+//   OMB_MAUSBOT  "1" for the person's MausBot, the only bot shown its notification tools
+//   OMB_AGENTS_TOOL_BRIDGE  "1" lists a few tools and puts the rest behind find_tool and use_tool
+// scripts/bundle-server.mjs inlines agents-mcp and agents-catalog/-call/-client/-bridge into this file, which the harness spawns.
 import readline from "node:readline";
 
-import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
-import { callTool, capResult, toolCallContextFromEnv } from "./agents-call.ts";
+import { agentsMcp } from "./agents-mcp.ts";
 import type { Json } from "./agents-client.ts";
 
-const AVAILABLE_TOOLS = availableTools(catalogProfileFromEnv(process.env));
-// One proxy process serves one turn, so its per-turn guards start here.
-const CONTEXT = toolCallContextFromEnv(process.env);
-
+const handle = agentsMcp(process.env);
 const send = (msg: Json) => process.stdout.write(JSON.stringify(msg) + "\n");
-const ok = (id: unknown, result: unknown) => send({ jsonrpc: "2.0", id, result });
-const rpcErr = (id: unknown, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
-const textResult = (id: unknown, text: string, isError = false) =>
-  ok(id, { content: [{ type: "text", text }], isError });
-
-async function handle(msg: Json) {
-  const id = msg.id;
-  const method = msg.method as string | undefined;
-  if (!method) return;
-  const params = (msg.params ?? {}) as Json;
-  switch (method) {
-    case "initialize":
-      ok(id, {
-        protocolVersion: (params.protocolVersion as string) ?? "2024-11-05",
-        capabilities: { tools: {} },
-        serverInfo: { name: "opengrokbot-agents", version: "0.1.0" },
-      });
-      return;
-    case "notifications/initialized":
-    case "notifications/cancelled":
-      return;
-    case "ping":
-      ok(id, {});
-      return;
-    case "tools/list":
-      ok(id, { tools: AVAILABLE_TOOLS });
-      return;
-    case "tools/call": {
-      const name = params.name as string;
-      if (!AVAILABLE_TOOLS.some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
-      try {
-        const { text, isError, passthrough } = await callTool(name, (params.arguments ?? {}) as Json, CONTEXT);
-        if (passthrough) ok(id, passthrough);
-        else textResult(id, name === "tool_result_read" ? text : await capResult(text, CONTEXT), isError);
-      } catch (e) {
-        textResult(id, await capResult((e as Error).message, CONTEXT), true);
-      }
-      return;
-    }
-    default:
-      if (id !== undefined) rpcErr(id, -32601, `Method not found: ${method}`);
-  }
-}
 
 const rl = readline.createInterface({ input: process.stdin, terminal: false });
 rl.on("line", (line) => {
@@ -105,8 +27,8 @@ rl.on("line", (line) => {
   } catch {
     return;
   }
-  void handle(msg).catch((e) => {
-    if (msg.id !== undefined) rpcErr(msg.id, -32603, (e as Error).message);
+  void handle(msg).then((reply) => { if (reply) send(reply); }, (e) => {
+    if (msg.id !== undefined) send({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: (e as Error).message } } as Json);
   });
 });
 rl.on("close", () => process.exit(0));

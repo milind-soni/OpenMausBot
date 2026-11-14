@@ -1,20 +1,25 @@
-// Engines settings — per-instance CLI path override. One "Set CLI…" button
-// per engine reveals a picker: a "detected" dropdown of every binary the
-// server found on PATH, plus a manual path input. Saving first probes the
-// binary (`<cli> --version`, same PATH a real turn uses); a failed probe
-// asks before registering — the classic miss is a path the terminal sees
-// but this GUI app can't.
-import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Check, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./EngineLibrary";
-import { ProviderIconPicker } from "./ProviderIconPicker";
 import { cn } from "@/lib/cn";
+import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
-import { EngineSetup, EngineUpdateNotice, EngineWarningNotice } from "./EngineSetup";
-import { AddClaudeAccount, ClaudeAccountSettings } from "./ClaudeAccountSettings";
-import { CodexAccountSettings } from "./CodexAccountSettings";
+import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotice, isApiKeyEngine } from "./EngineSetup";
+import { AppCopyNotice } from "./EngineAppCopy";
+import { forgetAppCopySwitches } from "@/state/engine-install";
+import { AccountsCard, AddAccount, accountGroupOf, accountsReady, type AccountGroup } from "./EngineAccounts";
+import { ClaudeEndpoints, CodexEndpoints } from "./ClaudeEndpoints";
+import { ClaudeBedrockEndpoints } from "./ClaudeBedrock";
+import { DEVICE_SIGN_IN_COPY, deviceSignInProvider } from "./DeviceSignIn";
+import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
+import { CacheKeepWarmSettings } from "./CacheKeepWarmSettings";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { Select } from "./Select";
+import { SettingsFoldRow, SettingsGroup, SettingsMark, SettingsRows, StatusDot } from "./SettingsPrimitives";
+import { OllamaModels, ollamaShortStatus } from "./OllamaStatusLine";
+import { InstanceProviderMark } from "./ProviderIcons";
 
 interface ProbeResult {
   ok: boolean;
@@ -29,14 +34,9 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
   onSaved: () => Promise<void>;
 }) {
   const [candidates, setCandidates] = useState<string[] | null>(instance.cliCandidates ?? null);
-  // `selected` starts EMPTY, never at instance.cli: a wrapper override
-  // ("/ag claude agp") has no matching <option>, and a select whose value
-  // points at a missing option renders the placeholder while still holding
-  // the ghost value — the form would look empty yet refuse to save.
+  // Starts empty: a select whose value names a missing option shows the placeholder yet still holds that value.
   const [selected, setSelected] = useState<string>("");
   const [manual, setManual] = useState<string>(
-    // the current override rides the manual input unless it is exactly a
-    // detected path (then the dropdown preselects it below)
     instance.cli && !(instance.cliCandidates ?? []).includes(instance.cli) ? instance.cli : "",
   );
   const [probing, setProbing] = useState(false);
@@ -45,8 +45,6 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
   const [error, setError] = useState<string | null>(null);
   const fetchedRef = useRef(false);
 
-  // The describe() snapshot can be stale (CLI installed since last refresh);
-  // re-fetch candidates once when the picker mounts so the dropdown is current.
   useEffect(() => {
     if (fetchedRef.current) return;
     fetchedRef.current = true;
@@ -54,8 +52,6 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
       .then(({ candidates: found }: { candidates: string[] }) => {
         setCandidates(found);
         if (!instance.cli) return;
-        // preselect a detected override in the dropdown; a non-detected one
-        // (wrapper string, moved binary) rides the manual input instead
         if (found.includes(instance.cli)) setSelected(instance.cli);
         else setManual(instance.cli);
       })
@@ -66,7 +62,6 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
   const dirty = value !== (instance.cli ?? "");
   const busy = probing || saving;
 
-  // Editing the path invalidates a previous probe result.
   useEffect(() => {
     setProbe(null);
   }, [value]);
@@ -75,15 +70,11 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
     if (busy || !value || !dirty) return;
     setSaving(true);
     setError(null);
-    const committed = value; // freeze: inputs disable during save, but the
-    // closure must not see a later keystroke either
+    const committed = value;
     api(`/api/instances/${encodeURIComponent(instance.instanceId)}`, {
       method: "PATCH",
       body: JSON.stringify({ cli: committed }),
     })
-      // onSaved (refreshInstances) failing must NOT read as "not saved" —
-      // the PATCH already returned 200. Close regardless; the global banner
-      // from refreshInstances already reports the refresh failure.
       .then(() => Promise.resolve(onSaved()).catch(() => {}))
       .then(onClose)
       .catch((e) => setError(e.message))
@@ -100,7 +91,6 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
     })
       .then((result: ProbeResult) => {
         setProbe(result);
-        // ok → save immediately; failed → hold for explicit confirmation
         if (result.ok) persist();
       })
       .catch((e) => setError(e.message))
@@ -110,24 +100,21 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
   return (
     <div className="mt-2.5 flex flex-col gap-2">
       {candidates !== null && candidates.length > 0 && (
-        <div className="relative">
-          <select
-            value={manual.trim() ? "" : selected}
-            onChange={(e) => {
-              setSelected(e.target.value);
-              setManual("");
-            }}
-            aria-label={t("engines.detectedAria", { name: instance.displayName })}
-            disabled={busy}
-            className="w-full appearance-none rounded-lg border border-hairline/40 bg-inset px-3 py-2 pr-8 font-mono text-[12px] text-ink focus:outline-none disabled:opacity-50"
-          >
-            <option value="">{t("engines.selectBinary")}</option>
-            {candidates.map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
-          <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-secondary" />
-        </div>
+        <Select
+          className="w-full font-mono"
+          value={manual.trim() ? "" : selected}
+          onChange={(e) => {
+            setSelected(e.target.value);
+            setManual("");
+          }}
+          aria-label={t("engines.detectedAria", { name: instance.displayName })}
+          disabled={busy}
+        >
+          <option value="">{t("engines.selectBinary")}</option>
+          {candidates.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </Select>
       )}
       <input
         type="text"
@@ -136,7 +123,7 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
         onKeyDown={(e) => {
           if (e.key !== "Enter") return;
           e.preventDefault();
-          if (!value || !dirty) return; // nothing to save — same hint the disabled button gives
+          if (!value || !dirty) return;
           save();
         }}
         placeholder={candidates?.length ? t("engines.manualPath") : "/absolute/path/to/cli"}
@@ -198,19 +185,17 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
   );
 }
 
-function EngineRow({ instance }: { instance: InstanceInfo }) {
+/** The executable behind an engine: its path, Claude's self-update, and a reset to the default. */
+function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
   const { refreshInstances } = useStore();
   const [open, setOpen] = useState(false);
+  const cliMotion = useMenuMotion(open);
   const [switching, setSwitching] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updatedVersion, setUpdatedVersion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const wasOpenFor = useRef<string | null>(null);
 
-  // Close the picker when this instance's override changes to anything else
-  // — a save from this row, another tab, or the 5-min refresh. The picker
-  // initialized its fields from the OLD value and never re-syncs, so staying
-  // open would show stale state.
   useEffect(() => {
     if (wasOpenFor.current !== null && wasOpenFor.current !== instance.cli) {
       setOpen(false);
@@ -226,8 +211,17 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
       method: "PATCH",
       body: JSON.stringify({ cli: "" }),
     })
-      // The reset already succeeded once PATCH returns 200. A follow-up list
-      // refresh failure should not tell the user the reset itself failed.
+      .then(() => Promise.resolve(refreshInstances()).catch(() => {}))
+      .catch((e) => setError(e.message))
+      .finally(() => setSwitching(false));
+  };
+
+  /** Out of every model list until Unhide; the CLI and its sign-in stay as they are. Refused while something uses it. */
+  const hide = () => {
+    if (switching || updating) return;
+    setSwitching(true);
+    setError(null);
+    api(`/api/instances/${encodeURIComponent(instance.instanceId)}`, { method: "PATCH", body: JSON.stringify({ hidden: true }) })
       .then(() => Promise.resolve(refreshInstances()).catch(() => {}))
       .catch((e) => setError(e.message))
       .finally(() => setSwitching(false));
@@ -250,36 +244,13 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
       .finally(() => setUpdating(false));
   };
 
-  const policyNote = instance.policy && <p className="mb-2 text-[12px] leading-relaxed text-ink-secondary">
-    <span className="font-medium text-ink">{t("policy.managedBy", { organization: instance.policy.organizationName })}</span> · {instance.policy.reason}
-  </p>;
-  if (instance.readOnly) return <EngineCard instance={instance}>
-    {policyNote}
-    <p className="text-[13px] leading-relaxed text-ink-secondary">{t("organization.managedEngine")}</p>
-    {!engineReady(instance) && <p className="mt-2 text-[12px] text-ink-secondary">{t("organization.engineUnavailable")}</p>}
-  </EngineCard>;
-
   return (
-    <EngineCard instance={instance}>
-      {policyNote}
-      <ProviderIconPicker instance={instance} />
-      {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} unframed />}
-      {instance.snapshot.update && <EngineUpdateNotice update={instance.snapshot.update} instance={instance} className="mt-3" />}
-      {instance.snapshot.warning && <EngineWarningNotice warning={instance.snapshot.warning} className="mt-3" />}
-      {instance.claudeAccount && <ClaudeAccountSettings instance={instance} />}
-      {engineReady(instance) && instance.snapshot.authenticated === true && (
-        instance.authentication?.method === "device-code"
-          ? <CodexAccountSettings instance={instance} />
-          : instance.authentication?.method === "paste-code" && !instance.claudeAccount && (
-            <p className="flex items-center gap-1.5 text-[12px] text-success"><Check size={13} />{t("engineSetup.claude.connectedAccount")}</p>
-          )
-      )}
-      <details className="mt-3 rounded-xl border border-hairline/40 px-3 py-2.5">
-        <summary className="cursor-pointer text-[12px] font-medium text-ink-secondary hover:text-ink">{t("engines.library.advanced")}</summary>
+      <details className="mt-4 border-t border-hairline/40 pt-3">
+        <summary className="cursor-pointer rounded-md py-1 text-[12px] font-medium text-ink-secondary outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">{t("engines.library.advanced")}</summary>
         <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("engines.footer")}</p>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-[13px]">
           {instance.cli ? (
-            <span className="w-full break-all font-mono text-[11.5px] text-ink-secondary" title={instance.cli}>
+            <span className="w-full break-all font-mono text-[12px] text-ink-secondary" title={instance.cli}>
               {instance.cli}
             </span>
           ) : (
@@ -297,7 +268,7 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
             <button
               onClick={updateClaude}
               disabled={switching || updating}
-              className="flex shrink-0 items-center gap-1 text-[11.5px] text-ink-secondary hover:text-ink disabled:opacity-50"
+              className="flex shrink-0 items-center gap-1 text-[12px] text-ink-secondary hover:text-ink disabled:opacity-50"
             >
               {updating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
               {updating ? t("engines.updating") : t("engines.updateClaude")}
@@ -307,11 +278,21 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
             <button
               onClick={reset}
               disabled={switching || updating}
-              className="shrink-0 text-[11.5px] text-ink-secondary hover:text-ink disabled:opacity-50"
+              className="shrink-0 text-[12px] text-ink-secondary hover:text-ink disabled:opacity-50"
             >
               {switching ? t("engines.resetting") : t("engines.reset")}
             </button>
           )}
+          <button
+            type="button"
+            data-hide-engine={instance.instanceId}
+            onClick={hide}
+            disabled={switching || updating}
+            title={t("engines.hideHint")}
+            className="shrink-0 text-[12px] text-ink-secondary hover:text-ink disabled:opacity-50"
+          >
+            {t("engines.hide")}
+          </button>
           <button
             onClick={() => setOpen((v) => !v)}
             disabled={updating}
@@ -329,37 +310,269 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
           <div role="status" className="mt-1 text-[12px] text-success">{t("engines.claudeUpdated", { version: updatedVersion })}</div>
         )}
         {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
-        {open && (
-          <CustomPicker
-            instance={instance}
-            cliDefault={instance.cliDefault}
-            onClose={() => setOpen(false)}
-            onSaved={refreshInstances}
-          />
+        {cliMotion.shown && (
+          <div className={cliMotion.className} {...cliMotion.exitProps}>
+            <CustomPicker
+              instance={instance}
+              cliDefault={instance.cliDefault}
+              onClose={() => setOpen(false)}
+              onSaved={refreshInstances}
+            />
+          </div>
         )}
       </details>
+  );
+}
+
+/** Remove drops an added account; Sign out forgets a signed-in account's Google sign-in, the first one too. */
+function AntigravityAccountAction({ instance, action }: { instance: InstanceInfo; action: "remove" | "signOut" }) {
+  const { state, dispatch, refreshInstances } = useStore();
+  const [confirming, setConfirming] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const remove = action === "remove";
+  const usedBy = remove ? state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId).length : 0;
+  const label = t(remove ? "accounts.remove" : "accounts.signOut");
+  const run = async () => {
+    setConfirming(false);
+    setRunning(true);
+    setError(null);
+    try {
+      const path = `/api/instances/${encodeURIComponent(instance.instanceId)}${remove ? "" : "/auth/sign-out"}`;
+      const { instances } = await api(path, { method: remove ? "DELETE" : "POST" });
+      if (Array.isArray(instances)) dispatch({ type: "instances", instances });
+      else await refreshInstances();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setRunning(false);
+    }
+  };
+  return <>
+    <div className="flex flex-wrap items-center gap-2">
+      <button type="button" disabled={running || usedBy > 0} onClick={() => setConfirming(true)} className={cn("rounded-lg px-2.5 py-1.5 text-[12px] font-medium disabled:cursor-not-allowed disabled:opacity-50", remove ? "text-danger hover:bg-danger/10" : "text-ink-secondary hover:bg-raised hover:text-ink")}>
+        {running ? <Loader2 size={13} className="animate-spin" /> : label}
+      </button>
+      {usedBy > 0 && <p className="text-[11px] text-ink-secondary">{t("accounts.inUse", { count: String(usedBy) })}</p>}
+    </div>
+    {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
+    <ConfirmDialog open={confirming} title={t(remove ? "accounts.removeTitle" : "accounts.signOutTitle", { name: instance.displayName })}
+      body={t(remove ? "accounts.removeBodyAntigravity" : "accounts.signOutBody")}
+      confirmLabel={label} tone="neutral" pending={running} onCancel={() => { if (!running) setConfirming(false); }} onConfirm={() => void run()} />
+  </>;
+}
+
+function AntigravityAddAccount({ source }: { source: InstanceInfo }) {
+  const { state } = useStore();
+  const [addedId, setAddedId] = useState<string | null>(null);
+  const added = addedId ? state.instances.find((instance) => instance.instanceId === addedId && instance.snapshot.authenticated !== true) : undefined;
+  return <>
+    <AddAccount label={t("engineSetup.antigravity.addAccount")} endpoint="/api/instances/antigravity-accounts" extra={{ sourceInstanceId: source.instanceId }} onAdded={setAddedId} />
+    {added && <div data-antigravity-added={added.instanceId}><EngineSetup instance={added} unframed /></div>}
+  </>;
+}
+
+function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: boolean }) {
+  const policyNote = instance.policy && <p className="mb-2 text-[12px] leading-relaxed text-ink-secondary">
+    <span className="font-medium text-ink">{t("policy.managedBy", { organization: instance.policy.organizationName })}</span> · {instance.policy.reason}
+  </p>;
+  if (instance.trialCredit) return <EngineCard instance={instance} bare={bare}>
+    <p data-trial-credit={instance.trialCredit} className="text-[13px] leading-relaxed text-ink-secondary">{t(instance.trialCredit === "used_up" ? "engines.trialCreditUsedUp"
+      : instance.trialCredit === "ended" ? "engines.trialCreditEnded" : engineReady(instance) ? "engines.trialCredit" : "engines.trialCreditOwn")}</p>
+  </EngineCard>;
+  if (instance.readOnly) return <EngineCard instance={instance} bare={bare}>
+    {policyNote}
+    <p className="text-[13px] leading-relaxed text-ink-secondary">{t("organization.managedEngine")}</p>
+    {!engineReady(instance) && <p className="mt-2 text-[12px] text-ink-secondary">{t("organization.engineUnavailable")}</p>}
+  </EngineCard>;
+
+  return (
+    <EngineCard instance={instance} bare={bare}>
+      {policyNote}
+      {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} description={instance.codexEndpoint ? t("agentEndpoints.codexHint") : undefined} unframed />}
+      {engineReady(instance) && <ApiKeyEngineManage instance={instance} className="mt-3" />}
+      {engineReady(instance) && instance.serverKind === "ollama" && <OllamaModels instance={instance} className="mt-3" />}
+      {/* The setup panel that first said so is gone once the engine is Ready. */}
+      {engineReady(instance) && <AppCopyNotice instance={instance} className="mt-3" />}
+      {instance.snapshot.update && <EngineUpdateNotice update={instance.snapshot.update} instance={instance} className="mt-3" quiet />}
+      {instance.snapshot.warning && <EngineWarningNotice warning={instance.snapshot.warning} className="mt-3" />}
+      {engineReady(instance) && instance.snapshot.authenticated === true && (
+        instance.authentication?.method === "device-code"
+          ? <p className="flex items-center gap-1.5 text-[12px] text-success"><Check size={13} />{t(DEVICE_SIGN_IN_COPY[deviceSignInProvider(instance.driverKind)].connectedAccount)}</p>
+          : instance.authentication?.method === "paste-code" && (
+            <p className="flex items-center gap-1.5 text-[12px] text-success"><Check size={13} />{t("engineSetup.claude.connectedAccount")}</p>
+          )
+      )}
+      {instance.freeUpSpace && <AntigravityFreeSpace instance={instance} />}
+      {instance.driverKind === "antigravityAgent" && (
+        <div className="mt-3 space-y-3">
+          {instance.snapshot.authenticated && <p className="break-words text-[12px] text-ink-secondary">{instance.snapshot.account?.email ?? t("engineSetup.antigravity.emailUnavailable")}</p>}
+          <AntigravityAddAccount source={instance} />
+          {instance.snapshot.authenticated === true && instance.authentication?.signOut === true && <AntigravityAccountAction instance={instance} action="signOut" />}
+          {instance.instanceId.startsWith("antigravity-") && <AntigravityAccountAction instance={instance} action="remove" />}
+        </div>
+      )}
+      <EngineAdvanced instance={instance} />
     </EngineCard>
   );
 }
 
-export function EnginesSettings() {
+/** "Ready", "Not set up", "Needs attention": the status first, with its 6 px dot. */
+function simpleStatus(instance: InstanceInfo, ready: boolean): { tone: "success" | "warning" | null; text: string } {
+  if (ready) {
+    const email = instance.snapshot.authenticated === true ? instance.snapshot.account?.email : undefined;
+    return { tone: "success", text: email ? `${t("settings.ai.ready")} · ${email}` : t("settings.ai.ready") };
+  }
+  if (instance.snapshot.ollama) return { tone: null, text: ollamaShortStatus(instance.snapshot.ollama) };
+  if (instance.snapshot.state === "available" && instance.snapshot.authenticated === false) return { tone: "warning", text: t("settings.ai.attention") };
+  // What it still needs, in a few plain words: an account sign-in or a key.
+  const needs = instance.authentication !== undefined ? t("settings.ai.needsAccountOrKey") : t("settings.ai.needsKey");
+  return { tone: null, text: `${t("settings.ai.notSetUp")} · ${needs}` };
+}
+
+/** One provider: its mark in the 32 px slot, the status under the name, and one Set up / Manage that opens its fold
+ * inside the same card. */
+function ProviderRow({ instance, ready, open, onToggle, compact, children }: {
+  instance: InstanceInfo; ready: boolean; open: boolean; onToggle: () => void; compact: boolean; children: ReactNode;
+}) {
+  const status = simpleStatus(instance, ready);
+  return <>
+    <div data-simple-engine={instance.instanceId} className={cn("flex items-center gap-3 px-4", compact && !ready && !status.tone ? "min-h-11 py-1.5" : "min-h-16 py-3")}>
+      <SettingsMark><InstanceProviderMark instance={instance} size={18} subtle /></SettingsMark>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-[14px] leading-5 text-ink">{instance.displayName}</span>
+        {!(compact && !ready && !status.tone) && <span className="truncate text-[13px] leading-[18px] text-ink-secondary"><StatusDot tone={status.tone} />{status.text}</span>}
+      </span>
+      <button type="button" aria-expanded={open} className="ui-button ml-3 shrink-0" onClick={onToggle}>
+        {t(open ? "common.close" : ready ? "settings.simple.ai.manage" : "settings.simple.ai.setUp")}
+      </button>
+    </div>
+    {open && <div data-provider-fold={instance.instanceId} className="pb-4 pl-[60px] pr-4 pt-3">{children}</div>}
+  </>;
+}
+
+function SimpleEngines({ rows, isReady, renderEngine, more }: {
+  rows: InstanceInfo[];
+  isReady: (instance: InstanceInfo) => boolean;
+  renderEngine: (instance: InstanceInfo, bare?: boolean) => ReactNode;
+  more: { id: string; open: boolean; onToggle: () => void };
+}) {
+  const [opened, setOpened] = useState<string | null>(null);
+  const featured = rows.filter((instance) => isReady(instance) || instance.authentication !== undefined);
+  const others = rows.filter((instance) => !featured.includes(instance));
+  const row = (instance: InstanceInfo, compact: boolean) => {
+    const open = opened === instance.instanceId;
+    return <ProviderRow key={instance.instanceId} instance={instance} ready={isReady(instance)} open={open} compact={compact}
+      onToggle={() => setOpened(open ? null : instance.instanceId)}>{renderEngine(instance, true)}</ProviderRow>;
+  };
+  return (
+    <SettingsGroup label={t("settings.ai.providers")} actions={<RefreshEngines />}>
+      <SettingsRows icons>
+        {featured.map((instance) => row(instance, false))}
+        {others.length > 0 && (
+          <SettingsFoldRow id={more.id} title={t("settings.ai.moreProviders")} value={String(others.length)} open={more.open} onToggle={more.onToggle}
+            leading={<span aria-hidden="true" />}>
+            {others.map((instance) => row(instance, true))}
+          </SettingsFoldRow>
+        )}
+      </SettingsRows>
+    </SettingsGroup>
+  );
+}
+
+/** Providers someone hid: listed apart, folded, each one click from coming back. */
+export function HiddenEngines() {
+  const { state, refreshInstances } = useStore();
+  const [hidden, setHidden] = useState<Array<{ instanceId: string; displayName: string }>>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    // An older server has no such route: nothing is hidden there.
+    api<{ instances?: Array<{ instanceId: string; displayName: string }> } | undefined>("/api/instances/hidden")
+      .then((result) => { if (alive) setHidden(Array.isArray(result?.instances) ? result.instances : []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [state.instances]);
+  if (hidden.length === 0) return null;
+  const unhide = (instanceId: string) => {
+    setBusy(instanceId);
+    setError(null);
+    api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "PATCH", body: JSON.stringify({ hidden: false }) })
+      .then(() => Promise.resolve(refreshInstances()).catch(() => {}))
+      .catch((e) => setError(e.message))
+      .finally(() => setBusy(null));
+  };
+  return (
+    <details data-hidden-engines className="px-4">
+      <summary className="cursor-pointer text-[13px] font-medium text-ink-secondary hover:text-ink">{t("engines.hiddenTitle", { count: String(hidden.length) })}</summary>
+      <p className="mt-2 text-[12px] text-ink-secondary">{t("engines.hiddenHint")}</p>
+      <div className="mt-2 flex flex-col gap-1.5">
+        {hidden.map((entry) => (
+          <div key={entry.instanceId} className="flex items-center justify-between gap-3 rounded-lg border border-hairline/40 bg-inset px-3 py-2">
+            <span className="min-w-0 truncate text-[13px] text-ink">{entry.displayName}</span>
+            <button type="button" data-unhide-engine={entry.instanceId} disabled={busy !== null} onClick={() => unhide(entry.instanceId)}
+              className="shrink-0 text-[12px] font-medium text-accent hover:underline disabled:opacity-50">
+              {busy === entry.instanceId ? t("engines.unhiding") : t("engines.unhide")}
+            </button>
+          </div>
+        ))}
+      </div>
+      {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
+    </details>
+  );
+}
+
+export function EnginesSettings({ simple = false, more }: { simple?: boolean; more?: { id: string; open: boolean; onToggle: () => void } }) {
   const { state } = useStore();
-  // every KNOWN-driver instance has cliDefault; unknown-driver shadows have
-  // neither unless an override was set. Including them keeps a Reset-able row
-  // (and a Set CLI… path) for engines the running build doesn't recognize.
-  const rows = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable");
+  // Leaving Settings ends the "now uses the copy OpenMausBot installed" lines.
+  useEffect(() => forgetAppCopySwitches, []);
+  const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined || i.claudeBedrock !== undefined || i.codexEndpoint !== undefined);
+  // A provider's accounts share one card, which takes the place of its first account.
+  const groups = new Map<AccountGroup, InstanceInfo[]>();
+  for (const instance of listed) {
+    const group = accountGroupOf(instance);
+    if (group) groups.set(group, [...groups.get(group) ?? [], instance]);
+  }
+  const groupOf = (instance: InstanceInfo) => {
+    const group = accountGroupOf(instance);
+    return group && groups.get(group)?.[0] === instance ? group : null;
+  };
+  const rows = listed.filter((instance) => !accountGroupOf(instance) || groupOf(instance));
+  // A hidden ordinary Claude instance takes its card, and the endpoint section inside it, away. A hosted
+  // workspace lists every engine read-only and refuses instance changes, so there the section has no Add.
+  const hostedWorkspace = rows.length > 0 && rows.every((instance) => instance.readOnly);
+  const orphanCodexEndpoints = !groups.has("chatgpt") && !hostedWorkspace;
+  const orphanEndpoints = !groups.has("claude") && !hostedWorkspace;
+  const isReady = (instance: InstanceInfo) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); };
+  const renderEngine = (instance: InstanceInfo, bare = false) => {
+    const group = groupOf(instance);
+    return group
+      ? <AccountsCard group={group} accounts={groups.get(group)!} bare={bare}
+        advanced={<>{group === "claude" ? <><ClaudeEndpoints /><ClaudeBedrockEndpoints /></> : <CodexEndpoints />}<EngineAdvanced instance={instance} /></>} />
+      : <EngineRow instance={instance} bare={bare} />;
+  };
+
+  if (simple && more) return <>
+    <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} more={more} />
+    {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
+    {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
+  </>;
 
   return (
     <div className="flex min-w-0 flex-col gap-6 pb-2">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1 basis-60">
+        <div className="min-w-0 flex-1 basis-60 space-y-2 px-4">
           <h1 className="text-[22px] font-semibold tracking-tight text-ink">{t("settings.engines.title")}</h1>
           <p className="mt-2 max-w-lg text-[13px] leading-relaxed text-ink-secondary">{t("engines.library.intro")}</p>
         </div>
         <RefreshEngines />
       </div>
-      <EngineSections instances={rows} renderEngine={(instance) => <EngineRow instance={instance} />} />
-      <div className="border-t border-hairline/40 pt-4"><AddClaudeAccount /></div>
+      <EngineSections instances={rows} isReady={isReady} renderEngine={renderEngine} />
+      {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
+      {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
+      <HiddenEngines />
+      <CacheKeepWarmSettings />
     </div>
   );
 }

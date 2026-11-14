@@ -37,10 +37,8 @@ describe("sdf", () => {
     // true centre, and the EDT measures to outside pixel CENTRES rather than to the
     // true edge. The shortfall is ~0.6px (~0.55 units) at every radius tested.
     expect(found.radius).toBeGreaterThan(79);
-    // The direction matters more than the magnitude, which is what the original
-    // tolerance failed to capture: an OVER-estimate would report clearance the shape
-    // does not have and let a face clip its own body. An under-estimate only costs a
-    // slightly smaller face — the safe side to be wrong on.
+    // Over-estimating would report clearance the shape lacks and let a face clip;
+    // under-estimating only costs a slightly smaller face.
     expect(found.radius).toBeLessThanOrEqual(80);
   });
 });

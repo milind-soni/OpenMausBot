@@ -1,5 +1,3 @@
-// Real server + pairing + agent MCP process + outbound desktop connector.
-// Only the model is fake. Files live in the disposable verification home.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync } from "node:fs";
@@ -31,8 +29,7 @@ const api = async (method: string, path: string, body?: unknown, headers: Record
 };
 const rpc = (method: string, params?: unknown): Promise<any> => new Promise((resolve, reject) => {
   const id = ++sequence;
-  // A shared terminal operation can legitimately run for 30 seconds, before
-  // its result crosses the connector and MCP boundaries (including Windows).
+  // A shared terminal operation can legitimately run 30 seconds before its result crosses the connector and MCP boundaries.
   const timeout = setTimeout(() => { waiting.delete(id); reject(new Error(`MCP ${method} ${JSON.stringify(params)} timed out`)); }, 40_000);
   waiting.set(id, value => { clearTimeout(timeout); resolve(value); });
   proxy.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
@@ -54,10 +51,7 @@ const commandAlive = (marker: string) => {
 
 beforeAll(async () => {
   fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "hang" });
-  // Computer sharing ships off (features.sharedComputers, config.ts). Turn it
-  // on for this fixture before anything is paired or dispatched: the routes,
-  // the advertised capability and the agent tools all read the same gate, and
-  // the agent process is handed its copy when its turn starts.
+  // Computer sharing ships off: turn it on before anything is paired, since routes, capability and agent tools read one gate.
   expect((await api("PATCH", "/api/config", { features: { sharedComputers: true } })).status).toBe(200);
   env = { id: "hosted-fixture", name: "Hosted fixture", origin: fixture.info.url };
   const local = join(fixture.info.dataDir, "shared-folder"); mkdirSync(local);
@@ -74,23 +68,18 @@ beforeAll(async () => {
     fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers, authorization: `Bearer ${pairing.token}` } }),
   });
   bot = (await api("POST", "/api/bots", { name: "Shared desktop tester" })).body.bot;
-  // The person who lends the desktop asks, from that same paired session:
-  // only a conversation that person started may use their computer.
   proxy = await agentProxyFor(bot.id, pairing.token, "Inspect the folder shared by my desktop; do not use files on the server.");
   createInterface({ input: proxy.stdout! }).on("line", line => { const msg = JSON.parse(line); waiting.get(msg.id)?.(msg); waiting.delete(msg.id); });
   await rpc("initialize", { protocolVersion: "2024-11-05" });
 }, 30_000);
 
-/** Start a turn on this bot from this paired session and return the agents
- * MCP proxy that turn was handed (the fake model hangs, so the turn and its
- * capability stay live). */
+/** The fake model hangs, so the turn and its agents capability stay live. */
 async function agentProxyFor(botId: string, token: string, text: string): Promise<ChildProcess> {
   return proxyForTurn(async () => {
     expect((await api("POST", `/api/bots/${botId}/messages`, { text }, { authorization: `Bearer ${token}` })).status).toBe(202);
   });
 }
 
-/** A second MCP client for an already running proxy, with its own ids. */
 function mcpClient(child: ChildProcess) {
   const replies = new Map<number, (value: any) => void>();
   createInterface({ input: child.stdout! }).on("line", line => { const msg = JSON.parse(line); replies.get(msg.id)?.(msg); replies.delete(msg.id); });
@@ -172,8 +161,35 @@ it("explicit edits and terminal work; old credentials and other sessions cannot 
   evidence.push("explicit hash-guarded edit and real terminal; cross-session, stale-secret, CSRF, local-control gate refusals");
 }, 60_000);
 
+it("a big lent file changes by one passage, gains lines at its end, and is deleted only once read", async () => {
+  await connector.save(env, { folders: [{ ...folder, write: true }], terminal: false, computer: false }, await connector.identity(env));
+  await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
+  const rules = "# Commands\n" + "- an unchanged rule that stays exactly as it is\n".repeat(720) + "- Where commands run: on the Mac\n";
+  writeFileSync(join(folder.path, "commands.md"), rules);
+  expect(Buffer.byteLength(rules)).toBeGreaterThan(34_000);
+
+  const edit = { path: "commands.md", old_text: "- Where commands run: on the Mac", new_text: "- Where commands run: in the Cloud terminal" };
+  const edited = await operation("edit_file", edit);
+  expect(edited.isError, JSON.stringify(edited)).toBeFalsy();
+  expect(readFileSync(join(folder.path, "commands.md"), "utf8")).toBe(rules.replace(edit.old_text, edit.new_text));
+  expect(Buffer.byteLength(JSON.stringify(edit))).toBeLessThan(200);
+  expect((await operation("edit_file", { path: "commands.md", old_text: "- an unchanged rule", new_text: "x" })).content[0].text).toContain("more than once");
+  expect((await operation("edit_file", { path: "commands.md", old_text: "not there", new_text: "x" })).content[0].text).toContain("not found");
+
+  const appended = await operation("append_file", { path: "data/metrics.jsonl", content: "{\"id\":\"x-0153\"}\n" });
+  expect(appended.isError, JSON.stringify(appended)).toBeFalsy();
+  await operation("append_file", { path: "data/metrics.jsonl", content: "{\"id\":\"x-0152\"}\n" });
+  expect(readFileSync(join(folder.path, "data", "metrics.jsonl"), "utf8")).toBe("{\"id\":\"x-0153\"}\n{\"id\":\"x-0152\"}\n");
+
+  writeFileSync(join(folder.path, "x-cookies.tmp"), "");
+  expect((await operation("delete_file", { path: "x-cookies.tmp" })).content[0].text).toContain("expected_sha256");
+  const seen = data(await operation("read_file", { path: "x-cookies.tmp" }));
+  expect(data(await operation("delete_file", { path: "x-cookies.tmp", expected_sha256: seen.sha256 })).deleted).toBe(true);
+  expect(existsSync(join(folder.path, "x-cookies.tmp"))).toBe(false);
+  evidence.push("edit_file sends one passage of a 34 KB file; append_file adds lines; delete_file needs the file read first");
+}, 60_000);
+
 it("another person's conversation can neither see nor use the lent desktop", async () => {
-  // A second person paired to the same server (client scope is enough to chat).
   const opened = await api("POST", "/api/auth/pairing", { label: "Another person", scopes: ["client"] });
   const intruder = (await api("POST", "/api/auth/pair", { code: opened.body.code })).body;
   const theirs = (await api("POST", "/api/bots", { name: "Their bot" })).body.bot;
@@ -181,12 +197,13 @@ it("another person's conversation can neither see nor use the lent desktop", asy
   const { initialize, call } = mcpClient(other);
   try {
     await initialize();
-    // The owner's own conversation still sees it.
     expect(await computers()).toHaveLength(1);
     expect(JSON.parse((await call("list_shared_computers")).content[0].text).computers).toEqual([]);
     const refused = await call("shared_computer", { computer_id: storedGrant().id, folder_id: folder.id, action: "read_file", path: "brief.txt" });
     expect(refused.isError).toBe(true);
     expect(JSON.stringify(refused)).not.toContain("Reviewed");
+    const noted = await call("memory_update", { action: "append", text: "A note from another person's chat." });
+    expect(noted.isError, JSON.stringify(noted)).toBeFalsy();
   } finally { other.kill(); }
   evidence.push("owner partition: another paired person's bot sees no computers and cannot read the owner's file by id");
 }, 45_000);
@@ -222,7 +239,6 @@ it("a bot whose computer is off cannot drive the lent screen, even when screen c
     const refused = await operation("computer_tools");
     expect(refused.isError).toBe(true);
     expect(refused.content[0].text).toContain("This bot has no computer");
-    // Folder work is unaffected by the bot's screen setting.
     expect(data(await operation("list_files")).entries.length).toBeGreaterThan(0);
   } finally {
     expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: null })).status).toBe(200);

@@ -1,28 +1,26 @@
-// Which place a tool call touched, read from its name alone. Shared by the
-// server (screen poller, transcript frames) and the renderer (place icons on
-// tool chips), so both sides read the same tool the same way. Names arrive
-// namespaced (`mcp__computer__click`, `computer__click`), prefixed
-// (`computer_click`) or bare (`click`).
+// Which place a tool call touched, read from its name alone, the same way on
+// the server and in the renderer. Names arrive namespaced
+// (`mcp__computer__click`, `computer__click`), prefixed (`computer_click`) or
+// bare (`click`).
 
 /** Tools whose completion can change what a screen shows. A bot on a
  * computer is illustrated only after one of these; the built-in browser's
  * read-only calls (snapshot, read, get_text, waits) stay out by the same rule. */
 export const SCREEN_TOUCHING_TOOLS: ReadonlySet<string> = new Set([
   // cloud boat / remote computer
-  "screenshot", "click", "type_text", "press_key", "scroll", "computer_batch", "open_url", "browser_click", "browser_fill",
-  // built-in browser: the Electron surface's names, kept because a bot on an
-  // older remote harness can still call them
+  "screenshot", "click", "type_text", "press_key", "key_press", "scroll", "computer_batch", "open_url", "browser_click", "browser_fill",
+  // built-in browser: the Electron surface's names, from older remote harnesses
   "browser_navigate", "browser_type", "browser_press", "browser_scroll", "browser_hover", "browser_drag",
   "browser_select_option", "browser_back", "browser_forward", "browser_screenshot",
-  // built-in browser: agent-browser's names
+  // built-in browser: agent-browser's names, and the new browser's
   "agent_browser_open", "agent_browser_click", "agent_browser_fill", "agent_browser_type", "agent_browser_press",
-  "agent_browser_select", "agent_browser_check", "agent_browser_screenshot",
+  "agent_browser_select", "agent_browser_check", "agent_browser_screenshot", "agent_browser_hover", "agent_browser_upload",
+  "agent_browser_navigate", "agent_browser_drag", "agent_browser_scroll", "agent_browser_tabs", "agent_browser_dialog", "agent_browser_eval",
   // Cua Driver (local Mac, Local VM, VPS)
   "double_click", "right_click", "drag", "hotkey", "move_cursor", "launch_app", "bring_to_front", "zoom",
 ]);
 
-// Keep legacy MCP namespaces accepted; desktop server__tool names follow
-// MCP_NAME in mcp-registry.ts (lowercase letters, digits, underscores, hyphens).
+// Legacy MCP namespaces, or a desktop server__tool name under the MCP_NAME rule.
 export const TOOL_NAMESPACE = /^(?:mcp__.+?|[a-z][a-z0-9_-]{0,31})__/;
 
 /** The same tool reaches the poke site as `mcp__computer__click`,

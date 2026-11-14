@@ -1,32 +1,19 @@
 #!/usr/bin/env node
-// The sidecar, as one command.
-//
-//   node companion/src/index.ts
-//
-// Three public/runtime sockets, and one optional private managed origin. The
-// split between them is the whole security model:
+// The sidecar: `node companion/src/index.ts`. Running it is the opt-in.
 //
 //   :8810  0.0.0.0    devices     token required, allowlisted, scrubbed
-//   :8811  127.0.0.1  you         pairing and revocation — never off-machine
+//   :8811  127.0.0.1  you         pairing and revocation, never off-machine
 //   :8799  127.0.0.1  the harness spoken to as this machine, unmodified
 //   UDS/pipe            one Electron-owned sidecar generation, never TCP
-//
-// 8810 rather than 8800, which is where these started: the harness opens a
-// webhook receiver one port above its own, so 8800 is already taken by the
-// app this is a sidecar to. Ten clear of the harness leaves it room to add
-// another adjacent listener without taking this one out again.
-//
-// Running this process *is* the opt-in. There is no toggle, because a toggle
-// inside a process you chose to start would be ceremony: stopping it is the
-// off switch, and it is a more honest one than a flag in a file.
 import { createServer } from "node:http";
 
 import { createAddressWatcher } from "./advertise-watch.ts";
-import { createControlServer, hostCandidates } from "./control.ts";
+import { createControlServer, hostCandidates, initialControlToken } from "./control.ts";
 import { createConnectedDeviceTracker } from "./connected-devices.ts";
 import { DeviceRegistry } from "./devices.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
-import { lanAddresses, refreshTailnetName, tailnetName, tailscaleAddress } from "./listener.ts";
+import { tailnetName, tailscaleAddress } from "./listener.ts";
+import { acceptsConnection, anyDirectRoute, directRoutes, directRoutesFromEnv, routedAddresses, setDirectRoutes } from "./direct-routes.ts";
 import {
   advertisableAddresses,
   clampBytes,
@@ -35,27 +22,47 @@ import {
   MdnsResponder,
   type ServiceInfo,
 } from "./mdns.ts";
+import { notifyDeviceRevoked } from "./harness-notice.ts";
 import { createProxyHandler } from "./proxy.ts";
+import { parseE2EMessage, parseRelayConfig, relayBaseUrlOverride, standaloneTransportKey, type RelayConfig } from "./e2e/config.ts";
+import { b64u } from "./e2e/credentials.ts";
+import { handleDirectUpgrade, isE2EUpgrade } from "./e2e/direct.ts";
+import { CLOSE, TRANSPORT_RELAY } from "./e2e/noise.ts";
+import { createE2EOrigin } from "./e2e/origin.ts";
+import { E2ERegistry } from "./e2e/registry.ts";
+import { RelayClient } from "./e2e/relay-client.ts";
 import { companionOriginSocket, listenCompanionOrigin } from "./origin.ts";
+import { gzipTunnelReplies } from "./tunnel-gzip.ts";
 import { normalizedPhoneSecretPublicKey } from "./phone-secret-key.ts";
+import { machineNameFromConfig } from "./machine-name.ts";
 
-// Only Electron supplies this port. Standalone sidecars retain the existing
-// unguarded local-server path; Electron children fail closed until initialized.
+// Only Electron supplies this port; Electron children fail closed until initialized.
 const parentPort = (process as NodeJS.Process & {
-  parentPort?: { on(event: "message", listener: (event: { data?: unknown }) => void): void };
+  parentPort?: {
+    on(event: "message", listener: (event: { data?: unknown }) => void): void;
+    postMessage(message: unknown): void;
+  };
 }).parentPort;
 let mutationToken: string | null = null;
+let controlToken = initialControlToken(process.env, Boolean(parentPort));
+let controlTokenReceived = (): void => {};
+const controlReady = controlToken ? Promise.resolve() : new Promise<void>((resolve) => { controlTokenReceived = resolve; });
 parentPort?.on("message", ({ data }) => {
   if (!data || typeof data !== "object") return;
   const message = data as Record<string, unknown>;
+  if (message.type === "openmausbot:companion-e2e") return void configureE2E(message);
+  if (message.type === "openmausbot:companion-e2e-redial") return void relay?.redial();
   if (message.type !== "openmausbot:companion-mutation-token") return;
   if (typeof message.token === "string" && /^[A-Za-z0-9_-]{43}$/.test(message.token)) {
     mutationToken = message.token;
   }
+  if (controlToken === null && typeof message.controlToken === "string" && /^[A-Za-z0-9_-]{43}$/.test(message.controlToken)) {
+    controlToken = message.controlToken;
+    controlTokenReceived();
+  }
 });
 
-/** A port from the environment, or the default. Anything that is not a whole
- * number in range is the default — a typo'd port must not become port 0. */
+/** A typo'd port must not become port 0. */
 const num = (value: string | undefined, fallback: number): number => {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 && parsed < 65536 ? parsed : fallback;
@@ -67,87 +74,76 @@ const COMPANION_PORT = num(process.env.OMB_COMPANION_PORT, 8810);
 const CONTROL_PORT = num(process.env.OMB_CONTROL_PORT, 8811);
 const SERVICE_TYPE = "_openmausbot._tcp";
 let hostedUrl = hostedCompanionUrl(process.env.OMB_COMPANION_HOSTED_URL);
+directRoutesFromEnv(process.env);
 const PRIVATE_ORIGIN = companionOriginSocket(process.env.OMB_COMPANION_INTERNAL_ORIGIN);
 const SECRET_PUBLIC_KEY = normalizedPhoneSecretPublicKey(
   process.env.OMB_PHONE_SECRET_PUBLIC_KEY ?? "",
 );
 
-/** Ports the harness takes for itself, and what it uses each for.
- *
- * Checked up front rather than left to EADDRINUSE, because the collision is
- * a race and the loser is whoever started second: bind first and the harness
- * reports its webhook receiver unavailable instead, which surfaces nowhere
- * near here. "Port 8800 is the webhook receiver" is a sentence someone can
- * act on; "address already in use" sends them to `lsof`. */
+/** Checked up front: the collision is a race, and the loser's error surfaces
+ * nowhere near here. */
 const HARNESS_PORTS = new Map([
   [HARNESS_PORT, "the harness itself"],
   [WEBHOOK_PORT, "the harness's webhook receiver"],
 ]);
 
-/** A sentence naming what already owns this port, or null when nothing does. */
 const conflict = (name: string, port: number): string | null => {
   const owner = HARNESS_PORTS.get(port);
   return owner ? `${name} is set to port ${port}, which is ${owner}` : null;
 };
 
-/** What the phone sees this computer called.
- *
- * Asked of the harness rather than invented here: it already knows whose
- * computer this is, from the profile collected during onboarding, and the
- * built-in companion used exactly this. A phone that paired before the move
- * should not suddenly find a differently-named computer in its list.
- *
- * Read once at startup and cached. An override wins, and a harness that is
- * not up or has no profile falls back rather than blocking — the name is a
- * label, and no part of pairing depends on it. */
-let cachedName = process.env.OMB_COMPANION_NAME?.trim() || "";
+/** OMB_COMPANION_NAME wins; otherwise the name set in Settings or the owner's profile name, re-read every 30
+ * seconds so a rename, or a harness that answered late, reaches the phone. Failures keep the last name. */
+const fixedName = process.env.OMB_COMPANION_NAME?.trim() || "";
+let cachedName = fixedName;
 
-/** What this computer is called on the phone. Never empty. */
 const machineName = (): string => cachedName || "OpenMausBot";
 
-/** Ask the harness whose computer this is, once, at startup. Every failure
- * is survivable: the name is a label, and no part of pairing depends on it. */
-async function refreshMachineName(): Promise<void> {
-  if (cachedName) return; // an explicit override is not ours to second-guess
+/** True when the name changed. */
+async function refreshMachineName(): Promise<boolean> {
+  if (fixedName) return false;
   try {
     const res = await fetch(`http://127.0.0.1:${HARNESS_PORT}/api/config`, {
       signal: AbortSignal.timeout(3000),
     });
-    if (!res.ok) return;
-    const config = (await res.json()) as { profile?: { name?: string } };
-    const owner = config.profile?.name?.trim();
-    if (owner) cachedName = `${owner}'s computer`;
+    if (!res.ok) return false;
+    const next = machineNameFromConfig(await res.json());
+    if (next === cachedName) return false;
+    cachedName = next;
+    return true;
   } catch {
-    /* not up, or no profile — "OpenMausBot" is a fine thing to be called */
+    return false;
   }
 }
 
+let nameTimer: ReturnType<typeof setInterval> | null = null;
+let stopping = false;
+
 const devices = new DeviceRegistry();
 const mdns = new MdnsResponder();
+const e2e = new E2ERegistry(devices);
+let relay: RelayClient | null = null;
+const relayBaseUrl = relayBaseUrlOverride(process.env.OMB_COMPANION_RELAY_URL);
 
-/** Keeps the Bonjour record matching the interface table: advertise when a
- * network appears, re-advertise when DHCP moves us, withdraw when it goes —
- * so `mdns.advertising` stays a true statement rather than a boot-time one. */
+/** Advertise when a network appears, re-advertise when DHCP moves us, withdraw
+ * when it goes. */
 const watcher = createAddressWatcher({
   addresses: advertisableAddresses,
-  // service() reads the current addresses, so a re-advertise carries them
+  name: machineName,
   advertise: () => mdns.advertise(service()),
   withdraw: () => mdns.stop(),
   log: (line) => console.log(`bonjour: ${line}`),
+  // On a Mac a failed join is not papered over by the default-route
+  // membership, so a join that fails while an interface settles is retried.
+  failureRetries: process.platform === "darwin" ? 3 : 0,
 });
 
-/** This machine as a Bonjour record: one DNS label, the device port, and the
- * addresses a phone could reach it on. */
 const service = (): ServiceInfo => ({
-  // one DNS label: no dots, and inside the 63-byte limit
   name: dnsLabel(machineName()),
   type: SERVICE_TYPE,
   port: COMPANION_PORT,
   host: defaultHostName(),
   addresses: advertisableAddresses(),
-  // TXT entries cap at 255 bytes, and this one is user-supplied — measured in
-  // bytes, since that is the unit the wire format actually counts in, and
-  // `slice` counts UTF-16 code units.
   txt: ["v=1", `name=${clampBytes(machineName(), 200)}`],
 });
 
@@ -155,28 +151,90 @@ const connectedDevices = createConnectedDeviceTracker();
 const proxy = createProxyHandler({
     harnessPort: HARNESS_PORT,
     mutationToken: parentPort ? () => mutationToken : undefined,
-    // `authenticate` also stamps lastSeenAt, which is what makes the control
-    // page able to say when a phone was last heard from.
+    // Also stamps lastSeenAt.
     authenticate: (token) => devices.authenticate(token),
     redeem: (code, deviceName, pairRequestId) => devices.redeem(code, deviceName, pairRequestId),
     serverName: machineName,
-    // Recomputed per pairing rather than cached: addresses change when the
-    // machine joins another network, and a pairing is exactly the moment the
-    // list has to be right.
     hosts: () => hostCandidates(),
     endpoints: () => companionEndpointCandidates(COMPANION_PORT, undefined, undefined, hostedUrl),
     connected: connectedDevices.open,
+    e2eDescriptor: (deviceId) => e2e.descriptor(deviceId),
+    e2ePaired: (context, deviceId) => e2e.paired(context, deviceId),
   });
-const companion = createServer(proxy);
-// `createServer(proxy)` handles ordinary HTTP only. noVNC switches its
-// connection to WebSocket, so every server exposing this proxy must also
-// forward Node's separate `upgrade` event to the viewer relay.
-companion.on("upgrade", proxy.upgrade);
-const managedOrigin = PRIVATE_ORIGIN ? createServer(proxy) : null;
-managedOrigin?.on("upgrade", proxy.upgrade);
+const e2eOrigin = createE2EOrigin((req, res) => proxy(req, res), (req, socket, head) => proxy.upgrade(req, socket, head));
+const companion = createServer((req, res) => proxy(req, res, "lan"));
+const directSockets = new Set<import("node:net").Socket>();
+companion.on("connection", (socket) => {
+  if (!acceptsConnection(socket.localAddress, socket.remoteAddress)) return void socket.destroy();
+  directSockets.add(socket);
+  socket.once("close", () => directSockets.delete(socket));
+});
+let directListening = false;
+
+/** Binds the device port while Same Wi-Fi or Tailscale is on, and drops connections on a way in just turned off. */
+async function syncDirectListener(): Promise<void> {
+  for (const socket of directSockets) if (!acceptsConnection(socket.localAddress, socket.remoteAddress)) socket.destroy();
+  if (anyDirectRoute() && !directListening) {
+    await listen(companion, COMPANION_PORT, "0.0.0.0");
+    directListening = true;
+  } else if (!anyDirectRoute() && directListening) {
+    directListening = false;
+    companion.closeAllConnections?.();
+    await new Promise<void>((resolve) => companion.close(() => resolve()));
+  }
+}
+// `createServer` handles plain HTTP only; noVNC's WebSocket and /v1/e2e arrive as Node's separate `upgrade` event.
+companion.on("upgrade", (req, socket, head) =>
+  isE2EUpgrade(req) ? handleDirectUpgrade(req, socket, head, e2e, e2eOrigin) : proxy.upgrade(req, socket, head, "lan"));
+// Large JSON replies go gzipped here: this is the only listener whose replies go up the home connection to Cloudflare.
+const managedOrigin = PRIVATE_ORIGIN ? createServer(gzipTunnelReplies((req, res) => proxy(req, res, "origin"))) : null;
+managedOrigin?.on("upgrade", (req, socket, head) => proxy.upgrade(req, socket, head, "origin"));
+
+function applyRelay(config: RelayConfig | null): void {
+  const sameHost = relay && config && e2e.relay?.hostId.equals(config.hostId);
+  if (!config || !e2e.enabled || !sameHost) {
+    relay?.stop();
+    relay = null;
+  }
+  e2e.setRelay(config && e2e.enabled ? { hostId: config.hostId, nodes: config.nodes } : null);
+  if (!config || !e2e.enabled) return;
+  if (relay) return relay.setToken(config.token, config.nodes);
+  relay = new RelayClient({
+    nodes: config.nodes,
+    token: config.token,
+    admissionSet: () => e2e.admissionSet(),
+    accept: (transport) => {
+      const session = e2e.accept(transport, TRANSPORT_RELAY, "relay", (context) => e2eOrigin.connect(context));
+      return session && { receive: (data, binary) => session.receive(data, binary), transportClosed: (code) => session.transportClosed(code) };
+    },
+    tokenRejected: () => parentPort?.postMessage({ type: "openmausbot:companion-e2e-token-rejected" }),
+    statusChanged: (status, node) => console.log(`e2e: relay ${status}${node ? ` via ${node}` : ""}`),
+    baseUrl: relayBaseUrl,
+  });
+  relay.start();
+}
+
+/** The desktop app's message; a malformed one changes nothing. */
+function configureE2E(message: Record<string, unknown>): void {
+  const config = parseE2EMessage(message);
+  if (!config) return void console.warn("e2e: ignored a malformed configuration");
+  e2e.setKey(config.transportKey);
+  applyRelay(config.relay);
+}
+
+/** A removal closes the device's sessions with an authenticated GoAway(3) first; the relay drops a session whose
+ * admission leaves the set at once (4404), so the smaller set follows a moment later. */
+const ADMISSION_SETTLE_MS = 300;
+devices.onChange(() => setTimeout(() => relay?.refreshAdmission(), ADMISSION_SETTLE_MS).unref());
+e2e.onAdmissionChange(() => relay?.refreshAdmission());
+devices.onDropped((deviceId) => {
+  e2e.closeDevice(deviceId);
+  console.log("companion: dropped a paired device its phone never used");
+});
 
 const control = createControlServer({
   devices,
+  controlToken: () => controlToken,
   companionPort: COMPANION_PORT,
   secretPublicKey: () => SECRET_PUBLIC_KEY,
   hostedUrl: () => hostedUrl,
@@ -189,18 +247,47 @@ const control = createControlServer({
     connectedDevices.disconnect(deviceId);
     proxy.disconnectDevice(deviceId);
   },
-  refreshTailscale: () => refreshTailnetName(),
+  // The harness hears a phone as this computer, so only the sidecar can tell
+  // it the phone lost access and end the Live call that phone holds.
+  revoked: (deviceId) => {
+    e2e.closeDevice(deviceId);
+    if (parentPort && !mutationToken) return;
+    void notifyDeviceRevoked({ harnessPort: HARNESS_PORT, deviceId, mutationToken: mutationToken ?? undefined });
+  },
+  setDirectRoutes: (body) => {
+    const next = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+    if (!next || typeof next.wifi !== "boolean" || typeof next.tailscale !== "boolean") return false;
+    setDirectRoutes(next);
+    void syncDirectListener().catch((error: Error) => console.warn(`companion: ${error.message}`));
+    void watcher.check();
+    return true;
+  },
+  e2e: () => ({ enabled: e2e.enabled, relay: relay?.status ?? "off", node: relay?.node ?? null, descriptor: e2e.descriptor(null) }),
+  liveRoutes: () => e2e.routes(),
+  // The phone hears where it may connect from inside its session first. Narrowed, the relay keeps it a moment so that
+  // lands, then refuses it (4404) and its relay sessions close; direct ones stay. Widened, it is admitted before it hears.
+  routesChanged: (deviceId, routes) => {
+    if (routes === "any") {
+      relay?.refreshAdmission();
+      proxy.sendEndpoints(deviceId);
+      return;
+    }
+    const held = e2e.holdAdmission(deviceId, ADMISSION_SETTLE_MS);
+    proxy.sendEndpoints(deviceId);
+    void held.then(() => e2e.closeDevice(deviceId, CLOSE.normal, "relay"));
+  },
+  setRelay: (body) => {
+    const config = parseRelayConfig(body);
+    if (config === "invalid" || !e2e.enabled) return false;
+    applyRelay(config);
+    return true;
+  },
 });
 
-/** Bind a server, turning a bind failure into a sentence rather than a stack
- * trace, and leaving a handler behind for the errors that come after. */
 const listen = (server: ReturnType<typeof createServer>, port: number, host: string): Promise<void> =>
   new Promise((resolve, reject) => {
     const onError = (error: NodeJS.ErrnoException) => {
       server.removeListener("listening", onListening);
-      // A second copy of the sidecar is the usual cause once the harness's
-      // own ports are ruled out above, and "close whatever is using it"
-      // sends someone hunting through `lsof` for a process they started.
       const hint = ` — another copy of the companion may already be running; ${
         port === COMPANION_PORT ? "OMB_COMPANION_PORT" : "OMB_CONTROL_PORT"
       } chooses a different one`;
@@ -212,14 +299,8 @@ const listen = (server: ReturnType<typeof createServer>, port: number, host: str
     };
     const onListening = () => {
       server.removeListener("error", onError);
-      // Bound is not safe, and removing the startup handler while leaving
-      // nothing in its place is how a running sidecar dies later. A listening
-      // socket still emits `error` — EMFILE on accept, or an interface
-      // disappearing under it — and an `error` with no listener is re-thrown
-      // as an uncaught exception, which here means the sidecar dies and every
-      // paired phone loses the machine over one refused connection. It is
-      // worth a line on stderr and nothing more: the other listener, and
-      // every connection on this one, carry on.
+      // A listening socket still emits `error` (EMFILE on accept, a vanished
+      // interface), and an unhandled one is an uncaught exception.
       server.on("error", (error: NodeJS.ErrnoException) => {
         console.warn(`companion: error on ${host}:${port} — ${error.message}`);
       });
@@ -230,21 +311,12 @@ const listen = (server: ReturnType<typeof createServer>, port: number, host: str
     server.listen(port, host);
   });
 
-/** Start the three-socket arrangement, in the order that makes a failure
- * legible: refuse impossible ports, bind, learn this machine's name, then
- * advertise and print where to point the phone. */
 async function main(): Promise<void> {
   const clash =
     conflict("OMB_COMPANION_PORT", COMPANION_PORT) ?? conflict("OMB_CONTROL_PORT", CONTROL_PORT);
   if (clash) throw new Error(`${clash}. Pick another port.`);
 
-  // The sidecar's own two ports, for the same reason as the harness's: bound
-  // in order, the second one loses with a bare EADDRINUSE that reads as
-  // "something else is using it" when the something else is this process.
-  // Worth naming even though the hosts differ — 127.0.0.1 and 0.0.0.0 on one
-  // port collide, and if they somehow did not the control plane would be
-  // sharing a socket with the device port, which is the one thing the three
-  // sockets exist to prevent.
+  // 127.0.0.1 and 0.0.0.0 on one port collide; name it rather than EADDRINUSE.
   if (COMPANION_PORT === CONTROL_PORT) {
     throw new Error(
       `OMB_COMPANION_PORT and OMB_CONTROL_PORT are both port ${COMPANION_PORT}, and they cannot share one: ` +
@@ -252,59 +324,55 @@ async function main(): Promise<void> {
     );
   }
 
+  await controlReady;
+  // Standing alone, end-to-end is opt-in and keeps its own key; the desktop app sends its key over its port.
+  if (!parentPort && process.env.OMB_COMPANION_E2E === "1") {
+    const key = standaloneTransportKey();
+    e2e.setKey(key);
+    console.log(`e2e: on, transport key ${b64u(key.publicKey).slice(0, 8)}…`);
+  }
   await listen(control, CONTROL_PORT, "127.0.0.1");
-  await listen(companion, COMPANION_PORT, "0.0.0.0");
+  await syncDirectListener();
   if (managedOrigin && PRIVATE_ORIGIN) {
     await listenCompanionOrigin(managedOrigin, PRIVATE_ORIGIN);
   }
 
-  // Before advertising: the service name goes into the Bonjour record, and
-  // re-advertising under a new name later would show the phone two computers.
+  // Before advertising, so the first record already carries the name; a later rename withdraws the old one.
   await refreshMachineName();
 
-  // Asking Tailscale costs a subprocess, so it happens once, here, rather
-  // than per request. Silent on every failure: not installed, not logged in,
-  // not running all just mean "no name", and the address still works.
-  const tailscaleTried: string[] = [];
-  await refreshTailnetName((cli, outcome) => tailscaleTried.push(`  ${cli} — ${outcome}`)).catch(() => {});
+  // Through the watcher: a laptop may have no addresses yet, and they change
+  // under a running sidecar. Discovery failing is never fatal.
+  if (process.env.OMB_COMPANION_BONJOUR !== "0") {
+    await watcher.check();
+    watcher.start();
+  }
+  // A rename in Settings reaches the phone within one tick: the watcher re-advertises when the name moves.
+  nameTimer = setInterval(() => void refreshMachineName().then((changed) => (changed && !stopping ? watcher.check() : undefined)), 30_000);
+  nameTimer.unref?.();
 
-  // Discovery failing is not an error anyone has to fix — port 5353 taken by
-  // another responder, multicast off, a guest network that isolates its
-  // clients. Pairing by typed address still works, and the control page says
-  // so rather than pretending the list will fill in.
-  //
-  // Through the watcher rather than a single advertise: a laptop opened
-  // before wifi associates has no addresses yet, and addresses change under
-  // a running sidecar. The first check advertises (or says why not), and the
-  // interval re-advertises on every change after that.
-  await watcher.check();
-  watcher.start();
-
-  const addresses = lanAddresses();
+  const addresses = routedAddresses();
   const tailscale = tailscaleAddress(addresses);
   const reach = tailnetName() ?? tailscale ?? addresses[0];
-  console.log(`companion  http://0.0.0.0:${COMPANION_PORT}  →  harness 127.0.0.1:${HARNESS_PORT}`);
-  console.log(`pair here  http://127.0.0.1:${CONTROL_PORT}`);
-  if (reach) console.log(`on your phone, enter  ${reach}:${COMPANION_PORT}`);
-  if (tailscale && !tailnetName()) {
-    // Do not tell someone to turn on MagicDNS when they may well have it on
-    // already — say what was actually tried, so the difference between "off"
-    // and "we could not find the CLI" is visible instead of guessed at.
-    console.log("no MagicDNS name found. Tailscale CLI attempts:");
-    for (const line of tailscaleTried) console.log(line);
-  }
+  const on = Object.entries(directRoutes()).filter(([name, value]) => name !== "tailnetName" && value).map(([name]) => name);
+  console.log(directListening
+    ? `companion  http://0.0.0.0:${COMPANION_PORT} (${on.join(", ")})  →  harness 127.0.0.1:${HARNESS_PORT}`
+    : `companion  no direct way in is on  →  harness 127.0.0.1:${HARNESS_PORT}`);
+  if (!parentPort) console.log(`pair here  http://127.0.0.1:${CONTROL_PORT}/#token=${controlToken}`);
+  if (reach && directListening) console.log(`on your phone, enter  ${reach}:${COMPANION_PORT}`);
 }
 
-/** Withdraw the Bonjour record, drop the sockets, exit. Stopping this process
- * is the off switch, so it has to actually stop. */
 const shutdown = async (signal: string): Promise<void> => {
   console.log(`\n${signal} — stopping`);
-  // the watcher first, or a tick could re-advertise the record the next
-  // line just withdrew
+  // The watcher first, or a tick (or a name refresh already in flight) could re-advertise the withdrawn record.
+  stopping = true;
   watcher.stop();
+  if (nameTimer) clearInterval(nameTimer);
   await mdns.stop().catch(() => {});
-  // close() waits for open connections, and an SSE stream never ends on its
-  // own — drop the sockets so "stop" means stopped, now.
+  // close() waits for open connections, and an SSE stream never ends on its own.
+  relay?.stop();
+  e2e.closeAll();
+  e2eOrigin.close();
+  proxy.closeViewers();
   companion.closeAllConnections?.();
   control.closeAllConnections?.();
   managedOrigin?.closeAllConnections?.();

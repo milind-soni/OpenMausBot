@@ -1,89 +1,70 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, type Dispatch, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Archive, ArchiveRestore, BellOff, Clock, Clock3, FolderInput, Link2, Loader2, MoreHorizontal, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
-import type { BotProject, Task } from "@/state/store";
+import { Archive, ArchiveRestore, BellOff, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
+import type { Action, AppState, BotProject, Task } from "@/state/store";
+import type { RoutineRun } from "@/lib/routines";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
+import { MENU_SHEET } from "./menu-recipe";
+import { useHeldMenuMotion } from "./MenuMotion";
+import { intlLocale, t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
+import { imeComposing } from "@/lib/send-key";
+import { isTickable, opensRowMenuFromKey } from "@/lib/bulk-select";
 import { threadRefUrl } from "@/lib/thread-refs";
+import { copyText } from "@/lib/copy-text";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { threadLinkLabel } from "../../shared/thread-link";
+import { isSnoozed, orderedThreadList } from "../../shared/wire";
+import { Select } from "./Select";
+import { WorkingTimer } from "./WorkingIndicator";
+import { useHeldText } from "./SidebarWorkingStep";
+import { localizedTaskTitle } from "@/lib/task-title";
+import { ShareRowItems } from "./conversation-share/ShareRowItems";
 
-type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates"> & {
+export { isSnoozed, orderedThreadList };
+
+type ThreadRowTask = Pick<Task, "threadId" | "title" | "sharedChat" | "private" | "shared" | "sharedWith" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates" | "link" | "turnStartedAt"> & {
   queued?: boolean;
   pinned?: boolean;
   createdAt?: number;
   updatedAt?: number;
+  lastThreadOrderAt?: number;
 };
 
-/** Local date and time. The runtime's timezone and locale are used on
- * purpose: a desktop in Tokyo and one in New York should not be forced
- * onto UTC. */
 export function formatUpdatedAt(at: number): string {
   if (!Number.isFinite(at) || at <= 0) return "";
-  return new Date(at).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+  return new Date(at).toLocaleString(intlLocale(), { dateStyle: "short", timeStyle: "short" });
 }
 
-/** The visible stamp on a thread row: "just now" for the freshest work, then
- * minutes, hours, and days, then the full date once a thread is a week old.
- * The caller supplies "now" so one clock tick re-renders a whole list
- * instead of each row keeping its own timer. */
 export function threadUpdatedLabel(at: number, now: number): string {
-  if (!Number.isFinite(at) || at <= 0) return "";
-  if (!Number.isFinite(now)) return formatUpdatedAt(at);
+  if (stampClock(at, now) === undefined) return formatUpdatedAt(at);
   const seconds = Math.max(0, Math.round((now - at) / 1000));
   if (seconds < 45) return t("task.updated.justNow");
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return t("task.updated.minutes", { count: minutes });
   const hours = Math.round(minutes / 60);
-  // Tier on unrounded time like the week gate below: 23.5 hours rounds to
-  // a display of "24 h ago" without a day having actually passed.
   if (seconds < 86_400) return t("task.updated.hours", { count: hours });
   const days = Math.round(hours / 24);
   if (days === 1) return t("task.updated.yesterday");
-  // Gate the fallback on unrounded elapsed time: six and a half days rounds
-  // to "7 d ago" but is still inside the week, so the absolute date waits
-  // for a full seven days.
-  if (seconds < 7 * 86_400) return t("task.updated.days", { count: days });
-  return formatUpdatedAt(at);
+  return t("task.updated.days", { count: days });
 }
 
-/** Newest message, else when the thread was created. Missing stamps sort as
- * oldest so a half-loaded row cannot jump the list as NaN. */
+export function stampClock(at: number, now: number): number | undefined {
+  if (!Number.isFinite(at) || at <= 0 || !Number.isFinite(now)) return undefined;
+  return Math.max(0, Math.round((now - at) / 1000)) < 7 * 86_400 ? now : undefined;
+}
+
 export function threadRecency(task: { updatedAt?: number; createdAt?: number }): number {
   if (typeof task.updatedAt === "number" && Number.isFinite(task.updatedAt)) return task.updatedAt;
   if (typeof task.createdAt === "number" && Number.isFinite(task.createdAt)) return task.createdAt;
   return 0;
 }
 
-/** Pin, then newest update. Equal stamps keep the caller's order. Attention
- * state does not move a row — the bell and the activity hatch still use
- * orderedSidebarThreads for that. */
-export function orderedThreadList<T extends { pinned?: boolean; updatedAt?: number; createdAt?: number }>(tasks: T[]): T[] {
-  return tasks
-    .map((task, index) => ({ task, index }))
-    .sort((a, b) => {
-      const pin = Number(b.task.pinned === true) - Number(a.task.pinned === true);
-      if (pin) return pin;
-      const recency = threadRecency(b.task) - threadRecency(a.task);
-      if (recency) return recency;
-      return a.index - b.index;
-    })
-    .map((entry) => entry.task);
-}
-
-/** "opened by Scout" for a thread a bot started, null for the person's own.
- * Shared by the sidebar row and the All-threads picker so both say it the
- * same quiet way. */
 export function threadOpenerLabel(task: Pick<Task, "openedBy">): string | null {
   const name = task.openedBy?.name.trim();
   return name ? t("task.openedBy", { name }) : null;
 }
 
-/** The one line under a title: "closed by Scout" once a bot has closed the
- * thread, "Archived" once the person put it away, "Snoozed" while it sleeps,
- * otherwise who opened it, otherwise nothing. Closed wins because it is the
- * newer fact; archived and snoozed win over the opener because each explains
- * why the row sits where it does. */
 export function threadByline(task: Pick<Task, "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil">): string | null {
   const closer = task.closedBy?.name.trim();
   if (closer) return t("task.closedBy", { name: closer });
@@ -91,20 +72,9 @@ export function threadByline(task: Pick<Task, "openedBy" | "closedBy" | "archive
   return isSnoozed(task) ? t("task.snoozed") : threadOpenerLabel(task);
 }
 
-/** Archived means the field is present, not truthy: the task API accepts any
- * epoch number, so a thread persisted with archivedAt: 0 is archived. */
+/** Present, not truthy: a thread stored with archivedAt: 0 is archived. */
 export const isArchived = (task: Pick<Task, "archivedAt">): boolean => task.archivedAt !== undefined;
 
-/** Snoozed means asleep right now: 0 is the "until new activity" sentinel
- * and sleeps until woken, while a timestamp sleeps only until it passes.
- * The server drops expired snoozes from snapshots, but a live event stream
- * never refreshes one, so the client checks the clock too. */
-export const isSnoozed = (task: Pick<Task, "snoozedUntil">, now = Date.now()): boolean =>
-  task.snoozedUntil !== undefined && (task.snoozedUntil === 0 || task.snoozedUntil > now);
-
-/** The next local 6 PM — "later today", rolling to tomorrow evening once
- * tonight's is already past. Local on purpose: it is the person's evening;
- * the server stores the absolute moment either way. */
 const nextSixPm = () => {
   const when = new Date();
   when.setHours(18, 0, 0, 0);
@@ -112,7 +82,6 @@ const nextSixPm = () => {
   return when.getTime();
 };
 
-/** Tomorrow morning at 9 local: a clean overnight break, no new deps. */
 const tomorrowNineAm = () => {
   const when = new Date();
   when.setDate(when.getDate() + 1);
@@ -120,77 +89,102 @@ const tomorrowNineAm = () => {
   return when.getTime();
 };
 
-/** Working is activity or flag: the wire can carry either alone, so the
- * visibility filter, the Working status, and the busy-disabled actions must
- * all ask the same question. */
 const isWorking = (task: Pick<Task, "activity" | "busy">): boolean => task.activity === "working" || Boolean(task.busy);
 
-/** The current wire distinguishes coordination waits from provider work. */
 const isWaitingOnTeammate = (task: Pick<Task, "waitingForTeammates">): boolean =>
   task.waitingForTeammates === true;
 
-/** Whether a row must stay on screen regardless of age or closed state:
- * the person is looking at it, it needs them, or it has something new. */
 const demandsAttention = (task: ThreadRowTask, activeId: string) =>
   task.threadId === activeId || task.activity === "waiting-on-you" || isWorking(task) || isWaitingOnTeammate(task) || Boolean(task.queued) || Boolean(task.unread);
 
-/** The default list is the six most recently updated OPEN threads, plus
- * anything pinned or demanding attention. Pins and attention rows do not
- * consume one of the six. A thread a bot closed is folded away — a PM bot
- * that opened ten helper threads and closed them must not leave ten rows
- * behind — but it is never gone: "show all" and search still list it, a
- * closed thread that becomes busy or unread is back at once, and a pin
- * keeps a closed or archived thread in the list. */
-export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false): T[] {
+export function partitionHelperThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = []): { own: T[]; helpers: T[] } {
+  if (query.trim()) return { own: tasks, helpers: [] };
+  const own: T[] = [];
+  const helpers: T[] = [];
+  for (const task of tasks) {
+    const filed = folders.some((folder) => folder.id === task.projectId);
+    const helper = Boolean(task.openedBy) && task.pinned !== true && !filed && !demandsAttention(task, activeId) &&
+      !task.closedBy && !isArchived(task) && !isSnoozed(task);
+    (helper ? helpers : own).push(task);
+  }
+  return { own, helpers };
+}
+
+export function HelperThreadGroup<T>({ tasks, renderThread }: { tasks: T[]; renderThread: (task: T) => ReactNode }) {
+  const [open, setOpen] = useState(false);
+  if (tasks.length === 0) return null;
+  const label = t("task.helperGroup");
+  return <div data-sidebar-helper-threads="">
+    <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} aria-label={t(open ? "task.collapseNamed" : "task.expandNamed", { name: label })}
+      className="flex min-h-8 w-full items-center gap-1.5 rounded-md py-1 pl-1.5 pr-3 text-left text-[12px] text-ink-secondary hover:bg-raised/30 hover:text-ink">
+      <ChevronRight aria-hidden="true" size={11} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
+      <span className="truncate">{label}</span>
+      <span className="shrink-0 text-[10px] opacity-50">{tasks.length}</span>
+    </button>
+    {open && <div role="group" aria-label={label}>{tasks.map(renderThread)}</div>}
+  </div>;
+}
+
+/** Default list shows each routine's newest run only; older runs stay under "Show all". */
+export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false, routineRuns: readonly Pick<RoutineRun, "routineId" | "threadId" | "createdAt">[] = []): T[] {
   const needle = query.trim().toLowerCase();
   if (needle) {
     return tasks.filter((task) => task.title.toLowerCase().includes(needle) || folders.some((folder) => folder.id === task.projectId && folder.name.toLowerCase().includes(needle)));
   }
   if (showAll) return tasks;
   let open = 0;
+  const runOf = new Map(routineRuns.flatMap((run) => run.threadId ? [[run.threadId, run] as const] : []));
+  // Newest by the run's start, not sidebar order (an older run that finished later sorts first), among runs the list can show.
+  const newestRun = new Map<string, Pick<RoutineRun, "routineId" | "createdAt">>();
+  for (const task of tasks) {
+    const run = runOf.get(task.threadId);
+    if (!run || task.pinned === true || task.openedBy?.burstId || isArchived(task)) continue;
+    if ((task.closedBy || isSnoozed(task)) && !demandsAttention(task, activeId)) continue;
+    const seen = newestRun.get(run.routineId);
+    if (!seen || run.createdAt > seen.createdAt) newestRun.set(run.routineId, run);
+  }
   return orderedThreadList(tasks).filter((task) => {
     if (task.pinned === true) return true;
-    return task.closedBy || isArchived(task) || isSnoozed(task)
+    if (task.openedBy?.burstId) return task.threadId === activeId || demandsAttention(task, activeId);
+    if (isArchived(task)) return task.threadId === activeId;
+    const run = runOf.get(task.threadId);
+    if (run && newestRun.get(run.routineId) !== run) return demandsAttention(task, activeId);
+    return task.closedBy || isSnoozed(task)
       ? demandsAttention(task, activeId)
       : open++ < 6 || demandsAttention(task, activeId);
   });
 }
 
-/** The soonest still-future timed snooze in a list, undefined when nothing
- * is scheduled to wake: 0 sleeps until activity and never ticks, and a
- * timestamp already in the past has nothing left to wait for. */
 export const nextSnoozeExpiry = (tasks: readonly Pick<Task, "snoozedUntil">[], now = Date.now()): number | undefined =>
   tasks.reduce<number | undefined>((soonest, task) => {
     const until = task.snoozedUntil;
     return until !== undefined && until > 0 && until > now ? Math.min(soonest ?? Number.POSITIVE_INFINITY, until) : soonest;
   }, undefined);
 
-/** A timed snooze ends on the wall clock, not on a server ping: rerender
- * the list when the nearest one expires so its row folds back in without
- * waiting for the next snapshot. */
 export function useSnoozeExpiry(tasks: readonly Pick<Task, "snoozedUntil">[]): void {
   const [tick, rerender] = useState(0);
   const next = nextSnoozeExpiry(tasks);
   useEffect(() => {
     if (next === undefined) return;
-    // Timers clamp delays above 2^31-1 to almost zero. Recheck distant
-    // deadlines in bounded chunks and also handle expiry before this effect.
+    // setTimeout treats delays above 2^31-1 ms as ~0, so distant deadlines are rechecked in bounded chunks.
     const id = window.setTimeout(() => rerender((count) => count + 1), Math.max(1, Math.min(2_147_483_647, next - Date.now() + 1)));
     return () => window.clearTimeout(id);
   }, [next, tick]);
 }
 
-/** One low-frequency clock for every relative stamp in a list: rows stay
- * timer-free and re-render when this tick moves. Paused while the window is
- * hidden, resynced the moment it becomes visible again, and cleared on
- * unmount — the same shape the computer inventory's refresh uses. */
+export function useRevealedThreadRow(reveal: AppState["revealThread"], currentThreadId: string | null) {
+  useEffect(() => {
+    if (!reveal || reveal.threadId !== currentThreadId) return;
+    const row = document.querySelector<HTMLElement>(`[data-sidebar-thread-row="${CSS.escape(reveal.threadId)}"]`);
+    row?.scrollIntoView({ block: "nearest" });
+  }, [reveal, currentThreadId]);
+}
+
 export function useRelativeNow(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const sync = () => { if (document.visibilityState === "visible") setNow(Date.now()); };
     const timer = window.setInterval(sync, 30_000);
-    // a window returning from hours hidden should not show a stale label
-    // while it waits for the next tick
     document.addEventListener("visibilitychange", sync);
     return () => {
       window.clearInterval(timer);
@@ -199,11 +193,6 @@ export function useRelativeNow(): number {
   }, []);
   return now;
 }
-/** Attention outranks recency within a bot: waiting-on-you needs the person
- * most, then working/busy, then a teammate wait, then queued, then unread.
- * The thread being looked at rides just
- * above the idle tail; idle threads keep stored order. Pure and shared so
- * the tree, the collapsed escape hatch, and the pickers agree. */
 const attentionRank = (task: ThreadRowTask, activeId: string): number => {
   if (task.activity === "waiting-on-you") return 0;
   if (isWaitingOnTeammate(task)) return 2;
@@ -214,8 +203,6 @@ const attentionRank = (task: ThreadRowTask, activeId: string): number => {
   return 6;
 };
 
-/** Order, never filter: whatever the caller passes stays visible, only the
- * position changes. Array#sort is stable, so equal ranks keep stored order. */
 export function orderedSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string): T[] {
   return tasks
     .map((task, index) => ({ task, index, rank: attentionRank(task, activeId) }))
@@ -223,32 +210,64 @@ export function orderedSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
     .map((entry) => entry.task);
 }
 
-/** One quiet row for bot and group histories. Surface denotes selection;
- * working/waiting/unread remain independent signals, never different cards. */
-export function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onDelete, onMove, onArchive, onPin, onSnooze, activityLabel, now }: {
+/** The store actions behind a bot's thread-row menu, for every list that draws that bot's threads. */
+export function threadRowActions(botId: string, dispatch: Dispatch<Action>, generatedTitles: boolean) {
+  return {
+    onRename: (task: { threadId: string }, title: string) => dispatch({ type: "renameTask", botId, threadId: task.threadId, title }),
+    onRegenerateTitle: generatedTitles ? (task: { threadId: string }, onSettled: (ok: boolean) => void) => dispatch({ type: "regenerateTaskTitle", botId, threadId: task.threadId, onSettled }) : undefined,
+    onDelete: (task: { threadId: string }) => dispatch({ type: "deleteTask", botId, threadId: task.threadId }),
+    onMove: (task: { threadId: string }, projectId: string | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { projectId } }),
+    onArchive: (task: { threadId: string }, archivedAt: number | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { archivedAt } }),
+    onPin: (task: { threadId: string }, pinned: boolean) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { pinned } }),
+    onSnooze: (task: { threadId: string }, snoozedUntil: number | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { snoozedUntil } }),
+    onLink: (task: { threadId: string }, link: string | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { link } }),
+  };
+}
+
+type ThreadRowProps = {
   task: ThreadRowTask;
-  /** the bot or room that owns the thread: the link's ?bot= */
   ownerId: string;
   current: boolean;
-  compact?: boolean;
   folders?: BotProject[];
-  /** Live verb the chat pane already derives ("Reading a file"); shown only while the row is working. */
   activityLabel?: string;
-  /** The list's shared clock tick; the visible stamp renders relative to it.
-   * Omit to keep the absolute date everywhere. */
   now?: number;
-  onSelect: () => void;
-  onRename: (title: string) => void;
-  onDelete: () => void;
-  onMove?: (folderId: string | null) => void;
-  onArchive?: (archivedAt: number | null) => void;
-  onPin?: (pinned: boolean) => void;
-  onSnooze?: (snoozedUntil: number | null) => void;
-}) {
+  locale: string;
+  onSelect: (task: ThreadRowTask) => void;
+  onRename: (task: ThreadRowTask, title: string) => void;
+  onRegenerateTitle?: (task: ThreadRowTask, onSettled: (ok: boolean) => void) => void;
+  onDelete: (task: ThreadRowTask) => void;
+  onMove?: (task: ThreadRowTask, folderId: string | null) => void;
+  onArchive?: (task: ThreadRowTask, archivedAt: number | null) => void;
+  onPin?: (task: ThreadRowTask, pinned: boolean) => void;
+  onSnooze?: (task: ThreadRowTask, snoozedUntil: number | null) => void;
+  onLink?: (task: ThreadRowTask, link: string | null) => void;
+  onRefreshPermissions?: (task: ThreadRowTask) => void;
+  selectMode?: boolean;
+  checked?: boolean;
+  onToggleSelect?: (task: ThreadRowTask, shiftKey: boolean) => void;
+  /** The bot panel's taller row: `preview` (the conversation's last line) under the title, and how long a running turn
+   * has worked. */
+  panel?: boolean;
+  preview?: string;
+};
+
+const sameFields = <T extends object>(a: T, b: T): boolean => {
+  const keys = Object.keys(a) as (keyof T)[];
+  return keys.length === Object.keys(b).length && keys.every((key) => Object.is(a[key], b[key]));
+};
+
+const sameThreadRow = ({ task: previousTask, ...previous }: ThreadRowProps, { task, ...next }: ThreadRowProps): boolean =>
+  sameFields(previousTask, task) && sameFields(previous, next);
+
+export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, activityLabel: liveActivity, now, selectMode = false, checked = false, onToggleSelect, panel = false, preview }: ThreadRowProps) {
+  const activityLabel = useHeldText(liveActivity);
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
+  const menuMotion = useHeldMenuMotion(menu);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const [deleting, setDeleting] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const displayTitle = localizedTaskTitle(task.title);
   const finishing = useRef(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
@@ -260,20 +279,26 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   const closed = Boolean(task.closedBy) && !status;
   const archived = isArchived(task);
   const snoozed = isSnoozed(task);
+  const tickable = isTickable(task);
+  const choose = (event: React.MouseEvent) => { if (!selectMode) onSelect(task); else if (tickable) onToggleSelect?.(task, event.shiftKey); };
+  const contextMenu = (event: React.MouseEvent) => { event.preventDefault(); if (!selectMode) openMenu(event.clientX, event.clientY); };
   const openMenu = (x: number, y: number) => setMenu({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 230)) });
-  const startRename = () => { finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
+  const startRename = () => { if (task.sharedChat) return; finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
   const copyLink = () => {
     setMenu(null);
-    navigator.clipboard?.writeText(threadRefUrl({ botId: ownerId, threadId: task.threadId })).catch(() => {
-      // clipboard write rejected — the link stays available to copy again
-    });
+    void copyText(threadRefUrl({ botId: ownerId, threadId: task.threadId }));
+  };
+  const regenerateTitle = () => {
+    if (!onRegenerateTitle || regenerating) return;
+    setRegenerating(true);
+    onRegenerateTitle(task, (ok) => { setRegenerating(false); if (ok) setMenu(null); });
   };
   const finishRename = (save: boolean) => {
     if (finishing.current) return;
     finishing.current = true;
     const title = save ? nextRename(task.title, draft) : null;
     setRenaming(false);
-    if (title) onRename(title);
+    if (title) onRename(task, title);
   };
   useEffect(() => {
     if (!menu) return;
@@ -284,9 +309,6 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
     window.addEventListener("mousedown", outside);
     return () => window.removeEventListener("mousedown", outside);
   }, [menu]);
-  /* The snooze presets make the menu taller than the 190px first guess, and
-   * the folder picker can grow it after open: clamp the bottom edge against
-   * the rendered height so the final actions stay reachable for lower rows. */
   useEffect(() => {
     if (!menu || !menuRef.current) return;
     const keepOnScreen = () => {
@@ -301,62 +323,82 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
     window.addEventListener("resize", keepOnScreen);
     return () => { observer?.disconnect(); window.removeEventListener("resize", keepOnScreen); };
   }, [menu]);
+  const heading = <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+    <span dir="auto" className={cn("min-w-0 flex-1 max-w-max", panel ? "truncate pe-6" : "truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{displayTitle}</span>
+    {byline && (
+      <span className="min-w-0 max-w-[45%] shrink truncate font-normal text-ink-tertiary">{byline}</span>
+    )}
+  </span>;
   return <>
-    <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", current ? "bg-raised" : "hover:bg-raised/50")}>
+    <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", selectMode && checked ? "bg-accent/10" : current ? "bg-raised" : "hover:bg-raised/50", panel && cn("items-start rounded-[8px]", current ? "bg-ink/[0.07]" : "hover:bg-ink/[0.04]"))}>
       {renaming ? <input autoFocus value={draft} maxLength={80} aria-label={t("task.renameAria")}
         onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDraft(event.target.value)} onBlur={() => finishRename(true)}
-        onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
-        className="m-1 min-w-0 flex-1 rounded border border-accent/50 bg-inset px-2 py-1 text-[12.5px] text-ink outline-none" /> : <button
+        onKeyDown={(event) => { if (imeComposing(event.nativeEvent)) { event.stopPropagation(); return; } if (event.key === "Enter") { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
+        dir="auto" className="m-1 min-w-0 flex-1 rounded border border-accent/50 bg-inset px-2 py-1 text-[13px] text-ink outline-none" /> : <button
         type="button" data-sidebar-thread-row={task.threadId} aria-current={current ? "page" : undefined}
-        title={[task.title, updatedStamp, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, snoozed ? t("task.snoozed") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
-        onClick={onSelect} onDoubleClick={startRename}
-        onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
-        onKeyDown={(event) => { if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
-        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", compact ? "min-h-7 py-1" : "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink")}>
-        <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-          <span className={cn("min-w-0 truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{task.title}</span>
-          {byline && (
-            // the same line and size as the title, only quieter: a second
-            // line per thread made the list twice as tall as it needs to be
-            <span className="min-w-0 max-w-[45%] shrink truncate font-normal text-ink-tertiary">{byline}</span>
-          )}
-        </span>
-        {updatedLabel && <time dateTime={new Date(updatedAt).toISOString()} className="shrink-0 tabular-nums text-[10px] text-ink-secondary">{updatedLabel}</time>}
-        {task.pinned === true && <Pin size={11} className="shrink-0 text-ink-secondary" aria-label={t("sidebar.bot.pin")} />}
-        {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : isWaitingOnTeammate(task) ? <Clock3 size={11} className="shrink-0 text-ink-secondary" aria-label={t("task.waitingOnTeammate")} /> : isWorking(task) ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={activityLabel ?? t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
-        {task.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
+        title={[displayTitle, updatedStamp, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, snoozed ? t("task.snoozed") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
+        {...(selectMode ? { role: "checkbox", "aria-checked": checked, "aria-disabled": !tickable, "aria-label": t("task.bulk.rowCheck", { title: displayTitle }) } : {})}
+        onClick={choose} onDoubleClick={selectMode ? undefined : startRename} onContextMenu={contextMenu}
+        onKeyDown={(event) => { if (opensRowMenuFromKey(event.key, event.shiftKey, selectMode)) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
+        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink", panel && "rounded-[8px] py-2 pl-3.5 pr-3.5 text-[14px] text-ink", selectMode && "pl-1.5", selectMode && !tickable && "cursor-not-allowed opacity-60")}>
+        {selectMode && <span aria-hidden="true" title={tickable ? undefined : t("task.bulk.running")}
+          className={cn("flex size-3.5 shrink-0 items-center justify-center rounded-[3px] border", checked ? "border-accent bg-accent text-white" : "border-ink-tertiary", !tickable && "opacity-50")}>
+          {checked && <Check size={10} strokeWidth={3} />}
+        </span>}
+        {panel ? <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          {heading}
+          {(preview || updatedLabel) && <span className="flex min-w-0 items-baseline gap-2 text-[13px] font-normal text-ink-secondary">
+            <span dir="auto" className="min-w-0 flex-1 truncate">{preview}</span>
+            {updatedLabel && <time dateTime={new Date(updatedAt).toISOString()} className="shrink-0 text-[12px] tabular-nums text-ink-tertiary">{updatedLabel}</time>}
+          </span>}
+          {isWorking(task) && <span data-thread-working="" className="flex items-center gap-1 text-[12px] font-normal text-success">
+            {t("chat.activity.working")}{task.turnStartedAt ? <><span aria-hidden="true">·</span><WorkingTimer since={task.turnStartedAt} /></> : null}
+          </span>}
+        </span> : heading}
       </button>}
-      <button ref={actionRef} type="button" aria-label={t("task.actions", { title: task.title })} aria-expanded={Boolean(menu)}
+      {task.link && <a href={task.link} target="_blank" rel="noreferrer" dir="ltr" title={task.link} aria-label={t("task.openLink", { link: threadLinkLabel(task.link) ?? task.link })}
+        className={cn("shrink-0 rounded px-1 font-mono text-[11px] text-ink-secondary hover:bg-raised hover:text-ink outline-none focus-visible:ring-1 focus-visible:ring-accent/60 [unicode-bidi:isolate]", panel && "mt-2.5")}>{threadLinkLabel(task.link) ?? t("task.link")}</a>}
+      {!renaming && <span className={cn("flex shrink-0 items-center gap-2 px-1", panel && "pt-2.5 empty:hidden")} onClick={choose} onContextMenu={contextMenu}>
+        {updatedLabel && !panel && <time dateTime={new Date(updatedAt).toISOString()} className="shrink-0 tabular-nums text-[10px] text-ink-secondary">{updatedLabel}</time>}
+        {task.pinned === true && <Pin size={11} className="shrink-0 text-ink-secondary" aria-label={t("sidebar.bot.pin")} />}
+        {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : isWaitingOnTeammate(task) ? <Clock3 size={11} className="shrink-0 text-ink-secondary" aria-label={t("task.waitingOnTeammate")} /> : isWorking(task) && !panel ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={activityLabel ?? t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
+        {task.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
+      </span>}
+      {!selectMode && <button ref={actionRef} type="button" aria-label={t("task.actions", { title: displayTitle })} aria-expanded={Boolean(menu)}
         onClick={(event) => { if (menu) { setMenu(null); return; } const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); }}
-        className="mr-0.5 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/thread:opacity-100 max-md:opacity-70 touch:opacity-70">
+        className={cn("mr-0.5 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/thread:opacity-100 max-md:opacity-70 touch:opacity-70", panel && "absolute end-1.5 top-1.5 me-0")}>
         <MoreHorizontal size={13} />
-      </button>
+      </button>}
     </div>
-    {menu && createPortal(<div ref={menuRef} data-thread-overlay role="group" aria-label={t("task.actions", { title: task.title })} style={menu}
-      className="fixed z-50 max-h-[calc(100vh-16px)] w-[220px] overflow-y-auto rounded-lg border border-hairline/50 bg-card p-1 shadow-xl"
+    {menuMotion.shown && menuMotion.value && createPortal(<div ref={menuRef} data-thread-overlay role="group" aria-label={t("task.actions", { title: displayTitle })} style={menuMotion.value}
+      className={cn("fixed z-50 max-h-[calc(100vh-16px)] w-[220px] overflow-y-auto", MENU_SHEET, menuMotion.className)} {...menuMotion.exitProps}
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMenu(null); actionRef.current?.focus(); } }}>
-      <button type="button" onClick={copyLink} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Link2 size={12} />{t("task.copyLink")}</button>
-      <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Pencil size={12} />{t("task.renameAria")}</button>
-      {onMove && Boolean(folders?.length) && <label className="block rounded px-2.5 py-2 text-[12px] text-ink"><span className="mb-1 flex items-center gap-2 text-ink-secondary"><FolderInput size={12} />{t("folder.move")}</span>
-        <select aria-label={t("folder.moveNamed", { title: task.title })} value={folders?.some((folder) => folder.id === task.projectId) ? task.projectId : ""}
-          onChange={(event) => { onMove(event.target.value || null); setMenu(null); }} className="w-full rounded border border-hairline/40 bg-card px-1 py-1 text-ink outline-none">
+      <button type="button" onClick={copyLink} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2 size={16} />{t("task.copyLink")}</button>
+      {!task.sharedChat && <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Pencil size={16} />{t("task.renameAria")}</button>}
+      <ShareRowItems botId={ownerId} task={task} onPicked={() => setMenu(null)} />
+      {onRegenerateTitle && !task.sharedChat && <button type="button" disabled={regenerating} aria-busy={regenerating} onClick={regenerateTitle} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40">{regenerating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}{regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle")}</button>}
+      {onMove && Boolean(folders?.length) && <label className="block rounded-md px-2 py-1.5 text-[13px] text-ink"><span className="mb-1 flex items-center gap-2 text-ink-secondary"><FolderInput size={16} />{t("folder.move")}</span>
+        <Select size="sm" className="w-full" aria-label={t("folder.moveNamed", { title: task.title })} value={folders?.some((folder) => folder.id === task.projectId) ? task.projectId : ""}
+          onChange={(event) => { onMove(task, event.target.value || null); setMenu(null); }}>
           <option value="">{t("folder.none")}</option>{folders?.map((folder) => <option key={folder.id} value={folder.id}>{folder.emoji ? `${folder.emoji} ` : ""}{folder.name}</option>)}
-        </select>
+        </Select>
       </label>}
-      {onPin && <button type="button" onClick={() => { setMenu(null); onPin(task.pinned !== true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised">{task.pinned === true ? <PinOff size={12} /> : <Pin size={12} />}{task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}</button>}
-      {onArchive && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onArchive(isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
-      {onSnooze && <div className="px-2.5 pt-1">
-        <span className="flex items-center gap-2 text-[11px] text-ink-secondary"><Clock size={12} />{t("task.snooze")}</span>
+      {onPin && <button type="button" onClick={() => { setMenu(null); onPin(task, task.pinned !== true); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover">{task.pinned === true ? <PinOff size={16} /> : <Pin size={16} />}{task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}</button>}
+      {onLink && task.link && <button type="button" onClick={() => { setMenu(null); onLink(task, null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2Off size={16} />{t("task.removeLink")}</button>}
+      {onArchive && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onArchive(task, isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40">{archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
+      {onSnooze && <div className="px-2 pt-1">
+        <span className="flex items-center gap-2 text-[12px] font-medium text-ink-secondary"><Clock size={16} />{t("task.snooze")}</span>
         <div className="mt-0.5 flex flex-col">
           {[{ label: t("task.snoozeUntilActivity"), at: 0 }, { label: t("task.snoozeTonight"), at: nextSixPm() }, { label: t("task.snoozeTomorrow"), at: tomorrowNineAm() }].map((preset) => (
-            <button key={preset.label} type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onSnooze(preset.at); }} className="flex w-full items-center rounded px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{preset.label}</button>
+            <button key={preset.label} type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onSnooze(task, preset.at); }} className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40">{preset.label}</button>
           ))}
         </div>
       </div>}
-      {onSnooze && snoozed && <button type="button" onClick={() => { setMenu(null); onSnooze(null); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><BellOff size={12} />{t("task.stopSnoozing")}</button>}
-      <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); setDeleting(true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-danger hover:bg-raised disabled:opacity-40"><Trash2 size={12} />{t("task.deleteAria")}</button>
+      {onSnooze && snoozed && <button type="button" onClick={() => { setMenu(null); onSnooze(task, null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><BellOff size={16} />{t("task.stopSnoozing")}</button>}
+      {onRefreshPermissions && <button type="button" disabled={isWorking(task)} title={t("task.refreshPermissionsHint")} onClick={() => { setMenu(null); onRefreshPermissions(task); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40"><RefreshCw size={16} />{t("task.refreshPermissions")}</button>}
+      <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); setDeleting(true); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-danger hover:bg-menu-hover disabled:opacity-40"><Trash2 size={16} />{t("task.deleteAria")}</button>
     </div>, document.body)}
     <ConfirmDialog open={deleting} title={t("task.deleteConfirm")} body={t("task.deleteBody", { title: task.title })} confirmLabel={t("task.deleteAria")}
-      onCancel={() => setDeleting(false)} onConfirm={() => { if (!isWorking(task)) onDelete(); setDeleting(false); }} returnFocusRef={actionRef} />
+      onCancel={() => setDeleting(false)} onConfirm={() => { if (!isWorking(task)) onDelete(task); setDeleting(false); }} returnFocusRef={actionRef} />
   </>;
-}
+}, sameThreadRow);

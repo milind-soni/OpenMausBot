@@ -3,7 +3,6 @@ import { z } from "zod";
 
 const sendIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,80}$/).optional();
 
-/** Parse an optional client-generated identity at the HTTP boundary. */
 export function parseSendId(value: string | null | undefined): string | undefined {
   const parsed = sendIdSchema.safeParse(value);
   if (!parsed.success) {
@@ -17,7 +16,6 @@ export type AcceptedSendMatch =
   | { kind: "match"; message: Message }
   | { kind: "conflict" };
 
-/** Match a retry to the canonical user message already persisted for it. */
 export function acceptedSendMatch(
   messages: Message[],
   sendId: string,
@@ -39,7 +37,6 @@ export function acceptedSendMatch(
   return { kind: "match", message };
 }
 
-/** Coalesces simultaneous retries onto the first request's exact outcome. */
 export class SendSequencer {
   private readonly inFlight = new Map<string, { fingerprint: string; result: Promise<unknown> }>();
 
@@ -54,8 +51,7 @@ export class SendSequencer {
       if (existing.fingerprint !== fingerprint) {
         throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
       }
-      // SAFETY: one key identifies one HTTP endpoint receipt, so every
-      // coalesced caller has the same result contract as the owner.
+      // SAFETY: one key is one endpoint receipt, so every coalesced caller shares the owner's result type.
       return existing.result as Promise<T>;
     }
     const current = work();

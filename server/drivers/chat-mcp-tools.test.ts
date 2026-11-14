@@ -1,10 +1,40 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { crc32 } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { augmentedPath } from "../env-path.ts";
-import { ChatToolSessionError, mountChatTools, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { MESSAGE_FILE_MAX_BYTES } from "../message-file.ts";
+import { Ajv2020 } from "ajv/dist/2020.js";
+import { ChatMcpClient, ChatToolSessionError, SAVED_RESULTS_FOLDER, SAVED_RESULTS_KEPT, chatToolNotices, directServers, mcpStartupMs, mountChatTools, trimmedToolsNotice, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { EXECUTOR_LIKE_TOOLS } from "../testing/executor-like-tools.ts";
+import type { ToolScope } from "../../shared/tool-scope.ts";
+import type { SendTurnInput } from "../contracts.ts";
+import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
+import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
+import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
+import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
+import { wideSchema } from "../testing/oversized-tool-schema.ts";
+import { schemaBytes, toolSchemaProfile } from "../tool-schema-profile.ts";
+
+const killProbe = vi.hoisted(() => ({ override: false, stopped: false, budgets: [] as number[] }));
+const spawned = vi.hoisted(() => [] as Array<{ owner?: string; opts: { env?: NodeJS.ProcessEnv; box?: unknown } }>);
+vi.mock("../procs.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../procs.ts")>();
+  return {
+    ...actual,
+    // Always runs the real kill for cleanup; the override only forces the verdict and records the budget.
+    spawnCli: (...args: Parameters<typeof actual.spawnCli>) => {
+      spawned.push({ owner: args[3], opts: args[2] });
+      return actual.spawnCli(...args);
+    },
+    killCliTree: (child: Parameters<typeof actual.killCliTree>[0], budget = 5_000) => {
+      killProbe.budgets.push(budget);
+      const run = actual.killCliTree(child, budget);
+      return killProbe.override ? run.then(() => killProbe.stopped) : run;
+    },
+  };
+});
 
 const dirs: string[] = [];
 const sessions: ChatToolSession[] = [];
@@ -48,12 +78,25 @@ function fixture(body = "", toolSchema: Record<string, unknown> = schema) {
   return {
     dir, receipt, controller, server,
     read: () => JSON.parse(readFileSync(receipt, "utf8")) as { pid: number; path: string; omb: Record<string, string>; calls: Array<{ method: string; params?: { name?: string; arguments?: unknown } }> },
-    async mount(computerUse = false, localComputer = false) {
-      const session = await mountChatTools(localComputer ? { localComputer: server } : { custom: { audit: server } }, controller.signal, computerUse);
+    async mount(computerUse = false, localComputer = false, toolScope?: ToolScope, resultFolder?: string, serverName = "audit", scrub?: (text: string) => string) {
+      const session = await mountChatTools(localComputer ? { localComputer: server } : { custom: { [serverName]: server } }, controller.signal, computerUse, toolScope,
+        undefined, undefined, resultFolder, scrub);
       sessions.push(session);
       return session;
     },
   };
+}
+
+/** A configured server that cannot mount is left out of the turn, closed,
+ * and reported, rather than failing every other server with it. */
+async function expectSkipped(f: ReturnType<typeof fixture>, reason: RegExp) {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    const session = await f.mount();
+    expect(session.definitions).toEqual([]);
+    expect(session.skipped).toEqual([{ server: "audit", reason: expect.stringMatching(reason) }]);
+    expect(alive(f.read().pid)).toBe(false);
+  } finally { warn.mockRestore(); }
 }
 
 function alive(pid: number): boolean {
@@ -68,6 +111,68 @@ afterEach(async () => {
 });
 
 describe("Chat MCP session", () => {
+  it("starts no server when the owner selected no MCP tools", async () => {
+    const f = fixture();
+    const session = await f.mount(false, false, { allow: ["native:ask_user"] });
+    expect(session.definitions).toEqual([]);
+    expect(existsSync(f.receipt)).toBe(false);
+  });
+
+  it.each([undefined, { allow: ["mcp:data:write"] }])("mounts Data without computer access and preserves selected tool arguments (%j)", async (scope) => {
+    const f = fixture();
+    const session = await mountChatTools({ data: f.server }, f.controller.signal, false, scope);
+    sessions.push(session);
+    expect(session.definitions).toEqual([{ type: "function", function: { name: "data_write", description: "Fixture write", parameters: schema } }]);
+    await expect(session.execute("data_write", { value: "query receipt" }, f.controller.signal)).resolves.toEqual({ text: "recorded:query receipt", ok: true });
+    expect(f.read().calls.at(-1)).toMatchObject({ method: "tools/call", params: { name: "write", arguments: { value: "query receipt" } } });
+  });
+
+  it("does not start Data when the owner's tool selection excludes it", async () => {
+    const f = fixture();
+    const session = await mountChatTools({ data: f.server }, f.controller.signal, false, { allow: ["native:ask_user"] });
+    sessions.push(session);
+    expect(session.definitions).toEqual([]);
+    expect(existsSync(f.receipt)).toBe(false);
+  });
+
+  it("filters original identities before catalog limits, alias conversion and schema compilation", async () => {
+    const f = fixture(`if (message.method === "tools/list") {
+      reply(message, {tools:[
+        {name:"read-notes",inputSchema:schema},
+        {name:"read_notes",inputSchema:{$ref:"https://example.invalid/private"}},
+        ...Array.from({length:129}, (_,i) => ({name:"excluded"+i,inputSchema:{type:"object"},description:"withheld-description"}))
+      ]}); return;
+    }`);
+    const session = await f.mount(false, false, { allow: ["mcp:audit:read-notes"] });
+    expect(session.definitions).toEqual([{ type: "function", function: { name: "audit_read_notes", description: "Configured MCP tool", parameters: schema } }]);
+    await expect(session.execute("audit_read_notes_2", { value: "blocked" }, f.controller.signal)).rejects.toThrow("not advertised");
+    expect(f.read().calls.filter((call) => call.method === "tools/call")).toEqual([]);
+    await session.execute("audit_read_notes", { value: "allowed" }, f.controller.signal);
+    expect(f.read().calls.filter((call) => call.method === "tools/call").map((call) => call.params)).toEqual([{ name: "read-notes", arguments: { value: "allowed" } }]);
+  });
+
+  it.each(["http", "sse"] as const)("executes only selected tools through a custom %s server", async (transport) => {
+    const remote = await startFakeHttpMcp({ transport, requireHeader: { name: "authorization", value: "Bearer synthetic" }, tools: [
+      { name: "read", inputSchema: schema }, { name: "write", inputSchema: schema },
+    ] });
+    const controller = new AbortController(); controllers.push(controller);
+    let session: ChatToolSession | undefined;
+    try {
+      session = await mountChatTools({ custom: { mail: { type: transport, url: remote.url, headers: { authorization: "Bearer synthetic" } } } }, controller.signal, false, { allow: ["mcp:mail:read"] });
+      expect(session.definitions.map((tool) => tool.function.name)).toEqual(["mail_read"]);
+      await expect(session.execute("mail_write", { value: "blocked" }, controller.signal)).rejects.toThrow("not advertised");
+      expect(remote.calls).toEqual([]);
+      await expect(session.execute("mail_read", { value: "selected" }, controller.signal)).resolves.toMatchObject({ ok: true, text: "remote execution recorded" });
+      expect(remote.calls).toEqual([{ name: "read", arguments: { value: "selected" } }]);
+    } finally { await session?.close(); await remote.close(); }
+  });
+
+  it("rejects corrupt selection before starting any MCP process", async () => {
+    const f = fixture();
+    await expect(f.mount(false, false, { allow: null } as never)).rejects.toThrow(/tool selection/i);
+    expect(existsSync(f.receipt)).toBe(false);
+  });
+
   it("discovers without executing, preserves schemas and validates before forwarding original arguments", async () => {
     const f = fixture();
     const session = await f.mount();
@@ -84,9 +189,59 @@ describe("Chat MCP session", () => {
     await expect(session.execute("audit_write", { value: "again" }, f.controller.signal)).rejects.toThrow("closed");
   });
 
+  it.each([
+    ["browser", true],
+    ["custom", false],
+  ] as const)("drops a blank url for agent_browser_read only on the built-in browser (%s)", async (mountAs, dropped) => {
+    const readSchema = { type: "object", properties: { url: { type: "string" } }, additionalProperties: false };
+    const f = fixture(`if (message.method === "tools/list") { reply(message, {tools:[{name:"agent_browser_read",description:"Omit url to read the active tab.",inputSchema:schema}]}); continue; }`, readSchema);
+    const session = await mountChatTools(mountAs === "browser" ? { browser: f.server } : { custom: { browser: f.server } }, f.controller.signal, true);
+    sessions.push(session);
+    const name = session.definitions[0]!.function.name;
+    await session.execute(name, { url: " " }, f.controller.signal);
+    await session.execute(name, { url: "https://example.com" }, f.controller.signal);
+    const calls = f.read().calls.filter((call) => call.method === "tools/call").map((call) => call.params?.arguments);
+    expect(calls).toEqual([dropped ? {} : { url: " " }, { url: "https://example.com" }]);
+  });
+
+  it.each([
+    ["browser", "Open the address with browser_agent_browser_open first, then call browser_agent_browser_read without url."],
+    ["custom", "input schema"],
+  ] as const)("names the way to read an address when agent_browser_read's url is hidden (%s)", async (mountAs, error) => {
+    // agent-browser's read with its url hidden by slimBrowserToolList (email bug 1a1cb892)
+    const readSchema = { type: "object", properties: { filter: { type: "string" } }, additionalProperties: false };
+    const f = fixture(`if (message.method === "tools/list") { reply(message, {tools:[{name:"agent_browser_read",description:"Read the open page.",inputSchema:schema}]}); continue; }`, readSchema);
+    const session = await mountChatTools(mountAs === "browser" ? { browser: f.server } : { custom: { browser: f.server } }, f.controller.signal, true);
+    sessions.push(session);
+    const name = session.definitions[0]!.function.name;
+    expect(() => session.validate(name, { url: "https://example.com/swagger.json" })).toThrow(error);
+    expect(() => session.validate(name, { filter: 7 })).toThrow("input schema");
+    // a url of the wrong type, or another bad argument, keeps the schema error
+    expect(() => session.validate(name, { url: 7 })).toThrow("input schema");
+    expect(() => session.validate(name, { url: "https://example.com", filter: 7 })).toThrow("input schema");
+    expect(() => session.validate(name, {})).not.toThrow();
+  });
+
+  it("shows a model behind Moonshot each schema fitted to its limit, and still checks calls against the full one", async () => {
+    const full = wideSchema(110);
+    const f = fixture("", full);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const plain = await f.mount();
+      expect(plain.definitions[0]!.function.parameters).toEqual(full);
+      const session = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal, false, undefined, undefined, toolSchemaProfile("moonshot"));
+      sessions.push(session);
+      const [definition] = session.definitions;
+      expect(schemaBytes(definition!.function.parameters)).toBeLessThanOrEqual(12_000);
+      expect(definition!.function.description).toContain("OpenMausBot shortened this tool's parameters to fit Kimi's size limit");
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^chat-mcp: audit: kept only the top-level fields of tool "write"'s parameters/));
+      expect(() => session.validate("audit_write", { field_000: { label: 5 } })).toThrow("input schema");
+      expect(() => session.validate("audit_write", { field_000: { label: "five" } })).not.toThrow();
+    } finally { warn.mockRestore(); }
+  });
+
   it("starts servers with the widened PATH rather than the bare one the desktop shell inherits", async () => {
-    // Launched from Finder, the harness sees only the system directories;
-    // the widened PATH is what the Claude and Codex drivers already hand out.
+    // Launched from Finder, the harness sees only the system directories.
     const widened = augmentedPath();
     vi.stubEnv("PATH", "/usr/bin:/bin");
     const f = fixture();
@@ -112,6 +267,17 @@ describe("Chat MCP session", () => {
     const seen = f.read().omb;
     expect(seen).toMatchObject({ OMB_CLOUDFLARED_PATH: "/usr/local/bin/cloudflared", OMB_COMMS_TOKEN: "turn-capability" });
     for (const name of secrets) expect(seen).not.toHaveProperty(name);
+  });
+
+  it("lets a configured server's own environment, a token included, through the bot box, and no built-in's", async () => {
+    const own = fixture(); const agents = fixture();
+    own.server.env = { ...own.server.env, OP_SERVICE_ACCOUNT_TOKEN: "ops_synthetic" };
+    spawned.length = 0;
+    const session = await mountChatTools({ agents: agents.server, custom: { onepassword: own.server } }, own.controller.signal);
+    sessions.push(session);
+    const of = (receipt: string) => spawned.find((entry) => entry.opts.env?.RECEIPT === receipt)!;
+    expect(of(own.receipt)).toMatchObject({ owner: "bot", opts: { box: { allowEnv: ["RECEIPT", "OP_SERVICE_ACCOUNT_TOKEN"], configured: true } } });
+    expect(of(agents.receipt).opts.box).toBeUndefined();
   });
 
   it("mounts only supported descriptors and preserves conversations with no tools", async () => {
@@ -143,37 +309,180 @@ describe("Chat MCP session", () => {
 
   it.each([
     ["repeated cursor", `reply(message, {tools:[],nextCursor:"same"});`],
-    ["too many tools", `reply(message, {tools:Array.from({length:129},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
+    ["too many tools", `reply(message, {tools:Array.from({length:2001},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
     ["duplicate tool", `reply(message, {tools:[{name:"same",inputSchema:schema},{name:"same",inputSchema:schema}]});`],
     ["invalid RPC", `process.stdout.write('{"result":1}\\n');`],
     ["oversized incomplete frame", `process.stdout.write("x".repeat(2*1024*1024+1));`],
     ["oversized complete frame", `process.stdout.write("x".repeat(2*1024*1024+1) + "\\n");`],
     ["too many response frames", `process.stdout.write("\\n".repeat(10001));`],
     ["oversized tool catalog", `reply(message, {tools:[{name:"write",inputSchema:schema,description:"x".repeat(1024*1024)}]});`],
-  ])("fails startup and awaits child cleanup for %s", async (_label, response) => {
+  ])("skips a configured server that fails startup and awaits child cleanup for %s", async (_label, response) => {
     const f = fixture(`if (message.method === "tools/list") { ${response} continue; }`);
-    await expect(f.mount()).rejects.toThrow(/MCP/);
+    await expectSkipped(f, /MCP/);
+  });
+
+  it.each([
+    ["too many tools", `reply(message, {tools:Array.from({length:2001},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
+    ["invalid RPC", `process.stdout.write('{"result":1}\\n');`],
+  ])("fails startup when the agents server can't start, naming it, and awaits child cleanup for %s", async (_label, response) => {
+    const f = fixture(`if (message.method === "tools/list") { ${response} continue; }`);
+    await expect(mountChatTools({ agents: f.server } as SendTurnInput["integrations"], f.controller.signal)).rejects.toThrow(/^MCP server "agents" didn't start: MCP/);
     expect(alive(f.read().pid)).toBe(false);
   });
 
-  it("rejects untrusted transport error text without leaking it", async () => {
+  describe("a built-in the turn can go on without", () => {
+    const broken = `if (message.method === "tools/list") { process.stdout.write('{"result":1}\\n'); continue; }`;
+    it.each([
+      ["computer", "hostComputer"],
+      ["browser", "browser"],
+      ["email", "email"],
+      ["device", "device"],
+      ["data", "data"],
+    ] as const)("%s is left out and the turn says so, while the others still mount", async (server, key) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const dead = fixture(broken), agents = fixture();
+        // This desktop's own computer is the optional one; a Local VM is not (below).
+        const integrations = key === "hostComputer" ? { localComputer: { ...dead.server, scope: "local-computer" as const } } : { [key]: dead.server };
+        const session = await mountChatTools({ ...integrations, agents: agents.server } as SendTurnInput["integrations"], dead.controller.signal, true);
+        sessions.push(session);
+        expect(session.skipped).toEqual([{ server, reason: expect.stringMatching(/MCP/) }]);
+        expect(chatToolNotices(session).join(" ")).toContain(`MCP server "${server}" was skipped for this turn`);
+        expect(session.definitions.map((tool) => tool.function.name)).toEqual(["agents_write"]);
+        expect(alive(dead.read().pid)).toBe(false);
+      } finally { warn.mockRestore(); }
+    });
+  });
+
+  describe("a server the turn must not run without", () => {
+    const broken = `if (message.method === "tools/list") { process.stdout.write('{"result":1}\\n'); continue; }`;
+    it("fails setup, naming it, when a Local VM can't start, and leaves no server running", async () => {
+      const vm = fixture(broken), other = fixture();
+      await expect(mountChatTools({ localComputer: vm.server, data: other.server } as SendTurnInput["integrations"], vm.controller.signal, true))
+        .rejects.toThrow(/^MCP server "computer" didn't start: MCP/);
+      expect(alive(vm.read().pid)).toBe(false);
+      await vi.waitFor(() => expect(alive(other.read().pid)).toBe(false));
+    });
+
+    it.each([
+      ["a Local VM", "computer", (server: Record<string, unknown>) => ({ localComputer: server })],
+      ["the agents server", "agents", (server: Record<string, unknown>) => ({ agents: server })],
+    ] as const)("ends the turn's session when %s fails during a call, instead of going on without it", async (_label, name, integrationsOf) => {
+      const failing = fixture(`if (message.method === "tools/call") { process.exit(3); }`), other = fixture();
+      const session = await mountChatTools({ ...integrationsOf(failing.server), data: other.server } as SendTurnInput["integrations"], failing.controller.signal, true);
+      sessions.push(session);
+      await expect(session.execute(`${name}_write`, { value: "x" }, failing.controller.signal)).rejects.toBeInstanceOf(ChatToolSessionError);
+      expect(() => session.validate("data_write", { value: "y" })).toThrow(ChatToolSessionError);
+      await vi.waitFor(() => expect(alive(other.read().pid)).toBe(false));
+    });
+
+    it("goes on without this desktop's own computer when it fails during a call", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const failing = fixture(`if (message.method === "tools/call") { process.exit(3); }`), other = fixture();
+        const session = await mountChatTools({ localComputer: { ...failing.server, scope: "local-computer" }, data: other.server } as SendTurnInput["integrations"], failing.controller.signal, true);
+        sessions.push(session);
+        await expect(session.execute("computer_write", { value: "x" }, failing.controller.signal)).resolves.toMatchObject({ ok: false });
+        await expect(session.execute("data_write", { value: "y" }, failing.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:y" });
+      } finally { warn.mockRestore(); }
+    });
+  });
+
+  describe("a server that fails during a turn", () => {
+    const warnings = () => vi.spyOn(console, "warn").mockImplementation(() => {});
+    async function pair(body: string, env: Record<string, string> = {}) {
+      const failing = fixture(body), healthy = fixture();
+      const session = await mountChatTools({ custom: { audit: { ...failing.server, env: { ...failing.server.env, ...env } }, other: healthy.server } }, failing.controller.signal);
+      sessions.push(session);
+      return { failing, healthy, session, signal: failing.controller.signal };
+    }
+
+    it("takes only that server, says which and why, masks its stderr, and leaves the other tools working", async () => {
+      const warn = warnings();
+      try {
+        const token = "fixture-configured-value-77";
+        const { failing, session, signal } = await pair(`if (message.method === "tools/call") { process.stderr.write("early line\\nboom with " + process.env.API_TOKEN + " and sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123\\n"); setTimeout(() => process.exit(3), 20); return; }`, { API_TOKEN: token });
+        const result = await session.execute("audit_write", { value: "x" }, signal);
+        expect(result.ok).toBe(false);
+        expect(result.text).toContain("MCP server exited before the session closed.");
+        expect(result.text).toContain("It last said: boom with [redacted]");
+        expect(result.text).toContain('That was the MCP server "audit". It is stopped for the rest of this turn');
+        expect(result.text).not.toContain(token);
+        expect(result.text).not.toContain("abcdefghijklmnopqrstuvwxyz0123");
+        expect(alive(failing.read().pid)).toBe(false);
+
+        await expect(session.execute("other_write", { value: "y" }, signal)).resolves.toMatchObject({ ok: true, text: "recorded:y" });
+        expect(() => session.validate("other_write", { value: "y" })).not.toThrow();
+      } finally { warn.mockRestore(); }
+    });
+
+    it("never runs a call again on a server that stopped, and says why", async () => {
+      const warn = warnings();
+      try {
+        const { failing, session, signal } = await pair(`if (message.method === "tools/call") { process.exit(3); }`);
+        await session.execute("audit_write", { value: "x" }, signal);
+        const again = await session.execute("audit_write", { value: "x" }, signal);
+        expect(again.ok).toBe(false);
+        expect(again.text).toContain('MCP server exited before the session closed. That was the MCP server "audit"');
+        expect(failing.read().calls.filter((call) => call.method === "tools/call")).toHaveLength(1);
+      } finally { warn.mockRestore(); }
+    });
+
+    it("says so on the next call when the server stopped between calls", async () => {
+      const warn = warnings();
+      try {
+        const { session, signal } = await pair(`if (message.method === "tools/list") { reply(message, {tools:[{name:"write",description:"Fixture write",inputSchema:schema}]}); setTimeout(() => process.exit(0), 20); continue; }`);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        const result = await session.execute("audit_write", { value: "x" }, signal);
+        expect(result).toMatchObject({ ok: false, text: expect.stringContaining("MCP server exited before the session closed") });
+      } finally { warn.mockRestore(); }
+    });
+
+    it("still ends the turn's session when the person stops it", async () => {
+      const f = fixture(`if (message.method === "tools/call") { return; }`);
+      const session = await f.mount();
+      const stop = new AbortController();
+      const pending = session.execute("audit_write", { value: "x" }, stop.signal);
+      await vi.waitFor(() => expect(f.read().calls.some((call) => call.method === "tools/call")).toBe(true));
+      stop.abort();
+      await expect(pending).rejects.toBeInstanceOf(ChatToolSessionError);
+      expect(() => session.validate("audit_write", { value: "x" })).toThrow(ChatToolSessionError);
+    });
+  });
+
+  describe("how long a server gets to start", () => {
+    it("is about half a minute on a Cloud home and eight seconds elsewhere", () => {
+      expect(mcpStartupMs({ OMB_CLOUD_ROLE: "home" })).toBe(30_000);
+      expect(mcpStartupMs({ OMB_CLOUD_ROLE: "team" })).toBe(30_000);
+      expect(mcpStartupMs({})).toBe(8_000);
+    });
+
+    // tools/list needs a budget that outlasts the child's own start, or the overrun would land in initialize.
+    it.each([["initialize", 150], ["tools/list", 2_500]] as const)("reports an overrun in %s as a startup timeout, not as a request whose outcome is uncertain", async (method, budget) => {
+      const f = fixture(`if (message.method === "${method}") { return; }`);
+      const client = new ChatMcpClient(f.server);
+      await expect(client.tools(f.controller.signal, undefined, budget)).rejects.toThrow(/^MCP startup timed out$/);
+      await client.close();
+    });
+  });
+
+  it("keeps a server that refused a call, without leaking what it said", async () => {
     const f = fixture(`if (message.method === "tools/call") { send({jsonrpc:"2.0",id:message.id,error:{code:-1,message:"secret-fixture-key"}}); continue; }`);
     const session = await f.mount();
-    const result = await session.execute("audit_write", { value: "test" }, f.controller.signal).catch((error: Error) => error);
-    expect(result).toBeInstanceOf(ChatToolSessionError);
-    expect(String(result)).toContain("MCP request failed");
-    expect(String(result)).not.toContain("secret-fixture-key");
-    expect(alive(f.read().pid)).toBe(false);
+    const result = await session.execute("audit_write", { value: "test" }, f.controller.signal);
+    expect(result).toMatchObject({ ok: false, text: 'MCP request failed; inspect the configured integration That was the MCP server "audit".' });
+    expect(result.text).not.toContain("secret-fixture-key");
+    expect(alive(f.read().pid)).toBe(true);
   });
 
   it("rejects malformed tool content instead of accepting an empty successful result", async () => {
     const f = fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:42}]}); continue; }`);
     const session = await f.mount();
-    const pending = session.execute("audit_write", {value:"test"}, f.controller.signal);
-    await expect(pending).rejects.toBeInstanceOf(ChatToolSessionError);
-    await expect(pending).rejects.toThrow("invalid content");
-    expect(alive(f.read().pid)).toBe(false);
-    expect(() => session.validate("audit_write", {value:"test"})).toThrow(ChatToolSessionError);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(session.execute("audit_write", {value:"test"}, f.controller.signal)).resolves.toMatchObject({ ok: false, text: expect.stringContaining("invalid content") });
+      expect(alive(f.read().pid)).toBe(false);
+    } finally { warn.mockRestore(); }
   });
 
   it("keeps schema errors recoverable without dispatching or closing the transport", async () => {
@@ -203,12 +512,97 @@ describe("Chat MCP session", () => {
     if (hasText) expect(result.text).toContain("partial result");
   });
 
-  it("closes already mounted peers when another server fails startup", async () => {
+  it("skips a configured server that fails startup, closes it, and keeps its healthy peers", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const ready = fixture();
     const failed = fixture(`if(message.method === "tools/list") { reply(message,{tools:"invalid"}); continue; }`);
-    await expect(mountChatTools({custom:{ready:ready.server,failed:failed.server}},ready.controller.signal)).rejects.toThrow("invalid result");
+    const session = await mountChatTools({custom:{ready:ready.server,failed:failed.server}},ready.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["ready_write"]);
+    expect(session.skipped).toEqual([{ server: "failed", reason: expect.stringContaining("invalid result") }]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`"failed"`));
+    await vi.waitFor(() => expect(alive(failed.read().pid)).toBe(false));
+    expect(alive(ready.read().pid)).toBe(true);
+    await expect(session.execute("ready_write", { value: "still works" }, ready.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:still works" });
+    warn.mockRestore();
+  });
+
+  it("skips servers that refuse sign-in or fail to start, and mounts the rest", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const unauthorized = fixture(`if(message.method === "initialize") { send({jsonrpc:"2.0",id:message.id,error:{code:-32001,message:"401 Unauthorized"}}); continue; }`);
+    const badTools = fixture(`if(message.method === "tools/list") { reply(message,{tools:[{name:"x",inputSchema:{type:"string"}}]}); continue; }`);
+    const session = await mountChatTools({ custom: {
+      slack: unauthorized.server, jira: ready.server, kissflow: badTools.server,
+      missing: { command: join(ready.dir, "does-not-exist"), args: [], env: {} },
+    } }, ready.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["jira_write"]);
+    expect(session.skipped.map((entry) => entry.server).sort()).toEqual(["kissflow", "missing", "slack"]);
+    expect(warn).toHaveBeenCalledTimes(3);
+    warn.mockRestore();
+  });
+
+  it("still fails setup when a harness mount (not a configured server) fails", async () => {
+    const ready = fixture();
+    const failed = fixture(`if(message.method === "tools/list") { reply(message,{tools:"invalid"}); continue; }`);
+    await expect(mountChatTools({ agents: failed.server, custom: { ready: ready.server } }, ready.controller.signal)).rejects.toThrow("invalid result");
     expect(alive(ready.read().pid)).toBe(false);
     expect(alive(failed.read().pid)).toBe(false);
+  });
+
+  it("skips a connected-apps mount that fails, and keeps the turn alive", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const refused = fixture(`if(message.method === "tools/list") { send({jsonrpc:"2.0",id:message.id,error:{code:-32000,message:"connector service returned HTTP 503"}}); continue; }`);
+    const session = await mountChatTools({ composio: refused.server, custom: { ready: ready.server } }, ready.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["ready_write"]);
+    expect(session.skipped).toEqual([{ server: "composio", reason: expect.stringContaining("MCP request failed") }]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`"composio"`));
+    await vi.waitFor(() => expect(alive(refused.read().pid)).toBe(false));
+    expect(alive(ready.read().pid)).toBe(true);
+    await expect(session.execute("ready_write", { value: "still works" }, ready.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:still works" });
+    warn.mockRestore();
+  });
+
+  it("skips the connected-apps own-apps mount that fails, and keeps the turn alive", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const missing = { command: join(ready.dir, "does-not-exist"), args: [], env: {} };
+    const session = await mountChatTools({ composioOwn: missing, custom: { ready: ready.server } }, ready.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["ready_write"]);
+    expect(session.skipped.map((entry) => entry.server)).toEqual([OWN_APPS_SERVER]);
+    warn.mockRestore();
+  });
+
+  it("keeps a configured server that shares the own-apps name alive when the built-in own-apps mount fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const missing = { command: join(ready.dir, "does-not-exist"), args: [], env: {} };
+    const session = await mountChatTools({ composioOwn: missing, custom: { [OWN_APPS_SERVER]: ready.server } }, ready.controller.signal);
+    sessions.push(session);
+    expect(session.skipped.map((entry) => entry.server)).toEqual([OWN_APPS_SERVER]);
+    expect(alive(ready.read().pid)).toBe(true);
+    expect(session.definitions).toHaveLength(1);
+    await expect(session.execute(session.definitions[0]!.function.name, { value: "still works" }, ready.controller.signal)).resolves.toMatchObject({ ok: true });
+    warn.mockRestore();
+  });
+
+  it("fails setup when the Local VM lists no tools, but not when the owner's selection leaves none", async () => {
+    const empty = fixture(`if(message.method === "tools/list") { reply(message,{tools:[]}); continue; }`);
+    await expect(empty.mount(true, true)).rejects.toThrow("The Local VM listed no tools");
+    expect(alive(empty.read().pid)).toBe(false);
+    expect((await empty.mount(false)).definitions).toEqual([]);
+    expect((await fixture().mount(true, true, { allow: ["mcp:computer:screenshot"] })).definitions).toEqual([]);
+  });
+
+  it("advertises only name, description and parameters, never outputSchema or other MCP tool fields", async () => {
+    const f = fixture(`if(message.method === "tools/list") { reply(message,{tools:[{name:"write",title:"W",description:"d",inputSchema:${JSON.stringify(schema)},outputSchema:{type:"object"},annotations:{readOnlyHint:true}}]}); continue; }`);
+    const session = await f.mount();
+    expect(session.definitions).toEqual([{ type: "function", function: { name: "audit_write", description: "d", parameters: schema } }]);
+    expect(session.skipped).toEqual([]);
   });
 
   it("returns declared tool errors and bounds aggregate text without splitting UTF-8", async () => {
@@ -219,6 +613,123 @@ describe("Chat MCP session", () => {
     expect(Buffer.byteLength(result.text)).toBeLessThan(52_000);
     expect(result.text).toContain("truncated");
     expect(result.text).not.toContain("�");
+  });
+
+  describe("a result over 50KB with a working folder", () => {
+    const big = "line of a big kDrive file as base64 text ".repeat(5000);
+    const bigFixture = () => fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:${JSON.stringify(big)}}]}); continue; }`);
+    const workFolder = () => { const dir = mkdtempSync(join(tmpdir(), "omb-chat-mcp-work-")); dirs.push(dir); return dir; };
+
+    it("is saved whole to a file there, and the model gets its start and the path", async () => {
+      const f = bigFixture();
+      const folder = workFolder();
+      const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      const saved = readdirSync(join(folder, SAVED_RESULTS_FOLDER));
+      expect(saved).toHaveLength(1);
+      expect(saved[0]).toMatch(/^result-audit_write-\d+-[0-9a-f]{6}\.txt$/);
+      const file = join(folder, SAVED_RESULTS_FOLDER, saved[0]);
+      expect(readFileSync(file, "utf8")).toBe(big);
+      expect(result.ok).toBe(true);
+      expect(result.text.startsWith(big.slice(0, 1000))).toBe(true);
+      expect(result.text).toContain(`The full result is saved in ${file}]`);
+      expect(result.text).toContain(`${Math.ceil(Buffer.byteLength(big) / 1024)}KB`);
+      expect(Buffer.byteLength(result.text)).toBeLessThan(52_000);
+    });
+
+    // Only computer-use servers may send a frame this big (32 MiB).
+    it("is cut as before when it is over the attach limit", async () => {
+      const f = fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:"a".repeat(${MESSAGE_FILE_MAX_BYTES + 1})}]}); continue; }`);
+      const folder = workFolder();
+      const result = await (await f.mount(true, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      expect(existsSync(join(folder, SAVED_RESULTS_FOLDER)) ? readdirSync(join(folder, SAVED_RESULTS_FOLDER)) : []).toEqual([]);
+      expect(result.text).toContain("truncated");
+      expect(Buffer.byteLength(result.text)).toBeLessThan(52_000);
+    });
+
+    it("stays inside the folder whatever the server is called", async () => {
+      const f = bigFixture();
+      const folder = workFolder();
+      const session = await f.mount(false, false, undefined, folder, "../../escape");
+      await session.execute(session.definitions[0].function.name, { value: "test" }, f.controller.signal);
+      expect(readdirSync(folder)).toEqual([SAVED_RESULTS_FOLDER]);
+      expect(readdirSync(join(folder, SAVED_RESULTS_FOLDER))[0]).toMatch(/^result-[a-z0-9_]+-\d+-[0-9a-f]{6}\.txt$/);
+    });
+
+    it("is cut as before when the results folder is a link elsewhere", async () => {
+      const f = bigFixture();
+      const folder = workFolder();
+      const elsewhere = workFolder();
+      symlinkSync(elsewhere, join(folder, SAVED_RESULTS_FOLDER));
+      const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      expect(readdirSync(elsewhere)).toEqual([]);
+      expect(result.text).toContain("[MCP result truncated at 50KB; request less output.]");
+    });
+
+    it("masks key-shaped values before the file is written", async () => {
+      const key = `sk-ant-${"k".repeat(40)}`;
+      const f = fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:${JSON.stringify(`${big}token ${key} end`)}}]}); continue; }`);
+      const folder = workFolder();
+      await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      const [saved] = readdirSync(join(folder, SAVED_RESULTS_FOLDER));
+      const text = readFileSync(join(folder, SAVED_RESULTS_FOLDER, saved), "utf8");
+      expect(text.startsWith(big)).toBe(true);
+      expect(text).not.toContain(key);
+    });
+
+    it("masks the turn's own secrets too, and says so in the notice", async () => {
+      const secret = "plain-configured-api-key-value";
+      const f = fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:${JSON.stringify(`${big}auth ${secret} end`)}}]}); continue; }`);
+      const folder = workFolder();
+      const scrub = (text: string) => text.split(secret).join("[redacted]");
+      const result = await (await f.mount(false, false, undefined, folder, "audit", scrub)).execute("audit_write", { value: "test" }, f.controller.signal);
+      const [saved] = readdirSync(join(folder, SAVED_RESULTS_FOLDER));
+      const text = readFileSync(join(folder, SAVED_RESULTS_FOLDER, saved), "utf8");
+      expect(text).not.toContain(secret);
+      expect(text).toContain("auth [redacted] end");
+      expect(result.text).toContain("(secret-looking values in it are masked)");
+    });
+
+    it(`keeps only the newest ${SAVED_RESULTS_KEPT} saved results`, async () => {
+      const f = bigFixture();
+      const folder = workFolder();
+      const results = join(folder, SAVED_RESULTS_FOLDER);
+      mkdirSync(results);
+      const old = Array.from({ length: SAVED_RESULTS_KEPT }, (_, i) => `result-audit_write-${1_700_000_000_000 + i}-abcdef.txt`);
+      for (const name of old) writeFileSync(join(results, name), "old");
+      writeFileSync(join(results, "notes.md"), "not a saved result");
+      writeFileSync(join(results, "export-1700000000000-abcdef.txt"), "the person's own file with a look-alike name");
+      await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      const left = readdirSync(results);
+      expect(left).toHaveLength(SAVED_RESULTS_KEPT + 2);
+      expect(left).toContain("notes.md");
+      expect(left).toContain("export-1700000000000-abcdef.txt");
+      expect(left).not.toContain(old[0]);
+      expect(left).toContain(old[1]);
+    });
+
+    it("never removes the file it just wrote, even when the clock went back", async () => {
+      const f = bigFixture();
+      const folder = workFolder();
+      const results = join(folder, SAVED_RESULTS_FOLDER);
+      mkdirSync(results);
+      const later = Array.from({ length: SAVED_RESULTS_KEPT }, (_, i) => `result-audit_write-${Date.now() + 3_600_000 + i}-abcdef.txt`);
+      for (const name of later) writeFileSync(join(results, name), "later");
+      const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      const [saved] = readdirSync(results).filter((name) => !later.includes(name));
+      expect(result.text).toContain(join(results, saved));
+      expect(readFileSync(join(results, saved), "utf8")).toBe(big);
+      expect(readdirSync(results)).toHaveLength(SAVED_RESULTS_KEPT);
+      expect(readdirSync(results)).not.toContain(later[0]);
+    });
+
+    it("leaves a result under 50KB as it is, with no file", async () => {
+      const f = fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:"small"}]}); continue; }`);
+      const folder = workFolder();
+      mkdirSync(join(folder, "keep"));
+      const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      expect(result.text).toBe("small");
+      expect(readdirSync(folder)).toEqual(["keep"]);
+    });
   });
 
   it.each(["initialize", "tools/list", "tools/call"])("cancels %s and awaits its owned process tree", async (method) => {
@@ -240,6 +751,412 @@ describe("Chat MCP session", () => {
     await rejected;
     expect(alive(receipt.pid)).toBe(false);
     expect(alive(receipt.helper)).toBe(false);
+  });
+});
+
+describe("Chat MCP shutdown verdict", () => {
+  afterEach(() => {
+    killProbe.override = false;
+    killProbe.stopped = false;
+    killProbe.budgets.length = 0;
+  });
+
+  it("a slow shutdown resolves close when no call was in flight", async () => {
+    const f = fixture();
+    const session = await f.mount();
+    killProbe.override = true;
+    killProbe.stopped = false;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(session.close()).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("chat-mcp:"));
+    } finally { warn.mockRestore(); }
+  });
+
+  it("an unconfirmed shutdown still fails close when a call was in flight", async () => {
+    const f = fixture(`if (message.method === "tools/call") return;`);
+    const session = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal);
+    const executing = session.execute("audit_write", { value: "in flight" }, f.controller.signal).catch(() => {});
+    await vi.waitFor(() => { expect(f.read().calls.some((call) => call.method === "tools/call")).toBe(true); });
+    killProbe.override = true;
+    killProbe.stopped = false;
+    await expect(session.close()).rejects.toThrow("MCP server shutdown could not be confirmed; execution outcome may be uncertain");
+    await executing;
+  });
+
+  it("the close budget is 15 seconds on Windows and 5 seconds elsewhere", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (const [platform, budget] of [["win32", 15_000], ["linux", 5_000]] as const) {
+        const f = fixture();
+        const session = await f.mount();
+        killProbe.budgets.length = 0;
+        Object.defineProperty(process, "platform", { ...descriptor, value: platform });
+        try { await session.close(); }
+        finally { Object.defineProperty(process, "platform", descriptor); }
+        expect(killProbe.budgets.at(-1)).toBe(budget);
+      }
+    } finally { warn.mockRestore(); }
+  });
+
+  it("the session close fails only when a server with an in-flight call could not be stopped", async () => {
+    killProbe.override = true;
+    killProbe.stopped = false;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const one = fixture(); const two = fixture();
+      const session = await mountChatTools({ custom: { alpha: one.server, beta: two.server } }, one.controller.signal);
+      sessions.push(session);
+      await expect(session.close()).resolves.toBeUndefined();
+
+      const busy = fixture(`if (message.method === "tools/call") return;`);
+      const risky = await mountChatTools({ custom: { busy: busy.server } }, busy.controller.signal);
+      const executing = risky.execute("busy_write", { value: "in flight" }, busy.controller.signal).catch(() => {});
+      await vi.waitFor(() => { expect(busy.read().calls.some((call) => call.method === "tools/call")).toBe(true); });
+      await expect(risky.close()).rejects.toBeInstanceOf(ChatToolSessionError);
+      await expect(risky.close()).rejects.toThrow("MCP server shutdown could not be confirmed; execution outcome may be uncertain");
+      await executing;
+    } finally { warn.mockRestore(); }
+  });
+});
+
+const grantFor = (server: string, tool: string) => expect.stringMatching(new RegExp(`^\\["${server}","[0-9a-f]{64}","${tool}"\\]$`));
+
+describe("Chat MCP approvals by server", () => {
+  it("asks nothing for OpenMausBot's agents server, and grants no session-wide allow on the person's computer", async () => {
+    const agents = fixture(); const audit = fixture(); const computer = fixture();
+    const session = await mountChatTools({
+      agents: agents.server, custom: { audit: audit.server },
+      localComputer: { ...computer.server, scope: "local-computer" },
+    }, agents.controller.signal, true);
+    sessions.push(session);
+    expect(session.definitions.map((tool) => tool.function.name).sort()).toEqual(["agents_write", "audit_write", "computer_write"]);
+    expect(session.view("agents_write", { value: "x" })).toEqual({ title: "agents_write", input: { value: "x" }, ask: false });
+    expect(session.view("audit_write", { value: "x" })).toEqual({ title: "audit_write", input: { value: "x" }, ask: true, grant: grantFor("audit", "write") });
+    expect(session.view("computer_write", { value: "x" })).toEqual({ title: "computer_write", input: { value: "x" }, ask: true });
+  });
+
+  it("ties an allow to the server as launched: the same server keeps it, a changed one under the same name does not", async () => {
+    const audit = fixture(); const other = fixture();
+    const grant = async (server: typeof audit.server) => {
+      const session = await mountChatTools({ custom: { audit: server } }, audit.controller.signal);
+      sessions.push(session);
+      return session.view("audit_write", { value: "x" }).grant;
+    };
+    const first = await grant(audit.server);
+    expect(first).toEqual(grantFor("audit", "write"));
+    expect(await grant({ ...audit.server, env: { ...audit.server.env } })).toBe(first);
+    expect(await grant(other.server)).not.toBe(first);
+    expect(await grant({ ...audit.server, env: { ...audit.server.env, AUDIT_TOKEN: "rotated" } })).not.toBe(first);
+    expect(first).not.toContain("rotated");
+  });
+
+  it("knows the harness's mounts by what the harness passed, not by a server's name", async () => {
+    const lookalike = fixture(); const vm = fixture();
+    const session = await mountChatTools({ custom: { agents: lookalike.server }, localComputer: vm.server }, lookalike.controller.signal, true);
+    sessions.push(session);
+    expect(session.view("agents_write", { value: "x" })).toMatchObject({ ask: true, grant: grantFor("agents", "write") });
+    expect(session.view("computer_write", { value: "x" })).toMatchObject({ ask: true, grant: grantFor("computer", "write") });
+  });
+});
+
+describe("Chat MCP tool directory", () => {
+  const catalog = whopLikeCatalog(300);
+  async function mountWhop(toolScope?: ToolScope) {
+    const remote = await startFakeHttpMcp({ tools: catalog });
+    const controller = new AbortController(); controllers.push(controller);
+    try {
+      const session = await mountChatTools({ custom: { whop: { type: "http", url: remote.url, headers: {} } } }, controller.signal, false, toolScope);
+      sessions.push(session);
+      return { remote, controller, session };
+    } catch (error) { await remote.close(); throw error; }
+  }
+
+  it("searches a 300-tool URL server instead of refusing it at the 128-tool limit", async () => {
+    const { remote, controller, session } = await mountWhop();
+    try {
+      expect(session.definitions.map((tool) => tool.function.name)).toEqual(["whop_search_tools", "whop_describe_tool", "whop_call_tool"]);
+      const search = await session.execute("whop_search_tools", { query: "list payments" }, controller.signal);
+      expect(JSON.parse(search.text).matches[0].name).toBe("payments_list");
+      expect(session.view("whop_search_tools", { query: "list payments" })).toEqual({ title: "whop_search_tools", input: { query: "list payments" }, ask: false });
+      const args = { name: "payments_list", arguments: { company_id: "biz_1" } };
+      expect(session.view("whop_call_tool", args)).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true, grant: grantFor("whop", "payments_list") });
+      await expect(session.execute("whop_call_tool", args, controller.signal)).resolves.toMatchObject({ ok: true, text: "remote execution recorded" });
+      expect(remote.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
+      const nameless = await session.execute("whop_call_tool", { arguments: {} }, controller.signal);
+      expect(nameless).toMatchObject({ ok: true, text: expect.stringContaining("search_tools") });
+      expect(session.view("whop_call_tool", { arguments: {} }).ask).toBe(false);
+      const misfit = await session.execute("whop_call_tool", { name: "payments_list", arguments: { first: "ten" } }, controller.signal);
+      expect(misfit.ok).toBe(true);
+      expect(JSON.parse(misfit.text).problems).toContain("must have required property 'company_id'");
+      const unknown = await session.execute("whop_describe_tool", { name: "payments_teleport" }, controller.signal);
+      expect(unknown).toMatchObject({ ok: true, text: expect.stringContaining("search_tools") });
+      expect(remote.calls).toHaveLength(1);
+    } finally { await remote.close(); }
+  });
+
+  it("neither finds nor runs a tool outside the bot's selection", async () => {
+    const selected = [...catalog.filter((tool) => tool.name.endsWith("_list")).map((tool) => tool.name), "payments_get", "stats_get"];
+    const { remote, controller, session } = await mountWhop({ allow: selected.map((name) => `mcp:whop:${name}`) });
+    try {
+      expect(session.definitions.map((tool) => tool.function.name)).toEqual(["whop_search_tools", "whop_describe_tool", "whop_call_tool"]);
+      const found = JSON.parse((await session.execute("whop_search_tools", { query: "create payments", limit: 20 }, controller.signal)).text).matches;
+      expect(found.map((match: { name: string }) => match.name).every((name: string) => selected.includes(name))).toBe(true);
+      expect(() => session.validate("whop_call_tool", { name: "payments_create", arguments: {} })).toThrow("Tool selection excludes this tool");
+      await expect(session.execute("whop_call_tool", { name: "payments_create", arguments: {} }, controller.signal)).rejects.toThrow("Tool selection excludes this tool");
+      expect(remote.calls).toEqual([]);
+      await expect(session.execute("whop_call_tool", { name: "payments_list", arguments: { company_id: "biz_1" } }, controller.signal)).resolves.toMatchObject({ ok: true });
+      expect(remote.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
+    } finally { await remote.close(); }
+  });
+
+  it("mounts a small URL server's own tools, unchanged", async () => {
+    const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(5) });
+    const controller = new AbortController(); controllers.push(controller);
+    try {
+      const session = await mountChatTools({ custom: { whop: { type: "http", url: remote.url, headers: {} } } }, controller.signal);
+      sessions.push(session);
+      expect(session.definitions.map((tool) => tool.function.name)).toEqual(whopLikeCatalog(5).map((tool) => `whop_${tool.name.replace("-", "_")}`));
+      expect(session.view("whop_payments_list", { company_id: "biz_1" })).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true, grant: grantFor("whop", "payments_list") });
+    } finally { await remote.close(); }
+  });
+});
+
+describe("Chat MCP tool limit", () => {
+  const CORE_COMPUTER = ["click", "double_click", "right_click", "drag", "scroll", "type_text", "press_key", "hotkey", "set_value",
+    "launch_app", "list_apps", "list_windows", "get_window_state", "get_desktop_state", "get_screen_size", "zoom", "invoke_menu"];
+  function catalog(names: readonly string[]) {
+    const { dir, server } = catalogServer(names);
+    dirs.push(dir);
+    return server;
+  }
+  async function mount(integrations: NonNullable<Parameters<typeof mountChatTools>[0]>) {
+    const controller = new AbortController();
+    controllers.push(controller);
+    const session = await mountChatTools(integrations, controller.signal, true);
+    sessions.push(session);
+    return { session, names: session.definitions.map((tool) => tool.function.name) };
+  }
+  const windowsTurn = (agents: number, more: Partial<NonNullable<Parameters<typeof mountChatTools>[0]>> = {}) => ({
+    localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" as const },
+    browser: catalog(syntheticToolNames("agent_browser", 32)),
+    agents: catalog(syntheticToolNames("agent", agents)),
+    composio: catalog(syntheticToolNames("router", 7)),
+    data: catalog(syntheticToolNames("table", 5)),
+    ...more,
+  });
+
+  it.each([42, 47])("fits a Windows turn with %i agents tools: every agents tool, the screen tools, and one browser", async (agents) => {
+    const { session, names } = await mount(windowsTurn(agents));
+    expect(session.skipped).toEqual([]);
+    expect(session.trimmed).toEqual([]);
+    expect(names.length + 1).toBeLessThanOrEqual(128);
+    expect(names).toEqual(expect.arrayContaining(syntheticToolNames("agents_agent", agents)));
+    expect(names).toEqual(expect.arrayContaining(CORE_COMPUTER.map((tool) => `computer_${tool}`)));
+    expect(names.filter((name) => /^computer_(?:browser_|get_browser_state$|page$)/.test(name))).toEqual([]);
+    expect(names.filter((name) => /^computer_(?:start_recording|set_config|get_config|check_for_update|install_ffmpeg|set_agent_cursor_motion)$/.test(name))).toEqual([]);
+    expect(names.filter((name) => name.startsWith("browser_"))).toHaveLength(32);
+  });
+
+  it("lists the computer's own browser tools when the turn has no built-in browser", async () => {
+    const { names } = await mount({ localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" } });
+    expect(names).toEqual(expect.arrayContaining(["computer_browser_navigate", "computer_get_browser_state", "computer_click"]));
+    expect(names).not.toContain("computer_install_ffmpeg");
+  });
+
+  it("caps built-ins that still overflow instead of failing the turn, keeping the agents server whole and saying what was left out", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { session, names } = await mount(windowsTurn(51, {
+        composio: catalog(syntheticToolNames("router", 14)),
+        email: catalog(syntheticToolNames("mail", 20)),
+        device: catalog(syntheticToolNames("phone", 23)),
+      }));
+      expect(names).toHaveLength(127);
+      expect(names).toEqual(expect.arrayContaining(syntheticToolNames("agents_agent", 51)));
+      expect(names).toEqual(expect.arrayContaining(CORE_COMPUTER.map((tool) => `computer_${tool}`)));
+      expect(names.filter((name) => name.startsWith("data_"))).toEqual(["data_table_1", "data_table_2"]);
+      expect(session.skipped).toEqual([]);
+      expect(session.trimmed).toEqual([{ server: "data", listed: 2, of: 5 }, { server: "email", listed: 0, of: 20 }, { server: "device", listed: 0, of: 23 }]);
+      expect(trimmedToolsNotice(session.trimmed)).toBe(`"data" listed 2 of 5 tools, "email" listed 0 of 20 tools, "device" listed 0 of 23 tools to fit the model's 128-tool limit; the rest are left out of this turn.`);
+      expect(trimmedToolsNotice([])).toBeUndefined();
+    } finally { warn.mockRestore(); }
+  });
+
+  it("gives the agents server its whole list before a computer mounted ahead of it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { session, names } = await mount({ localComputer: catalog(syntheticToolNames("vm", 100)), agents: catalog(syntheticToolNames("agent", 51)) });
+      expect(names).toEqual([...syntheticToolNames("computer_vm", 76), ...syntheticToolNames("agents_agent", 51)]);
+      expect(session.trimmed).toEqual([{ server: "computer", listed: 76, of: 100 }]);
+    } finally { warn.mockRestore(); }
+  });
+
+  it("reaches a configured server that does not fit beside the built-ins through the tool search, leaving room for ask_user", async () => {
+    const fits = await mount(windowsTurn(42, { custom: { notes: catalog(syntheticToolNames("note", 13)) } }));
+    expect(fits.names).toHaveLength(127);
+    expect(fits.session.skipped).toEqual([]);
+    expect(fits.session.budget.servers).toEqual([{ name: "notes", tools: 13, direct: true }]);
+    const over = await mount(windowsTurn(42, { custom: { notes: catalog(syntheticToolNames("note", 14)) } }));
+    expect(over.names).toHaveLength(117);
+    expect(over.names.slice(-3)).toEqual(["mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+    expect(over.session.skipped).toEqual([]);
+    expect(over.session.trimmed).toEqual([]);
+    expect(over.session.budget).toEqual({ limit: 128, listed: 117, servers: [{ name: "notes", tools: 14, direct: false }] });
+    await expect(over.session.execute("mcp_call_tool", { name: "notes_note_14", arguments: {} }, new AbortController().signal)).resolves.toEqual({ ok: true, text: "ran note_14" });
+  });
+
+  it("keeps room for the tool search when built-ins alone would fill the limit", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { session, names } = await mount({ agents: catalog(syntheticToolNames("agent", 51)), localComputer: catalog(syntheticToolNames("vm", 100)), custom: { notes: catalog(syntheticToolNames("note", 5)) } });
+      expect(names).toHaveLength(127);
+      expect(names.filter((name) => name.startsWith("agents_"))).toHaveLength(51);
+      expect(session.trimmed).toEqual([{ server: "computer", listed: 73, of: 100 }]);
+      expect(names.slice(-3)).toEqual(["mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+      expect(session.budget.servers).toEqual([{ name: "notes", tools: 5, direct: false }]);
+    } finally { warn.mockRestore(); }
+  });
+});
+
+describe("Chat MCP servers past the tool limit", () => {
+  function catalog(names: readonly string[]) {
+    const { dir, server } = catalogServer(names);
+    dirs.push(dir);
+    return server;
+  }
+  async function mount(custom: Record<string, { command: string; args: string[]; env: Record<string, string> }>, toolScope?: ToolScope) {
+    const controller = new AbortController();
+    controllers.push(controller);
+    const session = await mountChatTools({ custom }, controller.signal, false, toolScope);
+    sessions.push(session);
+    return { session, signal: controller.signal, names: session.definitions.map((tool) => tool.function.name) };
+  }
+
+  const PADDED_AUDIT = `if (message.method === "tools/list") {
+    reply(message, {tools:[{name:"write",description:"Fixture write",inputSchema:schema}, ...Array.from({length:125}, (_, i) => ({name:"pad_" + (i + 1),description:"Padding",inputSchema:{type:"object"}}))]});
+    continue;
+  }`;
+
+  it("lists the smallest servers whole, and reaches the biggest through the tool search in the same turn", async () => {
+    const audit = fixture(PADDED_AUDIT);
+    const { session, signal, names } = await mount({ audit: audit.server, notes: catalog(syntheticToolNames("note", 4)), extra: catalog(syntheticToolNames("extra", 3)) });
+    expect(names).toEqual([...syntheticToolNames("notes_note", 4), ...syntheticToolNames("extra_extra", 3), "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+    expect(session.skipped).toEqual([]);
+    expect(session.budget).toEqual({ limit: 128, listed: 10, servers: [
+      { name: "audit", tools: 126, direct: false }, { name: "notes", tools: 4, direct: true }, { name: "extra", tools: 3, direct: true },
+    ] });
+    expect(chatToolNotices(session)).toEqual(['To fit the model\'s 128-tool limit, the tools of "audit" are reached through the tool search this turn.']);
+    expect(session.definitions.at(-3)!.function.description).toContain('the MCP servers "audit"');
+
+    const found = JSON.parse((await session.execute("mcp_search_tools", { query: "fixture write" }, signal)).text);
+    expect(found.matches[0]).toMatchObject({ name: "audit_write", input: "{ value: string }" });
+    expect(session.view("mcp_search_tools", { query: "fixture write" })).toEqual({ title: "mcp_search_tools", input: { query: "fixture write" }, ask: false });
+    await expect(session.execute("mcp_describe_tool", { name: "audit_write" }, signal)).resolves.toMatchObject({ ok: true, text: expect.stringContaining('"required":["value"]') });
+
+    const call = { name: "audit_write", arguments: { value: "through search" } };
+    expect(session.view("mcp_call_tool", call)).toEqual({ title: "audit_write", input: { value: "through search" }, ask: true, grant: grantFor("audit", "write") });
+    const misfit = { name: "audit_write", arguments: { value: 7 } };
+    expect(session.view("mcp_call_tool", misfit).ask).toBe(false);
+    const refused = await session.execute("mcp_call_tool", misfit, signal);
+    expect(refused.ok).toBe(true);
+    expect(JSON.parse(refused.text).problems).toEqual(["value: must be string"]);
+    expect(audit.read().calls.some((entry) => entry.method === "tools/call")).toBe(false);
+    await expect(session.execute("mcp_call_tool", call, signal)).resolves.toEqual({ ok: true, text: "recorded:through search" });
+    expect(audit.read().calls.at(-1)).toMatchObject({ method: "tools/call", params: { name: "write", arguments: { value: "through search" } } });
+    await expect(session.execute("extra_extra_2", {}, signal)).resolves.toEqual({ ok: true, text: "ran extra_2" });
+
+    const unknown = { name: "audit_teleport", arguments: {} };
+    expect(session.view("mcp_call_tool", unknown).ask).toBe(false);
+    await expect(session.execute("mcp_call_tool", unknown, signal)).resolves.toMatchObject({ ok: true, text: expect.stringContaining("search_tools") });
+  });
+
+  it("searches a server that alone offers more than the limit, and lists only the search's three tools", async () => {
+    const { session, signal, names } = await mount({ big: catalog(syntheticToolNames("op", 300)) });
+    expect(names).toEqual(["mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+    expect(session.budget).toEqual({ limit: 128, listed: 3, servers: [{ name: "big", tools: 300, direct: false }] });
+    await expect(session.execute("mcp_call_tool", { name: "big_op_300", arguments: {} }, signal)).resolves.toEqual({ ok: true, text: "ran op_300" });
+  });
+
+  it("finds and runs only tools in the bot's selection through the tool search", async () => {
+    const allow = ["mcp:notes:*", "mcp:big:op_1", "mcp:big:op_2"];
+    const { session, names } = await mount({ notes: catalog(syntheticToolNames("note", 126)), big: catalog(syntheticToolNames("op", 200)) }, { allow, deny: ["mcp:notes:note_126"] });
+    expect(names).toEqual([...syntheticToolNames("notes_note", 125), "big_op_1", "big_op_2"]);
+    const crowded = await mount({ notes: catalog(syntheticToolNames("note", 130)), big: catalog(syntheticToolNames("op", 200)) }, { allow, deny: ["mcp:notes:note_130"] });
+    expect(crowded.names).toEqual(["big_op_1", "big_op_2", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+    const found = JSON.parse((await crowded.session.execute("mcp_search_tools", { query: "note 130", limit: 20 }, crowded.signal)).text);
+    expect(found.matches.map((match: { name: string }) => match.name)).not.toContain("notes_note_130");
+    await expect(crowded.session.execute("mcp_call_tool", { name: "notes_note_130", arguments: {} }, crowded.signal)).resolves.toMatchObject({ text: expect.stringContaining("No tool named") });
+    await expect(crowded.session.execute("mcp_call_tool", { name: "notes_note_129", arguments: {} }, crowded.signal)).resolves.toEqual({ ok: true, text: "ran note_129" });
+    expect(session.budget.servers.every((server) => server.direct)).toBe(true);
+  });
+
+  it("keeps the tool search's own three tools inside the room it divides", () => {
+    expect([...directServers([{ name: "a", tools: 10 }, { name: "b", tools: 3 }], 13)]).toEqual(["a", "b"]);
+    expect([...directServers([{ name: "a", tools: 12 }, { name: "b", tools: 5 }], 13)]).toEqual(["b"]);
+    expect([...directServers([{ name: "a", tools: 4 }, { name: "b", tools: 40 }, { name: "c", tools: 6 }], 13)]).toEqual(["a", "c"]);
+    expect([...directServers([{ name: "a", tools: 4 }], 3)]).toEqual([]);
+    expect([...directServers([{ name: "big", tools: 9 }, { name: "memory", tools: 5 }, { name: "small", tools: 4 }], 15)]).toEqual(["small", "memory"]);
+  });
+});
+
+describe("Chat MCP startup budgets", () => {
+  /** Lets real I/O run, the faked clock standing still, until `condition`. */
+  async function untilReal(condition: () => boolean): Promise<void> {
+    const started = Date.now();
+    while (!condition() && Date.now() - started < 15_000) await new Promise((resolve) => setImmediate(resolve));
+    expect(condition()).toBe(true);
+  }
+  /** Past a deadline: steps the faked clock too, by at most `budgetMs`, pausing in real time so a process can exit. */
+  async function settleWithin(budgetMs: number, condition: () => boolean): Promise<void> {
+    for (let spent = 0; !condition() && spent < budgetMs; spent += 25) {
+      const until = Date.now() + 20;
+      while (Date.now() < until) await new Promise((resolve) => setImmediate(resolve));
+      await vi.advanceTimersByTimeAsync(25);
+    }
+    expect(condition()).toBe(true);
+  }
+  function watch<T>(pending: Promise<T>) {
+    const state: { done: boolean; value?: T; error?: unknown } = { done: false };
+    void pending.then((value) => { state.done = true; state.value = value; }, (error: unknown) => { state.done = true; state.error = error; });
+    return state;
+  }
+
+  it("gives a searched URL server 30 seconds to list its tools", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(300), toolsDelayMs: 20_000 });
+    const controller = new AbortController(); controllers.push(controller);
+    try {
+      const mounting = watch(mountChatTools({ custom: { whop: { type: "http", url: remote.url, headers: {} } } }, controller.signal));
+      await untilReal(() => remote.delayedToolsLists === 1);
+      // well past the 8 seconds a command server gets
+      await vi.advanceTimersByTimeAsync(20_000);
+      await untilReal(() => mounting.done);
+      expect(mounting.error).toBeUndefined();
+      sessions.push(mounting.value!);
+      expect(mounting.value!.definitions).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+      await remote.close();
+    }
+  });
+
+  it("still gives a command server 8 seconds", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const f = fixture(`if (message.method === "tools/list") return;`);
+      const mounting = watch(f.mount());
+      const listed = () => { try { return f.read().calls.some((call) => call.method === "tools/list"); } catch { return false; } };
+      await untilReal(listed);
+      await vi.advanceTimersByTimeAsync(7_900);
+      expect(mounting.done).toBe(false);
+      await vi.advanceTimersByTimeAsync(200);
+      // stopped at 8 seconds: well short of the 30 a URL server gets
+      await settleWithin(1_000, () => mounting.done);
+      expect(mounting.error).toBeUndefined();
+      expect(mounting.value?.skipped).toEqual([{ server: "audit", reason: expect.stringMatching(/timed out/) }]);
+    } finally { vi.useRealTimers(); }
   });
 });
 
@@ -274,13 +1191,13 @@ describe("Chat MCP schema validation", () => {
   it("keeps a bounded frame limit for image-enabled custom servers", async () => {
     const f = fixture('if(message.method === "tools/call") { process.stdout.write("x".repeat(32*1024*1024+1)); continue; }');
     const session = await f.mount(true);
-    await expect(session.execute("audit_write", { value: "large" }, f.controller.signal)).rejects.toThrow(/frame|limit/i);
+    await expect(session.execute("audit_write", { value: "large" }, f.controller.signal)).resolves.toMatchObject({ ok: false, text: expect.stringMatching(/frame|limit/i) });
   });
 
   it("rejects malformed image results without claiming execution success", async () => {
     const f = fixture('if(message.method === "tools/call") { reply(message,{content:[{type:"image",mimeType:"image/png",data:"not-base64"}]}); continue; }');
     const session = await f.mount(true);
-    await expect(session.execute("audit_write", { value: "screenshot" }, f.controller.signal)).rejects.toThrow("Invalid or oversized MCP image");
+    await expect(session.execute("audit_write", { value: "screenshot" }, f.controller.signal)).resolves.toMatchObject({ ok: false, text: expect.stringContaining("Invalid or oversized MCP image") });
   });
   it.each([
     { type: "object", properties: { value: { type: "string", minLength: 2 } }, required: ["value"] },
@@ -313,6 +1230,33 @@ describe("Chat MCP schema validation", () => {
     expect(() => session.validate("audit_write", {value:[2]})).not.toThrow();
   });
 
+  it("accepts GitHub MCP's x-mcp-header annotation and still enforces the schema", async () => {
+    const toolSchema = {
+      type: "object",
+      properties: { owner: { type: "string", "x-mcp-header": "owner" }, repo: { type: "string", "x-mcp-header": "repo" } },
+      required: ["owner", "repo"],
+    };
+    const f = fixture("", toolSchema);
+    const session = await f.mount();
+    expect(() => session.validate("audit_write", { owner: "octo", repo: "hello" })).not.toThrow();
+    expect(() => session.validate("audit_write", { owner: "octo" })).toThrow("input schema");
+    expect(() => session.validate("audit_write", { owner: 1, repo: "hello" })).toThrow("input schema");
+  });
+
+  it("accepts Google MCP's x-google-enum-descriptions annotation and still enforces the enum", async () => {
+    const toolSchema = {
+      type: "object",
+      properties: {
+        value: { type: "string", enum: ["METRIC", "IMPERIAL"], "x-google-enum-descriptions": ["Metric units.", "Imperial units."] },
+      },
+      required: ["value"],
+    };
+    const f = fixture("", toolSchema);
+    const session = await f.mount();
+    expect(() => session.validate("audit_write", { value: "METRIC" })).not.toThrow();
+    expect(() => session.validate("audit_write", { value: "KELVIN" })).toThrow("input schema");
+  });
+
   it.each([
     ["email", "user@example.com", "invalid"],
     ["uri", "https://example.com/path", "not a uri"],
@@ -324,13 +1268,224 @@ describe("Chat MCP schema validation", () => {
     expect(() => session.validate("audit_write", {value:invalid})).toThrow("input schema");
   });
 
+  const unknownField = { $id: "/schemas/unknown", title: "unknown" };
   it.each([
-    { type: "object", properties: {value:{type:"string",format:"unregistered-format"}} },
-    { type: "object", properties: {value:{$ref:"https://example.invalid/private-schema"}} },
-    { type: "object", properties: {value:{type:"string",unrecognizedAssertion: true}} },
-  ])("refuses schemas it cannot validate instead of silently weakening them %#", async (toolSchema) => {
+    ["OpenAPI's example", { type: "object", properties: { value: { type: "string", example: "hello" } }, required: ["value"] }],
+    ["a vendor x- extension and OpenAPI's discriminator", { type: "object", "x-generator": "openapi", discriminator: { propertyName: "value" }, properties: { value: { type: "string", "x-order": 1 } }, required: ["value"] }],
+    ["VS Code's markdownDescription", { type: "object", properties: { value: { type: "string", markdownDescription: "**Value**" } }, required: ["value"] }],
+    ["Effect Schema's repeated $id", { $schema: "http://json-schema.org/draft-07/schema#", type: "object", properties: { value: { type: "string" }, a: unknownField, b: unknownField }, required: ["value"] }],
+    ["draft-07 named without its #", { $schema: "http://json-schema.org/draft-07/schema", type: "object", properties: { value: { type: "string" } }, required: ["value"] }],
+  ])("mounts a server whose schema carries %s, and still enforces every constraint", async (_label, toolSchema) => {
     const f = fixture("", toolSchema);
-    await expect(f.mount()).rejects.toThrow("schema could not be validated");
-    expect(alive(f.read().pid)).toBe(false);
+    const session = await f.mount();
+    expect(session.skipped).toEqual([]);
+    expect(session.definitions[0]!.function.parameters).toEqual(toolSchema);
+    expect(() => session.validate("audit_write", { value: "ok" })).not.toThrow();
+    expect(() => session.validate("audit_write", { value: 7 })).toThrow("input schema");
+    expect(() => session.validate("audit_write", {})).toThrow("input schema");
+  });
+
+  it("keeps a property named like a dropped keyword", async () => {
+    const g = fixture("", { type: "object", properties: { example: { type: "string", example: "x" } }, required: ["example"] });
+    const session = await g.mount();
+    expect(() => session.validate("audit_write", { example: "ok" })).not.toThrow();
+    expect(() => session.validate("audit_write", {})).toThrow("input schema");
+  });
+
+  it.each([
+    ["an unknown format", { type: "object", properties: { value: { type: "string", format: "unregistered-format" } }, required: ["value"] }, "lenient"],
+    ["an unknown keyword", { type: "object", properties: { value: { type: "string", unrecognizedAssertion: true } }, required: ["value"] }, "lenient"],
+    ["a malformed vendor annotation", { type: "object", properties: { value: { type: "string", "x-mcp-header": 5 } }, required: ["value"] }, "object"],
+    ["an external $ref", { type: "object", properties: { value: { $ref: "https://example.invalid/private-schema", description: "Value" } }, required: ["value"] }, "object"],
+    ["a $ref to a definition it does not hold", { type: "object", properties: { value: { $ref: "#/$defs/missing" } }, required: ["value"] }, "object"],
+  ])("mounts a tool whose schema has %s, checks what it can and leaves the rest to the server", async (_label, toolSchema, check) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const f = fixture("", toolSchema);
+      const session = await f.mount();
+      expect(session.skipped).toEqual([]);
+      expect(session.definitions.map((tool) => tool.function.name)).toEqual(["audit_write"]);
+      expect(JSON.stringify(session.definitions[0]!.function.parameters)).not.toMatch(/example\.invalid|missing/);
+      expect(() => session.validate("audit_write", { value: "ok" })).not.toThrow();
+      if (check === "lenient") expect(() => session.validate("audit_write", { value: 7 })).toThrow("input schema");
+      else expect(() => session.validate("audit_write", { value: 7 })).not.toThrow();
+      await expect(session.execute("audit_write", { value: "ok" }, f.controller.signal)).resolves.toEqual({ ok: true, text: "recorded:ok" });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('"audit" tool "write": its input schema could not be compiled whole'));
+    } finally { warn.mockRestore(); }
+  });
+
+  it("honors the configured per-call timeout instead of the fixed default", async () => {
+    const delayed = `if (message.method === "tools/call") { setTimeout(() => reply(message, {content:[{type:"text",text:"recorded:"+message.params.arguments.value}]}), 400); return; }`;
+    const f = fixture(delayed);
+    const short = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal, false, undefined, 100);
+    sessions.push(short);
+    await expect(short.execute("audit_write", { value: "x" }, f.controller.signal)).resolves.toMatchObject({ ok: false, text: expect.stringContaining("MCP request timed out") });
+    await expect(f.read().calls.filter((call) => call.method === "tools/call")).toHaveLength(1);
+
+    const long = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal, false, undefined, 5_000);
+    sessions.push(long);
+    await expect(long.execute("audit_write", { value: "y" }, f.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:y" });
+  });
+});
+
+/** What an OpenAI-compatible provider checks a request's tools against: a function name it accepts, and parameters that are
+ * a valid JSON Schema with an object root and no reference it would have to fetch. */
+function expectProviderAccepts(session: ChatToolSession) {
+  const metaSchema = new Ajv2020({ strict: false });
+  for (const { type, function: fn } of session.definitions) {
+    expect(type).toBe("function");
+    expect(fn.name).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
+    expect(fn.parameters.type).toBe("object");
+    expect(metaSchema.validateSchema(fn.parameters), `${fn.name}: ${JSON.stringify(metaSchema.errors)}`).toBe(true);
+    for (const ref of JSON.stringify(fn.parameters).match(/"\$ref":"[^"]*"/g) ?? []) expect(ref).toMatch(/^"\$ref":"#/);
+  }
+}
+
+describe("Chat MCP servers with a schema the checker cannot compile whole", () => {
+  async function mountRemote(tools: typeof EXECUTOR_LIKE_TOOLS, name = "executor-2") {
+    const remote = await startFakeHttpMcp({ tools });
+    const controller = new AbortController(); controllers.push(controller);
+    try {
+      const session = await mountChatTools({ custom: { [name]: { type: "http", url: remote.url, headers: {} } } }, controller.signal);
+      sessions.push(session);
+      return { remote, controller, session };
+    } catch (error) { await remote.close(); throw error; }
+  }
+
+  it("mounts every tool of an Executor gateway, whose skills tool has 2020-12's dependentRequired and no $schema, and enforces it", async () => {
+    const { remote, controller, session } = await mountRemote(EXECUTOR_LIKE_TOOLS);
+    try {
+      expect(session.skipped).toEqual([]);
+      expect(chatToolNotices(session)).toEqual([]);
+      expect(session.definitions.map((tool) => tool.function.name)).toEqual(EXECUTOR_LIKE_TOOLS.map((tool) => `executor_2_${tool.name}`));
+      expect(session.definitions[0]!.function.parameters).toEqual(EXECUTOR_LIKE_TOOLS[0]!.inputSchema);
+      expect(() => session.validate("executor_2_skills", {})).not.toThrow();
+      expect(() => session.validate("executor_2_skills", { app: "executor", name: "executor" })).not.toThrow();
+      expect(() => session.validate("executor_2_skills", { name: "executor" })).toThrow("input schema");
+      expect(() => session.validate("executor_2_call", { calls: { path: "tools.github.issues.list", input: {} } })).not.toThrow();
+      expect(() => session.validate("executor_2_call", { calls: [] })).toThrow("input schema");
+      await expect(session.execute("executor_2_skills", { app: "executor" }, controller.signal)).resolves.toMatchObject({ ok: true });
+      expect(remote.calls).toEqual([{ name: "skills", arguments: { app: "executor" } }]);
+      expectProviderAccepts(session);
+    } finally { await remote.close(); }
+  });
+
+  it("mounts every tool when one schema cannot be compiled at all, and leaves that tool's check to the server", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const broken = { name: "broken", description: "References a schema elsewhere", inputSchema: {
+      type: "object", properties: { item: { $ref: "https://example.invalid/item.json", description: "The item" }, note: { $ref: "#/$defs/note" } },
+      required: ["item"], $defs: { note: { type: "string" } },
+    } };
+    const { remote, controller, session } = await mountRemote([...EXECUTOR_LIKE_TOOLS, broken]);
+    try {
+      expect(session.skipped).toEqual([]);
+      expect(session.definitions.map((tool) => tool.function.name)).toEqual([...EXECUTOR_LIKE_TOOLS, broken].map((tool) => `executor_2_${tool.name}`));
+      expect(session.definitions.at(-1)!.function.parameters).toEqual({
+        type: "object", properties: { item: { description: "The item" }, note: { $ref: "#/$defs/note" } }, required: ["item"], $defs: { note: { type: "string" } },
+      });
+      expect(() => session.validate("executor_2_broken", { item: 7 })).not.toThrow();
+      await expect(session.execute("executor_2_broken", { item: { id: 1 } }, controller.signal)).resolves.toMatchObject({ ok: true });
+      expect(remote.calls).toEqual([{ name: "broken", arguments: { item: { id: 1 } } }]);
+      expect(() => session.validate("executor_2_skills", { name: "executor" })).toThrow("input schema");
+      expectProviderAccepts(session);
+    } finally { await remote.close(); warn.mockRestore(); }
+  });
+});
+
+describe("Chat MCP tool limit, fairly shared", () => {
+  function catalog(names: readonly string[]) {
+    const { dir, server } = catalogServer(names);
+    dirs.push(dir);
+    return server;
+  }
+  /** Built-ins of 102 tools, four entries for one URL server, an Executor gateway and a memory server. */
+  async function customerTurn(toolLimit?: number | null) {
+    const reason = await startFakeHttpMcp({ tools: whopLikeCatalog(12) });
+    const executor = await startFakeHttpMcp({ tools: EXECUTOR_LIKE_TOOLS });
+    const reasonEntry = { type: "http" as const, url: reason.url, headers: { authorization: "Bearer same-sign-in" } };
+    const custom = {
+      reason: reasonEntry, "reason-2": { ...reasonEntry }, "reason-3": { ...reasonEntry, headers: { Authorization: "Bearer same-sign-in" } }, "reason-4": { ...reasonEntry },
+      "executor-2": { type: "http" as const, url: executor.url, headers: {} },
+      basicmemory: catalog(syntheticToolNames("memory", 10)),
+    };
+    const controller = new AbortController(); controllers.push(controller);
+    const closeRemotes = async () => { await reason.close(); await executor.close(); };
+    try {
+      const session = await mountChatTools({
+        localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" },
+        browser: catalog(syntheticToolNames("agent_browser", 32)),
+        agents: catalog(syntheticToolNames("agent", 42)),
+        custom,
+      }, controller.signal, true, undefined, undefined, undefined, undefined, undefined, toolLimit);
+      sessions.push(session);
+      return { session, reason, controller, closeRemotes, names: session.definitions.map((tool) => tool.function.name) };
+    } catch (error) { await closeRemotes(); throw error; }
+  }
+
+  it("mounts one server for entries with the same address and sign-in, keeps the small connectors whole and searches the biggest", async () => {
+    const { session, reason, controller, closeRemotes, names } = await customerTurn();
+    try {
+      expect(session.merged).toEqual([{ server: "reason", same: ["reason-2", "reason-3", "reason-4"] }]);
+      expect(session.skipped).toEqual([]);
+      expect(session.trimmed).toEqual([]);
+      expect(session.budget.servers).toEqual([
+        { name: "reason", tools: 12, direct: false }, { name: "executor-2", tools: 6, direct: true }, { name: "basicmemory", tools: 10, direct: true },
+      ]);
+      expect(names.length + 1).toBeLessThanOrEqual(128);
+      expect(names).toEqual(expect.arrayContaining([...syntheticToolNames("basicmemory_memory", 10), "executor_2_skills", "mcp_search_tools", "mcp_call_tool"]));
+      expect(names.filter((name) => name.startsWith("reason"))).toEqual([]);
+      expect(chatToolNotices(session)).toEqual([
+        'MCP servers "reason-2", "reason-3" and "reason-4" connect to the same address with the same sign-in as "reason", so their tools are listed once, under "reason".',
+        'To fit the model\'s 128-tool limit, the tools of "reason" are reached through the tool search this turn.',
+      ]);
+      const search = session.definitions.find((tool) => tool.function.name === "mcp_search_tools")!;
+      expect(search.function.description).toContain('the MCP servers "reason"');
+      const found = JSON.parse((await session.execute("mcp_search_tools", { query: "list payments" }, controller.signal)).text);
+      expect(found.matches[0].name).toBe("reason_payments_list");
+      const call = { name: "reason_payments_list", arguments: { company_id: "biz_1" } };
+      expect(session.view("mcp_call_tool", call)).toMatchObject({ title: "reason_payments_list", input: { company_id: "biz_1" }, ask: true });
+      await expect(session.execute("mcp_call_tool", call, controller.signal)).resolves.toMatchObject({ ok: true, text: "remote execution recorded" });
+      expect(reason.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
+      expectProviderAccepts(session);
+    } finally { await closeRemotes(); }
+  });
+
+  it("lists every tool directly for a provider that takes any number", async () => {
+    const { session, closeRemotes, names } = await customerTurn(null);
+    try {
+      expect(session.budget).toEqual({ limit: null, listed: names.length, servers: [
+        { name: "reason", tools: 12, direct: true }, { name: "executor-2", tools: 6, direct: true }, { name: "basicmemory", tools: 10, direct: true },
+      ] });
+      expect(names).toHaveLength(28 + 32 + 42 + 12 + 6 + 10);
+      expect(names.some((name) => name.startsWith("mcp_"))).toBe(false);
+      expect(chatToolNotices(session)).toEqual([expect.stringContaining('"reason-2", "reason-3" and "reason-4"')]);
+    } finally { await closeRemotes(); }
+  });
+
+  it("lists the turn's tools again within a limit a provider names, and still reaches the rest through the tool search", async () => {
+    const { session, controller, closeRemotes } = await customerTurn(null);
+    try {
+      await session.refit(116);
+      const names = session.definitions.map((tool) => tool.function.name);
+      expect(names.length).toBeLessThanOrEqual(115);
+      expect(session.budget.limit).toBe(116);
+      expect(session.budget.servers.filter((server) => !server.direct).map((server) => server.name)).toEqual(["reason", "basicmemory"]);
+      await expect(session.execute("mcp_call_tool", { name: "basicmemory_memory_3", arguments: {} }, controller.signal)).resolves.toEqual({ ok: true, text: "ran memory_3" });
+      await expect(session.execute("executor_2_search", { query: "issues" }, controller.signal)).resolves.toMatchObject({ ok: true });
+    } finally { await closeRemotes(); }
+  });
+
+  it("keeps entries with the same address but different sign-ins apart", async () => {
+    const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(3) });
+    const controller = new AbortController(); controllers.push(controller);
+    try {
+      const session = await mountChatTools({ custom: {
+        work: { type: "http", url: remote.url, headers: { authorization: "Bearer work" } },
+        home: { type: "http", url: remote.url, headers: { authorization: "Bearer home" } },
+      } }, controller.signal);
+      sessions.push(session);
+      expect(session.merged).toEqual([]);
+      expect(session.budget.servers.map((server) => server.name)).toEqual(["work", "home"]);
+    } finally { await remote.close(); }
   });
 });

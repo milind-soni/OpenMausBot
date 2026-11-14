@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const sounds = vi.hoisted(() => ({ enabled: true }));
+const sounds = vi.hoisted(() => ({ enabled: true, finished: true }));
 vi.mock("./notification-preferences", () => ({
   notificationSoundsEnabled: () => sounds.enabled,
+  finishedNotificationsEnabled: () => sounds.finished,
 }));
 
+import { setLocale } from "./i18n";
 import {
   buildNotificationOptions,
   requestNotificationPermission,
@@ -41,6 +43,7 @@ function installNotification(permission: NotificationPermission, focused = false
 afterEach(() => {
   vi.unstubAllGlobals();
   sounds.enabled = true;
+  sounds.finished = true;
 });
 
 describe("desktop notifications", () => {
@@ -55,6 +58,32 @@ describe("desktop notifications", () => {
     const { requestPermission } = installNotification("default");
     await requestNotificationPermission();
     expect(requestPermission).toHaveBeenCalledOnce();
+  });
+
+  it("contains rejected and synchronous permission failures so Settings can retry", async () => {
+    const { requestPermission } = installNotification("default");
+    requestPermission.mockRejectedValueOnce(new Error("blocked"));
+    await expect(requestNotificationPermission()).resolves.toBe("default");
+    requestPermission.mockImplementationOnce(() => { throw new Error("unavailable"); });
+    await expect(requestNotificationPermission()).resolves.toBe("default");
+    await expect(requestNotificationPermission()).resolves.toBe("granted");
+  });
+
+  it("reports a permission already decided without asking again", async () => {
+    const { requestPermission } = installNotification("granted");
+    await expect(requestNotificationPermission()).resolves.toBe("granted");
+    expect(requestPermission).not.toHaveBeenCalled();
+  });
+
+  it("this device's switch mutes finished-work notices, never approval, sign-in or spend ones", () => {
+    const { notices } = installNotification("granted");
+    sounds.finished = false;
+    showNotification(frame, vi.fn());
+    expect(notices).toHaveLength(0);
+    showNotification({ ...frame, kind: "approval" }, vi.fn());
+    showNotification({ ...frame, kind: "sign-in" }, vi.fn());
+    showNotification({ ...frame, kind: "spend" }, vi.fn());
+    expect(notices).toHaveLength(3);
   });
 
   it("shows a notification after permission is granted", () => {
@@ -79,6 +108,12 @@ describe("desktop notifications", () => {
 
     expect(notices).toHaveLength(1);
     expect(notices[0]!.options).toMatchObject({ tag: "openmausbot:spend", icon: undefined });
+  });
+
+  it("shows a stored Markdown body as plain text", () => {
+    const { notices } = installNotification("granted");
+    showNotification({ ...frame, body: "**Facture reçue** — [voir](https://example.com)" }, vi.fn());
+    expect(notices[0]?.options?.body).toBe("Facture reçue — voir");
   });
 
   it("still alerts a focused app when another task is visible", () => {
@@ -113,8 +148,6 @@ describe("desktop notifications", () => {
       vi.fn(),
     );
 
-    // one bot across two threads shares a tag, so the platform replaces
-    // rather than stacks; another bot gets its own key
     expect(notices[0]?.options?.tag).toBe(`openmausbot:${frame.botId}`);
     expect(notices[1]?.options?.tag).toBe(`openmausbot:${frame.botId}`);
     showNotification({ ...frame, botId: "bot-2" }, vi.fn());
@@ -130,6 +163,62 @@ describe("desktop notifications", () => {
 
     showNotification(frame, vi.fn(), null);
     expect(notices[1]?.options?.icon).toBeUndefined();
+  });
+});
+
+describe("on the desktop app, where main shows the banner so its click outlives the page", () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  function installBridge(answer: () => Promise<boolean>) {
+    const installed = installNotification("granted");
+    const show = vi.fn(answer);
+    vi.stubGlobal("window", { focus: vi.fn(), ogb: { desktopNotifications: { show } } });
+    return { ...installed, show };
+  }
+
+  it("asks main, with the thread to come back to, and shows no banner of its own", async () => {
+    const { notices, show } = installBridge(async () => true);
+    showNotification(frame, vi.fn(), "/api/attachments/face.png");
+    await flush();
+    expect(show).toHaveBeenCalledWith({
+      title: frame.title, body: frame.body, tag: "openmausbot:bot-1", silent: false, picture: "/api/attachments/face.png", botId: "bot-1", threadId: "thread-1",
+    });
+    expect(notices).toHaveLength(0);
+  });
+
+  it("hands main the same plain line for an older Markdown body", async () => {
+    const { show } = installBridge(async () => true);
+    showNotification({ ...frame, body: "**Facture reçue**" }, vi.fn());
+    await flush();
+    expect(show).toHaveBeenCalledWith(expect.objectContaining({ body: "Facture reçue" }));
+  });
+
+  it("asks main for nothing without the person's permission or over the thread on screen, as ever", async () => {
+    const denied = installBridge(async () => true);
+    vi.stubGlobal("Notification", class { static permission = "denied"; });
+    showNotification(frame, vi.fn());
+    await flush();
+    expect(denied.show).not.toHaveBeenCalled();
+    const { show } = installBridge(async () => true);
+    vi.stubGlobal("document", { hasFocus: () => true });
+    showNotification(frame, vi.fn(), undefined, frame.threadId);
+    await flush();
+    expect(show).not.toHaveBeenCalled();
+  });
+
+  it.each([["says no", async () => false], ["fails", async () => { throw new Error("no handler"); }]])("shows its own when main %s, so a banner is never lost", async (_case, answer) => {
+    const { notices } = installBridge(answer as () => Promise<boolean>);
+    const onOpen = vi.fn();
+    showNotification(frame, onOpen);
+    await flush();
+    expect(notices).toHaveLength(1);
+    notices[0]!.onclick!();
+    expect(onOpen).toHaveBeenCalledWith({ botId: "bot-1", threadId: "thread-1" });
+  });
+
+  it("keeps the page's own banner on an older app, which has no bridge for it", () => {
+    const { notices } = installNotification("granted");
+    showNotification(frame, vi.fn());
+    expect(notices).toHaveLength(1);
   });
 });
 
@@ -155,5 +244,18 @@ describe("buildNotificationOptions", () => {
       tag: "openmausbot:bot-9",
       icon: undefined,
     });
+  });
+});
+
+describe("notification titles", () => {
+  afterEach(() => setLocale("en"));
+
+  it.each(["en", "pt-br"] as const)("displays the server's title unchanged with client language %s", (language) => {
+    const { notices } = installNotification("granted");
+    setLocale(language);
+    for (const title of ["Maus em Launch tem uma pergunta", "Maus in Launch has a question", "Maus in Launch hat eine Frage"]) {
+      showNotification({ ...frame, kind: "question", groupId: "g1", title }, vi.fn());
+      expect(notices.at(-1)?.title).toBe(title);
+    }
   });
 });

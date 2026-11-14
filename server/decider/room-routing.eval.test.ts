@@ -1,18 +1,7 @@
-// Live eval of room routing against the real decision model, on the bench's
-// labelled room messages (fixtures/room-routing.json). It spends real money
-// (about $0.002 a run: 53 calls of ~700 input tokens at $0.042/M), so it runs
-// only when asked:
-//
+// Live eval against the real decision model; spends real money, so it runs only when asked:
 //   OMB_JEV_LIVE_EVAL=1 OMB_JEV_API_KEY=… npx vitest run server/decider/room-routing.eval.test.ts --reporter=default
-//
-// (--reporter=default keeps the printed summary visible where vitest would
-// otherwise pick a quieter reporter, such as under a coding agent.)
-//
-// CI never sets the flag, so the suite is skipped there. It routes through the
-// same request builder and threshold the server uses. The option set is the
-// production one (members + __everyone__, no "nobody"), so messages labelled
-// "nobody" are reported, not scored: an Auto room has no silent answer and
-// they end with the lead, as a lead-mode room does today.
+//   OMB_OPENROUTER_LIVE_EVAL=1 OMB_OPENROUTER_DECIDER_KEY=… [OMB_OPENROUTER_EVAL_MODEL=vendor/model] (same command)
+// Messages labelled "nobody" are reported, not scored: an Auto room has no silent answer.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -27,15 +16,36 @@ interface Fixture {
   items: Array<{ id: string; set: string; room: string; from?: string; recent?: RoomRoutingInput["recent"]; message: string; gold: string[] }>;
 }
 
-const LIVE = process.env.OMB_JEV_LIVE_EVAL === "1";
-const KEY = process.env.OMB_JEV_API_KEY || process.env.TYPESAFE_API_KEY || "";
-const PRICE_PER_M_INPUT = 0.042;
+const RUNS = [
+  {
+    provider: "jev",
+    live: process.env.OMB_JEV_LIVE_EVAL === "1",
+    keyHint: "OMB_JEV_API_KEY (or TYPESAFE_API_KEY)",
+    key: process.env.OMB_JEV_API_KEY || process.env.TYPESAFE_API_KEY || "",
+    pricePerMInput: 0.042 as number | undefined,
+    decider: (key: string) => ({ enabled: true, key, jobs: { roomRouting: true } }),
+  },
+  {
+    provider: "openrouter",
+    live: process.env.OMB_OPENROUTER_LIVE_EVAL === "1",
+    keyHint: "OMB_OPENROUTER_DECIDER_KEY",
+    key: process.env.OMB_OPENROUTER_DECIDER_KEY || "",
+    pricePerMInput: undefined,
+    decider: (key: string) => ({
+      enabled: true,
+      provider: "openrouter" as const,
+      openrouterKey: key,
+      ...(process.env.OMB_OPENROUTER_EVAL_MODEL ? { openrouterModel: process.env.OMB_OPENROUTER_EVAL_MODEL } : {}),
+      jobs: { roomRouting: true },
+    }),
+  },
+];
 
-describe.skipIf(!LIVE)("room routing, live", () => {
+for (const run of RUNS) describe.skipIf(!run.live)(`room routing, live (${run.provider})`, () => {
   it("routes the bench's room messages", { timeout: 180_000 }, async () => {
-    expect(KEY, "set OMB_JEV_API_KEY (or TYPESAFE_API_KEY) for the live eval").not.toBe("");
+    expect(run.key, `set ${run.keyHint} for the live eval`).not.toBe("");
     const fixture = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "room-routing.json"), "utf8")) as Fixture;
-    const real = createDecider({ config: () => ({ decider: { enabled: true, key: KEY, jobs: { roomRouting: true } } }) });
+    const real = createDecider({ config: () => ({ decider: run.decider(run.key) }) });
     const rows: Array<{ id: string; set: string; gold: string[]; route: RoomRoute; answer?: DeciderResult<ChoiceAnswer> }> = [];
 
     for (const item of fixture.items) {
@@ -69,7 +79,7 @@ describe.skipIf(!LIVE)("room routing, live", () => {
       `room routing live eval: ${correct.length}/${scored.length} routed right, ${fellBack.length} fell back to the lead, ${confidentlyWrong.length} routed wrong`,
       `"nobody" messages (${rows.length - scored.length}): ${rows.filter((row) => row.gold.includes("nobody")).map((row) => row.route.kind).join(", ")}`,
       `latency p50 ${pct(0.5)} ms, p95 ${pct(0.95)} ms, over 1.5 s: ${latencies.filter((ms) => ms > 1_500).length}`,
-      `input tokens ${tokens} ≈ $${((tokens / 1e6) * PRICE_PER_M_INPUT).toFixed(4)}`,
+      `input tokens ${tokens}${run.pricePerMInput === undefined ? "" : ` ≈ $${((tokens / 1e6) * run.pricePerMInput).toFixed(4)}`}`,
       ...confidentlyWrong.map((row) => `WRONG ${summarize(row)}`),
       ...fellBack.map((row) => `FALLBACK ${summarize(row)}`),
     ].join("\n"));

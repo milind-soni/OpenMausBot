@@ -1,23 +1,31 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { hostname, tmpdir } from "node:os";
+import { join, relative } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { IncomingMessage } from "node:http";
 import { afterEach, expect, it } from "vitest";
 import {
-  CLOUD_HOME_MARKER, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_MAX_TTL_S, CLOUD_PAIRING_NONCE_MS, CLOUD_PAIRING_SKEW_S, cloudHomeConfiguration, cloudHomeConfigured,
-  cloudHomeHost, cloudPairingSignature, createCloudPairing, prepareCloudHomeVolume, withoutIgnoredCloudKeys,
+  CLOUD_BROWSER_SIGN_IN_MAX_TTL_S, CLOUD_HOME_MARKER, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_MAX_TTL_S, CLOUD_PAIRING_NONCE_MS, CLOUD_PAIRING_SKEW_S, cloudHomeConfiguration, cloudHomeConfigured,
+  cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, cloudRequestSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
+  withoutIgnoredCloudKeys,
 } from "./cloud-home.ts";
-import { cloudHomeChildEnvironments, passwdIds } from "./cloud-home-start.ts";
+import {
+  cloudHomeChildEnvironments, cloudHomeDataDir, codeTrustProblem, edgeCertIssuers, edgeClientAddress, edgeHold, hardenHost, hasCapability, holdVolume, passwdIds, prepareCloudHomeData,
+  readCloudSecretsFile, setprivArgs, spawnWithSecrets,
+} from "./cloud-home-start.ts";
+import { RESTART_EXIT_CODE, restartPolicy } from "./restart.ts";
 import { hostedModelPolicy } from "./hosted-models.ts";
 import { resolveRequestAuth } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+import { portableWorkspaceConfig, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 
 const directories: string[] = [];
 afterEach(async () => { for (const directory of directories.splice(0)) await removeTempDir(directory); });
 const directory = () => { const value = mkdtempSync(join(tmpdir(), "omb-cloud-home-")); directories.push(value); return value; };
 
-// Shapes exactly as openmaus-cloud's provisioner writes them (cloud-machines.ts).
+// Shapes exactly as openmaus-cloud's provisioner writes them.
 const secret = "S".repeat(43);
 const machineId = "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93";
 const contract = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
@@ -31,7 +39,6 @@ const gatewayUrl = "https://cloud.example.test/api/cloud/gateway/g0123456789abcd
 const withGateway = (extra: NodeJS.ProcessEnv = {}) => contract({ OMB_HOSTED_MODEL_URL: gatewayUrl, OMB_HOSTED_MODEL_TOKEN: token,
   OMB_HOSTED_MODELS: JSON.stringify({ anthropic: ["claude-sonnet-5"], openai: ["gpt-5.6-sol"], openrouter: ["anthropic/claude-sonnet-5"] }), ...extra });
 
-// ── boot contract ──────────────────────────────────────────────────────────
 
 it("is off on every ordinary server and desktop", () => {
   expect(cloudHomeConfigured({})).toBe(false);
@@ -41,17 +48,36 @@ it("is off on every ordinary server and desktop", () => {
 
 it("reads the Admin's contract", () => {
   expect(cloudHomeConfiguration(contract())).toEqual({
-    machineId, adminOrigin: "https://cloud.example.test", publicOrigin: "https://omb-u-1a2b3c4d5e6f.fly.dev", bootstrapSecret: secret, warnings: [],
+    role: "home", team: null, machineId, adminOrigin: "https://cloud.example.test", publicOrigin: "https://omb-u-1a2b3c4d5e6f.fly.dev", legacyOrigins: [], bootstrapSecret: secret,
+    warnings: [],
   });
   expect(cloudHomeConfiguration(contract({ OMB_CLOUD_ADMIN_URL: "https://cloud.example.test/" }))!.adminOrigin).toBe("https://cloud.example.test");
 });
 
+it("reads the addresses a moved home answered at before, exactly and once each, without its own", () => {
+  const legacy = (value: string) => cloudHomeConfiguration(contract({ OMB_CLOUD_LEGACY_ORIGINS: value }))!.legacyOrigins;
+  expect(legacy("https://omb-u-old.fly.dev")).toEqual(["https://omb-u-old.fly.dev"]);
+  expect(legacy(" https://omb-u-old.fly.dev/ , https://older.example.test,https://omb-u-old.fly.dev,https://omb-u-1a2b3c4d5e6f.fly.dev ,"))
+    .toEqual(["https://omb-u-old.fly.dev", "https://older.example.test"]);
+  expect(legacy("")).toEqual([]);
+});
+
+it.each([
+  ["an http origin", "http://omb-u-old.fly.dev"],
+  ["an origin with a path", "https://omb-u-old.fly.dev/app"],
+  ["an origin with credentials", "https://user:pass@omb-u-old.fly.dev"],
+  ["a host that is not written as its origin", "https://OMB-U-OLD.fly.dev"],
+  ["a loopback name", "https://localhost"],
+  ["a loopback address", "https://127.0.0.1:8443"],
+  ["too many", Array.from({ length: 9 }, (_, at) => `https://old-${at}.example.test`).join(",")],
+])("refuses to start with %s as a former address", (_why, value) => {
+  expect(() => cloudHomeConfiguration(contract({ OMB_CLOUD_LEGACY_ORIGINS: value }))).toThrow(/Cloud home configuration is invalid: .*OMB_CLOUD_LEGACY_ORIGINS/);
+});
+
 it("ignores a platform gateway's settings with one warning, whatever they hold, and never serves them", () => {
-  // Cloud Pro includes no AI: the person signs in with their own account or key.
   const all = cloudHomeConfiguration(withGateway())!;
-  expect(Object.keys(all).sort()).toEqual(["adminOrigin", "bootstrapSecret", "machineId", "publicOrigin", "warnings"]);
+  expect(Object.keys(all).sort()).toEqual(["adminOrigin", "bootstrapSecret", "legacyOrigins", "machineId", "publicOrigin", "role", "team", "warnings"]);
   expect(all.warnings).toEqual(["ignoring OMB_HOSTED_MODEL_URL, OMB_HOSTED_MODEL_TOKEN, OMB_HOSTED_MODELS: Cloud Pro includes no AI; people sign in with their own Claude or ChatGPT account, or an API key"]);
-  // Any one of them, valid or not, is ignored the same way instead of failing the machine.
   for (const stray of [{ OMB_HOSTED_MODEL_TOKEN: token }, { OMB_HOSTED_MODEL_TOKEN: "sk-ant-api03-platform-key" }, { OMB_HOSTED_MODELS: "{not json" },
     { OMB_HOSTED_MODEL_URL: "https://gateway.attacker.test/v1" }, { OMB_HOSTED_MODELS: "" }]) {
     const config = cloudHomeConfiguration(contract(stray))!;
@@ -59,10 +85,8 @@ it("ignores a platform gateway's settings with one warning, whatever they hold, 
     const value = Object.values(stray)[0];
     if (value) expect(JSON.stringify(config)).not.toContain(value);
   }
-  // The exclusive workspace model policy stays off, so nothing routes to a gateway.
   expect(hostedModelPolicy(directory(), withGateway())).toBeNull();
   expect(hostedModelPolicy(directory(), contract({ OMB_HOSTED_MODEL_TOKEN: `omb_workspace_${"t".repeat(43)}`, OMB_HOSTED_MODELS: "{}" }))).toBeNull();
-  // Nothing the machine starts inherits them.
   expect(Object.keys(withoutIgnoredCloudKeys(withGateway())).filter((key) => (CLOUD_IGNORED_KEYS as readonly string[]).includes(key))).toEqual([]);
   expect(withoutIgnoredCloudKeys(withGateway())).toEqual(contract());
 });
@@ -93,7 +117,24 @@ it("never echoes a secret or token in its refusal", () => {
   }
 });
 
-// ── the Admin's signed pairing request ───────────────────────────────────────
+
+it("offers the built-in browser and cloud computers, never this computer or a Local VM", () => {
+  expect((["cloud", "vm", "local", "browser"] as const).filter(cloudHomeOffersPlace)).toEqual(["cloud", "browser"]);
+  expect(cloudHomePlaceRefusal("cloud")).toBeUndefined();
+  expect(cloudHomePlaceRefusal("browser")).toBeUndefined();
+});
+
+it("refuses the places it never offers with what is true there, not a setup step", () => {
+  const local = cloudHomePlaceRefusal("local")!, vm = cloudHomePlaceRefusal("vm")!;
+  expect(local).toBe("This computer isn't a place in the Cloud. Set Works on to Auto, Cloud desktop or Browser; your own computer is reached while OpenMausBot is open on it.");
+  expect(vm).toBe("Cloud bots can't use a private desktop. Set Works on to Auto, Cloud desktop or Browser.");
+  for (const text of [local, vm]) {
+    expect(text).not.toMatch(/configure|Computer panel|install|set (?:it|one) up/i);
+    // A failed turn shows the first 160 characters of its error.
+    expect(text.length).toBeLessThanOrEqual(160);
+  }
+});
+
 
 function fixture() {
   const root = directory();
@@ -106,7 +147,7 @@ function fixture() {
     return { timestamp, nonce, signature: `v1=${cloudPairingSignature(options.key ?? secret, timestamp, nonce, body)}`, body: Buffer.from(body) };
   };
   const mint = (request = sign(), source = "203.0.113.9") => pairing.handle({ ...request, source });
-  const exchange = (code: string, source = "198.51.100.4") => sessions.exchange({ code, label: "", source });
+  const exchange = (code: string, source = "198.51.100.4", browser = false) => sessions.exchange({ code, label: "", source, browser });
   return { sessions, sign, mint, exchange, advance: (ms: number) => { now += ms; }, now: () => now };
 }
 
@@ -126,6 +167,14 @@ it("matches the Admin's signature byte for byte", () => {
   // printf 'v1\\n1800000000\\nnonce-fixture-0001\\nPOST\\n/api/cloud/pairing\\n<b64url sha256 of {}>' | openssl dgst -sha256 -hmac k -binary | base64url
   expect(cloudPairingSignature("k", "1800000000", "nonce-fixture-0001", "{}")).toBe("OlkaKFywjZ3VtoYxwTWpy025Itpl14gCeUrp8JYpX2o");
   expect(cloudPairingSignature("k", "1800000000", "nonce-fixture-0001", Buffer.from("{}"))).toBe("OlkaKFywjZ3VtoYxwTWpy025Itpl14gCeUrp8JYpX2o");
+  expect(cloudRequestSignature("k", "1800000000", "nonce-fixture-0001", "POST", "/api/cloud/pairing", "{}")).toBe("OlkaKFywjZ3VtoYxwTWpy025Itpl14gCeUrp8JYpX2o");
+});
+
+it("signs a health read over its method, path and query, byte for byte as the Admin does", () => {
+  // Same vector in openmaus-cloud tests/cloud-health.test.ts:
+  // printf 'v1\n1800000000\nnonce-fixture-0001\nGET\n/api/cloud/health?after=0\n<b64url sha256 of the empty body>' | openssl dgst -sha256 -hmac k -binary | base64url
+  expect(cloudRequestSignature("k", "1800000000", "nonce-fixture-0001", "GET", "/api/cloud/health?after=0", "")).toBe("qX07j43XUqYYi8T3l9T8WnC-hWLZSYuuvmRguJpbJKc");
+  expect(cloudRequestSignature("k", "1800000000", "nonce-fixture-0001", "GET", "/api/cloud/health?after=1", "")).not.toBe("qX07j43XUqYYi8T3l9T8WnC-hWLZSYuuvmRguJpbJKc");
 });
 
 it("refuses a wrong key, a tampered request or a malformed signature, and counts each", () => {
@@ -169,7 +218,6 @@ it("refuses a replayed request for as long as its timestamp could be accepted", 
   expect(f.mint(request).status).toBe(200);
   expect(f.mint(request)).toEqual({ status: 401, body: { error: "replayed_request" } });
   expect(f.sessions.openPairings()).toHaveLength(1);
-  // The same nonce, freshly signed later, is still refused within the window.
   f.advance(CLOUD_PAIRING_NONCE_MS - 1);
   expect(f.mint(f.sign(undefined, { nonce: request.nonce }))).toEqual({ status: 401, body: { error: "replayed_request" } });
   expect(f.sessions.openPairings()).toHaveLength(0);
@@ -187,19 +235,47 @@ it("keeps every window single use and short lived, capping what the Admin asks f
   expect(f.exchange(long.body.code as string).ok).toBe(false);
   const plain = f.mint(f.sign("{}"));
   expect(plain.body.expiresAt).toBe(f.now() + 300_000);
-  expect(f.exchange(plain.body.code as string)).toMatchObject({ ok: true, session: { label: "OMB Cloud" } });
+  expect(f.exchange(plain.body.code as string)).toMatchObject({ ok: true, session: { label: "MausBot Cloud" } });
+});
+
+it("opens a browser sign-in only a browser redeems, by credential alone, for at most two minutes", () => {
+  const f = fixture();
+  const granted = f.mint(f.sign(JSON.stringify({ label: "Web browser (Cloud page)", ttlSeconds: 120, purpose: "browser", owner: "ada@example.test" })));
+  expect(f.mint(f.sign(JSON.stringify({ purpose: "browser", owner: "ada.o'neil+cloud@example-mail.test" }))).status).toBe(200);
+  expect(granted.status).toBe(200);
+  expect(Object.keys(granted.body).sort()).toEqual(["credential", "expiresAt", "purpose"]);
+  expect(granted.body).toMatchObject({ credential: expect.stringMatching(/^omb_pair_[A-Za-z0-9_-]{43}$/), expiresAt: f.now() + 120_000, purpose: "browser" });
+  const credential = granted.body.credential as string;
+  expect(f.sessions.previewBrowserSignIn(credential)).toEqual({ owner: "ada@example.test", expiresAt: f.now() + 120_000 });
+  expect(f.exchange(credential).ok).toBe(false);
+  expect(f.exchange(credential, "198.51.100.4", true)).toMatchObject({ ok: true, session: { scopes: ["admin", "client"], owner: "ada@example.test" } });
+  expect(f.sessions.previewBrowserSignIn(credential)).toBeNull();
+  expect(f.exchange(credential, "198.51.100.5", true).ok).toBe(false);
+  const long = f.mint(f.sign(JSON.stringify({ ttlSeconds: 600, purpose: "browser", owner: "ada@example.test" })));
+  expect(long.body.expiresAt).toBe(f.now() + CLOUD_BROWSER_SIGN_IN_MAX_TTL_S * 1000);
+  expect(f.mint(f.sign(JSON.stringify({ purpose: "browser", owner: "ada@example.test" }))).body.expiresAt).toBe(f.now() + CLOUD_BROWSER_SIGN_IN_MAX_TTL_S * 1000);
+  f.advance(CLOUD_BROWSER_SIGN_IN_MAX_TTL_S * 1000);
+  expect(f.exchange(long.body.credential as string, "198.51.100.4", true).ok).toBe(false);
+  const ordinary = f.mint();
+  expect(f.exchange(ordinary.body.credential as string, "198.51.100.4", true).ok).toBe(false);
+  expect(f.exchange(ordinary.body.code as string).ok).toBe(true);
 });
 
 it("refuses a body that is not the expected JSON", () => {
   const f = fixture();
   for (const body of ["[]", "not json", JSON.stringify({ label: "tab\there" }), JSON.stringify({ label: "x".repeat(81) }),
-    JSON.stringify({ ttlSeconds: 0 }), JSON.stringify({ ttlSeconds: 1.5 }), JSON.stringify({ ttlSeconds: "300" })]) {
+    JSON.stringify({ ttlSeconds: 0 }), JSON.stringify({ ttlSeconds: 1.5 }), JSON.stringify({ ttlSeconds: "300" }),
+    JSON.stringify({ purpose: "app" }), JSON.stringify({ purpose: true }),
+    ...[undefined, "", "ada", "ada@", 7, "ada@example.test\u202Eevil", "ada@exa mple.test", "a\nb@example.test", `${"a".repeat(250)}@example.test`,
+      // Printable ASCII only, one @, no angle brackets: what the Admin's email schemas accept.
+      "adé@example.test", "ada@exämple.test", "<ada@example.test", "ada@example.test>", "ada@team@example.test", "ada\t@example.test", "ada@example.test\u00a0"]
+      .map((owner) => JSON.stringify({ purpose: "browser", owner })),
+    JSON.stringify({ owner: "not an address" })]) {
     expect(f.mint(f.sign(body)).status).toBe(400);
   }
   expect(f.sessions.openPairings()).toHaveLength(0);
 });
 
-// ── the edge never makes a remote request the owner ─────────────────────────
 
 it("treats a request the edge forwards as remote, whatever Host it claims", () => {
   const sessions = new SessionRegistry({ file: join(directory(), "sessions.json") });
@@ -216,7 +292,6 @@ it("treats a request the edge forwards as remote, whatever Host it claims", () =
   }
 });
 
-// ── volume and launcher ──────────────────────────────────────────────────────
 
 it("binds a fresh volume to its machine and refuses anyone else's data", () => {
   const home = directory();
@@ -232,13 +307,101 @@ it("binds a fresh volume to its machine and refuses anyone else's data", () => {
   expect(readFileSync(join(unmarked, "notes.txt"), "utf8")).toBe("someone's data");
 });
 
-it("gives the edge only its routing name and the server the contract, never a gateway's settings", () => {
+it("a new home on a kept volume clears the data-directory lease the previous machine left, once the volume is confirmed its own, and never this machine's or another Cloud's (2026-10-23)", () => {
+  const home = directory(), dataDir = cloudHomeDataDir({}, home);
+  // The image runs on Linux, so the server is given a POSIX path; here only where it sits under the home is the point.
+  expect(relative(home, dataDir)).toBe(".openmausbot");
+  expect(cloudHomeDataDir({}, "/data")).toBe("/data/.openmausbot");
+  expect(cloudHomeDataDir({ OMB_DATA_DIR: "/elsewhere" }, home)).toBe("/elsewhere");
+  mkdirSync(join(home, "lost+found"));
+  const locked: string[] = [];
+  const lock = (volume: string) => { locked.push(volume); };
+  expect(prepareCloudHomeData(home, dataDir, "home-7f3k2", lock)).toEqual({ volume: "new", cleared: [] });
+  expect(locked).toEqual([home]);
+  // The lease the home destroyed mid-boot left (its hostname is Fly's machine id), and the previous machine's own pid.
+  const lease = join(dataDir, "openmausbot-server.lease");
+  mkdirSync(dataDir, { recursive: true });
+  const left = (host: string) => writeFileSync(lease, `${JSON.stringify({ version: 1, pid: 613, host, token: "0f5e6c4a-1b2c-4d3e-8f9a-0b1c2d3e4f5a", createdAt: 1, boot: "boot-of-the-old-machine", uptime: 44_000 })}\n`);
+  left("d8d9e0f1a2b3c4");
+  // Another Cloud's volume: refused before anything on it is read or changed.
+  expect(() => prepareCloudHomeData(home, dataDir, "home-other", lock)).toThrow(/another Cloud machine/);
+  expect(readFileSync(lease, "utf8")).toContain("d8d9e0f1a2b3c4");
+  // A volume another live home holds: refused before the volume is even checked.
+  const held = () => { throw new Error("Another MausBot home is already running on this volume. No data was changed."); };
+  expect(() => prepareCloudHomeData(home, dataDir, "home-7f3k2", held)).toThrow(/already running on this volume/);
+  expect(readFileSync(lease, "utf8")).toContain("d8d9e0f1a2b3c4");
+  expect(prepareCloudHomeData(home, dataDir, "home-7f3k2", lock)).toEqual({ volume: "existing", cleared: [{ path: lease, host: "d8d9e0f1a2b3c4", pid: 613 }] });
+  expect(existsSync(lease)).toBe(false);
+  // This machine's own lease (its server restarted by the launcher): left for the server to refuse or recover.
+  left(hostname());
+  expect(prepareCloudHomeData(home, dataDir, "home-7f3k2", lock)).toEqual({ volume: "existing", cleared: [] });
+  expect(readFileSync(lease, "utf8")).toContain(hostname());
+});
+
+it("holds its volume for as long as it lives, and says plainly why it will not start on a volume it cannot hold", () => {
+  const home = directory();
+  const calls: number[] = [];
+  const answer = (status: number | null, extra: { error?: Error; stderr?: string } = {}) => (fd: number) => { calls.push(fd); return { status, ...extra }; };
+  expect(() => holdVolume(home, answer(75))).toThrow("Another MausBot home is already running on this volume. No data was changed.");
+  expect(() => holdVolume(home, answer(null, { error: new Error("spawnSync /usr/bin/flock ENOENT") }))).toThrow(/could not lock its volume \(spawnSync \/usr\/bin\/flock ENOENT\)/);
+  expect(() => holdVolume(home, answer(1, { stderr: "flock: 3: Bad file descriptor\n" }))).toThrow(/could not lock its volume \(flock: 3: Bad file descriptor\)/);
+  holdVolume(home, answer(0));
+  // Held once: the same process never locks its own volume again (the server restarts within one container).
+  holdVolume(home, answer(75));
+  expect(calls).toHaveLength(4);
+});
+
+it.skipIf(!existsSync("/usr/bin/flock"))("a second home on a volume a live home holds refuses to start, and once that home dies, even uncleanly, the volume is free", async () => {
+  const home = directory();
+  const holder = spawn(process.execPath, ["--no-warnings", "--experimental-strip-types", "--input-type=module", "--eval",
+    `const { holdVolume } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "cloud-home-start.ts")).href)});
+     holdVolume(${JSON.stringify(home)}); process.stdout.write("held\\n"); setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "inherit"] });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      holder.stdout.on("data", (chunk: Buffer) => { if (chunk.toString().includes("held")) resolve(); });
+      holder.once("exit", (code) => reject(new Error(`the holder exited ${code}`)));
+    });
+    expect(() => holdVolume(home)).toThrow("Another MausBot home is already running on this volume. No data was changed.");
+  } finally {
+    holder.kill("SIGKILL");
+  }
+  await new Promise((resolve) => holder.once("exit", resolve));
+  holdVolume(home);
+});
+
+it("lets nobody name the client on an own server unless its owner names a proxy, and only Fly's proxy on Fly", () => {
+  const config = cloudHomeConfiguration(contract())!;
+  const own = cloudHomeChildEnvironments(config, { ...contract(), PATH: "/usr/bin" }, "/data").edge;
+  expect(own).toMatchObject({ OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "X-Forwarded-For", OMB_CLOUD_EDGE_TRUSTED_PROXIES: "" });
+  const fly = cloudHomeChildEnvironments(config, { ...contract(), PATH: "/usr/bin", FLY_APP_NAME: "omb-u-1a2b3c4d5e6f" }, "/data").edge;
+  expect(fly).toMatchObject({ OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "Fly-Client-IP", OMB_CLOUD_EDGE_TRUSTED_PROXIES: "private_ranges" });
+  expect(edgeClientAddress({ FLY_APP_NAME: " " })).toEqual(edgeClientAddress({}));
+  // Both values are written into the edge's config as they are, so the edge's own names are never taken from outside.
+  for (const env of [{}, { FLY_APP_NAME: "omb-u-1a2b3c4d5e6f" }, { OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "X-Real-IP", OMB_CLOUD_EDGE_TRUSTED_PROXIES: "0.0.0.0/0" }]) {
+    const edge = cloudHomeChildEnvironments(config, { ...contract(), PATH: "/usr/bin", ...env }, "/data").edge;
+    expect(edge.OMB_CLOUD_EDGE_CLIENT_IP_HEADER).toMatch(/^(?:Fly-Client-IP|X-Forwarded-For)$/);
+    expect(edge.OMB_CLOUD_EDGE_TRUSTED_PROXIES).toMatch(/^(?:private_ranges|)$/);
+  }
+  expect(cloudHomeChildEnvironments(config, { ...contract(), PATH: "/usr/bin", FLY_APP_NAME: "omb-u-1a2b3c4d5e6f" }, "/data").server).not.toHaveProperty("OMB_CLOUD_EDGE_CLIENT_IP_HEADER");
+});
+
+it("gives the edge only its routing name and the server the contract, never a gateway's settings or a secret", () => {
+  const relay = { OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}`, OMB_CLOUD_VOICE_TOKEN: `omb_voice_${"v".repeat(43)}`, OMB_CLOUD_DECIDER_TOKEN: `omb_decide_${"d".repeat(43)}`,
+    OMB_CLOUD_AI_TOKEN: `omb_ai_${"a".repeat(43)}` };
   const config = cloudHomeConfiguration(withGateway())!;
-  const { server, edge } = cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin" }, "/data");
-  expect(server).toMatchObject({ HOME: "/data", OMB_DATA_DIR: "/data/.openmausbot", OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800",
-    OMB_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_WEBHOOK_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_CLOUD_BOOTSTRAP_SECRET: secret });
+  const { server, edge, secrets } = cloudHomeChildEnvironments(config, { ...withGateway(), ...relay, PATH: "/usr/bin" }, "/data");
+  expect(server).toMatchObject({ HOME: "/data", OMB_DATA_DIR: "/data/.openmausbot", NODE_COMPILE_CACHE: "/data/.openmausbot/cache/node-compile", OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800",
+    OMB_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_WEBHOOK_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_CLOUD_SECRETS_FD: "3" });
   for (const key of CLOUD_IGNORED_KEYS) expect(server).not.toHaveProperty(key);
+  // The bot box switch reaches the server; an unknown name does not.
+  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_BOT_BOX: "0", OMB_SOMETHING_ELSE: "x" }, "/data").server).toMatchObject({ OMB_BOT_BOX: "0" });
+  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_SOMETHING_ELSE: "x" }, "/data").server).not.toHaveProperty("OMB_SOMETHING_ELSE");
   expect(JSON.stringify(server)).not.toContain(token);
+  expect(secrets).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, ...relay });
+  for (const value of Object.values(secrets)) {
+    expect(JSON.stringify(server)).not.toContain(value);
+    expect(JSON.stringify(edge)).not.toContain(value);
+  }
   expect(edge.OMB_CLOUD_PUBLIC_HOST).toBe(cloudHomeHost(config));
   expect(JSON.stringify(edge)).not.toContain(token);
   expect(JSON.stringify(edge)).not.toContain(secret);
@@ -246,19 +409,468 @@ it("gives the edge only its routing name and the server the contract, never a ga
   expect(passwdIds("root:x:0:0::/root:/bin/sh\n", "maus")).toBeNull();
 });
 
+// The fallback CA's address is written into the edge's config, so nothing but a plain address may reach it.
+const fallbackIssuers = "cert_issuer acme\ncert_issuer acme https://acme.zerossl.com/v2/DV90 {\n\temail certs@example.test\n}";
+
+it("gives a home that ends TLS a fallback CA only when its operator names the account, Let's Encrypt first", () => {
+  const config = cloudHomeConfiguration(contract({ OMB_CLOUD_EDGE_TLS: "1" }))!;
+  const edge = (extra: NodeJS.ProcessEnv) => cloudHomeChildEnvironments(config, { ...contract({ OMB_CLOUD_EDGE_TLS: "1" }), PATH: "/usr/bin", ...extra }, "/data").edge;
+  expect(edge({}).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe("");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: "" }).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe("");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: "  " }).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe("");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: " certs@example.test " }).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe(fallbackIssuers);
+  // Let's Encrypt's issuer has no address, so it keeps the account it already has on the volume.
+  expect(fallbackIssuers.split("\n")[0]).toBe("cert_issuer acme");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test", OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "1" }).OMB_CLOUD_EDGE_CERT_ISSUERS)
+    .toBe("cert_issuer acme https://acme.zerossl.com/v2/DV90 {\n\temail certs@example.test\n}");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test", OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "0" }).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe(fallbackIssuers);
+  // The address is the edge's alone: the server never gets it.
+  expect(cloudHomeChildEnvironments(config, { ...contract({ OMB_CLOUD_EDGE_TLS: "1" }), PATH: "/usr/bin", OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test" }, "/data").server)
+    .not.toHaveProperty("OMB_CLOUD_EDGE_ACME_EMAIL");
+  // Without edge TLS (Fly, or a server where something else ends TLS) it is not read at all.
+  for (const extra of [{}, { FLY_APP_NAME: "omb-u-1a2b3c4d5e6f" }]) {
+    const flyEdge = cloudHomeChildEnvironments(cloudHomeConfiguration(contract())!, { ...contract(), PATH: "/usr/bin", OMB_CLOUD_EDGE_ACME_EMAIL: "not an address", ...extra }, "/data").edge;
+    expect(flyEdge).not.toHaveProperty("OMB_CLOUD_EDGE_CERT_ISSUERS");
+    expect(flyEdge).not.toHaveProperty("OMB_CLOUD_EDGE_ACME_EMAIL");
+  }
+});
+
+it("refuses a fallback CA setting the edge's config would read as more", () => {
+  const invalid = /OMB_CLOUD_EDGE_ACME_EMAIL must be one plain address/;
+  for (const value of ["certs", "certs@", "@example.test", "certs@example", "certs@example.test\ncert_issuer internal", "certs@example.test {", "a b@example.test", "a@b@example.test", "#a@example.test", "<<a@example.test", "a\"@example.test", `a${"b".repeat(260)}@example.test`]) {
+    expect(() => edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_EMAIL: value }), value).toThrow(invalid);
+  }
+  expect(() => edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test", OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "yes" })).toThrow(/must be 1/);
+  expect(() => edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "1" })).toThrow(/needs OMB_CLOUD_EDGE_ACME_EMAIL/);
+  expect(edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "0" })).toBe("");
+  expect(edgeCertIssuers({})).toBe("");
+});
+
+// `caddy validate` on the real template with what the launcher writes. Needs a Caddy: OMB_CADDY_BIN or one on the PATH (the
+// image's own 2.10.2 runs the same check at build, in the Dockerfile). Skipped when there is none.
+const caddyBin = process.env.OMB_CADDY_BIN || (spawnSync("caddy", ["version"], { stdio: "ignore" }).status === 0 ? "caddy" : "");
+it.skipIf(!caddyBin)("renders a Caddyfile.tls that Caddy accepts, with Let's Encrypt alone unless the setting is there", () => {
+  const dir = directory();
+  for (const file of ["Caddyfile.tls", "edge-routes.caddy"]) copyFileSync(join(import.meta.dirname, "../deploy/fly", file), join(dir, file));
+  const base = { PATH: "/usr/bin:/bin", HOME: dir, XDG_DATA_HOME: join(dir, "data"), XDG_CONFIG_HOME: join(dir, "config"), OMB_CLOUD_PUBLIC_HOST: "validate.example.com",
+    OMB_CLOUD_EDGE_STORAGE: join(dir, "edge"), OMB_CLOUD_EDGE_TRUSTED_PROXIES: "", OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "X-Forwarded-For", OMB_CLOUD_EDGE_HOLD: "0s" };
+  const run = (command: string, issuers?: string) => {
+    const result = spawnSync(caddyBin, [command, "--config", join(dir, "Caddyfile.tls"), "--adapter", "caddyfile"], { encoding: "utf8", env: { ...base, ...(issuers === undefined ? {} : { OMB_CLOUD_EDGE_CERT_ISSUERS: issuers }) } });
+    expect(result.status, result.stderr).toBe(0);
+    return result;
+  };
+  const issuersOf = (issuers?: string) => (JSON.parse(run("adapt", issuers).stdout) as { apps: { tls?: { automation?: { policies?: { issuers?: unknown[] }[] } } } }).apps.tls?.automation?.policies?.[0]?.issuers;
+  // Unset and empty: the same config as today, and it validates.
+  expect(issuersOf()).toBeUndefined();
+  expect(issuersOf("")).toBeUndefined();
+  expect(issuersOf(edgeCertIssuers({}))).toBeUndefined();
+  run("validate"); run("validate", "");
+  // A formatting warning would come at every boot of every home.
+  for (const issuers of [undefined, ""]) expect(run("adapt", issuers).stderr).not.toMatch(/not formatted/);
+  // Set: Let's Encrypt first, with no address, then the fallback with its account's.
+  const rendered = edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test" });
+  run("validate", rendered);
+  expect(issuersOf(rendered)).toEqual([{ module: "acme" }, { ca: "https://acme.zerossl.com/v2/DV90", email: "certs@example.test", module: "acme" }]);
+  // The live check's setting: the fallback alone.
+  const only = edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test", OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "1" });
+  run("validate", only);
+  expect(issuersOf(only)).toEqual([{ ca: "https://acme.zerossl.com/v2/DV90", email: "certs@example.test", module: "acme" }]);
+});
+
+it("holds requests at the edge while the server starts only when the Admin asked for it (a plan that sleeps)", () => {
+  const config = cloudHomeConfiguration(withGateway())!;
+  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin" }, "/data").edge.OMB_CLOUD_EDGE_HOLD).toBe("0s");
+  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_CLOUD_EDGE_HOLD: "30s" }, "/data").edge.OMB_CLOUD_EDGE_HOLD).toBe("30s");
+  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_CLOUD_EDGE_HOLD: "30s" }, "/data").server).not.toHaveProperty("OMB_CLOUD_EDGE_HOLD");
+  for (const raw of [undefined, "", "30", "1m", "-5s", "121s", "30s; respond 200", "9999s"]) expect(edgeHold(raw), String(raw)).toBe("0s");
+  expect(edgeHold(" 045s ")).toBe("45s");
+});
+
+it("hands the server the Admin's export-only switch, so an ended Cloud started for its owner's export runs frozen", () => {
+  // Seen on a real staging test Cloud on Oct 22: the Admin booted the held Cloud with OMB_CLOUD_EXPORT_ONLY=1, the log said
+  // "not passed to the server: … OMB_CLOUD_EXPORT_ONLY …", and it ran its routines every 5 minutes for the whole export
+  // window while the computers that came home ran the same ones.
+  const config = cloudHomeConfiguration(withGateway())!;
+  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_CLOUD_EXPORT_ONLY: "1" }, "/data").server).toMatchObject({ OMB_CLOUD_EXPORT_ONLY: "1" });
+});
+
+it("hands the server the addresses a moved home answered at before, and never its edge", () => {
+  const env = contract({ PATH: "/usr/bin", OMB_CLOUD_LEGACY_ORIGINS: "https://omb-u-old.fly.dev" });
+  const children = cloudHomeChildEnvironments(cloudHomeConfiguration(env)!, env, "/data");
+  expect(children.server).toMatchObject({ OMB_CLOUD_LEGACY_ORIGINS: "https://omb-u-old.fly.dev" });
+  expect(children.edge).not.toHaveProperty("OMB_CLOUD_LEGACY_ORIGINS");
+});
+
+it("gives the server only an allow-listed environment: a secret added later, a test's key or anything unknown never reaches it", () => {
+  const config = cloudHomeConfiguration(contract())!;
+  const env = { ...contract(), PATH: "/usr/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", NODE_ENV: "production", OMB_STATIC_DIR: "/app/dist",
+    OMB_CLOUD_BOAT_URL: "https://cloud.example.test/boat", OMB_TTS_DEFAULT_VOICE: "alloy", OMB_CLOUD_AI_URL: "https://cloud.example.test/api/cloud/services/ai",
+    OMB_COMPOSIO_BROKER_URL: "https://broker.example.test", OMB_COMPOSIO_BROKER_TOKEN: "b".repeat(64), OMB_COMPOSIO_BROKER: "off",
+    OMB_CLOUD_FUTURE_SECRET: "later", OMB_TEST_CLOUD_LEFT_BEHIND_KEY: "k".repeat(43), FLY_API_TOKEN: "fly", SOME_TOKEN: "t", HOME: "/root" };
+  const { server, dropped } = cloudHomeChildEnvironments(config, env, "/data");
+  expect(server).toMatchObject({ PATH: "/usr/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", NODE_ENV: "production", OMB_STATIC_DIR: "/app/dist",
+    OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: machineId, OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
+    OMB_CLOUD_BOAT_URL: "https://cloud.example.test/boat", OMB_TTS_DEFAULT_VOICE: "alloy", OMB_CLOUD_AI_URL: "https://cloud.example.test/api/cloud/services/ai", HOME: "/data",
+    // A staging Cloud may name its connected-apps service; the Cloud registers its own token, never one from outside.
+    OMB_COMPOSIO_BROKER_URL: "https://broker.example.test", OMB_COMPOSIO_BROKER: "off" });
+  for (const name of ["OMB_CLOUD_FUTURE_SECRET", "OMB_TEST_CLOUD_LEFT_BEHIND_KEY", "FLY_API_TOKEN", "SOME_TOKEN", "OMB_COMPOSIO_BROKER_TOKEN"]) {
+    expect(server).not.toHaveProperty(name);
+    expect(dropped).toContain(name);
+  }
+  expect(dropped).not.toContain("OMB_CLOUD_BOOTSTRAP_SECRET");
+});
+
+it("the root supervisor runs and trusts only root's code, never the volume's or anything maus could rewrite", () => {
+  const files = ["/usr/local/bin/node", "/app/dist-server/cloud-home-start.js", "/app/dist-server/index.js", "/usr/local/bin/caddy", "/app/cloud/Caddyfile"];
+  const image = (overrides: Record<string, { uid: number; mode: number }> = {}) => (path: string) =>
+    overrides[path] ?? { uid: 0, mode: path.includes(".") || path.endsWith("node") || path.endsWith("caddy") ? 0o100755 : 0o40755 };
+  expect(codeTrustProblem(files, "/data", image())).toBeNull();
+  expect(codeTrustProblem(files, "/data", image({ "/app/dist-server/index.js": { uid: 1001, mode: 0o100644 } }))).toBe("/app/dist-server/index.js is not root's");
+  expect(codeTrustProblem(files, "/data", image({ "/app/dist-server/cloud-home-start.js": { uid: 0, mode: 0o100666 } }))).toBe("/app/dist-server/cloud-home-start.js is writable by others than root");
+  expect(codeTrustProblem(files, "/data", image({ "/app/dist-server": { uid: 1001, mode: 0o40755 } }))).toBe("/app/dist-server is not root's");
+  expect(codeTrustProblem(files, "/data", image({ "/app": { uid: 0, mode: 0o40777 } }))).toBe("/app is writable by others than root");
+  expect(codeTrustProblem(["/tmp/caddy"], "/data", image({ "/tmp": { uid: 0, mode: 0o41777 } }))).toBeNull();
+  expect(codeTrustProblem([...files, "/data/.local/bin/caddy"], "/data", image())).toBe("/data/.local/bin/caddy is on the volume");
+  expect(codeTrustProblem(files, "/data", () => { throw new Error("ENOENT"); })).toBe("/usr/local/bin/node cannot be checked");
+});
+
 it("ships an edge and a Fly template that keep the server private", () => {
-  const caddy = readFileSync(join(import.meta.dirname, "../deploy/fly/Caddyfile"), "utf8");
-  expect(caddy).toMatch(/^:8080 \{/m);
+  const edgeFile = (name: string) => readFileSync(join(import.meta.dirname, "../deploy/fly", name), "utf8");
+  const caddy = edgeFile("edge-routes.caddy");
+  expect(edgeFile("Caddyfile")).toMatch(/^:8080 \{\n\timport edge-routes\.caddy\n\}\n/m);
+  expect(edgeFile("Caddyfile")).toMatch(/^\tauto_https off$/m);
+  expect(edgeFile("Caddyfile.tls")).toMatch(/^http:\/\/:8080 \{\n\timport edge-routes\.caddy\n\}\n\n\{\$OMB_CLOUD_PUBLIC_HOST\} \{\n\timport edge-routes\.caddy\n\}\n/m);
+  expect(edgeFile("Caddyfile.tunnel")).toMatch(/^:8080 \{\n\timport edge-routes\.caddy\n\}\n\n:8812 \{\n\tbind 127\.0\.0\.1\n\timport edge-routes\.caddy\n\}\n/m);
+  // Only the edge that ends TLS issues certificates, and its issuers are the launcher's to say (edgeCertIssuers).
+  expect(edgeFile("Caddyfile.tls").match(/^\t\{\$OMB_CLOUD_EDGE_CERT_ISSUERS\}$/gm)).toHaveLength(1);
+  for (const config of [edgeFile("Caddyfile"), edgeFile("Caddyfile.tunnel")]) expect(config).not.toContain("OMB_CLOUD_EDGE_CERT_ISSUERS");
+  // The tunnel's listener, on loopback alone, believes Cloudflare's header; :8080 believes only what the launcher says.
+  expect(edgeFile("Caddyfile.tunnel")).toMatch(/^\tservers 127\.0\.0\.1:8812 \{\n\t\ttrusted_proxies static 127\.0\.0\.1\/32\n\t\ttrusted_proxies_strict\n\t\tclient_ip_headers Cf-Connecting-IP\n\t\}$/m);
+  expect(edgeFile("Caddyfile.tunnel").match(/^\s*(?:trusted_proxies|client_ip_headers)\b/gm)).toHaveLength(4);
+  for (const config of [edgeFile("Caddyfile"), edgeFile("Caddyfile.tls"), edgeFile("Caddyfile.tunnel")]) {
+    expect(config.match(/^(?!#)\S[^\n]* \{$/gm)?.length, "every site imports the same routes").toBe(config.match(/^\timport edge-routes\.caddy$/gm)?.length);
+    expect(config).not.toMatch(/reverse_proxy|respond/);
+    // Who may name the client on :8080 and 443, and in which header, is the launcher's to say (edgeClientAddress).
+    expect(config).toMatch(/^\t\ttrusted_proxies static \{\$OMB_CLOUD_EDGE_TRUSTED_PROXIES\}\r?\n\t\ttrusted_proxies_strict\r?\n\t\tclient_ip_headers \{\$OMB_CLOUD_EDGE_CLIENT_IP_HEADER\}\r?\n/m);
+  }
+  for (const config of [edgeFile("Caddyfile"), edgeFile("Caddyfile.tls")]) expect(config.match(/^\s*(?:trusted_proxies|client_ip_headers)\b/gm)).toHaveLength(2);
+  expect(caddy).not.toMatch(/trusted_proxies|client_ip_headers/);
   const upstreams = [...caddy.matchAll(/reverse_proxy (\S+)/g)].map(match => match[1]);
   expect(new Set(upstreams)).toEqual(new Set(["127.0.0.1:8799", "127.0.0.1:8800"]));
-  // every forwarded request is marked as proxied
+  expect(caddy).toMatch(/handle \/hooks\/\* \{\s*reverse_proxy 127\.0\.0\.1:8800 \{/);
+  expect(caddy.match(/127\.0\.0\.1:8800/g)).toHaveLength(1);
+  const homeStart = caddy.indexOf("handle @home {");
+  let homeEnd = homeStart + "handle @home {".length;
+  for (let depth = 1; depth > 0; homeEnd++) depth += caddy[homeEnd] === "{" ? 1 : caddy[homeEnd] === "}" ? -1 : 0;
+  expect(caddy.slice(homeStart, homeEnd)).toContain("handle /hooks/* {");
   expect(caddy.match(/header_up X-Forwarded-For \{client_ip\}/g)).toHaveLength(upstreams.length);
+  expect(caddy.match(/lb_try_interval 50ms/g)).toHaveLength(upstreams.length);
+  // The root supervisor's code is root's, maus owns only the volume; the image's last step refuses to build otherwise.
+  const dockerfile = readFileSync(join(import.meta.dirname, "../Dockerfile"), "utf8");
+  const image = dockerfile.slice(dockerfile.indexOf("FROM runtime AS cloud-home"), dockerfile.indexOf("FROM runtime AS server"));
+  const check = image.indexOf('untrusted="$(find /app /usr/local/bin/caddy /usr/local/bin/cloudflared \\( ! -user root -o ! -type l -perm /022 \\) -print)"');
+  expect(image.slice(check)).toMatch(/^untrusted=.*\n && if \[ -n "\$untrusted" \]; then .*exit 1; fi \\\n/);
+  expect(check).toBeGreaterThan(image.lastIndexOf("COPY "));
+  expect(check).toBeLessThan(image.indexOf("CMD ["));
+  expect(image).toContain("COPY deploy/fly/Caddyfile deploy/fly/Caddyfile.tls deploy/fly/Caddyfile.tunnel deploy/fly/edge-routes.caddy /app/cloud/");
+  // The build's own Caddy validates Caddyfile.tls as the launcher renders it with a fallback CA.
+  expect(image).toContain('OMB_CLOUD_EDGE_CERT_ISSUERS="$(OMB_CLOUD_EDGE_ACME_EMAIL=validate@example.com node --input-type=module -e \'import { edgeCertIssuers } from "/app/dist-server/cloud-home-start.js"; process.stdout.write(edgeCertIssuers(process.env));\')" caddy validate --config /app/cloud/Caddyfile.tls');
+  // The bot box (server/bot-box) needs bubblewrap and socat in the image; pnpm is what bots' projects ask for.
+  expect(image).toMatch(/apt-get install -y --no-install-recommends [^\n]*\bbubblewrap\b[^\n]*\bsocat\b/);
+  expect(image).toMatch(/npm install -g pnpm@10\.33\.0/);
+  expect(image).toContain("bwrap --version && socat -V");
+  // uvx, so a connector someone runs with it can come along when they move here (server/cloud-connections.ts).
+  expect(image).toMatch(/ARG UV_VERSION=\d+\.\d+\.\d+/);
+  expect(image).toContain("install -m 0755 /tmp/uv-install/uv /tmp/uv-install/uvx /usr/local/bin/");
+  expect(image).toContain('uv --version | grep -qF "uv ${UV_VERSION}"');
   const fly = readFileSync(join(import.meta.dirname, "../deploy/fly/fly.toml"), "utf8");
   expect(fly).toMatch(/internal_port = 8080/);
   expect(fly).toMatch(/destination = "\/data"/);
   expect(fly).toMatch(/path = "\/api\/health"/);
   const env = /\[env\]([\s\S]*?)\n\[/.exec(fly)![1];
   for (const secretKey of ["OMB_CLOUD_BOOTSTRAP_SECRET", "OMB_CLOUD_ADMIN_URL"]) expect(env).not.toMatch(new RegExp(`^\\s*${secretKey}\\s*=`, "m"));
-  // Cloud Pro includes no AI: the template sets no gateway.
   expect(fly).not.toContain("OMB_HOSTED_");
+});
+
+it("the Cloud launcher starts the server again only when it asks to after a restore, and only a few times in a row", () => {
+  const launcher = readFileSync(join(import.meta.dirname, "cloud-home-start.ts"), "utf8");
+  expect(launcher).toContain("const policy = restartPolicy();");
+  // The volume is prepared (and the previous machine's lease cleared) through one helper, as `maus`, before any child starts.
+  expect(launcher).toContain("const prepare = () => prepareCloudHomeData(home, cloudHomeDataDir(env, home), config.machineId);");
+  expect(launcher.indexOf("prepared = prepare();")).toBeLessThan(launcher.indexOf("runServer();"));
+  expect(launcher).toContain("if (!policy.again(code, stopping)) return false;");
+  for (const code of [0, 1, null]) expect(restartPolicy().again(code)).toBe(false);
+  expect(restartPolicy().again(RESTART_EXIT_CODE, true)).toBe(false);
+  const policy = restartPolicy(() => 0);
+  expect([1, 2, 3, 4, 5, 6].map(() => policy.again(RESTART_EXIT_CODE, false))).toEqual([true, true, true, true, true, false]);
+});
+
+it("records the first finished bot turn once, on a Cloud home only, and a moved workspace never brings its own", () => {
+  const now = new Date("2026-09-30T08:00:00.000Z");
+  const turn = { cloudHome: true, recorded: undefined, ok: true, known: true, now };
+  expect(firstCloudTurnPatch(turn)).toEqual({ onboarding: { firstTurnAt: "2026-09-30T08:00:00.000Z" } });
+  expect(firstCloudTurnPatch({ ...turn, cloudHome: false })).toBeNull();
+  expect(firstCloudTurnPatch({ ...turn, recorded: "2026-09-29T08:00:00.000Z" })).toBeNull();
+  expect(firstCloudTurnPatch({ ...turn, ok: false })).toBeNull();
+  expect(firstCloudTurnPatch({ ...turn, known: false })).toBeNull();
+  const mac = { language: "en", onboarding: { completedAt: "2026-09-01T00:00:00.000Z", version: 1, firstTurnAt: "2026-08-01T00:00:00.000Z" } };
+  expect(restoredWorkspaceConfig(portableWorkspaceConfig(mac), { onboarding: { hintsSeen: ["cloud-setup-hidden"] } }).onboarding)
+    .toEqual({ hintsSeen: ["cloud-setup-hidden"] });
+  expect(restoredWorkspaceConfig(portableWorkspaceConfig(mac), {}).onboarding).toBeUndefined();
+});
+
+// The launcher only runs on Linux (the image); Windows passes descriptors differently.
+it.skipIf(process.platform === "win32")("hands the server its secrets over a pipe it reads once: never its environment, never a grandchild's", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "omb-cloud-secrets-"));
+  try {
+    const script = join(dir, "server.mjs");
+    const out = join(dir, "out.json");
+    // What a server does at startup (takeCloudSecrets), then what an engine
+    // it starts could see: its own environment and its parent's starting one.
+    writeFileSync(script, `
+import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+const { takeCloudSecrets } = await import(${JSON.stringify(join(import.meta.dirname, "cloud-home.ts"))});
+const secrets = takeCloudSecrets();
+const parentEnviron = (pid) => process.platform === "linux"
+  ? readFileSync("/proc/" + pid + "/environ", "utf8")
+  : execFileSync("ps", ["eww", "-p", String(pid), "-o", "command="]).toString();
+const child = spawnSync(process.execPath, ["-e", "process.stdout.write(JSON.stringify(process.env))"], { encoding: "utf8" });
+writeFileSync(${JSON.stringify(out)}, JSON.stringify({ secrets, env: process.env, own: parentEnviron(process.pid), child: child.stdout }));
+`);
+    const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), OMB_CLOUD_SECRETS_FD: "3", VISIBLE_PROBE: "visible" };
+    const child = spawnWithSecrets(process.execPath, [script], env, { OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: "box_omb_probe-token" });
+    await new Promise((resolve) => child.once("exit", resolve));
+    const seen = JSON.parse(readFileSync(out, "utf8"));
+    expect(seen.secrets).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: "box_omb_probe-token" });
+    if (process.platform !== "win32") expect(seen.own).toContain("VISIBLE_PROBE=visible");
+    for (const where of [seen.own, JSON.stringify(seen.env), seen.child]) {
+      expect(where).not.toContain(secret);
+      expect(where).not.toContain("box_omb_probe-token");
+    }
+    expect(seen.child).not.toContain("OMB_CLOUD_SECRETS_FD");
+  } finally {
+    await removeTempDir(dir);
+  }
+});
+
+it("captures a child's stdout and stderr when asked, and shares this process's otherwise", async () => {
+  const dir = directory();
+  const script = join(dir, "streams.mjs");
+  writeFileSync(script, `process.stdout.write("stdout marker"); process.stderr.write("stderr marker");`);
+  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) };
+  const run = async (capture: boolean) => {
+    const child = spawnWithSecrets(process.execPath, [script], env, { OMB_CLOUD_BOOTSTRAP_SECRET: secret }, undefined, capture);
+    let out = "", err = "";
+    child.stdout?.on("data", (chunk) => { out += chunk; });
+    child.stderr?.on("data", (chunk) => { err += chunk; });
+    await new Promise((resolve) => child.once("close", resolve));
+    return { child, out, err };
+  };
+  const captured = await run(true);
+  expect(captured.out).toContain("stdout marker");
+  expect(captured.err).toContain("stderr marker");
+  const shared = await run(false);
+  expect(shared.child.stdout).toBeNull();
+  expect(shared.child.stderr).toBeNull();
+});
+
+// /proc/mounts and /proc/self/status as a Docker container on Linux 6.8 shows them.
+const mounts = (procOptions: string) => `overlay / overlay rw,relatime,lowerdir=/var/lib/docker/overlay2/l/A 0 0\nproc /proc proc ${procOptions} 0 0\ntmpfs /dev tmpfs rw,nosuid,size=65536k,mode=755 0 0\n`;
+const capStatus = (bounding: string, effective = bounding) => `Name:\tnode\nCapInh:\t0000000000000000\nCapPrm:\t${effective}\nCapEff:\t${effective}\nCapBnd:\t${bounding}\nCapAmb:\t0000000000000000\n`;
+// CHOWN, KILL, SETGID, SETUID; with SETPCAP and SYS_ADMIN, as the connector grants an image that drops them.
+const FOUR = "00000000000000e1", WITH_SYS_ADMIN = "00000000002001e1";
+
+it("the Cloud supervisor hardens the host before anything runs as maus: hidepid on /proc and Fly's socket folder root-only, each a note, never fatal", () => {
+  const calls: string[] = [];
+  const run = (status: number, exists = true, files: Record<string, string> = {}) => ({
+    exec: (command: string, args: string[]) => { calls.push(`${command} ${args.join(" ")}`); return { status, stderr: status ? "mount: permission denied\n" : "" }; },
+    chmod: (path: string, mode: number) => { calls.push(`chmod ${mode.toString(8)} ${path}`); },
+    exists: () => exists,
+    read: (path: string) => files[path] ?? "",
+  });
+  expect(hardenHost({}, run(0))).toEqual({ notes: ["/proc: hidepid=invisible", "/.fly: root only"], dropCapabilities: false });
+  expect(calls).toEqual(["mount -o remount,hidepid=invisible /proc", "chmod 700 /.fly"]);
+  expect(hardenHost({}, run(32, false)).notes).toEqual(["/proc: hidepid not applied (mount: permission denied)"]);
+  expect(hardenHost({ OMB_CLOUD_HARDEN: "0" }, run(0))).toEqual({ notes: ["hardening skipped (OMB_CLOUD_HARDEN=0)"], dropCapabilities: false });
+  const failing = { ...run(0), chmod: () => { throw new Error("read-only"); } };
+  expect(hardenHost({}, failing).notes).toEqual(["/proc: hidepid=invisible", "/.fly: left as is (read-only)"]);
+  // Already hidden (the supervisor started again, or the platform mounted /proc so): no second remount, no false failure.
+  calls.splice(0);
+  expect(hardenHost({}, run(32, false, { "/proc/mounts": mounts("rw,hidepid=invisible") })).notes).toEqual(["/proc: hidepid=invisible"]);
+  expect(calls).toEqual([]);
+});
+
+it("CAP_SYS_ADMIN serves only the hidepid remount: the supervisor starts again through setpriv without it, and says when it could not", () => {
+  const run = (files: Record<string, string>, setpriv = true) => ({
+    exec: () => ({ status: 0 }), chmod: () => {}, exists: (path: string) => path === "/usr/bin/setpriv" && setpriv,
+    read: (path: string) => files[path] ?? "",
+  });
+  const granted = { "/proc/mounts": mounts("rw"), "/proc/self/status": capStatus(WITH_SYS_ADMIN) };
+  expect(hardenHost({}, run(granted))).toEqual({ notes: ["/proc: hidepid=invisible"], dropCapabilities: true });
+  // Started again: hidepid stays, and the capability is gone from every set it could come back from.
+  const dropped = { "/proc/mounts": mounts("rw,hidepid=invisible"), "/proc/self/status": capStatus(FOUR) };
+  expect(hardenHost({ OMB_CLOUD_CAPS_DROPPED: "1" }, run(dropped))).toEqual({ notes: ["/proc: hidepid=invisible", "CAP_SYS_ADMIN dropped"], dropCapabilities: false });
+  // setpriv without CAP_SETPCAP exits 0 and drops nothing: the next start sees it and never loops.
+  const kept = { "/proc/mounts": mounts("rw,hidepid=invisible"), "/proc/self/status": capStatus(WITH_SYS_ADMIN) };
+  expect(hardenHost({ OMB_CLOUD_CAPS_DROPPED: "1" }, run(kept))).toEqual({ notes: ["/proc: hidepid=invisible", "CAP_SYS_ADMIN kept: it could not be dropped (CAP_SETPCAP is missing)"], dropCapabilities: false });
+  expect(hardenHost({}, run(granted, false)).notes).toEqual(["/proc: hidepid=invisible", "CAP_SYS_ADMIN kept: /usr/bin/setpriv is missing"]);
+  // A remount that failed still drops a capability nothing needs.
+  expect(hardenHost({}, { ...run(granted), exec: () => ({ status: 32, stderr: "mount: denied" }) }).dropCapabilities).toBe(true);
+  // The connector's four capabilities: nothing to drop, nothing to start again.
+  expect(hardenHost({}, run({ "/proc/self/status": capStatus(FOUR) })).dropCapabilities).toBe(false);
+  expect(setprivArgs("/usr/local/bin/node", "/app/dist-server/cloud-home-start.js")).toEqual([
+    "setpriv", "--inh-caps=-sys_admin,-setpcap", "--bounding-set=-sys_admin,-setpcap", "--", "/usr/local/bin/node", "/app/dist-server/cloud-home-start.js",
+  ]);
+});
+
+it("reads a capability bit the way the kernel writes it", () => {
+  expect(hasCapability(capStatus(WITH_SYS_ADMIN), "CapBnd", 21)).toBe(true);
+  expect(hasCapability(capStatus(FOUR), "CapBnd", 21)).toBe(false);
+  expect(hasCapability(capStatus(FOUR, WITH_SYS_ADMIN), "CapEff", 21)).toBe(true);
+  expect(hasCapability(capStatus("000001ffffffffff"), "CapBnd", 21)).toBe(true);
+  expect(hasCapability("", "CapBnd", 21)).toBe(false);
+});
+
+it("takes an own server's secrets from the root-only file the connector mounts, and only the secrets it knows", () => {
+  const file = "/run/mausbot/secrets.json";
+  const fs = (overrides: { file?: { uid: number; mode: number; symlink?: boolean }; dir?: { uid: number; mode: number }; text?: string; exists?: boolean } = {}) => ({
+    exists: () => overrides.exists ?? true,
+    lstat: () => {
+      const entry = overrides.file ?? { uid: 0, mode: 0o100400 };
+      return { ...entry, isFile: () => !entry.symlink, isSymbolicLink: () => Boolean(entry.symlink) };
+    },
+    stat: (path: string) => (path === file ? overrides.file ?? { uid: 0, mode: 0o100400 } : path === "/run/mausbot" ? overrides.dir ?? { uid: 0, mode: 0o40700 } : { uid: 0, mode: 0o40755 }),
+    read: () => overrides.text ?? JSON.stringify({
+      OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}`, OMB_CLOUD_TUNNEL_TOKEN: "t".repeat(40),
+      OMB_PUBLIC_URL: "https://elsewhere.example", PATH: "/tmp",
+    }),
+  });
+  expect(readCloudSecretsFile("/data", file, fs())).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}`, OMB_CLOUD_TUNNEL_TOKEN: "t".repeat(40) });
+  expect(readCloudSecretsFile("/data", file, fs({ exists: false }))).toEqual({});
+  expect(() => readCloudSecretsFile("/data", file, fs({ file: { uid: 0, mode: 0o100644 } }))).toThrow("readable by others than root");
+  expect(() => readCloudSecretsFile("/data", file, fs({ file: { uid: 1001, mode: 0o100400 } }))).toThrow(`${file} is not root's`);
+  expect(() => readCloudSecretsFile("/data", file, fs({ dir: { uid: 0, mode: 0o40777 } }))).toThrow("/run/mausbot is writable by others than root");
+  expect(() => readCloudSecretsFile("/data", file, fs({ file: { uid: 0, mode: 0o120777, symlink: true } }))).toThrow("is not a plain file");
+  expect(() => readCloudSecretsFile("/data", file, fs({ text: "[1]" }))).toThrow("is not a JSON object");
+  expect(() => readCloudSecretsFile("/data", "/data/secrets.json", fs())).toThrow("is on the volume");
+});
+
+it("boots as a Team Cloud with the Admin's team id and name, and refuses a team without them", () => {
+  const team = cloudHomeConfiguration(contract({ OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: "team-7f3a", OMB_CLOUD_TEAM_NAME: " Acme " }))!;
+  expect(team).toMatchObject({ role: "team", team: { id: "team-7f3a", name: "Acme" } });
+  expect(cloudHomeConfiguration(contract())).toMatchObject({ role: "home", team: null });
+  expect(() => cloudHomeConfiguration(contract({ OMB_CLOUD_ROLE: "team" }))).toThrow(/OMB_CLOUD_TEAM_ID/);
+  expect(() => cloudHomeConfiguration(contract({ OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: "team-7f3a" }))).toThrow(/OMB_CLOUD_TEAM_NAME/);
+  expect(() => cloudHomeConfiguration(contract({ OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: "../x", OMB_CLOUD_TEAM_NAME: "Acme" }))).toThrow(/OMB_CLOUD_TEAM_ID/);
+  expect(() => cloudHomeConfiguration(contract({ OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: "t", OMB_CLOUD_TEAM_NAME: "a\nb" }))).toThrow(/OMB_CLOUD_TEAM_NAME/);
+  expect(() => cloudHomeConfiguration(contract({ OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: "t", OMB_CLOUD_TEAM_NAME: "x".repeat(81) }))).toThrow(/OMB_CLOUD_TEAM_NAME/);
+});
+
+it("a Team Cloud takes the team's default language from the Admin, and boots in its own default when it is missing or unknown", () => {
+  const team = (language?: string) => cloudHomeConfiguration(contract({ OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: "team-7f3a", OMB_CLOUD_TEAM_NAME: "Acme", ...(language === undefined ? {} : { OMB_CLOUD_TEAM_LANGUAGE: language }) }))!.team;
+  expect(team("de")).toEqual({ id: "team-7f3a", name: "Acme", language: "de" });
+  expect(team(" PT-BR ")).toMatchObject({ language: "pt-br" });
+  expect(team()).toEqual({ id: "team-7f3a", name: "Acme" });
+  for (const value of ["", "not a language", "../x", "e"]) expect(team(value)).toEqual({ id: "team-7f3a", name: "Acme" });
+});
+
+it("a Team Cloud's pairing binds the Admin's member claim to the session it opens: role to scopes, address to the person", () => {
+  const root = directory();
+  let now = 1_800_000_000_000;
+  const sessions = new SessionRegistry({ file: join(root, "sessions.json"), now: () => now });
+  const pairing = createCloudPairing({ secret, sessions, team: { id: "team-1", name: "Acme" }, now: () => now });
+  let counter = 0;
+  const mint = (claims: Record<string, unknown>) => {
+    const body = JSON.stringify({ label: "OpenMausBot app (Team Cloud)", ttlSeconds: 300, ...claims });
+    const timestamp = String(Math.floor(now / 1000)), nonce = `nonce-${String(++counter).padStart(12, "0")}`;
+    return pairing.handle({ timestamp, nonce, signature: `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}`, body: Buffer.from(body), source: "203.0.113.9" });
+  };
+  const member = mint({ team: { id: "team-1", name: "Acme" }, member: { email: "Ada@Acme.test", role: "member" } });
+  expect(member.status).toBe(200);
+  const paired = sessions.exchange({ code: member.body.code as string, label: "", source: "198.51.100.4" });
+  expect(paired).toMatchObject({ ok: true, session: { scopes: ["client"], email: "ada@acme.test", teamRole: "member" } });
+  const admin = sessions.exchange({ code: mint({ member: { email: "ben@acme.test", role: "admin" } }).body.code as string, label: "", source: "198.51.100.4" });
+  expect(admin).toMatchObject({ ok: true, session: { scopes: ["admin", "client"], teamRole: "admin" } });
+  const owner = sessions.exchange({ code: mint({ member: { email: "olive@acme.test", role: "owner" } }).body.code as string, label: "", source: "198.51.100.4" });
+  expect(owner).toMatchObject({ ok: true, session: { scopes: ["admin", "client"], teamRole: "owner" } });
+  expect(mint({})).toEqual({ status: 400, body: { error: "member_required" } });
+  expect(mint({ member: { email: "x@acme.test", role: "superuser" } })).toEqual({ status: 400, body: { error: "invalid_member" } });
+  expect(mint({ team: { id: "team-2" }, member: { email: "x@acme.test", role: "member" } })).toEqual({ status: 400, body: { error: "team_mismatch" } });
+  // The session is the Admin's claim: the sign-in list never revalidates or revokes it, and it ends within the hour.
+  const record = sessions.list().find((session) => session.email === "ada@acme.test")!;
+  expect(record).toMatchObject({ teamRole: "member", scopes: ["client"] });
+  expect(record.expiresAt).toBe(now + 3_600_000);
+  expect(JSON.parse(readFileSync(join(root, "sessions.json"), "utf8")).sessions.find((session: { email?: string }) => session.email === "ada@acme.test")).toMatchObject({ membershipAuthority: "team" });
+  sessions.revalidateEmailSessions();
+  expect(sessions.list().filter((session) => session.email).length).toBe(3);
+  now += 3_000_000;
+  // Used all along, it still ends at the hour: renewing never moves a team session's end.
+  expect(sessions.renew(record.id)).toBe(false);
+  expect(sessions.list().find((session) => session.id === record.id)!.expiresAt).toBe(record.expiresAt);
+  now += 600_000 - 1;
+  expect(sessions.authenticate((paired as { token: string }).token)).toBeTruthy();
+  now += 2;
+  expect(sessions.authenticate((paired as { token: string }).token)).toBeNull();
+});
+
+it("a Team Cloud pairing at a new role ends that person's sessions, phones and waiting codes at the old role at once", () => {
+  const root = directory();
+  const now = 1_800_000_000_000;
+  const sessions = new SessionRegistry({ file: join(root, "sessions.json"), now: () => now });
+  const pairing = createCloudPairing({ secret, sessions, team: { id: "team-1", name: "Acme" }, now: () => now });
+  let counter = 0;
+  const mint = (email: string, role: string) => {
+    const body = JSON.stringify({ label: "OpenMausBot app (Team Cloud)", ttlSeconds: 300, member: { email, role } });
+    const timestamp = String(Math.floor(now / 1000)), nonce = `nonce-${String(++counter).padStart(12, "0")}`;
+    return pairing.handle({ timestamp, nonce, signature: `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}`, body: Buffer.from(body), source: "203.0.113.9" });
+  };
+  const redeem = (code: string) => sessions.exchange({ code, label: "", source: "198.51.100.4" }) as { ok: true; token: string; session: { id: string } };
+  const admin = redeem(mint("ada@acme.test", "admin").body.code as string);
+  const phone = redeem(sessions.openPairing({ scopes: ["admin", "client"], member: { email: "ada@acme.test", role: "admin" }, memberCheckedAt: now }).code);
+  const waiting = mint("ada@acme.test", "admin").body.code as string;
+  const ben = redeem(mint("ben@acme.test", "admin").body.code as string);
+  const again = mint("ada@acme.test", "member");
+  expect(again.status).toBe(200);
+  expect([sessions.authenticate(admin.token), sessions.authenticate(phone.token)]).toEqual([null, null]);
+  expect(sessions.exchange({ code: waiting, label: "", source: "198.51.100.4" })).toMatchObject({ ok: false });
+  expect(sessions.authenticate(ben.token)).toBeTruthy();
+  const member = redeem(again.body.code as string);
+  expect(sessions.authenticate(member.token)).toMatchObject({ teamRole: "member", scopes: ["client"] });
+  expect(mint("ada@acme.test", "member").status).toBe(200);
+  expect(sessions.authenticate(member.token)).toBeTruthy();
+});
+
+it("a My Cloud refuses a team claim: it is one person's", () => {
+  const f = fixture();
+  expect(f.mint(f.sign(JSON.stringify({ member: { email: "ada@acme.test", role: "member" } })))).toEqual({ status: 400, body: { error: "not_a_team" } });
+  expect(f.mint(f.sign(JSON.stringify({ team: { id: "team-1" } })))).toEqual({ status: 400, body: { error: "not_a_team" } });
+  expect(f.sessions.openPairings()).toHaveLength(0);
+});
+
+it("a Team Cloud with remote access turned off refuses a User's browser sign-in, keeps an Owner's and an Admin's, and every app pairing", () => {
+  const root = directory();
+  let off = true, counter = 0;
+  const now = 1_800_000_000_000;
+  const sessions = new SessionRegistry({ file: join(root, "sessions.json"), now: () => now });
+  const pairing = createCloudPairing({ secret, sessions, team: { id: "team-1", name: "Acme" }, memberBrowserOff: () => off, now: () => now });
+  const mint = (claims: Record<string, unknown>) => {
+    const body = JSON.stringify({ label: "Web browser", ttlSeconds: 120, ...claims });
+    const timestamp = String(Math.floor(now / 1000)), nonce = `nonce-${String(++counter).padStart(12, "0")}`;
+    return pairing.handle({ timestamp, nonce, signature: `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}`, body: Buffer.from(body), source: "203.0.113.9" });
+  };
+  const browser = (email: string, role: string) => mint({ purpose: "browser", owner: email, member: { email, role } });
+  expect(browser("ada@acme.test", "member")).toEqual({ status: 403, body: { error: "remote_access_off" } });
+  expect(browser("ben@acme.test", "admin").status).toBe(200);
+  expect(browser("olive@acme.test", "owner").status).toBe(200);
+  expect(mint({ member: { email: "ada@acme.test", role: "member" } }).status, "the app's pairing stays: it is how the team reaches its Cloud").toBe(200);
+  off = false;
+  expect(browser("ada@acme.test", "member").status).toBe(200);
+  // Turned off again: the User's open browser signs out, the admins' stay.
+  const ada = sessions.exchange({ code: (browser("ada@acme.test", "member").body.credential as string), browser: true, label: "", source: "s" });
+  const ben = sessions.exchange({ code: (browser("ben@acme.test", "admin").body.credential as string), browser: true, label: "", source: "s" });
+  expect(ada.ok && ben.ok).toBe(true);
+  expect(sessions.closeMemberBrowsers()).toBe(1);
+  expect(sessions.list().map((session) => session.email)).toEqual(expect.arrayContaining(["ben@acme.test"]));
+  expect(sessions.list().map((session) => session.email)).not.toContain("ada@acme.test");
 });

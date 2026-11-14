@@ -1,4 +1,3 @@
-// Whether a turn may be sent twice.
 import { describe, expect, it } from "vitest";
 
 import {
@@ -28,8 +27,6 @@ describe("classifyResumeFailure", () => {
   });
 
   it("is after-accept once ANYTHING streamed, whatever the bookkeeping says", () => {
-    // output is the strongest evidence available: if the model spoke, the
-    // prompt landed, and the tools it called have already run
     expect(classifyResumeFailure(state({ promptSubmitted: false, producedOutput: true }))).toBe("after-accept");
   });
 
@@ -39,13 +36,10 @@ describe("classifyResumeFailure", () => {
   });
 
   it("never permits a replay on an unproven boundary", () => {
-    // an unproven guess is not a licence to repeat side effects
     expect(mayReplay("unknown")).toBe(false);
   });
 
   it("classifies from state alone — no error text is consulted", () => {
-    // the whole input surface is booleans; there is nowhere for a provider's
-    // prose to change the outcome
     for (const value of Object.values(state())) expect(typeof value).toBe("boolean");
   });
 });

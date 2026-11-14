@@ -8,17 +8,52 @@ icon: Cloud
 
 Add a Boat API key in App Settings to provision an isolated hosted Linux desktop. The computer can sleep and wake, and supported sessions provide a live viewer for temporary human control. Trial accounts automatically retry creation with the provider's shorter auto-stop ceiling when required.
 
-Boat is a third-party paid service after its trial. OpenMausBot stores the configured credential locally and does not expose it to the renderer.
+Boat is a third-party paid service after its trial. MausBot stores the configured credential locally and does not expose it to the renderer.
 
-OpenAI-compatible connections, including OpenRouter, can use the Boat desktop
-with the bot's selected model in direct chats, groups and cloud routines. Choose
-a model that supports both images and tools. Screenshots reach that model at
-native resolution; tool approvals and **Take control** still apply. Other engines
-continue to use the native Boat runner for cloud turns.
+A Boat bills while it is on, so MausBot turns it on and off by itself. It goes to sleep once nothing has used it for 10 minutes: no bot turn or routine run on it, nobody watching its screen or holding its desktop, and, for a team's shared computer, nobody on that team working. A computer stays on when a routine that uses it runs within the next 30 minutes. The next time a bot needs it, or you wake or open it, it starts again in a few seconds with its files and installed apps as they were. After MausBot restarts, any computer it left on gets the same 10 minutes. This works the same with your own Boat key and with the cloud computers included in a Cloud plan. A VPS is your own server and is never stopped.
+
+Every engine with computer tools (Claude, Codex, ACP, Pi, and OpenAI-compatible
+connections such as OpenRouter) uses the Boat desktop with the bot's own model
+and sign-in in direct chats, groups and cloud routines. For an API connection,
+choose a model that supports both images and tools. Screenshots reach that model
+at native resolution; tool approvals and **Take control** still apply. A model
+without computer tools can't use the cloud computer: choose another model, or set
+**Works on** to Auto.
+
+A bot can copy files between the Boat and its working folder: `copy_from_computer`
+brings back one file (for example a result to load in the Data tab or use in a
+page), and `copy_to_computer` sends one. Each copy moves one file of up to 2 GiB
+directly between the Boat and the computer the bot runs on, and may take up to 9
+minutes. A download is refused when the working folder's disk can't hold it with
+256 MiB to spare, and a half-finished copy never replaces a file on either side.
+On the Boat, files live under `/home/user` or `/tmp`. Both work with your own
+Boat key and with the cloud computers included in a Cloud plan.
+
+On **Auto**, a conversation works on the Boat only after the bot moves it there
+(it asks to switch with `select_computer`). Auto by itself never reads, wakes or
+creates a Boat, so it adds no cloud computer calls to an ordinary message.
+
+Browsers that run in the cloud don't open Reddit: a Boat's browser won't open a
+Reddit link a bot asks for, and a MausBot Cloud's built-in browser doesn't open
+Reddit at all. Reddit blocks bots that browse from cloud computers and can ban
+the account, so the bot is told to use the Reddit connected app or ask you to do
+it on your own computer.
+
+A bot's `exec` call waits for its command to finish, so a long one (a big
+download, a build, a data job) can run out of time while it keeps going on the
+Boat. For those, the bot starts the command with `background: true`, which
+answers at once with a process id, and follows it with `exec_status`, which shows
+whether it is still running, its exit code and the end of its output. The Boat
+doesn't go to sleep while a background command runs, for up to two hours after it
+started. When a plain `exec` runs out of time, the bot is told the command may
+still be running, so it checks instead of starting a second copy. This works with
+your own Boat key and with the cloud computers included in a Cloud plan.
 
 ## Bring your own VPS
 
-OpenMausBot can control Docker on an x86_64 Linux server through an SSH config alias. The agent process stays on your local machine; only Docker commands and the managed desktop container run on the VPS.
+Follow [Your own VPS (BYO)](/docs/computers/byo-vps) for the setup steps, where to select the backend, and the existing-bot workaround for 0.1.151 and 0.1.152. This keeps the agent on the MausBot host; [deploying the whole server](/docs/self-hosting/deploy-vps) is a different setup.
+
+MausBot can control Docker on an x86_64 Linux server through an SSH config alias. The agent process stays on your local machine; only Docker commands and the managed desktop container run on the VPS.
 
 Your SSH alias should include connection multiplexing, keepalives, and a connect timeout. Connect manually once to approve the host key, then verify:
 
@@ -27,10 +62,20 @@ ssh my-vps true
 docker -H ssh://my-vps info
 ```
 
+Install the Docker client on your own computer; the daemon stays on the VPS:
+
+```bash
+brew install docker                     # macOS
+winget install -e --id Docker.DockerCLI # Windows 10 or 11
+sudo apt install docker-ce-cli          # Debian or Ubuntu, Docker's apt repository
+```
+
+Windows 10 1809 and later include the OpenSSH client this needs. Podman cannot replace the Docker CLI here: the VPS backend runs `docker -H ssh://<alias>` itself.
+
 The SSH user needs Docker access, which is root-equivalent on that server. Use a dedicated VPS and firewall inbound traffic to SSH only.
 
 The managed container publishes no ports, has no host mounts, and is checked before every attach. Its filesystem should be treated as disposable; move important results out before deleting or upgrading the container.
 
-**Take control** opens the VPS desktop inside OpenMausBot through a temporary SSH tunnel. noVNC remains on the container's private bridge network; only a random loopback port is opened on your computer, and the tunnel closes with the viewer.
+**Take control** opens the VPS desktop inside MausBot through a temporary SSH tunnel. noVNC remains on the container's private bridge network; only a random loopback port is opened on your computer, and the tunnel closes with the viewer.
 
-Auto reuses an already-ready VPS without changing its lifecycle. To let Auto create or wake this bot's managed container, enable **Start VPS automatically** for that bot. This permission is off by default. When neither the VPS nor a local fallback is available, OpenMausBot shows the exact VPS failure instead of silently omitting computer tools.
+Auto reuses an already-ready VPS without changing its lifecycle. To let Auto create or wake this bot's managed container, enable **Start VPS automatically** for that bot. This permission is off by default. When neither the VPS nor a local fallback is available, MausBot shows the exact VPS failure instead of silently omitting computer tools.

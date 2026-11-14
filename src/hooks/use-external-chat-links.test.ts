@@ -1,0 +1,152 @@
+import type { EffectCallback } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { initialState, type Action, type AppState, type Bot } from "@/state/store";
+
+const fixture = vi.hoisted(() => ({ effects: [] as EffectCallback[], link: null as string | null, showThreads: true }));
+vi.mock("react", async (original) => ({
+  ...await original<typeof import("react")>(),
+  useState: () => [fixture.link, (next: string | null) => { fixture.link = next; }],
+  useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
+}));
+vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.showThreads }));
+
+import { useDesktopNotificationOpens, useExternalChatLinks } from "./use-external-chat-links";
+
+const scout: Bot = {
+  id: "scout", threadId: "scout-main", name: "Scout", title: "", description: "", notifications: true,
+  color: "green", unread: false, messages: [], modelSelection: { instanceId: "fake", model: "test" },
+  tasks: [{ threadId: "scout-main", title: "Main", createdAt: 1 }],
+};
+const loading: AppState = { ...initialState, bots: [], selectedId: "" };
+const loaded: AppState = { ...initialState, bots: [scout], selectedId: "scout", hydrated: true };
+
+/** One render: run its effects in order, as React would after commit. */
+function render(state: AppState, dispatch: (action: Action) => void) {
+  fixture.effects = [];
+  useExternalChatLinks(state, dispatch);
+  return fixture.effects.map((effect) => effect());
+}
+
+afterEach(() => { vi.unstubAllGlobals(); fixture.effects = []; fixture.link = null; fixture.showThreads = true; });
+
+describe("useExternalChatLinks", () => {
+  it("holds a link that arrives at launch until the bots have loaded, then opens it once", () => {
+    let deliver: ((link: string) => void) | undefined;
+    const unsubscribe = vi.fn();
+    vi.stubGlobal("window", { ogb: { onChatLink: (cb: (link: string) => void) => { deliver = cb; return unsubscribe; } } });
+    const dispatch = vi.fn();
+
+    const [cleanup] = render(loading, dispatch);
+    expect(cleanup).toBe(unsubscribe);
+    deliver!("openmausbot://bot/scout");
+    render(loading, dispatch);
+    expect(dispatch).not.toHaveBeenCalled();
+
+    render(loaded, dispatch);
+    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+      { type: "select", id: "scout" },
+      { type: "revealThread", threadId: "scout-main" },
+    ]);
+    expect(fixture.link).toBeNull();
+
+    dispatch.mockClear();
+    render(loaded, dispatch);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("closes Settings and the shortcuts list so the linked chat is not left behind them", () => {
+    vi.stubGlobal("window", {});
+    fixture.link = "openmausbot://bot/scout";
+    const dispatch = vi.fn();
+    render({ ...loaded, appSettingsOpen: true, shortcutsOpen: true }, dispatch);
+    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+      { type: "toggleAppSettings", open: false },
+      { type: "toggleShortcuts", open: false },
+      { type: "select", id: "scout" },
+      { type: "revealThread", threadId: "scout-main" },
+    ]);
+  });
+
+  it("opens a bot's link as its row would: at its main thread while threads are hidden", () => {
+    vi.stubGlobal("window", {});
+    fixture.link = "openmausbot://bot/scout";
+    fixture.showThreads = false;
+    const dispatch = vi.fn();
+    const left = { ...scout, threadId: "scout-report", mainThreadId: "scout-main",
+      tasks: [...scout.tasks!, { threadId: "scout-report", title: "Report", createdAt: 2, unread: true }] };
+    render({ ...loaded, bots: [left] }, dispatch);
+    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+      { type: "switchTask", botId: "scout", threadId: "scout-main" },
+      { type: "revealThread", threadId: "scout-main" },
+    ]);
+  });
+
+  it("opens a thread named in the web address once the bots have loaded, and only once", () => {
+    const replaceState = vi.fn();
+    vi.stubGlobal("window", { location: { pathname: "/", search: "?thread=scout-main&bot=scout", hash: "" }, history: { replaceState } });
+    const dispatch = vi.fn();
+    render(loading, dispatch);
+    expect(fixture.link).toBe("openmausbot://thread/scout-main?bot=scout");
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/");
+    expect(dispatch).not.toHaveBeenCalled();
+
+    render(loaded, dispatch);
+    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+      { type: "select", id: "scout" },
+      { type: "switchTask", botId: "scout", threadId: "scout-main" },
+      { type: "revealThread", threadId: "scout-main" },
+    ]);
+    expect(fixture.link).toBeNull();
+  });
+
+  it("says so when the web address names a thread this person can't see", () => {
+    vi.stubGlobal("window", { location: { pathname: "/", search: "?thread=elsewhere", hash: "" }, history: { replaceState: vi.fn() } });
+    const dispatch = vi.fn();
+    render(loading, dispatch);
+    render(loaded, dispatch);
+    expect(dispatch.mock.calls.map(([action]) => action)).toContainEqual({ type: "notice", notice: { kind: "thread-gone", botName: null } });
+  });
+
+  it("does nothing without the desktop bridge", () => {
+    vi.stubGlobal("window", {});
+    const dispatch = vi.fn();
+    expect(render(loaded, dispatch)).toEqual([undefined, undefined]);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+});
+
+describe("useDesktopNotificationOpens", () => {
+  const work = { ...scout, tasks: [...scout.tasks!, { threadId: "scout-work", title: "@CoS · work", createdAt: 2 }] };
+  const ready: AppState = { ...initialState, bots: [work], selectedId: "scout", hydrated: true };
+  const opens = (state: AppState, dispatch: (action: Action) => void) => {
+    fixture.effects = [];
+    useDesktopNotificationOpens(state, dispatch);
+    return fixture.effects.map((effect) => effect());
+  };
+
+  it("holds a click until a page just loaded for it has its bots, then opens that thread once", () => {
+    let deliver: ((target: unknown) => void) | undefined;
+    const unsubscribe = vi.fn();
+    vi.stubGlobal("window", { ogb: { desktopNotifications: { onOpen: (cb: (target: unknown) => void) => { deliver = cb; return unsubscribe; } } } });
+    const dispatch = vi.fn();
+    const [cleanup] = opens(loading, dispatch);
+    expect(cleanup).toBe(unsubscribe);
+    deliver!({ botId: "scout", threadId: "scout-work" });
+    opens(loading, dispatch);
+    expect(dispatch).not.toHaveBeenCalled();
+    opens(ready, dispatch);
+    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+      { type: "select", id: "scout" },
+      { type: "switchTask", botId: "scout", threadId: "scout-work" },
+      { type: "revealThread", threadId: "scout-work" },
+    ]);
+    expect(fixture.link).toBeNull();
+  });
+
+  it("subscribes to nothing on a browser or an older app", () => {
+    vi.stubGlobal("window", {});
+    const dispatch = vi.fn();
+    expect(opens(ready, dispatch)[0]).toBeUndefined();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+});

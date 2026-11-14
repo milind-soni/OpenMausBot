@@ -27,24 +27,13 @@ type TerminalOutput = Writable & { isTTY?: boolean; columns?: number; rows?: num
 type PromptContext = { input: TerminalInput; output: TerminalOutput; signal: AbortSignal };
 
 function displayText(value: string, multiline = false): string {
-  // OSC 8 hyperlinks slip past stripVTControlCharacters on supported Node
-  // versions whenever the URI carries a character RFC 3986 allows unencoded
-  // ((, ), +, and friends): the failed match strands most of the URI and its
-  // BEL as printable text (nodejs/node#64313). Strip whole OSC sequences
-  // here, from the raw value while their openers are still intact; the
-  // label between a link's opening and closing sequences survives, and an
-  // unterminated sequence is removed outright. Both introducer forms
-  // match: ESC ] and the lone C1 byte, which carries no closing bracket.
+  // stripVTControlCharacters misses OSC 8 hyperlinks whose URI carries RFC 3986 characters like ( ) +, leaving the URI and
+  // BEL as text (nodejs/node#64313), so whole OSC sequences (ESC ] or the lone C1 byte) are stripped first.
   // eslint-disable-next-line no-control-regex
   const withoutOsc = value.replace(/(?:\u001b\]|\u009d)[^\u0007\u001b\u009c]*(?:\u0007|\u001b\\|\u009c)?/g, "");
   const plain = stripVTControlCharacters(withoutOsc);
-  // Provider-supplied labels must not issue terminal control commands.
-  // stripVTControlCharacters glues a trailing BEL onto the escape sequence
-  // before it on some Node versions and leaves it bare on others, so the
-  // fallback below must be version-independent: controls that render no
-  // glyph (BEL, DEL, C1, …) are removed outright — padding them would
-  // counterfeit whitespace — while tab and carriage return collapse to one
-  // space and a newline survives only in multiline mode.
+  // Provider labels must not issue terminal control commands. stripVTControlCharacters treats a trailing BEL differently
+  // across Node versions, so glyph-less controls are removed outright (padding them would counterfeit whitespace).
   // eslint-disable-next-line no-control-regex
   const withoutControls = plain.replace(/[\u0000-\u001f\u007f-\u009f]/g, (character) => {
     if (character === "\n") return multiline ? "\n" : " ";
@@ -55,8 +44,7 @@ function displayText(value: string, multiline = false): string {
   return multiline ? withoutControls.replace(/[ \t]+(?=\n|$)/g, "") : withoutControls;
 }
 
-/** A line-based fallback with no cursor/color output. Readline has no output
- * stream for secrets, so even pasted input cannot be echoed. */
+/** Readline has no output stream for secrets, so even pasted input is never echoed. */
 function plainText(question: string, hidden: boolean, context: PromptContext): Promise<string> {
   const { input, output, signal } = context;
   return new Promise((resolve, reject) => {
@@ -80,7 +68,6 @@ function plainText(question: string, hidden: boolean, context: PromptContext): P
   });
 }
 
-/** Streams are injectable; fixtures never read the user's real terminal. */
 export function defaultSetupIo(input: TerminalInput = process.stdin, output: TerminalOutput = process.stdout): SetupIo {
   const log = (line: string) => { output.write(`${displayText(line, true)}\n`); };
   const rich = () => output.isTTY === true && process.env.TERM !== "dumb" && process.env.NO_COLOR === undefined
@@ -91,8 +78,7 @@ export function defaultSetupIo(input: TerminalInput = process.stdin, output: Ter
     const raw = input.isRaw === true;
     const flowing = input.readableFlowing === true;
     const controller = new AbortController();
-    // Clack owns this prompt's readline/key decoder, not the shared stdin.
-    // Discarding this stream also discards unfinished escape/paste sequences.
+    // Clack owns this prompt's readline key decoder; dropping the stream also drops unfinished escape or paste sequences.
     const promptInput = Object.assign(new PassThrough(), {
       isTTY: true,
       setRawMode: (mode: boolean) => input.setRawMode!(mode),
@@ -105,8 +91,7 @@ export function defaultSetupIo(input: TerminalInput = process.stdin, output: Ter
     };
     const cancel = () => fail(new SetupCancelled());
     const forward = (chunk: Buffer | string) => {
-      // Ctrl-D and cancellation during an incomplete escape must not wait
-      // for a key decoder. No prompt input is ever copied to its output.
+      // Ctrl-D and cancellation mid-escape must not wait for a key decoder; prompt input is never copied to its output.
       const interrupted = typeof chunk === "string"
         ? chunk.includes("\u0003") || chunk.includes("\u0004")
         : chunk.includes(3) || chunk.includes(4);

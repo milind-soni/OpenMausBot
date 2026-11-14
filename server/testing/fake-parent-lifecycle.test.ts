@@ -36,13 +36,12 @@ it.each(["fake-acp-cli.ts", "fake-claude-cli.ts", "fake-codex-app-server.ts"])(
       const exited = once(parent, "exit");
       parent.kill("SIGKILL");
       await exited;
-      // The fake inherits this pipe, so EOF proves it exited too, without
-      // treating a briefly unreaped zombie as a still-running process.
+      // The fake inherits this pipe, so EOF proves it exited without mistaking an unreaped zombie for a live one.
       await expect.poll(() => ended, { timeout: 5_000 }).toBe(true);
     } finally {
       const pid = Number(output.match(/FAKE_PID:(\d+)/)?.[1]);
       if (!ended && pid > 0) {
-        try { process.kill(pid, "SIGKILL"); } catch { /* already exited */ }
+        try { process.kill(pid, "SIGKILL"); } catch {}
       }
       await waitForExit(parent, { signal: "SIGKILL" });
     }

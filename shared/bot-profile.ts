@@ -10,13 +10,10 @@ export const BOT_PROFILE_LIMITS = {
   soul: 24_000,
 } as const;
 
-/** A name or title is quoted inside prompts and cards as one line — a
- * roster entry, a "Name: …" speaker line, the bracketed provenance note.
- * Text that can break out of that line (a newline, a control byte, the
- * Unicode separators) is refused at the door rather than flattened later,
- * so what the person sees in the sidebar is what every prompt sees too.
- * Written as a scan because a control-character class is the kind of
- * literal the linter (rightly) refuses. */
+/** A name or title is quoted inside prompts and cards as one line, so text that
+ * can break out of it (a newline, a control byte, the Unicode separators) is
+ * refused at the door. A scan, since the linter refuses a control-character
+ * class. */
 export function fitsOnOneLine(value: string): boolean {
   for (let i = 0; i < value.length; i += 1) {
     const code = value.charCodeAt(i);

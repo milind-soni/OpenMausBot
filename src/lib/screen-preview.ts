@@ -2,8 +2,6 @@ import type { LocaleKey } from "@/locales";
 
 export type ScreenPreviewFailurePhase = "cancelled" | "unavailable" | "error";
 
-// The caller keeps this in React state, so a failure carries a catalog key
-// rather than a sentence — a language switch must not freeze the message.
 export type ScreenPreviewStartResult =
   | { ok: true; stream: MediaStream }
   | { ok: false; phase: ScreenPreviewFailurePhase; messageKey: LocaleKey };
@@ -46,8 +44,7 @@ export async function requestScreenPreview({
   getDisplayMedia,
 }: ScreenPreviewRequest): Promise<ScreenPreviewStartResult> {
   try {
-    // Keep these synchronous and adjacent so Chromium sees the media request
-    // in the same user gesture that armed the one-shot main-process intent.
+    // Synchronous and adjacent: Chromium must see the media request in the same user gesture.
     if (!beginIntent()) {
       return {
         ok: false,

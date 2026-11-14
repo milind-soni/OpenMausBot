@@ -12,11 +12,11 @@ The packaged app can request Accessibility and Screen Recording permission. Afte
 
 ## Ubuntu
 
-Ubuntu 24.04 GNOME host control is temporarily disabled while the real-seat input-safety blocker in issue #345 is resolved. Packaged builds retain the pinned runtime for reproducible review, but OpenMausBot does not start it and clears legacy opt-ins. Chat, screen preview, Cloud, and Local VM remain available. Do not start the bundled driver manually as a workaround.
+Ubuntu 24.04 GNOME host control is temporarily disabled while the real-seat input-safety blocker in issue #345 is resolved. Packaged builds retain the pinned runtime for reproducible review, but MausBot does not start it and clears legacy opt-ins. Chat, screen preview, Cloud, and Local VM remain available. Do not start the bundled driver manually as a workaround.
 
 ## Safety model
 
 - Enabling local control globally does not assign it to a bot.
 - Choose **This computer** for each bot that should receive the capability.
-- Risky actions still surface through the approval flow.
+- A bot on **Ask for approval** asks before each computer action; at **Full access**, the default, they run without a card.
 - Missing permissions, unexpected binaries, unsupported desktop sessions, and failed health checks fail closed.

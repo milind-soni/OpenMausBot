@@ -1,10 +1,3 @@
-// pi driver contract tests, run against the scripted fake `pi` CLI in
-// server/testing/fake-pi-cli.ts: parse the live catalog, normalize a full
-// RPC turn into canonical events, ride the toolUse→end_turn auto-continue,
-// broker a permission ask, and report availability from `pi --version`.
-//
-// The fake CLI is a shebang script Windows cannot exec directly; spawnCli
-// resolves it to `node <script>`, so these run everywhere.
 import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,16 +6,22 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
-import type { ProviderInstance } from "../contracts.ts";
+import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
+import { publishedMessages, replyProblems } from "../harness/text-items.testkit.ts";
+import { caseTokens, LIVE_REPLY_CASES, liveReplyScripts } from "../testing/live-reply-cases.ts";
+import { removeTempDir } from "../testing/cleanup.ts";
 import { encodeInjectId, localHost } from "./local-inject.ts";
+import { buildMcpServers } from "./pi-mcp-servers.ts";
 import {
   applyPiLocalCatalog,
-  buildMcpServers,
+  decodePiFrame,
   ensurePiInjectModel,
   fetchPiModels,
   parsePiCatalog,
   PiDriver,
+  PiRpcChunks,
+  piLineReader,
   preferPiInjectRows,
   splitPiModel,
   updatePiModelCatalog,
@@ -78,7 +77,104 @@ describe("parsePiCatalog", () => {
   });
 });
 
+describe("PiRpcChunks", () => {
+  const split = (json: string, at: number, chunkId = "c1") => {
+    const bytes = Buffer.from(json, "utf8");
+    const data = (start: number, end: number) => bytes.subarray(start, end).toString("base64");
+    return [
+      { type: "rpc_chunk", chunkId, index: 0, count: 2, byteLength: bytes.length, data: data(0, at) },
+      { type: "rpc_chunk", chunkId, index: 1, count: 2, byteLength: bytes.length, data: data(at, bytes.length) },
+    ];
+  };
+
+  it("reassembles a split frame and passes plain frames through", () => {
+    const chunks = new PiRpcChunks();
+    const json = JSON.stringify({ type: "turn_end", usage: { input: 1, output: 2 } });
+    const [head, tail] = split(json, 7);
+    expect(decodePiFrame(JSON.stringify(head), chunks)).toBeNull();
+    expect(decodePiFrame(JSON.stringify(tail), chunks)).toEqual({ type: "turn_end", usage: { input: 1, output: 2 } });
+    expect(decodePiFrame(JSON.stringify({ type: "agent_end" }), chunks)).toEqual({ type: "agent_end" });
+  });
+
+  it.each([
+    ["a mismatched count", { count: 3 }],
+    ["a mismatched byteLength", { byteLength: 1 }],
+    ["a skipped index", { index: 2 }],
+  ])("drops the sequence on %s and recovers on the next one", (_label, overrides) => {
+    const chunks = new PiRpcChunks();
+    const json = JSON.stringify({ type: "turn_end" });
+    const [head, tail] = split(json, 4);
+    expect(decodePiFrame(JSON.stringify(head), chunks)).toBeNull();
+    expect(decodePiFrame(JSON.stringify({ ...tail, ...overrides }), chunks)).toBeNull();
+    const [head2, tail2] = split(json, 4, "c2");
+    expect(decodePiFrame(JSON.stringify(head2), chunks)).toBeNull();
+    expect(decodePiFrame(JSON.stringify(tail2), chunks)).toEqual({ type: "turn_end" });
+  });
+
+  it("ignores single-chunk, incomplete and non-JSON frames", () => {
+    const chunks = new PiRpcChunks();
+    expect(decodePiFrame(JSON.stringify({ type: "rpc_chunk", chunkId: "c", index: 0, count: 1, byteLength: 2, data: "e30=" }), chunks)).toBeNull();
+    expect(decodePiFrame(JSON.stringify({ type: "rpc_chunk", chunkId: "c", index: 0, count: 2, byteLength: 2 }), chunks)).toBeNull();
+    expect(decodePiFrame("not json", chunks)).toBeNull();
+  });
+
+  it("does not return a frame whose reassembled bytes are not JSON", () => {
+    const chunks = new PiRpcChunks();
+    const [head, tail] = split("not json at all", 4);
+    expect(decodePiFrame(JSON.stringify(head), chunks)).toBeNull();
+    expect(decodePiFrame(JSON.stringify(tail), chunks)).toBeNull();
+  });
+
+  it("rejects empty, oversized and too-many pieces without keeping the sequence", () => {
+    const piece = (overrides: Record<string, unknown>) =>
+      JSON.stringify({ type: "rpc_chunk", chunkId: "c", index: 0, count: 2, byteLength: 2, data: "e30=", ...overrides });
+    const oversized = "A".repeat(Math.ceil(PiRpcChunks.MAX_PIECE_BYTES / 3) * 4 + 4);
+    for (const overrides of [{ data: "" }, { data: "=" }, { data: oversized }, { count: PiRpcChunks.MAX_COUNT + 1 }]) {
+      const chunks = new PiRpcChunks();
+      expect(decodePiFrame(piece(overrides), chunks)).toBeNull();
+      expect(decodePiFrame(piece({ ...overrides, index: 1, data: "e30=" }), chunks)).toBeNull();
+    }
+  });
+});
+
+describe("piLineReader", () => {
+  it("drops a line longer than the frame cap and resumes at the next newline", () => {
+    const lines: string[] = [];
+    const read = piLineReader((line) => void lines.push(line));
+    read('{"a":1}\n');
+    read("x".repeat(PiRpcChunks.MAX_BYTES + 1));
+    read('{"type":"forged"}\n\n{"b":2}\n');
+    expect(lines).toEqual(['{"a":1}', '{"b":2}']);
+  });
+});
+
 describe("buildMcpServers", () => {
+  it("mounts a selected custom mail server without unrelated built-ins", () => {
+    const servers = buildMcpServers({ threadId: "selected", text: "Read mail", toolScope: { allow: ["mcp:mail:*"] }, integrations: {
+      agents: { command: "node", args: ["agents"], env: {} },
+      localComputer: { command: "node", args: ["computer"], env: {} },
+      custom: { mail: { command: "node", args: ["mail"], env: { SYNTHETIC: "1" } } },
+    } });
+    expect(Object.keys(servers ?? {})).toEqual(["mail"]);
+    expect(servers?.mail).toMatchObject({ scope: "custom" });
+  });
+
+  it("rejects malformed policy and mounts nothing for native-only selection", () => {
+    expect(() => buildMcpServers({ threadId: "bad", text: "Stop", toolScope: { allow: null } as never })).toThrow(/tool selection/i);
+    expect(buildMcpServers({ threadId: "native", text: "Draft", toolScope: { allow: ["native:read", "native:write"] }, integrations: { agents: { command: "node", args: [], env: {} } } })).toBeNull();
+  });
+  it("gates a URL server that has its own result limit, and only that one", () => {
+    const url = { type: "http" as const, url: "https://mcp.example.test/mcp", headers: {} };
+    const servers = buildMcpServers({ threadId: "t", text: "hi", integrations: {
+      custom: { motion: { ...url }, shop: { ...url } },
+      customResultBudgets: { motion: 40_000 },
+    } }) as Record<string, { args: string[]; env: Record<string, string> }>;
+    expect(servers.motion.env.OMB_GATE_BUDGET).toBe("40000");
+    expect(servers.motion.args[0]).toContain("mcp-gate");
+    expect(servers.shop.env).not.toHaveProperty("OMB_GATE_BUDGET");
+    expect(servers.shop.args[0]).toContain("mcp-remote-proxy");
+  });
+
   it("returns null when there are no integrations", () => {
     expect(buildMcpServers({ threadId: "t", text: "hi" })).toBeNull();
   });
@@ -100,7 +196,6 @@ describe("buildMcpServers", () => {
     });
   });
 
-
   it("passes a local computer (Cua/VPS) through as a direct stdio server", () => {
     const servers = buildMcpServers({
       threadId: "t",
@@ -110,6 +205,23 @@ describe("buildMcpServers", () => {
       },
     });
     expect(servers?.computer).toEqual({ command: "node", args: ["mcp"], env: { X: "y" } });
+  });
+
+  it("searches a URL server's catalog through the remote proxy, behind the gate when selected", () => {
+    const whop = { type: "http" as const, url: "https://mcp.example.test/mcp", headers: { Authorization: "Bearer disposable-pi-token" } };
+    const servers = buildMcpServers({ threadId: "t", text: "hi", integrations: { custom: { whop, notes: { command: "node", args: ["notes"], env: {} } } } });
+    const mounted = servers?.whop as { command: string; args: string[]; env: Record<string, string> };
+    expect(mounted).toMatchObject({ command: process.execPath, scope: "custom", directory: true });
+    expect(mounted.args[0]).toContain("mcp-remote-proxy");
+    expect(JSON.parse(mounted.env.OMB_REMOTE_MCP_DIRECTORY)).toEqual({ name: "whop" });
+    expect(JSON.stringify(mounted.args)).not.toContain("disposable-pi-token");
+    expect(servers?.notes).not.toHaveProperty("directory");
+    const toolScope = { allow: ["mcp:whop:*"], deny: ["mcp:whop:payments_create"] };
+    const scoped = buildMcpServers({ threadId: "t", text: "hi", toolScope, integrations: { custom: { whop } } })?.whop as { args: string[]; env: Record<string, string> };
+    expect(scoped).toMatchObject({ directory: true });
+    expect(scoped.args[0]).toContain("mcp-gate");
+    expect(scoped.env.OMB_GATE_DIRECTORY).toBe("1");
+    expect(JSON.parse(JSON.parse(scoped.env.OMB_GATE_UPSTREAM).env.OMB_REMOTE_MCP_DIRECTORY)).toEqual({ name: "whop", toolScope });
   });
 
   it("marks a host computer with scope so the extension gates its tools", () => {
@@ -177,6 +289,20 @@ describe("PiDriver catalog (fake CLI)", () => {
     expect(catalog.options).toEqual([]);
   });
 
+  it("reassembles the chunked catalog from a protocol-v2 runtime", async () => {
+    const catalog = await fetchPiModels(FAKE_CLI, {
+      PATH: process.env.PATH ?? "",
+      HOME: join(tmpdir(), "omb-pi-omp-chunk"),
+      FAKE_PI_MODE: "omp-chunk",
+    });
+    // The runtime stubs the catalog unless protocol 2 was negotiated first, so a catalog pins the order.
+    expect(catalog.options).toEqual([
+      { id: "ollama-cloud/glm-5.2", label: "glm-5.2", custom: true, provider: "ollama-cloud" },
+      { id: "openai/gpt-4o", label: "gpt-4o", custom: true, provider: "openai" },
+    ]);
+    expect(catalog.default).toBe("ollama-cloud/glm-5.2");
+  });
+
   it("updates pi's catalog only on explicit refresh, then probes it again", async () => {
     const home = mkdtempSync(join(tmpdir(), "omb-pi-update-"));
     const dump = join(home, "launches.jsonl");
@@ -240,6 +366,17 @@ describe("PiDriver turns (fake CLI)", () => {
     ensureDirs();
     chmodSync(FAKE_CLI, 0o755);
   });
+
+  it("refuses a restricted turn when the loaded extension has not confirmed enforcement", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-missing-scope-"));
+    const dump = join(dir, "rpc.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    await expect(instance.adapter.sendTurn({ threadId: "missing-enforcement", text: "Must not reach a provider", toolScope: { allow: [] } })).rejects.toThrow(/tool selection.*enforcement/i);
+    const rows = readFileSync(dump, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(rows.some((row) => row.argv?.includes("-e"))).toBe(true);
+    expect(rows.find((row) => row.argv?.includes("-e"))?.mcpConfig?.toolScope).toEqual({ allow: [] });
+    expect(rows.some((row) => row.prompt !== undefined)).toBe(false);
+  });
   afterEach(async () => {
     recorder?.stop();
     await instance?.dispose();
@@ -261,7 +398,7 @@ describe("PiDriver turns (fake CLI)", () => {
       "content.delta",
       "content.delta",
       "content.delta",
-      "item.completed", // assistant_text
+      "item.completed",
       "turn.completed",
     ]);
     expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "piAgent")).toBe(true);
@@ -277,6 +414,18 @@ describe("PiDriver turns (fake CLI)", () => {
     const done = recorder.events.at(-1)!;
     expect(done).toMatchObject({ type: "turn.completed", ok: true, stopReason: "end_turn", usage: { input: 12, output: 3 } });
     expect(instance.adapter.hasSession("t-happy")).toBe(false);
+  });
+
+  it("reassembles chunked turn frames from a protocol-v2 runtime", async () => {
+    await create("omp-chunk");
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-omp-chunk", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+
+    const text = recorder.events.find(
+      (e) => e.type === "item.completed" && (e as { itemType: string }).itemType === "assistant_text",
+    )!;
+    expect((text as { text: string }).text).toBe("Hello from pi");
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true, stopReason: "end_turn" });
   });
 
   it("sends images as native base64 prompt content without copying bytes into diagnostics", async () => {
@@ -334,8 +483,7 @@ describe("PiDriver turns (fake CLI)", () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-pi-split-"));
     const dump = join(dir, "dump.jsonl");
     await create(undefined, { FAKE_PI_DUMP: dump });
-    // The receipt store is keyed by thread and session file, so a unique
-    // thread keeps the run hermetic against earlier suite executions.
+    // Receipts are keyed by thread and session file, so a unique thread keeps the run hermetic.
     const threadId = "t-pi-prompt-split-" + randomUUID();
     const prompts = () =>
       readFileSync(dump, "utf8").split("\n").filter(Boolean)
@@ -355,13 +503,10 @@ describe("PiDriver turns (fake CLI)", () => {
       return { message: prompts().at(-1)!, cursor: session.sessionId };
     };
 
-    // The establishing turn carries the full prompt, exactly as before.
     const first = await send("first", "Memory: likes quiet hours.");
     expect(first.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
-    // The resumed session already carries it: later turns go through bare.
     const second = await send("second", "Memory: likes quiet hours.", first.cursor);
     expect(second.message).toBe("second");
-    // A changed volatile half rides the next prompt as a labelled note.
     const third = await send("third", "Memory: moved to Toronto.", first.cursor);
     expect(third.message)
       .toBe("Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:\n\nMemory: moved to Toronto.\n\nthird");
@@ -371,8 +516,7 @@ describe("PiDriver turns (fake CLI)", () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-pi-compaction-"));
     const dump = join(dir, "dump.jsonl");
     await create("compaction", { FAKE_PI_DUMP: dump });
-    // The receipt store is keyed by thread and session file, so a unique
-    // thread keeps the run hermetic against earlier suite executions.
+    // Receipts are keyed by thread and session file, so a unique thread keeps the run hermetic.
     const threadId = "t-pi-compaction-" + randomUUID();
     const prompts = () =>
       readFileSync(dump, "utf8").split("\n").filter(Boolean)
@@ -392,14 +536,25 @@ describe("PiDriver turns (fake CLI)", () => {
       return { message: prompts().at(-1)!, cursor: session.sessionId };
     };
 
-    // The establishing turn carries the full prompt; the fake then compacts
-    // mid-turn, and the compaction events must drop the just-written receipt.
     const first = await send("first");
     expect(first.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
-    // Compaction summarized the delivery away: the next turn re-establishes
-    // the standing prompt instead of running bare against a stale receipt.
     const second = await send("second", first.cursor);
     expect(second.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nsecond");
+    // Each turn condensed the session once; the chat marks each one.
+    const mine = recorder.events.filter((e) => e.threadId === threadId);
+    expect(mine.filter((e) => e.type === "context.compacted")).toHaveLength(2);
+    // Text streamed before the compaction is saved ahead of the marker, not joined to later text.
+    const before = mine.findIndex((e) => e.type === "item.completed" && (e as { text?: string }).text === "before");
+    expect(before).toBeGreaterThan(-1);
+    expect(before).toBeLessThan(mine.findIndex((e) => e.type === "context.compacted"));
+  });
+
+  it("adds no condensed marker when pi's compaction fails or is skipped", async () => {
+    await create("compaction", { FAKE_PI_COMPACTION_FAILS_ONLY: "1" });
+    const threadId = "t-pi-compaction-fails-" + randomUUID();
+    const { turnId } = await instance.adapter.sendTurn({ threadId, text: "first", system: "Standing rules." });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    expect(recorder.events.filter((e) => e.type === "context.compacted" && e.threadId === threadId)).toHaveLength(0);
   });
 
   it("keeps pi alive through post-run compaction recovery and re-establishes the full prompt", async () => {
@@ -425,15 +580,8 @@ describe("PiDriver turns (fake CLI)", () => {
       return { message: prompts().at(-1)!, cursor: session.sessionId };
     };
 
-    // The establishing turn ends, pi schedules overflow-recovery compaction
-    // after a non-terminal agent_end, and only then resumes for the final
-    // turn and the terminal agent_end. Settling at turn_end would kill the
-    // child before the late compaction events could drop the receipt.
     const first = await send("first");
     expect(first.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
-    // The recovery compaction summarized the delivery away: the next turn
-    // re-establishes the standing prompt instead of running bare against a
-    // receipt the missed events should have invalidated.
     const second = await send("second", first.cursor);
     expect(second.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nsecond");
   });
@@ -461,10 +609,6 @@ describe("PiDriver turns (fake CLI)", () => {
       return { message: prompts().at(-1)!, cursor: session.sessionId };
     };
 
-    // Upstream pi marks the pre-recovery agent_end with willRetry: true and
-    // closes the run with agent_settled; settling on the unmarked frame the
-    // way older drivers treated turn_end would kill the child before the
-    // overflow-recovery compaction could invalidate the receipt.
     const first = await send("first");
     expect(first.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
     const second = await send("second", first.cursor);
@@ -518,8 +662,6 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({
       message: "pi prompt failed",
     });
-    // A healthy pi resuming the same session: the rejected prompt left no
-    // receipt, so the full prompt rides again instead of a bare turn.
     recorder.stop();
     await instance.dispose();
     await create(undefined, { FAKE_PI_DUMP: dump });
@@ -553,9 +695,44 @@ describe("PiDriver turns (fake CLI)", () => {
     const message = readFileSync(dump, "utf8").split("\n").filter(Boolean)
       .map((line) => JSON.parse(line) as { prompt?: { message?: string } })
       .find((row) => row.prompt)?.prompt?.message;
-    // Without a session the prompt is the model's only context: the turn
-    // keeps the full block and writes no receipt.
     expect(message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nbare");
+  });
+
+  it("waits for a slow new_session reply before it sends the prompt, and says so in the chat", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-session-slow-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("session-slow", { FAKE_PI_DUMP: dump });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const sent = instance.adapter.sendTurn({ threadId: "t-pi-session-slow-" + randomUUID(), text: "hi", model: "openai/gpt-4o" });
+      await recorder.until((e) => e.type === "turn.started");
+      await vi.advanceTimersByTimeAsync(20_001);
+      const { turnId } = await sent;
+      const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      expect(done).toMatchObject({ ok: true });
+      const order = readFileSync(dump, "utf8").split("\n").filter(Boolean)
+        .map((line) => Object.keys(JSON.parse(line) as object)[0]).filter((key) => ["sessionReplied", "setModel", "prompt"].includes(key));
+      expect(order).toEqual(["sessionReplied", "setModel", "prompt"]);
+      expect(recorder.events.find((e) => e.type === "runtime.notice" && e.turnId === turnId)).toMatchObject({ message: expect.stringMatching(/Pi is taking longer than usual/) });
+    } finally {
+      vi.useRealTimers();
+      removeTempDir(dir);
+    }
+  });
+
+  it("stops waiting for the session reply when the turn is stopped, and sends nothing after", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-session-stop-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("session-slow", { FAKE_PI_DUMP: dump, FAKE_PI_SESSION_DELAY_MS: "60000" });
+    const threadId = "t-pi-session-stop-" + randomUUID();
+    const sent = instance.adapter.sendTurn({ threadId, text: "hi", model: "openai/gpt-4o" });
+    await recorder.until((e) => e.type === "turn.started");
+    await instance.adapter.interruptTurn(threadId);
+    const { turnId } = await sent;
+    expect(recorder.events.find((e) => e.type === "turn.completed" && e.turnId === turnId)).toMatchObject({ stopReason: "cancelled" });
+    const rows = readFileSync(dump, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as object);
+    expect(rows.some((row) => "setModel" in row || "prompt" in row)).toBe(false);
+    removeTempDir(dir);
   });
 
   it("fails promptly when the pi process exits before replying", async () => {
@@ -617,16 +794,13 @@ describe("PiDriver turns (fake CLI)", () => {
       .map((line) => JSON.parse(line) as { thinkingLevel?: string })
       .filter((record) => record.thinkingLevel !== undefined)
       .map((record) => record.thinkingLevel!);
-    // exactly one pin across both turns: the "none" turn's off — a plain turn
-    // must not touch the thinking level at all
     expect(levels).toEqual(["off"]);
   });
 
   it("scrubs provider and workspace credentials from every pi child env", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-pi-dump-"));
     const dump = join(dir, "dump.jsonl");
-    // Plant a workspace credential on the harness process itself — the leak
-    // path is `...process.env`, not just input.environment.
+    // The leak path is `...process.env`, not just input.environment.
     const savedBoat = process.env.BOX_TOKEN;
     const savedXai = process.env.XAI_API_KEY;
     process.env.BOX_TOKEN = "boat-secret-value";
@@ -662,6 +836,21 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(JSON.stringify(rows)).not.toContain("openai-secret-value");
   });
 
+  it("loads the extension's ask_user on a plain turn unless the tool selection excludes it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-ask-user-"));
+    const dump = join(dir, "dump.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-ask-user", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    await expect(instance.adapter.sendTurn({ threadId: "t-ask-user-scoped", text: "hi", toolScope: { allow: ["native:read"] } })).rejects.toThrow(/enforcement/i);
+    const rows = readFileSync(dump, "utf8").trim().split("\n")
+      .map((line) => JSON.parse(line) as { argv?: string[]; mcpConfig?: { askUser?: boolean; mcpServers?: object } | null })
+      .filter((row) => row.argv?.includes("-e"));
+    expect(rows.map((row) => row.mcpConfig?.askUser)).toEqual([true, false]);
+    expect(rows[0].mcpConfig?.mcpServers).toEqual({});
+    await removeTempDir(dir);
+  });
+
   it("mounts integrations as stdio MCP servers and loads the pi-mcp-extension", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-pi-mcp-dump-"));
     const dump = join(dir, "dump.jsonl");
@@ -671,7 +860,6 @@ describe("PiDriver turns (fake CLI)", () => {
       text: "hi",
       integrations: {
         composio: { command: "node", args: ["connector-proxy.js"], env: { COMPOSIO_KEY: "ck" } },
-        computer: { kind: "box", boxId: "b1", token: "bt", control: { url: "http://c", token: "ct" } },
       },
     });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
@@ -683,14 +871,34 @@ describe("PiDriver turns (fake CLI)", () => {
     const mcpRow = rows.find((r) => r.mcpConfig != null);
     expect(mcpRow).toBeTruthy();
 
-    // the extension rides `-e` so the external pi process mounts the servers
     const extIndex = mcpRow!.argv.indexOf("-e");
     expect(extIndex).toBeGreaterThanOrEqual(0);
     expect(mcpRow!.argv[extIndex + 1]).toContain("pi-mcp-extension");
 
     const servers = mcpRow!.mcpConfig!.mcpServers!;
-    // composio passes through verbatim as a stdio server
     expect(servers.composio).toMatchObject({ command: "node", args: ["connector-proxy.js"], env: { COMPOSIO_KEY: "ck" } });
+  });
+
+  it("reports pi's priced cost and cached tokens summed over the whole run", async () => {
+    await create("priced");
+    await instance.adapter.sendTurn({ threadId: "t-priced", text: "run it", model: "synthetic/hf:moonshotai/Kimi-K3" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+
+    expect(done).toMatchObject({ ok: true });
+    // input counts every prompt token, cached ones included, as the other drivers do.
+    expect((done as { usage: unknown }).usage).toEqual({ input: 257, output: 3, cachedInput: 220 });
+    expect((done as { cost: number }).cost).toBeCloseTo(0.0025, 10);
+  });
+
+  it("books a model call's cost when the turn is stopped while its tool runs", async () => {
+    await create("priced-stop");
+    await instance.adapter.sendTurn({ threadId: "t-priced-stop", text: "run it", model: "synthetic/hf:moonshotai/Kimi-K3" });
+    await recorder.until((e) => e.type === "item.started");
+    await instance.adapter.interruptTurn("t-priced-stop");
+    const done = await recorder.until((e) => e.type === "turn.completed");
+
+    expect(done).toMatchObject({ ok: true, stopReason: "cancelled", usage: { input: 125, output: 1, cachedInput: 100 } });
+    expect((done as { cost: number }).cost).toBeCloseTo(0.0021, 10);
   });
 
   it("rides the toolUse auto-continue and only settles on the final end_turn", async () => {
@@ -698,7 +906,6 @@ describe("PiDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-tool", text: "run it" });
     const done = await recorder.until((e) => e.type === "turn.completed");
 
-    // a tool ran and completed, then pi auto-continued to synthesize the reply
     expect(recorder.events.filter((e) => e.type === "item.started").length).toBe(1);
     expect(recorder.events.filter((e) => e.type === "item.completed" && (e as { itemType: string }).itemType === "tool").length).toBe(1);
     expect(recorder.events.find((event) => event.type === "item.started")).toMatchObject({ summary: "echo hi", input: expect.stringContaining("echo hi") });
@@ -706,7 +913,7 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(JSON.stringify(recorder.events)).not.toContain("pi-input-secret");
     expect(JSON.stringify(recorder.events)).not.toContain("pi-output-secret");
     expect(done).toMatchObject({ ok: true, stopReason: "end_turn" });
-    expect((done as { usage: { input: number; output: number } }).usage).toEqual({ input: 12, output: 2 });
+    expect((done as { usage: { input: number; output: number } }).usage).toEqual({ input: 17, output: 3 });
     const text = recorder.events.find(
       (e) => e.type === "item.completed" && (e as { itemType: string }).itemType === "assistant_text",
     ) as { text: string } | undefined;
@@ -724,22 +931,44 @@ describe("PiDriver turns (fake CLI)", () => {
       "turn.started",
       "session.started",
       "content.delta",
-      "item.completed", // before one
+      "item.completed",
       "item.started",
-      "item.completed", // tool
+      "item.completed",
       "content.delta",
-      "item.completed", // before two
+      "item.completed",
       "item.started",
-      "item.completed", // tool
+      "item.completed",
       "content.delta",
-      "item.completed", // after
+      "item.completed",
       "turn.completed",
     ]);
     const texts = recorder.events
       .filter((e) => e.type === "item.completed" && (e as { itemType: string }).itemType === "assistant_text")
       .map((e) => (e as { text: string }).text);
     expect(texts).toEqual(["before one", "before two", "after"]);
+    expect(publishedMessages(recorder.events).map(({ streamed, completed }) => ({ streamed, completed }))).toEqual([
+      { streamed: "before one", completed: "before one" },
+      { streamed: "before two", completed: "before two" },
+      { streamed: "after", completed: "after" },
+    ]);
+    expect(new Set(publishedMessages(recorder.events).map((message) => message.itemId)).size).toBe(3);
   });
+
+  it.each(LIVE_REPLY_CASES.filter((entry) => entry.action === undefined || entry.action === "stop").map((entry) => ({ entry, name: entry.name })))(
+    "streams the $name reply with one id per message and nothing doubled, lost or glued", async ({ entry }) => {
+      const scripts = join(mkdtempSync(join(tmpdir(), "omb-pi-live-")), "scripts.json");
+      writeFileSync(scripts, JSON.stringify(liveReplyScripts()));
+      await create(undefined, { FAKE_STREAM_SCRIPT: scripts, FAKE_STREAM_CADENCE: entry.action === "stop" ? "6:5" : "7:0" });
+      const threadId = `t-live-${entry.name}`;
+      const { turnId } = await instance.adapter.sendTurn({ threadId, text: `Please answer ${entry.marker}`, model: "ollama-cloud/glm-5.2" });
+      if (entry.action === "stop") {
+        await recorder.until((e) => e.type === "content.delta" && e.turnId === turnId);
+        await instance.adapter.interruptTurn(threadId);
+      }
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId, 30_000);
+      const events = recorder.events.filter((e) => e.turnId === turnId);
+      expect(replyProblems(events, caseTokens(entry), { stopped: entry.action === "stop" })).toEqual([]);
+    }, 60_000);
 
   it("brokers a permission ask through request.opened → respondToRequest", async () => {
     await create("permission");
@@ -793,8 +1022,7 @@ describe("PiDriver turns (fake CLI)", () => {
     const outcome = new Promise<string>((resolve) => {
       unsubscribe = instance.adapter.onEvent((event) => {
         if (event.type !== "request.opened" || !event.requestId) return;
-        // This mirrors the harness's auto-approve listener: emit() invokes it
-        // synchronously, so the ask must already be in pending here.
+        // Like the harness's auto-approve listener, which emit() invokes synchronously.
         void instance.adapter
           .respondToRequest(event.threadId, event.requestId, { behavior: "allow" })
           .then(resolve);
@@ -819,8 +1047,7 @@ describe("PiDriver turns (fake CLI)", () => {
       choices: ["Blue", "Green"],
       questions: [{ question: "Which color?", options: [{ label: "Blue" }, { label: "Green" }] }],
     });
-    // Exactly what the tabbed QuestionCard submits: one Q:/A: block, not a
-    // bare option label.
+    // Exactly what the tabbed QuestionCard submits: one Q:/A: block, not a bare option label.
     const outcome = await instance.adapter.respondToRequest("t-pi-select", (opened as { requestId: string }).requestId, {
       behavior: "answer",
       message: "The user answered your questions.\n\nQ: Which color?\nA: Green",
@@ -891,51 +1118,22 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(rows.find((row) => row.uiResponse)?.uiResponse).toMatchObject({ id: "ask-select", cancelled: true });
   });
 
-  it("cancels an unanswered ask after 15 minutes", async () => {
+  it("keeps an unanswered question open for days and still takes the person's answer", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-pi-timeout-"));
     const dump = join(dir, "dump.jsonl");
     await create("question-select", { FAKE_PI_DUMP: dump });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let opened: RuntimeEvent;
     try {
       await instance.adapter.sendTurn({ threadId: "t-pi-timeout", text: "go" });
-      const opened = await recorder.until((e) => e.type === "request.opened");
-      await vi.advanceTimersByTimeAsync(15 * 60_000);
-      const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId);
-      expect(resolved).toMatchObject({ behavior: "deny", source: "timeout" });
-      await recorder.until((e) => e.type === "turn.completed");
-      const rows = readFileSync(dump, "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as { uiResponse?: { id?: string; cancelled?: boolean } });
-      expect(rows.find((row) => row.uiResponse)?.uiResponse).toMatchObject({ id: "ask-select", cancelled: true });
+      opened = await recorder.until((e) => e.type === "request.opened");
+      await vi.advanceTimersByTimeAsync(72 * 60 * 60_000);
+      expect(recorder.events.some((e) => e.type === "request.resolved")).toBe(false);
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("cancels an ask's fail-safe timer when the turn is interrupted", async () => {
-    await create("question-select");
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const scheduled = vi.spyOn(globalThis, "setTimeout");
-    const cancelled = vi.spyOn(globalThis, "clearTimeout");
-    try {
-      await instance.adapter.sendTurn({ threadId: "t-ask-interrupt", text: "go" });
-      await recorder.until((e) => e.type === "request.opened");
-      const askIndex = scheduled.mock.calls.findIndex(([, delay]) => delay === 15 * 60_000);
-      expect(askIndex).toBeGreaterThanOrEqual(0);
-      const askTimer = scheduled.mock.results[askIndex].value;
-      expect(cancelled).not.toHaveBeenCalledWith(askTimer);
-      await instance.adapter.interruptTurn("t-ask-interrupt");
-      await recorder.until((e) => e.type === "turn.completed");
-      // Assert this ask's timer was cancelled, not that the whole process
-      // has no timers: killCliTree may still be polling for the real child
-      // to exit, which advancing a fake clock cannot guarantee.
-      expect(cancelled).toHaveBeenCalledWith(askTimer);
-    } finally {
-      scheduled.mockRestore();
-      cancelled.mockRestore();
-      vi.useRealTimers();
-    }
+    await instance.adapter.respondToRequest("t-pi-timeout", opened.requestId!, { behavior: "deny" });
+    expect(await recorder.until((e) => e.type === "request.resolved")).toMatchObject({ behavior: "deny", source: "user" });
   });
 
   it("respondToRequest is unavailable for an ask that is not pending", async () => {
@@ -1169,7 +1367,6 @@ describe("PiDriver mid-turn steer (fake CLI)", () => {
     const frame = rows.find((row) => row.steer)?.steer;
     expect(frame?.message).toBe(envelope);
     expect(typeof frame?.id).toBe("string");
-    // Finish the held turn: the seam belongs to the RUNNING turn only.
     await instance.adapter.respondToRequest("t-steer", "ask-1", { behavior: "allow" });
     await recorder.until((e) => e.type === "turn.completed");
     await expect(instance.adapter.steer!("t-steer", "late")).resolves.toBe("refused");
@@ -1190,10 +1387,7 @@ describe("PiDriver mid-turn steer (fake CLI)", () => {
     await create({ FAKE_PI_DUMP: dump, FAKE_PI_MODE: "permission", FAKE_PI_STEER_OUT_OF_ORDER: "1" });
     await instance.adapter.sendTurn({ threadId: "t-race", text: "go" });
     await recorder.until((e) => e.type === "request.opened");
-    // The fake holds the first steer's refusal until the second frame exists,
-    // then answers refusal-for-first / success-for-second: keyed by command
-    // name alone, the refusal would reject the second caller (requeueing
-    // words pi accepted) and the first caller would hang to its timeout.
+    // Keyed by command name alone, the first steer's refusal would reject the second caller.
     const first = instance.adapter.steer!("t-race", "first aside");
     const second = instance.adapter.steer!("t-race", "second aside");
     await expect(first).resolves.toBe("refused");

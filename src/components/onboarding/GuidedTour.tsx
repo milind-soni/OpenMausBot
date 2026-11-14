@@ -1,15 +1,10 @@
-// Runs the guided tour on the live interface. One spotlight at a time,
-// pointing at a real control, with Next on every step; the tour presses the
-// controls itself (the Tools menu, its items, the Computer button), so it
-// never waits on the user and the app reacts exactly as it would for them.
-// Clicking the pointed-at control counts as Next too. Every advance is
-// written to the server's hint list first, so a reload lands on the same
-// step.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { ANCHOR_EFFECTS, currentStep, stepNumber, TOUR_STEPS, withTourFinished, type TourEffect, type TourStep } from "@/lib/guided-tour";
 import { t } from "@/lib/i18n";
 import type { MausState } from "@/lib/mascot";
 import { hintSeenPatch } from "@/lib/onboarding";
+import { sendKeyLabel, useSendKey } from "@/lib/send-key";
 import type { LocaleKey } from "@/locales";
 import { api, useStore } from "@/state/store";
 import { Spotlight } from "./Spotlight";
@@ -27,7 +22,7 @@ const MASCOT: Record<TourStep["id"], MausState> = {
   "tour.done": "celebrate",
 };
 
-const copy = (id: TourStep["id"]) => t(`onboarding.tour.${id.slice(5)}` as LocaleKey);
+const copy = (step: TourStep, key: string) => t(step.copy ?? (`onboarding.tour.${step.id.slice(5)}` as LocaleKey), { key });
 
 function visible(anchor: string): HTMLElement | null {
   const all = Array.from(document.querySelectorAll<HTMLElement>(`[data-tour="${anchor}"]`));
@@ -38,7 +33,6 @@ function anchorPresent(anchor: string | null): boolean {
   return !anchor || visible(anchor) !== null;
 }
 
-/** Press a control the way the user would; false when it is not on screen. */
 function press(anchor: string): boolean {
   const el = visible(anchor);
   if (!el) return false;
@@ -49,7 +43,7 @@ function press(anchor: string): boolean {
 export function GuidedTour() {
   const { state, dispatch } = useStore();
   const record = state.config?.onboarding;
-  const step = currentStep(record);
+  const step = currentStep(record, useAdvancedMode());
   const saving = useRef(false);
   const pending = useRef<Promise<unknown>>(Promise.resolve());
   const latestRecord = useRef(record);
@@ -59,6 +53,7 @@ export function GuidedTour() {
   const [failed, setFailed] = useState(false);
   const entered = useRef<string | null>(null);
   const [fallback, setFallback] = useState<string | null>(null);
+  const sendKey = useSendKey();
 
   useEffect(() => {
     if (!state.tourOpen) return;
@@ -77,7 +72,6 @@ export function GuidedTour() {
           dispatch({ type: "toggleComputer", open: false });
           return;
         case "openTools": {
-          // the menu is a toggle: only press it when it is closed
           const trigger = visible("tools");
           if (trigger && trigger.getAttribute("aria-expanded") !== "true") trigger.click();
           return;
@@ -89,7 +83,7 @@ export function GuidedTour() {
           dispatch({ type: "togglePlugins", open: false });
           return;
         case "openAutomations":
-          if (!press("nav-automations")) dispatch({ type: "showRoutines" });
+          if (!press("nav-automations") && readAdvancedMode()) dispatch({ type: "showRoutines" });
           return;
         case "backToChat":
           dispatch({ type: "showChat" });
@@ -125,8 +119,8 @@ export function GuidedTour() {
       saving.current = true;
       setFailed(false);
       void save(false, step.id).then(() => {
-        // Only move the interface after progress was saved. A queued skip
-        // owns cleanup and must not have its panels reopened by this request.
+        // Move the interface only after progress is saved; a queued skip owns cleanup and must not have its panels
+        // reopened.
         if (!closed.current && !(fromAnchor && step.onExit && ANCHOR_EFFECTS.has(step.onExit))) run(step.onExit);
       }).catch(() => setFailed(true)).finally(() => { saving.current = false; });
     },
@@ -137,7 +131,6 @@ export function GuidedTour() {
     if (closed.current) return;
     closed.current = true;
     setDismissed(true);
-    // leave nothing open behind: the panel, the menu, the Automations page
     if (state.computerOpen) run("closeComputer");
     if (state.pluginsOpen) run("closeApps");
     run("backToChat");
@@ -145,19 +138,15 @@ export function GuidedTour() {
     dispatch({ type: "toggleTour", open: false });
   }, [state.computerOpen, state.pluginsOpen, run, save, dispatch]);
 
-  const active = !dismissed && Boolean(record?.completedAt) && !state.welcomeOpen && step !== null;
+  // Only ever started from Settings (Replay app tour): the welcome no longer hands over to it, now or after a reload.
+  const active = !dismissed && state.tourOpen && Boolean(record?.completedAt) && !state.welcomeOpen && step !== null;
 
-  // entering a step runs its effect once per step
   useEffect(() => {
     if (!active || !step || entered.current === step.id) return;
     entered.current = step.id;
     run(step.onEnter);
   }, [active, step, run]);
 
-  // a step whose control is not on screen points at its fallback, or skips
-  // itself, after the layout has a moment to settle (a menu closing, a
-  // page changing, a panel mounting). Its enter effect is pressed once
-  // more first: on a cold load the sidebar may not have been there yet.
   useEffect(() => {
     if (!active || !step?.skipIfMissing) return;
     let second: ReturnType<typeof setTimeout> | undefined;
@@ -177,7 +166,6 @@ export function GuidedTour() {
     };
   }, [active, step, advance, run]);
 
-  // clicking the pointed-at control is as good as Next
   useEffect(() => {
     if (!active || !step?.anchor || step.id === "tour.apps-panel" || step.id === "tour.automations-page" || step.id === "tour.done") return;
     const onClick = (event: MouseEvent) => {
@@ -204,7 +192,7 @@ export function GuidedTour() {
       secondary={closing ? undefined : { label: t("onboarding.tour.skip"), onClick: finish }}
       onDone={finish}
     >
-      {copy(step.id)}
+      {copy(step, sendKeyLabel(sendKey))}
       {failed && <p role="alert" className="mt-2 text-danger">{t("onboarding.tour.error")}</p>}
     </Spotlight>
   );

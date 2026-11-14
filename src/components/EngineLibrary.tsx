@@ -1,4 +1,6 @@
-import { useState, type ReactNode } from "react";
+import { useContext, useState, type ReactNode } from "react";
+import { SettingsLook } from "./SettingsPrimitives";
+import { useUpdatedOnce } from "@/hooks/use-updated-once";
 import { ArrowUpRight, Check, ChevronDown, RefreshCw } from "lucide-react";
 import { useStore, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -6,6 +8,9 @@ import { t } from "@/lib/i18n";
 import { InstanceProviderMark } from "./ProviderIcons";
 
 export function engineReady(instance: InstanceInfo): boolean {
+  if (instance.driverKind === "clineAgent") {
+    return instance.snapshot.state === "available" && instance.snapshot.authenticated === true;
+  }
   return instance.snapshot.state === "available" &&
     (instance.access === "custom" || instance.snapshot.authenticated !== false);
 }
@@ -14,20 +19,28 @@ const providers: Record<string, string> = {
   claudeAgent: "Anthropic", codex: "OpenAI", grok: "xAI", grokAgent: "xAI",
   kimiAgent: "Moonshot AI", droidAgent: "Factory", cursorAgent: "Cursor",
   antigravityAgent: "Google", opencodeGo: "OpenCode", qwenAgent: "Qwen",
-  hermesAgent: "Nous Research", piAgent: "pi.dev", mistral: "Mistral AI",
+  hermesAgent: "Nous Research", clineAgent: "Cline", copilotAgent: "GitHub", commandCodeAgent: "Command Code", kiroAgent: "Amazon Web Services", piAgent: "pi.dev", mistral: "Mistral AI", cerebras: "Cerebras", groq: "Groq", greenference: "Greenference", modelgo: "ModelGo", meta: "Meta", museCode: "Meta", deepseekAgent: "DeepSeek",
 };
 
-/** One disclosure, not a second settings dialog. Keep its children mounted so
- * closing a card does not abandon an in-progress sign-in or a CLI path draft. */
-export function EngineCard({ instance, children }: { instance: InstanceInfo; children: ReactNode }) {
-  const ready = engineReady(instance);
+export function providerName(instance: InstanceInfo): string {
+  return providers[instance.driverKind] ?? instance.driverKind;
+}
+
+/** What a card that stands for several accounts says about all of them. */
+export interface EngineCardSummary { title: string; subtitle: string; ready: boolean; status: string; action: string }
+
+/** Children stay mounted so closing a card does not abandon an in-progress sign-in or a CLI path draft. */
+export function EngineCard({ instance, children, summary, bare = false }: { instance: InstanceInfo; children: ReactNode; summary?: EngineCardSummary; bare?: boolean }) {
+  if (bare) return <div data-engine-card={instance.instanceId} className="min-w-0">{children}</div>;
+  const ready = summary?.ready ?? engineReady(instance);
   const email = instance.snapshot.authenticated === true ? instance.snapshot.account?.email : undefined;
-  const subtitle = email ?? (instance.access === "custom"
+  const title = summary?.title ?? instance.displayName;
+  const subtitle = summary?.subtitle ?? email ?? (instance.access === "custom"
     ? t("engines.library.custom")
-    : providers[instance.driverKind] ?? instance.driverKind);
-  // Some CLIs return their executable name rather than a version. Do not show
-  // duplicated labels such as “Grok · grok”; retain the raw value in details.
+    : providerName(instance));
+  // Some CLIs return their executable name rather than a version.
   const version = instance.snapshot.version?.match(/\d+\.\d+(?:\.\d+)?(?:[-+][\w.-]+)?/)?.[0];
+  const updatedTo = useUpdatedOnce(instance);
   return (
     <details data-engine-card={instance.instanceId} className="group/engine min-w-0 rounded-2xl border border-hairline/40 bg-card transition-colors open:col-span-full open:border-hairline/70 hover:border-hairline/70">
       <summary className="cursor-pointer list-none rounded-2xl p-4 outline-none focus-visible:ring-2 focus-visible:ring-accent [&::-webkit-details-marker]:hidden">
@@ -36,7 +49,7 @@ export function EngineCard({ instance, children }: { instance: InstanceInfo; chi
             <InstanceProviderMark instance={instance} size={28} />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[15px] font-semibold tracking-[-0.015em] text-ink" title={instance.displayName}>{instance.displayName}</div>
+            <div className="truncate text-[15px] font-semibold tracking-[-0.015em] text-ink" title={title}>{title}</div>
             <div className="mt-1 truncate text-[12px] text-ink-secondary" title={subtitle}>{subtitle}</div>
           </div>
           <ChevronDown size={16} aria-hidden="true" className="shrink-0 text-ink-secondary transition-transform group-open/engine:rotate-180 motion-reduce:transition-none" />
@@ -44,10 +57,13 @@ export function EngineCard({ instance, children }: { instance: InstanceInfo; chi
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
           <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium", ready ? "bg-success/10 text-success" : "bg-control text-ink-secondary")}>
             {ready ? <Check size={12} aria-hidden="true" /> : <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" />}
-            {ready ? t("onboarding.engines.ready") : t("onboarding.engines.needsSetup")}
+            {summary?.status ?? (ready ? t("onboarding.engines.ready") : instance.snapshot.state === "available" && instance.snapshot.authenticated === false
+              ? t("model.signInRequired") : t("onboarding.engines.needsSetup"))}
           </span>
-          {ready ? (
-            <span className="text-[11px] tabular-nums text-ink-secondary">{version ? `v${version}` : t("engines.library.manage")}</span>
+          {summary ? (
+            <span className={cn("text-[11px] font-medium", ready ? "text-ink-secondary" : "text-accent-text")}>{summary.action}</span>
+          ) : ready ? (
+            <span className="text-[11px] tabular-nums text-ink-secondary">{updatedTo ? t("engines.updatedTo", { version: updatedTo }) : version ? `v${version}` : t("engines.library.manage")}</span>
           ) : (
             <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-accent-text">
               {t("engines.library.setup")}<ArrowUpRight size={13} aria-hidden="true" />
@@ -60,20 +76,20 @@ export function EngineCard({ instance, children }: { instance: InstanceInfo; chi
   );
 }
 
-export function EngineSections({ instances, renderEngine }: {
+export function EngineSections({ instances, renderEngine, isReady = engineReady }: {
   instances: InstanceInfo[];
   renderEngine: (instance: InstanceInfo) => ReactNode;
+  isReady?: (instance: InstanceInfo) => boolean;
 }) {
-  // Flat, instance-keyed siblings keep forms and sign-in state alive when a
-  // refreshed status moves a card between groups. Separate section parents
-  // would remount it and discard unsaved input.
+  // Flat, instance-keyed siblings: separate section parents would remount a card that moves between groups and drop
+  // unsaved input.
   return <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] items-start gap-3">
     {[true, false].flatMap((ready) => {
-      const rows = instances.filter((instance) => engineReady(instance) === ready);
+      const rows = instances.filter((instance) => isReady(instance) === ready);
       if (!rows.length) return [];
       const label = t(ready ? "onboarding.engines.ready" : "onboarding.engines.needsSetup");
       return [
-        <div key={`heading-${ready}`} className={cn("col-span-full flex items-center justify-between gap-3", !ready && instances.some(engineReady) && "mt-4")}>
+        <div key={`heading-${ready}`} className={cn("col-span-full flex items-center justify-between gap-3 px-4", !ready && instances.some(isReady) && "mt-4")}>
           <h2 className="text-[12px] font-semibold text-ink-secondary">{label}</h2>
           <span className="text-[11px] tabular-nums text-ink-secondary">{t(rows.length === 1 ? "engines.library.countOne" : "engines.library.count", { count: rows.length })}</span>
         </div>,
@@ -87,11 +103,31 @@ export function EngineSections({ instances, renderEngine }: {
 export function RefreshEngines() {
   const { refreshInstances } = useStore();
   const [busy, setBusy] = useState(false);
-  return <button type="button" disabled={busy} onClick={async () => {
+  const [error, setError] = useState<string | null>(null);
+  const [checked, setChecked] = useState(false);
+  const settings = useContext(SettingsLook);
+  const check = async () => {
     setBusy(true);
-    try { await refreshInstances(); } finally { setBusy(false); }
-  }} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] font-medium text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
-    <RefreshCw size={13} aria-hidden="true" className={cn(busy && "animate-spin")} />
-    {busy ? t("common.checking") : t("engines.library.refresh")}
-  </button>;
+    setError(null);
+    setChecked(false);
+    try { await refreshInstances({ reportErrors: true }); setChecked(true); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBusy(false); }
+  };
+  // In Settings it is a section header's quiet button, a direct child of the header's action slot, so its text ends on
+  // the card's control edge like every other quiet button; a failure is the button's tooltip and its status.
+  if (settings) {
+    return <button type="button" disabled={busy} onClick={() => void check()} className="settings-quiet cursor-pointer disabled:opacity-40"
+      title={error ? t("engineSetup.checkFailed", { reason: error }) : undefined} aria-live="polite">
+      {busy ? t("common.checking") : error ? t("common.tryAgain") : t("engines.library.refresh")}
+    </button>;
+  }
+  return <div>
+    <button type="button" disabled={busy} onClick={() => void check()} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] font-medium text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
+      <RefreshCw size={13} aria-hidden="true" className={cn(busy && "animate-spin")} />
+      {busy ? t("common.checking") : t("engines.library.refresh")}
+    </button>
+    {error && <p role="alert" className="mt-1 text-[12px] text-danger">{t("engineSetup.checkFailed", { reason: error })}</p>}
+    {checked && <p role="status" className="mt-1 text-[11px] text-ink-secondary">{t("engineSetup.checked")}</p>}
+  </div>;
 }

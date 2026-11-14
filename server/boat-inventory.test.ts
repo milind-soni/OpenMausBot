@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { createServer, type IncomingMessage, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 type ProviderBoat = Record<string, unknown> & { id: string; name: string; state: string };
 type RequestRecord = { method: string; path: string; search: string; headers: IncomingMessage["headers"] };
-type PageResponse = { boxes: ProviderBoat[]; nextCursor: string | null };
+type PageResponse = { sandboxes: ProviderBoat[]; nextCursor: string | null };
 type DeletionStatus = "pending" | "processing" | "blocked" | "completed";
 
 const DELETION_OPERATION_ID = "bdop_0123456789abcdef0123456789abcdef";
@@ -27,9 +27,23 @@ describe("OpenMaus-managed Boat inventory", () => {
   let deleteBody: Record<string, unknown> | null = null;
   let deletionPollStatus = 200;
   let directStatus = 200;
+  /** Accept direct Boat reads and never answer them: a stalled relay. */
+  let directHangs = false;
+  const hung: ServerResponse[] = [];
   let deletionStatuses: DeletionStatus[] = ["completed"];
   let lastDeletionStatus: DeletionStatus = "completed";
+  /** The stage a blocked operation reports (docs.boat.dev/data-retention/delete), or none. */
+  let blockedStage: string | null = null;
   let deletionTargetId = "";
+  /** A deletion operation as Boat v1 reports it, its stage only while blocked. */
+  const deletionOperation = (targetId: string) => ({
+    id: DELETION_OPERATION_ID,
+    kind: "sandbox",
+    targetId,
+    status: lastDeletionStatus,
+    ...(lastDeletionStatus === "blocked" && blockedStage ? { stage: blockedStage } : {}),
+    ...(lastDeletionStatus === "blocked" && blockedStage === "waiting_for_uploads" ? { expectedBy: "2026-10-13T21:30:00Z" } : {}),
+  });
   const requests: RequestRecord[] = [];
   let boat: typeof import("./boat.ts");
   let journal: typeof import("./boat-create-idempotency.ts");
@@ -42,11 +56,11 @@ describe("OpenMaus-managed Boat inventory", () => {
       requests.push({ method: req.method ?? "GET", path: url.pathname, search: url.search, headers: req.headers });
       res.setHeader("content-type", "application/json");
 
-      if (url.pathname === "/api/box/v1/boxes" && req.method === "GET") {
+      if (url.pathname === "/api/v1/sandboxes" && req.method === "GET") {
         const page = pageResponses?.get(url.searchParams.get("cursor") ?? "");
         res.writeHead(listStatus).end(JSON.stringify(listBody ?? {
           ok: listStatus < 400,
-          boxes: page?.boxes ?? boats,
+          sandboxes: page?.sandboxes ?? boats,
           ...(page ? { pageInfo: { nextCursor: page.nextCursor } } : {}),
         }));
         return;
@@ -61,19 +75,14 @@ describe("OpenMaus-managed Boat inventory", () => {
         ));
         return;
       }
-      if (url.pathname === `/api/box/v1/deletion-operations/${DELETION_OPERATION_ID}` && req.method === "GET") {
+      if (url.pathname === `/api/v1/deletion-operations/${DELETION_OPERATION_ID}` && req.method === "GET") {
         lastDeletionStatus = deletionStatuses.shift() ?? lastDeletionStatus;
         res.writeHead(deletionPollStatus).end(JSON.stringify(
           deletionPollStatus < 400
             ? {
                 ok: true,
                 type: "deletion.operation",
-                operation: {
-                  id: DELETION_OPERATION_ID,
-                  kind: "box",
-                  targetId: deletionTargetId,
-                  status: lastDeletionStatus,
-                },
+                operation: deletionOperation(deletionTargetId),
               }
             : { ok: false, message: "deletion status unavailable" },
         ));
@@ -90,24 +99,20 @@ describe("OpenMaus-managed Boat inventory", () => {
           deleteBody ?? (deleteStatus < 400
             ? {
                 ok: true,
-                type: "deletion.operation",
-                operation: {
-                  id: DELETION_OPERATION_ID,
-                  kind: "box",
-                  targetId: boxId,
-                  status: lastDeletionStatus,
-                },
+                type: "sandbox.deleting",
+                operation: deletionOperation(boxId),
               }
             : { ok: false, message: "delete refused" }),
         ));
         return;
       }
-      const direct = boats.find((candidate) => url.pathname.endsWith(`/boxes/${candidate.id}`));
+      const direct = boats.find((candidate) => url.pathname.endsWith(`/sandboxes/${candidate.id}`));
       if (direct && req.method === "GET") {
+        if (directHangs) { hung.push(res); return; }
         res.writeHead(directStatus).end(JSON.stringify(
           directStatus < 400
-            ? { ok: true, box: direct }
-            : { ok: false, message: "box lookup unavailable" },
+            ? { ok: true, sandbox: direct }
+            : { ok: false, message: "sandbox lookup unavailable" },
         ));
         return;
       }
@@ -115,7 +120,7 @@ describe("OpenMaus-managed Boat inventory", () => {
     });
     await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
     const port = (api.address() as { port: number }).port;
-    vi.stubEnv("OMB_BOX_API", `http://127.0.0.1:${port}/api/box/v1`);
+    vi.stubEnv("OMB_BOAT_API", `http://127.0.0.1:${port}/api/v1`);
     vi.resetModules();
     boat = await import("./boat.ts");
     journal = await import("./boat-create-idempotency.ts");
@@ -133,8 +138,11 @@ describe("OpenMaus-managed Boat inventory", () => {
     deleteBody = null;
     deletionPollStatus = 200;
     directStatus = 200;
+    directHangs = false;
+    for (const response of hung.splice(0)) response.end("{}");
     deletionStatuses = ["completed"];
     lastDeletionStatus = "completed";
+    blockedStage = null;
     deletionTargetId = "";
     requests.length = 0;
     for (const record of journal.boatCreateRecoverySnapshot()) {
@@ -147,6 +155,7 @@ describe("OpenMaus-managed Boat inventory", () => {
 
   afterAll(async () => {
     vi.unstubAllEnvs();
+    for (const response of hung.splice(0)) response.end("{}");
     await new Promise<void>((resolve) => api.close(() => resolve()));
   });
 
@@ -187,7 +196,7 @@ describe("OpenMaus-managed Boat inventory", () => {
     expect(JSON.stringify(inventory)).not.toMatch(/desktopUrl|dedicatedIp|PRIVATE_KEY|do-not-leak|foreign-box/);
     expect(requests).toEqual([expect.objectContaining({
       method: "GET",
-      path: "/api/box/v1/boxes",
+      path: "/api/v1/sandboxes",
       search: "?limit=200",
     })]);
   });
@@ -198,17 +207,16 @@ describe("OpenMaus-managed Boat inventory", () => {
     boats = [{ id: boxId, name: legacyNameFor(botId), state: "ready" }];
 
     expect((await boat.listManagedBoats(cfg, [{ botId, name: "Legacy", inUse: false }])).available).toBe(true);
-    // Refreshing the same provider row must not grow the ownership journal.
     requests.length = 0;
     expect((await boat.listManagedBoats(cfg, [{ botId, name: "Legacy", inUse: false }])).available).toBe(true);
     expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
-      "GET /api/box/v1/boxes",
+      "GET /api/v1/sandboxes",
     ]);
     expect(journal.boatCreateRecoverySnapshot().filter((record) => record.botId === botId)).toEqual([
       { botId, boxId, resolved: true },
     ]);
 
-    pageResponses = new Map([["", { boxes: [], nextCursor: null }]]);
+    pageResponses = new Map([["", { sandboxes: [], nextCursor: null }]]);
     requests.length = 0;
     expect((await boat.listManagedBoats(cfg, [{ botId, name: "Legacy", inUse: false }])).instances).toEqual([
       expect.objectContaining({
@@ -219,8 +227,8 @@ describe("OpenMaus-managed Boat inventory", () => {
       }),
     ]);
     expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
-      "GET /api/box/v1/boxes",
-      `GET /api/box/v1/boxes/${boxId}`,
+      "GET /api/v1/sandboxes",
+      `GET /api/v1/sandboxes/${boxId}`,
     ]);
     expect(journal.boatCreateRecoverySnapshot().filter((record) => record.botId === botId)).toEqual([
       { botId, boxId, resolved: true },
@@ -233,7 +241,7 @@ describe("OpenMaus-managed Boat inventory", () => {
     const attempt = journal.beginBoatCreate(botId, JSON.stringify({ ttlSeconds: 7_200, noEnv: true }));
     journal.resolveBoatCreate(journal.rememberCreatedBoat(attempt.request, boxId));
     boats = [{ id: boxId, name: await boat.boatNameFor(botId), state: "ready" }];
-    pageResponses = new Map([["", { boxes: [], nextCursor: null }]]);
+    pageResponses = new Map([["", { sandboxes: [], nextCursor: null }]]);
 
     const inventory = await boat.listManagedBoats(
       cfg,
@@ -243,7 +251,7 @@ describe("OpenMaus-managed Boat inventory", () => {
 
     expect(inventory.instances).toEqual([]);
     expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
-      "GET /api/box/v1/boxes",
+      "GET /api/v1/sandboxes",
     ]);
     expect(journal.boatCreateRecoverySnapshot()).toContainEqual({ botId, boxId, resolved: true });
   });
@@ -253,14 +261,14 @@ describe("OpenMaus-managed Boat inventory", () => {
     const boxId = "bx_9abcdefg";
     const attempt = journal.beginBoatCreate(botId, JSON.stringify({ ttlSeconds: 7_200, noEnv: true }));
     journal.resolveBoatCreate(journal.rememberCreatedBoat(attempt.request, boxId));
-    pageResponses = new Map([["", { boxes: [], nextCursor: null }]]);
+    pageResponses = new Map([["", { sandboxes: [], nextCursor: null }]]);
 
     const inventory = await boat.listManagedBoats(cfg, [{ botId, name: "Stale", inUse: false }]);
 
     expect(inventory).toMatchObject({ available: true, instances: [] });
     expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
-      "GET /api/box/v1/boxes",
-      `GET /api/box/v1/boxes/${boxId}`,
+      "GET /api/v1/sandboxes",
+      `GET /api/v1/sandboxes/${boxId}`,
     ]);
     expect(journal.boatCreateRecoverySnapshot().some((record) => record.boxId === boxId)).toBe(false);
   });
@@ -271,7 +279,7 @@ describe("OpenMaus-managed Boat inventory", () => {
     const attempt = journal.beginBoatCreate(botId, JSON.stringify({ ttlSeconds: 7_200, noEnv: true }));
     journal.resolveBoatCreate(journal.rememberCreatedBoat(attempt.request, boxId));
     pageResponses = new Map([["", {
-      boxes: [{ id: boxId, name: "provider-renamed-box", state: "ready" }],
+      sandboxes: [{ id: boxId, name: "provider-renamed-box", state: "ready" }],
       nextCursor: null,
     }]]);
 
@@ -281,7 +289,7 @@ describe("OpenMaus-managed Boat inventory", () => {
     expect(inventory.problem).toMatch(/no longer has its OpenMausBot owner name/i);
     expect(journal.boatCreateRecoverySnapshot()).toContainEqual({ botId, boxId, resolved: true });
     expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
-      "GET /api/box/v1/boxes",
+      "GET /api/v1/sandboxes",
     ]);
   });
 
@@ -292,16 +300,16 @@ describe("OpenMaus-managed Boat inventory", () => {
     const attempt = journal.beginBoatCreate(botId, JSON.stringify({ ttlSeconds: 7_200, noEnv: true }));
     journal.resolveBoatCreate(journal.rememberCreatedBoat(attempt.request, boxId));
     boats = [{ id: boxId, name: managedName, state: "ARCHIVED" }];
-    pageResponses = new Map([["", { boxes: [], nextCursor: null }]]);
+    pageResponses = new Map([["", { sandboxes: [], nextCursor: null }]]);
 
     await expect(
       boat.deleteManagedBoat(cfg, [{ botId, name: "Omitted", inUse: false }], boxId, managedName),
     ).resolves.toEqual({ ok: true });
 
     expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
-      "GET /api/box/v1/boxes",
-      `GET /api/box/v1/boxes/${boxId}`,
-      `DELETE /api/box/v1/boxes/${boxId}`,
+      "GET /api/v1/sandboxes",
+      `GET /api/v1/sandboxes/${boxId}`,
+      `DELETE /api/v1/sandboxes/${boxId}`,
     ]);
     expect(journal.boatCreateRecoverySnapshot().some((record) => record.boxId === boxId)).toBe(false);
   });
@@ -346,6 +354,17 @@ describe("OpenMaus-managed Boat inventory", () => {
     const conflicting = await boat.listManagedBoats(cfg, [{ botId, name: "Invalid", inUse: false }]);
     expect(conflicting).toMatchObject({ configured: true, available: false, instances: [] });
     expect(conflicting.problem).toMatch(/conflicting id/i);
+  });
+
+  it("never hands a bot a sandbox Boat cancelled for want of a machine, or one in error", async () => {
+    const botId = "terminal-owner";
+    boats = [{ id: "bx_456789ab", name: legacyNameFor(botId), state: "ready" }];
+    await expect(boat.findBoat(cfg, botId)).resolves.toMatchObject({ id: "bx_456789ab" }); // caches the id
+    // The direct read of the cached id, then the listing, both pass it over.
+    boats[0]!.state = "cancelled";
+    await expect(boat.findBoat(cfg, botId)).resolves.toBeNull();
+    boats[0]!.state = "error";
+    await expect(boat.findBoat(cfg, botId)).resolves.toBeNull();
   });
 
   it("does not cache or use a malformed exact-name Boat identity", async () => {
@@ -399,8 +418,8 @@ describe("OpenMaus-managed Boat inventory", () => {
   it("walks cursor pages once and refuses a repeated cursor instead of looping", async () => {
     const botId = "second-page-owner";
     pageResponses = new Map([
-      ["", { boxes: [{ id: "foreign", name: "unmanaged", state: "ready" }], nextCursor: "page two/?=" }],
-      ["page two/?=", { boxes: [{ id: "bx_mnpqrstu", name: legacyNameFor(botId), state: "idle" }], nextCursor: null }],
+      ["", { sandboxes: [{ id: "foreign", name: "unmanaged", state: "ready" }], nextCursor: "page two/?=" }],
+      ["page two/?=", { sandboxes: [{ id: "bx_mnpqrstu", name: legacyNameFor(botId), state: "idle" }], nextCursor: null }],
     ]);
 
     const inventory = await boat.listManagedBoats(cfg, [{ botId, name: "Page two", inUse: false }]);
@@ -414,8 +433,8 @@ describe("OpenMaus-managed Boat inventory", () => {
 
     requests.length = 0;
     pageResponses = new Map([
-      ["", { boxes: [], nextCursor: "same" }],
-      ["same", { boxes: [], nextCursor: "same" }],
+      ["", { sandboxes: [], nextCursor: "same" }],
+      ["same", { sandboxes: [], nextCursor: "same" }],
     ]);
     const loop = await boat.listManagedBoats(cfg, []);
     expect(loop).toMatchObject({ configured: true, available: false, instances: [] });
@@ -435,7 +454,7 @@ describe("OpenMaus-managed Boat inventory", () => {
     expect(unavailable.problem).toMatch(/maintenance/);
 
     listStatus = 200;
-    listBody = { ok: true, boxes: [] };
+    listBody = { ok: true, sandboxes: [] };
     expect(await boat.listManagedBoats(cfg, [])).toMatchObject({ configured: true, available: true, instances: [] });
   });
 
@@ -446,9 +465,9 @@ describe("OpenMaus-managed Boat inventory", () => {
 
     await boat.sleepManagedBoat(cfg, owners, "bx_tuvwxyz2");
     expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
-      "GET /api/box/v1/boxes",
-      "POST /api/box/v1/boxes/bx_tuvwxyz2/commands",
-      "POST /api/box/v1/boxes/bx_tuvwxyz2/stop",
+      "GET /api/v1/sandboxes",
+      "POST /api/v1/sandboxes/bx_tuvwxyz2/commands",
+      "POST /api/v1/sandboxes/bx_tuvwxyz2/stop",
     ]);
 
     requests.length = 0;
@@ -497,7 +516,7 @@ describe("OpenMaus-managed Boat inventory", () => {
     deletionStatuses = ["pending", "processing", "completed"];
     await boat.deleteManagedBoat(cfg, owners, "bx_3456789a", managedName);
     const removal = requests.find((request) => request.method === "DELETE");
-    expect(removal?.path).toBe("/api/box/v1/boxes/bx_3456789a");
+    expect(removal?.path).toBe("/api/v1/sandboxes/bx_3456789a");
     expect(removal?.headers["x-ascii-confirm-delete"]).toBe("bx_3456789a");
     expect(requests.filter((request) => request.path.includes("/deletion-operations/"))).toHaveLength(2);
     expect(journal.boatCreateRecoverySnapshot().find((record) => record.botId === botId)).toBeUndefined();
@@ -507,24 +526,73 @@ describe("OpenMaus-managed Boat inventory", () => {
     expect(await boat.findBoat(cfg, botId)).toBeNull();
     expect(requests[0]).toMatchObject({
       method: "GET",
-      path: "/api/box/v1/boxes",
+      path: "/api/v1/sandboxes",
       search: "?limit=200",
     });
   });
 
-  it("keeps the durable Boat receipt when background deletion becomes blocked", async () => {
+  // Measured 2026-10-13: after file uploads, DELETE answered 202 and the operation stayed blocked in waiting_for_uploads for
+  // about an hour while the sandbox was gone and billing stopped; Boat erases such data on its own.
+  it.each([
+    ["waiting_for_uploads", ["pending", "blocked"]],
+    ["waiting_for_uploads", ["blocked"]],
+    ["waiting_for_restore", ["pending", "blocked"]],
+    ["retrying", ["pending", "blocked"]],
+  ] as const)("finishes a delete whose purge is only blocked until Boat finishes it: %s after %j", async (stage, statuses) => {
+    const botId = `self-finishing-${stage}-${statuses.length}`;
+    const managedName = legacyNameFor(botId);
+    const boxId = "bx_456789ab";
+    boats = [{ id: boxId, name: managedName, state: "archived" }];
+    const owners = [{ botId, name: "Self-finishing", inUse: false }];
+    const attempt = journal.beginBoatCreate(botId, JSON.stringify({ ttlSeconds: 7_200, noEnv: true }));
+    journal.resolveBoatCreate(journal.rememberCreatedBoat(attempt.request, boxId));
+    deletionStatuses = [...statuses];
+    blockedStage = stage;
+    deleteRemovesBoat = false;
+
+    await expect(boat.deleteManagedBoat(cfg, owners, boxId, managedName)).resolves.toEqual({ ok: true });
+    expect(deleteJournal.boatDeletionSnapshot()).toEqual([]);
+    expect(journal.boatCreateRecoverySnapshot().some((record) => record.boxId === boxId)).toBe(false);
+    boats = [];
+    await expect(boat.findBoat(cfg, botId)).resolves.toBeNull();
+  });
+
+  it.each([[["pending", "blocked"]], [["blocked"]]] as const)("keeps the fence and says what to do when Boat keeps the data for a fork or named snapshot, after %j", async (statuses) => {
+    const botId = `kept-delete-owner-${statuses.length}`;
+    const managedName = legacyNameFor(botId);
+    const boxId = "bx_456789ab";
+    boats = [{ id: boxId, name: managedName, state: "archived" }];
+    const owners = [{ botId, name: "Kept", inUse: false }];
+    const attempt = journal.beginBoatCreate(botId, JSON.stringify({ ttlSeconds: 7_200, noEnv: true }));
+    journal.resolveBoatCreate(journal.rememberCreatedBoat(attempt.request, boxId));
+    deletionStatuses = [...statuses];
+    blockedStage = "kept_for_newer_snapshots";
+
+    await expect(boat.deleteManagedBoat(cfg, owners, boxId, managedName))
+      .rejects.toThrow(`boat.dev deleted cloud computer ${boxId} but is keeping its stored data, because a fork or named snapshot made from it still uses that data. To erase the data, delete those in boat.dev.`);
+    expect(deleteJournal.boatDeletionSnapshot()).toEqual([expect.objectContaining({ boxId, phase: "blocked", status: "blocked" })]);
+    expect(journal.boatCreateRecoverySnapshot()).toContainEqual({ botId, boxId, resolved: true });
+
+    await expect(boat.listManagedBoats(cfg, owners)).resolves.toMatchObject({ available: true, instances: [] });
+    expect(deleteJournal.boatDeletionSnapshot()).toEqual([]);
+    expect(journal.boatCreateRecoverySnapshot().some((record) => record.boxId === boxId)).toBe(false);
+  });
+
+  it("keeps the fence when Boat blocks a delete without a documented stage", async () => {
     const botId = "blocked-delete-owner";
     const managedName = legacyNameFor(botId);
     const boxId = "bx_456789ab";
     boats = [{ id: boxId, name: managedName, state: "archived" }];
     const owners = [{ botId, name: "Blocked", inUse: false }];
-    const journal = await import("./boat-create-idempotency.ts");
     const attempt = journal.beginBoatCreate(botId, JSON.stringify({ ttlSeconds: 7_200, noEnv: true }));
     journal.resolveBoatCreate(journal.rememberCreatedBoat(attempt.request, boxId));
     deletionStatuses = ["pending", "blocked"];
     deleteRemovesBoat = false;
 
-    await expect(boat.deleteManagedBoat(cfg, owners, boxId, managedName)).rejects.toThrow(/deletion operation is blocked/i);
+    await expect(boat.deleteManagedBoat(cfg, owners, boxId, managedName)).rejects.toThrow(
+      `boat.dev accepted the deletion of cloud computer ${boxId}, but says it is blocked without a reason OpenMausBot knows. boat.dev keeps retrying on its own; if ${boxId} is still listed in boat.dev later, delete it there.`,
+    );
+    expect(deleteJournal.boatDeletionSnapshot()).toEqual([expect.objectContaining({ boxId, phase: "blocked" })]);
     expect(journal.boatCreateRecoverySnapshot()).toContainEqual({ botId, boxId, resolved: true });
   });
 
@@ -545,10 +613,8 @@ describe("OpenMaus-managed Boat inventory", () => {
     expect(journal.boatCreateRecoverySnapshot()).toContainEqual({ botId, boxId, resolved: true });
     expect(requests.some((request) => request.method === "DELETE")).toBe(true);
 
-    // Once LIST drops the row, direct absence is authoritative and retires
-    // the recovery receipt on the next inventory refresh.
     boats = [];
-    pageResponses = new Map([["", { boxes: [], nextCursor: null }]]);
+    pageResponses = new Map([["", { sandboxes: [], nextCursor: null }]]);
     await expect(boat.listManagedBoats(cfg, owners)).resolves.toMatchObject({ instances: [] });
     expect(journal.boatCreateRecoverySnapshot().some((record) => record.boxId === boxId)).toBe(false);
   });
@@ -571,7 +637,7 @@ describe("OpenMaus-managed Boat inventory", () => {
 
     // The account LIST is stale, but the exact operation/id record keeps the
     // Settings row honest and blocks all normal use after a restart.
-    pageResponses = new Map([["", { boxes: [], nextCursor: null }]]);
+    pageResponses = new Map([["", { sandboxes: [], nextCursor: null }]]);
     await expect(boat.listManagedBoats(cfg, owners)).resolves.toMatchObject({
       available: true,
       instances: [expect.objectContaining({ boxId, state: "removing", ownerBotId: botId })],
@@ -600,7 +666,7 @@ describe("OpenMaus-managed Boat inventory", () => {
     await expect(
       boat.deleteManagedBoat(cfg, [], boxId, managedName, undefined, { pollDelaysMs: [] }),
     ).resolves.toEqual({ ok: true, pending: true });
-    pageResponses = new Map([["", { boxes: [], nextCursor: null }]]);
+    pageResponses = new Map([["", { sandboxes: [], nextCursor: null }]]);
 
     await expect(boat.listManagedBoats(cfg, [])).resolves.toMatchObject({
       instances: [expect.objectContaining({ boxId, state: "removing", ownerBotId: null, orphaned: true })],
@@ -660,12 +726,30 @@ describe("OpenMaus-managed Boat inventory", () => {
     expect(journal.boatCreateRecoverySnapshot().some((entry) => entry.botId === botId)).toBe(false);
   });
 
+  it("bounds the direct read of a known Boat, so a stalled relay can't hold a turn's setup", async () => {
+    const botId = "stalled-direct-read";
+    boats = [{ id: "bx_456789ab", name: legacyNameFor(botId), state: "ready" }];
+    await expect(boat.findBoat(cfg, botId)).resolves.toMatchObject({ id: "bx_456789ab" }); // caches the id
+    directHangs = true;
+    requests.length = 0;
+    // The direct read's own deadline expires at once instead of after 20 s; without one the read waits on the stalled relay.
+    const deadline = vi.spyOn(AbortSignal, "timeout")
+      .mockImplementationOnce(() => AbortSignal.abort(new DOMException("deadline", "TimeoutError")));
+    try {
+      await expect(boat.findBoat(cfg, botId)).resolves.toMatchObject({ id: "bx_456789ab" });
+      expect(deadline).toHaveBeenNthCalledWith(1, 20_000);
+      expect(requests.map(request => `${request.method} ${request.path}`)).toEqual(["GET /api/v1/sandboxes"]);
+    } finally {
+      deadline.mockRestore();
+    }
+  }, 10_000);
+
   it("finds an existing boat on a later page and fails closed when listing is unavailable", async () => {
     const secondPageBot = "existing-second-page";
     pageResponses = new Map([
-      ["", { boxes: [], nextCursor: "next" }],
+      ["", { sandboxes: [], nextCursor: "next" }],
       ["next", {
-        boxes: [{ id: "bx_npqrstuv", name: legacyNameFor(secondPageBot), state: "ready" }],
+        sandboxes: [{ id: "bx_npqrstuv", name: legacyNameFor(secondPageBot), state: "ready" }],
         nextCursor: null,
       }],
     ]);
@@ -675,14 +759,14 @@ describe("OpenMaus-managed Boat inventory", () => {
       "?limit=200",
       "?limit=200&cursor=next",
     ]);
-    expect(requests.some((request) => request.method === "POST" && request.path.endsWith("/boxes"))).toBe(false);
+    expect(requests.some((request) => request.method === "POST" && request.path.endsWith("/sandboxes"))).toBe(false);
 
     requests.length = 0;
     pageResponses = null;
     listStatus = 503;
     listBody = { ok: false, message: "maintenance" };
     await expect(boat.provisionBoat(cfg, "provider-down-bot", "Offline")).rejects.toThrow(/maintenance/);
-    expect(requests.some((request) => request.method === "POST" && request.path.endsWith("/boxes"))).toBe(false);
+    expect(requests.some((request) => request.method === "POST" && request.path.endsWith("/sandboxes"))).toBe(false);
   });
 
   it("does not mutate a missing or busy managed boat and reports delete failures", async () => {

@@ -6,8 +6,8 @@ const path = require("node:path");
 const STAGE_PREFIX = "openmausbot-cua-linux-x64-";
 const LEGACY_STAGE_GRACE_MS = 10 * 60 * 1000;
 const FILES = Object.freeze({
-  "cua-driver": "ed5844fadf07b9b72c4a3b3802e1c47233c166d66d6198608d5991f807aab4ac",
-  "cua-cursor-theme": "e589b2b7521bbfeaf9e2bfce668a38e80ed1b9790b1327b13d374fc331d8312a",
+  "cua-driver": "83030028e7c9e3f4d753b3b27025135d44eb8d52f562cce0aaaf95777bc1b41f",
+  "cua-cursor-theme": "d39efb960d207e7328d7a9dd48e3b6565f74be073f9c2ca8dcba86a4d0f28312",
 });
 
 function sha256(file, fileSystem = fs) {
@@ -31,8 +31,7 @@ function processReferencesDirectory(directory, {
   try {
     processes = fileSystem.readdirSync(procRoot);
   } catch {
-    // If process discovery is unavailable, retain the candidate. Cleanup is
-    // optional; deleting a stage that might still be in use is not.
+    // Cleanup is optional; deleting a stage that might still be in use is not.
     return true;
   }
   for (const processName of processes) {
@@ -132,8 +131,6 @@ function reapStaleAppImageCuaBundles({
       fileSystem.rmSync(directory, { recursive: true, force: false });
       removed.push(directory);
     } catch {
-      // A concurrent process may have replaced or started using the stage.
-      // Retaining it is always safer than broadening cleanup.
     }
   }
   return removed;

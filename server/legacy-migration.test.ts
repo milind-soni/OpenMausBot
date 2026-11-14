@@ -1,7 +1,4 @@
-// A user upgrading from the pre-rename data dir (~/.opengrokbot) must find
-// everything in ~/.openmausbot after the first boot. Anything that touches
-// the new dir before ensureDirs() runs would make that rename a no-op and
-// boot the user into an empty workspace — this test pins the order.
+// Anything touching the new dir before ensureDirs() runs would make the ~/.opengrokbot rename a no-op: this pins the order.
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,11 +7,12 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
-const WEBHOOK_PORT = 39000 + Math.floor(Math.random() * 10_000);
+const PORT = workerPort(18800, 10_000);
+const WEBHOOK_PORT = workerPort(39000, 10_000);
 
 let home: string;
 let child: ChildProcess;
@@ -24,9 +22,7 @@ beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-legacy-test-"));
   const legacy = join(home, ".opengrokbot");
   mkdirSync(legacy, { recursive: true });
-  // A non-product shadow keeps startup deterministic: an empty map selects
-  // the user's full default engine fleet, whose installed CLI probes are not
-  // part of this migration test.
+  // A non-product shadow: an empty map would select the full default fleet, whose CLI probes are not part of this test.
   writeFileSync(join(legacy, "config.json"), JSON.stringify({
     instances: { fixture: { driver: "migration-test-shadow" } },
   }));
@@ -51,7 +47,6 @@ beforeAll(async () => {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/health`);
       if (res.ok) return;
     } catch {
-      /* not up yet */
     }
     await new Promise((r) => setTimeout(r, 100));
   }

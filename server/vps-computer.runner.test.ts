@@ -14,7 +14,7 @@ vi.mock("./procs.ts", async () => ({
   killCliTree: stopMock,
 }));
 
-import { defaultRunner } from "./vps-computer.ts";
+import { defaultRunner, dockerCliInstallCommand } from "./vps-computer.ts";
 import { resolveCliSpawn } from "./env-path.ts";
 
 type FakeChild = EventEmitter & {
@@ -94,6 +94,15 @@ describe("default VPS command runner", () => {
     expect(child.stdout.destroyed && child.stderr.destroyed).toBe(true);
   });
 
+  it("names the Docker CLI install line when the CLI is absent", async () => {
+    const child = fakeChild();
+    const result = defaultRunner(["info"]);
+    child.emit("error", Object.assign(new Error("spawn docker ENOENT"), { code: "ENOENT" }));
+    const message = await result.catch((error: Error) => error.message);
+    expect(message).toContain("Docker-over-SSH could not start: spawn docker ENOENT");
+    expect(message).toContain(dockerCliInstallCommand(process.platform)!);
+  });
+
   it.skipIf(process.platform === "win32").each(["timeout", "stdin"])("reaps real SSH-like grandchildren after %s without stopping an unrelated master", async (failure) => {
     const { spawn: realSpawn } = await vi.importActual<typeof import("node:child_process")>("node:child_process");
     const { killCliTree: realStop } = await vi.importActual<typeof import("./procs.ts")>("./procs.ts");
@@ -121,7 +130,6 @@ describe("default VPS command runner", () => {
       expect(docker.exitCode !== null || docker.signalCode !== null).toBe(true);
       expect(docker.stdin!.destroyed && docker.stdout!.destroyed && docker.stderr!.destroyed).toBe(true);
       expect(alive(master.pid!)).toBe(true);
-      // A subsequent command uses fresh handles; no automatic replay occurs.
       spawnMock.mockImplementation((_command, _args, options) => realSpawn(process.execPath, ["-e", "console.log('recovered')"], options));
       await expect(defaultRunner(["info"], { timeoutMs: 2_000 })).resolves.toMatchObject({ stdout: "recovered\n" });
     } finally {

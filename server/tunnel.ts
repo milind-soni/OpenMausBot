@@ -1,24 +1,4 @@
-// Rung three of the hosting ladder: `openmausbot serve --tunnel` gives a
-// server a public HTTPS address (https://c-<id>.openmausbot.com) with no
-// domain, no proxy and no open port, through the same control plane and
-// Cloudflare tunnel the desktop app already uses. Headless, so:
-//
-//   - the account and connector credentials live in a 0600 JSON file under
-//     the data dir instead of the OS keychain (a server has none; a key kept
-//     next to the ciphertext would be theatre), and its mode is re-tightened
-//     on every open;
-//   - cloudflared is fetched once into the data dir, by the same pinned
-//     version + digest script the release build uses, when nothing usable is
-//     on the machine;
-//   - the tunnel's loopback gateway forwards to an IPC listener the harness
-//     opens for it (OMB_TUNNEL_SOCKET), so to request-auth every public
-//     request is "through a proxy" by construction and needs a paired
-//     session — the loopback bind and its owner trust are untouched.
-//
-// Everything network- and process-shaped is the desktop's own code
-// (electron/control-plane-client.mjs, companion-account-service.mjs,
-// managed-companion-tunnel.mjs and the connector guardian): one
-// implementation, so a fix lands in both.
+// `openmausbot serve --tunnel`: every public request arrives over an IPC listener, so request-auth always demands a paired session.
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
@@ -45,6 +25,7 @@ import {
   createManagedCompanionTunnel,
   managedCompanionTunnelAccess,
   resolveCloudflaredBinary,
+  stagedCloudflaredPath,
   type ManagedTunnelAccess,
   type ManagedTunnelState,
 } from "../electron/managed-companion-tunnel.mjs";
@@ -58,11 +39,9 @@ export const TUNNEL_RUNTIME_DIR = "tunnel-runtime";
 
 export type { CompanionOriginEndpoint, ManagedTunnelAccess, ManagedTunnelState };
 
-// ── credentials: a private file, and "unreadable" is not "empty" ─────────
 export interface TunnelCredentials {
   file: string;
-  /** `unavailable` = the file exists but could not be read: nothing may be
-   * written over it, or a real account would be replaced by a fresh one. */
+  /** `unavailable`: the file exists but is unreadable, and nothing may be written over it. */
   status: "ok" | "empty" | "unavailable";
   read(): CredentialDocument;
   update(
@@ -107,7 +86,6 @@ export function openTunnelCredentials(dataDir: string): TunnelCredentials {
   };
 }
 
-// ── the account this machine is signed in to ──────────────────────────
 export interface TunnelAccountSummary {
   email: string | null;
   address: string | null;
@@ -131,7 +109,6 @@ export function tunnelAccess(document: CredentialDocument): ManagedTunnelAccess 
   return managedCompanionTunnelAccess(document);
 }
 
-/** The control plane's platform vocabulary. */
 export function platformName(platform: NodeJS.Platform = process.platform): "darwin" | "windows" | "linux" {
   return platform === "darwin" ? "darwin" : platform === "win32" ? "windows" : "linux";
 }
@@ -139,77 +116,99 @@ export function platformName(platform: NodeJS.Platform = process.platform): "dar
 export interface TunnelAccount {
   service: CompanionAccountService;
   credentials: TunnelCredentials;
-  /** "" when OMB_CONTROL_PLANE_URL is set to something unusable. */
   controlPlane: string;
 }
 
-/** The desktop honours OMB_CONTROL_PLANE_URL only in development builds; a
- * server's operator owns its environment, so it is honoured here always and
- * the caller says so in its output. */
+export interface TunnelRecovery {
+  running(): RunningTunnel | null;
+}
+
+const STOPPED_TUNNEL: ManagedTunnelState = { status: "stopped", ready: false };
+
+/** A server's operator owns its environment, so OMB_CONTROL_PLANE_URL is always honoured here (the desktop: dev builds only). */
 export function createTunnelAccount(options: {
   dataDir: string;
-  version: string;
+  version: string | undefined;
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
   machineName?: string;
+  recovery?: TunnelRecovery;
+  /** `login --relay`: sign in without reserving a public address; phones reach this machine through MausBot Relay. */
+  relayOnly?: boolean;
+  log?: (line: string) => void;
+  clock?: {
+    setTimer: (callback: () => void, milliseconds: number) => unknown;
+    clearTimer: (handle: unknown) => void;
+    now: () => number;
+  };
 }): TunnelAccount {
   const env = options.env ?? process.env;
   const credentials = openTunnelCredentials(options.dataDir);
   const controlPlane = resolveCompanionControlPlaneURL({ isPackaged: true, environment: env });
   const client = controlPlane ? createControlPlaneClient({ baseURL: controlPlane, fetchImpl: options.fetchImpl }) : null;
+  const recovery = options.recovery;
   const service = createCompanionAccountService({
     client,
     readCredentials: () => credentials.read(),
     updateCredentials: (derive, afterPersist) => credentials.update(derive, afterPersist),
-    identity: { name: options.machineName ?? hostname(), platform: platformName(), appVersion: options.version },
+    identity: { name: options.machineName ?? hostname(), platform: platformName(), appVersion: options.version, kind: "server" },
     newClientInstanceId: () => randomUUID(),
+    ...(options.log ? { log: options.log } : {}),
+    ...(options.relayOnly ? { onDemand: true, managedEndpointNeeded: async () => false, relay: { capable: () => true, legacyDevices: async () => 0 } } : {}),
+    ...(recovery
+      ? {
+          autoRecover: true,
+          companionIsOn: () => recovery.running() !== null,
+          managedConnectionState: () => recovery.running()?.state() ?? STOPPED_TUNNEL,
+          activatePersistedEndpoint: async () => {
+            const tunnel = recovery.running();
+            const access = tunnelAccess(credentials.read());
+            if (!tunnel || !access) return tunnel?.state() ?? STOPPED_TUNNEL;
+            return tunnel.restart(access);
+          },
+          ...options.clock,
+        }
+      : {}),
   });
   return { service, credentials, controlPlane };
 }
 
-// ── a fleet's credential: no account file, no emailed code ───────────────
 export const FLEET_CREDENTIAL_ENV = "OMB_INSTALLATION_CREDENTIAL";
 
-/** A container the fleet starts carries its installation credential in the
- * environment. Nothing is written to disk and nobody types a code; the
- * address and connector token are fetched fresh at every start. */
+/** A fleet container's installation credential comes from the environment; nothing is written to disk. */
 export function fleetCredential(env: NodeJS.ProcessEnv = process.env): string | null {
   const value = env[FLEET_CREDENTIAL_ENV]?.trim();
   return value ? value : null;
 }
 
-export async function fleetAccess(options: { credential: string; env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch }): Promise<ManagedTunnelAccess> {
+export async function fleetAccess(options: { credential: string; version?: string; env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch }): Promise<ManagedTunnelAccess> {
   const env = options.env ?? process.env;
   const controlPlane = resolveCompanionControlPlaneURL({ isPackaged: true, environment: env });
   if (!controlPlane) throw new Error("OMB_CONTROL_PLANE_URL is set but is not an https address");
   const client = createControlPlaneClient({ baseURL: controlPlane, fetchImpl: options.fetchImpl });
   try {
-    const { endpoint, connectorToken } = await client.ensureEndpoint(options.credential);
+    const { endpoint, connectorToken } = await client.ensureEndpoint(options.credential, { appVersion: options.version, kind: "server" });
     return { endpoint: endpoint.url, token: connectorToken };
   } catch (error) {
     if (error instanceof ControlPlaneError && error.status === 401) {
       throw new Error(`the installation credential in ${FLEET_CREDENTIAL_ENV} was rejected by ${controlPlane}; the fleet has to issue a new one`);
     }
-    throw new Error(`could not get this machine's public address from ${controlPlane}: ${error instanceof Error ? error.message : String(error)}`);
+    const reference = error instanceof ControlPlaneError && error.requestId ? ` (reference ${error.requestId})` : "";
+    throw new Error(`could not get this machine's public address from ${controlPlane}: ${error instanceof Error ? error.message : String(error)}${reference}`);
   }
 }
 
-// ── cloudflared and the guardian: where they are, or how to get them ──────
 /** OMB_CLOUDFLARED_PATH, then the copy this command downloaded into the data
  * dir, then PATH. */
 export function cloudflaredPath(dataDir: string, env: NodeJS.ProcessEnv = process.env): string | null {
   return resolveCloudflaredBinary({ isPackaged: false, appPath: dataDir, environment: env });
 }
 
-/** The pinned-download script: bundled beside the server in a package or
- * image, the source in a checkout. */
 export function prepareEntry(here = HERE): string {
   const bundled = join(here, "prepare-cloudflared.js");
   return existsSync(bundled) ? bundled : resolve(here, "..", "scripts", "prepare-cloudflared.mjs");
 }
 
-/** The connector guardian (the process that owns the gateway and cloudflared
- * and tears both down if this process dies), same rule. */
 export function guardianEntry(here = HERE): string | null {
   const bundled = join(here, "tunnel-guardian.js");
   if (existsSync(bundled)) return bundled;
@@ -225,22 +224,27 @@ export async function ensureCloudflared(options: {
 }): Promise<string> {
   const env = options.env ?? process.env;
   const found = cloudflaredPath(options.dataDir, env);
-  if (found) return found;
-  options.log(`downloading cloudflared once (pinned version and digest, about 40 MB) into ${options.dataDir}`);
+  const staged = stagedCloudflaredPath({ appPath: options.dataDir });
+  const refreshStaged = !env.OMB_CLOUDFLARED_PATH?.trim() && found === staged;
+  if (found && !refreshStaged) return found;
+  options.log(
+    refreshStaged
+      ? `checking staged cloudflared (pinned version and digest) in ${options.dataDir}`
+      : `downloading cloudflared once (pinned version and digest, about 40 MB) into ${options.dataDir}`,
+  );
   await new Promise<void>((done, fail) => {
     const child = spawn(process.execPath, [prepareEntry(options.here), "--current", "--root", options.dataDir], {
       env,
       stdio: ["ignore", "inherit", "inherit"],
     });
-    child.on("error", fail);
-    child.on("exit", (code) => (code === 0 ? done() : fail(new Error(`the cloudflared download failed (exit ${code ?? "signal"})`))));
+    child.on("error", (error) => fail(new Error(`could not prepare cloudflared: ${error.message}`)));
+    child.on("exit", (code) => (code === 0 ? done() : fail(new Error(`the cloudflared ${refreshStaged ? "refresh" : "download"} failed (exit ${code ?? "signal"})`))));
   });
-  const staged = cloudflaredPath(options.dataDir, env);
-  if (!staged) throw new Error("cloudflared was downloaded but is not where it should be; remove the data dir's dist-native folder and try again");
-  return staged;
+  const prepared = refreshStaged ? (existsSync(staged) ? staged : null) : cloudflaredPath(options.dataDir, env);
+  if (!prepared) throw new Error("cloudflared was prepared but is not where it should be; remove the data dir's dist-native folder and try again");
+  return prepared;
 }
 
-// ── the origin: an IPC path the harness listens on for the gateway ────────
 export function createTunnelOrigin(): CompanionOriginEndpoint {
   return createCompanionOriginEndpoint({ processId: process.pid });
 }
@@ -249,19 +253,15 @@ export function cleanupTunnelOrigin(origin: CompanionOriginEndpoint): void {
   cleanupCompanionOriginEndpoint(origin);
 }
 
-// ── the tunnel itself ────────────────────────────────────────────────────
 export interface RunningTunnel {
   address: string;
   state(): ManagedTunnelState;
-  /** Resolves with the first settled attempt: ready, or the reason it is retrying. */
   started: Promise<ManagedTunnelState>;
+  restart(access: ManagedTunnelAccess): Promise<ManagedTunnelState>;
   stop(): Promise<void>;
 }
 
-/** The gateway listens on 127.0.0.1:<originPort> (the control plane points
- * the tunnel at 8812; OMB_TUNNEL_ORIGIN_PORT exists for tests) and forwards
- * to the harness's IPC socket. Verification polls the public address until
- * it answers as this app, then retries with backoff forever if it never does. */
+/** The control plane points the tunnel at 127.0.0.1:8812 (OMB_TUNNEL_ORIGIN_PORT for tests); the gateway forwards to the IPC socket. */
 export function startTunnel(options: {
   dataDir: string;
   access: ManagedTunnelAccess;
@@ -292,13 +292,13 @@ export function startTunnel(options: {
     address: options.access.endpoint,
     state: () => current,
     started,
+    restart: (access) => tunnel.start({ endpoint: access.endpoint, token: access.token, originTarget: options.originTarget }),
     stop: async () => {
       await tunnel.stop();
     },
   };
 }
 
-/** One line per state change, for a terminal or a journal. */
 export function describeTunnelState(state: ManagedTunnelState, address: string): string {
   switch (state.status) {
     case "starting":

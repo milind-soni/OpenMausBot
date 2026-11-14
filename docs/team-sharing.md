@@ -1,10 +1,10 @@
-# Sharing a whole team
+# Sharing a whole department
 
-**Share team…** saves one team as a single file (`<team>-<version>.openmaus.json`).
+The sidebar groups bots into departments. **Share department…** saves one department as a single file (`<team>-<version>.openmaus.json`).
 Someone else adds it in **Templates → Import**, or an organization uploads it
 in Admin → Packages and its desktops add it from **Templates → From
-{Organization}** ([org-library.md](org-library.md)). Open it from the team's menu in the sidebar (right-click
-the team name), or from **Templates → Share**.
+{Organization}** ([org-library.md](org-library.md)). Open it from the department's menu in the sidebar (right-click
+the department name), or from **Templates → Share**.
 
 ## What goes in the file
 
@@ -82,7 +82,8 @@ Import is additive: everything becomes new records in a new team (numbered if
 the name is taken). Nothing in the file can change a bot, group chat or team
 you already have.
 
-- Bots start on **Ask**, with no connected-app access and the installation's
+- Bots start at the default approval level, **Full access** (Ask on a hosted
+  company workspace), with no connected-app access and the installation's
   default model. A suggested approval level in the file is recorded, never
   applied.
 - Skills arrive **switched off**; routines arrive **paused**.
@@ -102,6 +103,68 @@ you already have.
   {Organization}**, see [org-library.md](org-library.md)).
 
 If any step fails, everything the import created is removed again.
+
+## Moving from Grok Bot
+
+**Settings → Import & export → Move from Grok Bot** opens one dialog. It needs no sign-in
+and the import makes no network call. Grok Bot has no export button, so each Bot
+writes down its own setup.
+
+1. Copy the message and send it in the Bot's chat. The Bot saves
+   `grok-bot-export-<name>.json` or replies with it.
+2. Bring that back: paste the whole reply (chat text and code fences are fine),
+   drop the file or choose it. In the desktop app, on the computer running
+   OpenMausBot, files named `grok-bot-export*` in Downloads are offered in one
+   tap; a split or re-saved export joins up.
+3. The preview names the Bot and counts its skills, routines and memories. Nothing
+   is written yet.
+4. Import, then the same counts in the past tense and the one next step: turn each
+   routine off in Grok Bot, then on here.
+
+**Move another Bot** goes round again; each Bot exports itself.
+
+Everyone who can add a bot also sees a popup once, after the welcome on a new
+install and at the next launch otherwise: the two marks, **Let's start**, which
+opens this dialog, and **Not now**. It goes first in the queue of once-only
+notices (`GROK_MOVE_NOTICE`) and may interrupt a first chat, though not a turn, a
+dialog or a call. It reads nothing on this computer. It stays away from a Team
+Cloud, a hosted member, a branded build and a desktop an organization runs.
+
+| In Grok Bot | Here |
+| --- | --- |
+| Name, title, instructions | A new bot in its own section, through the `openmaus.package` import |
+| Skills | That bot's skills, switched on. One the skill scan flags stays off, and the dialog names it |
+| Memories and facts about you | That bot's `MEMORY.md`, repeats dropped |
+| Routine on a schedule | A routine named `<Bot>: <routine>`, paused, with its schedule and time zone and the skills it uses named in its prompt |
+| Routine on an event (Slack, GitHub, Linear, Sentry, PagerDuty, email, webhook) or with a schedule that can't be read | Not created: its trigger and instruction are saved in that bot's `memory/grok-bot-event-routines.md`, and the dialog counts them |
+| App with a remote `https` MCP address | That bot's MCP server, switched off, with values stripped |
+| Other apps | Not carried: their logins stay in Grok Bot. The dialog counts every app to connect again |
+
+Chat history, app logins and the model never come over.
+
+The export text is untrusted. A document with credential-looking keys is refused
+whole; token-shaped text elsewhere is redacted before anything uses it. An
+address carrying a key in its query loses it, and one with a key in its path is
+not carried at all. Importing grants nothing else: the package path sets every
+privilege-bearing field itself. A server name you already have is skipped, and a
+Bot already moved is not added twice. One file or item that can't be read costs
+the rest nothing.
+
+The earlier `openmaus.grok/1` export still reads.
+
+After the button is pressed, and on the computer running OpenMausBot only, the
+desktop app reads through `GET /api/setup-import/grok` (its own window only, never
+a paired device, a browser, a bot's shell, a Cloud or a hosted server) those
+Downloads files and one slice of the Grok Bot app's UI cache in
+`<user data>/sand-client-persistence/`: `roster.last-roster`, for the names of the
+Bots on this computer. Nothing else in that folder is opened, nor `~/.grokbot`.
+
+A `cursor-session.json` left in the data folder by an older version is deleted at
+start.
+
+The mapping lives in `shared/grok-import.ts`, the local look in
+`server/grok-local.ts`, the dialog in `src/components/GrokMoveDialog.tsx`, the
+popup in `src/components/GrokMovePopup.tsx`.
 
 ## The file format
 

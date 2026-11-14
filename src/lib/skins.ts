@@ -1,25 +1,14 @@
-// Skins are pure CSS. Every one of them is a block of custom properties in
-// styles.css, selected by a `data-skin` attribute; this module only decides
-// which one is active and remembers the choice. Nothing here knows a colour —
-// that keeps the two halves from drifting apart, and it means adding a skin is
-// one CSS block plus one line in SKINS.
+import { SKIN_IDS } from "../../shared/app-settings";
+import { paintAuroraField } from "./aurora-field";
+import { hasPriorRun } from "./prior-run";
+import { windowPrefChanged } from "./window-pref-changes";
 
-export const SKIN_IDS = [
-  "midnight",
-  "atelier",
-  "foundry",
-  "lagoon",
-  "graphite",
-  "linen",
-  "dusk",
-  "daylight",
-] as const;
+export { SKIN_IDS };
 export type SkinId = (typeof SKIN_IDS)[number];
 
 export type Skin = {
   id: SkinId;
   name: string;
-  /** One line, shown under the name in the picker. */
   tagline: string;
 };
 
@@ -32,62 +21,122 @@ export const SKINS: readonly Skin[] = [
   { id: "linen", name: "Linen", tagline: "Clean daylight with a restrained navy accent." },
   { id: "dusk", name: "Dusk", tagline: "Muted plum after dark, calm and low-key." },
   { id: "daylight", name: "Daylight", tagline: "Midnight in reverse. Near-white, ink-black bubbles." },
+  { id: "meadow", name: "Meadow", tagline: "Fresh white with a calm green. The MausBot look." },
+  { id: "pop", name: "Pop", tagline: "Cream paper, thick ink outlines, hard shadows. Chunky and cheerful." },
+  { id: "halloween", name: "Halloween", tagline: "Plum after dark, lit in pumpkin orange. Bats optional." },
+  { id: "diwali", name: "Diwali", tagline: "Indigo night, lit in marigold and diya gold. Fireworks optional." },
+  { id: "aurora", name: "Aurora", tagline: "Near-black, crossed by a band of green light. Glass on top." },
 ];
 
-export const DEFAULT_SKIN: SkinId = "midnight";
+/** "system" follows the OS between the light and dark skins below; anything else pins one skin. */
+export type SkinChoice = SkinId | "system";
+export const THEME_SKINS = { light: "daylight", dark: "midnight" } as const satisfies Record<"light" | "dark", SkinId>;
+
+export const DEFAULT_SKIN_CHOICE: SkinChoice = "system";
+export const PRIOR_INSTALL_SKIN: SkinId = "midnight";
 
 const KEY = "omb-skin";
+const DARK_QUERY = "(prefers-color-scheme: dark)";
 
-// The input is whatever localStorage handed back — a string this app wrote
-// on an earlier run, a value edited by hand, or a leftover from a renamed
-// skin. The list is the schema.
 function isSkinId(value: unknown): value is SkinId {
-  // SAFETY: the assertion only satisfies includes()' parameter type; the
-  // check itself is what decides, and a non-member returns false.
   return SKIN_IDS.includes(value as SkinId);
 }
 
-// Reaching for localStorage is itself a failure point: on an origin with
-// storage blocked the getter throws, and `typeof` alone doesn't shield it.
+function isSkinChoice(value: unknown): value is SkinChoice {
+  return value === "system" || isSkinId(value);
+}
+
+function systemPrefersDark(): boolean {
+  try {
+    return typeof matchMedia === "function" && matchMedia(DARK_QUERY).matches;
+  } catch {
+    return true;
+  }
+}
+
+export function resolveSkin(choice: SkinChoice, prefersDark = systemPrefersDark()): SkinId {
+  if (choice !== "system") return choice;
+  return prefersDark ? THEME_SKINS.dark : THEME_SKINS.light;
+}
+
+// With storage blocked the localStorage getter itself throws, and `typeof` alone doesn't shield it.
 function getStore(): Storage | undefined {
   try {
-    // A bare feature test, not a narrowing of parsed input: in a renderer
-    // without storage the identifier is simply not defined.
     return typeof localStorage === "undefined" ? undefined : localStorage;
   } catch {
     return undefined;
   }
 }
 
-export function readSkin(): SkinId {
+export function readSkinChoice(): SkinChoice {
   try {
-    const stored = getStore()?.getItem(KEY);
-    return isSkinId(stored) ? stored : DEFAULT_SKIN;
+    const store = getStore();
+    const stored = store?.getItem(KEY);
+    if (isSkinChoice(stored)) return stored;
+    return hasPriorRun(store) ? PRIOR_INSTALL_SKIN : DEFAULT_SKIN_CHOICE;
   } catch {
-    return DEFAULT_SKIN;
+    return PRIOR_INSTALL_SKIN;
   }
 }
 
-/**
- * Point the document at a skin and remember it. Called once before the first
- * paint (main.tsx) and again on every change from the picker — a stamped
- * attribute rather than a class so it can never collide with Tailwind.
- */
-export function applySkin(id: SkinId): void {
+export function readSkin(): SkinId {
+  return resolveSkin(readSkinChoice());
+}
+
+let followingSystem: { query: MediaQueryList; onChange: () => void } | null = null;
+const listeners = new Set<() => void>();
+
+export function subscribeSkin(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function paintSkin(id: SkinId): void {
   document.documentElement.dataset.skin = id;
-  try {
-    getStore()?.setItem(KEY, id);
-  } catch {
-    /* quota / private mode — the skin still applies for this session */
-  }
-  // The one surface CSS cannot reach: on Windows the caption buttons sit in a
-  // native overlay the main process paints. Left at the default it stays
-  // Midnight-black on a light skin — the "black block in the top-right
-  // corner" of issue #454. Best-effort: a browser tab or an older desktop
-  // build has no bridge, and the skin still applies without it.
+  if (id === "aurora") paintAuroraField();
+  for (const listener of listeners) listener();
+  // On Windows the caption buttons sit in a native overlay the main process paints, out of CSS's reach.
   try {
     void window.ogb?.applySkin?.(id)?.catch(() => undefined);
   } catch {
-    /* no bridge */
   }
+}
+
+function followSystem(follow: boolean): void {
+  if (followingSystem && !follow) {
+    followingSystem.query.removeEventListener("change", followingSystem.onChange);
+    followingSystem = null;
+  }
+  if (!follow || followingSystem || typeof matchMedia !== "function") return;
+  try {
+    const query = matchMedia(DARK_QUERY);
+    const onChange = () => paintSkin(resolveSkin("system", query.matches));
+    query.addEventListener("change", onChange);
+    followingSystem = { query, onChange };
+  } catch {
+  }
+}
+
+/** Wears a skin another page chose, without keeping it as this page's own choice or telling the app (the window's rail
+ * wearing the skin of the page beside it). */
+export function wearSkin(value: unknown): void {
+  if (!isSkinId(value)) return;
+  document.documentElement.dataset.skin = value;
+  for (const listener of listeners) listener();
+}
+
+export function applySkinChoice(choice: SkinChoice): void {
+  try {
+    getStore()?.setItem(KEY, choice);
+  } catch {
+  }
+  followSystem(choice === "system");
+  paintSkin(resolveSkin(choice));
+  windowPrefChanged();
+}
+
+export function applySkin(id: SkinId): void {
+  applySkinChoice(id);
 }

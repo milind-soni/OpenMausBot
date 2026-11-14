@@ -7,9 +7,7 @@ const { app, BrowserWindow, WebContentsView, nativeImage } = require("electron")
 const { createBrowserSurfaceManager } = require("../browser-surface.cjs");
 process.stdout.write("fixture-modules-loaded\n");
 
-// Linux CI runs under Xvfb as root. The dedicated Windows fixture job receives
-// the restricted-package filesystem ACL it needs from the test wrapper and
-// otherwise launches Electron with its production sandbox defaults intact.
+// Linux CI runs under Xvfb as root; elsewhere Electron keeps its production sandbox defaults.
 if (process.platform === "linux") {
   app.commandLine.appendSwitch("no-sandbox");
 }
@@ -34,13 +32,8 @@ async function waitForFixedViewport(browserView, label, timeoutMs = 2_000) {
   throw new Error(`${label} viewport was not fixed: ${JSON.stringify(viewport)}`);
 }
 
-// Only Linux moves a nested scroller synchronously from the isolated world;
-// everywhere else browser_scroll dispatches a real mouseWheel, which CDP
-// acknowledges as soon as it is routed and the compositor applies a frame or
-// more later. A fixed settle therefore races a loaded runner — macOS CI has
-// read the pre-scroll 0px twice — so poll for the offset the way the viewport
-// above is polled for. Only the assertions that expect movement can wait like
-// this: a scroll that must NOT happen still needs a fixed settle.
+// Outside Linux, browser_scroll sends a real mouseWheel that CDP acks before the compositor applies it, so poll.
+// A scroll that must NOT happen still needs a fixed settle.
 async function waitForScrollTop(browserView, selector, expected, label, timeoutMs = 2_000) {
   const read = `document.querySelector(${JSON.stringify(selector)}).scrollTop`;
   const deadline = Date.now() + timeoutMs;
@@ -99,9 +92,7 @@ async function verifySandboxedPreload() {
 
 async function run() {
   const owner = new BrowserWindow({ show: false, width: 900, height: 700 });
-  // Keep the fixture's owner alive while the one-shot preload probe closes;
-  // otherwise Electron may treat it as the last window and quit before the
-  // browser-surface assertions start.
+  // Keep the owner alive while the preload probe closes, or Electron may quit on its last window.
   await verifySandboxedPreload();
   let browserView = null;
   const manager = createBrowserSurfaceManager({
@@ -190,8 +181,6 @@ async function run() {
     if (!refused) throw new Error("closed-shadow protected input was not refused");
     process.stdout.write("closed-shadow-screenshot-refused\n");
 
-    // With protected values cleared, any ordinary closed-shadow control must
-    // still be represented through the conservative AX fallback.
     await browserView.webContents.executeJavaScript(`document.querySelector("closed-login").clearProtectedFields()`);
     const safeClosedSnapshot = await manager.snapshot("fixture-bot", "");
     if (!safeClosedSnapshot.elements.some(element => element.role === "button")) {
@@ -206,11 +195,7 @@ async function run() {
     }
     process.stdout.write("closed-shadow-nested-name-source-redacted\n");
 
-    // A hostile page can transform a human-entered password into sibling
-    // text/title and clear the input before a postflight DOM scan. Native
-    // human keyboard input taints the document until committed navigation,
-    // so no transformed output becomes model-facing even after the field is
-    // empty and exact-string redaction would be insufficient.
+    // A hostile page can turn a typed password into sibling text and clear the input; human keyboard input taints the document.
     manager.setHumanControl("fixture-bot", true, "");
     await browserView.webContents.executeJavaScript(`document.querySelector("closed-login").focusCredential()`);
     browserView.webContents.focus();
@@ -236,10 +221,7 @@ async function run() {
     }
     process.stdout.write("transformed-secret-taint\n");
 
-    // Exercise the injected Playwright snapshot on an ordinary open-DOM page.
-    // The closed-shadow document above deliberately takes the conservative AX
-    // fallback, so it cannot prove that nested accessible-name contributors
-    // are redacted by the rich snapshot implementation itself.
+    // The closed-shadow page takes the conservative AX fallback, so only an open-DOM page exercises the rich snapshot's redaction.
     const richSnapshotHtml = `<!doctype html><html><body>
       <label id="credential-label" for="credential">
         API key
@@ -299,11 +281,7 @@ async function run() {
     if (!reviewedRef) throw new Error("real Electron fixture did not produce a rich browser ref");
     manager.setHumanControl("fixture-bot", false, "");
 
-    // CDP DOM boxes are in the fixed 1280x800 page viewport, while Electron's
-    // native device-emulation scale expects pointer positions in the smaller
-    // WebContentsView. Exercise real compositor dispatch in both modes: this
-    // failed silently before page coordinates were converted for the current
-    // presentation scale.
+    // CDP boxes are in the fixed 1280x800 viewport while Electron's device-emulation scale expects WebContentsView positions.
     await waitForFixedViewport(browserView, "compact action");
     await manager.click("fixture-bot", reviewedRef, { profile: "" });
     let actionEvents = await browserView.webContents.executeJavaScript(`window.actionEvents`);

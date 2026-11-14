@@ -1,8 +1,3 @@
-// The `auto` room responder must load everywhere a room's routing is read or
-// written: stored rooms, team backups, packages and legacy team files. Old
-// data without it keeps loading unchanged, and a kind this build does not
-// know degrades to today's default (the first member as lead) instead of
-// refusing the file.
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 

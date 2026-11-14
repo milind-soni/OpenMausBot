@@ -1,5 +1,4 @@
-// MiniMax API driver. The wire protocol is OpenAI chat completions; this file
-// keeps only MiniMax's credentials, catalog, and request differences.
+// MiniMax API driver over the OpenAI chat-completions protocol.
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -14,8 +13,7 @@ const DEFAULT_URL = "https://api.minimax.io/v1";
 const CN_URL = "https://api.minimaxi.com/v1";
 const MODELS: ModelCatalog = {
   default: "MiniMax-M3",
-  // `custom: true` because the driver is access "custom": the picker opens
-  // custom-access engines in the pane that lists only custom-flagged models.
+  // `custom: true` is load-bearing: a custom-access engine's picker pane lists only custom-flagged models.
   options: [
     { id: "MiniMax-M3", label: "MiniMax M3", contextWindow: 1_000_000, custom: true },
     { id: "MiniMax-M2.7", label: "MiniMax M2.7", contextWindow: 204_800, custom: true },
@@ -25,7 +23,8 @@ const MODELS: ModelCatalog = {
 
 export interface MinimaxConfig {
   tools?: boolean;
-  url: string;
+  /** An explicit instance or environment URL; absent uses mmx-cli's endpoint, then the international API. */
+  url?: string;
 }
 
 interface LocalMiniMaxConfig {
@@ -68,9 +67,10 @@ export function decodeMinimaxConfig(raw: unknown): MinimaxConfig {
   if (tools !== undefined && typeof tools !== "boolean") throw new Error("tools must be a boolean");
   const parsed = driverConfigSchema.safeParse(raw ?? {});
   const config = parsed.success ? parsed.data : {};
+  const url = config.url?.trim() || process.env.MINIMAX_BASE_URL?.trim();
   return {
     ...(tools !== undefined ? { tools } : {}),
-    url: normalizedApiUrl(config.url?.trim() || process.env.MINIMAX_BASE_URL?.trim() || DEFAULT_URL),
+    ...(url ? { url: normalizedApiUrl(url) } : {}),
   };
 }
 
@@ -97,9 +97,7 @@ export const MinimaxDriver: ProviderDriver<MinimaxConfig> = {
       input.environment[API_KEY_ENV]?.trim() ||
       process.env[API_KEY_ENV]?.trim() ||
       local.apiKey;
-    const apiUrl = input.config.url === DEFAULT_URL && local.url !== DEFAULT_URL
-      ? local.url
-      : input.config.url;
+    const apiUrl = input.config.url ?? local.url;
     const models = local.defaultModel && MODELS.options.some((model) => model.id === local.defaultModel)
       ? { ...MODELS, default: local.defaultModel }
       : MODELS;

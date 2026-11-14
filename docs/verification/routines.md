@@ -45,10 +45,10 @@ cloud VM, or external service.
 
 The launcher prepares these cases:
 
-- **Pepper** receives a pending **Agent-created inbox check** confirmation card.
-  The real `propose_routine` MCP handler creates the card using credentials
-  captured from a running fixture turn. The fake model does not decide to call
-  the tool, and the launcher does not confirm the card.
+- **Pepper** gets an **Agent-created inbox check** trigger, applied at once with
+  its live trigger card. The real `trigger` MCP handler (`action: "create"`) creates it using
+  credentials captured from a running fixture turn. The fake model does not
+  decide to call the tool.
 - **Manual inbox check** is created through the routine API and run twice for
   Pepper. Both fresh executions report into **Fleet health reports**, inside
   the **OMB management** folder. Its next scheduled occurrence is an hour later.
@@ -66,9 +66,12 @@ The final startup JSON includes the server `url`, `previewUrl`, `pepperId`,
 1. In Pepper's source chat, inspect the pending routine card. Confirm it once;
    the card must become settled and exactly one matching routine must appear.
    Reloading must preserve both the routine and the card's settled state.
-   Open that routine, run it, and return to its source chat: its lifecycle
-   receipt must lead to the isolated execution thread, not replace the source
-   conversation.
+   Open that routine and run it. Its report lands in Pepper's main thread (the
+   open conversation the person last wrote in, here the source chat), not a new
+   "· Results" thread, as one Pepper message captioned with the routine's name,
+   and the caption's **See run** leads to the isolated execution thread. See
+   [automation reports](automation-reports.md) for quiet runs, questions and
+   the concurrency rule.
 2. Open **Automations → Schedule**. Toggle **List / Calendar**. The list must
    show paused and finished schedules as well as active ones; changing views
    must not change a routine or start a run. Filter by Pepper and Miso and
@@ -100,30 +103,64 @@ The final startup JSON includes the server `url`, `previewUrl`, `pepperId`,
    reports** thread, not separate sidebar entries for the two executions.
    Right-click the folder (or use its actions menu) → **Mark folder as read**.
    Its unread dots clear without selecting a conversation or resolving any
-   pending approvals. Open the results thread: both dated reports remain.
-9. Use a report's **Open run** to inspect its fresh execution transcript, then
+   pending approvals. Open the results thread: both captioned reports remain.
+9. Use a report's **See run** to inspect its fresh execution transcript, then
    **Back to results**. **Run logs** retains the full execution history.
    A user follow-up sent in a completed execution makes it an ordinary visible
    thread; marking the older run seen must not hide that conversation again.
 10. In the routine editor, **Post results to** offers visible threads grouped by
-    folder or **Create a dedicated results thread**. Save to Fleet health
+    folder or **The bot's main thread** (the default). Save to Fleet health
     reports, reload, and confirm the selection persists. In quick create,
     **More options** must preserve the chosen destination. Changing the owning
     bot, including via Call/Team goal selectors, must reset a foreign destination.
     Run a new routine twice: both reports use the chosen thread, while Run logs
-    links to two different executions. The dedicated default similarly reuses
-    one results thread for future runs.
+    links to two different executions. The default reports every run into the
+    bot's main thread and never creates a "· Results" thread.
 
-Existing chat-created routines keep reporting to their source conversation
-unless the user chooses another destination. Historical runs keep the destination
-they started with. If that destination is deleted, their execution threads become
-visible so results and approvals remain reachable; future runs can create a new
-results destination. No existing user conversation is silently deleted or filed.
+Every routine reports into its bot's main thread unless the user chooses another
+destination, whether it was made in a chat, the editor or the API, and whether a
+teammate (such as a Chief) asked for it. The main thread is the open
+conversation a person last wrote in (until anyone has, the selected one, then
+the oldest); a bot with hidden threads opens there too. Conversations from
+before the server kept that take it, once on upgrade, from the newest line a
+person sent there from the app. Each run looks it up
+again, so the routine saves nothing and its results follow the person. A routine
+still pointing at an automatic "<name> · Results" thread from an older version
+moves to the main thread on its next run; that thread and its reports stay. The
+oldest thread that v0.1.98 to v0.1.107 saved on routines as if it were chosen is
+cleared once on upgrade, also when it was archived since. On a Cloud home, a routine written by someone other
+than the owner keeps its own results conversation, opened as theirs. Historical
+runs keep the destination they started with. If that destination is deleted,
+their execution threads become visible so results and approvals remain
+reachable; future runs report into the main thread. No existing user
+conversation is silently deleted or filed.
 
 An unconfirmed proposal is not an active routine. A run marked **Waiting** is
 not necessarily asking the user for approval: its attention text can explain
-that delegated work is still running. Status, result and scheduled/manual
-trigger must agree with the saved server record.
+that work it handed to teammates is still outstanding — the job runtime has
+assignments open for the run's thread (docs/runtime-contract.md §9), and the
+run completes when their results have resumed it as a routine turn. Status,
+result and scheduled/manual trigger must agree with the saved server record.
+
+## Run on startup
+
+A repeating routine's **Advanced** section offers **Also run when OpenMausBot
+starts**. In the isolated renderer, create a daily routine with it ticked, then
+reopen the editor: the box stays ticked. A one-time routine does not offer it.
+Startup needs a restart on the same data, which this launcher does not do;
+`server/routines-startup.test.ts` restarts a real fixture server on its own
+store and requires exactly one completed **On startup** run.
+
+The desktop gives every server child of one launch the same
+`OMB_DESKTOP_LAUNCH_ID`, and `routines.json` records the launch whose startup
+runs were queued. A crash recovery or switching back to a workspace within
+that launch queues none; the next launch does. A server without the variable,
+such as a standalone one, counts every process start.
+
+```sh
+pnpm exec vitest run server/routines.test.ts server/routines-startup.test.ts server/routine-requests.test.ts server/drivers/agents-proxy.test.ts shared/package-format.test.ts server/package-export.test.ts server/package-import.test.ts
+node --test electron/server-child-launch.node-test.mjs
+```
 
 ## Evidence and cleanup
 
@@ -146,14 +183,25 @@ never kill processes by name or delete a broad temporary root.
 
 ## Automated regressions
 
+The automation notification regression creates a failed run followed by six
+successful runs, restarts the isolated server, and checks that the list explains
+the unread failure and the panel shows it beyond the five newest runs. Opening
+the panel marks the failure seen; a second restart must keep the dot cleared.
+It retains screenshots under `.omb-scratch/automations-journey/notification*`.
+
+```sh
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/automations-journey.ui.e2e.test.ts -t explains.an.old.automation.notification
+```
+
 In the editor's Advanced section, recurring routines offer **Skip this
 occurrence** (the default) or **Queue one run**. The queued scheduled run waits
-for the same routine to finish, including delegated work; extra occurrences
-are skipped, not accumulated. Manual runs and webhook deliveries remain
-independent. Pausing still cancels queued work. The cron renderer test changes
-this option, saves it, opens the editor again and switches it back.
+for the same routine to finish, including the assignments its run still has
+outstanding on the job runtime; extra occurrences are skipped, not
+accumulated. Manual runs and webhook deliveries remain independent. Pausing
+still cancels queued work. The cron renderer test changes this option, saves
+it, opens the editor again and switches it back.
 
-The List view and `list_routines` expose saved skipped-occurrence counts and
+The List view and `trigger_info` expose saved skipped-occurrence counts and
 recent consecutive failures. Skips count occurrences observed by the scheduler
 while busy, not every interval elapsed while offline. Failure streaks are
 derived from retained terminal receipts (up to the existing history limit),
@@ -165,7 +213,8 @@ rollback on a failed save. The MCP fixture verifies reviewed policy changes
 and the listing through the actual tool and API, using no live accounts.
 
 The routine tool defaults to `maus` (the bot's configured model and computer,
-including VPS); `box` explicitly selects the separate Boat agent. Legacy `cloud`
+including VPS); `box` explicitly selects the bot's Boat cloud computer, which the
+bot's own model drives through its computer tools. Legacy `cloud`
 values remain accepted without migrating existing routines. The cron tool
 fixture checks this default and the missing-Boat-account recovery instruction.
 The VPS fixture runs an actual scheduled execution with fake ACP/SSH and checks
@@ -181,13 +230,19 @@ pnpm exec vitest run server/routines.test.ts server/routines-startup.test.ts ser
 pnpm exec vitest run src/components/routines/RoutineViews.test.ts src/components/routines/ResultsDestination.test.ts src/components/bot-settings/RoutinesSection.test.ts src/components/RoutineRunCard.test.ts src/components/BotProjects.test.ts src/lib/folder-read.test.ts src/lib/computer-panel-view.test.ts src/state/store.test.ts
 ```
 
-The delegation integration tests launch their own shared-control fixtures.
-They verify a busy peer delaying completion until its result resumes the same
-routine, a denied handoff resuming the routine with that outcome, and a cancelled
-routine refusing a stale approved handoff. They print retained server-log and
-JSON evidence paths. These complement the scheduler, proposal and renderer
-tests; they do not prove real-provider tool selection, actual desktop work, or
-packaged Electron behavior.
+The hand-off integration tests (`server/routine-delegation.e2e.test.ts`,
+`server/runtime-paths.e2e.test.ts`) launch their own shared-control fixtures.
+A routine turn hands work on with `coordinate_bots`; the run's root on the
+job runtime names the run as its
+requester with routine lineage (docs/runtime-contract.md §9). They verify a
+busy peer delaying completion until its result resumes the same run as a
+routine turn, a denied hand-off refused with that outcome and no assignment
+written, a run that stays waiting through a restart while its cut teammate
+turn runs again once (§5), and the one-time import of a pre-runtime
+`delegations.json` at boot (`server/routines-startup.test.ts`). They print
+retained server-log and JSON evidence paths. These complement the scheduler,
+proposal and renderer tests; they do not prove real-provider tool selection,
+actual desktop work, or packaged Electron behavior.
 
 Webhook delivery IDs are committed atomically with their execution receipt.
 Retries keep the same run ID for seven days, independently of run-log pruning;
@@ -204,7 +259,7 @@ that same isolated server and checks that redelivery returns the original run ID
 with one execution. Its retained JSON evidence includes the receipt and transcript.
 
 The results integration fixture additionally proves fresh provider contexts,
-saved destination snapshots, dated result cards, approval links, deleted-thread
-fallback, and continued user conversations staying visible. Native decoding and
+saved destination snapshots, captioned report lines, copied approval cards,
+deleted-thread fallback, and continued user conversations staying visible. Native decoding and
 thread-list tests retain hidden execution records for direct navigation and
 approvals while omitting them from ordinary iOS/Android thread pickers.

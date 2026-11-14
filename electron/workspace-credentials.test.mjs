@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  migrateWorkspaceConfigFile,
   migrateWorkspaceCredentials,
   workspaceCredentialEnv,
   WORKSPACE_CREDENTIALS,
@@ -36,8 +40,6 @@ describe("workspace credential migration", () => {
       opencodeGoApiKey: "ocg-secret",
       openaiImageApiKey: "image-secret",
     });
-    // secrets are DELETED (not blanked) so "" stays meaningful as "cleared";
-    // non-secret siblings (endpoint url, chosen voice) stay in the file
     expect(result.config).toEqual({
       xai: { url: "https://api.example.test/v1" },
       box: {},
@@ -46,8 +48,22 @@ describe("workspace credential migration", () => {
       opencodeGo: {},
       profile: { name: "Ada" },
     });
-    // inputs are never mutated — main.mjs decides which files to rewrite
     expect(config.xai.key).toBe("xai-secret");
+  });
+
+  it("keeps the Jev and OpenRouter decision keys apart, with the model and provider left in the file", () => {
+    const result = migrateWorkspaceCredentials({
+      decider: { provider: "openrouter", openrouterModel: "openai/gpt-4o-mini", key: "jev-secret", openrouterKey: "sk-or-secret", enabled: true },
+      openrouter: { key: "engine-openrouter-key" },
+    }, {});
+    expect(result.credentials).toEqual({ jevApiKey: "jev-secret", openrouterDeciderKey: "sk-or-secret", openrouterApiKey: "engine-openrouter-key" });
+    expect(result.config.decider).toEqual({ provider: "openrouter", openrouterModel: "openai/gpt-4o-mini", enabled: true });
+    expect(result.config.openrouter).toEqual({});
+    expect(workspaceCredentialEnv(result.credentials)).toEqual({
+      OMB_JEV_API_KEY: "jev-secret",
+      OMB_OPENROUTER_DECIDER_KEY: "sk-or-secret",
+      OMB_OPENROUTER_API_KEY: "engine-openrouter-key",
+    });
   });
 
   it("is idempotent: a second boot over migrated output changes nothing", () => {
@@ -63,8 +79,6 @@ describe("workspace credential migration", () => {
   });
 
   it("treats a saved non-empty value as newest intent and overwrites the store", () => {
-    // mid-session key change: the server persisted the new key to config.json;
-    // the stale stored secret must not win at the next boot
     const result = migrateWorkspaceCredentials(
       { box: { token: "box-NEW" } },
       { boxToken: "box-OLD", xaiApiKey: "xai-keep" },
@@ -74,27 +88,21 @@ describe("workspace credential migration", () => {
   });
 
   it("treats an empty saved value as no information and keeps the stored secret", () => {
-    // The packaged app tombstones every external-mode save as "" in
-    // config.json while the real key goes to credentials.bin — a boot that
-    // read "" as "cleared" would delete freshly saved keys on every restart.
+    // The packaged app tombstones every external-mode save as "" in config.json while the key goes to credentials.bin.
     const result = migrateWorkspaceCredentials(
       { xai: { key: "" }, tts: { key: "   " } },
       { xaiApiKey: "xai-OLD", ttsKey: "tts-OLD", boxToken: "box-keep" },
     );
     expect(result.credentialsChanged).toBe(false);
     expect(result.credentials).toEqual({ xaiApiKey: "xai-OLD", ttsKey: "tts-OLD", boxToken: "box-keep" });
-    // the swept field itself is still removed from the file
     expect(result.config).toEqual({ xai: {}, tts: {} });
     expect(result.configChanged).toBe(true);
   });
 
   it("keeps the packaged save → restart cycle lossless end to end", () => {
-    // first boot migrates the plaintext key in and sweeps the field
     const boot = migrateWorkspaceCredentials({ opencodeGo: { apiKey: "ocg-secret" } }, {});
     expect(boot.credentials).toEqual({ opencodeGoApiKey: "ocg-secret" });
 
-    // an external-mode save commits the key to the store and leaves a ""
-    // tombstone in config.json; the next boot must not read it as a clear
     const afterTombstone = migrateWorkspaceCredentials(
       { opencodeGo: { apiKey: "" }, profile: { name: "Ada" } },
       { opencodeGoApiKey: "ocg-secret" },
@@ -151,5 +159,91 @@ describe("workspace credential env", () => {
     const credentials = Object.fromEntries(WORKSPACE_CREDENTIALS.map((c) => [c.name, `v-${c.name}`]));
     const env = workspaceCredentialEnv(credentials);
     expect(Object.keys(env).sort()).toEqual(WORKSPACE_CREDENTIALS.map((c) => c.env).sort());
+  });
+});
+
+const AI_PROVIDER_KEYS = [
+  ["openai", "openaiApiKey", "OMB_OPENAI_API_KEY"],
+  ["anthropic", "anthropicApiKey", "OMB_ANTHROPIC_API_KEY"],
+  ["openrouter", "openrouterApiKey", "OMB_OPENROUTER_API_KEY"],
+  ["mistral", "mistralApiKey", "MISTRAL_API_KEY"],
+  ["cerebras", "cerebrasApiKey", "CEREBRAS_API_KEY"],
+  ["groq", "groqApiKey", "OMB_GROQ_API_KEY"],
+  ["greenference", "greenferenceApiKey", "OMB_GREENFERENCE_API_KEY"],
+  ["modelgo", "modelgoApiKey", "OMB_MODELGO_API_KEY"],
+  ["meta", "metaApiKey", "OMB_META_API_KEY"],
+  ["deepseek", "deepseekApiKey", "OMB_DEEPSEEK_API_KEY"],
+  ["openaiCompat", "openaiCompatApiKey", "OPENAI_COMPAT_API_KEY"],
+];
+
+describe("AI provider keys in the encrypted store", () => {
+  it.each(AI_PROVIDER_KEYS)("moves %s into its slot and hands it to the server under its own variable", (section, name, env) => {
+    const result = migrateWorkspaceCredentials({ [section]: { key: `fixture-${section}` } }, {});
+    expect(result.credentials).toEqual({ [name]: `fixture-${section}` });
+    expect(result.config).toEqual({ [section]: {} });
+    expect(workspaceCredentialEnv(result.credentials)).toEqual({ [env]: `fixture-${section}` });
+  });
+
+  it("keeps the Anthropic and OpenAI-compatible settings that are not secrets", () => {
+    const { config } = migrateWorkspaceCredentials({
+      anthropic: { key: "ant", url: "https://claude.example.test", everyClaudeBot: false },
+      openaiCompat: { key: "compat", url: "http://127.0.0.1:1234/v1", model: "local", provider: "pin" },
+    }, {});
+    expect(config).toEqual({
+      anthropic: { url: "https://claude.example.test", everyClaudeBot: false },
+      openaiCompat: { url: "http://127.0.0.1:1234/v1", model: "local", provider: "pin" },
+    });
+  });
+});
+
+describe("migrating config.json on disk", () => {
+  const folders = [];
+  const configFile = (config) => {
+    const folder = mkdtempSync(join(tmpdir(), "omb-workspace-credentials-"));
+    folders.push(folder);
+    const path = join(folder, "config.json");
+    writeFileSync(path, JSON.stringify(config));
+    return path;
+  };
+  afterEach(() => { for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true }); });
+
+  it("writes the encrypted store before it blanks the file", async () => {
+    const path = configFile({ openai: { key: "openai-secret" }, profile: { name: "Ada" } });
+    const save = vi.fn(async () => { expect(readFileSync(path, "utf8")).toContain("openai-secret"); });
+    const credentials = await migrateWorkspaceConfigFile({ configPath: path, credentials: { boxToken: "kept" }, save, log: vi.fn() });
+    expect(save).toHaveBeenCalledExactlyOnceWith({ boxToken: "kept", openaiApiKey: "openai-secret" });
+    expect(credentials).toEqual({ boxToken: "kept", openaiApiKey: "openai-secret" });
+    expect(readFileSync(path, "utf8")).not.toContain("openai-secret");
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ openai: {}, profile: { name: "Ada" } });
+    expect(readdirSync(join(path, ".."))).toEqual(["config.json"]);
+  });
+
+  it("leaves every key in the file and the store unchanged when encryption is unavailable", async () => {
+    const before = { anthropic: { key: "ant-secret" }, groq: { key: "gsk-secret" } };
+    const path = configFile(before);
+    const log = vi.fn();
+    const stored = { boxToken: "kept" };
+    const save = vi.fn().mockRejectedValue(new Error("The operating-system credential store is unavailable"));
+    const credentials = await migrateWorkspaceConfigFile({ configPath: path, credentials: stored, save, log });
+    expect(credentials).toBe(stored);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(before);
+    expect(log).toHaveBeenCalledExactlyOnceWith("credential migration failed: The operating-system credential store is unavailable");
+  });
+
+  it("keeps the encrypted copy when the file cannot be rewritten afterwards, so no key is lost", async () => {
+    const path = configFile({ mistral: { key: "mistral-secret" } });
+    const save = vi.fn(async () => { rmSync(join(path, ".."), { recursive: true, force: true }); });
+    const credentials = await migrateWorkspaceConfigFile({ configPath: path, credentials: {}, save, log: vi.fn() });
+    expect(save).toHaveBeenCalledOnce();
+    expect(credentials).toEqual({ mistralApiKey: "mistral-secret" });
+  });
+
+  it("changes nothing when there is no config.json yet", async () => {
+    const path = join(configFile({}), "..", "absent", "config.json");
+    const log = vi.fn();
+    const save = vi.fn();
+    await expect(migrateWorkspaceConfigFile({ configPath: path, credentials: { boxToken: "kept" }, save, log })).resolves.toEqual({ boxToken: "kept" });
+    expect(save).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
   });
 });

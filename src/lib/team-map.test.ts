@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTeamMapEdges, buildTeamMapSections, teamMapStatus, type TeamMapSnapshot } from "./team-map";
+import { setLocale } from "./i18n";
+import { buildTeamMapEdges, buildTeamMapSections, teamMapBotCount, teamMapStatus, type TeamMapSnapshot } from "./team-map";
 
 const bots = [
   { id: "chief", name: "Atlas", section: "Work", chiefOfStaff: true, busy: true },
@@ -30,6 +31,9 @@ describe("team map projection", () => {
       { key: "", name: "General" },
       { key: "General", name: "General" },
     ]);
+    setLocale("pt-br");
+    expect(buildTeamMapSections([{ id: "none", name: "Unsectioned" }])[0]!.name, "the fallback in the app language").toBe("Geral");
+    setLocale("en");
   });
 
   it("keeps one edge per pair and gives live work priority", () => {
@@ -39,7 +43,18 @@ describe("team map projection", () => {
       running: [{ sourceBotId: "chief", targetBotId: "maker", threadId: "task" }],
     };
     expect(buildTeamMapEdges(bots, snapshot)).toEqual([
-      { sourceBotId: "chief", targetBotId: "maker", state: "running", groupId: undefined },
+      { sourceBotId: "chief", targetBotId: "maker", state: "running", groupId: undefined, threadId: "task" },
+    ]);
+  });
+
+  it("keeps the work thread of a queued handoff so the row can open it", () => {
+    const snapshot: TeamMapSnapshot = {
+      collaborations: [],
+      queued: [{ sourceBotId: "chief", targetBotId: "home", threadId: "home-task" }],
+      running: [],
+    };
+    expect(buildTeamMapEdges(bots, snapshot)).toEqual([
+      { sourceBotId: "chief", targetBotId: "home", state: "queued", threadId: "home-task" },
     ]);
   });
 
@@ -55,5 +70,14 @@ describe("team map projection", () => {
       label: "Waiting for you",
       tone: "warning",
     });
+  });
+});
+
+describe("team map header", () => {
+  it("counts one bot in the singular", () => {
+    setLocale("en");
+    expect(teamMapBotCount(1)).toBe("1 bot");
+    expect(teamMapBotCount(0)).toBe("0 bots");
+    expect(teamMapBotCount(2)).toBe("2 bots");
   });
 });

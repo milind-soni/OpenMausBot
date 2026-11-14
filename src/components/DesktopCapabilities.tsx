@@ -44,32 +44,49 @@ export function useDesktopCapabilities(): DesktopState {
 }
 
 /**
- * Shared chrome styles for the overlay-less frameless Windows window: headers
- * become window drag regions, and the controls at a header's right end drop
- * 16px below the 26px-tall renderer-drawn caption buttons that occupy the
- * window's top-right corner (WindowCaptionButtons.tsx).
+ * Electron zooms or minimizes on a double-click in a hiddenInset window's drag region, so no handler is needed.
+ * styles.css opts the controls inside a drag region back out.
  */
 export function useCaptionChrome() {
   const { capabilities } = useDesktopCapabilities();
-  const windowsCaption = capabilities.windowChrome === "win-caption";
+  return captionChrome(capabilities.windowChrome);
+}
+
+// SAFETY: Electron's -webkit-app-region is not in React's CSSProperties type; the renderer accepts it as an inline
+// style.
+const DRAG_STYLE = { WebkitAppRegion: "drag" } as CSSProperties;
+const NO_DRAG_STYLE = { WebkitAppRegion: "no-drag" } as CSSProperties;
+
+export type WindowDragProps = { "data-window-drag"?: ""; style?: CSSProperties };
+
+/** A window with no title bar of its own, which the page can frame: the person may turn that frame off. */
+export function windowFrameable(capabilities: Pick<DesktopCapabilities, "windowChrome"> | undefined): boolean {
+  return capabilities?.windowChrome === "mac-inset" || capabilities?.windowChrome === "win-caption";
+}
+
+/** A window that draws its own frame: the top bar holding the traffic lights or the Windows caption buttons
+ * (WindowFrameBar) and the rail of places in the frame's colour, and the app, its sidebar and the chat or page, in a
+ * rounded card beside them. Nothing under the bar makes room for the window's buttons. Off once the person turned the frame off. */
+export function windowFramed(capabilities: Pick<DesktopCapabilities, "windowChrome" | "windowFrame"> | undefined): boolean {
+  return windowFrameable(capabilities) && capabilities?.windowFrame !== false;
+}
+
+/** A window with no title bar of its own: the page's headers drag it, framed or not. */
+export function captionChrome(windowChrome: DesktopCapabilities["windowChrome"] | undefined) {
+  const windowsCaption = windowChrome === "win-caption";
+  const draggable = windowsCaption || windowChrome === "mac-inset";
+  const dragProps: WindowDragProps = draggable ? { "data-window-drag": "", style: DRAG_STYLE } : {};
   return {
     windowsCaption,
-    // SAFETY: Electron's documented -webkit-app-region CSS property is not in
-    // React's CSSProperties type, but the renderer accepts it as an inline style.
-    dragStyle: windowsCaption ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined,
-    noDragStyle: windowsCaption ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined,
-    // A header's right-end control row: drop it 16px below the caption
-    // buttons. Margins, not a transform: Blink resolves -webkit-app-region
-    // from untransformed layout boxes, so translateY would leave the row's
-    // shifted top half inside the header's drag region (dead clicks). The
-    // negative bottom margin cancels the height growth, so the rest of the
-    // layout does not move.
-    controlsShiftStyle: windowsCaption
-      ? ({ WebkitAppRegion: "no-drag", marginTop: "16px", marginBottom: "-16px" } as CSSProperties)
-      : undefined,
-    // Docked right panels: their headers sit flush under the caption corner,
-    // so the whole header (not just an icon row) drops 16px via padding.
-    // tailwind-merge in cn() lets this override just the pt half of py-*.
-    padClass: windowsCaption ? "pt-[28px]" : undefined,
+    draggable,
+    dragProps,
+    dragStyle: draggable ? DRAG_STYLE : undefined,
+    noDragStyle: draggable ? NO_DRAG_STYLE : undefined,
   };
+}
+
+export function WindowDragStrip() {
+  const { dragProps } = useCaptionChrome();
+  if (!dragProps.style) return null;
+  return <div aria-hidden data-window-drag-strip {...dragProps} className="pointer-events-none absolute inset-x-0 top-0 h-[52px]" />;
 }

@@ -20,7 +20,7 @@ vi.mock("@/state/store", async (importOriginal) => {
     useStore: () => ({
       state: {
         ...original.initialState,
-        appSettingsSection: "experimental",
+        appSettingsSection: "computer",
         config: { box: { configured: false }, ...fixture.config },
         instances: [{
           instanceId: "fixture", driverKind: "claudeAgent", displayName: "Fixture",
@@ -65,20 +65,20 @@ describe("browser installation opt-in", () => {
     const toggle = switchTag(settings(), "Enable the built-in browser");
     expect(toggle).toContain('aria-checked="false"');
     expect(toggle).not.toContain("disabled=");
-    expect(panel(false)).not.toContain("Install the browser engine");
+    expect(panel(false)).not.toContain("Install the browser");
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
-  it("allows an explicitly disabled bot to opt in after the workspace, while its browser destination stays unavailable", () => {
+  it("allows an explicitly disabled bot to opt in after the workspace, leaving its destination to the Computer panel", () => {
     expect(switchTag(access(), "Give this bot a built-in browser")).toContain("disabled=");
     fixture.config.features = { browser: true };
     const markup = access();
     const toggle = switchTag(markup, "Give this bot a built-in browser");
     expect(toggle).toContain('aria-checked="false"');
     expect(toggle).not.toContain("disabled=");
-    expect(markup.match(/<button[^>]*>Browser<\/button>/)?.[0]).toContain("disabled=");
-    expect(panel(false)).not.toContain("Install the browser engine");
-    expect(panel(true)).toContain("Install the browser engine");
+    expect(markup.match(/<button[^>]*>Browser<\/button>/)).toBeNull();
+    expect(panel(false)).not.toContain("Install the browser");
+    expect(panel(true)).toContain("Install the browser");
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
@@ -87,7 +87,7 @@ describe("browser installation opt-in", () => {
     expect(switchTag(settings(), "Enable the built-in browser")).toContain("disabled=");
     fixture.config.features = { browser: true };
     expect(switchTag(access(), "Give this bot a built-in browser")).toContain("disabled=");
-    expect(panel(true)).not.toContain("Install the browser engine");
+    expect(panel(true)).not.toContain("Install the browser");
   });
 
   it("preserves the per-bot provider capability gate", () => {

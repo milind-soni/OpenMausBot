@@ -1,7 +1,3 @@
-// "You have not set this up" and "I could not read your key" produce the same
-// empty screen today. They are opposite situations: the first is the truth,
-// the second is ignorance the UI must be told about so it can keep showing
-// what it already knew.
 import { describe, expect, it } from "vitest";
 
 import { connectorAvailability, connectorSetup } from "./composio.ts";
@@ -30,11 +26,6 @@ describe("connectorAvailability", () => {
   });
 });
 
-// "Not set up yet" and "the service we rely on is down" are also opposite
-// situations. A source build or a fresh self-hosted server has no managed
-// service at all, so the honest answer is "add a key", not "restart and retry".
-// Only the installed desktop app registers with the managed service, so only
-// there does a missing service mean something went wrong.
 describe("connectorSetup", () => {
   it("is ready when a connection service is configured", () => {
     expect(connectorSetup(cfg({ composio: { apiKey: "ak_live" } }), false)).toBe("ready");
@@ -46,7 +37,7 @@ describe("connectorSetup", () => {
     expect(connectorSetup(cfg({ composio: { apiKey: "" } }), false)).toBe("needs-setup");
   });
 
-  it("reports the managed service as unavailable only inside the installed desktop app", () => {
+  it("reports the managed service as unavailable only on a host it comes with (the installed desktop app, a Cloud home)", () => {
     expect(connectorSetup(cfg(), true)).toBe("service-unavailable");
   });
 });

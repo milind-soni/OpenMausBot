@@ -1,164 +1,116 @@
-import { realpathSync } from "node:fs";
-import { relative, resolve, sep } from "node:path";
-import { IdleReleasePolicy } from "./claim-idle.ts";
-
 export type TurnOwner = {
   threadId: string;
   generation: string;
-  /** Set when a lazy computer-claim rejection was already reported for this
-   * generation; the turn.completed fold checks it so that failure settles as
-   * one incident, not two (Claude settles the follow-up interrupt as
-   * exit_before_result, which reads there like a fresh failure). */
+  /** Already reported: Claude settles the follow-up interrupt as exit_before_result, which must not read as a second failure. */
   lazyClaimFailureReported?: boolean;
+  computerParkedOn?: string;
 };
 
-/** Options at claim time (#1653): `idle` opts the claim into quiet-window
- * release; `now` pins the clock in tests. */
-export interface ClaimOptions {
-  now?: number;
-  idle?: IdleReleasePolicy;
-}
-
-type ClaimRecord = {
-  owner: TurnOwner;
-  /** Clock of the last real screen call (#1653). Only claims taken with an
-   * idle policy carry it; everything else keeps hold-until-settle. */
-  activityAt?: number;
-  idle?: IdleReleasePolicy;
-};
-
-type ReclaimRecord = { owner: TurnOwner; until: number };
-
-/** One harness owns the data directory. Claims are synchronous and last for
- * the whole turn, not just a click: a screenshot and its following click
- * must see the same desktop. These coordinate app-managed resources; they
- * are not a sandbox for arbitrary shell commands. */
+/** Whole-turn claims on app-managed resources (a desktop, a browser session, a phone), so a screenshot and its click see the same desktop. Not a shell sandbox. */
 export class TurnResources {
-  private readonly owners = new Map<string, ClaimRecord>();
-  private readonly reclaims = new Map<string, ReclaimRecord>();
+  private readonly owners = new Map<string, TurnOwner>();
+  /** Only turns actually waiting: a lazy claim that failed once and moved on must not block the front. */
+  private readonly waiters = new Map<string, TurnOwner[]>();
+  private readonly waitStats = new Map<string, { ewmaMs: number; samples: number }>();
+  private readonly claimListeners = new Set<(resource: string, owner: TurnOwner) => void>();
 
-  blocker(resource: string, owner: TurnOwner, now = Date.now()): TurnOwner | undefined {
-    this.expireIdle(resource, now);
-    for (const [key, current] of this.owners) {
-      if (overlaps(key, resource) && !sameOwner(current.owner, owner)) return current.owner;
-    }
-    return undefined;
+  /** Told each time a claim makes a turn a resource's new holder; returns the way to stop listening. */
+  onClaim(listener: (resource: string, owner: TurnOwner) => void): () => void {
+    this.claimListeners.add(listener);
+    return () => { this.claimListeners.delete(listener); };
   }
 
-  claim(resource: string, owner: TurnOwner, options: ClaimOptions = {}): boolean {
-    const now = options.now ?? Date.now();
-    if (this.blocker(resource, owner, now)) return false;
+  startWaiting(resource: string, owner: TurnOwner): number {
+    const queue = this.waiters.get(resource);
+    if (!queue) {
+      this.waiters.set(resource, [owner]);
+      return 1;
+    }
+    const index = queue.findIndex(waiting => sameOwner(waiting, owner));
+    if (index >= 0) return index + 1;
+    queue.push(owner);
+    return queue.length;
+  }
+
+  stopWaiting(resource: string, owner: TurnOwner): void {
+    const queue = this.waiters.get(resource);
+    if (!queue) return;
+    const next = queue.filter(waiting => !sameOwner(waiting, owner));
+    if (next.length) this.waiters.set(resource, next);
+    else this.waiters.delete(resource);
+  }
+
+  waitPosition(resource: string, owner: TurnOwner): number | undefined {
+    const queue = this.waiters.get(resource);
+    if (!queue) return undefined;
+    const index = queue.findIndex(waiting => sameOwner(waiting, owner));
+    return index < 0 ? undefined : index + 1;
+  }
+
+  noteWait(resource: string, waitedMs: number): void {
+    if (!Number.isFinite(waitedMs) || waitedMs < 0) return;
+    const sample = Math.min(waitedMs, 24 * 60 * 60_000);
+    const stats = this.waitStats.get(resource);
+    this.waitStats.set(resource, stats
+      ? { ewmaMs: stats.ewmaMs + 0.25 * (sample - stats.ewmaMs), samples: stats.samples + 1 }
+      : { ewmaMs: sample, samples: 1 });
+  }
+
+  waitEstimateMs(resource: string): number | undefined {
+    return this.waitStats.get(resource)?.ewmaMs;
+  }
+
+  blocker(resource: string, owner: TurnOwner): TurnOwner | undefined {
+    const current = this.owners.get(resource);
+    return current && !sameOwner(current, owner) ? current : undefined;
+  }
+
+  claim(resource: string, owner: TurnOwner): boolean {
+    if (this.blocker(resource, owner)) return false;
     const existing = this.owners.get(resource);
-    if (existing && sameOwner(existing.owner, owner)) {
-      // A repeated claim by the sitting owner changes nothing: replacing
-      // the record would restart activityAt, and re-claims alone would
-      // hold the seat past every quiet window (#1653).
-      return true;
+    if (existing && sameOwner(existing, owner)) return true;
+    // A current holder's revalidation never loses its own claim to this queue.
+    const queue = this.waiters.get(resource);
+    if (queue?.length && !sameOwner(queue[0]!, owner)) return false;
+    if (queue?.length) {
+      queue.shift();
+      if (!queue.length) this.waiters.delete(resource);
     }
-    const record: ClaimRecord = { owner };
-    if (options.idle) {
-      record.idle = options.idle;
-      // Taking (or retaking) a seat is itself screen activity: the quiet
-      // window of #1653 starts at the claim, not at the first later call.
-      record.activityAt = now;
-    }
-    this.owners.set(resource, record);
-    const reclaimed = this.reclaims.get(resource);
-    // Seating an owner closes any idle-release record for this resource:
-    // the previous holder re-claimed (its turn lives on), or another turn
-    // took the free seat — an occupied seat is exactly where #1653 says
-    // the old holder yields.
-    if (reclaimed) this.reclaims.delete(resource);
+    this.owners.set(resource, owner);
+    for (const listener of this.claimListeners) listener(resource, owner);
     return true;
   }
 
-  owns(resource: string, owner: TurnOwner, now = Date.now()): boolean {
-    this.expireIdle(resource, now);
-    const current = this.owners.get(resource);
-    return Boolean(current && sameOwner(current.owner, owner));
+  holder(resource: string): TurnOwner | undefined {
+    return this.owners.get(resource);
   }
 
-  /** A real screen call touched this claim (#1653): restart its quiet
-   * window. Claims without an idle policy — and anything the screen
-   * poller drives — are no-ops, so preview frames can never hold a seat. */
-  activity(resource: string, owner: TurnOwner, now = Date.now()): void {
-    // Expiry first: a straggler screen completion arriving at or past the
-    // quiet boundary must release the seat and open the reclaim window,
-    // not restart the clock on a claim that already lapsed.
-    this.expireIdle(resource, now);
+  owns(resource: string, owner: TurnOwner): boolean {
     const current = this.owners.get(resource);
-    if (current?.idle && sameOwner(current.owner, owner)) current.activityAt = now;
-  }
-
-  /** Who may still re-claim `resource` directly after an idle release
-   * (#1653): the mid-task turn that went quiet, until its reclaim window
-   * ends or another turn seats itself. The direct re-claim itself is
-   * just `claim`: a free seat answers the returning holder's next screen
-   * call without the wait a new arrival would enter. */
-  reclaimHolder(resource: string, now = Date.now()): TurnOwner | undefined {
-    const reclaimed = this.reclaims.get(resource);
-    if (!reclaimed) return undefined;
-    if (reclaimed.until <= now) {
-      this.reclaims.delete(resource);
-      return undefined;
-    }
-    return reclaimed.owner;
+    return Boolean(current && sameOwner(current, owner));
   }
 
   release(owner: TurnOwner): void {
+    for (const [key, queue] of this.waiters) {
+      const next = queue.filter(waiting => !sameOwner(waiting, owner));
+      if (next.length) this.waiters.set(key, next);
+      else this.waiters.delete(key);
+    }
     for (const [key, current] of this.owners) {
-      if (sameOwner(current.owner, owner)) this.owners.delete(key);
-    }
-    // A settling turn keeps no reclaim priority (#1653): only a live
-    // mid-task turn may pick its seat back up.
-    for (const [key, reclaimed] of this.reclaims) {
-      if (sameOwner(reclaimed.owner, owner)) this.reclaims.delete(key);
+      if (sameOwner(current, owner)) this.owners.delete(key);
     }
   }
 
-  /** Drop one of an owner's claims early, when the sequence that took it
-   * could not finish. The owner's other claims stand until settle. */
-  releaseOne(resource: string, owner: TurnOwner, now = Date.now()): void {
-    if (this.owns(resource, owner, now)) this.owners.delete(resource);
-    // owns() may have just expired a quiet claim into a reclaim record
-    // for this same owner: an early release keeps no reclaim priority.
-    const reclaimed = this.reclaims.get(resource);
-    if (reclaimed && sameOwner(reclaimed.owner, owner)) this.reclaims.delete(resource);
+  releaseOne(resource: string, owner: TurnOwner): void {
+    if (this.owns(resource, owner)) this.owners.delete(resource);
+    this.stopWaiting(resource, owner);
   }
 
-  /** Quiet-window expiry (#1653), evaluated when the claim is touched: a
-   * screen-quiet seat is released while its turn lives and remembered for
-   * the reclaim window. Synchronous on purpose — the claim map decides
-   * every transition on the server's single thread. */
-  private expireIdle(resource: string, now: number): void {
-    const current = this.owners.get(resource);
-    if (!current?.idle || current.activityAt === undefined) return;
-    if (!current.idle.quietElapsed(current.activityAt, now)) return;
-    this.owners.delete(resource);
-    this.reclaims.set(resource, { owner: current.owner, until: now + current.idle.reclaimMs });
+  free(resource: string): boolean {
+    return !this.owners.has(resource);
   }
 }
 
 function sameOwner(a: TurnOwner, b: TurnOwner): boolean {
   return a.threadId === b.threadId && a.generation === b.generation;
-}
-
-export function workspaceResource(cwd: string): string {
-  // Selected folders must exist before the engine starts. Resolve symlinks
-  // and native filename casing so aliases cannot grant two writers to the
-  // same project on case-insensitive volumes.
-  const canonical = realpathSync.native(resolve(cwd));
-  return `workspace:${process.platform === "win32" ? canonical.toLowerCase() : canonical}`;
-}
-
-function overlaps(a: string, b: string): boolean {
-  if (a === b) return true;
-  if (!a.startsWith("workspace:") || !b.startsWith("workspace:")) return false;
-  const left = a.slice("workspace:".length);
-  const right = b.slice("workspace:".length);
-  const contains = (parent: string, child: string) => {
-    const path = relative(parent, child);
-    return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !path.startsWith(sep) && !/^[A-Za-z]:/.test(path));
-  };
-  return contains(left, right) || contains(right, left);
 }

@@ -12,9 +12,7 @@ function isCredential(value: unknown): value is WebhookCredential {
   );
 }
 
-/** Private webhook URLs are returned only when created or rotated. Keep that
- * one-time value in this app's local browser storage so changing tabs or
- * relaunching the desktop app does not force a surprise secret rotation. */
+/** The server returns a private webhook URL only on create or rotate, so the one-time value is kept here. */
 export function loadWebhookCredentials(store: Store): Record<string, WebhookCredential> {
   try {
     const raw = store?.getItem(KEY);
@@ -34,7 +32,6 @@ export function saveWebhookCredential(store: Store, webhookId: string, credentia
   try {
     store?.setItem(KEY, JSON.stringify(credentials));
   } catch {
-    // Storage is best-effort. The URL remains usable for this mount.
   }
 }
 
@@ -44,7 +41,6 @@ export function removeWebhookCredential(store: Store, webhookId: string): void {
   try {
     store?.setItem(KEY, JSON.stringify(credentials));
   } catch {
-    // A failed cleanup must not block deleting the webhook itself.
   }
 }
 

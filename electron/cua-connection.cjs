@@ -7,8 +7,6 @@ function createCuaConnectionStore({
   fileSystem = fs,
   temporaryId = randomUUID,
   processId = process.pid,
-  // The same atomic, private-mode write serves every Electron-owned
-  // descriptor the harness reads (cua-connection.json, browser-connection.json).
   fileName = "cua-connection.json",
 }) {
   let connection = null;
@@ -51,7 +49,6 @@ function createCuaConnectionStore({
         try {
           fileSystem.unlinkSync(temporaryPath);
         } catch {
-          // The temporary file may not have been created or may already be renamed.
         }
         throw error;
       }

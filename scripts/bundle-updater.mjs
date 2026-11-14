@@ -1,11 +1,6 @@
 // Bundle electron-updater into one self-contained file the packaged app can
-// require. This app ships ZERO node_modules at runtime (the harness + UI are
-// pre-compiled into Resources), so a main-process dependency has to be
-// vendored. esbuild inlines electron-updater + its whole dep tree; `electron`
-// stays external (resolved from the runtime). Output ships via files:electron/**.
-//
-// The bundle is then patched so an AppImage update keeps the path the user
-// launches — see scripts/patch-appimage-updater.mjs for why.
+// require: it ships no node_modules. `electron` stays external. The bundle is
+// then patched so an AppImage update keeps the path the user launches.
 import { build } from "esbuild";
 import { createRequire } from "node:module";
 import { readFile, writeFile } from "node:fs/promises";

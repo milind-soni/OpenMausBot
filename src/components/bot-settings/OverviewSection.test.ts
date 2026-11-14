@@ -6,14 +6,11 @@ import type { BotOverview } from "@/lib/bot-overview-types";
 import type { PromptPreviewData } from "./PromptPreview";
 import { OverviewSection } from "./OverviewSection";
 
-// renderToStaticMarkup HTML-escapes apostrophes as &#x27; — decode before
-// comparing against plain-text fixtures that use a straight quote.
+// renderToStaticMarkup HTML-escapes apostrophes as &#x27;; decode before comparing.
 function render(element: Parameters<typeof renderToStaticMarkup>[0]): string {
   return renderToStaticMarkup(element).replace(/&#x27;/g, "'");
 }
 
-// A bot with every off switch flipped: exercises all six "wont" sentences
-// buildBotOverview (server/bot-overview.ts) can produce at once.
 const sentences: BotOverview = {
   who: {
     name: "Scout",
@@ -22,7 +19,7 @@ const sentences: BotOverview = {
     soulLead: "Always cite primary sources and separate fact from inference.",
   },
   does: ["Daily at 9:00 AM: Morning brief. Next run 9:00 AM."],
-  reaches: ["Works in its private workspace.", "Has the built-in browser."],
+  reaches: ["Works in its own private folder.", "Has the built-in browser."],
   wont: [
     "Won't run commands without asking you first.",
     "Won't contact other bots without asking.",
@@ -46,16 +43,25 @@ describe("OverviewSection", () => {
     const markup = render(createElement(OverviewSection, {
       overview: { ...sentences, setup: [
         { id: "identity", label: "Identity", done: true, section: "identity" },
-        { id: "folder", label: "Choose a project folder", done: false, section: "access" },
+        { id: "folder", label: "Choose a working folder", done: false, section: "access" },
         { id: "schedule", label: "Add a routine", done: false, section: "routines" },
       ] }, prompt: null, onOpen: vi.fn(),
     }));
     expect(markup).toContain("Setup ideas");
     expect(markup).toContain("You can start chatting now.");
-    expect(markup).toContain("Choose a project folder");
+    expect(markup).toContain("Choose a working folder");
     expect(markup).not.toContain("Finish setting up");
     expect(markup).not.toContain("1 of 3 done");
     expect(markup).not.toContain(">Identity</span>");
+  });
+
+  it("says in its own words that a bot can reach every bot, and whose departments a Chief is in charge of", () => {
+    const markup = render(createElement(OverviewSection, {
+      overview: { ...sentences, reaches: ["Can talk to all 7 other bots, in any department.", "Also in charge of these departments: Dev, Sales."] },
+      prompt: null, onOpen: vi.fn(),
+    }));
+    expect(markup).toContain("Can talk to all 7 other bots, in any department.");
+    expect(markup).toContain("Also in charge of these departments: Dev, Sales.");
   });
 
   it("shows Loading… before the overview arrives", () => {
@@ -91,8 +97,6 @@ describe("OverviewSection", () => {
       createElement(OverviewSection, { overview: sentences, prompt: null, promptError: true, onOpen: vi.fn() }),
     );
 
-    // Closed by default, so the failure text isn't shown yet — but the
-    // header must not be stuck offering a preview that will never arrive.
     expect(markup).toContain("Prompt preview");
   });
 
@@ -101,9 +105,7 @@ describe("OverviewSection", () => {
       createElement(OverviewSection, { overview: sentences, refreshError: true, prompt, onOpen: vi.fn() }),
     );
 
-    expect(markup).toContain("Couldn’t refresh — showing the last loaded overview.");
-    // The data itself must still be there — a refresh failure is not a load
-    // failure, so none of the sections should be replaced by an error state.
+    expect(markup).toContain("Couldn’t refresh. Showing the last loaded overview.");
     for (const line of sentences.wont) {
       expect(markup).toContain(line);
     }
@@ -115,5 +117,53 @@ describe("OverviewSection", () => {
     );
 
     expect(markup).not.toContain("Couldn’t refresh");
+  });
+});
+
+describe("the overview's reach and limits in the person's language", () => {
+  it("words the bots it can talk to, contact and Ask mode, each count by its own plural", async () => {
+    const { setLocale } = await import("@/lib/i18n");
+    const overview = { ...sentences, reaches: ["Can talk to 1 other bot in its department.", "Can talk to 3 other bots in its allowed departments."],
+      wont: ["Cannot initiate contact with other bots.", "Command approvals use Ask mode; saved permissions and provider rules still apply."] };
+    const html = () => render(createElement(OverviewSection, { overview, prompt: null, onOpen: vi.fn() }));
+    expect(html()).toContain("Can talk to 1 other bot in its department.");
+    setLocale("pt-br");
+    try {
+      const shown = html();
+      expect(shown).toContain("Pode falar com 1 outro bot da equipe.");
+      expect(shown).toContain("Pode falar com 3 outros bots nas equipes permitidas.");
+      expect(shown).toContain("Não pode iniciar contato com outros bots.");
+      expect(shown).toContain("A aprovação de comandos está no modo “Pedir”. As permissões salvas e as regras do provedor continuam valendo.");
+    } finally {
+      setLocale("en");
+    }
+  });
+
+  it("words an older server's overview, with no doesRoutines or managedSections, as it words a newer one's", async () => {
+    const { setLocale } = await import("@/lib/i18n");
+    const older: BotOverview = { ...sentences, does: ["Paused: Nightly Backup."],
+      reaches: ["Can talk to 1 other bot in its section.", "Can talk to 2 other bots in its allowed teams.", "Coordinates its section as Chief of Staff.", "May also coordinate these teams: General, Research."] };
+    const newer: BotOverview = { ...sentences, does: ["Paused: Nightly Backup."], managedSections: ["", "Research"],
+      doesRoutines: [{ name: "Nightly Backup", paused: true, schedule: { type: "daily", time: "09:00", weekdays: [1] } }],
+      reaches: ["Can talk to 1 other bot in its department.", "Can talk to 2 other bots in its allowed departments.", "Coordinates its department as Chief of Staff.", "May also coordinate these departments: General, Research."] };
+    const html = (overview: BotOverview) => render(createElement(OverviewSection, { overview, prompt: null, onOpen: vi.fn() }));
+    for (const overview of [older, newer]) {
+      const shown = html(overview);
+      for (const line of [...overview.does, ...overview.reaches]) expect(shown, line).toContain(line);
+    }
+    setLocale("pt-br");
+    try {
+      for (const shown of [html(older), html(newer)]) {
+        expect(shown).toContain("Pode falar com 1 outro bot da equipe.");
+        expect(shown).toContain("Pode falar com 2 outros bots nas equipes permitidas.");
+        expect(shown).toContain("Coordena a equipe como Chefe de gabinete.");
+      }
+      expect(html(older)).toContain("Também pode coordenar estas equipes: General, Research.");
+      expect(html(older)).toContain("Paused: Nightly Backup.");
+      expect(html(newer)).toContain("Também pode coordenar estas equipes: Geral, Research.");
+      expect(html(newer)).toContain("Pausada: Nightly Backup.");
+    } finally {
+      setLocale("en");
+    }
   });
 });

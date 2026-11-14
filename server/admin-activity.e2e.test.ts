@@ -1,10 +1,3 @@
-// The admin activity log through the real server: an admin session (Boss)
-// and the owner on this machine change settings, people, keys, budgets, MCP
-// servers, webhooks, bots, a bot's audience and sessions; each change lands
-// in <data>/admin-activity/YYYY-MM.ndjson naming who acted, what changed
-// and the redacted values before and after. GET /api/admin-activity (and its
-// CSV) shows those rows beside the decision log's answered cards, filtered by
-// who, what and when, to admins only. Nothing is sent anywhere.
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,9 +7,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { SessionRegistry } from "./sessions.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
-const PORT = 28800 + Math.floor(Math.random() * 10_000);
+const PORT = workerPort(28800, 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
 const BOSS = "boss@example.test";
@@ -43,7 +37,6 @@ const api = async (method: string, path: string, body?: unknown, as?: string, ex
   try {
     parsed = JSON.parse(text);
   } catch {
-    /* CSV */
   }
   return { status: res.status, body: parsed, text, headers: res.headers };
 };
@@ -65,7 +58,6 @@ async function start() {
     try {
       if ((await fetch(`${BASE}/api/health`)).ok) return;
     } catch {
-      /* not up yet */
     }
     if (Date.now() > deadline) throw new Error(`server never came up:\n${log}`);
     await new Promise((r) => setTimeout(r, 150));
@@ -110,7 +102,7 @@ posixOnly("admin activity log", () => {
     data = join(home, ".openmausbot");
     mkdirSync(join(data, "decisions"), { recursive: true });
     writeFileSync(join(data, "config.json"), JSON.stringify({ signIn: { admins: [BOSS], members: [ADA] } }));
-    // One card Ada answered earlier, as the decision log recorded it (#1708).
+    // One card Ada answered earlier, as the decision log recorded it.
     writeFileSync(join(data, "decisions", `${month()}.ndjson`), [
       { at: new Date(Date.now() - 60_000).toISOString(), threadId: "t1", requestId: "r1", botName: "Ops", tool: "Bash", summary: "echo hi",
         decision: "user-approved", source: "user", actor: { kind: "session", sessionId: "s-ada", label: "ada's laptop", email: ADA } },
@@ -154,7 +146,6 @@ posixOnly("admin activity log", () => {
     expect(config[0]).toMatchObject({ who: "Command line", changed: ["profile.name"], after: { "profile.name": "Ops desk" } });
     expect(config[1]).toMatchObject({ who: "This computer", changed: ["decisions.retentionDays"], after: { "decisions.retentionDays": 400 } });
 
-    // Neither the key nor any part of it is on disk in the log, and the file is private.
     const dir = join(data, "admin-activity");
     for (const name of readdirSync(dir)) {
       expect(readFileSync(join(dir, name), "utf8")).not.toContain("activity-fixture-secret");
@@ -169,8 +160,7 @@ posixOnly("admin activity log", () => {
     expect(bot.status).toBe(201);
     const botId = bot.body.bot.id as string;
     expect((await api("PATCH", `/api/bots/${botId}`, { visibility: { people: [ADA] } }, BOSS)).status).toBe(200);
-    expect((await api("PATCH", `/api/bots/${botId}`, { approvePeerComms: true }, BOSS)).status).toBe(200);
-    // display-only and refused changes leave no row
+    expect((await api("PATCH", `/api/bots/${botId}`, { parkDirectMessages: true }, BOSS)).status).toBe(200);
     expect((await api("PATCH", `/api/bots/${botId}`, { pinned: true }, ADA)).status).toBe(200);
     expect((await api("PATCH", `/api/bots/${botId}`, { visibility: { people: ["nope"] } }, BOSS)).status).toBe(400);
     const signOut = await api("POST", "/api/instances/no-such-engine/auth/sign-out", {}, BOSS);
@@ -187,8 +177,8 @@ posixOnly("admin activity log", () => {
     for (const action of ["mcp.update", "bot.create", "visibility.update", "bot.update", "webhook.create", "webhook.delete", "session.revoke", "pairing.create", "bot.delete"]) {
       expect(actions, action).toContain(action);
     }
-    expect(actions.filter((action) => action === "bot.update")).toHaveLength(1); // not the pin, not the refused audience
-    expect(actions).not.toContain("engine.auth-sign-out"); // refused: nothing happened
+    expect(actions.filter((action) => action === "bot.update")).toHaveLength(1);
+    expect(actions).not.toContain("engine.auth-sign-out");
     expect(actions.filter((action) => action === "visibility.update")).toHaveLength(1);
     const audience = rows.find((entry) => entry.action === "visibility.update");
     expect(audience).toMatchObject({ who: BOSS, target: { kind: "bot", id: botId, name: "Audit Owl" }, before: { visibility: "everyone" }, after: { visibility: { people: [ADA] } } });
@@ -206,13 +196,11 @@ posixOnly("admin activity log", () => {
     const all = await activity();
     const approval = all.find((entry) => entry.type === "approval");
     expect(approval).toMatchObject({ who: ADA, what: "user-approved", bot: "Ops", tool: "Bash" });
-    // automatic decisions only when asked for
     expect(all.some((entry) => entry.what === "auto-approved")).toBe(false);
     expect((await activity("?what=decisions")).map((entry) => entry.what).sort()).toEqual(["auto-approved", "user-approved"]);
     expect((await activity("?what=approvals")).map((entry) => entry.who)).toEqual([ADA]);
     expect((await activity(`?who=${encodeURIComponent("ADA@")}`)).map((entry) => entry.type)).toEqual(["approval"]);
     expect((await activity("?who=command")).map((entry) => entry.action)).toEqual(["config.update"]);
-    // newest first
     const times = all.map((entry) => entry.at);
     expect([...times].sort().reverse()).toEqual(times);
     expect(await activity("?from=2020-01-01&to=2020-01-31")).toEqual([]);
@@ -230,7 +218,7 @@ posixOnly("admin activity log", () => {
     const bot = (await api("POST", "/api/bots", { name: "Race Finch" }, BOSS)).body.bot as { id: string };
     // Boss's request is slow: its body arrives only after the owner on this
     // machine has made (and finished) a change of their own to the same thing.
-    const slowBot = slowRequest("PATCH", `/api/bots/${bot.id}`, { approvePeerComms: true }, BOSS);
+    const slowBot = slowRequest("PATCH", `/api/bots/${bot.id}`, { parkDirectMessages: true }, BOSS);
     await new Promise((r) => setTimeout(r, 300));
     expect((await api("PATCH", `/api/bots/${bot.id}`, { composio: false })).status).toBe(200);
     slowBot.release();
@@ -244,7 +232,7 @@ posixOnly("admin activity log", () => {
     const rows = (await activity("?what=all")).filter((entry) => entry.type === "admin");
     const botRows = rows.filter((entry) => entry.action === "bot.update" && entry.target?.id === bot.id);
     expect(botRows.map((entry) => [entry.who, entry.changed]).sort()).toEqual([
-      [BOSS, ["approvePeerComms"]],
+      [BOSS, ["parkDirectMessages"]],
       ["This computer", ["composio"]],
     ].sort());
     const configRows = rows.filter((entry) => entry.action === "config.update" &&
@@ -255,15 +243,26 @@ posixOnly("admin activity log", () => {
     ].sort());
   });
 
+  it("records a new department a Chief in charge of every department got, put down to the admin who made it", async () => {
+    const chief = (await api("POST", "/api/bots", { name: "Wide Heron" }, BOSS)).body.bot as { id: string };
+    expect((await api("PATCH", `/api/bots/${chief.id}`, { section: "Heron desk" }, BOSS)).status).toBe(200);
+    const others = ((await api("GET", "/api/sidebar-sections", undefined, BOSS)).body.sections as string[]).filter((name) => name !== "Heron desk");
+    const ticked = ["", ...others];
+    expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, managedSections: ticked, acknowledgePeerScope: true }, BOSS)).status).toBe(200);
+    expect((await api("POST", "/api/sidebar-sections", { name: "Heron research", botIds: [] }, BOSS)).status).toBe(200);
+
+    const rows = (await activity("?what=bot")).filter((entry) => entry.action === "bot.update" && entry.target?.id === chief.id);
+    expect(rows[0]).toMatchObject({ who: BOSS, target: { kind: "bot", id: chief.id, name: "Wide Heron" }, changed: ["managedSections"],
+      before: { managedSections: ticked }, after: { managedSections: [...ticked, "Heron research"] } });
+  });
+
   it("records only while the workspace is shared, including the change that ends or starts sharing", async () => {
-    // Ada leaves: the change that ends sharing is still recorded…
     expect((await api("PUT", "/api/config", { signIn: { admins: [BOSS], members: [] } }, BOSS)).status).toBe(200);
     expect((await activity("?what=people"))[0]).toMatchObject({ who: BOSS, changed: ["signIn.members"] });
     // (an unused chat-only pairing code from earlier also counts as sharing)
     for (const pairing of (await api("GET", "/api/auth/pairing", undefined, BOSS)).body.pairings ?? []) {
       expect((await api("DELETE", `/api/auth/pairing/${pairing.id}`, undefined, BOSS)).status).toBe(200);
     }
-    // …and after it, a one-person server keeps no admin log.
     expect((await api("PUT", "/api/config", { profile: { name: "Solo desk" } }, BOSS)).status).toBe(200);
     expect((await api("POST", "/api/bots", { name: "Solo Wren" }, BOSS)).status).toBe(201);
     let rows = await activity("?what=all");
@@ -271,8 +270,6 @@ posixOnly("admin activity log", () => {
     expect(JSON.stringify(rows)).not.toContain("Solo Wren");
     expect((await api("GET", "/api/admin-activity", undefined, BOSS)).body.recording).toBe(false);
 
-    // A chat-only phone makes it shared again: its pairing code is recorded,
-    // and so is signing it out, though that leaves one person again.
     const opened = await api("POST", "/api/auth/pairing", { label: "Front desk phone", scopes: ["client"] }, BOSS);
     expect(opened.status).toBe(200);
     const paired = await api("POST", "/api/auth/pair", { code: opened.body.code, label: "Front desk phone" });

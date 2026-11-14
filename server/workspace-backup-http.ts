@@ -13,6 +13,7 @@ import {
   type WorkspaceBackupSummary,
 } from "./workspace-backup.ts";
 import type { RequestAuth } from "./request-auth.ts";
+import { userErrorFields } from "./user-errors.ts";
 
 const PREFIX = "/api/workspace-backup";
 const MAX_UPLOAD_BYTES = MAX_WORKSPACE_BACKUP_UPLOAD_BYTES;
@@ -23,16 +24,13 @@ const failure = (message: string, status = 400) => Object.assign(new Error(messa
 type Artifact = { owner: string; kind: "download" | "upload" | "staged"; path?: string; expires: number; summary?: WorkspaceBackupSummary };
 type RestoreResult = { id?: string; restored?: boolean; safetyCopyPath?: string; clientState?: Record<string, string> };
 
-/** Session-only controls remain usable while the workspace is locked. Their
- * excluded session file is not part of the snapshot or replacement. */
 export function isWorkspaceBackupSessionControl(method: string, path: string): boolean {
   return (method === "GET" && path === "/api/auth/sessions") ||
     (method === "POST" && path === "/api/auth/logout") ||
     (method === "DELETE" && /^\/api\/auth\/sessions\/[\w-]+$/.test(path));
 }
 
-/** All routes remain admin-only in request-auth. Passwords and raw credential
- * metadata never appear in URLs, responses, logs, or event broadcasts. */
+/** Admin-only; passwords and raw credential metadata never appear in URLs, responses, logs or broadcasts. */
 export function createWorkspaceBackupRoutes(options: {
   dataDir: string;
   appVersion: string;
@@ -41,8 +39,10 @@ export function createWorkspaceBackupRoutes(options: {
   authorized: (req: IncomingMessage, auth: RequestAuth) => boolean;
   status: () => { busy: boolean; pendingRestore: boolean };
   restored: RestoreResult;
+  /** Starts this server again so startup installs a committed restore. Given only where a launcher always starts it
+   * again (My Cloud), since the person there has no app to quit or process to restart. */
+  restart?: () => void;
 }) {
-  // ponytail: one bounded set per server; transfers expire after an hour.
   const artifacts = new Map<string, Artifact>();
   let operating = false;
   const json = (res: ServerResponse, status: number, body: unknown) => {
@@ -55,18 +55,17 @@ export function createWorkspaceBackupRoutes(options: {
   };
   function remove(id: string, artifact: Artifact) {
     if (artifact.path) { try { unlinkSync(artifact.path); } catch {} }
-    if (artifact.kind !== "upload") { try { removeWorkspaceBackupJob(options.dataDir, id); } catch { /* Recovery jobs are deliberately protected. */ } }
+    if (artifact.kind !== "upload") { try { removeWorkspaceBackupJob(options.dataDir, id); } catch {} }
     artifacts.delete(id);
   }
-  // A crashed process has no in-memory transfer map. Reclaim only its old,
-  // app-named jobs; never safety copies or pending/committed recovery state.
+  // Reclaim only old app-named jobs, never safety copies or pending/committed recovery state.
   function reclaimAbandoned() {
     const root = join(options.dataDir, ".backups");
     if (!existsSync(root) || lstatSync(root).isSymbolicLink()) return;
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory() || !/^[a-f0-9-]{36}$/.test(entry.name)) continue;
       if (statSync(join(root, entry.name)).mtimeMs + EXPIRES_MS > Date.now()) continue;
-      try { removeWorkspaceBackupJob(options.dataDir, entry.name); } catch { /* May belong to a recoverable restore. */ }
+      try { removeWorkspaceBackupJob(options.dataDir, entry.name); } catch {}
     }
     const uploads = join(root, "uploads");
     if (!existsSync(uploads) || lstatSync(uploads).isSymbolicLink()) return;
@@ -76,7 +75,7 @@ export function createWorkspaceBackupRoutes(options: {
       if (statSync(file).mtimeMs + EXPIRES_MS <= Date.now()) { try { unlinkSync(file); } catch {} }
     }
   }
-  try { reclaimAbandoned(); } catch { /* Temporary-file cleanup must not prevent normal server startup. */ }
+  try { reclaimAbandoned(); } catch {}
   function expire() {
     for (const [id, artifact] of artifacts) {
       if (artifact.expires > Date.now()) continue;
@@ -109,6 +108,7 @@ export function createWorkspaceBackupRoutes(options: {
       if (method === "GET" && path === `${PREFIX}/status`) {
         json(res, 200, {
           ...options.status(),
+          ...(options.restart ? { restarts: true } : {}),
           lastRestoreId: options.restored.restored ? options.restored.id : null,
           safetyCopyPath: options.restored.safetyCopyPath ?? null,
         });
@@ -122,7 +122,6 @@ export function createWorkspaceBackupRoutes(options: {
         return true;
       }
       if (method === "POST" && path === `${PREFIX}/export`) {
-        // Allow the full preference budget plus the JSON envelope/password.
         const body = z.object({ password: passwordSchema, clientState: z.record(z.string(), z.string()).default({}) }).parse(await options.readBody(req, MAX_CLIENT_STATE_BYTES + 8 * 1024));
         if (Buffer.byteLength(JSON.stringify(body.clientState)) > MAX_CLIENT_STATE_BYTES) throw failure("Saved drafts exceed the 2 MB backup preference limit.", 413);
         const clientState = Object.fromEntries(Object.entries(body.clientState).filter(([key]) => WORKSPACE_BACKUP_CLIENT_KEYS.includes(key as typeof WORKSPACE_BACKUP_CLIENT_KEYS[number])));
@@ -198,7 +197,10 @@ export function createWorkspaceBackupRoutes(options: {
           return commitPendingWorkspaceRestore(options.dataDir, body.id);
         }, true));
         artifacts.delete(body.id);
-        json(res, 200, { ...result, restoreId: body.id });
+        const restart = options.restart;
+        json(res, 200, { ...result, restoreId: body.id, ...(restart ? { restarting: true } : {}) });
+        // Answer first, so the browser knows to wait for the server to come back; restart even if it hung up.
+        if (restart) { if (res.closed) restart(); else res.once("close", restart); }
         return true;
       }
       json(res, 404, { error: "Unknown backup operation." });
@@ -206,6 +208,7 @@ export function createWorkspaceBackupRoutes(options: {
       if (res.headersSent) { res.destroy(); return true; }
       json(res, error instanceof z.ZodError ? 400 : (error as { status?: number }).status ?? 400, {
         error: error instanceof z.ZodError ? error.issues[0]?.message ?? "Invalid backup request." : error instanceof Error ? error.message : "Backup failed.",
+        ...userErrorFields(error),
       });
     }
     return true;

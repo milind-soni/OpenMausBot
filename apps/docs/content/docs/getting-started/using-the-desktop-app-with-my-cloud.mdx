@@ -1,0 +1,89 @@
+---
+title: One assistant, everywhere
+description: With MausBot Cloud, your bots live on My Cloud and the desktop app is a window onto it, like your phone. How your bots get there by themselves, how your Mac works for them, passkey sign-ins, and where the logs are.
+---
+
+With MausBot Cloud, **My Cloud is where your bots live**: their memory, chats, routines, logins and connected apps. It keeps working when your computer is off.
+
+The desktop app and the phone app are two windows onto it. Open the desktop app and it opens My Cloud by itself: there is nothing to switch and nothing to send.
+
+Without MausBot Cloud, nothing changes: your bots live on this computer, as before.
+
+## Your bots come to My Cloud by themselves
+
+When My Cloud is ready, the desktop app moves everything from this computer to it, once, by itself:
+
+- **Bots**, with their instructions, pictures, skills, memory and files.
+- **Chats**, in rooms too, with their attachments.
+- **Routines and automations**, switched on there if they were on here, so nothing runs twice.
+- **Logins and 1Password**, and your **API keys, MCP tools and connected apps**, over a private connection, never through a chat.
+- **Your settings**: your name, About me, language and the rest.
+
+This computer keeps working while it happens. One line in the sidebar says how far it is, for example *Moving your bots to My Cloud… 34 of 120 chats*. At the first quiet moment, when no bot is answering and you are not typing, it says *Moving to My Cloud… almost done* for a few seconds, then the same window opens My Cloud.
+
+My Cloud then says once what arrived, for example *Everything from this computer is here: 4 bots, 2 skills, 2 logins, 1Password, 148 chats and 2 routines*. If you paired your phone with this computer, the same line offers **Pair your phone with My Cloud**.
+
+If My Cloud already had bots of its own, it keeps them. The same bot on both sides becomes one bot, and two different bots with the same name are both kept.
+
+## Sign in to Claude or ChatGPT on My Cloud
+
+Your Claude, ChatGPT, Gemini and Grok sign-ins stay on the computer where you made them. Sign in once on My Cloud, under **Settings → AI** there, or follow the setup card in its first chat.
+
+## When My Cloud can't be reached
+
+The desktop app wakes My Cloud by itself (*Waking My Cloud…*) and signs in to it again by itself when it needs to. If My Cloud can't be reached, for example with no internet, the window says *Can't reach My Cloud right now. It comes back by itself when it answers.* and keeps trying. The only button is **Sign in**, for when this computer's MausBot Cloud sign-in itself has ended.
+
+## Your Mac works for your Clouds
+
+There is nothing to switch on. While the desktop app is open and signed in to MausBot Cloud, each Cloud of your own (My Cloud and any other Cloud you own, never a team's Cloud) can use this computer by itself:
+
+- **Your files**: your home folder, to read and edit. The places that hold keys, passwords and sign-ins, such as `.ssh`, your shell's start-up files and git's settings, always stay private, and nothing changes the hidden files, Library or AppData in your home folder.
+- **Your internet connection**, for the websites that turn away data centres, such as Instagram, YouTube and Google sign-in. Every other website loads straight from My Cloud, which is faster.
+- **Your Chrome**, for bots whose browser profile is **My Chrome**. Chrome asks you to allow the connection.
+- **Your apps and screen**, once your Mac allows OpenMausBot Accessibility and Screen Recording. macOS asks the first time a bot needs them. On Windows they work as soon as screen control runs; if it isn't running, the taskbar icon's menu says why, with **Start screen control**.
+
+Commands never run on your computer.
+
+Only your own conversations and routines can use it. A conversation someone else wrote in can't, and neither can a bot whose memory was changed in a conversation you didn't write, until you review it in Memory. Each bot still asks first or just does it, as you set it for that bot.
+
+Group chats can use your Mac too, when you started them and only you write in them. The bot that answers you, and the bots it mentions, can use it. If a group chat came from your computer before this worked, start a new thread in it.
+
+After the move to My Cloud, each bot's own project folder is lent with editing too, so My Cloud keeps a copy of it for when this computer is away.
+
+**The menu bar** (the taskbar on Windows) shows when a Cloud is using this computer, for example *Client A is using this Mac*. Its menu has two things:
+
+- **Pause** stops every Cloud from using this computer at once, until you choose **Resume**. A pause lasts across restarts.
+- **See activity** lists what your Clouds did on this computer, refused requests too.
+
+If you had turned sharing off, or the internet connection, in an earlier version, the app starts paused: choose **Resume** when you want your Clouds to use this computer.
+
+When your Clouds can't use this computer's apps and screen, the menu says so and why, with the one thing that fixes it, such as **Start screen control**.
+
+## When a bot needs your computer
+
+If a bot on the Cloud needs your computer and can't use it right now (you paused it, screen control isn't running, or the app is closed), it asks with one card in the chat: what it wants to do and why, and **Turn on**. The app on your computer asks too, once. Choose **Turn on** in either and the bot carries on by itself. If the app isn't open on your computer, the card says so, with **Get MausBot**: open it, and the bot carries on. **Not now** tells the bot to go without your computer.
+
+While a Cloud can use it, the app opens by itself when you log in, out of sight. When this computer is away, asleep or with the app closed, those websites open from My Cloud's own connection and may turn your bots away. Reddit stays off either way.
+
+## Signing in to Google and other passkey sites
+
+A passkey lives on your own phone or computer, so a browser on My Cloud can't use it. What works:
+
+1. **Use your computer's own browser**: with apps and screen working (above), ask the bot to use your computer's browser for that site. Approve the passkey on your computer when it asks.
+2. **Try another way**: in the bot's browser, on the passkey step, choose **Try another way**, then your password and a code from your authenticator app, a text message or a backup code.
+3. **For Gmail, Calendar and Drive**, connect them under **Connected apps** on My Cloud instead. The bot then doesn't need a browser sign-in at all.
+
+Step-by-step help, and what to do when a page doesn't respond: [Signing in to Google from a cloud browser](../troubleshooting/google-sign-in-cloud-browser.mdx).
+
+## If My Cloud ends
+
+If your trial ends unpaid or you cancel, your bots come back to this computer by themselves, with what you did on My Cloud while it is still kept.
+
+## Which version am I on?
+
+My Cloud updates by itself, a little after each desktop release, and the window reloads it at a quiet moment. To see the desktop app's version, open the menu under your name at the bottom of the sidebar and choose **About**.
+
+## Where are the logs?
+
+- **This computer**: **Settings → General → Diagnostics → Open logs folder**. **Export Diagnostics…** saves one file with secrets removed, ready to send to support. Details: [Where are my logs?](../troubleshooting/logs.mdx).
+- **My Cloud** keeps its own logs on the Cloud machine. MausBot Cloud support can read them: tell them what went wrong and roughly when.

@@ -44,7 +44,7 @@ try {
     `await import(${JSON.stringify(pathToFileURL(join(root, "server/testing/fake-claude-cli.ts")).href)});`,
   ].join("\n"), { mode: 0o700 });
   await api("PATCH", "/api/instances/claude", { cli: wrapper });
-  await control(["send", "--bot", pepper.id, "--text", "Please schedule a recurring inbox check. Show me the confirmation card."]);
+  await control(["send", "--bot", pepper.id, "--text", "Please schedule a recurring inbox check."]);
   await until(() => existsSync(fixture.fixtureDumpPath));
   const captured = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).mcpConfig.mcpServers.agents;
   const proxy = spawn(process.execPath, ["--experimental-strip-types", join(root, "server/drivers/agents-proxy.ts")], {
@@ -67,11 +67,11 @@ try {
       proxy.once("exit", () => { clearTimeout(timer); reject(new Error("MCP exited before replying")); });
     });
     proxy.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: {
-      name: "propose_routine", arguments: { name: "Agent-created inbox check", instructions: "Summarize the test inbox. No external services.", schedule: { type: "interval", every_minutes: 5 } },
+      name: "create_trigger", arguments: { when: "schedule", name: "Agent-created inbox check", instructions: "Summarize the test inbox. No external services.", schedule: { type: "interval", every_minutes: 5 } },
     } }) + "\n");
     const result = await reply;
     if (result.error || result.result?.isError) throw new Error(JSON.stringify(result));
-    evidence.push({ tool: "propose_routine", result });
+    evidence.push({ tool: "create_trigger", result });
   } finally { await waitForExit(proxy, { signal: "SIGTERM" }); }
   writeFileSync(gate, "finish the isolated setup turn");
   await control(["wait", "--bot", pepper.id, "--timeout", "15"]);

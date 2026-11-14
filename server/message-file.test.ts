@@ -1,21 +1,26 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { closeSync, constants, mkdirSync, mkdtempSync, openSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  MESSAGE_FILE_DOWNLOAD_MAX_BYTES,
   MESSAGE_FILE_MAX_BYTES,
   messageFileDisposition,
   messageFileDownloadName,
   messageAttachmentName,
   messageFileRoots,
   messageImageTargetAt,
-  messageReferencesAttachment,
   messageReferencesFile,
+  listMessageFolder,
+  messageFolderEntryName,
   openMessageFile,
+  openMessageFolderEntry,
 } from "./message-file.ts";
 
+const referencesAttachment = (text: string, requested: string) => messageAttachmentName(text, requested) !== null;
 const suite = mkdtempSync(join(tmpdir(), "omb-message-file-"));
 const workspace = join(suite, "workspace");
 const outside = join(suite, "outside");
@@ -30,6 +35,27 @@ beforeEach(() => {
 afterAll(() => rmSync(suite, { recursive: true, force: true }));
 
 describe("message-linked files", () => {
+  it.skipIf(process.platform === "win32")("rejects a named pipe without waiting for a writer", async () => {
+    const fifo = join(workspace, "waiting-pipe");
+    execFileSync("mkfifo", [fifo]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const opened = openMessageFile(fifo, [workspace]).then(
+      async (file) => { await file.handle.close(); return null; },
+      (error: unknown) => error,
+    );
+    const result = await Promise.race([
+      opened,
+      new Promise<"blocked">((resolve) => { timer = setTimeout(() => resolve("blocked"), 1_000); }),
+    ]);
+    try {
+      expect(result).toMatchObject({ status: 400, message: "the link does not point to a regular file" });
+    } finally {
+      clearTimeout(timer);
+      if (result === "blocked") closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
+      await opened;
+    }
+  });
+
   it("resolves a Markdown image from an opaque source offset", () => {
     const markdown = [
       "See this:",
@@ -95,8 +121,6 @@ describe("message-linked files", () => {
     expect(messageReferencesFile("<file:///Users/milind/report.md>", "/Users/milind/report.md"))
       .toBe(true);
 
-    // Equivalent separators and dot segments are normalised within a path
-    // flavour, but distinct path flavours and casing remain distinct.
     expect(messageReferencesFile(
       "[Open it](C:/Users/Maus/drafts/../report.md)",
       "C:\\Users\\Maus\\report.md",
@@ -121,8 +145,6 @@ describe("message-linked files", () => {
       "//server/share/team notes.md",
     )).toBe(true);
 
-    // Decoding is deliberately single-pass: a double-encoded space must not
-    // authorize the ordinary decoded path.
     expect(messageReferencesFile(
       "[Open it](C:/Users/Maus/release%2520notes.md?download=1)",
       "C:\\Users\\Maus\\release notes.md",
@@ -138,7 +160,6 @@ describe("message-linked files", () => {
     expect(messageReferencesFile(markdown, report)).toBe(true);
     expect(messageReferencesFile(markdown, notes)).toBe(true);
     expect(messageImageTargetAt(markdown, markdown.indexOf("![Chart]"))).toBe(chart);
-    // The folders a dropped backslash would have joined are not what was linked.
     expect(messageReferencesFile(markdown, "C:\\Users\\Maus.openmausbot\\workspaces\\bot_drafts\\report.md")).toBe(false);
   });
 
@@ -187,15 +208,15 @@ describe("message-linked files", () => {
 
   it("matches only exact standalone attachment tags", () => {
     const path = "/app/attachments/report & notes.pdf";
-    expect(messageReferencesAttachment(
+    expect(referencesAttachment(
       '<attached-file path="/app/attachments/report &amp; notes.pdf" />',
       path,
     )).toBe(true);
-    expect(messageReferencesAttachment(
+    expect(referencesAttachment(
       'A note\n<attached-image path="/app/attachments/report &amp; notes.pdf" name="report.pdf" />\n',
       path,
     )).toBe(true);
-    expect(messageReferencesAttachment(`<attached-file path="${path}" />`, "/app/attachments/other.pdf"))
+    expect(referencesAttachment(`<attached-file path="${path}" />`, "/app/attachments/other.pdf"))
       .toBe(false);
 
     for (const text of [
@@ -213,7 +234,7 @@ describe("message-linked files", () => {
       `<attached-file path="${path}" extra="yes" />`,
       `<attached-file path="${path}">`,
     ]) {
-      expect(messageReferencesAttachment(text, path), text).toBe(false);
+      expect(referencesAttachment(text, path), text).toBe(false);
     }
   });
 
@@ -325,10 +346,10 @@ describe("message-linked files", () => {
     writeFileSync(secret, "not for this conversation");
     symlinkSync(secret, join(workspace, "escape.md"));
 
-    await expect(openMessageFile("../outside/secret.md", [workspace]))
-      .rejects.toMatchObject({ status: 403 });
-    await expect(openMessageFile("escape.md", [workspace]))
-      .rejects.toMatchObject({ status: 403 });
+    const refusal = { status: 403, code: "outside_workspace" };
+    await expect(openMessageFile("../outside/secret.md", [workspace])).rejects.toMatchObject(refusal);
+    await expect(openMessageFile(secret, [workspace])).rejects.toMatchObject(refusal);
+    await expect(openMessageFile("escape.md", [workspace])).rejects.toMatchObject(refusal);
   });
 
   it("accepts only regular files no larger than the phone download ceiling", async () => {
@@ -340,6 +361,106 @@ describe("message-linked files", () => {
     truncateSync(large, MESSAGE_FILE_MAX_BYTES + 1);
     await expect(openMessageFile("large.pdf", [workspace]))
       .rejects.toMatchObject({ status: 413 });
+  });
+
+  it("lets a saved download pass the preview ceiling and explains a file over the limit", async () => {
+    const large = join(workspace, "reel.mp4");
+    writeFileSync(large, "x");
+    truncateSync(large, 26 * 1024 * 1024);
+
+    await expect(openMessageFile("reel.mp4", [workspace])).rejects.toMatchObject({
+      status: 413,
+      code: "file_too_large",
+      errorKey: "serverError.file.tooLarge",
+      errorParams: { size: "26 MB", limit: "25 MB", name: "reel.mp4" },
+    });
+    const file = await openMessageFile("reel.mp4", [workspace], MESSAGE_FILE_DOWNLOAD_MAX_BYTES);
+    expect(file.bytes).toBe(26 * 1024 * 1024);
+    await file.handle.close();
+
+    mkdirSync(join(workspace, "Reels"));
+    writeFileSync(join(workspace, "Reels", "big.mp4"), "x");
+    truncateSync(join(workspace, "Reels", "big.mp4"), 26 * 1024 * 1024);
+    await expect(openMessageFolderEntry("Reels/", "big.mp4", [workspace])).rejects.toMatchObject({ status: 413 });
+    const entry = await openMessageFolderEntry("Reels/", "big.mp4", [workspace], MESSAGE_FILE_DOWNLOAD_MAX_BYTES);
+    await entry.handle.close();
+
+    truncateSync(large, MESSAGE_FILE_DOWNLOAD_MAX_BYTES + 1);
+    await expect(openMessageFile("reel.mp4", [workspace], MESSAGE_FILE_DOWNLOAD_MAX_BYTES))
+      .rejects.toMatchObject({ status: 413, errorParams: { size: "500.1 MB", limit: "500 MB" } });
+  });
+
+  it("lists the regular files directly inside a linked folder", async () => {
+    const folder = join(workspace, "Posts", "2026-10-07_News");
+    mkdirSync(join(folder, "nested"), { recursive: true });
+    writeFileSync(join(folder, "b.png"), "png");
+    writeFileSync(join(folder, "a.md"), "# a");
+    writeFileSync(join(folder, "nested", "deep.txt"), "not listed");
+
+    await expect(openMessageFile("Posts/2026-10-07_News/", [workspace]))
+      .rejects.toMatchObject({ status: 400, code: "directory" });
+    await expect(listMessageFolder("Posts/2026-10-07_News/", [workspace])).resolves.toEqual({
+      name: "2026-10-07_News",
+      entries: [
+        { name: "a.md", bytes: 3, mime: "text/markdown; charset=utf-8" },
+        { name: "b.png", bytes: 3, mime: "image/png" },
+      ],
+      truncated: false,
+    });
+
+    const opened = await openMessageFolderEntry("Posts/2026-10-07_News/", "a.md", [workspace]);
+    try {
+      expect(opened).toMatchObject({ name: "a.md", bytes: 3 });
+    } finally {
+      await opened.handle.close();
+    }
+    await expect(openMessageFolderEntry("Posts/2026-10-07_News/", "nested", [workspace]))
+      .rejects.toMatchObject({ status: 404 });
+    expect(messageFolderEntryName("../secret.md")).toBeNull();
+    expect(messageFolderEntryName("nested/deep.txt")).toBeNull();
+    expect(messageFolderEntryName("..")).toBeNull();
+    expect(messageFolderEntryName("a.md")).toBe("a.md");
+  });
+
+  it("refuses a folder outside the root and leaves out symlinks that escape it", async () => {
+    writeFileSync(join(outside, "secret.md"), "not for this conversation");
+    const refusal = { status: 403, code: "outside_workspace" };
+    await expect(listMessageFolder(outside, [workspace])).rejects.toMatchObject(refusal);
+    await expect(listMessageFolder("../outside", [workspace])).rejects.toMatchObject(refusal);
+    symlinkSync(outside, join(workspace, "escape"));
+    await expect(listMessageFolder("escape", [workspace])).rejects.toMatchObject(refusal);
+
+    const folder = join(workspace, "posts");
+    mkdirSync(folder);
+    writeFileSync(join(folder, "kept.md"), "ok");
+    symlinkSync(join(outside, "secret.md"), join(folder, "leak.md"));
+    const listing = await listMessageFolder("posts", [workspace]);
+    expect(listing.entries.map((entry) => entry.name)).toEqual(["kept.md"]);
+    await expect(openMessageFolderEntry("posts", "leak.md", [workspace]))
+      .rejects.toMatchObject({ status: 404 });
+  });
+
+  it("matches a raw file URL with non-ASCII names, then refuses it only for its folder", async () => {
+    // Bots on macOS write the URL unencoded; Windows needs a real file URL.
+    const url = (path: string) => process.platform === "win32" ? pathToFileURL(path).href : `file://${path}`;
+    const folder = join(outside, "Posts", "2026-10-08_News");
+    mkdirSync(join(folder, "00_غلاف"), { recursive: true });
+    writeFileSync(join(outside, "PREVIEW.jpg"), "jpg");
+    const file = url(join(outside, "PREVIEW.jpg"));
+    const linkedFolder = url(folder);
+    const nested = url(join(folder, "00_غلاف"));
+    const text = `- [PREVIEW.jpg](${file})\n- [2026-10-08_News](${linkedFolder})\n- [00_غلاف](${nested})`;
+    for (const href of [file, linkedFolder, nested]) expect(messageReferencesFile(text, href)).toBe(true);
+
+    const roots = [workspace];
+    const refusal = { status: 403, code: "outside_workspace" };
+    await expect(openMessageFile(file, roots)).rejects.toMatchObject(refusal);
+    await expect(openMessageFile(linkedFolder, roots)).rejects.toMatchObject(refusal);
+    await expect(listMessageFolder(nested, roots)).rejects.toMatchObject(refusal);
+
+    const opened = await openMessageFile(file, [workspace, outside]);
+    await opened.handle.close();
+    await expect(listMessageFolder(linkedFolder, [workspace, outside])).resolves.toMatchObject({ name: "2026-10-08_News" });
   });
 
   it("emits a safe UTF-8 attachment filename", () => {

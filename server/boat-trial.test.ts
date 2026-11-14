@@ -15,10 +15,10 @@ describe("Boat trial provisioning", () => {
       req.on("data", (chunk) => (raw += chunk));
       req.on("end", () => {
         res.setHeader("content-type", "application/json");
-        if (url.pathname === "/api/box/v1/boxes" && req.method === "GET") {
-          return res.end(JSON.stringify({ ok: true, boxes: [] }));
+        if (url.pathname === "/api/v1/sandboxes" && req.method === "GET") {
+          return res.end(JSON.stringify({ ok: true, type: "sandbox.list", sandboxes: [] }));
         }
-        if (url.pathname === "/api/box/v1/boxes" && req.method === "POST") {
+        if (url.pathname === "/api/v1/sandboxes" && req.method === "POST") {
           const body = JSON.parse(raw);
           createBodies.push(body);
           createKeys.push(String(req.headers["idempotency-key"] ?? ""));
@@ -29,14 +29,14 @@ describe("Boat trial provisioning", () => {
               error: { code: "trial_auto_stop_required", details: { maxTtlSeconds: 7200 } },
             }));
           }
-          res.writeHead(201);
-          return res.end(JSON.stringify({ ok: true, box: { id: "bx_23456789", state: "ready" } }));
+          res.writeHead(202);
+          return res.end(JSON.stringify({ ok: true, type: "sandbox.created", sandbox: { id: "bx_23456789", state: "ready" } }));
         }
-        if (url.pathname === "/api/box/v1/boxes/bx_23456789" && req.method === "PATCH") {
+        if (url.pathname === "/api/v1/sandboxes/bx_23456789" && req.method === "PATCH") {
           return res.end(JSON.stringify({ ok: true }));
         }
-        if (url.pathname === "/api/box/v1/boxes/bx_23456789" && req.method === "GET") {
-          return res.end(JSON.stringify({ ok: true, box: { id: "bx_23456789", state: "ready" } }));
+        if (url.pathname === "/api/v1/sandboxes/bx_23456789" && req.method === "GET") {
+          return res.end(JSON.stringify({ ok: true, sandbox: { id: "bx_23456789", state: "ready" } }));
         }
         if (url.pathname.endsWith("/commands")) {
           return res.end(JSON.stringify({ ok: true, exitCode: 0, stdout: "", stderr: "" }));
@@ -50,7 +50,7 @@ describe("Boat trial provisioning", () => {
     await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
     // SAFETY: the test server was bound as TCP above, not to a Unix socket.
     const port = (api.address() as AddressInfo).port;
-    vi.stubEnv("OMB_BOX_API", `http://127.0.0.1:${port}/api/box/v1`);
+    vi.stubEnv("OMB_BOAT_API", `http://127.0.0.1:${port}/api/v1`);
     vi.resetModules();
     ({ provisionBoat } = await import("./boat.ts"));
   });

@@ -39,8 +39,7 @@ it("does not run a delivery twice after a process dies between the queue and ing
       OMB_PORT: new URL(url).port, OMB_WEBHOOK_PORT: String(Number(new URL(url).port) + 1),
       PATH: dirname(process.execPath), FAKE_CLAUDE_MODE: "happy",
     });
-    // This disposable child executes the real enqueue then exits before the
-    // WebhookManager can record acceptance. No production crash switch needed.
+    // This disposable child runs the real enqueue, then exits before the WebhookManager can record acceptance.
     const crash = spawnSync(process.execPath, ["--input-type=module", "-e", `
       import { readFileSync } from 'node:fs';
       import { RoutineManager } from ${JSON.stringify(new URL("./routines.ts", import.meta.url).href)};

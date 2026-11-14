@@ -114,6 +114,7 @@ process.env = env;
 const children = new Set();
 const clients = [];
 let server;
+let gate;
 let report;
 let failure;
 let fixtureRequests = 0;
@@ -212,9 +213,9 @@ async function failureDiagnostics() {
     if (!daemonAlive) continue;
     try {
       // Failure evidence, not a fallback or prewarm: the MCP test still fails.
-      // Upstream Windows issue #1308/#1407 can leave MCP waiting on inherited
-      // pipe handles after navigation actually succeeded. A read-only command
-      // to the exact existing fixture session distinguishes those two cases.
+      // On Windows vercel-labs/agent-browser#1308 and vercel-labs/agent-browser#1407
+      // can leave MCP waiting on inherited pipe handles after navigation
+      // succeeded; a read-only command to this fixture session tells them apart.
       const response = JSON.parse(await run(integration.command, ["--json", "--no-webmcp", "get", "url"], { ...env, ...integration.env }, 8_000));
       console.error(`[browser-smoke] existing-session URL diagnostic ${JSON.stringify({ session, success: response.success, url: response.data?.url, error: response.error }).slice(0, 2_000)}`);
     } catch (error) {
@@ -287,10 +288,16 @@ try {
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const url = `http://127.0.0.1:${server.address().port}/`;
+  // The bundled Chrome browses through the egress gate, as every bot browser does; desktop rules let it reach this
+  // local page, like a dev server.
+  const { openGate } = await import("../server/browser/egress/gate.ts");
+  const { refusalFor } = await import("../server/browser/egress/policy.ts");
+  const rules = { host: "desktop", ownPort: () => false, botPort: async () => false, localNetwork: true, allowed: () => false };
+  gate = await openGate({ decide: (target, addresses) => refusalFor(target, addresses, rules) });
   for (const name of ["alpha", "beta"]) {
     const integration = agentBrowserIntegration({ binaryPath: status.binaryPath,
       session: `omb-${name[0]}-${randomBytes(4).toString("hex")}`,
-      encryptionKey: randomBytes(32).toString("hex"), persistent: false, env });
+      encryptionKey: randomBytes(32).toString("hex"), persistent: false, env, egressPort: gate.port });
     assert.equal(resolve(integration.env.AGENT_BROWSER_EXECUTABLE_PATH ?? ""), resolve(paths.chrome), "MCP did not receive bundled Chromium");
     assert.equal(integration.env.AGENT_BROWSER_RESTORE_SAVE, "never");
     // Use the production preparation path. Guest preparation creates only
@@ -311,6 +318,29 @@ try {
   await alpha.tool("agent_browser_fill", { selector: "#message", text: "Bundled browser works" });
   await alpha.tool("agent_browser_click", { selector: "#submit" });
   assert.equal((await alpha.tool("agent_browser_get_text", { selector: "#result" })).data.text, "Bundled browser works");
+  // The harness reads, sizes and pictures a bot's browser over the engine's own
+  // loopback relay: page health, step evidence, preview frames and login typing.
+  phase = "relay contract";
+  const { RelayPorts, relay } = await import("../server/browser-relay.ts");
+  const relayTarget = { session: alpha.integration.env.AGENT_BROWSER_SESSION, binaryPath: alpha.integration.command, env: { ...env, ...alpha.integration.env } };
+  const relayPort = await new RelayPorts().port(relayTarget);
+  assert(relayPort, "The engine wrote no .stream file naming its relay, or the relay did not name this session");
+  const relayed = async (command) => {
+    const answer = await relay(relayPort, command, { timeoutMs: 15_000 });
+    assert(answer.success, `relayed ${command.action} failed: ${answer.error}`);
+    return answer.data;
+  };
+  assert.equal((await relayed({ action: "stream_status" })).connected, true);
+  for (const list of [["console", "messages"], ["errors", "errors"]]) assert(Array.isArray((await relayed({ action: list[0] }))[list[1]]), `relayed ${list[0]} has no list`);
+  assert(Array.isArray((await relayed({ action: "requests", status: "400-599" })).requests), "relayed requests has no list");
+  const snapshot = (await alpha.tool("agent_browser_snapshot", { compact: true })).data;
+  const buttonRef = Object.entries(snapshot.refs ?? {}).find(([, ref]) => ref.name === "Show message")?.[0];
+  assert(buttonRef, "The snapshot named no ref for the button");
+  const box = await relayed({ action: "boundingbox", selector: `@${buttonRef}` });
+  assert(box.width > 0 && box.height > 0, `relayed boundingbox of a ref gave ${JSON.stringify(box)}`);
+  const relayShot = join(fixture, "relay.jpg");
+  await relayed({ action: "screenshot", path: relayShot, format: "jpeg", quality: 70 });
+  assert((await stat(relayShot)).size > 0, "relayed screenshot wrote nothing");
   const storage = "({ local: localStorage.getItem('omb-smoke'), cookie: document.cookie })";
   const setStorage = (value) => `(() => { localStorage.setItem('omb-smoke', '${value}'); document.cookie = 'omb_smoke=${value}; Path=/; SameSite=Lax'; return ${storage}; })()`;
   assert.deepEqual((await alpha.tool("agent_browser_eval", { script: setStorage("alpha") })).data.result, { local: "alpha", cookie: "omb_smoke=alpha" });
@@ -338,7 +368,7 @@ try {
   assert(image?.data, "MCP did not return the screenshot image to the agent");
   const screenshotInfo = pngInfo(await readFile(screenshotPath));
   assert.deepEqual(pngInfo(Buffer.from(image.data, "base64")), screenshotInfo, "MCP image differs from screenshot file");
-  report = { ok: true, target, engineMode: values["engine-candidate"] ? "vendor-candidate" : "packaged", engineVersion, chromeVersion, checks: ["fresh-home auto-discovery", "real MCP cold-start navigation", "title", "input and click", "same-MCP close and reopen", "PNG screenshot after restart", "two-bot cookie and localStorage isolation"], screenshot: screenshotInfo };
+  report = { ok: true, target, engineMode: values["engine-candidate"] ? "vendor-candidate" : "packaged", engineVersion, chromeVersion, checks: ["fresh-home auto-discovery", "real MCP cold-start navigation", "title", "input and click", "loopback relay reads, ref box and screenshot", "same-MCP close and reopen", "PNG screenshot after restart", "two-bot cookie and localStorage isolation"], screenshot: screenshotInfo };
 } catch (error) {
   failure = error;
   try { await failureDiagnostics(); } catch (diagnosticError) {
@@ -359,6 +389,7 @@ finally {
     proc.kill("SIGKILL");
   })));
   if (server?.listening) { server.closeAllConnections(); await new Promise((done) => server.close(done)); }
+  await gate?.close();
   process.removeListener("SIGINT", interrupt);
   process.removeListener("SIGTERM", interrupt);
   if (cleanupErrors.length) failure = new Error(`${failure?.message ?? "Browser test passed"}; browser cleanup failed, isolated fixture retained at ${fixture}: ${cleanupErrors.join("; ")}`);

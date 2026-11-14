@@ -1,18 +1,11 @@
-// Watches the selected bot's chat and puts a spotlight on the right control
-// at the right moment during the first real turn. The order and the
-// once-only rule live in lib/first-conversation.ts; this component only
-// observes the store and persists dismissals to the server's hint list.
-// It stays quiet until the welcome tour is done, and never shows on a
-// paired remote client or to a hosted workspace's member, who cannot save
-// the hint list.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hintSeenPatch, welcomeDue } from "@/lib/onboarding";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { emailGateDone } from "@/lib/analytics";
-import { currentStep } from "@/lib/guided-tour";
-import { anchorFor, nextSpotlight, placementFor, tourComplete, type ChatObservation, type SpotlightId } from "@/lib/first-conversation";
+import { anchorFor, cardAnswered, nextSpotlight, placementFor, tourComplete, type ChatObservation, type SpotlightId } from "@/lib/first-conversation";
 import { t } from "@/lib/i18n";
 import type { MausState } from "@/lib/mascot";
-import { api, useStore, useStreaming } from "@/state/store";
+import { api, useStore } from "@/state/store";
 import { Spotlight } from "./Spotlight";
 
 const COPY: Record<SpotlightId, { key: "onboarding.spot.composer" | "onboarding.spot.model" | "onboarding.spot.approval" | "onboarding.spot.connector"; mascot: MausState }> = {
@@ -22,13 +15,12 @@ const COPY: Record<SpotlightId, { key: "onboarding.spot.composer" | "onboarding.
   "spot.connector": { key: "onboarding.spot.connector", mascot: "curious" },
 };
 
+/** Spotlights on the first chat, in Advanced mode only: Simple mode's cards carry a one-line hint instead. */
 export function FirstConversationTour({ quiet = false }: { quiet?: boolean }) {
   const { state, dispatch } = useStore();
-  const { streaming } = useStreaming();
+  const advanced = useAdvancedMode();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const record = state.config?.onboarding;
-  // the guided tour covers the composer and the model chip; this watcher
-  // only explains the two cards that appear on their own
   const [dismissed, setDismissed] = useState<string[]>([]);
   const seen = useMemo(() => [...(record?.hintsSeen ?? []), ...dismissed, "spot.composer", "spot.model"], [record?.hintsSeen, dismissed]);
   const [active, setActive] = useState<SpotlightId | null>(null);
@@ -36,20 +28,20 @@ export function FirstConversationTour({ quiet = false }: { quiet?: boolean }) {
   const sawBusy = useRef(false);
 
   const bot = state.bots.find((b) => b.id === state.selectedId) ?? null;
-  const busy = Boolean(bot?.busy) || Boolean(bot && streaming[bot.threadId]);
+  const busy = Boolean(bot?.busy);
 
-  // a reply has finished once the bot was busy and then stopped
   useEffect(() => {
     if (busy) sawBusy.current = true;
     else if (sawBusy.current) setReplyFinished(true);
   }, [busy]);
 
   const eligible =
+    advanced &&
     !quiet &&
     !remoteClient &&
     !state.welcomeOpen &&
     Boolean(record?.completedAt) &&
-    currentStep(record) === null &&
+    !state.tourOpen &&
     !welcomeDue(state.config, { remoteClient, legacyDone: emailGateDone() }) &&
     !tourComplete(seen);
 
@@ -64,13 +56,6 @@ export function FirstConversationTour({ quiet = false }: { quiet?: boolean }) {
     ),
   };
 
-  useEffect(() => {
-    if (!eligible) return;
-    const next = nextSpotlight(observation, seen, active);
-    if (next !== active) setActive(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eligible, seen, active, observation.replyStarted, observation.replyFinished, observation.approvalVisible, observation.connectorVisible]);
-
   const dismiss = useCallback(() => {
     if (!active) return;
     const id = active;
@@ -83,7 +68,18 @@ export function FirstConversationTour({ quiet = false }: { quiet?: boolean }) {
       .catch(() => {});
   }, [active, record, dispatch]);
 
-  if (!eligible || !active || !bot) return null;
+  useEffect(() => {
+    if (!eligible) return;
+    if (active && cardAnswered(active, observation)) {
+      dismiss();
+      return;
+    }
+    const next = nextSpotlight(observation, seen, active);
+    if (next !== active) setActive(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eligible, seen, active, dismiss, observation.replyStarted, observation.replyFinished, observation.approvalVisible, observation.connectorVisible]);
+
+  if (!eligible || !active || !bot || cardAnswered(active, observation)) return null;
   const copy = COPY[active];
   return (
     <Spotlight

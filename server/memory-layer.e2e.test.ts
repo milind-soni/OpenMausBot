@@ -1,9 +1,4 @@
-// The memory layer end to end, against an isolated fixture server and the
-// fake engine, named after the memory rubric it covers: single-fact recall,
-// recall across sessions, temporal forgetting, update and contradiction,
-// explicit personalisation, and the identity regressions. The model steps
-// are scripted with FAKE_CLAUDE_TEXT_ROUTES, so this proves the plumbing,
-// not a model's judgement.
+// The model steps are scripted with FAKE_CLAUDE_TEXT_ROUTES, so this proves the plumbing, not a model's judgement.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,10 +15,10 @@ it("recalls, captures, suggests, forgets and tidies a bot's memory", async () =>
   const future = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
   writeFileSync(routes, JSON.stringify({
     [CAPTURE_MARKER]: JSON.stringify([
-      { text: "The person is vegetarian", kind: "preference", aboutUser: true, confidence: 0.9 },
-      { text: "The person has exams this weekend", kind: "fact", until: future, aboutUser: true, confidence: 0.9 },
-      { text: "The account balance is -10", kind: "fact", confidence: 0.9 },
-      { text: "The person loves Irani cafes", kind: "preference", topic: "food", topicAliases: ["restaurants", "cafes"], confidence: 0.9 },
+      { text: "The person is vegetarian", kind: "preference", evidence: "I'm vegetarian", aboutUser: true, confidence: 0.9 },
+      { text: "The person has exams this weekend", kind: "fact", evidence: "I have exams this weekend", until: future, aboutUser: true, confidence: 0.9 },
+      { text: "The account balance is -10", kind: "fact", evidence: "The account balance is -10", confidence: 0.9 },
+      { text: "The person loves Irani cafes", kind: "preference", evidence: "I love Irani cafes", topic: "food", topicAliases: ["restaurants", "cafes"], confidence: 0.9 },
     ]),
     [TIDY_MARKER]: '{"pairs": []}',
   }));
@@ -52,7 +47,6 @@ it("recalls, captures, suggests, forgets and tidies a bot's memory", async () =>
     expect(await api(`/api/bots/${bot.id}/memory/upkeep`)).toMatchObject({ enabled: true });
     await api(`/api/bots/${bot.id}`, "PATCH", { memoryUpkeep: false });
 
-    // A successful routine is automation, not the owner's personal words.
     const { bot: scheduled } = await api<{ bot: WireBot }>("/api/bots", "POST", { name: "Scheduled memory" }, 201);
     const { routine } = await api("/api/routines", "POST", {
       name: "Automated report", prompt: "Report the work status.", botId: scheduled.id, enabled: false,
@@ -65,8 +59,6 @@ it("recalls, captures, suggests, forgets and tidies a bot's memory", async () =>
     expect((await memoryFile(scheduled.id)).text).not.toContain("The person is vegetarian");
     expect((await api("/api/profile/learned")).learned).toEqual([]);
 
-    // ── read side, on by default ─────────────────────────────────────────
-    // single-fact recall by an alias: a topic note found by a word it never says
     await api(`/api/bots/${bot.id}/memory/file`, "PUT", { path: "memory/dining.md", text: "---\ntitle: Dining\naliases: [food, restaurants, lunch]\n---\n- Loves pasta, hates olives\n" });
     const preview = JSON.stringify(await api(`/api/bots/${bot.id}/system-prompt`));
     expect(preview).toContain("memory/dining.md — Dining (also: food, restaurants, lunch)");
@@ -75,7 +67,6 @@ it("recalls, captures, suggests, forgets and tidies a bot's memory", async () =>
     expect(sentSince(before)).toContain("Recalled for this message");
     expect(sentSince(before)).toContain("Loves pasta, hates olives");
 
-    // recall across sessions: a codename said in one chat is recalled in a new one
     await turn(bot.id, bot.threadId, "Note for later: the project codename is Bluebird.");
     const created = await api<any>(`/api/bots/${bot.id}/tasks`, "POST", { title: "New chat" }, 201);
     const second: string = created.task?.threadId ?? created.threadId;
@@ -84,7 +75,22 @@ it("recalls, captures, suggests, forgets and tidies a bot's memory", async () =>
     expect(sentSince(before)).toContain("Bluebird");
     expect(sentSince(before)).toMatch(/your main chat|chat \\"[^"\\]+\\"/);
 
-    // temporal: an entry past its until day no longer loads
+    await api(`/api/bots/${bot.id}/memory/file`, "PUT", { path: "memory/home.md", text: "- 净水器的滤芯每六个月更换一次，上次是五月初换的。\n" });
+    before = sentCount();
+    await turn(bot.id, second, "滤芯多久要换一次？");
+    expect(sentSince(before)).toContain("滤芯每六个月更换一次");
+    await turn(bot.id, bot.threadId, "备忘：周三下午三点去社区图书馆还书。");
+    before = sentCount();
+    await turn(bot.id, second, "借的书哪天去图书馆还？");
+    expect(sentSince(before)).toContain("社区图书馆还书");
+
+    await api(`/api/bots/${bot.id}`, "PATCH", { memoryEnabled: false });
+    before = sentCount();
+    await turn(bot.id, second, "Can you suggest some restaurants for Friday?");
+    expect(sentSince(before)).not.toContain("Recalled for this message");
+    expect(JSON.stringify(await api(`/api/bots/${bot.id}/system-prompt`))).not.toContain("memory/dining.md");
+    await api(`/api/bots/${bot.id}`, "PATCH", { memoryEnabled: true });
+
     const index = await memoryFile(bot.id);
     await api(`/api/bots/${bot.id}/memory/file`, "PUT", {
       path: "MEMORY.md",
@@ -95,17 +101,14 @@ it("recalls, captures, suggests, forgets and tidies a bot's memory", async () =>
     expect(withExpired).not.toContain("Dentist appointment on Monday");
     expect(withExpired).toContain("Prefers short replies");
 
-    // ── write side, on by default; off above ─────────────────────────────
     await api(`/api/bots/${bot.id}/memory/tidy`, "POST", undefined, 409);
-    await turn(bot.id, bot.threadId, "Just so you know, I'm vegetarian and I have exams this weekend.");
+    await turn(bot.id, bot.threadId, "Just so you know, I'm vegetarian and I have exams this weekend. The account balance is -10. I love Irani cafes.");
     await new Promise((resolve) => setTimeout(resolve, 2_500));
     expect((await memoryFile(bot.id)).text).not.toContain("The person is vegetarian");
 
     await api("/api/config", "PUT", { memory: { captureQuietMs: 5_000 } });
     await api(`/api/bots/${bot.id}`, "PATCH", { memoryUpkeep: true });
-    await turn(bot.id, bot.threadId, "Just so you know, I'm vegetarian and I have exams this weekend.");
-    // A later invalid field rejects the entire patch: queued capture must
-    // survive, since memory upkeep was never actually switched off.
+    await turn(bot.id, bot.threadId, "Just so you know, I'm vegetarian and I have exams this weekend. The account balance is -10. I love Irani cafes.");
     expect((await memoryFile(bot.id)).text).not.toContain("The person is vegetarian");
     await api(`/api/bots/${bot.id}`, "PATCH", { memoryUpkeep: false, browser: "invalid" }, 400);
     expect(await api(`/api/bots/${bot.id}/memory/upkeep`)).toMatchObject({ enabled: true });
@@ -115,7 +118,6 @@ it("recalls, captures, suggests, forgets and tidies a bot's memory", async () =>
     expect(captured).toMatch(/- \d{4}-\d{2}-\d{2} · from chat "[^"]*" \(noticed\) · The person is vegetarian/);
     expect(captured).toContain(`The person has exams this weekend · until ${future}`);
     expect(captured).toContain("The account balance is -10");
-    // detail is filed into a topic the bot creates, found later by its other words
     const food = (await memoryFile(bot.id, "memory/food.md")).text;
     expect(food).toContain("title: food");
     expect(food).toContain("aliases: [restaurants, cafes]");
@@ -124,20 +126,17 @@ it("recalls, captures, suggests, forgets and tidies a bot's memory", async () =>
     const journal = await api<{ entries: Array<{ actor: string; via: string }> }>(`/api/bots/${bot.id}/memory/journal`);
     expect(journal.entries.some((row) => row.actor === "upkeep" && row.via === "capture")).toBe(true);
 
-    // identity: a later capture of "-10" again adds nothing; "10" is a different fact
     writeFileSync(routes, JSON.stringify({
       [CAPTURE_MARKER]: JSON.stringify([
-        { text: "The account balance is -10", kind: "fact" },
-        { text: "The account balance is 10", kind: "fact" },
+        { text: "The account balance is -10", kind: "fact", evidence: "The account balance is -10" },
+        { text: "The account balance is 10", kind: "fact", evidence: "the account balance is 10" },
       ]),
       [TIDY_MARKER]: '{"pairs": []}',
     }));
-    await turn(bot.id, bot.threadId, "The balance changed today.");
+    await turn(bot.id, bot.threadId, "The balance changed today: the account balance is 10.");
     await expect.poll(async () => (await memoryFile(bot.id)).text, { timeout: 20_000 }).toContain("The account balance is 10\n");
     expect((await memoryFile(bot.id)).text.match(/The account balance is -10/g)).toHaveLength(1);
 
-    // explicit personalisation: a durable fact about the person reaches About
-    // me on its own, is listed with Remove, and a removed one never returns
     const { learned } = await api<{ learned: Array<{ id: string; text: string; botName: string }> }>("/api/profile/learned");
     expect(learned.map((f) => f.text)).toEqual(["The person is vegetarian"]);
     expect((await api("/api/config")).profile.aboutMe).toMatch(/- \d{4}-\d{2}-\d{2} · learned by Memo · The person is vegetarian/);
@@ -146,13 +145,10 @@ it("recalls, captures, suggests, forgets and tidies a bot's memory", async () =>
     expect(removed.aboutMe).not.toContain("vegetarian");
     await api(`/api/profile/learned/${learned[0]!.id}/remove`, "POST", undefined, 404);
 
-    // forgetting and contradiction: the tidy-up archives the expired entry
-    // and strikes the older balance, leaving both in the record
     const current = (await memoryFile(bot.id)).text.split("\n").filter((line) => /^- \d{4}/.test(line));
     const minus = current.findIndex((line) => line.includes("balance is -10"));
     const plus = current.findIndex((line) => line.includes("balance is 10"));
     expect(current.length).toBeGreaterThanOrEqual(5);
-    // the candidate list skips the expired dentist line
     const live = current.filter((line) => !line.includes("Dentist"));
     writeFileSync(routes, JSON.stringify({ [TIDY_MARKER]: JSON.stringify({ pairs: [{ a: live.indexOf(current[minus]!), b: live.indexOf(current[plus]!), keep: "b" }] }) }));
     const { report } = await api<{ report: { expired: number; superseded: number; contradictionsChecked: boolean } }>(`/api/bots/${bot.id}/memory/tidy`, "POST");
@@ -164,7 +160,6 @@ it("recalls, captures, suggests, forgets and tidies a bot's memory", async () =>
     const status = await api(`/api/bots/${bot.id}/memory/upkeep`);
     expect(status).toMatchObject({ enabled: true, modelSteps: true, lastTidy: { expired: 1, superseded: 1 } });
 
-    // every upkeep change can be undone from the journal
     const rows = await api<{ entries: Array<{ id: string; actor: string; via: string; path: string }> }>(`/api/bots/${bot.id}/memory/journal`);
     const tidyRow = rows.entries.find((row) => row.actor === "upkeep" && row.via === "tidy" && row.path === "MEMORY.md")!;
     await api(`/api/bots/${bot.id}/memory/journal/${tidyRow.id}/revert`, "POST");

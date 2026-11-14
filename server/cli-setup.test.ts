@@ -6,6 +6,8 @@ import { DATA_DIR, instanceConfigs, loadConfig, PROVIDER_CREDENTIAL_ENV, WORKSPA
 import { acquireDataDirLease } from "./data-dir-lease.ts";
 import { SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { isSetupComplete, readCliStartup, runSetup, saveCliStartup } from "./cli-setup.ts";
+import { hasDeepSeekKey } from "./drivers/acp/deepseek.ts";
+import { geminiIsAuthenticated } from "./drivers/acp/gemini.ts";
 import { OpenAICompatDriver } from "./drivers/openai-compat.ts";
 
 const options = { dataDir: DATA_DIR, port: 8799 };
@@ -128,7 +130,7 @@ describe("native provider onboarding", () => {
     persist({ instances: { workClaude: original } });
     const deps = dependencies();
     deps.inspect.mockResolvedValueOnce({ snapshot: { state: "available", authenticated: false }, models });
-    const ui = prompts({ choices: [3, 0], confirms: [true] });
+    const ui = prompts({ choices: [6, 0], confirms: [true] });
     expect(await runSetup(options, ui.io, deps)).toBe(true);
     expect(deps.runCli).toHaveBeenCalledWith("/fixture/bin/claude", ["auth", "login"], original.environment);
     expect(loadConfig().instances?.workClaude).toEqual({ ...original, enabled: true });
@@ -171,9 +173,9 @@ describe("native provider onboarding", () => {
 
   it("keeps the saved native model selected when setup is run again", async () => {
     persist({ instances: { codex: { driver: "codex" } }, defaultModelSelection: { instanceId: "codex", model: "fixture-selected" } });
-    const ui = prompts({ choices: [3, 0], confirms: [true] });
+    const ui = prompts({ choices: [6, 0], confirms: [true] });
     expect(await runSetup(options, ui.io, dependencies())).toBe(true);
-    expect(ui.io.choose.mock.calls[0]?.[2]).toBe(3);
+    expect(ui.io.choose.mock.calls[0]?.[2]).toBe(6);
     expect(ui.io.choose.mock.calls[1]?.[2]).toBe(0);
     expect(ui.io.choose.mock.calls[1]?.[1][0]).toBe("Fixture selected");
     expect(loadConfig().defaultModelSelection).toEqual({ instanceId: "codex", model: "fixture-selected" });
@@ -208,6 +210,77 @@ describe("native provider onboarding", () => {
     expect(await runSetup(options, ui.io, deps)).toBe(false);
     expect(ui.lines.join("\n")).toContain("custom CLI path is unavailable");
     expect(deps.runCli).not.toHaveBeenCalled();
+    expect(readFileSync(configPath, "utf8")).toBe(original);
+    expectLeaseReleased();
+  });
+
+  it("offers Kimi, Gemini and DeepSeek after Codex and Claude, before the API key route", async () => {
+    const ui = prompts({ choices: [0, 0], confirms: [true] });
+    expect(await runSetup(options, ui.io, dependencies())).toBe(true);
+    expect(ui.io.choose.mock.calls[0]?.[1].slice(0, 6)).toEqual([
+      "ChatGPT / Codex — sign in with your account",
+      "Claude Code — sign in with your account",
+      "Kimi Code — sign in with your Kimi account",
+      "Gemini CLI — Gemini API key",
+      "DeepSeek Harness — DeepSeek API key",
+      "API key — OpenAI, OpenRouter, Groq or a compatible service (chat only)",
+    ]);
+  });
+
+  it("installs Kimi on confirmation and runs its device-code login", async () => {
+    const deps = dependencies();
+    deps.inspect
+      .mockResolvedValueOnce({ snapshot: { state: "unavailable", reason: "missing fixture CLI" }, models })
+      .mockResolvedValueOnce({ snapshot: { state: "available", authenticated: false }, models });
+    const ui = prompts({ choices: [2, 0], confirms: [true, true] });
+    expect(await runSetup(options, ui.io, deps)).toBe(true);
+    expect(deps.runCli.mock.calls).toEqual([
+      ["npm", ["install", "-g", "@moonshot-ai/kimi-code"]],
+      ["kimi", ["login"], undefined],
+    ]);
+    expect(loadConfig().instances?.kimi).toEqual({ driver: "kimiAgent", enabled: true });
+    expect(loadConfig().defaultModelSelection).toEqual({ instanceId: "kimi", model: "fixture-default" });
+    ui.assertConsumed();
+  });
+
+  it.each([
+    { choice: 3, id: "gemini", driver: "geminiAgent", env: "GEMINI_API_KEY" },
+    { choice: 4, id: "deepseek", driver: "deepseekAgent", env: "DEEPSEEK_API_KEY" },
+  ])("saves a $id API key on its own instance without starting a login", async ({ choice, id, driver, env }) => {
+    const deps = dependencies();
+    deps.inspect.mockResolvedValueOnce({ snapshot: { state: "available", authenticated: false }, models });
+    const ui = prompts({ choices: [choice, 0], secrets: ["  fixture-engine-key  "], confirms: [true] });
+    expect(await runSetup(options, ui.io, deps)).toBe(true);
+    expect(deps.runCli).not.toHaveBeenCalled();
+    expect(deps.inspect).toHaveBeenLastCalledWith(id, { driver, enabled: true, environment: { [env]: "fixture-engine-key" } });
+    expect(loadConfig().instances?.[id]).toEqual({ driver, enabled: true, environment: { [env]: "fixture-engine-key" } });
+    expect(loadConfig().defaultModelSelection).toEqual({ instanceId: id, model: "fixture-default" });
+    expect(ui.lines.join("\n")).not.toContain("fixture-engine-key");
+    ui.assertConsumed();
+  });
+
+  it("hands a key saved by setup to its engine at run time, ahead of a workspace key", async () => {
+    persist({ deepseek: { key: "fixture-workspace-key" }, tts: { geminiKey: "fixture-speech-key" } });
+    for (const [choice, id, env] of [[3, "gemini", "GEMINI_API_KEY"], [4, "deepseek", "DEEPSEEK_API_KEY"]] as const) {
+      const deps = dependencies();
+      deps.inspect.mockResolvedValueOnce({ snapshot: { state: "available", authenticated: false }, models });
+      const ui = prompts({ choices: [choice, 0], secrets: [`fixture-${id}-key`], confirms: [true] });
+      expect(await runSetup(options, ui.io, deps)).toBe(true);
+      const saved = loadConfig();
+      expect(instanceConfigs(saved)[id]?.environment?.[env]).toBe(`fixture-${id}-key`);
+      expect(saved.tts?.geminiKey, "the speech key stays its own").toBe("fixture-speech-key");
+    }
+    expect(geminiIsAuthenticated({ GEMINI_API_KEY: instanceConfigs(loadConfig()).gemini?.environment?.GEMINI_API_KEY })).toBe(true);
+    expect(hasDeepSeekKey({ DEEPSEEK_API_KEY: instanceConfigs(loadConfig()).deepseek?.environment?.DEEPSEEK_API_KEY })).toBe(true);
+  });
+
+  it("saves nothing when an engine API key is left empty", async () => {
+    const original = persist({ profile: { name: "Keep" } });
+    const deps = dependencies();
+    deps.inspect.mockResolvedValue({ snapshot: { state: "available", authenticated: false }, models });
+    const ui = prompts({ choices: [4, 2], secrets: [" "] });
+    expect(await runSetup(options, ui.io, deps)).toBe(false);
+    expect(ui.lines.join("\n")).toContain("An API key is required");
     expect(readFileSync(configPath, "utf8")).toBe(original);
     expectLeaseReleased();
   });
@@ -266,7 +339,7 @@ describe("API onboarding", () => {
     };
     persist({ instances: { existing: original } });
     const deps = dependencies();
-    const ui = prompts({ choices: [3, 0], confirms: [true, true] });
+    const ui = prompts({ choices: [6, 0], confirms: [true, true] });
     expect(await runSetup(options, ui.io, deps)).toBe(true);
     expect(deps.models).toHaveBeenCalledWith("https://api.example.test/v1", expected);
     expect(deps.verify).toHaveBeenCalledWith("https://api.example.test/v1", expected, "fixture-default");
@@ -281,7 +354,7 @@ describe("API onboarding", () => {
       instances: { routed: { driver: "openai-compat", config: { url: "https://openrouter.ai/api/v1", key: "fixture-key" } } },
     });
     const deps = dependencies();
-    const ui = prompts({ choices: [3, 0], confirms: [true, true] });
+    const ui = prompts({ choices: [6, 0], confirms: [true, true] });
     expect(await runSetup(options, ui.io, deps)).toBe(true);
     expect(deps.verify).toHaveBeenCalledWith("https://openrouter.ai/api/v1", "fixture-key", "fixture-default", "fireworks");
     expect(loadConfig().instances?.routed.config).toEqual({ url: "https://openrouter.ai/api/v1", key: "fixture-key", model: "fixture-default" });
@@ -292,7 +365,7 @@ describe("API onboarding", () => {
     persist({ openaiCompat: { provider: "workspace-provider" } });
     vi.stubEnv("OPENAI_COMPAT_PROVIDER", "environment-provider");
     const deps = dependencies();
-    const ui = prompts({ choices: [2, 1, 0], secrets: ["fixture-new-key"], confirms: [true, true] });
+    const ui = prompts({ choices: [5, 1, 0], secrets: ["fixture-new-key"], confirms: [true, true] });
     expect(await runSetup(options, ui.io, deps)).toBe(true);
     expect(deps.verify).toHaveBeenCalledWith("https://openrouter.ai/api/v1", "fixture-new-key", "fixture-default");
     const saved = loadConfig();
@@ -310,7 +383,7 @@ describe("API onboarding", () => {
     };
     persist({ instances: { pinned: original } });
     const deps = dependencies();
-    const ui = prompts({ choices: [3, 0], secrets: ["fixture-new-key"], confirms: [true, true] });
+    const ui = prompts({ choices: [6, 0], secrets: ["fixture-new-key"], confirms: [true, true] });
     expect(await runSetup(options, ui.io, deps)).toBe(true);
     expect(ui.io.secret).toHaveBeenCalledTimes(1);
     expect(deps.verify).toHaveBeenCalledWith("https://openrouter.ai/api/v1", "fixture-new-key", "fixture-default", "fireworks");
@@ -338,7 +411,7 @@ describe("API onboarding", () => {
     writeFileSync(join(DATA_DIR, "bots.json"), sentinel);
     writeFileSync(join(DATA_DIR, "messages-existing-thread.json"), transcript);
     const deps = dependencies();
-    const ui = prompts({ choices: [2, 0, 1], secrets: ["  new-fixture-secret  "], confirms: [true, true] });
+    const ui = prompts({ choices: [5, 0, 1], secrets: ["  new-fixture-secret  "], confirms: [true, true] });
     expect(await runSetup(options, ui.io, deps)).toBe(true);
 
     expect(deps.models).toHaveBeenCalledWith("https://api.openai.com/v1", "new-fixture-secret");
@@ -367,7 +440,7 @@ describe("API onboarding", () => {
     async ({ confirms, verified }) => {
       const original = persist({ profile: { name: "Keep" } });
       const deps = dependencies();
-      const ui = prompts({ choices: [2, 1, 0], secrets: ["fixture-key"], confirms });
+      const ui = prompts({ choices: [5, 1, 0], secrets: ["fixture-key"], confirms });
       expect(await runSetup(options, ui.io, deps)).toBe(false);
       expect(deps.verify).toHaveBeenCalledTimes(verified ? 1 : 0);
       expect(readFileSync(configPath, "utf8")).toBe(original);
@@ -379,7 +452,7 @@ describe("API onboarding", () => {
     const original = persist({ profile: { name: "Keep" }, defaultModelSelection: { instanceId: "codex", model: "original" } });
     const deps = dependencies();
     deps.verify.mockRejectedValue(new Error("API returned HTTP 401. Check the API key."));
-    const ui = prompts({ choices: [2, 2, 0, 2], secrets: ["fixture-key"], confirms: [true] });
+    const ui = prompts({ choices: [5, 2, 0, 2], secrets: ["fixture-key"], confirms: [true] });
     expect(await runSetup(options, ui.io, deps)).toBe(false);
     expect(ui.lines.join("\n")).toContain("HTTP 401");
     expect(readFileSync(configPath, "utf8")).toBe(original);
@@ -388,7 +461,7 @@ describe("API onboarding", () => {
 
   it("cancels hidden key entry without saving or contacting the provider", async () => {
     const deps = dependencies();
-    const ui = prompts({ choices: [2, 0], secrets: [new SetupCancelled()] });
+    const ui = prompts({ choices: [5, 0], secrets: [new SetupCancelled()] });
     expect(await runSetup(options, ui.io, deps)).toBe(false);
     expect(deps.models).not.toHaveBeenCalled();
     expect(deps.verify).not.toHaveBeenCalled();
@@ -399,7 +472,7 @@ describe("API onboarding", () => {
   it("allows an exact model ID after a catalog failure and verifies it before saving", async () => {
     const deps = dependencies();
     deps.models.mockRejectedValue(new Error("The catalog is unavailable"));
-    const ui = prompts({ choices: [2, 0, 0], secrets: ["fixture-key"], answers: [" manual-chat-model "], confirms: [true, true, true] });
+    const ui = prompts({ choices: [5, 0, 0], secrets: ["fixture-key"], answers: [" manual-chat-model "], confirms: [true, true, true] });
     expect(await runSetup(options, ui.io, deps)).toBe(true);
     expect(deps.verify).toHaveBeenCalledWith("https://api.openai.com/v1", "fixture-key", "manual-chat-model");
     expect(loadConfig().defaultModelSelection?.model).toBe("manual-chat-model");
@@ -409,12 +482,12 @@ describe("API onboarding", () => {
   it("keeps custom API setup after the built-in endpoints", async () => {
     const deps = dependencies();
     const ui = prompts({
-      choices: [2, 3, 0], answers: ["https://custom.example.test/v1"],
+      choices: [5, 4, 0], answers: ["https://custom.example.test/v1"],
       secrets: ["fixture-custom-key"], confirms: [true, true],
     });
     expect(await runSetup(options, ui.io, deps)).toBe(true);
     expect(ui.io.choose.mock.calls[1]?.[1]).toEqual([
-      "OpenAI API", "OpenRouter", "Groq", "Other OpenAI-compatible endpoint",
+      "OpenAI API", "OpenRouter", "Groq", "Meta Model API", "Other OpenAI-compatible endpoint",
     ]);
     expect(deps.verify).toHaveBeenCalledWith("https://custom.example.test/v1", "fixture-custom-key", "fixture-default");
     const cfg = loadConfig();
@@ -426,16 +499,14 @@ describe("API onboarding", () => {
 
   it("reuses an API connection without changing its endpoint or key and preselects the saved model", async () => {
     const deps = dependencies();
-    const first = prompts({ choices: [2, 0, 1], secrets: ["fixture-first-key"], confirms: [true, true] });
+    const first = prompts({ choices: [5, 0, 1], secrets: ["fixture-first-key"], confirms: [true, true] });
     expect(await runSetup(options, first.io, deps)).toBe(true);
     const before = loadConfig();
     const priorId = before.defaultModelSelection!.instanceId;
     const prior = before.instances![priorId]!;
-    // The explicit saved fleet has Codex, Claude, OpenAI-compatible, then
-    // this newly added API connection in the existing-connections list.
     const existingIds = Object.entries(before.instances!).filter(([, entry]) =>
-      ["codex", "claudeAgent", "openai-compat"].includes(entry.driver) && entry.enabled !== false).map(([id]) => id);
-    const chosen = existingIds.indexOf(priorId) + 3;
+      ["codex", "claudeAgent", "kimiAgent", "geminiAgent", "deepseekAgent", "openai-compat"].includes(entry.driver) && entry.enabled !== false).map(([id]) => id);
+    const chosen = existingIds.indexOf(priorId) + 6;
     const second = prompts({ choices: [chosen, 1], confirms: [true, true] });
     expect(await runSetup(options, second.io, deps)).toBe(true);
     expect(second.io.choose.mock.calls[0]?.[2]).toBe(chosen);
@@ -455,7 +526,7 @@ describe("API onboarding", () => {
     const deps = dependencies();
     const catalog = Array.from({ length: 25 }, (_, index) => ({ id: `fixture-model-${index}`, label: `Model ${index}` }));
     deps.models.mockResolvedValue(catalog);
-    const ui = prompts({ choices: [2, 0, 20, 0], secrets: ["fixture-key"], answers: ["fixture-model-24"], confirms: [true, true] });
+    const ui = prompts({ choices: [5, 0, 20, 0], secrets: ["fixture-key"], answers: ["fixture-model-24"], confirms: [true, true] });
     expect(await runSetup(options, ui.io, deps)).toBe(true);
     expect(deps.verify).toHaveBeenCalledWith("https://api.openai.com/v1", "fixture-key", "fixture-model-24");
     expect(loadConfig().defaultModelSelection?.model).toBe("fixture-model-24");
@@ -472,7 +543,7 @@ describe("API onboarding", () => {
     deps.models.mockResolvedValue(Array.from({ length: 25 }, (_, index) => ({ id: `fixture-model-${index}`, label: `Model ${index}` })));
     const ui = prompts({ confirms: [true, true] });
     ui.io.choose.mockImplementation(async (question, available, defaultIndex) => {
-      if (question === "Choose your AI connection") return 3;
+      if (question === "Choose your AI connection") return 6;
       expect(defaultIndex).toBeDefined();
       expect(available[defaultIndex!]).toBe("Model 24");
       return defaultIndex!;
@@ -492,7 +563,7 @@ describe("API onboarding", () => {
       defaultModelSelection: { instanceId: "primary", model: "fixture-selected" },
     });
     const deps = dependencies();
-    const ui = prompts({ choices: [4, 0], confirms: [true, true] });
+    const ui = prompts({ choices: [7, 0], confirms: [true, true] });
     expect(await runSetup(options, ui.io, deps)).toBe(true);
     expect(ui.io.choose.mock.calls[1]?.[2]).toBe(0);
     expect(deps.verify).toHaveBeenCalledWith("https://secondary.example.test/v1", "secondary-key", "fixture-default");
@@ -566,7 +637,7 @@ describe("connection recovery", () => {
       throw new Error("API returned HTTP 401. Check the API key.");
     });
     const ui = prompts({
-      choices: [2, 2, 0, 0, 2, 0],
+      choices: [5, 2, 0, 0, 2, 0],
       secrets: ["fixture-wrong-key", "fixture-replacement-key"], confirms: [true, true, true],
     });
     expect(await runSetup(options, ui.io, deps)).toBe(true);
@@ -588,7 +659,7 @@ describe("connection recovery", () => {
   it("can leave a failing API route for a native account without saving the key", async () => {
     const deps = dependencies();
     deps.verify.mockRejectedValue(new Error("API returned HTTP 429. Check limits."));
-    const ui = prompts({ choices: [2, 0, 0, 1, 1, 0], secrets: ["fixture-unused-key"], confirms: [true, true] });
+    const ui = prompts({ choices: [5, 0, 0, 1, 1, 0], secrets: ["fixture-unused-key"], confirms: [true, true] });
     expect(await runSetup(options, ui.io, deps)).toBe(true);
     expect(loadConfig().defaultModelSelection).toEqual({ instanceId: "claude", model: "fixture-default" });
     expect(readFileSync(configPath, "utf8")).not.toContain("fixture-unused-key");
@@ -601,7 +672,7 @@ describe("connection recovery", () => {
     const deps = dependencies();
     deps.models.mockRejectedValueOnce(new Error("The model list timed out."));
     const ui = prompts({
-      choices: [2, 0, 0, 0, 0], secrets: ["fixture-key", "fixture-key"], confirms: [false, true, true],
+      choices: [5, 0, 0, 0, 0], secrets: ["fixture-key", "fixture-key"], confirms: [false, true, true],
     });
     expect(await runSetup(options, ui.io, deps)).toBe(true);
     expect(deps.models).toHaveBeenCalledTimes(2);

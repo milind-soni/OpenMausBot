@@ -1,5 +1,3 @@
-// The entry grammar read back, the expiry rule, the narrow fact identity
-// (the regressions #1362/#1363's review asked for), and the topic index.
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -26,6 +24,21 @@ describe("memory entry grammar", () => {
     expect(entries[0]).toMatchObject({ line: 1, date: "2026-09-10", body: "Exams this weekend", until: "2026-09-14", struck: false });
     expect(entries[1]).toMatchObject({ body: "Office is in Pune", struck: true, until: null });
     expect(entries[2]).toMatchObject({ body: "Office is in Mumbai", struck: false });
+  });
+
+  it("gives an entry the lines under it: indented ones and a code block it opens, never a fence that does not close", () => {
+    const lines = [
+      "- 2026-09-01 · Deploy command:", "  ```sh", "  railway up", "", "  ```", "  run it from the repo root",
+      "- 2026-09-02 · Older shape:", "```sh", "railway up", "```",
+      "- 2026-09-03 · Snippet ```", "x", "```",
+      "- 2026-09-04 · Code blocks start with ```",
+      "## Notes",
+      "- 2026-09-05 · plain",
+      "a hand-written line",
+    ];
+    expect(parseMemoryEntries(lines.join("\n")).map((e) => [e.line, e.end])).toEqual([[0, 6], [6, 10], [10, 13], [13, 14], [15, 16]]);
+    const loose = ["- 2026-09-01 · Code blocks start with ```", "- 2026-09-02 · next", "- 2026-09-03 · Deploy:", "```sh", "railway up", "```"];
+    expect(parseMemoryEntries(loose.join("\n")).map((e) => [e.line, e.end])).toEqual([[0, 1], [1, 2], [2, 6]]);
   });
 
   it("expires a live entry only after its until day, never a struck one", () => {
@@ -80,7 +93,6 @@ describe("topic headers and the index", () => {
     });
     expect(parseTopicHeader("---\naliases:\n  - food\n  - lunch\ntags: dining\n---\n").aliases).toEqual(["food", "lunch", "dining"]);
     expect(parseTopicHeader("no frontmatter here")).toEqual({ aliases: [] });
-    // the panel's old new-topic text put a heading first
     expect(parseTopicHeader("# Dining\n\n---\naliases: [Bhel, Irani Cafe]\n---\n- Loves pasta\n")).toEqual({ title: "Dining", aliases: ["Bhel", "Irani Cafe"] });
     expect(parseTopicHeader("# Dining\n\n- Loves pasta\n")).toEqual({ title: "Dining", aliases: [] });
   });
@@ -92,8 +104,10 @@ describe("topic headers and the index", () => {
     ]);
     expect(text.split("\n")).toEqual([
       "- memory/dining.md — Dining (also: food)",
-      "- memory/archive.md — expired and replaced notes, kept for the record",
+      "- memory/archive.md — older notes moved out of MEMORY.md, kept for the record",
     ]);
+    expect(renderTopicIndex([{ name: "archive.md", header: { title: "Archive", description: "expired notes moved out by the tidy-up", aliases: [] } }]))
+      .toBe("- memory/archive.md — older notes moved out of MEMORY.md, kept for the record");
     const many = Array.from({ length: TOPIC_INDEX_MAX_TOPICS + 5 }, (_, i) => ({ name: `t${String(i).padStart(2, "0")}.md`, header: { aliases: [] } }));
     expect(renderTopicIndex(many)).toContain("…and 5 more in memory/");
   });
@@ -126,7 +140,7 @@ describe("memory with until dates and topics, on disk", () => {
     writeMemoryTopic(BOT, "dining.md", "---\ntitle: Dining\naliases: [food, lunch, restaurants]\n---\n- Loves pasta\n");
     writeFileSync(join(WORKSPACES_DIR, BOT, "memory", "notes.md"), "plain topic\n");
     const prompt = memorySystemPrompt(BOT, { managedWrites: true, fileTools: true });
-    expect(prompt).toContain("Your topic notes (not loaded; when a request touches one of these topics, read that file with your file tools before you answer):");
+    expect(prompt).toContain(`Your topic notes (not loaded; paths are relative to ${JSON.stringify(join(WORKSPACES_DIR, BOT))}, not your working folder; when a request touches one of these topics, read that file with your file tools before you answer):`);
     expect(prompt).toContain("- memory/dining.md — Dining (also: food, lunch, restaurants)");
     expect(prompt).toContain("- memory/notes.md");
     expect(memorySystemPrompt(BOT, { fileTools: false })).toContain("look it up with session_search before you answer");

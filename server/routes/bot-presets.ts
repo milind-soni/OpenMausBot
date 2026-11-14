@@ -1,16 +1,8 @@
-// Preset bots for New bot (server/presets.ts has the store and the rules).
-// GET lists what New bot offers: the organization's presets first, then
-// imported files', never one from a withdrawn release. DELETE removes an
-// imported preset (the person's own click; no confirm step). Organization
-// presets are Admin's to remove. Both are admin-scoped by default in
-// server/request-auth.ts, like the New bot defaults: a preset adds skills
-// and starter notes to the bot made from it.
 import { listBotPresets, ORG_PRESET_REMOVE_MESSAGE, PRESET_UNAVAILABLE_MESSAGE, type OrgInstallStatus, type PresetStore } from "../presets.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BotPresetRouteDeps {
   presets: Pick<PresetStore, "list" | "resolve" | "removeFilePreset">;
-  /** The organization library's install statuses, read per request. */
   orgStatuses(): ReadonlyMap<string, OrgInstallStatus>;
 }
 

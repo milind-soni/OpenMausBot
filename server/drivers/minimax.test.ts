@@ -74,6 +74,48 @@ describe("MinimaxDriver", () => {
     });
   });
 
+  const endpointCases: Array<{
+    name: string; configuredUrl?: string; environmentUrl?: string;
+    local: Record<string, string>; expectedUrl: string;
+  }> = [
+    { name: "explicit international URL over local CN region", configuredUrl: "https://api.minimax.io/v1", local: { region: "cn" }, expectedUrl: "https://api.minimax.io/v1" },
+    { name: "normalized explicit international URL over local proxy", configuredUrl: " https://api.minimax.io/v1/ ", local: { base_url: "https://saved-proxy.example.test/v1" }, expectedUrl: "https://api.minimax.io/v1" },
+    { name: "explicit custom URL over local CN region", configuredUrl: "https://chosen.example.test/", local: { region: "cn" }, expectedUrl: "https://chosen.example.test/v1" },
+    { name: "international environment URL over local CN region", environmentUrl: "https://api.minimax.io/v1", local: { region: "cn" }, expectedUrl: "https://api.minimax.io/v1" },
+    { name: "custom environment URL over local proxy", environmentUrl: "https://environment.example.test/v1", local: { base_url: "https://saved-proxy.example.test/v1" }, expectedUrl: "https://environment.example.test/v1" },
+    { name: "instance URL over environment and local settings", configuredUrl: "https://api.minimax.io/v1", environmentUrl: "https://environment.example.test/v1", local: { region: "cn" }, expectedUrl: "https://api.minimax.io/v1" },
+    { name: "local CN region when no explicit URL is set", local: { region: "cn" }, expectedUrl: "https://api.minimaxi.com/v1" },
+    { name: "local proxy when no explicit URL is set", local: { base_url: "https://saved-proxy.example.test/v1" }, expectedUrl: "https://saved-proxy.example.test/v1" },
+    { name: "international fallback when no URL is configured", local: {}, expectedUrl: "https://api.minimax.io/v1" },
+  ];
+
+  it.each(endpointCases)("routes a turn using $name", async ({ configuredUrl, environmentUrl, local, expectedUrl }) => {
+    const dir = join(home, ".mmx");
+    mkdirSync(dir);
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ api_key: "fixture-local-key", ...local }));
+    if (environmentUrl) process.env.MINIMAX_BASE_URL = environmentUrl;
+    const requests: Array<{ url: string; key: string | null }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(input), key: new Headers(init?.headers).get("authorization") });
+      return new Response('data: {"choices":[{"delta":{"content":"fixture reply"}}]}\n' +
+        'data: [DONE]\n', { headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await MinimaxDriver.create({
+      instanceId: "minimax-routing", displayName: "MiniMax fixture", enabled: true,
+      config: decodeMinimaxConfig({ ...(configuredUrl === undefined ? {} : { url: configuredUrl }), tools: false }),
+      environment: { MINIMAX_API_KEY: "fixture-instance-key" },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "routing-fixture", text: "fixture" });
+      expect(await recorder.until(event => event.type === "turn.completed")).toMatchObject({ ok: true });
+      expect(requests).toEqual([{ url: `${expectedUrl}/chat/completions`, key: "Bearer fixture-instance-key" }]);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
   it("skips blank environment credentials and does not probe on snapshot", async () => {
     const dir = join(home, ".mmx");
     mkdirSync(dir);
@@ -188,7 +230,6 @@ describe("MinimaxDriver", () => {
     await instance.dispose();
   });
 });
-
 
 it("minimax preserves an explicit tools-off connection and rejects ambiguous flags", () => {
   expect(MinimaxDriver.decodeConfig({})).not.toHaveProperty("tools");

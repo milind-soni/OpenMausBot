@@ -63,7 +63,17 @@ switching and Stop can be exercised without a real provider or account.
     Group/channel histories are unchanged. Background working, queued, unread,
     and waiting conversations remain reachable through activity-only controls.
     The header stays uncluttered; **Other activity** appears below it only when
-    there is sibling activity, including when the sidebar is closed.
+    there is sibling activity, including when the sidebar is closed. Open a
+    sibling from its activity entry, then click the bot's row: it returns to
+    the conversation you last wrote in (the bot's main thread). Open another
+    bot, let a reply land in the sibling it was left on, and check that the
+    sibling has its own activity entry under that bot. Follow a notification,
+    a thread chip or a search hit to a third thread of that bot: the sibling
+    keeps its unread entry, and the third thread is read once open. An
+    `openmausbot://bot/<id>` link opens the main thread. A row or tile with a
+    mark on it opens the thread the mark is about (waiting on you, then unread,
+    then work under way, a thread another bot opened included); a second click
+    returns to the main thread.
 13. Stop a running job through its activity entry while a sibling is queued;
     verify only the chosen job stops and the queued message starts normally.
     Reload and confirm Show threads remains off. Turn it back on to recover
@@ -82,7 +92,7 @@ switching and Stop can be exercised without a real provider or account.
     returns. Timed snoozes also return when due without a new server snapshot.
     Pinned, selected, unread, queued, and working threads remain reachable.
     Snooze is a display preference, not a pause or cancellation of work.
-16. Open **Active Threads** while a channel is working. Its entry should name
+16. Open the **Inbox** row, then **Active Threads** in its panel, while a channel is working. Its entry should name
     the channel and open that channel's exact thread, not a member's direct
     chat. Direct-chat and channel activity can appear together.
 17. In compact/quiet rows, idle message previews disappear but working,
@@ -132,6 +142,36 @@ The offline CLI may report an interrupted subprocess when stopped; the checks
 here concern ownership, state and navigation, not real-provider behavior.
 The seed/setup path uses the same HTTP and control commands as the API tests.
 This renderer fixture does not test a native mobile device or real computer use.
+
+## A new direct thread with a working folder
+
+In Advanced mode, open the bot row's **Actions → New thread in a working folder…**.
+Enter an existing absolute path on the machine running the harness. A missing
+path must leave the dialog open with its error and create no thread. Cancel
+must create nothing and retain the previously selected conversation, including
+when the dialog was opened for another bot. Editing the path clears its old
+error. A valid path creates an empty thread with `task.cwd`
+already pinned; changing the bot's default folder later must not move it.
+The ordinary **New thread** button still uses the bot default at first run.
+The folder action is visible only to the local owner or an admin session,
+matching who may edit a bot's working folder. Sidebar folders still organize
+threads and do not determine their filesystem location.
+
+```sh
+pnpm exec vitest run server/task-cwd-api.test.ts src/components/NewTaskFolderDialog.test.ts src/components/Sidebar.working-folder.test.ts src/state/task-folder-navigation.test.ts
+```
+
+The API check launches the standard disposable fake-Claude fixture and proves
+the selected folder reaches both its first and continued turns. It also
+checks invalid paths, persistence before any message, client-scope refusal,
+the unchanged default path, and rejection of `cwd` edits on existing threads.
+It retains the HTTP actions, bounded transcript, waits and redacted working
+directory receipts at the printed `.task-cwd.json` path. Component checks
+cover initial focus, cancellation, duplicate submit prevention and recovery
+from validation errors. Store/dialog tests delay HTTP responses to check
+cross-bot creation, failed validation followed by cancellation, and preservation
+of newer navigation. This does not test real-provider resume or a native
+operating-system folder picker.
 
 ## Permanent regression checks
 

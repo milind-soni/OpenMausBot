@@ -51,13 +51,12 @@ it("keeps ordinary work out of setup and carries explicit bot defaults and file 
     const setup = await direct("/setup Help me track garden watering");
     expect(setup.system).toContain("The user explicitly asked you to set yourself up");
     expect(setup.system).toContain("at most four questions");
-    // /setup is not sticky; a subsequent task must not carry its coaching.
     const afterSetup = await direct("Never mind setup. Summarize: the garden needs water Friday.");
     expect(afterSetup.system).not.toContain("at most four questions");
     expect(JSON.stringify(afterSetup.prompt)).toContain("Never mind setup");
 
     await api("PATCH", `/api/bots/${bot.id}`, { soul: "You look after the garden. Keep its watering plan.", description: "Garden helper" });
-    const { task: sibling } = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Sibling keeps its model" });
+    const { task: sibling } = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Sibling follows the bot" });
     // Change an inactive task, not the newly selected sibling.
     await api("PATCH", `/api/bots/${bot.id}/tasks/${bot.threadId}`, { modelSelection: selection(b), updateBotDefault: true });
     expect((await direct("Tell me your responsibility in one sentence.")).model).toBe(b);
@@ -78,7 +77,7 @@ it("keeps ordinary work out of setup and carries explicit bot defaults and file 
     expect(readFileSync(oldFile, "utf8")).toContain("MOSS-42");
     const state = (await api("GET", "/api/bots")).bots.find((item: any) => item.id === bot.id);
     expect(state.modelSelection).toEqual(selection(b));
-    expect(state.tasks.find((task: any) => task.threadId === sibling.threadId).modelSelection).toEqual(selection(a));
+    expect(state.tasks.find((task: any) => task.threadId === sibling.threadId)).toMatchObject({ modelSelection: selection(b), followsBotModel: true });
     const { task: future } = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Future uses default" });
     expect(future.modelSelection).toEqual(selection(b));
 

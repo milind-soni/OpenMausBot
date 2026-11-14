@@ -1,0 +1,13 @@
+{
+  "messages": [
+    {
+      "messageId": "important-1", "threadId": "thread-important", "messageTimestamp": "2026-10-17T05:50:00Z",
+      "sender": "Ada <ada@example.test>", "subject": "Q3 numbers due Friday", "labelIds": ["INBOX", "UNREAD"],
+      "preview": { "subject": "Q3 numbers due Friday", "body": "Can you send the Q3 numbers by Friday?\nThanks" },
+      "messageText": "Can you send the Q3 numbers by Friday?\nThanks, Ada"
+    },
+    { "id": "newsletter-1", "threadId": "thread-news", "internalDate": "1792216200000", "from": "News <news@example.test>", "subject": "This week in tech", "snippet": "Top stories" },
+    { "subject": "no id, skipped" }
+  ],
+  "nextPageToken": null
+}

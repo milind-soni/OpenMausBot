@@ -1,14 +1,3 @@
-// Quiet text (timestamps, hints, placeholders, calendar hours) used to be
-// drawn as `text-ink-secondary/70` and friends: the secondary ink with an
-// opacity modifier on top. The secondary ink is already tuned to sit just
-// above WCAG AA on the light skins, so any fade takes it below: /70 measured
-// 2.6–3.1:1 on Atelier and Linen, /60 down to 2.2:1. The contrast script
-// only sees whole tokens, so none of that was ever measured.
-//
-// Quiet text now has its own token, `--color-ink-tertiary`, tuned per skin
-// and checked by `pnpm check:contrast`. This file keeps the two halves
-// honest: every skin defines it at a readable strength, and nothing fades
-// the secondary ink with an opacity modifier again.
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative, sep } from "node:path";
@@ -36,7 +25,6 @@ function luminance({ r, g, b }: Rgba): number {
   const linear = (v: number) => (v / 255 <= 0.04045 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4);
   return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
 }
-/** WCAG contrast of a (possibly translucent) ink composited over an opaque surface. */
 function contrast(ink: Rgba, surface: Rgba): number {
   const over = (f: number, b: number) => f * ink.a + b * (1 - ink.a);
   const flat = { r: over(ink.r, surface.r), g: over(ink.g, surface.g), b: over(ink.b, surface.b), a: 1 };
@@ -44,7 +32,6 @@ function contrast(ink: Rgba, surface: Rgba): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-// The same eight surfaces the contrast script measures body text on.
 const SURFACES = ["app", "panel", "raised", "raised-hover", "card", "inset", "composer", "menu"];
 
 function sources(dir: string): string[] {
@@ -55,16 +42,10 @@ function sources(dir: string): string[] {
   });
 }
 
-// Faint graphics that stay faint on purpose. WCAG 1.4.11 asks nothing of a
-// purely decorative mark, so these keep their opacity; each is named so a
-// new one has to be argued for here. (A disabled control's text is exempt
-// from 1.4.3 too, and is skipped by its `disabled:` variant below.)
+// WCAG 1.4.11 asks nothing of a purely decorative mark; each exemption is named so a new one must be argued for.
 const DECORATIVE: Record<string, string> = {
-  // aria-hidden arrow between the chiefs and members columns of a team map
   "components/TeamCanvas.tsx text-ink-secondary/35": "decorative connector",
-  // aria-hidden drag grip; the row itself is labelled "Drag <bot> onto the schedule"
   "components/routines/CalendarSidebar.tsx text-ink-secondary/35": "decorative drag grip",
-  // film glyph on an unplayed video tile; the tile's own name is the file chip under it
   "components/AttachmentGallery.tsx text-ink-secondary/50": "decorative placeholder glyph",
 };
 

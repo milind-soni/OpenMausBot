@@ -40,8 +40,8 @@ async function capture() {
     assert.match(workspace, /^\/tmp\/omb-font-[A-Za-z0-9]+$/);
     const target = { ...perBotLocalVmTarget(randomUUID()), containerName: `omb-font-fixture-${randomUUID()}`, workspaceDir: workspace };
     const args = containerRunArgs("podman", randomUUID(), target);
-    // Separate known Firefox/Podman sandbox issue #853 is not this font patch.
-    // Supply its prerequisite in the visual fixture only; production args stay unchanged.
+    // Podman's default seccomp gates Firefox's sandbox chroot on SYS_CHROOT, a
+    // problem apart from this font patch: supplied in this fixture only.
     args.splice(args.length - 1, 0, "--cap-add", "SYS_CHROOT");
     args[args.length - 1] = imageId;
     try {

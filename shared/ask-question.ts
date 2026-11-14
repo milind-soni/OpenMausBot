@@ -1,33 +1,20 @@
 /**
- * Structured questions raised by a provider's own "ask the human" tool —
- * Claude Code's built-in `AskUserQuestion`.
- *
- * That tool reaches us as a PERMISSION ask (the CLI routes it through
- * --permission-prompt-tool like any other tool use), which is exactly the
- * wrong shape: a person cannot answer "which model should this bot use?"
- * with Deny / Always allow / Allow once. So the ask is re-read here into the
- * questions the model actually posed, the card renders them as choices, and
- * the answer goes back as text.
- *
- * The payload is bot-authored, so every field is treated as untrusted: the
- * shape is validated rather than cast, and the counts and lengths are capped
- * so a runaway (or hostile) tool call cannot produce an unreadable card.
+ * Structured questions from a provider's own "ask the human" tool, Claude
+ * Code's `AskUserQuestion`. The CLI routes it through --permission-prompt-tool
+ * like any tool use, so it is re-read here into the questions posed. The
+ * payload is bot-authored: validated rather than cast, and capped.
  */
 
-/** The provider tool whose input this module understands. */
 export const ASK_USER_QUESTION_TOOL = "AskUserQuestion";
+export const QUESTION_DISMISS_MESSAGE = "The user closed this question without answering. Use your best judgment and continue.";
 
-/** Caps. Claude Code's own limits are smaller (1-4 questions, 2-4 options);
- * these leave room for a provider that widens them without letting a card
- * grow without bound. */
+/** Claude Code's own limits are 1-4 questions and 2-4 options; these leave
+ * room for a provider that widens them. */
 export const MAX_QUESTIONS = 6;
 export const MAX_OPTIONS = 12;
-/** Long enough for a real question. The card collapses the preview and
- * expands to this whole text; cutting it here would throw the rest away. */
 export const MAX_QUESTION_TEXT = 8_000;
 const MAX_LABEL = 120;
 const MAX_DESCRIPTION = 400;
-/** One free-text answer. Long enough for a sentence or two of context. */
 export const MAX_CUSTOM_ANSWER = 2000;
 
 export interface AskQuestionOption {
@@ -41,19 +28,40 @@ export interface AskQuestion {
   header?: string;
   multiSelect?: boolean;
   options: AskQuestionOption[];
+  /** false when the provider can only take an option back (an ACP
+   * permission-style question answers with an option id): no free text. */
+  custom?: false;
 }
 
-/** Durable payload on a question card. Versioned like the other card
- * payloads so a later shape change can be told apart from this one. */
 export interface QuestionRequestCardData {
   version: 1;
   questions: AskQuestion[];
-  /** Where the ask came from: a real tool call ("tool", also the meaning
-   * of absent on cards saved before this field existed) or a block OMB
-   * parsed out of model-authored output ("output" — the BoatAgent
-   * transport). Only drives the agent-composed badge; it never changes
-   * how a card is answered. */
+  /** "tool" (or absent): a real tool call; "output": a block parsed from
+   * model-authored output. Only drives the agent-composed badge. */
   origin?: "tool" | "output";
+}
+
+/** Excludes the other durable proposal card kinds that share requestId. */
+export function isPersistentQuestionCard(card?: {
+  requestType?: "permission" | "question";
+  questionRequest?: unknown;
+  tool?: string;
+  routineRequest?: unknown;
+  skillRequest?: unknown;
+  profileRequest?: unknown;
+  modelRequest?: unknown;
+  teamSetupRequest?: unknown;
+} | null): boolean {
+  return Boolean(card && (
+    card.requestType === "question" || card.questionRequest ||
+    (!card.requestType && !card.tool && !card.routineRequest && !card.skillRequest && !card.profileRequest &&
+      !card.modelRequest && !card.teamSetupRequest)
+  ));
+}
+
+/** System/provider completion ends the live run, not the human's question. */
+export function shouldSettleRequestCard(card: Parameters<typeof isPersistentQuestionCard>[0], source: "user" | "auto" | "timeout" | "system" | "unavailable" | "peer"): boolean {
+  return !isPersistentQuestionCard(card) || source === "user";
 }
 
 function text(value: unknown, limit: number): string | undefined {
@@ -67,8 +75,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseOption(value: unknown): AskQuestionOption | null {
-  // A bare string is not the documented shape, but it is the obvious
-  // degradation and costs one line to accept.
+  // Not the documented shape, but accepted.
   if (typeof value === "string") {
     const label = text(value, MAX_LABEL);
     return label ? { label } : null;
@@ -88,26 +95,25 @@ function parseQuestion(value: unknown): AskQuestion | null {
   const seen = new Set<string>();
   for (const raw of Array.isArray(value.options) ? value.options : []) {
     const option = parseOption(raw);
-    // Duplicate labels are the one thing a radio group cannot survive: the
-    // answer text could no longer say which row was picked.
+    // Duplicate labels: the answer text could not say which row was picked.
     if (!option || seen.has(option.label)) continue;
     seen.add(option.label);
     options.push(option);
     if (options.length === MAX_OPTIONS) break;
   }
-  // A question with nothing to choose from is still answerable — the card
-  // always offers free text — so an empty option list is kept, not dropped.
+  // An empty option list is kept: the card always offers free text.
   const header = text(value.header, MAX_LABEL);
   return {
     question,
     ...(header ? { header } : {}),
     ...(value.multiSelect === true ? { multiSelect: true } : {}),
     options,
+    // only meaningful beside options: with none, free text is the only answer
+    ...(value.custom === false && options.length ? { custom: false as const } : {}),
   };
 }
 
-/** The questions inside an AskUserQuestion tool input, or null when the
- * payload is not one (a malformed call falls back to the ordinary card). */
+/** null when the payload is not one; a malformed call gets the ordinary card. */
 export function parseAskQuestions(input: unknown): AskQuestion[] | null {
   if (!isRecord(input) || !Array.isArray(input.questions)) return null;
   const questions: AskQuestion[] = [];
@@ -120,54 +126,14 @@ export function parseAskQuestions(input: unknown): AskQuestion[] | null {
   return questions.length ? questions : null;
 }
 
-/** The fenced block a turn-boundary agent ends its run with when it wants
- * to ask the person something (the BoatAgent transport): the harness cannot
- * pause mid-run, so the questions ride the final output and OMB parses them
- * at settle. The block is model-authored — untrusted input like any tool
- * call — so its body runs through parseAskQuestions and the same caps. */
-const OMB_ASK_FENCE = /(^|\n)[ \t]{0,3}(`{3,}|~{3,})[ \t]*omb-ask[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]{0,3}\2[ \t]*(?=\r?\n|$)/;
-const OMB_ASK_FENCE_GLOBAL = new RegExp(OMB_ASK_FENCE.source, OMB_ASK_FENCE.flags + "g");
-
-/** The questions inside the first fenced omb-ask block in an output, or
- * null when there is nothing worth showing (no fence, invalid JSON, or no
- * entry that parses as a question). The first fence wins: a second block
- * in the same output is ignored, not merged. */
-export function parseOmbAskQuestions(output: string): AskQuestion[] | null {
-  const match = OMB_ASK_FENCE.exec(output);
-  if (!match) return null;
-  try {
-    return parseAskQuestions(JSON.parse(match[3]!));
-  } catch {
-    return null;
-  }
-}
-
-/** The output with its omb-ask block(s) removed, for display: the person
- * reads the prose around the ask, never the raw protocol JSON. Text
- * without a block is returned untouched. */
-export function stripOmbAskBlock(output: string): string {
-  if (!OMB_ASK_FENCE.test(output)) return output;
-  return output.replace(OMB_ASK_FENCE_GLOBAL, "").replace(/\n{3,}/g, "\n\n").trim();
-}
-
-/** The prompt contract that teaches a model the turn-held ask transport: end
- * the reply with a fenced `omb-ask` block carrying the questions, and the
- * answers come back on the next prompt. A harness that cannot pause mid-run
- * (the BoatAgent transport) appends this to every prompt; the caps in the text
- * are the constants above, so the taught contract and the parser cannot
- * drift apart. */
-export function ombAskProtocolPrompt(): string {
-  return [
-    "",
-    "## Asking the person a question",
-    "When a decision belongs to the person, end your reply with a fenced block exactly like this:",
-    "",
-    "```omb-ask",
-    '{"questions":[{"question":"Ship the release now?","header":"Release","options":[{"label":"Ship now"},{"label":"Wait for the QA signoff"}]}]}',
-    "```",
-    "",
-    `The block must be the last thing in your reply. You may ask up to ${MAX_QUESTIONS} questions at once, each with up to ${MAX_OPTIONS} options; the person can always answer in their own words. Their answers arrive on your next prompt as \`Q:\`/\`A:\` lines — never invent them.`,
-  ].join("\n");
+/** Codex request_user_input_async's `{ title, options: string[] | null }` entries in the card's shape. Null unless one
+ * offers an option: a bare question already reads in the message text. */
+export function parseAsyncQuestions(entries: unknown): AskQuestion[] | null {
+  if (!Array.isArray(entries)) return null;
+  const questions = parseAskQuestions({
+    questions: entries.map((entry) => (isRecord(entry) ? { question: entry.title, options: entry.options } : null)),
+  });
+  return questions?.some((question) => question.options.length > 0) ? questions : null;
 }
 
 /** The one line the card subtitle and a spoken prompt show. */
@@ -177,18 +143,13 @@ export function askQuestionSummary(questions: readonly AskQuestion[]): string {
   return rest > 0 ? `${first} (+${rest} more question${rest > 1 ? "s" : ""})` : first;
 }
 
-/** How many one-tap answers an `ask_user` card offers; the tool advertises
- * "2-5 suggested answers". */
+/** The tool advertises "2-5 suggested answers". */
 export const MAX_CHOICES = 5;
 
 /**
- * Flat labels from a bot-authored `ask_user` `choices` array.
- *
- * The tool schema says strings, but a model that has also seen Claude's
- * AskUserQuestion will hand over `{ label, description }` rows instead
- * (MiniMax M3 does). The label is the choice either way. Anything else is
- * dropped: a non-string choice that reached the card was drawn as a React
- * child, which React refuses, taking the whole chat page down with it.
+ * A model that has seen AskUserQuestion may hand over `{ label, description }`
+ * rows instead of strings (MiniMax M3 does). Anything else is dropped: React
+ * refuses a non-string child.
  */
 export function parseChoices(input: unknown, limit = MAX_CHOICES): string[] | undefined {
   if (!Array.isArray(input)) return undefined;
@@ -204,9 +165,8 @@ export function parseChoices(input: unknown, limit = MAX_CHOICES): string[] | un
   return choices.length ? choices : undefined;
 }
 
-/** Flat labels for clients that only know how to render a list of choices
- * (the phone companions, and any older desktop build). Only a single
- * question can be answered that way without losing which one was answered. */
+/** For clients that only render a list of choices: only a single question can
+ * be answered that way. */
 export function questionChoices(questions: readonly AskQuestion[]): string[] | undefined {
   if (questions.length !== 1) return undefined;
   const only = questions[0]!;
@@ -214,15 +174,12 @@ export function questionChoices(questions: readonly AskQuestion[]): string[] | u
   return only.options.map((option) => option.label);
 }
 
-/** The chat runtime's own ask tool: the OpenAI-compatible engines'
- * counterpart of ASK_USER_QUESTION. Named ask_user so the ASKS_A_PERSON
- * backstop already covers it — no auto mode may answer a question. */
+/** The chat runtime's ask tool. Named ask_user so the ASKS_A_PERSON backstop
+ * covers it: no auto mode may answer a question. */
 export const ASK_USER_TOOL = "ask_user";
 
-/** The ask_user definition shared by every chat-runtime engine, shaped for
- * an OpenAI function-calling tool list. The schema states the caps; the
- * parser enforces them again on arrival, because a model-authored argument
- * is a request to follow the schema, not a guarantee that it did. */
+/** Shaped for an OpenAI function-calling tool list. The parser enforces the caps
+ * again: a model-authored argument is not a guarantee it followed the schema. */
 export const ASK_USER_TOOL_DEFINITION = {
   type: "function",
   function: {
@@ -268,50 +225,39 @@ export const ASK_USER_TOOL_DEFINITION = {
   },
 } as const;
 
-/** The synthetic tool string for an ask parsed out of model-authored final
- * output (the BoatAgent turn-held transport): there is no tool call to name,
- * but the event and the ASKS_A_PERSON backstop need one string. */
-export const OMB_ASK_TOOL = "omb-ask";
-
-/** The lead-in on a formatted answer. It exists for the model — the answer
- * is delivered on the deny channel, so it has to say what it is — and the
- * card strips it back off when it shows the person what they sent. */
+/** The answer is delivered on the deny channel, so it says what it is; the card
+ * strips it back off for display. */
 export const ANSWER_PREAMBLE = "The user answered your questions.";
+const JSON_ANSWERS_PREFIX = `${ANSWER_PREAMBLE}\n\nAnswers (JSON):\n`;
 
-/**
- * What the model is told. It arrives as the tool's result, so it has to
- * stand on its own: name each question, then what was picked for it.
- */
+/** Arrives as the tool's result, so it names each question and what was picked. */
 export function formatQuestionAnswers(
   questions: readonly AskQuestion[],
   answers: readonly (readonly string[])[],
 ): string {
-  const blocks: string[] = [];
+  const pairs: [string, string][] = [];
   questions.forEach((question, index) => {
     const picked = (answers[index] ?? []).map((value) => value.trim()).filter(Boolean);
     if (!picked.length) return;
-    blocks.push(`Q: ${question.question}\nA: ${picked.join(", ")}`);
+    pairs.push([question.question, picked.join(", ")]);
   });
-  if (!blocks.length) return "";
-  return `${ANSWER_PREAMBLE}\n\n${blocks.join("\n\n")}`;
+  if (!pairs.length) return "";
+  // Newlines can contain Q:/A: headers; JSON preserves them as answer text.
+  if (pairs.some(pair => pair.some(value => /[\r\n]/.test(value)))) {
+    return JSON_ANSWERS_PREFIX + JSON.stringify(pairs);
+  }
+  return `${ANSWER_PREAMBLE}\n\n${pairs.map(([question, answer]) => `Q: ${question}\nA: ${answer}`).join("\n\n")}`;
 }
 
-/** The same answer with the model-facing lead-in removed, for the settled
- * card. Anything that does not carry the lead-in is shown as it is. */
 export function answerWithoutPreamble(answer: string): string {
   return answer.startsWith(`${ANSWER_PREAMBLE}\n\n`) ? answer.slice(ANSWER_PREAMBLE.length + 2) : answer;
 }
 
-/** The longest formatted answer OMB will echo back into a follow-up prompt
- * (the BoatAgent continuation). formatQuestionAnswers itself does not
- * truncate — the tool-result channel has no stated limit — but a prompt is
- * not the place to find one: six answers at the custom-answer cap is the
- * most a legitimate reply weighs, so that is the ceiling. */
-export const MAX_ANSWER_ECHO = 6 * MAX_CUSTOM_ANSWER;
+/** Sized so a reply typed in a card is never cut; only a longer chat message echoed back as free text is. */
+export const MAX_ANSWER_ECHO = ANSWER_PREAMBLE.length + MAX_QUESTIONS
+  * ("\n\nQ: \nA: ".length + MAX_QUESTION_TEXT + MAX_OPTIONS * (MAX_LABEL + ", ".length) + MAX_CUSTOM_ANSWER);
 
-/** Cap a formatted answer for echoing into a follow-up prompt. An over-cap
- * echo is cut back to the last whole block so no partial answer reads as
- * one, and says it was truncated. */
+/** Cut back to the last whole block, so no partial answer reads as one. */
 export function capAnswerEcho(answer: string, limit = MAX_ANSWER_ECHO): string {
   if (answer.length <= limit) return answer;
   const cut = answer.slice(0, limit);
@@ -321,19 +267,10 @@ export function capAnswerEcho(answer: string, limit = MAX_ANSWER_ECHO): string {
 }
 
 /**
- * The answer text, read back as one value per question.
- *
- * `AskUserQuestion` is answered through its own `answers` field, keyed by the
- * question's text — but the card sends ONE answer for the whole set, because
- * a person answers the whole card at once. `formatQuestionAnswers` writes
- * each question's text beside its answer for exactly this reason, so the map
- * is recovered rather than guessed.
- *
- * A message that carries no blocks at all is the flat path: an older client,
- * or a phone answering a single-question card with one of the option labels
- * the harness also sends. With exactly one question there is no ambiguity
- * about what it answers, so the whole message is that question's answer.
- * With more than one there is, and nothing is filed.
+ * The card sends one answer for the whole set; `formatQuestionAnswers` writes
+ * each question's text beside its answer, so the map is recovered rather than
+ * guessed. A message with no blocks is filed only when there is exactly one
+ * question.
  */
 export function questionAnswersByQuestion(
   message: string,
@@ -342,23 +279,49 @@ export function questionAnswersByQuestion(
   return questionAnswersById(message, questions.map(question => ({ id: question.question, question })));
 }
 
-/** Longest protocol id accepted. Ids are harness-internal keys, never shown
- * on the card, but they ride the reply — so they are capped like the rest. */
+/**
+ * One answer read back as picked option labels plus the person's own words, for a protocol that answers by option.
+ * The card joins multi-select labels with ", " and a label may contain ", ": every reading is tried, a reading that
+ * is labels end to end wins, and when the best readings disagree the whole answer is own words, never a guessed option.
+ */
+export function pickedOptionLabels(answer: string, question: AskQuestion): { labels: string[]; other?: string } {
+  const text = answer.trim();
+  const labels = question.options.map((option) => option.label);
+  if (!question.multiSelect) {
+    if (labels.includes(text)) return { labels: [text] };
+    return text ? { labels: [], other: text } : { labels: [] };
+  }
+  const whole: string[][] = [];
+  const partial: Array<{ labels: string[]; other: string }> = [];
+  const read = (rest: string, picked: string[]): void => {
+    const next = labels.filter((label) => !picked.includes(label) && (rest === label || rest.startsWith(`${label}, `)));
+    if (!next.length) {
+      if (rest) partial.push({ labels: picked, other: rest });
+      else whole.push(picked);
+      return;
+    }
+    for (const label of next) read(rest.slice(label.length + 2), [...picked, label]);
+  };
+  read(text, []);
+  const key = (reading: { labels: string[]; other?: string }) => JSON.stringify([[...reading.labels].sort(), reading.other ?? null]);
+  const readings = whole.length ? whole.map((picked) => ({ labels: picked })) : partial;
+  const first = readings[0]!;
+  const agree = readings.every((reading) => key(reading) === key(first));
+  return agree ? first : { labels: [], other: text };
+}
+
+/** Ids ride the reply, so they are capped like the rest. */
 const MAX_QUESTION_ID = 200;
 
-/** A protocol questions entry: the id the harness will key its reply by,
- * beside the card question parsed from that same entry. Ids live only in
- * the protocol — the card never sees them. */
+/** Ids live only in the protocol; the card never sees them. */
 export interface ProtocolAskQuestion {
   id: string;
   question: AskQuestion;
 }
 
-/** Parse a protocol questions array whose entries carry their own string
- * ids (codex's item/tool/requestUserInput). The same caps and skip rules
- * as parseAskQuestions; an entry without both a usable id and a usable
- * question is skipped rather than fatal, and nothing answerable parses to
- * null. */
+/** Entries carry their own string ids (codex's item/tool/requestUserInput). An
+ * entry without a usable id and question is skipped; nothing answerable parses
+ * to null. */
 export function parseProtocolAskQuestions(entries: unknown): ProtocolAskQuestion[] | null {
   if (!Array.isArray(entries)) return null;
   const parsed: ProtocolAskQuestion[] = [];
@@ -366,12 +329,9 @@ export function parseProtocolAskQuestions(entries: unknown): ProtocolAskQuestion
   for (const raw of entries) {
     if (!isRecord(raw)) continue;
     const question = parseQuestion(raw);
-    // The id is opaque protocol data echoed back verbatim in the answer, so
-    // it is preserved exactly as sent — trimmed only to reject an
-    // all-whitespace id — and an overlong id is rejected whole rather than
-    // truncated. A duplicate id fails the whole request: two questions
-    // cannot share one answer slot, and silently dropping one would ask
-    // the person a question whose answer could never be delivered.
+    // Echoed back verbatim, so preserved exactly and an overlong id rejected
+    // whole. A duplicate id fails the request: two questions cannot share one
+    // answer slot.
     const id = raw.id;
     if (!question || typeof id !== "string" || !id.trim() || id.length > MAX_QUESTION_ID) continue;
     if (seenIds.has(id)) return null;
@@ -382,19 +342,14 @@ export function parseProtocolAskQuestions(entries: unknown): ProtocolAskQuestion
   return parsed.length ? parsed : null;
 }
 
+/** A card reply answers by question text, so it cannot tell two questions with the same text apart. */
+export function repeatsQuestionText(questions: readonly ProtocolAskQuestion[]): boolean {
+  return new Set(questions.map(({ question }) => question.question)).size !== questions.length;
+}
+
 /**
- * The id-keyed counterpart of questionAnswersByQuestion, for a protocol
- * that answers by id (codex's requestUserInput) rather than by question
- * text.
- *
- * Each protocol entry's id is paired with the AskQuestion parsed from that
- * same entry, so a Q:/A: block the card wrote is matched against the text
- * that produced it and filed under the id that asked. Only ids with a real
- * block are answered — a question left unanswered gets no entry rather
- * than a guess. When the reply carries no blocks at all, the flat path
- * applies with exactly one question: the whole message is that question's
- * answer, as it is for a phone or an older client. With more than one,
- * nothing is filed.
+ * Answers by id (codex's requestUserInput). Only ids with a real block are
+ * answered; without blocks, the whole message answers a lone question.
  */
 export function questionAnswersById(
   message: string,
@@ -405,16 +360,25 @@ export function questionAnswersById(
   const ambiguous = new Set<string>();
   for (const { id, question } of questions) {
     if (idByText.has(question.question)) {
-      // Two questions with identical text cannot be told apart in a block;
-      // answering either id would be a guess, so neither is answered.
+      // Identical question text cannot be told apart in a block: neither is answered.
       ambiguous.add(question.question);
       continue;
     }
     idByText.set(question.question, id);
   }
-  // A block runs from one Q: header to the next (blank lines inside an
-  // answer are the answer's, not block boundaries), so the reply is scanned
-  // for header-to-header spans instead of split on every blank line.
+  if (message.startsWith(JSON_ANSWERS_PREFIX)) {
+    let pairs: unknown;
+    try { pairs = JSON.parse(message.slice(JSON_ANSWERS_PREFIX.length)); }
+    catch { return {}; }
+    if (!Array.isArray(pairs) || !pairs.every(pair => Array.isArray(pair) && pair.length === 2 && pair.every(value => typeof value === "string"))) return {};
+    for (const [asked, answer] of pairs as [string, string][]) {
+      const id = idByText.get(asked);
+      if (id && !ambiguous.has(asked) && answer.trim()) answers[id] = answer;
+    }
+    return answers;
+  }
+  // A block runs from one Q: header to the next; blank lines inside an answer
+  // are the answer's.
   const blocks = message.matchAll(/(?:^|\n\n)Q: ([\s\S]+?)\nA: ([\s\S]*?)(?=\n\nQ: |$)/g);
   let sawBlock = false;
   for (const match of blocks) {
@@ -423,14 +387,12 @@ export function questionAnswersById(
     if (ambiguous.has(asked)) continue;
     const id = idByText.get(asked);
     const answer = match[2]!.trim();
-    // A blank A: is no answer: the id stays unanswered rather than filed
-    // as an empty string.
+    // A blank A: is no answer.
     if (id && answer) answers[id] = answer;
   }
   if (Object.keys(answers).length) return answers;
-  // A structured reply that matched a block is authoritative even when it
-  // answered nothing: falling through to the flat fallback would file the
-  // literal Q:/A: text as the person's answer.
+  // A reply that matched a block is authoritative even when it answered
+  // nothing, or the literal Q:/A: text would be filed as the answer.
   if (sawBlock) return {};
   const only = questions.length === 1 ? questions[0] : undefined;
   const flat = message.trim();

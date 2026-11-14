@@ -17,7 +17,7 @@ const store = vi.hoisted(() => ({ instances: [] as unknown[], dispatch: vi.fn(),
 vi.mock("@/state/store", () => ({
   useStore: () => ({ state: { instances: store.instances }, dispatch: store.dispatch, refreshInstances: store.refreshInstances }),
 }));
-// The sign-in cards themselves have their own tests (ClaudeSignIn, CodexDeviceSignIn, EngineSetup).
+// The sign-in cards themselves have their own tests (ClaudeSignIn, DeviceSignIn, EngineSetup).
 vi.mock("@/components/EngineSetup", () => ({
   EngineSetup: ({ instance }: { instance: InstanceInfo }) => createElement("div", { "data-engine-setup": instance.instanceId }),
 }));
@@ -42,7 +42,7 @@ const choose = (id: string) => {
 };
 
 const engine = (instanceId: string, driverKind: string, method: "paste-code" | "device-code", extra: Partial<InstanceInfo> = {}): InstanceInfo => ({
-  instanceId, driverKind, displayName: driverKind === "codex" ? "Codex" : "Claude", access: "subscription",
+  instanceId, driverKind, displayName: driverKind === "codex" ? "Codex" : driverKind === "grokAgent" ? "Grok" : "Claude", access: "subscription",
   snapshot: { state: "available", authenticated: false }, models: { default: "", options: [] }, authentication: { method },
   ...extra,
 } as InstanceInfo);
@@ -61,11 +61,10 @@ beforeEach(() => {
 it("offers the three ways in and says plainly whose plan limits apply", () => {
   const { html } = render();
   expect(html).toContain("data-cloud-sign-in");
-  for (const label of ["Sign in to Claude", "Sign in to ChatGPT (Codex)", "Use an API key"]) expect(html).toContain(label);
-  expect(html).toContain("plan limits apply to bots running 24/7");
-  expect(html).toContain("a Claude Max plan or an API key is recommended");
+  for (const label of ["Claude", "Use your Claude subscription.", "ChatGPT", "Use your ChatGPT plan with Codex.", "Use an API key"]) expect(html).toContain(label);
+  expect(html).toContain("plan&#x27;s limits apply to bots that work around the clock");
+  expect(html).toContain("Anthropic&#x27;s Claude Max plan or an API key works best");
   expect(html).not.toMatch(/included/i);
-  // nothing is opened on the person's behalf
   expect(html).not.toContain("data-engine-setup");
 });
 
@@ -79,7 +78,7 @@ it("opens the existing paste-code and device-code sign-ins on this server's own 
   expect(store.dispatch).not.toHaveBeenCalled();
 });
 
-it("sends an API key to the existing model-provider keys in Settings → Connections", () => {
+it("sends an API key to the existing model-provider keys in Settings → API keys", () => {
   choose("api-key");
   expect(store.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "toggleAppSettings", open: true, section: "connections" });
 });
@@ -91,5 +90,35 @@ it("picks the person's own engine, never a local-model or read-only one, and say
   expect(cloudEngine([local, company], "claudeAgent")).toBeUndefined();
   store.instances = [codex];
   choose("claude");
-  expect(render().html).toContain("not available on your Cloud yet");
+  expect(render().html).toContain("isn&#x27;t available in the Cloud yet");
+});
+
+it("offers Grok as a third choice when this Cloud computer has the Grok CLI, and opens its code sign-in", () => {
+  const grok = engine("grok", "grokAgent", "device-code");
+  store.instances = [claude, codex, grok];
+  const { html } = render();
+  for (const label of ["Claude", "ChatGPT", "Grok", "Use your grok.com subscription with Grok Build.", "Use an API key"]) expect(html).toContain(label);
+  expect(html.indexOf('data-cloud-choice="grok"')).toBeGreaterThan(html.indexOf('data-cloud-choice="codex"'));
+  expect(html.indexOf('data-cloud-choice="grok"')).toBeLessThan(html.indexOf('data-cloud-choice="api-key"'));
+  expect(html).toContain("grid-cols-3");
+  choose("grok");
+  expect(render().html).toContain('data-engine-setup="grok"');
+});
+
+it("leaves Grok out where this Cloud computer has no Grok CLI (an older image)", () => {
+  store.instances = [claude, codex, engine("grok", "grokAgent", "device-code", { snapshot: { state: "unavailable", reason: "`grok` CLI not found" } })];
+  const { html } = render();
+  expect(html).not.toContain('data-cloud-choice="grok"');
+  expect(html).toContain("grid-cols-2");
+  expect(html).toContain("Use an API key");
+});
+
+it("says a Claude connected through an API key runs on that key, not on a subscription", () => {
+  store.instances = [engine("claude", "claudeAgent", "paste-code", { snapshot: { state: "available", authenticated: true, account: { method: "api-key" } } }), codex];
+  const keyed = render().html;
+  expect(keyed).toContain("Runs on your API key.");
+  expect(keyed).not.toContain("Use your Claude subscription.");
+  store.instances = [engine("claude", "claudeAgent", "paste-code", { snapshot: { state: "available", authenticated: true, account: { method: "login", email: "a@example.test" } } }), codex];
+  f.values = [];
+  expect(render().html).toContain("Use your Claude subscription.");
 });

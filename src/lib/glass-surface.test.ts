@@ -1,0 +1,113 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { glassPopupTopInset } from "./glass-popup";
+import { SKIN_IDS } from "./skins";
+
+const src = join(dirname(fileURLToPath(import.meta.url)), "..");
+const css = readFileSync(join(src, "styles.css"), "utf8");
+
+function rule(selector: string, from = 0): string {
+  const start = css.indexOf(`${selector} {`, from);
+  expect(start, selector).toBeGreaterThanOrEqual(0);
+  return css.slice(css.indexOf("{", start) + 1, css.indexOf("}", start));
+}
+
+function skinBlocks(): string[] {
+  return [...css.matchAll(/\[data-skin="[a-z]+"\] \{[\s\S]*?\n\}/g)].map((match) => match[0]);
+}
+
+describe("glass surface", () => {
+  it("derives the pane from the skin's menu, ink and card tokens", () => {
+    const surface = rule(".glass-surface");
+    expect(surface).toContain("color-mix(in srgb, var(--color-menu) 62%, transparent)");
+    expect(surface).toContain("backdrop-filter: blur(28px) saturate(170%)");
+    expect(surface).toContain("-webkit-backdrop-filter: blur(28px) saturate(170%)");
+    expect(surface).toContain("var(--color-ink) 10%");
+    expect(surface).toMatch(/inset 0 1px 0/);
+    expect(rule(".glass-card")).toContain("var(--color-card) 60%");
+    const scrim = rule(".glass-scrim");
+    expect(scrim).toContain("background: color-mix(in srgb, black 28%, transparent)");
+    const scrimRules = [...css.matchAll(/\.glass-scrim\s*\{[^}]*\}/g)].map((match) => match[0]).join("\n");
+    expect(scrimRules).not.toMatch(/(?:-webkit-)?backdrop-filter\s*:/);
+    for (const selector of [".glass-surface", ".glass-card", ".glass-scrim", ".glass-rail"]) {
+      expect(rule(selector), selector).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    }
+  });
+
+  it("is an opaque sheet for Settings in Midnight and Daylight in both modes, 920 by 720 at most with radius 16", () => {
+    const sheet = rule(':root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-surface');
+    expect(sheet).toContain("background: var(--color-app)");
+    expect(sheet).toContain("backdrop-filter: none");
+    expect(sheet).toContain("box-shadow: none");
+    expect(css.indexOf("[data-settings-look] .glass-surface {")).toBeGreaterThan(css.indexOf(".glass-surface {"));
+    const size = rule('.glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup');
+    expect(size).toContain("width: min(920px, 100%)");
+    expect(size).toContain("height: min(720px, 100%)");
+    expect(size).toContain("border-radius: 16px");
+  });
+
+  it("falls back to the opaque menu colour when transparency is reduced", () => {
+    const at = css.indexOf("@media (prefers-reduced-transparency: reduce)");
+    expect(at).toBeGreaterThan(0);
+    const surface = rule(".glass-surface", at);
+    expect(surface).toContain("background: var(--color-menu)");
+    expect(surface).toContain("backdrop-filter: none");
+  });
+
+  it("is the opaque menu colour, without a blur, when the desktop app renders without a GPU", () => {
+    const surface = rule(":root[data-software-rendering] .glass-surface");
+    expect(surface).toContain("background: var(--color-menu)");
+    expect(surface).toContain("-webkit-backdrop-filter: none");
+    expect(surface).toContain("backdrop-filter: none");
+    expect(css.indexOf(":root[data-software-rendering] .glass-surface {")).toBeGreaterThan(css.indexOf(".glass-surface {"));
+  });
+
+  it("lives outside every skin block, and every skin still defines the tokens it reads", () => {
+    const blocks = skinBlocks();
+    expect(blocks).toHaveLength(SKIN_IDS.length);
+    for (const block of blocks) {
+      expect(block).not.toContain("glass");
+      for (const token of ["--color-menu", "--color-card", "--color-ink"]) expect(block).toContain(`${token}:`);
+    }
+  });
+
+  it("is what the Settings and Apps pop-ups are drawn on", () => {
+    for (const file of ["settings/SettingsWindow.tsx", "PluginsPanel.tsx"]) {
+      const source = readFileSync(join(src, "components", file), "utf8");
+      expect(source, file).toContain("glass-surface");
+      // The scrim is a sibling: a backdrop-filter on an ancestor would hide the app from the pane's own blur.
+      expect(source, file).toContain('className="glass-scrim pointer-events-none absolute inset-0"');
+    }
+  });
+
+  it("sits in a safe area clear of the window's own buttons, at every window size", () => {
+    const frame = rule(".glass-popup-frame");
+    expect(frame).toContain("position: fixed");
+    expect(frame).toContain("padding: var(--glass-popup-top, 24px) 24px 24px");
+    const pane = rule(".glass-popup");
+    expect(pane).toContain("width: min(1040px, 100%)");
+    expect(pane).toContain("height: min(760px, 100%)");
+    expect(glassPopupTopInset("mac-inset")).toBe(56);
+    expect(glassPopupTopInset("win-caption")).toBe(56);
+    expect(glassPopupTopInset("native")).toBe(24);
+    for (const file of ["settings/SettingsWindow.tsx", "PluginsPanel.tsx"]) {
+      const source = readFileSync(join(src, "components", file), "utf8");
+      expect(source, file).toContain('className="glass-popup-frame"');
+      expect(source, file).toMatch(/style=\{(\{ \.\.\.)?glassPopupFrameStyle\(\)/);
+      expect(source, file).toMatch(/className="glass-surface glass-popup /);
+      expect(source, file).not.toMatch(/100dvh/);
+    }
+  });
+
+  it("lets the Apps contents reflow inside the pop-up rather than overflow it", () => {
+    const apps = readFileSync(join(src, "components", "PluginsPanel.tsx"), "utf8");
+    expect(apps).toContain('data-apps-grid className="@container flex flex-col gap-7 pt-1"');
+    const section = readFileSync(join(src, "components", "AppsSection.tsx"), "utf8");
+    expect(section).toContain("grid grid-cols-1 items-start gap-x-6 gap-y-1 @xl:grid-cols-2");
+    const mcp = readFileSync(join(src, "components", "McpServersPanel.tsx"), "utf8");
+    expect(mcp).toContain('data-mcp-row className="flex flex-wrap items-center gap-3"');
+    expect(mcp).toContain('data-mcp-row-actions className="ml-auto flex flex-wrap items-center justify-end gap-1"');
+  });
+});

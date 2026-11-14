@@ -1,16 +1,12 @@
-// Follow-up messages sent while a channel is working.
-//
-// The renderer must hand these to the harness immediately. Keeping them in a
-// mounted composer loses the auto-send intent on navigation, reconnect, or a
-// renderer reload. They stay off the transcript until the active channel
-// operation settles so the current responder cannot appear to answer words it
-// never saw.
+// Follow-ups sent while a channel works stay off the transcript until it settles, so the current responder cannot appear
+// to answer words it never saw.
 
 import { newId } from "./contracts.ts";
 import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
 import { drainCoalesceHead, DRAIN_COALESCE_MAX_ITEMS } from "./admission.ts";
 import type { ResolvedSender } from "../shared/wire.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
+import type { RoomPick } from "./room-pointed.ts";
 
 export interface ChannelQueueItem {
   id: string;
@@ -18,14 +14,14 @@ export interface ChannelQueueItem {
   replyToId?: string;
   sendId?: string;
   mode: "chat" | "goal";
-  /** kept so the drain appends it with the same provenance it arrived with */
   via?: "api";
-  /** the person who sent it, so the drained line still names them */
   sender?: ResolvedSender;
-  /** who the ledger books the room turn it starts to, captured when sent */
   trigger?: UsageTrigger;
-  /** when the words were queued (epoch ms): drain-time coalescing splits
-   * one sender's items when the gap between them outgrows the window */
+  reaction?: string;
+  /** Bot ids picked from the @ list; the turn that drains this line reads its @names with them. */
+  mentions?: string[];
+  /** What the person pointed at in a member's page; only that page's bot reads it. */
+  pointed?: RoomPick;
   queuedAt: number;
 }
 
@@ -34,7 +30,7 @@ interface ChannelQueueEntry {
   items: ChannelQueueItem[];
 }
 
-const queues = new Map<string, ChannelQueueEntry>(); // threadId -> waiting sends
+const queues = new Map<string, ChannelQueueEntry>();
 
 export function restoreChannelMessages(): void {
   queues.clear();
@@ -42,12 +38,13 @@ export function restoreChannelMessages(): void {
     if (row.status !== "pending") continue;
     const entry = queues.get(row.threadId) ?? { groupId: row.ownerId, items: [] };
     if (entry.groupId !== row.ownerId) throw new Error("queued task belongs to another channel");
+    // a channel line is only ever stamped "api"; "call" belongs to 1:1 rows
+    const { via, ...payload } = row.payload;
     entry.items.push({
-      ...row.payload,
+      ...payload,
+      ...(via === "api" ? { via } : {}),
       id: row.id,
       mode: row.payload.mode ?? "chat",
-      // rows queued before timestamps were kept read as queued at restore
-      // time: the burst was still live when the restart interrupted it
       queuedAt: row.payload.queuedAt ?? Date.now(),
     });
     queues.set(row.threadId, entry);
@@ -69,6 +66,9 @@ export function queueChannelMessage(
     via?: "api";
     sender?: ResolvedSender;
     trigger?: UsageTrigger;
+    reaction?: string;
+    mentions?: string[];
+    pointed?: RoomPick;
   } = {},
 ): QueuedChannelMessage {
   const entry = queues.get(threadId) ?? { groupId, items: [] };
@@ -82,6 +82,9 @@ export function queueChannelMessage(
     via: options.via,
     sender: options.sender,
     trigger: options.trigger,
+    ...(options.reaction ? { reaction: options.reaction } : {}),
+    ...(options.mentions?.length ? { mentions: options.mentions } : {}),
+    ...(options.pointed ? { pointed: options.pointed } : {}),
     queuedAt: Date.now(),
   };
   saveChatFollowup({ id: item.id, kind: "channel", ownerId: groupId, threadId, payload: item });
@@ -90,7 +93,6 @@ export function queueChannelMessage(
   return { id: item.id };
 }
 
-/** Find the stable receipt for an HTTP retry that is still waiting. */
 export function queuedChannelMessage(
   groupId: string,
   threadId: string,
@@ -101,7 +103,15 @@ export function queuedChannelMessage(
   return entry.items.find((item) => item.sendId === sendId) ?? null;
 }
 
-/** Remove one queued message before it starts. */
+/** The waiting line under that id, and the conversation it waits in. */
+export function channelQueueItem(groupId: string, queueId: string): { threadId: string; item: ChannelQueueItem } | null {
+  for (const [threadId, entry] of queues) {
+    const item = entry.groupId === groupId ? entry.items.find((candidate) => candidate.id === queueId) : undefined;
+    if (item) return { threadId, item };
+  }
+  return null;
+}
+
 export function cancelChannelMessage(groupId: string, queueId: string): boolean {
   for (const [threadId, entry] of queues) {
     if (entry.groupId !== groupId) continue;
@@ -115,22 +125,14 @@ export function cancelChannelMessage(groupId: string, queueId: string): boolean 
   return false;
 }
 
-/** A channel thread's queue lifted out of the map while a live steer is
- * attempted against the room's running speaker. */
 export interface HeldChannelQueue {
   groupId: string;
   threadId: string;
   items: ChannelQueueItem[];
 }
 
-/** Atomically lift a channel thread's whole queue out for a live steer. The
- * entry leaves first so a room that settles while the adapter is still
- * thinking can never also drain the same words as a follow-up turn. Only
- * the HEAD can be lifted (the chip the UI offers Steer on): the success
- * path steers and settles the head GROUP — the leading coalesced run — as
- * one, so a request naming a later item must not lift the queue at all (it
- * would steer and delete words the requester did not name). The caller must
- * either restore the held queue or settle its head group. */
+/** The entry leaves first, so a room settling meanwhile can never also drain the same words. Only the head group can be
+ * lifted, and the caller must either restore the held queue or settle its head group. */
 export function holdChannelQueue(groupId: string, threadId: string, queueId: string): HeldChannelQueue | null {
   const entry = queues.get(threadId);
   if (!entry || entry.groupId !== groupId || entry.items[0]?.id !== queueId) return null;
@@ -138,8 +140,7 @@ export function holdChannelQueue(groupId: string, threadId: string, queueId: str
   return { groupId, threadId, items: entry.items };
 }
 
-/** Put a held queue back after the steer was refused. Words queued while the
- * hold was open keep their place behind the restored items. */
+/** Words queued while the hold was open keep their place behind the restored items. */
 export function restoreHeldChannelQueue(held: HeldChannelQueue): void {
   const existing = queues.get(held.threadId);
   if (existing && existing.groupId !== held.groupId) throw new Error("queued task belongs to another channel");
@@ -149,11 +150,7 @@ export function restoreHeldChannelQueue(held: HeldChannelQueue): void {
   });
 }
 
-/** Resolve the held head's reply target through a caller-supplied resolver.
- * The queue is already lifted out of the map here, so a target that cannot
- * be resolved (missing, non-text, empty — state drift between queueing and
- * the steer) must not strand the held words outside it until restart:
- * restore first, then let the error propagate to the request. */
+/** The queue is already lifted, so restore first, then let the error reach the request. */
 export function resolveHeldReplyTarget<T>(
   held: HeldChannelQueue,
   resolve: (threadId: string, replyToId: string) => T,
@@ -168,10 +165,7 @@ export function resolveHeldReplyTarget<T>(
   }
 }
 
-/** Mark a held queue's head delivered — its words were folded into the
- * running turn — the whole head group steers as one — and re-queue the
- * rest for the room's one-coalesced-item-per-turn drain. A restart must
- * not replay the steered words as a fresh follow-up. */
+/** A restart must not replay the steered words as a fresh follow-up. */
 export function settleHeldChannelQueueHead(held: HeldChannelQueue): void {
   const head = headChannelGroup(held.items);
   const rest = held.items.slice(head.length);
@@ -185,19 +179,13 @@ export function settleHeldChannelQueueHead(held: HeldChannelQueue): void {
   });
 }
 
-/**
- * Start at most one follow-up per idle channel: the leading coalesced
- * group — one sender's contiguous in-window burst — runs as ONE item.
- * Starting it synchronously marks the channel working again; its completion
- * calls this drain for the next group. Removing first makes repeated settle
- * notifications harmless.
- */
+/** Removing first makes repeated settle notifications harmless. */
 export function drainChannelMessages(
-  isWorking: (groupId: string) => boolean,
+  isWorking: (groupId: string, threadId: string) => boolean,
   run: (input: { groupId: string; threadId: string; items: ChannelQueueItem[] }) => void | Promise<void>,
 ): void {
   for (const [threadId, entry] of queues) {
-    if (isWorking(entry.groupId)) continue;
+    if (isWorking(entry.groupId, threadId)) continue;
     if (entry.items.length === 0) {
       queues.delete(threadId);
       continue;
@@ -207,7 +195,9 @@ export function drainChannelMessages(
     settleChatFollowups(ids, "dispatching");
     entry.items.splice(0, group.length);
     if (entry.items.length === 0) queues.delete(threadId);
-    const running = run({ groupId: entry.groupId, threadId, items: group });
+    let running: void | Promise<void>;
+    try { running = run({ groupId: entry.groupId, threadId, items: group }); }
+    catch (error) { console.warn("channel-queue: queued dispatch threw", error); running = Promise.reject(error); }
     void Promise.resolve(running).then(
       () => settleChatFollowups(ids, null),
       () => settleChatFollowups(ids, "interrupted"),
@@ -215,31 +205,21 @@ export function drainChannelMessages(
   }
 }
 
-/** The leading run of queued room messages that drain as one item: same
- * sender, same provenance shape, each within the coalescing window of the
- * one before it, bounded at the room-context window — a room turn reads
- * the burst through that window, so a longer run would append lines the
- * responder never sees; the excess stays queued for the next turn. Manual
- * head-steer folds and settles exactly this group into the live turn. */
 export function headChannelGroup(items: readonly ChannelQueueItem[]): ChannelQueueItem[] {
   return drainCoalesceHead(items, coalesceIdentity, (item) => item.queuedAt, DRAIN_COALESCE_MAX_ITEMS);
 }
 
-/** A queued room message's coalescing identity: WHO sent it, with the
- * provenance shape as part of the identity. A person's texts merge only
- * with that same person's; an API send has no person behind it, so it never
- * merges with anything, and neither does a goal (its coordinator routing
- * is per-send). Unattributed local sends (the loopback owner typing in the
- * room composer) are one identity — the transcript already names them all
- * the same. */
+/** An API send has no person behind it and never merges, nor does a goal; unattributed local sends are one identity. */
 function coalesceIdentity(item: ChannelQueueItem): string {
   if (item.via === "api") return `api:${item.id}`;
   if (item.mode !== "chat") return `mode:${item.mode}:${item.id}`;
+  if (item.pointed) return `pointed:${item.id}`;
   if (item.sender) return `person:${item.sender.id ?? item.sender.name}`;
   return "person:local";
 }
 
-/** Test helper. */
-export function _queuedChannelCount(threadId: string): number {
+export function queuedChannelSends(threadId: string): number {
   return queues.get(threadId)?.items.length ?? 0;
 }
+
+export const _queuedChannelCount = queuedChannelSends;

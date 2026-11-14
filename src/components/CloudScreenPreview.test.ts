@@ -34,13 +34,13 @@ describe("cloud screen connection feedback", () => {
 
   it("distinguishes starting the computer from waiting for a frame", () => {
     const html = renderToStaticMarkup(createElement(CloudScreenPreview, { ...defaults, starting: true }));
-    expect(html).toContain("Starting your bot&#x27;s computer…");
+    expect(html).toContain("Starting your bot&#x27;s desktop…");
     expect(html).not.toContain("Connecting to the screen…");
   });
 
   it("surfaces request failures with a retry action instead of a permanent loader", () => {
     const html = renderToStaticMarkup(createElement(CloudScreenPreview, {
-      ...defaults, error: "The computer took too long to send a frame. Try again.",
+      ...defaults, error: "The screen took too long to update. Try again.",
     }));
     expect(html).toContain('role="alert"');
     expect(html).toContain("took too long");

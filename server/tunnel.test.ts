@@ -1,18 +1,21 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { stagedCloudflaredPath } from "../electron/managed-companion-tunnel.mjs";
 import { runLogin, runLogout, runStatus, type CliIo, type CliOptions } from "./cli.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { startControlPlaneStub, type ControlPlaneStub } from "./testing/control-plane-stub.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import {
   cleanupTunnelOrigin,
+  createTunnelAccount,
   createTunnelOrigin,
   describeTunnelAccount,
   describeTunnelState,
+  ensureCloudflared,
   fleetAccess,
   fleetCredential,
   guardianEntry,
@@ -22,6 +25,8 @@ import {
   startTunnel,
   TUNNEL_CREDENTIALS_FILE,
   tunnelAccess,
+  type ManagedTunnelAccess,
+  type RunningTunnel,
 } from "./tunnel.ts";
 
 const posix = process.platform !== "win32";
@@ -36,6 +41,91 @@ function fakeIo(answers: string[]) {
   const io: CliIo = { log: (line) => out.push(line), error: (line) => err.push(line), ask: async () => answers.shift() ?? "" };
   return { io, out, err };
 }
+
+describe("the headless cloudflared connector", () => {
+  let dir: string;
+  let here: string;
+  let dataDir: string;
+  let staged: string;
+  let marker: string;
+  let lines: string[];
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "omb-tunnel-connector-"));
+    here = join(dir, "bundle");
+    dataDir = join(dir, "data");
+    staged = join(dataDir, "dist-native", "cloudflared", `${process.platform}-${process.arch}`, process.platform === "win32" ? "cloudflared.exe" : "cloudflared");
+    marker = join(dir, "prepare-args.json");
+    lines = [];
+    mkdirSync(here, { recursive: true });
+    writeFileSync(join(here, "prepare-cloudflared.js"), `
+      const fs = require("node:fs");
+      const path = require("node:path");
+      fs.writeFileSync(process.env.MARKER, JSON.stringify(process.argv.slice(2)));
+      if (process.env.FAIL_PREPARE) process.exit(41);
+      const root = process.argv[process.argv.indexOf("--root") + 1];
+      const file = path.join(root, "dist-native", "cloudflared", \`${process.platform}-${process.arch}\`, process.platform === "win32" ? "cloudflared.exe" : "cloudflared");
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, "fresh");
+    `);
+  });
+  afterEach(() => removeTempDir(dir));
+
+  it("refreshes a staged connector before returning it", async () => {
+    mkdirSync(dirname(staged), { recursive: true });
+    writeFileSync(staged, "stale");
+
+    const found = await ensureCloudflared({ dataDir, here, env: { PATH: "", MARKER: marker }, log: (line) => lines.push(line) });
+
+    expect(found).toBe(staged);
+    expect(existsSync(marker)).toBe(true);
+    expect(JSON.parse(readFileSync(marker, "utf8"))).toEqual(["--current", "--root", dataDir]);
+    expect(readFileSync(staged, "utf8")).toBe("fresh");
+    expect(lines.join("\n")).not.toMatch(/downloading/i);
+  });
+
+  it("honours an explicit override even when it names the staged path", async () => {
+    mkdirSync(dirname(staged), { recursive: true });
+    writeFileSync(staged, "override");
+    expect(await ensureCloudflared({
+      dataDir, here, env: { PATH: "", MARKER: marker, OMB_CLOUDFLARED_PATH: staged }, log: (line) => lines.push(line),
+    })).toBe(staged);
+    expect(existsSync(marker)).toBe(false);
+    expect(readFileSync(staged, "utf8")).toBe("override");
+    expect(lines).toEqual([]);
+  });
+
+  it("uses a PATH connector without preparing it when none is staged", async () => {
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    const executable = join(bin, process.platform === "win32" ? "cloudflared.exe" : "cloudflared");
+    writeFileSync(executable, "path");
+    expect(await ensureCloudflared({ dataDir, here, env: { PATH: bin, MARKER: marker }, log: (line) => lines.push(line) })).toBe(executable);
+    expect(existsSync(marker)).toBe(false);
+    expect(lines).toEqual([]);
+  });
+
+  it("rejects a failed refresh instead of returning the stale connector", async () => {
+    mkdirSync(dirname(staged), { recursive: true });
+    writeFileSync(staged, "stale");
+    await expect(ensureCloudflared({
+      dataDir, here, env: { PATH: "", MARKER: marker, FAIL_PREPARE: "1" }, log: (line) => lines.push(line),
+    })).rejects.toThrow("the cloudflared refresh failed (exit 41)");
+    expect(JSON.parse(readFileSync(marker, "utf8"))).toEqual(["--current", "--root", dataDir]);
+    expect(readFileSync(staged, "utf8")).toBe("stale");
+  });
+
+  it("prepares a connector when none is found", async () => {
+    expect(await ensureCloudflared({ dataDir, here, env: { PATH: "", MARKER: marker }, log: (line) => lines.push(line) })).toBe(staged);
+    expect(JSON.parse(readFileSync(marker, "utf8"))).toEqual(["--current", "--root", dataDir]);
+    expect(readFileSync(staged, "utf8")).toBe("fresh");
+    expect(lines.join("\n")).toMatch(/downloading/i);
+  });
+
+  it("uses the Windows executable name in the shared staged path", () => {
+    expect(stagedCloudflaredPath({ appPath: dataDir, platform: "win32", arch: "x64" }))
+      .toBe(join(dataDir, "dist-native", "cloudflared", "win32-x64", "cloudflared.exe"));
+  });
+});
 
 describe("tunnel credentials: a private file, and unreadable is not empty", () => {
   let dir: string;
@@ -99,10 +189,9 @@ describe("login and logout against the control plane", () => {
     expect([...stub.installations.values()][0]).toMatchObject({ platform: platformName() });
     if (posix) expect(statSync(join(dir, TUNNEL_CREDENTIALS_FILE)).mode & 0o777).toBe(0o600);
 
-    // status mentions the address without touching the network
     const status = fakeIo([]);
     await runStatus(options(dir, { command: "status" }), status.io);
-    expect(status.out.join("\n")).toContain(`public address: ${stub.endpointUrl}`);
+    expect(status.out.join("\n")).toContain(`MausBot web address: ${stub.endpointUrl}`);
 
     const bye = fakeIo([]);
     expect(await runLogout(options(dir, { command: "logout" }), bye.io)).toBe(0);
@@ -110,6 +199,77 @@ describe("login and logout against the control plane", () => {
     expect(describeTunnelAccount(openTunnelCredentials(dir).read()).email).toBeNull();
     expect(stub.calls).toContain("DELETE /v1/installations/self/endpoint");
     expect(stub.calls).toContain("POST /api/auth/sign-out");
+  });
+
+  it("tells the control plane the release this server runs, and no version at all when it cannot read one", async () => {
+    vi.stubEnv("OMB_APP_VERSION", "0.1.153");
+    expect(await runLogin(options(dir, { email: "milind@example.test" }), fakeIo([stub.otp]).io)).toBe(0);
+    expect([...stub.installations.values()][0]?.appVersion).toBe("0.1.153");
+
+    expect(await runLogout(options(dir, { command: "logout" }), fakeIo([]).io)).toBe(0);
+    stub.installations.clear();
+    vi.stubEnv("OMB_APP_VERSION", "unknown");
+    expect(await runLogin(options(dir, { email: "milind@example.test" }), fakeIo([stub.otp]).io)).toBe(0);
+    expect([...stub.installations.values()][0]?.appVersion).toBeNull();
+  });
+
+  it("a running serve --tunnel re-creates a reclaimed endpoint behind the same address and reconnects", async () => {
+    expect(await runLogin(options(dir, { email: "milind@example.test" }), fakeIo([stub.otp]).io)).toBe(0);
+    const pending = new Map<number, () => void>();
+    let nextTimer = 1;
+    let clock = 1_000_000;
+    const restarts: ManagedTunnelAccess[] = [];
+    const running: RunningTunnel = {
+      address: stub.endpointUrl,
+      state: () => ({ status: "ready", ready: true }),
+      started: Promise.resolve({ status: "ready", ready: true }),
+      restart: async (access) => {
+        restarts.push(access);
+        return { status: "ready", ready: true };
+      },
+      stop: async () => {},
+    };
+    let serving: RunningTunnel | null = null;
+    const account = createTunnelAccount({
+      dataDir: dir,
+      version: "test",
+      recovery: { running: () => serving },
+      clock: {
+        setTimer: (callback, _milliseconds) => {
+          pending.set(nextTimer, callback);
+          return nextTimer++;
+        },
+        clearTimer: (handle) => {
+          pending.delete(handle as number);
+        },
+        now: () => clock,
+      },
+    });
+    const fire = () => {
+      const due = [...pending.values()];
+      pending.clear();
+      for (const callback of due) callback();
+    };
+    try {
+      serving = running;
+      await account.service.restore();
+      expect(stub.calls.filter((call) => call === "GET /v1/installations/self/endpoint")).toHaveLength(1);
+      expect(restarts).toEqual([]);
+
+      // Weeks offline with the process alive; the control plane reclaimed the tunnel.
+      const replacement = stub.reclaim();
+      clock += 30 * 24 * 60 * 60_000;
+      fire();
+      await vi.waitFor(() => expect(restarts).toEqual([{ endpoint: stub.endpointUrl, token: replacement }]));
+      expect(tunnelAccess(openTunnelCredentials(dir).read())).toEqual({ endpoint: stub.endpointUrl, token: replacement });
+      expect(stub.calls.filter((call) => call === "POST /api/auth/email-otp/send-verification-otp")).toHaveLength(1);
+
+      serving = null;
+      account.service.dispose();
+      expect(pending.size).toBe(0);
+    } finally {
+      account.service.dispose();
+    }
   });
 
   it("an unusable control-plane override is a clear error, not a silent default", async () => {
@@ -136,7 +296,6 @@ describe("where the pieces are", () => {
     } finally {
       void removeTempDir(bundled);
     }
-    // a checkout: the source files
     expect(guardianEntry()).toMatch(/managed-companion-guardian-main\.mjs$/);
   });
 
@@ -174,7 +333,6 @@ describe.skipIf(!posix)("startTunnel: guardian, gateway and connector, verified 
       binaryPath: fake,
       guardian: guardian ?? "",
       env: { ...process.env, OMB_TUNNEL_ORIGIN_PORT: String(originPort) },
-      // the public address does not exist here; verify through the gateway instead
       fetchImpl: (input, init) => fetch(String(input).replace(endpoint, `http://127.0.0.1:${originPort}`), init),
       onState: (state) => states.push(state.status),
     });
@@ -185,12 +343,22 @@ describe.skipIf(!posix)("startTunnel: guardian, gateway and connector, verified 
       expect(viaGateway.app).toBe("openmausbot");
       expect(viaGateway.peer).toBeNull();
       // the connector is spawned right after the gateway binds; its shell writes the pid a moment later
-      let connectorPid = 0;
-      for (let tries = 0; tries < 50 && !connectorPid; tries += 1) {
-        connectorPid = existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8").trim()) : 0;
-        if (!connectorPid) await new Promise((r) => setTimeout(r, 100));
-      }
+      const connectorPidOtherThan = async (previous: number) => {
+        let pid = 0;
+        for (let tries = 0; tries < 50 && (!pid || pid === previous); tries += 1) {
+          pid = existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8").trim()) : 0;
+          if (!pid || pid === previous) await new Promise((r) => setTimeout(r, 100));
+        }
+        return pid === previous ? 0 : pid;
+      };
+      const firstPid = await connectorPidOtherThan(0);
+      expect(firstPid).toBeGreaterThan(0);
+      expect((await tunnel.restart({ endpoint, token: `connector-${"t".repeat(60)}` })).status).toBe("ready");
+      expect(Number(readFileSync(pidFile, "utf8").trim())).toBe(firstPid);
+      expect((await tunnel.restart({ endpoint, token: `connector-${"u".repeat(60)}` })).status).toBe("ready");
+      const connectorPid = await connectorPidOtherThan(firstPid);
       expect(connectorPid).toBeGreaterThan(0);
+      expect(() => process.kill(firstPid, 0)).toThrow();
       await tunnel.stop();
       expect(tunnel.state().status).toBe("stopped");
       await new Promise((r) => setTimeout(r, 300));
@@ -214,9 +382,11 @@ describe("a fleet's credential in the environment", () => {
       expect(fleetCredential({ OMB_INSTALLATION_CREDENTIAL: "   " })).toBeNull();
       const credential = stub.seedInstallation("boat-1");
       expect(fleetCredential({ OMB_INSTALLATION_CREDENTIAL: ` ${credential} ` })).toBe(credential);
-      const access = await fleetAccess({ credential, env });
+      const access = await fleetAccess({ credential, env, version: "9.8.7" });
       expect(access).toEqual({ endpoint: stub.endpointUrl, token: stub.connectorToken });
       expect(stub.calls).toContain("POST /v1/installations/self/endpoint");
+      // The fleet created the installation without a version; the endpoint request reports this server's release.
+      expect([...stub.installations.values()].find((inst) => inst.credential === credential)?.appVersion).toBe("9.8.7");
       expect(stub.calls.some((call) => call.includes("/api/auth/"))).toBe(false);
       await expect(fleetAccess({ credential: `omb_install_${"x".repeat(22)}.${"y".repeat(43)}`, env })).rejects.toThrow(/rejected/);
       await expect(fleetAccess({ credential, env: { ...env, OMB_CONTROL_PLANE_URL: "ftp://nope" } })).rejects.toThrow(/OMB_CONTROL_PLANE_URL/);

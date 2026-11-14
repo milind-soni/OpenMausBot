@@ -2,14 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createRequire } from "node:module";
 
-// preload.cjs is renderer-side CommonJS that destructures require("electron")
-// at load time. Node tests run without Electron, so satisfy that require from
-// the require cache before the bridge module is first loaded — the real
-// preload source still executes end to end, only the electron surface is fake.
+// Node tests run without Electron: satisfy preload's require("electron") from the require cache; the real preload still runs.
 const require = createRequire(import.meta.url);
 
-const listeners = new Map(); // channel -> Set<handler>
+const listeners = new Map();
 const exposed = { name: null, api: null };
+const invocations = [];
 const fakeIpcRenderer = {
   on: (channel, handler) => {
     if (!listeners.has(channel)) listeners.set(channel, new Set());
@@ -18,7 +16,7 @@ const fakeIpcRenderer = {
   removeListener: (channel, handler) => {
     listeners.get(channel)?.delete(handler);
   },
-  invoke: async () => undefined,
+  invoke: async (...args) => { invocations.push(args); },
   send: () => undefined,
 };
 const fakeElectron = {
@@ -41,7 +39,6 @@ require.cache[electronEntry] = {
 };
 require("./preload.cjs");
 
-/** Simulate the main process emitting a channel to its subscribers. */
 const emit = (channel, ...args) => {
   for (const handler of listeners.get(channel) ?? []) handler({}, ...args);
 };
@@ -50,16 +47,56 @@ const subscriberCount = (channel) => listeners.get(channel)?.size ?? 0;
 test("exposes the full local-shell bridge on window.ogb", () => {
   assert.equal(exposed.name, "ogb");
   assert.equal(typeof exposed.api, "object");
-  // The settings channel is local-shell only, so it exists on the bridge
-  // exactly when the page is local (no --omb-local-origin in argv here).
   assert.equal(typeof exposed.api.onOpenAppSettings, "function");
 });
 
+test("desktopNotices keeps shown() for a Cloud page on an older release, and asks main nothing", async () => {
+  // 0.1.135's page calls desktopNotices.shown(...) as its Cloud Pro popup opens; without it the page threw and went blank.
+  const before = invocations.length;
+  assert.equal(await exposed.api.desktopNotices.shown("cloud-pro-update-2026-10"), false);
+  assert.deepEqual(invocations.slice(before), []);
+});
+
+test("openLogsFolder asks main for its own logs folder and names no path", async () => {
+  const before = invocations.length;
+  await exposed.api.openLogsFolder("C:\\Windows\\System32");
+  assert.deepEqual(invocations.slice(before), [["desktop:open-logs"]]);
+});
+
+test("copyText forwards only the text over the explicit clipboard:write-text channel", async () => {
+  const before = invocations.length;
+  await exposed.api.copyText("hello");
+  assert.deepEqual(invocations.slice(before), [["clipboard:write-text", "hello"]]);
+  assert.equal("ipcRenderer" in exposed.api, false);
+});
+
+test("browser control forwards a separate per-device capability, not the cloud grant", async () => {
+  const before = invocations.length;
+  await exposed.api.companion.browserControl("phone-1", true);
+  await exposed.api.companion.browserControl("phone-1", false);
+  assert.deepEqual(invocations.slice(before), [
+    ["companion:browser-control", "phone-1", true],
+    ["companion:browser-control", "phone-1", false],
+  ]);
+});
+
+test("the talk bridge asks main over its own channels with only what it understands", async () => {
+  const before = invocations.length;
+  await exposed.api.talkShortcut.state();
+  await exposed.api.talkShortcut.set({ enabled: false, key: "ctrl-shift-space", extra: "x" });
+  await exposed.api.callActive(true);
+  await exposed.api.callActive("yes");
+  assert.deepEqual(invocations.slice(before), [["talk-shortcut:state"], ["talk-shortcut:set", { enabled: false, key: "ctrl-shift-space" }], ["call:active", true], ["call:active", false]]);
+});
+
+test("account prepare asks for the secure address over its own channel and sends nothing from the page", async () => {
+  const before = invocations.length;
+  await exposed.api.companionAccount.prepare({ endpoint: "https://evil.example.test" });
+  assert.deepEqual(invocations.slice(before), [["companion-account:prepare"]]);
+});
+
 test("onOpenAppSettings subscribes to the exact app:open-settings channel, forwards every emit, and unsubscribes cleanly", () => {
-  // Channel contract: electron/main.mjs answers the Preferences… item with
-  // webContents.send("app:open-settings"). Listening on any other name would
-  // leave the shortcut inert while every menu-construction test still passes,
-  // so pin the literal on the receiving side too.
+  // main.mjs sends "app:open-settings"; a different name would leave the shortcut inert while menu tests still pass.
   const cbCalls = [];
   const unsubscribe = exposed.api.onOpenAppSettings(() => cbCalls.push(1));
   assert.equal(subscriberCount("app:open-settings"), 1);
@@ -114,6 +151,22 @@ test("native Settings requests accept only the fixed organisation section, Cloud
   emit("app:open-settings", ["cloud"]);
   assert.deepEqual(calls, ["organization", "cloud", "cloud-settings", undefined, undefined, undefined, undefined, undefined]);
   unsubscribe();
+});
+
+test("a Settings page name from Switch to This computer reaches Settings, also before React subscribes", async () => {
+  const calls = [];
+  const unsubscribe = exposed.api.onOpenAppSettings(section => calls.push(section));
+  try {
+    emit("app:open-settings", "app");
+    emit("app:open-settings", "account");
+    emit("app:open-settings", "phone");
+  } finally { unsubscribe(); }
+  assert.deepEqual(calls, ["app", "account", "phone"]);
+  emit("app:open-settings", "account");
+  const later = exposed.api.onOpenAppSettings(section => calls.push(section));
+  await Promise.resolve();
+  assert.deepEqual(calls.slice(3), ["account"]);
+  later();
 });
 
 test("a Cloud link arriving before React subscriptions is delivered exactly once after mount", async () => {

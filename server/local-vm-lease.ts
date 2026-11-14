@@ -4,10 +4,7 @@ export interface LocalVmLeaseRecord {
   expiresAt: number;
 }
 
-/** A short, renewable ownership fence for one Local VM desktop.
- * Runtime events keep an active turn's lease alive; a dead provider cannot
- * pin the VM forever. All methods are synchronous so lifecycle routes and
- * turn dispatch can claim their side of the race before either awaits. */
+/** Synchronous, so lifecycle routes and turn dispatch claim their side of the race before either awaits. */
 export class LocalVmLease {
   private record: LocalVmLeaseRecord | null = null;
   private readonly ttlMs: number;
@@ -47,10 +44,6 @@ export class LocalVmLease {
   }
 }
 
-/** Independent lease lanes keyed by an already-validated Local VM target.
- * Shared mode uses one key; per-bot mode uses one digest-derived key per bot,
- * so separate desktops never block each other while each desktop remains a
- * strict singleton. */
 export class LocalVmLeasePool {
   private readonly leases = new Map<string, LocalVmLease>();
   private readonly ttlMs: number;
@@ -69,7 +62,6 @@ export class LocalVmLeasePool {
     return lease;
   }
 
-  /** Drop an idle per-target lane after its owning bot and VM are gone. */
   forget(targetKey: string): void {
     this.leases.delete(targetKey);
   }

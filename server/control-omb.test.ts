@@ -180,8 +180,6 @@ describe("control-omb command mapping", () => {
   });
 
   it("treats edit as mutating, so it cannot reach a silently discovered app", async () => {
-    // it forks a live conversation and starts a turn; it must never land on
-    // whatever instance happened to be running
     await expect(runControlOmb(["edit", "--bot", "b", "--message", "m", "--text", "x"], {
       callTool: vi.fn() as any,
       env: {},
@@ -208,7 +206,9 @@ describe("control-omb command mapping", () => {
     await expect(runControlOmb(["wait", "--bot", "bot-1", "--timeout", "0"], {
       callTool: callTool as any,
       env: {},
-    })).rejects.toThrow("--timeout must be an integer from 1 to 120");
+    })).rejects.toThrow("--timeout must be a duration from 1s to 24h");
+    await expect(runControlOmb(["wait", "--bot", "bot-1", "--timeout", "25h"], { callTool: callTool as any, env: {} }))
+      .rejects.toThrow("--timeout must be a duration from 1s to 24h");
     expect(callTool).not.toHaveBeenCalled();
   });
 
@@ -272,7 +272,6 @@ describe("control-omb isolated verification loop", () => {
       expect(fixtureEnv).not.toHaveProperty("OMB_SKILLS_DIR");
       expect(fixtureEnv).not.toHaveProperty("XAI_API_KEY");
       expect(JSON.stringify(fixtureEnv)).not.toContain("must-not-reach-the-fixture");
-      // The fake engine's own knobs are the one thing that crosses.
       expect(fixtureEnv.FAKE_CLAUDE_PROBE).toBe("fixture-scripting-knob");
     } finally {
       await session.close();
@@ -322,8 +321,6 @@ describe("control-omb isolated verification loop", () => {
         .filter((message: { kind?: string }) => message.kind === "activity")
         .map((message: { tool?: { name?: string; ok?: boolean } }) => ({ name: message.tool?.name, ok: message.tool?.ok }));
       expect(tools).toEqual([{ name: "Bash", ok: true }, { name: "Bash", ok: false }]);
-      // The model-facing control transcript stays compact. The renderer's
-      // own HTTP hydration path, not that projection, carries display details.
       for (const message of transcript.messages.filter((message: { tool?: unknown }) => message.tool)) {
         expect(message.tool).not.toHaveProperty("input");
         expect(message.tool).not.toHaveProperty("output");

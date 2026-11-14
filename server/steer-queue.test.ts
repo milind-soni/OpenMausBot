@@ -1,16 +1,6 @@
-// Queue-and-steer for busy 1:1 bots, at two levels:
-//
-// Unit: the steer-queue module against a fake store — queue bookkeeping,
-// the drain-once property, and the joined single-prompt shape.
-//
-// e2e: the real harness server with the grokAgent driver on the fake ACP
-// CLI in echo-gated mode, whose turns stay open until a gate file exists —
-// a deterministic busy window. The echo reply carries the FULL prompt
-// (system + turn text), which pins both what a drained turn was sent (the
-// queued texts separated by a blank line, in ONE turn) and what it was not (the
-// webhook untrusted-data paragraph an attended turn must never get).
+// The e2e half runs the fake ACP CLI in echo-gated mode: turns stay open until a gate file exists, and the echo carries the full prompt.
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -18,11 +8,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { saveChatFollowup } from "./message-db.ts";
+import { killCliTree } from "./procs.ts";
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
   hasQueuedSteeredMessages,
   holdSteeredQueue,
+  isSteeredMessageQueued,
   onSteeredQueueChange,
   queuedThreadPosition,
   queuedSteerSnapshot,
@@ -35,13 +27,12 @@ import {
   type SteerStore,
 } from "./steer-queue.ts";
 import type { BotRecord, Message } from "./store.ts";
+import { removeTempDir } from "./testing/cleanup.ts";
+import { freePortBlock } from "./testing/ports.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
-const BASE = `http://127.0.0.1:${PORT}`;
 
-// ── unit: the queue module against a fake store ────────────────────────
 function fakeBot(id: string, threadId: string, busy: boolean): BotRecord {
   return {
     id,
@@ -80,6 +71,37 @@ function fakeStore(bots: BotRecord[]): SteerStore & { messages: Message[] } {
 }
 
 describe("steer-queue module", () => {
+  it("keeps readable citation prompts byte-for-byte through queue, hold, and drain", () => {
+    const bot = fakeBot("bot-citation-queue", "thread-citation-queue", true);
+    const store = fakeStore([bot]);
+    const prompt = '<!--omb-citation-v1:fixture-->\n> Quoted message:\n> const café = "🐭";\n\nComment:\nExplain this';
+    const queued = queueSteeredMessage(bot.id, bot.threadId, prompt);
+    const held = holdSteeredQueue(bot.id, bot.threadId, queued.id)!;
+    expect(held.items[0]).toMatchObject({ text: prompt, prompt });
+    restoreHeldSteeredQueue(held);
+    bot.busy = false;
+    const run = vi.fn();
+    drainSteeredMessages(store, run);
+    expect(run.mock.calls[0][2]).toBe(prompt);
+    expect(store.messages[0].text).toBe(prompt);
+  });
+
+  // After a crash the first coordinator read opens the job runtime, whose restart changes drain the queue from inside it.
+  it("drains a send once when the block check re-enters the drain", () => {
+    const bot = fakeBot("bot-reentrant-drain", "thread-reentrant-drain", false);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    queueSteeredMessage(bot.id, bot.threadId, "Run me exactly once");
+    let nested = false;
+    const isBlocked = (): boolean => {
+      if (!nested) { nested = true; drainSteeredMessages(store, run, isBlocked); }
+      return false;
+    };
+    drainSteeredMessages(store, run, isBlocked);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(store.messages.filter((message) => message.role === "user")).toHaveLength(1);
+  });
+
   it.each([undefined, "capacity", "group-turn"] as const)("detects an exact owner's queued correction with reason %s", (reason) => {
     const botId = `correction-${reason ?? "busy"}`;
     const threadId = `${botId}-thread`;
@@ -98,8 +120,6 @@ describe("steer-queue module", () => {
     queueSteeredMessage(botId, "thread-room", "waiting for the room", { reason: "group-turn" });
     expect(queuedThreadPosition(botId, "thread-slot")).toBe(1);
     expect(queuedThreadPosition(botId, "thread-room")).toBe(2);
-    // a correction held only by its own thread's turn is not in the bot-wide
-    // line: the thread is busy, not queued behind a sibling
     queueSteeredMessage(botId, "thread-own", "waiting on its own turn");
     expect(queuedThreadPosition(botId, "thread-own")).toBeNull();
     expect(queuedThreadPosition("other-bot", "thread-slot")).toBeNull();
@@ -121,12 +141,60 @@ describe("steer-queue module", () => {
     expect(run.mock.calls[0][3].peerAsk).toEqual(peerAsk);
   });
 
+  it("keeps where a self-opened thread's work started through persistence and a capacity wait", () => {
+    const bot = fakeBot("bot-self-origin", "thread-self-origin", true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    const peerAsk = { botId: bot.id, name: "Planner" };
+    const origin = { kind: "user", request: "Review each open PR" } as const;
+    queueSteeredMessage(bot.id, bot.threadId, "Review PR 12", { reason: "capacity", peerAsk, origin });
+    saveChatFollowup({ id: "forged-origin", kind: "bot", ownerId: bot.id, threadId: "thread-forged-origin",
+      payload: { text: "x", peerAsk, origin: { kind: "user", request: "" } as never } });
+    restoreSteeredMessages();
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    const turn = (threadId: string, at = 0) => run.mock.calls.filter((call) => call[1] === threadId)[at]!;
+    expect(turn(bot.threadId)[6].origin).toEqual(origin);
+    expect(turn("thread-forged-origin")[6].origin).toBeUndefined();
+    expect(store.messages.find((message) => message.text === "Review PR 12")?.peerAsk).toEqual(peerAsk);
+    queueSteeredMessage(bot.id, bot.threadId, "Review PR 13", { peerAsk, origin });
+    queueSteeredMessage(bot.id, bot.threadId, "Check the logs", { peerAsk });
+    drainSteeredMessages(store, run);
+    expect(turn(bot.threadId, 1)[2]).toBe("Review PR 13");
+    drainSteeredMessages(store, run);
+    expect(turn(bot.threadId, 2)[2]).toBe("Check the logs");
+    expect(turn(bot.threadId, 2)[6].origin).toBeUndefined();
+  });
+
+  it("answers Problems to look at reports that waited as one turn, whichever bot broke, through a restart", () => {
+    const chief = fakeBot("bot-incidents-chief", "thread-incidents-reports", true);
+    const store = fakeStore([chief]);
+    const run = vi.fn();
+    const ada = { botId: "bot-ada", name: "Ada", unattended: true, incident: { threadId: "thread-ada" } };
+    const ben = { botId: "bot-ben", name: "Ben", unattended: true, incident: { threadId: "thread-ben", notified: true } };
+    queueSteeredMessage(chief.id, chief.threadId, "Ada's report", { unattended: true, peerAsk: ada });
+    queueSteeredMessage(chief.id, chief.threadId, "Ben's report", { unattended: true, peerAsk: ben });
+    queueSteeredMessage(chief.id, chief.threadId, "what happened?");
+    restoreSteeredMessages();
+    const heads: unknown[] = [];
+    chief.busy = false;
+    drainSteeredMessages(store, run, (_botId, _threadId, head) => { heads.push(head.peerAsk); return false; });
+    expect(heads).toEqual([ada]);
+    expect(store.messages.map((message) => [message.text, message.peerAsk])).toEqual([["Ada's report", ada], ["Ben's report", ben]]);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0][2]).toBe("Ada's report\n\nBen's report");
+    expect(run.mock.calls[0][5]).toBe(true);
+    drainSteeredMessages(store, run);
+    expect(store.messages.at(-1)).toMatchObject({ text: "what happened?" });
+    expect(store.messages.at(-1)?.peerAsk).toBeUndefined();
+  });
+
   it("keeps who sent each queued message, so a steer of the held queue can still name them", () => {
     const botId = "bot-sender-held";
     const threadId = "thread-sender-held";
     const theirs = queueSteeredMessage(botId, threadId, "from the paired person", { sender: { name: "Priya" } });
     queueSteeredMessage(botId, threadId, "from the owner");
-    restoreSteeredMessages(); // a restart reads the name back from the durable row
+    restoreSteeredMessages();
     const held = holdSteeredQueue(botId, threadId, theirs.id);
     expect(held?.items.map((item) => item.sender)).toEqual([{ name: "Priya" }, undefined]);
     settleHeldSteeredQueue(held!);
@@ -140,8 +208,6 @@ describe("steer-queue module", () => {
     queueSteeredMessage(bot.id, bot.threadId, "from the paired person", { sender: { name: "Priya" } });
     bot.busy = false;
     drainSteeredMessages(store, run);
-    // M2: different senders never coalesce — the owner's turn runs first
-    // and Priya's words wait for the next settle.
     expect(store.messages.map((message) => [message.text, message.sender])).toEqual([
       ["from the owner", undefined],
     ]);
@@ -150,10 +216,119 @@ describe("steer-queue module", () => {
       ["from the owner", undefined],
       ["from the paired person", { name: "Priya" }],
     ]);
-    // the line handed to each turn is the stamped one, not a copy without it
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1][3].sender).toEqual({ name: "Priya" });
     expect(run.mock.calls[0][3].sender).toBeUndefined();
+  });
+
+  it("keeps a call's via on the message it drains", () => {
+    const bot = fakeBot("bot-via-drain", "thread-via-drain", true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    queueSteeredMessage(bot.id, bot.threadId, "typed while the bot worked");
+    queueSteeredMessage(bot.id, bot.threadId, "what is on my calendar", { via: "call" });
+    restoreSteeredMessages();
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    drainSteeredMessages(store, run);
+    expect(store.messages.map((message) => [message.text, message.via])).toEqual([
+      ["typed while the bot worked", undefined],
+      ["what is on my calendar", "call"],
+    ]);
+    expect("via" in store.messages[0]).toBe(false);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[1][3].via).toBe("call");
+  });
+
+  it("keeps a call's id on the line it drains, also after a restart", () => {
+    const bot = fakeBot("bot-call-id-drain", "thread-call-id-drain", true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    queueSteeredMessage(bot.id, bot.threadId, "typed while the bot worked");
+    queueSteeredMessage(bot.id, bot.threadId, "what is on my calendar", { via: "call", callId: "call-1" });
+    restoreSteeredMessages();
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    drainSteeredMessages(store, run);
+    expect(store.messages.map((message) => [message.text, message.via, message.callId])).toEqual([
+      ["typed while the bot worked", undefined, undefined],
+      ["what is on my calendar", "call", "call-1"],
+    ]);
+    expect("callId" in store.messages[0]!).toBe(false);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[0]![3].callId).toBeUndefined();
+    expect(run.mock.calls[1]![3].callId).toBe("call-1");
+  });
+
+  it.each([
+    ["a spoken line, then a typed one", "spoken-typed", { via: "call", callId: "call-1" }, {}],
+    ["a typed line, then a spoken one", "typed-spoken", {}, { via: "call", callId: "call-1" }],
+    ["a spoken line with no call id (an older build's row), then a typed one", "legacy-typed", { via: "call" }, {}],
+  ] as const)("drains %s as two turns", (_what, slug, first, second) => {
+    const bot = fakeBot(`bot-call-split-${slug}`, `thread-call-split-${slug}`, true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    queueSteeredMessage(bot.id, bot.threadId, "first words", first);
+    queueSteeredMessage(bot.id, bot.threadId, "second words", second);
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0]![2]).toBe("first words");
+    drainSteeredMessages(store, run);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[1]![2]).toBe("second words");
+    expect(store.messages.map((message) => message.text)).toEqual(["first words", "second words"]);
+  });
+
+  it("where several people write, runs each person's lines as their own turn, the asker's own addition first, and names each chip", () => {
+    const bot = fakeBot("bot-several", "thread-several", true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    const tom = { name: "Tom", id: "p_tom" }, priya = { name: "Priya", id: "p_priya" };
+    queueSteeredMessage(bot.id, bot.threadId, "what is due", { sender: tom, first: true });
+    queueSteeredMessage(bot.id, bot.threadId, "and the PR", { sender: priya, first: true, aheadOfOthers: "p_priya" });
+    expect(queuedSteerSnapshot((id) => id === bot.id, undefined, (_threadId, sender) => sender)[bot.threadId]!.map((chip) => chip.sender?.name)).toEqual(["Priya", "Tom"]);
+    expect(queuedSteerSnapshot((id) => id === bot.id)[bot.threadId]!.some((chip) => "sender" in chip)).toBe(false);
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    drainSteeredMessages(store, run);
+    expect(run.mock.calls.map((call) => [call[2], call[6].sender?.name])).toEqual([["and the PR", "Priya"], ["what is due", "Tom"]]);
+  });
+
+  it("drains one call's spoken lines as one turn, and the next call's as its own", () => {
+    const bot = fakeBot("bot-call-groups", "thread-call-groups", true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    queueSteeredMessage(bot.id, bot.threadId, "check the build", { via: "call", callId: "call-1" });
+    queueSteeredMessage(bot.id, bot.threadId, "and the tests", { via: "call", callId: "call-1" });
+    queueSteeredMessage(bot.id, bot.threadId, "then deploy", { via: "call", callId: "call-2" });
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    drainSteeredMessages(store, run);
+    expect(run.mock.calls.map((call) => call[2])).toEqual(["check the build\n\nand the tests", "then deploy"]);
+    expect(store.messages.map((message) => [message.text, message.callId])).toEqual([
+      ["check the build", "call-1"],
+      ["and the tests", "call-1"],
+      ["then deploy", "call-2"],
+    ]);
+  });
+
+  it("never puts a call id on a line that was not spoken", () => {
+    const bot = fakeBot("bot-call-id-stray", "thread-call-id-stray", true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    queueSteeredMessage(bot.id, bot.threadId, "typed with a stray id", { callId: "call-stray" });
+    saveChatFollowup({
+      id: "followup-stray-call-id", kind: "bot", ownerId: bot.id, threadId: bot.threadId,
+      payload: { text: "typed by another build", prompt: "typed by another build", callId: "call-stray", queuedAt: Date.now() },
+    });
+    restoreSteeredMessages();
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    expect(store.messages.map((message) => [message.text, message.via, message.callId])).toEqual([
+      ["typed with a stray id", undefined, undefined],
+      ["typed by another build", undefined, undefined],
+    ]);
   });
 
   it("still loads and drains a durable row written before senders were kept", () => {
@@ -218,15 +393,13 @@ describe("steer-queue module", () => {
     const store = fakeStore([bot]);
     const run = vi.fn();
     const queued = queueSteeredMessage(bot.id, bot.threadId, "steer me");
-    queueSteeredMessage("bot-hold", "thread-hold", "second"); // same bot, same thread
+    queueSteeredMessage("bot-hold", "thread-hold", "second");
     try {
       expect(holdSteeredQueue("other-bot", bot.threadId, queued.id)).toBeNull();
       expect(holdSteeredQueue(bot.id, bot.threadId, "not-a-queue-id")).toBeNull();
       expect(holdSteeredQueue(bot.id, "thread-elsewhere", queued.id)).toBeNull();
-      expect(_queuedCount(bot.threadId)).toBe(2); // untouched by failed holds
+      expect(_queuedCount(bot.threadId)).toBe(2);
 
-      // the lift is atomic: while held, a settle draining queues cannot also
-      // dispatch these words as a follow-up turn
       const held = holdSteeredQueue(bot.id, bot.threadId, queued.id);
       expect(held?.items.map((item) => item.text)).toEqual(["steer me", "second"]);
       expect(_queuedCount(bot.threadId)).toBe(0);
@@ -265,7 +438,7 @@ describe("steer-queue module", () => {
     const second = queueSteeredMessage(bot.id, bot.threadId, "also folded");
     const held = holdSteeredQueue(bot.id, bot.threadId, first.id)!;
     settleHeldSteeredQueue(held);
-    restoreSteeredMessages(); // restart: only still-pending rows come back
+    restoreSteeredMessages();
     expect(_queuedCount(bot.threadId)).toBe(0);
     expect(queuedSteerSnapshot(() => true)).toEqual({});
     cancelSteeredMessage(bot.id, second.id);
@@ -283,7 +456,7 @@ describe("steer-queue module", () => {
       expect(snapshots).toHaveLength(2);
       expect(cancelSteeredMessage(bot.id, second.id)).toBe(true);
       bot.busy = false;
-      expect(() => drainSteeredMessages(fakeStore([bot]), () => { throw new Error("failed dispatch"); })).toThrow("failed dispatch");
+      expect(() => drainSteeredMessages(fakeStore([bot]), () => { throw new Error("failed dispatch"); })).not.toThrow();
       expect(snapshots).toEqual([
         { [bot.threadId]: [{ queueId: first.id, text: "keep" }] },
         { [bot.threadId]: [{ queueId: first.id, text: "keep" }, { queueId: second.id, text: "cancel" }] },
@@ -314,7 +487,7 @@ describe("steer-queue module", () => {
     const blocked = vi.fn(() => true);
     queueSteeredMessage(bot.id, bot.threadId, "after handshake");
     drainSteeredMessages(store, run, blocked);
-    expect(blocked).toHaveBeenCalledWith(bot.id, bot.threadId);
+    expect(blocked).toHaveBeenCalledWith(bot.id, bot.threadId, expect.anything());
     expect(run).not.toHaveBeenCalled();
     expect(store.messages).toHaveLength(0);
     expect(_queuedCount(bot.threadId)).toBe(1);
@@ -390,10 +563,7 @@ describe("steer-queue module", () => {
     const [botId, threadId, prompt, userMessage] = run.mock.calls[0];
     expect(botId).toBe("bot-b");
     expect(threadId).toBe("thread-b");
-    // ONE turn for the whole burst, with a Markdown block boundary between
-    // messages so a trailing attachment tag remains standalone.
     expect(prompt).toBe("first note\n\nsecond note");
-    // appended at drain, last message so startTurn adds nothing new
     expect(store.messages.map((m) => m.text)).toEqual(["first note", "second note"]);
     expect(store.messages.map((m) => m.queueId)).toEqual([first.id, second.id]);
     expect(userMessage.text).toBe("second note");
@@ -401,9 +571,25 @@ describe("steer-queue module", () => {
     expect(store.messages.every((m) => !m.queued)).toBe(true);
     expect(_queuedCount("thread-b")).toBe(0);
 
-    // drain-once: a second settle finds nothing and fires nothing
     drainSteeredMessages(store, run);
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells whether one send still waits in its thread's queue", () => {
+    const bot = fakeBot("bot-waiting", "thread-waiting", true);
+    const store = fakeStore([bot]);
+    const kept = queueSteeredMessage(bot.id, bot.threadId, "keep waiting");
+    const edited = queueSteeredMessage(bot.id, bot.threadId, "edited away");
+    expect(isSteeredMessageQueued(bot.id, bot.threadId, kept.id)).toBe(true);
+    expect(isSteeredMessageQueued("other-bot", bot.threadId, kept.id)).toBe(false);
+    expect(isSteeredMessageQueued(bot.id, "other-thread", kept.id)).toBe(false);
+    expect(cancelSteeredMessage(bot.id, edited.id, bot.threadId)).toBe(true);
+    expect(isSteeredMessageQueued(bot.id, bot.threadId, edited.id)).toBe(false);
+    expect(isSteeredMessageQueued(bot.id, bot.threadId, kept.id)).toBe(true);
+    bot.busy = false;
+    drainSteeredMessages(store, vi.fn());
+    expect(store.messages.map((m) => m.queueId)).toEqual([kept.id]);
+    expect(isSteeredMessageQueued(bot.id, bot.threadId, kept.id)).toBe(false);
   });
 
   it("drops a cancelled message so drain does not send it", () => {
@@ -502,10 +688,10 @@ describe("steer-queue module", () => {
 
 });
 
-// ── e2e: the real server on the gated fake ACP fleet ───────────────────
 describe("steer-queue e2e (fake ACP fleet)", () => {
   let child: ChildProcess;
   let home: string;
+  let base = "";
   let stderr = "";
   let drainGate: string;
   let stopGate: string;
@@ -514,10 +700,10 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
   let receiptGate: string;
   let dispatchGate: string;
   let roomGate: string;
+  let roomRpcAppend: string;
   const evidence: unknown[] = [];
   let evidencePath: string;
 
-  /** the flat command payloads these tests POST/PATCH */
   type ApiBody = Record<
     string,
     | string
@@ -528,7 +714,7 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
   >;
 
   const api = async (method: string, path: string, body?: ApiBody): Promise<{ status: number; body: any }> => {
-    const res = await fetch(`${BASE}${path}`, {
+    const res = await fetch(`${base}${path}`, {
       method,
       headers: body ? { "content-type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
@@ -572,9 +758,9 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
     receiptGate = join(home, "gates", "receipt-provider.gate");
     dispatchGate = join(home, "gates", "early-dispatch.gate");
     roomGate = join(home, "gates", "room.gate");
+    roomRpcAppend = join(home, "gates", "room.rpc-append");
     evidencePath = join(tmpdir(), `omb-steer-evidence-${Date.now()}-${process.pid}.json`);
-    // The CLI and harness remain real. Delay only the adapter's returned
-    // acknowledgment, reproducing completion before sendTurn resolves.
+    // Delay only the adapter's returned acknowledgment, reproducing completion before sendTurn resolves.
     const prelude = join(home, "delayed-dispatch.mjs");
     writeFileSync(prelude, [
       `import { ProviderRegistry } from ${JSON.stringify(pathToFileURL(join(SERVER_DIR, "harness/registry.ts")).href)};`,
@@ -606,8 +792,7 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
       '  receipt.adapter.sendTurn = async (turn) => {',
       '    const replacement = ++calls === 2;',
       '    if (replacement) {',
-      // Replay only a completion from this fixture's old real provider turn,
-      // after the replacement has installed its generation but before its ACK.
+      // Replay a completion from the old provider turn after the replacement installed its generation but before its ACK.
       '      publish.call(receiptBus, { ...oldCompletion, eventId: randomUUID(), createdAt: new Date().toISOString() });',
       `      writeFileSync(${JSON.stringify(`${receiptGate}.late`)}, "old completion delivered");`,
       `      while (!existsSync(${JSON.stringify(`${receiptGate}.dispatch`)})) await new Promise(resolve => setTimeout(resolve, 20));`,
@@ -637,9 +822,7 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
             environment: { FAKE_ACP_MODE: "echo-gated", FAKE_ACP_GATE_FILE: receiptGate },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
-          // the RPC dump lets the interrupt test wait for session/prompt to
-          // be in flight — interrupting earlier would be a no-op on a turn
-          // the driver has not registered yet
+          // Wait for session/prompt to be in flight: an earlier interrupt is a no-op on a turn the driver has not registered.
           steerStop: {
             driver: "grokAgent",
             environment: {
@@ -649,21 +832,22 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
             },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
-          // a room turn for the group-turn queue test: one gate holds the
-          // room's turn open while a 1:1 message arrives
+          // One gate holds the room's turn open while a 1:1 message arrives.
           steerRoom: {
             driver: "grokAgent",
-            environment: { FAKE_ACP_MODE: "echo-gated", FAKE_ACP_GATE_FILE: roomGate },
+            environment: { FAKE_ACP_MODE: "echo-gated", FAKE_ACP_GATE_FILE: roomGate, FAKE_ACP_RPC_APPEND_FILE: roomRpcAppend },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
         },
       }),
     );
 
+    const port = await freePortBlock([0, 1]);
+    base = `http://127.0.0.1:${port}`;
     const env: NodeJS.ProcessEnv = {
       HOME: home,
       USERPROFILE: home,
-      OMB_PORT: String(PORT),
+      OMB_PORT: String(port),
     };
     if (process.env.PATH) env.PATH = process.env.PATH;
     // Without SystemRoot, winsock fails to initialize in the child.
@@ -678,10 +862,9 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
     const deadline = Date.now() + 20_000;
     for (;;) {
       try {
-        const res = await fetch(`${BASE}/api/health`);
+        const res = await fetch(`${base}/api/health`);
         if (res.ok) break;
       } catch {
-        /* not up yet */
       }
       if (Date.now() > deadline) throw new Error(`server never came up. stderr:\n${stderr}`);
       if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}. stderr:\n${stderr}`);
@@ -690,15 +873,12 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
   }, 30_000);
 
   afterAll(async () => {
-    child?.kill("SIGTERM");
-    await new Promise<void>((resolve) => {
-      if (!child || child.exitCode !== null) return resolve();
-      child.on("close", () => resolve());
-      setTimeout(() => (child.kill("SIGKILL"), resolve()), 5_000).unref?.();
-    });
-    writeFileSync(evidencePath, JSON.stringify({ url: BASE, fixtureHome: home, requests: evidence, stderr }, null, 2));
+    // Windows' SIGTERM ends only the server, so its engines would keep their working folders in the home open:
+    // the whole tree goes, and is gone, before the home is deleted.
+    if (child) await killCliTree(child, 15_000);
+    writeFileSync(evidencePath, JSON.stringify({ url: base, fixtureHome: home, requests: evidence, stderr }, null, 2));
     console.info(JSON.stringify({ evidencePath }));
-    rmSync(home, { recursive: true, force: true });
+    if (home) await removeTempDir(home);
   });
 
   it("drains exactly once after completion precedes the dispatch acknowledgment", async () => {
@@ -752,13 +932,11 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
     async () => {
       const bot = await newBot("steer", "Steerable");
 
-      // the first send starts a turn that stays open until the gate exists
       const first = await api("POST", `/api/bots/${bot.id}/messages`, { text: "first task please" });
       expect(first.status).toBe(202);
       expect(first.body.queued).toBeUndefined();
       expect((await botById(bot.id)).busy).toBe(true);
 
-      // sends while busy stay off the transcript so they cannot become the leaf
       const second = await api("POST", `/api/bots/${bot.id}/messages`, { text: "steer two" });
       expect(second.status).toBe(202);
       expect(second.body).toMatchObject({ ok: true, queued: true });
@@ -770,9 +948,8 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
       expect(snapshot.messages.filter((m: any) => m.role === "user").map((m: any) => m.text)).toEqual([
         "first task please",
       ]);
-      expect(echoes(snapshot)).toHaveLength(0); // nothing has answered yet
+      expect(echoes(snapshot)).toHaveLength(0);
 
-      // open the gate: turn 1 settles, and the queue drains into ONE turn
       writeFileSync(drainGate, "open");
       await until(async () => {
         snapshot = await botById(bot.id);
@@ -780,22 +957,15 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
       }, "the queued turn");
 
       const replies = echoes(snapshot);
-      // exactly one drained turn for two queued messages — not one each
       expect(replies).toHaveLength(2);
       expect(replies[0].text).toContain("first task please");
-      // the drained prompt keeps a Markdown block boundary between messages
       expect(replies[1].text).toContain("steer two\n\nsteer three");
-      // ...and it is an ordinary attended turn: no webhook untrusted-data
-      // framing, no rewind replay wrapper
-      expect(replies[1].text).not.toContain("authenticated external webhook");
+      expect(replies[1].text).not.toContain("authenticated outside event");
       expect(replies[1].text).not.toContain("[The user rewound");
-      // drain appends the queued lines after the first turn's reply
       const userTexts = snapshot.messages.filter((m: any) => m.role === "user").map((m: any) => m.text);
       expect(userTexts).toEqual(["first task please", "steer two", "steer three"]);
       expect(snapshot.messages.some((m: any) => m.queued)).toBe(false);
 
-      // an idle send with an empty queue runs one normal turn — the drain
-      // adds nothing behind it
       const followUp = await api("POST", `/api/bots/${bot.id}/messages`, { text: "plain follow-up" });
       expect(followUp.body.queued).toBeUndefined();
       await until(async () => {
@@ -819,7 +989,6 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
       const queued = await api("POST", `/api/bots/${bot.id}/messages`, { text: "after stop please" });
       expect(queued.body.queued).toBe(true);
 
-      // wait for the prompt to be genuinely in flight before stopping it
       await until(async () => {
         try {
           return readFileSync(stopRpcDump, "utf8").includes("session/prompt");
@@ -829,9 +998,6 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
       }, "the hung prompt");
       expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
 
-      // the interrupt settles the hung turn (ACP cancel grace), and the
-      // drain consumes the queue: its message loses the queued flag while
-      // the steered turn waits on the still-missing gate
       await until(async () => {
         const snapshot = await botById(bot.id);
         const message = snapshot.messages.find((m: any) => m.text === "after stop please");
@@ -845,7 +1011,6 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
         return !snapshot.busy && echoes(snapshot).length >= 1;
       }, "the steered turn");
 
-      // the interrupted turn produced no reply; the steered one answers
       const replies = echoes(snapshot);
       expect(replies).toHaveLength(1);
       expect(replies[0].text).toContain("after stop please");
@@ -854,12 +1019,20 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
   );
 
   it(
-    "queues a person's 1:1 message behind the bot's room turn instead of bouncing it",
+    "starts a person's 1:1 turn while the bot's room turn is still open",
     async () => {
       const bot = await newBot("steerRoom", "RoomBusy");
+      const roomPrompts = () => {
+        try {
+          return readFileSync(roomRpcAppend, "utf8").trim().split("\n")
+            .map((line) => JSON.parse(line))
+            .filter((entry: any) => entry.method === "session/prompt");
+        } catch {
+          return [];
+        }
+      };
 
-      // a one-member room whose message starts the room turn; the turn
-      // stays open until the gate exists, so the room holds the bot
+      // The room turn stays open until the gate exists, so the room holds the bot.
       const room = (await api("POST", "/api/groups", {
         name: "Ops Room",
         memberIds: [bot.id],
@@ -867,30 +1040,30 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
       })).body.group;
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "room work" })).status).toBe(202);
       await until(async () => (await groupById(room.id))?.working === true, "the room turn to start");
+      await until(() => Promise.resolve(roomPrompts().length === 1), "the room prompt in flight");
 
-      // the person's 1:1 words arrive mid-room-turn: queued with the real
-      // bound named, not bounced with 409 thread_busy
       const direct = await api("POST", `/api/bots/${bot.id}/messages`, { text: "meanwhile, direct words" });
       expect(direct.status).toBe(202);
-      expect(direct.body).toMatchObject({ ok: true, queued: true, reason: "group-turn" });
-
-      // the queued words stay off the 1:1 transcript while the room runs
+      expect(direct.body.queued).toBeUndefined();
+      // A second prompt is in flight on the same provider while the room turn is still open.
+      await until(() => Promise.resolve(roomPrompts().length === 2), "the 1:1 prompt in flight beside the room turn");
+      expect((await groupById(room.id))?.working).toBe(true);
       const during = await botById(bot.id);
-      expect(during.messages.filter((m: any) => m.role === "user").map((m: any) => m.text)).toEqual([]);
+      expect(during.tasks.find((task: any) => task.threadId === bot.threadId)?.busy).toBe(true);
 
-      // the room turn ends: the drain runs the queued words as exactly one
-      // attended 1:1 turn
       writeFileSync(roomGate, "open");
+      await until(async () => (await groupById(room.id))?.working === false, "the room turn to finish");
       await until(async () => {
         const after = await botById(bot.id);
         return !after.busy && echoes(after).some((reply) => reply.text.includes("meanwhile, direct words"));
-      }, "the drained 1:1 turn");
+      }, "the 1:1 turn");
 
       const after = await botById(bot.id);
       const directEchoes = echoes(after).filter((reply) => reply.text.includes("meanwhile, direct words"));
       expect(directEchoes).toHaveLength(1);
-      expect((await groupById(room.id))?.working).toBe(false);
-      evidence.push({ groupTurnQueue: { direct, after } });
+      expect(after.messages.filter((message: any) => message.role === "user").map((message: any) => message.text))
+        .toEqual(["meanwhile, direct words"]);
+      evidence.push({ roomTurnOverlap: { direct, during, after } });
     },
     60_000,
   );

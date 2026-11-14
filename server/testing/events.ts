@@ -1,6 +1,4 @@
-// Event recorder for adapter tests: collect every canonical event and
-// await predicates instead of sleeping (a test that needs a timeout to
-// pass is wrong — it should wait on the event that proves the behavior).
+// Event recorder for adapter tests: await the event that proves the behaviour instead of sleeping.
 import type { ProviderAdapter, RuntimeEvent } from "../contracts.ts";
 
 export interface EventRecorder {

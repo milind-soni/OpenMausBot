@@ -13,9 +13,7 @@ const sameFingerprint = (left: string, right: string) => {
   return a.length === b.length && timingSafeEqual(a, b);
 };
 
-/** Read a bounded regular file through the descriptor whose permissions we
- * checked. A pipe must not block the request loop, nor a pathname swap replace
- * the checked file before the read. */
+/** Read through the descriptor whose permissions were checked: a pipe must not block, nor a path swap replace the file before the read. */
 function registrations(file: string): Registration[] {
   let fd: number | undefined;
   try {
@@ -32,7 +30,7 @@ function registrations(file: string): Registration[] {
       const read = readSync(fd, bytes, count, bytes.length - count, null);
       if (!read) break;
       count += read;
-      if (count > stat.size) return []; // changed while being read
+      if (count > stat.size) return [];
     }
     const parsed: unknown = JSON.parse(bytes.subarray(0, count).toString("utf8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
@@ -57,8 +55,7 @@ function resolveRegistration(file: string, tokenHash: string, botForId: BotLooku
   const registration = matches[0];
   const bot = botForId(registration.botId);
   if (!bot || bot.hidden) return null;
-  // There is no durable "main thread": bot.threadId is the UI selection and
-  // new tasks are prepended. Every grant needs an explicit binding.
+  // There is no durable "main thread" (bot.threadId is the UI selection), so every grant needs an explicit binding.
   const task = bot.tasks?.find(candidate => candidate.threadId === registration.threadId);
   if (!task || task.archivedAt !== undefined) return null;
   return { botId: bot.id, threadId: task.threadId, tokenHash };
@@ -69,8 +66,7 @@ export function authorizeExternalRuntime(file: string, header: string | string[]
   return resolveRegistration(file, fingerprint(header.slice(7)), botForId);
 }
 
-/** Re-check after every body/approval/poll wait. The captured identity is not
- * a lease: token rotation, rebinding, deletion and archive take effect now. */
+/** Re-check after every wait: the captured identity is not a lease, and rotation, rebinding, deletion and archive apply now. */
 export function externalRuntimeIsActive(file: string, grant: ExternalRuntimeGrant, botForId: BotLookup): boolean {
   const current = resolveRegistration(file, grant.tokenHash, botForId);
   return current?.botId === grant.botId && current.threadId === grant.threadId;

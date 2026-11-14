@@ -1,4 +1,5 @@
 import { t } from "./i18n";
+import { randomUuid } from "./random-uuid";
 
 interface BrowserProfileUser {
   name: string;
@@ -9,17 +10,16 @@ interface BrowserProfileUser {
 interface BrowserProfileRecord {
   id: string;
   name: string;
+  browser?: "chrome";
   partitionId?: string;
 }
 
-/** Internal partition routing is read-only. Never reflect it through a config
- * PATCH, even though GET /api/config provides it to the trusted desktop UI. */
-export function browserProfilesForPatch(profiles: BrowserProfileRecord[]): Array<{ id: string; name: string }> {
-  return profiles.map(({ id, name }) => ({ id, name }));
+/** Partition routing is read-only: never reflect it through a config PATCH. */
+export function browserProfilesForPatch(profiles: BrowserProfileRecord[]): Array<{ id: string; name: string; browser?: "chrome" }> {
+  return profiles.map(({ id, name, browser }) => ({ id, name, ...(browser ? { browser } : {}) }));
 }
 
-/** Include the list the person edited so another window's changes cannot
- * silently disappear when this whole-list update reaches the server. */
+/** Sends the list the person edited, so another window's changes cannot silently disappear. */
 export function browserProfilesMutation(current: BrowserProfileRecord[], next: BrowserProfileRecord[]) {
   return {
     browserProfiles: browserProfilesForPatch(next),
@@ -28,11 +28,10 @@ export function browserProfilesMutation(current: BrowserProfileRecord[], next: B
 }
 
 export function newBrowserProfileId(): string {
-  return `profile-${crypto.randomUUID().replaceAll("-", "")}`;
+  return `profile-${randomUuid().replaceAll("-", "")}`;
 }
 
-/** A live turn may still be issuing browser actions against this partition.
- * Refuse deletion until those turns are stopped rather than racing the wipe. */
+/** A live turn may still be acting on this partition: refuse deletion rather than race the wipe. */
 export function browserProfileDeletionBlockReason(
   bots: BrowserProfileUser[],
   profileId: string,

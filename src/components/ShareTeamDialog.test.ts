@@ -27,7 +27,7 @@ afterEach(() => {
 describe("Share team", () => {
   it("is in every named team's menu", () => {
     const markup = renderToStaticMarkup(createElement(TeamMenuItems, { onAddBots: vi.fn(), onRename: vi.fn(), onShare: vi.fn(), onDelete: vi.fn() }));
-    expect(text(markup)).toMatch(/Add bots .*Rename team .*Share team… .*Delete team/);
+    expect(text(markup)).toMatch(/Add bots .*Rename department .*Share department… .*Delete department/);
     expect(markup.match(/role="menuitem"/g)).toHaveLength(4);
   });
 
@@ -61,12 +61,9 @@ describe("Share team", () => {
   });
 
   it("keeps every skill box when a 31-skill bot's exact choice is refused", () => {
-    // The refusal the server sends for a bot with 31 ticked skills: the
-    // sentence, and the team's skill names so the boxes stay drawn.
     const names = Array.from({ length: 31 }, (_, index) => `step-${String(index + 1).padStart(2, "0")}`);
     const refusal = new ApiError("Morgan has more than 30 skills. Choose fewer skills and try again.", 400,
       { error: "Morgan has more than 30 skills. Choose fewer skills and try again.", choices: { skills: names } });
-    // The dialog's state after that refusal, from the API client's real error.
     const view = shareRefused({ ...SHARE_VIEW_START, included: names.slice(0, 30) }, refusal);
     expect(view.preview).toBeNull();
     expect(view.error).toBe("Morgan has more than 30 skills. Choose fewer skills and try again.");
@@ -79,7 +76,7 @@ describe("Share team", () => {
     expect(markup).toMatch(/<input type="checkbox"[^>]*\/>step-31/);
     expect(markup).not.toMatch(/checked=""[^>]*\/>step-31/);
     expect(text(renderToStaticMarkup(createElement(ShareSkillChoices, { available: [], ticked: new Set<string>(), counted: true, onToggle: vi.fn() }))))
-      .toContain("This team's bots have no skills.");
+      .toContain("This department's bots have no skills.");
   });
 
   it("saves the document as the file other apps and Admin read", async () => {
@@ -100,10 +97,10 @@ describe("importing a shared team", () => {
     const pending = teamImportPreview(fixture());
     const words = text(renderToStaticMarkup(createElement(TeamImportDetails, { pending, importedNames: ["Morgan", "Scout", "Quill"] })));
     for (const line of [
-      "Shared instructions", "49 per seat", "Morgan leads", "1 group chat", "1 playbooks", "Routines: 2 · paused",
+      "Shared instructions", "49 per seat", "Morgan leads", "1 group chat", "1 playbook(s)", "Routines: 2 · paused",
       "Connections to finish: 1 · keys and passwords are never included", "CRM · https://mcp.example.com/crm",
       "Starter notes: 2", "Preset bots: 1 · appear in New bot",
-      "Included skills — added switched off", "pricing-policy, research-brief", "Offered skills — not added to any bot", "objection-handling",
+      "Included skills (added switched off)", "pricing-policy, research-brief", "Offered skills (not added to any bot)", "objection-handling",
       "Skills arrive switched off and routines paused.",
     ]) expect(words).toContain(line);
     expect(renderToStaticMarkup(createElement(TeamImportDetails, { pending, importedNames: ["Morgan", "Scout", "Quill"] })))

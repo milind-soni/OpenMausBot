@@ -1,0 +1,964 @@
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import { TurnNotStartedError, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener, type SendTurnInput } from "./contracts.ts";
+import {
+  BOT_TURN_GIVES_WAY_MS, BROWSER_BYTES, CHAT_RUNTIME_KINDS, EngineMemory, memoryStallText, memoryStillWaitingText, memoryStopped, memoryStopText, memoryWaitText, PressureLedger, processGroupBytes, readHostMemory,
+  withEngineMemory, type HostMemory,
+} from "./engine-memory.ts";
+import { OOM_SCORE, protectSupervisor, spawnBotWork, spawnWithOomScore } from "./oom-score.ts";
+
+const MB = 1024 * 1024, GB = 1024 * MB;
+
+describe("reading the host", () => {
+  it("reads memory, swap, the OOM kill count and the memory stall from /proc", () => {
+    const files: Record<string, string> = {
+      "/proc/meminfo": "MemTotal:        4022248 kB\nMemFree:          112000 kB\nMemAvailable:     524288 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\n",
+      "/proc/vmstat": "nr_free_pages 28000\noom_kill 3\n",
+      "/proc/pressure/memory": "some avg10=61.20 avg60=40.00 avg300=12.00 total=99\nfull avg10=47.50 avg60=30.00 avg300=9.00 total=88\n",
+    };
+    expect(readHostMemory((path) => files[path] ?? (() => { throw new Error("ENOENT"); })())).toEqual({
+      totalBytes: 4022248 * 1024, availableBytes: 512 * MB, swapFreeBytes: 0, oomKills: 3, fullStall10: 47.5 });
+    expect(readHostMemory((path) => { if (path === "/proc/meminfo") return files[path]!; throw new Error("ENOENT"); }))
+      .toMatchObject({ oomKills: null, fullStall10: null });
+    expect(readHostMemory(() => { throw new Error("ENOENT"); })).toBeNull();
+  });
+
+  it("adds up each process group: an engine and the MCP servers it started", () => {
+    const stat = (pid: number, comm: string, pgrp: number, rssPages: number) =>
+      `${pid} (${comm}) S 1 ${pgrp} ${pgrp} 0 -1 4194560 ${Array(14).fill(0).join(" ")} ${rssPages} 18446744073709551615`;
+    const stats: Record<string, string> = {
+      "/proc/100/stat": stat(100, "opencode", 100, 100_000),
+      "/proc/101/stat": stat(101, "node (mcp) x", 100, 25_000),
+      "/proc/200/stat": stat(200, "chrome", 200, 50_000),
+    };
+    const groups = processGroupBytes(() => ["100", "101", "200", "self", "999"], (path) => stats[path] ?? (() => { throw new Error("gone"); })());
+    expect(groups.get(100)).toBe(125_000 * 4096);
+    expect(groups.get(200)).toBe(50_000 * 4096);
+  });
+
+  it("counts each process's own share of what it shares, as the kernel splits it, and its resident pages only without one", () => {
+    const stat = (pid: number, pgrp: number, rssPages: number) => `${pid} (node) S 1 ${pgrp} ${pgrp} 0 -1 4194560 ${Array(14).fill(0).join(" ")} ${rssPages} 18446744073709551615`;
+    // Two MCP servers on one runtime: 100 MB resident each, of which 60 MB is the runtime's code they share.
+    const files: Record<string, string> = {
+      "/proc/100/stat": stat(100, 100, 75_000), "/proc/100/smaps_rollup": "00400000-7fff [rollup]\nRss:              300000 kB\nPss:              240000 kB\n",
+      "/proc/101/stat": stat(101, 100, 25_600), "/proc/101/smaps_rollup": "Rss:              102400 kB\nPss:               71680 kB\n",
+      "/proc/102/stat": stat(102, 100, 25_600), "/proc/102/smaps_rollup": "Rss:              102400 kB\nPss:               71680 kB\n",
+      "/proc/103/stat": stat(103, 100, 1_000),
+    };
+    const groups = processGroupBytes(() => ["100", "101", "102", "103"], (path) => files[path] ?? (() => { throw new Error("EACCES"); })());
+    expect(groups.get(100)).toBe((240_000 + 71_680 * 2) * 1024 + 1_000 * 4096);
+  });
+
+  it("starts a process with an OOM score of its own and puts this process's back, whatever the spawn does", () => {
+    const writes: string[] = [];
+    let own = "-800";
+    const file = { read: () => `${own}\n`, write: (_path: string, data: string) => { writes.push(data); own = data; } };
+    const spawned = spawnWithOomScore(OOM_SCORE.bot, () => own, file);
+    expect(process.platform === "linux" ? [spawned, writes, own] : [spawned, writes]).toEqual(process.platform === "linux" ? ["1000", ["1000", "-800"], "-800"] : ["-800", []]);
+    writes.length = 0;
+    expect(() => spawnWithOomScore(OOM_SCORE.bot, () => { throw new Error("ENOENT"); }, file)).toThrow("ENOENT");
+    if (process.platform === "linux") expect([writes, own]).toEqual([["1000", "-800"], "-800"]);
+    // A score that can't be read or set: the process starts as before.
+    expect(spawnWithOomScore(OOM_SCORE.bot, () => "started", { read: () => { throw new Error("EACCES"); }, write: () => { throw new Error("no"); } })).toBe("started");
+    // A bot's browser, helper engine or tool starts where its engine does: first in line when memory runs out.
+    writes.length = 0;
+    expect(spawnBotWork(() => own, file)).toBe(process.platform === "linux" ? "1000" : "-800");
+  });
+
+  it("keeps the supervisor from ever being picked when memory runs out, where root can say so", () => {
+    let own = "0";
+    const file = { read: () => `${own}\n`, write: (_path: string, data: string) => { own = data; } };
+    expect([protectSupervisor(file), own]).toEqual(process.platform === "linux" ? [true, "-1000"] : [false, "0"]);
+    // Not root: the kernel refuses a lower score, and the supervisor starts as before.
+    expect(protectSupervisor({ read: () => "0\n", write: () => { throw Object.assign(new Error("EACCES"), { code: "EACCES" }); } })).toBe(false);
+    expect([OOM_SCORE.supervisor, OOM_SCORE.edge, OOM_SCORE.server, OOM_SCORE.bot]).toEqual([-1000, -900, -800, 1000]);
+  });
+});
+
+it("scales an idle engine's keep-alive by the memory left above the floor", () => {
+  const at = (available: number) => new EngineMemory({ enabled: true,
+    read: () => ({ totalBytes: 4 * GB, availableBytes: available, swapFreeBytes: 0, oomKills: 0, fullStall10: 0 }) }).headroom();
+  // The floor is 410 MB on 4 GB; half the machine above it is full headroom.
+  expect(at(3.4 * GB)).toBe(1);
+  expect(at(2 * GB + 410 * MB)).toBeCloseTo(1, 2);
+  expect(at(1 * GB + 410 * MB)).toBeCloseTo(0.5, 2);
+  expect(at(300 * MB)).toBe(0.1);
+  expect(new EngineMemory({ enabled: false, read: () => ({ totalBytes: 4 * GB, availableBytes: 0, swapFreeBytes: 0, oomKills: 0, fullStall10: 0 }) }).headroom()).toBe(1);
+  expect(new EngineMemory({ enabled: true, read: () => null }).headroom()).toBe(1);
+});
+
+class FakeChild extends EventEmitter {
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  readonly pid: number;
+  constructor(pid: number) { super(); this.pid = pid; }
+  exit(signal: NodeJS.Signals | null = null) {
+    if (signal) this.signalCode = signal; else this.exitCode = 0;
+    this.emit("exit", this.exitCode, signal);
+  }
+}
+
+/** A 4 GB home without swap: `available` before any engine (the test may change it), less `perEngine` per running engine. */
+function host(options: { available?: number; perEngine?: number; tickMs?: number } = {}) {
+  let clock = 1_800_000_000_000, oomKills = 0;
+  const perEngine = options.perEngine ?? 700 * MB;
+  const state = { available: options.available ?? 3.4 * GB, fullStall10: 0 };
+  const children = new Map<number, FakeChild>();
+  const signals: string[] = [];
+  const logs: string[] = [];
+  const memory = new EngineMemory({
+    enabled: true, tickMs: options.tickMs ?? 5,
+    read: (): HostMemory => ({ totalBytes: 4 * GB, availableBytes: Math.max(0, state.available - children.size * perEngine), swapFreeBytes: 0, oomKills, fullStall10: state.fullStall10 }),
+    groups: () => new Map([...children.keys()].map((pid) => [pid, perEngine])),
+    now: () => clock,
+    signal: (pid, signal) => {
+      signals.push(`${signal} -${pid}`);
+      const child = children.get(-(-pid));
+      if (child && child.exitCode === null && child.signalCode === null) queueMicrotask(() => child.exit(signal));
+    },
+    log: (line) => logs.push(line),
+  });
+  let nextPid = 1000;
+  /** A turn on this thread starts its engine: tracked as spawnCli does inside the turn. */
+  const spawn = (threadId: string) => memory.within(threadId, () => {
+    const child = new FakeChild(nextPid++);
+    children.set(child.pid, child);
+    child.once("exit", () => children.delete(child.pid));
+    memory.track(child as unknown as ChildProcess);
+    return child;
+  });
+  return { memory, state, children, signals, logs, spawn, advance: (ms: number) => { clock += ms; }, oomKill: () => { oomKills++; } };
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+describe("admitting engines", () => {
+  it("lets engines start while they fit, then makes the next one wait, saying so, until one finishes", async () => {
+    const h = host();
+    const started: string[] = [];
+    const notices: string[] = [];
+    // 3.4 GB free less the 410 MB kept back: four engines of 700 MB fit, counting those still starting.
+    for (const thread of ["a", "b", "c", "d"]) {
+      expect(await h.memory.admit(thread, new AbortController().signal, (text) => notices.push(text))).toBe(true);
+      h.memory.turnStarted(thread);
+      h.spawn(thread);
+      started.push(thread);
+    }
+    expect(notices).toEqual([]);
+    const fifth = h.memory.admit("e", new AbortController().signal, (text) => notices.push(text));
+    await settle();
+    expect(notices).toEqual([memoryWaitText(4)]);
+    expect(notices[0]).toBe("Waiting for memory: 4 tasks are running on this Cloud, and one more could run it out of memory. This one starts by itself when there is room.");
+    // Ten minutes on, it says so again, so the turn never looks stalled.
+    h.advance(10 * 60_000);
+    await settle();
+    expect(notices).toEqual([memoryWaitText(4), memoryStillWaitingText(4)]);
+    // "a" finishes and its engine exits (Codex stops its process after each turn).
+    h.memory.turnEnded("a");
+    h.children.get(1000)!.exit();
+    expect(await fifth).toBe(true);
+  });
+
+  it("counts engines admitted but not started yet, so a burst of five does not all start at once", async () => {
+    const h = host();
+    for (const thread of ["a", "b", "c", "d"]) expect(await h.memory.admit(thread, new AbortController().signal, () => {})).toBe(true);
+    const notices: string[] = [];
+    const stop = new AbortController();
+    const fifth = h.memory.admit("e", stop.signal, (text) => notices.push(text));
+    await settle();
+    expect(notices).toEqual([memoryWaitText(4)]);
+    stop.abort();
+    expect(await fifth).toBe(false);
+  });
+
+  it("stops an engine nobody is using to make room, oldest first", async () => {
+    const h = host();
+    for (const thread of ["a", "b", "c", "d"]) {
+      await h.memory.admit(thread, new AbortController().signal, () => {});
+      h.memory.turnStarted(thread);
+      h.spawn(thread);
+    }
+    h.advance(91_000);
+    // "b" and "c" finished; their engines stay for the next turn.
+    h.memory.turnEnded("c");
+    h.memory.turnEnded("b");
+    const notices: string[] = [];
+    const admitted = h.memory.admit("e", new AbortController().signal, (text) => notices.push(text));
+    await settle();
+    expect(h.signals).toEqual(["SIGTERM -1001"]);
+    expect(await admitted).toBe(true);
+    expect(notices).toEqual([]);
+    expect(h.memory.hasEngine("b")).toBe(false);
+    expect(h.memory.hasEngine("c")).toBe(true);
+  });
+
+  it("never holds back the only task, and gives up when stopped", async () => {
+    const h = host({ available: 200 * MB });
+    expect(await h.memory.admit("a", new AbortController().signal, () => {})).toBe(true);
+    h.memory.turnStarted("a");
+    h.spawn("a");
+    const stop = new AbortController();
+    const second = h.memory.admit("b", stop.signal, () => {});
+    await settle();
+    stop.abort();
+    expect(await second).toBe(false);
+  });
+
+  it("admits everything where memory can't be read or the gate is off", async () => {
+    const off = new EngineMemory({ enabled: false, read: () => { throw new Error("not read when off"); } });
+    expect(await off.admit("a", new AbortController().signal, () => { throw new Error("no notice"); })).toBe(true);
+    const unknown = new EngineMemory({ enabled: true, read: () => null });
+    expect(await unknown.admit("a", new AbortController().signal, () => {})).toBe(true);
+  });
+});
+
+describe("who goes first when memory holds several", () => {
+  const waiting = (h: ReturnType<typeof host>, threadId: string, order: string[]) =>
+    h.memory.admit(threadId, new AbortController().signal, () => {}).then((admitted) => { if (admitted) order.push(threadId); h.memory.turnStarted(threadId); h.spawn(threadId); });
+  /** One engine runs and no second fits. */
+  const full = async (personal: readonly string[]) => {
+    const h = host({ available: 1.4 * GB });
+    h.memory.useTurnOrder((threadId) => personal.includes(threadId));
+    await h.memory.admit("running", new AbortController().signal, () => {});
+    h.memory.turnStarted("running");
+    h.spawn("running");
+    h.advance(100_000);
+    return h;
+  };
+  const finish = async (h: ReturnType<typeof host>, threadId: string) => {
+    h.memory.turnEnded(threadId);
+    for (const child of h.children.values()) child.exit();
+    await settle();
+  };
+
+  it("starts a person's line ahead of bot work that came first, and the bot work after it", async () => {
+    const h = await full(["person"]);
+    const order: string[] = [];
+    void waiting(h, "handoff-1", order);
+    void waiting(h, "handoff-2", order);
+    await settle();
+    void waiting(h, "person", order);
+    await settle();
+    expect(order).toEqual([]);
+    await finish(h, "running");
+    expect(order[0]).toBe("person");
+    await finish(h, "person");
+    expect(order).toEqual(["person", "handoff-1"]);
+    await finish(h, "handoff-1");
+    expect(order).toEqual(["person", "handoff-1", "handoff-2"]);
+  });
+
+  it("never lets more start than fit: an order only, each still waits for its room", async () => {
+    const h = await full(["person"]);
+    const order: string[] = [];
+    void waiting(h, "handoff", order);
+    void waiting(h, "person", order);
+    await settle();
+    expect(order).toEqual([]);
+    expect(h.memory.busy()).toBe(1);
+  });
+
+  it("lets people's own turns go in the order they came", async () => {
+    const h = await full(["first", "second"]);
+    const order: string[] = [];
+    void waiting(h, "first", order);
+    await settle();
+    void waiting(h, "second", order);
+    await settle();
+    await finish(h, "running");
+    expect(order).toEqual(["first"]);
+    await finish(h, "first");
+    expect(order).toEqual(["first", "second"]);
+  });
+
+  it("says what runs and what is ahead in the order they will go, and whether anything waits", async () => {
+    const h = await full(["person"]);
+    const said: string[] = [], began: string[] = [];
+    let changes = 0;
+    h.memory.useWaits({ text: (threadId, wait) => `${threadId} ${wait.first ? "first" : "again"} ${wait.running} ${wait.ahead}`, began: (threadId, wait) => began.push(`${threadId} ${wait.ahead}`), changed: () => { changes += 1; } });
+    const order: string[] = [];
+    void h.memory.admit("handoff", new AbortController().signal, (text) => said.push(text)).then(() => order.push("handoff"));
+    await settle();
+    void h.memory.admit("person", new AbortController().signal, (text) => said.push(text)).then(() => order.push("person"));
+    await settle();
+    expect(said).toEqual(["handoff first 1 0", "person first 1 0"]);
+    expect(began).toEqual(["handoff 0", "person 0"]);
+    expect(h.memory.waiting()).toBe(true);
+    expect(changes).toBe(1);
+    h.advance(10 * 60_000);
+    await settle();
+    expect(said.at(-1)).toMatch(/again 1 [01]$/);
+    await finish(h, "running");
+    await finish(h, "person");
+    await finish(h, "handoff");
+    expect(h.memory.waiting()).toBe(false);
+    expect(changes).toBe(2);
+  });
+
+  it("does not starve bot work: past its wait it goes ahead of a person's newer line", async () => {
+    const h = await full(["person"]);
+    const order: string[] = [];
+    void waiting(h, "handoff", order);
+    await settle();
+    h.advance(BOT_TURN_GIVES_WAY_MS - 1);
+    void waiting(h, "person", order);
+    await settle();
+    h.advance(1);
+    await finish(h, "running");
+    expect(order[0]).toBe("handoff");
+  });
+
+  it("asks who goes first once per waiter, since every waiter orders the queue on each wake", async () => {
+    const h = await full(["person"]);
+    const asked: string[] = [];
+    h.memory.useTurnOrder((threadId) => { asked.push(threadId); return threadId === "person"; });
+    for (const threadId of ["handoff-1", "handoff-2", "person"]) void waiting(h, threadId, []);
+    await settle();
+    asked.length = 0;
+    h.advance(1);
+    const order = (h.memory as unknown as { order(): { threadId: string }[] }).order();
+    expect(order.map((waiter) => waiter.threadId)).toEqual(["person", "handoff-1", "handoff-2"]);
+    expect(asked).toEqual(["handoff-1", "handoff-2", "person"]);
+  });
+});
+
+describe("running short", () => {
+  it("stops the newest of the busy engines before the home runs out, and the turn says why", async () => {
+    const h = host();
+    for (const thread of ["a", "b", "c", "d", "e"]) {
+      h.memory.turnStarted(thread);
+      h.spawn(thread);
+      h.advance(1_000);
+    }
+    h.state.available = 100 * MB;
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGKILL -1004"]);
+    expect(h.memory.stopText("e")).toBe(memoryStopText(false));
+    expect(memoryStopText(false)).toBe("Ran out of room, so I stopped this task to keep everything else running.");
+    expect(memoryStopText(true)).toBe("Ran out of room, so I closed the browser to keep everything else running.");
+    expect([memoryStopped(`${memoryStopText(true)} (opencodeGo exited null)`), memoryStopped(memoryStopText(false)), memoryStopped("the run ended without a result")]).toEqual([true, true, false]);
+    // Within the cooldown, the next tick stops nothing more.
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toHaveLength(1);
+    // The others ran short too: a stall among them says memory was the reason.
+    expect(h.memory.stallCause("a", "no activity for 20 minutes — the turn was stopped"))
+      .toBe("no activity for 20 minutes — the turn was stopped. This Cloud ran out of memory while 5 tasks ran at once (not a problem with the AI provider)");
+    h.memory.turnEnded("a");
+    expect(h.memory.stallCause("a", "x")).toBe("x");
+  });
+
+  it("stops an idle engine first, and never the only busy one", async () => {
+    const h = host();
+    h.memory.turnStarted("a"); h.spawn("a");
+    h.memory.turnStarted("b"); h.spawn("b");
+    h.memory.turnEnded("b");
+    h.state.available = 100 * MB;
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGTERM -1001"]);
+    expect(h.memory.stopText("b")).toBeNull();
+    h.advance(20_000);
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toHaveLength(1);
+    expect(h.memory.stopText("a")).toBeNull();
+  });
+
+  it("lets the memory the kernel's OOM killer just freed come back before stopping anything itself", async () => {
+    const h = host({ tickMs: 60_000 });
+    for (const thread of ["a", "b", "c"]) { h.memory.turnStarted(thread); h.spawn(thread); h.advance(1_000); }
+    h.memory.tick();
+    h.state.available = 100 * MB;
+    h.oomKill();
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual([]);
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGKILL -1002"]);
+  });
+
+  it("names memory when the kernel's OOM killer took an engine", () => {
+    const h = host();
+    h.memory.turnStarted("a"); const a = h.spawn("a");
+    h.memory.turnStarted("b"); h.spawn("b");
+    h.oomKill();
+    a.exit("SIGKILL");
+    expect(h.memory.stopText("a")).toBe(memoryStopText(false));
+    // A kill without the kernel's count moving (someone's kill -9) is not memory.
+    const c = (h.memory.turnStarted("c"), h.spawn("c"));
+    c.exit("SIGKILL");
+    expect(h.memory.stopText("c")).toBeNull();
+  });
+});
+
+describe("bots' browsers", () => {
+  /** Threads whose bot may browse and whose browser is not running yet, and the threads whose browser was told to close. */
+  function browsers(h: ReturnType<typeof host>, starting: Iterable<string>, open: Iterable<string> = []) {
+    const pending = new Set(starting), running = new Set(open), closed: string[] = [];
+    h.memory.useBrowsers({ starts: (threadId) => pending.has(threadId), running: (threadId) => running.has(threadId), stopped: (threadId) => closed.push(threadId) });
+    return { pending, closed };
+  }
+
+  it("counts the browser a turn may start, so a burst of browsing turns waits before the home runs out", async () => {
+    const h = host();
+    browsers(h, ["a", "b", "c"]);
+    // 3.4 GB free less the 410 MB kept back: two engines with a browser each fit, not four engines.
+    for (const thread of ["a", "b"]) {
+      expect(await h.memory.admit(thread, new AbortController().signal, () => {})).toBe(true);
+      h.memory.turnStarted(thread);
+      h.spawn(thread);
+    }
+    const notices: string[] = [];
+    const stop = new AbortController();
+    const third = h.memory.admit("c", stop.signal, (text) => notices.push(text));
+    await settle();
+    expect(notices).toEqual([memoryWaitText(2)]);
+    stop.abort();
+    expect(await third).toBe(false);
+  });
+
+  it("lets a second thread of one bot run beside the first on a 2 GB Cloud, counting the bot's one browser once", async () => {
+    let clock = 1_800_000_000_000;
+    const running = new Map<number, number>();
+    const memory = new EngineMemory({
+      enabled: true, tickMs: 5,
+      // 2 GB with no swap, 1.5 GB available beside the server; an engine takes 350 MB once it has run a while.
+      read: (): HostMemory => ({ totalBytes: 2 * GB, availableBytes: 1.5 * GB - [...running.values()].reduce((sum, bytes) => sum + bytes, 0), swapFreeBytes: 0, oomKills: 0, fullStall10: 0 }),
+      groups: () => new Map(running), now: () => clock, signal: () => {}, log: () => {},
+    });
+    memory.useBrowsers({ starts: () => true, which: () => "bot-a", running: () => false, stopped: () => {} });
+    expect(await memory.admit("first", new AbortController().signal, () => {})).toBe(true);
+    memory.turnStarted("first");
+    memory.within("first", () => { const child = new FakeChild(1000); running.set(child.pid, 350 * MB); memory.track(child as unknown as ChildProcess); });
+
+    const notices: string[] = [];
+    const second = memory.admit("second", new AbortController().signal, (text) => notices.push(text));
+    await settle();
+    expect(notices, "said why while the first engine has not been measured").toEqual([memoryWaitText(1)]);
+    // Measured, with the reservation for its browser still held: no more than 30 s, not the 90 s of a browser counted twice.
+    clock += 31_000;
+    await expect.poll(async () => Promise.race([second, settle().then(() => "waiting")]), { timeout: 2_000, interval: 10 }).toBe(true);
+  });
+
+  it.each([[2, 1.5, 2], [8, 7.2, 10]])("holds sixteen threads on a %d GB Cloud to what fits: the rest wait and say so, none refused or stopped", async (totalGb, availableGb, fits) => {
+    let clock = 1_800_000_000_000;
+    const running = new Map<number, number>(), signals: string[] = [];
+    const memory = new EngineMemory({
+      enabled: true, tickMs: 5,
+      read: (): HostMemory => ({ totalBytes: totalGb * GB, availableBytes: availableGb * GB - [...running.values()].reduce((sum, bytes) => sum + bytes, 0), swapFreeBytes: 0, oomKills: 0, fullStall10: 0 }),
+      groups: () => new Map(running), now: () => clock, signal: (pid, signal) => { signals.push(`${signal} ${pid}`); }, log: () => {},
+    });
+    const notices: string[] = [], outcomes = new Map<string, boolean>(), children = new Map<string, FakeChild>();
+    let pid = 2000;
+    const threads = Array.from({ length: 16 }, (_, i) => `thread-${i}`);
+    for (const thread of threads) void memory.admit(thread, new AbortController().signal, (text) => notices.push(text)).then((admitted) => {
+      outcomes.set(thread, admitted);
+      memory.turnStarted(thread);
+      memory.within(thread, () => { const child = new FakeChild(pid++); children.set(thread, child); running.set(child.pid, 600 * MB); memory.track(child as unknown as ChildProcess); });
+    });
+    // Each engine is measured once it has run a while, which is when the next can be let in.
+    for (let round = 0; round < 20; round++) { await settle(); clock += 31_000; }
+    expect(outcomes.size).toBe(fits);
+    expect([...outcomes.values()].every(Boolean)).toBe(true);
+    expect(notices.some((text) => text.startsWith("Waiting for memory:"))).toBe(true);
+    expect(signals, "nothing stopped to make room").toEqual([]);
+    // One ends, and the next starts by itself.
+    const first = threads.find((thread) => outcomes.has(thread))!;
+    memory.turnEnded(first);
+    running.delete(children.get(first)!.pid);
+    children.get(first)!.exit();
+    await expect.poll(() => outcomes.size, { timeout: 2_000, interval: 10 }).toBe(fits + 1);
+    expect(signals).toEqual([]);
+  });
+
+  it("stops holding a browser's share once it has run a while, where what it takes shows in free memory", async () => {
+    const h = host();
+    const { pending } = browsers(h, ["a", "b", "c"]);
+    for (const thread of ["a", "b"]) {
+      await h.memory.admit(thread, new AbortController().signal, () => {});
+      h.memory.turnStarted(thread);
+      h.spawn(thread);
+    }
+    let admitted = false;
+    const third = h.memory.admit("c", new AbortController().signal, () => {}).then((ok) => { admitted = ok; });
+    await settle();
+    // Both browsers started on a light page: 100 MB each, not the 400 MB held for each.
+    pending.delete("a"); pending.delete("b");
+    h.state.available -= 200 * MB;
+    await settle();
+    // Just started, a browser may still grow: its share stays held.
+    expect(admitted).toBe(false);
+    h.advance(30_000);
+    await third;
+    expect(admitted).toBe(true);
+    expect(BROWSER_BYTES).toBe(400 * MB);
+  });
+
+  it("closes the browser of a turn stopped for memory, and leaves an idle engine's alone", async () => {
+    const h = host();
+    const { closed } = browsers(h, []);
+    for (const thread of ["a", "b", "c"]) { h.memory.turnStarted(thread); h.spawn(thread); h.advance(1_000); }
+    h.memory.turnStarted("d"); h.spawn("d");
+    h.memory.turnEnded("d");
+    h.state.available = 100 * MB;
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGTERM -1003"]);
+    expect(closed).toEqual([]);
+    h.advance(20_000);
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGTERM -1003", "SIGKILL -1002"]);
+    expect(closed).toEqual(["c"]);
+  });
+
+  it("closes the browser of a turn the kernel's OOM killer stopped, and its turn says so in one line", () => {
+    const h = host();
+    const { closed } = browsers(h, [], ["a"]);
+    h.memory.turnStarted("a"); const a = h.spawn("a");
+    h.memory.turnStarted("b"); const b = h.spawn("b");
+    h.oomKill();
+    a.exit("SIGKILL");
+    expect(closed).toEqual(["a"]);
+    expect(h.memory.stopText("a")).toBe("Ran out of room, so I closed the browser to keep everything else running.");
+    // A turn whose bot had no browser open: only the task was stopped.
+    h.oomKill();
+    b.exit("SIGKILL");
+    expect(h.memory.stopText("b")).toBe(memoryStopText(false));
+  });
+});
+
+function fakeInstance(driverKind = "opencodeGo") {
+  const listeners = new Set<RuntimeEventListener>();
+  const sent: string[] = [];
+  let modelsRead = 0;
+  const instance = {
+    instanceId: "i1", driverKind, displayName: "x", enabled: true,
+    get models() { modelsRead++; return { default: "m", options: [] }; },
+    snapshot: async () => ({ state: "available" as const }),
+    dispose: async () => {},
+    adapter: {
+      provider: driverKind,
+      capabilities: { sessionModelSwitch: "unsupported" as const },
+      sendTurn: async (input: SendTurnInput) => { sent.push(input.threadId); return { turnId: `turn-${input.threadId}` }; },
+      interruptTurn: async () => {},
+      respondToRequest: async () => "unavailable" as const,
+      hasSession: () => false,
+      stopAll: async () => {},
+      onEvent: (listener: RuntimeEventListener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    },
+  } as unknown as ProviderInstance;
+  const emit = (event: Partial<RuntimeEvent>) => { for (const listener of listeners) listener({ eventId: "e", provider: driverKind, createdAt: "", ...event } as RuntimeEvent); };
+  return { instance, sent, emit, modelsRead: () => modelsRead };
+}
+
+describe("an engine's adapter on a Cloud home", () => {
+  it("tells the chat a turn waits for memory, and a Stop while it waits starts nothing", async () => {
+    const h = host({ available: 300 * MB });
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const { instance, sent } = fakeInstance();
+    const decorated = withEngineMemory(instance, h.memory);
+    expect(decorated).toBe(instance);
+    const seen: RuntimeEvent[] = [];
+    decorated.adapter.onEvent((event) => seen.push(event));
+    const turn = decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    await settle();
+    expect(seen).toEqual([expect.objectContaining({ type: "runtime.notice", threadId: "t1", provider: "opencodeGo", message: memoryWaitText(1) })]);
+    await decorated.adapter.interruptTurn("t1");
+    await expect(turn).rejects.toBeInstanceOf(TurnNotStartedError);
+    expect(sent).toEqual([]);
+  });
+
+  it("starts at once when the thread's engine is still running, and keeps the instance's live getters", async () => {
+    const h = host({ available: 100 * MB });
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    h.memory.turnStarted("t1"); h.spawn("t1"); h.memory.turnEnded("t1");
+    const fake = fakeInstance();
+    const decorated = withEngineMemory(fake.instance, h.memory);
+    expect(await decorated.adapter.sendTurn({ threadId: "t1", text: "again" } as SendTurnInput)).toEqual({ turnId: "turn-t1" });
+    expect(fake.sent).toEqual(["t1"]);
+    void decorated.models; void decorated.models;
+    expect(fake.modelsRead()).toBe(2);
+  });
+
+  it("fails a turn stopped for memory with that reason, and adds it when the engine said nothing", async () => {
+    const h = host();
+    const fake = fakeInstance();
+    const decorated = withEngineMemory(fake.instance, h.memory);
+    const seen: RuntimeEvent[] = [];
+    decorated.adapter.onEvent((event) => seen.push(event));
+    await decorated.adapter.sendTurn({ threadId: "a", text: "1" } as SendTurnInput);
+    await decorated.adapter.sendTurn({ threadId: "b", text: "2" } as SendTurnInput);
+    h.spawn("a"); h.advance(1_000); h.spawn("b");
+    h.state.available = 50 * MB;
+    h.memory.tick();
+    await settle();
+    fake.emit({ threadId: "b", turnId: "tb", type: "runtime.error", message: "opencodeGo exited null before the prompt result" });
+    fake.emit({ threadId: "b", turnId: "tb", type: "turn.completed", ok: false, stopReason: "exit_before_result" });
+    await settle();
+    expect(seen.map((event) => event.type === "runtime.error" ? event.message : event.type)).toEqual([
+      `${memoryStopText(false)} (opencodeGo exited null before the prompt result)`, "turn.completed"]);
+    expect(seen[0]).toMatchObject({ text: { key: "chat.notice.memoryReclaimedTaskDetail", params: { detail: "opencodeGo exited null before the prompt result" } } });
+    expect(h.memory.stopText("b")).toBeNull();
+    // An engine that ends its turn without an error of its own: the reason comes first.
+    h.oomKill();
+    h.children.get(1000)!.exit("SIGKILL");
+    fake.emit({ threadId: "a", turnId: "ta", type: "turn.completed", ok: false, stopReason: "exit_before_result" });
+    expect(seen.slice(2).map((event) => event.type === "runtime.error" ? event.message : event.type)).toEqual([memoryStopText(false), "turn.completed"]);
+  });
+
+  it("makes a chat-runtime turn wait for memory, as its MCP servers need it", async () => {
+    const h = host({ available: 300 * MB });
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const { instance, sent } = fakeInstance("openai-compat");
+    const decorated = withEngineMemory(instance, h.memory);
+    const seen: RuntimeEvent[] = [];
+    decorated.adapter.onEvent((event) => seen.push(event));
+    const turn = decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    await settle();
+    expect(seen).toEqual([expect.objectContaining({ type: "runtime.notice", threadId: "t1", provider: "openai-compat", message: memoryWaitText(1) })]);
+    expect(sent).toEqual([]);
+    await decorated.adapter.interruptTurn("t1");
+    await expect(turn).rejects.toBeInstanceOf(TurnNotStartedError);
+  });
+
+  it("gates every engine built on the chat runtime", () => {
+    const drivers = join(dirname(fileURLToPath(import.meta.url)), "drivers");
+    const kinds = readdirSync(drivers).filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts")).flatMap((file) => {
+      const source = readFileSync(join(drivers, file), "utf8");
+      if (!source.includes("createOpenAIChatRuntime(")) return [];
+      const kind = /driverKind: "([^"]+)"/.exec(source)?.[1] ?? /DRIVER_KIND = "([^"]+)"/.exec(source)?.[1];
+      return kind ? [kind] : [`no kind found in ${file}`];
+    });
+    expect(kinds.length).toBeGreaterThanOrEqual(8);
+    expect(kinds.filter((kind) => !CHAT_RUNTIME_KINDS.has(kind))).toEqual([]);
+  });
+
+  it("leaves engines that start no process of their own, and every engine where the gate is off, as they are", () => {
+    const h = host();
+    const api = fakeInstance("some-remote-engine");
+    const adapter = api.instance.adapter;
+    expect(withEngineMemory(api.instance, h.memory).adapter).toBe(adapter);
+    const local = fakeInstance();
+    const localAdapter = local.instance.adapter;
+    expect(withEngineMemory(local.instance, new EngineMemory({ enabled: false })).adapter).toBe(localAdapter);
+  });
+});
+
+describe("a plan's limit on turns at once", () => {
+  const signal = () => new AbortController().signal;
+  const capped = (most: number | undefined, waitsOnOthers: (threadId: string) => boolean = () => false) => {
+    const h = host();
+    h.memory.useCap({ most: () => most, waitsOnOthers });
+    h.memory.useWaits({ text: (_threadId, wait) => `limit ${wait.limit} ahead ${wait.ahead}`, began: () => {}, changed: () => {} });
+    return h;
+  };
+
+  it("runs the plan's number of turns, whatever memory allows, and the next starts once one ends, saying why it waits", async () => {
+    const h = capped(2);
+    expect(h.memory.limited()).toBe(true);
+    expect(await h.memory.admit("a", signal(), () => {}, "turn")).toBe(true);
+    expect(await h.memory.admit("b", signal(), () => {}, "turn")).toBe(true);
+    const said: string[] = [];
+    let third: boolean | null = null;
+    void h.memory.admit("c", signal(), (text) => said.push(text), "turn").then((admitted) => { third = admitted; });
+    await settle();
+    expect([third, said]).toEqual([null, ["limit 2 ahead 0"]]);
+    h.memory.turnEnded("a");
+    await settle();
+    expect(third).toBe(true);
+  });
+
+  it("lets two woken together take only the places there are", async () => {
+    const h = capped(2);
+    await h.memory.admit("a", signal(), () => {}, "turn");
+    const admitted: string[] = [];
+    for (const threadId of ["b", "c"]) void h.memory.admit(threadId, signal(), () => {}, "turn").then(() => admitted.push(threadId));
+    await settle();
+    expect(admitted).toEqual(["b"]);
+  });
+
+  it("asks who goes first and who holds a place a number of times that grows with the queue, not with its square", async () => {
+    const perWake = async (waiters: number) => {
+      const h = host({ tickMs: 60_000 });
+      let asked = 0;
+      h.memory.useCap({ most: () => 2, waitsOnOthers: () => { asked++; return false; } });
+      h.memory.useTurnOrder(() => { asked++; return false; });
+      await h.memory.admit("a", signal(), () => {}, "turn");
+      await h.memory.admit("b", signal(), () => {}, "turn");
+      const stop = new AbortController();
+      for (let at = 0; at < waiters; at++) void h.memory.admit(`w${at}`, stop.signal, () => {}, "turn");
+      await settle();
+      asked = 0;
+      for (let round = 0; round < 5; round++) {
+        (h.memory as unknown as { wake(): void }).wake();
+        await settle();
+      }
+      const each = asked / 5;
+      stop.abort();
+      await settle();
+      return each;
+    };
+    const [ten, forty] = [await perWake(10), await perWake(40)];
+    expect(forty, "one wake of 40 waiters").toBeLessThanOrEqual(2 * 40 + 10);
+    expect(forty / ten, "four times the waiters, about four times the asking").toBeLessThan(6);
+  });
+
+  it("holds no place for a turn waiting on work it handed out, so that work runs", async () => {
+    const waiting = new Set(["a", "b"]);
+    const h = capped(2, (threadId) => waiting.has(threadId));
+    await h.memory.admit("a", signal(), () => {}, "turn");
+    await h.memory.admit("b", signal(), () => {}, "turn");
+    expect(await h.memory.admit("child", signal(), () => {}, "turn")).toBe(true);
+  });
+
+  it("limits nothing where the plan sets no number", async () => {
+    const h = capped(undefined);
+    expect(h.memory.limited()).toBe(false);
+    for (const threadId of ["a", "b", "c", "d"]) expect(await h.memory.admit(threadId, signal(), () => {}, "turn")).toBe(true);
+  });
+
+  it("makes a turn wait for a place even when its thread's engine is still running", async () => {
+    const h = capped(1);
+    h.memory.turnStarted("t1"); h.spawn("t1"); h.memory.turnEnded("t1");
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const fake = fakeInstance();
+    const decorated = withEngineMemory(fake.instance, h.memory);
+    const turn = decorated.adapter.sendTurn({ threadId: "t1", text: "again" } as SendTurnInput);
+    await settle();
+    expect(fake.sent).toEqual([]);
+    h.memory.turnEnded("busy");
+    expect(await turn).toEqual({ turnId: "turn-t1" });
+    expect(fake.sent).toEqual(["t1"]);
+  });
+
+  it("gives the place back when a turn is stopped while it waits for memory", async () => {
+    const h = capped(2);
+    h.state.available = 300 * MB;
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const fake = fakeInstance();
+    const decorated = withEngineMemory(fake.instance, h.memory);
+    const turn = decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    await settle();
+    await decorated.adapter.interruptTurn("t1");
+    await expect(turn).rejects.toBeInstanceOf(TurnNotStartedError);
+    expect(h.memory.busy()).toBe(1);
+    expect(await h.memory.admit("t2", signal(), () => {}, "turn")).toBe(true);
+  });
+});
+
+describe("engines that run several threads' sessions", () => {
+  it("lets a session into a running engine where a whole new engine would not fit", async () => {
+    // One busy engine on 1.6 GB: 900 MB free less the 410 MB kept back fits a 200 MB session but not a 700 MB engine.
+    const h = host({ available: 1.6 * GB });
+    h.memory.turnStarted("a");
+    const child = h.spawn("a");
+    expect(await h.memory.admit("c", new AbortController().signal, () => {}, "session")).toBe(true);
+    h.advance(90_000);
+    const notices: string[] = [];
+    const stop = new AbortController();
+    const process = h.memory.admit("b", stop.signal, (text) => notices.push(text), "process");
+    await settle();
+    expect(notices).toEqual([memoryWaitText(1)]);
+    h.memory.attach(child as unknown as ChildProcess, "c");
+    expect(h.memory.hasEngine("c")).toBe(true);
+    h.memory.detach(child as unknown as ChildProcess, "c");
+    expect(h.memory.hasEngine("c")).toBe(false);
+    expect(h.memory.hasEngine("a")).toBe(true);
+    stop.abort();
+    expect(await process).toBe(false);
+  });
+
+  it("never stops the idle engine a thread is joining to make room for that thread, and never holds back the only task", async () => {
+    // One idle shared engine and too little memory for even a session.
+    const h = host({ available: 900 * MB });
+    h.memory.turnStarted("chief");
+    const engine = h.spawn("chief");
+    h.memory.turnEnded("chief");
+    h.memory.turnStarted("w1");
+    expect(await h.memory.admit("w1", new AbortController().signal, () => {}, "session", engine.pid)).toBe(true);
+    expect(h.signals).toEqual([]);
+    h.memory.turnStarted("w2");
+    const notices: string[] = [];
+    const stop = new AbortController();
+    const second = h.memory.admit("w2", stop.signal, (text) => notices.push(text), "session", engine.pid);
+    await settle();
+    expect([notices, h.signals]).toEqual([[memoryWaitText(1)], []]);
+    stop.abort();
+    expect(await second).toBe(false);
+  });
+
+  it("stops a shared engine only as a whole, names memory for every task it ran, and counts it idle only when all are done", async () => {
+    const h = host();
+    h.memory.turnStarted("x"); h.spawn("x");
+    h.advance(1_000);
+    for (const thread of ["s1", "s2"]) h.memory.turnStarted(thread);
+    const shared = h.spawn("s1");
+    h.memory.attach(shared as unknown as ChildProcess, "s2");
+    expect(h.memory.busy()).toBe(3);
+    h.state.available = 1.5 * GB;
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual([`SIGKILL -${shared.pid}`]);
+    expect([h.memory.stopText("s1"), h.memory.stopText("s2"), h.memory.stopText("x")]).toEqual([memoryStopText(false), memoryStopText(false), null]);
+    expect(h.memory.stallCause("s2", "x")).toBe(memoryStallText("x", 3));
+
+    const g = host();
+    for (const thread of ["s1", "s2"]) g.memory.turnStarted(thread);
+    const engine = g.spawn("s1");
+    g.memory.attach(engine as unknown as ChildProcess, "s2");
+    g.memory.turnEnded("s1");
+    g.state.available = 800 * MB;
+    g.memory.tick();
+    await settle();
+    expect(g.signals).toEqual([]);
+    g.memory.turnEnded("s2");
+    g.memory.tick();
+    await settle();
+    expect(g.signals).toEqual([`SIGTERM -${engine.pid}`]);
+  });
+
+  it("hands admission to a driver that starts or joins engines itself, instead of holding its turn up front", async () => {
+    const h = host({ available: 300 * MB });
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const fake = fakeInstance();
+    (fake.instance.adapter.capabilities as { engineAdmission?: boolean }).engineAdmission = true;
+    let admission: SendTurnInput["engineAdmission"];
+    const sendTurn = fake.instance.adapter.sendTurn;
+    (fake.instance.adapter as { sendTurn: typeof sendTurn }).sendTurn = async (input) => { admission = input.engineAdmission; return sendTurn(input); };
+    const decorated = withEngineMemory(fake.instance, h.memory);
+    const seen: RuntimeEvent[] = [];
+    decorated.adapter.onEvent((event) => seen.push(event));
+    expect(await decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput)).toEqual({ turnId: "turn-t1" });
+    expect(fake.sent).toEqual(["t1"]);
+    const waiting = admission!("process");
+    await settle();
+    expect(seen).toEqual([expect.objectContaining({ type: "runtime.notice", threadId: "t1", message: memoryWaitText(1) })]);
+    await decorated.adapter.interruptTurn("t1");
+    await expect(waiting).rejects.toBeInstanceOf(TurnNotStartedError);
+  });
+});
+
+it("words a stall the same way the Cloud's health report classifies it", () => {
+  expect(memoryStallText("no activity for 20 minutes — the turn was stopped", 1)).toMatch(/ran out of memory while 1 task ran at once/);
+});
+
+describe("the day's memory pressure, for the Admin", () => {
+  it("counts the tasks that waited and how long, the turns stopped, the kernel's kills and the stalled minutes, over the last day", async () => {
+    const h = host({ available: 1.2 * GB, tickMs: 60_000 });
+    h.memory.turnStarted("a"); h.spawn("a");
+    expect(h.memory.dayPressure()).toEqual({ waits: 0, waitMs: 0, stopped: 0, killed: 0, stallMinutes: 0 });
+    // "b" waits three minutes for memory; a wait still going counts its time so far.
+    const stop = new AbortController();
+    const b = h.memory.admit("b", stop.signal, () => {});
+    await settle();
+    h.advance(3 * 60_000);
+    expect(h.memory.dayPressure()).toMatchObject({ waits: 1, waitMs: 3 * 60_000 });
+    h.memory.turnEnded("a");
+    h.children.get(1000)!.exit();
+    expect(await b).toBe(true);
+    expect(h.memory.dayPressure()).toMatchObject({ waits: 1, waitMs: 3 * 60_000 });
+    // The machine stalls on memory for two minutes, and the kernel stops a turn's engine.
+    h.state.available = 3.4 * GB;
+    h.memory.turnStarted("b"); const engine = h.spawn("b");
+    h.memory.turnStarted("c"); h.spawn("c");
+    h.state.fullStall10 = 45;
+    h.memory.tick(); h.memory.tick();
+    h.advance(60_000);
+    h.memory.tick();
+    h.state.fullStall10 = 0;
+    h.oomKill();
+    engine.exit("SIGKILL");
+    expect(h.memory.dayPressure()).toEqual({ waits: 1, waitMs: 3 * 60_000, stopped: 1, killed: 1, stallMinutes: 2 });
+    // A day on, none of it counts.
+    h.advance(24 * 60 * 60_000);
+    expect(h.memory.dayPressure()).toEqual({ waits: 0, waitMs: 0, stopped: 0, killed: 0, stallMinutes: 0 });
+  });
+
+  it("reads the pressure from the kernel's own files: memory left, the OOM kill count and the memory stall", async () => {
+    const proc = { kills: 7, stall: "0.00", available: 2_400_000 };
+    const files = (path: string) => {
+      if (path === "/proc/meminfo") return `MemTotal:        4022248 kB\nMemAvailable:    ${proc.available} kB\nSwapFree:              0 kB\n`;
+      if (path === "/proc/vmstat") return `oom_kill ${proc.kills}\n`;
+      if (path === "/proc/pressure/memory") return `some avg10=10.00 avg60=1.00 avg300=0.10 total=1\nfull avg10=${proc.stall} avg60=0.00 avg300=0.00 total=1\n`;
+      throw new Error("ENOENT");
+    };
+    let clock = 1_800_000_000_000;
+    const memory = new EngineMemory({ enabled: true, tickMs: 60_000, read: () => readHostMemory(files), groups: () => new Map(), now: () => clock, signal: () => {}, log: () => {} });
+    const engine = new FakeChild(4242);
+    memory.within("t", () => memory.track(engine as unknown as ChildProcess));
+    memory.turnStarted("t");
+    // The machine stalls on memory, then the kernel stops two processes (a bot's browser, say): counted, nothing else stopped.
+    proc.stall = "38.50";
+    memory.tick();
+    clock += 60_000;
+    proc.kills = 9; proc.stall = "0.00";
+    memory.tick();
+    expect(memory.dayPressure()).toEqual({ waits: 0, waitMs: 0, stopped: 0, killed: 2, stallMinutes: 1 });
+    expect(memory.stopText("t")).toBeNull();
+    // The kernel then stops the turn's own engine: one plain line for it, and the server goes on.
+    proc.kills = 10;
+    engine.exit("SIGKILL");
+    expect(memory.stopText("t")).toBe(memoryStopText(false));
+    expect(memory.dayPressure()).toMatchObject({ stopped: 1, killed: 3 });
+    memory.turnEnded("t");
+    expect(await memory.admit("next", new AbortController().signal, () => {})).toBe(true);
+  });
+
+  it("keeps a minute's counts once and forgets them after a day", () => {
+    const ledger = new PressureLedger(), start = 1_800_000_000_000;
+    ledger.note(start, "waits"); ledger.note(start + 10_000, "waits"); ledger.note(start, "waitMs", 90_000);
+    ledger.note(start, "stalled"); ledger.note(start + 20_000, "stalled");
+    ledger.note(start, "killed", 3); ledger.note(start, "stopped");
+    expect(ledger.read(start + 60_000, [start])).toEqual({ waits: 2, waitMs: 150_000, stopped: 1, killed: 3, stallMinutes: 1 });
+    expect(ledger.read(start + 24 * 60 * 60_000 + 60_000)).toEqual({ waits: 0, waitMs: 0, stopped: 0, killed: 0, stallMinutes: 0 });
+  });
+});
+
+describe("a lane of its own", () => {
+  const free = (bytes: number) => () => ({ totalBytes: 4 * GB, availableBytes: bytes, swapFreeBytes: 0, oomKills: 0, fullStall10: 0 });
+  const lane = new Set(["burst-1", "burst-2"]);
+  const capped = (running: string[], most = 2) => {
+    const memory = new EngineMemory({ enabled: true, read: free(3 * GB), groups: () => new Map(), now: () => 0, signal: () => {}, log: () => {} });
+    memory.useCap({ most: () => most, waitsOnOthers: () => false, laneOwned: (threadId) => lane.has(threadId) });
+    for (const threadId of running) memory.turnStarted(threadId);
+    return memory;
+  };
+
+  it("keeps a burst's threads out of the plan's turn cap, so a person's chat still starts", async () => {
+    const memory = capped(["burst-1", "burst-2"]);
+    await expect(memory.admit("persons-chat", new AbortController().signal, () => {}, "turn")).resolves.toBe(true);
+  });
+
+  it("lets a lane's thread past the cap the lane already counted", async () => {
+    const memory = capped(["persons-chat-1", "persons-chat-2"]);
+    await expect(memory.admit("burst-1", new AbortController().signal, () => {}, "turn")).resolves.toBe(true);
+  });
+
+  it("gives the lane no room under the plan's cap, its own turns counted", () => {
+    expect(capped(["burst-1"]).laneHasRoom()).toBe(true);
+    expect(capped(["burst-1", "persons-chat"]).laneHasRoom()).toBe(false);
+  });
+
+  it("gives the lane no room while the person's own work waits", async () => {
+    const memory = capped(["busy-a", "busy-b"]);
+    memory.useTurnOrder((threadId) => threadId === "persons-chat");
+    const abort = new AbortController();
+    const waiting = memory.admit("persons-chat", abort.signal, () => {}, "turn");
+    await Promise.resolve();
+    expect(memory.laneHasRoom()).toBe(false);
+    abort.abort();
+    await waiting;
+  });
+
+  it("is always open with the gate off", () => {
+    expect(new EngineMemory({ enabled: false }).laneHasRoom()).toBe(true);
+  });
+});

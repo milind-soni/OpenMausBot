@@ -1,6 +1,5 @@
-// Let Codex resolve its effective account, including keyring credentials.
-// Reading auth.json directly can label an API-key or keyring login with an
-// old file's email. Only the protocol's display email leaves this helper.
+// Codex resolves its own effective account (keyring included): reading auth.json directly can label an
+// API-key or keyring login with an old file's email. Only the protocol's display email leaves here.
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { userHome } from "../env-path.ts";
@@ -9,16 +8,13 @@ import { killCliTree, spawnCli } from "../procs.ts";
 const MAX_OUTPUT = 16_384;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** Where this environment's Codex keeps its credentials, or null when the
- * configured home is not absolute (the login controller refuses those too). */
 export function codexHome(env: Record<string, string | undefined>): string | null {
   if (env.CODEX_HOME) return isAbsolute(env.CODEX_HOME) ? resolve(env.CODEX_HOME) : null;
   const home = userHome(env);
   return isAbsolute(home) ? join(home, ".codex") : null;
 }
 
-/** Read-only account metadata. Unsupported CLIs and uncertain responses stay
- * unnamed; never fall back to a potentially inactive credential file. */
+/** Unsupported CLIs and uncertain answers stay unnamed; never fall back to a possibly inactive credential file. */
 export async function codexAccountEmail(
   cli: string,
   env: Record<string, string | undefined>,
@@ -48,7 +44,7 @@ export async function codexAccountEmail(
           if (process.platform === "win32") child.kill("SIGKILL");
           else process.kill(-child.pid, "SIGKILL");
         } catch {
-          try { child.kill("SIGKILL"); } catch { /* already gone */ }
+          try { child.kill("SIGKILL"); } catch {}
         }
         stopped = await killCliTree(child, 1_000);
       }

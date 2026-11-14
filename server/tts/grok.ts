@@ -1,4 +1,3 @@
-// xAI TTS runs on the harness and reuses the existing workspace xAI key.
 import { z } from "zod";
 import type { Audio, Voice } from "./elevenlabs.ts";
 

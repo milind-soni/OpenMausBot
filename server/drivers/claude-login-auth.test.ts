@@ -5,9 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { ClaudeLoginController, claudeLoginCode, claudeLoginPrompt, claudeSignInLink } from "./claude-login-auth.ts";
 
-// A stand-in for the Claude CLI: prints what `claude auth login` prints,
-// waits for the pasted code on stdin, and answers `auth status --json`. It
-// never touches the network or any real credential.
+// A stand-in for the Claude CLI's `auth login` / `auth status --json`; never the network or a real credential.
 const FAKE = `#!/usr/bin/env node
 import { appendFileSync, existsSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -125,7 +123,6 @@ describe("Claude server-owned sign-in", () => {
     expect(start).toMatchObject({ phase: "waiting", authorizationUrl: "https://claude.com/cai/oauth/authorize?code=true&client_id=fixture&state=abc" });
     expect(start.userCode).toBeUndefined();
     expect(start.flowId).toMatch(/^[0-9a-f-]{36}$/);
-    // a second click while waiting returns the same link, no second process
     expect((await controller.start()).flowId).toBe(start.flowId);
     await controller.complete(start.flowId!, " GOODCODE#abc\n");
     expect(await controller.get(start.flowId!)).toEqual({ phase: "succeeded", flowId: start.flowId, authorizationUrl: null, expiresAt: null });
@@ -250,8 +247,7 @@ describe("Claude server-owned sign-in", () => {
   });
 
   it("never shows a link that is not Anthropic's, and times out instead", async () => {
-    // Startup timeout must land before the 3s link lifetime so the rejection
-    // names the missing safe link, not an expired one.
+    // The startup timeout lands before the 3s link lifetime, so the rejection names the missing link.
     const controller = create("evil", { startupTimeoutMs: 1000 });
     await expect(controller.start()).rejects.toThrow(/did not show a sign-in link/);
   });

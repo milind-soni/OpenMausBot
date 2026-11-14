@@ -65,8 +65,8 @@ function fakeChild(pid = 4321) {
 function handshake(pid = 4321) {
   return {
     metadata: {
-      driver_version: "0.19.3",
-      contract_version: "0.6.0",
+      driver_version: "0.41.3",
+      contract_version: "0.8.0",
       tools_list_schema_version: "1",
       capability_version: "1",
       mcp_protocol_version: "2025-06-18",
@@ -85,10 +85,10 @@ function healthyWaylandHealth() {
       structuredContent: {
         schema_version: "1",
         platform: "linux",
-        driver_version: "0.19.3",
+        driver_version: "0.41.3",
         overall: "ok",
         checks: [
-          { name: "binary_version", status: "pass", message: "cua-driver 0.19.3" },
+          { name: "binary_version", status: "pass", message: "cua-driver 0.41.3" },
           { name: "platform_supported", status: "pass", message: "Ubuntu 24.04" },
           { name: "session_active", status: "pass", message: "MCP session is active." },
           { name: "ax_capability", status: "pass", message: "AT-SPI is reachable." },
@@ -112,6 +112,8 @@ function harness({
   preferenceEnabled = false,
   afterIdentityCaptured,
   session = "x11",
+  compositor = session === "wayland" ? "gnome-mutter" : undefined,
+  inspected = {},
   runtimeOptions = {},
 } = {}) {
   const userData = temporaryDirectory();
@@ -130,12 +132,13 @@ function harness({
       path: binary,
       fileIdentity,
       source: "environment",
-      driverVersion: "0.19.3",
+      driverVersion: "0.41.3",
       manifestSchema: "1",
       mcp: { command: binary, args: ["mcp"] },
       doctor: { ok: true, probes: [], warnings: [] },
       session,
-      ...(session === "wayland" ? { compositor: "gnome-mutter" } : {}),
+      ...(compositor ? { compositor } : {}),
+      ...inspected,
     };
   });
   const spawnProcess = vi.fn(() => child);
@@ -154,7 +157,8 @@ function harness({
       ...(session === "wayland"
         ? {
             WAYLAND_DISPLAY: "wayland-0",
-            XDG_CURRENT_DESKTOP: "ubuntu:GNOME",
+            XDG_CURRENT_DESKTOP: compositor === "hyprland" ? "Hyprland" : "ubuntu:GNOME",
+            ...(compositor === "hyprland" ? { HYPRLAND_INSTANCE_SIGNATURE: "6f2a0c1e_1762560000_123456789" } : {}),
             DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
           }
         : {}),
@@ -262,9 +266,7 @@ describe("unavailable Linux CUA runtime", () => {
   });
 });
 
-// Windows does not provide the POSIX executable and Unix-socket semantics this
-// lifecycle contract exercises. Canonical short temp paths keep it portable
-// across Linux and macOS.
+// Windows lacks the POSIX executable and Unix-socket semantics this exercises; short canonical temp paths keep it portable.
 describe.skipIf(process.platform === "win32")("Linux CUA opt-in and lifecycle", () => {
   it("cleans only known private runtime files from a dead owner", () => {
     const root = temporaryDirectory();
@@ -370,6 +372,8 @@ describe.skipIf(process.platform === "win32")("Linux CUA opt-in and lifecycle", 
     expect(context.probe).toHaveBeenCalledWith(expect.stringMatching(/driver\.sock$/), {
       childPid: context.child.pid,
       session: "x11",
+      driverVersion: "0.41.3",
+      compositor: undefined,
     });
     expect(context.runtime.getConnection()).toMatchObject({
       schemaVersion: 1,
@@ -382,12 +386,12 @@ describe.skipIf(process.platform === "win32")("Linux CUA opt-in and lifecycle", 
       generation: "01234567-89ab-cdef-0123-456789abcdef",
       driver: {
         path: context.binary,
-        version: "0.19.3",
+        version: "0.41.3",
         source: "environment",
         manifestSchema: "1",
         fileIdentity: validateDriverCandidate(context.binary).fileIdentity,
       },
-      daemon: { pid: 4321, contractVersion: "0.6.0" },
+      daemon: { pid: 4321, contractVersion: "0.8.0" },
       mcp: {
         command: context.binary,
         args: ["mcp", "--embedded", "--socket", expect.stringMatching(/driver\.sock$/)],
@@ -519,6 +523,8 @@ describe.skipIf(process.platform === "win32")("Linux CUA opt-in and lifecycle", 
     expect(context.probe).toHaveBeenCalledWith(expect.stringMatching(/driver\.sock$/), {
       childPid: context.child.pid,
       session: "wayland",
+      driverVersion: "0.41.3",
+      compositor: "gnome-mutter",
     });
     expect(context.spawnProcess.mock.calls[0][2].env.CUA_DRIVER_RS_ENABLE_WAYLAND).toBe("1");
     expect(context.runtime.getConnection()).toMatchObject({
@@ -532,6 +538,53 @@ describe.skipIf(process.platform === "win32")("Linux CUA opt-in and lifecycle", 
           CUA_DRIVER_RS_UPDATE_CHECK: "false",
         },
       },
+    });
+  });
+
+  it("publishes the Omarchy contract for Omarchy's package-owned driver and checks the daemon against that version", async () => {
+    const context = harness({
+      session: "wayland",
+      compositor: "hyprland",
+      inspected: { source: "system-package", driverVersion: "0.41.5", packageVersion: "0.41.5-1" },
+    });
+    context.probe.mockImplementation(async () => {
+      const ready = handshake(context.child.pid);
+      return { ...ready, metadata: { ...ready.metadata, driver_version: "0.41.5" } };
+    });
+    await context.runtime.enable();
+    expect(context.probe).toHaveBeenCalledWith(expect.stringMatching(/driver\.sock$/), {
+      childPid: context.child.pid,
+      session: "wayland",
+      driverVersion: "0.41.5",
+      compositor: "hyprland",
+    });
+    const spawnEnv = context.spawnProcess.mock.calls[0][2].env;
+    expect(spawnEnv.CUA_DRIVER_RS_ENABLE_WAYLAND).toBe("1");
+    expect(spawnEnv.HYPRLAND_INSTANCE_SIGNATURE).toBe("6f2a0c1e_1762560000_123456789");
+    expect(context.runtime.getConnection()).toMatchObject({
+      mode: "linux-wayland-hyprland-supervised",
+      session: "wayland",
+      compositor: "hyprland",
+      driver: { source: "system-package", version: "0.41.5" },
+      mcp: { env: { CUA_DRIVER_RS_ENABLE_WAYLAND: "1" } },
+    });
+    expect(context.runtime.getStatus()).toMatchObject({ status: "ready", compositor: "hyprland", driverSource: "system-package" });
+  });
+
+  it("keeps the Omarchy plugin guidance when the plugin is off at start", async () => {
+    const context = harness({ session: "wayland", compositor: "hyprland" });
+    context.inspect.mockImplementation(async () => ({
+      status: "unavailable",
+      reasonCode: "linux-hyprland-plugin-required",
+      message: "Turn the plugin on.",
+      compositor: "hyprland",
+    }));
+    await context.runtime.enable();
+    expect(context.spawnProcess).not.toHaveBeenCalled();
+    expect(context.runtime.getStatus()).toMatchObject({
+      status: "error",
+      reasonCode: "linux-hyprland-plugin-required",
+      compositor: "hyprland",
     });
   });
 
@@ -613,6 +666,25 @@ describe("Linux CUA handshake validation", () => {
     expect(() =>
       validateDaemonMetadata({ ok: true, result: { ...valid.result, contract_version: "9" } }),
     ).toThrow(/contract_version/);
+  });
+
+  it("checks a package-owned driver's daemon against the version that was inspected, not the bundled one", () => {
+    const newer = { ok: true, result: { ...handshake(99).metadata, driver_version: "0.41.5" } };
+    expect(validateDaemonMetadata(newer, { childPid: 99, driverVersion: "0.41.5" })).toEqual(newer.result);
+    expect(() => validateDaemonMetadata(newer, { childPid: 99 })).toThrow(/driver_version/);
+    const health = healthyWaylandHealth();
+    health.result.structuredContent.driver_version = "0.41.5";
+    expect(validateWaylandHealthReport(health, { driverVersion: "0.41.5", compositor: "hyprland" }).overall).toBe("ok");
+    expect(() => validateWaylandHealthReport(health)).toThrow(/invalid Wayland health report/);
+  });
+
+  it("names Hyprland, not GNOME, when the Omarchy backend fails its health check", () => {
+    const unhealthy = healthyWaylandHealth();
+    unhealthy.result.structuredContent.overall = "failed";
+    const backend = unhealthy.result.structuredContent.checks.find((entry) => entry.name === "wayland_backend");
+    Object.assign(backend, { status: "fail", message: "No virtual pointer.", hint: "Use a wlroots compositor." });
+    expect(() => validateWaylandHealthReport(unhealthy, { compositor: "hyprland" })).toThrow(/Hyprland control backend.*cua-hyprland-plugin/);
+    expect(() => validateWaylandHealthReport(unhealthy)).toThrow(/GNOME/);
   });
 
   it("requires the inspect and mutation tool surface", () => {

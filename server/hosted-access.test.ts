@@ -1,4 +1,3 @@
-// Owned full server, disposable data, dynamically loaded enterprise hook.
 // The HTTPS backchannel is injected, never redirected to a real portal.
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -8,11 +7,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { freePortBlock } from "./testing/ports.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { HOSTED_CONTRACT_HEADER, HOSTED_CONTRACT_METADATA } from "./hosted-contract.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const PORT = 35000 + Math.floor(Math.random() * 5000);
+let PORT: number;
 const HOST = "acme.example.test";
 const EMAIL = "member@example.test";
 const INSTANCES = { fixture: { driver: "hosted-access-test-shadow" }, claude: {
@@ -36,7 +36,7 @@ function call(path: string, options: { method?: string; cookie?: string; token?:
       ...(options.body === undefined ? {} : { "content-type": "application/json" }),
     } }, (res) => {
       let raw = ""; res.on("data", (chunk) => raw += chunk);
-      res.on("end", () => { let body: unknown = raw; try { body = JSON.parse(raw); } catch { /* static HTML */ }
+      res.on("end", () => { let body: unknown = raw; try { body = JSON.parse(raw); } catch {}
         resolve({ status: res.statusCode!, body, cookies: res.headers["set-cookie"] ?? [], location: res.headers.location, contractVersion: res.headers[HOSTED_CONTRACT_HEADER] }); });
     });
     req.on("error", reject); req.end(options.body === undefined ? undefined : JSON.stringify(options.body));
@@ -53,6 +53,8 @@ async function policyBot() {
     name: "Hosted policy fixture", requireAvailableModel: true, modelSelection: { instanceId: "claude", model: provider.models.default },
   } });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
+  // Everywhere else bots start at Full access; here Full comes only from the operator's policy.
+  expect(created.body.bot.approvalMode).toBe("ask");
   return policyBotId = created.body.bot.id as string;
 }
 async function policyHealth(enabled: boolean, cookie?: string) {
@@ -90,6 +92,7 @@ async function restart(env: NodeJS.ProcessEnv = {}) {
 }
 
 beforeAll(async () => {
+  PORT = await freePortBlock([0, 1], 35_000, 5_000);
   home = mkdtempSync(join(tmpdir(), "omb-hosted-server-"));
   stateFile = join(home, "portal-fixture.json"); state();
   const data = join(home, ".openmausbot");
@@ -126,15 +129,13 @@ beforeAll(async () => {
     OMB_STATIC_DIR: join(home, "static"), OMB_BROWSER_CONNECTION: join(home, "browser-connection.json"),
     OMB_ENTERPRISE_DIR: layer, OMB_LICENSE_KEY: "fixture-only", OMB_ADMIN_URL: "https://admin.example.test",
     OMB_ADMIN_WORKSPACE: "acme", OMB_PUBLIC_URL: `https://${HOST}`,
-    // These cases exercise portal sessions and set fixtures up over loopback,
-    // so they keep the owner explicitly. A hosted workspace's default
-    // (service) has its own case at the end, which drops this override.
+    // These cases set fixtures up over loopback, so they keep the owner; the hosted default (service) has its own case.
     OMB_LOOPBACK_TRUST: "owner",
   }, stdio: ["ignore", "pipe", "pipe"] });
   child.stdout?.on("data", (chunk) => log += chunk); child.stderr?.on("data", (chunk) => log += chunk);
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    try { if ((await call("/api/health", { local: true })).status === 200) return; } catch { /* starting */ }
+    try { if ((await call("/api/health", { local: true })).status === 200) return; } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`Owned hosted fixture failed to start:\n${log}`);
@@ -178,6 +179,30 @@ describe("hosted bridge in the full server", () => {
     expect((await call("/api/auth/session", { cookie: memberCookie })).body).toMatchObject({ scopes: ["client"], hosted: true });
     expect((await call("/api/auth/sessions", { cookie: memberCookie })).status).toBe(403);
   });
+  it("keeps an Azure Live call to a workspace admin, in plain words, and never takes a local request for one", async () => {
+    state();
+    const botId = await policyBot();
+    const admin = await login();
+    const start = (options: { cookie?: string; local?: boolean }) => call("/api/live/session", { method: "POST", body: { botId, sdp: "v=0\r\n", client: "web" }, ...options });
+    const refusal = "Live calls here go through Azure OpenAI, so only an admin or the owner of this server can start one. Ask an admin if you need a call.";
+    expect((await call("/api/live/settings", { method: "PATCH", cookie: admin, body: { provider: "azure", azureEndpoint: "https://fixture.openai.azure.com", azureDeployment: "fixture-dep" } })).status).toBe(200);
+    try {
+      // No key is saved: past the limit, the call stops at the setup prompt and nothing leaves this machine.
+      expect(await start({ cookie: admin })).toMatchObject({ status: 409, body: { needsKey: true } });
+      // This fixture runs with OMB_LOOPBACK_TRUST=owner, an operator's override: every bot's shell is a local caller too.
+      expect(await start({ local: true })).toMatchObject({ status: 403, body: { error: refusal } });
+      state("member");
+      const member = await login();
+      expect(await start({ cookie: member })).toMatchObject({ status: 403, body: { error: refusal } });
+      const seen = (await call("/api/config", { cookie: member })).body.live;
+      expect(seen).toMatchObject({ provider: "azure" });
+      expect(seen).not.toHaveProperty("azureEndpoint");
+      expect(seen).not.toHaveProperty("azureDeployment");
+    } finally {
+      state();
+      expect((await call("/api/live/settings", { method: "PATCH", cookie: await login(), body: { provider: "openai", azureEndpoint: "", azureDeployment: "" } })).status).toBe(200);
+    }
+  });
   it("closes an existing quiet event stream within fifteen seconds of remote revocation", async () => {
     state();
     const cookie = await login();
@@ -208,6 +233,16 @@ describe("hosted bridge in the full server", () => {
     expect((await call(`/api/bots/${botId}`, { method: "PATCH", local: true,
       body: { approvalMode: "auto", acknowledgeLocalAuto: true, alwaysAllow: ["Bash:fixture-only"] } })).status).toBe(200);
     const before = (await call("/api/bots?messages=0", { local: true })).body.bots.find((bot: any) => bot.id === botId);
+    for (const [method, path, body] of [
+      ["PATCH", `/api/bots/${botId}`, { approvalMode: "full" }],
+      ["PATCH", `/api/bots/${botId}/tasks/${before.tasks[0].threadId}`, { approvalMode: "full" }],
+      ["POST", "/api/bots", { name: "Born Full", settings: { approvalMode: "full" } }],
+    ] as const) {
+      const refusedFull = await call(path, { method, cookie, body });
+      expect(refusedFull.status, `${method} ${path}`).toBe(403);
+      expect(refusedFull.body.error).toContain("operator's dedicated policy");
+    }
+    expect((await call("/api/bots?messages=0", { local: true })).body.bots.find((bot: any) => bot.id === botId)).toEqual(before);
     let existingTasks = before.tasks;
     for (const approvalMode of ["full", "ask"] as const) {
       const created = await call(`/api/bots/${botId}/tasks`, { method: "POST", local: true,
@@ -219,13 +254,6 @@ describe("hosted bridge in the full server", () => {
       existingTasks = created.body.bot.tasks;
       policyEvidence.push({ newTask: created.body.task, botDefaults: { approvalMode: created.body.bot.approvalMode, autoApprove: created.body.bot.autoApprove, alwaysAllow: created.body.bot.alwaysAllow } });
     }
-    const unsupported = await call("/api/bots", { method: "POST", local: true,
-      body: { name: "Unavailable provider fixture", modelSelection: { instanceId: "fixture", model: "fixture-only" } } });
-    expect(unsupported.status).toBe(201);
-    const rejected = await call(`/api/bots/${unsupported.body.bot.id}/tasks`, { method: "POST", local: true,
-      body: { title: "Unsupported Full", approvalMode: "full" } });
-    expect(rejected.status).toBe(400);
-    expect(rejected.body.error).toContain("provider does not support Full");
   }, 30_000);
   it("fails closed if a configured deployment loses its enterprise hook, with local owner access retained", async () => {
     await restart({ OMB_ENTERPRISE_DIR: join(home, "absent-layer"), OMB_ADMIN_MEMBERSHIP: "portal", OMB_SHARED_WORKSPACE_FULL_ACCESS: "1" });
@@ -300,8 +328,7 @@ describe("hosted bridge in the full server", () => {
     await refuseFullTask();
   }, 25_000);
   it("withdraws hosted readiness the moment the running server's license grace period ends", async () => {
-    // Expired a week ago less eight seconds: still inside the 7-day grace
-    // (server/enterprise.ts LICENSE_GRACE_DAYS), which ends mid-test.
+    // Expired a week ago less eight seconds: inside the 7-day grace, which ends mid-test.
     state("admin", false, { expiresAt: new Date(Date.now() + 8_000 - 7 * 24 * 60 * 60_000).toISOString() });
     await restart({ OMB_ADMIN_MEMBERSHIP: "portal", OMB_SHARED_WORKSPACE_FULL_ACCESS: "1" });
     expect((await call("/api/health/hosted")).status).toBe(200);
@@ -334,14 +361,12 @@ describe("hosted bridge in the full server", () => {
     expect((await call(`/api/bots/${botId}`, { local: true, method: "PATCH", body: { hidden: false } })).status).toBe(200);
     state("member");
     expect((await call(path, { cookie })).status).toBe(401);
-    // A member reads Bot Settings too: same link, and Admin decides what its visitor may do.
     const memberCookie = await login();
     expect((await call("/api/auth/session", { cookie: memberCookie })).body.scopes).toEqual(["client"]);
     const asMember = await call(path, { cookie: memberCookie });
     expect(asMember.status).toBe(200);
     expect(asMember.body).toEqual(management.body);
     expect((await call(path, { cookie: memberCookie, method: "POST", body: {} })).status).toBe(403);
-    // No credential at all: the gate refuses a remote stranger before the route table runs.
     const stranger = await call(path);
     expect(stranger.status).toBe(403);
     expect(JSON.stringify(stranger.body)).not.toContain("admin.example.test");
@@ -365,8 +390,8 @@ describe("hosted bridge in the full server", () => {
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     const botId = created.body.bot.id as string;
 
-    // What the loopback caller is, and the worker's whole path (cloud server/slack-worker.ts).
     expect((await call("/api/auth/session", { local: true })).body).toMatchObject({ kind: "loopback", scopes: ["client"], trust: "service" });
+    expect(await call("/api/live/session", { method: "POST", local: true, body: { botId, sdp: "v=0\r\n", client: "web" } })).toMatchObject({ status: 403, body: { error: expect.stringContaining("may only use the service routes") } });
     const health = await call("/api/health", { local: true });
     expect(health.status).toBe(200);
     expect(health.body.capabilities).toMatchObject({ guardedMessages: 1, guardedRequests: 1, sharedWorkspaceFullAccess: 1 });
@@ -383,7 +408,6 @@ describe("hosted bridge in the full server", () => {
     expect(sent.status, JSON.stringify(sent.body)).toBe(202);
     expect((await call(`/api/bots/${botId}/requests/${sendId}?threadId=${threadId}`, { local: true })).status).toBe(200);
 
-    // Admin changes from a bot's shell are refused, and leave nothing changed.
     const refused: Array<[string, string, unknown?]> = [
       ["PUT", "/api/config", { budgets: { monthlyUsd: 0 } }],
       ["POST", "/api/webhooks", { name: "Backdoor", prompt: "hi", botId }],
@@ -404,7 +428,6 @@ describe("hosted bridge in the full server", () => {
     expect(bots.some((bot: any) => bot.name === "Rogue")).toBe(false);
     expect(bots.find((bot: any) => bot.id === botId).approvalMode).not.toBe("auto");
 
-    // A real session still administers the workspace, and Settings learns who manages people.
     expect((await call("/api/config", { method: "PUT", cookie: admin, body: { decisions: { retentionDays: 365 } } })).status).toBe(200);
     const config = (await call("/api/config", { cookie: admin })).body;
     expect(config.decisions).toEqual({ retentionDays: 365 });

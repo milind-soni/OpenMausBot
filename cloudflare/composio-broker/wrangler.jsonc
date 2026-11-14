@@ -21,8 +21,11 @@
   ],
   "ratelimits": [
     { "name": "REGISTRATION_LIMITER", "namespace_id": "8261701", "simple": { "limit": 30, "period": 60 } },
-    { "name": "SESSION_LIMITER", "namespace_id": "8261702", "simple": { "limit": 120, "period": 60 } }
+    { "name": "SESSION_LIMITER", "namespace_id": "8261702", "simple": { "limit": 120, "period": 60 } },
+    { "name": "EVENTS_LIMITER", "namespace_id": "8261703", "simple": { "limit": 60, "period": 60 } }
   ],
+  // Hourly: expire app events older than 7 days, pause the triggers of installations idle for 14 days.
+  "triggers": { "crons": ["23 * * * *"] },
   "observability": {
     "enabled": true,
     "logs": { "enabled": true, "head_sampling_rate": 1 },

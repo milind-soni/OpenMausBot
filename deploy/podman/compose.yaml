@@ -7,7 +7,10 @@ services:
       args:
         ENGINES: ${ENGINES:-}
     image: localhost/openmausbot-podman:${OMB_IMAGE_TAG:-local}
+    # Collects exited browser processes; Chrome's shared memory as on the
+    # desktop containers (docs/browser-packaging.md, "Process hygiene").
     init: true
+    shm_size: 512m
     userns_mode: keep-id:uid=1001,gid=1001
     user: "1001:1001"
     restart: unless-stopped

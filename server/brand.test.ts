@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { DEFAULT_BRAND, describeBrand, loadBrand } from "./brand.ts";
+import { DEFAULT_BRAND, describeBrand, loadBrand, productName } from "./brand.ts";
 
 const dirs: string[] = [];
 const licensed = (feature: string) => feature === "whitelabel";
@@ -26,6 +26,7 @@ describe("brand.json", () => {
     const file = join(tmpdir(), "omb-brand-missing", "brand.json");
     expect(loadBrand({ file, isEntitled: licensed })).toEqual({ brand: DEFAULT_BRAND, source: "default", file });
     expect(describeBrand(loadBrand({ file, isEntitled: licensed }))).toBe("brand: default");
+    expect(productName(loadBrand({ file, isEntitled: licensed }))).toBe("MausBot");
   });
 
   it("applies a valid file on a licensed server", () => {
@@ -42,6 +43,7 @@ describe("brand.json", () => {
     expect(status.brand.accent).toBe("#1D4ED8");
     expect(status.notice).toBeUndefined();
     expect(describeBrand(status)).toBe(`brand: Reliable Platform (from ${file})`);
+    expect(productName(status)).toBe("Reliable Platform");
   });
 
   it("keeps the default brand on an unlicensed server and says so", () => {

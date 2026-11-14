@@ -35,8 +35,7 @@ describe("blank terminal launcher", () => {
   it("opens a blank PowerShell window on Windows", async () => {
     const fake = launcher(["spawn"]);
     await expect(openBlankTerminal("win32", fake.run)).resolves.toBe(true);
-    // The terminal must not be the launcher's own child: that child reads and
-    // writes pipes back to the app and never gets a window to type into.
+    // Not the launcher's own child: that child's stdio is piped to the app and never gets a window.
     expect(fake.calls).toEqual([
       {
         executable: "powershell.exe",

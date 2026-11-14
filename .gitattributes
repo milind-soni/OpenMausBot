@@ -7,8 +7,9 @@ shared/mascot-bodies.ts text eol=lf
 # git runs hooks through sh; a CRLF shebang line is "/bin/sh^M: bad interpreter" on every platform.
 scripts/git-hooks/* text eol=lf
 deploy/podman/*.sh text eol=lf
-ios/Sources/CompanionCore/MausBodies.swift text eol=lf
-android/app/src/main/kotlin/com/openmausbot/companion/ui/MausBodies.kt text eol=lf
+# install.sh is piped to sh on a customer's server, and the AppArmor profile is loaded as it is.
+connector/**/*.sh text eol=lf
+connector/profiles/* text eol=lf
 # Vendor patch hashes and original notices must survive Windows checkout
 # byte-for-byte. Do not let core.autocrlf rewrite these reviewed inputs.
 third_party/browser/** text eol=lf
@@ -18,3 +19,43 @@ third_party/browser/** text eol=lf
 # on Windows fails both for a reason that has nothing to do with the evals.
 evals/live/judge/prompts/** text eol=lf
 evals/golden/**/*.json text eol=lf
+# The announcements file and its JSON Schema: scripts/check-announcements.mjs compares the committed schema with the one
+# it generates (LF), and installs read the file as main serves it. The comparison ignores line endings too; this keeps a
+# Windows checkout identical to what installs download.
+announcements/*.json text eol=lf
+# The bundled model catalog is compared byte for byte with what
+# scripts/build-model-catalog.mjs writes (LF), and its licence text with the
+# LICENSE files, in scripts/build-model-catalog.test.mjs and by --check.
+server/model-catalog/models-dev.snapshot.json text eol=lf
+third_party/models-dev/LICENSE text eol=lf
+third_party/opencode/LICENSE text eol=lf
+# scripts/docker-image.test.ts and server/cloud-home.test.ts read the
+# Dockerfile's instructions line by line, joining a line that ends in "\" to
+# the next. A CRLF checkout on Windows ends those lines in "\r", so nothing
+# joins and every layering, healthcheck and trust check fails for a reason
+# that has nothing to do with the image. Docker itself reads LF everywhere.
+Dockerfile text eol=lf
+# shared/app-frame/host-page.test.ts compares the committed app host page with
+# what scripts/build-app-host.ts writes (LF), and checks the sha256 on its first
+# line against the body after it; the phone apps copy it byte for byte. A CRLF
+# checkout on Windows fails both for a reason that has nothing to do with the page.
+shared/app-frame/app-host.html text eol=lf
+
+# Imported by a vitest test: a CRLF checkout of its first lines broke the import on Windows.
+scripts/tighten-ratchets.mjs text eol=lf
+
+# The E2E wire vectors are pinned by SHA-256 and compared byte for byte with what companion/src/e2e/gen-vectors.ts
+# writes (LF), in companion/test/e2e/vectors.test.ts; the relay and the phone apps keep pinned copies. A CRLF checkout
+# on Windows fails every one of those checks for a reason that has nothing to do with the wire.
+companion/src/e2e/vectors/** text eol=lf
+relay/test/vectors/** text eol=lf
+
+# server/cloud-home.test.ts matches the edge's Caddy configs line by line with "\n", and Caddy reads them as written;
+# a CRLF checkout on Windows fails every match for a reason that has nothing to do with the edge.
+deploy/fly/Caddyfile* text eol=lf
+deploy/fly/*.caddy text eol=lf
+
+# Bundled skills ship to Linux Clouds as they are, and server/skill-publish-to-netlify.test.ts imports a skill's helper
+# through vitest: Vite's transform (vitest 4.1.11) fails with "Invalid or unexpected token" on a file that starts
+# with a shebang and has CRLF line endings, which is what a Windows checkout made of it.
+skills/** text eol=lf

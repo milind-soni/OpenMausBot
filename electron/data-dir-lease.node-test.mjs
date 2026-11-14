@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir, uptime as osUptime } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,6 +9,8 @@ import test from "node:test";
 import {
   acquireDataDirLease,
   acquireDataDirLeaseForProcess,
+  clearRecordsFromEarlierRunOfThisContainer,
+  clearRecordsFromOtherMachines,
 } from "./data-dir-lease.mjs";
 
 const MODULE_URL = new URL("./data-dir-lease.mjs", import.meta.url).href;
@@ -57,16 +59,6 @@ async function exitedPid() {
     child.once("close", resolve);
   });
   return pid;
-}
-
-function wmicAvailable() {
-  if (process.platform !== "win32") return false;
-  try {
-    execFileSync("wmic", ["/?"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 test.afterEach(() => {
@@ -231,8 +223,7 @@ test("a new parent refuses to pass an orphaned live delegated child", async () =
       child.once("error", reject);
       child.stdout.once("data", (chunk) => chunk.includes("ready") ? resolve() : reject(new Error(String(chunk))));
     });
-    // Simulate hard parent death: the primary record is complete but its pid
-    // is dead, while the subordinate child remains live.
+    // Hard parent death: the primary record is complete but its pid is dead, while the child stays live.
     const primaryPath = path.join(dataDir, LEASE_NAME);
     const stored = JSON.parse(readFileSync(primaryPath, "utf8"));
     stored.pid = await exitedPid();
@@ -246,8 +237,6 @@ test("a new parent refuses to pass an orphaned live delegated child", async () =
   } finally {
     child.kill("SIGKILL");
     await new Promise((resolve) => child.once("close", resolve));
-    // The original handle no longer matches the simulated dead owner. A fresh
-    // claimant safely retires both stale records and performs final cleanup.
     const recovered = acquireDataDirLease(dataDir);
     recovered.release();
   }
@@ -399,10 +388,7 @@ test("process entry API remains compatible with a standalone server", () => {
   assert.equal(lease.release(), true);
 });
 
-/**
- * Read the lease record this build actually writes, so the boot-identity tests
- * assert against the real on-disk shape instead of a hand-copied duplicate.
- */
+/** The record this build actually writes, so the boot-identity tests assert against the real on-disk shape. */
 function recordWrittenByThisProcess(dataDir) {
   const lease = acquireDataDirLease(dataDir);
   const record = JSON.parse(readFileSync(path.join(dataDir, LEASE_NAME), "utf8"));
@@ -420,10 +406,7 @@ function plantOwner(dataDir, overrides) {
 test("a lease left behind by an earlier boot is retired even though its pid is live", (t) => {
   const { dataDir } = temporaryDirectory();
   if (recordWrittenByThisProcess(dataDir).boot === null) return t.skip("no boot identity on this platform");
-  // The reported failure: a restart force-kills the desktop, the pid it
-  // recorded is reused by a root-owned daemon on the next boot, and kill(0)
-  // answers EPERM. Our own live pid reproduces that "owner looks alive" state
-  // exactly, without depending on which daemon holds a recycled pid.
+  // Our own live pid reproduces a pid reused by a root daemon after a reboot: kill(0) answers EPERM and the owner looks alive.
   plantOwner(dataDir, { boot: randomUUID(), pid: process.pid, token: randomUUID() });
 
   const lease = acquireDataDirLease(dataDir);
@@ -436,6 +419,84 @@ test("a live owner from the current boot still blocks a second instance", () => 
   plantOwner(dataDir, { pid: process.pid, token: randomUUID() });
 
   assert.throws(() => acquireDataDirLease(dataDir), /already using this data directory/i);
+});
+
+test("a Linux record names its pid namespace and when its process started; elsewhere both are null", () => {
+  const { dataDir } = temporaryDirectory();
+  const record = recordWrittenByThisProcess(dataDir);
+  if (process.platform !== "linux") {
+    assert.deepEqual({ ns: record.ns, start: record.start }, { ns: null, start: null });
+    return;
+  }
+  assert.equal(record.ns, /^pid:\[(\d+)\]$/.exec(readlinkSync("/proc/self/ns/pid"))[1]);
+  const stat = readFileSync("/proc/self/stat", "utf8");
+  assert.equal(record.start, Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]));
+});
+
+// Two containers on one host: the same boot, another pid namespace, and pids that start again from 1.
+const anotherPidNamespace = (current) => String(BigInt(current.ns) + 1n);
+
+test("a lease another container on this host left is never judged by this container's pids", (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.ns === null || current.boot === null) return t.skip("no pid namespace or boot identity on this platform");
+  // The new container's server got the pid the dead one recorded, here our own live pid.
+  const leasePath = plantOwner(dataDir, { ns: anotherPidNamespace(current), pid: process.pid, token: randomUUID() });
+  const planted = readFileSync(leasePath, "utf8");
+
+  assert.throws(() => acquireDataDirLease(dataDir), /already owned by a process on another machine/i);
+  assert.equal(readFileSync(leasePath, "utf8"), planted);
+  assert.deepEqual(clearRecordsFromOtherMachines(dataDir), [{ path: leasePath, host: current.host, pid: process.pid }]);
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(JSON.parse(readFileSync(leasePath, "utf8")).ns, current.ns);
+  assert.equal(lease.release(), true);
+});
+
+// A container Docker restarts after its server was killed outright (out of memory, kill -9) keeps its hostname, and gets a
+// new pid namespace: its launcher clears what the earlier run left, and only that.
+test("a container's launcher clears the lease its own earlier run left, never another container's", (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.ns === null || current.boot === null) return t.skip("no pid namespace or boot identity on this platform");
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  const plant = (overrides) => writeFileSync(leasePath, `${JSON.stringify({ ...current, ...overrides })}\n`, { mode: 0o600 });
+  plant({ host: `${current.host}-another-container`, ns: anotherPidNamespace(current), pid: process.pid, token: randomUUID() });
+  assert.deepEqual(clearRecordsFromEarlierRunOfThisContainer(dataDir), []);
+  assert.throws(() => acquireDataDirLease(dataDir), /already owned by a process on another machine/i);
+
+  plant({ ns: anotherPidNamespace(current), pid: process.pid, token: randomUUID() });
+  assert.throws(() => acquireDataDirLease(dataDir), /already owned by a process on another machine/i);
+  assert.deepEqual(clearRecordsFromEarlierRunOfThisContainer(dataDir), [{ path: leasePath, host: current.host, pid: process.pid }]);
+  const lease = acquireDataDirLease(dataDir);
+  try {
+    // This run's own lease is live, and stays.
+    assert.deepEqual(clearRecordsFromEarlierRunOfThisContainer(dataDir), []);
+    assert.throws(() => acquireDataDirLease(dataDir), /already using this data directory/i);
+  } finally {
+    lease.release();
+  }
+});
+
+test("a pid this container reused for another process is not the lease's owner", (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.ns === null || current.start === null) return t.skip("no process start time on this platform");
+  plantOwner(dataDir, { pid: process.pid, start: current.start + 1, token: randomUUID() });
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.ownerPid, process.pid);
+  assert.equal(lease.release(), true);
+});
+
+test("a lease this host left before a reboot is recovered whatever pid namespace wrote it", (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.ns === null || current.boot === null) return t.skip("no pid namespace or boot identity on this platform");
+  plantOwner(dataDir, { boot: randomUUID(), ns: anotherPidNamespace(current), pid: process.pid, token: randomUUID() });
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.ownerPid, process.pid);
+  assert.equal(lease.release(), true);
 });
 
 test("a reaper from an earlier boot is succeeded even when its pid is live", (t) => {
@@ -471,11 +532,62 @@ test("a delegated child from an earlier boot cannot block a new parent", (t) => 
   assert.equal(parent.release(), true);
 });
 
+// macOS renames the host when it joins another network.
+const renamedHost = (current) => (current.host === "Ryans-MacBook-Pro.local" ? "Ryans-MBP.lan" : "Ryans-MacBook-Pro.local");
+
+test("a lease this computer left under its old hostname is recovered", async (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.boot === null) return t.skip("no boot identity on this platform");
+  plantOwner(dataDir, { host: renamedHost(current), pid: await exitedPid(), token: randomUUID() });
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(JSON.parse(readFileSync(path.join(dataDir, LEASE_NAME), "utf8")).host, hostname());
+  assert.equal(lease.release(), true);
+});
+
+test("a delegated child this computer left under its old hostname cannot block a new parent", async (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.boot === null) return t.skip("no boot identity on this platform");
+  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  mkdirSync(path.dirname(childPath));
+  writeFileSync(childPath, JSON.stringify({ ...current, host: renamedHost(current), pid: await exitedPid(), token: randomUUID() }));
+
+  const parent = acquireDataDirLease(dataDir);
+  const child = acquireDataDirLeaseForProcess(dataDir, { ...parent.utilityServerLeaseEnvironment() });
+  assert.equal(child.delegated, true);
+  assert.equal(child.release(), true);
+  assert.equal(parent.release(), true);
+});
+
+test("a lease under another name from another boot still fails closed, and says how to recover", async () => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  const foreign = { host: renamedHost(current), boot: randomUUID(), pid: await exitedPid(), token: randomUUID() };
+  const leasePath = plantOwner(dataDir, foreign);
+  const planted = JSON.parse(readFileSync(leasePath, "utf8"));
+  assert.throws(() => acquireDataDirLease(dataDir), (error) => {
+    assert.match(error.message, /already owned by a process on another machine/i);
+    assert.ok(error.message.includes(`delete ${JSON.stringify(leasePath)} and start again`));
+    return true;
+  });
+  assert.deepEqual(JSON.parse(readFileSync(leasePath, "utf8")), planted);
+  rmSync(leasePath);
+
+  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  mkdirSync(path.dirname(childPath));
+  writeFileSync(childPath, JSON.stringify({ ...current, ...foreign }));
+  assert.throws(() => acquireDataDirLease(dataDir), (error) => {
+    assert.match(error.message, /delegated server on another machine/i);
+    assert.ok(error.message.includes(`delete ${JSON.stringify(childPath)} and start again`));
+    return true;
+  });
+});
+
 test("a lease recorded above the machine's current uptime is retired", () => {
   const { dataDir } = temporaryDirectory();
-  // Windows has no boot session id, so a reboot is proven by the only
-  // one-directional signal available: a since-boot clock cannot run backwards
-  // within a single boot.
+  // Windows has no boot session id; a since-boot clock cannot run backwards within one boot.
   plantOwner(dataDir, {
     boot: null,
     uptime: Math.floor(osUptime() * 1000) + 3_600_000,
@@ -504,8 +616,7 @@ test("the contention error names the lease record so a stuck owner is recoverabl
 test("a stale lease whose pid was recycled by a root-owned daemon no longer blocks startup", (t) => {
   const { dataDir } = temporaryDirectory();
   if (recordWrittenByThisProcess(dataDir).boot === null) return t.skip("no boot identity on this platform");
-  // Root/container runners may be allowed to signal PID 1. Only run this
-  // fixture when it reproduces the reported EPERM failure.
+  // Root/container runners may signal PID 1; run only where this reproduces the EPERM failure.
   try {
     process.kill(1, 0);
     return t.skip("this runner can signal PID 1");
@@ -521,10 +632,6 @@ test("a stale lease whose pid was recycled by a root-owned daemon no longer bloc
 
 test("boot identity does not weaken exclusion: only one of many live racers wins", async () => {
   const { dataDir } = temporaryDirectory();
-  // The guarantee this module exists to provide. Boot identity may only ever
-  // prove a record dead, so concurrent live claimants must still serialize to
-  // exactly one owner -- a stale-detection bug that let two in would corrupt
-  // the very state the lease protects.
   const racers = await Promise.all(Array.from({ length: 8 }, (_, index) => runNode(`
     const { existsSync, writeFileSync } = await import("node:fs");
     const { acquireDataDirLease } = await import(${JSON.stringify(MODULE_URL)});
@@ -566,22 +673,19 @@ test("boot identity does not weaken exclusion: only one of many live racers wins
     assert.match(loser.error, /already using this data directory|being recovered/i);
   }
 
-  // And the directory is left usable rather than wedged by the contention.
   const after = acquireDataDirLease(dataDir);
   assert.equal(after.release(), true);
 });
 
 test("a live but unrelated Windows pid reused within the same boot is treated as stale", async (t) => {
-  if (process.platform !== "win32") return t.skip("Windows-only: wmic process-identity check");
-  if (!wmicAvailable()) return t.skip("wmic is not available; the Windows process-identity check cannot be exercised");
+  // With or without wmic: Windows 11 no longer installs it, and the check must still tell a reused pid apart.
+  if (process.platform !== "win32") return t.skip("Windows-only: process-identity check");
   const { dataDir } = temporaryDirectory();
   const sibling = spawn(process.execPath, ["--eval", "setInterval(()=>{}, 1_000);"], { stdio: "ignore" });
   const siblingPid = sibling.pid;
   assert.ok(siblingPid);
   t.after(() => sibling.kill());
-  // Give the sibling enough time to start so its CreationDate is unambiguously
-  // later than the synthetic lease's createdAt, reproducing the same-boot
-  // PID-reuse case from the issue.
+  // Long enough that the sibling's CreationDate is unambiguously later than the synthetic lease's createdAt.
   await new Promise((resolve) => setTimeout(resolve, 200));
 
   const leasePath = path.join(dataDir, LEASE_NAME);
@@ -602,4 +706,56 @@ test("a live but unrelated Windows pid reused within the same boot is treated as
   } finally {
     lease.release();
   }
+});
+
+// A Cloud home's volume mounts on one machine at a time, and each new home on it has a new hostname and boot.
+const otherMachine = (current) => ({ host: renamedHost(current), boot: randomUUID(), uptime: 1 });
+
+test("on request, the lease, delegated child and recovery record another machine left are cleared and their holder named; then the lease is free", async () => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  const foreign = { ...otherMachine(current), pid: await exitedPid(), token: randomUUID() };
+  const leasePath = plantOwner(dataDir, foreign);
+  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  mkdirSync(path.dirname(childPath));
+  writeFileSync(childPath, JSON.stringify({ ...current, ...foreign, token: randomUUID() }));
+  const reaperPath = path.join(dataDir, `${LEASE_NAME}.reap-${foreign.token}`);
+  writeFileSync(reaperPath, JSON.stringify({ ...current, ...foreign, token: randomUUID(), targetToken: foreign.token }));
+  assert.throws(() => acquireDataDirLease(dataDir), /another machine/);
+
+  const cleared = clearRecordsFromOtherMachines(dataDir);
+  assert.deepEqual(cleared.map((record) => record.path).sort(), [leasePath, childPath, reaperPath].sort());
+  for (const record of cleared) assert.deepEqual({ host: record.host, pid: record.pid }, { host: foreign.host, pid: foreign.pid });
+  for (const cleared of [leasePath, childPath, reaperPath]) assert.throws(() => readFileSync(cleared), /ENOENT/);
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(JSON.parse(readFileSync(leasePath, "utf8")).host, hostname());
+  assert.equal(lease.release(), true);
+  assert.deepEqual(clearRecordsFromOtherMachines(dataDir), []);
+  assert.deepEqual(clearRecordsFromOtherMachines(path.join(dataDir, "missing")), []);
+});
+
+test("clearing never touches this machine's records: a live owner still refuses a second instance, a dead one is recovered as usual", async () => {
+  const { dataDir } = temporaryDirectory();
+  const live = acquireDataDirLease(dataDir);
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  const planted = readFileSync(leasePath, "utf8");
+  try {
+    assert.deepEqual(clearRecordsFromOtherMachines(dataDir), []);
+    assert.equal(readFileSync(leasePath, "utf8"), planted);
+    assert.throws(() => acquireDataDirLease(dataDir), /already using this data directory/i);
+  } finally {
+    live.release();
+  }
+  const dead = plantOwner(dataDir, { pid: await exitedPid(), token: randomUUID() });
+  assert.deepEqual(clearRecordsFromOtherMachines(dataDir), []);
+  assert.ok(readFileSync(dead, "utf8"));
+  const recovered = acquireDataDirLease(dataDir);
+  assert.equal(recovered.release(), true);
+});
+
+test("clearing refuses an unreadable record rather than guess whose it is", () => {
+  const { dataDir } = temporaryDirectory();
+  writeFileSync(path.join(dataDir, LEASE_NAME), "not json");
+  assert.throws(() => clearRecordsFromOtherMachines(dataDir), /lease is invalid/);
+  assert.equal(readFileSync(path.join(dataDir, LEASE_NAME), "utf8"), "not json");
 });

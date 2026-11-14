@@ -1,6 +1,5 @@
-// Reviewed vendor assets, downloaded and hashed on 2026-09-16. Update all
-// pins together and run each platform's packaged, offline browser smoke test.
-// This is Chromium's headless shell, not full Chrome (which includes Widevine).
+// Reviewed vendor assets hashed on 2026-09-16: update all pins together and run each platform's packaged offline browser
+// smoke test. Chromium's headless shell, not full Chrome (which includes Widevine).
 import { join } from "node:path";
 import {
   agentBrowserReleaseUrl,
@@ -52,7 +51,6 @@ export function browserBundleSpec(target: string) {
   };
 }
 
-/** bundleDirectory is the target's directory, e.g. Resources/browser-engine. */
 export function browserBundlePaths(bundleDirectory: string, target: string) {
   const spec = browserBundleSpec(target);
   return {

@@ -11,7 +11,12 @@
 // request on silence by itself; it only produces `isFinal` after endAudio().
 // Composer dictation omits this flag and keeps its existing press-to-stop
 // behavior, while call mode opts into silence endpointing.
+//
+// `--finish-on-release control,option` finishes recognition once any of the
+// listed modifiers (control, option, shift, command) is no longer held.
 import AVFoundation
+import CoreGraphics
+import Darwin
 import Foundation
 import Speech
 
@@ -51,6 +56,71 @@ let finishFile: String? = {
   return args[index + 1]
 }()
 
+func releaseModifiers(_ list: String) -> CGEventFlags? {
+  var flags = CGEventFlags()
+  for name in list.split(separator: ",", omittingEmptySubsequences: false) {
+    switch name {
+    case "control": flags.insert(.maskControl)
+    case "option": flags.insert(.maskAlternate)
+    case "shift": flags.insert(.maskShift)
+    case "command": flags.insert(.maskCommand)
+    default: return nil
+    }
+  }
+  return flags.isEmpty ? nil : flags
+}
+
+func released(_ required: CGEventFlags, _ current: CGEventFlags) -> Bool {
+  !current.contains(required)
+}
+
+if let index = CommandLine.arguments.firstIndex(of: "--release-check") {
+  let args = CommandLine.arguments
+  guard index + 2 < args.count, let required = releaseModifiers(args[index + 1]),
+    let raw = UInt64(args[index + 2])
+  else { fail("bad-modifiers") }
+  emit(["released": released(required, CGEventFlags(rawValue: raw))])
+  exit(0)
+}
+
+let finishOnRelease: CGEventFlags? = {
+  let args = CommandLine.arguments
+  guard let index = args.firstIndex(of: "--finish-on-release") else { return nil }
+  guard index + 1 < args.count, let flags = releaseModifiers(args[index + 1]) else {
+    fail("bad-modifiers")
+  }
+  return flags
+}()
+
+let lifelineFile: String = {
+  let args = CommandLine.arguments
+  guard let index = args.firstIndex(of: "--lifeline-file"), index + 1 < args.count else {
+    fail("missing-lifeline")
+  }
+  return args[index + 1]
+}()
+let lifelineFD = Darwin.open(lifelineFile, O_RDONLY | O_NONBLOCK)
+guard lifelineFD >= 0 else { fail("lifeline-unavailable") }
+
+func checkOwner() {
+  var byte: UInt8 = 0
+  let count = Darwin.read(lifelineFD, &byte, 1)
+  guard count == 0 || (count < 0 && errno != EAGAIN && errno != EINTR) else { return }
+  let sessionDir = (lifelineFile as NSString).deletingLastPathComponent
+  // Owner death leaves private transcripts behind. Remove only this session's known files, never a directory tree.
+  for name in ["stdout.ndjson", "stderr.log", "stop", "finish", "owner.pipe"] {
+    _ = unlink((sessionDir as NSString).appendingPathComponent(name))
+  }
+  _ = rmdir(sessionDir)
+  exit(0)
+}
+
+// LaunchServices reparents the helper. FIFO EOF binds capture to Electron's lifetime without trusting a reusable PID.
+checkOwner()
+let ownerSource = DispatchSource.makeReadSource(fileDescriptor: lifelineFD, queue: .global(qos: .userInitiated))
+ownerSource.setEventHandler { checkOwner() }
+ownerSource.resume()
+
 // LaunchServices gives the helper the bundle identity TCC needs, but it also
 // means the parent cannot terminate it by killing the `open -W` process. A
 // per-session stop marker keeps intentional mute/hang-up deterministic.
@@ -70,11 +140,14 @@ if let stopFile {
 // if an unusually fast key release beats authorization/setup.
 var finishHandler: (() -> Void)?
 var finishTimer: DispatchSourceTimer?
-if let finishFile {
+if finishFile != nil || finishOnRelease != nil {
   let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
   timer.schedule(deadline: .now() + .milliseconds(50), repeating: .milliseconds(50))
   timer.setEventHandler {
-    guard FileManager.default.fileExists(atPath: finishFile), let finish = finishHandler else { return }
+    let finishRequested =
+      finishFile.map { FileManager.default.fileExists(atPath: $0) } == true
+      || finishOnRelease.map { released($0, CGEventSource.flagsState(.combinedSessionState)) } == true
+    guard finishRequested, let finish = finishHandler else { return }
     timer.cancel()
     finish()
   }
@@ -181,10 +254,26 @@ SFSpeechRecognizer.requestAuthorization { status in
     if let result = result {
       let text = result.bestTranscription.formattedString
       endpointer?.saw(text)
-      emit(["partial": !result.isFinal, "text": text])
+      var line: [String: Any] = ["partial": !result.isFinal, "text": text]
+      // Apple's on-device recognizer can end an utterance without isFinal,
+      // then return only the next utterance: developer.apple.com/forums/thread/762952
+      if let metadata = result.speechRecognitionMetadata, metadata.speechDuration > 0 {
+        line["utteranceFinal"] = true
+        line["speechStart"] = metadata.speechStartTimestamp
+        line["speechDuration"] = metadata.speechDuration
+      }
+      emit(line)
       if result.isFinal { exit(0) }
     }
-    if error != nil { fail("recognition-error") }
+    if let error {
+      let nsError = error as NSError
+      // macOS can authorize this helper while system Dictation is disabled.
+      // Preserve that distinction so the UI points to the right setting.
+      if nsError.domain == "kLSRErrorDomain" && nsError.code == 201 {
+        fail("dictation-disabled")
+      }
+      fail("recognition-error")
+    }
   }
 }
 

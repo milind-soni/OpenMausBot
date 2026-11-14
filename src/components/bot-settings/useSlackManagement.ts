@@ -1,12 +1,8 @@
-// Whether this bot's Slack app can be managed from here, and where. The app
-// holds no Slack logic: on a hosted organisation workspace the server answers
-// with a link into the organisation's Admin; everywhere else it answers
-// { available: false } and the Slack section stays out of the rail.
 import { useEffect, useState } from "react";
 
 import { api } from "@/state/store";
 
-/** The link to render, or null for anything but an available https link. */
+/** Only an available https link; null for anything else. */
 export function slackManagementUrl(response: unknown): string | null {
   if (!response || typeof response !== "object") return null;
   const { available, managementUrl } = response as { available?: unknown; managementUrl?: unknown };
@@ -18,8 +14,6 @@ export function slackManagementUrl(response: unknown): string | null {
   }
 }
 
-/** Null while loading, on a local install, and when the read fails: in all
- * three there is nothing to offer, so the section simply is not there. */
 export function useSlackManagementUrl(botId: string): string | null {
   const [loaded, setLoaded] = useState<{ botId: string; url: string | null } | null>(null);
   useEffect(() => {

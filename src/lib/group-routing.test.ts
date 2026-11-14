@@ -1,8 +1,25 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { setLocale } from "./i18n";
-import { goalCoordinatorForComposer, groupComposerHint, roomRespondersForComposer } from "./group-routing";
-import type { GroupDefaultResponder } from "@/state/store";
+import { goalCoordinatorForComposer, groupComposerHint, openTaskWorking, roomRespondersForComposer, roomRouteForComposer } from "./group-routing";
+import type { Group, GroupDefaultResponder } from "@/state/store";
+
+describe("openTaskWorking", () => {
+  const tasks = [
+    { threadId: "goal", title: "Weekly report", createdAt: 1, working: true },
+    { threadId: "chat", title: "Questions", createdAt: 2, working: false },
+  ] as Group["tasks"];
+
+  it("locks a task's composer on its own work, not a background task's", () => {
+    expect(openTaskWorking({ threadId: "chat", working: true, tasks })).toBe(false);
+    expect(openTaskWorking({ threadId: "goal", working: true, tasks })).toBe(true);
+  });
+
+  it("reads the room's flag when no task list came", () => {
+    expect(openTaskWorking({ threadId: "dm", working: true })).toBe(true);
+    expect(openTaskWorking({ threadId: "dm", working: false })).toBe(false);
+  });
+});
 
 describe("roomRespondersForComposer", () => {
   const members = [
@@ -49,6 +66,30 @@ describe("roomRespondersForComposer", () => {
     expect(roomRespondersForComposer("@everyone𐐀 hello", members, mentionsOnly)).toEqual([]);
     expect(roomRespondersForComposer("user@everyone /@everyone", members, mentionsOnly)).toEqual([]);
     expect(roomRespondersForComposer("İ @everyone", members, mentionsOnly)).toEqual(members);
+  });
+});
+
+describe("who answers when two room members share a name", () => {
+  const analyst = { id: "quill-analyst", name: "Quill" };
+  const chief = { id: "quill-chief", name: "Quill", chiefOfStaff: true };
+  const scout = { id: "scout", name: "Scout" };
+  const members = [analyst, chief, scout];
+  const led = { defaultResponder: { kind: "member", botId: "scout" } } as const;
+
+  it("names the bot picked from the @ list, as the room will", () => {
+    expect(roomRouteForComposer("@Quill check this", members, led, [chief.id])).toEqual({ responders: [chief], ambiguous: false });
+    expect(roomRespondersForComposer("@Quill check this", members, led, [analyst.id])).toEqual([analyst]);
+    expect(goalCoordinatorForComposer("@Quill finish this", members, led, [chief.id])?.id).toBe(chief.id);
+  });
+
+  it("names nobody for a typed name with no pick, since the room refuses that line", () => {
+    expect(roomRouteForComposer("@Quill check this", members, led)).toEqual({ responders: [], ambiguous: true });
+  });
+
+  it("keeps a unique name, the lead and @everyone as they were", () => {
+    expect(roomRouteForComposer("@Scout check this", members, led)).toEqual({ responders: [scout], ambiguous: false });
+    expect(roomRouteForComposer("check this", members, led, [chief.id])).toEqual({ responders: [scout], ambiguous: false });
+    expect(roomRouteForComposer("@everyone @Quill check this", members, led)).toEqual({ responders: members, ambiguous: false });
   });
 });
 

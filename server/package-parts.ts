@@ -1,13 +1,4 @@
-// Part hashes for records added from an organization's library (contract
-// §1.6). Every part of an added team keeps two hashes: `r`, the value the
-// release shipped, and `w`, the value OpenMausBot wrote at install. The
-// automatic updater compares them later: `hash(local) ≠ w` means the person
-// edited the part, `r(new release) ≠ r` means the publisher changed it. Only
-// the hashes are kept, never a second copy of the content.
-//
-// The value shapes are frozen: a stamp written today must still compare
-// correctly in a later version, so change nothing here without a new stamp
-// version.
+// Release (r) and written (w) hashes per part. The value shapes are frozen: change nothing here without a new stamp version.
 import { createHash } from "node:crypto";
 
 import { canonicalJson, decodeBase64 } from "../shared/package-format.ts";
@@ -32,14 +23,12 @@ export type TeamPart = typeof TEAM_PARTS[number];
 
 export const sha256Hex = (bytes: Uint8Array | string): string => createHash("sha256").update(bytes).digest("hex");
 
-/** sha256hex(utf8(canonicalJson(value ?? null))) */
 export function partHash(value: unknown): string {
   return sha256Hex(canonicalJson(value ?? null));
 }
 
 export const pair = (release: unknown, written: unknown): PartPair => ({ r: partHash(release), w: partHash(written) });
 
-/** A bot's look: colour, mascot, and the picture by its bytes' hash. */
 export interface LookValue {
   color: string;
   mascotExpression: string | null;
@@ -63,7 +52,6 @@ export function playbookValues(playbooks: ReadonlyArray<Pick<PackagePlaybook, "k
   return playbooks.map(({ key, name, summary, triggers, instructions }) => ({ key, name, summary, triggers: [...triggers], instructions }));
 }
 
-/** The release side of every bot part. */
 export function agentReleaseValues(agent: PackageAgent, playbooks: ReadonlyMap<string, PackagePlaybook>): Record<AgentPart, unknown> {
   return {
     name: agent.name,
@@ -89,8 +77,7 @@ export const roomReleaseValues = (room: PackageRoom): Record<RoomPart, unknown> 
       : { kind: room.defaultResponder.kind },
 });
 
-/** One normal form for a routine's timing on both sides, so an untouched
- * routine compares equal: absent cap → null, absent overlap → "skip". */
+/** Run on startup appears only when set, so installs from before it keep their hash. */
 export function scheduleValue(routine: {
   runOn: string;
   schedule: unknown;
@@ -98,6 +85,7 @@ export function scheduleValue(routine: {
   timeoutMinutes?: number | null;
   overlap?: string | null;
   continuity?: boolean | null;
+  runOnStartup?: boolean | null;
 }) {
   return {
     runOn: routine.runOn,
@@ -106,6 +94,7 @@ export function scheduleValue(routine: {
     timeoutMinutes: routine.timeoutMinutes ?? null,
     overlap: routine.overlap ?? "skip",
     continuity: routine.continuity === true,
+    ...(routine.runOnStartup === true ? { runOnStartup: true } : {}),
   };
 }
 

@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 
-/** Resolve only after the launcher really spawns or reports an error. */
 function launch(executable, args, options, run = execFile) {
   return new Promise((resolve) => {
     let child;
@@ -23,8 +22,7 @@ function launch(executable, args, options, run = execFile) {
   });
 }
 
-/** Open a blank terminal. Installer text is deliberately not accepted here,
- * so renderer-controlled input can never become a process argument. */
+/** Installer text is deliberately not accepted, so renderer-controlled input never becomes a process argument. */
 export async function openBlankTerminal(platform = process.platform, run = execFile) {
   if (platform === "darwin") {
     return launch(
@@ -35,11 +33,8 @@ export async function openBlankTerminal(platform = process.platform, run = execF
     );
   }
   if (platform === "win32") {
-    // Launched directly, PowerShell's stdin and stdout are pipes to this app,
-    // and from the windowless app it gets no visible window: the app reports
-    // a terminal nobody can see or type into. A hidden PowerShell hands the
-    // real one to Start-Process, which gives it a console window of its own.
-    // The command is fixed text.
+    // Launched directly from the windowless app, PowerShell gets piped stdio and no visible window;
+    // a hidden PowerShell hands the real one to Start-Process, which gets its own console.
     return launch(
       "powershell.exe",
       ["-NoProfile", "-NonInteractive", "-Command", "Start-Process powershell.exe"],

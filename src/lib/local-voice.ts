@@ -1,6 +1,3 @@
-// Voice output selected on a paired desktop belongs to that device, not the
-// remote host. A Mac client can therefore use its installed voices while a
-// Windows host independently uses ElevenLabs for its own playback.
 export type RemoteVoiceProvider = "host" | "system";
 
 type Preferences = {
@@ -33,8 +30,6 @@ function write(next: Preferences): void {
   try {
     storage()?.setItem(STORAGE_KEY, JSON.stringify(next));
   } catch {
-    // A locked-down renderer may reject storage. Voice still works for the
-    // current default; persistence is a convenience, not a prerequisite.
   }
 }
 
@@ -50,8 +45,6 @@ export function localSystemVoicesAvailable(): boolean {
 
 export function remoteVoiceProvider(): RemoteVoiceProvider {
   const provider = read().provider;
-  // A paired Mac defaults to its private, installed voices. Choosing Host
-  // voice is explicit and remains independent from the host's own setting.
   return provider === "host" ? "host" : "system";
 }
 

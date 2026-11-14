@@ -23,9 +23,7 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
     expect(response.status, JSON.stringify(result)).toBe(status);
     return result;
   };
-  // A second person on a paired device. What they queue must still be theirs
-  // after the wait, the crash and the restart: the name rides the durable row.
-  // `id` is the opaque person key the server derives from the session; a row
+  // A second person on a paired device: what they queue stays theirs through the wait, the crash and the restart. A row
   // written straight to the database below keeps the older name-only shape.
   const PAIRED = { name: "Safari on Mac", id: expect.stringMatching(/^p_[\w-]{22}$/) };
   const PAIRED_ROW = { name: "Safari on Mac" };
@@ -116,6 +114,14 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
     await api("POST", `/api/bots/${bot.id}/messages`, { text: "Working before restart", threadId: bot.threadId }, 202);
     await expect.poll(() => prompts(bot.threadId).length, { timeout: 15_000 }).toBe(1);
     const replyToId = (await messages(bot.threadId)).find((message) => message.role === "user").id;
+    // Claude takes pictures into a running turn, so words for this busy
+    // thread would be steered in. Let the turn finish and have a second task
+    // hold the bot's one slot: the attachment then waits in the durable queue.
+    writeFileSync(join(dataDir, `${bot.threadId}.gate`), "finish the first task");
+    expect(await runControlOmb(["wait", "--bot", bot.id, "--task", bot.threadId, "--url", url])).toMatchObject({ status: "settled" });
+    const holder = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Hold the slot" }, 201)).task;
+    await api("POST", `/api/bots/${bot.id}/messages`, { text: "Hold the slot", threadId: holder.threadId }, 202);
+    await expect.poll(() => prompts(holder.threadId).length, { timeout: 15_000 }).toBe(1);
     const attachments = join(dataDir, "attachments");
     mkdirSync(attachments, { recursive: true });
     const image = join(attachments, "123e4567-e89b-42d3-a456-426614174000.png");
@@ -123,7 +129,7 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
     const text = `Inspect screenshot after the first task\n\n<attached-image path="${image}" name="fixture.png" />`;
     const body = { text, threadId: bot.threadId, replyToId, sendId: "durable_bot_send_123456" };
     const queued = await asPairedPerson(`/api/bots/${bot.id}/messages`, body);
-    expect(queued).toMatchObject({ queued: true, queueId: expect.any(String) });
+    expect(queued).toMatchObject({ queued: true, queueId: expect.any(String), reason: "capacity" });
     const cancelledBody = { ...body, text: `${text}\n\nCancelled task`, sendId: "cancelled_bot_send_123456" };
     const cancelled = await api("POST", `/api/bots/${bot.id}/messages`, cancelledBody, 202);
     await api("DELETE", `/api/bots/${bot.id}/queue/${cancelled.queueId}`, { threadId: bot.threadId });
@@ -180,14 +186,15 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
     writeFileSync(join(dataDir, "restarted"), "allow restored fake turns to finish");
     const crashed = new DatabaseSync(join(dataDir, "messages.db"));
     try {
-      // The narrowest crash window: the dispatch claim reached disk, the
-      // transcript line did not. One row names its sender; one was written by
-      // a build that did not keep one and must still recover.
+      // The narrowest crash window: the dispatch claim reached disk, the transcript line did not. One row names its sender, one
+      // is from a build that kept none, one was spoken in a Live call, and one typed row carries a stray call id.
       const claim = crashed.prepare(
         "INSERT INTO chat_followups(id, kind, owner_id, thread_id, send_id, status, payload) VALUES (?, 'bot', ?, ?, NULL, 'dispatching', ?)",
       );
       claim.run("claimed_before_append_named", unappended.id, unappended.threadId, JSON.stringify({ text: "Claimed, never appended", sender: PAIRED_ROW }));
       claim.run("claimed_before_append_legacy", unappended.id, unappended.threadId, JSON.stringify({ text: "Claimed by an older build" }));
+      claim.run("claimed_before_append_call", unappended.id, unappended.threadId, JSON.stringify({ text: "Claimed from a call", via: "call", callId: "call-restart-fixture" }));
+      claim.run("claimed_before_append_stray", unappended.id, unappended.threadId, JSON.stringify({ text: "Typed, with a stray call id", callId: "call-stray" }));
       crashed.prepare("UPDATE messages SET json = json_set(json, '$.text', '') WHERE thread_id = ? AND id = ?")
         .run(lost.threadId, lostTarget.message.id);
     } finally { crashed.close(); }
@@ -200,9 +207,11 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
     expect((await api("POST", `/api/bots/${bot.id}/messages`, body, 202)).message).toMatchObject({
       sendId: body.sendId, queueId: queued.queueId, replyToId, text, sender: PAIRED,
     });
-    expect((await messages(unappended.threadId)).filter((message) => message.role === "user").map((message) => [message.queueId, message.text, message.sender])).toEqual([
-      ["claimed_before_append_named", "Claimed, never appended", PAIRED_ROW],
-      ["claimed_before_append_legacy", "Claimed by an older build", undefined],
+    expect((await messages(unappended.threadId)).filter((message) => message.role === "user").map((message) => [message.queueId, message.text, message.sender, message.via, message.callId])).toEqual([
+      ["claimed_before_append_named", "Claimed, never appended", PAIRED_ROW, undefined, undefined],
+      ["claimed_before_append_legacy", "Claimed by an older build", undefined, undefined, undefined],
+      ["claimed_before_append_call", "Claimed from a call", undefined, "call", "call-restart-fixture"],
+      ["claimed_before_append_stray", "Typed, with a stray call id", undefined, undefined, undefined],
     ]);
     await expect.poll(async () => (await messages(lost.threadId)).some((message) => message.tool?.name?.includes("queued channel message could not start")), { timeout: 15_000 }).toBe(true);
     expect((await messages(lost.threadId)).filter((message) => message.queueId === lostQueued.queueId)).toEqual([
@@ -223,11 +232,10 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
     const interrupted = await messages(later.threadId);
     expect(interrupted.filter((message) => message.queueId === claimed.queueId)).toEqual([
       expect.objectContaining({ role: "user", text: uncertainBody.text, sendId: uncertainBody.sendId }),
-      expect.objectContaining({ kind: "activity", tool: { name: expect.stringContaining("Review the result"), ok: false } }),
+      expect.objectContaining({ kind: "activity", tool: { name: expect.stringContaining("Review the result"), ok: false, nameCode: "chat.notice.followupInterrupted" } }),
     ]);
     expect((await api("POST", `/api/bots/${uncertain.id}/messages`, uncertainBody, 202)).message.queueId).toBe(claimed.queueId);
     expect(prompts(later.threadId)).toHaveLength(1);
-    // A second boot must not duplicate recovery notices or replay a claim.
     await waitForExit(restarted, { signal: "SIGTERM" });
     await restart();
     expect((await messages(later.threadId)).filter((message) => message.queueId === claimed.queueId)).toEqual(interrupted.filter((message) => message.queueId === claimed.queueId));

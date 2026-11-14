@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Check, CheckCircle2, Circle, Copy, Loader2, XCircle } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { copyText } from "@/lib/copy-text";
 import { runLogText, type TimelineEvent } from "@/lib/taskTimeline";
 import { formatTime } from "@/state/store";
 
@@ -10,19 +11,15 @@ const STATUS = {
   complete: "inspector.run.complete",
   failed: "inspector.run.failed",
   observed: "inspector.run.observed",
+  unverified: "inspector.run.unverified",
 } as const;
 
 export function RunLog({ events }: { events: TimelineEvent[] }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
-  // The full conversation remains in chat. Keep the debugging view bounded.
   const recent = events.slice(-200);
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(runLogText(recent));
-      setCopyState("copied");
-    } catch {
-      setCopyState("failed");
-    }
+    const result = await copyText(runLogText(recent));
+    if (result !== "empty") setCopyState(result);
   };
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -55,7 +52,7 @@ export function RunLog({ events }: { events: TimelineEvent[] }) {
                 <span className="min-w-0 flex-1 break-words font-medium text-ink">{label}</span>
                 <time dateTime={new Date(event.at).toISOString()} className="shrink-0 tabular-nums text-ink-secondary">{formatTime(event.at)}</time>
               </div>
-              {event.command && <pre className="mt-2 whitespace-pre-wrap break-all rounded-lg bg-inset p-2 font-mono text-[11.5px] leading-relaxed text-ink">{event.command}</pre>}
+              {event.command && <pre className="mt-2 whitespace-pre-wrap break-all rounded-lg bg-inset p-2 font-mono text-[12px] leading-relaxed text-ink">{event.command}</pre>}
               {event.kind === "tool" && <p className={cn("mt-1 pl-[22px] text-[11px]", event.state === "failed" ? "text-danger" : "text-ink-secondary")}>{t(STATUS[event.state])}</p>}
             </li>;
           })}

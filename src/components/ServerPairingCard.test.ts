@@ -2,12 +2,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { canPairDevices, lastSeen, minutesLeft, pairingBlockedReason, ServerPairingCard } from "./ServerPairingCard";
+import { codeUntil, lastSeen } from "../lib/pairing-time";
+import { canPairDevices, pairingBlockedReason, phoneSecretNote, sameWifiOnlyLink, ServerPairingCard, shownDevices } from "./ServerPairingCard";
 
 describe("pairing devices from a hosted server's settings", () => {
   it("is offered to the owner on the box and to admin sessions, never to chat-only sessions", () => {
     expect(canPairDevices({ kind: "loopback" })).toBe(true);
-    // a shared server that treats session-less local requests as a service, not the owner
     expect(canPairDevices({ kind: "loopback", trust: "service" })).toBe(false);
     expect(canPairDevices({ kind: "session", id: "s", label: "Her iPad", scopes: ["admin", "client"], expiresAt: 1 })).toBe(true);
     expect(canPairDevices({ kind: "session", id: "s", label: "Staff phone", scopes: ["client"], expiresAt: 1 })).toBe(false);
@@ -15,10 +15,8 @@ describe("pairing devices from a hosted server's settings", () => {
     expect(canPairDevices(null)).toBe(false);
   });
 
-  it("counts down whole minutes and describes when a device was last seen", () => {
-    expect(minutesLeft(60_000 * 5 + 1, 0)).toBe(6);
-    expect(minutesLeft(60_000 * 5, 0)).toBe(5);
-    expect(minutesLeft(0, 1)).toBe(0);
+  it("says until when a code works as a clock time, and when a device was last seen", () => {
+    expect(codeUntil(new Date(2026, 10, 7, 11, 14).getTime())).toBe("Works once, until 11:14 AM");
     expect(lastSeen(1_000, 30_000)).toBe("just now");
     expect(lastSeen(0, 3 * 60_000)).toBe("3 min ago");
     expect(lastSeen(0, 5 * 3_600_000)).toBe("5 h ago");
@@ -29,6 +27,19 @@ describe("pairing devices from a hosted server's settings", () => {
     expect(renderToStaticMarkup(createElement(ServerPairingCard))).toBe("");
   });
 
+  it("offers every member of a Team Cloud a code for their own phone, never the admins' pairing", () => {
+    const member = { kind: "session" as const, id: "s", label: "Desktop", scopes: ["client"], expiresAt: 1, team: { id: "team-acme-1", name: "Acme", role: "member" } };
+    const html = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: member, cloudHome: true, team: "Acme" }));
+    expect(html).toContain("Open on your phone");
+    expect(html).toContain("Your phone opens Acme as you");
+    expect(html).toContain("data-phone-pairing-action");
+    expect(html).not.toContain("data-server-pairing-chat-only");
+    expect(html).not.toContain("server-pairing-scope");
+    const admin = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: { ...member, scopes: ["admin", "client"], team: { ...member.team, role: "admin" } }, cloudHome: true, team: "Acme" }));
+    expect(admin).toContain("Open on your phone");
+    expect(admin).not.toContain("Pair a phone or another computer");
+  });
+
   it("explains a chat-only connection instead of showing nothing", () => {
     const chatOnly = { kind: "session" as const, id: "s", label: "Mac Studio", scopes: ["client"], expiresAt: 1 };
     expect(pairingBlockedReason(chatOnly)).toBe("chat-only");
@@ -37,10 +48,14 @@ describe("pairing devices from a hosted server's settings", () => {
     const html = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: chatOnly }));
     expect(html).toContain("data-server-pairing-chat-only");
     expect(html).toContain("openmausbot pair");
-    expect(html).not.toContain("Create pairing code");
+    expect(html).toContain("This device has chat and approvals only, so it can&#x27;t pair others.");
+    expect(html).toMatch(/<button[^>]*aria-disabled="true"[^>]*data-phone-pairing-action[^>]*>Pair a phone<\/button>/);
     const admin = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: { ...chatOnly, scopes: ["admin", "client"] } }));
-    expect(admin).toContain("Create pairing code");
     expect(admin).not.toContain("data-server-pairing-chat-only");
+    expect(admin).toMatch(/<button[^>]*data-phone-pairing-action[^>]*>Pair a phone<\/button>/);
+    expect(admin.match(/data-phone-pairing-action/g)?.length).toBe(1);
+    expect(admin).toContain('data-phone-pairing="server"');
+    expect(html).toContain('data-phone-pairing="server"');
   });
 
   it("offers no pairing code on a hosted workspace, where people sign in through the portal", () => {
@@ -48,11 +63,47 @@ describe("pairing devices from a hosted server's settings", () => {
     const html = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: admin, initialPairingCodes: false }));
     expect(html).toContain("data-server-pairing-portal");
     expect(html).toContain("organization&#x27;s Admin");
-    expect(html).not.toContain("Create pairing code");
+    expect(html).toContain("pairing codes are off");
     expect(html).not.toMatch(/pairing code from|openmausbot pair/);
-    expect(html).toContain("Signed-in devices");
+    expect(html).not.toContain("Get for iPhone");
     const member = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: { ...admin, scopes: ["client"] }, initialPairingCodes: false }));
     expect(member).toContain("data-server-pairing-chat-only");
     expect(member).not.toContain("openmausbot pair");
+  });
+
+  it("on an OMB Cloud home, which is personal, offers no chat-only choice, lists only the owner's devices, and says why in one line", () => {
+    const admin = { kind: "session" as const, id: "s", label: "Mac", scopes: ["admin", "client"], expiresAt: 1 };
+    const cloud = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: admin, cloudHome: true, placeName: "My Cloud" }));
+    expect(cloud).toContain(">Pair a phone<");
+    expect(cloud).not.toContain("Chat and approvals only");
+    expect(cloud, "one untitled row says what to do; the code and \"scan this code\" are only in the dialog").toContain("Install MausBot on your phone from the App Store or Google Play, then pair it here.");
+    expect(cloud).not.toContain("is always on");
+    const elsewhere = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: admin }));
+    expect(elsewhere).toContain("Chat and approvals only");
+    const devices = [
+      { id: "a", label: "Mac", scopes: ["admin", "client"], lastSeenAt: 0, expiresAt: 1 },
+      { id: "b", label: "Old phone", scopes: ["client"], lastSeenAt: 0, expiresAt: 1 },
+    ];
+    expect(shownDevices(devices, true).map((device) => device.id)).toEqual(["a"]);
+    expect(shownDevices(devices, false).map((device) => device.id)).toEqual(["a", "b"]);
+  });
+
+  it("says under the code that secrets go on the web when the server has no phone key, and nothing otherwise", () => {
+    expect(phoneSecretNote({ phoneSecrets: false })).toBe("This phone can chat and approve here, but secrets must be entered on the web or computer.");
+    expect(phoneSecretNote({ phoneSecrets: true })).toBeNull();
+    expect(phoneSecretNote({})).toBeNull();
+  });
+
+  it("says a pairing link works on the same Wi-Fi only when it is a plain http address on this network", () => {
+    expect(sameWifiOnlyLink("http://192.168.1.20:5199/pair#code=ABCD-EFGH-IJKL")).toBe(true);
+    expect(sameWifiOnlyLink("http://10.0.0.5:5199/pair#code=ABCD-EFGH-IJKL")).toBe(true);
+    expect(sameWifiOnlyLink("http://my-pc.local:5199/pair#code=ABCD-EFGH-IJKL")).toBe(true);
+    expect(sameWifiOnlyLink("https://bots.example.com/pair#code=ABCD-EFGH-IJKL")).toBe(false);
+    expect(sameWifiOnlyLink("http://my-pc.tail1234.ts.net:5199/pair#code=ABCD-EFGH-IJKL")).toBe(false);
+    expect(sameWifiOnlyLink("http://100.101.102.103:5199/pair#code=ABCD-EFGH-IJKL")).toBe(false);
+    expect(sameWifiOnlyLink("http://[fd7a:115c:a1e0::1]:5199/pair#code=ABCD-EFGH-IJKL")).toBe(false);
+    expect(sameWifiOnlyLink("http://bots.example.com/pair#code=ABCD-EFGH-IJKL")).toBe(false);
+    expect(sameWifiOnlyLink(null)).toBe(false);
+    expect(sameWifiOnlyLink("not a link")).toBe(false);
   });
 });

@@ -3,7 +3,6 @@ import { Loader2, Maximize2, Monitor } from "lucide-react";
 
 import { t } from "@/lib/i18n";
 
-/** A connection is only visible once the browser has decoded its first frame. */
 export function CloudScreenPreview({ src, name, error, starting, opening, disabled, refreshing = false, retry = 0, onOpen, onRetry }: {
   src: string | null;
   name: string;

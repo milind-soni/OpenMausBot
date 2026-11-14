@@ -1,6 +1,6 @@
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { readThreadEvents } from "./thread-events.ts";
@@ -47,9 +47,51 @@ describe("readThreadEvents", () => {
       ["native", "2026-08-17T10:00:01.000Z"],
       ["runtime", "2026-08-17T10:00:02.000Z"],
     ]);
-    // each entry keeps its original record whole under `data`
     expect(page.entries[1]).toMatchObject({ kind: "native", data: { dir: "out", msg: { type: "user" } } });
     expect(page.entries[0]).toMatchObject({ kind: "runtime", data: { eventId: "e1" } });
+  });
+
+  it("keeps a runtime notice, which reports without failing the turn", () => {
+    const eventsDir = tmp();
+    const nativeDir = tmp();
+    writeFileSync(
+      join(eventsDir, "t1.ndjson"),
+      line(runtime({ eventId: "e1", type: "runtime.notice", createdAt: "2026-08-17T10:00:00.000Z", message: "OpenCode no longer offers x" })) +
+        line(runtime({ eventId: "e2", type: "runtime.notice", createdAt: "2026-08-17T10:00:01.000Z" })),
+    );
+    const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1" });
+    expect(page.entries.map((entry) => (entry.data as { eventId: string }).eventId)).toEqual(["e1"]);
+  });
+
+  it("keeps budget exhaustion and its handoff while rejecting malformed cap events", () => {
+    const eventsDir = tmp();
+    const nativeDir = tmp();
+    const cap = runtime({ eventId: "cap", type: "cap.exhausted", createdAt: "2026-08-17T10:00:00.000Z", handoffPath: resolve("/fixture/handoff.json"), reason: "cap" });
+    writeFileSync(join(eventsDir, "t1.ndjson"), [
+      cap,
+      { ...cap, eventId: "missing-path", handoffPath: undefined },
+      { ...cap, eventId: "bad-path", handoffPath: 42 },
+      { ...cap, eventId: "empty-path", handoffPath: "" },
+      { ...cap, eventId: "blank-path", handoffPath: "   " },
+      { ...cap, eventId: "missing-reason", reason: undefined },
+      { ...cap, eventId: "bad-reason", reason: "timeout" },
+    ].map(line).join(""));
+
+    const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1" });
+
+    expect(page.entries).toHaveLength(1);
+    expect(page.entries[0]).toMatchObject({ kind: "runtime", data: cap });
+  });
+
+  it("replays legacy relative handoff paths as absolute paths without dropping the event", () => {
+    const eventsDir = tmp();
+    const nativeDir = tmp();
+    const handoffPath = "legacy-data/handoffs/cap-old.md";
+    const cap = runtime({ eventId: "legacy-cap", type: "cap.exhausted", createdAt: "1", handoffPath, reason: "cap" });
+    writeFileSync(join(eventsDir, "t1.ndjson"), line(cap));
+    const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1" });
+    expect(page.entries).toHaveLength(1);
+    expect(page.entries[0]).toMatchObject({ kind: "runtime", data: { ...cap, handoffPath: resolve(handoffPath) } });
   });
 
   it("caps each log to its most recent `limit` lines and reports what it skipped", () => {
@@ -76,8 +118,6 @@ describe("readThreadEvents", () => {
     );
     const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1" });
     expect(page.entries).toHaveLength(2);
-    // `total` is the number of non-empty log lines; malformed records are
-    // counted but deliberately absent from the returned entries.
     expect(page.total.runtime).toBe(3);
   });
 
@@ -99,9 +139,6 @@ describe("readThreadEvents", () => {
     expect(page.total).toEqual({ runtime: 3, native: 2 });
   });
 
-  // A structured ask replays with the model's own questions on it. A card
-  // built from a half-decoded one would offer options that were never
-  // offered, so a malformed payload is dropped whole rather than trimmed.
   it("keeps a structured ask's questions and drops a malformed one", () => {
     const eventsDir = tmp();
     const nativeDir = tmp();
@@ -117,9 +154,7 @@ describe("readThreadEvents", () => {
     writeFileSync(
       join(eventsDir, "t1.ndjson"),
       line({ ...base, eventId: "rich", createdAt: "1", questions: [question] }) +
-        // an option with no label is not the contract
         line({ ...base, eventId: "bad-option", createdAt: "2", questions: [{ question: "q", options: [{ hint: "x" }] }] }) +
-        // neither is a question that is not a record
         line({ ...base, eventId: "bad-question", createdAt: "3", questions: ["Which framework?"] }),
     );
     writeFileSync(join(nativeDir, "t1.ndjson"), "");
@@ -128,9 +163,6 @@ describe("readThreadEvents", () => {
     expect(page.entries[0]!.data).toMatchObject({ questions: [question] });
   });
 
-  // origin marks asks parsed out of model-authored output; events recorded
-  // before the field existed must keep replaying, and anything but the two
-  // documented marks is not this contract.
   it("replays an ask's origin and keeps events recorded before it existed", () => {
     const eventsDir = tmp();
     const nativeDir = tmp();

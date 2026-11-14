@@ -85,6 +85,7 @@ try {
       eventLoopMaxMs: Number((lag.max / 1e6).toFixed(2)) }));
   }
 } finally {
+  await bus.flush();
   await db.closeMessageSearch();
   db.closeMessageDb();
   if (previousDataDir === undefined) delete process.env.OMB_DATA_DIR;

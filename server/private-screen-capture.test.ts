@@ -23,7 +23,6 @@ describe("private screen capture", () => {
     let state = { held: false, revision: 3 };
     const capture = vi.fn(async () => {
       state = { held: true, revision: 4 };
-      // The person finished before the remote screenshot response arrived.
       state = { held: false, revision: 5 };
       return { png: "typed-secret", format: "png" };
     });

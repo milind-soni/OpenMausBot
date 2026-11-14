@@ -62,20 +62,15 @@ function selectCaptureSource({ sources, host, primaryDisplayId }) {
         primaryDisplayId !== undefined &&
         String(source.display_id) === String(primaryDisplayId),
     );
-    // Some X11 backends omit or misreport display_id. A single enumerated
-    // source is still unambiguous; never guess when multiple sources remain.
+    // Some X11 backends omit or misreport display_id: a single source is unambiguous, but never guess among several.
     return exact ?? (sources.length === 1 ? sources[0] : null);
   }
   if (host === "darwin") return sources[0];
   return null;
 }
 
-// Electron may throw synchronously from the display-media callback when an
-// empty response rejects a video request. That rejection is expected after a
-// portal cancellation, but allowing it to escape from a Promise catch creates
-// an unhandled rejection in the main process. Return the error to the caller so
-// successful-response failures can still be logged without destabilizing the
-// cancellation path.
+// Electron may throw synchronously when an empty response rejects a video request (expected after a portal cancel):
+// return the error rather than letting it escape as an unhandled rejection.
 function invokeDisplayMediaCallback(callback, response) {
   try {
     callback(response);

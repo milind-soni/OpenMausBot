@@ -25,7 +25,6 @@ function addRow(totals: Map<string, Summary>, row: Row) {
   totals.set(row.threadId, summary);
 }
 
-/** Cache per-month/per-thread summaries, not the complete ledger in memory. */
 export class GroupUsageReader {
   private files = new Map<string, { stamp: string; totals: Map<string, Summary> }>();
   private signature = "";
@@ -33,7 +32,6 @@ export class GroupUsageReader {
   private dataDir: string;
   constructor(dataDir: string) { this.dataDir = dataDir; }
 
-  /** Refresh only at startup or after ledger persistence, never on an SSE lookup. */
   refresh(): void {
     const dir = join(this.dataDir, "usage");
     let names: string[];
@@ -54,7 +52,7 @@ export class GroupUsageReader {
         if (entry?.stamp !== stamp) {
           const totals = new Map<string, Summary>();
           for (const line of readFileSync(join(dir, name), "utf8").split("\n")) {
-            try { const row = JSON.parse(line); if (valid(row)) addRow(totals, row); } catch { /* incomplete or damaged row */ }
+            try { const row = JSON.parse(line); if (valid(row)) addRow(totals, row); } catch {}
           }
           entry = { stamp, totals };
         }

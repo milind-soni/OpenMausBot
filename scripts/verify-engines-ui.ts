@@ -31,6 +31,11 @@ const instances: InstanceInfo[] = [
   ["hermes", "hermesAgent", "Hermes", false, ""],
   ["qwen", "qwenAgent", "Qwen", false, ""],
   ["pi", "piAgent", "Pi", false, ""],
+  ["omp", "ompAgent", "OMP", false, ""],
+  ["deepseek", "deepseekAgent", "DeepSeek Harness", false, ""],
+  ["githubCopilot", "copilotAgent", "GitHub Copilot", true, "1.0.103"],
+  ["commandCode", "commandCodeAgent", "Command Code", true, "1.88.4"],
+  ["kiro", "kiroAgent", "Kiro", true, "3.1.0"],
 ].map(([id, driver, name, ready, version]) => ({
   instanceId: String(id), driverKind: String(driver), displayName: String(name),
   cliDefault: String(id),
@@ -38,6 +43,7 @@ const instances: InstanceInfo[] = [
   models: { default: "fixture", options: [] },
   install: { command: { darwin: "echo 'Isolated preview — no installation'", linux: "echo 'Isolated preview — no installation'", win32: "echo Isolated preview — no installation" } },
 }));
+instances.find((instance) => instance.instanceId === "omp")!.access = "custom";
 instances[0].snapshot.account = { email: "personal@example.test" };
 instances[0].claudeAccount = { configDir: "", isDefault: true, signInCommand: "echo 'Preview only'", signInShell: "sh" };
 instances[1].authentication = { method: "device-code", signOut: true };
@@ -47,6 +53,20 @@ instances[5].install!.server = { package: "kimi-fixture" };
 instances[3].install!.server = { package: "opencode-fixture" };
 instances[3].snapshot.update = { title: "OpenCode update available", message: "A sample update for this isolated preview.", command: "echo 'Preview only'" };
 instances.push({ ...instances[0], instanceId: "claude-local", displayName: "Claude · Local", access: "custom", claudeAccount: undefined, snapshot: { state: "available", authenticated: false } });
+const chatgptPlan: InstanceInfo = {
+  instanceId: "chatgpt", driverKind: "codex", displayName: "ChatGPT plan", cliDefault: "codex", access: "subscription",
+  snapshot: { state: "available", authenticated: false, chatgptPlan: true },
+  models: { default: "", options: [] }, authentication: { method: "browser-pkce", signOut: true },
+  install: { docsUrl: "https://developers.openai.com/siwc/token-sharing-open-source" },
+};
+instances.push(chatgptPlan);
+instances.push({
+  instanceId: "cline", driverKind: "clineAgent", displayName: "Cline", cliDefault: "cline",
+  snapshot: { state: "available", authenticated: true, version: "3.0.70" },
+  models: { default: "cline-default", options: [{ id: "cline-default", label: "Cline default (configured)" }] },
+  install: { command: { darwin: "echo 'Preview only'", linux: "echo 'Preview only'", win32: "echo Preview only" },
+    needsNode: true, signInCommand: "echo 'Preview only'", docsUrl: "https://docs.cline.bot/usage/acp" },
+});
 const controller = new AbortController();
 const cancel = () => controller.abort();
 process.once("SIGINT", cancel);
@@ -88,6 +108,14 @@ try {
         }
         if (path === "/__fixture/connect" && req.method === "POST") {
           instances[4].snapshot.authenticated = !instances[4].snapshot.authenticated;
+          instances[4].snapshot.account = instances[4].snapshot.authenticated ? { email: "google@example.test", method: "login" } : undefined;
+          return json({ ok: true });
+        }
+        if (path === "/__fixture/chatgpt" && req.method === "POST") {
+          const connected = !chatgptPlan.snapshot.authenticated;
+          chatgptPlan.snapshot.authenticated = connected;
+          chatgptPlan.snapshot.account = connected ? { email: "preview@example.test", method: "login" } : undefined;
+          chatgptPlan.models = connected ? { default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] } : { default: "", options: [] };
           return json({ ok: true });
         }
         if (path === "/api/cli-candidates") return json({ candidates: ["/preview/bin/claude"] });

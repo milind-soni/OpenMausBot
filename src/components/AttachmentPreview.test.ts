@@ -1,11 +1,17 @@
-import { createElement } from "react";
+// @vitest-environment happy-dom
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import {
   AttachedFileChips,
   AttachedImageGallery,
+  AttachmentPreviewDialog,
   MarkdownImagePreview,
+  OutsideWorkspaceFile,
   canonicalDownloadFilename,
   contentDispositionFilename,
   imageGalleryLayout,
@@ -13,7 +19,10 @@ import {
   messageImagePreviewUrl,
   previewImage,
   previewKeyAction,
+  requestMessageFile,
   safeDownloadFilename,
+  saveFailureText,
+  useLocalFileSave,
   wrappedImageIndex,
 } from "./AttachmentPreview";
 
@@ -163,6 +172,126 @@ describe("attachment preview surfaces", () => {
   });
 });
 
+describe("Show in folder for a file outside the workspace", () => {
+  const render = (filePath: string) => renderToStaticMarkup(createElement(OutsideWorkspaceFile, { filePath }));
+
+  it("offers the reveal only for an absolute local path, and only in the local desktop app", () => {
+    vi.stubGlobal("window", { ogb: { revealInFolder: vi.fn(), remoteClient: { active: false } } });
+    try {
+      expect(render("/Users/maus/_draft/ollama-gen.js")).toContain("Show in folder");
+      expect(render("C:\\Users\\Maus\\_draft\\ollama-gen.js")).toContain("Show in folder");
+      for (const filePath of ["_draft/ollama-gen.js", "\\\\server\\share\\ollama-gen.js"]) {
+        expect(render(filePath)).not.toContain("Show in folder");
+        expect(render(filePath)).toContain(`>${filePath}</code>`);
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("gives a remote client the path, since the file is not on its computer", () => {
+    vi.stubGlobal("window", { ogb: { revealInFolder: vi.fn(), remoteClient: { active: true } } });
+    try {
+      expect(render("/Users/maus/_draft/ollama-gen.js")).toContain(">/Users/maus/_draft/ollama-gen.js</code>");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("a failed save", () => {
+  it("explains a file outside the working folder instead of echoing the server", () => {
+    const server = "the linked file is outside this conversation's workspace";
+    expect(saveFailureText({ reason: server, outsideWorkspace: true }))
+      .toBe("This file is outside this chat's working folder, so it can't be saved from here");
+    expect(saveFailureText({ reason: "the linked file is unavailable", outsideWorkspace: false }))
+      .toBe("the linked file is unavailable");
+  });
+});
+
+describe("a file over the download limit", () => {
+  it("shows the server's plain explanation and keeps its code, not the raw byte count", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: "file exceeds 524288000 bytes",
+      code: "file_too_large",
+      errorKey: "serverError.file.tooLarge",
+      errorParams: { size: "612 MB", limit: "500 MB", name: "reel.mp4" },
+    }), { status: 413, headers: { "content-type": "application/json" } })));
+    try {
+      await expect(requestMessageFile("reel.mp4", { threadId: "t", messageId: "m" }, new AbortController().signal))
+        .rejects.toMatchObject({
+          code: "file_too_large",
+          message: "This file is 612 MB, over the 500 MB limit for opening files from chat. The file itself is still saved as reel.mp4.",
+        });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("a folder linked in a message", () => {
+  const folderPath = "/work/Reports";
+  const listing = { name: "Reports", entries: [{ name: "q3.pdf", bytes: 2048, mime: "application/pdf" }], truncated: false };
+  const authorized = () => new Response(JSON.stringify(listing), { status: 200, headers: { "content-type": "application/json", "x-openmausbot-folder": "1" } });
+  const refused = () => new Response(JSON.stringify({ error: "the linked file is outside this conversation's workspace", code: "outside_workspace" }), { status: 403, headers: { "content-type": "application/json" } });
+
+  async function clickLink(answer: () => Response) {
+    vi.stubGlobal("fetch", vi.fn(async () => answer()));
+    const seen: { current: ReturnType<typeof useLocalFileSave> | null } = { current: null };
+    const Probe = () => {
+      seen.current = useLocalFileSave(folderPath, undefined, { threadId: "thread-1", messageId: "message-1" });
+      return null;
+    };
+    const root = createRoot(document.createElement("div"));
+    await act(async () => { root.render(createElement(Probe)); });
+    await act(async () => { await seen.current!.save(); });
+    const result = { state: seen.current!.state, folder: seen.current!.folder };
+    await act(async () => { root.unmount(); });
+    return result;
+  }
+
+  it("opens in the file manager once the route authorized it, with no listing", async () => {
+    const openFolder = vi.fn(async () => "opened");
+    vi.stubGlobal("ogb", { openFolder, remoteClient: { active: false } });
+    try {
+      expect(await clickLink(authorized)).toEqual({ state: "idle", folder: null });
+      expect(openFolder).toHaveBeenCalledWith(folderPath);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("shows the listing when the desktop would not open it", async () => {
+    const openFolder = vi.fn(async () => "not-folder");
+    vi.stubGlobal("ogb", { openFolder, remoteClient: { active: false } });
+    try {
+      expect(await clickLink(authorized)).toEqual({ state: "idle", folder: listing });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("shows the listing where there is no desktop bridge", async () => {
+    vi.stubGlobal("ogb", undefined);
+    try {
+      expect(await clickLink(authorized)).toEqual({ state: "idle", folder: listing });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("never reaches the desktop when the route refuses the link", async () => {
+    const openFolder = vi.fn(async () => "opened");
+    vi.stubGlobal("ogb", { openFolder, remoteClient: { active: false } });
+    try {
+      expect(await clickLink(refused)).toEqual({ state: "failed", folder: null });
+      expect(openFolder).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("local Markdown image lifecycle", () => {
   it("builds a path-free, directly streamable message preview URL", () => {
     expect(messageImagePreviewUrl(
@@ -171,5 +300,50 @@ describe("local Markdown image lifecycle", () => {
     )).toBe(
       "/api/threads/thread-one/messages/message-two/file?preview=1&ref=42",
     );
+  });
+});
+
+describe("image preview copy button", () => {
+  const image = { src: "/api/files/shot.png", name: "shot.png", downloadUrl: "/api/files/shot.png" };
+
+  async function openPreview() {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(createElement(AttachmentPreviewDialog, { image, onClose: () => {} })); });
+    const button = () => document.querySelector<HTMLButtonElement>('button[title="Copy image"], button[title="Image copied"]');
+    return { button, close: () => act(() => root.unmount()) };
+  }
+
+  it("copies the shown image as a PNG and says so", async () => {
+    const write = vi.fn(async (items: { items: Record<string, Promise<Blob>> }[]) => {
+      await items[0]!.items["image/png"];
+    });
+    vi.stubGlobal("ClipboardItem", class { constructor(readonly items: Record<string, Promise<Blob>>) {} });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Blob(["png"], { type: "image/png" }))));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { write } });
+    const preview = await openPreview();
+    try {
+      expect(preview.button()?.getAttribute("aria-label")).toBe("Copy shot.png as an image");
+      await act(async () => { preview.button()!.click(); });
+      expect(write).toHaveBeenCalledOnce();
+      expect(fetch).toHaveBeenCalledWith("/api/files/shot.png");
+      expect(preview.button()?.title).toBe("Image copied");
+    } finally {
+      await preview.close();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("is hidden where the clipboard cannot take images", async () => {
+    vi.stubGlobal("ClipboardItem", undefined);
+    const preview = await openPreview();
+    try {
+      expect(preview.button()).toBeNull();
+      expect(document.querySelector('a[title="Download"]')).not.toBeNull();
+    } finally {
+      await preview.close();
+      vi.unstubAllGlobals();
+    }
   });
 });

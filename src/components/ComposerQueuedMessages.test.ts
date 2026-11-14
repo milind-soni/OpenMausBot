@@ -8,6 +8,7 @@ import {
   doubleEnterSteerWindowExpiresAt,
   doubleEnterSteersQueue,
 } from "./ComposerQueuedMessages";
+import { citationAttachment, createCitationTextSelector, serializeCitation } from "@/lib/citations";
 
 const oneItem = [{ queueId: "q1", text: "actually stop at 10\nand use the smaller model" }];
 
@@ -22,15 +23,24 @@ describe("composerCanSteerQueuedMessages", () => {
   });
 });
 
+describe("the queued line", () => {
+  const capacity = [{ queueId: "q1", text: "later", reason: "capacity" as const }];
+  it("says a free slot elsewhere, and on Starter names the plan and the way to a bigger one", () => {
+    const line = (props: object) => renderToStaticMarkup(createElement(QueuedComposerMessages, { items: capacity, onCancel: () => {}, ...props }));
+    expect(line({})).toContain("Starts when this bot has a free thread slot.");
+    const starter = line({ oneThreadPerBot: true, onSeePlans: () => {} });
+    expect(starter).toContain("Starter runs one thread at a time per bot");
+    expect(starter).toContain("A bigger plan runs more.");
+    expect(starter).toContain("See plans");
+  });
+});
+
 describe("double-Enter steer gesture", () => {
   it("opens the window only when a chip arrives on a busy steer-capable thread", () => {
     const now = 1_000_000;
     expect(doubleEnterSteerWindowExpiresAt(0, 1, true, true, now)).toBe(now + 1_500);
-    // nothing new queued: not a second-Enter moment
     expect(doubleEnterSteerWindowExpiresAt(1, 1, true, true, now)).toBeNull();
     expect(doubleEnterSteerWindowExpiresAt(2, 1, true, true, now)).toBeNull();
-    // idle threads and engines without live steering never open it; rooms
-    // share the gesture, so capability alone decides
     expect(doubleEnterSteerWindowExpiresAt(0, 1, false, true, now)).toBeNull();
     expect(doubleEnterSteerWindowExpiresAt(0, 1, true, false, now)).toBeNull();
   });
@@ -38,21 +48,40 @@ describe("double-Enter steer gesture", () => {
   it("steers on the second Enter only while the composer is empty, a chip waits, and the window is open", () => {
     const now = 1_000_000;
     expect(doubleEnterSteersQueue(now + 1, now, 1, false)).toBe(true);
-    expect(doubleEnterSteersQueue(now, now, 1, false)).toBe(false); // window closed
-    expect(doubleEnterSteersQueue(now + 1, now, 0, false)).toBe(false); // nothing queued
-    expect(doubleEnterSteersQueue(now + 1, now, 1, true)).toBe(false); // typed words: a plain send
+    expect(doubleEnterSteersQueue(now, now, 1, false)).toBe(false);
+    expect(doubleEnterSteersQueue(now + 1, now, 0, false)).toBe(false);
+    expect(doubleEnterSteersQueue(now + 1, now, 1, true)).toBe(false);
   });
 });
 
 describe("QueuedComposerMessages", () => {
+  it("shows a queued message's words exactly as typed, with nothing hidden", () => {
+    const text = '<data-context>{"cardId":"c_1"}</data-context>\nOnly show last month';
+    const markup = renderToStaticMarkup(createElement(QueuedComposerMessages, { items: [{ queueId: "q", text }], onCancel: () => undefined }));
+    expect(markup).toContain("Only show last month");
+    expect(markup).toContain("&lt;data-context&gt;");
+  });
   it("explains a capacity wait without offering to interrupt another thread", () => {
     const markup = renderToStaticMarkup(createElement(QueuedComposerMessages, {
       items: [{ queueId: "capacity", text: "Run when there is room", reason: "capacity" }],
       onCancel: () => undefined,
     }));
-    expect(markup).toContain("Queued — starts when this bot has a free thread slot.");
+    expect(markup).toContain("Queued. Starts when this bot has a free thread slot.");
     expect(markup).toContain('aria-label="Delete queued message 1 of 1"');
     expect(markup).not.toContain("Steer");
+  });
+  it("names a queued picture instead of showing its attachment tag and path", () => {
+    const markup = renderToStaticMarkup(
+      createElement(QueuedComposerMessages, {
+        items: [{ queueId: "q1", text: 'Use this mockup\n\n<attached-image path="/tmp/uploads/mockup.png" name="mockup.png" />' }],
+        onSteer: () => undefined,
+        onCancel: () => undefined,
+      }),
+    );
+
+    expect(markup).toContain("Use this mockup [image]");
+    expect(markup).not.toContain("attached-image");
+    expect(markup).not.toContain("/tmp/uploads");
   });
   it("shows the full queued text in an attached, truncated row with real actions", () => {
     const markup = renderToStaticMarkup(
@@ -69,6 +98,21 @@ describe("QueuedComposerMessages", () => {
     expect(markup).toContain("truncate");
     expect(markup).toContain('aria-label="Steer queued message now"');
     expect(markup).toContain('aria-label="Delete queued message 1 of 1"');
+  });
+
+  it("shows readable citation content instead of transport metadata", () => {
+    const citation = citationAttachment(
+      { ownerType: "bot", ownerId: "b1", threadId: "t1", messageId: "m1" },
+      createCitationTextSelector("selected 🐭 code", 0, 16)!,
+      "explain it",
+    );
+    const markup = renderToStaticMarkup(createElement(QueuedComposerMessages, {
+      items: [{ queueId: "citation", text: serializeCitation(citation) }],
+      onCancel: () => undefined,
+    }));
+    expect(markup).toContain("selected 🐭 code");
+    expect(markup).toContain("explain it");
+    expect(markup).not.toContain("omb-citation-v1");
   });
 
   it("offers Edit on every queued row only when the composer can take the words back", () => {
@@ -90,14 +134,16 @@ describe("QueuedComposerMessages", () => {
     expect(withoutEdit).not.toContain("Edit queued message");
   });
 
-  it("says the fallback Steer stops the running turn when the engine cannot steer live", () => {
+  it("shows Stop and send on the button when the engine cannot steer live", () => {
     const base = { items: oneItem, onSteer: () => undefined, onCancel: () => undefined } as const;
     const liveMarkup = renderToStaticMarkup(createElement(QueuedComposerMessages, base));
     expect(liveMarkup).toContain("aria-label=\"Steer queued message now\"");
     const interruptMarkup = renderToStaticMarkup(
       createElement(QueuedComposerMessages, { ...base, steerInterrupts: true }),
     );
-    expect(interruptMarkup).toContain("aria-label=\"Stop the running turn and send this message now\"");
+    expect(interruptMarkup).toContain(">Stop and send</button>");
+    expect(interruptMarkup).toContain('aria-label="Stop and send"');
+    expect(interruptMarkup).toContain('title="Stop the running turn and any work it handed to other bots, then send this message now"');
     expect(interruptMarkup).not.toContain("aria-label=\"Steer queued message now\"");
   });
 
@@ -130,8 +176,22 @@ describe("QueuedComposerMessages", () => {
         onCancel: () => undefined,
       }),
     );
-    expect(markup).toContain("aria-label=\"Stop the running turn and send the next queued message now\"");
+    expect(markup).toContain(">Stop and send next</button>");
+    expect(markup).toContain('aria-label="Stop and send next"');
+    expect(markup).toContain('title="Stop the running turn and any work it handed to other bots, then send the next queued message now"');
     expect(markup).not.toContain("aria-label=\"Steer the next queued message now\"");
+  });
+
+  it("shows Stop and send all when the action will stop the turn and drain the direct queue", () => {
+    const markup = renderToStaticMarkup(createElement(QueuedComposerMessages, {
+      items: [{ queueId: "q1", text: "first" }, { queueId: "q2", text: "second" }],
+      onSteer: () => undefined,
+      onCancel: () => undefined,
+      steerInterrupts: true,
+    }));
+    expect(markup).toContain(">Stop and send all</button>");
+    expect(markup).toContain('aria-label="Stop and send all"');
+    expect(markup).toContain('title="Stop the running turn and any work it handed to other bots, then send all 2 queued messages now"');
   });
 
   it("puts the queue-level Steer action on the head only and keeps every delete distinct", () => {

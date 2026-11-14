@@ -66,7 +66,6 @@ describe.skipIf(process.platform === "win32")("Stop through the isolated server"
       evidence.push({ stoppedPids: [...pids], alive: pids.map(alive), elapsedMs: Date.now() - started });
       await control(["messages", ...target, "--limit", "10"]);
 
-      // A new turn works after the verified stop and starts a new CLI.
       writeFileSync(gate, "finish");
       await control(["send", ...target, "--text", "Reply after Stop"]);
       expect((await control(["wait", ...target, "--timeout", "10"])).status).toBe("settled");

@@ -84,8 +84,6 @@ it("compacts durably, keeps corrections and starts a fresh native session withou
   await f.idle();
   const after = await f.messages();
   const record = after.at(-1);
-  // The unbound maintenance turn invalidates the previous completion fence;
-  // every saved message otherwise remains byte-for-byte equivalent on the wire.
   expect(after.slice(0, before.length)).toEqual(before.map(message =>
     message.id === previousRequest.id ? { ...message, requestPending: true } : message));
   expect(record.kind).toBe("compaction");
@@ -113,7 +111,6 @@ it("compacts durably, keeps corrections and starts a fresh native session withou
   await f.idle();
   expect(f.turns().at(-1).resumed).toBe(false);
   expect(String(f.turns().at(-1).prompt.message.content)).not.toContain("CORRECTION");
-  // Abandoned branches remain available in history, but were not replayed.
   expect((await f.messages()).some(m => m.id === record.id)).toBe(true);
 }), 90_000);
 
@@ -149,8 +146,6 @@ it("Stop cancels a stalled summary without writing a late record or starting an 
   await f.cli("interrupt", "--bot", f.bot.id, "--task", f.thread);
   await f.idle();
   expect((await f.messages()).filter(m => m.kind === "compaction")).toHaveLength(0);
-  // Stopping the summary must not restore an earlier completion fence or
-  // change the conversation beyond the maintenance turn's pending marker.
   expect((await f.messages()).slice(0, before.length)).toEqual(before.map(message =>
     message.id === previousRequest.id ? { ...message, requestPending: true } : message));
   expect(f.turns()).toHaveLength(count);
@@ -184,8 +179,6 @@ it.each([
   if (native === "off") expect(launch.argv).not.toContain("--autocompact");
   else expect(launch.argv[launch.argv.indexOf("--autocompact") + 1]).toBe(native ?? "200000");
   if (compactions) {
-    // Even an irreducible prompt close to the native boundary must not let
-    // the regrowth floor postpone the next harness fold beyond that boundary.
     await f.send("NEXT keep the native headroom after the first fold");
     expect((await f.messages()).filter(m => m.kind === "compaction")).toHaveLength(2);
     expect(f.turns().at(-1).resumed).toBe(false);

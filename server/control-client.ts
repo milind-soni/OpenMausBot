@@ -1,52 +1,71 @@
-// The proxy-side half of computer control. The harness keeps the record of
-// who is driving (server/computer-control.ts); the per-turn computer
-// processes consult it through this client before acting, because the
-// action paths themselves never traverse the harness — a boat click goes
-// straight to the boat's REST API, and a Local VM / VPS click rides a
-// transparent stdio bridge into Cua Driver.
-//
-// Failure posture: CLOSED once configured. A missing/expired turn capability
-// must never be interpreted as "the person released control": that would let
-// a stale computer proxy resume acting underneath them. An unconfigured
-// client remains disengaged because there is no control surface to consult.
-//
-// The state is cached briefly so a computer_batch of two dozen actions
-// doesn't turn into two dozen loopback round trips.
+// Fails closed once configured: an unanswered check must never read as "the person released control", nor as "a person
+// took control", whose text is reserved for the harness saying a person holds the computer.
+
+/** Under the 60 seconds an engine may give one tool call (Codex's default), with room for the action itself. */
+export const CONTROL_WAIT_MS = 45_000;
+/** A call that waited longer is not performed: a late action could outlive a call the engine already retried, and happen twice. */
+export const CONTROL_ACT_WITHIN_MS = 5_000;
+/** Past the harness's longest answer, so a check it still legitimately holds is never cut off and misread. */
+const READ_TIMEOUT_MS = CONTROL_WAIT_MS + 10_000;
+const WAIT_WORDS = `${CONTROL_WAIT_MS / 1000} seconds`;
+
+/** Only while a person holds the computer (the harness marks it `reason: "person"`). */
+export const CONTROL_REFUSAL_PLAIN =
+  "A person has taken control of this computer, so this call was NOT performed. " +
+  "Do not act until they hand it back — the screen is changing under their hands. " +
+  `To wait for them, take a screenshot: each computer call waits up to ${WAIT_WORDS} and returns as soon as they hand control back. ` +
+  "Meanwhile you may work on anything that does not need this computer.";
+/** Not forwarded: a click composed before their hands moved must never land on whatever is under it now. */
+export const CONTROL_HANDED_BACK =
+  "The person has handed this computer back. This call was NOT performed — the screen may have changed while they had it. " +
+  "Take a fresh screenshot, then continue the task.";
+export const CONTROL_WAITED =
+  "This computer is free now, but this call had to wait for it, so it was NOT performed. " +
+  "Call again: the next call goes through at once. If you meant to click or type from an earlier screenshot, take a fresh one first — the screen may have changed while you waited.";
+export const CONTROL_BUSY =
+  "Another thread is using this computer. This call was not performed. This turn gets the computer as soon as it is free: " +
+  `to keep waiting, take a screenshot (each computer call waits up to ${WAIT_WORDS}) instead of ending your turn.`;
+export const CONTROL_UNCONFIRMED =
+  "OpenMausBot could not confirm that this computer is free, so this call was NOT performed and nothing happened on the screen. " +
+  "Retry in a few seconds.";
+/** The gate no longer accepts this call's turn capability (401: the turn settled, or its computer was switched or taken back), so no retry can succeed. */
+export const CONTROL_TURN_ENDED =
+  "This turn no longer has access to this computer (the turn already ended, or the computer was switched or taken back), so this call was NOT performed and nothing happened on the screen. " +
+  "Retrying will not help: stop calling the computer tools now and end your turn. The computer can be used again in a new turn.";
 
 export interface ControlState {
-  /** The person is driving; actions must be refused, not queued. */
   held: boolean;
-  /** A help request the person has neither answered nor dismissed. */
   helpOpen: boolean;
-  /** A different thread owns the same physical computer, not a human hold. */
+  /** "person" only when the harness says a person holds the computer. */
+  reason?: "person";
   blockedReason?: string;
 }
 
 export interface ControlClient {
-  /** Current state, cached for `cacheMs`. `fresh` bypasses the cache —
-   * the wait loop in request-help polls with it so a hand-back is seen
-   * within one poll interval, not one poll interval plus the cache. */
-  state(fresh?: boolean): Promise<ControlState>;
-  /** Surface the bot's plea in the app. Returns its expiry id, or null when
-   * the harness could not be told. */
-  requestHelp(reason: string): Promise<string | null>;
-  /** Close only the unanswered plea opened by this client. */
-  expireHelp(requestId: string): Promise<void>;
+  /** `call`: what a tools/call would open, sent along so a first ask can name it; such a read is never cached. */
+  state(fresh?: boolean, call?: Record<string, string>): Promise<ControlState>;
   readonly configured: boolean;
 }
 
 const DISENGAGED: ControlState = { held: false, helpOpen: false };
-const UNAVAILABLE: ControlState = { held: true, helpOpen: false };
+const UNCONFIRMED: ControlState = { held: true, helpOpen: false, blockedReason: CONTROL_UNCONFIRMED };
+const TURN_ENDED: ControlState = { held: true, helpOpen: false, blockedReason: CONTROL_TURN_ENDED };
+
+export function controlRefusal(state: Pick<ControlState, "reason" | "blockedReason">): string {
+  return state.blockedReason ?? (state.reason === "person" ? CONTROL_REFUSAL_PLAIN : CONTROL_UNCONFIRMED);
+}
 
 export function createControlClient(options?: {
   url?: string;
   token?: string;
   cacheMs?: number;
+  timeoutMs?: number;
   fetchImpl?: typeof fetch;
 }): ControlClient {
   const url = options?.url ?? process.env.OMB_CONTROL_URL ?? "";
   const token = options?.token ?? process.env.OMB_CONTROL_TOKEN ?? "";
   const cacheMs = options?.cacheMs ?? 750;
+  const timeoutMs = options?.timeoutMs ?? READ_TIMEOUT_MS;
   const fetchImpl = options?.fetchImpl ?? fetch;
   const configured = Boolean(url && token);
   const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
@@ -54,79 +73,39 @@ export function createControlClient(options?: {
   let cachedAt = 0;
   let cached: ControlState = DISENGAGED;
 
-  async function read(): Promise<ControlState> {
+  async function read(call?: Record<string, string>): Promise<ControlState> {
     try {
-      const res = await fetchImpl(url, { headers, signal: AbortSignal.timeout(2_000) });
-      if (!res.ok) return UNAVAILABLE;
+      let target = url;
+      if (call && Object.keys(call).length) {
+        const withCall = new URL(url);
+        for (const [key, value] of Object.entries(call)) withCall.searchParams.set(key, value);
+        target = withCall.href;
+      }
+      const res = await fetchImpl(target, { headers, signal: AbortSignal.timeout(timeoutMs) });
+      if (res.status === 401) return TURN_ENDED;
+      if (!res.ok) return UNCONFIRMED;
       const body: any = await res.json().catch(() => null);
-      if (typeof body?.held !== "boolean" || typeof body?.helpOpen !== "boolean") return UNAVAILABLE;
+      if (typeof body?.held !== "boolean" || typeof body?.helpOpen !== "boolean") return UNCONFIRMED;
       return {
         held: body.held,
         helpOpen: body.helpOpen,
+        ...(body.reason === "person" ? { reason: "person" as const } : {}),
         ...(typeof body.blockedReason === "string" && body.blockedReason.trim() ? { blockedReason: body.blockedReason } : {}),
       };
     } catch {
-      return UNAVAILABLE;
+      return UNCONFIRMED;
     }
   }
 
   return {
     configured,
-    async state(fresh = false): Promise<ControlState> {
+    async state(fresh = false, call?: Record<string, string>): Promise<ControlState> {
       if (!configured) return DISENGAGED;
       const now = Date.now();
-      if (!fresh && now - cachedAt < cacheMs) return cached;
-      cached = await read();
+      if (!fresh && !call && now - cachedAt < cacheMs) return cached;
+      cached = await read(call);
       cachedAt = Date.now();
       return cached;
     },
-    async requestHelp(reason: string): Promise<string | null> {
-      if (!configured) return null;
-      try {
-        const res = await fetchImpl(url, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ reason }),
-          signal: AbortSignal.timeout(2_000),
-        });
-        if (!res.ok) return null;
-        const body: any = await res.json().catch(() => null);
-        return typeof body?.requestId === "string" && body.requestId ? body.requestId : null;
-      } catch {
-        return null;
-      }
-    },
-    async expireHelp(requestId: string): Promise<void> {
-      if (!configured || !requestId) return;
-      try {
-        await fetchImpl(url, {
-          method: "DELETE",
-          headers,
-          body: JSON.stringify({ requestId }),
-          signal: AbortSignal.timeout(2_000),
-        });
-      } catch {
-        // Best effort: the harness also clears the in-memory request on
-        // release/restart, and an unavailable harness cannot show the card.
-      }
-    },
   };
 }
-
-/** The one sentence every refused action gets. Deliberately does not vary
- * per tool: the model needs the same three facts every time — nothing
- * happened, don't retry blindly, and how to wait properly. */
-export const CONTROL_REFUSAL =
-  "A person has taken control of this computer, so this call was NOT performed. " +
-  "Do not retry it — the screen is changing under their hands. " +
-  "Call computer_request_help (no reason needed) to wait for them to finish, " +
-  "then take a fresh screenshot before your next action.";
-
-/** The bridge-gated computers (Local VM, VPS) speak Cua Driver's own tool
- * surface, which has no wait tool to point at — so the guidance is to
- * pause, not to call anything. */
-export const CONTROL_REFUSAL_PLAIN =
-  "A person has taken control of this computer, so this call was NOT performed. " +
-  "Do not retry it — the screen is changing under their hands. " +
-  "Pause this task, tell the person you are waiting for them to hand control back, " +
-  "and take a fresh screenshot before your next action once they have.";

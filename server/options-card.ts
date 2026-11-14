@@ -27,11 +27,7 @@ export type CreateOptionsCardResult =
   | { ok: true; messageId: string }
   | { ok: false; status: 400 | 403; error: string };
 
-/**
- * Persist one passive, legacy options card. It deliberately has no requestId
- * or tool field: clicking it replies to the conversation, but grants no tool
- * approval and performs no external action.
- */
+/** Passive: no requestId or tool field, so a click grants no tool approval and performs no external action. */
 export function createOptionsCard(args: {
   store: OptionsCardStore;
   bot: OptionsCardBot;

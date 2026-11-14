@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { askInputSummary, commandSummary, toolDetailPreview } from "./tool-summary.ts";
+import { HELD_SECRET_MASK } from "./redact.ts";
+import { COMMAND_SUMMARY_MAX, askInputSummary, commandSummary, previewIsPartial, toolDetailPreview } from "./tool-summary.ts";
 
 describe("toolDetailPreview", () => {
   it("keeps useful input and results while removing nested credentials and binary data", () => {
@@ -66,8 +67,7 @@ describe("commandSummary", () => {
   });
 
   it("redacts credentials before cutting, so a sliced key cannot slip through", () => {
-    // the token starts at column 186: cutting first would leave "ghp_" plus
-    // ten characters — too short for the github shape to catch
+    // The token starts at column 186: cutting first would leave "ghp_" plus ten characters, too short for the github shape.
     const token = `ghp_${"a".repeat(36)}`;
     const summary = commandSummary({ command: `${"x".repeat(180)} curl ${token} https://api` });
     expect(summary).not.toContain("ghp_");
@@ -97,5 +97,35 @@ describe("askInputSummary", () => {
 
   it("redacts a key in a url", () => {
     expect(askInputSummary({ url: `https://h/?api_key=${"k".repeat(24)}` })).toBe("https://h/?api_key=«redacted 24 chars»");
+  });
+});
+
+describe("previewIsPartial", () => {
+  it("is false for arguments shown whole", () => {
+    expect(previewIsPartial(toolDetailPreview({ command: "git status", description: "Show the tree" })!)).toBe(false);
+    expect(previewIsPartial(commandSummary({ command: "pnpm exec vitest run server/a.test.ts" })!)).toBe(false);
+    expect(previewIsPartial("ls [a-z]* && echo redacted")).toBe(false);
+  });
+
+  it("is true wherever a preview left something out, masked it or cut it", () => {
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    const partial = [
+      toolDetailPreview({ command: "curl x", password: "short" }),
+      toolDetailPreview({ result: [{ type: "image", data: "private-base64" }] }),
+      toolDetailPreview("x".repeat(256_001)),
+      toolDetailPreview(cycle),
+      toolDetailPreview(Array.from({ length: 100 }, () => "item")),
+      toolDetailPreview(Object.fromEntries(Array.from({ length: 50 }, (_, index) => [`field${index}`, index]))),
+      toolDetailPreview("x".repeat(7_000)),
+      toolDetailPreview({ command: `curl -H "x: ghp_${"a".repeat(36)}" https://api` }),
+      commandSummary({ command: `curl ghp_${"a".repeat(36)} https://api` }),
+      `login ${HELD_SECRET_MASK}`,
+    ];
+    for (const preview of partial) expect(previewIsPartial(preview!), preview).toBe(true);
+  });
+
+  it("names the cut a command summary gets", () => {
+    expect(commandSummary({ command: "x".repeat(260) })).toHaveLength(COMMAND_SUMMARY_MAX);
   });
 });

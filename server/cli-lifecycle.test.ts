@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isWorkspaceRunning, qrToString, runOnboardingCommand, runServe, type CliOptions } from "./cli.ts";
+import { isWorkspaceRunning, runOnboardingCommand, runServe, type CliOptions } from "./cli.ts";
+import { qrToString } from "./cli-pairing.ts";
 
 const mocks = vi.hoisted(() => ({
   // the fleet path is off in these tests: no credential in the environment
@@ -13,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   FLEET_CREDENTIAL_ENV: "OMB_INSTALLATION_CREDENTIAL",
   denyLogOpen: false,
   spawn: vi.fn(),
-  tailscaleStatus: vi.fn(), tailscaleServe: vi.fn(), tailscaleServeOff: vi.fn(),
+  tailscaleStatus: vi.fn(), tailscaleServe: vi.fn(), tailscaleStop: vi.fn(), clearLeftoverTailscaleServe: vi.fn(), tailnetListenFallback: vi.fn(),
   createTunnelAccount: vi.fn(), createTunnelOrigin: vi.fn(), cleanupTunnelOrigin: vi.fn(),
   describeTunnelAccount: vi.fn(), tunnelAccess: vi.fn(), ensureCloudflared: vi.fn(),
   guardianEntry: vi.fn(), startTunnel: vi.fn(),
@@ -34,8 +35,8 @@ vi.mock("node:fs", async (original) => {
   };
 });
 vi.mock("./tailscale.ts", () => ({
-  tailscaleStatus: mocks.tailscaleStatus, tailscaleServe: mocks.tailscaleServe,
-  tailscaleServeOff: mocks.tailscaleServeOff, explainTailscaleFailure: (failure: string) => failure,
+  tailscaleStatus: mocks.tailscaleStatus, tailscaleServe: mocks.tailscaleServe, tailnetListenFallback: mocks.tailnetListenFallback,
+  clearLeftoverTailscaleServe: mocks.clearLeftoverTailscaleServe, explainTailscaleFailure: (failure: string) => failure,
 }));
 vi.mock("./tunnel.ts", () => ({ ...mocks, describeTunnelState: () => "Fixture tunnel" }));
 vi.mock("./browser-engine.ts", () => ({
@@ -81,9 +82,11 @@ beforeEach(() => {
   signalListeners = new Map(["SIGINT", "SIGTERM"].map((signal) => [signal as NodeJS.Signals, new Set(process.listeners(signal))]));
   mocks.spawn.mockImplementation(() => childProcess());
   mocks.tailscaleStatus.mockResolvedValue({ status: { cli: "/fixture/tailscale", dnsName: "fixture.tail.test", addresses: [], backendState: "Running" } });
-  mocks.tailscaleServe.mockResolvedValue({ origin: "https://fixture.tail.test" });
-  mocks.tailscaleServeOff.mockResolvedValue(undefined);
-  mocks.createTunnelAccount.mockReturnValue({ credentials: { status: "available", read: () => ({}) }, service: { retry: async () => ({}) } });
+  mocks.tailscaleServe.mockResolvedValue({ origin: "https://fixture.tail.test", stop: mocks.tailscaleStop });
+  mocks.tailscaleStop.mockResolvedValue(undefined);
+  mocks.tailnetListenFallback.mockReturnValue(null);
+  mocks.clearLeftoverTailscaleServe.mockResolvedValue(false);
+  mocks.createTunnelAccount.mockReturnValue({ credentials: { status: "available", read: () => ({}) }, service: { retry: async () => ({}), restore: async () => ({}), dispose: vi.fn() } });
   mocks.describeTunnelAccount.mockReturnValue({ email: "fixture@example.test" });
   mocks.tunnelAccess.mockReturnValue({ endpoint: "https://fixture.openmausbot.test" });
   mocks.ensureCloudflared.mockResolvedValue("/fixture/cloudflared");
@@ -115,7 +118,7 @@ describe("CLI startup lifecycle", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({}, { status: 503 })));
     await expect(runServe({ ...options, tailscale: true }, vi.fn())).rejects.toMatchObject({ code: "EACCES" });
     expect(mocks.tailscaleServe).not.toHaveBeenCalled();
-    expect(mocks.tailscaleServeOff).not.toHaveBeenCalled();
+    expect(mocks.tailscaleStop).not.toHaveBeenCalled();
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
 
@@ -124,14 +127,31 @@ describe("CLI startup lifecycle", () => {
     mocks.spawn.mockImplementation(() => { throw new Error("Fixture spawn failure"); });
     await expect(runServe({ ...options, tailscale: true }, vi.fn())).rejects.toThrow("Fixture spawn failure");
     expect(mocks.tailscaleServe).toHaveBeenCalledOnce();
-    expect(mocks.tailscaleServeOff).toHaveBeenCalledOnce();
-    expect(mocks.tailscaleServeOff).toHaveBeenCalledWith(expect.objectContaining({ dnsName: "fixture.tail.test" }));
+    expect(mocks.tailscaleStop).toHaveBeenCalledOnce();
+  });
+
+  it("starts the server on the tailnet when tailscale serve can't front it, with nothing of Tailscale's to stop", async () => {
+    mocks.tailscaleServe.mockResolvedValue({ failure: "https-not-enabled" });
+    mocks.tailnetListenFallback.mockReturnValue({ origin: "http://fixture.tail.ts.net:18451", env: { OMB_TAILNET_NAME: "fixture.tail.ts.net" }, line: "tailscale: listening" });
+    let started: NodeJS.ProcessEnv = {};
+    mocks.spawn.mockImplementation((_command: string, _args: string[], spawned: { env: NodeJS.ProcessEnv }) => { started = spawned.env; throw new Error("Fixture spawn failure"); });
+    const log = vi.fn();
+    await expect(runServe({ ...options, tailscale: true }, log)).rejects.toThrow("Fixture spawn failure");
+    expect(started).toMatchObject({ OMB_TAILNET_NAME: "fixture.tail.ts.net", OMB_PUBLIC_URL: "http://fixture.tail.ts.net:18451" });
+    expect(log).toHaveBeenCalledWith("tailscale: listening");
+    expect(mocks.tailscaleStop).not.toHaveBeenCalled();
+  });
+
+  it("stops with Tailscale's reason when listening on the tailnet can't help either", async () => {
+    mocks.tailscaleServe.mockResolvedValue({ failure: "unknown" });
+    await expect(runServe({ ...options, tailscale: true }, vi.fn())).rejects.toThrow("--tailscale: ");
+    expect(mocks.spawn).not.toHaveBeenCalled();
   });
 
   it.each([
-    { outcome: "success", result: { origin: "https://fixture.tail.test" } },
-    { outcome: "failure", result: { failure: "unknown" } },
-  ])("cleans up and never spawns when Tailscale returns $outcome after startup cancellation", async ({ result }) => {
+    { outcome: "success", result: { origin: "https://fixture.tail.test", stop: mocks.tailscaleStop }, stops: 1 },
+    { outcome: "failure", result: { failure: "unknown" }, stops: 0 },
+  ])("cleans up and never spawns when Tailscale returns $outcome after startup cancellation", async ({ result, stops }) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({}, { status: 503 })));
     mocks.tailscaleServe.mockImplementation(async () => {
       await Promise.resolve();
@@ -140,8 +160,7 @@ describe("CLI startup lifecycle", () => {
     });
     expect(await runServe({ ...options, tailscale: true }, vi.fn())).toBe(130);
     expect(mocks.tailscaleServe).toHaveBeenCalledOnce();
-    expect(mocks.tailscaleServeOff).toHaveBeenCalledOnce();
-    expect(mocks.tailscaleServeOff).toHaveBeenCalledWith(expect.objectContaining({ dnsName: "fixture.tail.test" }));
+    expect(mocks.tailscaleStop).toHaveBeenCalledTimes(stops);
     expect(mocks.spawn).not.toHaveBeenCalled();
     for (const [signal, before] of signalListeners) {
       expect(process.listeners(signal).filter((handler) => !before.has(handler))).toEqual([]);
@@ -162,6 +181,35 @@ describe("CLI startup lifecycle", () => {
     expect(mocks.startTunnel).not.toHaveBeenCalled();
     expect(children[0]!.kill).toHaveBeenCalledWith("SIGTERM");
     expect(mocks.cleanupTunnelOrigin).toHaveBeenCalledOnce();
+  });
+
+  it("hands the running tunnel to background endpoint recovery and takes it back on stop", async () => {
+    let healthRequests = 0;
+    // Nothing answers before serve starts its server; then it is up.
+    vi.stubGlobal("fetch", vi.fn(async () => (++healthRequests === 1
+      ? Response.json({}, { status: 503 })
+      : Response.json({ app: "openmausbot", pid: childPid }))));
+    const service = { retry: vi.fn(async () => ({})), restore: vi.fn(), dispose: vi.fn() };
+    mocks.createTunnelAccount.mockReturnValue({ credentials: { status: "available", read: () => ({}) }, service });
+    const running = { started: Promise.resolve(), stop: vi.fn().mockResolvedValue(undefined) };
+    mocks.startTunnel.mockImplementation(() => {
+      setTimeout(interrupt, 10);
+      return running;
+    });
+    let servingAtRestore: unknown = "not called";
+    service.restore.mockImplementation(async () => {
+      servingAtRestore = recovery().running();
+      return {};
+    });
+    const recovery = () => mocks.createTunnelAccount.mock.calls[0]![0].recovery as { running(): unknown };
+
+    expect(await runServe({ ...options, tunnel: true }, vi.fn())).toBe(0);
+    expect(mocks.startTunnel).toHaveBeenCalledOnce();
+    expect(service.restore).toHaveBeenCalledOnce();
+    expect(servingAtRestore).toBe(running);
+    expect(recovery().running()).toBeNull();
+    expect(service.dispose).toHaveBeenCalled();
+    expect(running.stop).toHaveBeenCalledOnce();
   });
 
   it("reopens a matching desktop workspace even when its server PID differs from the lease owner", async () => {
@@ -188,6 +236,31 @@ describe("CLI startup lifecycle", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json({ app: "openmausbot", pid: childPid }))
       .mockResolvedValueOnce(Response.json({ environmentId: "different-workspace" })));
     expect(await isWorkspaceRunning(options)).toBe(false);
+  });
+
+  it.each([true, false])("with no way in: the guided start signs a browser here in; serve lists the ways in and mints nothing (guided: %s)", async (guided) => {
+    let healthRequests = 0;
+    const code = "ABCD-EFGH-JKLM";
+    const pairings: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const address = String(url);
+      if (address.endsWith("/api/health")) {
+        return ++healthRequests === 1 ? Response.json({}, { status: 503 }) : Response.json({ app: "openmausbot", pid: childPid });
+      }
+      if (address.endsWith("/.well-known/openmausbot/environment")) return Response.json({ environmentId: workspaceId, label: "fixture box" });
+      expect(address).toBe(`http://127.0.0.1:${options.port}/api/auth/pairing`);
+      expect(init?.method).toBe("POST");
+      pairings.push(JSON.parse(String(init?.body)));
+      return Response.json({ code, url: null, expiresAt: Date.now() + 120_000 });
+    }));
+    const log = vi.fn((line: string) => { if (line.includes(guided ? "Keep this terminal open" : "Sign in from a browser on this machine")) interrupt(); });
+    expect(await runServe({ ...options, guided, pair: true }, log)).toBe(0);
+    const output = log.mock.calls.map(([line]) => line).join("\n");
+    expect(output).toContain('server "fixture box"');
+    expect(pairings).toEqual(guided ? [{}] : []);
+    expect(output.includes(`http://127.0.0.1:${options.port}/pair#code=${code}`)).toBe(guided);
+    expect(output.includes("Sign in from a browser on this computer")).toBe(guided);
+    expect(output.includes("serve --lan                      this network only, not encrypted")).toBe(!guided);
   });
 
   it.each(["mismatched", "unreachable"])("never mints a phone code for a %s public endpoint", async (failure) => {
@@ -218,8 +291,7 @@ describe("CLI startup lifecycle", () => {
     const code = "ABCD-EFGH-JKLM";
     const expiresAt = Date.now() + 300_000;
     const pairingUrl = `${origin}/pair#code=${code}`;
-    // A real server mints both encodings of one window; Android can only scan
-    // the openmausbot:// one (android/core Connection.kt).
+    // A real server mints both encodings of one window; Android can only scan the openmausbot:// one.
     const credential = `omb_pair_${"a".repeat(43)}`;
     const inviteUrl = `openmausbot://pair?address=${encodeURIComponent(origin)}&token=${credential}&name=fixture`;
     let healthRequests = 0;
@@ -251,14 +323,12 @@ describe("CLI startup lifecycle", () => {
     expect(requests).toContain(`${origin}/.well-known/openmausbot/environment`);
     expect(requests.indexOf(`${origin}/.well-known/openmausbot/environment`)).toBeLessThan(requests.indexOf(pairingRequest));
     const output = log.mock.calls.map(([line]) => line).join("\n");
-    expect(output).toContain(`pairing code:  ${code}`);
-    expect(output).toContain(`expires:       ${new Date(expiresAt).toLocaleTimeString()} (single use)`);
-    expect(output).toContain(`web browser:   ${pairingUrl}`);
+    expect(output).toContain(`Pairing code   ${code}   works once, until`);
+    expect(output).toContain("· chat and approvals");
+    expect(output).toContain(`Link           ${pairingUrl}`);
     expect(output).toMatch(/[▀▄█]/);
     expect(output).toContain(`Or open ${origin}/pair on your phone and enter the code.`);
     expect(output).toContain("On Android, open the OpenMausBot app and scan the QR with its pairing scanner.");
-    // The QR rendered for an Android phone must be the app-scheme invite, not
-    // the https link its scanner rejects.
     expect(output).toContain(qrToString(inviteUrl));
     expect(output).not.toContain(qrToString(pairingUrl));
     expect(output).toContain("client access: chat and approvals, not settings or pairing administration");

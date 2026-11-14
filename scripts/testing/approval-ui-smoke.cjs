@@ -25,7 +25,6 @@ module.exports = async function verifyApprovalUi({ root, url, api, until, grant 
   });
   const evaluate = js => window.webContents.executeJavaScript(js).catch(error => { throw new Error(`${error.message}: ${js}`); });
   const text = () => evaluate("document.body.innerText");
-  const click = name => evaluate(`(() => { const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === ${JSON.stringify(name)}); if (!button || button.disabled) throw new Error('Missing enabled button'); button.click(); return true; })()`);
   const selectFull = async () => {
     await evaluate("document.querySelector('[data-tour=composer] button[aria-haspopup=menu][aria-label*=\" for \"]').click(); true");
     await until(() => evaluate("[...document.querySelectorAll('[role=menuitemradio]')].some(b => b.textContent.trim().startsWith('Full access'))"));
@@ -38,21 +37,14 @@ module.exports = async function verifyApprovalUi({ root, url, api, until, grant 
     await until(() => evaluate("Boolean(document.querySelector('[data-tour=composer] button[aria-haspopup=menu][aria-label*=\" for \"]'))"));
     assert.ok((await text()).includes("Full access controls tool approvals, not provider safety checks"));
     assert.equal(await evaluate("[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Retry')"), false);
-    await selectFull();
-    await until(async () => (await text()).includes("The bot default and other threads keep their approval levels"));
-    assert.equal(await evaluate("document.activeElement.textContent.trim()"), "Cancel");
-    await click("Cancel");
-    assert.equal(calls, 0);
-    assert.equal(await readMode(), "ask");
     window.setSize(390, 844);
     await until(async () => await evaluate("innerWidth") === 390);
     writeFileSync(join(evidence, "narrow.png"), (await window.webContents.capturePage()).toPNG());
     await until(() => evaluate("document.documentElement.scrollWidth <= innerWidth"));
+    // Full applies the moment it is picked: no confirmation dialog.
     await selectFull();
-    await until(async () => (await text()).includes("Enable Full access?"));
-    writeFileSync(join(evidence, "confirmation.png"), (await window.webContents.capturePage()).toPNG());
-    await click("Enable full access");
     await until(async () => await readMode() === "full");
+    assert.equal(await evaluate("Boolean(document.querySelector('[role=alertdialog]'))"), false);
     await until(() => evaluate("document.querySelector('[data-tour=composer] button[aria-haspopup=menu][aria-label*=\" for \"]').getAttribute('aria-label').includes('Full access')"));
     assert.equal((await api("/api/bots?messages=0")).body.bots.find(candidate => candidate.id === bot.id).approvalMode, "ask");
     assert.equal(calls, 1);
@@ -66,23 +58,16 @@ module.exports = async function verifyApprovalUi({ root, url, api, until, grant 
     allThreads = true;
     await window.loadURL(`${preview.previewUrl}?bot=${bot.id}&permissions=1`);
     await until(() => evaluate("Boolean(document.querySelector('button[aria-haspopup=menu]'))"));
-    const chooseBotFull = async () => {
-      await evaluate("document.querySelector('button[aria-haspopup=menu]').click(); true");
-      await until(() => evaluate("[...document.querySelectorAll('[role=menuitemradio]')].some(b => b.textContent.trim().startsWith('Full access'))"));
-      await evaluate("[...document.querySelectorAll('[role=menuitemradio]')].find(b => b.textContent.trim().startsWith('Full access')).click(); true");
-      await until(() => evaluate("Boolean(document.querySelector('[role=alertdialog] input[type=checkbox]'))"));
-    };
-    await chooseBotFull();
-    assert.equal(await evaluate("document.querySelector('[role=alertdialog] input').checked"), true);
-    await click("Cancel");
-    assert.equal(calls, 1);
-    await chooseBotFull();
-    await click("Enable full access");
+    // In bot settings Full applies at once to the bot and every thread.
+    await evaluate("document.querySelector('button[aria-haspopup=menu]').click(); true");
+    await until(() => evaluate("[...document.querySelectorAll('[role=menuitemradio]')].some(b => b.textContent.trim().startsWith('Full access'))"));
+    await evaluate("[...document.querySelectorAll('[role=menuitemradio]')].find(b => b.textContent.trim().startsWith('Full access')).click(); true");
     await until(async () => (await api("/api/bots?messages=0")).body.bots.find(candidate => candidate.id === bot.id).tasks.every(task => task.approvalMode === "full"));
+    assert.equal(await evaluate("Boolean(document.querySelector('[role=alertdialog]'))"), false);
     await until(async () => (await text()).includes("Apply Full access to all threads"));
     assert.equal(calls, 2);
     writeFileSync(join(evidence, "all-threads.png"), (await window.webContents.capturePage()).toPNG());
-    console.log(JSON.stringify({ ui: true, cancelPreservedAsk: true, confirmedThreadFull: true, confirmedAllThreadsFull: true, sentAfterGrant: true, narrowLayout: true, safetyGuidance: true, evidence }));
+    console.log(JSON.stringify({ ui: true, threadFullAtOnce: true, allThreadsFullAtOnce: true, noConfirmation: true, sentAfterGrant: true, narrowLayout: true, safetyGuidance: true, evidence }));
   } catch (error) {
     console.error("Approval fixture UI:", await text());
     throw error;

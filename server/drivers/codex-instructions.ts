@@ -8,10 +8,6 @@ import { writeFileAtomic } from "../atomic.ts";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
-/** Receipts written before the volatile split hold the bare instruction
- * fingerprint, as do ones still waiting for their turn to be accepted;
- * committed ones are JSON with both digests. Anything unreadable reads as
- * unknown, which re-delivers once and rewrites the file. */
 export interface CodexInstructionReceipt {
   instructions: string;
   volatile?: string;
@@ -34,9 +30,7 @@ function parseReceipt(raw: string | undefined): CodexInstructionReceipt | null {
         };
       }
     }
-  } catch {
-    /* a corrupt receipt is simply unknown */
-  }
+  } catch {}
   return null;
 }
 
@@ -49,8 +43,7 @@ export function codexDeveloperInstructions(config: unknown, botInstructions: str
   if (configured != null && typeof configured !== "string") {
     throw new Error("Codex returned invalid developer instructions; cannot safely update bot instructions.");
   }
-  // Native rules previously outranked the bot's user-message prefix. Keep
-  // them last in the combined developer block to preserve that precedence.
+  // Native rules go last, keeping their precedence over the bot's.
   return configured
     ? `${botInstructions || "No OpenMausBot bot-specific instructions remain."}\n\n${configured}`
     : botInstructions;
@@ -77,11 +70,8 @@ export async function syncCodexInstructions(
     previous = null;
   }
   if (resumed && previous?.instructions !== fingerprint) {
-    // thread/resume config overrides are used after compaction, but Codex
-    // 0.153.4 keeps the old initial developer message until then. Append a
-    // developer update ONLY on change (or first adoption of an old session).
-    // inject_items flushes native history before acknowledging; only then
-    // persist our receipt. Unknown-method errors must fail, never lose rules.
+    // Codex 0.153.4 keeps the old initial developer message until compaction, so an update is appended
+    // only on change. inject_items flushes history before acknowledging; only then is the receipt written.
     try {
       await request("thread/inject_items", {
         threadId: nativeThreadId,
@@ -102,15 +92,10 @@ export async function syncCodexInstructions(
       throw error;
     }
   }
-  // A mention describes the turn it rides: deliver it on every tagged turn,
-  // even when the volatile text is byte-identical to the previous turn's.
   const deliverVolatile = !resumed || previous?.volatile !== volatileFingerprint || mentionTurn;
   const hadVolatile = typeof previous?.volatile === "string" && previous.volatile !== digest("");
   if (!resumed || previous?.instructions !== fingerprint) {
-    // Instructions-only, and only after inject_items acknowledged: the
-    // volatile digest stays pending until the driver commits it after the
-    // provider accepts the turn, so a submission the provider rejected
-    // redelivers its context on the next attempt.
+    // The volatile digest stays pending until the provider accepts the turn, so a rejected one redelivers.
     mkdirSync(directory, { recursive: true });
     writeFileAtomic(path, JSON.stringify({ instructions: fingerprint }), { mode: 0o600 });
   }

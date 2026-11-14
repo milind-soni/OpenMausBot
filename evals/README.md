@@ -29,7 +29,7 @@ Each fixture declares a `world`, the `bots` to create with their scripted `turns
 
 ## Current pins
 
-- `dispatch-supersede` — a message sent while coordinated work is outstanding runs immediately, the assignment stays attached, and the steered turn is told which work is outstanding. (Current semantics: steering is not cancelling.)
+- `dispatch-supersede` — a message sent to an idle Chief while its coordinated work is outstanding runs immediately as its own turn (not steered into the dispatching turn, not queued behind the work), the assignment stays attached, and that turn is told which work is outstanding. (Current semantics: a new message is not a cancellation.)
 - `routine-deferral` — a routine due behind a busy target is stamped `deferredAt` while staying queued, then dispatches and completes when the target frees.
 - `lazy-claim-screenless` (issue #1361) — a screen-less Auto turn mounts computer tools without claiming the VM and completes while another thread holds it; no wait activity appears.
 - `lazy-computer-claim` (issue #1361) — the first screen call fires the deferred claim, is honestly refused while another thread holds the VM, shows the existing wait activity, and proceeds on release.
@@ -51,6 +51,18 @@ Turn a real coordination thread into a synthetic fixture, then replay it through
 
 The redaction step rewrites ids, names, and free text into stable synthetic placeholders and runs a leak scan before writing anything, so a real thread becomes reviewable, committable data. Commit both the redacted scenario and the regenerated baseline under `evals/golden/baselines/`; replay asserts the stable tool traces and outcomes — turn order, tool-call names, dispatch targets, handoff-tree shape — against that baseline.
 
+## Tool choice — does a real model reach the right tool?
+
+`evals/tool-choice` holds requests that went wrong in real use, in the words people used, each with the tools that would have
+been right. It runs a real model against the tool list as shipped, one thread per case on one bot, and prints which tool each
+case reached, whether it looked it up first, and what the turn cost. Use it before changing the tool list: the agents tool
+bridge, a shorter description, a removed built-in.
+
+    OMB_EVAL_LIVE=1 OMB_EVAL_LIVE_INSTANCE='{"instanceId":"claude","driver":"claudeAgent","model":"claude-sonnet-5","config":{"cli":"/path/to/claude"},"environmentFrom":["HOME","USER"]}' \
+      node --experimental-strip-types evals/tool-choice/run-tool-choice.ts --only trigger-on-new-mail,what-did-we-decide
+
+Each case is one real turn on your account, so name the cases you need. It is closed unless `OMB_EVAL_LIVE=1`, never runs in CI, and its data folder is temporary. Add `OMB_AGENTS_TOOL_BRIDGE=1 OMB_EVAL_LIVE_PASS_ENV=OMB_AGENTS_TOOL_BRIDGE` to try the bridge. Only the scoring has an offline test.
+
 ## Tier 3 — opt-in live-model smoke
 
 Live-model runs never execute by default: `pnpm eval --live` prints one skip line and exits 0 unless the gate is open.
@@ -58,6 +70,10 @@ Live-model runs never execute by default: `pnpm eval --live` prints one skip lin
     OMB_EVAL_LIVE=1 OMB_EVAL_LIVE_CONFIG=/path/to/instance.json pnpm eval --live
 
 The instance file (or inline `OMB_EVAL_LIVE_INSTANCE` JSON) uses the product's own instance shape — `instanceId`, `driver`, `model`, optional `config` and `environmentFrom` — so credential variables are copied from the launching shell (`OMB_EVAL_LIVE_PASS_ENV` lists names to forward) and never inlined. Thresholds live in the committed `evals/live/config.json`: minimum suite score, maximum drift from the last recorded baseline, and turn and judge timeouts. Scenarios run cheap real models with state-based waits, deterministic checks (`botReplied`, tool traces), and a versioned judge whose prompt files are pinned by sha256 in a manifest; drift against the gitignored `evals/live/baselines/` baseline fails the suite.
+
+The `live-reply-*` scenarios grade how a bot talks (answer first, one question at most, no machinery named, plain time zones, remember and forget confirmed) with the `reply-habits-v1` judge. For a before/after of a prompt change, run them on a worktree of the base commit with these scenario and judge files copied in and `--update-baseline`, then on the change without it; the drift line compares the two.
+
+    OMB_EVAL_LIVE=1 OMB_EVAL_LIVE_CONFIG=/path/to/instance.json pnpm eval --live --scenario live-reply-research --scenario live-reply-plan-week --scenario live-reply-remember --scenario live-reply-routine --scenario live-reply-dead-link
 
 ## Skill bench (alpha)
 

@@ -6,9 +6,10 @@ ends; “unauthorized” after that boundary must not be repaired by giving a
 worker permanent browser credentials.
 
 The Claude driver keeps native background tasks disabled. Native subagents
-can still work within the active turn; asynchronous work across bots uses
-OpenMausBot's `delegate_bot` path, which owns each recipient's turn, approvals,
-and completion receipt. Long-running native Bash commands can no longer
+can still work within the active turn; asynchronous work across bots is a
+`coordinate_bots` assignment on OpenMausBot's job runtime
+(docs/runtime-contract.md), which owns each recipient's turn, approvals,
+and the report that resumes the requester. Long-running native Bash commands can no longer
 auto-background past the owning turn. This does not change approval modes or
 disable sandbox protections.
 
@@ -18,10 +19,14 @@ The regression fixture emits this result, then asks for WebFetch permission,
 and only finishes the parent after the test releases a file gate.
 
 The small `agents` and `ogb` MCP servers use `alwaysLoad: true` so the first
-prompt includes coordination and approval tools. Other MCP servers retain
-normal deferred loading. This prevents the deferred-lookup dependency; it
-does not magically reconnect a crashed server or override a user's denied
-tool policy.
+prompt includes coordination and approval tools; the browser does too when the
+turn plans to browse. Every other MCP server (connected apps, a bot's own
+servers, data, phone, computer and the rest) loads on demand: each turn's
+private `--settings` file sets `ENABLE_TOOL_SEARCH=true`, unless the person set
+an opt-out such as `false` or `auto:100` in the bot project's or their own
+Claude settings or the environment (`server/drivers/claude-tool-search.ts`).
+This prevents the deferred-lookup dependency; it does not magically reconnect a
+crashed server or override a user's denied tool policy.
 
 Sources:
 
@@ -32,7 +37,7 @@ Sources:
 Regression checks:
 
 ```sh
-pnpm exec vitest run server/drivers/claude.test.ts server/drivers/agents-proxy.test.ts server/browser-proxy.test.ts
+pnpm exec vitest run server/drivers/claude.test.ts server/drivers/claude-tool-search.test.ts server/drivers/agents-proxy.test.ts server/harness-mcp-proxy.test.ts
 ```
 
 The turn boundary itself — a capability whose owning turn has been replaced
@@ -40,6 +45,54 @@ is refused with 401 even when its request body arrives late — is covered by
 `server/index.test.ts` ("binds profile proposals to the capability's bot and
 thread and rechecks late bodies"); every internal capability, the browser's
 included, passes through that same gate.
+
+A thread keeps its integration credentials from one turn to the next, so its
+engine stays warm instead of relaunching every turn. The same bot on the same
+thread, with the same grants and approval level, holds the same bearer, and
+the harness honours it only while one of that thread's turns runs. Stop, a
+stall, a deleted bot or thread, a changed grant or approval level, or a
+provider reload gives the next turn a new bearer. The computer gets a new
+bearer every turn: its tools bridge into a machine that can stop between
+turns (an idle Local VM, a VPS that Auto starts), and a warm engine would not
+restart a bridge whose machine went away. The per-turn limits (bots
+created, threads opened, room posts, and not checking a delegation in the
+turn that made it) are counted by the harness for each turn, not by the
+proxy, which a warm engine keeps across turns.
+
+```sh
+pnpm exec vitest run server/session-credentials.e2e.test.ts server/post-to-room.test.ts server/vps-routing.test.ts
+```
+
+A message steered into a running Claude turn is folded in only before a
+model call that has not started yet. Words that land during the turn's last
+call are queued and run as the CLI's next native turn, in the same process
+and on the same tools. The driver holds that turn open until the queued
+words are answered: one `turn.completed`, the bot busy throughout, and the
+turn's internal tool pass valid until then — never revoked under a running
+continuation and never re-issued. From Claude Code 2.1.282 the driver runs
+the CLI with `--replay-user-messages`: the CLI echoes each stdin message, with
+the uuid it was sent with, as a model call takes it in. A steer written during
+a tool call is echoed right after that tool's result; one written during the
+turn's last model call is echoed only after the turn's `result`, as its own
+turn starts. A `result` is held when the CLI reports `queued_turn_count` above
+zero, or while a steer has not been echoed (2.1.282 reports 0 for words
+waiting on stdin, so 0 decides nothing). On an older CLI nothing says whether
+a steer was folded in, so every steer since the previous hold holds the
+result, and a folded one costs the grace below. A held result stands as the
+turn's if no `init` follows within 2 s (the words were folded after all), or
+if the continuation's `init` is followed by 30 s of silence. The queue-steer
+buttons go through the same `steer()`, so a steer landing in the last
+model call extends the turn into its continuation the same way. (A teammate's
+question no longer lands in a running turn: it is a `coordinate_bots`
+consultation on the job runtime, answered in a work thread of its own.) The CLI's
+`total_cost_usd` is a running total, so the turn's cost is the latest
+figure; per-turn token usage adds up.
+
+```sh
+pnpm exec vitest run server/drivers/claude.test.ts -t "could not fold"
+pnpm exec vitest run server/drivers/claude.test.ts -t "queued_turn_count|tool result did not take in|echoed as taken in|does not echo|held window|stays silent|steered continuation|whole grace"
+pnpm exec vitest run server/steer-e2e.test.ts -t "internal tool pass"
+```
 
 For end-to-end verification, launch the isolated fixture described in
 [README.md](README.md), then follow [Chat turns](chat-turns.md). Never use the

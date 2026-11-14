@@ -36,10 +36,7 @@ describe("LocalVmLease", () => {
     expect(lease.current(busy, 1_151)).toBeNull();
   });
 
-  // The screen poller's Local VM capture reads current() to decide whether a
-  // frame still belongs to the turn that asked for it: the settled transcript
-  // frame is taken AFTER the turn released the desktop, so "nobody owns it"
-  // has to stay distinguishable from "somebody else does".
+  // The screen poller reads current() after the turn released the desktop, so "nobody owns it" must differ from "somebody else does".
   it("reads as unowned once the turn settles, and as the new thread after a handoff", () => {
     const lease = new LocalVmLease(100);
     let busyBot: string | null = "bot-a";

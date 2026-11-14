@@ -1,41 +1,13 @@
-// The shared stdio bridge for the host computer, Local VM, and BYO VPS.
-//
-// It is almost transparent — bytes in, bytes out — with three deliberate
-// near-side exceptions:
-//
-//   1. `ping`. The bundled cua-driver (through at least v0.22.1) does not
-//      implement this MCP method and would answer with -32601. Answering it
-//      here keeps the handshake alive without reaching the driver.
-//   2. The who-is-driving `gate` (opt-in via `gate`). While the person holds
-//      control of this computer, a `tools/call` from the agent is answered
-//      with a refusal here and never forwarded.
-//   3. `tools/list` schemas. Every engine passes a tool's inputSchema to its
-//      model provider, and strict providers refuse a root that is not a plain
-//      object — failing the whole turn. The answer to a tools/list is
-//      rewritten to a provider-safe root (see mcp-tool-schema.ts); the far
-//      end still validates each call against its own schema.
-//
-// Both behaviors live here so neither entry point can drift:
-//   1. Exit without truncation. `process.exit()` in a close/error handler
-//      discards whatever is still buffered on stdout — a final MCP result
-//      would be cut mid-frame. The bridge sets exitCode and unpipes instead,
-//      letting stdio drain before the process ends on its own.
-//   2. A dead-transport watchdog (opt-in via `liveness`). docker's ssh
-//      connection helper accepts no ConnectTimeout/ServerAlive options, so a
-//      VPS dropping mid-turn leaves the exec silently wedged until the OS
-//      gives up — the harness sees a hung tool call, not an error.
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 
-import { CONTROL_REFUSAL_PLAIN, createControlClient } from "./control-client.ts";
-import { augmentedPath } from "./env-path.ts";
+import { CONTROL_ACT_WITHIN_MS, CONTROL_UNCONFIRMED, CONTROL_WAITED, controlRefusal, createControlClient, type ControlState } from "./control-client.ts";
+import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
+import { textOnlyErrorResultLine } from "./mcp-error-result.ts";
 import { createToolListNormalizer } from "./mcp-tool-schema.ts";
+import { createJournalTap, postJournal } from "./saved-steps/journal-tap.ts";
+import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 
-// 45s of TOTAL silence before the bridge even probes. An MCP session is
-// legitimately quiet between tool calls and a slow screenshot can take tens
-// of seconds, so silence alone never kills anything — it only triggers a
-// liveness probe, and only a probe that FAILS ends the bridge. Any byte on
-// stdin/stdout/stderr resets the window.
 export const BRIDGE_INACTIVITY_MS = 45_000;
 const PROBE_TIMEOUT_MS = 10_000;
 
@@ -44,9 +16,6 @@ export interface BridgeLiveness {
   args: string[];
 }
 
-/** Run the liveness command; alive means "exited 0 within the timeout". A
- * separate bounded command checks the transport without waiting for an
- * answer on the possibly wedged MCP stream. */
 export function runLivenessProbe(probe: BridgeLiveness, timeoutMs = PROBE_TIMEOUT_MS, env?: NodeJS.ProcessEnv): Promise<boolean> {
   return new Promise((resolve) => {
     const child = spawn(probe.command, probe.args, {
@@ -71,14 +40,10 @@ export function runLivenessProbe(probe: BridgeLiveness, timeoutMs = PROBE_TIMEOU
 }
 
 export interface WatchdogHandle {
-  /** Any traffic in either direction — resets the inactivity window. */
   touch: () => void;
   stop: () => void;
 }
 
-/** Inactivity → probe → (only then) declare dead. Traffic arriving while a
- * probe is in flight vetoes even a failed probe: bytes are better evidence
- * of life than a health command racing a congested link. */
 export function createInactivityWatchdog(options: {
   inactivityMs: number;
   probe: () => Promise<boolean>;
@@ -127,24 +92,38 @@ export function createInactivityWatchdog(options: {
   };
 }
 
+export interface ToolCall {
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+/** What a relay may do with the child: tools/call of its own, whose answers never reach the agent. */
+export interface ChildCalls {
+  call(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>>;
+  /** From the child's initialize answer, or its per-request metadata; undefined until one is seen. */
+  readonly driverVersion: string | undefined;
+}
+
 export interface BridgeOptions {
   command: string;
   args: string[];
-  /** Explicit child environment; absent preserves the existing PATH setup. */
   env?: NodeJS.ProcessEnv;
-  /** Names the far end in stderr messages, e.g. "Cua Driver". */
   label: string;
-  /** Enables the dead-transport watchdog. Omitted for the Local VM, whose
-   * runtime CLI talks to a local daemon and fails fast on its own. */
+  /** docker's ssh connection helper takes no ConnectTimeout/ServerAlive options, so a dropped VPS wedges silently without this. */
   liveness?: BridgeLiveness;
-  /** Enables the who-is-driving gate: the harness's loopback control
-   * endpoint plus its per-boot token. Absent → fully transparent bridge. */
-  gate?: { url: string; token: string };
+  /** `describe`: what a tools/call would open, passed to the gate so the person can be asked in plain words. */
+  gate?: { url: string; token: string; describe?: (frame: unknown) => Record<string, string> };
+  journal?: { url: string; token: string };
+  rewriteResponse?: (line: string) => string;
+  /** A tools/call the bridge carries out itself through the child, answering the agent with what this resolves to; null
+   * forwards the frame as it came. Frames after it wait, so the agent's calls still act in order. */
+  relay?: (call: ToolCall, child: ChildCalls) => Promise<unknown> | null;
+  /** The child can die and come back behind this bridge (the app restarts the driver), so the agent's connection stays up:
+   * calls that were waiting are answered with `stopped`, and the next call starts a new child. */
+  respawn?: { stopped: string };
 }
 
-/** Collect a byte stream into complete newline-terminated lines. MCP's
- * stdio transport is one JSON-RPC frame per line, so line boundaries are
- * the only safe place to inspect — or inject — anything. */
+/** MCP stdio is one JSON-RPC frame per line, so line boundaries are the only safe place to inspect or inject. */
 export function createLineSplitter(onLine: (line: string) => void): {
   push: (chunk: Buffer | string) => void;
   flush: () => void;
@@ -169,44 +148,38 @@ export function createLineSplitter(onLine: (line: string) => void): {
   };
 }
 
-/** The gate itself, factored free of process wiring so a test can drive it
- * with plain strings. Frames are handled on a serialized queue: the
- * held-check is async, and answering frame N+1 before frame N would
- * reorder the agent's protocol stream. Only a `tools/call` is ever
- * refused; every other frame — handshakes, tools/list, notifications,
- * lines that are not JSON — passes through untouched. */
+/** Serialized: the check is async, and answering frame N+1 before frame N would reorder the agent's protocol stream. */
 export function createGateInterceptor(options: {
-  isHeld: () => Promise<boolean>;
-  forward: (line: string) => void;
+  check: (frame: unknown) => Promise<ControlState>;
+  forward: (line: string) => void | Promise<void>;
   refuse: (line: string) => void;
-  refusalText?: string;
-  getRefusalReason?: () => string | undefined;
+  actWithinMs?: number;
 }): (line: string) => Promise<void> {
-  const refusalText = options.refusalText ?? CONTROL_REFUSAL_PLAIN;
+  const actWithinMs = options.actWithinMs ?? CONTROL_ACT_WITHIN_MS;
   let queue: Promise<void> = Promise.resolve();
   return (line: string) => {
+    const arrivedAt = Date.now();
     queue = queue.then(async () => {
       let frame: any = null;
       try {
         frame = JSON.parse(line);
       } catch {
-        // not a frame this gate understands — never stand between the
-        // agent and its driver on anything but a recognized tool call
       }
       if (!frame || frame.method !== "tools/call") {
-        options.forward(line);
+        await options.forward(line);
         return;
       }
-      const held = await options.isHeld().catch(() => true);
-      if (!held) {
-        options.forward(line);
+      const state = await options.check(frame).catch((): ControlState => ({ held: true, helpOpen: false, blockedReason: CONTROL_UNCONFIRMED }));
+      if (!state.held && Date.now() - arrivedAt <= actWithinMs) {
+        // A relayed call is checked once, when it arrives; the next frame's check waits until it has acted.
+        await options.forward(line);
         return;
       }
       options.refuse(
         JSON.stringify({
           jsonrpc: "2.0",
           id: frame.id ?? null,
-          result: { content: [{ type: "text", text: options.getRefusalReason?.() ?? refusalText }], isError: true },
+          result: completeFor(frame.params?._meta, { content: [{ type: "text", text: state.held ? controlRefusal(state) : CONTROL_WAITED }], isError: true }),
         }),
       );
     });
@@ -215,44 +188,28 @@ export function createGateInterceptor(options: {
 }
 
 export interface McpBridgeInterceptorOptions {
-  /** Writes a JSON-RPC response line to the agent's stdout. */
   answer: (line: string) => void;
-  /** Forwards a line to the far-end child. */
-  forward: (line: string) => void;
-  /** Optional who-is-driving gate; when set, `tools/call` may be refused. */
-  gate?: {
-    isHeld: () => Promise<boolean>;
-    refusalText?: string;
-    getRefusalReason?: () => string | undefined;
-  };
+  forward: (line: string) => void | Promise<void>;
+  gate?: { check: (frame: unknown) => Promise<ControlState> };
 }
 
-/** The near-side MCP method filter. `ping` is answered here so the bundled
- * cua-driver is never invoked for it; everything else is delegated to the
- * gate (if configured) or forwarded untouched. */
+/** The bundled cua-driver (through at least v0.22.1) answers MCP `ping` with -32601, so ping is answered here. */
 export function createMcpBridgeInterceptor(
   options: McpBridgeInterceptorOptions,
 ): (line: string) => void | Promise<void> {
   const afterPing = options.gate
-    ? createGateInterceptor({
-        isHeld: options.gate.isHeld,
-        forward: options.forward,
-        refuse: options.answer,
-        refusalText: options.gate.refusalText,
-        getRefusalReason: options.gate.getRefusalReason,
-      })
-    : (line: string) => { options.forward(line); };
+    ? createGateInterceptor({ check: options.gate.check, forward: options.forward, refuse: options.answer })
+    : (line: string) => options.forward(line);
   return (line: string) => {
     let frame: any = null;
     try {
       frame = JSON.parse(line);
     } catch {
-      // not a frame this bridge understands — forward untouched
     }
     if (frame && frame.method === "ping") {
       // Notifications have no `id` and require no response.
       if (frame.id !== undefined) {
-        options.answer(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: {} }));
+        options.answer(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: completeFor(frame.params?._meta, {}) }));
       }
       return;
     }
@@ -260,45 +217,264 @@ export function createMcpBridgeInterceptor(
   };
 }
 
-export function runMcpBridge(options: BridgeOptions): void {
-  const child = spawn(options.command, options.args, {
-    shell: false,
-    env: options.env ?? { ...process.env, PATH: augmentedPath() },
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+/** Without a tap, writes are synchronous. With one, a single chain keeps replies in order while each waits for its journal post; no failure in the tap may drop a reply. */
+export function createReplyQueue(
+  tap: { response(raw: string): Promise<void> } | null,
+  write: (written: string) => void,
+): (raw: string, written: string) => void {
+  let chain: Promise<void> = Promise.resolve();
+  return (raw, written) => {
+    if (!tap) {
+      write(written);
+      return;
+    }
+    chain = chain
+      .then(() => tap.response(raw))
+      .catch(() => {})
+      .then(() => write(written));
+  };
+}
 
-  // docker may exit before it drains stdin; pipe() leaves this error unhandled.
-  child.stdin.on("error", () => {});
-  child.stderr.pipe(process.stderr);
+const OWN_ID = "omb-bridge-";
+const SERVER_INFO_META = "io.modelcontextprotocol/serverInfo";
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function failed(text: string): Record<string, unknown> {
+  return { content: [{ type: "text", text }], isError: true };
+}
+
+const PROTOCOL_VERSION_META = "io.modelcontextprotocol/protocolVersion";
+
+/** A client on protocol revision 2026-07-28 or later rejects a result without resultType (the driver sends one), so an
+ * answer the bridge writes itself says it is complete. Older clients get the result as it was. */
+export function completeFor(meta: unknown, result: unknown): unknown {
+  const version = isObject(meta) ? meta[PROTOCOL_VERSION_META] : undefined;
+  if (typeof version !== "string" || version < "2026-07-28" || !isObject(result) || "resultType" in result) return result;
+  return { ...result, resultType: "complete" };
+}
+
+/** A tools/call request the agent waits on, as a relay sees it; anything else is not the relay's to answer. */
+function relayableCall(line: string): { id: unknown; call: ToolCall; meta: unknown } | null {
+  let frame: any = null;
+  try {
+    frame = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  const params = frame?.method === "tools/call" && frame.id !== undefined && frame.id !== null ? frame.params : null;
+  if (!isObject(params) || typeof params.name !== "string") return null;
+  return { id: frame.id, call: { name: params.name, arguments: isObject(params.arguments) ? params.arguments : {} }, meta: params._meta };
+}
+
+/** The bridge's own calls on the child, under ids the agent never sees. */
+export function createChildCalls(write: (line: string) => void, closedText = "Computer-control transport closed") {
+  let sequence = 0;
+  let driverVersion: string | undefined;
+  let closed = false;
+  const waiting = new Map<string, (result: Record<string, unknown>) => void>();
+  return {
+    /** Each call carries the agent's own `_meta`: a driver spoken to with per-request metadata refuses a call without it. */
+    forCall(meta: unknown): ChildCalls {
+      return {
+        call(name, args) {
+          if (closed) return Promise.resolve(failed(closedText));
+          const id = `${OWN_ID}${++sequence}`;
+          return new Promise((resolve) => {
+            waiting.set(id, resolve);
+            write(JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args, ...(meta === undefined ? {} : { _meta: meta }) } }));
+          });
+        },
+        get driverVersion() {
+          return driverVersion;
+        },
+      };
+    },
+    /** Notes the driver's version, and keeps an answer to one of the bridge's calls from the agent (true when it did). */
+    take(line: string): boolean {
+      const versioned = driverVersion === undefined && line.includes("serverInfo");
+      const ours = waiting.size > 0 && line.includes(OWN_ID);
+      if (!versioned && !ours) return false;
+      let frame: any = null;
+      try {
+        frame = JSON.parse(line);
+      } catch {
+        return false;
+      }
+      const version = frame?.result?.serverInfo?.version ?? frame?.result?._meta?.[SERVER_INFO_META]?.version;
+      if (versioned && typeof version === "string") driverVersion = version;
+      const resolve = ours && typeof frame?.id === "string" ? waiting.get(frame.id) : undefined;
+      if (!resolve) return false;
+      waiting.delete(frame.id);
+      resolve(isObject(frame.result) ? frame.result : failed(String(frame.error?.message ?? "Computer control returned no result")));
+      return true;
+    },
+    /** The child is gone: every call still waiting, and any made later, ends as a failure. */
+    close() {
+      closed = true;
+      for (const resolve of waiting.values()) resolve(failed(closedText));
+      waiting.clear();
+    },
+  };
+}
+
+/** How long a call waits, in steps, for a dead child to come back before the agent is told it stopped. */
+const RESPAWN_WAITS_MS = [0, 500, 1_500, 3_000];
+const RESPAWN_INITIALIZE_MS = 5_000;
+
+export function runMcpBridge(options: BridgeOptions): void {
+  const env = options.env ?? { ...process.env, PATH: augmentedPath() };
+  const { command, args } = resolveCliSpawn(options.command, options.args, env);
+  const respawn = options.respawn;
+  const spawnChild = () => {
+    const proc = spawn(command, args, {
+      shell: false,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    // docker may exit before it drains stdin; pipe() leaves this error unhandled.
+    proc.stdin.on("error", () => {});
+    proc.stderr.pipe(process.stderr, { end: false });
+    return proc;
+  };
+  let child = spawnChild();
 
   const client = options.gate
     ? createControlClient({ url: options.gate.url, token: options.gate.token })
     : null;
-  let refusalReason: string | undefined;
 
-  const answer = (line: string) => process.stdout.write(line + "\n");
-  const forward = (line: string) => child.stdin.write(line + "\n");
+  const tap = options.journal
+    ? createJournalTap({ post: postJournal(options.journal.url, options.journal.token) })
+    : null;
+  const reply = createReplyQueue(tap, (written) => process.stdout.write(written + "\n"));
+  const answer = (line: string) => reply(line, line);
+  const toolLists = createToolListNormalizer(toolSchemaProfileFromEnv(), (line) => process.stderr.write(`${options.label}: ${line}\n`));
+  // Injected responses must never land inside one of the child's half-written frames.
+  const rewrite = options.rewriteResponse ?? ((line: string) => line);
+  const respond = (line: string) => reply(line, textOnlyErrorResultLine(rewrite(toolLists.rewriteResponse(line))));
+  const newChildCalls = () => createChildCalls((line) => child.stdin.write(line + "\n"), respawn?.stopped);
+  let children = newChildCalls();
+
+  let childGone = false;
+  let stopping = false;
+  let revival: Promise<boolean> | null = null;
+  let initializeParams: unknown;
+  const waitingOnChild = new Map<string, { id: unknown; method: unknown; meta: unknown }>();
+
+  const answerStopped = (id: unknown, method: unknown, meta: unknown, text: string) => {
+    if (id === undefined || id === null) return;
+    answer(JSON.stringify(method === "tools/call"
+      ? { jsonrpc: "2.0", id, result: completeFor(meta, failed(text)) }
+      : { jsonrpc: "2.0", id, error: { code: -32000, message: text } }));
+  };
+  const noteRequest = (line: string) => {
+    let frame: any = null;
+    try {
+      frame = JSON.parse(line);
+    } catch {
+      return null;
+    }
+    if (frame?.method === "initialize") initializeParams = frame.params;
+    if (frame?.id !== undefined && frame.id !== null && frame.method) {
+      waitingOnChild.set(JSON.stringify(frame.id), { id: frame.id, method: frame.method, meta: frame.params?._meta });
+    }
+    return frame;
+  };
+  const noteResponse = (line: string) => {
+    if (waitingOnChild.size === 0) return;
+    try {
+      const id = JSON.parse(line)?.id;
+      if (id !== undefined) waitingOnChild.delete(JSON.stringify(id));
+    } catch {}
+  };
+
+  /** A new child, past its initialize handshake (the proxy refuses calls before it), or false when it did not come up. */
+  const startChild = () => new Promise<boolean>((resolve) => {
+    const proc = spawnChild();
+    const handshake = `${OWN_ID}init-${Date.now()}`;
+    let settled = false;
+    const finish = (up: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (!up) proc.kill("SIGKILL");
+      resolve(up);
+    };
+    const timer = setTimeout(() => finish(false), RESPAWN_INITIALIZE_MS);
+    timer.unref?.();
+    const adopt = () => {
+      child = proc;
+      children = newChildCalls();
+      childGone = false;
+      watchChild(proc);
+      finish(true);
+    };
+    proc.once("error", () => finish(false));
+    proc.once("close", () => finish(false));
+    wireChildOutput(proc, (line) => {
+      if (!line.includes(handshake)) return false;
+      proc.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+      adopt();
+      children.take(line);
+      return true;
+    });
+    if (initializeParams === undefined) {
+      adopt();
+      return;
+    }
+    proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: handshake, method: "initialize", params: initializeParams }) + "\n");
+  });
+
+  const reviveChild = async () => {
+    for (const wait of RESPAWN_WAITS_MS) {
+      await new Promise((settle) => setTimeout(settle, wait));
+      if (await startChild()) return true;
+    }
+    return false;
+  };
+  /** Waits for a dead child to come back. Frames are sent one at a time, so at most one revival runs. */
+  const childAlive = () => (childGone ? (revival ??= reviveChild().finally(() => { revival = null; })) : Promise.resolve(true));
+
+  const send = async (line: string) => {
+    if (respawn && !(await childAlive())) {
+      const frame = noteRequest(line);
+      if (frame) answerStopped(frame.id, frame.method, frame.params?._meta, respawn.stopped);
+      waitingOnChild.clear();
+      return;
+    }
+    const frame = line.includes('"tools/call"') ? relayableCall(line) : null;
+    const relayed = frame && options.relay?.(frame.call, children.forCall(frame.meta));
+    if (!frame || !relayed) {
+      if (respawn) noteRequest(line);
+      child.stdin.write(line + "\n");
+      return;
+    }
+    // Fail-closed: a relayed answer is the bridge's, never the driver's, so it is not journalled. The gate check the call
+    // passed is then left without an entry, which keeps its request's journal incomplete, and an incomplete one never saves.
+    tap?.leaveOut(frame.id);
+    const result = completeFor(frame.meta, await relayed.catch((error: unknown) => failed(error instanceof Error ? error.message : String(error))));
+    respond(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result }));
+  };
+  let sending: Promise<void> = Promise.resolve();
+  const forward = (line: string): void | Promise<void> => {
+    if (!options.relay && !respawn) {
+      child.stdin.write(line + "\n");
+      return;
+    }
+    sending = sending.then(() => send(line)).catch(() => {});
+    return sending;
+  };
   const intercept = createMcpBridgeInterceptor({
     answer,
     forward,
-    ...(options.gate
-      ? {
-          gate: {
-            isHeld: async () => {
-              refusalReason = undefined;
-              const state = await client!.state(true);
-              refusalReason = state.blockedReason;
-              return state.held;
-            },
-            getRefusalReason: () => refusalReason,
-          },
-        }
-      : {}),
+    ...(client ? { gate: { check: (frame: unknown) => client.state(true, options.gate?.describe?.(frame)) } } : {}),
   });
-  const toolLists = createToolListNormalizer();
   let pendingInput = Promise.resolve();
   const inbound = createLineSplitter((line) => {
     toolLists.observeRequest(line);
+    tap?.request(line);
     const completion = intercept(line);
     if (completion) pendingInput = completion;
   });
@@ -307,17 +483,20 @@ export function runMcpBridge(options: BridgeOptions): void {
   process.stdin.on("data", onStdin);
   process.stdin.on("end", () => {
     inbound.flush();
-    // A final tools/call can still be awaiting the control endpoint. Do not
-    // close the far end before the serialized gate has forwarded it.
+    // A final tools/call may still await the gate: close the far end only after it is forwarded.
     void pendingInput.finally(() => child.stdin.end());
   });
 
-  // Injected responses and refusals must never land inside one of the
-  // child's half-written frames, so the child's stdout is re-emitted at
-  // line granularity as well.
-  const outbound = createLineSplitter((line) => process.stdout.write(toolLists.rewriteResponse(line) + "\n"));
-  child.stdout.on("data", (chunk) => outbound.push(chunk));
-  child.stdout.on("end", () => outbound.flush());
+  const wireChildOutput = (proc: typeof child, take: (line: string) => boolean) => {
+    const outbound = createLineSplitter((line) => {
+      if (take(line) || children.take(line)) return;
+      if (respawn) noteResponse(line);
+      respond(line);
+    });
+    proc.stdout.on("data", (chunk) => outbound.push(chunk));
+    proc.stdout.on("end", () => outbound.flush());
+  };
+  wireChildOutput(child, () => false);
 
   const detach = () => {
     process.stdin.off("data", onStdin);
@@ -337,10 +516,7 @@ export function runMcpBridge(options: BridgeOptions): void {
         process.exitCode = 1;
         detach();
         child.kill("SIGKILL");
-        // A docker wedged on a dead ssh connection may never deliver close.
-        // Nothing can be buffered on stdout after 45 quiet seconds, so this
-        // hard exit — unlike the close-handler one this file exists to avoid —
-        // cannot truncate anything.
+        // A docker wedged on a dead ssh link may never deliver close; after 45 quiet seconds nothing is buffered to truncate.
         const failsafe = setTimeout(() => process.exit(1), 2_000);
         failsafe.unref?.();
       },
@@ -351,21 +527,47 @@ export function runMcpBridge(options: BridgeOptions): void {
     child.stderr.on("data", touch);
   }
 
-  child.on("error", (error) => {
-    process.stderr.write(`could not connect to ${options.label}: ${error.message}\n`);
-    process.exitCode = 1;
-    watchdog?.stop();
-    detach();
-  });
-  child.on("close", (code, signal) => {
-    if (signal) process.stderr.write(`${options.label} connection ended with ${signal}\n`);
-    // Let stdout and stderr drain before the bridge exits.
-    process.exitCode = process.exitCode ?? code ?? 1;
-    watchdog?.stop();
-    detach();
-  });
+  const childLost = (proc: typeof child) => {
+    if (!respawn || proc !== child) return;
+    childGone = true;
+    children.close();
+    for (const { id, method, meta } of waitingOnChild.values()) answerStopped(id, method, meta, respawn.stopped);
+    waitingOnChild.clear();
+    process.stderr.write(`${options.label}: its helper stopped; a new one starts on the next call\n`);
+    if (stopping) detach();
+  };
+  function watchChild(proc: typeof child) {
+    proc.on("error", (error) => {
+      process.stderr.write(`could not connect to ${options.label}: ${error.message}\n`);
+      if (respawn) {
+        childLost(proc);
+        return;
+      }
+      process.exitCode = 1;
+      watchdog?.stop();
+      children.close();
+      detach();
+    });
+    proc.on("close", (code, signal) => {
+      if (respawn) {
+        childLost(proc);
+        return;
+      }
+      if (signal) process.stderr.write(`${options.label} connection ended with ${signal}\n`);
+      // process.exit() here would discard buffered stdout mid-frame: set exitCode and let stdio drain.
+      process.exitCode = process.exitCode ?? code ?? 1;
+      watchdog?.stop();
+      children.close();
+      detach();
+    });
+  }
+  watchChild(child);
 
   for (const signal of ["SIGTERM", "SIGINT"] as const) {
-    process.on(signal, () => child.kill(signal));
+    process.on(signal, () => {
+      stopping = true;
+      if (childGone) process.exit(0);
+      child.kill(signal);
+    });
   }
 }

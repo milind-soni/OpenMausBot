@@ -1,31 +1,31 @@
-// pi-mcp-extension — the Pi-side half of "hands" for the pi engine.
-//
-// Pi core deliberately ships no MCP client (see pi's docs: "does not include
-// built-in MCP"). This extension is that client: loaded into the per-turn
-// `pi --mode rpc --no-session` process via `-e`, it reads a JSON file whose
-// path is handed in through OMB_MCP_CONFIG and mounts every server described
-// there as first-class pi tools (pi.registerTool). OpenMausBot ships this file
-// and the pi driver spawns it — the pi repo itself is never touched.
-//
-// Protocol: the OpenMausBot proxies speak raw JSON-RPC 2.0 over stdio, one
-// frame per line (no MCP SDK, no Content-Length framing) — see
-// server/mcp-bridge.ts and server/drivers/agents-proxy.ts. This client matches
-// that exactly.
+// pi's MCP client: pi core ships none ("does not include built-in MCP"), so this extension, loaded with
+// `-e`, mounts every server in the OMB_MCP_CONFIG file as pi tools. OpenMausBot's proxies speak raw
+// JSON-RPC 2.0 over stdio, one frame per line, without Content-Length framing.
 import { Type, type TObjectOptions, type TSchema, type TSchemaOptions } from "typebox";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { allowsTool, canUseMcpServer, parseToolScope, type ToolIdentity } from "../../shared/tool-scope.ts";
+import { ASK_USER_TOOL, formatQuestionAnswers, MAX_OPTIONS, MAX_QUESTIONS, parseAskQuestions } from "../../shared/ask-question.ts";
+import { CALL_TOOL, directoryCallTarget, isDirectoryTool } from "../mcp-directory.ts";
+import { REMOTE_MCP_STARTUP_MS } from "../mcp-http.ts";
+import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts";
 
 interface McpServerDef {
   command: string;
   args?: string[];
   env?: Record<string, string>;
-  /** "local-computer" marks the user's real host desktop: every tool on such
-   * a server is gated behind a permission card before it executes. */
+  /** "local-computer" marks the user's real desktop: every tool on it is gated behind a permission card. */
   scope?: string;
+  directory?: boolean;
 }
 
 interface McpConfig {
   mcpServers?: Record<string, McpServerDef>;
+  toolScope?: unknown;
+  scopeReadyPath?: string;
+  approvalMode?: string;
+  /** Register the ask_user tool: the driver sets it when the turn may ask. */
+  askUser?: boolean;
 }
 
 interface McpTool {
@@ -50,6 +50,9 @@ type PiToolContent = { type: "text"; text: string } | { type: "image"; data: str
 interface PiToolContext {
   ui: {
     confirm(title: string, message: string): Promise<boolean>;
+    // Dialogs resolve undefined when dismissed, timed out or aborted.
+    select?(title: string, options: string[], opts?: { signal?: AbortSignal }): Promise<string | undefined>;
+    input?(title: string, placeholder?: string, opts?: { signal?: AbortSignal }): Promise<string | undefined>;
   };
 }
 
@@ -58,6 +61,8 @@ interface PiToolDefinition {
   label: string;
   description: string;
   parameters: TSchema;
+  /** Pi 1.0+: declared to the model and never callable from other tools, as Pi documents for tools that ask the user. */
+  exposure?: "model-only";
   execute(
     toolCallId: string,
     params: unknown,
@@ -67,32 +72,33 @@ interface PiToolDefinition {
   ): Promise<{ content: PiToolContent[]; details: Record<string, never> }>;
 }
 
-/** Structural slice of Pi 0.84's ExtensionAPI used by this standalone file.
- * Keeping it local avoids bundling Pi into OpenMausBot; the extension is
- * loaded by the user's installed Pi, which supplies the real implementation. */
+/** The slice of Pi 0.84's ExtensionAPI this standalone file uses; the user's installed Pi supplies it. */
 interface PiExtensionApi {
   registerTool(definition: PiToolDefinition): void;
-  on(event: "session_shutdown", handler: () => void): void;
+  on(event: string, handler: (event?: Record<string, unknown>, context?: { abort?(): void }) => unknown): void;
+  getActiveTools?(): string[];
+  setActiveTools?(names: string[]): void;
 }
 
 const MCP_STARTUP_TIMEOUT_MS = 8_000;
-const MCP_TOOL_TIMEOUT_MS = 10 * 60_000;
+const MCP_TOOL_TIMEOUT_MS = AGENTS_TOOL_TIMEOUT_SECONDS * 1000;
 const MCP_MAX_LIST_PAGES = 100;
 const MCP_MAX_FRAME_BYTES = 32 * 1024 * 1024;
 const TOOL_OUTPUT_MAX_BYTES = 50 * 1024;
 const TOOL_OUTPUT_MAX_LINES = 2_000;
 const TOOL_NAME_MAX_LENGTH = 64;
 
-/** A minimal stdio JSON-RPC 2.0 MCP client, matched to OpenMausBot's
- * newline-delimited house protocol. */
 export class StdioMcp {
   private child: ChildProcessWithoutNullStreams;
   private buf = "";
   private nextId = 1;
   private disposed = false;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private readonly remote: boolean;
+  private listDeadline: number | undefined;
 
   constructor(def: McpServerDef) {
+    this.remote = def.directory === true;
     this.child = spawn(def.command, def.args ?? [], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ...def.env },
@@ -103,13 +109,9 @@ export class StdioMcp {
     this.child.stdout.setEncoding("utf8");
     this.child.stdout.on("data", (chunk: string) => this.onData(chunk));
     this.child.on("error", (err) => this.closeWithError(err));
-    // A server that starts and then dies emits `exit`, never `error`; without
-    // settling on it, an in-flight init/listTools would hang the extension
-    // load for the whole turn.
+    // A server that starts and then dies emits `exit`, never `error`.
     this.child.on("exit", (code) => this.closeWithError(new Error(`MCP server exited (code ${code ?? "?"})`)));
-    // A write to a dead child errors asynchronously on the stream; an
-    // unhandled stream error would kill the pi process (the same hazard
-    // spawnCli documents for driver-spawned children in procs.ts).
+    // A write to a dead child errors asynchronously; an unhandled stream error would kill pi.
     this.child.stdin.on("error", () => this.closeWithError(new Error("MCP server stdin closed")));
   }
 
@@ -124,9 +126,7 @@ export class StdioMcp {
     this.failAll(err);
     try {
       this.child.kill();
-    } catch {
-      /* already gone */
-    }
+    } catch {}
   }
 
   private onData(chunk: string): void {
@@ -153,8 +153,6 @@ export class StdioMcp {
         else p.resolve(msg.result);
         continue;
       }
-      // This minimal client does not implement server→client requests. Reply
-      // explicitly instead of leaving a conforming server waiting forever.
       if (msg.id !== undefined && typeof msg.method === "string") {
         try {
           this.write({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "Client method not supported" } });
@@ -163,8 +161,6 @@ export class StdioMcp {
           return;
         }
       }
-      // Notifications (e.g. notifications/tools/list_changed) are intentionally
-      // ignored for this single-shot mount.
     }
     if (Buffer.byteLength(this.buf, "utf8") > MCP_MAX_FRAME_BYTES) {
       this.closeWithError(new Error(`MCP frame exceeded ${MCP_MAX_FRAME_BYTES} bytes without a newline`));
@@ -199,9 +195,7 @@ export class StdioMcp {
         this.pending.delete(id);
         try {
           this.notify("notifications/cancelled", { requestId: id, reason });
-        } catch {
-          /* the transport may already be gone */
-        }
+        } catch {}
         settle(() => reject(new Error(reason)));
       };
       const onAbort = () => cancel(`MCP ${method} aborted`);
@@ -226,6 +220,8 @@ export class StdioMcp {
   }
 
   async init(): Promise<void> {
+    const budget = this.remote ? REMOTE_MCP_STARTUP_MS : MCP_STARTUP_TIMEOUT_MS;
+    this.listDeadline = this.remote ? Date.now() + budget : undefined;
     await this.call(
       "initialize",
       {
@@ -233,7 +229,7 @@ export class StdioMcp {
         capabilities: {},
         clientInfo: { name: "openmausbot-pi", version: "1" },
       },
-      MCP_STARTUP_TIMEOUT_MS,
+      budget,
     );
     this.notify("notifications/initialized");
   }
@@ -241,7 +237,7 @@ export class StdioMcp {
   async listTools(): Promise<McpTool[]> {
     const tools: McpTool[] = [];
     const seenCursors = new Set<string>();
-    const deadline = Date.now() + MCP_STARTUP_TIMEOUT_MS;
+    const deadline = this.listDeadline ?? Date.now() + MCP_STARTUP_TIMEOUT_MS;
     let cursor: string | undefined;
     for (let page = 0; page < MCP_MAX_LIST_PAGES; page += 1) {
       const remainingMs = Math.max(1, deadline - Date.now());
@@ -260,8 +256,7 @@ export class StdioMcp {
     throw new Error(`MCP tools/list exceeded ${MCP_MAX_LIST_PAGES} pages`);
   }
 
-  /** tools/call → Pi content, preserving screenshots and bounding text so a
-   * remote server cannot flood the model context. */
+  /** Text is bounded so a remote server cannot flood the model context. */
   async callTool(name: string, args: unknown, signal?: AbortSignal): Promise<{ content: PiToolContent[]; isError: boolean }> {
     const res = (await this.call(
       "tools/call",
@@ -298,9 +293,7 @@ export class StdioMcp {
     this.failAll(new Error("MCP client disposed"));
     try {
       this.child.kill();
-    } catch {
-      /* already gone */
-    }
+    } catch {}
   }
 }
 
@@ -390,8 +383,6 @@ function collectObjectShape(schema: JsonSchema): { properties: Record<string, un
     for (const branch of candidate.allOf ?? []) visit(branch, mode === "choice" ? "choice" : "all");
     for (const branch of [...(candidate.anyOf ?? []), ...(candidate.oneOf ?? [])]) visit(branch, "choice");
     for (const [key, value] of Object.entries(candidate.properties ?? {})) {
-      // The root declaration is authoritative; branch-only properties are
-      // still retained so the model knows which arguments exist.
       if (mode === "root" || properties[key] === undefined) properties[key] = value;
     }
     if (mode !== "choice" && Array.isArray(candidate.required)) {
@@ -429,8 +420,7 @@ function nestedTypebox(schema: unknown): TSchema {
 
   if (Array.isArray(schema.enum) && schema.enum.length > 0) {
     if (schema.enum.every((value) => typeof value === "string")) {
-      // `{type:"string", enum:[...]}` works across Google/OpenAI/Anthropic;
-      // Type.Union(Type.Literal(...)) does not work with Google's tool API.
+      // `{type:"string", enum}` works across Google/OpenAI/Anthropic; Google's tool API rejects Type.Union of literals.
       return withNullable(Type.String({ ...options, enum: schema.enum }), schema.nullable);
     }
     const literals = schema.enum.map(primitiveLiteral).filter((value): value is TSchema => value !== null);
@@ -480,17 +470,13 @@ function nestedTypebox(schema: unknown): TSchema {
   }
 }
 
-/** Best-effort JSON Schema → TypeBox. MCP tool parameters must always expose
- * an object at the root; Pi/provider tool serialization rejects a root schema
- * without `type: "object"`. Nested schemas retain unions, nullability and
- * constraints instead of being incorrectly rewritten as objects. */
+/** Best-effort JSON Schema → TypeBox. Pi/provider tool serialization rejects a root schema without
+ * `type: "object"`, so the root is always an object. */
 export function toTypebox(schema: unknown): TSchema {
   return objectSchema(isSchemaObject(schema) ? schema : {}, true);
 }
 
-/** pi tool names are lowercase snake identifiers; MCP tool names are not
- * (COMPOSIO_SEARCH_TOOLS, browser_navigate, mcp__x…). Normalize and prefix
- * with the server so two servers can never collide. */
+/** pi tool names are lowercase snake identifiers; prefixed with the server so two servers never collide. */
 function sanitizeToolName(server: string, tool: string): string {
   const raw = `${server}_${tool}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
   return raw.slice(0, TOOL_NAME_MAX_LENGTH) || "mcp_tool";
@@ -511,8 +497,6 @@ export function truncateToolText(text: string): string {
   const lineLimited = lines.slice(0, TOOL_OUTPUT_MAX_LINES).join("\n");
   const bytes = Buffer.from(lineLimited, "utf8");
   let byteEnd = Math.min(bytes.length, TOOL_OUTPUT_MAX_BYTES);
-  // Avoid returning a replacement character when the byte limit lands in the
-  // middle of a UTF-8 code point.
   while (byteEnd > 0 && byteEnd < bytes.length && (bytes[byteEnd] & 0xc0) === 0x80) byteEnd -= 1;
   const content = bytes.subarray(0, byteEnd).toString("utf8");
   const truncatedByLines = lines.length > TOOL_OUTPUT_MAX_LINES;
@@ -525,7 +509,6 @@ export function truncateToolText(text: string): string {
   return `${content}\n\n[MCP output truncated: ${reasons.join(" and ")}. Refine the request for less output.]`;
 }
 
-/** A short human-readable line for the permission card's detail. */
 function summarizeParams(params: unknown): string {
   try {
     const s = JSON.stringify(params ?? {});
@@ -533,6 +516,59 @@ function summarizeParams(params: unknown): string {
   } catch {
     return "";
   }
+}
+
+const ASK_USER_NOT_ANSWERED = "The person did not answer this question. Do not guess an answer; ask again later or proceed without it.";
+
+/** The shared ask_user tool over Pi's own dialogs: in RPC mode each select is one question card, asked in turn.
+ * A select takes one pick, so a multiSelect call is refused rather than answered with one. */
+function askUserTool(allowed: () => boolean): PiToolDefinition {
+  return {
+    name: ASK_USER_TOOL,
+    label: "Ask the person",
+    description:
+      "Ask the person questions when the decision is theirs. Offer concrete options where they exist; they can always answer in their own words. Ask up to six questions in one call rather than one at a time. Each question takes one answer.",
+    parameters: Type.Object({
+      questions: Type.Array(Type.Object({
+        question: Type.String({ description: "The question to show the person." }),
+        options: Type.Optional(Type.Array(
+          Type.Object({ label: Type.String(), description: Type.Optional(Type.String()) }),
+          { maxItems: MAX_OPTIONS, description: "Suggested answers; the person picks one or writes their own." },
+        )),
+      }), { minItems: 1, maxItems: MAX_QUESTIONS }),
+    }),
+    exposure: "model-only",
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      if (!allowed()) throw new Error("Tool selection excludes this tool");
+      const raw = (params as { questions?: unknown } | null)?.questions;
+      if (Array.isArray(raw) && raw.some((entry) => (entry as { multiSelect?: unknown } | null)?.multiSelect === true)) {
+        throw new Error("This engine takes one answer per question. Ask a single-choice question instead; the person can still name several things in their own words.");
+      }
+      const questions = parseAskQuestions(params);
+      if (!questions) {
+        throw new Error("The ask_user arguments are malformed: pass a questions array of one to six questions, each with a question string and at most twelve options carrying a label. Ask again with valid arguments.");
+      }
+      const answers: string[][] = [];
+      for (const question of questions) {
+        const labels = question.options.map((option) => option.label);
+        // pi's select carries bare strings, so option descriptions go under the question and the labels stay exact.
+        const described = question.options.filter((option) => option.description);
+        const title = described.length
+          ? `${question.question}\n\n${described.map((option) => `${option.label}: ${option.description}`).join("\n")}`
+          : question.question;
+        const answer = labels.length
+          ? await ctx.ui.select?.(title, labels, { signal })
+          : await ctx.ui.input?.(question.question, undefined, { signal });
+        if (!answer?.trim()) break;
+        answers.push([answer.trim()]);
+      }
+      if (!answers.length) throw new Error(ASK_USER_NOT_ANSWERED);
+      const unanswered = answers.length < questions.length
+        ? "\n\nThe person did not answer the other questions. Do not guess their answers."
+        : "";
+      return { content: [{ type: "text", text: formatQuestionAnswers(questions, answers) + unanswered }], details: {} };
+    },
+  };
 }
 
 export default async function (pi: PiExtensionApi): Promise<void> {
@@ -543,16 +579,80 @@ export default async function (pi: PiExtensionApi): Promise<void> {
   try {
     config = JSON.parse(readFileSync(configPath, "utf8")) as McpConfig;
   } catch {
-    return;
+    throw new Error("OpenMausBot Pi MCP configuration could not be read");
   }
+  if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("OpenMausBot Pi MCP configuration is invalid");
+  const parsed = parseToolScope(config.toolScope);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const scope = parsed.scope;
+  if (scope !== undefined && (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function")) throw new Error("Pi tool selection enforcement APIs are unavailable");
 
   const used = new Set<string>();
+  const identities = new Map<string, ToolIdentity>();
+  const directoryTools = new Map<string, string>();
+  let enforcementFailed = false;
   const clients: StdioMcp[] = [];
-  const serverEntries = Object.entries(config.mcpServers ?? {});
+  const serverEntries = Object.entries(config.mcpServers ?? {}).filter(([name]) => scope === undefined || canUseMcpServer(scope, name));
 
-  // Mount independent servers concurrently so one slow integration cannot
-  // consume the startup timeout once per server. Registration remains in
-  // config order below for deterministic tool names and collision suffixes.
+  if (scope !== undefined) {
+    const allowed = (name: string) => directoryTools.has(name)
+      ? canUseMcpServer(scope, directoryTools.get(name)!)
+      : allowsTool(scope, identities.get(name) ?? { kind: "native", name });
+    const intersect = () => {
+      if (enforcementFailed) throw new Error("Pi tool selection enforcement is unavailable");
+      try {
+        const active = pi.getActiveTools!();
+        if (!Array.isArray(active) || active.some((name) => typeof name !== "string")) throw new Error("Pi tool selection enforcement returned an invalid catalog");
+        const requested = new Set(active.filter(allowed));
+        pi.setActiveTools!([...requested]);
+        const selected = pi.getActiveTools!();
+        if (!Array.isArray(selected) || selected.some((name) => !requested.has(name))) throw new Error("Pi tool selection enforcement did not apply the active-tool restriction");
+        if (config.scopeReadyPath) writeFileSync(config.scopeReadyPath, JSON.stringify({ ok: true, toolScope: scope }), { mode: 0o600 });
+        return selected;
+      } catch (error) {
+        enforcementFailed = true;
+        if (config.scopeReadyPath) {
+          try { writeFileSync(config.scopeReadyPath, JSON.stringify({ ok: false }), { mode: 0o600 }); } catch { /* A failed receipt cannot grant access. */ }
+        }
+        throw error;
+      }
+    };
+    for (const event of ["session_start", "session_switch", "model_select", "before_agent_start", "context"]) pi.on(event, () => { intersect(); });
+    pi.on("tool_call", (event) => !enforcementFailed && typeof event?.toolName === "string" && allowed(event.toolName) ? undefined : { block: true, reason: "Tool selection excludes this tool" });
+    // Providers serialize tools before this hook, so the final payload is filtered too.
+    pi.on("before_provider_request", (event, context) => {
+      let selected = new Set<string>();
+      try { selected = new Set(intersect()); } catch {
+        // Pi catches hook errors: keep the payload empty and block every later execution.
+        try { context?.abort?.(); } catch { /* The deny-all payload still applies. */ }
+      }
+      const declared = (name: string) => selected.has(name) && allowed(name);
+      const payload = event?.payload;
+      if (!payload || typeof payload !== "object") return payload;
+      const body = payload as { tools?: unknown[] };
+      if (Array.isArray(body.tools)) body.tools = body.tools.flatMap((value) => {
+        if (!value || typeof value !== "object") return [];
+        const tool = value as { name?: string; function?: { name?: string }; functionDeclarations?: Array<{ name?: string }> };
+        if (Array.isArray(tool.functionDeclarations)) {
+          const functionDeclarations = tool.functionDeclarations.filter((declaration) => typeof declaration.name === "string" && declared(declaration.name));
+          return functionDeclarations.length ? [{ ...tool, functionDeclarations }] : [];
+        }
+        const name = tool.function?.name ?? tool.name;
+        return typeof name === "string" && declared(name) ? [tool] : [];
+      });
+      return payload;
+    });
+  }
+
+  if (config.askUser === true) {
+    const identity: ToolIdentity = { kind: "native", name: ASK_USER_TOOL };
+    if (scope === undefined || allowsTool(scope, identity)) {
+      pi.registerTool(askUserTool(() => scope === undefined || (!enforcementFailed && allowsTool(scope, identity))));
+      // MCP tools are named server_tool; keep one from taking this name.
+      used.add(ASK_USER_TOOL);
+    }
+  }
+
   const mounts = await Promise.all(
     serverEntries.map(async ([serverName, def]) => {
       if (!def || typeof def.command !== "string" || !def.command.trim()) return { serverName };
@@ -573,7 +673,7 @@ export default async function (pi: PiExtensionApi): Promise<void> {
   for (const mount of mounts) {
     if (!mount.client || !mount.def || !mount.tools) continue;
     const { serverName, def, client, tools } = mount;
-    const gated = def.scope === "local-computer";
+    const gated = def.scope === "local-computer" || (def.scope === "custom" && config.approvalMode !== "full");
     let registered = 0;
 
     for (const tool of tools) {
@@ -582,6 +682,9 @@ export default async function (pi: PiExtensionApi): Promise<void> {
         continue;
       }
       const toolName = tool.name;
+      const identity: ToolIdentity = { kind: "mcp", server: serverName, name: toolName };
+      const directoryTool = def.directory === true && isDirectoryTool(toolName);
+      if (scope !== undefined && !directoryTool && !allowsTool(scope, identity)) continue;
       const name = allocateToolName(serverName, toolName, used);
       try {
         const parameters = toTypebox(tool.inputSchema);
@@ -591,14 +694,19 @@ export default async function (pi: PiExtensionApi): Promise<void> {
           description: typeof tool.description === "string" ? tool.description : `${toolName} (MCP tool from ${serverName})`,
           parameters,
           async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-            // Host tools ask first, using pi's native permission card
-            // (ctx.ui.confirm → extension_ui_request → Allow/Deny card). This
-            // mirrors ACP's session/request_permission and Codex's elicitation.
-            if (gated) {
-              const detail = summarizeParams(params);
+            const target = directoryTool ? directoryCallTarget(toolName, params) : toolName;
+            if (scope !== undefined && (enforcementFailed
+              || (target !== undefined && !allowsTool(scope, { kind: "mcp", server: serverName, name: target },
+                (directoryTool && toolName === CALL_TOOL ? (params as { arguments?: unknown } | undefined)?.arguments : params) ?? {})))) {
+              throw new Error("Tool selection excludes this tool");
+            }
+            // Host tools ask first through pi's native card (ctx.ui.confirm → extension_ui_request).
+            if (gated && target !== undefined) {
+              const shown = target;
+              const detail = summarizeParams(directoryTool && toolName === CALL_TOOL ? (params as { arguments?: unknown } | undefined)?.arguments : params);
               const allowed = await ctx.ui.confirm(
-                `Allow ${toolName} on your computer?`,
-                detail || `Run ${serverName}:${toolName}`,
+                def.scope === "local-computer" ? `Allow ${shown} on your computer?` : `Allow ${serverName}:${shown}?`,
+                detail || `Run ${serverName}:${shown}`,
               );
               if (!allowed) {
                 return { content: [{ type: "text", text: "Blocked by the user." }], details: {} };
@@ -610,18 +718,17 @@ export default async function (pi: PiExtensionApi): Promise<void> {
                 .filter((item): item is { type: "text"; text: string } => item.type === "text")
                 .map((item) => item.text)
                 .join("\n");
-              // Pi marks a custom tool as failed only when execute throws;
-              // returning error-looking text incorrectly produces isError=false.
+              // Pi marks a custom tool failed only when execute throws.
               throw new Error(message || `MCP tool ${serverName}:${toolName} returned an error`);
             }
             return { content: res.content, details: {} };
           },
         });
         used.add(name);
+        identities.set(name, identity);
+        if (directoryTool) directoryTools.set(name, serverName);
         registered += 1;
       } catch (err) {
-        // One malformed tool must not dispose the client behind tools that
-        // were already registered from the same server.
         const message = err instanceof Error ? err.message : String(err);
         process.stderr.write(`[openmausbot-pi-mcp] ${serverName}:${toolName}: ${message}\n`);
       }

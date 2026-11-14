@@ -55,7 +55,7 @@ it("retains delivery identities after run-history pruning, with a seven-day retr
   const h = harness();
   const first = h.manager.enqueueWebhook(input);
   const disk = JSON.parse(readFileSync(h.options.file, "utf8"));
-  disk.runs = []; // Run-log retention is independent of the retry guarantee.
+  disk.runs = [];
   writeFileSync(h.options.file, JSON.stringify(disk));
   let reloaded = new RoutineManager(h.options);
   expect(reloaded.enqueueWebhook(input)).toEqual({ id: first.id });

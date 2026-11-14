@@ -60,9 +60,7 @@ function sameScope(left: CommandAllowlistCandidate, right: CommandAllowlistCandi
   return left.command === right.command && left.cwd === right.cwd && left.providerInstanceId === right.providerInstanceId;
 }
 
-/** Installation-local grants, deliberately separate from bot profiles and
- * templates. Callers must also exclude this file from workspace backups.
- * One server owns the store; a successful atomic save precedes publication. */
+/** Installation-local grants, apart from bot profiles and templates; callers must also keep this file out of workspace backups. */
 export class CommandAllowlistStore {
   private rules: StoredRule[] = [];
   private unreadable = false;
@@ -94,8 +92,7 @@ export class CommandAllowlistStore {
       }
       this.rules = rules;
     } catch (error) {
-      // Missing means no grants. Any other read/validation failure disables
-      // all grants and forbids overwriting evidence of a damaged store.
+      // Missing means no grants; any other failure disables every grant and forbids overwriting a damaged store.
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.unreadable = true;
     }
   }

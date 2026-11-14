@@ -1,31 +1,93 @@
 import { Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
-import { browserAvailable, builtInBrowserEnabled } from "@/lib/feature-flags";
+import { useMenuMotion } from "./MenuMotion";
+import { MENU_HEADING, MENU_SHEET } from "./menu-recipe";
 import { t } from "@/lib/i18n";
-import { instanceSupportsLocalComputer, localComputerSelectable } from "@/lib/local-computer";
-import { effectivePlace, PLACES, placeLabelKey, type Place } from "@/lib/place";
+import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable, pageOnRemoteServer } from "@/lib/local-computer";
+import { effectivePlace, personPin, PLACES, placeLabelKey, placeOffered, type Place } from "@/lib/place";
+import { placeBlocked, placeFacts, placeHasIssue, placeViewFor, usePlaceSeat } from "@/lib/place-view";
 import { useStore, type Bot, type Task } from "@/state/store";
+import type { PlaceView } from "../../shared/place-view";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { PlaceIcon } from "./PlaceIcon";
+import type { SidebarMenuItem } from "./SidebarPopoverMenu";
 
 export type PlaceAvailability = Record<Place, boolean>;
 
-/** The same reachability the Works on picker applies, so the chip never
- * offers a place the panel would grey out. */
-export function usePlaceAvailability(bot: Bot): PlaceAvailability {
+export function usePlaceViews(bot: Bot): Record<Place, { view: PlaceView; reachable: boolean; policy: boolean; listed: boolean }> {
   const { state } = useStore();
   const { capabilities } = useDesktopCapabilities();
-  const instance = state.instances.find((candidate) => candidate.instanceId === bot.modelSelection.instanceId);
-  const computerMcp = instance?.capabilities?.computerMcp === true;
-  const boxAgent = instance?.driverKind === "boxAgent";
-  // Places the enrolled organisation disallows are never offered.
+  const seat = usePlaceSeat(state.config, capabilities);
+  const backend = bot.cloudBackend === "vps" ? "vps" : "box";
   const allowed = state.config?.managedPolicy?.computers ?? { thisComputer: true, localVm: true, box: true, vps: true };
+  const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
+  const local = {
+    ready: localComputerSelectable({ capabilities, providerSupportsLocal }),
+    reason: localComputerDisabledReason({ capabilities, providerSupportsLocal }) ?? t("computer.unavailableLocal"),
+  };
+  const entry = (place: Place) => {
+    const view = placeViewFor(placeFacts({ bot, place, seat, config: state.config, instances: state.instances, local }));
+    const policy = (place === "cloud" ? allowed[backend] : place === "vm" ? allowed.localVm : place === "local" ? allowed.thisComputer : true)
+      && placeOffered(place, state.config);
+    const listed = placeOffered(place, state.config) && !(place === "local" && pageOnRemoteServer(capabilities));
+    return { view, policy, listed, reachable: policy && !placeBlocked(view) };
+  };
+  return { cloud: entry("cloud"), vm: entry("vm"), local: entry("local"), browser: entry("browser") };
+}
+
+export function usePlaceAvailability(bot: Bot): PlaceAvailability {
+  const views = usePlaceViews(bot);
+  return { cloud: views.cloud.reachable, vm: views.vm.reachable, local: views.local.reachable, browser: views.browser.reachable };
+}
+
+/** The place chip as one + menu entry with the same choices, for a phone composer that has no room for the chip. */
+export function usePlaceMenuItem({ bot, task, disabled = false, onPin }: {
+  bot: Bot;
+  task?: Pick<Task, "surface" | "surfaceAuto"> | null;
+  disabled?: boolean;
+  onPin: (surface: Place | null) => void;
+}): SidebarMenuItem {
+  const places = usePlaceViews(bot);
+  const effective = effectivePlace(bot, task);
+  const pin = personPin(task);
+  const pinned = Boolean(pin);
+  const off = effective === "off";
+  const botDefault = bot.computer ?? "auto";
+  const followsAuto = botDefault === "auto";
+  const check = <Check size={14} className="text-accent" aria-hidden="true" />;
+  const choose = (surface: Place | null) => { if (surface !== (pin ?? null)) onPin(surface); };
   return {
-    cloud: (bot.cloudBackend === "vps" ? computerMcp && !boxAgent : computerMcp || boxAgent) && (bot.cloudBackend === "vps" ? allowed.vps : allowed.box),
-    vm: Boolean(instance?.snapshot?.state === "available" && computerMcp && !boxAgent) && allowed.localVm,
-    local: localComputerSelectable({ capabilities, providerSupportsLocal: instanceSupportsLocalComputer(state.instances, bot) }) && allowed.thisComputer,
-    browser: builtInBrowserEnabled(state.config) && browserAvailable(state.config) && instance?.capabilities?.browserMcp === true && !boxAgent,
+    key: "place",
+    label: t("computer.worksOn"),
+    subtitle: t(placeLabelKey(effective)),
+    icon: <PlaceIcon place={effective} size={16} aria-hidden="true" />,
+    disabled: disabled || off,
+    onSelect: () => {},
+    submenu: [
+      {
+        key: "place:follow",
+        label: followsAuto ? t("place.auto") : t("place.followBot"),
+        note: followsAuto ? t("place.autoDetail") : t("place.followBotDetail", { place: t(placeLabelKey(botDefault)) }),
+        icon: <PlaceIcon place={botDefault} size={16} aria-hidden="true" />,
+        active: !pinned,
+        trailing: !pinned ? check : undefined,
+        onSelect: () => choose(null),
+      },
+      ...PLACES.filter((place) => places[place].listed).map((place): SidebarMenuItem => {
+        const { view, reachable, policy } = places[place];
+        return {
+          key: `place:${place}`,
+          label: t(placeLabelKey(place)),
+          note: !policy ? t("place.unavailable") : placeHasIssue(view) ? view.short : t(DESCRIPTION[place]),
+          icon: <PlaceIcon place={place} size={16} aria-hidden="true" />,
+          active: pin === place,
+          trailing: pin === place ? check : undefined,
+          disabled: !reachable,
+          onSelect: () => choose(place),
+        };
+      }),
+    ],
   };
 }
 
@@ -33,22 +95,20 @@ const DESCRIPTION: Record<Place, "computer.dest.cloudDesc" | "computer.dest.vmDe
   cloud: "computer.dest.cloudDesc", vm: "computer.dest.vmDesc", local: "computer.dest.localDesc", browser: "computer.dest.browserDesc",
 };
 
-/** Where this conversation works, always visible beside the send button.
- * Shows the effective place (the conversation's pin, else the bot's Works
- * on), pulses while a turn is acting there, and pins another place for this
- * conversation only. No confirmation card: choosing is the whole gesture. */
 export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
   bot: Bot;
-  task?: Pick<Task, "surface"> | null;
+  task?: Pick<Task, "surface" | "surfaceAuto"> | null;
   live: boolean;
   disabled?: boolean;
   onPin: (surface: Place | null) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const motion = useMenuMotion(open);
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const availability = usePlaceAvailability(bot);
+  const places = usePlaceViews(bot);
   const effective = effectivePlace(bot, task);
-  const pinned = Boolean(task?.surface);
+  const pin = personPin(task);
+  const pinned = Boolean(pin);
   const off = effective === "off";
   const label = t(placeLabelKey(effective));
   const showLive = live && effective !== "off" && effective !== "auto";
@@ -63,8 +123,9 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
     return () => { document.removeEventListener("mousedown", outside); document.removeEventListener("keydown", escape); };
   }, [open]);
 
-  const choose = (surface: Place | null) => { setOpen(false); if (surface !== (task?.surface ?? null)) onPin(surface); };
+  const choose = (surface: Place | null) => { setOpen(false); if (surface !== (pin ?? null)) onPin(surface); };
   const botDefault = bot.computer ?? "auto";
+  const followsAuto = botDefault === "auto";
 
   return (
     <div className="relative flex items-center" ref={wrapperRef}>
@@ -86,27 +147,30 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
         <PlaceIcon place={effective} size={16} className="shrink-0 opacity-80" aria-hidden="true" />
         {showLive && <span className="absolute right-1.5 top-1.5 size-1.5 animate-pulse rounded-full bg-success" aria-label={t("place.live")} />}
       </button>
-      {open && (
-        <div role="menu" aria-label={t("place.chipTitle")} className="absolute bottom-full left-0 z-40 mb-2 w-[300px] overflow-hidden rounded-2xl border border-hairline/40 bg-raised shadow-2xl">
-          <div className="border-b border-hairline/20 px-4 py-3 text-[14px] font-medium text-ink">{t("place.chipTitle")}</div>
-          <div className="flex flex-col py-1.5">
+      {motion.shown && (
+        <div role="menu" aria-label={t("place.chipTitle")} className={cn("absolute bottom-full left-0 z-40 mb-2 w-[300px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}>
+          <div className={MENU_HEADING}>{t("place.chipTitle")}</div>
+          <div className="flex flex-col gap-1">
             <button
               type="button"
               role="menuitemradio"
               aria-checked={!pinned}
               onClick={() => choose(null)}
-              className={cn("flex items-start gap-3 px-4 py-2 text-left hover:bg-control/60", !pinned && "bg-control/40")}
+              className={cn("flex items-start gap-2 rounded-md px-2 py-1.5 text-left", !pinned ? "bg-menu-active" : "hover:bg-menu-hover")}
             >
-              <PlaceIcon place={botDefault} size={14} className="mt-0.5 shrink-0 opacity-70" aria-hidden="true" />
+              <PlaceIcon place={botDefault} size={16} className="mt-px shrink-0 text-ink-secondary" aria-hidden="true" />
               <span className="min-w-0 flex-1">
-                <span className="block text-[13px] text-ink">{t("place.followBot")}</span>
-                <span className="block text-[11px] text-ink-secondary">{t("place.followBotDetail", { place: t(placeLabelKey(botDefault)) })}</span>
+                <span className="block text-[14px] leading-[18px] text-ink">{followsAuto ? t("place.auto") : t("place.followBot")}</span>
+                <span className="block text-[12px] leading-4 text-ink-secondary">
+                  {followsAuto ? t("place.autoDetail") : t("place.followBotDetail", { place: t(placeLabelKey(botDefault)) })}
+                </span>
               </span>
               {!pinned && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
             </button>
-            {PLACES.map((place) => {
-              const selected = task?.surface === place;
-              const reachable = availability[place];
+            {PLACES.filter((place) => places[place].listed).map((place) => {
+              const selected = pin === place;
+              const { view, reachable, policy } = places[place];
+              const detail = !policy ? t("place.unavailable") : placeHasIssue(view) ? view.short : t(DESCRIPTION[place]);
               return (
                 <button
                   key={place}
@@ -114,14 +178,14 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
                   role="menuitemradio"
                   aria-checked={selected}
                   disabled={!reachable}
-                  title={reachable ? undefined : t("place.unavailable")}
+                  title={!policy ? t("place.unavailable") : placeHasIssue(view) ? view.line : undefined}
                   onClick={() => choose(place)}
-                  className={cn("flex items-start gap-3 px-4 py-2 text-left", reachable ? "hover:bg-control/60" : "cursor-not-allowed opacity-45", selected && "bg-control/40")}
+                  className={cn("flex items-start gap-2 rounded-md px-2 py-1.5 text-left", selected ? "bg-menu-active" : reachable ? "hover:bg-menu-hover" : "cursor-not-allowed opacity-45")}
                 >
-                  <PlaceIcon place={place} size={14} className="mt-0.5 shrink-0 opacity-70" aria-hidden="true" />
+                  <PlaceIcon place={place} size={16} className="mt-px shrink-0 text-ink-secondary" aria-hidden="true" />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[13px] text-ink">{t(placeLabelKey(place))}</span>
-                    <span className="block text-[11px] text-ink-secondary">{reachable ? t(DESCRIPTION[place]) : t("place.unavailable")}</span>
+                    <span className="block text-[14px] leading-[18px] text-ink">{t(placeLabelKey(place))}</span>
+                    <span className="block text-[12px] leading-4 text-ink-secondary">{detail}</span>
                   </span>
                   {selected && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
                 </button>

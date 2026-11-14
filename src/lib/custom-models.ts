@@ -1,6 +1,3 @@
-// Custom picker: search the live inject list, and pin models the host
-// already has in memory so the user can pick them without scrolling.
-
 export function filterCustomModels<T extends { id: string; label: string; provider?: string }>(
   options: readonly T[],
   query: string,
@@ -27,9 +24,6 @@ export function partitionCustomModels<T extends { id: string; loaded?: boolean }
   return { pinned, rest };
 }
 
-/** Keep the active and default choices visible, then fill the compact list
- * from catalog order. Catalog order is provider-owned and already reflects
- * its preferred/current models. */
 export function suggestedModels<T extends { id: string }>(
   options: readonly T[],
   defaultId: string,

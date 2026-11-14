@@ -1,24 +1,17 @@
-// Who a turn is booked to, end to end: boots the real harness against the
-// fake engines in a disposable home, sends as this machine (loopback) and as
-// a paired person, and reads the usage ledger file back. A turn belongs to
-// the sender of the message that started it: a second person's queued or
-// steered words, or pressing Steer, never re-book it; a queued message's own
-// turn is booked to its sender; a guarded relay (the Slack worker) names the
-// person it acts for.
-//
-// POSIX-gated like the other CLI e2es (the fakes are shebang scripts).
+// POSIX-gated like the other CLI e2es: the fakes are shebang scripts.
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
 const FAKE_ACP = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
 const FAKE_CODEX = join(SERVER_DIR, "testing", "fake-codex-app-server.ts");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
+const PORT = workerPort(18800, 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
 
@@ -61,11 +54,12 @@ posixOnly("usage attribution e2e", () => {
       await new Promise((r) => setTimeout(r, 100));
     }
   };
-  /** The ledger rows for one bot (or one room's speakers), oldest first. */
   const ledger = (botId: string) => {
     const file = join(home, ".openmausbot", "usage", `${new Date().toISOString().slice(0, 7)}.jsonl`);
     if (!existsSync(file)) return [];
-    return readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((row) => row.botId === botId);
+    // The server may be appending a line as this reads: only complete lines count, and the caller's wait reads again.
+    const text = readFileSync(file, "utf8");
+    return text.slice(0, text.lastIndexOf("\n") + 1).split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((row) => row.botId === botId);
   };
   const newBot = async (instanceId: string, model: string) => {
     const created = (await api("POST", "/api/bots")).body.bot;
@@ -99,7 +93,6 @@ posixOnly("usage attribution e2e", () => {
             environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: finishGate },
             config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" },
           },
-          // no live session: a message while busy waits in the server-side queue
           acp: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "hang" }, config: { cli: FAKE_ACP, fullAuto: true } },
           // reports tokens (10 in, 5 out) but no price, like every engine but Claude
           acpHappy: { driver: "grokAgent", config: { cli: FAKE_ACP, fullAuto: true } },
@@ -122,7 +115,6 @@ posixOnly("usage attribution e2e", () => {
       try {
         if ((await fetch(`${BASE}/api/health`)).ok) break;
       } catch {
-        /* not up yet */
       }
       if (Date.now() > deadline) throw new Error(`server never came up. stderr:\n${stderr}`);
       if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}. stderr:\n${stderr}`);
@@ -163,6 +155,25 @@ posixOnly("usage attribution e2e", () => {
     await waitFor(async () => (await getBot(unlisted.id)).busy === false, "the bots to go idle");
   }, 40_000);
 
+  it("books each turn to the department its bot was in then, and moving the bot later keeps what was spent there", async () => {
+    const bot = await newBot("acpHappy", "grok-4.7");
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { section: "Finance" })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "for finance" })).status).toBe(202);
+    await waitFor(() => ledger(bot.id).length === 1, "the Finance turn to be booked");
+    await waitFor(async () => (await getBot(bot.id)).busy === false, "the bot to go idle");
+    expect(ledger(bot.id)[0]).toMatchObject({ section: "Finance" });
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { section: "Operations" })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "for operations" })).status).toBe(202);
+    await waitFor(() => ledger(bot.id).length === 2, "the Operations turn to be booked");
+    await waitFor(async () => (await getBot(bot.id)).busy === false, "the bot to go idle");
+    const byDepartment = (await api("GET", "/api/usage?groupBy=department")).body.groups as Array<{ key: string; turns: number }>;
+    expect(byDepartment.find((group) => group.key === "department:Finance")).toMatchObject({ turns: 1 });
+    expect(byDepartment.find((group) => group.key === "department:Operations")).toMatchObject({ turns: 1 });
+    const csv = await (await fetch(`${BASE}/api/usage.csv`)).text();
+    expect(csv.split("\n")[0]).toMatch(/,thread,department,person$/);
+    expect(csv).toContain(",Finance,");
+  }, 40_000);
+
   it("a queued message leaves the running turn with its starter, and its own turn is booked to its sender", async () => {
     const bot = await newBot("acp", "fake-model");
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "owner's work" })).status).toBe(202);
@@ -200,8 +211,7 @@ posixOnly("usage attribution e2e", () => {
   }, 40_000);
 
   it("books each Claude turn at its own cost when the next turn resumes the session in a new process", async () => {
-    // Every turn gets a fresh comms token, so the next one relaunches the CLI
-    // with --resume, and the CLI's first total then counts the earlier turn.
+    // Every turn gets a fresh comms token, so the next relaunches the CLI with --resume, whose first total counts the earlier turn.
     const bot = await newBot("claudeResumed", "claude-fake");
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "first turn" })).status).toBe(202);
     await waitFor(() => ledger(bot.id).length === 1, "the first turn to be booked");
@@ -262,7 +272,7 @@ posixOnly("usage attribution e2e", () => {
     const send = async (sendId: string, extra: Record<string, unknown> = {}) => {
       const page = await api("GET", `/api/threads/${bot.threadId}/messages?limit=0`);
       return api("POST", `/api/bots/${bot.id}/messages/guarded`, {
-        threadId: bot.threadId, sendId, text: `guarded ${sendId}`, expectedActiveLeafId: page.body.activeLeafId, ...extra,
+        threadId: bot.threadId, sendId, text: `guarded ${sendId}`, expectedActiveLeafId: page.body.activeLeafId, expectedApprovalMode: "full", ...extra,
       });
     };
     const refused = await send("guarded-send-invalid-0001", { onBehalfOf: {} });
@@ -279,7 +289,6 @@ posixOnly("usage attribution e2e", () => {
     expect(ledger(bot.id)[1].trigger).toEqual(owner);
     await waitFor(async () => (await getBot(bot.id)).busy === false, "the plain guarded turn to settle");
 
-    // The route stays admin-only: a member's session cannot name someone else.
     const member = await asPerson(["client"]);
     const page = await api("GET", `/api/threads/${bot.threadId}/messages?limit=0`);
     const memberTry = await member("POST", `/api/bots/${bot.id}/messages/guarded`, {

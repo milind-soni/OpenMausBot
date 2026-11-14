@@ -22,8 +22,6 @@ const group: Group = {
   bulletin: "", unread: false, createdAt: 1, dm: true, messages: [],
 } as unknown as Group;
 
-// Same rule as the one-on-one chat: the room transcript is browsable but not
-// live, and one hidden status line speaks when a member's reply is done.
 describe("room screen reader announcements", () => {
   it("keeps the room log quiet and renders one status line", () => {
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(GroupView, { group })));

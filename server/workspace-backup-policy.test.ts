@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
+import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 
 describe("workspace backup data boundary", () => {
   it("exports ordinary settings only and retains destination connection sections unchanged", () => {
@@ -25,6 +25,22 @@ describe("workspace backup data boundary", () => {
     expect(restored.instances).toBe(connections.instances);
   });
 
+  it("leaves the helper model with the destination: a restored backup never names one and never clears the destination's", () => {
+    // it names one of this machine's provider instances, and switching it on sends bots' text to that provider
+    const portable = portableWorkspaceConfig({ helper: { instanceId: "claude" }, language: "ja" });
+    expect(portable).toEqual({ language: "ja" });
+    expect(restoredWorkspaceConfig(portable, {})).not.toHaveProperty("helper");
+    expect(restoredWorkspaceConfig(portable, { helper: { instanceId: "openrouter" } }).helper).toEqual({ instanceId: "openrouter" });
+  });
+
+  it("keeps the destination's own computer-sharing switch, whatever the backup says", () => {
+    const portable = portableWorkspaceConfig({ features: { browser: true, sharedComputers: true } });
+    expect(restoredWorkspaceConfig(portable, { features: { sharedComputers: false } }).features).toEqual({ browser: true, sharedComputers: false });
+    expect(restoredWorkspaceConfig(portable, {}).features).toEqual({ browser: true });
+    expect(restoredWorkspaceConfig(portableWorkspaceConfig({ features: { sharedComputers: true } }), {})).not.toHaveProperty("features");
+    expect(restoredWorkspaceConfig({}, { features: { sharedComputers: true, browser: true } }).features).toEqual({ sharedComputers: true });
+  });
+
   it.each([
     "providers/account/.credentials.json", "providers/antigravity/profile/antigravity-acp/acp_token.json",
     "workspace-credentials.json", "browser-engine-key", "caddy/data/certificates/private.key",
@@ -38,9 +54,28 @@ describe("workspace backup data boundary", () => {
     expect(excludedWorkspaceAuthPath(path)).toBe(true);
   });
 
+  it("never exports or restores saved website logins or their key, or the key sealing webhook secrets", () => {
+    for (const path of ["logins.json.enc", "member-secrets.json.enc", "member-secrets.json.enc.4242.05a7b3e0-1234-4abc-8def-0123456789ab.tmp", "logins-key", "logins.json.enc.4242.05a7b3e0-1234-4abc-8def-0123456789ab.tmp", "logins-key.12.05a7b3e0-1234.tmp", "webhook-key", "webhook-key.12.05a7b3e0-1234.tmp"]) {
+      expect(excludedWorkspaceAuthPath(path)).toBe(true);
+    }
+    for (const path of ["logins.json", "logins.md", "workspaces/bot/logins.json.enc", "attachments/logins-key"]) expect(excludedWorkspaceAuthPath(path)).toBe(false);
+  });
+
+  it("never exports or restores a Cloud home's connected-apps installation", () => {
+    for (const path of ["connected-apps-installation.json", "connected-apps-installation.json.4242.05a7b3e0-1234-4abc-8def-0123456789ab.tmp"]) {
+      expect(excludedWorkspaceAuthPath(path)).toBe(true);
+    }
+    for (const path of ["connected-apps-installation.json.md", "workspaces/bot/connected-apps-installation.json"]) expect(excludedWorkspaceAuthPath(path)).toBe(false);
+  });
+
+  it("never exports or restores MCP sign-in tokens", () => {
+    for (const path of ["mcp-oauth.json", "mcp-oauth.json.4242.05a7b3e0-1234-4abc-8def-0123456789ab.tmp"]) expect(excludedWorkspaceAuthPath(path)).toBe(true);
+    for (const path of ["mcp-oauth.json.md", "workspaces/bot/mcp-oauth.json"]) expect(excludedWorkspaceAuthPath(path)).toBe(false);
+  });
+
   it("never exports the per-turn hook token directory, and only that directory", () => {
-    for (const path of ["hook-tokens", "hook-tokens/0123456789abcdef01234567.token"]) expect(ephemeralWorkspaceTokenPath(path)).toBe(true);
-    for (const path of ["hook-tokens.md", "workspaces/bot/hook-tokens/notes.md", "attachments/api.token"]) expect(ephemeralWorkspaceTokenPath(path)).toBe(false);
+    for (const path of ["hook-tokens", "hook-tokens/0123456789abcdef01234567.token", "sessions.json.open"]) expect(ephemeralWorkspaceTokenPath(path)).toBe(true);
+    for (const path of ["hook-tokens.md", "workspaces/bot/hook-tokens/notes.md", "attachments/api.token", "sessions.json.opened", "workspaces/bot/sessions.json.open"]) expect(ephemeralWorkspaceTokenPath(path)).toBe(false);
   });
 
   it("leaves out only the Organization library files Electron main downloads again", () => {
@@ -51,6 +86,16 @@ describe("workspace backup data boundary", () => {
     for (const path of ["org-library", "org-library/state.json", "org-library/presets.json", "org-library/catalog.json.bak", "org-library/blobs.md",
       "workspaces/bot/org-library/catalog.json", "attachments/org-library/blobs/x.json", "catalog.json", "blobs/x.json"]) {
       expect(redownloadedOrgLibraryPath(path)).toBe(false);
+    }
+  });
+
+  it("leaves out a bot's live DuckDB database, WAL and spill directory, and nothing else in its folder", () => {
+    for (const path of ["bots/b1/data.duckdb", "bots/b1/data.duckdb.wal", "bots/b1/data-tmp", "bots/b1/data-tmp/duckdb_temp_storage-0.tmp"]) {
+      expect(liveDataEnginePath(path)).toBe(true);
+    }
+    for (const path of ["bots/b1/SOUL.md", "bots/b1/sheet.json", "bots/b1/data.duckdb.bak", "bots/b1/data-tmp.zip", "bots/data.duckdb", "data.duckdb",
+      "workspaces/bot/data.duckdb", "bots/b1/exports/data.duckdb", "attachments/data-tmp/x"]) {
+      expect(liveDataEnginePath(path)).toBe(false);
     }
   });
 

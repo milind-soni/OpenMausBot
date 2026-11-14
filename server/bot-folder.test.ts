@@ -1,7 +1,3 @@
-// The bot folder contract: SOUL.md is a mirror of the record, written by
-// the server, never read to build a prompt. A file that no longer matches
-// the record's hash is reported as drift with its text; a missing file is
-// simply re-created. The prompt block is empty for an empty soul.
 // Test isolation is provided by server/testing/setup.ts's per-file throwaway HOME.
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";

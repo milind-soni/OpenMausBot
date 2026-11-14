@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { documentLanguage, resolveLocale, setLocale, t, tFromServer } from "./i18n";
+import { applyBrand, DEFAULT_BRAND } from "./brand";
+import { activePackComplete, documentLanguage, intlLocale, resolveLocale, setLocale, t, tFromServer } from "./i18n";
 import { en, localeChoices, locales } from "@/locales";
 
 afterEach(() => {
@@ -35,20 +36,30 @@ describe("t", () => {
     expect(t("engines.cloud")).toBe("Cloud");
   });
 
-  it("keeps new team lifecycle labels available in partial packs, with interpolated names and counts", () => {
-    setLocale("de");
-    expect(t("team.create")).toBe("Create team");
+  it("fills {app} with the product's name, a white-label brand's own name, or the name a caller passes", () => {
+    expect(t("routines.runsOn.localHint")).toBe("Starts while MausBot is open here.");
+    expect(t("routines.runsOn.localHint", { app: "Acme" })).toBe("Starts while Acme is open here.");
+    applyBrand({ brand: { name: "Acme Bots" }, source: "file", file: "/brand.json" });
+    try {
+      expect(t("routines.runsOn.localHint")).toBe("Starts while Acme Bots is open here.");
+    } finally {
+      applyBrand({ brand: DEFAULT_BRAND, source: "default", file: "" });
+    }
+  });
+
+  it("keeps new department lifecycle labels available in partial packs, with interpolated names and counts", () => {
+    // Hindi does not translate the department dialogs yet, so they fall back to English with their names and counts.
+    setLocale("hi");
+    expect(t("team.create")).toBe("Create department");
     expect(t("team.moveTo", { name: "Research" })).toBe("Move bots to Research");
     expect(t("team.moveMany", { count: 2 })).toBe("Move 2 bots");
-    expect(t("team.deleteTitle", { name: "Research" })).toBe("Delete Research team?");
+    expect(t("team.deleteTitle", { name: "Research" })).toBe("Delete Research department?");
     expect(t("team.instructionsTitle", { name: "Research" })).toBe("Research shared instructions");
   });
 
   it("setLocale reports the locale that actually took effect", () => {
-    // a shipped base pack catches its regional variants…
     expect(setLocale("de-AT")).toBe("de");
     expect(t("engines.local")).toBe("Lokal");
-    // …and a genuinely unknown tag falls back to English
     expect(setLocale("xx-YY")).toBe("en");
     expect(t("engines.local")).toBe("Local");
   });
@@ -70,6 +81,9 @@ describe("t", () => {
     expect(resolveLocale("pt-BR", available)).toBe("pt-br");
     expect(resolveLocale("pt-PT", available)).toBe("pt");
     expect(resolveLocale("hi-IN", available)).toBe("hi");
+    expect(resolveLocale("tr-TR", available)).toBe("tr");
+    expect(resolveLocale("ru-RU", available)).toBe("ru");
+    expect(resolveLocale("ru-RU-x-custom", available)).toBe("ru");
   });
 
   it("every registered pack carries only known keys with non-empty values", () => {
@@ -105,7 +119,6 @@ describe("t", () => {
     try {
       expect(setLocale("zz")).toBe("zz");
       expect(t("engines.cloud")).toBe("Wolke");
-      // key the pack omits → English, not undefined and not the key
       expect(t("engines.local")).toBe("Local");
     } finally {
       delete locales["zz"];
@@ -114,8 +127,7 @@ describe("t", () => {
   });
 
   it("interpolates params and keeps unmatched placeholders visible", () => {
-    // exercised through a raw template so the test doesn't depend on which
-    // catalog keys happen to use params yet
+    // A raw template, so the test doesn't depend on which catalog keys use params.
     const template = "Hello {name}, {missing}!";
     const rendered = template.replace(/\{(\w+)\}/g, (match, name: string) =>
       name in { name: "Maus" } ? String({ name: "Maus" }[name as "name"]) : match,
@@ -124,15 +136,28 @@ describe("t", () => {
   });
 });
 
-// The server picks which note a held approval card shows; the renderer picks
-// the language. A key this build has never heard of must still read.
-describe("tFromServer", () => {
-  it("translates a key the catalog knows", () => {
-    locales["zz"] = { "approval.held.destructive": "Sieht zerstoererisch aus." };
+describe("activePackComplete", () => {
+  it("is true only for a pack other than English that has every English key", () => {
+    expect(activePackComplete()).toBe(false);
+    setLocale("pt-br");
+    expect(activePackComplete()).toBe(true);
+    locales["zz"] = { "approval.held.native": "x" };
     try {
       setLocale("zz");
-      expect(tFromServer("approval.held.destructive", "This looks destructive, so Approve for me stopped to ask."))
-        .toBe("Sieht zerstoererisch aus.");
+      expect(activePackComplete()).toBe(false);
+    } finally {
+      delete locales["zz"];
+    }
+  });
+});
+
+describe("tFromServer", () => {
+  it("translates a key the catalog knows", () => {
+    locales["zz"] = { "approval.held.native": "Der Anbieter verlangt deine Zustimmung." };
+    try {
+      setLocale("zz");
+      expect(tFromServer("approval.held.native", "The provider requires your approval for this action."))
+        .toBe("Der Anbieter verlangt deine Zustimmung.");
     } finally {
       delete locales["zz"];
       setLocale("en");
@@ -154,21 +179,72 @@ describe("tFromServer", () => {
     expect(tFromServer(undefined, undefined)).toBeUndefined();
   });
 
-  // The rule these notes have to keep — a note must name a button the reader
-  // can see — now lives in ApprovalModeSelector.i18n.test.ts, which checks the
-  // note against the label the selector renders in that same language. The
-  // labels used to be hardcoded English, so this file pinned the English words
-  // instead; the selector reads the catalog now.
+  it("fills the params, and keeps the English when one the template needs is missing", () => {
+    expect(tFromServer("chat.notice.cutOffByRestart", "Scout was cut off by a restart; resuming", { name: "Scout" }))
+      .toBe("Scout was cut off by a restart; resuming");
+    setLocale("pt-br");
+    try {
+      expect(tFromServer("chat.notice.cutOffByRestart", "English", { name: "Scout" })).toBe("Uma reinicialização interrompeu Scout. Retomando.");
+      expect(tFromServer("chat.notice.cutOffByRestart", "English")).toBe("English");
+      expect(tFromServer("chat.notice.cutOffByRestart", "English", { other: "x" })).toBe("English");
+    } finally {
+      setLocale("en");
+    }
+  });
 
   it("prefers the catalog over stale text saved with an older card", () => {
-    expect(tFromServer("approval.held.destructive", "This looked destructive, so auto mode stopped to ask."))
-      .toBe(en["approval.held.destructive"]);
+    expect(tFromServer("approval.held.undelivered", "Auto mode couldn't answer this one."))
+      .toBe(en["approval.held.undelivered"]);
   });
 });
 
-// Screen readers pick a voice and pronunciation rules from <html lang>. A
-// German or Japanese interface read out with English rules is gibberish, so
-// the page language follows the pack that is actually showing.
+describe("loading a language", () => {
+  afterEach(() => {
+    vi.doUnmock("@/locales");
+    vi.resetModules();
+  });
+
+  it("starts with English alone and shows another language only once its pack is here", async () => {
+    vi.resetModules();
+    const page = await import("./i18n");
+    const packs = await import("@/locales");
+    expect(Object.keys(packs.locales)).toEqual(["en"]);
+    expect(page.setLocale("de")).toBe("en");
+    expect(await page.loadLocale("de-AT")).toBe("de");
+    expect(page.t("engines.local")).toBe("Lokal");
+    expect(Object.keys(packs.locales)).toEqual(["en", "de"]);
+    expect(await page.loadLocale("pt")).toBe("pt");
+    expect(packs.locales["pt-br"]).toBe(packs.locales.pt);
+    expect(page.setLocale("de")).toBe("de");
+  });
+
+  it("shows the language asked for last, whichever pack arrives first", async () => {
+    vi.resetModules();
+    const page = await import("./i18n");
+    await Promise.all([page.loadLocale("ja"), page.loadLocale("fr"), page.loadLocale("de")]);
+    expect(page.activeLocale()).toBe("de");
+    const later = page.loadLocale("ko");
+    page.setLocale("en");
+    await later;
+    expect(page.activeLocale()).toBe("en");
+  });
+
+  it("falls back to English when a pack can't be loaded, and tries again next time", async () => {
+    vi.resetModules();
+    let offline = true;
+    vi.doMock("@/locales", async (original) => {
+      const real = await original<typeof import("@/locales")>();
+      return { ...real, loadLocalePack: (tag: string) => offline ? Promise.reject(new Error("offline")) : real.loadLocalePack(tag) };
+    });
+    const page = await import("./i18n");
+    expect(await page.loadLocale("fr")).toBe("en");
+    expect(page.t("rail.thisComputer")).toBe("This computer");
+    offline = false;
+    expect(await page.loadLocale("fr")).toBe("fr");
+    expect(page.t("rail.thisComputer")).toBe("Cet ordinateur");
+  });
+});
+
 describe("page language", () => {
   afterEach(() => {
     setLocale("en");
@@ -177,7 +253,7 @@ describe("page language", () => {
 
   it("names every picker language with a valid BCP-47 tag", () => {
     expect(localeChoices.map(({ code }) => documentLanguage(code))).toEqual([
-      "en", "de", "es", "fr", "hi", "ja", "pt-BR", "zh", "zh-TW", "uk",
+      "en", "de", "es", "fr", "hi", "ja", "pt-BR", "zh", "zh-TW", "uk", "vi", "tr", "pl", "ru", "it", "ko",
     ]);
     for (const { code } of localeChoices) {
       expect(Intl.getCanonicalLocales(documentLanguage(code))).toEqual([documentLanguage(code)]);
@@ -201,23 +277,67 @@ describe("page language", () => {
     expect(root.lang).toBe("zh-TW");
     setLocale("ja");
     expect(root.lang).toBe("ja");
-    // an unknown language shows English, so the page says English
     setLocale("xx-YY");
     expect(root.lang).toBe("en");
   });
 
-  it("tags the page from the system language the moment the module loads", async () => {
+  it("tags the page once the language's pack has loaded, keeping the one it shows until then", async () => {
     const root = { lang: "en", dir: "" };
     vi.stubGlobal("document", { documentElement: root });
-    vi.stubGlobal("navigator", { language: "ja-JP" });
     vi.resetModules();
-    await import("./i18n");
+    const page = await import("./i18n");
+    await page.loadLocale("de");
+    const loading = page.loadLocale("ja-JP");
+    expect(root.lang).toBe("de");
+    expect(page.t("engines.local")).toBe("Lokal");
+    expect(await loading).toBe("ja");
     expect(root).toEqual({ lang: "ja", dir: "ltr" });
+    expect(page.t("engines.local")).toBe(locales.ja!["engines.local"]);
   });
 
   it("still switches language where there is no page (tests, workers)", () => {
     vi.stubGlobal("document", undefined);
     expect(setLocale("fr")).toBe("fr");
     expect(t("engines.local")).not.toBe("");
+  });
+});
+
+describe("intlLocale", () => {
+  afterEach(() => {
+    setLocale("en");
+  });
+
+  it("formats in the app language, not the system's", () => {
+    setLocale("pt-br");
+    expect(intlLocale("en-US")).toBe("pt-BR");
+    setLocale("pt");
+    expect(intlLocale("pt-PT")).toBe("pt-BR");
+    setLocale("zh-hant");
+    expect(intlLocale("en-US")).toBe("zh-TW");
+    setLocale("de");
+    expect(intlLocale("ja-JP")).toBe("de");
+    setLocale("en");
+    expect(intlLocale("pt-BR")).toBe("en");
+    expect(intlLocale(undefined)).toBe("en");
+  });
+
+  it("keeps the system region when it speaks the app language", () => {
+    expect(intlLocale("en-GB")).toBe("en-GB");
+    expect(intlLocale("en-gb")).toBe("en-GB");
+    setLocale("de");
+    expect(intlLocale("de-AT")).toBe("de-AT");
+  });
+
+  it("falls back to the app language for a missing, empty or malformed system tag", () => {
+    for (const system of [undefined, "", "en-!", "en--US", "!!"]) {
+      expect(intlLocale(system), String(system)).toBe("en");
+      expect(() => new Intl.DateTimeFormat(intlLocale(system))).not.toThrow();
+    }
+  });
+
+  it("gives Intl a tag it formats in the app language", () => {
+    setLocale("pt-br");
+    expect(new Intl.DateTimeFormat(intlLocale("en-US"), { month: "long", timeZone: "UTC" }).format(Date.UTC(2024, 9, 1))).toBe("outubro");
+    expect(new Intl.NumberFormat(intlLocale("en-US")).format(1440.5)).toBe("1.440,5");
   });
 });

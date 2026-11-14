@@ -38,6 +38,16 @@ test("private snapshot allowlist stays exactly equal to the full-backup browser-
   assert.equal(f.bridge.companyBackups.collectClientState, undefined, "no renderer-callable snapshot capability");
 });
 
+test("tools layout persists in the backup client keys", () => {
+  const f = fixture();
+  const preloadKeys = JSON.parse(vm.runInContext("JSON.stringify(COMPANY_BACKUP_CLIENT_KEYS)", f.context));
+  for (const keys of [preloadKeys, WORKSPACE_BACKUP_CLIENT_KEYS]) {
+    const density = keys.indexOf("openmausbot.sidebarDensity");
+    assert.ok(density >= 0, "density key is allowlisted");
+    assert.equal(keys[density + 1], "openmausbot.sidebarToolsLayout");
+  }
+});
+
 test("each native request collects fresh allowed state and never credentials or unknown keys", () => {
   const f = fixture();
   f.values.set("omb-drafts", "first draft"); f.values.set("omb-skin", "dark");

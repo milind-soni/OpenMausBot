@@ -49,13 +49,15 @@ describe("guarded request ancestry", () => {
     expect(requestSourceForCard([source, reply, card, later], card.id)).toBe(source.id);
     expect(requestSourceForCard([source, { ...card, parentId: "missing" }], card.id)).toBeUndefined();
   });
-  it("keeps unsupported questions waiting for review in the workspace", () => {
+  it("lets a completed run settle while its durable question stays open", () => {
     const card = { ...reply, card: { title: "Question", subtitle: "Choose in the workspace", options: [], requestId: "question-id" } };
-    expect(requestNeedsInput(card)).toBe(true);
+    expect(requestNeedsInput(card)).toBe(false);
     expect(requestNeedsInput({ ...card, card: { ...card.card, answered: "done" } })).toBe(false);
     expect(requestNeedsInput({ ...card, card: { ...card.card, expired: true } })).toBe(false);
     const secret = { ...reply, secret: { target: "openaiImageApiKey" as const, label: "Key", description: "", placeholder: "", helpUrl: "", requestKey: "key" } };
     expect(requestNeedsInput(secret)).toBe(true);
     expect(requestNeedsInput({ ...secret, secret: { ...secret.secret, superseded: true } })).toBe(false);
+    expect(requestNeedsInput({ ...card, card: { ...card.card, requestType: "permission", tool: "Bash" } })).toBe(true);
+    expect(requestNeedsInput({ ...card, card: { ...card.card, requestType: "permission", tool: "Bash", expired: true } })).toBe(false);
   });
 });

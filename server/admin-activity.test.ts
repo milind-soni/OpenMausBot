@@ -19,6 +19,7 @@ import {
   readAdminActivityRange,
   sharedSignIn,
   signInListsOf,
+  TEAM_BOT_AUDIT_FIELDS,
   type AdminActionRow,
 } from "./admin-activity.ts";
 import { bindDecisionRetention, DEFAULT_DECISION_RETENTION_DAYS, type DecisionRow } from "./decision-log.ts";
@@ -74,6 +75,26 @@ describe("what a row records", () => {
       .toEqual({ "instances.grok.environment": { KEY: "[hidden]" }, "box.token": "[hidden]", "rooms.maxTokens": 9 });
   });
 
+  it("names each key saved for an OpenCode provider, never its value", () => {
+    const rows = configChangeRows({ opencodeGo: { apiKey: "" } }, {
+      opencodeGo: { apiKey: "", providerKeys: { VENICE_API_KEY: "venice-secret", GROQ_TOKEN: "groq-secret", DEEPSEEK_KEY: "deepseek-secret" } },
+    });
+    expect(rows.map((row) => row.category)).toEqual(["engine"]);
+    expect(rows[0]!.changed).toEqual(["opencodeGo.providerKeys.DEEPSEEK_KEY", "opencodeGo.providerKeys.GROQ_TOKEN", "opencodeGo.providerKeys.VENICE_API_KEY"]);
+    expect(JSON.stringify(auditValues(rows[0]!.after!))).not.toContain("secret");
+    expect(JSON.stringify(auditValues({ "opencodeGo.providerKeys": { VENICE_API_KEY: "venice-secret" } }))).not.toContain("secret");
+  });
+
+  it("hides a url server's sign-in app secret, keeps its client id", () => {
+    const rows = configChangeRows({ mcpServers: {} }, { mcpServers: {
+      corp: { url: "https://mcp.example.test", oauth: { clientId: "corp-app", clientSecret: "app-secret-value", scopes: ["mcp"] } },
+    } });
+    expect(auditValues(rows[0]!.after!)).toEqual({
+      "mcpServers.corp.oauth": { clientId: "corp-app", clientSecret: "[hidden]", scopes: ["mcp"] },
+      "mcpServers.corp.url": "https://mcp.example.test",
+    });
+  });
+
   it("hides a credential passed as a flag or in a URL", () => {
     const rows = configChangeRows({ mcpServers: {} }, { mcpServers: {
       stripe: { command: "npx", args: ["-y", "@acme/mcp", "--api-key", "acme_live_9f8e7d6c5b4a3f2e1d0c", "--token=tok_live_123456", "--verbose", "--port", "8080"] },
@@ -92,7 +113,6 @@ describe("what a row records", () => {
     expect(more).toContain('["-k","[hidden]","-p","8080"]');
     expect(more).toContain("https://mcp.zapier.com/api/mcp/s/[hidden]/sse");
     expect(more).toContain("https://[hidden]@mcp.example.com/sse");
-    // readable names and ids stay readable
     expect(more).toContain("getting-started-guide-2024");
     expect(more).toContain("4575b1f7-c16c-4afa-82ce-bcc2fdc70374");
     expect(values).toContain('"--api-key","[hidden]","--token=[hidden]","--verbose","--port","8080"');
@@ -106,6 +126,34 @@ describe("what a row records", () => {
     expect(botChangeRows({ id: "b" }, before, after).map((row) => row.changed)).toEqual([["approvalMode", "composio"]]);
   });
 
+  it("follows a bot's helper-model switch: putting a bot back on the helper decides where its text may go", () => {
+    const off = botAuditSnapshot({ id: "b", helperModel: false });
+    const on = botAuditSnapshot({ id: "b", helperModel: true });
+    const unset = botAuditSnapshot({ id: "b" });
+    expect(botChangeRows({ id: "b", name: "Legal" }, off, on)).toEqual([
+      { category: "bot", action: "bot.update", target: { kind: "bot", id: "b", name: "Legal" }, changed: ["helperModel"], before: { helperModel: false }, after: { helperModel: true } },
+    ]);
+    expect(botChangeRows({ id: "b" }, unset, off).map((row) => [row.action, row.changed, row.after])).toEqual([["bot.update", ["helperModel"], { helperModel: false }]]);
+    expect(botChangeRows({ id: "b" }, off, off)).toEqual([]);
+  });
+
+  it("records that a Team bot's instructions changed without keeping their text", () => {
+    const before = botAuditSnapshot({ id: "b", soul: "Keep the vault code 4242 secret." }, TEAM_BOT_AUDIT_FIELDS);
+    const after = botAuditSnapshot({ id: "b", soul: "Be brief." }, TEAM_BOT_AUDIT_FIELDS);
+    const rows = botChangeRows({ id: "b" }, before, after, undefined, TEAM_BOT_AUDIT_FIELDS);
+    expect(rows.map((row) => row.changed)).toEqual([["soul"]]);
+    expect(JSON.stringify(rows)).not.toMatch(/4242|Be brief/);
+    expect(botChangeRows({ id: "b" }, after, botAuditSnapshot({ id: "b", soul: "Be brief." }, TEAM_BOT_AUDIT_FIELDS), undefined, TEAM_BOT_AUDIT_FIELDS)).toEqual([]);
+  });
+
+  it("records a bot moving to another VPS server, and back to the default", () => {
+    const own = botAuditSnapshot({ id: "b", cloudBackend: "vps", vpsAlias: "alpha-vps" });
+    const onDefault = botAuditSnapshot({ id: "b", cloudBackend: "vps" });
+    expect(botChangeRows({ id: "b" }, onDefault, own).map((row) => [row.changed, row.before, row.after]))
+      .toEqual([[["vpsAlias"], { vpsAlias: null }, { vpsAlias: "alpha-vps" }]]);
+    expect(botChangeRows({ id: "b" }, own, onDefault).map((row) => row.changed)).toEqual([["vpsAlias"]]);
+  });
+
   it("knows when more than one person signs in", () => {
     expect(sharedSignIn({ admins: ["boss@example.test"], members: [] })).toBe(false);
     expect(sharedSignIn({ admins: [], members: [] })).toBe(false);
@@ -117,13 +165,13 @@ describe("what a row records", () => {
   });
 
   it("splits a bot's audience from its other permissions and ignores display fields", () => {
-    const before = botAuditSnapshot({ id: "b", color: "red", approvalMode: "ask", peers: ["x"] });
-    const after = botAuditSnapshot({ id: "b", color: "blue", approvalMode: "ask", peers: [], visibility: { people: ["ada@example.test"] } });
+    const before = botAuditSnapshot({ id: "b", color: "red", approvalMode: "ask" });
+    const after = botAuditSnapshot({ id: "b", color: "blue", approvalMode: "auto", visibility: { people: ["ada@example.test"] } });
     const rows = botChangeRows({ id: "b", name: "Payroll" }, before, after);
     expect(rows).toEqual([
       { category: "visibility", action: "visibility.update", target: { kind: "bot", id: "b", name: "Payroll" }, changed: ["visibility"],
         before: { visibility: "everyone" }, after: { visibility: { people: ["ada@example.test"] } } },
-      { category: "bot", action: "bot.update", target: { kind: "bot", id: "b", name: "Payroll" }, changed: ["peers"], before: { peers: ["x"] }, after: { peers: [] } },
+      { category: "bot", action: "bot.update", target: { kind: "bot", id: "b", name: "Payroll" }, changed: ["approvalMode"], before: { approvalMode: "ask" }, after: { approvalMode: "auto" } },
     ]);
     expect(botChangeRows({ id: "b" }, botAuditSnapshot({ color: "red" }), botAuditSnapshot({ color: "blue" }))).toEqual([]);
   });
@@ -194,6 +242,13 @@ describe("the Activity view", () => {
     expect(parseActivityWhat(null)).toBe("all");
     expect(parseActivityWhat("budget")).toBe("budget");
     expect(parseActivityWhat("nonsense")).toBeNull();
+  });
+
+  it("carries coded phone summaries into the global activity view without changing CSV words", () => {
+    const row: DecisionRow = { ...decisions[0]!, summary: "allowed PHONE_CREATE_EVENT", summaryCode: "chat.notice.phone.allowed", summaryParams: { tool: "PHONE_CREATE_EVENT" } };
+    const entries = activityEntries([row], [], { what: "decisions" });
+    expect(entries).toEqual([expect.objectContaining({ summary: row.summary, summaryCode: row.summaryCode, summaryParams: row.summaryParams })]);
+    expect(activityCsv(entries)).toContain("allowed PHONE_CREATE_EVENT");
   });
 
   it("exports CSV with formula cells neutralised", () => {

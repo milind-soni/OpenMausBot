@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { parseServerInput } from "../../electron/server-address.mjs";
 import { t } from "@/lib/i18n";
 import { Laptop, Loader2, Unplug } from "lucide-react";
+import { Select } from "./Select";
 import { Card } from "./SettingsPrimitives";
 
 const inputClass =
@@ -13,21 +15,16 @@ function errorText(error: unknown): string {
   );
 }
 
+/** A whole pairing link with its code: https anywhere, http on a private network. */
 export function isServerPairingLink(input: string): boolean {
   const link = input.trim();
-  if (!/^https:\/\//i.test(link) || /[\s\\]/.test(link)) return false;
-  try {
-    const url = new URL(link);
-    const code = /(?:^|[#&])code=([^&]+)/.exec(url.hash)?.[1];
-    return url.protocol === "https:" && !url.username && !url.password && !url.search
-      && (url.pathname === "/pair" || url.pathname === "/pair/")
-      && Boolean(code && decodeURIComponent(code).trim());
-  } catch {
-    return false;
-  }
+  if (!/^https?:\/\//i.test(link)) return false;
+  const read = parseServerInput(link);
+  return read.ok && (read.code !== null || read.credential !== null);
 }
 
-export function RemoteComputerSection() {
+/** `legacyOnly`: only an installation already in client mode sees this card, to leave it before the mode ends. */
+export function RemoteComputerSection({ hideWhenUnavailable = false, legacyOnly = false }: { hideWhenUnavailable?: boolean; legacyOnly?: boolean }) {
   const bridge = window.ogb?.remoteClient;
   const environments = window.ogb?.environments;
   const [state, setState] = useState<DesktopRemoteClientState>({ active: bridge?.active === true });
@@ -42,9 +39,8 @@ export function RemoteComputerSection() {
 
   const aliveRef = useRef(true);
   const refreshState = useCallback(() => {
-    // Pairing and disconnecting change connection state off the render path;
-    // the bridge's own snapshot is the source of truth, so re-read it after
-    // every transition instead of trusting the action's return value.
+    // The bridge's own snapshot is the truth: re-read it after every transition rather than trusting the action's
+    // return value.
     void bridge?.state().then((next) => {
       if (aliveRef.current) setState(next);
     }).catch(() => {});
@@ -96,6 +92,9 @@ export function RemoteComputerSection() {
     }
   };
 
+  if (!bridge && !environments && hideWhenUnavailable) return null;
+  if (legacyOnly && !state.active) return null;
+
   return (
     <Card
       title={state.active ? t("remote.client.active") : t("remote.client.idle")}
@@ -114,8 +113,11 @@ export function RemoteComputerSection() {
               <div className="mt-1 break-all text-[12px] text-ink-secondary">{state.endpoint}</div>
             </div>
           </div>
-          <p className="text-[12.5px] leading-relaxed text-ink-secondary">
+          <p className="text-[13px] leading-relaxed text-ink-secondary">
             {t("remote.client.mode")}
+          </p>
+          <p role="status" className="rounded-lg bg-inset px-3 py-2 text-[13px] leading-relaxed text-ink" data-legacy-client-notice="">
+            {t("remote.client.endsDec7")}
           </p>
           <button
             type="button"
@@ -132,28 +134,35 @@ export function RemoteComputerSection() {
           {environments && bridge ? (
             <label className="flex flex-col gap-1.5 text-[12px] text-ink-secondary">
               {t("remote.client.connectionType")}
-              <select
+              <Select
                 value={connection}
                 disabled={busy}
                 onChange={(event) => {
                   setConnection(event.target.value as "server" | "companion");
                   setError("");
                 }}
-                className={inputClass}
+                className="w-full"
               >
                 <option value="server">{t("remote.client.server.option")}</option>
                 <option value="companion">{t("remote.client.companion.option")}</option>
-              </select>
+              </Select>
             </label>
           ) : null}
           {serverMode ? (
             <>
-              <p className="text-[12.5px] leading-relaxed text-ink-secondary">
+              <p className="text-[13px] leading-relaxed text-ink-secondary">
                 {t("remote.client.server.hint")}
               </p>
-              <code className="select-all rounded-lg bg-inset px-3 py-2 text-[12px] text-ink">
-                npx openmausbot pair --client
-              </code>
+              {/* A chat-only link cannot pass the ownership check behind "Make … my home", so full access comes first. */}
+              <div data-pair-access="full" className="flex flex-col gap-1">
+                <p className="text-[12px] font-medium text-ink">{t("remote.client.server.fullTitle")}</p>
+                <code className="select-all rounded-lg bg-inset px-3 py-2 text-[12px] text-ink">npx openmausbot pair</code>
+              </div>
+              <div data-pair-access="client" className="flex flex-col gap-1">
+                <p className="text-[12px] font-medium text-ink">{t("remote.client.server.clientTitle")}</p>
+                <code className="select-all rounded-lg bg-inset px-3 py-2 text-[12px] text-ink">npx openmausbot pair --client</code>
+                <p className="text-[12px] leading-relaxed text-ink-secondary">{t("remote.client.server.clientNote")}</p>
+              </div>
               <label className="flex flex-col gap-1.5 text-[12px] text-ink-secondary">
                 {t("remote.client.server.pairingLink")}
                 <input
@@ -168,13 +177,13 @@ export function RemoteComputerSection() {
                   className={inputClass}
                 />
               </label>
-              <p className="text-[11.5px] leading-relaxed text-ink-secondary">
+              <p className="text-[12px] leading-relaxed text-ink-secondary">
                 {t("remote.client.server.domainHint")}
               </p>
             </>
           ) : (
             <>
-              <p className="text-[12.5px] leading-relaxed text-ink-secondary">
+              <p className="text-[13px] leading-relaxed text-ink-secondary">
                 {t("remote.client.companion.hint")}
               </p>
               <label className="flex flex-col gap-1.5 text-[12px] text-ink-secondary">
@@ -204,7 +213,7 @@ export function RemoteComputerSection() {
               </label>
             </>
           )}
-          {error ? <p role="alert" className="text-[12.5px] text-danger">{error}</p> : null}
+          {error ? <p role="alert" className="text-[13px] text-danger">{error}</p> : null}
           <button
             type="submit"
             disabled={busy || (serverMode ? !serverLink.trim() : endpoint.trim() === "" || code.length !== 6)}
@@ -213,12 +222,12 @@ export function RemoteComputerSection() {
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Laptop size={14} />}
             {serverMode ? t("remote.client.server.connect") : t("remote.client.pair")}
           </button>
-          <p className="text-[11.5px] leading-relaxed text-ink-secondary">
+          <p className="text-[12px] leading-relaxed text-ink-secondary">
             {serverMode ? t("remote.client.server.switchNote") : t("remote.client.restartNote")}
           </p>
         </form>
       )}
-      {state.active && error ? <p role="alert" className="mt-3 text-[12.5px] text-danger">{error}</p> : null}
+      {state.active && error ? <p role="alert" className="mt-3 text-[13px] text-danger">{error}</p> : null}
     </Card>
   );
 }

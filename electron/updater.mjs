@@ -1,14 +1,7 @@
-// In-app auto-updater (electron-updater). Downloads are user-driven; macOS
-// stages the downloaded ZIP immediately and the explicit restart applies it.
-// One state object is broadcast on every transition.
-//
-// Only runs in the packaged, signed+notarized app (mac auto-update requires
-// signing). In dev it's a no-op so the browser/dev shell is unaffected.
-// electron-updater is vendored (electron/vendor/electron-updater.cjs) because
-// the packaged app ships no node_modules.
+// macOS auto-update requires a signed app, so this runs only when packaged. electron-updater is vendored
+// because the packaged app ships no node_modules.
 import { app, clipboard, ipcMain } from "electron";
-import localOriginModule from "./local-origin.cjs";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import {
@@ -17,16 +10,63 @@ import {
   packageInstallCommand,
   stagedInstallFile,
 } from "./package-install-command.mjs";
+import { canInstallElevated, installPackageElevated } from "./elevated-install.mjs";
+import { releaseSingleInstanceLock } from "./single-instance.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
+import { UPDATE_TEXT } from "./update-errors.mjs";
 import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
+import { createQuietInstall, installFailed, launchAfter, LOOK_EVERY_MS, updateSeen } from "./update-when-quiet.mjs";
+
+export { quietSignals } from "./update-when-quiet-main.mjs";
 
 const require = createRequire(import.meta.url);
 
 let autoUpdater = null;
 let win = null;
-// status: idle | checking | available | downloading | preparing | downloaded | installing | handed-off | error
 let state = { status: "idle" };
 let updaterCoordinator = null;
+let pageAllowed = () => false;
+let quiet = null;
+let launch = null;
+/** Where these updaters install without asking anything: Squirrel.Mac, and the per-user NSIS installer run silently. */
+const QUIET_PLATFORMS = new Set(["darwin", "win32"]);
+
+function quietRecord() {
+  const file = join(app.getPath("userData"), "update-when-quiet.json");
+  return {
+    read: () => { try { return JSON.parse(readFileSync(file, "utf8")); } catch { return null; } },
+    write: (value) => {
+      try {
+        writeFileSync(`${file}.tmp`, JSON.stringify(value ?? null), { mode: 0o600 });
+        renameSync(`${file}.tmp`, file);
+      } catch {
+      }
+    },
+  };
+}
+
+function launched() {
+  launch ??= app.isPackaged && QUIET_PLATFORMS.has(process.platform)
+    ? launchAfter(quietRecord(), { version: app.getVersion() })
+    : { hidden: false, updated: null };
+  return launch;
+}
+
+/** This launch is a quiet install's reopening while the window was closed: it stays closed. macOS activates the app it
+ * reopens, so the app hands the focus back at once. */
+export function reopenedOutOfSight() {
+  const { hidden } = launched();
+  if (hidden && process.platform === "darwin") app.hide();
+  return hidden;
+}
+
+function view() {
+  return {
+    ...state,
+    ...(quiet && state.status === "downloaded" ? { installsByItself: quiet.promises(state.version) } : {}),
+    ...(launch?.updated ? { updated: launch.updated } : {}),
+  };
+}
 
 function updaterLogger() {
   const directory = app.getPath("logs");
@@ -39,21 +79,16 @@ function updaterLogger() {
         .join(" ");
       appendFileSync(file, `[${new Date().toISOString()}] [${level}] ${message}\n`, { mode: 0o600 });
     } catch {
-      // Logging must never make updating unavailable.
     }
   };
   return Object.fromEntries(["debug", "info", "warn", "error"].map((level) => [level, (...values) => write(level, values)]));
 }
 
-// A system package is the distro's to install, not ours. Left to
-// electron-updater, a .deb update raises a polkit root prompt out of a chat
-// app, runs `dpkg -i` (which resolves no dependencies) and replaces
-// /opt/OpenMausBot while this very process is still running.
+// electron-updater would install a .deb through a polkit root prompt and `dpkg -i` (no dependency resolution) over the running app.
+// A .deb is installed by elevated-install.mjs when a password prompt can be shown; every system package otherwise gets the hand-off below.
 const HAND_OFF_TYPES = new Set(HAND_OFF_PACKAGE_TYPES);
 
-// Do what this app already does for engine installs: put the exact command on
-// the clipboard and open a blank terminal to paste it into. The command is
-// never executed for the user, so nothing here becomes a process argument.
+// The command is never executed for the person, so nothing here becomes a process argument.
 export function handOffDownloadedPackage(packageType) {
   return async (files) => {
     const target = stagedInstallFile(files);
@@ -63,34 +98,90 @@ export function handOffDownloadedPackage(packageType) {
   };
 }
 
+export function installDownloadedPackage(files, { sha512 } = {}) {
+  return installPackageElevated({ file: stagedInstallFile(files), sha512 });
+}
+
+// The install replaced the files under this process, so reopen at once; the lock goes first or the new copy exits (see main.mjs).
+function relaunchAfterInstall() {
+  releaseSingleInstanceLock(app);
+  app.relaunch();
+  app.quit();
+}
+
 function setState(patch) {
-  state = { ...state, ...patch };
+  const { messageCode: _stale, messageKey: _key, messageParams: _params, ...kept } = state;
+  state = { ...(Object.hasOwn(patch, "message") ? kept : state), ...patch };
+  if (quiet && patch.status === "error") installFailed(quietRecord());
   try {
-    win?.webContents?.send("update:state", state);
+    const contents = win?.webContents;
+    if (contents && pageAllowed({ sender: contents, senderFrame: contents.mainFrame })) contents.send("update:state", view());
   } catch {
-    /* window gone */
   }
 }
 
-// The updater changes THIS app: only the local server's UI may drive it.
-const { localOnly } = localOriginModule;
-
-export function registerUpdaterIpc() {
-  ipcMain.handle("update:get-state", localOnly("update:get-state", () => state));
-  ipcMain.handle("update:check", localOnly("update:check", () => updaterCoordinator?.check(true)));
-  ipcMain.handle("update:download", localOnly("update:download", () => updaterCoordinator?.download()));
-  ipcMain.handle("update:install", localOnly("update:install", () => updaterCoordinator?.install()));
+export function sendUpdaterState() {
+  setState({});
 }
 
-// macOS keeps the process (and updater) alive after its window closes.
-// Retarget broadcasts on every window creation without adding more timers
-// or event listeners to the process-wide updater.
+/** How long a server's page's answer stands before it may ask again: one click never opens a second dialog. */
+export const SERVER_PAGE_ASK_COOLDOWN_MS = 10_000;
+let serverPageAsk = null;
+
+async function askForServerPage(confirmRestart, server) {
+  if (!updaterCoordinator) return "unavailable";
+  if (state.status !== "downloaded") await updaterCoordinator.check(true);
+  if (state.status === "downloaded") {
+    if (!(await confirmRestart(state.version ?? "", server))) return "later";
+    updaterCoordinator.install();
+    return "installing";
+  }
+  if (state.status === "downloading" || state.status === "preparing" || state.status === "available") return "downloading";
+  return state.status === "error" ? "failed" : "current";
+}
+
+/** What a server's page learns when it asks for this app's own update; never the updater's state. Asks at once share
+ * one answer, and that answer stands for SERVER_PAGE_ASK_COOLDOWN_MS. `server`: the asking page's address, for the dialog. */
+export function updateForServerPage(confirmRestart, server = "", now = Date.now) {
+  if (serverPageAsk && (!serverPageAsk.done || now() - serverPageAsk.done < SERVER_PAGE_ASK_COOLDOWN_MS)) return serverPageAsk.answer;
+  const ask = { done: 0, answer: null };
+  ask.answer = askForServerPage(confirmRestart, server).finally(() => { ask.done = now(); });
+  serverPageAsk = ask;
+  return ask.answer;
+}
+
+/** `serverPage`: the address of the page this app's window shows when it may ask for this app's update
+ * (`update:for-server-page`), a server from the Server menu newer than the app; null for any other sender. Nothing restarts
+ * until `confirmRestart`, this app's own dialog naming that address, says so. */
+export function registerUpdaterIpc({ pageAllowed: allowed, serverPage = () => null, confirmRestart = async () => false }) {
+  pageAllowed = allowed;
+  const guarded = (channel, handler) => (event) => {
+    if (!pageAllowed(event)) throw new Error(`${channel} is only available in this app's window`);
+    return handler();
+  };
+  ipcMain.handle("update:get-state", guarded("update:get-state", view));
+  ipcMain.handle("update:check", guarded("update:check", () => updaterCoordinator?.check(true)));
+  ipcMain.handle("update:install", guarded("update:install", () => updaterCoordinator?.install()));
+  ipcMain.handle("update:for-server-page", (event) => {
+    const server = serverPage(event);
+    if (!server) throw new Error("update:for-server-page is only available to the page this app's window shows");
+    return updateForServerPage(confirmRestart, server);
+  });
+  ipcMain.handle("update:seen", guarded("update:seen", () => {
+    if (!launch?.updated) return;
+    updateSeen(quietRecord());
+    launch = { ...launch, updated: null };
+    setState({});
+  }));
+}
+
+// macOS keeps the process (and updater) alive after its window closes, so each new window is retargeted here.
 export function attachUpdaterWindow(mainWindow) {
   win = mainWindow;
 }
 
-export function startUpdater() {
-  // dev / unsigned builds can't auto-update — leave the banner dormant
+/** `signals` (quietSignals): what tells a quiet moment; without them a downloaded update installs only on Restart or quit. */
+export function startUpdater(signals = null) {
   if (!app.isPackaged) {
     updaterCoordinator = null;
     setState({ status: "idle" });
@@ -100,29 +191,35 @@ export function startUpdater() {
     ({ autoUpdater } = require("./vendor/electron-updater.cjs"));
   } catch {
     updaterCoordinator = null;
-    setState({ status: "error", message: "updater unavailable" });
+    setState({ status: "error", message: UPDATE_TEXT.unavailable, messageCode: "unavailable" });
     return;
   }
-  autoUpdater.autoDownload = false; // button-driven download
-  // Squirrel.Mac has a second, native staging pass after the ZIP download.
-  // Start it immediately so "Restart to update" never has to begin that slow
-  // pass and wait indefinitely. Windows keeps the explicit installer click.
-  autoUpdater.autoInstallOnAppQuit = process.platform === "darwin";
+  // The coordinator starts each download itself, so it owns macOS staging and quiet failures.
+  autoUpdater.autoDownload = false;
   autoUpdater.logger = updaterLogger();
 
-  // Broadcast the install flavour before the first check so the banner never
-  // offers a restart it cannot deliver.
+  // Broadcast the install flavour before the first check so the banner never offers a restart it cannot deliver.
   const packageType = linuxPackageType({ readMarker: (file) => (existsSync(file) ? readFileSync(file, "utf8") : null) });
   const handOff = HAND_OFF_TYPES.has(packageType);
-  setState({ installMode: handOff ? "handoff" : "restart" });
+  // On macOS this also starts Squirrel.Mac's native staging at once; a system package is never installed on quit.
+  autoUpdater.autoInstallOnAppQuit = !handOff;
+  const elevated = packageType === "deb" && canInstallElevated();
+  setState({ installMode: handOff && !elevated ? "handoff" : "restart" });
   updaterCoordinator = createUpdaterCoordinator(autoUpdater, setState, {
     handOffInstall: handOff ? handOffDownloadedPackage(packageType) : null,
+    elevatedInstall: elevated ? installDownloadedPackage : null,
+    relaunch: elevated ? relaunchAfterInstall : null,
     nativeStaging: process.platform === "darwin",
   });
+  if (signals && QUIET_PLATFORMS.has(process.platform)) {
+    launched();
+    quiet = createQuietInstall({ updater: updaterCoordinator, signals, record: quietRecord(), version: app.getVersion(),
+      log: (line) => autoUpdater.logger?.info?.(line) });
+    setInterval(() => void quiet?.look(), LOOK_EVERY_MS).unref?.();
+    signals.watch(() => quiet?.look());
+    setState({});
+  }
 
-  // first check ~15s after launch (let the app settle), then hourly — both
-  // silent on failure, hence the arrow: a bare `check` would receive the
-  // timer's argument as `manual` and start reporting errors again.
   setTimeout(() => void updaterCoordinator?.check(), 15_000).unref?.();
   setInterval(() => void updaterCoordinator?.check(), 60 * 60 * 1000).unref?.();
 }

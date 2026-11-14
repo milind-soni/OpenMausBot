@@ -1,6 +1,7 @@
 import { parse as parseYaml } from "yaml";
+import { t } from "./i18n";
 import { parseTeamBackup, TEAM_BACKUP_CONTENTS } from "../../shared/team-backup";
-import { NEWER_PACKAGE_MESSAGE, PACKAGE_VERSION, parsePackageDocument, type PackageDocument } from "../../shared/package-format";
+import { PACKAGE_VERSION, parsePackageDocument, type PackageDocument } from "../../shared/package-format";
 
 export interface PendingTeamImport {
   manifest: unknown;
@@ -17,31 +18,22 @@ export interface PendingTeamImport {
   conversations?: number;
   archivedBots?: number;
   warnings?: string[];
-  /** Package version (packages only). v2 adds everything below. */
   version?: number;
-  /** The team the import creates (numbered if the name is taken). */
   teamName?: string;
-  /** The team's shared instructions. */
   brief?: string;
-  /** Per member, a data URL for the bot's picture, or null. */
   pictures?: Array<string | null>;
-  /** Skills offered by the package but not added to any bot. */
   offeredSkills?: string[];
-  /** Connection slots: address and the number of values to fill in. */
   connections?: Array<{ label: string; url: string; values: number }>;
-  /** Starter note files across all bots. */
   notes?: number;
-  /** Preset bot names; they appear in New bot. */
   presets?: string[];
-  /** Skills and presets, no team (a library package). */
   library?: boolean;
 }
 
-/** Small client-side preview only; the server remains the trust boundary. */
+/** Client-side preview only; the server remains the trust boundary. */
 export function teamImportPreview(manifest: unknown): PendingTeamImport {
   if (typeof manifest === "string") manifest = markdownPackage(manifest);
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
-    throw new Error("This file does not contain a team.");
+    throw new Error(t("teamImport.noTeam"));
   }
   const root = manifest as Record<string, unknown>;
   if (root.format === "openmaus.backup") {
@@ -57,22 +49,22 @@ export function teamImportPreview(manifest: unknown): PendingTeamImport {
     };
   }
   if (root.format === "openmaus.package") return packagePreview(root, manifest);
-  if (root.format !== "openmaus.team") throw new Error("This is not an OpenMaus backup, BotMRR playbook or legacy team.");
-  if (root.version !== 1 && root.version !== 2) throw new Error(`Team file version ${String(root.version)} is not supported.`);
+  if (root.format !== "openmaus.team") throw new Error(t("teamImport.unknownFormat"));
+  if (root.version !== 1 && root.version !== 2) throw new Error(t("teamImport.teamVersion", { version: String(root.version) }));
   if (!root.team || typeof root.team !== "object" || Array.isArray(root.team)) {
-    throw new Error("This team file is missing its team definition.");
+    throw new Error(t("teamImport.teamMissing"));
   }
   const team = root.team as Record<string, unknown>;
-  if (typeof team.name !== "string" || !team.name.trim()) throw new Error("This team does not have a name.");
-  if (!Array.isArray(team.members) || team.members.length === 0) throw new Error("This team has no members.");
-  if (team.members.length > 200) throw new Error("This team has too many members.");
+  if (typeof team.name !== "string" || !team.name.trim()) throw new Error(t("teamImport.teamNoName"));
+  if (!Array.isArray(team.members) || team.members.length === 0) throw new Error(t("teamImport.teamNoMembers"));
+  if (team.members.length > 200) throw new Error(t("teamImport.teamTooMany"));
   const members = team.members.map((member, index) => {
     if (!member || typeof member !== "object" || Array.isArray(member)) {
-      throw new Error(`Team member ${index + 1} is invalid.`);
+      throw new Error(t("teamImport.memberInvalid", { number: index + 1 }));
     }
     const value = member as Record<string, unknown>;
     if (typeof value.name !== "string" || !value.name.trim()) {
-      throw new Error(`Team member ${index + 1} does not have a name.`);
+      throw new Error(t("teamImport.memberNoName", { number: index + 1 }));
     }
     return {
       name: value.name.trim(),
@@ -94,23 +86,21 @@ export function teamImportPreview(manifest: unknown): PendingTeamImport {
 
 function markdownPackage(markdown: string): unknown {
   const frontmatter = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  if (!frontmatter) throw new Error("This Markdown is missing its BotMRR frontmatter.");
+  if (!frontmatter) throw new Error(t("teamImport.markdownNoFrontmatter"));
   let metadata: unknown;
   try {
     metadata = parseYaml(frontmatter[1]);
   } catch {
-    throw new Error("This Markdown has invalid YAML frontmatter.");
+    throw new Error(t("teamImport.markdownBadYaml"));
   }
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
-    throw new Error("This Markdown is missing its BotMRR blueprint.");
+    throw new Error(t("teamImport.markdownNoBlueprint"));
   }
   const { botmrr, ...pkg } = metadata as Record<string, unknown>;
-  if (botmrr !== 1) throw new Error("This BotMRR Markdown version is not supported.");
+  if (botmrr !== 1) throw new Error(t("teamImport.markdownVersion"));
   return { format: "openmaus.package", version: 1, package: pkg };
 }
 
-/** A v2 file is read with the same parser the server imports with, so the
- * preview already names any problem in the file's own words. */
 function sharedTeamPreview(document: PackageDocument, manifest: unknown): PendingTeamImport {
   const pkg = document.package;
   if (!pkg.agents.length) return libraryPreview(document, manifest);
@@ -143,11 +133,9 @@ function sharedTeamPreview(document: PackageDocument, manifest: unknown): Pendin
   };
 }
 
-/** Skills and preset bots, no team: the presets go to New bot. A file with
- * skills only has nothing to add here (the server says the same). */
 function libraryPreview(document: PackageDocument, manifest: unknown): PendingTeamImport {
   const pkg = document.package;
-  if (!pkg.presets?.length) throw new Error("This file has no bots or preset bots to add. Its skills can be added from your organization's shelf.");
+  if (!pkg.presets?.length) throw new Error(t("teamImport.libraryEmpty"));
   return {
     manifest,
     kind: "package",
@@ -161,27 +149,26 @@ function libraryPreview(document: PackageDocument, manifest: unknown): PendingTe
     routines: 0,
     apps: [],
     skills: [],
-    // A preset brings its own skills; the rest are only offered.
     offeredSkills: (pkg.skills?.entries ?? []).filter((skill) => !pkg.presets!.some((preset) => preset.skills?.includes(skill.name))).map((skill) => skill.name),
     presets: pkg.presets.map((preset) => preset.name),
   };
 }
 
 function packagePreview(root: Record<string, unknown>, manifest: unknown): PendingTeamImport {
-  if (typeof root.version === "number" && root.version > PACKAGE_VERSION) throw new Error(NEWER_PACKAGE_MESSAGE);
+  if (typeof root.version === "number" && root.version > PACKAGE_VERSION) throw new Error(t("teamImport.newer"));
   if (root.version === PACKAGE_VERSION) return sharedTeamPreview(parsePackageDocument(manifest), manifest);
-  if (root.version !== 1) throw new Error(`BotMRR playbook version ${String(root.version)} is not supported.`);
+  if (root.version !== 1) throw new Error(t("teamImport.playbookVersion", { version: String(root.version) }));
   if (!root.package || typeof root.package !== "object" || Array.isArray(root.package)) {
-    throw new Error("This playbook is missing its team definition.");
+    throw new Error(t("teamImport.playbookMissing"));
   }
   const pkg = root.package as Record<string, unknown>;
-  if (typeof pkg.name !== "string" || !pkg.name.trim()) throw new Error("This playbook does not have a name.");
-  if (!Array.isArray(pkg.agents) || pkg.agents.length === 0) throw new Error("This playbook has no bots.");
-  if (pkg.agents.length > 200) throw new Error("This playbook has too many bots.");
+  if (typeof pkg.name !== "string" || !pkg.name.trim()) throw new Error(t("teamImport.playbookNoName"));
+  if (!Array.isArray(pkg.agents) || pkg.agents.length === 0) throw new Error(t("teamImport.playbookNoBots"));
+  if (pkg.agents.length > 200) throw new Error(t("teamImport.playbookTooMany"));
   const members = pkg.agents.map((agent, index) => {
-    if (!agent || typeof agent !== "object" || Array.isArray(agent)) throw new Error(`Bot ${index + 1} is invalid.`);
+    if (!agent || typeof agent !== "object" || Array.isArray(agent)) throw new Error(t("teamImport.botInvalid", { number: index + 1 }));
     const value = agent as Record<string, unknown>;
-    if (typeof value.name !== "string" || !value.name.trim()) throw new Error(`Bot ${index + 1} does not have a name.`);
+    if (typeof value.name !== "string" || !value.name.trim()) throw new Error(t("teamImport.botNoName", { number: index + 1 }));
     return { name: value.name.trim(), title: typeof value.title === "string" ? value.title.trim() : "" };
   });
   const chiefKey = typeof pkg.chiefOfStaff === "string" ? pkg.chiefOfStaff : undefined;

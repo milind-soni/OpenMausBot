@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { intlLocale, t } from "@/lib/i18n";
+import { namesLocale } from "@/lib/clock-time";
 
-const WEEKDAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
+export const weekdayLabels = (): string[] =>
+  Array.from({ length: 7 }, (_, day) => new Intl.DateTimeFormat(namesLocale(), { weekday: "narrow", timeZone: "UTC" }).format(Date.UTC(2023, 0, 2 + day)));
 
 function startOfMonth(value: number | Date) {
   const date = new Date(value);
@@ -24,7 +27,6 @@ export interface MiniMonthProps {
   onSelect: (at: number) => void;
 }
 
-/** A compact, Monday-first month picker for the calendar sidebar. */
 export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
   const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(anchor));
 
@@ -47,21 +49,21 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
 
   const selected = new Date(anchor);
   const today = new Date();
-  const monthLabel = visibleMonth.toLocaleDateString(undefined, {
+  const monthLabel = visibleMonth.toLocaleDateString(intlLocale(), {
     month: "long",
     year: "numeric",
   });
 
   return (
-    <section aria-label="Mini calendar" className="select-none px-3 py-3">
+    <section aria-label={t("routines.miniCalendar.label")} className="select-none px-3 py-3">
       <div className="mb-2 flex items-center justify-between px-1">
-        <div className="text-[12.5px] font-semibold text-ink">{monthLabel}</div>
+        <div className="text-[13px] font-semibold text-ink">{monthLabel}</div>
         <div className="flex items-center gap-0.5">
           <button
             type="button"
             onClick={() => setVisibleMonth((month) => moveMonth(month, -1))}
             className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-            aria-label="Previous month"
+            aria-label={t("routines.miniCalendar.previous")}
           >
             <ChevronLeft size={15} aria-hidden="true" />
           </button>
@@ -69,7 +71,7 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
             type="button"
             onClick={() => setVisibleMonth((month) => moveMonth(month, 1))}
             className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-            aria-label="Next month"
+            aria-label={t("routines.miniCalendar.next")}
           >
             <ChevronRight size={15} aria-hidden="true" />
           </button>
@@ -77,7 +79,7 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
       </div>
 
       <div className="grid grid-cols-7" aria-hidden="true">
-        {WEEKDAY_LABELS.map((label, index) => (
+        {weekdayLabels().map((label, index) => (
           <div
             key={`${label}-${index}`}
             className="flex h-6 items-center justify-center text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-tertiary"
@@ -92,7 +94,7 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
           const isSelected = sameDay(date, selected);
           const isToday = sameDay(date, today);
           const isOutsideMonth = date.getMonth() !== visibleMonth.getMonth();
-          const label = date.toLocaleDateString(undefined, {
+          const label = date.toLocaleDateString(intlLocale(), {
             weekday: "long",
             month: "long",
             day: "numeric",
@@ -110,7 +112,7 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
               className="group flex h-7 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               <span
-                className={`flex size-6 items-center justify-center rounded-full text-[10.5px] transition-colors ${
+                className={`flex size-6 items-center justify-center rounded-full text-[11px] transition-colors ${
                   isSelected
                     ? "bg-accent font-semibold text-white shadow-sm"
                     : isToday

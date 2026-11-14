@@ -1,84 +1,54 @@
-// Connected apps marketplace, backed by Composio Sessions. Catalog comes
-// from /api/connectors/catalog — the full toolkit list with logos when a
-// Composio API key is configured, a curated set otherwise. Icons resolve
-// logo → favicon → monogram.
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Loader2, RefreshCw, Search, TriangleAlert, X } from "lucide-react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Check, ChevronDown, ChevronRight, Loader2, RefreshCw, Search, Server, TriangleAlert, X } from "lucide-react";
 import { api, useStore, type Bot, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
+import { glassPopupFrameStyle } from "@/lib/glass-popup";
+import { activeLocale, intlLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { readCachedInventory, writeCachedInventory } from "@/lib/connected-apps-cache";
+import { readCachedInventory } from "@/lib/connected-apps-cache";
+import { connectorStatusMemory, preloadConnectedApps, rememberConnectorStatus } from "@/lib/connected-apps";
+import { reserveConnectionPage, reusableConnectionUrl, type PendingAuthorization } from "@/lib/connector-oauth";
+import { mcpSignInLink } from "@/lib/mcp-sign-in";
+import { pollConnector } from "@/lib/connector-poll";
+import { connectorConnect } from "@/lib/product-events";
 import { managedConnectorUnavailableReason } from "../../shared/connector-availability";
 import { isConnectorToolGrantShape } from "@/lib/connector-grants";
+import {
+  accountAliasTaken,
+  accountToReconnect,
+  connectedInventoryCopy,
+  connectorActionLabel,
+  hasActiveConnection,
+  needsReconnect,
+  requiresAccountAlias,
+  type ConnectorAccount,
+  type ConnectorInventoryPhase,
+  type ConnectorStatus,
+} from "@/lib/connector-status";
+import { BotAvatar } from "./Avatar";
+import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
+import { appCategoryLabel, CATEGORY_SECTION_SIZE, catalogSections, connectorDescription, inCategory, rankCategories } from "@/lib/app-catalog";
 import { McpServersPanel } from "./McpServersPanel";
+import { HOSTED_MCP_APPS, mcpServerConnected, ownMcpServer, type HostedApp, type HostedConnections } from "@/lib/hosted-mcp-apps";
+import { isRemoteMcpListing, type McpServerListing } from "./mcp-draft";
+import { useSuggestedApps } from "@/lib/app-suggestions";
+import { matchesCatalogSearch } from "../../shared/app-suggestions";
+import { EmailCard } from "./EmailCard";
+import { PostizCard } from "./PostizCard";
+import { POSTIZ_CATALOG_CARD, POSTIZ_SEARCH } from "@/lib/postiz";
+import { X_CARD_SEARCH, XCard } from "./XCard";
+import { mergeCompleteConnectorStatus, mergeCurrentConnectorStatus, onlyLatestConnectorResponses } from "@/lib/connector-status-merge";
+import { openBotSettings } from "./bot-panel/panel-link";
+import { openKeySettings } from "./keys/key-focus";
+import { lacksAdminScope } from "@/lib/admin-scope";
+import { SavedKeysReset } from "./SavedKeysReset";
+import { botAppScope } from "@/lib/bot-app-access";
+import { AppGrantPrompt, botsForApps, useAppGrants } from "./AppGrantPrompt";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { ServiceIcon, type ToolkitCard } from "./ServiceIcon"; import { AppsSection } from "./AppsSection";
+export { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
 
-export interface ToolkitCard {
-  slug: string;
-  label: string;
-  blurb: string;
-  logo: string | null;
-  noAuth?: boolean;
-  domain: string | null;
-}
-
-export interface ConnectorStatus {
-  connected: boolean;
-  pending?: boolean;
-  status?: string;
-  accounts?: Array<{
-    id: string;
-    alias?: string;
-    status: string;
-  }>;
-}
-
-// The panel is a modal and unmounts whenever it closes. Keep the last known
-// account inventory at module scope so reopening never flashes every service
-// as disconnected while a fresh secure status check runs in the background.
-let cachedConnectorStatus: Record<string, ConnectorStatus> | null = null;
-let cachedConnectorStatusAt = 0;
-let cachedConnectorStatusAuthoritative = true;
-let connectorStatusRequest: Promise<ConnectorInventory> | null = null;
-const CONNECTOR_STATUS_CACHE_MS = 30_000;
-
-export interface ConnectorInventory {
-  services: Record<string, ConnectorStatus>;
-  /** false when the server could not read the credential store: the list is
-   * then "we do not know", and nothing may be cleared on the strength of it */
-  authoritative: boolean;
-}
-
-/** Warm the account inventory once the app server is ready. Concurrent panel
- * opens share the same request, and recent data survives modal unmounts. */
-export function preloadConnectedApps(force = false): Promise<ConnectorInventory> {
-  if (!force && cachedConnectorStatus !== null && Date.now() - cachedConnectorStatusAt < CONNECTOR_STATUS_CACHE_MS) {
-    return Promise.resolve({
-      services: cachedConnectorStatus,
-      authoritative: cachedConnectorStatusAuthoritative,
-    });
-  }
-  if (connectorStatusRequest) return connectorStatusRequest;
-  connectorStatusRequest = api("/api/connectors/connected")
-    .then((response) => {
-      const services: Record<string, ConnectorStatus> = response.services ?? {};
-      // An unreadable credential store tells us nothing about what is
-      // connected. Keep the last inventory we were sure about instead.
-      if (response.credentialStore === "unavailable") {
-        return { services: readCachedInventory()?.services ?? {}, authoritative: false };
-      }
-      cachedConnectorStatus = services;
-      cachedConnectorStatusAt = Date.now();
-      cachedConnectorStatusAuthoritative = true;
-      writeCachedInventory(services, Date.now());
-      return { services, authoritative: true };
-    })
-    .catch(() => ({ services: readCachedInventory()?.services ?? {}, authoritative: false }))
-    .finally(() => {
-      connectorStatusRequest = null;
-    });
-  return connectorStatusRequest;
-}
+export { preloadConnectedApps, type ConnectorInventory } from "@/lib/connected-apps";
 
 export function disconnectAccountConfirmation(
   service: string,
@@ -88,28 +58,6 @@ export function disconnectAccountConfirmation(
   return t("connectors.disconnectConfirm", { identity, service });
 }
 
-/** Bots that cannot see the workspace's connected apps because their own
- * per-bot grant is off. Connecting an app is only half of it: a bot a Chief
- * of Staff created, a package brought in, or a backup restored starts with
- * that grant off, and until it is on the bot is never told the tools exist
- * and reaches for a browser instead — with nothing on screen saying why.
- * Bots whose engine cannot mount the tools at all are left out, because
- * their switch is disabled: naming them would move the dead end, not end it.
- * Hidden bots are left out for the same reason — the person cannot act on
- * one from here. */
-export function botsMissingConnectedApps(bots: Bot[], instances: InstanceInfo[]): Bot[] {
-  return bots.filter((bot) =>
-    !bot.hidden &&
-    bot.composio === false &&
-    instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)
-      ?.capabilities?.composioMcp === true);
-}
-
-/** Bots whose connector tool grants limit this service below every tool —
- * a partial list, no entry at all inside an explicit record, or a grant
- * shape this build cannot read. Legacy bots (no grants record) have every
- * tool and never appear. Engines that cannot mount the tools and hidden
- * bots are left out: their editors are dead ends from here. */
 export function botsWithLimitedServiceTools(bots: Bot[], instances: InstanceInfo[], slug: string): Bot[] {
   return bots.filter((bot) => {
     if (bot.hidden || bot.composio === false) return false;
@@ -123,19 +71,15 @@ export function botsWithLimitedServiceTools(bots: Bot[], instances: InstanceInfo
   });
 }
 
-export function hasUsableConnectedApps(configured: boolean, phase: ConnectorInventoryPhase, stale: boolean, status: Record<string, ConnectorStatus>): boolean {
-  return configured && phase === "ready" && !stale && Object.values(status).some((service) => service.connected);
+/** Whether a hosted app's card shows: it matches the search, and the filter is All, or Connected and it isn't known to be
+ * disconnected (unknown while its servers load). */
+export function hostedShown(app: HostedApp, search: string, filter: AppsFilter, connected: HostedConnections | null): boolean {
+  const matches = !search || `${app.label} ${app.keywords} ${t(app.description)}`.toLowerCase().includes(search.toLowerCase().trim());
+  return matches && (filter === "all" || (filter === "connected" && connected?.[app.id] !== false));
 }
 
-/** What the host says about why connected apps are off (see
- * `connectorSetup` in server/composio.ts). Absent from older hosts. */
 export type ConnectorSetup = "ready" | "needs-setup" | "service-unavailable";
 
-/** The one notice above the marketplace when connected apps are off. A fresh
- * install that never had a connection service gets a calm "here is what to
- * do"; only a real outage of the managed service, or an older host that does
- * not say which it is, gets the warning. Two notices about the same fact is
- * one too many, so the stale banner wins when it is showing. */
 export function connectorSetupNotice(state: {
   configured: boolean;
   stale: boolean;
@@ -149,136 +93,21 @@ export function connectorSetupNotice(state: {
   return { key: "connectors.notConfigured", tone: "warning" };
 }
 
-export function requiresAccountAlias(message: string) {
-  return /account alias.*existing connection.*not replaced/i.test(message);
-}
-
-export type ConnectorInventoryPhase = "loading" | "ready" | "error";
-
-export function connectorActionLabel(
-  phase: ConnectorInventoryPhase,
-  state: { busy: boolean; included: boolean; canContinue: boolean; pending?: boolean; hasAccounts: boolean; failed: boolean },
-) {
-  if (state.busy) return null;
-  if (state.included) return t("connectors.action.included");
-  if (phase === "loading") return t("connectors.action.checking");
-  if (phase === "error") return t("connectors.action.unavailable");
-  if (state.canContinue) return t("connectors.action.continue");
-  if (state.pending) return t("connectors.action.checkStatus");
-  if (state.hasAccounts) return t("connectors.action.addAccount");
-  if (state.failed) return t("connectors.action.retry");
-  return t("connectors.action.connect");
-}
-
-export function connectedInventoryCopy(phase: ConnectorInventoryPhase) {
-  if (phase === "loading") return {
-    title: t("connectors.empty.loadingTitle"),
-    description: t("connectors.empty.loadingDesc"),
-  };
-  if (phase === "error") return {
-    title: t("connectors.empty.errorTitle"),
-    description: t("connectors.empty.errorDesc"),
-  };
-  return {
-    title: t("connectors.empty.noneTitle"),
-    description: t("connectors.empty.noneDesc"),
-  };
-}
-
-export function mergeCurrentConnectorStatus(
-  current: Record<string, ConnectorStatus>,
-  incoming: Record<string, ConnectorStatus>,
-  latestGenerations: ReadonlyMap<string, number>,
-  requestGenerations: ReadonlyMap<string, number>,
-) {
-  const next = { ...current };
-  for (const [slug, state] of Object.entries(incoming)) {
-    if ((latestGenerations.get(slug) ?? 0) !== (requestGenerations.get(slug) ?? 0)) continue;
-    next[slug] = state;
-  }
-  return next;
-}
-
-export function mergeCompleteConnectorStatus(
-  current: Record<string, ConnectorStatus>,
-  incoming: Record<string, ConnectorStatus>,
-  latestGenerations: ReadonlyMap<string, number>,
-  requestGenerations: ReadonlyMap<string, number>,
-  /** Did the server actually KNOW the full picture? A response sent while the
-   * credential store was unreadable carries no information about what is
-   * connected, so it must not be allowed to clear anything — an empty list
-   * from an ignorant server is exactly how a connected app became a Connect
-   * button. Disconnection still shows up on the next authoritative answer. */
-  authoritative = true,
-) {
-  const next = { ...current };
-  if (!authoritative) return mergeCurrentConnectorStatus(next, incoming, latestGenerations, requestGenerations);
-  for (const [slug, state] of Object.entries(current)) {
-    if (incoming[slug]) continue;
-    if (!state.connected && !state.accounts?.length) continue;
-    if ((latestGenerations.get(slug) ?? 0) !== (requestGenerations.get(slug) ?? 0)) continue;
-    next[slug] = { connected: false, pending: false, status: "not_connected", accounts: [] };
-  }
-  return mergeCurrentConnectorStatus(next, incoming, latestGenerations, requestGenerations);
-}
-
-export function onlyLatestConnectorResponses(
-  incoming: Record<string, ConnectorStatus>,
-  latestRequests: ReadonlyMap<string, number>,
-  requestIds: ReadonlyMap<string, number>,
-) {
-  return Object.fromEntries(
-    Object.entries(incoming).filter(
-      ([slug]) => (latestRequests.get(slug) ?? 0) === (requestIds.get(slug) ?? 0),
-    ),
-  );
-}
-
-/** A toolkit's mark: official logo, else favicon by domain, else monogram.
- * Shared with the onboarding connectors scene so both show the same logos. */
-export function ServiceIcon({ card, className = "size-11" }: { card: Pick<ToolkitCard, "logo" | "domain" | "label">; className?: string }) {
-  // 0 = official logo, 1 = favicon by domain, 2 = monogram
-  const [stage, setStage] = useState(card.logo ? 0 : card.domain ? 1 : 2);
-  // The full catalog is well over a thousand cards, so let the browser skip
-  // the logos that are scrolled out of view instead of fetching every one.
-  if (stage === 0 && card.logo) {
-    return (
-      <img
-        src={card.logo}
-        alt=""
-        loading="lazy"
-        className={cn("rounded-xl object-contain", className)}
-        onError={() => setStage(1)}
-      />
-    );
-  }
-  if (stage === 1 && card.domain) {
-    return (
-      <img
-        src={`https://www.google.com/s2/favicons?domain=${card.domain}&sz=64`}
-        alt=""
-        loading="lazy"
-        className={cn("rounded-xl object-contain", className)}
-        onError={() => setStage(2)}
-      />
-    );
-  }
-  return (
-    <div className={cn("flex items-center justify-center rounded-xl bg-raised text-[15px] font-semibold text-ink-secondary", className)}>
-      {card.label.slice(0, 1).toUpperCase()}
-    </div>
-  );
-}
-
-/** Catalog completeness, as reported by /api/connectors/catalog. Absent
- * totalItems means upstream never stated a total, so there is nothing to
- * compare the served cards against. */
 export interface CatalogPagination {
   items: number;
   totalItems?: number;
   stalled: boolean;
-  /** Server-side stop reason, present only when the walk stalled (#1838). */
   reason?: string;
+}
+
+export type AppsFilter = "all" | "connected" | "mcp";
+
+export const APPS_PREVIEW_COUNT = 48;
+
+export const USED_BY_AVATAR_SIZE = 16;
+
+export function botsUsingService(bots: Bot[], instances: InstanceInfo[], slug: string): Bot[] {
+  return botsForApps(bots, instances).filter((bot) => botAppScope(bot, slug) !== null);
 }
 
 export function PluginsPanel() {
@@ -292,32 +121,46 @@ export function PluginsPanel() {
   const [configured, setConfigured] = useState(false);
   const [mode, setMode] = useState<"managed" | "self-hosted" | "unavailable">("unavailable");
   const [setup, setSetup] = useState<ConnectorSetup | undefined>(undefined);
-  // Paint what we last knew before any request goes out: the module cache if
-  // this window already fetched, otherwise the inventory saved on disk. An
-  // empty panel is never the first thing a connected user sees.
   const [status, setStatus] = useState<Record<string, ConnectorStatus>>(
-    () => cachedConnectorStatus ?? readCachedInventory()?.services ?? {},
+    () => connectorStatusMemory()?.services ?? readCachedInventory()?.services ?? {},
   );
-  /** true when what is on screen is remembered rather than confirmed */
   const [stale, setStale] = useState(
-    cachedConnectorStatus !== null && !cachedConnectorStatusAuthoritative,
+    connectorStatusMemory()?.authoritative === false,
   );
-  const [pendingUrls, setPendingUrls] = useState<Record<string, string>>({});
+  const [pendingUrls, setPendingUrls] = useState<Record<string, PendingAuthorization>>({});
   const [aliasSlug, setAliasSlug] = useState<string | null>(null);
   const [aliasDraft, setAliasDraft] = useState("");
   const [busySlug, setBusySlug] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [inventoryPhase, setInventoryPhase] = useState<ConnectorInventoryPhase>(
-    cachedConnectorStatus === null ? "loading" : "ready",
+    connectorStatusMemory() === null ? "loading" : "ready",
   );
   const [error, setError] = useState<string | { key: LocaleKey } | null>(null);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"marketplace" | "connected">("marketplace");
+  const [showAllApps, setShowAllApps] = useState(false);
+  const [hostedConnected, setHostedConnected] = useState<HostedConnections | null>(null);
+  const [cardsRefresh, setCardsRefresh] = useState(0);
+  const [category, setCategory] = useState<string | null>(null);
+  // Appended after the older state so tests that seed state by call order keep their indices.
+  const [xConnected, setXConnected] = useState<boolean | null>(null);
+  const [postizConnected, setPostizConnected] = useState<boolean | null>(null);
+  const [emailConnected, setEmailConnected] = useState<boolean | null>(null);
+  const [mcpServers, setMcpServers] = useState<McpServerListing[]>([]);
 
-  const pollTimers = useRef(new Map<string, ReturnType<typeof setInterval>>());
+  const disconnectingRef = useRef<{ slug: string; label: string; account: ConnectorAccount } | null>(null);
+  const polls = useRef(new Map<string, () => void>());
   const statusGenerations = useRef(new Map<string, number>());
   const latestStatusRequests = useRef(new Map<string, number>());
+  const opening = useRef<ReturnType<typeof reserveConnectionPage> | null>(null);
+  const reconnecting = useRef(new Set<string>());
 
+  /** A connection that finished or failed since a request no newer than this one no longer needs its sign-in page. */
+  const forgetSettledUrls = (services: Record<string, ConnectorStatus>, requestGenerations: ReadonlyMap<string, number>) => {
+    const settled = Object.entries(services).filter(([slug, state]) => (statusGenerations.current.get(slug) ?? 0) === (requestGenerations.get(slug) ?? 0)
+      && ((state.connected && !state.pending) || /^(expired|failed)$/i.test(state.status ?? ""))).map(([slug]) => slug);
+    if (settled.length) setPendingUrls((current) => settled.some((slug) => current[slug]) ? Object.fromEntries(Object.entries(current).filter(([slug]) => !settled.includes(slug))) : current);
+  };
   const refreshStatus = useCallback((slugs: string[]): Promise<Record<string, ConnectorStatus>> => {
     if (!slugs.length) return Promise.resolve({});
     const requestGenerations = new Map(slugs.map((slug) => [slug, statusGenerations.current.get(slug) ?? 0]));
@@ -333,24 +176,15 @@ export function PluginsPanel() {
           latestStatusRequests.current,
           requestIds,
         );
-        // A one-service OAuth poll must not erase every other app's state.
-        // A request that began before Connect must also not erase the newer
-        // local INITIATED state when its stale not_connected result arrives.
+        // A one-service poll must not erase other apps' state, and a request older than Connect must not erase the
+        // newer INITIATED state.
         setStatus((current) => mergeCurrentConnectorStatus(
           current,
           services,
           statusGenerations.current,
           requestGenerations,
         ));
-        for (const [slug, state] of Object.entries(services)) {
-          const isCurrent = (statusGenerations.current.get(slug) ?? 0) === (requestGenerations.get(slug) ?? 0);
-          if (isCurrent && state.connected && !state.pending) setPendingUrls((current) => {
-            if (!current[slug]) return current;
-            const next = { ...current };
-            delete next[slug];
-            return next;
-          });
-        }
+        forgetSettledUrls(services, requestGenerations);
         return services;
       })
       .catch(() => ({}));
@@ -360,8 +194,9 @@ export function PluginsPanel() {
     const requestGenerations = new Map(statusGenerations.current);
     setRefreshing(true);
     return preloadConnectedApps(force)
-      .then(({ services, authoritative }) => {
+      .then(({ services, authoritative, refused }) => {
         setStale(!authoritative);
+        if (refused) setError({ key: "connectors.adminOnly" });
         setStatus((current) => mergeCompleteConnectorStatus(
           current,
           services,
@@ -369,22 +204,14 @@ export function PluginsPanel() {
           requestGenerations,
           authoritative,
         ));
-        for (const [slug, state] of Object.entries(services)) {
-          const isCurrent = (statusGenerations.current.get(slug) ?? 0) === (requestGenerations.get(slug) ?? 0);
-          if (isCurrent && state.connected && !state.pending) setPendingUrls((current) => {
-            if (!current[slug]) return current;
-            const next = { ...current };
-            delete next[slug];
-            return next;
-          });
-        }
+        forgetSettledUrls(services, requestGenerations);
         return services;
       })
       .finally(() => setRefreshing(false));
   }, []);
 
   const loadConnectionInventory = useCallback((force = false) => {
-    const hadCachedInventory = cachedConnectorStatus !== null;
+    const hadCachedInventory = connectorStatusMemory() !== null;
     if (!hadCachedInventory) setInventoryPhase("loading");
     setError(null);
     return refreshConnectedStatus(force)
@@ -400,15 +227,16 @@ export function PluginsPanel() {
   }, [refreshConnectedStatus]);
 
   useEffect(() => () => {
-    for (const timer of pollTimers.current.values()) clearInterval(timer);
-    pollTimers.current.clear();
+    opening.current?.cancel();
+    opening.current = null;
+    for (const stop of polls.current.values()) stop();
+    polls.current.clear();
   }, []);
+  const appGrants = useAppGrants({ status, emailConnected, inventoryReady: inventoryPhase === "ready" && !stale });
 
   useEffect(() => {
     if (inventoryPhase !== "ready") return;
-    cachedConnectorStatus = status;
-    cachedConnectorStatusAt = Date.now();
-    cachedConnectorStatusAuthoritative = !stale;
+    rememberConnectorStatus(status, !stale);
   }, [inventoryPhase, stale, status]);
 
   useEffect(() => {
@@ -426,7 +254,8 @@ export function PluginsPanel() {
       })
       .catch((e) => {
         if (!alive) return;
-        setError(e.message);
+        setCards((current) => current ?? []);
+        setError(lacksAdminScope(e) ? { key: "connectors.adminOnly" } : e.message);
       });
     return () => {
       alive = false;
@@ -441,10 +270,12 @@ export function PluginsPanel() {
         dialog?.querySelectorAll<HTMLElement>(
           'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
         ) ?? [],
-      );
+      ).filter((element) => element.getClientRects().length > 0);
 
-    (dialog?.querySelector<HTMLElement>("input") ?? focusable()[0] ?? dialog)?.focus();
+    const controls = focusable();
+    (controls.find((element) => element.matches("input")) ?? controls[0] ?? dialog)?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
+      if (disconnectingRef.current) return;
       if (event.key === "Escape") {
         event.preventDefault();
         dispatch({ type: "togglePlugins", open: false });
@@ -459,7 +290,10 @@ export function PluginsPanel() {
       }
       const first = items[0];
       const last = items.at(-1)!;
-      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+      if (!items.some((element) => element === document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -475,50 +309,52 @@ export function PluginsPanel() {
     };
   }, [dispatch]);
 
+  const { suggestions, picking, pick } = useSuggestedApps(cards !== null && configured && inventoryPhase === "ready", `${cardsRefresh}:${Object.keys(status).filter((slug) => status[slug]?.connected).sort().join()}`);
+  const [disconnecting, setDisconnecting] = useState<{ slug: string; label: string; account: ConnectorAccount } | null>(null); disconnectingRef.current = disconnecting;
+
   const openConnectUrl = async (url: string) => {
-    if (window.ogb?.openExternal) {
-      await window.ogb.openExternal(url);
-      return;
+    if (opening.current) return;
+    const launch = reserveConnectionPage();
+    opening.current = launch;
+    try {
+      if (!await launch.open(url) && opening.current === launch) {
+        setError({ key: "connectors.popupBlockedContinue" });
+      }
+    } finally {
+      launch.cancel();
+      if (opening.current === launch) opening.current = null;
     }
-    // Browser development fallback. If a popup blocker rejects the first
-    // asynchronous open, the visible Continue button retries from a direct
-    // user gesture using the URL retained in pendingUrls.
-    const opened = window.open("", "_blank");
-    if (!opened) {
-      setError({ key: "connectors.popupBlockedContinue" });
-      return;
-    }
-    // Open a same-origin blank page first so the OAuth origin never receives
-    // an opener reference, while a real null remains a reliable blocked signal.
-    opened.opener = null;
-    opened.location.replace(url);
   };
 
-  const startPolling = (slug: string) => {
-    const old = pollTimers.current.get(slug);
-    if (old) clearInterval(old);
-    let tries = 0;
-    const timer = setInterval(() => {
-      void refreshStatus([slug]).then((services) => {
-        const state = services[slug];
-        if (++tries >= 24 || (state?.connected && !state.pending) || (state?.status && /^(expired|failed)$/i.test(state.status))) {
-          clearInterval(timer);
-          pollTimers.current.delete(slug);
-        }
-      });
-    }, 5000);
-    pollTimers.current.set(slug, timer);
+  const startPolling = (slug: string, before: ConnectorStatus | undefined, firstConnection: boolean) => {
+    polls.current.get(slug)?.();
+    const stop = pollConnector(before, () => refreshStatus([slug]).then((services) => services[slug]), (result) => {
+      if (polls.current.get(slug) === stop) polls.current.delete(slug);
+      connectorConnect(slug, result);
+      if (result === "connected" && firstConnection) appGrants.appConnected(slug, cards?.find((card) => card.slug === slug)?.label ?? slug);
+    });
+    polls.current.set(slug, stop);
   };
 
-  const connect = async (slug: string, alias?: string) => {
+  const connect = async (slug: string, alias?: string, replacing?: ConnectorAccount) => {
+    if (busySlug || opening.current) return;
+    const launch = reserveConnectionPage();
+    opening.current = launch;
     statusGenerations.current.set(slug, (statusGenerations.current.get(slug) ?? 0) + 1);
     setBusySlug(slug);
     setError(null);
+    if (replacing) reconnecting.current.add(slug);
+    const firstConnection = !reconnecting.current.has(slug) && !hasActiveConnection(status[slug]);
     try {
+      const createdAt = Date.now();
+      if (replacing) await api(`/api/connectors/${slug}/accounts/${encodeURIComponent(replacing.id)}`, { method: "DELETE" });
       const request: RequestInit = { method: "POST" };
       if (alias) request.body = JSON.stringify({ alias });
-      const { url } = await api(`/api/connectors/${slug}/authorize`, request);
-      setPendingUrls((current) => ({ ...current, [slug]: url }));
+      const result = await api(`/api/connectors/${slug}/authorize`, request);
+      if (opening.current !== launch) return;
+      const url = mcpSignInLink(typeof result.url === "string" ? result.url : null);
+      if (!url) throw new Error(t("connectors.invalidAuthorizationUrl"));
+      setPendingUrls((current) => ({ ...current, [slug]: { url, createdAt } }));
       setStatus((current) => ({
         ...current,
         [slug]: {
@@ -530,22 +366,27 @@ export function PluginsPanel() {
       }));
       setAliasSlug(null);
       setAliasDraft("");
-      startPolling(slug);
-      await openConnectUrl(url);
+      startPolling(slug, status[slug], firstConnection);
+      if (!await launch.open(url) && opening.current === launch) {
+        setError({ key: "connectors.popupBlockedContinue" });
+      }
     } catch (e) {
+      if (opening.current !== launch) return;
       const message = e instanceof Error ? e.message : String(e);
       if (requiresAccountAlias(message)) {
-        // Recover gracefully if an existing account was discovered after the
-        // button rendered. Show the label field and refresh only this app.
         setAliasSlug(slug);
         setAliasDraft("");
         setError({ key: "connectors.aliasNeeded" });
         void refreshStatus([slug]);
       } else {
-        setError(message);
+        setError(accountAliasTaken(message) ? { key: "connectors.aliasTaken" } : message);
       }
     } finally {
-      setBusySlug(null);
+      launch.cancel();
+      if (opening.current === launch) {
+        opening.current = null;
+        setBusySlug(null);
+      }
     }
   };
 
@@ -557,26 +398,75 @@ export function PluginsPanel() {
       .finally(() => setBusySlug(null));
   };
 
-  const matching = (cards ?? []).filter(
-    (c) => !search || `${c.label} ${c.slug} ${c.blurb}`.toLowerCase().includes(search.toLowerCase()),
-  );
-  const visible = matching.filter((card) =>
-    tab === "marketplace" || status[card.slug]?.connected || Boolean(status[card.slug]?.accounts?.length)
-  );
-  const connectedCount = Object.values(status).filter((service) => service.connected || service.accounts?.length).length;
+  const matching = (cards ?? []).filter((c) => (!managedConnectorUnavailableReason(mode, c.slug) || hasActiveConnection(status[c.slug]))
+    && matchesCatalogSearch(`${c.label} ${c.slug} ${connectorDescription(c)} ${(c.categories ?? []).join(" ")}`, search));
+  const isConnected = (slug: string) => Boolean(status[slug]?.connected || status[slug]?.accounts?.length);
+  const filter: AppsFilter = surface === "mcp" ? "mcp" : tab === "connected" ? "connected" : "all";
+  const searching = search.trim().length > 0;
+  /** A search covers the whole catalog, whichever view it was typed in. */
+  const listing: AppsFilter = searching && filter === "connected" ? "all" : filter;
+  const shownHosted = new Set(HOSTED_MCP_APPS.filter((app) => hostedShown(app, search, listing, hostedConnected)).map((app) => app.id));
+  const showEmail = (!search || `email mail imap smtp mailbox ${t("email.description")}`.toLowerCase().includes(search.toLowerCase().trim())) && (listing === "all" || (listing === "connected" && emailConnected !== false));
+  const showX = (!search || `${X_CARD_SEARCH} ${t("apps.x.description")}`.toLowerCase().includes(search.toLowerCase().trim())) && (listing === "all" || (listing === "connected" && xConnected !== false));
+  const showPostiz = (!search || `${POSTIZ_SEARCH} ${t("postiz.description")}`.toLowerCase().includes(search.toLowerCase().trim())) && (listing === "all" || (listing === "connected" && postizConnected !== false));
+  const visible = (listing === "connected" ? matching.filter((card) => isConnected(card.slug)) : matching)
+    .map((card, index) => ({ card, index }))
+    .sort((a, b) => Number(isConnected(b.card.slug)) - Number(isConnected(a.card.slug)) || a.index - b.index)
+    .map(({ card }) => card);
+  const connectedHosted = HOSTED_MCP_APPS.filter((app) => hostedConnected?.[app.id]);
+  const ownServers = mcpServers.filter((server) => ownMcpServer(server));
+  const ownServerShown = (server: McpServerListing) => matchesCatalogSearch(`${server.name} ${isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ")}`, search);
+  const connectedCount = Object.values(status).filter(hasActiveConnection).length + connectedHosted.length + ownServers.filter(mcpServerConnected).length + Number(emailConnected === true) + Number(xConnected === true) + Number(postizConnected === true);
   const connectedEmptyCopy = connectedInventoryCopy(inventoryPhase);
   const close = () => dispatch({ type: "togglePlugins", open: false });
-  // Only worth saying once an app is actually connected and reachable.
   const setupNotice = connectorSetupNotice({ configured, stale, setup, remoteClient });
-  const botsWithoutApps = hasUsableConnectedApps(configured, inventoryPhase, stale, status)
-    ? botsMissingConnectedApps(state.bots, state.instances)
-    : [];
+  const chooseFilter = (next: AppsFilter) => {
+    setCategory(null);
+    if (next === "mcp") {
+      dispatch({ type: "togglePlugins", open: true, surface: "mcp" });
+      return;
+    }
+    setTab(next === "connected" ? "connected" : "marketplace");
+    if (surface !== "apps") dispatch({ type: "togglePlugins", open: true, surface: "apps" });
+  };
+
+  const ranked = rankCategories([...(cards ?? []), POSTIZ_CATALOG_CARD], undefined, POSTIZ_CATALOG_CARD.categories);
+  const moreCategories = ranked.more;
+  const categoryInMore = category !== null && moreCategories.includes(category);
+  const inCategoryView = filter === "all" && category !== null && !searching;
+  const postizHere = showPostiz && (!inCategoryView || inCategory(POSTIZ_CATALOG_CARD, category));
+  const nativeCardsShown = (!inCategoryView && (shownHosted.size > 0 || showEmail || showX)) || postizHere || (filter === "connected" && ownServers.some((server) => server.enabled && ownServerShown(server)));
+  const categoryCards = inCategoryView ? visible.filter((card) => inCategory(card, category)) : visible;
+  const sectioned = filter === "all" && !searching && category === null;
+  const sections = sectioned ? catalogSections(visible, isConnected, ranked.inline) : [];
+  const allSection = sections.find((section) => section.kind === "all");
+  const allCards = sectioned ? allSection?.cards ?? [] : categoryCards;
+  const allCapped = sectioned && !showAllApps && allCards.length > APPS_PREVIEW_COUNT;
+  const allShown = allCapped ? allCards.slice(0, APPS_PREVIEW_COUNT) : allCards;
+  const connectedCards = (cards ?? []).filter((card) => hasActiveConnection(status[card.slug]));
+  const pickCategory = (next: string | null) => {
+    setCategory(next);
+    setTab("marketplace");
+    if (surface !== "apps") dispatch({ type: "togglePlugins", open: true, surface: "apps" });
+  };
+  const listTitle = searching
+    ? t("connectors.section.results")
+    : filter === "connected"
+      ? t("connectors.section.yours")
+      : category ? appCategoryLabel(category) : (sections.length > 1 ? t("apps.section.all") : t("connectors.section.available"));
+  const pill = "inline-flex h-7 shrink-0 items-center justify-center gap-2 rounded-full px-3 text-[13px] font-medium leading-5 transition-colors";
+  const pillTone = (selected: boolean) => selected
+    ? "bg-ink text-app"
+    : "bg-control/70 text-ink-secondary hover:bg-raised-hover hover:text-ink";
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px] sm:p-6"
+      className="glass-popup-frame"
+      style={glassPopupFrameStyle()}
       onMouseDown={(event) => event.target === event.currentTarget && close()}
     >
+      {/* A sibling, not the parent: a backdrop-filter on an ancestor would stop the pop-up's own glass from seeing the app behind it. */}
+      <div aria-hidden="true" className="glass-scrim pointer-events-none absolute inset-0" />
       <div
         ref={dialogRef}
         data-tour="apps-panel"
@@ -584,396 +474,526 @@ export function PluginsPanel() {
         aria-modal="true"
         aria-labelledby="plugins-title"
         tabIndex={-1}
-        className="animate-pop-in flex h-[min(780px,calc(100dvh-2rem))] w-full max-w-[1040px] flex-col overflow-hidden rounded-[24px] border border-hairline/50 bg-panel shadow-2xl shadow-black/50"
+        className="glass-surface glass-popup animate-pop-in relative flex max-w-[780px] flex-col overflow-hidden rounded-2xl"
       >
-        <header className="flex items-start justify-between gap-4 px-6 pb-3 pt-6 sm:px-8 sm:pt-7">
+        <header className="flex flex-col gap-4 px-5 pb-4 pt-5 sm:px-7 sm:pt-6">
           <div>
-            <h2 id="plugins-title" className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{t("connectors.title")}</h2>
-            <p className="mt-1 text-[13px] text-ink-secondary">{t("connectors.subtitle")}</p>
-          </div>
-          <div className="flex items-center gap-1">
-            {surface === "apps" && (
+          <div className="flex items-center justify-between gap-3">
+            <h2 id="plugins-title" className="min-w-0 truncate text-[20px] font-semibold leading-7 tracking-[-0.01em] text-ink">{t("apps.title")}</h2>
+            <div className="flex shrink-0 items-center gap-1">
               <button
-                onClick={() => void loadConnectionInventory(true)}
-                disabled={refreshing}
-                className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
-                title={t("connectors.refreshTitle")}
+                type="button"
+                data-apps-filter="connected"
+                aria-pressed={filter === "connected"}
+                onClick={() => chooseFilter(filter === "connected" ? "all" : "connected")}
+                className={cn(
+                  "inline-flex h-8 items-center gap-2 rounded-full ps-1.5 pe-2 text-[13px] font-medium leading-5 transition-colors",
+                  filter === "connected" ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
+                )}
               >
-                <RefreshCw size={17} className={cn(refreshing && "animate-spin")} />
+                {connectedCards.length > 0 && (
+                  <span aria-hidden="true" className="flex -space-x-1.5 rtl:space-x-reverse">
+                    {connectedCards.slice(0, 4).map((card) => (
+                      <span key={card.slug} className="flex size-5 items-center justify-center overflow-hidden rounded-md bg-menu ring-2 ring-menu">
+                        <ServiceIcon card={card} className="size-5 rounded-md" />
+                      </span>
+                    ))}
+                  </span>
+                )}
+                <span className="whitespace-nowrap">
+                  {connectedCount > 0 ? t("apps.connectedCount", { count: connectedCount }) : t("apps.filter.connected")}
+                </span>
+                <ChevronRight size={14} aria-hidden="true" className="shrink-0 rtl:-scale-x-100" />
               </button>
-            )}
-            <button data-tour="apps-close"
-              onClick={close}
-              aria-label={t("connectors.closeAria")}
-              className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink"
+              <button
+                onClick={() => { setCardsRefresh((value) => value + 1); void loadConnectionInventory(true); }}
+                disabled={refreshing}
+                className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
+                title={t("connectors.refreshTitle")}
+                aria-label={t("connectors.refreshTitle")}
+              >
+                <RefreshCw size={16} className={cn(refreshing && "animate-spin")} />
+              </button>
+              <button data-tour="apps-close"
+                onClick={close}
+                aria-label={t("connectors.closeAria")}
+                className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
+              >
+                <X size={18} />
+              </button>
+            </div>
+          </div>
+          <p className="mt-0.5 text-[13px] leading-5 text-ink-secondary">{t("apps.subtitle")}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-full bg-control/70 px-3.5 focus-within:ring-1 focus-within:ring-accent">
+              <Search size={15} className="shrink-0 text-ink-secondary" />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("connectors.searchPlaceholder")}
+                aria-label={t("connectors.searchPlaceholder")}
+                className="min-w-0 flex-1 bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
+              />
+            </label>
+            <button
+              type="button"
+              data-apps-filter="mcp"
+              aria-pressed={filter === "mcp"}
+              onClick={() => chooseFilter(filter === "mcp" ? "all" : "mcp")}
+              className={cn(pill, "h-9 border border-hairline/40 px-3.5", filter === "mcp" ? "bg-ink text-app" : "text-ink hover:bg-raised")}
             >
-              <X size={21} />
+              <Server size={14} aria-hidden="true" />
+              <span className="hidden sm:inline">{t("apps.filter.mcp")}</span>
+              <span className="sr-only sm:hidden">{t("apps.filter.mcp")}</span>
             </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t("apps.categoriesAria")}>
+            <button
+              type="button"
+              data-apps-filter="all"
+              aria-pressed={filter === "all" && category === null}
+              onClick={() => { chooseFilter("all"); setCategory(null); }}
+              className={cn(pill, pillTone(filter === "all" && category === null))}
+            >
+              {t("apps.filter.all")}
+            </button>
+            {ranked.inline.map((name) => (
+              <button
+                key={name}
+                type="button"
+                data-apps-category={name}
+                aria-pressed={filter === "all" && category === name}
+                onClick={() => pickCategory(category === name ? null : name)}
+                className={cn(pill, pillTone(filter === "all" && category === name))}
+              >
+                {appCategoryLabel(name)}
+              </button>
+            ))}
+            {moreCategories.length > 0 && (
+              <SidebarPopoverMenu
+                ariaLabel={t("apps.moreCategories")}
+                items={moreCategories.map((name) => ({ key: name, label: appCategoryLabel(name), active: category === name, onSelect: () => pickCategory(name) }))}
+                renderTrigger={({ open }) => (
+                  <span className={cn(pill, pillTone(filter === "all" && categoryInMore), open && !categoryInMore && "bg-raised-hover text-ink")}>
+                    {categoryInMore ? appCategoryLabel(category) : t("apps.more")}
+                    <ChevronDown size={14} aria-hidden="true" />
+                  </span>
+                )}
+              />
+            )}
           </div>
         </header>
 
-        <div className="border-b border-hairline/40 px-6 sm:px-8">
-          <div className="flex gap-6" role="tablist" aria-label={t("connectors.typeAria")}>
-            {(["apps", "mcp"] as const).map((item) => (
-              <button
-                key={item}
-                type="button"
-                role="tab"
-                aria-selected={surface === item}
-                onClick={() => dispatch({ type: "togglePlugins", open: true, surface: item })}
-                className={cn(
-                  "border-b-2 px-0.5 pb-3 pt-1 text-[13.5px] font-medium transition-colors",
-                  surface === item ? "border-accent text-ink" : "border-transparent text-ink-secondary hover:text-ink",
-                )}
-              >
-                {item === "apps" ? t("connectors.tab.apps") : t("connectors.tab.mcp")}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {surface === "apps" ? (
-          <>
-        {stale && (
-          // Say which of the two things is true. Silence here is what makes a
-          // remembered list indistinguishable from a confirmed one.
-          <div className="mx-6 mb-1 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12.5px] text-warning sm:mx-8">
-            <TriangleAlert size={14} className="mt-px shrink-0" />
-            <span>
-              {t("connectors.stale")}
-            </span>
-          </div>
-        )}
-
-        <div className="flex flex-col gap-3 px-6 pb-4 pt-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
-          <div className="flex w-fit rounded-xl bg-raised/70 p-1" role="tablist" aria-label={t("connectors.viewAria")}>
-            <button
-              role="tab"
-              aria-selected={tab === "marketplace"}
-              onClick={() => setTab("marketplace")}
-              className={cn(
-                "rounded-lg px-4 py-2 text-[13.5px] transition-colors",
-                tab === "marketplace" ? "bg-card text-ink shadow-sm" : "text-ink-secondary hover:text-ink",
-              )}
-            >
-              {t("connectors.tab.marketplace")}
-            </button>
-            <button
-              role="tab"
-              aria-selected={tab === "connected"}
-              onClick={() => setTab("connected")}
-              className={cn(
-                "rounded-lg px-4 py-2 text-[13.5px] transition-colors",
-                tab === "connected" ? "bg-card text-ink shadow-sm" : "text-ink-secondary hover:text-ink",
-              )}
-            >
-              {t("connectors.tab.connected")}{connectedCount > 0 ? ` ${connectedCount}` : ""}
-            </button>
-          </div>
-          <label className="flex h-11 w-full items-center gap-2.5 rounded-xl bg-raised/70 px-3.5 sm:w-[320px]">
-            <Search size={17} className="shrink-0 text-ink-secondary" />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={t("connectors.searchPlaceholder")}
-              aria-label={t("connectors.searchPlaceholder")}
-              className="min-w-0 flex-1 bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
-            />
-          </label>
-        </div>
-
-        {/* Not set up yet is not an outage: see connectorSetupNotice. */}
-        {setupNotice && (
-          <div
-            className={cn(
-              "mx-6 mb-1 rounded-xl px-4 py-3 text-[13px] sm:mx-8",
-              setupNotice.tone === "warning" ? "bg-warning/10 text-warning" : "bg-inset text-ink-secondary",
-            )}
-          >
-            {t(setupNotice.key)}{" "}
-            <button
-              className={cn(
-                "font-medium underline underline-offset-2",
-                setupNotice.tone === "info" && "text-ink",
-                remoteClient && "hidden",
-              )}
-              onClick={() => {
-                close();
-                dispatch({ type: "toggleAppSettings", open: true, section: "connections" });
-              }}
-            >
-              {t("connectors.openSettings")}
-            </button>
-          </div>
-        )}
-        {botsWithoutApps.length > 0 && (
-          <div className="mx-6 mb-1 rounded-xl bg-inset px-4 py-3 text-[12.5px] leading-relaxed text-ink-secondary sm:mx-8">
-            <span className="font-medium text-ink">{t("connectors.perBot.title")}</span>{" "}
-            {t("connectors.perBot.body")}
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {botsWithoutApps.map((candidate) => (
-                <button
-                  key={candidate.id}
-                  type="button"
-                  onClick={() => dispatch({ type: "updateBot", botId: candidate.id, patch: { composio: true } })}
-                  className="rounded-full bg-control px-2.5 py-1 text-[11.5px] font-medium text-ink hover:bg-raised-hover"
-                >
-                  {t("connectors.perBot.allow", { name: candidate.name })}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {configured && !remoteClient && source === "curated" && mode === "self-hosted" && (
-          <div className="mx-6 mb-1 text-[12px] text-ink-secondary sm:mx-8">
-            {t("connectors.featuredBefore")}{" "}
-            <button
-              className="underline underline-offset-2 hover:text-ink"
-              onClick={() => {
-                close();
-                dispatch({ type: "toggleAppSettings", open: true });
-              }}
-            >
-              {t("connectors.updateKey")}
-            </button>{" "}
-            {t("connectors.featuredAfter")}
-          </div>
-        )}
-        {error && <div role="alert" className="mx-6 mt-2 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger sm:mx-8">{typeof error === "string" ? error : t(error.key)}</div>}
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-7 pt-5 sm:px-8">
-          {cards === null ? (
-            <div className="flex items-center justify-center gap-2 py-24 text-[13px] text-ink-secondary">
-              <Loader2 size={14} className="animate-spin" /> {t("connectors.loadingCatalog")}
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-7 sm:px-7">
+          {stale ? (
+            <div className="mb-3 flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 text-[13px] text-warning">
+              <TriangleAlert size={14} className="mt-px shrink-0" />
+              <span>
+                {t("connectors.stale")}
+                <SavedKeysReset />
+              </span>
             </div>
           ) : (
-            <div>
-              <div className="mb-3 text-[12px] font-medium text-ink-secondary">
-                {tab === "connected"
-                  ? t("connectors.section.yours")
-                  : search
-                    ? t("connectors.section.results")
-                    : t("connectors.section.available")}
-                {tab === "marketplace" && !search && pagination
-                  && (pagination.stalled || (pagination.totalItems !== undefined && pagination.items < pagination.totalItems)) && (
-                  <span className="ml-2 font-normal">
-                    {pagination.totalItems !== undefined && pagination.items < pagination.totalItems
-                      ? t("connectors.marketplace.partialCount", {
-                        shown: pagination.items.toLocaleString(),
-                        total: pagination.totalItems.toLocaleString(),
-                      })
-                      : t("connectors.marketplace.partialStalled")}
-                    {pagination.reason
-                      ? ` — ${t("connectors.marketplace.partialReason", { reason: pagination.reason })}`
-                      : null}
-                  </span>
+            <SavedKeysReset notice />
+          )}
+          {setupNotice && filter !== "mcp" && (
+            <div
+              className={cn(
+                "mb-3 rounded-xl px-4 py-3 text-[13px]",
+                setupNotice.tone === "warning" ? "bg-warning/10 text-warning" : "bg-control/50 text-ink-secondary",
+              )}
+            >
+              {connectedHosted.length > 0
+                ? t("hostedMcp.otherAppsSetup", { services: new Intl.ListFormat(activeLocale(), { style: "long", type: "conjunction" }).format(connectedHosted.map((app) => app.label)) })
+                : t(setupNotice.key)}{" "}
+              <button
+                className={cn(
+                  "font-medium underline underline-offset-2",
+                  setupNotice.tone === "info" && "text-ink",
+                  remoteClient && "hidden",
                 )}
-              </div>
-              <div className="grid grid-cols-1 gap-x-10 md:grid-cols-2">
-              {visible.map((card) => {
-              const serviceStatus = status[card.slug];
-              const pending = serviceStatus?.pending;
-              const failed = serviceStatus?.status && /^(expired|failed)$/i.test(serviceStatus.status);
-              const accounts = serviceStatus?.accounts ?? [];
-              // connected with no accounts and nothing in flight = a no-auth
-              // toolkit: there is no OAuth to run, so "Connect" would mint a
-              // pointless authorize. It ships included.
-              const included = card.noAuth === true
-                || (serviceStatus?.connected === true && !accounts.length && !pending && !failed);
-              const addingAccount = aliasSlug === card.slug && !pending;
-              const busy = busySlug === card.slug;
-              const unavailableReason = managedConnectorUnavailableReason(mode, card.slug)
-                ? t("connectors.selfHostOnlyReason")
-                : null;
-              return (
-                <div
-                  key={card.slug}
-                  className="min-h-[88px] border-b border-hairline/35 px-1 py-4"
-                >
-                  <div className="flex items-center gap-3">
-                    <ServiceIcon card={card} />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[14px] font-medium text-ink">{card.label}</div>
-                      <div
-                        className="mt-0.5 truncate text-[12.5px] text-ink-secondary"
-                        title={unavailableReason ?? undefined}
-                      >
-                        {unavailableReason ?? (
-                          pending
-                            ? pendingUrls[card.slug]
-                              ? t("connectors.finishSetup")
-                              : t("connectors.finishSetupOrDisconnect")
-                            : failed && !accounts.length
-                              ? t("connectors.authExpired")
-                              : card.blurb
-                        )}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={!configured || inventoryPhase !== "ready" || busy || included || Boolean(unavailableReason)}
-                      title={unavailableReason ?? undefined}
-                      onClick={() => {
-                        if (pending) {
-                          if (pendingUrls[card.slug]) {
-                            setError(null);
-                            void openConnectUrl(pendingUrls[card.slug]).catch((e) => setError(e.message));
-                          } else {
-                            setAliasSlug(null);
-                            setError(null);
-                            void refreshStatus([card.slug]);
-                            startPolling(card.slug);
-                          }
-                        } else {
-                          setAliasSlug((current) => current === card.slug ? null : card.slug);
-                          setAliasDraft("");
-                        }
-                      }}
-                      className="flex min-w-[88px] items-center justify-center gap-1.5 rounded-full bg-raised px-3 py-2 text-[12.5px] text-ink transition-colors hover:bg-raised-hover disabled:opacity-40"
-                    >
-                      {unavailableReason ? (
-                        t("connectors.selfHostOnly")
-                      ) : busy ? (
-                        <Loader2 size={13} className="mx-auto animate-spin" />
-                      ) : (
-                        connectorActionLabel(inventoryPhase, {
-                          busy,
-                          included,
-                          canContinue: Boolean(pending && pendingUrls[card.slug]),
-                          pending,
-                          hasAccounts: accounts.length > 0,
-                          failed: Boolean(failed),
-                        })
-                      )}
-                    </button>
-                  </div>
-                  {accounts.length > 0 && (
-                    <div className="ml-14 mt-3 space-y-2">
-                      {accounts.map((account) => {
-                        const active = /^active$/i.test(account.status);
-                        return (
-                          <div key={account.id} className="flex items-center gap-2 rounded-lg bg-raised/45 px-3 py-2">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5 text-[12.5px] font-medium text-ink">
-                                {active && <Check size={13} className="shrink-0 text-success" />}
-                                <span className="truncate">{account.alias || account.id}</span>
-                              </div>
-                              <div className="mt-0.5 truncate text-[10.5px] text-ink-secondary">
-                                {account.alias ? `${account.id} · ` : ""}{account.status.toLowerCase()}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => {
-                                if (!window.confirm(disconnectAccountConfirmation(card.label, account))) return;
-                                disconnectAccount(card.slug, account.id);
-                              }}
-                              className="rounded-md px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-40"
-                              aria-label={t("connectors.disconnectAria", {
-                                account: account.alias || account.id,
-                                service: card.label,
-                              })}
-                            >
-                              {t("connectors.disconnect")}
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  {(serviceStatus?.connected || included) && (() => {
-                    const limited = botsWithLimitedServiceTools(state.bots, state.instances, card.slug);
-                    if (!limited.length) return null;
-                    const names = limited.slice(0, 4).map((candidate, index) => (
-                      <span key={candidate.id}>
-                        {index > 0 && ", "}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            close();
-                            dispatch({ type: "toggleSettings", open: true, botId: candidate.id, section: "access" });
-                          }}
-                          className="font-medium text-ink underline underline-offset-2 hover:text-accent-text"
-                        >
-                          {candidate.name}
-                        </button>
-                      </span>
-                    ));
-                    return (
-                      <div className="ml-14 mt-2 text-[11px] leading-relaxed text-ink-secondary">
-                        <span>{t("connectors.grants.limited", { count: limited.length })}</span>{" "}
-                        {names}
-                        {limited.length > 4 && <span>{t("connectors.grants.more", { count: limited.length - 4 })}</span>}
-                      </div>
-                    );
-                  })()}
-                  {addingAccount && (
-                    <form
-                      className="ml-14 mt-3 flex items-center gap-2"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        const alias = aliasDraft.trim();
-                        if (!alias) {
-                          setError({ key: "connectors.aliasRequired" });
-                          return;
-                        }
-                        void connect(card.slug, alias);
-                      }}
-                    >
-                      <input
-                        autoFocus
-                        value={aliasDraft}
-                        maxLength={64}
-                        onChange={(event) => setAliasDraft(event.target.value)}
-                        placeholder={t("connectors.aliasPlaceholder")}
-                        aria-label={accounts.length > 0
-                          ? t("connectors.aliasAriaAnother", { service: card.label })
-                          : t("connectors.aliasAriaNew", { service: card.label })}
-                        className="min-w-0 flex-1 rounded-lg bg-raised px-3 py-2 text-[12px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent"
-                      />
-                      <button
-                        type="submit"
-                        disabled={busy || !aliasDraft.trim()}
-                        className="rounded-lg bg-accent px-3 py-2 text-[12px] font-medium text-white disabled:opacity-40"
-                      >
-                        {t("connectors.action.continue")}
-                      </button>
-                    </form>
-                  )}
-                </div>
-              );
-              })}
-              </div>
+                onClick={() => { close(); dispatch(openKeySettings("composio")); }}
+              >
+                {t("connectors.openSettings")}
+              </button>
             </div>
           )}
-          {cards !== null && visible.length === 0 && (
-            <div className="flex min-h-56 flex-col items-center justify-center text-center">
-              <div className="text-[14px] font-medium text-ink">
-                {tab === "connected" ? connectedEmptyCopy.title : t("connectors.noAppsFound")}
-              </div>
-              <div className="mt-1 text-[12.5px] text-ink-secondary">
-                {tab === "connected" ? connectedEmptyCopy.description : t("connectors.tryDifferentSearch")}
-              </div>
-              {tab === "connected" && inventoryPhase === "error" && (
-                <button
-                  type="button"
-                  disabled={refreshing}
-                  onClick={() => void loadConnectionInventory(true)}
-                  className="mt-4 flex items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[12.5px] text-ink transition-colors hover:bg-raised-hover disabled:opacity-50"
+          {configured && !remoteClient && source === "curated" && mode === "self-hosted" && filter !== "mcp" && (
+            <div className="mb-3 text-[12px] text-ink-secondary">
+              {t("connectors.featuredBefore")}{" "}
+              <button
+                className="underline underline-offset-2 hover:text-ink"
+                onClick={() => {
+                  close();
+                  dispatch({ type: "toggleAppSettings", open: true });
+                }}
+              >
+                {t("connectors.updateKey")}
+              </button>{" "}
+              {t("connectors.featuredAfter")}
+            </div>
+          )}
+          {error && <div role="alert" className="mb-3 rounded-xl bg-danger/10 px-3 py-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</div>}
+
+          {filter !== "mcp" && (
+            <div data-apps-grid className="@container flex flex-col gap-7 pt-1">
+              {!sections.some((section) => section.kind === "connected") && renderSuggested()}
+              {sections.filter((section) => section.kind !== "all").map((section) => section.kind === "connected" ? (
+                <Fragment key="connected">
+                  <AppsSection
+                    id="apps-section-connected"
+                    title={t("apps.section.connected")}
+                    viewAll={section.cards.length > CATEGORY_SECTION_SIZE ? { label: t("apps.viewAll"), onClick: () => chooseFilter("connected") } : undefined}
+                  >
+                    {section.cards.slice(0, CATEGORY_SECTION_SIZE).map((card) => renderTile(card))}
+                  </AppsSection>
+                  {renderSuggested()}
+                </Fragment>
+              ) : (
+                <AppsSection
+                  key={section.category}
+                  id={`apps-section-${section.category}`}
+                  title={appCategoryLabel(section.category)}
+                  viewAll={section.more ? { label: t("apps.viewAll"), onClick: () => pickCategory(section.category) } : undefined}
                 >
-                  <RefreshCw size={13} className={cn(refreshing && "animate-spin")} />
-                  {t("connectors.action.retry")}
-                </button>
-              )}
+                  {section.cards.map((card) => renderTile(card))}
+                </AppsSection>
+              ))}
+              <AppsSection
+                id="apps-grid-title"
+                title={listTitle}
+                note={filter === "all" && !search && category === null && pagination
+                  && (pagination.stalled || (pagination.totalItems !== undefined && pagination.items < pagination.totalItems))
+                  ? `${pagination.totalItems !== undefined && pagination.items < pagination.totalItems
+                    ? t("connectors.marketplace.partialCount", {
+                      shown: pagination.items.toLocaleString(intlLocale()),
+                      total: pagination.totalItems.toLocaleString(intlLocale()),
+                    })
+                    : t("connectors.marketplace.partialStalled")}${pagination.reason
+                    ? ` — ${t("connectors.marketplace.partialReason", { reason: pagination.reason })}`
+                    : ""}`
+                  : undefined}
+                viewAll={allCapped ? { label: t("apps.viewAll"), onClick: () => setShowAllApps(true) } : undefined}
+                after={(
+                  <>
+                    {cards === null && (
+                      <div className="flex items-center justify-center gap-2 py-24 text-[13px] text-ink-secondary">
+                        <Loader2 size={14} className="animate-spin" /> {t("connectors.loadingCatalog")}
+                      </div>
+                    )}
+                    {allCapped && (
+                      <div className="mt-4 flex justify-center">
+                        <button
+                          type="button"
+                          onClick={() => setShowAllApps(true)}
+                          className={cn(pill, "bg-control/70 px-4 text-ink hover:bg-raised-hover")}
+                        >
+                          {t("apps.showAll", { count: allCards.length.toLocaleString(intlLocale()) })}
+                        </button>
+                      </div>
+                    )}
+                    {cards !== null && allShown.length === 0 && !nativeCardsShown && sections.length <= 1 && (
+                      <div className="flex min-h-40 flex-col items-center justify-center text-center">
+                        <div className="text-[14px] font-medium text-ink">
+                          {listing === "connected" ? connectedEmptyCopy.title : t("connectors.noAppsFound")}
+                        </div>
+                        <div className="mt-1 text-[13px] text-ink-secondary">
+                          {listing === "connected" ? connectedEmptyCopy.description : t("connectors.tryDifferentSearch")}
+                        </div>
+                        {filter === "connected" && inventoryPhase === "error" && (
+                          <button
+                            type="button"
+                            disabled={refreshing}
+                            onClick={() => void loadConnectionInventory(true)}
+                            className={cn(pill, "mt-4 bg-raised text-ink hover:bg-raised-hover disabled:opacity-50")}
+                          >
+                            <RefreshCw size={14} className={cn(refreshing && "animate-spin")} />
+                            {t("connectors.action.retry")}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              >
+                <McpServersPanel hostedCards={{ shown: (id) => !inCategoryView && shownHosted.has(id), onConnections: setHostedConnected, onServers: setMcpServers, ...(filter === "connected" ? { ownServers: { shown: ownServerShown, manage: () => chooseFilter("mcp") } } : {}) }} refreshKey={cardsRefresh} />
+                <div data-native-card="x" className={showX && !inCategoryView ? "contents" : "hidden"}><XCard refreshKey={cardsRefresh} onConnection={setXConnected} /></div>
+                <div data-native-card="email" className={showEmail && !inCategoryView ? "contents" : "hidden"}><EmailCard refreshKey={cardsRefresh} onConnection={setEmailConnected} /></div>
+                <div data-native-card="postiz" className={postizHere ? "contents" : "hidden"}><PostizCard refreshKey={cardsRefresh} onConnection={setPostizConnected} /></div>
+                {allShown.map((card) => renderTile(card))}
+              </AppsSection>
+            </div>
+          )}
+
+          {filter !== "connected" && category === null && (
+            <div className={cn(filter === "all" && "mt-8 border-t border-hairline/30 pt-6", filter === "mcp" && "pt-1")}>
+              <McpServersPanel embedded hideHosted={filter === "all"} />
             </div>
           )}
         </div>
-          </>
-        ) : (
-          <McpServersPanel />
+        <ConfirmDialog open={disconnecting !== null} layer="z-[60]" tone="danger" title={t("connectors.disconnect")} confirmLabel={t("connectors.disconnect")}
+          body={disconnecting ? disconnectAccountConfirmation(disconnecting.label, disconnecting.account) : ""} onCancel={() => setDisconnecting(null)}
+          onConfirm={() => { if (disconnecting) disconnectAccount(disconnecting.slug, disconnecting.account.id); setDisconnecting(null); }} />
+        {appGrants.changing && (
+          <AppGrantPrompt
+            key={appGrants.changing}
+            app={cards?.find((card) => card.slug === appGrants.changing)?.label ?? appGrants.changing}
+            slug={appGrants.changing}
+            bots={appGrants.bots}
+            onDone={appGrants.done}
+            onDismiss={appGrants.dismiss}
+          />
         )}
       </div>
     </div>
   );
+
+  function renderSuggested() {
+    const shown = suggestions.cards.filter((card) => !isConnected(card.slug));
+    if (!sectioned || shown.length === 0) return null;
+    const action = suggestions.pick === "available"
+      ? { label: t(picking ? "apps.suggested.picking" : "apps.suggested.show"), onClick: pick }
+      : suggestions.pick === "needs-key" && !remoteClient
+        ? { label: t("apps.suggested.addKey"), onClick: () => { close(); dispatch(openKeySettings("jev")); } }
+        : undefined;
+    return (
+      <AppsSection id="apps-section-suggested" title={t("apps.section.suggested")} note={suggestions.pick === "picked" ? t("apps.suggested.picked") : undefined} viewAll={action}>
+        {shown.map((card) => renderTile(card))}
+      </AppsSection>
+    );
+  }
+
+  function renderTile(card: ToolkitCard) {
+    const serviceStatus = status[card.slug];
+    const failed = serviceStatus?.status && /^(expired|failed)$/i.test(serviceStatus.status);
+    const pending = serviceStatus?.pending && !failed;
+    const pendingAuthorization = pending && !failed ? pendingUrls[card.slug] : undefined;
+    const authorizationUrl = reusableConnectionUrl(pendingAuthorization);
+    const accounts = serviceStatus?.accounts ?? [];
+    const included = card.noAuth === true
+      || (serviceStatus?.connected === true && !accounts.length && !pending && !failed);
+    const connected = hasActiveConnection(serviceStatus);
+    const reconnect = pending ? undefined : accountToReconnect(serviceStatus);
+    const addingAccount = aliasSlug === card.slug && !included;
+    const busy = busySlug === card.slug;
+    const policy = state.config?.managedPolicy, unavailableReason = policy?.apps && !policy.apps.allowAll && !policy.apps.allowlist.includes(card.slug) ? t("policy.managedBy", { organization: policy.organizationName })
+      : managedConnectorUnavailableReason(mode, card.slug) ? t("connectors.selfHostOnlyReason") : null;
+    const usedBy = connected || included ? botsUsingService(state.bots, state.instances, card.slug) : [];
+    const usedByLabel = t("apps.usedBy", { names: usedBy.map((candidate) => candidate.name).join(", ") });
+    const description = unavailableReason ?? (
+      pending
+        ? authorizationUrl
+          ? t("connectors.finishSetup")
+          : t("connectors.finishSetupOrDisconnect")
+        : reconnect
+          ? t("connectors.signedOut")
+          : failed && !accounts.length
+            ? t("connectors.authExpired")
+            : connectorDescription(card)
+    );
+    return (
+      <div
+        key={card.slug}
+        data-app-tile={card.slug}
+        className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40"
+      >
+        <div className="flex items-center gap-3">
+          <ServiceIcon card={card} className="size-10 shrink-0 rounded-[8px]" />
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate text-[14px] font-semibold leading-5 text-ink">{card.label}</span>
+              {connected && !pending && (
+                <Check size={13} strokeWidth={2.5} className="shrink-0 text-success" aria-label={t("apps.connected")} />
+              )}
+              {usedBy.length > 0 && (
+                <span
+                  className="ms-1 flex shrink-0 -space-x-1.5 rtl:space-x-reverse"
+                  title={usedByLabel}
+                  aria-label={usedByLabel}
+                  role="img"
+                >
+                  {usedBy.slice(0, 3).map((candidate) => (
+                    <span
+                      key={candidate.id}
+                      data-used-by-avatar={candidate.id}
+                      className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-menu ring-2 ring-menu"
+                    >
+                      <BotAvatar bot={candidate} size={USED_BY_AVATAR_SIZE} animated={false} />
+                    </span>
+                  ))}
+                </span>
+              )}
+            </div>
+            <div className="truncate text-[13px] leading-[18px] text-ink-secondary" title={description}>
+              {description}
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={!configured || inventoryPhase !== "ready" || busy || included || Boolean(unavailableReason)}
+            title={unavailableReason ?? undefined}
+            onClick={() => {
+              if (pending && !failed) {
+                const url = reusableConnectionUrl(pendingAuthorization);
+                if (url) {
+                  setError(null);
+                  void openConnectUrl(url).catch((e) => setError(e.message));
+                } else {
+                  void connect(card.slug);
+                }
+              } else if (reconnect) {
+                void connect(card.slug, reconnect.alias, reconnect);
+              } else {
+                setAliasSlug((current) => current === card.slug ? null : card.slug);
+                setAliasDraft("");
+              }
+            }}
+            className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors hover:bg-raised-hover disabled:opacity-40"
+          >
+            {unavailableReason ? (
+              t("connectors.selfHostOnly")
+            ) : busy ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              connectorActionLabel(inventoryPhase, {
+                busy,
+                included,
+                canContinue: Boolean(pendingAuthorization),
+                pending,
+                reconnect: Boolean(reconnect),
+                hasAccounts: accounts.length > 0,
+                failed: Boolean(failed),
+              })
+            )}
+          </button>
+        </div>
+        <div className="ps-[52px]">
+          {authorizationUrl && (
+            <a href={authorizationUrl} target="_blank" rel="noopener noreferrer" onClick={(event) => {
+              if (!reusableConnectionUrl(pendingAuthorization)) {
+                event.preventDefault();
+                void connect(card.slug);
+              }
+            }} className="mt-1.5 inline-block text-[12px] text-accent-text underline underline-offset-2">
+              {t("connectors.openAuthorizationPage")}
+            </a>
+          )}
+          {connected && !pending && (
+            <div data-app-bots={card.slug} className="mt-1.5 flex min-w-0 items-center gap-2 text-[12px] leading-5 text-ink-secondary">
+              <span className="min-w-0 truncate" title={usedBy.length ? usedByLabel : undefined}>
+                {usedBy.length ? usedByLabel : t("apps.usedByNone")}
+              </span>
+              {appGrants.canChange && (
+                <button
+                  type="button"
+                  onClick={() => appGrants.change(card.slug)}
+                  aria-label={t("apps.whichBots", { app: card.label })}
+                  className="ms-auto shrink-0 rounded-full px-2 text-[12px] font-medium leading-5 text-accent-text transition-colors hover:bg-raised-hover"
+                >
+                  {t("apps.usedByChange")}
+                </button>
+              )}
+            </div>
+          )}
+          {accounts.length > 0 && (
+            <div className="mt-1.5 space-y-0.5">
+              {accounts.map((account) => {
+                const active = /^active$/i.test(account.status);
+                const reconnectable = needsReconnect(account) && account.id !== reconnect?.id;
+                return (
+                  <div key={account.id} className="flex min-w-0 items-center gap-2 text-[12px] leading-5">
+                    {active ? <Check size={12} className="shrink-0 text-success" /> : <span className="size-3 shrink-0" />}
+                    <span className="min-w-0 truncate text-ink" title={`${account.alias ? `${account.id} · ` : ""}${account.status.toLowerCase()}`}>
+                      {account.alias || account.id}
+                      <span className="text-ink-secondary"> · {account.status.toLowerCase()}</span>
+                    </span>
+                    {reconnectable && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void connect(card.slug, account.alias, account)}
+                        className="ms-auto shrink-0 rounded-full px-2 text-[12px] font-medium leading-5 text-accent-text transition-colors hover:bg-raised-hover disabled:opacity-40"
+                        aria-label={t("connectors.reconnectAria", { account: account.alias || account.id, service: card.label })}
+                      >
+                        {t("connectors.action.reconnect")}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setDisconnecting({ slug: card.slug, label: card.label, account })}
+                      className={cn("shrink-0 rounded-full px-2 text-[12px] font-medium leading-5 text-ink-secondary transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-40", !reconnectable && "ms-auto")}
+                      aria-label={t("connectors.disconnectAria", {
+                        account: account.alias || account.id,
+                        service: card.label,
+                      })}
+                    >
+                      {t("connectors.disconnect")}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {(serviceStatus?.connected || included) && (() => {
+            const limited = botsWithLimitedServiceTools(state.bots, state.instances, card.slug);
+            if (!limited.length) return null;
+            const names = limited.slice(0, 4).map((candidate, index) => (
+              <span key={candidate.id}>
+                {index > 0 && ", "}
+                <button
+                  type="button"
+                  onClick={() => { close(); openBotSettings(dispatch, "access", { botId: candidate.id, page: "apps" }); }}
+                  className="font-medium text-ink underline underline-offset-2 hover:text-accent-text"
+                >
+                  {candidate.name}
+                </button>
+              </span>
+            ));
+            return (
+              <div className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">
+                <span>{t("connectors.grants.limited", { count: limited.length })}</span>{" "}
+                {names}
+                {limited.length > 4 && <span>{t("connectors.grants.more", { count: limited.length - 4 })}</span>}
+              </div>
+            );
+          })()}
+          {addingAccount && (
+            <form
+              className="mt-2 flex items-center gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const alias = aliasDraft.trim();
+                if (!alias) {
+                  setError({ key: "connectors.aliasRequired" });
+                  return;
+                }
+                void connect(card.slug, alias);
+              }}
+            >
+              <input
+                autoFocus
+                value={aliasDraft}
+                maxLength={64}
+                onChange={(event) => setAliasDraft(event.target.value)}
+                placeholder={t("connectors.aliasPlaceholder")}
+                aria-label={accounts.length > 0
+                  ? t("connectors.aliasAriaAnother", { service: card.label })
+                  : t("connectors.aliasAriaNew", { service: card.label })}
+                className="h-8 min-w-0 flex-1 rounded-full bg-inset px-3 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+              <button
+                type="submit"
+                disabled={busy || !aliasDraft.trim()}
+                className="inline-flex h-7 shrink-0 items-center rounded-full bg-accent px-3 text-[13px] font-medium leading-5 text-accent-ink disabled:opacity-40"
+              >
+                {t("connectors.action.continue")}
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+    );
+  }
 }

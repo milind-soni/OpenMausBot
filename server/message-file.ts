@@ -1,29 +1,34 @@
-// A bot may link to a file it created in the workspace for one conversation.
-// Opening that link from a phone must not become a general-purpose host file
-// reader: the HTTP route supplies only roots derived from the exact bot
-// message, and this helper keeps the eventual file handle inside one of them.
+// A message file link must never become a general-purpose host file reader: every handle stays inside a root
+// derived from the exact bot message.
 import { constants } from "node:fs";
-import { open, realpath, stat, type FileHandle } from "node:fs/promises";
-import { basename, extname, isAbsolute, posix, relative, resolve, sep, win32 } from "node:path";
-import { fileURLToPath } from "node:url";
+import { lstat, open, readdir, realpath, stat, type FileHandle } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { fromMarkdown } from "mdast-util-from-markdown";
 
 import { windowsPathDestinations } from "../shared/markdown-windows-paths.ts";
+import { linkPlainPaths } from "../shared/markdown-plain-paths.ts";
+import { PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
+import { inSecretFolder, SECRET_FILE_REFUSAL } from "./secret-folder.ts";
+import { userErrorThrown } from "./user-errors.ts";
 
-export const MESSAGE_FILE_MAX_BYTES = 25 * 1024 * 1024;
+export const MESSAGE_FILE_MAX_BYTES = PREVIEW_MAX_BYTES;
+/** Saving a linked file streams it to the person, so it may be larger than anything read into memory or previewed. */
+export const MESSAGE_FILE_DOWNLOAD_MAX_BYTES = 500 * 1024 * 1024;
 
 export interface OpenedMessageFile {
   handle: FileHandle;
   bytes: number;
   name: string;
   mime: string;
+  /** The canonical host path that was opened. */
+  path: string;
 }
 
 export function messageFileRoots(options: {
   senderWorkspace: string;
   attachments: string;
-  /** undefined = not pinned yet; null = explicitly pinned to no host root. */
   pinnedCwd: string | null | undefined;
   configuredCwd?: string;
 }): string[] {
@@ -35,15 +40,29 @@ export function messageFileRoots(options: {
   ])];
 }
 
-function statusError(status: number, message: string): Error & { status: number } {
-  return Object.assign(new Error(message), { status });
+function statusError(status: number, message: string, code?: string): Error & { status: number; code?: string } {
+  return Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 }
 
+/** Rounded up so a file just over the limit never reads as the limit itself. */
+function megabytes(bytes: number, round: (value: number) => number = Math.round): string {
+  return `${round(bytes / (1024 * 102.4)) / 10} MB`;
+}
+
+function fileTooLarge(bytes: number, limit: number, path: string): Error {
+  const error = userErrorThrown("serverError.file.tooLarge", {
+    size: megabytes(bytes, Math.ceil),
+    limit: megabytes(limit),
+    name: basename(path),
+  });
+  return Object.assign(error, { status: 413, code: "file_too_large" });
+}
+
+const outsideWorkspace = () =>
+  statusError(403, "the linked file is outside this conversation's workspace", "outside_workspace");
+
 function decodePathWithSuffixRemoved(href: string): string {
-  // Split before decoding so an encoded `?` or `#` remains part of the
-  // filename, while a real Markdown query/fragment never reaches the file
-  // lookup. Decode exactly once so authorization and opening see the same
-  // path without making double-encoded input more privileged.
+  // Split before decoding, and decode exactly once, so authorization and opening see the same path.
   const path = href.split(/[?#]/, 1)[0]!;
   if (!path) throw statusError(400, "path must be a non-empty file link");
   try {
@@ -61,15 +80,11 @@ function referencedPath(
   if (!href || Buffer.byteLength(href) > 8_192 || href.includes("\0")) {
     throw statusError(400, "path must be a non-empty file link");
   }
-  // A Windows drive prefix is a path, not a one-letter URL scheme. UNC is
-  // also already an absolute local path on Windows and must not be mistaken
-  // for a protocol-relative web URL.
+  // A Windows drive prefix or a UNC path is a local path, not a URL scheme or a protocol-relative URL.
   if (/^[a-z]:[\\/]/i.test(href) || href.startsWith("\\\\")) {
     return decodePathWithSuffixRemoved(href);
   }
-  // In Markdown, //host/path is a protocol-relative web URL. It is accepted
-  // only as the normalized request spelling of an explicit file:// UNC link,
-  // never as the authored capability itself.
+  // In Markdown //host/path is a web URL: accepted only as the request spelling of an explicit file:// UNC link.
   if (href.startsWith("//")) {
     if (!allowForwardSlashUNC) {
       throw statusError(400, "protocol-relative web links are not local files");
@@ -102,28 +117,25 @@ function referencedPath(
     }
     try {
       const decoded = decodeURIComponent(url.pathname);
-      // WHATWG file URLs always spell drive paths as /C:/..., even when the
-      // URL is parsed on macOS or Linux. Strip only that drive sentinel; an
-      // ordinary /Users/... URL must remain a POSIX path on every host.
+      // WHATWG file URLs spell drive paths /C:/... on every host; strip only that sentinel.
       return /^\/[a-z]:[\\/]/i.test(decoded) ? decoded.slice(1) : decoded;
     } catch {
       throw statusError(400, "path must be a valid file link");
     }
   }
 
-  // Query strings and fragments belong to the Markdown link, not the local
-  // filename. Percent-encoding is common for spaces in relative hrefs.
   return decodePathWithSuffixRemoved(href);
 }
 
-/**
- * A lexical path identity used only for matching a requested file against a
- * rendered Markdown link. Native `resolve` and `fileURLToPath` follow the
- * runner OS, which makes a Unix link compare differently on Windows CI and a
- * Windows link compare differently on macOS. Keeping the path flavour in the
- * identity also prevents a POSIX path such as `/C:/notes.md` from being
- * mistaken for the Windows path `C:\\notes.md`.
- */
+export function referencedFileName(href: string): string | null {
+  try {
+    return referencedPath(href, true).split(/[\\/]/).at(-1) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Lexical on purpose: `resolve` and `fileURLToPath` follow the runner OS, and `/C:/notes.md` is not `C:\\notes.md`. */
 function referencedPathIdentity(href: string, allowForwardSlashUNC = true): string {
   const path = referencedPath(href, true, allowForwardSlashUNC);
   if (/^[a-z]:[\\/]/i.test(path) || path.startsWith("\\\\") || path.startsWith("//")) {
@@ -157,12 +169,15 @@ function walkMarkdown(node: MarkdownNode, visit: (node: MarkdownNode) => void): 
   }
 }
 
-function renderedMarkdownTargets(markdown: string): string[] {
+/** `plainPaths`: also the paths written as plain text, which the app renders as links too. */
+function renderedMarkdownTargets(markdown: string, plainPaths = false): string[] {
   const definitions = new Map<string, string>();
   const links: string[] = [];
   const references: string[] = [];
 
-  walkMarkdown(fromMarkdown(markdown, { mdastExtensions: [windowsPathDestinations] }), (node) => {
+  const tree = fromMarkdown(markdown, { mdastExtensions: [windowsPathDestinations] });
+  if (plainPaths) linkPlainPaths(tree, markdown);
+  walkMarkdown(tree, (node) => {
     if (node.type === "definition" && node.identifier && node.url) {
       if (!definitions.has(node.identifier)) definitions.set(node.identifier, node.url);
     } else if ((node.type === "link" || node.type === "image") && node.url) {
@@ -179,10 +194,13 @@ function renderedMarkdownTargets(markdown: string): string[] {
   return links;
 }
 
-/** Resolve the local image authored at one Markdown source offset. The
- * browser can use this small message-scoped reference instead of putting an
- * absolute host path in a GET URL. Definitions are collected first because
- * CommonMark permits them to appear after the image reference. */
+export function messageFileTargets(text: string): string[] {
+  return [...new Set(renderedMarkdownTargets(text))].filter((target) =>
+    !target.startsWith("#") && !target.startsWith("//") &&
+    (/^[a-z]:[\\/]/i.test(target) || /^file:/i.test(target) || !/^[a-z][a-z\d+.-]*:/i.test(target)));
+}
+
+/** Definitions are collected first: CommonMark lets them follow the reference. */
 export function messageImageTargetAt(text: string, sourceOffset: number): string | null {
   if (!Number.isSafeInteger(sourceOffset) || sourceOffset < 0) return null;
   const definitions = new Map<string, string>();
@@ -202,13 +220,7 @@ export function messageImageTargetAt(text: string, sourceOffset: number): string
   return direct ?? (reference ? definitions.get(reference) ?? null : null);
 }
 
-/**
- * Confirm that the requested path is carried by this message, tolerating the
- * one representation change native URL APIs make for us: a file href with
- * percent-encoded spaces arrives from iOS as a decoded filesystem path.
- * Normalisation is applied only to rendered Markdown link targets, never to
- * arbitrary prose in the message.
- */
+/** iOS delivers a percent-encoded file href as a decoded path; only rendered link targets are normalised, never prose. */
 export function messageReferencesFile(text: string, requested: string): boolean {
   let wanted: string;
   try {
@@ -217,20 +229,17 @@ export function messageReferencesFile(text: string, requested: string): boolean 
     return false;
   }
 
-  for (const target of renderedMarkdownTargets(text)) {
+  for (const target of renderedMarkdownTargets(text, true)) {
     try {
       if (referencedPathIdentity(target, false) === wanted) return true;
     } catch {
-      // A malformed candidate is not the link the client asked to open.
     }
   }
   return false;
 }
 
-/** Decode exactly the entity spellings emitted by the composer. A single
- * pass is intentional: double-encoded input must not turn into a path only
- * while it is being authorised. */
-function decodeAttachmentAttribute(value: string): string {
+/** A single pass on purpose: double-encoded input stays encoded and must not become a path while being authorised. */
+export function decodeAttachmentAttribute(value: string): string {
   return value.replace(
     /&(quot|lt|gt|amp);|&#(9|10|13);/g,
     (entity, named: string | undefined, numeric: string | undefined) => {
@@ -258,8 +267,7 @@ function utf8Prefix(value: string, maximumBytes: number): string {
   return result;
 }
 
-/** Keep the eventual native filename below common 255-byte component limits.
- * 180 bytes leaves room for the app's temporary-file suffix. */
+/** Below common 255-byte name limits, with room for the app's temporary-file suffix. */
 function boundedDisplayName(value: string, maximumBytes = 180): string {
   if (Buffer.byteLength(value) <= maximumBytes) return value;
   const extension = extname(value);
@@ -284,18 +292,7 @@ function safeDisplayName(value: string): string {
   return boundedDisplayName(clean || "download");
 }
 
-/**
- * Confirm that a stored user message carries the requested attachment as an
- * exact standalone transport tag. Plain prose, inline examples, fenced code,
- * and near-matching paths do not grant access. The HTTP route pairs this
- * message capability with ATTACHMENTS_DIR containment, so this can never
- * become an arbitrary host-file reader.
- */
-export function messageReferencesAttachment(text: string, requested: string): boolean {
-  return messageAttachmentName(text, requested) !== null;
-}
-
-/** Return the user-facing name carried by an authorised attachment tag. */
+/** Only an exact standalone transport tag grants access; prose, examples, code and near-matches never do. */
 export function messageAttachmentName(text: string, requested: string): string | null {
   let wanted: string;
   try {
@@ -325,7 +322,6 @@ export function messageAttachmentName(text: string, requested: string): string |
           : decodeAttachmentAttribute(match[1]!));
       }
     } catch {
-      // A malformed transport tag grants no capability.
     }
   });
   return found;
@@ -375,14 +371,12 @@ export function mimeFor(path: string): string {
   }
 }
 
-/**
- * Open a message-linked file under one of the supplied roots. The returned
- * handle, not the pathname, is what the caller streams. We canonicalise both
- * before and after opening and compare the handle with the post-open path;
- * this rejects symlink escapes and directory swaps instead of checking a
- * path and then opening a potentially different file.
- */
-export async function openMessageFile(href: string, roots: readonly string[]): Promise<OpenedMessageFile> {
+/** Canonicalised before and after opening, and the handle compared with the post-open path, to reject symlink escapes and directory swaps. */
+export async function openMessageFile(
+  href: string,
+  roots: readonly string[],
+  maxBytes = MESSAGE_FILE_MAX_BYTES,
+): Promise<OpenedMessageFile> {
   const requested = referencedPath(href);
   const canonicalRoots = (await Promise.all(roots.map(async (root) => {
     try {
@@ -411,19 +405,21 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
       sawOutsideRoot = true;
       continue;
     }
+    if (inSecretFolder(canonicalBefore)) throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
 
     let handle: FileHandle | undefined;
     try {
       const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
-      handle = await open(canonicalBefore, constants.O_RDONLY | noFollow);
+      const nonBlock = typeof constants.O_NONBLOCK === "number" ? constants.O_NONBLOCK : 0;
+      handle = await open(canonicalBefore, constants.O_RDONLY | noFollow | nonBlock);
       const opened = await handle.stat();
+      if (opened.isDirectory()) throw statusError(400, "the link points to a folder, not a file", "directory");
       if (!opened.isFile()) throw statusError(400, "the link does not point to a regular file");
-      if (opened.size > MESSAGE_FILE_MAX_BYTES) {
-        throw statusError(413, `file exceeds ${MESSAGE_FILE_MAX_BYTES} bytes`);
-      }
+      if (opened.size > maxBytes) throw fileTooLarge(opened.size, maxBytes, canonicalBefore);
 
       const canonicalAfter = await realpath(candidate);
-      if (!containedBy(root, canonicalAfter)) throw statusError(403, "the linked file is outside this conversation's workspace");
+      if (!containedBy(root, canonicalAfter)) throw outsideWorkspace();
+      if (inSecretFolder(canonicalAfter)) throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
       const after = await stat(canonicalAfter);
       if (opened.dev !== after.dev || opened.ino !== after.ino) {
         throw statusError(409, "the linked file changed while it was being opened");
@@ -434,6 +430,7 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
         bytes: opened.size,
         name: basename(canonicalAfter),
         mime: mimeFor(canonicalAfter),
+        path: canonicalAfter,
       };
     } catch (error) {
       await handle?.close().catch(() => undefined);
@@ -442,11 +439,145 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
     }
   }
 
-  if (sawOutsideRoot) throw statusError(403, "the linked file is outside this conversation's workspace");
+  if (sawOutsideRoot) throw outsideWorkspace();
   throw statusError(404, "the linked file is unavailable");
 }
 
-/** A safe attachment header with a readable ASCII fallback and UTF-8 name. */
+/** HFS+ and FAT keep whole or even seconds, so a file written early in a turn can carry a slightly earlier time. */
+const SAVED_SINCE_SLACK_MS = 2_000;
+
+/** Grants no folder and is never used for a message link. */
+export async function openFileSavedSince(
+  href: string,
+  options: { since: number; refuse: readonly string[] },
+  maxBytes = MESSAGE_FILE_MAX_BYTES,
+): Promise<OpenedMessageFile> {
+  const requested = referencedPath(href, false, false);
+  if (!isAbsolute(requested) || requested.startsWith("\\\\") || requested.startsWith("//")) throw outsideWorkspace();
+  let canonical: string;
+  try {
+    canonical = await realpath(requested);
+  } catch {
+    throw statusError(404, "the linked file is unavailable");
+  }
+  const refused = (await Promise.all(options.refuse.map((root) => realpath(root).catch(() => null))))
+    .filter((root): root is string => Boolean(root));
+  const hidden = canonical.split(/[\\/]/).some((part) => part.startsWith("."));
+  if (hidden || refused.some((root) => containedBy(root, canonical))) {
+    throw statusError(403, "files in hidden folders or in the app's own data can't be attached", "outside_workspace");
+  }
+  const file = await openMessageFile(canonical, [dirname(canonical)], maxBytes);
+  const opened = await file.handle.stat().catch(async (error: unknown) => {
+    await file.handle.close().catch(() => undefined);
+    throw error;
+  });
+  if (opened.mtimeMs < options.since - SAVED_SINCE_SLACK_MS) {
+    await file.handle.close().catch(() => undefined);
+    throw statusError(403, "that file is outside your working folder and was not saved during this turn, so it can't be attached", "outside_workspace");
+  }
+  return file;
+}
+
+export const MESSAGE_FOLDER_MAX_ENTRIES = 200;
+
+export interface MessageFolderEntry {
+  name: string;
+  bytes: number;
+  mime: string;
+}
+
+export interface MessageFolderListing {
+  name: string;
+  entries: MessageFolderEntry[];
+  truncated: boolean;
+}
+
+export async function listMessageFolder(href: string, roots: readonly string[]): Promise<MessageFolderListing> {
+  const { path: _path, ...listing } = await readMessageFolder(href, roots);
+  return listing;
+}
+
+export async function openMessageFolderEntry(
+  href: string,
+  entry: string,
+  roots: readonly string[],
+  maxBytes = MESSAGE_FILE_MAX_BYTES,
+): Promise<OpenedMessageFile> {
+  const folder = await readMessageFolder(href, roots);
+  if (!folder.entries.some((listed) => listed.name === entry)) {
+    throw statusError(404, "the linked file is unavailable");
+  }
+  return openMessageFile(pathToFileURL(join(folder.path, entry)).href, roots, maxBytes);
+}
+
+async function readMessageFolder(
+  href: string,
+  roots: readonly string[],
+): Promise<MessageFolderListing & { path: string }> {
+  const requested = referencedPath(href);
+  const canonicalRoots = (await Promise.all(roots.map(async (root) => {
+    try {
+      const canonical = await realpath(root);
+      return (await stat(canonical)).isDirectory() ? canonical : null;
+    } catch {
+      return null;
+    }
+  }))).filter((root): root is string => Boolean(root));
+  if (canonicalRoots.length === 0) throw statusError(404, "the linked folder is unavailable");
+  const candidates = isAbsolute(requested)
+    ? [resolve(requested)]
+    : canonicalRoots.map((root) => resolve(root, requested));
+
+  let sawOutsideRoot = false;
+  for (const candidate of new Set(candidates)) {
+    let folder: string;
+    try {
+      folder = await realpath(candidate);
+    } catch {
+      continue;
+    }
+    const root = canonicalRoots.find((allowed) => containedBy(allowed, folder));
+    if (!root) {
+      sawOutsideRoot = true;
+      continue;
+    }
+    if (inSecretFolder(folder)) throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
+    if (!(await stat(folder)).isDirectory()) throw statusError(400, "the link does not point to a folder");
+
+    const names = (await readdir(folder)).sort((a, b) => a.localeCompare(b));
+    const entries: MessageFolderEntry[] = [];
+    let truncated = false;
+    for (const name of names) {
+      const child = join(folder, name);
+      try {
+        const own = await lstat(child);
+        if (!own.isFile() && !own.isSymbolicLink()) continue;
+        const target = await realpath(child);
+        if (!containedBy(root, target) || inSecretFolder(target)) continue;
+        const info = await stat(target);
+        if (!info.isFile()) continue;
+        if (entries.length >= MESSAGE_FOLDER_MAX_ENTRIES) {
+          truncated = true;
+          break;
+        }
+        entries.push({ name, bytes: info.size, mime: mimeFor(target) });
+      } catch {
+        continue;
+      }
+    }
+    return { name: basename(folder), entries, truncated, path: folder };
+  }
+
+  if (sawOutsideRoot) throw outsideWorkspace();
+  throw statusError(404, "the linked folder is unavailable");
+}
+
+export function messageFolderEntryName(value: unknown): string | null {
+  if (typeof value !== "string" || !value || value.length > 255) return null;
+  if (value === "." || value === ".." || /[\\/\0]/.test(value)) return null;
+  return value;
+}
+
 export function messageFileDisposition(name: string): string {
   const safeName = safeDisplayName(name);
   const fallback = safeName
@@ -460,8 +591,7 @@ export function messageFileDisposition(name: string): string {
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
-/** Keep a friendly transport name without allowing it to disguise the bytes'
- * canonical extension (for example PDF bytes named setup.exe). */
+/** A transport name must not disguise the bytes' canonical extension (PDF bytes named setup.exe). */
 export function messageFileDownloadName(displayName: string | undefined, canonicalName: string): string {
   const canonical = safeDisplayName(canonicalName);
   if (!displayName) return canonical;

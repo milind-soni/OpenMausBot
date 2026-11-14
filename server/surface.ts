@@ -1,24 +1,16 @@
-// Where a bot's hands land — and therefore where the person goes when it
-// needs them. A turn can mount two places at once (a computer plus the
-// built-in browser), which is exactly what confused people: "do this on the
-// web" landed in the cloud boat's Chrome one turn and in the Browser tab the
-// next, and the "needs your hands" plea never said which. Everything that
-// decides or describes a surface lives here, so the picker, the dispatch,
-// the system prompt and the notification cannot drift apart.
-
-/** A place a bot can act. `cloud` covers both the Boat and VPS backends —
- * from the person's seat they are the same "cloud computer" panel. */
 import type { Surface } from "../shared/wire.ts";
-export type { Surface };
+import { canWorkOnCloud, type CloudEngine } from "../shared/cloud-computer.ts";
+import { canUseMcpServer } from "../shared/tool-scope.ts";
+import { placeRowText, type PlaceRow, type PlaceSource } from "../shared/place-view.ts";
+import { PLAIN_WORDS } from "./local-computer-guidance.ts";
+import { theirComputer, type LentPlatform } from "./lent-computers.ts";
+export type { Surface, PlaceSource };
 
 /** The bot's "Works on" setting; undefined = Auto. */
 export type Destination = Surface | "off" | undefined;
 
-/** What the computer block of a dispatch aims for. Mirrors the old `wants`
- * local exactly, so its strict/auto branches keep their meaning. */
 export type ComputerWant = "cloud" | "vm" | "local" | "off" | undefined;
 
-/** What a turn actually mounted, in surface terms. */
 export interface MountedSurfaces {
   computer: Surface | null;
   browser: boolean;
@@ -27,24 +19,19 @@ export interface MountedSurfaces {
 export interface SurfacePlan {
   computer: ComputerWant;
   browser: boolean;
-  /** The surface this Auto turn was held to by the task's pin, or null. */
   pinned: Surface | null;
-  /** Reserved for a deliberate migration; unavailable targets retain their pin. */
-  clearPin: boolean;
-  /** One prompt sentence when the chosen destination cannot be honoured. */
   note: string;
+  /** A bot opened this thread, so no person watches its Screen panel: the browser is mounted beside any computer. */
+  botOpened?: true;
 }
 
 const SURFACES: ReadonlySet<string> = new Set(["cloud", "vm", "local", "browser"]);
 
-/** Parse a surface arriving over the wire; anything else is "not said". */
 export function parseSurface(value: unknown): Surface | undefined {
-  // SAFETY: the set membership check is the narrowing — only the four
-  // literal strings pass, and the assertion just names that fact to the type.
+  // SAFETY: the set membership check is the narrowing; only the four literals pass.
   return typeof value === "string" && SURFACES.has(value) ? (value as Surface) : undefined;
 }
 
-/** The per-turn computer kinds the dispatch tracks, folded to a surface. */
 export function surfaceOfComputerKind(kind: "box" | "vps" | "vm" | "local" | null): Surface | null {
   if (kind === "box" || kind === "vps") return "cloud";
   return kind;
@@ -56,60 +43,109 @@ const NO_BROWSER_NOTE =
 const OFF_NOTE =
   " This bot's \"Works on\" setting is Off, so no computer and no built-in browser are mounted this turn: you cannot open a page, click, or type on any screen. If the user asks for something that needs one, tell them Works on is Off in this bot's settings — never claim you are opening a browser you do not have.";
 
-/** Decide what a turn mounts. One place per turn: a computer destination
- * mounts only that computer (web work happens in its own browser), a browser
- * destination mounts only the built-in browser, Off mounts nothing. A
- * conversation pin — set by the person from the composer, or by the
- * conversation's own first turn on Auto — wins over the bot's default, so a
- * thread never changes place under someone; only Off overrides it. An
- * Auto-recorded pin is the machine's memory, not a person's choice: it yields
- * when the bot's Works on later changes and no longer matches, while a
- * person's pin (including legacy pins of unknown origin) keeps winning until
- * they clear it. Auto without a pin leaves
- * the computer choice to the dispatch, which then mounts the browser only
- * when no computer was reached. A pin the turn cannot honour is retained and
- * reported instead of being swapped silently. */
+export function computerSkippedNote(cause: string): string {
+  const why = cause.trim().replace(/[\s.]+$/, "");
+  return ` This turn answers a Team incidents report and your computer could not be prepared for it (${why}), so no computer is mounted: you cannot open, click or check anything on it this turn. Act through your teammates, or tell the person what only they can fix — never claim to have checked that computer yourself.`;
+}
+
+/** One place per turn, plus the browser beside it in a thread a bot opened. A person's pin beats the bot's default (only Off overrides it), an Auto pin yields to a Works on change, and a pin the turn cannot honour is reported, never swapped. */
 export function resolveSurface(input: {
   destination: Destination;
   pinnedSurface?: Surface | null;
-  /** The built-in browser may mount: workspace flag, bot switch and engine. */
   browserOn: boolean;
+  botOpened?: boolean;
 }): SurfacePlan {
-  const { destination, browserOn } = input;
-  // Off is the whole answer: no computer and no browser. It used to withhold
-  // only the computer, which left a bot set to Off holding the built-in
-  // browser — the one surface the setting most obviously reads as forbidding,
-  // and the one people then watched it reach for. The overview ("Can't use a
-  // computer.") and the settings prompt preview already described Off this
-  // way; the dispatch was the odd one out. A bot that should keep the browser
-  // and nothing else has its own destination: Browser.
-  if (destination === "off") {
-    return { computer: "off", browser: false, pinned: null, clearPin: false, note: OFF_NOTE };
-  }
-  const pin = input.pinnedSurface ?? null;
-  if (pin === "browser") {
-    if (browserOn) return { computer: "off", browser: true, pinned: "browser", clearPin: false, note: "" };
-    // A missing browser is not permission to act on the host instead. Keep
-    // the chosen place so a retry or unrelated provider failure cannot move
-    // the task to a different signed-in computer.
-    return { computer: "off", browser: false, pinned: pin, clearPin: false,
-      note: " This conversation is pinned to the built-in browser, but its tools are unavailable this turn. No computer is mounted instead. Do not claim to have used it; a different place must be selected before acting there." };
-  }
-  if (pin) return { computer: pin, browser: false, pinned: pin, clearPin: false, note: "" };
-  if (destination === "browser") {
-    return browserOn
-      ? { computer: "off", browser: true, pinned: null, clearPin: false, note: "" }
-      : { computer: "off", browser: false, pinned: null, clearPin: false, note: NO_BROWSER_NOTE };
-  }
-  if (destination !== undefined) {
-    return { computer: destination, browser: false, pinned: null, clearPin: false, note: "" };
-  }
-  return { computer: undefined, browser: browserOn, pinned: null, clearPin: false, note: "" };
+  const plan = placeOf(input);
+  return input.botOpened ? { ...plan, botOpened: true } : plan;
 }
 
-/** How the prompt and the app name a surface. Deliberately the same words
- * the panel uses, so "tell them it is on the cloud computer" points at a
- * label the person can find. */
+function placeOf(input: { destination: Destination; pinnedSurface?: Surface | null; browserOn: boolean; botOpened?: boolean }): SurfacePlan {
+  const { destination, browserOn } = input;
+  if (destination === "off") {
+    return { computer: "off", browser: false, pinned: null, note: OFF_NOTE };
+  }
+  const beside = input.botOpened === true && browserOn;
+  const pin = input.pinnedSurface ?? null;
+  if (pin === "browser") {
+    if (browserOn) return { computer: "off", browser: true, pinned: "browser", note: "" };
+    // A missing browser is not permission to act on the host instead.
+    return { computer: "off", browser: false, pinned: pin,
+      note: " This conversation is pinned to the built-in browser, but its tools are unavailable this turn. No computer is mounted instead. Do not claim to have used it; a different place must be selected before acting there." };
+  }
+  if (pin) return { computer: pin, browser: beside, pinned: pin, note: "" };
+  if (destination === "browser") {
+    return browserOn
+      ? { computer: "off", browser: true, pinned: null, note: "" }
+      : { computer: "off", browser: false, pinned: null, note: NO_BROWSER_NOTE };
+  }
+  if (destination !== undefined) {
+    return { computer: destination, browser: beside, pinned: null, note: "" };
+  }
+  return { computer: undefined, browser: browserOn, pinned: null, note: "" };
+}
+
+/** On Auto, work handed over by another bot runs on the receiving bot's own cloud computer when it has one (asleep or awake): the handoff cannot pick a place itself. Auto still never creates one; Works on, a pin, a person's turn and a consult keep their usual place. */
+/** Work another bot handed over: a child node (a person's own root also runs as "work" when it resumes), never a consult. */
+export function isHandedWork(node: { parentId?: string; mode: string } | undefined): boolean {
+  return Boolean(node?.parentId && node.mode !== "consult");
+}
+
+export function handoffUsesOwnCloud(input: { plan: Pick<SurfacePlan, "computer">; handoffWork: boolean; ownCloudState: string | null | undefined }): boolean {
+  return input.handoffWork && input.plan.computer === undefined && Boolean(input.ownCloudState);
+}
+
+/** Best effort: an unreachable Boat service counts as no cloud computer after `ms`, so a handoff still starts promptly.
+ * `unavailable` marks a failed or slow lookup, which is not a confirmed "no cloud computer". */
+export function ownCloudStateWithin(status: Promise<{ box?: { state?: string | null } | null }>, ms = 3_000): Promise<{ state: string | null | undefined; unavailable: boolean }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const unavailable = { state: undefined, unavailable: true };
+  return Promise.race([
+    status.then((result) => ({ state: result.box?.state, unavailable: false }), () => unavailable),
+    new Promise<typeof unavailable>((resolve) => { timer = setTimeout(() => resolve(unavailable), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+export function browserIsThePlace(plan: SurfacePlan): boolean {
+  return plan.computer === "off" && plan.browser;
+}
+
+/** The conversation's pin as a person chose it: a pin a turn made on its own (auto) is none. */
+export function chosenPin(task: { surface?: Surface; surfaceSource?: "user" | "auto" } | undefined): Surface | null | undefined {
+  return task?.surfaceSource === "auto" ? null : task?.surface;
+}
+
+/** Where a turn's pinned place came from. A pin a turn made on its own to the place Works on already names is Works on:
+ * the person chose that place, so it is never asked for again (only a turn on Auto asks before using this computer). */
+export function pinSource(pinned: Surface, task: { surfaceSource?: "user" | "auto" } | undefined, destination: Destination): PlaceSource {
+  if (task?.surfaceSource !== "auto") return "pin";
+  return pinned === destination ? "works-on" : "auto-pin";
+}
+
+export function cloudPlaceRefusal(engine: CloudEngine & { name: string }, source: PlaceSource, bot: string): PlaceUnavailableError | null {
+  if (canWorkOnCloud(engine)) return null;
+  return placeUnavailable("cloud", { state: "cc-cannot", params: { bot, model: engine.name }, source });
+}
+
+export function computerToolsRefusal(toolScope: unknown, source: PlaceSource, bot: string): PlaceUnavailableError | null {
+  if (canUseMcpServer(toolScope, "computer")) return null;
+  return placeUnavailable("cloud", { state: "cc-tools-off", params: { bot }, source });
+}
+
+export class PlaceUnavailableError extends Error {
+  readonly place: Surface;
+  readonly row: PlaceRow;
+  constructor(place: Surface, row: PlaceRow, cloudHome = false) {
+    super(placeRowText(row, cloudHome ? "my-cloud" : undefined));
+    this.name = "PlaceUnavailableError";
+    this.place = place;
+    this.row = row;
+  }
+}
+
+export function placeUnavailable(place: Surface, row: PlaceRow, cloudHome = false): PlaceUnavailableError {
+  return new PlaceUnavailableError(place, row, cloudHome);
+}
+
 export function surfaceLabel(surface: Surface): string {
   switch (surface) {
     case "cloud":
@@ -123,62 +159,102 @@ export function surfaceLabel(surface: Surface): string {
   }
 }
 
-/** Said once per task, so the person hears the place before the first click
- * lands there. Same words as the panel and the composer chip. */
+/** This computer is the person's own: web work goes elsewhere first, and their first-use question is the harness's to ask. */
+const WEB_WORK_ORDER = "For web work such as finding, booking or looking something up, use, in this order:";
+const YOUR_COMPUTER_LAST =
+  " Use their own browser or screen only when the task needs their own signed-in session and nothing else works. Before your first action on it in a request, OpenMausBot asks them once whether you may, at every approval level except Full access: do not ask in chat yourself, and if they say no, finish another way. " + PLAIN_WORDS;
+const YOUR_COMPUTER_BESIDE_BROWSER =
+  ` This computer is the person's own: their screen, their apps and the browsers they are signed in to. ${WEB_WORK_ORDER} a connected app that does it, your built-in browser, a cloud computer if select_computer offers one.${YOUR_COMPUTER_LAST}`;
+const YOUR_COMPUTER_ALONE =
+  ` Everything you do on screen happens on this computer, which is the person's own: their screen, their apps and the browsers they are signed in to; there is no built-in browser of yours this turn. ${WEB_WORK_ORDER} a connected app that does it, web search and fetching pages, a cloud computer if select_computer offers one.${YOUR_COMPUTER_LAST} If you need the user to sign in, tell them it is on this computer.`;
+
+/** A connected app does a task more cheaply and surely than any screen, and one that is refused or broken is the person's
+ * to fix: worked around on a screen, it stays broken and they never hear why. */
+const CONNECTED_APP_FIRST =
+  " When a connected app can do the task, use it before any browser or screen. If that app is refused or fails, say so in one plain line with what fixes it (connecting it, or who can), and ask before doing the task on a screen instead.";
+
 const RESTATE_SENTENCE =
   " Before your first action on a screen or page in a task, say in one short sentence where you are working, using that same name.";
 
-const SURFACE_AUTHORITY =
-  " For browser and computer tasks, use OpenMausBot's mounted browser/computer tools first: inspect the target, perform the action, and verify its result before claiming success. Discover deferred tools by their server/name when needed. Do not substitute the provider's own desktop, a shell-launched browser, or another automation path for the selected OpenMausBot surface. Ordinary code and file tasks may still use their normal tools. Announcing an action is not performing it. A request naming another place does not move these tools: this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote, and the built-in browser is a separate browser. If the requested place differs from the mounted one, explain the mismatch and ask the user to change the conversation's computer selector; never act on a different computer or describe a host window as a VM.";
+const PLACE_CONTROL = "the Screen panel";
+/** surfacePrompt swaps exactly this phrase when select_computer is mounted. */
+const ASK_TO_SWITCH = `explain the mismatch and ask the user to change where this conversation works in ${PLACE_CONTROL}`;
+const REPORT_BACK = "tell the bot that gave you this job which place you need and end your turn, because no person watches this conversation";
 
-/** The one paragraph that says where this turn's work happens. Assembled
- * from what was actually mounted, never from the setting, so the model is
- * only ever told about tools it can call. */
+const SURFACE_AUTHORITY =
+  ` For browser and computer tasks, use OpenMausBot's mounted browser/computer tools first: inspect the target, perform the action, and verify its result before claiming success. Discover deferred tools by their server/name when needed. Do not substitute the provider's own desktop, a shell-launched browser, or another automation path for the selected OpenMausBot surface. Ordinary code and file tasks may still use their normal tools. Announcing an action is not performing it. A request naming another place does not move these tools: this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote, and the built-in browser is a separate browser. If the requested place differs from the mounted one, ${ASK_TO_SWITCH}; never act on a different computer or describe a host window as a VM.`;
+
+/** A Cloud home without the shared-computer tools cannot reach the person's own computer at all. */
+const UNREACHABLE_OWN = "the user's own computer cannot be reached from here";
+
+/** With the shared-computer tools, what the wording above says of every screen holds only for this turn's places. */
+const OWN_COMPUTER_WORDING: ReadonlyArray<readonly [RegExp | string, string]> = [
+  [/ Everything you do on screen happens (on|in) /, " The screen tools mounted this turn work $1 "],
+  ["there is no desktop computer this turn", "no desktop computer is mounted this turn"],
+  ["You cannot open apps, click, or inspect a screen through OpenMausBot.", "No place's tools can open apps, click, or inspect a screen this turn."],
+];
+
+/** A Cloud home has neither this computer nor a Local VM; each pair rewrites one phrase of the wording above. */
+const CLOUD_HOME_WORDING: ReadonlyArray<readonly [string, string]> = [
+  ["this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote, and the built-in browser is a separate browser",
+    `the cloud computer is remote, the built-in browser is a separate browser, and ${UNREACHABLE_OWN}`],
+  [" or describe a host window as a VM", ""],
+  ["select an available Local VM without asking", "select an available cloud computer without asking"],
+  [" Never silently replace an explicitly requested VM with the host desktop.", ""],
+];
+
+/** On a Cloud home the person's own computer is never one of the places above: shared_computer reaches it, whatever
+ * place the conversation has. Saying it can't be reached there turned a bot away from a PC lent with its screen. */
+function ownComputerSentence(lent: ReadonlyArray<{ name: string; platform: LentPlatform | null }>, place: string | null): string {
+  const { theirs } = theirComputer(lent);
+  return ` ${theirs[0]!.toUpperCase()}${theirs.slice(1)} is reached only through shared_computer, never select_computer: when they ask for something on it, check list_shared_computers, then use shared_computer on it (computer_tools, then computer_call, for its apps and screen), whatever this conversation is pinned to. If list_shared_computers says this conversation can't use it, or that it doesn't lend what you need, say so in one sentence${place ? ` and don't do it on ${place} instead unless they ask` : ""}.`;
+}
+
+/** Built from what was actually mounted, never from the setting, so the model is only told about tools it can call.
+ * `ownComputer`: on a Cloud home, the person's lent computers (newest first) when this turn has the shared-computer tools. */
 export function surfacePrompt(
   mounted: MountedSurfaces,
-  opts: { pinned?: Surface | null; note?: string; canSelect?: boolean } = {},
+  opts: { pinned?: Surface | null; note?: string; canSelect?: boolean; cloudHome?: boolean; botOpened?: boolean;
+    ownComputer?: ReadonlyArray<{ name: string; platform: LentPlatform | null }> } = {},
 ): string {
+  const reportBack = opts.botOpened && !opts.canSelect;
   const computer = mounted.computer ? surfaceLabel(mounted.computer) : null;
   let text = "";
-  if (computer && mounted.browser) {
+  if (mounted.computer === "local" && !opts.cloudHome) {
+    text = mounted.browser
+      ? ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and this computer (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → this computer tools. Pick one surface for a task and stay on it; if you need the user to sign in, say which surface — the Browser tab or this computer.${YOUR_COMPUTER_BESIDE_BROWSER}`
+      : YOUR_COMPUTER_ALONE;
+  } else if (computer && mounted.browser) {
+    // The two browsers usually share no cookies: "Web tasks → the built-in browser" alone sent a bot whose site was
+    // signed in on the computer to a signed-out tab, where it asked the person to sign in again.
     text =
-      ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and ${computer} (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → ${computer} tools. Pick one surface for a task and stay on it; if you need the user to sign in, say which surface — the Browser tab or ${computer}.`;
+      ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and ${computer} (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → ${computer} tools. Pick one surface for a task and stay on it; if you need the user to sign in, say which surface — the Browser tab or ${computer}. The built-in browser and ${computer} may not share sign-ins. When you pick the surface for a new task and the user did not name a place, if you already saw its site signed in on ${computer} with the account it needs, pick ${computer} instead of the Browser tab, unless the task needs something already in the Browser tab, such as a cart; if the site turns out signed out on ${computer}, use the Browser tab when it is signed in there.`;
   } else if (computer) {
     text =
       ` Everything you do on screen happens on ${computer}, web pages included, through its own browser; there is no separate built-in browser this turn. If you need the user to sign in, tell them it is on ${computer}.`;
   } else if (mounted.browser) {
     text =
-      " Everything you do on screen happens in the built-in browser tab; there is no desktop, file or shell computer this turn. If you need the user to sign in, tell them it is in the Browser tab of the Computer panel.";
+      " Everything you do on screen happens in the built-in browser tab; there is no desktop computer this turn, but your own shell and file tools still work for ordinary code and file tasks, if you have them. If you need the user to sign in, tell them it is in the Browser tab of the Screen panel.";
   }
   if (text) text += RESTATE_SENTENCE + (opts.canSelect
-    ? SURFACE_AUTHORITY.replace("explain the mismatch and ask the user to change the conversation's computer selector", "inspect connected choices with select_computer and select the requested available place; on a pending result end this turn so OpenMausBot can reconnect the correct tools and continue the original request")
-    : SURFACE_AUTHORITY);
+    ? SURFACE_AUTHORITY.replace(ASK_TO_SWITCH, "inspect connected choices with select_computer and select the requested available place; on a pending result end this turn so OpenMausBot can reconnect the correct tools and continue the original request")
+    : reportBack ? SURFACE_AUTHORITY.replace(ASK_TO_SWITCH, REPORT_BACK) : SURFACE_AUTHORITY);
   else if (!opts.note && !opts.canSelect) {
-    text = " No computer or built-in browser tools are mounted this turn. You cannot open apps, click, or inspect a screen through OpenMausBot. If asked for screen work, explain this and ask the user to choose and connect a computer in the Computer panel; do not claim to have opened or checked it.";
+    text = ` No computer or built-in browser tools are mounted this turn. You cannot open apps, click, or inspect a screen through OpenMausBot. If asked for screen work, ${reportBack ? REPORT_BACK : "explain this and ask the user to choose where this conversation works in the Screen panel"}; do not claim to have opened or checked it.`;
   }
   if (opts.pinned) {
-    text += ` This conversation is pinned to ${surfaceLabel(opts.pinned)}; changing places requires ${opts.canSelect ? "select_computer or " : ""}the conversation's computer selector, not a different tool name.`;
+    text += ` This conversation is pinned to ${surfaceLabel(opts.pinned)}; changing places requires ${opts.canSelect ? "select_computer or " : ""}the user's choice in ${PLACE_CONTROL}, not a different tool name.`;
   }
   if (opts.canSelect) text += " For a screen task, use select_computer with no arguments when you need to inspect the actual available targets. Choose the requested place from its result; if the user left the place open, use a suitable available target or surface auto instead of asking them to operate the menu. Browser-only work can stay in Browser; when it needs desktop apps or capabilities the current Browser lacks, select an available Local VM without asking the user to switch it manually. Choose before taking actions, and do not repeat actions already completed if the task must continue elsewhere. OpenMausBot can start an existing configured computer and highlight the selected target. If the right tools are already mounted, use them directly. On a pending switch, end this turn: the original request resumes automatically with the new tools, and then you must carry out the task. Only ask for input for a genuine blocker, such as missing setup, required sign-in or an approval. Never silently replace an explicitly requested VM with the host desktop.";
   if (opts.canSelect) text += " If no suitable computer is running but its provider is configured, select_computer can provision one for this computer task; reuse existing resources first. Do not provision merely for ordinary chat or inspection.";
   if (opts.canSelect && !computer && !mounted.browser) text += " No computer or browser tools are mounted yet; select_computer is the way to connect them before screen work, not a reason to claim you already performed it.";
+  if (computer || mounted.browser) text += CONNECTED_APP_FIRST;
   if (computer || mounted.browser) text += " For online research, use the selected OpenMausBot browser when a search service is unavailable. A failed tool proves only that this attempt failed, not that every browser is unavailable. Inspect the current page after navigation; report a sign-in page, redirect or error as such. A completed model turn is not proof that the user's task succeeded.";
+  if (opts.cloudHome) for (const [desktop, cloudHome] of CLOUD_HOME_WORDING) text = text.replace(desktop, cloudHome);
+  if (opts.cloudHome && opts.ownComputer) {
+    // What this turn's places reach, never every screen: their own computer is reachable too, through shared_computer.
+    for (const [nowhere, places] of OWN_COMPUTER_WORDING) text = text.replace(nowhere, places);
+    text = text.replace(UNREACHABLE_OWN, `${theirComputer(opts.ownComputer).theirs} is not one of these places`) + ownComputerSentence(opts.ownComputer, computer);
+  }
   return text + (opts.note ?? "");
-}
-
-/** Tool names that touch a screen, for engines that report bare names.
- * Mirrors the screen-poller regex in the harness. */
-const SCREEN_TOOL = /^(?:screenshot|click|type_text|press_key|scroll|open_url|wait_for|computer_|browser_)/i;
-
-/** Which surface a completed tool call landed on, or null when it cannot
- * be told apart. The Claude driver namespaces MCP tools by server, which
- * is the only fully reliable signal; a bare name is trusted only when one
- * surface was mounted, because both servers expose `browser_snapshot`. */
-export function surfaceForTool(toolName: string, mounted: MountedSurfaces): Surface | null {
-  if (toolName.startsWith("mcp__browser__")) return mounted.browser ? "browser" : null;
-  if (toolName.startsWith("mcp__computer__")) return mounted.computer;
-  if (!SCREEN_TOOL.test(toolName)) return null;
-  if (mounted.computer && !mounted.browser) return mounted.computer;
-  if (!mounted.computer && mounted.browser && /^browser_/i.test(toolName)) return "browser";
-  return null;
 }

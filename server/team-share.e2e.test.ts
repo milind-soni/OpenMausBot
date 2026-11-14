@@ -9,9 +9,6 @@ import { includedSkills, requestedSkills, startingTicks } from "../src/lib/team-
 const FIXTURES = join(import.meta.dirname, "..", "shared", "package-fixtures");
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
-// The recipe in docs/verification/team-sharing.md: a disposable fake-engine
-// server, a team built through the public API, Share team (dry run and save),
-// renames, then the file imported back as an untrusted file.
 it("shares one team whole (minus chat history) and imports it back as new, inert copies", async () => {
   const fixture = await launchVerificationServer();
   console.log(JSON.stringify({ fixture: fixture.info }));
@@ -64,8 +61,6 @@ it("shares one team whole (minus chat history) and imports it back as new, inert
     expect(saved.document.package.agents.find((agent: { key: string }) => agent.key === "morgan").seed.memory).toEqual({ "MEMORY.md": "- Prefers short summaries.\n", "memory/pricing.md": "List price 49.\n" });
     expect(existsSync(published)).toBe(true);
 
-    // Renaming the team and a bot keeps the package id and every key; the
-    // next save suggests the next patch release.
     await ok("PATCH", `/api/sidebar-sections?section=${encodeURIComponent("Sales desk")}`, { name: "Revenue desk" });
     await ok("PATCH", `/api/bots/${scout.id}`, { name: "Scout Two" });
     const again = await ok("POST", "/api/teams/export", { ...body, team: "Revenue desk" });
@@ -74,8 +69,6 @@ it("shares one team whole (minus chat history) and imports it back as new, inert
     expect(again.document.package.agents.map((agent: { key: string }) => agent.key)).toEqual(saved.document.package.agents.map((agent: { key: string }) => agent.key));
     expect(again.document.package.rooms[0].key).toBe(saved.document.package.rooms[0].key);
 
-    // Import the saved file. The body claims trust and a publisher; both are
-    // ignored: this is a file.
     const beforeServers = (await ok("GET", "/api/mcp/servers")).servers.map((server: { name: string }) => server.name);
     const imported = await call("POST", "/api/teams/import?trust=org", {
       ...saved.document, trust: "org", org: { installId: "x" },
@@ -89,6 +82,7 @@ it("shares one team whole (minus chat history) and imports it back as new, inert
     expect(copyLead).toMatchObject({ chiefOfStaff: true, mcpServers: ["crm-2"], installedPackage: { id: "sales-desk", source: "file", agentKey: "morgan" } });
     expect(copyLead.installedPackage).not.toHaveProperty("publisher");
     expect(copyLead.avatarUrl).toMatch(/^\/api\/attachments\//);
+    expect(copies.map((bot) => bot.approvalMode)).toEqual(copies.map(() => "full"));
     for (const bot of copies) {
       const skills = (await ok("GET", `/api/bots/${bot.id}/skills`)).skills as Array<{ enabled: boolean }>;
       expect(skills.every((skill) => !skill.enabled)).toBe(true);
@@ -104,27 +98,19 @@ it("shares one team whole (minus chat history) and imports it back as new, inert
     expect((await ok("GET", `/api/bots/${copyLead.id}/memory/file?path=${encodeURIComponent("memory/pricing.md")}`)).text).toBe("List price 49.\n");
     expect(imported.body.groups[0]).toMatchObject({ name: "Deal desk", bulletin: "Cite sources.", defaultResponder: { kind: "member", botId: copyLead.id } });
 
-    // Other files: a library package adds its preset to New bot and no bots
-    // (server/presets.e2e.test.ts covers presets); a newer file asks for an
-    // update; neither creates a bot.
     const before = await ok("GET", "/api/bots");
     const library = await call("POST", "/api/teams/import", JSON.parse(readFileSync(join(FIXTURES, "library-only.v2.json"), "utf8")));
     expect(library).toMatchObject({ status: 201, body: { bots: [], section: "", presets: [{ key: "support", name: "Support agent" }] } });
     const newer = await call("POST", "/api/teams/import", JSON.parse(readFileSync(join(FIXTURES, "newer.v3.json"), "utf8")));
     expect(newer).toEqual({ status: 400, body: { error: NEWER_PACKAGE_MESSAGE } });
     expect(await ok("GET", "/api/bots")).toEqual(before);
-    // The saved document is exactly what every reader accepts.
     expect(() => parsePackageDocument(saved.document)).not.toThrow();
   } finally {
     await fixture.close();
   }
 }, 120_000);
 
-// A team whose skills cannot all go in one file (a bot with 31, a name two
-// bots hold with different content) and a connection whose address carries
-// its key. The dialog's first look ("all") must still get counts and every
-// skill name; an exact choice that cannot fit is a 400 sentence that still
-// names the skills, never a 500 or a dead end.
+// Skills that cannot all fit one file (a bot with 31, a name two bots hold with different content) and an address carrying its key.
 it("never leaves Share team stuck on skills, and keeps keys out of connection addresses", async () => {
   const fixture = await launchVerificationServer();
   console.log(JSON.stringify({ fixture: fixture.info }));
@@ -166,20 +152,19 @@ it("never leaves Share team stuck on skills, and keeps keys out of connection ad
     expect(JSON.stringify(all.document)).not.toContain("ZTJmNDk1YjMtNjQ0Yi00ZjU2LWI1ZjY");
 
     const crowded = await call("POST", "/api/teams/export", { ...body, skills: names });
-    expect(crowded).toEqual({ status: 400, body: { error: "Morgan has more than 30 skills. Choose fewer skills and try again.", choices: { skills: all.choices.skills } } });
+    expect(crowded).toEqual({ status: 400, body: { error: "Morgan has more than 30 skills. Choose fewer skills and try again.",
+      errorKey: "serverError.department.shareBotSkillLimit", errorParams: { name: "Morgan", count: "30" }, choices: { skills: all.choices.skills } } });
     const conflict = await call("POST", "/api/teams/export", { ...body, skills: ["pricing"] });
     expect(conflict).toEqual({ status: 400, body: {
-      error: 'Two bots in this team have different skills named "pricing". Leave that skill out and try again.', choices: { skills: all.choices.skills } } });
+      error: 'Two bots in this department have different skills named "pricing". Leave that skill out and try again.',
+      errorKey: "serverError.department.shareSkillClash", errorParams: { skill: "pricing" }, choices: { skills: all.choices.skills } } });
     const unknown = await call("POST", "/api/teams/export", { ...body, skills: ["gone"] });
     expect(unknown.status).toBe(400);
     expect(unknown.body.choices.skills).toEqual(all.choices.skills);
-    // Unticking one of the lead's skills is a choice that fits.
     const fits = await ok("POST", "/api/teams/export", { ...body, skills: names.slice(1) });
     expect(fits.document.package.skills.entries).toHaveLength(30);
 
-    // Scout also holds the lead's step-31 (same content) and z-only: "all"
-    // puts step-31 in the file for Scout. The dialog's starting ticks leave
-    // it out, so unticking z-only is still a choice that fits.
+    // Scout also holds the lead's step-31 (same content) and z-only; the dialog's starting ticks leave step-31 out.
     await addSkill(scout.id, "step-31");
     await addSkill(scout.id, "z-only");
     const shared = await ok("POST", "/api/teams/export", body);

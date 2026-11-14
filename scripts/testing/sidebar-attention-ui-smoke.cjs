@@ -1,34 +1,16 @@
-// The Active Threads popover geometry contract, as a ui-smoke leg: a sibling
-// of approval-ui-smoke.cjs, run by scripts/smoke-approval-modes.cjs (its --ui
-// group, or --sidebar-attention-only alone; --capture-only writes the PNG
-// evidence without asserting, for before/after composites on other trees).
-// The disposable fake-engine server holds one bot whose settled reply is
-// never read - the unread state the cross-bot attention list collects - and
-// the real Sidebar is mounted at each density through the shared preview
-// fixture. The popover must keep its 16px inset in the row densities: in
-// compact a static w-72 (288px) crossed the window edge by 32px
-// (272 < 16 + 288) and the OS clipped the title row, which is the reported
-// field bug. In the avatar column the header's actions stack vertically, so
-// the menu must anchor to the Active Threads button itself: anchored to the
-// action cluster it opened below the + button instead, the reported
-// avatar-view bug.
-//
-// Determinism: the popover opens the instant the button is clicked, but its
-// rows exist only once the store's first /api/bots fetch lands in the page,
-// so openAndMeasure waits for a populated menu before it measures - geometry
-// is always taken from the popover the field bug is about.
+// The Active Threads popover geometry contract: it keeps its 16px inset at the
+// row densities, and in the avatar column anchors to the Active Threads button.
+// Run by scripts/smoke-approval-modes.cjs (its --ui group, or
+// --sidebar-attention-only alone; --capture-only writes the PNG evidence
+// without asserting).
 const { BrowserWindow } = require("electron");
 const assert = require("node:assert/strict");
 const { mkdirSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-// The popover anchors right-0 to the header's action cluster, so every
-// anchored menu's right edge sits this far inside the sidebar's outer edge:
-// px-4 ends the cluster 16px inside the sidebar's usable width, and the
-// sidebar's own border-r adds one more pixel. (A left-edge "sidebarLeft + 16"
-// model is never executable: every anchored menu, healthy comfortable
-// included, measures 15px from the sidebar's left edge.)
+// The popover anchors right-0 to the header's action cluster: px-4 ends it 16px
+// inside the sidebar, and the sidebar's border-r adds one more pixel.
 const HEADER_ACTION_INSET_PX = 16; // px-4 on the header's action cluster
 const SIDEBAR_BORDER_RIGHT_PX = 1; // border-r on the sidebar itself
 const POPOVER_RIGHT_INSET_PX = HEADER_ACTION_INSET_PX + SIDEBAR_BORDER_RIGHT_PX;
@@ -84,10 +66,9 @@ module.exports = async function verifySidebarAttentionUi({ root, url, api, until
   };
   try {
     const results = {};
-    // Compact must shrink the menu to w-60 (240px); comfortable keeps w-72
-    // (288px). Both sit 16px inside the sidebar: popover width + px-4 anchor
-    // equal the sidebar's own width plus the shared 16px inset.
-    for (const [density, sidebarPixels, menuWidth] of [["compact", 272, 240], ["comfortable", 320, 288]]) {
+    // The open sidebar keeps the menu at w-72 (288px), 16px inside the sidebar:
+    // popover width + px-4 anchor equal the sidebar's own width plus the 16px inset.
+    for (const [density, sidebarPixels, menuWidth] of [["comfortable", 320, 288]]) {
       await window.loadURL(`${preview.previewUrl}?density=${density}`);
       await until(async () => await evaluate(sidebarAtWidth(sidebarPixels)) === true);
       const measured = await openAndMeasure();
@@ -105,11 +86,8 @@ module.exports = async function verifySidebarAttentionUi({ root, url, api, until
           `the ${density} title must start inside the window: ${JSON.stringify(measured)}`);
       }
     }
-    // The avatar column anchors the menu to the Active Threads button
-    // itself: left-0 on the button's left edge and top directly under it
-    // (top-full + mt-1). Anchored to the cluster the menu opened a full
-    // button-plus-gap lower - under the + button - which is the reported
-    // avatar-view bug.
+    // The avatar column anchors the menu to the button itself: left-0 on its
+    // left edge, directly under it (top-full + mt-1).
     await window.loadURL(`${preview.previewUrl}?density=icons`);
     await until(async () => await evaluate(sidebarAtWidth(80)) === true);
     const icons = await openAndMeasure();

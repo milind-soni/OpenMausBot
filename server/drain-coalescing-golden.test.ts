@@ -1,9 +1,6 @@
-// Golden freeze of M2's drain-coalescing rule (the L2 ordering/batching
-// layer in admission.ts): a sender's CONTIGUOUS burst inside a short window
-// is one drained item; senders never merge; provenance kind is part of the
-// sender identity; rooms drain one coalesced item per turn. A failing row
-// means the drain batching changed; pair any intentional change with an
-// update here so the diff says so out loud.
+// Golden freeze of the drain-coalescing rule: a sender's contiguous burst inside a short window is one drained item, senders
+// never merge, provenance kind is part of the sender, and rooms drain one coalesced item per turn. A failing row means the
+// batching changed; pair an intentional change with an update here.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DRAIN_COALESCE_MAX_ITEMS, DRAIN_COALESCE_WINDOW_MS } from "./admission.ts";
@@ -82,7 +79,6 @@ describe("drain coalescing golden (M2)", () => {
 
     drainSteeredMessages(store, run);
     expect(run).toHaveBeenCalledTimes(1);
-    // one turn, blank-line joined, every line under its own queueId
     expect(run.mock.calls[0][2]).toBe("part one\n\npart two\n\npart three");
     expect(store.messages.map((m) => m.queueId)).toEqual([first.id, second.id, third.id]);
     expect(_queuedCount(bot.threadId)).toBe(0);
@@ -120,7 +116,6 @@ describe("drain coalescing golden (M2)", () => {
     expect(run.mock.calls[0][2]).toBe("this morning");
     drainSteeredMessages(store, run);
     expect(run.mock.calls[1][2]).toBe("this afternoon");
-    // two turns, never the joined prompt of the pre-M2 drain
     expect(run.mock.calls.map((call) => call[2])).toEqual(["this morning", "this afternoon"]);
   });
 
@@ -137,7 +132,6 @@ describe("drain coalescing golden (M2)", () => {
     drainSteeredMessages(store, run);
     expect(run).toHaveBeenCalledTimes(3);
     expect(run.mock.calls.map((call) => call[2])).toEqual(["owner first", "priya's note", "owner second"]);
-    // each turn is booked to the line that started it
     expect(run.mock.calls[1][6].sender).toEqual({ name: "Priya", id: "p_priya" });
     expect(run.mock.calls[0][6].sender).toBeUndefined();
     expect(_queuedCount(bot.threadId)).toBe(0);
@@ -154,13 +148,32 @@ describe("drain coalescing golden (M2)", () => {
     drainSteeredMessages(store, run);
     expect(run).toHaveBeenCalledTimes(1);
     expect(run.mock.calls[0][2]).toBe("a person's words");
-    expect(run.mock.calls[0][5]).toBe(false); // the person's turn stays attended
+    expect(run.mock.calls[0][5]).toBe(false);
 
     drainSteeredMessages(store, run);
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1][2]).toBe("the planner's own job");
-    expect(run.mock.calls[1][5]).toBe(true); // unattended provenance rides its own turn
+    expect(run.mock.calls[1][5]).toBe(true);
     expect(run.mock.calls[1][6].peerAsk).toEqual(peerAsk);
+    expect(_queuedCount(bot.threadId)).toBe(0);
+  });
+
+  it("1:1 Problems to look at reports merge whichever bot they are about, never with a bot's own job or a person's words", () => {
+    const bot = fakeBot("gd-incidents", "gd-thread-incidents", false);
+    const store = fakeStore([bot]);
+    const report = (botId: string) => ({ botId, name: botId, unattended: true, incident: { threadId: `${botId}-thread` } });
+    queueSteeredMessage(bot.id, bot.threadId, "ada's report", { peerAsk: report("gd-ada"), unattended: true });
+    vi.advanceTimersByTime(30_000);
+    queueSteeredMessage(bot.id, bot.threadId, "ben's report", { peerAsk: report("gd-ben"), unattended: true });
+    queueSteeredMessage(bot.id, bot.threadId, "ada's own job", { peerAsk: { botId: "gd-ada", name: "gd-ada" }, unattended: true });
+    queueSteeredMessage(bot.id, bot.threadId, "a person's words");
+    const run = vi.fn();
+
+    drainSteeredMessages(store, run);
+    drainSteeredMessages(store, run);
+    drainSteeredMessages(store, run);
+    expect(run.mock.calls.map((call) => call[2])).toEqual(["ada's report\n\nben's report", "ada's own job", "a person's words"]);
+    expect(run.mock.calls[0][6].peerAsk).toEqual(report("gd-ada"));
     expect(_queuedCount(bot.threadId)).toBe(0);
   });
 
@@ -215,14 +228,12 @@ describe("drain coalescing golden (M2)", () => {
 
   it("a regressed queuedAt never joins the head group", () => {
     const item = (id: string, text: string, queuedAt: number): ChannelQueueItem => ({ id, text, mode: "chat", queuedAt });
-    // clock skew or a rewritten row: an earlier timestamp after a later one
-    // is not "within the window", so the run stops at the first item
+    // Clock skew or a rewritten row: an earlier timestamp after a later one is not "within the window".
     expect(headChannelGroup([
       item("q-earlier", "typed first", 1_000),
       item("q-regressed", "clock went backwards", 500),
       item("q-next", "typed next", 1_100),
     ]).map((entry) => entry.id)).toEqual(["q-earlier"]);
-    // the same items in honest order still coalesce inside the window
     expect(headChannelGroup([
       item("q-earlier", "typed first", 1_000),
       item("q-next", "typed next", 1_100),
@@ -239,13 +250,10 @@ describe("drain coalescing golden (M2)", () => {
     const run = vi.fn();
     drainChannelMessages(() => false, run);
     expect(run).toHaveBeenCalledTimes(1);
-    // the turn sees the transcript through the context window, so the group
-    // never outgrows it: exactly the first window's worth drains now
     expect(run.mock.calls[0][0].items.map((item: { text: string }) => item.text))
       .toEqual(Array.from({ length: DRAIN_COALESCE_MAX_ITEMS }, (_, i) => `burst ${i + 1}`));
     expect(_queuedChannelCount(thread)).toBe(2);
 
-    // the excess keeps its FIFO place and drains as the next turn
     drainChannelMessages(() => false, run);
     expect(run.mock.calls[1][0].items.map((item: { text: string }) => item.text))
       .toEqual([`burst ${DRAIN_COALESCE_MAX_ITEMS + 1}`, `burst ${DRAIN_COALESCE_MAX_ITEMS + 2}`]);
@@ -261,8 +269,6 @@ describe("drain coalescing golden (M2)", () => {
 
     const held = holdChannelQueue(group, thread, headOne.id)!;
     expect(headChannelGroup(held.items).map((item) => item.id)).toEqual([headOne.id, headTwo.id]);
-    // steering the head settles its whole coalesced group; the next sender's
-    // item still waits its own turn
     settleHeldChannelQueueHead(held);
     expect(_queuedChannelCount(thread)).toBe(1);
     const run = vi.fn();

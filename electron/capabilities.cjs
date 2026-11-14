@@ -1,6 +1,4 @@
-// Pure desktop capability detection shared by Electron main tests and the
-// renderer contract. Keep this file free of Electron imports so every branch
-// is deterministic and unit-testable.
+const { PLUGIN_REQUIRED_MESSAGE, isHyprlandSession } = require("./cua-hyprland.cjs");
 
 const DESKTOP_PLATFORMS = new Set(["darwin", "linux", "win32"]);
 const UNAVAILABLE_LOCAL_STATUSES = new Set(["disabled", "checking", "starting", "error", "stopped", "unavailable"]);
@@ -21,15 +19,15 @@ function nativeDesktopActions(platform) {
 function linuxSession(platform, env) {
   if (platform !== "linux") return "unknown";
   const declared = String(env.XDG_SESSION_TYPE ?? "").toLowerCase();
-  // A Wayland user session may also expose DISPLAY for XWayland. Prefer the
-  // Wayland signal so the UI never bypasses portal-mediated behavior.
+  // A Wayland session may also expose DISPLAY for XWayland: prefer Wayland so the UI never bypasses portals.
   if (declared === "wayland" || env.WAYLAND_DISPLAY) return "wayland";
   if (declared === "x11" || declared === "xorg") return "x11";
   if (env.DISPLAY) return "x11";
   return "headless";
 }
 
-function linuxLocalControlSupport(platform, env) {
+/** `hyprlandPlugin` is what `probeCuaHyprlandPlugin` found: "active" or anything else. */
+function linuxLocalControlSupport(platform, env, { hyprlandPlugin } = {}) {
   if (platform !== "linux") {
     return Object.freeze({
       available: false,
@@ -40,6 +38,18 @@ function linuxLocalControlSupport(platform, env) {
   }
   const session = linuxSession(platform, env);
   if (session === "x11") return Object.freeze({ available: true, session });
+  // Hyprland with Cua's plugin is the one Wayland desktop allowed: the plugin gives the bot seats of its own inside the
+  // compositor. Every other Wayland desktop keeps the seat-safety block.
+  if (session === "wayland" && isHyprlandSession(env)) {
+    if (hyprlandPlugin === "active") return Object.freeze({ available: true, session, compositor: "hyprland" });
+    return Object.freeze({
+      available: false,
+      session,
+      compositor: "hyprland",
+      reasonCode: "linux-hyprland-plugin-required",
+      message: PLUGIN_REQUIRED_MESSAGE,
+    });
+  }
   if (session === "wayland") {
     return Object.freeze({
       available: false,
@@ -57,6 +67,12 @@ function linuxLocalControlSupport(platform, env) {
   });
 }
 
+/** Computer control's helper is gone, or the system refused to run it: access denied (os error 5), or Windows Security
+ * found it unsafe (os error 225, ERROR_VIRUS_INFECTED). */
+function driverBlocked(reason) {
+  return /binary not found|is missing|ENOENT|EPERM|EACCES|os error (?:2|5|225)\b|access is denied|virus/i.test(String(reason ?? ""));
+}
+
 function localComputerReady(platform, connection) {
   const validLegacyConnection = connection &&
     (!Object.hasOwn(connection, "status") || connection.status === "ready") &&
@@ -69,7 +85,6 @@ function localComputerReady(platform, connection) {
   if (platform === "darwin") {
     return Boolean(validLegacyConnection && (connection.mode === "embedded" || connection.mode === "standalone"));
   }
-  // Windows only exposes the host-owned embedded connection.
   if (platform === "win32") {
     return Boolean(validLegacyConnection && connection.mode === "embedded");
   }
@@ -85,6 +100,9 @@ function localComputerReady(platform, connection) {
   if (connection.mode === "linux-x11-supervised") {
     return connection.session === "x11";
   }
+  if (connection.mode === "linux-wayland-hyprland-supervised") {
+    return connection.session === "wayland" && connection.compositor === "hyprland";
+  }
   return false;
 }
 
@@ -94,8 +112,9 @@ function desktopCapabilities({
   packaged = false,
   localConnection = null,
   homeDir = require("node:os").homedir(),
-  // The page asking is a remote server's UI: this computer's screen, voice
-  // and local control are not on offer, whatever the host could do.
+  // Whether the page draws the window's frame now.
+  frame = true,
+  // A remote server's page: this computer's screen, voice and local control are never on offer.
   remote = false,
 } = {}) {
   const hostPlatform = normalizedPlatform(platform);
@@ -118,12 +137,14 @@ function desktopCapabilities({
     screenPreview.reasonCode =
       hostPlatform === "linux" ? "headless-session" : "unsupported-platform";
   }
+  // Off the Mac the page listens itself and Fish Audio turns each clip into text (src/lib/fish-speech.ts).
+  const fishListening = hostPlatform === "win32" || hostPlatform === "linux";
   const dictation = {
-    available: isMac,
-    engine: isMac ? "apple-speech" : "none",
+    available: isMac || fishListening,
+    engine: isMac ? "apple-speech" : fishListening ? "fish-audio" : "none",
     onDevice: isMac,
   };
-  if (!isMac) dictation.reasonCode = "unsupported-platform";
+  if (!dictation.available) dictation.reasonCode = "unsupported-platform";
   const localComputer = {
     available: localAvailable,
     support:
@@ -135,9 +156,7 @@ function desktopCapabilities({
     enabled: connectionEnabled(hostPlatform, localConnection),
     status: localStatus,
   };
-  // These fields expose local-machine detail (installed driver, seat,
-  // diagnostics), so populate them only when no remote override replaces
-  // localComputer below; a remote page must never receive local values.
+  // Local-machine detail (driver, seat, diagnostics): a remote page must never receive these.
   if (!remote) {
     if (localConnection?.mode === "unavailable" && typeof localConnection.reason === "string" &&
         localConnection.reason.trim() && localConnection.reason.length <= 2_000) {
@@ -165,7 +184,9 @@ function desktopCapabilities({
   if (!localAvailable) {
     localComputer.reasonCode =
       localConnection?.reasonCode ??
-      (hostPlatform === "darwin" ? "cua-driver-unavailable" : "unsupported-platform");
+      (hostPlatform === "darwin" || hostPlatform === "win32"
+        ? driverBlocked(localConnection?.reason) ? "cua-driver-blocked" : "cua-driver-unavailable"
+        : "unsupported-platform");
   }
 
   if (remote) {
@@ -200,13 +221,12 @@ function desktopCapabilities({
               : "Desktop",
       session: hostSession,
       packaged: Boolean(packaged),
-      // so the renderer can show paths as ~/… without a Node builtin in
-      // the sandboxed preload; a remote server's page learns nothing about
-      // this computer's users
+      // The sandboxed preload has no Node builtins; a remote page learns nothing about this computer's users.
       homeDir: remote ? "" : homeDir,
     },
     windowChrome:
-      isMac ? "mac-inset" : hostPlatform === "win32" ? "win-caption" : "native",
+      isMac ? "mac-inset" : hostPlatform === "win32" && frame ? "win-caption" : "native",
+    windowFrame: frame !== false,
     screenPreview,
     dictation,
     localComputer,
@@ -223,6 +243,7 @@ function connectionEnabled(platform, connection) {
 module.exports = {
   connectionEnabled,
   desktopCapabilities,
+  driverBlocked,
   linuxLocalControlSupport,
   linuxSession,
   localComputerReady,

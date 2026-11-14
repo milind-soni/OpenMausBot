@@ -8,7 +8,6 @@ import { api } from "@/state/store";
 import type { NewBotDefaults } from "../../shared/new-bot-defaults";
 import type { PackageDocument, PackageSummary } from "../../shared/package-format";
 
-/** POST /api/teams/export with kind "library": a preset file. */
 export interface PresetShareResponse {
   document: PackageDocument;
   filename: string;
@@ -27,7 +26,6 @@ export interface PresetShareChoices {
   dryRun?: boolean;
 }
 
-/** The request body for a preset file. Pure, for tests. */
 export function presetShareBody(choices: PresetShareChoices): Record<string, unknown> {
   const text = (value: string | undefined) => (value?.trim() ? value.trim() : undefined);
   return {
@@ -45,7 +43,6 @@ export function presetShareBody(choices: PresetShareChoices): Record<string, unk
   };
 }
 
-/** What the preset file holds, counted by the server's own dry run. Pure, for tests. */
 export function SharePresetContents({ preview, localSkips }: { preview: PresetShareResponse; localSkips: string[] }) {
   const preset = preview.document.package.presets?.[0];
   const notes = Object.keys(preset?.seed?.memory ?? {}).length;
@@ -58,7 +55,7 @@ export function SharePresetContents({ preview, localSkips }: { preview: PresetSh
   return (
     <div>
       <div className="text-[12px] font-medium text-ink-secondary">{t("teamShare.included")}</div>
-      <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 rounded-xl bg-raised/45 px-4 py-3 text-[12.5px]">
+      <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 rounded-xl bg-raised/45 px-4 py-3 text-[13px]">
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
             <dt className="text-ink-secondary">{label}</dt>
@@ -66,12 +63,12 @@ export function SharePresetContents({ preview, localSkips }: { preview: PresetSh
           </div>
         ))}
       </dl>
-      <p className="mt-3 flex items-start gap-2 text-[12.5px] leading-relaxed text-ink-secondary">
+      <p className="mt-3 flex items-start gap-2 text-[13px] leading-relaxed text-ink-secondary">
         <ShieldCheck size={15} className="mt-0.5 shrink-0 text-success" />
         <span>{t("presetShare.never")}</span>
       </p>
       {preview.redacted.length > 0 && (
-        <div className="mt-3 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+        <div className="mt-3 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{t("teamShare.redacted")}</div>
           <ul className="mt-1 list-disc pl-5">
             {preview.redacted.map((part) => <li key={part}>{describePart(part, preview.document)}</li>)}
@@ -79,7 +76,7 @@ export function SharePresetContents({ preview, localSkips }: { preview: PresetSh
         </div>
       )}
       {skipped.length > 0 && (
-        <div className="mt-3 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+        <div className="mt-3 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{t("teamShare.skipped")}</div>
           <ul className="mt-1 list-disc pl-5">
             {skipped.map((line, index) => <li key={`${line}-${index}`}>{line}</li>)}
@@ -90,9 +87,6 @@ export function SharePresetContents({ preview, localSkips }: { preview: PresetSh
   );
 }
 
-/** Share as preset…: my New bot defaults as a file of one preset bot and
- * its skills (no team). Whoever imports it picks the preset in New bot. No
- * confirm step; Save file is the decision. */
 export function SharePresetDialog({ onClose }: { onClose: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [name, setName] = useState("");
@@ -101,7 +95,6 @@ export function SharePresetDialog({ onClose }: { onClose: () => void }) {
   const [notes, setNotes] = useState("");
   const [includeNotes, setIncludeNotes] = useState(true);
   const [includePicture, setIncludePicture] = useState(true);
-  // null while the defaults' picture is being prepared.
   const [picture, setPicture] = useState<{ dataUrl?: string; skipped: string[] } | null>(null);
   const [preview, setPreview] = useState<PresetShareResponse | null>(null);
   const [saving, setSaving] = useState(false);
@@ -130,7 +123,6 @@ export function SharePresetDialog({ onClose }: { onClose: () => void }) {
     ...(includePicture && picture?.dataUrl ? { picture: picture.dataUrl } : {}),
   });
 
-  // Live counts from the server's dry run whenever what goes in changes.
   useEffect(() => {
     if (!picture) return;
     const id = ++request.current;
@@ -149,7 +141,6 @@ export function SharePresetDialog({ onClose }: { onClose: () => void }) {
         });
     }, 250);
     return () => window.clearTimeout(timer);
-    // Only what goes in changes the counts; names and notes do not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [picture, includeNotes, includePicture]);
 
@@ -175,7 +166,7 @@ export function SharePresetDialog({ onClose }: { onClose: () => void }) {
   }, []);
 
   const localSkips = includePicture ? picture?.skipped ?? [] : [];
-  const field = "mt-1 w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[13.5px] text-ink disabled:opacity-60";
+  const field = "mt-1 w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[14px] text-ink disabled:opacity-60";
   return createPortal(
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4" onMouseDown={(event) => {
       if (event.target === event.currentTarget && !saving) onClose();
@@ -195,7 +186,7 @@ export function SharePresetDialog({ onClose }: { onClose: () => void }) {
         <header className="flex items-start justify-between gap-3 px-6 pb-2 pt-5">
           <div>
             <h2 id="share-preset-title" className="text-[17px] font-semibold">{t("presetShare.title")}</h2>
-            <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">{t("presetShare.intro")}</p>
+            <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">{t("presetShare.intro")}</p>
           </div>
           <button aria-label={t("presetShare.close")} disabled={saving} onClick={onClose} className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised"><X size={18} /></button>
         </header>
@@ -203,8 +194,8 @@ export function SharePresetDialog({ onClose }: { onClose: () => void }) {
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4 pt-2">
           {saved ? (
             <>
-              <p className="flex items-center gap-2 text-[13.5px] font-medium text-ink"><Check size={16} className="text-success" />{t("teamShare.saved", { filename: saved.filename })}</p>
-              <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">{t("presetShare.savedHint")}</p>
+              <p className="flex items-center gap-2 text-[14px] font-medium text-ink"><Check size={16} className="text-success" />{t("teamShare.saved", { filename: saved.filename })}</p>
+              <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">{t("presetShare.savedHint")}</p>
               <div className="mt-4"><SharePresetContents preview={saved} localSkips={localSkips} /></div>
             </>
           ) : (
@@ -223,24 +214,24 @@ export function SharePresetDialog({ onClose }: { onClose: () => void }) {
                 </label>
               </fieldset>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <label className="block text-[12.5px] text-ink-secondary">{t("presetShare.name")}
+                <label className="block text-[13px] text-ink-secondary">{t("presetShare.name")}
                   <input value={name} maxLength={100} disabled={saving} onChange={(event) => setName(event.target.value)} className={field} />
                 </label>
-                <label className="block text-[12.5px] text-ink-secondary">{t("teamShare.release")}
+                <label className="block text-[13px] text-ink-secondary">{t("teamShare.release")}
                   <input value={release} maxLength={20} disabled={saving} placeholder="1.0.0" onChange={(event) => setRelease(event.target.value)} className={field} />
                 </label>
               </div>
-              <label className="mt-3 block text-[12.5px] text-ink-secondary">{t("presetShare.description")}
+              <label className="mt-3 block text-[13px] text-ink-secondary">{t("presetShare.description")}
                 <input value={description} maxLength={300} disabled={saving} onChange={(event) => setDescription(event.target.value)} className={field} />
               </label>
-              <label className="mt-3 block text-[12.5px] text-ink-secondary">{t("teamShare.notes")}
+              <label className="mt-3 block text-[13px] text-ink-secondary">{t("teamShare.notes")}
                 <textarea value={notes} maxLength={4000} rows={2} disabled={saving} onChange={(event) => setNotes(event.target.value)} className={field} />
               </label>
             </>
           )}
         </div>
 
-        {error && <p role="alert" className="mx-6 mb-2 rounded-lg bg-danger/10 px-3 py-2 text-[12.5px] text-danger">{error}</p>}
+        {error && <p role="alert" className="mx-6 mb-2 rounded-lg bg-danger/10 px-3 py-2 text-[13px] text-danger">{error}</p>}
         <footer className="flex justify-end gap-2 border-t border-hairline/35 px-6 py-3">
           {saved ? (
             <button onClick={onClose} className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white">{t("teamShare.done")}</button>

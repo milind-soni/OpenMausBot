@@ -57,7 +57,6 @@ it("retains empty teams, moves existing bots, and keeps legacy imports additive 
     expect((await api("/api/section-context?section=Launch")).text).toBe("Finish research before engineering.");
     await api("/api/sidebar-sections?section=Launch", "PATCH", { name: "Untouched empty" }, 409);
 
-    // Legacy templates cannot occupy an existing empty team's name or brief.
     const imported = await api("/api/teams/import?mode=add", "POST", {
       format: "openmaus.team", version: 2, team: { name: "Launch", members: [
         { key: "writer", name: "Fixture writer", appearance: { color: "purple" } },
@@ -68,7 +67,6 @@ it("retains empty teams, moves existing bots, and keeps legacy imports additive 
     expect((await api("/api/section-context?section=Launch")).text).toBe("Finish research before engineering.");
     expect(await messages()).toEqual(transcript);
 
-    // Removing a populated team keeps archived bots and their conversations.
     await api(`/api/bots/${imported.bots[0].id}`, "PATCH", { hidden: true });
     await api("/api/sidebar-sections?section=Launch%202", "DELETE");
     expect((await api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === imported.bots[0].id)).toMatchObject({ hidden: true });
@@ -113,8 +111,6 @@ it("retains empty teams, moves existing bots, and keeps legacy imports additive 
     await api("/api/section-context?section=Launch", "GET", undefined, 404);
     expect(readFileSync(logPath, "utf8")).not.toMatch(/ReferenceError|store: change listener threw/);
 
-    // The team file is independent of bot/group transcripts. A malformed
-    // registry must not abort startup, including legacy migration saves.
     const room = (await control("new-channel", "--name", "Recovery room", "--members", a.id) as any).channel;
     await control("send-channel", "--channel", room.id, "--text", "Keep this group conversation through recovery.");
     expect(await control("wait", "--channel", room.id, "--timeout", "30")).toMatchObject({ status: "settled" });

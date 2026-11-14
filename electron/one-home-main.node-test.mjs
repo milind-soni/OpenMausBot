@@ -1,0 +1,195 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { freezeAnswer, installOneHome } from "./one-home-main.mjs";
+import nativeText from "./native-text.cjs";
+
+const json = (value, status = 200) => new Response(JSON.stringify(value), { status });
+
+/** A main window whose page takes keys: `type()` is the person pressing one. */
+function fakeWindow() {
+  const listeners = [];
+  const webContents = { on: (event, listener) => { if (event === "before-input-event") listeners.push(listener); }, id: 1 };
+  return { isDestroyed: () => false, webContents, type: () => { for (const listener of listeners) listener({}, { type: "keyDown", key: "a" }); } };
+}
+
+test("the move's quiet moment counts keys pressed before it first asks, so it never freezes this computer mid-sentence", async () => {
+  // Seen in the real app on Oct 22: real keys every second in a bot's message box, and this computer froze 1 s after one,
+  // because the key watch was only set up the first time the wait asked, which then read "never typed".
+  const win = fakeWindow();
+  let kept = null;
+  const main = installOneHome({
+    ipcMain: { handle: () => {} }, cloudPage: () => "local", server: () => null, home: () => null, cookieFetch: async () => json({}, 401),
+    reconnect: async () => false, power: { asleep: () => false }, file: () => "/nonexistent/cloud-send.json", window: () => win, localOrigin: () => "http://127.0.0.1:4100",
+    fetch: async () => json({}, 404), localRequest: async () => json({}, 404), account: () => null, journalFile: () => "/nonexistent/one-home.json",
+    tempRoot: () => "/nonexistent", journal: { read: () => kept, write: (value) => { kept = value; } },
+  });
+  try {
+    await main.kick();
+    const before = Date.now();
+    win.type();
+    assert.ok(main.lastInput() >= before, `a key pressed once the move has looked is counted: ${main.lastInput()}`);
+  } finally { main.close(); }
+});
+
+test("a key watch set up only as it is first asked knows nothing yet, so it counts as a key just now and the reload or freeze waits its quiet time", () => {
+  // The window can open after the launch's first look; then My Cloud's version reload asks first. Seen in the real app:
+  // the reload came 2 s after a key, mid-sentence, and the draft was lost.
+  const win = fakeWindow();
+  let kept = null;
+  const main = installOneHome({
+    ipcMain: { handle: () => {} }, cloudPage: () => "local", server: () => null, home: () => null, cookieFetch: async () => json({}, 401),
+    reconnect: async () => false, power: { asleep: () => false }, file: () => "/nonexistent/cloud-send.json", window: () => win, localOrigin: () => "http://127.0.0.1:4100",
+    fetch: async () => json({}, 404), localRequest: async () => json({}, 404), account: () => null, journalFile: () => "/nonexistent/one-home.json",
+    tempRoot: () => "/nonexistent", journal: { read: () => kept, write: (value) => { kept = value; } },
+  });
+  try {
+    const before = Date.now();
+    assert.ok(main.lastInput() >= before, `never "typed long ago": ${main.lastInput()}`);
+  } finally { main.close(); }
+});
+
+test("the switch that keeps this computer's bots here: only on this app's pages, and shown only to someone with a Cloud of their own the move applies to", async () => {
+  const handlers = new Map();
+  let state = null, kept = null, choice = null;
+  const main = installOneHome({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: (event) => event.page ?? null, server: () => null, home: () => null,
+    cookieFetch: async () => json({}, 401), reconnect: async () => false, power: { asleep: () => false }, file: () => "/nonexistent/cloud-send.json", window: () => null,
+    localOrigin: () => "http://127.0.0.1:4100", fetch: async () => json({}, 404), localRequest: async () => json({ frozen: false }), account: () => (state ? { state: () => state } : null),
+    journalFile: () => "/nonexistent/one-home.json", tempRoot: () => "/nonexistent", journal: { read: () => kept, write: (value) => { kept = value; } },
+    keep: { read: () => choice, write: (value) => { choice = value; } },
+  });
+  const ask = (channel, page, ...args) => handlers.get(channel)({ page }, ...args);
+  const hidden = { shown: false, on: false, moved: false, coming: false };
+  const account = { id: "acct-1", email: "person@example.test" };
+  const machine = { status: "ready", origin: "https://omb-t-1.fly.dev", moves: true };
+  try {
+    for (const channel of ["one-home:keep", "one-home:keep-set"]) assert.throws(() => ask(channel, null, true), /only available/u, channel);
+    assert.deepEqual(ask("one-home:keep", "local"), hidden, "signed out");
+    state = { status: "connected", account, entitlement: { plan: "free", status: "inactive" } };
+    assert.deepEqual(ask("one-home:keep", "local"), hidden, "no Cloud");
+    state = { status: "connected", account, entitlement: { plan: "pro", tier: "team", status: "active" }, teams: [{ id: "team-1", name: "Acme", role: "owner", machine }] };
+    assert.deepEqual(ask("one-home:keep", "cloud"), hidden, "only a team's Cloud");
+    assert.throws(() => ask("one-home:keep-set", "local", true), { message: "This computer has no My Cloud to keep its bots from." });
+    assert.equal(choice, null);
+    state = { status: "connected", account, entitlement: { plan: "pro", tier: "personal", status: "active" }, machine: { ...machine, moves: false } };
+    assert.deepEqual(ask("one-home:keep", "local"), hidden, "a Cloud the move doesn't apply to yet");
+    state = { ...state, machine };
+    assert.deepEqual(ask("one-home:keep", "local"), { shown: true, on: false, moved: false, coming: false });
+    assert.deepEqual(ask("one-home:keep-set", "cloud", true), { shown: true, on: true, moved: false, coming: false });
+    assert.equal(choice.on, true, "kept on this computer");
+    await main.oneHome.kick();
+    assert.equal(kept, null, "and no move starts");
+    state = { ...state, machine: { ...machine, moves: false } };
+    assert.deepEqual(ask("one-home:keep", "local"), { shown: true, on: true, moved: false, coming: false }, "switched on, it stays shown, so it can be switched off");
+  } finally { main.close(); }
+});
+
+test("the switch's refusal follows the app's language", () => {
+  const handlers = new Map();
+  const { t } = nativeText.createNativeText({ saved: "pt-br" });
+  const main = installOneHome({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: (event) => event.page ?? null, server: () => null, home: () => null,
+    cookieFetch: async () => json({}, 401), reconnect: async () => false, power: { asleep: () => false }, file: () => "/nonexistent/cloud-send.json", window: () => null,
+    localOrigin: () => "http://127.0.0.1:4100", fetch: async () => json({}, 404), localRequest: async () => json({ frozen: false }), account: () => null,
+    journalFile: () => "/nonexistent/one-home.json", tempRoot: () => "/nonexistent", journal: { read: () => null, write: () => {} },
+    keep: { read: () => null, write: () => {} }, t,
+  });
+  try {
+    assert.throws(() => handlers.get("one-home:keep-set")({ page: "local" }, true), { message: "Este computador não tem um Cloud para receber seus bots." });
+  } finally { main.close(); }
+});
+
+test("the freeze's answer carries what holds the move, by name or, with none, what it is", () => {
+  assert.deepEqual(freezeAnswer({ ok: false, status: 409, body: { error: "A bot is still working.", busy: "Scout", what: "bot" } }), { busy: "Scout", what: "bot" });
+  assert.deepEqual(freezeAnswer({ ok: false, status: 409, body: { busy: "", what: "sign-in" } }), { busy: "", what: "sign-in" });
+  assert.deepEqual(freezeAnswer({ ok: true, status: 200, body: { frozen: true } }), { frozen: true });
+  assert.throws(() => freezeAnswer({ ok: false, status: 500, body: {} }), /could not pause/u);
+});
+
+test("while a server of the person's own is chosen as home, no move to My Cloud starts, and this computer's page shows that move's line", async () => {
+  const handlers = new Map();
+  const install = (other) => {
+    let kept = null;
+    const main = installOneHome({
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: () => "local", server: () => null, home: () => null, cookieFetch: async () => json({}, 401),
+      reconnect: async () => false, power: { asleep: () => false }, file: () => "/nonexistent/cloud-send.json", window: () => null, localOrigin: () => "http://127.0.0.1:4100",
+      fetch: async () => json({}, 404), localRequest: async (route) => (route === "/api/move/freeze" ? json({ frozen: false }) : json({}, 404)),
+      account: () => ({ state: () => ({ status: "connected", account: { id: "acct-1" }, machine: { status: "ready", origin: "https://omb-u-1.fly.dev", moves: true } }),
+        pairHome: async () => { throw new Error("no code in this test"); } }),
+      journalFile: () => "/nonexistent/one-home.json", tempRoot: () => "/nonexistent", journal: { read: () => kept, write: (value) => { kept = value; } }, other,
+    });
+    return { main, journal: () => kept };
+  };
+  const own = { active: () => true, view: () => ({ phase: "copy", place: "Garage server" }), seen: () => null, retry: async () => {} };
+  const chosen = install(() => own);
+  try {
+    await chosen.main.kick();
+    assert.equal(chosen.journal(), null, "My Cloud's move never starts");
+    assert.deepEqual((await handlers.get("cloud-send:notice")({})).move, { phase: "copy", place: "Garage server" });
+  } finally { chosen.main.close(); }
+  const none = install(() => null);
+  try {
+    await none.main.kick();
+    assert.equal(none.journal()?.cloud.origin, "https://omb-u-1.fly.dev", "without one, My Cloud's move starts as before");
+  } finally { none.main.close(); }
+});
+
+test("the team bring handlers receive the same dynamic translator as one home", async () => {
+  const handlers = new Map();
+  let language = "en";
+  const main = installOneHome({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: () => "local", server: () => null, home: () => null,
+    cookieFetch: async () => json({}, 401), reconnect: async () => false, power: { asleep: () => false }, file: () => "/nonexistent/cloud-send.json", window: () => null,
+    localOrigin: () => "http://127.0.0.1:4100", fetch: async () => json({}, 404), localRequest: async () => json({}, 404), account: () => null,
+    journalFile: () => "/nonexistent/one-home.json", tempRoot: () => "/nonexistent", journal: { read: () => null, write: () => {} },
+    t: (key) => `${language}:${key}`,
+  });
+  try {
+    const move = handlers.get("cloud-send:team-bring-move");
+    await assert.rejects(move({}, "atlas-bot-1"), { message: "en:native.teamMove.openTeam" });
+    language = "pt-br";
+    await assert.rejects(move({}, "atlas-bot-1"), { message: "pt-br:native.teamMove.openTeam" });
+  } finally { main.close(); }
+});
+
+test("a first move waits for the person's choice, asked on whichever page is open; with one bot there is nothing to choose", async () => {
+  const CLOUD = "https://omb-t-1.fly.dev";
+  const folder = mkdtempSync(join(tmpdir(), "omb-move-choice-"));
+  const launch = (bots) => {
+    const handlers = new Map();
+    let kept = null, url = "http://127.0.0.1:4100/";
+    const main = installOneHome({
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: (event) => event.page ?? null, server: () => null, home: () => ({ origin: CLOUD, grant: async () => ({ origin: CLOUD, code: "x" }) }),
+      cookieFetch: async () => json({}, 401), reconnect: async () => false, power: { asleep: () => false }, file: () => join(folder, "cloud-send.json"),
+      window: () => ({ isDestroyed: () => false, webContents: { on: () => {}, send: () => {}, get mainFrame() { return { url }; } } }), localOrigin: () => "http://127.0.0.1:4100", fetch: async () => json({}, 404),
+      localRequest: async (route) => (route === "/api/bots?messages=0" ? json({ bots }) : json({ frozen: false })),
+      account: () => ({ state: () => ({ status: "connected", account: { id: "acct-1", email: "person@example.test" }, machine: { status: "ready", origin: CLOUD, moves: true } }), pairHome: async () => { throw new Error("not in this test"); } }),
+      journalFile: () => join(folder, `${bots.length}-one-home.json`), tempRoot: () => folder, journal: { read: () => kept, write: (value) => { kept = value; } }, keep: { read: () => null, write: () => {} }, chooses: true,
+    });
+    return { main, ask: (channel, page, ...args) => handlers.get(channel)({ page }, ...args), kept: () => kept, show: (next) => { url = next; } };
+  };
+  const named = (count) => Array.from({ length: count }, (_, i) => ({ id: `b${i}`, name: `Bot ${i}` }));
+  const asked = launch([...named(3), { id: "maus", name: "Maus", defaultBot: { v: 1 } }]);
+  const alone = launch([...named(1), { id: "maus", name: "Maus", defaultBot: { v: 1 } }]);
+  try {
+    await asked.main.kick();
+    assert.equal(asked.kept(), null, "nothing starts by itself");
+    assert.deepEqual(asked.ask("cloud-send:notice", "local").move, { phase: "choose" });
+    asked.show(`${CLOUD}/`);
+    assert.deepEqual(asked.ask("cloud-send:notice", "cloud").move, { phase: "choose" }, "someone back from buying My Cloud is looking at it, and is asked there");
+    assert.deepEqual((await asked.ask("cloud-send:bot-choices", "cloud")).bots.map((bot) => bot.id), ["b0", "b1", "b2"], "this computer's bots, whichever page asks");
+    assert.throws(() => asked.ask("cloud-send:bot-move-state", "cloud"), /only available on this computer's page/u);
+    assert.throws(() => asked.ask("cloud-send:move-everything", null), /only available/u);
+    asked.ask("cloud-send:move-everything", "cloud");
+    await asked.main.kick();
+    assert.equal(asked.kept()?.phase, "copy", "Move everything starts the one-time move");
+
+    await alone.main.kick();
+    assert.equal(alone.kept()?.phase, "copy", "with one bot there is nothing to choose");
+  } finally { asked.main.close(); alone.main.close(); rmSync(folder, { recursive: true, force: true }); }
+});

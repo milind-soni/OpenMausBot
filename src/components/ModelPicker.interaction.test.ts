@@ -4,11 +4,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 
 import type { Bot, InstanceInfo } from "@/state/store";
 
-// Opens the real picker and clicks through it without a DOM: useState is
-// held here by call order (the picker's own hooks run first, children after),
-// effects never run, and handlers are read off the returned element tree.
-// The headless renderer check in docs/verification/bot-continuity.md covers
-// the same flows in a browser.
+// Hook-by-call-order harness: useState is held by call order (the picker's own hooks first, children after), effects
+// never run, and handlers are read off the element tree.
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
@@ -33,6 +30,8 @@ vi.mock("react", async (original) => ({
   },
   useEffect: () => {},
 }));
+// This hook fixture does not emulate React's render-time state retries.
+vi.mock("./MenuMotion", () => ({ useMenuMotion: (open: boolean) => ({ shown: open, closing: false, className: "" }) }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
   useStore: () => ({
@@ -43,7 +42,12 @@ vi.mock("@/state/store", async (importOriginal) => ({
   }),
 }));
 
-const { LOCAL_PROBE_TIMEOUT_MS, ModelEngineRail, ModelPicker, offersLocalModels, probeLocalModels } = await import("./ModelPicker");
+// These cases cover the full picker; Simple mode has its own file.
+vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
+
+const { ModelPicker } = await import("./ModelPicker");
+const { LOCAL_PROBE_TIMEOUT_MS, offersLocalModels, probeLocalModels } = await import("./local-model-probe");
+const { ModelEngineRail } = await import("./ModelPickerFull");
 
 afterAll(() => vi.unstubAllGlobals());
 
@@ -83,7 +87,6 @@ function bot(instanceId: string, model: string): Bot {
   };
 }
 
-/** Render the picker once; the picker's own state survives, children start fresh. */
 function render(forBot: Bot) {
   fixture.values.length = Math.min(fixture.values.length, fixture.own);
   let tree: ReactNode = null;
@@ -107,7 +110,6 @@ function rail(rendered: ReturnType<typeof render>) {
   return rendered.nodes.find((node) => node.type === ModelEngineRail) as ReactElement<{ instances: InstanceInfo[]; onSelect: (instance: InstanceInfo) => void }> | undefined;
 }
 
-/** The open menu only; the trigger always names the saved model. */
 const menu = (html: string) => html.slice(html.indexOf("data-model-picker-content"));
 
 const flush = async () => { for (let index = 0; index < 20; index++) await Promise.resolve(); };
@@ -123,6 +125,20 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("ModelPicker with a signed-out or missing Claude", () => {
+  it("keeps an empty ChatGPT plan catalog on the cloud rail so sign-in is reachable", () => {
+    const plan: InstanceInfo = { ...codex, instanceId: "chatgpt", displayName: "ChatGPT plan", snapshot: { state: "available", authenticated: false, chatgptPlan: true }, models: { default: "", options: [] }, authentication: { method: "browser-pkce" }, install: { signInCommand: "codex login" } };
+    fixture.instances = [codex, plan];
+    const forBot = bot("codex", "gpt-5.6");
+    const opened = open(forBot);
+    expect(rail(opened)!.props.instances.map((instance) => instance.instanceId)).toContain("chatgpt");
+    rail(opened)!.props.onSelect(plan);
+    const html = menu(render(forBot).html);
+    expect(html).toContain("Continue with ChatGPT");
+    expect(html).toContain("Available models appear after");
+    expect(html).not.toContain("codex login");
+    expect(html).not.toContain("Local models will appear");
+  });
+
   it("keeps a signed-out Claude on the rail and shows its sign-in card instead of pickable cloud models", () => {
     fixture.instances = [codex, signedOut()];
     const onCodex = bot("codex", "gpt-5.6");
@@ -135,8 +151,6 @@ describe("ModelPicker with a signed-out or missing Claude", () => {
     expect(browsing).toContain("Sign in to Claude");
     expect(browsing).toContain("data-claude-sign-in");
     expect(browsing).toContain("2 models will appear after setup.");
-    // No official model is offered as a row, so nothing can start a turn on
-    // the signed-out account from here.
     expect(browsing).not.toContain(">Opus 5.5<");
     expect(browsing).not.toContain(">Sonnet 5<");
     expect(browsing).not.toContain("No model providers are available.");
@@ -151,14 +165,26 @@ describe("ModelPicker with a signed-out or missing Claude", () => {
     expect(html).not.toContain("No model providers are available.");
   });
 
+  it("on a paired desktop, sends a signed-out provider's sign-in to the host instead of offering one that cannot run", () => {
+    fixture.instances = [signedOut()];
+    window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
+    try {
+      const html = menu(open(bot("claude", "claude-opus-5-5")).html);
+      expect(html).toContain("data-engine-setup-on-host");
+      expect(html).toContain("Set up Claude there");
+      expect(html).not.toContain("data-claude-sign-in");
+    } finally {
+      delete window.ogb;
+    }
+  });
+
   it("keeps the bot's own Claude with its install card when the CLI is not found", () => {
     fixture.instances = [codex, notFound()];
     const html = open(bot("claude", "claude-opus-5-5")).html;
     expect(html).toContain('aria-label="Claude"');
-    expect(html).toContain("Install Claude");
+    expect(html).toContain("Set up Claude");
     expect(html).toContain("`claude` CLI not found");
     expect(html).toContain("npm install -g @anthropic-ai/claude-code");
-    // Local models need the CLI too, so there is no way in to them yet.
     expect(html).not.toContain("data-model-local-entry");
   });
 
@@ -167,7 +193,39 @@ describe("ModelPicker with a signed-out or missing Claude", () => {
     const opened = open(bot("codex", "gpt-5.6"));
     expect(rail(opened)!.props.instances.map((instance) => instance.instanceId)).toEqual(["codex"]);
     expect(opened.html).not.toContain('aria-label="Claude"');
-    expect(opened.html).toContain("Engines and accounts");
+    expect(opened.html).toContain("Model providers and accounts");
+  });
+});
+
+describe("the way into API keys", () => {
+  it("opens Settings on the API keys section from the picker footer", () => {
+    fixture.instances = [codex];
+    const opened = open(bot("codex", "gpt-5.6"));
+    const entry = opened.nodes.find((node) => node.props["data-model-add-api-keys"]);
+    expect(opened.html).toContain("Add API keys");
+    (entry!.props.onClick as () => void)();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "connections" });
+  });
+
+  it("says the shortcut changes keys too once a key is saved", () => {
+    const openai: InstanceInfo = {
+      instanceId: "openai", driverKind: "openai-compat", displayName: "OpenAI", access: "api",
+      snapshot: { state: "available", authenticated: true, version: null },
+      models: { default: "gpt-5", options: [{ id: "gpt-5", label: "GPT-5" }] },
+    };
+    fixture.instances = [codex, openai];
+    const opened = open(bot("codex", "gpt-5.6"));
+    expect(opened.html).toContain("Add or change API keys");
+    expect(opened.html).not.toContain(">Add API keys<");
+  });
+
+  it("ends the rail's API keys group with a way to add one", () => {
+    fixture.instances = [codex];
+    const opened = open(bot("codex", "gpt-5.6"));
+    expect(opened.html).toContain(">API keys<");
+    const add = rail(opened)!.props as { onAddApiKeys?: () => void };
+    add.onAddApiKeys!();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "connections" });
   });
 });
 
@@ -189,7 +247,6 @@ describe("the way into local models", () => {
     expect(looking).toContain('role="status"');
     expect(looking).not.toContain("No local models found");
 
-    // The probe found a model the startup scan missed.
     fixture.instances = [make()];
     fixture.instances[0].models.options = [...official, qwen];
     answer();

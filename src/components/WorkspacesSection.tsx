@@ -1,7 +1,3 @@
-// App settings → Workspaces: the operator's view of the client workspaces on
-// this server, through the fleet agent (server/fleet-agent.ts). Create one,
-// add or remove a person, suspend, resume, delete, upgrade all. Enterprise
-// `admin` entitlement, and only where an agent exists.
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Plus, RefreshCw } from "lucide-react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
@@ -34,12 +30,11 @@ export function workspacesAvailable(config: ConfigStatus | null | undefined): bo
 
 const fetchFleet = (): Promise<FleetView> => api("/api/fleet");
 
-/** The list alone, so it renders the same from a fetch or a fixture. */
 export function WorkspacesTable({ fleet, onAct, busy }: { fleet: FleetView; onAct: (slug: string, action: "suspend" | "resume" | "delete" | "users") => void; busy: string | null }) {
   if (fleet.workspaces.length === 0) return <div className="text-[13px] text-ink-secondary">{t("workspaces.empty", { domain: fleet.domain })}</div>;
   return (
     <div className="flex flex-col">
-      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-5 border-b border-hairline/40 pb-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">
+      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-5 border-b border-hairline/40 pb-2 text-[12px] font-medium uppercase tracking-wide text-ink-secondary">
         <span>{t("workspaces.colWorkspace")}</span>
         <span className="text-right">{t("workspaces.colState")}</span>
         <span className="text-right">{t("workspaces.colMonth")}</span>
@@ -135,10 +130,10 @@ function NewWorkspaceForm({ domain, onCreated, disabled }: { domain: string; onC
           <input value={anthropicKey} onChange={(e) => setAnthropicKey(e.target.value)} type="password" autoComplete="off" placeholder="sk-ant-…" disabled={disabled || saving} aria-label={t("workspaces.anthropicKey")} className={field} />
         </label>
       </div>
-      <p className="text-[11.5px] leading-relaxed text-ink-secondary">{t("workspaces.createHint")}</p>
+      <p className="text-[12px] leading-relaxed text-ink-secondary">{t("workspaces.createHint")}</p>
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
       <div className="flex justify-end">
-        <button type="submit" disabled={disabled || saving} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-semibold text-white hover:brightness-110 disabled:opacity-60">
+        <button type="submit" disabled={disabled || saving} className="ui-button ui-button-primary">
           {saving ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}{saving ? t("workspaces.creating") : t("workspaces.create")}
         </button>
       </div>
@@ -167,7 +162,7 @@ function UsersForm({ slug, onDone }: { slug: string; onDone: (log: string[]) => 
   };
   return (
     <div className="mt-2 rounded-lg border border-hairline/40 p-3">
-      <div className="mb-2 text-[12.5px] font-medium text-ink">{t("workspaces.usersTitle", { slug })}</div>
+      <div className="mb-2 text-[13px] font-medium text-ink">{t("workspaces.usersTitle", { slug })}</div>
       <div className="flex flex-wrap items-center gap-2">
         <input value={email} onChange={(e) => setEmail(e.target.value)} type="text" placeholder="person@example.com or @example.com" aria-label={t("workspaces.email")} disabled={busy !== null} className="min-w-[16rem] flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none disabled:opacity-50" />
         <label className="flex items-center gap-1.5 text-[12px] text-ink-secondary"><input type="checkbox" checked={chatOnly} onChange={(e) => setChatOnly(e.target.checked)} disabled={busy !== null} />{t("workspaces.chatOnly")}</label>
@@ -262,7 +257,7 @@ export function WorkspacesSection({ load = fetchFleet }: { load?: () => Promise<
         {fleet ? <WorkspacesTable fleet={fleet} onAct={(slug, action) => void act(slug, action)} busy={busy} /> : loading ? <div className="flex items-center gap-2 text-[13px] text-ink-secondary"><Loader2 size={14} className="animate-spin" />{t("common.checking")}</div> : null}
         {usersFor && <UsersForm slug={usersFor} onDone={(lines) => { setLog(lines); void refresh(); }} />}
         {log.length > 0 && (
-          <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-inset p-2 text-[11.5px] text-ink-secondary">{log.join("\n")}</pre>
+          <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-inset p-2 text-[12px] text-ink-secondary">{log.join("\n")}</pre>
         )}
       </Card>
       <ConfirmDialog

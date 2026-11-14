@@ -1,6 +1,5 @@
 type Status = "idle" | "saving" | "saved" | "error";
 
-/** Owned by the store, so section navigation cannot discard an unsaved edit. */
 export function createAboutMeDraft(initial: string, save: (value: string) => Promise<void>) {
   let snapshot = { value: initial, status: "idle" as Status };
   let dirty = false;

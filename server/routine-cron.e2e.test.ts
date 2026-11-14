@@ -1,12 +1,10 @@
-// Real server, injected MCP proxy, durable confirmation and scheduler records.
-// The scripted provider chooses known expressions; this is not a model-quality test.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { nextCronRuns } from "../shared/routine-schedule.ts";
 
-it("takes cron through the real routine tools and confirmation, preserving its zone and rejecting invalid API input", async () => {
+it("takes cron through the real routine tools, applying the bot's own routine at once, preserving its zone and rejecting invalid API input", async () => {
   const fixture = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
   const evidence: unknown[] = [{ fixture: fixture.info }];
   const planPath = join(fixture.info.dataDir, "room-plan.json");
@@ -33,8 +31,8 @@ it("takes cron through the real routine tools and confirmation, preserving its z
       const previousTurns = providerEvidence().length;
       writeFileSync(planPath, JSON.stringify({ [bot.id]: {
         expectSystemIncludes: ["five-field cron expression", "Never replace a calendar rule with daily AI date checking", "including its VPS"],
-        steps: [{ tool: "list_routines", arguments: {} }, { tool, arguments: args, expectError }],
-        reply: expectError ? "That invalid schedule was refused." : "Please review the routine confirmation.",
+        steps: [{ tool: "list_triggers", arguments: {} }, { tool, arguments: args, expectError }],
+        reply: expectError ? "That invalid schedule was refused." : "The routine change is applied.",
       } }));
       await cli("send", "--bot", bot.id, "--task", threadId, "--text", text);
       await expect.poll(() => providerEvidence().length, { timeout: 20_000 }).toBe(previousTurns + 1);
@@ -44,66 +42,65 @@ it("takes cron through the real routine tools and confirmation, preserving its z
       expect(toolResponse.error).toBeUndefined();
       expect(Boolean(toolResponse.result.isError)).toBe(expectError);
       evidence.push({ turn });
-      return (await messages()).findLast(message => message.card?.routineRequest && !message.card.answered)?.card;
+      return (await messages()).findLast(message => message.card?.routineRequest)?.card;
     };
-    const confirm = async (card: any) => {
-      expect(card?.requestId).toBeTruthy();
-      const result = await api("POST", `/api/bots/${bot.id}/respond`, { threadId, requestId: card.requestId, behavior: "allow" });
-      expect(result.outcome).toBe("allowed-once");
-      expect((await messages()).find(message => message.card?.requestId === card.requestId)?.card.answered).toBe("allow");
-      return result;
+    const applied = (card: any) => {
+      expect(card).toMatchObject({ answered: "allow", autoApplied: true, options: [] });
+      return { resultId: card.routineRequest.resultId as string };
     };
     const schedule = { type: "cron" as const, expression: "0 9 1 * *", timeZone: "America/New_York" };
-    const create = await proposal("propose_routine", {
-      name: "Monthly report", instructions: "Summarize last month's fixture activity; no external services.", schedule, overlap: "queue",
-    }, "Schedule a report at 9am New York time on the first of each month.");
-    expect((await api("GET", "/api/routines")).routines).toHaveLength(0);
-    expect(create.routineRequest).toMatchObject({ version: 1, operation: { action: "create", routine: { schedule } } });
-    expect(create.subtitle).toContain("Next 3 runs (America/New_York)");
+    const create = await proposal("create_trigger", { when: "schedule",
+      name: "Monthly report", instructions: "Summarize last month's fixture activity; no external services.", schedule, overlap: "queue", run_on_startup: true,
+    }, "Schedule a report at 9am New York time on the first of each month, and also whenever the app starts.");
+    expect(create.routineRequest).toMatchObject({ version: 1, operation: { action: "create", routine: { schedule } }, undo: { name: "Monthly report", schedule } });
+    expect(create.subtitle).toContain("Next 3 runs (Eastern time)");
     expect(create.subtitle).toContain("Cron: 0 9 1 * *");
-    const { resultId: routineId } = await confirm(create);
+    const { resultId: routineId } = applied(create);
     const current = async () => (await api("GET", "/api/routines")).routines.find((routine: any) => routine.id === routineId);
-    expect(await current()).toMatchObject({ schedule, enabled: true, runOn: "maus", overlap: "queue" });
+    expect(await current()).toMatchObject({ schedule, enabled: true, runOn: "maus", overlap: "queue", runOnStartup: true });
     expect(create.subtitle).toContain("Queue one scheduled run");
+    expect(create.subtitle).toContain("On startup: Also runs once each time OpenMausBot starts");
     expect((await current()).nextRunAt).toBe(nextCronRuns(schedule, create.routineRequest.createdAt, 1)[0]);
 
     const cardCount = (await messages()).filter(message => message.card?.routineRequest).length;
-    await proposal("propose_routine", {
-      name: "Renamed monthly report", instructions: "Summarize last month's fixture activity; no external services.", schedule, overlap: "queue",
+    await proposal("create_trigger", { when: "schedule",
+      name: "Renamed monthly report", instructions: "Summarize last month's fixture activity; no external services.", schedule, overlap: "queue", run_on_startup: true,
     }, "Try scheduling the same work again under a different name.", true);
-    const duplicateResponse = providerEvidence().at(-1).evidence.find((entry: any) => entry.step?.tool === "propose_routine").response;
+    const duplicateResponse = providerEvidence().at(-1).evidence.find((entry: any) => entry.step?.tool === "create_trigger").response;
     expect(duplicateResponse.result.content[0].text).toContain(routineId);
     expect(duplicateResponse.result.content[0].text).toContain("already exists");
     expect((await messages()).filter(message => message.card?.routineRequest)).toHaveLength(cardCount);
     expect((await api("GET", "/api/routines")).routines).toHaveLength(1);
 
     const lastDay = { ...schedule, expression: "0 9 L * *" };
-    const update = await proposal("propose_routine_action", {
-      action: "update", routine_id: routineId, changes: { schedule: lastDay, overlap: "skip" },
+    const update = await proposal("manage_trigger", {
+      action: "update", trigger_id: routineId, changes: { schedule: lastDay, overlap: "skip", run_on_startup: false },
     }, "Change that report to the last day of each month at the same time and zone.");
-    const listed = providerEvidence().at(-1).evidence.find((entry: any) => entry.step?.tool === "list_routines").response.result.content[0].text;
+    const listed = providerEvidence().at(-1).evidence.find((entry: any) => entry.step?.tool === "list_triggers").response.result.content[0].text;
     expect(listed).toContain('"type": "cron"');
     expect(listed).toContain('"timeZone": "America/New_York"');
     expect(listed).toContain('"overlap": "queue"');
+    expect(listed).toContain('"runOnStartup": true');
     expect(listed).toContain('"failureStreak": 0');
-    expect((await current()).schedule).toEqual(schedule);
-    await confirm(update);
+    applied(update);
+    expect(update.routineRequest.undo.before).toMatchObject({ schedule, overlap: "queue", runOnStartup: true });
+    expect(update.subtitle).toContain("On startup: Runs only on its schedule");
     expect((await current()).schedule).toEqual(lastDay);
     expect((await current()).overlap).toBeUndefined();
-    const pause = await proposal("propose_routine_action", { action: "pause", routine_id: routineId }, "Pause the monthly report.");
-    expect((await current()).enabled).toBe(true);
-    await confirm(pause);
+    expect((await current()).runOnStartup).toBeUndefined();
+    const pause = await proposal("manage_trigger", { action: "pause", trigger_id: routineId }, "Pause the monthly report.");
+    applied(pause);
     expect(await current()).toMatchObject({ enabled: false, nextRunAt: null, schedule: lastDay });
-    const resume = await proposal("propose_routine_action", { action: "resume", routine_id: routineId }, "Resume the monthly report.");
-    expect(resume.subtitle).toContain("Next 3 runs (America/New_York)");
-    await confirm(resume);
+    const resume = await proposal("manage_trigger", { action: "resume", trigger_id: routineId }, "Resume the monthly report.");
+    expect(resume.subtitle).toContain("Next 3 runs (Eastern time)");
+    applied(resume);
     expect(await current()).toMatchObject({ enabled: true, schedule: lastDay });
 
-    await proposal("propose_routine", { name: "Impossible date", instructions: "Must not run.", schedule: { ...schedule, expression: "0 9 31 2 *" } }, "Try an invalid calendar rule.", true);
-    await proposal("propose_routine", {
+    await proposal("create_trigger", { when: "schedule", name: "Impossible date", instructions: "Must not run.", schedule: { ...schedule, expression: "0 9 31 2 *" } }, "Try an invalid calendar rule.", true);
+    await proposal("create_trigger", { when: "schedule",
       name: "Explicit Boat", instructions: "Run on the Boat-hosted agent.", schedule, run_on: "box",
     }, "Try the separate Boat runner without a Boat account.", true);
-    const boatResponse = providerEvidence().at(-1).evidence.find((entry: any) => entry.step?.tool === "propose_routine").response;
+    const boatResponse = providerEvidence().at(-1).evidence.find((entry: any) => entry.step?.tool === "create_trigger").response;
     expect(boatResponse.result.content[0].text).toContain('run_on="maus"');
     expect(boatResponse.result.content[0].text).toContain("self-hosted VPS");
     const before = await current();

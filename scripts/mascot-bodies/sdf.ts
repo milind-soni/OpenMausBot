@@ -1,13 +1,7 @@
 /**
- * Signed distance field for a silhouette.
- *
- * The face has to sit somewhere the body can actually hold it, so we need to ask "how far
- * is this point from the edge?" thousands of times. Rasterising once into a distance field
- * makes each of those questions an array lookup.
- *
- * Distances are exact (Felzenszwalb & Huttenlocher's squared-EDT, linear time per axis)
- * rather than an approximate chamfer pass — a wrong distance here shows up as a mascot with
- * its mouth hanging off the edge.
+ * Signed distance field for a silhouette, so each "how far from the edge?" is an
+ * array lookup. Exact (Felzenszwalb & Huttenlocher's squared EDT, linear time per
+ * axis): a wrong distance shows up as a mouth hanging off the edge.
  */
 
 import { FACE_BOX } from "../../src/components/cursor-face-data.ts"

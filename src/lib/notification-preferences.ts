@@ -1,16 +1,14 @@
 import { useSyncExternalStore } from "react";
+import { windowPrefChanged } from "./window-pref-changes";
 
 export const NOTIFICATION_SOUNDS_KEY = "omb-notification-sounds";
+export const NOTIFICATION_FEED_KEY = "omb-notification-feed";
+export const FINISHED_NOTIFICATIONS_KEY = "omb-finished-notifications";
+export const NOTIFICATION_TRAY_PINNED_KEY = "omb-notification-tray-pinned";
 
-// Whether desktop notifications on THIS computer may play the platform's
-// alert sound. The server still decides what is worth a notification (each
-// bot's own switch); this only decides whether it dings when it lands. Kept
-// per renderer, like the thread display choice: a laptop in a meeting and a
-// desk machine can differ, and nothing about the conversation is in it.
-//
-// Same shape as thread-preferences.ts: a session choice survives blocked or
-// full storage, and another window's storage event supersedes it.
 let sessionChoice: boolean | undefined;
+let feedSessionChoice: boolean | undefined;
+let finishedSessionChoice: boolean | undefined;
 const listeners = new Set<() => void>();
 
 function storage(): Storage | undefined {
@@ -21,8 +19,6 @@ function storage(): Storage | undefined {
   }
 }
 
-/** True unless this computer has muted notification sounds. Plain function
- * rather than a hook because the notification path runs outside React. */
 export function notificationSoundsEnabled(): boolean {
   if (sessionChoice !== undefined) return sessionChoice;
   try {
@@ -37,9 +33,11 @@ function notify() {
 }
 
 function onStorage(event: StorageEvent) {
-  if (event.key !== NOTIFICATION_SOUNDS_KEY && event.key !== null) return;
+  if (event.key !== NOTIFICATION_SOUNDS_KEY && event.key !== NOTIFICATION_FEED_KEY && event.key !== FINISHED_NOTIFICATIONS_KEY && event.key !== null) return;
   if (event.storageArea && event.storageArea !== storage()) return;
   sessionChoice = undefined;
+  feedSessionChoice = undefined;
+  finishedSessionChoice = undefined;
   notify();
 }
 
@@ -62,15 +60,82 @@ export function setNotificationSounds(enabled: boolean): void {
     const local = storage();
     const value = enabled ? "1" : "0";
     local?.setItem(NOTIFICATION_SOUNDS_KEY, value);
-    // Notifications also read this outside mounted Settings. Prefer storage
-    // when it works, so another window's change cannot leave a stale override.
     if (local?.getItem(NOTIFICATION_SOUNDS_KEY) === value) sessionChoice = undefined;
   } catch {
-    // The visible setting still changes for this session when storage is full.
   }
   notify();
+  windowPrefChanged();
 }
 
 export function useNotificationSounds(): boolean {
   return useSyncExternalStore(subscribe, notificationSoundsEnabled, () => true);
+}
+
+export function notificationFeedEnabled(): boolean {
+  if (feedSessionChoice !== undefined) return feedSessionChoice;
+  try {
+    return storage()?.getItem(NOTIFICATION_FEED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setNotificationFeed(enabled: boolean): void {
+  feedSessionChoice = enabled;
+  try {
+    const local = storage();
+    const value = enabled ? "1" : "0";
+    local?.setItem(NOTIFICATION_FEED_KEY, value);
+    if (local?.getItem(NOTIFICATION_FEED_KEY) === value) feedSessionChoice = undefined;
+  } catch {
+  }
+  notify();
+}
+
+export function useNotificationFeed(): boolean {
+  return useSyncExternalStore(subscribe, notificationFeedEnabled, () => false);
+}
+
+/** Per device: "done" notices only; approvals, questions and warnings always show. */
+export function finishedNotificationsEnabled(): boolean {
+  if (finishedSessionChoice !== undefined) return finishedSessionChoice;
+  try {
+    return storage()?.getItem(FINISHED_NOTIFICATIONS_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setFinishedNotifications(enabled: boolean): void {
+  finishedSessionChoice = enabled;
+  try {
+    const local = storage();
+    const value = enabled ? "1" : "0";
+    local?.setItem(FINISHED_NOTIFICATIONS_KEY, value);
+    if (local?.getItem(FINISHED_NOTIFICATIONS_KEY) === value) finishedSessionChoice = undefined;
+  } catch {
+  }
+  notify();
+}
+
+export function useFinishedNotifications(): boolean {
+  return useSyncExternalStore(subscribe, finishedNotificationsEnabled, () => true);
+}
+
+/** Per device: the notification tray stays open while the person switches chats. */
+export function notificationTrayPinned(): boolean {
+  try {
+    return storage()?.getItem(NOTIFICATION_TRAY_PINNED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setNotificationTrayPinned(pinned: boolean): void {
+  try {
+    if (pinned) storage()?.setItem(NOTIFICATION_TRAY_PINNED_KEY, "1");
+    else storage()?.removeItem(NOTIFICATION_TRAY_PINNED_KEY);
+  } catch {
+    // Storage can be full or blocked; the pin still holds for this session.
+  }
 }

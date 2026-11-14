@@ -1,15 +1,33 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
+import { rebuiltSessionNotice } from "./resume-recovery.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+import { readHandoffs } from "./testing/handoff-rows.ts";
 import { openSse } from "./testing/sse.ts";
 
-/** Run direct Chief/lead/specialist workflows against an isolated scripted server. */
+/** A fixture turn's launch instructions plus its own message, where changed parts arrive when the process was kept warm. */
+const told = (turn: any): string => {
+  const content = turn.prompt?.message?.content;
+  return `${turn.system}\n${typeof content === "string" ? content : JSON.stringify(content ?? "")}`;
+};
+
+/** With OMB_TEST_DESKTOP_OWNER_TOKEN it runs as the desktop app runs it, every change carrying the app's owner capability. */
 async function fixture(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessEnv = {}) {
+  const desktopOwner = fakeEnv.OMB_TEST_DESKTOP_OWNER_TOKEN;
+  const realFetch = globalThis.fetch;
+  if (desktopOwner) globalThis.fetch = (input, init = {}) => realFetch(input, { ...init,
+    headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": desktopOwner } });
+  try { await fixtureSession(test, fakeEnv); } finally { globalThis.fetch = realFetch; }
+}
+
+async function fixtureSession(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessEnv) {
   const session = await launchVerificationServer({ ...process.env, ...fakeEnv }, undefined, undefined, undefined, undefined, { scripted: true });
   const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
   const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
@@ -20,33 +38,122 @@ async function fixture(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessE
     await api(`/api/bots/${chief.id}`, { chiefOfStaff: true, managedSections: ["Engineering"], acknowledgePeerScope: true }, "PATCH");
     const planPath = join(session.info.dataDir, "room-plan.json");
     const plan: Record<string, any> = {
-      [chief.id]: { steps: [{ arguments: { bot_ids: [lead.id], request_key: "build", message: "Implement and independently verify the CSV export" } }], reply: "Assigned to Engineering", resumeReply: "The requested CSV export is implemented and verified" },
-      [lead.id]: { steps: [{ arguments: { bot_ids: [specialist.id], request_key: "verify", message: "Independently verify the CSV export" } }], reply: "Sent for verification", resumeReply: "Implemented and reviewer confirmed checks" },
+      [chief.id]: { steps: [{ arguments: { bot_ids: [lead.id], message: "Implement and independently verify the CSV export" } }], reply: "Assigned to Engineering", resumeReply: "The requested CSV export is implemented and verified" },
+      [lead.id]: { steps: [{ arguments: { bot_ids: [specialist.id], message: "Independently verify the CSV export" } }], reply: "Sent for verification", resumeReply: "Implemented and reviewer confirmed checks" },
       [specialist.id]: { reply: "CSV boundary cases verified" },
     };
     const save = () => writeFileSync(planPath, JSON.stringify(plan));
-    const nodes = () => existsSync(join(session.info.dataDir, "room-handoffs.json")) ? JSON.parse(readFileSync(join(session.info.dataDir, "room-handoffs.json"), "utf8")) : [];
+    const nodes = () => readHandoffs(session.info.dataDir);
+    const eventsOf = (id: string): string[] => {
+      const db = new DatabaseSync(join(session.info.dataDir, "runtime.db"), { readOnly: true });
+      try {
+        return (db.prepare("SELECT kind FROM assignment_events WHERE assignment_id = ? ORDER BY id").all(id) as Array<{ kind: string }>).map(row => row.kind);
+      } finally { db.close(); }
+    };
     const evidence = () => existsSync(`${planPath}.evidence.jsonl`) ? readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
     const messages = async (threadId: string) => (await api(`/api/threads/${threadId}/messages`)).messages;
     const start = async () => { save(); return cli("send", "--bot", chief.id, "--task", chief.activeTaskId, "--text", "Please have Engineering build and independently verify a CSV export. Own the result."); };
     const wait = () => cli("wait", "--bot", chief.id, "--task", chief.activeTaskId, "--timeout", "30");
-    await test({ session, cli, api, chief, lead, specialist, plan, save, start, wait, nodes, evidence, messages });
+    await test({ session, cli, api, chief, lead, specialist, plan, save, start, wait, nodes, eventsOf, evidence, messages });
   } finally { await session.close(); }
 }
 
-it("does not grant a specialist direct access to its supervising Chief", () => fixture(async f => {
-  f.plan[f.lead.id] = {
-    steps: [{ expectError: true, arguments: { bot_ids: [f.chief.id], request_key: "supervisor", message: "Contact the Chief without a shared room" } }],
-    reply: "The direct request was refused",
+it("sends cross-bot work onward without resuming either sender", () => fixture(async f => {
+  const gate = join(f.session.info.dataDir, "sent-work-ready");
+  f.plan[f.chief.id] = { steps: [{ arguments: {
+    bot_ids: [f.lead.id], message: "Own the release and send final QA to Reviewer.", thread: "new", reply: "none",
+  } }], reply: "Release sent" };
+  f.plan[f.lead.id] = { steps: [{ arguments: {
+    bot_ids: [f.specialist.id], message: "Own final release QA.", thread: "new", reply: "none",
+  } }], reply: "QA sent onward" };
+  f.plan[f.specialist.id] = { gateFile: gate, reply: "Release QA complete" };
+
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const sendOf = (botId: string) => f.evidence().find((turn: any) => turn.botId === botId)?.evidence
+    .find((entry: any) => entry.step?.arguments?.reply === "none")?.response.result;
+  const leadSend = () => sendOf(f.lead.id);
+  await expect.poll(leadSend, { timeout: 15_000 }).toBeTruthy();
+  expect(leadSend().isError).toBeFalsy();
+  const sentThread = (botId: string) => JSON.parse(sendOf(botId).content[0].text).receipts[0].threadId;
+  await expect.poll(async () => (await f.api("/api/bots?messages=0")).bots
+    .find((bot: any) => bot.id === f.specialist.id)?.busy, { timeout: 15_000 }).toBe(true);
+  await f.api(`/api/bots/${f.lead.id}`, { visibility: "admins" }, "PATCH");
+  writeFileSync(gate, "finish detached work");
+  await expect.poll(() => f.evidence().filter((turn: any) => turn.botId === f.specialist.id).length, { timeout: 15_000 }).toBe(1);
+  const bots = (await f.api("/api/bots")).bots;
+  const leadThread = bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === sentThread(f.chief.id));
+  const qaThread = bots.find((bot: any) => bot.id === f.specialist.id).tasks.find((task: any) => task.threadId === sentThread(f.lead.id));
+  expect(leadThread.title).toBe("Own the release and send final QA to Reviewer.");
+  expect(qaThread.title).toBe("Own final release QA.");
+  const qaMessages = await f.messages(qaThread.threadId);
+  expect(qaMessages.some((message: any) => message.text === "Release QA complete")).toBe(true);
+  expect(qaMessages.some((message: any) => message.tool?.name?.includes("Send failed"))).toBe(false);
+  expect((await f.messages(leadThread.threadId)).some((message: any) => message.text?.includes("Release QA complete"))).toBe(false);
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text?.includes("QA sent") || message.text?.includes("Release QA complete"))).toBe(false);
+}), 60_000);
+
+it("lets a teammate answer a one-way ask in the thread that asked, with a notice and nothing more", () => fixture(async f => {
+  const asking = f.chief.activeTaskId;
+  f.plan[f.chief.id] = { steps: [{ arguments: {
+    bot_ids: [f.lead.id], message: `Ask the person which day suits, then tell me in thread ${asking}.`, thread: "new", reply: "none",
+  } }], reply: "Asked Engineering", byPrompt: [{ promptIncludes: "Tuesday suits", plan: { reply: "Got Tuesday from Engineering" } }] };
+  f.plan[f.lead.id] = { steps: [
+    { arguments: { bot_ids: [f.chief.id], message: "Tuesday suits, please plan for it", thread: asking }, expectError: true },
+    { arguments: { bot_ids: [f.chief.id], message: "Tuesday suits", thread: asking, reply: "none" } },
+  ], reply: "Told Clive" };
+  await f.start();
+  const sends = () => f.evidence().find((turn: any) => turn.botId === f.lead.id)?.evidence.filter((entry: any) => entry.step?.arguments?.thread === asking);
+  await expect.poll(() => sends()?.length, { timeout: 15_000 }).toBe(2);
+  const [work, notice] = sends().map((entry: any) => entry.response.result);
+  expect(JSON.stringify(work)).toContain("handed you work: answer it there with reply");
+  expect(notice.isError).toBeFalsy();
+  expect(JSON.parse(notice.content[0].text).receipts[0]).toMatchObject({ threadId: asking });
+  await expect.poll(async () => (await f.messages(asking)).some((message: any) => message.text === "Got Tuesday from Engineering"), { timeout: 15_000 }).toBe(true);
+  expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id).tasks.filter((task: any) => task.title?.includes("Tuesday"))).toEqual([]);
+}), 60_000);
+
+it("marks a failed one-way send so restart recovery cannot duplicate its notice", () => fixture(async f => {
+  // The failed send reports an incident to Clive, the lead's Chief; answering it must not send the task again.
+  f.plan[f.chief.id] = { steps: [{ arguments: {
+    bot_ids: [f.lead.id], message: "Try the task", thread: "new", reply: "none",
+  } }], reply: "Sent", byPrompt: [{ promptIncludes: "[From OpenMausBot · incident report", plan: { reply: "Noted the failed send" } }] };
+  f.plan[f.lead.id] = { fail: true };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const failureNotice = async () => {
+    const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
+    const tasks = lead?.tasks.filter((item: any) => item.title === "Try the task") ?? [];
+    expect(tasks.length).toBeLessThanOrEqual(1);
+    if (!tasks[0]) return null;
+    const messages = await f.messages(tasks[0].threadId);
+    return messages.find((message: any) => message.tool?.name?.startsWith("Send failed")) ?? null;
   };
+  await expect.poll(failureNotice, { timeout: 15_000 }).toBeTruthy();
+  expect((await failureNotice())?.tool?.handoffId).toEqual(expect.any(String));
+}), 45_000);
+
+it("lets a bot ask a bot in another department directly, with nothing set up first", () => fixture(async f => {
+  // Engineering lead and Clive, the Chief in Leadership: different departments, no peers list, no grant either way.
+  await f.api(`/api/bots/${f.chief.id}`, { managedSections: [] }, "PATCH");
+  f.plan[f.lead.id] = {
+    steps: [{ arguments: { bot_ids: ["Clive"], message: "Can we upgrade to the latest PHP version?", consult: true } }],
+    reply: "Asked Clive", resumeReply: "Clive says yes: the latest PHP is fine for us.",
+  };
+  f.plan[f.chief.id] = { reply: "Yes, the latest PHP version is fine for us." };
   f.save();
-  await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "Check the direct peer boundary");
+  await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "Please ask Clive if we can upgrade to the latest PHP version");
   expect((await f.cli("wait", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--timeout", "30")).status).toBe("settled");
-  expect(f.nodes()).toEqual([]);
-  const response = f.evidence().find((turn: any) => turn.botId === f.lead.id).evidence.find((entry: any) => entry.step).response;
-  expect(response.result.isError).toBe(true);
-  expect(response.result.content[0].text).toContain("sender's section boundary");
-  expect((await f.api("/api/bots")).groups).toEqual([]);
+  const asked = f.evidence().find((turn: any) => turn.botId === f.lead.id);
+  expect(asked.system).toContain("You can reach every other bot on this team, in every department");
+  expect(asked.system).toContain("Clive — General assistant (Leadership) [Chief of Staff]");
+  const response = asked.evidence.find((entry: any) => entry.step).response;
+  expect(response.result.isError).toBeFalsy();
+  const child = f.nodes().find((node: any) => node.parentId);
+  expect(child).toMatchObject({ botId: f.chief.id, mode: "consult", status: "completed" });
+  const said = await f.messages(f.lead.activeTaskId);
+  expect(said.some((message: any) => message.tool?.name === "Sent to Clive")).toBe(true);
+  expect(said.some((message: any) => message.text === "Clive says yes: the latest PHP is fine for us.")).toBe(true);
 }), 45_000);
 
 it.each([false, true])("starts independent work immediately and frees the Chief while waiting (source fails: %s)", fail => fixture(async f => {
@@ -54,8 +161,6 @@ it.each([false, true])("starts independent work immediately and frees the Chief 
   const childGate = join(f.session.info.dataDir, "child-ready");
   f.plan[f.chief.id].gateFile = sourceGate;
   f.plan[f.chief.id].fail = fail;
-  // The direct lane carries the same dispatch-time live roster the room lane
-  // does: fresh hand-offs name the teammates the recipient can reach now.
   f.plan[f.lead.id] = { gateFile: childGate, reply: "CSV export implemented and checked", expectContextIncludes: ["[LIVE TEAMMATES]", `[id: ${f.specialist.id}]`] };
   await f.start();
   await expect.poll(() => f.nodes().find((n: any) => n.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
@@ -66,7 +171,6 @@ it.each([false, true])("starts independent work immediately and frees the Chief 
     const b = await readChief();
     return !b.busy && b.waitingForTeammates && b.tasks.find((t: any) => t.threadId === f.chief.activeTaskId)?.waitingForTeammates;
   }, { timeout: 30_000 }).toBe(true);
-  // No provider turn is occupying the Chief; its thread controls remain usable.
   await f.api(`/api/bots/${f.chief.id}/tasks/${f.chief.activeTaskId}`, { approvalMode: "ask" }, "PATCH");
   expect(f.nodes().find((n: any) => n.botId === f.lead.id).status).toBe("running");
   writeFileSync(childGate, "complete the fixture teammate");
@@ -96,58 +200,37 @@ it("coordinates a lead and its specialist from ordinary chat, returns to Clive, 
   const bots = (await f.api("/api/bots")).bots;
   expect(bots.find((bot: any) => bot.id === f.lead.id).managedSections).toBeUndefined();
   const turn = f.evidence().find((entry: any) => entry.botId === f.lead.id);
-  const tools = turn.evidence[0].result.tools.map((tool: any) => tool.name);
+  const leadTools = turn.evidence[0].result.tools;
+  const tools = leadTools.map((tool: any) => tool.name);
   expect(tools).toContain("coordinate_bots");
-  expect(tools).not.toContain("delegate_bot");
-  expect(tools).not.toContain("start_thread");
+  expect(tools).toContain("assignment_status");
+  for (const alias of ["delegate_bot", "ask_bot", "send_to_bot", "check_delegation", "wait_delegation"]) expect(tools).not.toContain(alias);
   const chiefTools = f.evidence()[0].evidence[0].result.tools;
   const selfThread = chiefTools.find((tool: any) => tool.name === "start_thread");
   expect(selfThread.description).toContain("separate job on yourself");
-  expect(selfThread.inputSchema.properties.bot_id.enum).toEqual([f.chief.id]);
+  expect(selfThread.inputSchema.properties.bot_id).toBeUndefined();
   expect(bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === receipt.threadRef.threadId).openedBy)
     .toMatchObject({ botId: f.chief.id, name: "Clive" });
   expect(turn.system).toContain("only an actual coordinate_bots result proves that teammate participated");
 }), 45_000);
 
-it("announces a settled delegation and its resume in the parent thread", () => fixture(async f => {
+it("shows a settled delegation and its resume in the parent thread, and notifies once, with the answer", () => fixture(async f => {
   const stream = await openSse(`${f.session.info.url}/api/events`);
   try {
     await f.start();
     expect((await f.wait()).status).toBe("settled");
-    // f.wait() resolves through the control CLI poll, an independent path
-    // from the SSE reader loop; until() (which also resolves on frames
-    // already seen) is what proves both settles are stored before the
-    // assertions below count them
-    await Promise.all([
-      stream.until(frame => frame.kind === "notify"
-        && frame.notification?.kind === "delegation-settled"
-        && frame.notification.botId === f.chief.id),
-      stream.until(frame => frame.kind === "notify"
-        && frame.notification?.kind === "delegation-settled"
-        && frame.notification.botId === f.lead.id),
-    ]);
-    const settles = () => stream.frames.filter(frame => frame.kind === "notify" && frame.notification?.kind === "delegation-settled");
-    // the chief's resume is announced exactly once, pointing at the
-    // conversation the notification opens
-    const chiefFrames = settles().filter(frame => frame.notification.botId === f.chief.id);
-    expect(chiefFrames).toHaveLength(1);
-    expect(chiefFrames[0].notification).toMatchObject({
-      threadId: f.chief.activeTaskId,
-      title: "Clive resumed with results",
-      body: "Results in from Engineering lead",
-    });
-    // the nested lead resume is announced too, on its delegated thread
-    const leadFrames = settles().filter(frame => frame.notification.botId === f.lead.id);
-    expect(leadFrames).toHaveLength(1);
-    expect(leadFrames[0].notification.threadId).not.toBe(f.lead.activeTaskId);
-    // the specialist ran the work and never resumed, so it earns no frame
-    expect(settles().some(frame => frame.notification.botId === f.specialist.id)).toBe(false);
-    // suppression of the delegated turns themselves is unchanged: neither
-    // child earns a done frame. The chief's own asked-for outer turn still
-    // may, exactly as before.
+    // f.wait() resolves through the control CLI poll, independent of the SSE reader: until() proves the "done" is stored first.
+    await stream.until(frame => frame.kind === "notify" && frame.notification?.kind === "done" && frame.notification.botId === f.chief.id);
+    // The results coming back to the bot that asked notify nobody: its answer, the one "done", is what the person needs.
+    const notes = stream.frames.filter(frame => frame.kind === "notify").map(frame => frame.notification);
+    expect(notes.map(note => [note.kind, note.botId]), JSON.stringify(notes)).toEqual([["done", f.chief.id]]);
+    expect(notes[0]).toMatchObject({ threadId: f.chief.activeTaskId, title: "Clive finished" });
+    const { bots } = await f.api("/api/bots?messages=0");
+    const work = bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.openedBy?.botId === f.chief.id);
+    expect(work.unread, "no unread mark, on the desktop or the phone's To review, for a teammate's own step").toBeFalsy();
+    expect(bots.find((bot: any) => bot.id === f.chief.id).tasks.find((task: any) => task.threadId === f.chief.activeTaskId).unread, "the person's own conversation still is").toBe(true);
     expect(stream.frames.some(frame => frame.kind === "notify" && frame.notification?.kind === "done"
       && (frame.notification.botId === f.lead.id || frame.notification.botId === f.specialist.id))).toBe(false);
-    // one visible chip per settle in the parent's conversation, never per steer
     const chips = (await f.messages(f.chief.activeTaskId))
       .filter((message: any) => message.kind === "activity" && message.tool?.name.startsWith("Resumed with "));
     expect(chips.map((message: any) => message.tool.name)).toEqual(["Resumed with Engineering lead results, reviewing"]);
@@ -191,14 +274,13 @@ it.each(["resume", "stop", "failed resume", "failed root"] as const)("keeps a gu
     expect(waiting.messages.find((message: any) => message.text === "Assigned to Engineering").requestMessageId).toBe(accepted.message.id);
     await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
     const child = f.nodes().find((node: any) => node.botId === f.lead.id);
-    // Waiting for teammates does not occupy a provider turn or disable edits.
     await api("PATCH", `/api/bots/${f.chief.id}/tasks/${threadId}`, { approvalMode: "ask" });
     const target = { threadId, messageId: waiting.messageId, expectedActiveLeafId: waiting.activeLeafId,
       expectedTurnId: waiting.activeTurnId, expectedExecutionId: waiting.executionId };
     if (action === "failed root") {
       await api("PATCH", `/api/bots/${f.chief.id}`, { chiefOfStaff: false, hidden: true });
+      writeFileSync(gate, "release the isolated teammate after its root lost its Chief");
       await expect.poll(() => f.nodes().find((node: any) => node.id === waiting.executionId)?.status, { timeout: 15_000 }).toBe("failed");
-      writeFileSync(gate, "release the isolated teammate after its root failed");
       const finalWait = await f.wait();
       evidence.push({ command: ["wait", "--bot", f.chief.id, "--task", threadId, "--timeout", "30"], result: finalWait });
       expect(finalWait.status).toBe("settled");
@@ -219,13 +301,14 @@ it.each(["resume", "stop", "failed resume", "failed root"] as const)("keeps a gu
       await api("POST", `${route}/interrupt`, { ...target, expectedExecutionId: null }, 409);
       expect(await api("POST", `${route}/interrupt`, target)).toEqual({ ok: true, outcome: "stopped" });
       await api("POST", `${route}/interrupt`, target, 409);
-      expect(f.nodes().find((node: any) => node.botId === f.lead.id).status).toBe("running");
+      // Stop means stop: the teammate working for the request ends with it.
+      expect(f.nodes().find((node: any) => node.botId === f.lead.id).status).toBe("cancelled");
     }
     writeFileSync(gate, "finish only the isolated teammate");
     const childWait = await f.cli("wait", "--bot", f.lead.id, "--task", child.threadId, "--timeout", "20");
     evidence.push({ command: ["wait", "--bot", f.lead.id, "--task", child.threadId, "--timeout", "20"], result: childWait });
     expect(childWait.status).toBe("settled");
-    await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id).status).toBe("completed");
+    await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id).status).toBe(action === "stop" ? "cancelled" : "completed");
     const finalWait = await f.wait();
     evidence.push({ command: ["wait", "--bot", f.chief.id, "--task", threadId, "--timeout", "30"], result: finalWait });
     expect(action === "failed resume" ? ["settled", "failed"] : ["settled"]).toContain(finalWait.status);
@@ -270,15 +353,45 @@ it.each(["resume", "stop", "failed resume", "failed root"] as const)("keeps a gu
   }
 }), 45_000);
 
-it("uses only the coordinator for teammates and lets the opener find and close the completed task", () => fixture(async f => {
-  f.plan[f.chief.id].steps.unshift({ tool: "start_thread", arguments: { bot_id: f.lead.id, title: "Wrong path", message: "Use teamwork" }, expectError: true });
+it("opens a fresh thread on a teammate with coordinate_bots thread \"new\" and gets the result back", () => fixture(async f => {
+  const originalLead = await f.messages(f.lead.activeTaskId);
+  f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "NEW_THREAD_BRIEF verify the CSV export yourself", thread: "new" } }],
+    reply: "Opened a fresh thread", resumeReply: "The fresh thread reported back" };
+  f.plan[f.lead.id] = { reply: "NEW_THREAD_RESULT verified" };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const answered = f.evidence()[0].evidence.find((entry: any) => entry.step?.arguments?.thread === "new").response.result;
+  expect(answered.isError).toBeFalsy();
+  expect(answered.content[0].text).not.toMatch(/Deprecated|alias/);
+  const child = f.nodes().find((node: any) => node.botId === f.lead.id);
+  expect(child).toMatchObject({ mode: "work", reply: "resume", status: "completed", text: expect.stringContaining("NEW_THREAD_BRIEF") });
+  const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
+  expect(lead.tasks.find((task: any) => task.threadId === child.threadId)).toMatchObject({ title: "NEW_THREAD_BRIEF verify the CSV export yourself", openedBy: { botId: f.chief.id, name: "Clive" } });
+  expect(child.threadId).not.toBe(f.lead.activeTaskId);
+  expect(await f.messages(f.lead.activeTaskId)).toEqual(originalLead);
+  expect(f.evidence().map((turn: any) => turn.botId)).toEqual([f.chief.id, f.lead.id, f.chief.id]);
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied" && message.tool.output === "NEW_THREAD_RESULT verified")).toBe(true);
+}), 45_000);
+
+it("names a fresh teammate thread with coordinate_bots title", () => fixture(async f => {
+  f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "TITLED_BRIEF verify the CSV export yourself", thread: "new", title: "CSV export: verify" } }],
+    reply: "Opened a titled thread", resumeReply: "The titled thread reported back" };
+  f.plan[f.lead.id] = { reply: "TITLED_RESULT verified" };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const answered = f.evidence()[0].evidence.find((entry: any) => entry.step?.arguments?.title).response.result;
+  expect(answered.isError).toBeFalsy();
+  const child = f.nodes().find((node: any) => node.botId === f.lead.id);
+  const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
+  expect(lead.tasks.find((task: any) => task.threadId === child.threadId)).toMatchObject({ title: "CSV export: verify", openedBy: { botId: f.chief.id, name: "Clive" } });
+}), 45_000);
+
+it("lets the opener find and close the completed task", () => fixture(async f => {
   await f.start();
   expect((await f.wait()).status).toBe("settled");
   const child = f.nodes().find((node: any) => node.botId === f.lead.id);
   const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
   expect(lead.tasks).toHaveLength(2);
-  const rejected = f.evidence()[0].evidence.find((entry: any) => entry.step?.tool === "start_thread");
-  expect(rejected.response.result.content[0].text).toContain("Use coordinate_bots for teammates");
   f.plan[f.chief.id] = {
     steps: [
       { tool: "list_threads", arguments: {} },
@@ -309,7 +422,7 @@ it("does not treat self-opened work or an abandoned human branch as new human au
     { steps: [post("First update"), post("Second update"), { tool: "start_thread", arguments: { title: "Independent job", message: "Continue the separate check." } }], reply: "Opened the independent job" },
     { steps: [post("A self-opened job is not another human answer", true), { tool: "request_credential", arguments: { credential_id: "ttsKey", reason: "Fixture continuation" } }], reply: "Waiting for the fixture credential decision" },
     { reply: "This alternative human branch will be abandoned" },
-    { steps: [{ tool: "start_thread", arguments: { title: "Recursive job", message: "Must not start." }, expectError: true }], reply: "Continuing only the original self-opened job" },
+    { reply: "Continuing only the original self-opened job" },
     { steps: [post("A real user explicitly asked for this update")], reply: "Posted the requested update" },
   ] };
   f.save();
@@ -336,16 +449,11 @@ it("does not treat self-opened work or an abandoned human branch as new human au
   await f.api(`/api/bots/${f.chief.id}/messages/${opening.id}/edit`, { threadId: child.threadId, text: "An alternative human request." });
   await providerFinished(3);
   await f.api(`/api/bots/${f.chief.id}/active-branch`, { threadId: child.threadId, messageId: secret.id });
-  // The later human message remains in storage, but not in this active branch.
   expect((await f.messages(child.threadId)).some((message: any) => message.text === "An alternative human request.")).toBe(true);
   await f.api(`/api/bots/${f.chief.id}/secret-cards/${secret.id}/dismiss`, { threadId: child.threadId });
   await providerFinished(4);
   expect((await childWait()).status).toBe("settled");
-  const continuation = f.evidence().at(-1);
-  expect(continuation.evidence[0].result.tools.some((tool: any) => tool.name === "start_thread")).toBe(false);
-  const denied = continuation.evidence.find((entry: any) => entry.step?.tool === "start_thread");
-  expect(denied).toBeDefined();
-  expect(denied.response.error.message).toBe("Unknown tool: start_thread");
+  expect(f.evidence().at(-1).evidence[0].result.tools.find((tool: any) => tool.name === "start_thread").inputSchema.properties.bot_id).toBeUndefined();
   expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id).tasks).toHaveLength(2);
   await f.cli("send", "--bot", f.chief.id, "--task", child.threadId, "--text", "Now I want you to post one new update.");
   await providerFinished(5);
@@ -368,6 +476,7 @@ it("returns a nested coordinated result after Claude retries a transient provide
   } finally { await removeTempDir(scratch); }
 }, 45_000);
 
+// The CLI ends between turns here, so each later turn resumes and is refused.
 it("returns nested results after Claude rejects the source's prior resume cursor", () => fixture(async f => {
   const coordination = f.plan[f.chief.id];
   f.plan[f.chief.id] = { reply: "Earlier conversation" };
@@ -377,12 +486,12 @@ it("returns nested results after Claude rejects the source's prior resume cursor
   f.plan[f.chief.id] = coordination;
   await f.start();
   expect((await f.wait()).status).toBe("settled");
-  expect(f.nodes()).toHaveLength(3);
+  expect(f.nodes()).toHaveLength(4);
   expect(f.nodes().every((node: any) => node.status === "completed")).toBe(true);
   expect(f.evidence().map((turn: any) => turn.botId)).toEqual([f.chief.id, f.chief.id, f.lead.id, f.specialist.id, f.lead.id, f.chief.id]);
   const transcript = await f.messages(f.chief.activeTaskId);
-  expect(transcript.some((message: any) => message.tool?.name?.includes("resume_rejected"))).toBe(true);
-}, { FAKE_CLAUDE_MODE: "dead-session" }), 45_000);
+  expect(transcript.some((message: any) => message.tool?.name === `notice: ${rebuiltSessionNotice("Claude Code")}`)).toBe(true);
+}, { FAKE_CLAUDE_MODE: "dead-session", FAKE_CLAUDE_EXIT_AFTER_TURN: "1" }), 45_000);
 
 it("uses recipient bot defaults for its new task, never the sender's or its selected old thread's settings", () => fixture(async f => {
   const models = await f.cli("models");
@@ -393,18 +502,22 @@ it("uses recipient bot defaults for its new task, never the sender's or its sele
   const node = f.nodes().find((entry: any) => entry.botId === f.lead.id);
   const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
   expect(lead.tasks.find((task: any) => task.threadId === f.lead.activeTaskId)).toMatchObject({ modelSelection: { model: selected.id }, approvalMode: "edits" });
-  expect(lead.tasks.find((task: any) => task.threadId === node.threadId)).toMatchObject({ modelSelection: f.lead.modelSelection, approvalMode: "ask" });
-  expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).every((turn: any) => turn.model === f.lead.modelSelection.model && turn.permissionMode === "default")).toBe(true);
+  expect(lead.tasks.find((task: any) => task.threadId === node.threadId)).toMatchObject({ modelSelection: f.lead.modelSelection, approvalMode: "full" });
+  expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).every((turn: any) => turn.model === f.lead.modelSelection.model && turn.permissionMode === "bypassPermissions")).toBe(true);
 }), 45_000);
 
-it("keeps one conversation per bot pair across separate user turns, titled for the sender", () => fixture(async f => {
+const sendReceipts = (f: any, botId: string) => f.evidence().filter((turn: any) => turn.botId === botId)
+  .flatMap((turn: any) => turn.evidence.filter((entry: any) => entry.step))
+  .map((entry: any) => JSON.parse(entry.response.result.content[0].text).receipts[0]);
+
+it("continues one recipient thread for every follow-up from the same conversation", () => fixture(async f => {
   f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Header row added" }, { reply: "Write-up published" }] };
   f.plan[f.chief.id] = { turns: [
-    { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Implement the CSV export" } }], reply: "Assigned the build" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export" } }], reply: "Assigned the build" },
     { reply: "The export is implemented" },
-    { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: "header", message: "Add the header row to that export" } }], reply: "Assigned the header row" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Add the header row to that export" } }], reply: "Assigned the header row" },
     { reply: "The header row is in" },
-    { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: "docs", message: "Document the export you just built" } }], reply: "Assigned the write-up" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Document the export you just built" } }], reply: "Assigned the write-up" },
     { reply: "It is documented" },
   ] };
   f.save();
@@ -414,88 +527,155 @@ it("keeps one conversation per bot pair across separate user turns, titled for t
   };
   const leadTasks = async () => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks;
   await send("Ask Engineering to build the CSV export.");
-  const opened = (await leadTasks()).filter((task: any) => task.threadId !== f.lead.activeTaskId);
-  expect(opened).toHaveLength(1);
-  const pair = opened[0];
-  // the sender's name, not an 80-character slice of the brief
-  expect(pair.title).toBe("@Clive");
-  expect(pair.openedBy).toMatchObject({ botId: f.chief.id, name: "Clive", kind: "pair" });
+  const first = (await leadTasks()).find((task: any) => task.threadId !== f.lead.activeTaskId);
+  expect(first.title).toBe("@Clive · work");
+  expect(first.openedBy).toMatchObject({ botId: f.chief.id, name: "Clive", kind: "work", threadId: f.chief.activeTaskId });
+  expect(first.closedBy).toMatchObject({ botId: f.chief.id });
   await send("Now ask them to add the header row.");
   await send("Now ask them to document it.");
-  // three assignments, three user turns, one conversation
-  expect(await leadTasks()).toHaveLength(2);
-  expect(f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId))
-    .toEqual([pair.threadId, pair.threadId, pair.threadId]);
-  const transcript = (await f.messages(pair.threadId)).map((message: any) => message.text).filter(Boolean).join("\n");
-  for (const brief of ["Implement the CSV export", "Add the header row to that export", "Document the export you just built"]) {
-    expect(transcript).toContain(brief);
-  }
-  // Claude snapshots the system prompt at the session's first request. The
-  // briefs must therefore travel in their user turns so they remain current
-  // whether the CLI process is retained or the session is resumed.
+  const tasks = await leadTasks();
+  expect(tasks).toHaveLength(2);
+  expect(tasks.find((task: any) => task.threadId === first.threadId)).toMatchObject({ title: "@Clive · work", closedBy: { botId: f.chief.id } });
+  expect(f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId)).toEqual([first.threadId, first.threadId, first.threadId]);
+  const briefs = ["Implement the CSV export", "Add the header row to that export", "Document the export you just built"];
+  const transcript = (await f.messages(first.threadId)).map((message: any) => message.text).filter(Boolean).join("\n");
+  for (const brief of briefs) expect(transcript).toContain(brief);
+  // Claude snapshots the system prompt at the session's first request, so briefs must travel in their user turns.
   const leadTurns = f.evidence().filter((turn: any) => turn.botId === f.lead.id);
-  expect(leadTurns).toHaveLength(3);
-  expect(leadTurns[0].prompt.message.content).toContain("Implement the CSV export");
-  expect(leadTurns[1].prompt.message.content).toContain("Add the header row to that export");
-  expect(leadTurns[2].prompt.message.content).toContain("Document the export you just built");
+  expect(leadTurns.map((turn: any) => turn.threadId)).toEqual([first.threadId, first.threadId, first.threadId]);
+  for (const [index, brief] of briefs.entries()) expect(leadTurns[index].prompt.message.content).toContain(brief);
   expect(leadTurns.every((turn: any) => turn.system.includes("current request and returned results arrive in the user turn"))).toBe(true);
   expect(leadTurns.every((turn: any) => turn.snapshotMode === "off")).toBe(true);
-  for (const brief of ["Implement the CSV export", "Add the header row to that export", "Document the export you just built"]) {
-    expect(leadTurns.every((turn: any) => !turn.system.includes(brief))).toBe(true);
-  }
-  // a pair conversation is the standing line between two bots: it never
-  // auto-closes, and every receipt in the sender's chat points at it
-  expect((await leadTasks()).find((task: any) => task.threadId === pair.threadId)).not.toHaveProperty("closedBy");
-  expect((await f.messages(f.chief.activeTaskId)).filter((message: any) => message.threadRef?.threadId === pair.threadId)).toHaveLength(6);
+  for (const brief of briefs) expect(leadTurns.every((turn: any) => !turn.system.includes(brief))).toBe(true);
+  const receipts = sendReceipts(f, f.chief.id);
+  expect(receipts.map((receipt: any) => receipt.threadId)).toEqual([first.threadId, first.threadId, first.threadId]);
+  for (const receipt of receipts) expect(receipt.detail).toBe('sent to "@Clive · work"; it runs after anything still running there');
+  const chips = (await f.messages(f.chief.activeTaskId)).filter((message: any) => message.threadRef?.threadId === first.threadId);
+  expect(chips.filter((message: any) => message.tool?.name === "Sent to Engineering lead")).toHaveLength(3);
+  expect((await leadTasks()).find((task: any) => task.threadId === f.lead.activeTaskId)).not.toHaveProperty("closedBy");
 }, { FAKE_CLAUDE_VERSION: "2.1.270" }), 90_000);
 
-it("gives a second simultaneous assignment its own labelled thread, which closes once its result is reported", () => fixture(async f => {
+it.each<[string, NodeJS.ProcessEnv]>([
+  ["a headless server", {}],
+  ["the desktop app", { OMB_TEST_DESKTOP_OWNER_TOKEN: randomBytes(32).toString("base64url") }],
+])("on %s, hands a follow-up sent while the teammate still works to its running turn, and one result comes back", (_where, env) => fixture(async f => {
+  expect((await f.api("/.well-known/openmausbot/environment", undefined, "GET")).capabilities.selfUpdate)
+    .toBe(env.OMB_TEST_DESKTOP_OWNER_TOKEN ? "desktop-managed" : "operator");
+  const gate = join(f.session.info.dataDir, "first-request.gate");
+  f.plan[f.lead.id] = { turns: [{ gateFile: gate, reply: "Export implemented, with the header row" }] };
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export" } }], reply: "Assigned the build" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Also add a header row to that export" } }], reply: "Sent the change" },
+    { reply: "Reviewed" },
+  ] };
+  const chiefTurns = () => f.evidence().filter((turn: any) => turn.botId === f.chief.id);
+  const stream = await openSse(`${f.session.info.url}/api/events`);
+  await f.start();
+  await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
+  await expect.poll(() => chiefTurns().length, { timeout: 15_000 }).toBe(1);
+  await f.api(`/api/bots/${f.chief.id}/messages`, { text: "Change of plan: the export also needs a header row.", threadId: f.chief.activeTaskId });
+  await expect.poll(() => chiefTurns().length, { timeout: 20_000 }).toBe(2);
+  expect(told(chiefTurns()[1])).toContain("send the change to the same teammate with coordinate_bots");
+  const [running, ...others] = f.nodes().filter((node: any) => node.botId === f.lead.id);
+  expect(others, "the change started no second job").toEqual([]);
+  expect(sendReceipts(f, f.chief.id)[1]).toMatchObject({ outcome: "injected", threadId: running.threadId, requestId: running.id });
+  expect((await f.messages(running.threadId)).filter((message: any) => message.peerAsk?.name === "Clive" && message.text === "Also add a header row to that export"))
+    .toHaveLength(1);
+  writeFileSync(gate, "go");
+  expect((await f.wait()).status).toBe("settled");
+  await expect.poll(() => f.nodes().filter((node: any) => node.parentId).every((node: any) => node.status === "completed"), { timeout: 15_000 }).toBe(true);
+  const leadTurns = f.evidence().filter((turn: any) => turn.botId === f.lead.id);
+  expect(leadTurns.map((turn: any) => [turn.turnIndex, turn.threadId])).toEqual([[0, running.threadId]]);
+  expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks).toHaveLength(2);
+  await stream.until(frame => frame.kind === "bot" && frame.bot?.id === f.lead.id
+    && frame.bot.tasks?.find((task: any) => task.threadId === running.threadId)?.closedBy);
+  const closed = stream.frames.filter(frame => frame.kind === "bot" && frame.bot?.id === f.lead.id)
+    .map(frame => Boolean(frame.bot.tasks?.find((task: any) => task.threadId === running.threadId)?.closedBy));
+  stream.close();
+  expect(closed.filter((now, at) => now && !closed[at - 1])).toHaveLength(1);
+}, env), 60_000);
+
+it("runs two assignments to one teammate from one turn in its thread, one after the other", () => fixture(async f => {
   f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Benchmark finished" }] };
   f.plan[f.chief.id] = { steps: [
-    { arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Implement the CSV export" } },
-    { arguments: { bot_ids: [f.lead.id], request_key: "bench", message: "Benchmark the exporter on the large fixture", label: "Benchmark" } },
+    { arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export" } },
+    { arguments: { bot_ids: [f.lead.id], message: "Benchmark the exporter on the large fixture" } },
   ], reply: "Both assignments are out", resumeReply: "Both came back" };
   await f.start();
   expect((await f.wait()).status).toBe("settled");
   const tasks = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks;
-  expect(tasks).toHaveLength(3);
-  const pair = tasks.find((task: any) => task.openedBy?.kind === "pair");
+  expect(tasks).toHaveLength(2);
   const work = tasks.find((task: any) => task.openedBy?.kind === "work");
-  expect(pair.title).toBe("@Clive");
-  expect(work.title).toBe("@Clive · Benchmark");
-  // the two jobs never share a transcript
-  const threads = f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId);
-  expect(new Set(threads)).toEqual(new Set([pair.threadId, work.threadId]));
-  expect((await f.messages(pair.threadId)).some((message: any) => message.text?.includes("Implement the CSV export"))).toBe(true);
-  expect((await f.messages(work.threadId)).some((message: any) => message.text?.includes("Benchmark the exporter"))).toBe(true);
-  expect((await f.messages(pair.threadId)).some((message: any) => message.text?.includes("Benchmark the exporter"))).toBe(false);
-  // scaffolding tidies up after itself; the standing conversation stays
-  expect(work.closedBy).toMatchObject({ botId: f.chief.id, name: "Clive" });
-  expect(pair).not.toHaveProperty("closedBy");
+  expect(work).toMatchObject({ title: "@Clive · work", closedBy: { botId: f.chief.id } });
+  expect(f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId)).toEqual([work.threadId, work.threadId]);
+  expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).map((turn: any) => [turn.turnIndex, turn.threadId]))
+    .toEqual([[0, work.threadId], [1, work.threadId]]);
+  const transcript = (await f.messages(work.threadId)).map((message: any) => message.text).filter(Boolean).join("\n");
+  expect(transcript).toContain("Implement the CSV export");
+  expect(transcript).toContain("Benchmark the exporter");
 }), 60_000);
 
-it("refuses a reused request_key for different work and leaves no thread behind", () => fixture(async f => {
-  f.plan[f.lead.id] = { reply: "Export implemented" };
-  f.plan[f.chief.id] = { steps: [
-    { arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Implement the CSV export" } },
-    { arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Something else entirely" }, expectError: true },
-  ], reply: "One assignment is out", resumeReply: "It came back" };
+it("gives another conversation of the same Chief its own thread with the teammate", () => fixture(async f => {
+  f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Invoices exported" }] };
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export" } }], reply: "Assigned" },
+    { reply: "Done" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Export the invoices" } }], reply: "Assigned" },
+    { reply: "Done" },
+  ] };
   await f.start();
   expect((await f.wait()).status).toBe("settled");
-  const refused = f.evidence()[0].evidence.find((entry: any) => entry.step?.arguments?.message === "Something else entirely");
-  expect(JSON.stringify(refused.response)).toContain("request_key was already used for different work");
-  expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks).toHaveLength(2);
-  expect(f.nodes().filter((node: any) => node.botId === f.lead.id)).toHaveLength(1);
-}), 45_000);
+  const other = (await f.api(`/api/bots/${f.chief.id}/tasks`, { title: "Invoices" })).task.threadId;
+  await f.cli("send", "--bot", f.chief.id, "--task", other, "--text", "Ask Engineering to export the invoices.");
+  expect((await f.cli("wait", "--bot", f.chief.id, "--task", other, "--timeout", "30")).status).toBe("settled");
+  const work = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.filter((task: any) => task.openedBy?.kind === "work");
+  expect(work.map((task: any) => task.openedBy.threadId).sort()).toEqual([f.chief.activeTaskId, other].sort());
+  expect(new Set(f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId))).toEqual(new Set(work.map((task: any) => task.threadId)));
+}), 60_000);
 
-it("deduplicates a repeated direct request without creating extra recipient tasks", () => fixture(async f => {
+it("runs an identical call made twice in one turn once, without an extra recipient thread", () => fixture(async f => {
   f.plan[f.chief.id].steps.push(structuredClone(f.plan[f.chief.id].steps[0]));
   await f.start(); expect((await f.wait()).status).toBe("settled");
   expect(f.nodes().filter((node: any) => node.botId === f.lead.id)).toHaveLength(1);
   const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
   expect(lead.tasks).toHaveLength(2);
   expect((await f.messages(f.chief.activeTaskId)).filter((message: any) => message.tool?.name === "Sent to Engineering lead")).toHaveLength(1);
+  const [sent, repeated] = sendReceipts(f, f.chief.id);
+  expect(repeated).toMatchObject({ requestId: sent.requestId, threadId: sent.threadId });
+  expect(repeated.detail).toContain("already sent");
 }), 45_000);
+
+it.each<[string, Record<string, unknown>, string]>([
+  ["finished", { reply: "3 tests fail" }, "not sent again: it already finished and its result stands; send it with rework=true to run it again"],
+  ["failed", { fail: true }, "not sent again: it failed; send it with rework=true to retry"],
+])("runs an identical brief again only with rework=true once its first run %s", (how, firstRun, refusal) => fixture(async f => {
+  const brief = "Run the full test suite and report every failure";
+  f.plan[f.lead.id] = { turns: [firstRun, { reply: "All tests pass" }] };
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: brief } }], reply: "Sent" },
+    { steps: [
+      { arguments: { bot_ids: [f.lead.id], message: brief }, expectError: true },
+      ...(how === "finished" ? [{ arguments: { bot_ids: [f.lead.id], message: "Thanks, approved" }, expectError: true }] : []),
+      { arguments: { bot_ids: [f.lead.id], message: brief, rework: true } },
+    ], reply: "Sent again" },
+    { reply: "The suite is green" },
+  ] };
+  await f.start();
+  await expect.poll(() => f.evidence().filter((turn: any) => turn.botId === f.chief.id).length, { timeout: 30_000 }).toBe(3);
+  expect((await f.wait()).status).toBe("settled");
+  const results = f.evidence().filter((turn: any) => turn.botId === f.chief.id)
+    .flatMap((turn: any) => turn.evidence.filter((entry: any) => entry.step)).map((entry: any) => entry.response.result);
+  const [sent, repeated] = results;
+  const rerun = results.at(-1);
+  expect(repeated.isError).toBe(true);
+  expect(repeated.content[0].text).toContain(refusal);
+  if (how === "finished") expect(results[2].content[0].text).toContain("Only use rework=true for concrete additional work.");
+  const [first, again] = [sent, rerun].map((result: any) => JSON.parse(result.content[0].text).receipts[0]);
+  expect(again).toMatchObject({ outcome: "queued", threadId: first.threadId });
+  expect(again.requestId).not.toBe(first.requestId);
+  expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).map((turn: any) => turn.threadId)).toEqual([first.threadId, first.threadId]);
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "The suite is green")).toBe(true);
+}), 60_000);
 
 it("dispatches to a spare recipient thread without waiting for unrelated work", () => fixture(async f => {
   await f.api("/api/config", { threads: { maxConcurrentPerBot: 2 } }, "PUT");
@@ -532,14 +712,18 @@ it("queues a recipient at capacity, preserving its existing task and resuming on
   expect((await f.wait()).status).toBe("settled");
   expect(await f.messages(next.task.threadId)).toEqual([]);
   expect((await f.messages(f.lead.activeTaskId)).some((message: any) => message.text === "Unrelated work completed")).toBe(true);
-  expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).map((turn: any) => turn.threadId)).toEqual([f.lead.activeTaskId, f.nodes().find((node: any) => node.botId === f.lead.id).threadId]);
+  expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).map((turn: any) => turn.threadId)).toEqual([f.lead.activeTaskId, f.nodes().find((node: any) => node.parentId && node.botId === f.lead.id).threadId]);
 }), 45_000);
 
-// Steering is not cancelling. A person who types while teammates work keeps
-// the work: the new turn runs now, the assignments stay out, and it is told
-// which ones — otherwise the model assumes its fan-out died and resends it.
+/** A message sent while the Chief's assigning turn is still finishing is steered into that turn, so it is never parked or started on its own. */
+const assigningTurnEnded = (f: any) => expect.poll(async () => {
+  const chief = (await f.api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === f.chief.id);
+  return { busy: chief.busy, waitingForTeammates: chief.waitingForTeammates };
+}, { timeout: 15_000 }).toEqual({ busy: false, waitingForTeammates: true });
+
 it("runs a message sent while a teammate works, keeps the assignment, and names it in that turn", () => fixture(async f => {
-  f.plan[f.lead.id] = { delayMs: 4000, reply: "CSV export implemented" };
+  const gate = join(f.session.info.dataDir, "steered-assignment-ready");
+  f.plan[f.lead.id] = { gateFile: gate, reply: "CSV export implemented" };
   f.plan[f.chief.id] = { turns: [
     { steps: structuredClone(f.plan[f.chief.id].steps), reply: "Assigned to Engineering" },
     { reply: "Noted; Engineering is still working on it" },
@@ -549,30 +733,28 @@ it("runs a message sent while a teammate works, keeps the assignment, and names 
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
   const assignment = f.nodes().find((node: any) => node.parentId);
 
+  await assigningTurnEnded(f);
   const receipt = await f.api(`/api/bots/${f.chief.id}/messages`, { text: "Also make sure the export is UTF-8.", threadId: f.chief.activeTaskId });
-  // It ran; it was not held behind the outstanding work.
   expect(receipt.queued).toBeUndefined();
   expect(receipt.message.text).toBe("Also make sure the export is UTF-8.");
   await expect.poll(() => f.evidence().filter((turn: any) => turn.botId === f.chief.id).length, { timeout: 20_000 }).toBe(2);
 
   const steered = f.evidence().filter((turn: any) => turn.botId === f.chief.id)[1];
   expect(steered.resumed).toBe(false);
-  expect(steered.system).toContain("Assignments you already sent are still outstanding");
-  expect(steered.system).toContain(assignment.id);
-  expect(steered.system).toContain("Engineering lead");
-  // The teammate was never touched: it finishes and still returns here.
-  expect(f.nodes().find((node: any) => node.id === assignment.id).status).not.toBe("cancelled");
+  expect(told(steered)).toContain("Assignments you already sent are still outstanding");
+  expect(told(steered)).toContain(assignment.id);
+  expect(told(steered)).toContain("Engineering lead");
+  expect(f.nodes().find((node: any) => node.id === assignment.id).status).toBe("running");
+  writeFileSync(gate, "finish after the steered turn read its assignments");
   expect((await f.wait()).status).toBe("settled");
   expect(f.nodes().every((node: any) => node.status === "completed")).toBe(true);
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied")).toBe(true);
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "The requested CSV export is implemented and verified")).toBe(true);
 }), 60_000);
 
-// The opt-in from #1194: with parking on, the same message waits in the
-// composer queue until the outstanding assignments settle — room-style
-// parking for direct chat — and only then runs as its own follow-up turn.
 it("parks a message behind outstanding teammate work when the bot opts in, then runs it after", () => fixture(async f => {
-  f.plan[f.lead.id] = { delayMs: 4000, reply: "CSV export implemented" };
+  const gate = join(f.session.info.dataDir, "parked-assignment-ready");
+  f.plan[f.lead.id] = { gateFile: gate, reply: "CSV export implemented" };
   f.plan[f.chief.id] = { turns: [
     { steps: structuredClone(f.plan[f.chief.id].steps), reply: "Assigned to Engineering" },
     { reply: "The requested CSV export is implemented and verified" },
@@ -582,40 +764,38 @@ it("parks a message behind outstanding teammate work when the bot opts in, then 
   await f.start();
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
   const assignment = f.nodes().find((node: any) => node.parentId);
+  await assigningTurnEnded(f);
 
   const receipt = await f.api(`/api/bots/${f.chief.id}/messages`, { text: "Also make sure the export is UTF-8.", threadId: f.chief.activeTaskId });
-  // It parked: not run, not even on the transcript yet.
   expect(receipt.queued).toBe(true);
   expect(typeof receipt.queueId).toBe("string");
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Also make sure the export is UTF-8.")).toBe(false);
   expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(1);
-  expect(f.nodes().find((node: any) => node.id === assignment.id).status).not.toBe("cancelled");
+  expect(f.nodes().find((node: any) => node.id === assignment.id).status).toBe("running");
+  writeFileSync(gate, "finish after the message was parked");
 
-  // The teammate finishes, the coordination resumes and settles, and only
-  // then the parked words run as their own turn.
   expect((await f.wait()).status).toBe("settled");
   await expect.poll(() => f.evidence().filter((turn: any) => turn.botId === f.chief.id).length, { timeout: 20_000 }).toBe(3);
   const parked = f.evidence().filter((turn: any) => turn.botId === f.chief.id)[2];
   expect(parked.resumed).toBe(false);
-  expect(parked.system).not.toContain("Assignments you already sent are still outstanding");
+  expect(told(parked)).not.toContain("Assignments you already sent are still outstanding");
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Also make sure the export is UTF-8.")).toBe(true);
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Noted; the export is UTF-8 too")).toBe(true);
 }), 60_000);
 
-// An automation turn is not the person cancelling either: a delegated
-// (routine-driven) turn lands in the same conversation and leaves the
-// outstanding assignment alone.
-it("does not cancel a live coordination when an automation turn lands in the conversation", () => fixture(async f => {
+it("runs a teammate's hand-off to the Chief in the Chief's work thread for that sender, cancelling no live coordination", () => fixture(async f => {
   const ops = (await f.cli("new-bot", "--name", "Ops", "--section", "Leadership")).bot;
+  const assign = structuredClone(f.plan[f.chief.id].steps);
   f.plan[f.lead.id] = { delayMs: 6000, reply: "CSV export implemented" };
-  f.plan[f.chief.id] = { turns: [
-    { steps: structuredClone(f.plan[f.chief.id].steps), reply: "Assigned to Engineering" },
-    { reply: "The requested CSV export is implemented and verified" },
-    { reply: "Nothing further" },
+  // Turns whose order nothing pins pick their entry by what they were asked.
+  f.plan[f.chief.id] = { script: [
+    { key: "assign", match: ["Please have Engineering build"], steps: assign, reply: "Assigned to Engineering" },
+    { key: "note", match: ["Nightly note: confirm the export owner."], reply: "The export owner is Engineering." },
+    { key: "review", match: ["Your downstream room requests have settled."], reply: "The requested CSV export is implemented and verified" },
   ] };
-  f.plan[ops.id] = { turns: [
-    { steps: [{ tool: "delegate_bot", arguments: { bot_id: f.chief.id, message: "Nightly note: confirm the export owner." } }], reply: "Delegated the nightly note" },
-    { reply: "Recorded the outcome of the nightly note" },
+  f.plan[ops.id] = { script: [
+    { key: "send", match: ["Send the nightly note."], steps: [{ arguments: { bot_ids: [f.chief.id], message: "Nightly note: confirm the export owner." } }], reply: "Delegated the nightly note" },
+    { key: "resume", match: ["Your downstream room requests have settled."], reply: "Recorded the outcome of the nightly note" },
   ] };
   await f.start();
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
@@ -624,58 +804,54 @@ it("does not cancel a live coordination when an automation turn lands in the con
   const { routine } = await f.api("/api/routines", { name: "Nightly note", prompt: "Send the nightly note.", botId: ops.id,
     enabled: false, schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } });
   await f.api(`/api/routines/${routine.id}/run`, {});
-  // The delegated turn really reaches the conversation the coordination lives in.
-  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((message: any) => message.peerAsk?.botId === ops.id), { timeout: 25_000 }).toBe(true);
+  await expect.poll(() => f.evidence().some((turn: any) => turn.planKey === "note"), { timeout: 25_000 }).toBe(true);
+  const note = f.evidence().find((turn: any) => turn.planKey === "note");
+  expect(note.threadId).not.toBe(f.chief.activeTaskId);
+  const chief = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id);
+  expect(chief.tasks.find((task: any) => task.threadId === note.threadId)).toMatchObject({ title: "@Ops · work", openedBy: { botId: ops.id, kind: "work" } });
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.peerAsk?.botId === ops.id || String(message.text ?? "").includes("Nightly note"))).toBe(false);
   expect(f.nodes().find((node: any) => node.id === assignment.id).status).not.toBe("cancelled");
 
   await expect.poll(() => f.nodes().find((node: any) => node.id === assignment.id)?.status, { timeout: 25_000 }).toBe("completed");
   await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied"), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => f.evidence().map((turn: any) => turn.planKey).filter(Boolean).sort(), { timeout: 20_000 }).toEqual(["assign", "note", "resume", "review", "send"]);
+  // The last settlement lands a tick after its turn's end.
+  await expect.poll(() => f.nodes().every((node: any) => node.status === "completed"), { timeout: 10_000 }).toBe(true);
 }), 60_000);
 
-// Stop belongs to the conversation it was pressed in. It stops this bot and
-// stops awaiting its teammates; a teammate already mid-turn keeps its own
-// provider process and its result is still recorded here.
-it("stops a waiting source without reaching into the teammate already working", () => fixture(async f => {
-  f.plan[f.lead.id] = { delayMs: 4000, reply: "Finished after the source was stopped" };
+it("stops a waiting source and the teammate already working for it, with no late result and no pill", () => fixture(async f => {
+  const childGate = join(f.session.info.dataDir, "child-ready");
+  f.plan[f.lead.id] = { gateFile: childGate, reply: "Finished after the source was stopped" };
   await f.start();
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
+  await assigningTurnEnded(f);
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.chief.activeTaskId });
 
-  // The source stops awaiting immediately; the teammate keeps running.
-  await expect.poll(() => f.nodes().find((node: any) => !node.parentId)?.status).toBe("cancelled");
-  expect(f.nodes().find((node: any) => node.parentId).status).toBe("running");
+  await expect.poll(() => f.nodes().map((node: any) => [Boolean(node.parentId), node.status])).toEqual([[false, "cancelled"], [true, "cancelled"]]);
+  writeFileSync(childGate, "finish after the source was stopped");
   expect((await f.wait()).status).toBe("settled");
-  const chip = (await f.messages(f.chief.activeTaskId)).find((message: any) => message.tool?.name?.startsWith("Stopped here"));
-  expect(chip.tool.name).toContain("Engineering lead");
-  expect(chip.threadRef).toMatchObject({ botId: f.lead.id, threadId: f.nodes().find((node: any) => node.parentId).threadId });
-
-  // Its work lands: the result is recorded and reported into the stopped chat.
-  await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 20_000 }).toBe("completed");
-  expect(f.nodes().find((node: any) => node.parentId).result).toContain("Finished after the source was stopped");
-  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied")).toBe(true);
-  // ...but nothing resumes the conversation the person stopped.
+  await new Promise(resolve => setTimeout(resolve, 1_000));
+  const rows = await f.messages(f.chief.activeTaskId);
+  expect(rows.some((message: any) => message.tool?.name?.startsWith("Stopped here"))).toBe(false);
+  expect(rows.some((message: any) => message.tool?.output?.includes("Finished after the source was stopped"))).toBe(false);
+  expect(f.nodes().find((node: any) => node.parentId).status).toBe("cancelled");
   expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(1);
-  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "The requested CSV export is implemented and verified")).toBe(false);
+  expect(rows.some((message: any) => message.text === "The requested CSV export is implemented and verified")).toBe(false);
 }), 60_000);
 
 it("deleting the waiting source cancels its tree and never recreates the deleted conversation", () => fixture(async f => {
-  // The teammate holds its reply until the source is gone, however slowly
-  // the runner settles the Chief's own turn.
+  // The teammate holds its reply until the source is gone, however slowly the runner settles the Chief's own turn.
   const childGate = join(f.session.info.dataDir, "child-ready");
   f.plan[f.lead.id] = { gateFile: childGate, reply: "Must not return to a deleted task" };
   await f.start();
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
-  // The teammate starts before the Chief's own turn ends, and a running task
-  // cannot be deleted (409). The source is "waiting" only once that turn has
-  // settled and its conversation is parked on the teammate.
+  // A running task cannot be deleted (409): the source is "waiting" only once its own turn has settled.
   await expect.poll(async () => {
     const waiting = (await f.api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === f.chief.id);
     return !waiting.busy && waiting.tasks.find((task: any) => task.threadId === f.chief.activeTaskId)?.waitingForTeammates;
   }, { timeout: 30_000 }).toBe(true);
   await f.api(`/api/bots/${f.chief.id}/tasks/${f.chief.activeTaskId}`, {}, "DELETE");
   await expect.poll(() => f.nodes().every((node: any) => node.status === "cancelled")).toBe(true);
-  // Release the teammate: whatever it still produces must not bring the
-  // deleted conversation back.
   writeFileSync(childGate, "finish after the source was deleted");
   await expect.poll(async () => (await f.api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === f.lead.id).busy, { timeout: 15_000 }).toBe(false);
   expect(f.nodes().every((node: any) => node.status === "cancelled")).toBe(true);
@@ -687,19 +863,24 @@ it("deleting the waiting source cancels its tree and never recreates the deleted
   }
 }), 45_000);
 
-it("withholds direct results when the owner's cross-team grant is revoked", () => fixture(async f => {
-  f.plan[f.lead.id] = { delayMs: 3000, reply: "PRIVATE_ENGINEERING_RESULT" };
+it("withholds direct results when the sender's peers list cuts the teammate off mid-turn", () => fixture(async f => {
+  // Revoke while the teammate's engine is inside its turn: a "running" record is written at dispatch, before setup.
+  const ready = join(f.session.info.dataDir, "private-work.ready");
+  const gate = join(f.session.info.dataDir, "private-work.gate");
+  f.plan[f.lead.id] = { readyFile: ready, gateFile: gate, reply: "PRIVATE_ENGINEERING_RESULT" };
   await f.start();
-  await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
-  await f.api(`/api/bots/${f.chief.id}`, { managedSections: [] }, "PATCH");
+  await expect.poll(() => existsSync(ready), { timeout: 15_000 }).toBe(true);
+  await f.api(`/api/bots/${f.chief.id}`, { visibility: "admins" }, "PATCH");
+  writeFileSync(gate, "finish the private work after the teammate was cut off");
   expect((await f.wait()).status).toBe("settled");
-  expect(f.nodes().find((node: any) => node.parentId).status).toBe("failed");
   const resumed = f.evidence().find((turn: any) => turn.botId === f.chief.id && turn.resumed);
+  expect(JSON.stringify(resumed), told(resumed).slice(-1_500)).not.toContain("PRIVATE_ENGINEERING_RESULT");
+  const child = f.nodes().find((node: any) => node.parentId);
+  expect(child.status, `${JSON.stringify(child)}\n${told(resumed).slice(-1_500)}`).toBe("failed");
   expect(resumed.prompt.message.content).toContain("Result withheld");
-  expect(JSON.stringify(resumed)).not.toContain("PRIVATE_ENGINEERING_RESULT");
 }), 45_000);
 
-it("retains returned direct reports for follow-up turns but rechecks access before replay", () => fixture(async f => {
+it("retains returned direct reports for follow-up turns but rechecks reach before replay", () => fixture(async f => {
   f.plan[f.lead.id] = { reply: "PRIVATE_ENGINEERING_FACT_8347" };
   f.plan[f.chief.id].resumeReply = "Finished";
   await f.start(); expect((await f.wait()).status).toBe("settled");
@@ -714,11 +895,9 @@ it("retains returned direct reports for follow-up turns but rechecks access befo
   await f.api(`/api/bots/${f.chief.id}/messages/${followup.id}/edit`, { threadId: f.chief.activeTaskId, text: "Check the earlier engineering report" });
   expect((await f.wait()).status).toBe("settled");
   expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id).at(-1).prompt.message.content).toContain("PRIVATE_ENGINEERING_FACT_8347");
-  await f.api(`/api/bots/${f.chief.id}`, { managedSections: [] }, "PATCH");
+  await f.api(`/api/bots/${f.chief.id}`, { visibility: "admins" }, "PATCH");
   f.plan[f.chief.id] = { reply: "Access removed", expectContextIncludes: ["Teammate result withheld"] };
   f.save();
-  // Editing the follow-up forces a fresh replay while retaining the earlier
-  // result receipt, rather than assuming a native provider forgot its cache.
   const edited = (await f.messages(f.chief.activeTaskId)).findLast((message: any) => message.role === "user");
   await f.api(`/api/bots/${f.chief.id}/messages/${edited.id}/edit`, { threadId: f.chief.activeTaskId, text: "What can you access now?" });
   expect((await f.wait()).status).toBe("settled");
@@ -729,32 +908,28 @@ it("retains returned direct reports for follow-up turns but rechecks access befo
 
 it("runs the owed direct follow-up while the same bot works in another thread", () => fixture(async f => {
   const gate = join(f.session.info.dataDir, "hold-gate");
-  f.plan[f.chief.id] = { turns: [
-    { steps: [
-      { tool: "coordinate_bots", arguments: { bot_ids: [f.specialist.id], request_key: "check", message: "Independently verify the CSV export" } },
+  // The hold's turn starts while the assigning turn is still open, so each turn picks its plan by its own text.
+  f.plan[f.chief.id] = { script: [
+    { key: "assign", match: ["Assign the check, then open an independent job"], steps: [
+      { tool: "coordinate_bots", arguments: { bot_ids: [f.specialist.id], message: "Independently verify the CSV export" } },
       { tool: "start_thread", arguments: { title: "Independent hold", message: "Run the long independent check." } },
     ], reply: "Assigned the check and opened the hold" },
-    { gateFile: gate, reply: "The follow-up ran while the hold worked" },
-    // The hold's completion and the resume's plan read race: the resume
-    // lands on slot 1 while the hold still waits, or slot 2 once the hold
-    // has finished. Both must settle the same reply in this conversation.
-    { reply: "The follow-up ran while the hold worked" },
+    { key: "hold", match: ["Run the long independent check."], gateFile: gate, reply: "The hold finished" },
+    { key: "resume", match: ["Your downstream room requests have settled."], reply: "The follow-up ran while the hold worked" },
   ] };
   f.save();
   await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Assign the check, then open an independent job that runs long.");
   const chiefTasks = async () => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id).tasks;
-  // The self-opened job stays mid-turn at its gate: the whole-bot busy flag
-  // is held up by a thread that has nothing to do with this coordination.
-  await expect.poll(async () => (await chiefTasks()).find((task: any) => task.title === "Independent hold")?.busy, { timeout: 20_000 }).toBe(true);
-  // The owed follow-up belongs to this conversation alone: it must dispatch
-  // even while the bot stays busy in its sibling thread.
-  const root = () => f.nodes().find((node: any) => node.key === "root");
-  await expect.poll(() => root()?.status, { timeout: 10_000 }).toBe("running");
-  writeFileSync(gate, "");
-  await expect.poll(() => root()?.status, { timeout: 10_000 }).toBe("completed");
+  const holdBusy = async () => (await chiefTasks()).find((task: any) => task.title === "Independent hold")?.busy;
+  // The self-opened job stays mid-turn at its gate, so the whole-bot busy flag stays up for an unrelated thread.
+  await expect.poll(holdBusy, { timeout: 20_000 }).toBe(true);
+  const root = () => f.nodes().find((node: any) => !node.parentId);
+  await expect.poll(() => root()?.status, { timeout: 15_000 }).toBe("completed");
+  expect(await holdBusy()).toBe(true);
   const tasks = await chiefTasks();
   expect(tasks.find((task: any) => task.threadId === f.chief.activeTaskId).busy).toBe(false);
-  await expect.poll(async () => (await chiefTasks()).find((task: any) => task.title === "Independent hold")?.busy, { timeout: 10_000 }).toBe(false);
+  writeFileSync(gate, "");
+  await expect.poll(holdBusy, { timeout: 10_000 }).toBe(false);
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "The follow-up ran while the hold worked")).toBe(true);
 }), 45_000);
 
@@ -767,16 +942,143 @@ it("sends each teammate result once in the turn that reviews it", () => fixture(
   expect(text.split("LEAD_RESULT_ONCE").length - 1).toBe(1);
 }), 45_000);
 
-it("gives a teammate whose session is rebuilt its second request once, never also as a bare assistant line", () => fixture(async f => {
+it("gives a teammate each request once, never also as a bare assistant line", () => fixture(async f => {
   f.plan[f.lead.id] = { reply: "round result" };
   for (const key of ["first", "second"]) {
-    f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: key, message: `REQUEST_${key.toUpperCase()} please do it` } }], reply: "Assigned", resumeReply: "Done" };
+    f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: `REQUEST_${key.toUpperCase()} please do it` } }], reply: "Assigned", resumeReply: "Done" };
     f.save();
     await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", `Delegate the ${key} request.`);
     expect((await f.wait()).status).toBe("settled");
   }
   const second = String(f.evidence().filter((turn: any) => turn.botId === f.lead.id).at(-1).prompt.message.content);
   expect(second.split("REQUEST_SECOND").length - 1).toBe(1);
-  expect(second).toContain("could not be resumed");
   expect(second).not.toMatch(/^Assistant: @/m);
 }, { FAKE_CLAUDE_MODE: "dead-session" }), 60_000);
+
+/** The Engineering lead on a loopback OpenAI-compatible engine where `answer` replies to every chat request. */
+async function onLoopbackEngine(f: any, answer: (res: ServerResponse) => void): Promise<() => Promise<void>> {
+  const llm = createServer(async (req, res) => {
+    for await (const _ of req) {}
+    // The chat engine asks a local server whether it is Ollama (/api/version); this one is not, and that is no model call.
+    if (req.url?.endsWith("/api/version")) { res.statusCode = 404; res.end(); return; }
+    if (req.url?.endsWith("/models")) { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "loop-model" }] })); return; }
+    answer(res);
+  });
+  await new Promise<void>(resolve => llm.listen(0, "127.0.0.1", resolve));
+  const port = (llm.address() as { port: number }).port;
+  await f.api("/api/config", { openaiCompat: { key: "fixture-loop-key", url: `http://127.0.0.1:${port}/v1`, model: "loop-model" } }, "PATCH");
+  await f.cli("set-model", "--bot", f.lead.id, "--instance", "openaiCompat", "--model", "loop-model");
+  return () => new Promise<void>(resolve => llm.close(() => resolve()));
+}
+
+it("continues a teammate's step cap in place and stops it once it makes no progress", () => fixture(async f => {
+  let calls = 0;
+  const close = await onLoopbackEngine(f, res => {
+    // Never a final answer: one more tool call, every round.
+    const call = { tool_calls: [{ index: 0, id: `call_${++calls}`, type: "function", function: { name: "missing_tool", arguments: JSON.stringify({ attempt: calls }) } }] };
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: call, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`);
+  });
+  try {
+    await f.start();
+    expect((await f.wait()).status).toBe("settled");
+    const leads = f.nodes().filter((node: any) => node.botId === f.lead.id);
+    expect(leads).toHaveLength(1);
+    const child = leads[0];
+    expect(child).toMatchObject({ status: "failed", outcome: "stalled", executions: 2,
+      result: expect.stringMatching(/^Stopped after 64 steps without a final answer\./) });
+    expect(child.outcomeDetail).toMatch(/^Stopped after 2 continuations without progress: Stopped after 64 steps without a final answer\./);
+    expect(child.result).not.toContain("assign what is left");
+    expect(f.eventsOf(child.id).filter((kind: string) => kind === "continued")).toHaveLength(1);
+    expect(f.eventsOf(child.id)).toContain("stalled");
+    const resumed = f.evidence().find((turn: any) => turn.botId === f.chief.id && turn.resumed);
+    expect(resumed.prompt.message.content).toContain("Stopped after 2 continuations without progress");
+    expect(resumed.prompt.message.content).not.toContain("assign what is left");
+    const chip = (await f.messages(f.chief.activeTaskId)).find((message: any) => message.roomRequest?.phase === "result");
+    expect(chip.tool.name).toContain("Engineering lead — failed: Stopped after 64 steps without a final answer");
+    expect((await f.messages(f.chief.activeTaskId)).filter((message: any) => message.roomRequest?.phase === "result")).toHaveLength(1);
+    const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
+    expect(lead.tasks.map((task: any) => task.title).filter((title: string) => title.startsWith("Continue:"))).toEqual([]);
+    expect(calls).toBe(128);
+  } finally { await close(); }
+}), 90_000);
+
+it("tells the Chief a teammate's provider refused the turn, in the provider's words", () => fixture(async f => {
+  const close = await onLoopbackEngine(f, res => {
+    res.writeHead(429, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: { message: "Rate limit reached for loop-model: 30 requests per minute" } }));
+  });
+  try {
+    await f.start();
+    expect((await f.wait()).status).toBe("settled");
+    const child = f.nodes().find((node: any) => node.botId === f.lead.id);
+    expect(child.status).toBe("failed");
+    expect(child.result).toContain("429");
+    expect(child.result).toContain("Rate limit reached for loop-model: 30 requests per minute");
+    const resumed = f.evidence().find((turn: any) => turn.botId === f.chief.id && turn.resumed);
+    expect(resumed.prompt.message.content).toContain("Rate limit reached for loop-model");
+  } finally { await close(); }
+}), 45_000);
+
+it("keeps a teammate working through a provider settings save that does not touch its engine", () => fixture(async f => {
+  const gate = join(f.session.info.dataDir, "lead-ready");
+  f.plan[f.lead.id] = { gateFile: gate, reply: "CSV export implemented and checked" };
+  await f.start();
+  await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
+  const compat = async () => (await f.api("/api/instances")).instances.find((instance: any) => instance.instanceId === "openaiCompat");
+  expect((await compat()).snapshot.state).toBe("unavailable");
+  await f.api("/api/config", { openaiCompat: { key: "fixture-compat-key", url: "http://127.0.0.1:9/v1" } }, "PATCH");
+  expect((await compat()).snapshot.state).toBe("available");
+  await f.api("/api/config", { openaiCompat: { key: "fixture-compat-key", url: "http://127.0.0.1:9/v1" } }, "PATCH");
+  expect(f.nodes().find((node: any) => node.botId === f.lead.id).status).toBe("running");
+  writeFileSync(gate, "finish the teammate");
+  expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes().find((node: any) => node.botId === f.lead.id)).toMatchObject({ status: "completed", result: "CSV export implemented and checked" });
+  const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
+  for (const task of lead.tasks) {
+    expect((await f.messages(task.threadId)).some((message: any) => message.tool?.name?.includes("provider settings changed"))).toBe(false);
+  }
+}), 45_000);
+
+it("tells the Chief a teammate's turn stopped because its engine's settings changed", () => fixture(async f => {
+  const gate = join(f.session.info.dataDir, "lead-ready");
+  f.plan[f.lead.id] = { gateFile: gate, reply: "Never reached" };
+  await f.start();
+  await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
+  await f.api("/api/config", { anthropic: { key: "fixture-anthropic-key" } }, "PATCH");
+  expect((await f.wait()).status).toBe("settled");
+  const child = f.nodes().find((node: any) => node.botId === f.lead.id);
+  expect(child.status).toBe("failed");
+  expect(child.result).toMatch(/^Turn interrupted — provider settings changed\.(?: |$)/);
+  const resumed = f.evidence().find((turn: any) => turn.botId === f.chief.id && turn.resumed);
+  expect(resumed.prompt.message.content).toContain("Turn interrupted — provider settings changed.");
+  expect(resumed.prompt.message.content).not.toContain("The coordinated turn was interrupted");
+}), 45_000);
+
+// The small model's word is the fixture's: what matters here is what the runtime does with it.
+const withStatusAnswer = (answer: string) => {
+  const routes = join(mkdtempSync(join(tmpdir(), "omb-status-reply-")), "routes.json");
+  writeFileSync(routes, JSON.stringify({ "<teammate_reply>": answer }));
+  return { FAKE_CLAUDE_TEXT_ROUTES: routes };
+};
+
+it("spends no requester turn on a reply that only acknowledged, and the reply stays in its thread", () => fixture(async f => {
+  f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "FYI: the mailbox moved." } }], reply: "I told the lead.", resumeReply: "This is just a confirmation, no action needed." };
+  f.plan[f.lead.id] = { reply: "Noted, thanks." };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(1);
+  const messages = await f.messages(f.chief.activeTaskId);
+  expect(messages.some((message: any) => message.text === "This is just a confirmation, no action needed.")).toBe(false);
+  expect(messages.find((message: any) => message.roomRequest?.phase === "result")?.tool?.output).toBe("Noted, thanks.");
+  expect(f.nodes().every((node: any) => node.status === "completed")).toBe(true);
+}, withStatusAnswer("ACK")));
+
+it("wakes the requester for a reply that carries something, in any language", () => fixture(async f => {
+  f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Hast du die IMAP-Zugangsdaten?" } }], reply: "Ich habe gefragt.", resumeReply: "Es sind keine hinterlegt." };
+  f.plan[f.lead.id] = { reply: "Nein, ich habe nichts gespeichert." };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(2);
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Es sind keine hinterlegt.")).toBe(true);
+}, withStatusAnswer("NEEDS")));

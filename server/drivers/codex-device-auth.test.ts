@@ -6,8 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { CodexDeviceAuthController, codexDevicePrompt } from "./codex-device-auth.ts";
 
-// Every subprocess uses this script and a disposable HOME. No real Codex
-// process, provider network call, or user's credentials are involved.
+// Every subprocess is this script in a disposable HOME: no real Codex, network or credentials.
 const FAKE = `#!/usr/bin/env node
 import { appendFileSync, existsSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -24,6 +23,8 @@ if (args.join(' ') === 'login status') {
     process.stderr.write('Logged in using ChatGPT\\n'); process.exit(0);
   } else if (mode === 'api') {
     process.stderr.write('Logged in using an API key - sk-private-token\\n'); process.exit(0);
+  } else if (mode === 'api-configured') {
+    process.stderr.write('API key configured - sk-private-token\\nAuthentication is checked when you send a request.\\n'); process.exit(0);
   } else if (mode === 'unknown-status') {
     process.stderr.write('Unrecognized login status secret-token\\n'); process.exit(0);
   } else { process.stderr.write('Not logged in\\n'); process.exit(1); }
@@ -80,10 +81,7 @@ describe("Codex server-owned device authentication", () => {
   const create = (mode = "success", overrides: Partial<ConstructorParameters<typeof CodexDeviceAuthController>[0]> = {}) => {
     const controller = new CodexDeviceAuthController({
       cli, environment: () => ({ ...process.env, HOME: home, CODEX_HOME: join(home, ".codex"), INSTANCE_MARKER: "own-instance", FAKE_AUTH_MODE: mode }),
-      // The code is surfaced the moment the CLI writes it; these windows only
-      // bound a CLI that never does. Fake-CLI spawns can take seconds on a
-      // loaded machine, so a tight window reports a slow machine as a missing
-      // sign-in code.
+      // Fake-CLI spawns can take seconds on a loaded machine; a tight window would report a missing code.
       startupTimeoutMs: 10_000, lifetimeMs: 15_000, terminateTimeoutMs: 50,
       ...overrides,
     });
@@ -150,7 +148,6 @@ describe("Codex server-owned device authentication", () => {
       const controller = create("waiting");
       await controller.start();
       await expect(controller.signOut()).rejects.toThrow("sign-in in progress");
-      // A sibling instance on the same credential home is refused as well.
       await expect(create("waiting").signOut()).rejects.toThrow("sign-in is running");
       expect(calls().map((call) => call.args)).not.toContainEqual(["logout"]);
       await controller.cancel();
@@ -174,7 +171,6 @@ describe("Codex server-owned device authentication", () => {
       signedIn();
       const controller = create("logout-hang", { startupTimeoutMs: 1000 });
       await expect(controller.signOut()).rejects.toThrow("could not remove the sign-in");
-      // The lock is released: a later sign-out on the same home proceeds.
       await expect(create("success").signOut()).resolves.toBeUndefined();
     });
 
@@ -241,8 +237,22 @@ describe("Codex server-owned device authentication", () => {
     expect(calls().map((call) => call.args)).toEqual([["login", "status"]]);
   });
 
+  it("replaces a ChatGPT login the provider refused, though status still reports it", async () => {
+    writeFileSync(join(home, "authenticated"), "fake fixture only");
+    const controller = create("success", { signInRejected: () => true });
+    const start = await controller.start();
+    expect(start).toMatchObject({ phase: "waiting", userCode: "0CSG-0IXIM" });
+    await expect.poll(() => controller.get(start.flowId!), { timeout: 5_000 }).toMatchObject({ phase: "succeeded" });
+    expect(calls().map((call) => call.args)).toEqual([["login", "status"], ["login", "--device-auth"], ["login", "status"]]);
+  });
+
   it("does not replace another auth method or expose its secret", async () => {
     await expect(create("api").start()).rejects.toThrow("different sign-in method");
+    expect(calls()).toHaveLength(1);
+  });
+
+  it("does not replace an API key that newer Codex reports as configured", async () => {
+    await expect(create("api-configured").start()).rejects.toThrow("different sign-in method");
     expect(calls()).toHaveLength(1);
   });
 
@@ -262,13 +272,11 @@ describe("Codex server-owned device authentication", () => {
     const controller = create("status-hang", { startupTimeoutMs: 1000 });
     const starting = controller.start();
     const rejection = expect(starting).rejects.toThrow("cancelled");
-    // Wait out a slow first spawn exactly as long as the controller's own
-    // startup window does, so this poll cannot expire before cancel matters.
+    // As long as the controller's own startup window, so this poll cannot expire before cancel matters.
     await expect.poll(() => existsSync(join(home, "calls.jsonl")), { timeout: 10_000 }).toBe(true);
     await controller.cancel();
     await rejection;
-    // The default windows tolerate slow spawns; keep one deliberately short
-    // here so the missing-code deadline is still exercised quickly.
+    // One deliberately short window, so the missing-code deadline is still exercised quickly.
     await expect(create("status-hang", { startupTimeoutMs: 250 }).start()).rejects.toThrow("did not provide");
   });
 

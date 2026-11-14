@@ -1,30 +1,3 @@
-// The organization library: packages an organization's Admin shares with
-// this desktop, shown on a shelf (Templates → From {Organization}) and added
-// with one click.
-//
-// Electron main owns the Admin connection (electron/managed-desktop.mjs): it
-// fetches the catalog and every release file, checks their SHA-256, stores
-// the files in DATA_DIR/org-library/blobs/, and relays the catalog here over
-// the private utility port. This runtime never talks to Admin. It:
-//
-//   - keeps the relayed catalog in memory (a sign-out relays null: the shelf
-//     disappears and everything already added stays);
-//   - adds a package through the one importer with trust "org": skills
-//     switched ON (the organization's Admin published them), routines paused,
-//     every record stamped with its install and per-part hashes;
-//   - keeps DATA_DIR/org-library/state.json as an index of what was added.
-//     The records themselves are the source of truth: the index is rebuilt
-//     from them on start, before every Add and whenever records disappear, so
-//     a crash between the two writes is adopted, never duplicated. A team Add
-//     is marked in the index before its first record, so one the app stopped
-//     halfway through is removed again rather than adopted half-built;
-//   - switches off the skills and pauses the routines of a release its
-//     publisher withdrew;
-//   - reports a full snapshot of what this desktop has back to Electron,
-//     which posts it to Admin (contract §5.5).
-//
-// With no organization, nothing here runs: the shelf is absent, the routes
-// answer {organization: null}, and no file is written.
 import {
   closeSync,
   constants,
@@ -48,6 +21,7 @@ import {
 } from "./package-import.ts";
 import { pair, partHash, sha256Hex, type PartPair, type TeamPart } from "./package-parts.ts";
 import { storedPresetObject, type StoredPreset } from "./presets.ts";
+import { applyUpdates, handleWithdrawn, type ReleaseContext } from "./org-library-releases.ts";
 import type { RoutineManager } from "./routines.ts";
 import type { SkillListing, SkillPackageStamp } from "./skills.ts";
 import { sectionKey, type InstalledPackageMetadata, type Store, type StoreChange } from "./store.ts";
@@ -60,7 +34,6 @@ import {
 } from "../shared/package-format.ts";
 
 export const ORG_LIBRARY_FORMAT = "openmaus.org-library";
-/** The catalog body cap (contract §1.8). */
 export const ORG_LIBRARY_CATALOG_MAX_BYTES = 256 * 1024;
 export const ORG_LIBRARY_MAX_ENTRIES = 100;
 export const ORG_LIBRARY_REPORT_MAX_ENTRIES = 100;
@@ -71,7 +44,7 @@ const INSTALL_ID = /^[a-f0-9]{32}$/;
 const SEMVER = /^(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})$/;
 const REF = /^[a-z][a-z0-9-]{1,30}\/[a-z0-9][a-z0-9-]{0,79}$/;
 
-/** Electron's safeText rule (electron/managed-desktop.mjs): no control characters. */
+/** Same rule as Electron main's safeText: no control characters. */
 // oxlint-disable-next-line no-control-regex
 const CONTROL = /[\x00-\x1f\x7f]/;
 // oxlint-disable-next-line no-control-regex
@@ -123,8 +96,6 @@ export interface OrgLibraryCatalog {
   packages: OrgLibraryEntry[];
 }
 
-/** The catalog as §5.3 defines it. Unknown fields are ignored and a malformed
- * entry is dropped; a malformed envelope returns null (keep the last one). */
 export function parseOrgLibraryCatalog(value: unknown): OrgLibraryCatalog | null {
   const envelope = envelopeSchema.safeParse(value);
   if (!envelope.success) return null;
@@ -145,7 +116,6 @@ export function parseOrgLibraryCatalog(value: unknown): OrgLibraryCatalog | null
   };
 }
 
-/** An Admin origin: https, or http on loopback, with nothing after the host. */
 function adminOrigin(value: unknown): string | null {
   if (typeof value !== "string" || value.length > 300) return null;
   try {
@@ -166,7 +136,6 @@ const relaySchema = z.object({
   catalog: z.unknown(),
 });
 
-/** One install as the report sends it (contract §5.5). */
 export interface OrgLibraryReportEntry {
   packageId: string;
   release: string;
@@ -182,7 +151,6 @@ export interface OrgLibraryStateMessage {
   packages: OrgLibraryReportEntry[];
 }
 
-// ── state.json (contract §3.4) ──────────────────────────────────────────
 
 const partPair = z.object({ r: z.string().regex(HEX64), w: z.string().regex(HEX64) });
 const installSchema = z.object({
@@ -192,7 +160,6 @@ const installSchema = z.object({
   release: z.string().regex(SEMVER),
   sha256: z.string().regex(HEX64),
   status: z.enum(["installed", "withdrawn", "removed"]),
-  // Additive to §3.4: what kind of package, and its display name.
   kind: z.enum(["team", "library"]).default("team"),
   name: z.string().max(100).default(""),
   section: z.string().max(60),
@@ -203,18 +170,12 @@ const installSchema = z.object({
   connections: z.record(z.string(), z.object({ name: z.string(), r: z.string().regex(HEX64), w: z.string().regex(HEX64) })),
   presets: z.record(z.string(), z.object({ presetId: z.string(), r: z.string().regex(HEX64) })),
   removedLocally: z.array(z.string()).max(1_000),
-  // Additive to §3.4: a removed team's release whose withdrawal has already
-  // switched off the copies it left (offered skills on other bots).
   withdrawnHandled: z.string().regex(HEX64).optional(),
   addedAt: count,
   updatedAt: count,
 });
 export type OrgInstall = z.output<typeof installSchema>;
 
-// Additive to §3.4: a team Add that has started and not finished. Written
-// before the first record, removed with the index write that completes it.
-// The import is synchronous, so one found on disk means the app stopped
-// mid-import (the importer's own rollback runs on errors only).
 const partKeys = z.array(z.string().min(1).max(64)).max(500);
 const addingSchema = z.object({
   packageId: z.string().regex(UUID),
@@ -224,7 +185,6 @@ const addingSchema = z.object({
   release: z.string().regex(SEMVER),
   sha256: z.string().regex(HEX64),
   startedAt: count,
-  /** What a finished import has: every bot, group chat and routine key, and the leader. */
   expect: z.object({ bots: partKeys, rooms: partKeys, routines: partKeys, leader: z.string().min(1).max(64).nullable() }),
 });
 export type OrgPendingAdd = z.output<typeof addingSchema>;
@@ -249,31 +209,19 @@ function emptyState(): OrgLibraryStateFile {
   return { version: 1, source: null, appliedDigest: null, installs: {}, adding: {} };
 }
 
-/** What scanRecords finds for one install id. */
 interface LiveRecords {
   bots: Record<string, string>;
   rooms: Record<string, string>;
   routines: Record<string, string>;
-  /** Skill-state entries carrying the install, on any bot. */
   skills: number;
   sections: string[];
   meta?: InstalledPackageMetadata;
 }
 
-/** A team install lives in its own bots, group chats and routines. An
- * offered skill someone put on another bot is a copy, like any skill: it
- * stays, but it does not keep the team "installed". */
 function teamAlive(live: LiveRecords | undefined): boolean {
   return Boolean(live && (Object.keys(live.bots).length || Object.keys(live.rooms).length || Object.keys(live.routines).length));
 }
 
-/** Contract §3.4 `removedLocally`: the parts the person deleted, so the
- * automatic update (v1.1) can tell them from parts a new release adds and
- * never brings them back. Before an install's bots, group chats and routines
- * are replaced by what is left, each key that went is noted once, as
- * `agent:<key>`, `room:<key>` or `routine:<key>`. A key that exists again
- * (records restored from a backup) is dropped, so the list never names a
- * part that is there. Returns whether the list changed. */
 function noteRemovedParts(install: OrgInstall, next: Pick<LiveRecords, "bots" | "rooms" | "routines">): boolean {
   const removed = new Set(install.removedLocally);
   const present = new Set<string>();
@@ -291,23 +239,24 @@ function noteRemovedParts(install: OrgInstall, next: Pick<LiveRecords, "bots" | 
   return true;
 }
 
-// ── the library ─────────────────────────────────────────────────────────
 
 export interface OrgLibraryDeps {
-  /** DATA_DIR; the library lives in DATA_DIR/org-library/. */
   dataDir: string;
   store: Store;
-  routines: Pick<RoutineManager, "packageStamps" | "update" | "listRoutines" | "remove">;
+  routines: Pick<RoutineManager, "packageStamps" | "update" | "listRoutines" | "remove"> & Partial<Pick<RoutineManager, "stampInstalledPackage">>;
   skills: {
     list(botId: string): SkillListing[];
     stamps(botId: string): Array<{ name: string; enabled: boolean; stamp: SkillPackageStamp }>;
     setEnabled(botId: string, name: string, enabled: boolean): SkillListing | { error: string };
     installOrg(botId: string, source: string, skillMd: string, stamp: SkillPackageStamp): SkillListing | { error: string };
+    /** An update replaces a skill's text only through these; without them skills keep the text they were added with. */
+    read?(botId: string, name: string): string | null;
+    remove?(botId: string, name: string): { removed: true } | { error: string };
   };
-  /** Runtime → Electron main: the report snapshot. Absent in plain Node. */
+  /** A team's brief, by its section; without it an update leaves the brief as it is. */
+  sections?: { read(section: string): string; write(section: string, text: string): void };
   postState?: (message: OrgLibraryStateMessage) => void;
   now?: () => number;
-  /** Preset bots (presets.ts): an install's preset rows carry its id. */
   presets?: { list(): StoredPreset[] };
 }
 
@@ -328,8 +277,6 @@ export interface OrgLibraryListEntry extends OrgLibraryEntry {
 export interface OrgLibraryListing {
   organization: { id: string; name: string } | null;
   packages: OrgLibraryListEntry[];
-  /** What this desktop added from the current organization, including
-   * packages the catalog no longer lists (their copies stay). */
   installs?: Array<{ installId: string; packageId: string; name: string; release: string; status: OrgInstall["status"]; publisher: string }>;
 }
 
@@ -340,11 +287,9 @@ export interface OfferedSkill {
   release: string;
   name: string;
   description: string;
-  /** This bot already has a skill of that name. */
   added: boolean;
 }
 
-/** Plain sentences for the person; `code` for the renderer and tests. */
 export type OrgLibraryOutcome<T> =
   | { ok: true; status: number; value: T }
   | { ok: false; status: number; code: string; error: string };
@@ -361,14 +306,12 @@ export class OrgLibrary {
   private readonly root: string;
   private state: OrgLibraryStateFile;
   private library: AppliedLibrary | null = null;
-  /** Adds that failed since the last success, by package (reported as failed). */
   private readonly failures = new Map<string, OrgLibraryReportEntry>();
-  /** stat-keyed "this blob verified" cache for listings; content reads always re-verify. */
+  /** Listings only: content reads always re-verify the blob hash. */
   private readonly verified = new Map<string, string>();
   private pending: Promise<void> = Promise.resolve();
   private recheck: ReturnType<typeof setTimeout> | null = null;
   private lastPosted: OrgLibraryStateMessage | null = null;
-  /** The install id add() is importing right now (never a crashed one). */
   private importing: string | null = null;
   private readonly unsubscribe: () => void;
 
@@ -376,7 +319,6 @@ export class OrgLibrary {
     this.deps = deps;
     this.root = join(deps.dataDir, "org-library");
     this.state = this.load();
-    // Records are the source of truth: reconcile the index with what exists.
     if (this.rebuild()) this.save();
     this.unsubscribe = deps.store.onChange((change) => this.onStoreChange(change));
   }
@@ -386,12 +328,10 @@ export class OrgLibrary {
     if (this.recheck) clearTimeout(this.recheck);
   }
 
-  /** Resolves once relayed work (reconcile, withdrawn handling, report) is done. */
   settled(): Promise<void> {
     return this.pending;
   }
 
-  /** The last report snapshot handed to Electron (for tests and fixtures). */
   lastReport(): OrgLibraryStateMessage | null {
     return this.lastPosted ? structuredClone(this.lastPosted) : null;
   }
@@ -400,21 +340,12 @@ export class OrgLibrary {
     return this.library ? { ...this.library.catalog.organization } : null;
   }
 
-  /** Every install's status, from this library's own state (what it last
-   * rebuilt, added or withdrew, saved or not), for New bot's presets
-   * (presets.ts presetOffered). Every install is listed, whichever
-   * organization it came from and with no organization signed in, as the
-   * statuses have always been read. Reads no file and no skill state. */
   installStatuses(): Map<string, OrgInstall["status"]> {
     return new Map(Object.entries(this.state.installs).map(([installId, install]) => [installId, install.status]));
   }
 
-  // ── the relay (Electron main → runtime) ───────────────────────────────
 
-  /** `openmausbot:managed-library`: swap the catalog and return at once; the
-   * reconcile and the report run afterwards (the relay times out at 15 s).
-   * null (sign-out, expiry, revocation) hides the shelf and changes nothing
-   * else: everything already added stays. */
+  /** Returns at once (Electron's relay times out at 15 s); reconcile and report run afterwards. */
   applyRelay(value: unknown): { ok: true } | { ok: false; error: string } {
     if (value === null) {
       this.library = null;
@@ -425,7 +356,6 @@ export class OrgLibrary {
     if (!relay.success || !origin) return { ok: false, error: "The organization's library could not be read." };
     let raw = relay.data.catalog;
     if (typeof raw === "string") {
-      // The raw body Electron applied: it must be the bytes the digest names.
       if (Buffer.byteLength(raw, "utf8") > ORG_LIBRARY_CATALOG_MAX_BYTES || sha256Hex(raw) !== relay.data.digest) {
         return { ok: false, error: "The organization's library could not be read." };
       }
@@ -436,7 +366,6 @@ export class OrgLibrary {
       }
     }
     const catalog = parseOrgLibraryCatalog(raw);
-    // A malformed envelope or another organization's catalog keeps the last one.
     if (!catalog || catalog.organization.id !== relay.data.organizationId) {
       return { ok: false, error: "The organization's library could not be read." };
     }
@@ -457,22 +386,29 @@ export class OrgLibrary {
 
   private reconcile(applied: AppliedLibrary): void {
     this.rebuild();
-    this.handleWithdrawn();
+    const releases = this.releases();
+    if (releases) { handleWithdrawn(releases); applyUpdates(releases); }
     this.state.source = { adminOrigin: applied.adminOrigin, organizationId: applied.organizationId };
     this.state.appliedDigest = applied.digest;
     this.save();
     this.report();
   }
 
-  // ── records → index ───────────────────────────────────────────────────
+
+  private releases(): ReleaseContext | null {
+    const library = this.library;
+    if (!library) return null;
+    return {
+      installs: this.state.installs, entries: library.catalog.packages, currentInstallId: (packageId) => this.currentInstallId(packageId),
+      releaseDocument: (entry) => { const read = this.releaseDocument(entry); return read.ok ? read.value : null; },
+      installedDocument: (install) => this.installDocument(install), deps: this.deps, now: () => this.deps.now?.() ?? Date.now(),
+    };
+  }
 
   private currentInstallId(packageId: string): string | null {
     return this.library ? orgInstallId(this.library.adminOrigin, this.library.organizationId, packageId) : null;
   }
 
-  /** Every live record that carries an organization install id. A routine
-   * counts only while its bot exists (deleting a bot pauses, not removes,
-   * its routines). */
   private scanRecords(): Map<string, LiveRecords> {
     const { store } = this.deps;
     const found = new Map<string, LiveRecords>();
@@ -492,8 +428,6 @@ export class OrgLibrary {
         value.sections.push(sectionKey(bot.section));
         value.meta ??= stamp;
       }
-      // A bot made from an install's preset (presets.ts) is the person's own,
-      // like a copy: its stamped skills never count as the install's records.
       if (stamp?.presetKey) continue;
       for (const skill of this.deps.skills.stamps(bot.id)) entry(skill.stamp.installId).skills += 1;
     }
@@ -506,11 +440,6 @@ export class OrgLibrary {
     return found;
   }
 
-  /** Whether anything here came from an organization. Without an install,
-   * a stamped record or a relayed catalog there is nothing to reconcile, so
-   * an installation that never had an organization reads no skill state at
-   * all. (Skill stamps alone are read only once a catalog arrives: they are
-   * how a skills-only package is recognized after a lost state.json.) */
   private hasOrgRecords(): boolean {
     return Object.keys(this.state.installs).length > 0 ||
       Object.keys(this.state.adding).length > 0 ||
@@ -520,12 +449,10 @@ export class OrgLibrary {
       this.orgPresetRows().length > 0;
   }
 
-  /** Preset rows (presets.ts) an organization install registered. */
   private orgPresetRows(): StoredPreset[] {
     return (this.deps.presets?.list() ?? []).filter((row) => row.source === "org" && INSTALL_ID.test(row.installId));
   }
 
-  /** Reconcile state.json with the records. Returns whether it changed. */
   rebuild(): boolean {
     if (!this.library && !this.hasOrgRecords()) return false;
     const now = this.deps.now?.() ?? Date.now();
@@ -534,10 +461,7 @@ export class OrgLibrary {
     for (const [installId, install] of Object.entries(this.state.installs)) {
       const live = records.get(installId);
       if (!teamAlive(live)) {
-        // A library install creates no records of its own; it stays.
         if (install.kind === "team" && install.status !== "removed") {
-          // Every part is noted too, so the list reads the same whether the
-          // person deleted the team at once or one bot at a time.
           noteRemovedParts(install, { bots: {}, rooms: {}, routines: {} });
           install.status = "removed";
           install.bots = {};
@@ -562,14 +486,10 @@ export class OrgLibrary {
         changed = true;
       }
     }
-    // Records with no index entry: a crash after the records but before
-    // state.json. Adopt them once the catalog says which package they are.
     for (const [installId, live] of records) {
       if (this.state.installs[installId] || !this.library) continue;
       const entry = this.library.catalog.packages.find((candidate) => this.currentInstallId(candidate.packageId) === installId);
       if (!entry) continue;
-      // A team is adopted from its own records. A skills-only package has
-      // none; an offered skill carrying its stamp shows it was added.
       if (entry.kind === "team" ? !teamAlive(live) : !live.skills) continue;
       const meta = live.meta;
       const [slug] = entry.ref.split("/");
@@ -583,10 +503,6 @@ export class OrgLibrary {
         kind: entry.kind,
         name: meta?.name ?? entry.name,
         section: mostCommon(live.sections) ?? "",
-        // What was written at install is not recoverable here; with no base
-        // hashes a later update treats these parts as edited and keeps them.
-        // Nor is what the person deleted before state.json was lost, so
-        // removedLocally starts empty (docs/org-library.md, known limit).
         team: { parts: {} },
         bots: live.bots,
         rooms: live.rooms,
@@ -603,13 +519,6 @@ export class OrgLibrary {
     return changed;
   }
 
-  /** Preset rows never keep a team "installed" (its bots, group chats and
-   * routines do), but they are a skills-and-presets package's only records.
-   * Such an install whose index entry was lost (the app stopped between
-   * presets.json and state.json, or state.json could not be read) is adopted
-   * from them, so Add stays a no-op, its skills stay offered and a
-   * withdrawal still reaches its presets. An adopted install of either kind
-   * gets its presets back in the index. */
   private indexPresets(now: number): boolean {
     const byInstall = new Map<string, StoredPreset[]>();
     for (const row of this.orgPresetRows()) byInstall.set(row.installId, [...(byInstall.get(row.installId) ?? []), row]);
@@ -618,7 +527,6 @@ export class OrgLibrary {
       let install = this.state.installs[installId];
       if (!install) {
         const entry = this.library?.catalog.packages.find((candidate) => this.currentInstallId(candidate.packageId) === installId);
-        // A team is adopted from its own records (above), never from presets alone.
         if (!entry || entry.kind !== "library") continue;
         const row = rows[0]!;
         const [slug] = entry.ref.split("/");
@@ -636,7 +544,6 @@ export class OrgLibrary {
         changed = true;
       }
       if (Object.keys(install.presets).length) continue;
-      // A row is the preset exactly as the release carried it (§1.6).
       install.presets = Object.fromEntries(rows.map((row) => [row.key, { presetId: row.id, r: partHash(storedPresetObject(row)) }]));
       install.updatedAt = now;
       changed = true;
@@ -644,10 +551,6 @@ export class OrgLibrary {
     return changed;
   }
 
-  /** Team Adds the app never finished (it stopped mid-import). A team whose
-   * records are all there is indexed, as any crash after the records is
-   * (§3.3). A partial one is removed again, so the person can add it whole
-   * from the shelf instead of keeping half a team that Add calls added. */
   private resolveInterruptedAdds(now: number): boolean {
     const pending = Object.entries(this.state.adding).filter(([installId]) => installId !== this.importing);
     if (!pending.length) return false;
@@ -659,8 +562,6 @@ export class OrgLibrary {
         this.state.installs[installId] = {
           packageId: add.packageId, ref: add.ref, publisher: { ...add.publisher }, release: add.release, sha256: add.sha256,
           status: "installed", kind: "team", name: add.name, section: mostCommon(live.sections) ?? "",
-          // As with any adopted install, the team-part and connection hashes
-          // were only in the index write that never happened.
           team: { parts: {} }, bots: live.bots, rooms: live.rooms, routines: live.routines, connections: {}, presets: {},
           removedLocally: [], addedAt: previous?.addedAt ?? add.startedAt, updatedAt: now,
         };
@@ -673,8 +574,6 @@ export class OrgLibrary {
     return true;
   }
 
-  /** Every bot (with its skills and starter notes), group chat and routine
-   * the Add would have written, and its leader, which is set last. */
   private finished(add: OrgPendingAdd, live: LiveRecords): boolean {
     const { store } = this.deps;
     return add.expect.bots.every((key) => Boolean(live.bots[key] && store.bot(live.bots[key]!)?.packageBase)) &&
@@ -683,10 +582,6 @@ export class OrgLibrary {
       (add.expect.leader === null || store.bot(live.bots[add.expect.leader] ?? "")?.chiefOfStaff === true);
   }
 
-  /** The importer's rollback, for an import the app stopped in the middle
-   * of: its routines, group chats and bots go, and its new team with them.
-   * Every one of its routines belongs to one of its new bots, and a group
-   * chat it had not stamped yet has only those bots in that team. */
   private discardPartial(installId: string, live: LiveRecords): void {
     const { store, routines } = this.deps;
     const botIds = new Set(Object.values(live.bots));
@@ -699,67 +594,10 @@ export class OrgLibrary {
         group.memberIds.length > 0 && group.memberIds.every((id) => botIds.has(id))));
     for (const group of groups) store.deleteGroup(group.id);
     for (const id of botIds) store.deleteBot(id);
-    // Only if nothing else is in it (the store refuses otherwise).
     if (section && store.sections.includes(section)) store.changeEmptySection(section, null);
     console.warn(`[org-library] removed a team that was only partly added when OpenMausBot stopped; it can be added again from the shelf`);
   }
 
-  /** A release its publisher withdrew: its skills off, its routines paused,
-   * its status "withdrawn". Only the transition acts, so a person who
-   * switches something back on afterwards is not overruled again. A team
-   * the person already removed stays "removed", but an offered skill it
-   * left on another bot is switched off too, once. */
-  private handleWithdrawn(): boolean {
-    if (!this.library) return false;
-    let changed = false;
-    for (const [installId, install] of Object.entries(this.state.installs)) {
-      if (this.currentInstallId(install.packageId) !== installId) continue;
-      if (install.status === "withdrawn" || (install.status === "removed" && install.withdrawnHandled === install.sha256)) continue;
-      const entry = this.library.catalog.packages.find((candidate) => candidate.packageId === install.packageId);
-      if (!entry?.withdrawnReleases.some((withdrawn) => withdrawn.sha256 === install.sha256)) continue;
-      this.switchOff(installId);
-      if (install.status === "installed") install.status = "withdrawn";
-      else install.withdrawnHandled = install.sha256;
-      install.updatedAt = this.deps.now?.() ?? Date.now();
-      changed = true;
-    }
-    return changed;
-  }
-
-  private switchOff(installId: string): void {
-    for (const bot of this.deps.store.bots) {
-      for (const skill of this.deps.skills.stamps(bot.id)) {
-        if (skill.stamp.installId !== installId || !skill.enabled) continue;
-        const result = this.deps.skills.setEnabled(bot.id, skill.name, false);
-        if ("error" in result) console.warn(`[org-library] could not switch off ${skill.name}: ${result.error}`);
-      }
-    }
-    // A bot made from one of the install's presets (presets.ts) got the
-    // preset's skills under the release's organization source. They carry
-    // the install's stamp too (`via: "preset"`, reached above); the source
-    // also reaches one made before presets stamped their skills.
-    for (const bot of this.deps.store.bots) {
-      const made = bot.installedPackage;
-      if (made?.source !== "org" || made.installId !== installId || !made.presetKey || !made.ref) continue;
-      const source = `org:${made.ref}@${made.release}`;
-      for (const skill of this.deps.skills.list(bot.id)) {
-        if (skill.source !== source || !skill.enabled) continue;
-        const result = this.deps.skills.setEnabled(bot.id, skill.name, false);
-        if ("error" in result) console.warn(`[org-library] could not switch off ${skill.name}: ${result.error}`);
-      }
-    }
-    for (const routine of this.deps.routines.packageStamps()) {
-      if (routine.stamp.installId !== installId || !routine.enabled) continue;
-      try {
-        this.deps.routines.update(routine.routineId, { enabled: false });
-      } catch (error) {
-        console.warn(`[org-library] could not pause a routine: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-  }
-
-  /** Bots, rooms or routines went away: when that removes an install's
-   * last record, the index and the report say so. Debounced. */
   private onStoreChange(change: StoreChange): void {
     if (change.type !== "bot.deleted" && change.type !== "group.deleted" && change.type !== "sections") return;
     if (!Object.keys(this.state.installs).length) return;
@@ -780,9 +618,7 @@ export class OrgLibrary {
     this.recheck.unref?.();
   }
 
-  // ── report ────────────────────────────────────────────────────────────
 
-  /** The full snapshot for the current organization (contract §5.5). */
   reportEntries(): OrgLibraryReportEntry[] {
     const entries: OrgLibraryReportEntry[] = [];
     const reported = new Set<string>();
@@ -817,7 +653,6 @@ export class OrgLibrary {
     }
   }
 
-  // ── files ─────────────────────────────────────────────────────────────
 
   private statePath(): string {
     return join(this.root, "state.json");
@@ -852,7 +687,6 @@ export class OrgLibrary {
         adding,
       };
     } catch {
-      // The records are the source of truth; an unreadable index is rebuilt.
       console.warn("[org-library] state.json could not be read; rebuilding it from your bots, rooms and routines");
       return emptyState();
     }
@@ -867,7 +701,7 @@ export class OrgLibrary {
     return join(this.root, "blobs", `${sha256}.json`);
   }
 
-  /** The release bytes, only if they hash to `sha256`. Never follows a link. */
+  /** Only bytes that hash to `sha256`; never follows a link. */
   readBlob(sha256: string): Buffer | null {
     if (!HEX64.test(sha256)) return null;
     let descriptor: number | null = null;
@@ -909,7 +743,6 @@ export class OrgLibrary {
     return "ready";
   }
 
-  /** The verified release, parsed as the organization channel reads it. */
   private releaseDocument(entry: OrgLibraryEntry): OrgLibraryOutcome<PackageDocument> {
     if (!entry.release) return refusal(404, "no_release", "This package has no release to add right now.");
     if (entry.release.formatVersion > PACKAGE_VERSION) return refusal(409, "newer_app_required", NEWER_APP);
@@ -944,9 +777,7 @@ export class OrgLibrary {
     };
   }
 
-  // ── renderer routes ───────────────────────────────────────────────────
 
-  /** GET /api/org-library. With no organization: {organization: null, packages: []}. */
   list(): OrgLibraryListing {
     if (!this.library) return { organization: null, packages: [] };
     return {
@@ -960,7 +791,6 @@ export class OrgLibrary {
     };
   }
 
-  /** GET /api/org-library/packages/:packageId — the preview, from the verified file. */
   preview(packageId: string): OrgLibraryOutcome<{ package: OrgLibraryListEntry; document: PackageDocument }> {
     const entry = this.visibleEntry(packageId);
     if (!entry) return refusal(404, "not_listed", NOT_LISTED);
@@ -969,8 +799,6 @@ export class OrgLibrary {
     return { ok: true, status: 200, value: { package: this.listEntry(entry), document: document.value } };
   }
 
-  /** POST /api/org-library/add — one click, no confirmation: the person's
-   * click is the decision. Idempotent per install id. */
   add(packageId: string, importDeps: PackageImportDeps):
     OrgLibraryOutcome<{ alreadyAdded: true; installId: string } | { alreadyAdded: false; result: PackageImportResult }> {
     const library = this.library;
@@ -997,9 +825,7 @@ export class OrgLibrary {
     const [slug] = entry.ref.split("/");
     const publisher = { organizationId: entry.publisher.organizationId, slug: slug!, name: entry.publisher.name };
     const pkg = document.value.package;
-    // A team's Add is marked before its first record is written, so if the
-    // app stops mid-import the next start finishes the job one way or the
-    // other (resolveInterruptedAdds). A skills-only package writes nothing.
+    // Marked before the first record is written so a mid-import stop is resolved on the next start.
     const pending = pkg.agents.length > 0 && Boolean(pkg.team);
     const settle = () => {
       if (!pending) return;
@@ -1041,12 +867,11 @@ export class OrgLibrary {
       }
       result = imported;
     } catch (error) {
-      // The importer removed everything it created.
       settle();
       try {
         this.save();
       } catch {}
-      if (error instanceof PackageImportError) return fail(refusal(422, error.code, error.message), "invalid_package");
+      if (error instanceof PackageImportError) return error.status === 409 ? refusal(409, error.code, error.message) : fail(refusal(422, error.code, error.message), "invalid_package");
       console.error(`[org-library] could not add ${entry.ref}: ${error instanceof Error ? error.message : String(error)}`);
       return fail(refusal(500, "import_failed", ADD_FAILED), "import_failed");
     }
@@ -1068,7 +893,6 @@ export class OrgLibrary {
       rooms: index.rooms,
       routines: index.routines,
       connections: index.connections,
-      // Presets now in New bot (presets.ts), with the release-side hash (§1.6).
       presets: Object.fromEntries((result.presets ?? []).flatMap((preset) => {
         const released = document.value.package.presets?.find((candidate) => candidate.key === preset.key);
         return released ? [[preset.key, { presetId: preset.id, r: partHash(released) }]] : [];
@@ -1078,14 +902,11 @@ export class OrgLibrary {
       updatedAt: now,
     };
     this.failures.delete(packageId);
-    // The records were written first; the index follows, and clears the mark.
     this.save();
     this.report();
     return { ok: true, status: 201, value: { alreadyAdded: false, result } };
   }
 
-  /** The skills installs offer without putting them on a bot (library
-   * packages, and a team's unassigned skills): Bot → Skills → From {Org}. */
   offeredSkills(botId?: string): { organization: { id: string; name: string } | null; skills: OfferedSkill[] } {
     if (!this.library) return { organization: null, skills: [] };
     const have = new Set(botId && this.deps.store.bot(botId) ? this.deps.skills.list(botId).map((skill) => skill.name) : []);
@@ -1116,7 +937,6 @@ export class OrgLibrary {
     }
   }
 
-  /** Put one offered skill on a bot, switched on, stamped with its install. */
   addOfferedSkill(botId: string, installId: string, name: string): OrgLibraryOutcome<SkillListing> {
     if (!this.library) return refusal(404, "not_listed", NOT_LISTED);
     const bot = this.deps.store.bot(botId);

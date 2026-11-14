@@ -1,8 +1,5 @@
-// The fleet agent: the one root process on a shared server, listening on a
-// Unix socket only the operator's user may open. It answers a small JSON API
-// by planning with fleet.ts and running the plan with the same executor the
-// CLI uses. Every request is validated here, every action is written to an
-// audit log, and nothing arrives as a command string.
+// The one root process on a shared server, on a Unix socket only the operator's user may open. Every request is validated
+// and audited, and nothing arrives as a command string.
 import { appendFileSync, chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname } from "node:path";
@@ -18,7 +15,6 @@ export interface FleetAgentOptions {
   licenseKey?: string;
   root?: string;
   deps?: FleetDeps;
-  /** Where actions are recorded; the layout's audit file by default. */
   auditFile?: string;
   now?: () => Date;
 }
@@ -30,14 +26,26 @@ export interface FleetWorkspaceView extends FleetWorkspace {
 
 const MAX_BODY = 256 * 1024;
 
-function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+export function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    let text = "";
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let tooLarge = false;
     req.on("data", (chunk: Buffer) => {
-      text += chunk.toString("utf8");
-      if (text.length > MAX_BODY) reject(Object.assign(new Error("request too large"), { status: 413 }));
+      if (tooLarge) return;
+      bytes += chunk.length;
+      if (bytes > MAX_BODY) {
+        // Keep draining so the 413 can still be sent, but stop holding bytes.
+        tooLarge = true;
+        chunks.length = 0;
+        return reject(Object.assign(new Error("request too large"), { status: 413 }));
+      }
+      chunks.push(chunk);
     });
     req.on("end", () => {
+      if (tooLarge) return;
+      // Decode once: a character split across two chunks stays whole.
+      const text = Buffer.concat(chunks).toString("utf8");
       if (!text.trim()) return resolve({});
       try {
         const value: unknown = JSON.parse(text);
@@ -80,7 +88,6 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
       mkdirSync(dirname(auditFile), { recursive: true, mode: 0o750 });
       appendFileSync(auditFile, `${JSON.stringify({ at: now().toISOString(), ...entry })}\n`, { mode: 0o600 });
     } catch {
-      /* the audit line must never fail the action it records */
     }
   };
 
@@ -112,8 +119,7 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
     return code === 0 ? { status: 200, body: { ok: true, log } } : { status: 500, body: { error: errors[0] ?? "the step failed", log: [...log, ...errors] } };
   };
 
-  // Planning reads the registry too: serialize the entire read/modify/execute
-  // sequence, not just the subprocesses, so ports and updates cannot collide.
+  // Planning reads the registry too: serialize the whole read/modify/execute sequence so ports and updates cannot collide.
   let mutationTail: Promise<unknown> = Promise.resolve();
   const act = (input: FleetInput) => {
     const result = mutationTail.then(() => runAction(input));

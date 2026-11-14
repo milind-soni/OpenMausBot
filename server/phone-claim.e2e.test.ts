@@ -6,11 +6,8 @@ import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { freePortBlock } from "./testing/ports.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { fakePhone, usbPhoneLine } from "./testing/fake-phone.ts";
 
-// Phone exclusivity on the real server (issue #1663): trigger-term matching
-// may mount the phone tools, but computer:phone is claimed only at the first
-// real tool call and released when the turn settles. A concurrent caller
-// gets a blocked tool result, never a dead turn.
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 let child: ChildProcess;
 let fixtureHome = "";
@@ -19,6 +16,7 @@ let dumpFile = "";
 let finishFile = "";
 let stderr = "";
 const PHONE_BUSY_ERROR = "another thread is using the phone";
+const USB_PHONE = "PHONE1";
 const api = async (method: string, path: string, body?: unknown) => {
   const r = await fetch(base + path, { method, headers: { "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -35,8 +33,7 @@ async function until<T>(read: () => T | Promise<T>, accept: (value: T) => boolea
     await new Promise(r => setTimeout(r, 40));
   }
 }
-// The fake CLI writes its dump in one go; a poll can land mid-write, so a
-// partial file is "not yet", not a failure.
+// The fake CLI writes its dump in one go; a poll can land mid-write, so a partial file is "not yet".
 const dump = () => until(() => {
   if (!existsSync(dumpFile)) return null;
   try { return JSON.parse(readFileSync(dumpFile, "utf8")); } catch { return null; }
@@ -65,11 +62,9 @@ const noPhoneConflict = async (...botIds: string[]) => {
   }
 };
 
-// Speak enough MCP to one spawned phone proxy for these tests: initialize,
-// then tools/call frames, collecting responses by id.
+// Speak just enough MCP to one spawned phone proxy: initialize, then tools/call frames, collected by id.
 async function withPhoneProxy<T>(spec: any, run: (call: (name: string) => Promise<any>) => Promise<T>): Promise<T> {
-  // Node acts as an inert cross-platform ADB: `node devices -l` runs the
-  // synthetic script below. Never discover or contact a real attached phone.
+  // Node acts as an inert cross-platform ADB; never discover or contact a real attached phone.
   const proxy = spawn(spec.command, spec.args, { cwd: fixtureHome,
     env: { ...process.env, ...spec.env, HOME: fixtureHome, USERPROFILE: fixtureHome, OMB_ADB_PATH: process.execPath },
     stdio: ["pipe", "pipe", "ignore"] });
@@ -129,12 +124,13 @@ beforeAll(async () => {
   } } }));
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
+  const serverAdb = fakePhone({ devices: usbPhoneLine(USB_PHONE), under: fixtureHome }).adbPath;
   child = spawn(process.execPath, [join(ROOT, "server/index.ts")], {
     cwd: ROOT, env: {
       PATH: process.env.PATH, HOME: fixtureHome, USERPROFILE: fixtureHome, OMB_DATA_DIR: data,
       APPDATA: join(fixtureHome, "appdata"), LOCALAPPDATA: join(fixtureHome, "localappdata"),
       TEMP: fixtureHome, TMP: fixtureHome, TMPDIR: fixtureHome,
-      OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui,
+      OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_ADB_PATH: serverAdb,
     }, stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout!.on("data", () => {});
@@ -171,6 +167,28 @@ const makeRoom = async (name: string, botId: string) => {
   return group;
 };
 const roomIdle = (groupId: string) => until(() => api("GET", "/api/bots?messages=0"), s => s.groups.find((g: any) => g.id === groupId)?.working !== true);
+
+describe("features.usbPhoneTakeover on the real server", () => {
+  it("is off until set, is kept once set, and the USB phone list answers only while it is on", async () => {
+    const reported = async () => (await api("GET", "/api/config")).features.usbPhoneTakeover;
+    const list = () => fetch(base + "/api/usb-phones");
+    expect(await reported()).toBe(false);
+    expect((await list()).status).toBe(404);
+    try {
+      await api("PATCH", "/api/config", { features: { usbPhoneTakeover: true } });
+      expect(await reported()).toBe(true);
+      expect(JSON.parse(readFileSync(join(fixtureHome, "data", "config.json"), "utf8")).features.usbPhoneTakeover).toBe(true);
+      expect(await (await list()).json()).toEqual({
+        available: true,
+        devices: [{ serial: USB_PHONE, state: "device", connection: "usb", model: "Pixel 8 Pro" }],
+      });
+    } finally {
+      await api("PATCH", "/api/config", { features: { usbPhoneTakeover: false } });
+    }
+    expect(await reported()).toBe(false);
+    expect((await list()).status).toBe(404);
+  });
+});
 
 describe("Lazy phone claim on the real server", () => {
   it("rejects a retained proxy after its turn settles, before and after a new owner claims", async () => {
@@ -210,15 +228,11 @@ describe("Lazy phone claim on the real server", () => {
     const second = await makeBot("Second phone asker");
     await holdDirectTurn(second.id, "open uber on my phone");
     await busy(second.id);
-    // Three concurrent trigger-word turns, all dispatched, zero claims: with
-    // the eager claim any turn after the first died at dispatch instead.
     await noPhoneConflict(holder.id, roomBot.id, second.id);
   });
 
   it("holds no claim when the trigger word only appears in room history", async () => {
     rmSync(finishFile, { force: true });
-    // Room turns match trigger terms over the whole room context, so this
-    // covers the history case; a direct turn matches its new message only.
     const roomBot = await makeBot("Room history android");
     const room = await makeRoom("Room history phone room", roomBot.id);
     await holdRoomTurn(room.id, "help me fix this android gradle error");
@@ -226,8 +240,6 @@ describe("Lazy phone claim on the real server", () => {
     await roomIdle(room.id);
 
     rmSync(finishFile, { force: true });
-    // The new message has no trigger word; the room context does. The tools
-    // stay mounted (follow-up room turns keep them) but nothing is claimed.
     await holdRoomTurn(room.id, "now give a short status update");
     await until(() => api("GET", "/api/bots?messages=0"), s => s.groups.find((g: any) => g.id === room.id)?.working === true);
 
@@ -249,8 +261,6 @@ describe("Lazy phone claim on the real server", () => {
       expect(status.result.isError).toBeUndefined();
       expect(status.result.content[0].text).toContain("available");
     });
-    // The proxy's call claimed computer:phone for holder's turn: the same
-    // owner may re-claim, a concurrent turn may not.
     const claim = (token: string) => fetch(base + "/api/internal/phone/claim", {
       method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: "{}",
     });
@@ -261,8 +271,6 @@ describe("Lazy phone claim on the real server", () => {
       const blocked = await call("status");
       expect(blocked.result).toMatchObject({ isError: true });
       expect(blocked.result.content[0].text).toBe("Another thread is using the phone. This call was not performed. Pause phone work until that thread finishes, then read the screen again before acting.");
-      // The blocked result is an answer inside the turn, not a dispatch
-      // failure: the turn stays alive and can try again once the holder ends.
       await busy(other.id);
       await api("POST", `/api/bots/${holder.id}/interrupt`, {});
       await idle(holder.id);

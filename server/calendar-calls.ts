@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
+import { startDueTimer, type DueTimer } from "./due-timer.ts";
 import { nextOccurrence } from "./routines.ts";
 
 export type CalendarCallSchedule =
@@ -177,7 +178,7 @@ export class CalendarCallManager {
   private readonly botExists: CalendarCallManagerOptions["botExists"];
   private readonly onDue: CalendarCallManagerOptions["onDue"];
   private calls: CalendarCall[] = [];
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: DueTimer | null = null;
   private ticking = false;
 
   constructor(options: CalendarCallManagerOptions) {
@@ -235,6 +236,18 @@ export class CalendarCallManager {
     return cloneCall(call);
   }
 
+  /** Another server's call under its own id. A new one is not scheduled (`nextRunAt` null) until it is switched on;
+   * one already here keeps its schedule's next time. */
+  adopt(record: CalendarCall): CalendarCall {
+    const clean = cleanInput(record, this.botExists);
+    const index = this.calls.findIndex((call) => call.id === record.id);
+    const held = index < 0 ? null : this.calls[index]!;
+    const call: CalendarCall = { id: record.id, ...clean, ...(record.roomId ? { roomId: record.roomId } : {}), nextRunAt: held?.nextRunAt ?? null,
+      createdAt: record.createdAt, updatedAt: this.now() };
+    this.commit(() => { if (held) this.calls[index] = call; else this.calls.push(call); });
+    return cloneCall(call);
+  }
+
   update(id: string, patch: CalendarCallPatch): CalendarCall {
     const index = this.calls.findIndex((call) => call.id === id);
     if (index < 0) throw new Error("Call not found");
@@ -262,6 +275,17 @@ export class CalendarCallManager {
     return cloneCall(updated);
   }
 
+  /** Not scheduled again until it is saved again, which works out its next time. */
+  switchOff(id: string): boolean {
+    const call = this.calls.find((candidate) => candidate.id === id);
+    if (!call || call.nextRunAt === null) return false;
+    this.commit(() => {
+      call.nextRunAt = null;
+      call.updatedAt = this.now();
+    });
+    return true;
+  }
+
   linkRoom(id: string, roomId: string): CalendarCall {
     const call = this.calls.find((candidate) => candidate.id === id);
     if (!call) throw new Error("Call not found");
@@ -281,8 +305,6 @@ export class CalendarCallManager {
     return true;
   }
 
-  /** Keep calendar plans usable when a participant is archived permanently.
-   * A call with other guests survives; an empty call no longer has meaning. */
   removeBot(botId: string): number {
     const affected = this.calls.filter((call) => call.botIds.includes(botId)).length;
     if (!affected) return 0;
@@ -300,13 +322,16 @@ export class CalendarCallManager {
 
   start(): void {
     if (this.timer) return;
-    void this.tick();
-    this.timer = setInterval(() => void this.tick(), 10_000);
-    this.timer.unref?.();
+    this.timer = startDueTimer({
+      run: () => this.tick(),
+      next: () => this.calls.reduce<number | null>((at, call) => call.nextRunAt == null ? at : Math.min(at ?? Infinity, call.nextRunAt), null),
+      now: this.now,
+      onError: (error) => console.error("calendar calls: a scheduler pass failed", error),
+    });
   }
 
   stop(): void {
-    if (this.timer) clearInterval(this.timer);
+    this.timer?.stop();
     this.timer = null;
   }
 
@@ -340,8 +365,7 @@ export class CalendarCallManager {
     return schedule.type === "once" ? schedule.at : nextOccurrence(schedule, now);
   }
 
-  /** Old calendar calls were reminders only. Start recurring reminders from
-   * the next future slot and never replay an already-past one-time reminder. */
+  /** Recurring reminders start from the next future slot; a past one-time reminder is never replayed. */
   private loadedOccurrence(schedule: CalendarCallSchedule): number | null {
     const now = this.now();
     if (schedule.type === "once") return schedule.at > now ? schedule.at : null;
@@ -357,6 +381,7 @@ export class CalendarCallManager {
       this.calls = before;
       throw error;
     }
+    this.timer?.poke();
   }
 
   private save(): void {

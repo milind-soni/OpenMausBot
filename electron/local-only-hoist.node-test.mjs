@@ -1,9 +1,4 @@
-// The local-origin gate is bound with a `const` destructure while ipcMain
-// handlers are registered at module top level. If that binding ever sits
-// below the first `localOnly(...)` again (it did once, #802), the packaged app
-// dies at boot with "Cannot access 'localOnly' before initialization" — which
-// only the Linux package smoke sees, long after the unit legs are green. This
-// pins the order statically so the failure is a red test, not a red release.
+// The localOnly const must bind above the first top-level `localOnly(...)`, or the packaged app dies at boot (temporal dead zone).
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

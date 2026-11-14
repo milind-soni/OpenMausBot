@@ -1,7 +1,3 @@
-// Command + receipt seam (Phase 0, item 0.5): every new mutation runs as a
-// typed command whose receipt is written in the same SQLite transaction as
-// its effects, so a retry with the same (kind, key) returns the stored
-// result instead of applying twice.
 import { mkdirSync, rmSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -56,7 +52,6 @@ describe("runCommand", () => {
     ).toThrow("boom");
     expect(readThread("t1", "/nonexistent").messages).toEqual([]);
     expect(commandReceipt("digest.append", "t1:turn-2")).toBeNull();
-    // the same key can be retried after a failure
     const retried = runCommand({ kind: "digest.append", key: "t1:turn-2" }, () => {
       insertMessage("t1", msg("m1", "done"));
       return "ok";
@@ -93,7 +88,7 @@ describe("runCommand nesting", () => {
           insertMessage("nested", msg("partial", "must roll back"));
           throw new Error("inner failed");
         });
-      } catch { /* the outer command can continue without the failed inner effect */ }
+      } catch {}
       insertMessage("nested", msg("complete", "kept"));
       return "outer completed";
     });
@@ -112,7 +107,6 @@ describe("runCommand nesting", () => {
     });
     expect(readThread("t9", "/nonexistent").messages.map((m) => m.text)).toEqual(["[digest] one"]);
     expect(commandReceipt("digest.append", "t9:turn-1")).not.toBeNull();
-    // and a failure after the nested write rolls back the write too
     expect(() =>
       runCommand({ kind: "digest.append", key: "t9:turn-2" }, () => {
         appendMessage("t9", msg("d2", "[digest] two"));

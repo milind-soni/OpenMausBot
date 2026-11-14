@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createScreenFrameSource, type ScreenCapture } from "./screen-frame-source.ts";
+import { createScreenFrameSource, latestTurnFrame, rememberTurnFrame, type ScreenCapture } from "./screen-frame-source.ts";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -59,7 +59,7 @@ describe("screen frame source", () => {
     resolveDesktop(frame("stale desktop"));
     await Promise.all([oldCapture, settled]);
     expect(source.last).toEqual(publicFrame("page"));
-    expect(onFrame.mock.calls).toEqual([[publicFrame("page")]]);
+    expect(onFrame.mock.calls).toEqual([[publicFrame("page"), "browser"]]);
   });
 
   it("also switches from the browser back to the desktop", async () => {
@@ -110,5 +110,17 @@ describe("screen frame source", () => {
     expect(source.surface).toBe("browser");
     await source.capture(true);
     expect(source.last).toEqual(publicFrame("only browser"));
+  });
+});
+
+describe("turn frames for watchers outside the turn", () => {
+  it("keeps the newest frame per computer, for a bounded number of computers", () => {
+    rememberTurnFrame(undefined, publicFrame("lost"), 1);
+    rememberTurnFrame("computer:box:bx_a", publicFrame("first"), 10);
+    rememberTurnFrame("computer:box:bx_a", publicFrame("second"), 20);
+    expect(latestTurnFrame("computer:box:bx_a")).toEqual({ frame: publicFrame("second"), at: 20 });
+    for (let index = 0; index < 64; index++) rememberTurnFrame(`computer:box:other-${index}`, publicFrame(`f${index}`), 30 + index);
+    expect(latestTurnFrame("computer:box:bx_a")).toBeUndefined();
+    expect(latestTurnFrame("computer:box:other-63")).toEqual({ frame: publicFrame("f63"), at: 93 });
   });
 });

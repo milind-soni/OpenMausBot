@@ -21,7 +21,6 @@ test("accepts a bare origin or a full URL on either side", () => {
 test("refuses input permissions to any other origin", () => {
   assert.equal(desktopViewerPermissionAllowed("keyboardLock", "https://other.example/vnc.html", VIEWER), false);
   assert.equal(desktopViewerPermissionAllowed("clipboard-read", "https://desktop.example.evil/vnc.html", VIEWER), false);
-  // Scheme and port are part of the origin.
   assert.equal(desktopViewerPermissionAllowed("pointerLock", "http://desktop.example/vnc.html", VIEWER), false);
   assert.equal(desktopViewerPermissionAllowed("fullscreen", "https://desktop.example:8443/vnc.html", VIEWER), false);
 });

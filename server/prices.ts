@@ -1,10 +1,7 @@
-// Sell prices per million tokens, and what one ledger row is billable at.
-// Pure arithmetic shared by the ledger summaries and the spend module; the
-// numbers are the operator's own price list, never a vendor rate card.
+// The operator's own sell prices, never a vendor rate card.
 export interface ModelPrice {
   inputPerMillion: number;
   outputPerMillion: number;
-  /** Re-read context, when priced apart; falls back to the input rate. */
   cachedInputPerMillion?: number;
 }
 
@@ -19,14 +16,16 @@ export interface PricedTurn {
   cachedInput?: number;
 }
 
-/** The most specific price for a turn: driver/model, then model, then default. */
 export function priceFor(turn: Pick<PricedTurn, "driverKind" | "model">, prices: PriceList): ModelPrice | null {
-  return prices[`${turn.driverKind}/${turn.model}`] ?? prices[turn.model] ?? prices.default ?? null;
+  const driverKey = `${turn.driverKind}/${turn.model}`;
+  const forDriver = Object.hasOwn(prices, driverKey) ? prices[driverKey] : undefined;
+  const forModel = Object.hasOwn(prices, turn.model) ? prices[turn.model] : undefined;
+  const fallback = Object.hasOwn(prices, "default") ? prices.default : undefined;
+  return forDriver ?? forModel ?? fallback ?? null;
 }
 
 const clean = (value: number | undefined): number => (typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0);
 
-/** Dollars billable for one turn, or null when the list has no price for it. */
 export function billableFor(turn: PricedTurn, prices: PriceList): number | null {
   const price = priceFor(turn, prices);
   if (!price) return null;

@@ -1,0 +1,745 @@
+[
+  {
+    "step": "open",
+    "answer": "undefined",
+    "events": [
+      "control",
+      "frame",
+      "ready",
+      "status",
+      "tabs"
+    ],
+    "shapes": {
+      "control": {
+        "controlling": "boolean",
+        "held": "boolean",
+        "owned": "boolean"
+      },
+      "frame": {
+        "data": "string",
+        "format": "string",
+        "metadata": {
+          "deviceHeight": "number",
+          "deviceWidth": "number",
+          "offsetTop": "number",
+          "pageScaleFactor": "number",
+          "scrollOffsetX": "number",
+          "scrollOffsetY": "number",
+          "timestamp": "number"
+        },
+        "seq": "number"
+      },
+      "ready": {
+        "viewerId": "string"
+      },
+      "status": {
+        "connected": "boolean",
+        "screencasting": "boolean",
+        "viewportHeight": "number",
+        "viewportWidth": "number"
+      },
+      "tabs": {
+        "tabs": [
+          {
+            "active": "boolean",
+            "tabId": "string",
+            "title": "string",
+            "url": "string"
+          }
+        ]
+      }
+    },
+    "control": {
+      "held": false,
+      "owned": false,
+      "controlling": false
+    },
+    "tabs": [
+      {
+        "title": "",
+        "url": "about:blank",
+        "active": true
+      }
+    ],
+    "connected": true,
+    "frameFormat": "jpeg"
+  },
+  {
+    "step": "take",
+    "answer": {
+      "ok": "boolean",
+      "waited": "boolean"
+    },
+    "events": [
+      "control"
+    ],
+    "shapes": {
+      "control": {
+        "controlling": "boolean",
+        "held": "boolean",
+        "owned": "boolean"
+      }
+    },
+    "control": {
+      "held": true,
+      "owned": true,
+      "controlling": true
+    }
+  },
+  {
+    "step": "navigate",
+    "answer": {
+      "ok": "boolean"
+    },
+    "events": [
+      "control",
+      "frame",
+      "tabs",
+      "url"
+    ],
+    "shapes": {
+      "control": {
+        "controlling": "boolean",
+        "held": "boolean",
+        "owned": "boolean"
+      },
+      "frame": {
+        "data": "string",
+        "format": "string",
+        "metadata": {
+          "deviceHeight": "number",
+          "deviceWidth": "number",
+          "offsetTop": "number",
+          "pageScaleFactor": "number",
+          "scrollOffsetX": "number",
+          "scrollOffsetY": "number",
+          "timestamp": "number"
+        },
+        "seq": "number"
+      },
+      "tabs": {
+        "tabs": [
+          {
+            "active": "boolean",
+            "tabId": "string",
+            "title": "string",
+            "url": "string"
+          }
+        ]
+      },
+      "url": {
+        "url": "string"
+      }
+    },
+    "control": {
+      "held": true,
+      "owned": true,
+      "controlling": true
+    },
+    "tabs": [
+      {
+        "title": "127.0.0.1:52549/a",
+        "url": "<origin>/a",
+        "active": true
+      }
+    ],
+    "url": "<origin>/a",
+    "frameFormat": "jpeg"
+  },
+  {
+    "step": "tap",
+    "answer": {
+      "ok": "boolean"
+    },
+    "events": [
+      "control",
+      "frame",
+      "tabs"
+    ],
+    "shapes": {
+      "control": {
+        "controlling": "boolean",
+        "held": "boolean",
+        "owned": "boolean"
+      },
+      "frame": {
+        "data": "string",
+        "format": "string",
+        "metadata": {
+          "deviceHeight": "number",
+          "deviceWidth": "number",
+          "offsetTop": "number",
+          "pageScaleFactor": "number",
+          "scrollOffsetX": "number",
+          "scrollOffsetY": "number",
+          "timestamp": "number"
+        },
+        "seq": "number"
+      },
+      "tabs": {
+        "tabs": [
+          {
+            "active": "boolean",
+            "tabId": "string",
+            "title": "string",
+            "url": "string"
+          }
+        ]
+      }
+    },
+    "control": {
+      "held": true,
+      "owned": true,
+      "controlling": true
+    },
+    "tabs": [
+      {
+        "title": "127.0.0.1:52549/a",
+        "url": "<origin>/a",
+        "active": true
+      }
+    ],
+    "frameFormat": "jpeg"
+  },
+  {
+    "step": "type",
+    "answer": {
+      "ok": "boolean"
+    },
+    "events": [
+      "control",
+      "frame",
+      "tabs"
+    ],
+    "shapes": {
+      "control": {
+        "controlling": "boolean",
+        "held": "boolean",
+        "owned": "boolean"
+      },
+      "frame": {
+        "data": "string",
+        "format": "string",
+        "metadata": {
+          "deviceHeight": "number",
+          "deviceWidth": "number",
+          "offsetTop": "number",
+          "pageScaleFactor": "number",
+          "scrollOffsetX": "number",
+          "scrollOffsetY": "number",
+          "timestamp": "number"
+        },
+        "seq": "number"
+      },
+      "tabs": {
+        "tabs": [
+          {
+            "active": "boolean",
+            "tabId": "string",
+            "title": "string",
+            "url": "string"
+          }
+        ]
+      }
+    },
+    "control": {
+      "held": true,
+      "owned": true,
+      "controlling": true
+    },
+    "tabs": [
+      {
+        "title": "127.0.0.1:52549/a",
+        "url": "<origin>/a",
+        "active": true
+      }
+    ],
+    "frameFormat": "jpeg"
+  },
+  {
+    "step": "enter",
+    "answer": {
+      "ok": "boolean"
+    },
+    "events": [
+      "control",
+      "frame",
+      "tabs"
+    ],
+    "shapes": {
+      "control": {
+        "controlling": "boolean",
+        "held": "boolean",
+        "owned": "boolean"
+      },
+      "frame": {
+        "data": "string",
+        "format": "string",
+        "metadata": {
+          "deviceHeight": "number",
+          "deviceWidth": "number",
+          "offsetTop": "number",
+          "pageScaleFactor": "number",
+          "scrollOffsetX": "number",
+          "scrollOffsetY": "number",
+          "timestamp": "number"
+        },
+        "seq": "number"
+      },
+      "tabs": {
+        "tabs": [
+          {
+            "active": "boolean",
+            "tabId": "string",
+            "title": "string",
+            "url": "string"
+          }
+        ]
+      }
+    },
+    "control": {
+      "held": true,
+      "owned": true,
+      "controlling": true
+    },
+    "tabs": [
+      {
+        "title": "127.0.0.1:52549/a",
+        "url": "<origin>/a",
+        "active": true
+      }
+    ],
+    "frameFormat": "jpeg"
+  },
+  {
+    "step": "scroll",
+    "answer": {
+      "ok": "boolean"
+    },
+    "events": [
+      "control",
+      "frame",
+      "tabs"
+    ],
+    "shapes": {
+      "control": {
+        "controlling": "boolean",
+        "held": "boolean",
+        "owned": "boolean"
+      },
+      "frame": {
+        "data": "string",
+        "format": "string",
+        "metadata": {
+          "deviceHeight": "number",
+          "deviceWidth": "number",
+          "offsetTop": "number",
+          "pageScaleFactor": "number",
+          "scrollOffsetX": "number",
+          "scrollOffsetY": "number",
+          "timestamp": "number"
+        },
+        "seq": "number"
+      },
+      "tabs": {
+        "tabs": [
+          {
+            "active": "boolean",
+            "tabId": "string",
+            "title": "string",
+            "url": "string"
+          }
+        ]
+      }
+    },
+    "control": {
+      "held": true,
+      "owned": true,
+      "controlling": true
+    },
+    "tabs": [
+      {
+        "title": "127.0.0.1:52549/a",
+        "url": "<origin>/a",
+        "active": true
+      }
+    ],
+    "frameFormat": "jpeg"
+  },
+  {
+    "step": "tab-new",
+    "answer": {
+      "ok": "boolean"
+    },
+    "events": [
+      "control",
+      "frame",
+      "status",
+      "tabs"
+    ],
+    "shapes": {
+      "control": {
+        "controlling": "boolean",
+        "held": "boolean",
+        "owned": "boolean"
+      },
+      "frame": {
+        "data": "string",
+        "format": "string",
+        "metadata": {
+          "deviceHeight": "number",
+          "deviceWidth": "number",
+          "offsetTop": "number",
+          "pageScaleFactor": "number",
+          "scrollOffsetX": "number",
+          "scrollOffsetY": "number",
+          "timestamp": "number"
+        },
+        "seq": "number"
+      },
+      "status": {
+        "connected": "boolean",
+        "screencasting": "boolean",
+        "viewportHeight": "number",
+        "viewportWidth": "number"
+      },
+      "tabs": {
+        "tabs": [
+          {
+            "active": "boolean",
+            "tabId": "string",
+            "title": "string",
+            "url": "string"
+          }
+        ]
+      }
+    },
+    "control": {
+      "held": true,
+      "owned": true,
+      "controlling": true
+    },
+    "tabs": [
+      {
+        "title": "127.0.0.1:52549/a",
+        "url": "<origin>/a",
+        "active": false
+      },
+      {
+        "title": "127.0.0.1:52549/b",
+        "url": "<origin>/b",
+        "active": true
+      }
+    ],
+    "connected": true,
+    "frameFormat": "jpeg"
+  },
+  {
+    "step": "tab-select",
+    "answer": {
+      "ok": "boolean"
+    },
+    "events": [
+      "control",
+      "frame",
+      "status",
+      "tabs"
+    ],
+    "shapes": {
+      "control": {
+        "controlling": "boolean",
+        "held": "boolean",
+        "owned": "boolean"
+      },
+      "frame": {
+        "data": "string",
+        "format": "string",
+        "metadata": {
+          "deviceHeight": "number",
+          "deviceWidth": "number",
+          "offsetTop": "number",
+          "pageScaleFactor": "number",
+          "scrollOffsetX": "number",
+          "scrollOffsetY": "number",
+          "timestamp": "number"
+        },
+        "seq": "number"
+      },
+      "status": {
+        "connected": "boolean",
+        "screencasting": "boolean",
+        "viewportHeight": "number",
+        "viewportWidth": "number"
+      },
+      "tabs": {
+        "tabs": [
+          {
+            "active": "boolean",
+            "tabId": "string",
+            "title": "string",
+            "url": "string"
+          }
+        ]
+      }
+    },
+    "control": {
+      "held": true,
+      "owned": true,
+      "controlling": true
+    },
+    "tabs": [
+      {
+        "title": "Page A",
+        "url": "<origin>/a",
+        "active": true
+      },
+      {
+        "title": "127.0.0.1:52549/b",
+        "url": "<origin>/b",
+        "active": false
+      }
+    ],
+    "connected": true,
+    "frameFormat": "jpeg"
+  },
+  {
+    "step": "tab-close",
+    "answer": {
+      "ok": "boolean"
+    },
+    "events": [
+      "control",
+      "tabs"
+    ],
+    "shapes": {
+      "control": {
+        "controlling": "boolean",
+        "held": "boolean",
+        "owned": "boolean"
+      },
+      "tabs": {
+        "tabs": [
+          {
+            "active": "boolean",
+            "tabId": "string",
+            "title": "string",
+            "url": "string"
+          }
+        ]
+      }
+    },
+    "control": {
+      "held": true,
+      "owned": true,
+      "controlling": true
+    },
+    "tabs": [
+      {
+        "title": "Page A",
+        "url": "<origin>/a",
+        "active": true
+      }
+    ]
+  },
+  {
+    "step": "back",
+    "answer": {
+      "error": "string"
+    },
+    "events": [
+      "control",
+      "frame",
+      "tabs",
+      "url"
+    ],
+    "shapes": {
+      "control": {
+        "controlling": "boolean",
+        "held": "boolean",
+        "owned": "boolean"
+      },
+      "frame": {
+        "data": "string",
+        "format": "string",
+        "metadata": {
+          "deviceHeight": "number",
+          "deviceWidth": "number",
+          "offsetTop": "number",
+          "pageScaleFactor": "number",
+          "scrollOffsetX": "number",
+          "scrollOffsetY": "number",
+          "timestamp": "number"
+        },
+        "seq": "number"
+      },
+      "tabs": {
+        "tabs": [
+          {
+            "active": "boolean",
+            "tabId": "string",
+            "title": "string",
+            "url": "string"
+          }
+        ]
+      },
+      "url": {
+        "url": "string"
+      }
+    },
+    "control": {
+      "held": true,
+      "owned": true,
+      "controlling": true
+    },
+    "tabs": [
+      {
+        "title": "Page A",
+        "url": "<origin>/a",
+        "active": true
+      }
+    ],
+    "url": "about:blank",
+    "frameFormat": "jpeg"
+  },
+  {
+    "step": "forward",
+    "answer": {
+      "ok": "boolean"
+    },
+    "events": [
+      "control",
+      "frame",
+      "tabs",
+      "url"
+    ],
+    "shapes": {
+      "control": {
+        "controlling": "boolean",
+        "held": "boolean",
+        "owned": "boolean"
+      },
+      "frame": {
+        "data": "string",
+        "format": "string",
+        "metadata": {
+          "deviceHeight": "number",
+          "deviceWidth": "number",
+          "offsetTop": "number",
+          "pageScaleFactor": "number",
+          "scrollOffsetX": "number",
+          "scrollOffsetY": "number",
+          "timestamp": "number"
+        },
+        "seq": "number"
+      },
+      "tabs": {
+        "tabs": [
+          {
+            "active": "boolean",
+            "tabId": "string",
+            "title": "string",
+            "url": "string"
+          }
+        ]
+      },
+      "url": {
+        "url": "string"
+      }
+    },
+    "control": {
+      "held": true,
+      "owned": true,
+      "controlling": true
+    },
+    "tabs": [
+      {
+        "title": "Page A",
+        "url": "<origin>/a",
+        "active": true
+      }
+    ],
+    "url": "<origin>/a",
+    "frameFormat": "jpeg"
+  },
+  {
+    "step": "reload",
+    "answer": {
+      "ok": "boolean"
+    },
+    "events": [
+      "control",
+      "frame",
+      "tabs",
+      "url"
+    ],
+    "shapes": {
+      "control": {
+        "controlling": "boolean",
+        "held": "boolean",
+        "owned": "boolean"
+      },
+      "frame": {
+        "data": "string",
+        "format": "string",
+        "metadata": {
+          "deviceHeight": "number",
+          "deviceWidth": "number",
+          "offsetTop": "number",
+          "pageScaleFactor": "number",
+          "scrollOffsetX": "number",
+          "scrollOffsetY": "number",
+          "timestamp": "number"
+        },
+        "seq": "number"
+      },
+      "tabs": {
+        "tabs": [
+          {
+            "active": "boolean",
+            "tabId": "string",
+            "title": "string",
+            "url": "string"
+          }
+        ]
+      },
+      "url": {
+        "url": "string"
+      }
+    },
+    "control": {
+      "held": true,
+      "owned": true,
+      "controlling": true
+    },
+    "tabs": [
+      {
+        "title": "Page A",
+        "url": "<origin>/a",
+        "active": true
+      }
+    ],
+    "url": "<origin>/a",
+    "frameFormat": "jpeg"
+  },
+  {
+    "step": "release",
+    "answer": {
+      "ok": "boolean"
+    },
+    "events": [
+      "control"
+    ],
+    "shapes": {
+      "control": {
+        "controlling": "boolean",
+        "held": "boolean",
+        "owned": "boolean"
+      }
+    },
+    "control": {
+      "held": false,
+      "owned": false,
+      "controlling": false
+    }
+  }
+]

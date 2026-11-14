@@ -1,13 +1,13 @@
 ---
 name: create-verification-skill
-description: "Create one reviewed skill that teaches a bot how to launch, drive, and verify a specific app or project. Use only when the user explicitly asks for a verification skill."
+description: "Create one skill that teaches a bot how to launch, drive, and verify a specific app or project. Use only when the user explicitly asks for a verification skill."
 ---
 
 # Create a verification skill
 
-Create one compact, project-specific `SKILL.md` through OpenMausBot's normal
-skill review flow. Do not install files directly, enable a skill yourself, or
-silently add scripts to the user's project.
+Create one compact, project-specific `SKILL.md` through `skill_manage`, which
+shows the person every change with an Undo. Do not install skill files
+directly or silently add scripts to the user's project.
 
 ## 1. Inspect before drafting
 
@@ -52,13 +52,14 @@ The proposed `SKILL.md` must contain YAML frontmatter and these sections:
 Keep it concise. Evidence about the user path is input to the draft—not
 permission to retain secrets, audio, screenshots, or coordinates.
 
-## 4. Stage it for review
+## 4. Save it
 
 Call `skills_list` first. If an existing skill already covers the project,
 report that and do not overwrite it. Otherwise call `skill_manage` with
 `action="create"`, the complete `skill_md`, a short `gist`, and the exact
 source used (repository path, URL, or `conversation`).
 
-`skill_manage` only stages the proposal. Tell the user its name and that it is
-inactive until they approve the in-app review card. Never claim it was enabled
-or scheduled automatically.
+Read the `skill_manage` result. If it applied, tell the user the skill's name,
+that it is on, and that they can undo it from the chat. Only if it is pending,
+tell them it stays inactive until they decide on the in-app card. Never claim
+it was enabled without an applied result.

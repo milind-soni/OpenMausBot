@@ -153,19 +153,8 @@ it("expires Company access and cancels only its instances", async () => {
   now = value.expiresAt;
   await expect(company.adapter.sendTurn({ threadId: "company", text: "Fixture", model: "gpt-fixture" })).rejects.toThrow("ended");
   expect(await company.snapshot()).toMatchObject({ state: "unavailable" });
-  await manager.restore();
+  await manager.apply(null);
   expect(registry.instances().map(instance => instance.instanceId)).toEqual(["personal", "local"]);
-});
-
-it("reapplies the transient overlay after a personal fleet rebuild without copying it into config", async () => {
-  const { registry, manager } = await setup(), value = connection();
-  await manager.apply(value);
-  await registry.disposeAll();
-  await registry.load({ personal: { driver: "claudeAgent" }, local: { driver: "openai-compat" } });
-  const personal = registry.get("personal");
-  await manager.restore();
-  expect(registry.instances()).toHaveLength(5);
-  expect(registry.get("personal")).toBe(personal);
 });
 
 it("does not revive a delayed Company creation after the parent revokes it", async () => {
@@ -220,7 +209,7 @@ it("keeps a newer revocation authoritative while a previous registry load fails"
   release(); await rejected; await clearing;
   expect(registry.instances().map(instance => instance.instanceId)).toEqual(["personal", "local"]);
   await expect(oldCompany.adapter.sendTurn({ threadId: "stale", text: "No revival", model: "claude-fixture" })).rejects.toThrow("personal billing");
-  await manager.apply(null); // A superseded failure must not poison the later successful snapshot.
+  await manager.apply(null);
 });
 
 it("rejects invalid origins, expired tokens, provider collisions and local model injection IDs without echoing secrets", () => {
@@ -228,7 +217,7 @@ it("rejects invalid origins, expired tokens, provider collisions and local model
   for (const patch of [
     { portalOrigin: "http://public.example.test" }, { portalOrigin: "https://user:secret@example.test" },
     { portalOrigin: "https://admin.example.test/other" }, { expiresAt: Date.now() - 1 }, { token: "not-a-device-token" },
-    { token: `omd_${"A".repeat(43)}` }, // Device/session/backup authority never enters a provider process.
+    { token: `omd_${"A".repeat(43)}` },
     { providers: [value.providers[0], value.providers[0]] },
     { providers: [{ id: "anthropic", configured: true, models: ["ollama::personal-local"] }] },
   ]) expect(() => parseManagedDesktopConnection({ ...value, ...patch })).toThrow();
@@ -270,14 +259,12 @@ it("applies a renewal or a lapsed licence in place, without restarting or ending
   const { registry, manager, before, fakes } = await setup({ now: () => now, onAvailability }), value = connection();
   await manager.apply(value);
   const id = companyInstanceId(value, "anthropic"), company = registry.get(id)!;
-  // Renewal: the same token and processes, a later expiry.
   const renewed = { ...value, expiresAt: value.expiresAt + 30 * 86400_000 };
   await manager.apply(renewed);
   expect(registry.get(id)).toBe(company); expect(before).toHaveBeenCalledTimes(1);
   expect(fakes.flatMap(fake => fake.disposed)).toEqual([]);
   now = value.expiresAt + 1000;
   expect(await company.adapter.sendTurn({ threadId: "company", text: "Fixture", model: "claude-fixture" })).toEqual({ turnId: "fake-turn" });
-  // The Admin's licence lapsed: listed, unavailable, never a revocation.
   await manager.apply({ ...renewed, suspended: "license-expired" });
   expect(registry.get(id)).toBe(company); expect(before).toHaveBeenCalledTimes(1);
   expect(await company.snapshot()).toEqual({ state: "unavailable", reason: LICENSE_EXPIRED_MESSAGE });
@@ -310,11 +297,9 @@ it("migrates an expired or cleared enrollment by its identity alone, so a later 
   mkdirSync(legacyHome, { recursive: true }); writeFileSync(join(legacyHome, "session.json"), "native-resume");
   const migrate = vi.fn();
   const { manager, registry } = await setup({ dataDirectory, migrate });
-  // No live grant: the enrollment expired before this version was installed.
   await manager.migrateIdentity({ portalOrigin: expired.portalOrigin, organizationId: expired.organizationId, email: "Employee@Example.test", deviceId: expired.deviceId });
   expect(migrate).toHaveBeenCalledWith(expect.arrayContaining([{ from: legacy, to: stable }]));
   expect(readFileSync(join(dataDirectory, "providers", "company", stable, "claude", "session.json"), "utf8")).toBe("native-resume");
-  // Re-enrolment as a new device resolves to the same stable id.
   const reenrolled = { ...expired, deviceId: "55555555-5555-4555-8555-555555555555" };
   await manager.apply(reenrolled);
   expect(registry.get(stable)).not.toBeNull();
@@ -350,7 +335,6 @@ it("sends new bots to a Company model that can run while enrolled, and disconnec
   await manager.apply(null);
   expect(registry.get(companyClaude)).toBeNull();
   expect(store.bot(personalBot.id)!.modelSelection).toEqual({ instanceId: "personal", model: "fake-default" });
-  // The Company choice waits for the same person to reconnect; it never falls back to personal billing.
   expect(store.bot(companyBot.id)!.modelSelection).toEqual({ instanceId: companyClaude, model: "claude-fixture" });
   expect(selectDefaultModelSelection(await described(), undefined, { company })).toEqual(before);
 });

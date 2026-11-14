@@ -12,12 +12,8 @@ vi.mock("react", async (original) => ({ ...await original<typeof import("react")
   useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
 }));
 import { useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
-import { BotThreadList } from "./Sidebar";
-import type { Bot } from "@/state/store";
-vi.mock("@/state/store", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/state/store")>(),
-  useStore: () => ({ state: { pendingQueued: {} }, dispatch: vi.fn() }),
-}));
+import { BotThreadList, botRowProps } from "./Sidebar";
+import { initialState, type Bot } from "@/state/store";
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
 type Row = { threadId: string; title: string; snoozedUntil?: number };
@@ -41,14 +37,12 @@ describe("snooze expiry wake-up", () => {
     vi.stubGlobal("window", {
       setTimeout: (callback: () => void, delay: number) => { scheduled = { at: Date.now() + delay, fire: callback }; return 1; },
       clearTimeout: vi.fn(),
-      // the production list also runs the shared relative-time clock; its
-      // interval is covered by SidebarThreadRow.relative-now.test.ts
+      // The production list also runs the shared relative-time clock, covered by its own test.
       setInterval: vi.fn(() => 0),
       clearInterval: vi.fn(),
     });
     vi.stubGlobal("fetch", vi.fn());
-    // the shared relative-time clock also listens for visibility changes;
-    // its behavior is covered by SidebarThreadRow.relative-now.test.ts
+    // The shared relative-time clock also listens for visibility changes, covered by its own test.
     vi.stubGlobal("document", { visibilityState: "visible", addEventListener: vi.fn(), removeEventListener: vi.fn() });
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -116,14 +110,12 @@ describe("snooze expiry wake-up", () => {
     };
     const render = () => {
       fixture.index = 0; fixture.effects = [];
-      return renderToStaticMarkup(createElement(BotThreadList, { bot, selected: true }));
+      return renderToStaticMarkup(createElement(BotThreadList, { ...botRowProps(initialState, vi.fn(), bot, { density: "comfortable", query: "", onMenu: vi.fn() }), selected: true }));
     };
     const hidden = render();
     expect(hidden).toContain("Current chat");
     expect(hidden).not.toContain("Napping");
 
-    // The production list itself must schedule the wake-up: without the
-    // useSnoozeExpiry call in BotThreadList no effect sets a timer.
     for (const effect of fixture.effects) effect();
     expect(scheduled?.at).toBe(now + 60_001);
 

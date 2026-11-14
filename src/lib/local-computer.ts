@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import type { Bot, InstanceInfo } from "@/state/store";
 
 export function instanceSupportsLocalComputer(
@@ -10,10 +11,10 @@ export function instanceSupportsLocalComputer(
   return capabilities?.localComputerMcp === true || capabilities?.computerMcp === true;
 }
 
-/** Whether the Runs-on “This computer” control should be clickable.
- *  macOS keeps the destination available even before CUA has a grant, so
- *  the user can pick it and then approve Accessibility / Screen Recording
- *  instead of finding a grayed-out button. */
+export function pageOnRemoteServer(capabilities: DesktopCapabilities): boolean {
+  return capabilities.localComputer?.reasonCode === "remote-server";
+}
+
 export function localComputerSelectable({
   capabilities,
   providerSupportsLocal,
@@ -23,12 +24,11 @@ export function localComputerSelectable({
 }): boolean {
   if (!providerSupportsLocal) return false;
   if (capabilities.localComputer.available) return true;
-  // macOS and Windows both keep the destination clickable before the driver
-  // is live, so the user can pick it and then finish the permission/setup
-  // step instead of hunting for why the button is greyed out.
+  if (pageOnRemoteServer(capabilities)) return false;
   return capabilities.host.platform === "darwin" || capabilities.host.platform === "win32";
 }
 
+/** Why a bot can't use this computer, in words for the person: what to do, never the parts underneath. */
 export function localComputerDisabledReason({
   capabilities,
   providerSupportsLocal,
@@ -36,37 +36,24 @@ export function localComputerDisabledReason({
   capabilities: DesktopCapabilities;
   providerSupportsLocal: boolean;
 }): string | null {
-  if (!providerSupportsLocal) {
-    return "The selected provider cannot request approvals for local computer actions.";
-  }
+  if (!providerSupportsLocal) return t("computer.problem.localAiCannot");
   if (capabilities.localComputer.available) return null;
+  if (pageOnRemoteServer(capabilities)) return t("computer.problem.localRemoteServer");
   if (capabilities.host.platform === "linux") {
-    if (capabilities.localComputer.reasonCode === "linux-wayland-seat-safety-blocked") {
-      return "Local computer control is not available on Wayland yet. Sign out and choose Ubuntu on Xorg to use This computer.";
-    }
-    if (capabilities.localComputer.reasonCode === "wayland-compositor-unsupported") {
-      return "Wayland local control is currently limited to GNOME. Xorg remains available on supported desktops.";
-    }
-    if (!capabilities.localComputer.enabled) {
-      return "Enable the local control beta and complete the Cua Driver checks first.";
-    }
-    return capabilities.localComputer.message ?? "Cua Driver is not ready for local control.";
+    if (capabilities.localComputer.reasonCode === "linux-wayland-seat-safety-blocked") return t("computer.problem.localWaylandBlocked");
+    if (capabilities.localComputer.reasonCode === "wayland-compositor-unsupported") return t("computer.problem.localWaylandDesktop");
+    if (capabilities.localComputer.reasonCode === "linux-hyprland-plugin-required") return t("computer.problem.localHyprlandPlugin");
+    if (!capabilities.localComputer.enabled) return t("computer.problem.localTurnOn");
+    return capabilities.localComputer.message ?? t("computer.problem.localNotReady");
   }
-  if (capabilities.host.label === "Browser") {
-    return "Local computer control requires the desktop app.";
-  }
-  if (capabilities.host.platform === "win32") {
-    return "The bundled Cua Driver could not start. Restart OpenMausBot and check Diagnostics if it still fails.";
-  }
-  return "CUA Driver is not ready for local computer control.";
-}
-
-export function linuxAutoDescription(): string {
-  return "Auto reuses an existing Boat cloud computer; otherwise computer use stays off.";
+  if (capabilities.host.label === "Browser") return t("computer.problem.localNeedsApp");
+  if (capabilities.host.platform === "win32") return t("computer.problem.localWindows");
+  return t("computer.problem.localMac");
 }
 
 export type BoatPanelAction =
-  | "ensure-boat"
+  | "cloud-new"
+  | "cloud-asleep"
   | "attach-ready-boat"
   | "busy-boat"
   | "team-boat"
@@ -79,17 +66,12 @@ export type BoatPanelAction =
 
 const READY_BOAT_STATES = new Set(["idle", "ready", "running"]);
 
-/** A Boat state the panel can attach to and poll. */
 export function isReadyBoatState(state: string | null | undefined): boolean {
   return typeof state === "string" && READY_BOAT_STATES.has(state);
 }
 const SLEEPING_BOAT_STATES = new Set(["archived", "stopped"]);
 
-/** Mirror the turn router's Boat choice without letting a passive panel open
- * mutate infrastructure. Auto only reports an existing Boat's current state;
- * it never creates, wakes, bootstraps, or opens one. This is deliberately
- * independent of the engine: even the boat-native Computer engine needs an
- * explicit Cloud choice before the panel may provision. */
+/** A passive panel open never provisions: nothing creates, wakes or opens a Boat without an explicit Cloud choice. */
 export function resolveBoatPanelAction({
   computer,
   configured,
@@ -105,13 +87,8 @@ export function resolveBoatPanelAction({
   canUseCloud: boolean;
   autoLocal: boolean;
   teamComputer?: boolean;
-  /** A turn is running on this bot: the server refuses provision/sleep
-   * with 409 while the turn owns the boat, and the turn itself creates or
-   * wakes the boat it needs. */
   busy?: boolean;
 }): BoatPanelAction {
-  // A team's explicit grant wins over Auto's private-Boat/local fallback.
-  // This panel reports it; paid lifecycle and shared access stay in Team map.
   if (computer === undefined && teamComputer) return "team-boat";
   const explicitCloud = computer === "cloud";
 
@@ -121,10 +98,9 @@ export function resolveBoatPanelAction({
   }
   if (explicitCloud) {
     if (!canUseCloud) return "auto-unavailable";
-    // Mid-turn the panel only watches: a ready boat is shown as-is (its
-    // frames already stream in), anything else is left to the turn.
-    if (busy) return boatState && READY_BOAT_STATES.has(boatState) ? "attach-ready-boat" : "busy-boat";
-    return "ensure-boat";
+    if (boatState && READY_BOAT_STATES.has(boatState)) return "attach-ready-boat";
+    if (busy || (boatState && !SLEEPING_BOAT_STATES.has(boatState))) return "busy-boat";
+    return boatState ? "cloud-asleep" : "cloud-new";
   }
   if (canUseCloud && boatState) {
     if (READY_BOAT_STATES.has(boatState)) return "show-ready-boat";
@@ -134,9 +110,16 @@ export function resolveBoatPanelAction({
   return autoLocal ? "local" : "auto-unavailable";
 }
 
-/** A stale ready phase can survive one render while the selected bot or its
- * destination changes. Keep every cloud preview POST behind the durable,
- * explicit Cloud choice as well as the resolved phase. */
+export function busyBoatView(boatState: string | null, busy: boolean): {
+  line: "computer.cloud.new" | "computer.cloud.asleep" | "computer.phase.busyBoat" | "computer.phase.starting";
+  spinner: boolean;
+} {
+  if (!boatState) return { line: "computer.cloud.new", spinner: false };
+  if (SLEEPING_BOAT_STATES.has(boatState)) return { line: "computer.cloud.asleep", spinner: false };
+  return { line: busy ? "computer.phase.busyBoat" : "computer.phase.starting", spinner: true };
+}
+
+/** A stale ready phase can survive one render, so preview POSTs also need the durable, explicit Cloud choice. */
 export function shouldPollCloudPreview(
   {
     computer,
@@ -163,9 +146,7 @@ export function shouldPollCloudPreview(
     && resolvedCloudBackend === cloudBackend;
 }
 
-/** A computer effect may render optimistic profile state while its PATCH is
- * still in flight. Provider work is safe only when the settled server bot
- * confirms the same destination and backend that this render expects. */
+/** Provider work only once the settled server bot confirms the destination and backend this render expects. */
 export function persistedComputerSelectionMatches({
   computer,
   cloudBackend,

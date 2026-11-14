@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorFor, nextSpotlight, placementFor, SPOTLIGHTS, tourComplete, type ChatObservation } from "./first-conversation";
+import { anchorFor, cardAnswered, nextSpotlight, placementFor, SPOTLIGHTS, tourComplete, type ChatObservation } from "./first-conversation";
 
 const quiet: ChatObservation = { replyStarted: false, replyFinished: false, approvalVisible: false, connectorVisible: false };
 
@@ -10,13 +10,21 @@ describe("first conversation spotlights", () => {
 
   it("opens on the composer when the reply starts, then the model chip when it ends", () => {
     expect(nextSpotlight({ ...quiet, replyStarted: true }, [], null)).toBe("spot.composer");
-    // the model chip waits for the composer to be dismissed
     expect(nextSpotlight({ ...quiet, replyStarted: true, replyFinished: true }, [], null)).toBe("spot.composer");
     expect(nextSpotlight({ ...quiet, replyFinished: true }, ["spot.composer"], null)).toBe("spot.model");
   });
 
   it("never stacks: an active spotlight stays until dismissed", () => {
     expect(nextSpotlight({ ...quiet, replyFinished: true, approvalVisible: true }, ["spot.composer"], "spot.model")).toBe("spot.model");
+  });
+
+  it("counts a card spotlight as done once its card is answered", () => {
+    expect(cardAnswered("spot.approval", { ...quiet, approvalVisible: true })).toBe(false);
+    expect(cardAnswered("spot.approval", { ...quiet, replyStarted: true })).toBe(true);
+    expect(cardAnswered("spot.connector", { ...quiet, connectorVisible: true })).toBe(false);
+    expect(cardAnswered("spot.connector", quiet)).toBe(true);
+    expect(cardAnswered("spot.composer", quiet)).toBe(false);
+    expect(cardAnswered("spot.model", quiet)).toBe(false);
   });
 
   it("lets a live card interrupt the chrome order", () => {

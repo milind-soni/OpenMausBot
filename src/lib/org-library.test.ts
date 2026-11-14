@@ -47,7 +47,6 @@ describe("the shelf card", () => {
     expect(orgCardAction(entry({ release: null, blob: "unavailable" }))).toBe("noRelease");
     expect(orgCardAction(entry({ installed: { installId: "b".repeat(32), release: "1.3.0", status: "installed" } }))).toBe("added");
     expect(orgCardAction(entry({ installed: { installId: "b".repeat(32), release: "1.3.0", status: "withdrawn" } }))).toBe("added");
-    // Removed locally: the person may add it again.
     expect(orgCardAction(entry({ installed: { installId: "b".repeat(32), release: "1.3.0", status: "removed" } }))).toBe("add");
   });
 
@@ -57,11 +56,13 @@ describe("the shelf card", () => {
     expect(orgModeBadge(entry())).toBeNull();
     expect(orgModeBadge(entry({ mode: "required" }))).toBe("Recommended by Acme Partners");
     expect(orgCardNotes(entry({ installed: { installId: "b".repeat(32), release: "1.2.0", status: "installed" } }))).toEqual([
-      "Version 1.3.0 available. Updates arrive automatically in an upcoming OpenMausBot update.",
+      "Version 1.3.0 available. It comes over on its own once it's downloaded, and keeps your changes.",
     ]);
     expect(orgCardNotes(entry({ release: null, installed: { installId: "b".repeat(32), release: "1.3.0", status: "withdrawn" } }))).toEqual([
       "Withdrawn by Acme Partners",
     ]);
+    // A withdrawn install isn't updated, so it isn't told a newer release is coming.
+    expect(orgCardNotes(entry({ installed: { installId: "b".repeat(32), release: "1.2.0", status: "withdrawn" } }))).toEqual(["Withdrawn by Acme Partners"]);
     expect(orgContentsLine(entry().contents)).toBe("Bots: 3 · Skills: 3 · Preset bots: 1 · Group chats: 1 · Routines: 2 · Connections: 1");
     expect(orgContentsLine({ bots: 0, skills: 2, presets: 0, rooms: 0, routines: 0, connections: 0, botNames: [] })).toBe("Skills: 2");
   });
@@ -80,7 +81,7 @@ describe("the shelf card", () => {
       busy: null, notice: "", error: "", onAdd, onDetails: vi.fn(),
     }));
     const shown = text(markup);
-    for (const line of ["Packages Customer Co shares with you", "Sales desk", "Recommended by Acme Partners", "From Acme Partners", "Added", "Update OpenMausBot to add this"]) {
+    for (const line of ["Packages Customer Co shares with you", "Sales desk", "Recommended by Acme Partners", "From Acme Partners", "Added", "Update MausBot to add this"]) {
       expect(shown).toContain(line);
     }
     expect(markup).toContain('aria-label="Add Sales desk"');
@@ -99,7 +100,7 @@ describe("the preview and the provenance line", () => {
     const preview = orgPackagePreview(team);
     expect(preview).toMatchObject({ kind: "package", version: 2, name: "Sales desk", members: expect.arrayContaining([{ name: "Scout", title: "Prospect researcher" }]) });
     const shown = text(renderToStaticMarkup(createElement(TeamImportDetails, { pending: preview, importedNames: preview.members.map((member) => member.name), org: true })));
-    expect(shown).toContain("Included skills — switched on");
+    expect(shown).toContain("Included skills (switched on)");
     expect(shown).toContain("Skills arrive switched on and routines paused");
     expect(shown).not.toContain("added switched off");
 
@@ -112,8 +113,6 @@ describe("the preview and the provenance line", () => {
 
   it("says where a bot came from, and when its release was withdrawn", () => {
     expect(packageProvenance(undefined)).toBeNull();
-    // A bot imported from a file (old records have no source) shows nothing
-    // new: with no organization, Bot settings stays as it was.
     expect(packageProvenance({ id: "sales-desk", name: "Sales desk", release: "1.3.0", requiredApps: [] })).toBeNull();
     expect(packageProvenance({ id: "sales-desk", name: "Sales desk", release: "1.3.0", requiredApps: [], source: "file", installId: "f".repeat(32) })).toBeNull();
     const stamp = { id: "sales-desk", name: "Sales desk", release: "1.3.0", requiredApps: [], source: "org" as const, installId: "d".repeat(32),

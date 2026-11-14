@@ -5,10 +5,7 @@ import vm from "node:vm";
 import localOrigin from "./local-origin.cjs";
 import environments from "./environments.cjs";
 
-// "Open the sign-in page again" crosses two boundaries: the preload bridge and
-// the main-process IPC handler. Both run from their real sources here without
-// Electron; the managed-desktop client behind them is a synthetic stub, and its
-// own reopen rules are covered in managed-desktop.node-test.mjs.
+// The preload bridge and the main IPC handler run from their real sources without Electron; the client behind them is a stub.
 const ORIGIN = "http://127.0.0.1:48993";
 
 function preload({ company = true } = {}) {

@@ -1,13 +1,15 @@
 import { CURSOR_STATES, type CursorState } from "@/components/CursorAvatar";
+import { botShowsUnread } from "./bot-unread";
 import { lastNonReceipt } from "./receipts";
+import type { MausColor } from "../../shared/wire";
+import type { LocaleKey } from "@/locales";
 
-/** The mascot's behaviour vocabulary — CursorAvatar's 39 states, under the
- * app's historical names. */
+export { MAUS_COLOR_NAMES, type MausColor } from "../../shared/wire";
+
 export type MausState = CursorState;
 export const MAUS_STATES = CURSOR_STATES;
 
-/** CursorAvatar ships French group labels; the app shows these instead. The
- * memberships mirror its STATE_GROUPS exactly. */
+/** CursorAvatar ships French group labels; these mirror its STATE_GROUPS memberships exactly. */
 export const STATE_GROUPS = {
   Lifecycle: ["sleeping", "waking", "idle", "listening", "thinking", "searching", "working"],
   Reactions: [
@@ -46,21 +48,6 @@ export const STATE_GROUPS = {
   ],
 } satisfies Record<string, MausState[]>;
 
-export const MAUS_COLOR_NAMES = [
-  "green",
-  "blue",
-  "red",
-  "orange",
-  "purple",
-  "cyan",
-  "pink",
-  "yellow",
-  "teal",
-  "coral",
-] as const;
-
-export type MausColor = (typeof MAUS_COLOR_NAMES)[number];
-
 export const MAUS_COLORS = {
   green: "#009957",
   blue: "#377FE6",
@@ -72,7 +59,25 @@ export const MAUS_COLORS = {
   yellow: "#D8A729",
   teal: "#01A492",
   coral: "#E5634E",
+  silver: "#A8ADB4",
+  chrome: "#B3BAC4",
 } satisfies Record<MausColor, string>;
+
+export const MAUS_COLOR_LABEL = {
+  green: "mascotColor.green", blue: "mascotColor.blue", red: "mascotColor.red", orange: "mascotColor.orange",
+  purple: "mascotColor.purple", cyan: "mascotColor.cyan", pink: "mascotColor.pink", yellow: "mascotColor.yellow",
+  teal: "mascotColor.teal", coral: "mascotColor.coral", silver: "mascotColor.silver",
+  chrome: "mascotColor.chrome",
+} as const satisfies Record<MausColor, LocaleKey>;
+
+export const CHROME_GRADIENT: [string, string, string] = ["#F1F4F7", "#AEB8C3", "#66717E"];
+export const CHROME_EYES = "#1E2833";
+
+export function colorSwatch(color: MausColor): string {
+  if (color !== "chrome") return MAUS_COLORS[color];
+  const [light, mid, edge] = CHROME_GRADIENT;
+  return `radial-gradient(circle at 34% 26%, #ffffff 0%, ${light} 20%, ${mid} 55%, ${edge} 100%)`;
+}
 
 export const MAUS_MOTIONS = [
   "arrive",
@@ -91,12 +96,6 @@ export const MAUS_MOTIONS = [
 
 export type MausMotion = "none" | (typeof MAUS_MOTIONS)[number];
 
-/**
- * The face used to be ten hand-drawn SVGs; it is now the engine's 39 states.
- * Bots saved under the old vocabulary still carry one of these ten names, so
- * they are translated on read rather than migrated in place — a bot's stored
- * face should survive a downgrade too.
- */
 interface LegacyStates {
   [state: string]: MausState;
 }
@@ -116,37 +115,23 @@ const LEGACY_STATES: LegacyStates = {
 
 const KNOWN_STATES = new Set<string>(MAUS_STATES);
 
-/** Resolves any stored value — current, legacy or junk — to a real state. */
 export function normalizeState(value: string | null | undefined): MausState | null {
   if (!value) return null;
   if (KNOWN_STATES.has(value)) return value as MausState;
   return LEGACY_STATES[value] ?? null;
 }
 
-/**
- * The states worth offering in the appearance picker.
- *
- * The engine carries 39, but many are transient beats the app drives itself
- * (`sending`, `alerting`, `powering-down`) and make no sense as a bot's resting
- * face. More importantly, states share resting faces: `happy`, `excited` and
- * `playful` all rest on expression 2, and `curious`, `surprised` and `scared`
- * all rest on 3 — they differ in which faces they *drift* to, which a static
- * swatch cannot show. Offering them all gave 15 buttons showing 8 pictures.
- *
- * Across all 39 states there are only 11 distinct resting faces, so this is one
- * state per face, chosen for the clearest name. Every swatch looks different.
- */
 export const PICKABLE_STATES: MausState[] = [
-  "idle", // expression 0
-  "happy", // 2
-  "curious", // 3
-  "drowsy", // 4
-  "working", // 7
-  "thinking", // 8
-  "listening", // 10
-  "sleeping", // 13
-  "suspicious", // 14
-  "proud", // 15
+  "idle",
+  "happy",
+  "curious",
+  "drowsy",
+  "working",
+  "thinking",
+  "listening",
+  "sleeping",
+  "suspicious",
+  "proud",
 ];
 
 type MascotMessage = {
@@ -161,25 +146,19 @@ export type MascotBotProfile = {
   mascotExpression?: string | null;
   busy?: boolean;
   unread?: boolean;
+  tasks?: Array<{ unread?: boolean; routineRunId?: string }> | null;
   messages?: MascotMessage[];
 };
 
-/**
- * Selects a state from live state first, then from what the bot is about.
- * The keyword groups deliberately overlap as little as possible so a bot's
- * visual identity stays stable while its title and description are edited.
- */
 export function stateForBot(bot: MascotBotProfile): MausState {
   const pinned = normalizeState(bot.mascotExpression);
   if (pinned) return pinned;
 
-  // the harness's receipts (digest, compaction) follow every turn; the mood
-  // reads the last row a person reads, not the record about it
   const last = lastNonReceipt(bot.messages);
 
   if (last?.kind === "activity" && last.tool?.ok === false) return "alerting";
   if (bot.busy) return "working";
-  if (bot.unread) return "notifying";
+  if (botShowsUnread(bot)) return "notifying";
   if (last?.kind === "options") return "curious";
 
   const profile = `${bot.name} ${bot.title ?? ""} ${bot.description ?? ""}`.toLowerCase();

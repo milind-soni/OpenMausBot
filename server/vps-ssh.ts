@@ -1,36 +1,24 @@
-// SSH connection sharing for the VPS computer, supplied by the app.
-//
-// Every VPS action is `docker -H ssh://alias …`, and the live desktop is an
-// SSH port forward. Docker's SSH transport runs whatever `ssh` it finds on
-// PATH with the user's own ~/.ssh/config, so without ControlMaster in that
-// alias every command pays a full handshake — several hundred milliseconds
-// each, on every preview frame and every click. The guide asks people to add
-// the block; nothing checked, and the ones who missed it saw a computer that
-// "connected but was slow". This module makes the alias irrelevant: a config
-// that includes theirs first (so anything they set still wins) and fills in
-// connection sharing and fail-fast timeouts, plus an `ssh` shim docker finds
-// ahead of the real one that points at that config.
+// An ssh_config and an `ssh` shim that add connection sharing and fail-fast timeouts to every VPS command, whatever the user's alias sets; the live-desktop tunnel opts out of sharing.
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 
 export const VPS_SSH_DIR = "ssh";
+/** The person's optional wake script in the data folder's ssh directory, e.g. to resume a host that pauses when idle. */
+export const VPS_WAKE_SCRIPT = "wake";
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-/** macOS limits Unix socket paths to 104 bytes, including the terminator.
- * OpenSSH also appends a temporary suffix while creating a master socket.
- * A long application/test data path must not disable every SSH command. */
+/** macOS caps Unix socket paths at 104 bytes and OpenSSH appends a temporary suffix, so a long data path cannot host the socket. */
 function controlDirectory(sshDir: string): string {
   if (Buffer.byteLength(join(sshDir, `cm-${"0".repeat(40)}`)) <= 80) return sshDir;
   const uid = process.getuid!();
   const id = createHash("sha256").update(resolve(sshDir)).digest("hex").slice(0, 12);
-  // /tmp is intentionally used instead of tmpdir(): macOS TMPDIR is itself
-  // often too long for a control socket. Validate before chmod or use so an
-  // existing symlink/other user's directory cannot redirect the socket.
+  // /tmp, not tmpdir(): macOS TMPDIR is often too long for a control socket. Validated first so a symlink or another user's dir cannot redirect it.
   const dir = `/tmp/omb-ssh-${uid}-${id}`;
   try { mkdirSync(dir, { mode: 0o700 }); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
@@ -47,23 +35,19 @@ function findExecutable(name: string, pathValue: string, exclude: string): strin
     try {
       const stat = statSync(candidate);
       if (stat.isFile() && (stat.mode & 0o111) !== 0) return candidate;
-    } catch { /* keep looking */ }
+    } catch {}
   }
   return null;
 }
 
 function writeIfChanged(path: string, content: string, mode: number): void {
-  try { if (readFileSync(path, "utf8") === content) { chmodSync(path, mode); return; } } catch { /* absent or unreadable: rewrite */ }
+  try { if (readFileSync(path, "utf8") === content) { chmodSync(path, mode); return; } } catch {}
   const temp = `${path}.${process.pid}.tmp`;
   writeFileSync(temp, content, { mode });
   renameSync(temp, path);
 }
 
-/** The ssh_config the app hands to every VPS SSH connection. The person's own
- * file is included first: ssh keeps the first value it sees for an option, so
- * an alias that already sets ControlMaster or a timeout keeps its settings and
- * these lines only fill what it leaves unset. `-F` also skips the system file,
- * so that is included last for the same reason. */
+/** ssh keeps the first value it sees, so the person's file goes first; -F skips the system file, so it goes last. */
 export function vpsSshConfigText(sshDir: string, userConfig = join(homedir(), ".ssh", "config"), systemConfig = "/etc/ssh/ssh_config"): string {
   return [
     "# Written by OpenMausBot for its VPS computer connections. Do not edit;",
@@ -82,15 +66,11 @@ export function vpsSshConfigText(sshDir: string, userConfig = join(homedir(), ".
 }
 
 export interface VpsSshSetup {
-  /** ssh_config to pass with -F, or null when the platform has no sharing. */
   configPath: string | null;
-  /** PATH for a docker child: the shim directory first, when installed. */
   path: string;
 }
 
-/** Prepare the shared-connection config and the `ssh` shim under the data
- * directory, and return the PATH a docker or ssh child should run with.
- * Windows OpenSSH has no ControlMaster, so there everything stays as it was. */
+/** Windows OpenSSH has no ControlMaster, so there nothing changes. */
 export function prepareVpsSsh(dataDir: string, pathValue: string, platform: NodeJS.Platform = process.platform): VpsSshSetup {
   if (platform === "win32") return { configPath: null, path: pathValue };
   const sshDir = join(dataDir, VPS_SSH_DIR);
@@ -104,10 +84,128 @@ export function prepareVpsSsh(dataDir: string, pathValue: string, platform: Node
   const shim = [
     "#!/bin/sh",
     "# Written by OpenMausBot. docker's SSH transport finds this ssh first, so",
-    "# every VPS command shares one connection whether or not the alias says so.",
+    "# docker commands share one connection unless the alias turns that off.",
     `exec ${shellQuote(realSsh)} -F ${shellQuote(configPath)} "$@"`,
     "",
   ].join("\n");
   writeIfChanged(join(binDir, "ssh"), shim, 0o700);
   return { configPath, path: `${binDir}${delimiter}${pathValue}` };
+}
+
+const MASTER_INITIALIZATION_TIMEOUT_MS = 30_000;
+// Long enough to resume a paused cloud box; the script should return once the host takes SSH again.
+const WAKE_TIMEOUT_MS = 120_000;
+// Kept back from the wake script so the connection retry after it still has time (ssh's ConnectTimeout is 10 s).
+const WAKE_RETRY_RESERVE_MS = 15_000;
+/** When the wake script ran for a pending connection (null when it did not run). */
+type WakeWindow = { start: number; end: number } | null;
+const pendingMasters = new Map<string, Promise<WakeWindow>>();
+
+/** The wake script, when the person has put an executable one there. */
+function vpsWakeScript(ssh: VpsSshSetup): string | null {
+  if (!ssh.configPath) return null;
+  const path = join(dirname(ssh.configPath), VPS_WAKE_SCRIPT);
+  try {
+    const stat = statSync(path);
+    return stat.isFile() && (stat.mode & 0o111) !== 0 ? path : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Runs the wake script with the alias. It gets its own process group, so a timeout also stops anything it started
+ * (a cloud CLI that hangs, for example), not just the script.
+ */
+function runWakeScript(file: string, alias: string, pathValue: string, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (timeoutMs <= 0) { reject(new Error("VPS SSH initialization timed out")); return; }
+    const group = process.platform !== "win32";
+    const child = spawn(file, [alias], { env: { ...process.env, PATH: pathValue }, stdio: ["ignore", "ignore", "pipe"], detached: group });
+    let stderr = "";
+    let timedOut = false;
+    child.stderr?.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-1000); });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { process.kill(group ? -child.pid! : child.pid!, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+    }, timeoutMs);
+    child.once("error", (error) => { clearTimeout(timer); reject(error); });
+    child.once("close", (code, signal) => {
+      clearTimeout(timer);
+      if (timedOut) reject(new Error("VPS SSH initialization timed out"));
+      else if (code === 0) resolve();
+      else reject(new Error(stderr.trim() || `exited with ${code ?? signal}`));
+    });
+  });
+}
+
+/**
+ * Starts (or reuses) the shared SSH connection to the alias. Resolves with the milliseconds this caller spent waiting
+ * on the wake script (0 when it did not run), so callers can keep that time out of their own command deadline.
+ */
+export async function ensureVpsSshMaster(
+  ssh: VpsSshSetup,
+  alias: string,
+  timeoutMs = MASTER_INITIALIZATION_TIMEOUT_MS,
+  wakeTimeoutMs = WAKE_TIMEOUT_MS,
+): Promise<number> {
+  if (!ssh.configPath) return 0;
+  const key = `${ssh.configPath}:${alias}`;
+  const wake = vpsWakeScript(ssh);
+  const wakeBudget = wake ? wakeTimeoutMs : 0;
+  const waitStarted = Date.now();
+  let pending = pendingMasters.get(key);
+  if (!pending) {
+    const deadline = Date.now() + MASTER_INITIALIZATION_TIMEOUT_MS + wakeBudget;
+    const command = (args: string[]) => new Promise<void>((resolve, reject) => {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) { reject(new Error("VPS SSH initialization timed out")); return; }
+      const child = execFile("ssh", args, {
+        env: { ...process.env, PATH: ssh.path },
+        timeout: remaining,
+        killSignal: "SIGKILL",
+        maxBuffer: 64 * 1024,
+      }, (error, _stdout, stderr) => {
+        if (!error) { resolve(); return; }
+        const killed = (error as { killed?: boolean }).killed === true;
+        const detail = killed ? "VPS SSH initialization timed out" : String(stderr).trim().slice(-1000) || error.message;
+        reject(Object.assign(new Error(detail), { killed }));
+      });
+      child.stdin?.end();
+    });
+    pending = (async () => {
+      try { await command(["-O", "check", "--", alias]); return null; }
+      catch (error) {
+        if ((error as { killed?: boolean }).killed) throw error;
+        // ControlMaster auto only shares after authentication. A harmless first command starts the persistent master without replaying Docker work.
+        const connect = () => command(["-o", "BatchMode=yes", "-o", "PermitLocalCommand=no", "-T", "--", alias, "true"]);
+        try { await connect(); return null; }
+        catch (unreachable) {
+          if (!wake || (unreachable as { killed?: boolean }).killed) throw unreachable;
+          // A host that pauses when idle refuses SSH until resumed: wake it once, then try once more.
+          const wakeStarted = Date.now();
+          // At most the wake limit, and never the time the retry below needs.
+          try { await runWakeScript(wake, alias, ssh.path, Math.min(wakeTimeoutMs, deadline - wakeStarted - WAKE_RETRY_RESERVE_MS)); }
+          catch (failure) {
+            throw new Error(`${(unreachable as Error).message}; the wake script failed: ${(failure as Error).message}`);
+          }
+          const wakeEnded = Date.now();
+          await connect();
+          return { start: wakeStarted, end: wakeEnded };
+        }
+      }
+    })().finally(() => {
+      if (pendingMasters.get(key) === pending) pendingMasters.delete(key);
+    });
+    pendingMasters.set(key, pending);
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const woke = await Promise.race([pending, new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error("VPS SSH initialization timed out")), timeoutMs + wakeBudget);
+      timer.unref();
+    })]);
+    // A caller that joined a wake already under way only waited for the rest of it.
+    return woke ? Math.max(0, woke.end - Math.max(woke.start, waitStarted)) : 0;
+  } finally { clearTimeout(timer); }
 }

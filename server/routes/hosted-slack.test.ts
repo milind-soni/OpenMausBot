@@ -1,6 +1,3 @@
-// The Slack management link is served by a route module, so it is exercised
-// the way a request reaches it: through the table, on a real HTTP server,
-// with a stand-in for index.ts's inline routes behind it.
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
@@ -57,10 +54,8 @@ describe("GET /api/bots/:id/slack-management through the route table", () => {
     const response = await fetch(`${local}/api/bots/bot_123/slack-management`);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ available: false });
-    // Hosted configuration alone is not enough: the workspace hook must be live.
     const notReady = await serve({ hostedReady: () => false });
     expect(await (await fetch(`${notReady}/api/bots/bot_123/slack-management`)).json()).toEqual({ available: false });
-    // Nor is a live hook enough without portal membership.
     const localMembership = await serve({ env: { ...HOSTED, OMB_ADMIN_MEMBERSHIP: "local" } });
     expect(await (await fetch(`${localMembership}/api/bots/bot_123/slack-management`)).json()).toEqual({ available: false });
   });

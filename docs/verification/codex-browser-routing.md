@@ -1,11 +1,11 @@
 # Codex browser routing
 
-Codex bot processes use OpenMausBot's selected browser/desktop bridge. Process-local overrides disable the bundled desktop-only browser/computer plugins; they do not uninstall plugins, change the user's Codex configuration, or disable native web search.
+Codex bot processes use OpenMausBot's selected browser/desktop bridge. Process-local overrides disable the bundled desktop-only browser/computer plugins and, with `features.plugins=false`, the plugins the signed-in ChatGPT account installed (their skills and the `request_plugin_install` tool); they do not uninstall plugins, change the user's Codex configuration, or disable native web search.
 
 ## Regression checks
 
 ```sh
-pnpm exec vitest run server/browser-runtime.test.ts server/browser-proxy.test.ts server/surface.test.ts server/drivers/codex.test.ts scripts/testing/native-search-evidence.test.ts
+pnpm exec vitest run server/browser-runtime.test.ts server/harness-mcp-proxy.test.ts server/surface.test.ts server/drivers/codex.test.ts scripts/testing/native-search-evidence.test.ts
 pnpm exec tsc --noEmit -p tsconfig.server.json
 ```
 

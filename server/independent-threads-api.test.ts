@@ -1,18 +1,22 @@
-// Real harness + its isolated fake-engine launcher. Gates are per model so
-// two tasks on one bot stay in flight until this test completes or stops each.
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+// Gates are per model, so two tasks on one bot stay in flight until the test completes or stops each.
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 import { handleToolCall, request } from "../scripts/mcp-server.ts";
+import { readHandoffs } from "./testing/handoff-rows.ts";
 import { memoryDate } from "./workspace.ts";
 
 describe("independent bot tasks through the isolated control surface", () => {
   let session: VerificationServer;
+  const cuaRecordDir = mkdtempSync(join(tmpdir(), "omb-independent-cua-"));
+  const cuaRecord = join(cuaRecordDir, "cua-connection.json");
+  afterAll(() => rmSync(cuaRecordDir, { recursive: true, force: true }));
   let models: string[];
   const sockets: Socket[] = [];
   let evidence: Array<Record<string, unknown>>;
@@ -51,7 +55,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     await expect.poll(() => existsSync(modelFile(model, "json")), { timeout: 15_000 }).toBe(true);
     return JSON.parse(readFileSync(modelFile(model, "json"), "utf8"));
   };
-  const permission = async (model: string, id: string) => {
+  const permission = async (model: string, id: string, input: Record<string, unknown> = { command: "ls -la ./dist" }) => {
     const launched = await dump(model);
     const socketPath = launched.mcpConfig.mcpServers.ogb.args.at(-1);
     const socket = connect(socketPath);
@@ -62,12 +66,15 @@ describe("independent bot tasks through the isolated control surface", () => {
     });
     const answers: any[] = [];
     createInterface({ input: socket }).on("line", (line) => answers.push(JSON.parse(line)));
-    socket.write(`${JSON.stringify({ t: "ask", id, kind: "permission", tool: "Bash", input: { command: "ls -la ./dist" } })}\n`);
+    socket.write(`${JSON.stringify({ t: "ask", id, kind: "permission", tool: "Bash", input })}\n`);
     return answers;
   };
 
   beforeEach(async () => {
-    session = await launchVerificationServer();
+    // The approval deadline fires only on a marker file.
+    // Each server hears the desktop app's driver record from its parent, as the app's own server does; absent, there is none.
+    rmSync(cuaRecord, { force: true });
+    session = await launchVerificationServer({ ...process.env, OMB_TEST_APPROVAL_CLOCK: "1", OMB_TEST_DESKTOP_CUA_CONNECTION: cuaRecord });
     evidence = [{ fixture: session.info }];
     const wrapper = join(session.info.dataDir, "gated-claude.mjs");
     const fake = pathToFileURL(join(process.cwd(), "server/testing/fake-claude-cli.ts")).href;
@@ -97,16 +104,15 @@ describe("independent bot tasks through the isolated control surface", () => {
     await session.close();
   });
 
-  it("queues coordinated work behind a peer's approval even with a spare thread, and delivers it once without another user prompt", async () => {
+  it("holds coordinated work behind a peer's approval only while that card holds its last slot, says so, and delivers it once", async () => {
     const chief = (await tool("create_bot", { name: "Mailbox Chief", instance_id: "claude", model: models[0] })).bot;
     const peer = (await tool("create_bot", { name: "Mailbox Peer", instance_id: "claude", model: models[1] })).bot;
     await api("PATCH", `/api/bots/${peer.id}/tasks/${peer.activeTaskId}`, { approvalMode: "ask" });
     await control(["send", "--bot", peer.id, "--text", "Hold this review until I approve the check."]);
     const answers = await permission(models[1], "mailbox-approval");
     await expect.poll(async () => (await botState(peer.id)).activity).toBe("waiting-on-you");
-    // A spare slot must not hide the approval hold. Capacity 1 would queue
-    // this for a different reason.
-    expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 3 } })).status).toBe(200);
+    // One thread per bot: the card's thread holds the peer's only slot.
+    expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 1 } })).status).toBe(200);
     await control(["send", "--bot", chief.id, "--text", "Ask the reviewer to check the release notes, then return the result here."]);
     const token = (await dump(models[0])).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
     const roster = await internal(token, "GET", "/api/internal/agents");
@@ -115,38 +121,44 @@ describe("independent bot tasks through the isolated control surface", () => {
       status: "waiting-on-user", statusText: "waiting on the user", busy: true,
     });
     const queued = await internal(token, "POST", "/api/internal/coordinate-bots", {
-      botIds: [peer.id], requestKey: "mailbox-review", message: "MAILBOX_REVIEW: check the release notes.",
+      botIds: [peer.id], message: "MAILBOX_REVIEW: check the release notes.",
     });
     expect(queued.status).toBe(200);
-    expect(queued.body.accepted).toHaveLength(1);
-    const requestId = queued.body.accepted[0].requestId;
-    // The receipt is the sender's honest answer at send time: this peer is
-    // queued behind its open approval card, so nothing has been delivered.
+    const requestId = queued.body.receipts[0].requestId;
     expect(queued.body.receipts).toEqual([{
       botId: peer.id,
       botName: "Mailbox Peer",
       outcome: "queued",
-      detail: "handed to the coordinator; the teammate's turn has not started yet",
-      requestId,
+      detail: "sent to \"@Mailbox Chief · work\"; it runs after anything still running there",
+      requestId: expect.any(String),
+      threadId: expect.any(String),
     }]);
-    const handoff = () => JSON.parse(readFileSync(join(session.info.dataDir, "room-handoffs.json"), "utf8"))
-      .find((node: any) => node.id === requestId);
-    const peerThread = handoff().threadId;
+    const handoff = () => readHandoffs(session.info.dataDir).find((node) => node.id === requestId);
+    const peerThread = handoff()!.threadId;
     expect(peerThread).not.toBe(peer.activeTaskId);
-    // The open approval keeps fresh work queued across a tick, spare slot or
-    // not. Ending the source turn does not release it. #1589 admits a spare
-    // slot only beside a sibling that is running, not beside this card.
+    expect(queued.body.receipts[0].threadId).toBe(peerThread);
     writeFileSync(modelFile(models[0], "gate"), "finish");
-    await expect.poll(async () => {
-      const current = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === chief.id);
-      return current.messages.filter((message: any) => message.tool?.name === "Sent to Mailbox Peer").length;
-    }).toBe(1);
+    const chiefMessages = async () => (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === chief.id).messages as any[];
+    const queuedChips = async () => (await chiefMessages()).filter((message: any) => message.tool?.name?.startsWith("Queued for @Mailbox Peer"));
+    await expect.poll(async () => (await queuedChips()).length).toBe(1);
+    const [chip] = await queuedChips();
+    expect(chip.threadRef).toMatchObject({ botId: peer.id, threadId: peer.activeTaskId });
+    expect(chip.tool.name).toBe(`Queued for @Mailbox Peer behind your approval in “${chip.threadRef.title}”`);
+    expect(chip.tool.ok).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 1_500));
-    const peerNow = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === peer.id);
-    const side = peerNow?.tasks?.find((task: any) => task.threadId === peerThread || task.taskId === peerThread);
-    expect(peerNow?.activity).toBe("waiting-on-you");
-    expect(side?.busy).not.toBe(true);
     expect(handoff()?.status).toBe("queued");
+    expect(await queuedChips()).toHaveLength(1);
+    expect((await chiefMessages()).filter((message: any) => message.tool?.name === "Sent to Mailbox Peer")).toHaveLength(1);
+    await expect.poll(async () => (await botState(chief.id)).busy).toBe(false);
+    await control(["send", "--bot", chief.id, "--text", "Is the review moving?"]);
+    const told = async () => JSON.stringify((await dump(models[0])).prompt ?? "");
+    await expect.poll(told).toContain("waiting for a free slot: that teammate is waiting on the person's approval in its thread");
+    expect(await told()).toContain(chip.threadRef.title);
+    await expect.poll(async () => (await botState(chief.id)).busy).toBe(false);
+    expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 3 } })).status).toBe(200);
+    await expect.poll(() => handoff()?.status, { timeout: 10_000 }).toBe("running");
+    const peerNow = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === peer.id);
+    expect(peerNow.tasks.find((task: any) => task.threadId === peer.activeTaskId)?.activity).toBe("waiting-on-you");
     expect(answers).toEqual([]);
     await control(["messages", "--bot", chief.id, "--limit", "10"]);
     const allowed = await api("POST", `/api/threads/${peer.activeTaskId}/respond`, { requestId: "mailbox-approval", behavior: "allow" });
@@ -167,10 +179,207 @@ describe("independent bot tasks through the isolated control surface", () => {
     expect(targetMessages.filter((message: any) => message.roomRequest?.id === requestId && message.roomRequest.phase === "request")).toHaveLength(1);
     expect(targetMessages.some((message: any) => message.text?.includes("MAILBOX_REVIEW"))).toBe(true);
     await expect.poll(() => handoff()?.status, { timeout: 10_000 }).toBe("completed");
+    expect(await queuedChips()).toHaveLength(1);
     expect((await control(["wait", "--bot", peer.id, "--timeout", "15"])).status).toBe("settled");
     await control(["messages", "--bot", peer.id, "--limit", "10"]);
     await control(["messages", "--bot", chief.id, "--limit", "15"]);
   }, 60_000);
+
+  it("tells the Chief what became of each teammate approval, and that an unanswered one did not run", async () => {
+    const chief = (await tool("create_bot", { name: "Release Chief", instance_id: "claude", model: models[0] })).bot;
+    const peer = (await tool("create_bot", { name: "Release Peer", instance_id: "claude", model: models[1] })).bot;
+    expect((await api("PATCH", `/api/bots/${peer.id}`, { approvalMode: "ask" })).status).toBe(200);
+    await control(["send", "--bot", chief.id, "--text", "Ask the reviewer to run the release checks, then report back."]);
+    const token = (await dump(models[0])).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const sent = await internal(token, "POST", "/api/internal/coordinate-bots", {
+      botIds: [peer.id], message: "RELEASE_CHECKS: run the release checks.",
+    });
+    expect(sent.status).toBe(200);
+    const requestId = sent.body.receipts[0].requestId;
+    const handoff = () => readHandoffs(session.info.dataDir).find((node) => node.id === requestId);
+    const workThread = handoff()!.threadId;
+    writeFileSync(modelFile(models[0], "gate"), "finish");
+    const chiefChips = async () => (await api("GET", `/api/threads/${chief.activeTaskId}/messages?limit=100`)).body.messages
+      .filter((message: any) => message.kind === "activity" && message.from?.botId === peer.id && message.threadRef?.threadId === workThread
+        && message.tool && !message.roomRequest) as any[];
+    const card = async (id: string) => (await api("GET", `/api/threads/${workThread}/messages?limit=100`)).body.messages
+      .find((message: any) => message.card?.requestId === id);
+
+    const deniedAnswers = await permission(models[1], "denied-approval", { command: "git push --force" });
+    await expect.poll(async () => (await chiefChips()).map((chip) => chip.tool.name)).toEqual(["Waiting on your approval in @Release Peer"]);
+    expect((await api("POST", `/api/threads/${workThread}/respond`, { requestId: "denied-approval", behavior: "deny" })).status).toBeLessThan(300);
+    await expect.poll(() => deniedAnswers.some((answer) => answer.id === "denied-approval" && answer.behavior === "deny")).toBe(true);
+    await expect.poll(async () => (await chiefChips()).map((chip) => [chip.tool.name, chip.tool.ok]))
+      .toEqual([["@Release Peer's request was denied", false]]);
+
+    const unanswered = await permission(models[1], "unanswered-approval", { command: "npm run release-check" });
+    await expect.poll(async () => Boolean(await card("unanswered-approval"))).toBe(true);
+    expect((await chiefChips()).at(-1).tool.name).toBe("Waiting on your approval in @Release Peer");
+    const expiry = join(session.info.dataDir, "expire-approvals");
+    writeFileSync(expiry, "expire");
+    await expect.poll(() => unanswered.find((answer) => answer.id === "unanswered-approval")).toMatchObject({ behavior: "deny", source: "timeout" });
+    rmSync(expiry, { force: true });
+    await expect.poll(async () => (await chiefChips()).map((chip) => [chip.tool.name, chip.tool.ok])).toEqual([
+      ["@Release Peer's request was denied", false],
+      ["Nobody answered @Release Peer's approval in time — that step did not run", false],
+    ]);
+    expect((await card("unanswered-approval")).card).toMatchObject({ answered: "deny", dismissed: true });
+
+    const lint = await permission(models[1], "lint-approval", { command: "npm run lint" });
+    await expect.poll(async () => Boolean(await card("lint-approval"))).toBe(true);
+    writeFileSync(expiry, "expire");
+    await expect.poll(() => lint.find((answer) => answer.id === "lint-approval")).toMatchObject({ behavior: "deny", source: "timeout" });
+    rmSync(expiry, { force: true });
+    const retried = await permission(models[1], "lint-retry", { command: "npm run lint" });
+    await expect.poll(async () => Boolean(await card("lint-retry"))).toBe(true);
+    expect((await api("POST", `/api/threads/${workThread}/respond`, { requestId: "lint-retry", behavior: "allow" })).status).toBeLessThan(300);
+    await expect.poll(() => retried.find((answer) => answer.id === "lint-retry")).toMatchObject({ behavior: "allow" });
+    await expect.poll(async () => (await chiefChips()).map((chip) => [chip.tool.name, chip.tool.ok])).toEqual([
+      ["@Release Peer's request was denied", false],
+      ["Nobody answered @Release Peer's approval in time — that step did not run", false],
+      ["Nobody answered @Release Peer's approval in time — that step did not run", false],
+      ["@Release Peer got your approval", true],
+    ]);
+
+    writeFileSync(modelFile(models[1], "gate"), "finish");
+    await expect.poll(() => handoff()?.status, { timeout: 20_000 }).toBe("waiting");
+    const question = handoff()!.question ?? "";
+    expect(question).toContain("“Bash: npm run release-check”");
+    expect(question).not.toContain("git push");
+    expect(question).not.toContain("npm run lint");
+    await expect.poll(async () => (await api("GET", `/api/threads/${workThread}/messages?limit=100`)).body.messages
+      .some((message: any) => message.card?.requestId?.startsWith("needs-input-") && message.card.options?.includes("Try again"))).toBe(true);
+    await expect.poll(async () => (await api("GET", `/api/threads/${chief.activeTaskId}/messages?limit=100`)).body.messages
+      .some((message: any) => message.tool?.name?.includes("needs your input") && message.tool.name.includes("npm run release-check"))).toBe(true);
+    evidence.push({ requestId, question: question.slice(0, 400) });
+  }, 60_000);
+
+  it.each(["finish", "fail"] as const)("tells a delegating bot that its teammate's approval went unanswered, so the step did not run (turn ends: %s)", async (ending) => {
+    const chief = (await tool("create_bot", { name: "Delegating Chief", instance_id: "claude", model: models[0] })).bot;
+    const peer = (await tool("create_bot", { name: "Delegated Peer", instance_id: "claude", model: models[1] })).bot;
+    expect((await api("PATCH", `/api/bots/${peer.id}`, { approvalMode: "ask" })).status).toBe(200);
+    const routine = await api("POST", "/api/routines", {
+      name: "Release checks", prompt: "Delegate the release checks to the reviewer.", botId: chief.id, enabled: false,
+      schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
+    });
+    expect(routine.status).toBe(201);
+    const run = (await api("POST", `/api/routines/${routine.body.routine.id}/run`)).body.run;
+    const runThread = async () => (await api("GET", "/api/routines")).body.runs.find((candidate: any) => candidate.id === run.id)?.threadId as string | undefined;
+    await expect.poll(runThread).toBeTruthy();
+    const token = (await dump(models[0])).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const delegated = await internal(token, "POST", "/api/internal/coordinate-bots", { botIds: [peer.id], message: "RELEASE_CHECKS: run the release checks." });
+    expect(delegated.status).toBe(200);
+    expect(delegated.body.receipts).toEqual([expect.objectContaining({ botId: peer.id, outcome: "queued", requestId: expect.any(String) })]);
+    const requestId = delegated.body.receipts[0].requestId as string;
+    const handoff = () => readHandoffs(session.info.dataDir).find((node) => node.id === requestId);
+    expect(handoff()).toMatchObject({ botId: peer.id, mode: "work", reply: "resume" });
+    writeFileSync(modelFile(models[0], "gate"), "finish");
+    const unanswered = await permission(models[1], "unanswered-delegated", { command: "npm run release-check" });
+    const peerCard = async () => {
+      for (const task of (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === peer.id).tasks as any[]) {
+        const found = (await api("GET", `/api/threads/${task.threadId}/messages?limit=100`)).body.messages
+          .find((message: any) => message.card?.requestId === "unanswered-delegated");
+        if (found) return found;
+      }
+      return undefined;
+    };
+    await expect.poll(async () => Boolean(await peerCard()), { timeout: 15_000 }).toBe(true);
+    const expiry = join(session.info.dataDir, "expire-approvals");
+    writeFileSync(expiry, "expire");
+    await expect.poll(() => unanswered.find((answer) => answer.id === "unanswered-delegated")).toMatchObject({ behavior: "deny", source: "timeout" });
+    rmSync(expiry, { force: true });
+    // whole, so the engine never reads the gate half-written
+    writeFileSync(`${modelFile(models[1], "gate")}.tmp`, ending);
+    renameSync(`${modelFile(models[1], "gate")}.tmp`, modelFile(models[1], "gate"));
+    const note = "[OpenMausBot: nobody answered the approval for “Bash: npm run release-check” in time, so it did not run.";
+    const runMessages = async () => (await api("GET", `/api/threads/${await runThread()}/messages?limit=100`)).body.messages as any[];
+    const reported = async () => (await runMessages()).find((message: any) => message.roomRequest?.id === requestId && message.roomRequest.phase === "result")?.tool;
+    if (ending === "finish") {
+      await expect.poll(reported, { timeout: 20_000 }).toBeTruthy();
+      expect(await reported()).toMatchObject({ name: "Delegated Peer replied", ok: true });
+      expect(String((await reported())!.output).startsWith(note)).toBe(true);
+      await expect.poll(() => handoff()?.status, { timeout: 20_000 }).toBe("completed");
+      expect(handoff()!.result.startsWith(note)).toBe(true);
+    } else {
+      await expect.poll(reported, { timeout: 20_000 }).toBeTruthy();
+      expect(await reported()).toMatchObject({ ok: false });
+      expect((await reported())!.name).toBe("Delegated Peer — failed: Fixture turn failed. Before it stopped it made 1 tool call: Bash ×1.");
+      await expect.poll(() => handoff()?.status, { timeout: 20_000 }).toBe("failed");
+    }
+    const woken = async () => JSON.stringify((await dump(models[0])).prompt);
+    await expect.poll(woken, { timeout: 20_000 }).toContain("[From @Delegated Peer (bot) · report on assignment");
+    expect(await woken()).toContain("nobody answered the approval for “Bash: npm run release-check” in time, so it did not run. Do not report it as done; it needs the person's approval.");
+  }, 60_000);
+
+  it("tells a room's coordinator that a member's approval went unanswered, so the step did not run", async () => {
+    const chief = (await tool("create_bot", { name: "Room Chief", instance_id: "claude", model: models[0] })).bot;
+    const peer = (await tool("create_bot", { name: "Room Peer", instance_id: "claude", model: models[1] })).bot;
+    expect((await api("PATCH", `/api/bots/${peer.id}`, { approvalMode: "ask" })).status).toBe(200);
+    const created = await api("POST", "/api/groups", {
+      name: "Release room", memberIds: [chief.id, peer.id],
+      setup: { bulletin: "", defaultResponder: { kind: "member", botId: chief.id } },
+    });
+    expect(created.status).toBe(201);
+    const room = created.body.group;
+    expect((await api("POST", `/api/groups/${room.id}/messages`, { threadId: room.threadId, text: "Have the reviewer run the release checks." }, true)).status).toBe(202);
+    const token = (await dump(models[0])).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const sent = await internal(token, "POST", "/api/internal/coordinate-bots", { botIds: [peer.id], message: "RELEASE_CHECKS: run the release checks." });
+    expect(sent.status).toBe(200);
+    const requestId = sent.body.receipts[0].requestId;
+    const handoff = () => readHandoffs(session.info.dataDir).find((node) => node.id === requestId);
+    expect(handoff()).toMatchObject({ groupId: room.id });
+    writeFileSync(modelFile(models[0], "gate"), "finish");
+    const unanswered = await permission(models[1], "unanswered-room", { command: "npm run release-check" });
+    await expect.poll(async () => (await api("GET", `/api/threads/${room.threadId}/messages?limit=100`)).body.messages
+      .some((message: any) => message.card?.requestId === "unanswered-room"), { timeout: 15_000 }).toBe(true);
+    const expiry = join(session.info.dataDir, "expire-approvals");
+    writeFileSync(expiry, "expire");
+    await expect.poll(() => unanswered.find((answer) => answer.id === "unanswered-room")).toMatchObject({ behavior: "deny", source: "timeout" });
+    rmSync(expiry, { force: true });
+    writeFileSync(modelFile(models[1], "gate"), "finish");
+    await expect.poll(() => handoff()?.status, { timeout: 20_000 }).toBe("waiting");
+    expect(handoff()!.question).toContain("“Bash: npm run release-check”");
+  }, 60_000);
+
+  it("ends a one-way notice whose recipient thread was deleted before it started, without restarting the sender", async () => {
+    const sender = (await tool("create_bot", { name: "Independent sender", instance_id: "claude", model: models[0] })).bot;
+    const recipient = (await tool("create_bot", { name: "Independent recipient", instance_id: "claude", model: models[1] })).bot;
+    // One slot, held by the recipient's own turn, so the notice queues.
+    const capacity = (await api("GET", "/api/config")).body.threads?.maxConcurrentPerBot ?? 2;
+    expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 1 } })).status).toBe(200);
+    try {
+      await control(["send", "--bot", recipient.id, "--text", "Hold the recipient's slot."]);
+      await expect.poll(async () => (await botState(recipient.id)).busy, { timeout: 15_000 }).toBe(true);
+      await control(["send", "--bot", sender.id, "--text", "Prepare independent work."]);
+      const launched = await dump(models[0]);
+      const token = launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+      const sent = await internal(token, "POST", "/api/internal/coordinate-bots", {
+        botIds: [recipient.id], message: "Own this work.", thread: "new", reply: "none",
+      });
+      expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+      const receipt = sent.body.receipts[0];
+      expect(receipt).toMatchObject({ botId: recipient.id, outcome: "queued", threadId: expect.any(String), requestId: expect.any(String) });
+      const threadId = receipt.threadId as string;
+      const notice = () => readHandoffs(session.info.dataDir).find((node) => node.id === receipt.requestId);
+      expect(notice()).toMatchObject({ mode: "notify", reply: "none", status: "queued", threadId });
+      expect((await api("DELETE", `/api/bots/${recipient.id}/tasks/${threadId}`)).status).toBe(200);
+      await expect.poll(() => notice()?.status, { timeout: 15_000 }).toMatch(/^(failed|cancelled)$/);
+      expect(notice()!.executions).toBe(0);
+      writeFileSync(modelFile(models[0], "gate"), "finish sender");
+      expect((await control(["wait", "--bot", sender.id, "--timeout", "15"])).status).toBe("settled");
+      const after = (await api("GET", `/api/threads/${sender.activeTaskId}/messages`)).body.messages as any[];
+      expect(after.filter((message: any) => message.tool?.ok === false)).toEqual([]);
+      expect(after.filter((message: any) => message.roomRequest?.phase === "result")).toEqual([]);
+      expect((await api("GET", `/api/threads/${threadId}/messages`)).status).toBe(404);
+      expect((await botState(recipient.id)).tasks.some((task: any) => task.threadId === threadId)).toBe(false);
+      expect((await botState(sender.id)).busy).toBe(false);
+      expect((await dump(models[0])).pid).toBe(launched.pid);
+      writeFileSync(modelFile(models[1], "gate"), "finish recipient");
+      await expect.poll(async () => (await botState(recipient.id)).busy, { timeout: 15_000 }).toBe(false);
+    } finally {
+      expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: capacity } })).status).toBe(200);
+    }
+  }, 45_000);
 
   it("replaces the final worked thread with blank context but refuses to delete it while running", async () => {
     const created = await tool("create_bot", { name: "Last thread fixture", instance_id: "claude", model: models[0] });
@@ -221,7 +430,6 @@ describe("independent bot tasks through the isolated control surface", () => {
     expect((await internal(token, "POST", "/api/internal/memory", { action: "append", text: "A unique saved fact." })).status).toBe(200);
     for (const text of ["", " \n\t "]) {
       expect((await internal(token, "POST", "/api/internal/memory", { action: "replace", oldText: "unique saved fact", text })).status).toBe(400);
-      // the append landed as one dated entry naming the thread it came from
       expect((await api("GET", `/api/bots/${botId}/memory`)).body.text).toBe(`- ${memoryDate()} · from chat "${"t".repeat(60)}…" · A unique saved fact.\n`);
     }
     const project = join(session.info.dataDir, "task-workspaces", botId, threadId, "result.txt");
@@ -270,7 +478,6 @@ describe("independent bot tasks through the isolated control surface", () => {
     const background = await paired("GET", `/api/threads/${threadB}/messages?limit=50`);
     expect(background.body.messages.some((message: any) => message.card?.requestId === "phone-approval-b" && !message.card.answered)).toBe(true);
 
-    // A stale island's immutable A target must never authorize B's request.
     const stale = await paired("POST", `/api/threads/${threadA}/respond`, { requestId: "phone-approval-b", behavior: "allow" });
     expect(stale.body.outcome).toBe("unavailable");
     expect(answersA).toEqual([]);
@@ -297,8 +504,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     const second = await tool("create_task", { target_type: "bot", target_id: botId, title: "Independent B" });
     const taskB = second.task.taskId;
     await control(["set-model", "--bot", botId, "--task", taskB, "--instance", "claude", "--model", models[1]]);
-    // Loosening approval from an originless agent request stays forbidden;
-    // this settings action models the trusted app's same-origin request.
+    // This settings action models the trusted app's same-origin request.
     expect((await api("PATCH", `/api/bots/${botId}/tasks/${taskB}`, { approvalMode: "auto" })).status).toBe(409);
     expect((await api("PATCH", `/api/bots/${botId}/tasks/${taskB}`, { approvalMode: "auto" }, true)).status).toBe(200);
     await control(["send", "--bot", botId, "--task", taskB, "--text", "ONLY_B"]);
@@ -361,13 +567,12 @@ describe("independent bot tasks through the isolated control surface", () => {
     expect((await api("POST", `/api/bots/${botId}/messages/${userA.id}/edit`, { threadId: taskB, text: "wrong task" })).status).toBe(404);
     expect((await api("POST", `/api/bots/${botId}/active-branch`, { threadId: taskB, messageId: userA.id })).status).toBe(404);
 
-    // Compatibility: changing the profile model updates only the selected
-    // idle task, not the independently configured sibling.
+    await tool("switch_task", { target_type: "bot", target_id: botId, task_id: taskA });
     const legacyModel = models.at(-1)!;
     expect((await api("PATCH", `/api/bots/${botId}`, { modelSelection: { instanceId: "claude", model: legacyModel } })).status).toBe(200);
     const final = await botState(botId);
-    expect(final.tasks.find((task: any) => task.taskId === taskB).modelSelection.model).toBe(legacyModel);
-    expect(final.tasks.find((task: any) => task.taskId === taskA).modelSelection.model).toBe(models[0]);
+    expect(final.tasks.find((task: any) => task.taskId === taskA).modelSelection.model).toBe(legacyModel);
+    expect(final.tasks.find((task: any) => task.taskId === taskB).modelSelection.model).toBe(models[1]);
   }, 45_000);
 
   it("cancels a detached routine on its captured provider after an idle sibling changes the default", async () => {
@@ -385,8 +590,6 @@ describe("independent bot tasks through the isolated control surface", () => {
     const run = (await api("GET", "/api/routines")).body.runs.find((item: any) => item.id === launched.body.run.id);
     expect(run.threadId).not.toBe(selectedThread);
     expect((await botState(botId)).tasks.find((task: any) => task.taskId === run.threadId)?.busy).toBe(true);
-    // An offline profile default is supported; it must not become the
-    // cancellation target for an already-running task on Claude.
     expect((await api("PATCH", `/api/bots/${botId}`, {
       modelSelection: { instanceId: "offline-fixture", model: "offline-model" },
     })).status).toBe(200);
@@ -394,7 +597,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     await expect.poll(async () => (await botState(botId)).tasks.find((task: any) => task.taskId === run.threadId)?.busy,
       { timeout: 10_000 }).toBe(false);
     const final = await botState(botId);
-    expect(final.tasks.find((task: any) => task.taskId === run.threadId)?.modelSelection.instanceId).toBe("claude");
+    expect(final.tasks.find((task: any) => task.taskId === run.threadId)?.modelSelection.instanceId).toBe("offline-fixture");
     expect(final.tasks.find((task: any) => task.taskId === selectedThread)?.modelSelection.instanceId).toBe("offline-fixture");
     evidence.push({ routineCancelledOnOriginalProvider: true, runId: run.id, taskId: run.threadId });
   }, 30_000);
@@ -411,8 +614,6 @@ describe("independent bot tasks through the isolated control surface", () => {
     await dump(models[0]);
     const selection = { instanceId: "claude", model: models[1] };
     expect((await api("PATCH", `/api/bots/${botId}/tasks/${threadId}`, { modelSelection: selection })).status).toBe(200);
-    // The selected task already has B, but the Group still owns default A:
-    // a no-op relative to the task is not a no-op relative to the Group.
     expect((await api("PATCH", `/api/bots/${botId}/model`, selection)).status).toBe(409);
     expect((await api("PATCH", `/api/bots/${botId}`, { modelSelection: selection })).status).toBe(409);
     expect((await api("PATCH", `/api/bots/${botId}/tasks/${threadId}`, { modelSelection: selection, updateBotDefault: true })).status).toBe(409);
@@ -426,7 +627,32 @@ describe("independent bot tasks through the isolated control surface", () => {
     evidence.push({ groupDefaultPreservedUntilStop: true, groupId: group.id, selectedTaskId: threadId });
   }, 30_000);
 
-  it("refuses a second engine in the same selected project folder until its owner stops", async () => {
+  it("lets a chat-only session change its thread's model, never the bot's default", async () => {
+    const created = await tool("create_bot", { name: "Client default fixture", instance_id: "claude", model: models[0] });
+    const botId = created.bot.id;
+    const threadId = created.bot.activeTaskId;
+    const opened = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
+    const token = (await api("POST", "/api/auth/pair", { code: opened.body.code })).body.token as string;
+    const asClient = async (method: string, path: string, body: unknown) => {
+      const response = await fetch(`${session.info.url}${path}`, {
+        method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body),
+      });
+      evidence.push({ authority: "client-only session", method, path, body, status: response.status });
+      return { status: response.status, body: await response.json() as any };
+    };
+    const selection = { instanceId: "claude", model: models[1] };
+    expect((await asClient("PATCH", `/api/bots/${botId}`, { modelSelection: selection })).status).toBe(403);
+    const refused = await asClient("PATCH", `/api/bots/${botId}/tasks/${threadId}`, { modelSelection: selection, updateBotDefault: true });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect((await botState(botId)).modelSelection.model).toBe(models[0]);
+    expect((await botState(botId)).tasks.find((task: any) => task.taskId === threadId)?.modelSelection.model).toBe(models[0]);
+    const threadOnly = await asClient("PATCH", `/api/bots/${botId}/tasks/${threadId}`, { modelSelection: selection });
+    expect(threadOnly.status, JSON.stringify(threadOnly.body)).toBe(200);
+    expect((await botState(botId)).tasks.find((task: any) => task.taskId === threadId)?.modelSelection).toEqual(selection);
+    expect((await botState(botId)).modelSelection.model).toBe(models[0]);
+  }, 30_000);
+
+  it("runs a second engine of the same bot in the selected project folder at the same time", async () => {
     const created = await tool("create_bot", { name: "Shared project fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;
     const taskA = created.bot.activeTaskId;
@@ -438,29 +664,24 @@ describe("independent bot tasks through the isolated control surface", () => {
     const second = await tool("create_task", { target_type: "bot", target_id: botId, title: "Project sibling" });
     const taskB = second.task.taskId;
     await control(["set-model", "--bot", botId, "--task", taskB, "--instance", "claude", "--model", models[1]]);
-    await control(["send", "--bot", botId, "--task", taskB, "--text", "PROJECT_B_CONFLICT"]);
-    const blocked = await control(["wait", "--bot", botId, "--task", taskB, "--timeout", "10"]);
-    expect(blocked.status).toBe("failed");
-    expect(JSON.stringify(blocked.messages)).toContain("project folder");
-    expect(existsSync(modelFile(models[1], "json"))).toBe(false);
-    expect((await botState(botId)).tasks.find((task: any) => task.taskId === taskA)?.busy).toBe(true);
-
-    await control(["interrupt", "--bot", botId, "--task", taskA]);
-    await control(["wait", "--bot", botId, "--task", taskA, "--timeout", "10"]);
-    await control(["send", "--bot", botId, "--task", taskB, "--text", "PROJECT_B_NOW_OWNS_FOLDER"]);
+    await control(["send", "--bot", botId, "--task", taskB, "--text", "PROJECT_B_PARALLEL"]);
     expect((await dump(models[1])).env.OMB_FIXTURE_CWD).toBe(realpathSync(cwd));
+    const both = await botState(botId);
+    expect(both.tasks.find((task: any) => task.taskId === taskA)?.busy).toBe(true);
+    expect(both.tasks.find((task: any) => task.taskId === taskB)?.busy).toBe(true);
+    expect(JSON.stringify((await control(["messages", "--bot", botId, "--task", taskB])).messages)).not.toContain("project folder");
+    await control(["interrupt", "--bot", botId, "--task", taskA]);
     await control(["interrupt", "--bot", botId, "--task", taskB]);
+    evidence.push({ parallelThreadsInOneProjectFolder: true, botId, taskA, taskB });
   }, 45_000);
 
   it.skipIf(process.platform !== "darwin")("claims the shared computer only on first use and keeps a sibling stop from releasing it", async () => {
-    // The fake provider only receives this inert descriptor; no UI driver is
-    // launched and the descriptor lives inside the fixture's disposable home.
-    const descriptorDir = join(session.info.dataDir, "Library", "Application Support", "OpenMausBot");
-    mkdirSync(descriptorDir, { recursive: true });
-    writeFileSync(join(descriptorDir, "cua-connection.json"), JSON.stringify({
+    // The fake provider only receives this inert descriptor; no UI driver is launched.
+    writeFileSync(cuaRecord, JSON.stringify({
       mode: "embedded", socketPath: join(session.info.dataDir, "never-used.sock"),
       mcpCommand: join(session.info.dataDir, "never-launched-computer"), mcpArgs: ["mcp"], mcpEnv: {},
     }));
+    await new Promise((resolve) => setTimeout(resolve, 200));
     const created = await tool("create_bot", { name: "Computer lease fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;
     const taskA = created.bot.activeTaskId;
@@ -478,11 +699,12 @@ describe("independent bot tasks through the isolated control surface", () => {
       expect(url.origin).toBe(session.info.url);
       return internal(env.OMB_CONTROL_TOKEN, "GET", `${url.pathname}${url.search}`);
     };
-    // B acquires first although A started first: mounting the tool did not
-    // lock the shared computer. A receives an actionable hold, not authority.
     expect((await gate(launchedB)).body.held).toBe(false);
-    expect((await gate(launchedA)).body).toMatchObject({ held: true, blockedReason: expect.stringContaining("Another thread") });
+    const waitingA = gate(launchedA);
+    await expect.poll(async () => ((await api("GET", `/api/threads/${taskA}/messages`)).body.messages as any[])
+      .some((message) => String(message.tool?.name ?? "").startsWith("Waiting for its turn on this computer")), { timeout: 15_000 }).toBe(true);
     await control(["interrupt", "--bot", botId, "--task", taskA]);
+    expect((await waitingA).body.held).toBe(true);
     expect((await gate(launchedA)).status).toBe(401);
     expect((await gate(launchedB)).body.held).toBe(false);
     await control(["interrupt", "--bot", botId, "--task", taskB]);
@@ -515,9 +737,6 @@ describe("independent bot tasks through the isolated control surface", () => {
     await control(["set-model", "--bot", botId, "--task", attendedTask, "--instance", "claude", "--model", models[1]]);
     await control(["send", "--bot", botId, "--task", attendedTask, "--text", "ATTENDED_ONLY"]);
     const attendedLaunch = await dump(models[1]);
-    // Approval levels are the provider's own modes, passed through: a turn a
-    // webhook started runs in the bot's level like any other, and a request
-    // Claude's reviewer leaves for a person is carded, not answered.
     expect(unattendedLaunch.argv[unattendedLaunch.argv.indexOf("--permission-mode") + 1]).toBe("auto");
     expect(attendedLaunch.argv[attendedLaunch.argv.indexOf("--permission-mode") + 1]).toBe("auto");
 

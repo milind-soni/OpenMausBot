@@ -2,7 +2,7 @@
   "id": "create-verification-skill",
   "name": "Create Verification Skill",
   "version": "0.1.0",
-  "description": "Stage one reviewed verification skill for a specific app or project.",
+  "description": "Write one verification skill for a specific app or project.",
   "defaultEnabled": true,
   "triggerTerms": [
     "/create-verification-skill",

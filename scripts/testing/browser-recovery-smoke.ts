@@ -51,24 +51,29 @@ export async function verifyBrowserRecovery(input: {
     page.on("request", (request: any) => {
       if (request.url().endsWith("/browser/action")) actions.push(request.postDataJSON());
     });
+    const painted = () => page.waitForFunction(() => (document.querySelector<HTMLCanvasElement>("[data-browser-surface] canvas")?.width ?? 0) > 0, undefined, { timeout: 30_000 });
     await page.goto(input.previewUrl);
-    await page.getByRole("img", { name: "Live bot browser" }).waitFor({ timeout: 30_000 });
-    await page.getByRole("button", { name: "Take control", exact: true }).click();
-    await page.getByRole("button", { name: "Return to bot", exact: true }).waitFor();
+    await painted();
+    // No Take control button: submitting the address takes control, then navigates.
     await page.getByRole("textbox", { name: "Browser address" }).fill(input.testPage);
     const navigation = page.waitForResponse((response: any) => response.url().endsWith("/browser/action") && response.request().postDataJSON()?.type === "navigate");
     await page.getByRole("textbox", { name: "Browser address" }).press("Enter");
     assert((await navigation).ok());
-    await page.waitForFunction(() => document.querySelector<HTMLImageElement>('img[alt="Live bot browser"]')?.naturalWidth);
+    assert.deepEqual(actions.filter((action) => action.type !== "ack").map((action) => action.type), ["take", "navigate"]);
+    await page.locator('[data-pill="yours"]').waitFor({ state: "attached" });
+    await painted();
     // Inject only a transport failure into a real EventSource. The component
     // must close the old server viewer and establish a new watch-only viewer.
     const offset = actions.length;
     await page.evaluate(() => (window as any).fixtureSources.at(-1).dispatchEvent(new Event("error")));
-    await page.getByText("Connection interrupted. Reconnecting the browser view…").waitFor();
+    await page.getByText("Opening the live browser…").waitFor();
     await page.waitForFunction(() => (window as any).fixtureSources.length === 2);
-    await page.getByRole("img", { name: "Live bot browser" }).waitFor({ timeout: 30_000 });
-    await page.getByRole("button", { name: "Take control", exact: true }).waitFor();
-    assert.deepEqual(actions.slice(offset).filter((action) => action.type !== "ack"), []);
+    await painted();
+    // The replacement viewer only watches until the person interacts again.
+    assert.equal(await page.locator('[data-pill="yours"]').count(), 0);
+    // The old viewer may hand back on its idle timer before the injected
+    // failure lands; nothing else may be sent or replayed.
+    assert.deepEqual(actions.slice(offset).filter((action) => action.type !== "ack" && action.type !== "release"), []);
     await page.waitForFunction((url: string) => document.querySelector<HTMLInputElement>('input[aria-label="Browser address"]')?.value === url, input.testPage);
     console.log("PASS: real native preview reconnects automatically, retaining the page without replaying navigation or taking control.");
     for (const width of [390, 1280]) {

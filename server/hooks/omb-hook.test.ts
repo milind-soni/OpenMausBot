@@ -1,7 +1,3 @@
-// The hook helper Claude Code runs at PostToolUse etc. (Phase 0, item 0.2).
-// Contract, learned the hard way by others: it ALWAYS exits 0, never takes
-// longer than its budget, speaks only to the loopback harness, and prints a
-// hookSpecificOutput block only when the harness returned one.
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";

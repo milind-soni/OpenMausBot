@@ -1,16 +1,28 @@
 import { describe, expect, it } from "vitest";
 
-import { describeRun, groupActivityRuns, groupTranscript, isRecoveryActivity } from "./activity-runs";
+import { describeRun, groupActivityRuns, groupTranscript, isRecoveryActivity, isToolStep, roomTurnFolds, statusActivity } from "./activity-runs";
+import { setLocale } from "./i18n";
+import { toolStepLabel } from "./tool-step-label";
 import type { Message } from "@/state/store";
 
 let seq = 0;
 const tool = (name: string, ok = true): Message =>
   ({ id: `t${++seq}`, at: seq, role: "bot", kind: "activity", tool: { name, ok } });
-/** a step with no verdict yet — `ok` absent, not `ok: undefined`, which a
- * default parameter would quietly turn back into a finished step */
+/** `ok` absent, not `ok: undefined`: a default parameter would turn that back into a finished step. */
 const running = (name: string): Message =>
   ({ id: `t${++seq}`, at: seq, role: "bot", kind: "activity", tool: { name } });
 const text = (body: string): Message => ({ id: `m${++seq}`, at: seq, role: "bot", kind: "text", text: body });
+
+describe("a reaction's own line", () => {
+  it("draws no bubble in a conversation or a room: the reaction shows on the message it answered", () => {
+    const asked = text("Shall I send it?");
+    const reaction: Message = { id: `u${++seq}`, at: seq, role: "user", kind: "text", text: "👍", replyToId: asked.id, reaction: "👍" };
+    const typed: Message = { id: `u${++seq}`, at: seq, role: "user", kind: "text", text: "👍", replyToId: asked.id };
+    for (const items of [groupTranscript([asked, reaction, typed]), groupActivityRuns([asked, reaction, typed])]) {
+      expect(items.map((item) => item.kind === "message" ? item.message.id : item.id)).toEqual([asked.id, typed.id]);
+    }
+  });
+});
 
 describe("groupActivityRuns", () => {
   it("folds consecutive tool steps into one run", () => {
@@ -29,6 +41,13 @@ describe("groupActivityRuns", () => {
     const opened: Message = { ...tool("Opened thread #QA PR 245 on Scout"),
       threadRef: { botId: "scout", threadId: "qa-245", title: "QA PR 245" } };
     const items = groupActivityRuns([tool("Edit"), tool("Edit"), opened, tool("Write"), tool("Write")]);
+    expect(items.map((i) => i.kind)).toEqual(["run", "message", "run"]);
+  });
+
+  it("never folds a bot-to-bot chip into a run — it links to the other conversation", () => {
+    const messaged: Message = { ...tool("Messaged @Ada"),
+      comm: { groupId: "g1", withBotId: "ada", withName: "Ada", withColor: "blue" } };
+    const items = groupActivityRuns([tool("Edit"), tool("Edit"), messaged, tool("Write"), tool("Write")]);
     expect(items.map((i) => i.kind)).toEqual(["run", "message", "run"]);
   });
 
@@ -57,6 +76,32 @@ describe("groupActivityRuns", () => {
       const items = group(messages);
       expect(items.map(item => item.kind)).toEqual(["run", "message", "run"]);
       expect(items[1]).toEqual({ kind: "message", message: recovery });
+    }
+  });
+
+  it("keeps a stopped turn visible between successful tool runs", () => {
+    const stopped = tool("stopped: Stopped");
+    const messages = [tool("Read"), tool("Edit"), stopped, tool("Bash"), tool("Write")];
+    expect(statusActivity(stopped)).toEqual({ kind: "stopped", text: "Stopped" });
+    for (const group of [groupActivityRuns, groupTranscript]) {
+      const items = group(messages);
+      expect(items.map(item => item.kind)).toEqual(["run", "message", "run"]);
+      expect(items[1]).toEqual({ kind: "message", message: stopped });
+    }
+  });
+
+  it("keeps a model notice visible between successful tool runs", () => {
+    const notice = tool("notice: OpenCode no longer offers opencode/x, so this conversation uses opencode/big-pickle.");
+    const messages = [tool("Read"), tool("Edit"), notice, tool("Bash"), tool("Write")];
+    expect(statusActivity(notice)).toEqual({
+      kind: "notice", text: "OpenCode no longer offers opencode/x, so this conversation uses opencode/big-pickle.",
+    });
+    expect(isRecoveryActivity(notice)).toBe(false);
+    expect(statusActivity(text("notice: ordinary text"))).toBeNull();
+    for (const group of [groupActivityRuns, groupTranscript]) {
+      const items = group(messages);
+      expect(items.map(item => item.kind)).toEqual(["run", "message", "run"]);
+      expect(items[1]).toEqual({ kind: "message", message: notice });
     }
   });
 
@@ -109,6 +154,46 @@ describe("groupActivityRuns", () => {
   });
 });
 
+describe("isToolStep", () => {
+  const opened: Message = { ...tool("Opened thread #QA PR 245 on Scout"),
+    threadRef: { botId: "scout", threadId: "qa-245", title: "QA PR 245" } };
+  const messaged: Message = { ...tool("Messaged @Ada"),
+    comm: { groupId: "g1", withBotId: "ada", withName: "Ada", withColor: "blue" } };
+
+  it("is true for a tool the bot ran, whether it is running, finished or failed", () => {
+    const steps = [tool("Edit"), running("Bash"), tool("Bash", false)];
+    expect(steps.filter((step) => isToolStep(step))).toEqual(steps);
+    const step = tool("Edit");
+    expect(isToolStep(step) && step.tool.name).toBe("Edit");
+  });
+
+  it("is false for what is not work: chips that link elsewhere, status rows and a failed turn", () => {
+    const rows = [
+      opened,
+      messaged,
+      tool("notice: the engine runs another model"),
+      tool("recovery: Automatic recovery: trying a backup once."),
+      tool("error: the CLI exited"),
+    ];
+    expect(rows.filter((row) => isToolStep(row))).toEqual([]);
+  });
+
+  it("does not ask for a provider item id: the chat still folds the harness's own chips", () => {
+    const receipt = tool("approved Bash (full access): pnpm test");
+    expect(receipt.tool).not.toHaveProperty("itemId");
+    expect(isToolStep(receipt)).toBe(true);
+    const items = groupActivityRuns([tool("Edit"), receipt, tool("Write")]);
+    expect(items.map((i) => i.kind)).toEqual(["run"]);
+    expect(items[0].kind === "run" && items[0].messages).toHaveLength(3);
+  });
+
+  it("is false for anything that is not an activity row with a tool", () => {
+    const noTool: Message = { id: "n1", at: 1, role: "bot", kind: "activity" };
+    const notActivity: Message = { ...tool("Edit"), kind: "text" };
+    expect([text("hi"), noTool, notActivity].filter((row) => isToolStep(row))).toEqual([]);
+  });
+});
+
 describe("describeRun", () => {
   it("counts repeats and names the tools in order of first use", () => {
     expect(describeRun([tool("Edit"), tool("Bash"), tool("Edit"), tool("Edit")])).toBe("4 steps · Edit ×3, Bash");
@@ -122,6 +207,28 @@ describe("describeRun", () => {
     expect(describeRun([tool("Edit"), tool("Bash"), tool("Write"), tool("Grep"), tool("Read")])).toBe(
       "5 steps · Edit, Bash, Write +2 more",
     );
+  });
+
+  it("words a server notice in the person's language and leaves real tool names as they are", () => {
+    const resumed: Message = { ...tool("Resuming after a restart"), tool: { name: "Resuming after a restart", ok: true, nameCode: "chat.notice.resumingAfterRestart" } };
+    setLocale("pt-br");
+    try {
+      expect(describeRun([resumed, tool("Bash")])).toBe("Passos: 2 · Retomando após uma reinicialização, Bash");
+      expect(describeRun([resumed, tool("Bash")], toolStepLabel)).toBe("Passos: 2 · Retomando após uma reinicialização, Executar um comando");
+    } finally {
+      setLocale("en");
+    }
+    expect(describeRun([resumed, tool("Bash")])).toBe("2 steps · Resuming after a restart, Bash");
+  });
+
+  it("names a step by the line the harness wrote for it, not its raw tool name", () => {
+    const labelled: Message = { ...tool("mcp__agents__mcp_server"), tool: { name: "mcp__agents__mcp_server", ok: true, label: "Added MCP server linear · Turned on · Test: 3 tools" } };
+    expect(describeRun([labelled, tool("Bash")])).toBe("2 steps · Added MCP server linear · Turned on · Test: 3 tools, Bash");
+  });
+
+  it("names steps by the label it is given, counting steps that read the same together", () => {
+    const plain = ({ name }: { name: string }) => (name === "Bash" || name.includes(" ") ? "Run a command" : name);
+    expect(describeRun([tool("Bash"), tool("ls -la"), tool("Edit")], plain)).toBe("3 steps · Run a command ×2, Edit");
   });
 });
 
@@ -141,21 +248,47 @@ describe("groupTranscript", () => {
     turnTerminal,
   });
 
-  it("folds settled progress messages and leaves the terminal answer visible", () => {
-    const user: Message = { id: "u1", at: 1_000, role: "user", kind: "text", text: "check todoist" };
-    const first = assistant("I'm checking connected apps.", "turn-1", false, 2_000);
-    const second = assistant("I'm reading your tasks.", "turn-1", false, 3_000);
-    const final = assistant("You have three tasks.", "turn-1", true, 5_000);
+  const step = (name: string, turnId: string, at = ++seq * 1_000): Message =>
+    ({ id: `t${++seq}`, at, role: "bot", kind: "activity", tool: { name, ok: true }, turnId });
 
-    const items = groupTranscript([user, first, second, final]);
+  it("keeps the bot's progress lines above the answer and folds only the settled turn's tool steps", () => {
+    const user: Message = { id: "u1", at: 1_000, role: "user", kind: "text", text: "compare note-takers" };
+    const ack = assistant("I'll check current pricing since this changes often.", "turn-1", false, 2_000);
+    const search = step("WebSearch", "turn-1", 2_500);
+    const read = step("WebFetch", "turn-1", 3_000);
+    const helper = assistant("I'll spin up a research specialist for the details.", "turn-1", false, 3_500);
+    const fetch = step("WebFetch", "turn-1", 4_000);
+    const final = assistant("Here are the three best.", "turn-1", true, 30_000);
+
+    const items = groupTranscript([user, ack, search, read, helper, fetch, final]);
+    expect(items.map((item) => item.kind === "message" ? item.message.id : item.kind)).toEqual([user.id, ack.id, "turn", helper.id, final.id]);
+    expect(items[2]).toMatchObject({ kind: "turn", id: "turn:turn-1", label: "Worked for 29s", messages: [search, read, fetch] });
+  });
+
+  it("shows just the answer for a turn with nothing to say: its steps fold, no line of it is hidden", () => {
+    const user: Message = { id: "u2", at: 1_000, role: "user", kind: "text", text: "what time is it in Tokyo?" };
+    const lookup = step("Bash", "turn-2", 1_500);
+    const final = assistant("It's 9:30 PM in Tokyo.", "turn-2", true, 5_000);
+    const items = groupTranscript([user, lookup, final]);
     expect(items.map((item) => item.kind)).toEqual(["message", "turn", "message"]);
-    expect(items[1]).toMatchObject({
-      kind: "turn",
-      id: "turn:turn-1",
-      label: "Worked for 4s",
-      messages: [first, second],
-    });
-    expect(items[2].kind === "message" && items[2].message).toBe(final);
+    expect(items.flatMap((item) => item.kind === "message" ? [item.message.text] : [])).toEqual([user.text, final.text]);
+    expect(groupTranscript([user, final]).map((item) => item.kind)).toEqual(["message", "message"]);
+  });
+
+  it("leaves a failed step and other rows that are not work where they were", () => {
+    const failed: Message = { ...step("Bash", "turn-3"), tool: { name: "Bash", ok: false } };
+    const ok = step("Read", "turn-3");
+    const final = assistant("Done.", "turn-3", true);
+    const items = groupTranscript([ok, failed, final]);
+    expect(items.map((item) => item.kind === "message" ? item.message.id : item.kind)).toEqual(["turn", failed.id, final.id]);
+  });
+
+  it("folds a room member's working notes, so a room still reads as answers", () => {
+    const first = assistant("I'm checking connected apps.", "turn-r", false, 2_000);
+    const final = assistant("You have three tasks.", "turn-r", true, 5_000);
+    const { byTerminalId, hiddenIds } = roomTurnFolds([first, final]);
+    expect([...hiddenIds]).toEqual([first.id]);
+    expect(byTerminalId.get(final.id)).toMatchObject({ messages: [first] });
   });
 
   it("keeps every message visible until the turn settles", () => {
@@ -169,13 +302,13 @@ describe("groupTranscript", () => {
     expect(groupTranscript([only])).toEqual([{ kind: "message", message: only }]);
   });
 
-  it("does not fold narration from a different turn", () => {
-    const older = assistant("Previous answer.", "turn-old");
-    const progress = assistant("Checking.", "turn-new");
+  it("does not fold steps from a different turn", () => {
+    const older = step("Read", "turn-old");
+    const progress = step("Edit", "turn-new");
     const final = assistant("Done.", "turn-new", true);
-    expect(groupTranscript([older, progress, final]).map((item) => item.kind)).toEqual([
+    expect(groupTranscript([older, progress, final]).map((item) => item.kind === "turn" ? item.messages.map((m) => m.id) : item.kind)).toEqual([
       "message",
-      "turn",
+      [progress.id],
       "message",
     ]);
   });

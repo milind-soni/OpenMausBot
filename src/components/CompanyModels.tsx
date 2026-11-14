@@ -1,7 +1,3 @@
-// The connected Organisation panel's Company engines: whether each one can run
-// on this computer, and one inline action for bots that cannot run at all.
-// No dialog: nothing changes until the button is pressed, and it never moves a
-// bot that works on a personal engine.
 import { useState } from "react";
 import { Check } from "lucide-react";
 import { useStore, type InstanceInfo } from "@/state/store";
@@ -23,11 +19,8 @@ export function CompanyModels({ providers }: { providers: ReadonlyArray<{ id: st
     if (!target || !plan.bots.length || switching) return;
     const bots = plan.bots, selection = { instanceId: target.instanceId, model: target.models.default };
     setSwitching(true); setDone(null);
-    // The model chip's own path: PATCH /api/bots/:id with only the selection.
     for (const bot of bots) dispatch({ type: "setModel", botId: bot.id, selection });
     try {
-      // Name only bots the server kept on the Company model. A refused PATCH
-      // rolls its bot back (it is counted again) and shows the app's error.
       const settled = await Promise.all(bots.map((bot) => flushBotPatches(bot.id).catch(() => null)));
       const moved = bots.filter((_bot, index) => settled[index]?.modelSelection.instanceId === selection.instanceId);
       if (moved.length) setDone({ name: target.displayName, bots: moved.map((bot) => bot.name) });
@@ -60,9 +53,6 @@ export function CompanyModels({ providers }: { providers: ReadonlyArray<{ id: st
   </>;
 }
 
-/** Company Claude and Codex run the CLI installed on this computer with the
- * organisation's key, so a missing CLI reuses the personal engine's install
- * action, without its sign-in. OpenRouter needs nothing installed. */
 function CompanyEngineReadiness({ instance, instances }: { instance: InstanceInfo | undefined; instances: readonly InstanceInfo[] }) {
   if (!instance) return null;
   if (instance.policy) return <p className="mt-1 text-[12px] text-ink-secondary">{instance.policy.reason}</p>;

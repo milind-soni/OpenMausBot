@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { compactBudget, contextWindowFor, shouldCompact, DEFAULT_CONTEXT_WINDOW } from "./context-budget.ts";
+import { compactBudget, compactionReading, contextWindowFor, shouldCompact, DEFAULT_CONTEXT_WINDOW } from "./context-budget.ts";
 
 it("keeps compaction reachable below small model windows", () => {
   expect(compactBudget(8_000)).toBe(6_400);
@@ -31,4 +31,18 @@ it("does not let the regrowth floor outrun a known native compaction threshold",
   expect(budget).toBe(180_000);
   expect(shouldCompact({ contextTokens: 180_000, estimatedBytes: 0, budget, floor: 175_000, window, nativeCompactAt })).toBe(true);
   expect(shouldCompact({ contextTokens: 179_999, estimatedBytes: 0, budget, floor: 175_000, window, nativeCompactAt })).toBe(false);
+});
+
+it("times compaction from a driver's reading unless the driver reports it for the meter only", () => {
+  const reading = { tokens: 190_000, window: 200_000 };
+  // Claude and Codex: the reading is what compaction acts on.
+  expect(compactionReading({}, reading)).toBe(reading);
+  expect(compactionReading(undefined, reading)).toBe(reading);
+  // ACP agents: shown on the meter only.
+  expect(compactionReading({ contextReading: "meter" }, reading)).toBeUndefined();
+  expect(compactionReading({ contextReading: "meter" }, undefined)).toBeUndefined();
+  const window = contextWindowFor("unknown-model", undefined, compactionReading({ contextReading: "meter" }, reading)?.window);
+  expect(window).toBe(DEFAULT_CONTEXT_WINDOW);
+  expect(shouldCompact({ contextTokens: compactionReading({ contextReading: "meter" }, reading)?.tokens, estimatedBytes: 4_000,
+    budget: compactBudget(window), window })).toBe(false);
 });

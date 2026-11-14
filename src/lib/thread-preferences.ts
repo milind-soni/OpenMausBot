@@ -1,10 +1,9 @@
 import { useSyncExternalStore } from "react";
 
+import { useAdvancedMode } from "./interface-mode";
+
 export const SHOW_THREADS_KEY = "omb-show-threads";
 
-// Only a renderer preference: no conversation or server configuration belongs
-// here. Keep a session choice even if private/blocked storage rejects reads or
-// writes; another window's storage event can supersede that choice.
 let sessionChoice: boolean | undefined;
 const listeners = new Set<() => void>();
 
@@ -16,7 +15,7 @@ function storage(): Storage | undefined {
   }
 }
 
-function showThreads(): boolean {
+export function showThreads(): boolean {
   if (sessionChoice !== undefined) return sessionChoice;
   try {
     return storage()?.getItem(SHOW_THREADS_KEY) !== "0";
@@ -54,11 +53,15 @@ export function setShowThreads(enabled: boolean): void {
   try {
     storage()?.setItem(SHOW_THREADS_KEY, enabled ? "1" : "0");
   } catch {
-    // The visible setting still changes for this session when storage is full.
   }
   notify();
 }
 
-export function useShowThreads(): boolean {
+export function useShowThreadsChoice(): boolean {
   return useSyncExternalStore(subscribe, showThreads, () => true);
+}
+
+export function useShowThreads(): boolean {
+  const chosen = useShowThreadsChoice();
+  return useAdvancedMode() && chosen;
 }

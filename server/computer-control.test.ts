@@ -1,8 +1,4 @@
-// The who-is-driving record. What these tests pin is the authority split:
-// the person's three moves (take, release, dismiss) all work, the bot's one
-// move (requestHelp) never grants anything, and a release settles the help
-// request in the same change the person made.
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ComputerControl, type ControlSnapshot } from "./computer-control.ts";
 
@@ -80,77 +76,87 @@ describe("computer control", () => {
     expect(changes.map((change) => change.snapshot.held)).toEqual([true, false]);
   });
 
-  it("requestHelp surfaces the plea but never grants control", () => {
+  const ref = (messageId: string, site = "example.com") => ({ botId: "b1", threadId: "t1", messageId, site, place: "browser" as const });
+
+  it("requestHelp surfaces the plea and its card but never grants control", () => {
     const { control } = tracked();
-    const snapshot = control.requestHelp("b1", "  please log in for me  ");
+    const snapshot = control.requestHelp("b1", "  sign in to example.com  ", ref("card-1"));
     expect(snapshot.held).toBe(false);
-    expect(snapshot.helpReason).toBe("please log in for me");
+    expect(snapshot.helpReason).toBe("sign in to example.com");
+    expect(snapshot.help).toEqual(ref("card-1"));
   });
 
-  it("an empty reason still reads as a plea", () => {
+  it("an empty reason still names the site", () => {
     const { control } = tracked();
-    expect(control.requestHelp("b1", undefined).helpReason).toBe("the bot asked you to take over");
+    expect(control.requestHelp("b1", undefined, ref("card-1", "mail.example")).helpReason).toBe("sign in to mail.example");
   });
 
-  it("a shouted second reason cannot clobber the one the person is reading", () => {
+  it("shows the newest plea, and the older one again once the newer settles", () => {
     const { control } = tracked();
-    control.requestHelp("b1", "first");
-    expect(control.requestHelp("b1", "second").helpReason).toBe("first");
+    control.requestHelp("b1", "first", ref("card-1"));
+    expect(control.requestHelp("b1", "second", ref("card-2", "other.example")).help?.messageId).toBe("card-2");
+    expect(control.settleHelp("card-2")).toEqual(["b1"]);
+    expect(control.snapshot("b1")).toMatchObject({ helpReason: "first", help: { messageId: "card-1" } });
   });
 
-  it("expires only the help request that owns the timeout", () => {
+  it("a plea whose card no longer waits is neither shown nor listed, and counts again once its card waits again", () => {
+    const waiting = new Set(["card-1", "card-2"]);
+    const control = new ComputerControl(() => {}, Date.now, (ref) => waiting.has(ref.messageId));
+    control.requestHelp("b1", "first", ref("card-1"));
+    control.requestHelp("b1", "second", ref("card-2"));
+    waiting.delete("card-2");
+    expect(control.snapshot("b1")).toMatchObject({ helpReason: "first", help: { messageId: "card-1" } });
+    expect(control.pleas("b1").map((plea) => plea.messageId)).toEqual(["card-1"]);
+    waiting.delete("card-1");
+    expect(control.snapshot("b1")).toEqual({ held: false, helpReason: null, heldSinceMs: null });
+    expect(control.pleas("b1")).toEqual([]);
+    waiting.add("card-2");
+    expect(control.snapshot("b1")).toMatchObject({ helpReason: "second", help: { messageId: "card-2" } });
+  });
+
+  it("lists every open plea on a key, oldest first", () => {
+    const { control } = tracked();
+    control.requestHelp("b1", "first", ref("card-1"));
+    control.requestHelp("b1", "second", ref("card-2"));
+    control.requestHelp("b2", "elsewhere", ref("card-3"));
+    expect(control.pleas("b1").map((plea) => plea.messageId)).toEqual(["card-1", "card-2"]);
+    control.settleHelp("card-1");
+    expect(control.pleas("b1").map((plea) => plea.messageId)).toEqual(["card-2"]);
+    expect(control.pleas("nobody")).toEqual([]);
+  });
+
+  it("settles only the card it names, wherever it was raised", () => {
     const { control, changes } = tracked();
-    const first = control.requestHelpLease("b1", "first");
-    expect(control.expireHelp("b1", "some-older-request").helpReason).toBe("first");
+    control.requestHelp("b1", "first", ref("card-1"));
+    expect(control.settleHelp("some-other-card")).toEqual([]);
     expect(changes).toHaveLength(1);
-    expect(control.expireHelp("b1", first.requestId).helpReason).toBeNull();
+    expect(control.settleHelp("card-1")).toEqual(["b1"]);
+    expect(control.snapshot("b1")).toEqual({ held: false, helpReason: null, heldSinceMs: null });
     expect(changes).toHaveLength(2);
-  });
-
-  it("an old timeout cannot dismiss a newer plea", () => {
-    const { control } = tracked();
-    const first = control.requestHelpLease("b1", "first");
-    control.dismissHelp("b1");
-    const second = control.requestHelpLease("b1", "second");
-    expect(second.requestId).not.toBe(first.requestId);
-    expect(control.expireHelp("b1", first.requestId).helpReason).toBe("second");
   });
 
   it("a novel-length reason is cut to card size", () => {
     const { control } = tracked();
     const reason = "x".repeat(2000);
-    expect(control.requestHelp("b1", reason).helpReason?.length).toBe(280);
+    expect(control.requestHelp("b1", reason, ref("card-1")).helpReason?.length).toBe(280);
   });
 
-  it("release settles an open help request in the same change", () => {
+  it("handing back mid-way keeps the plea: only the card settles it", () => {
     const { control } = tracked();
-    control.requestHelp("b1", "stuck on a captcha");
+    control.requestHelp("b1", "sign in to example.com", ref("card-1"));
     control.take("b1");
     const after = control.release("b1");
-    expect(after).toEqual({ held: false, helpReason: null, heldSinceMs: null });
+    expect(after).toMatchObject({ held: false, helpReason: "sign in to example.com", help: { messageId: "card-1" } });
+    control.settleHelp("card-1");
+    expect(control.snapshot("b1")).toEqual({ held: false, helpReason: null, heldSinceMs: null });
   });
 
-  it("dismiss clears the plea without taking control", () => {
-    const { control } = tracked();
-    control.requestHelp("b1", "stuck");
-    const after = control.dismissHelp("b1");
-    expect(after.helpReason).toBeNull();
-    expect(after.held).toBe(false);
-  });
-
-  it("dismiss while driving keeps the hold", () => {
+  it("settling a plea while driving keeps the hold", () => {
     const { control } = tracked();
     control.take("b1");
-    control.requestHelp("b1", "also this");
-    const after = control.dismissHelp("b1");
-    expect(after.held).toBe(true);
-    expect(after.helpReason).toBeNull();
-  });
-
-  it("dismissing nothing is silent — no phantom broadcast", () => {
-    const { control, changes } = tracked();
-    control.dismissHelp("b1");
-    expect(changes).toEqual([]);
+    control.requestHelp("b1", "also this", ref("card-1"));
+    control.settleHelp("card-1");
+    expect(control.snapshot("b1")).toMatchObject({ held: true, helpReason: null });
   });
 
   it("bots are independent", () => {
@@ -159,17 +165,143 @@ describe("computer control", () => {
     expect(control.snapshot("b2").held).toBe(false);
   });
 
-  it("forget clears a hold and tells the listeners", () => {
-    const { control, changes } = tracked();
-    control.take("b1");
-    control.forget("b1");
-    expect(control.snapshot("b1").held).toBe(false);
-    expect(changes.at(-1)?.snapshot).toEqual({ held: false, helpReason: null, heldSinceMs: null });
+  it("reports whether a lease holds the computer without taking a free one", () => {
+    const control = new ComputerControl();
+    expect(control.ownsLease("bot", "lease-aaaaaaaaaaaaaa")).toBe(false);
+    expect(control.snapshot("bot").held).toBe(false);
+    control.acquireLease("bot", "lease-aaaaaaaaaaaaaa");
+    expect(control.ownsLease("bot", "lease-aaaaaaaaaaaaaa")).toBe(true);
+    expect(control.ownsLease("bot", "lease-bbbbbbbbbbbbbb")).toBe(false);
+    control.release("bot");
+    expect(control.ownsLease("bot", "lease-aaaaaaaaaaaaaa")).toBe(false);
   });
 
-  it("forgetting an unknown bot is silent", () => {
+  describe("lease expiry", () => {
+    const lease = "6f1d2c4e-0b7a-4d58-9a3e-2c1f8e7b5a90";
+    const other = "a2b9c7d1-5e3f-4a6b-8c0d-1e2f3a4b5c6d";
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    it("a beaten hold is released 60 s after the beat, keeping the plea and broadcasting", () => {
+      const { control, changes } = tracked();
+      control.requestHelp("b1", "sign in to example.com", ref("card-1"));
+      control.acquireLease("b1", lease);
+      expect(control.beat("b1", lease)).toBe(true);
+      vi.advanceTimersByTime(59_999);
+      expect(control.snapshot("b1").held).toBe(true);
+      const before = changes.length;
+      vi.advanceTimersByTime(2);
+      expect(control.snapshot("b1")).toMatchObject({ held: false, help: { messageId: "card-1" } });
+      expect(changes.slice(before)).toEqual([{ botId: "b1", snapshot: control.snapshot("b1") }]);
+    });
+
+    it("a second beat restarts the 60 s", () => {
+      const { control } = tracked();
+      control.acquireLease("b1", lease);
+      control.beat("b1", lease);
+      vi.advanceTimersByTime(30_000);
+      control.beat("b1", lease);
+      vi.advanceTimersByTime(59_999);
+      expect(control.snapshot("b1").held).toBe(true);
+      vi.advanceTimersByTime(2);
+      expect(control.snapshot("b1").held).toBe(false);
+    });
+
+    it("a beat with another lease is refused and does not renew", () => {
+      const { control } = tracked();
+      control.acquireLease("b1", lease);
+      control.beat("b1", lease);
+      vi.advanceTimersByTime(30_000);
+      expect(control.beat("b1", other)).toBe(false);
+      expect(control.beat("b2", lease)).toBe(false);
+      vi.advanceTimersByTime(30_001);
+      expect(control.snapshot("b1").held).toBe(false);
+    });
+
+    it.each([
+      ["a fresh armed acquire", (control: ComputerControl) => control.acquireLease("b1", lease, { armed: true })],
+      ["an armed acquire of a lease already held", (control: ComputerControl) => {
+        control.acquireLease("b1", lease);
+        return control.acquireLease("b1", lease, { armed: true });
+      }],
+    ])("%s with no beat expires at 60 s", (_name, acquire) => {
+      const { control } = tracked();
+      expect(acquire(control)).toMatchObject({ owned: true, snapshot: { held: true } });
+      vi.advanceTimersByTime(59_999);
+      expect(control.snapshot("b1").held).toBe(true);
+      vi.advanceTimersByTime(2);
+      expect(control.snapshot("b1").held).toBe(false);
+    });
+
+    it("an unarmed take or acquire that never beats is still held after 2 h", () => {
+      const { control } = tracked();
+      control.take("b1");
+      control.acquireLease("b2", lease);
+      vi.advanceTimersByTime(2 * 60 * 60_000);
+      expect(control.snapshot("b1").held).toBe(true);
+      expect(control.snapshot("b2").held).toBe(true);
+    });
+
+    it.each([
+      ["releaseLease", (control: ComputerControl) => control.releaseLease("b1", lease)],
+      ["release", (control: ComputerControl) => control.release("b1")],
+    ])("dropping a beaten hold by %s stops its clock", (_name, drop) => {
+      const { control } = tracked();
+      control.acquireLease("b1", lease);
+      control.beat("b1", lease);
+      vi.advanceTimersByTime(30_000);
+      drop(control);
+      control.acquireLease("b1", lease);
+      vi.advanceTimersByTime(2 * 60 * 60_000);
+      expect(control.snapshot("b1").held).toBe(true);
+    });
+  });
+
+  it("forgetBot removes only that bot's pleas, from every key", () => {
     const { control, changes } = tracked();
-    control.forget("ghost");
-    expect(changes).toEqual([]);
+    const plea = (botId: string, messageId: string) => ({ botId, threadId: "t1", messageId, site: "example.com", place: "browser" as const });
+    control.requestHelp("desk", "a asks", plea("a", "a-1"));
+    control.requestHelp("desk", "b asks", plea("b", "b-1"));
+    control.requestHelp("desk", "a asks again", plea("a", "a-2"));
+    control.requestHelp("a", "a asks", plea("a", "a-3"));
+    control.take("held");
+    control.requestHelp("held", "a asks", plea("a", "a-4"));
+    control.requestHelp("b", "b asks", plea("b", "b-2"));
+    changes.length = 0;
+
+    control.forgetBot("a");
+
+    expect(control.snapshot("desk")).toEqual({ held: false, helpReason: "b asks", heldSinceMs: null, help: plea("b", "b-1") });
+    expect(control.snapshot("a")).toEqual({ held: false, helpReason: null, heldSinceMs: null });
+    expect(control.snapshot("held")).toMatchObject({ held: true, helpReason: null });
+    expect(control.snapshot("b")).toMatchObject({ helpReason: "b asks", help: { messageId: "b-2" } });
+    expect(control.settleHelp("a-1")).toEqual([]);
+    expect(changes.map((change) => change.botId).sort()).toEqual(["a", "desk", "held"]);
+  });
+
+  it("recheck tells every key with a plea from those conversations, and names the bots that asked", () => {
+    const { control, changes } = tracked();
+    const plea = (botId: string, threadId: string, messageId: string) => ({ botId, threadId, messageId, site: "example.com", place: "vm" as const });
+    control.requestHelp("desk", "a asks", plea("a", "t1", "m-1"));
+    control.requestHelp("b", "b asks", plea("b", "t2", "m-2"));
+    changes.length = 0;
+    expect(control.recheck(["t1", "t9"])).toEqual(["a"]);
+    expect(changes.map((change) => change.botId)).toEqual(["desk"]);
+    expect(control.snapshot("desk")).toMatchObject({ helpReason: "a asks" });
+  });
+
+  it("forgetThread removes only that conversation's pleas, from every key", () => {
+    const { control, changes } = tracked();
+    const plea = (threadId: string, messageId: string) => ({ botId: "a", threadId, messageId, site: "example.com", place: "vm" as const });
+    control.requestHelp("desk", "t1 asks", plea("t1", "m-1"));
+    control.requestHelp("desk", "t2 asks", plea("t2", "m-2"));
+    control.requestHelp("a", "t1 asks", plea("t1", "m-3"));
+    changes.length = 0;
+
+    expect(control.forgetThread("t1")).toEqual(["a"]);
+
+    expect(control.snapshot("desk")).toMatchObject({ helpReason: "t2 asks", help: { messageId: "m-2" } });
+    expect(control.snapshot("a")).toEqual({ held: false, helpReason: null, heldSinceMs: null });
+    expect(changes.map((change) => change.botId).sort()).toEqual(["a", "desk"]);
   });
 });

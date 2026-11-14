@@ -1,0 +1,235 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { WIDGET_SAMPLES } from "../../shared/widget-samples.ts";
+import { callTool, type ToolCallContext } from "./agents-call.ts";
+import { availableTools, type CatalogProfile } from "./agents-catalog.ts";
+import type { HarnessClient } from "./agents-client.ts";
+
+const PROFILE: CatalogProfile = { skillAuthoring: false, sharedComputers: false, voiceNotes: false, cloudHome: false, chief: false, botId: "bot-scout" };
+
+function harness(answer: { ok: boolean; status: number; body: Record<string, unknown> } = { ok: true, status: 201, body: { messageId: "m42" } }) {
+  const api = vi.fn<HarnessClient["api"]>(async () => ({}));
+  const apiResponse = vi.fn<HarnessClient["apiResponse"]>(async () => answer);
+  const context: ToolCallContext = { botId: "bot-scout", threadId: "thread-scout", depth: 0, externalRuntime: false, sharedComputers: false, client: { api, apiResponse } };
+  return { api, apiResponse, context };
+}
+
+describe("the widget tools in the catalog", () => {
+  it("are offered to every bot that gets the agents catalog, whatever the turn mounts", () => {
+    const profiles: CatalogProfile[] = [
+      PROFILE,
+      { ...PROFILE, chief: true, skillAuthoring: true, sharedComputers: true, voiceNotes: true },
+      { ...PROFILE, cloudHome: true },
+      { ...PROFILE, memoryEnabled: false },
+    ];
+    for (const profile of profiles) {
+      const names = availableTools(profile).map((tool) => tool.name);
+      expect(names.slice(names.indexOf("attach_file"), names.indexOf("attach_file") + 2)).toEqual(["attach_file", "show_widget"]);
+      expect(names).not.toContain("update_widget");
+    }
+  });
+
+  it("carry schemas a model can fill, and no read-only annotation: they post into the chat", () => {
+    const tools = new Map(availableTools(PROFILE).map((tool) => [tool.name, tool as { name: string; description: string; inputSchema: unknown; annotations?: unknown }]));
+    const show = tools.get("show_widget")!;
+    expect(show.inputSchema).toEqual({
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        widget: { type: "object", additionalProperties: true, description: "The widget tree." },
+        fallback_text: { type: "string", description: "Optional plain-text version for clients that cannot draw widgets. Written for you when omitted." },
+        widget_id: { type: "string", description: "Only to replace a widget you showed: the id it returned." },
+      },
+      required: ["widget"],
+    });
+    expect(show.description).toMatch(/^Show an interactive widget in this chat: one question answered with a tap instead of typing/);
+    expect(show.description).toContain("Ask only what you cannot find or sensibly default, one question per widget;");
+    expect(show.description).toContain("if they type something else instead, that is their answer");
+    expect(show.description).not.toMatch(/without being asked/);
+    expect(show.description).toMatch(/Never ask for passwords here\. In rooms it is view-only: ask in text there\.$/);
+    expect(show.description).toContain("To replace a widget in place (a progress bar moving, a status changing), call this again with the widget_id it returned (was update_widget); one the person already answered cannot be replaced, so show a new one.");
+    for (const name of ["attach_file", "show_widget"]) expect(tools.get(name), name).not.toHaveProperty("annotations");
+  });
+});
+
+describe("show_widget", () => {
+  it("posts the tree as the model wrote it, and lets the model finish what does not wait on the answer", async () => {
+    const { api, apiResponse, context } = harness();
+    const result = await callTool("show_widget", { widget: WIDGET_SAMPLES.pullRequests }, context);
+    expect(apiResponse).toHaveBeenCalledTimes(1);
+    expect(apiResponse).toHaveBeenCalledWith("/api/internal/options-card", {
+      method: "POST",
+      body: JSON.stringify({ tool: "show_widget", widget: WIDGET_SAMPLES.pullRequests }),
+    });
+    expect(api).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      text: 'Shown as widget m42. Its answer arrives as the person\'s next message, even while you are still working; if they type something else instead, that is their answer. Do what does not depend on it, then end your turn without asking again in text. To change it later, call show_widget again with widget_id "m42".',
+    });
+  });
+
+  it("says so when the harness masked something that read as a secret", async () => {
+    const { apiResponse, context } = harness();
+    apiResponse.mockResolvedValueOnce({ ok: true, status: 201, body: { messageId: "m42", masked: true } });
+    const result = await callTool("show_widget", { widget: WIDGET_SAMPLES.pullRequests }, context);
+    expect(result.isError).toBeUndefined();
+    expect(result.text).toMatch(/^Shown as widget m42\. .* Something in it read as a secret and was masked before it was stored\. Never put secrets in a widget, and name a payload field key, token or password only when it holds one\.$/);
+  });
+
+  it("warns when a list has a confirm button and no row that can be chosen, and says nothing when one can", async () => {
+    const { context } = harness();
+    const rows = ["Butter chicken", "Veggie bowl", "Pizza"].map((value) => ({ type: "ListViewItem", children: [{ type: "Text", value }] }));
+    const confirm = { label: "Pick this", action: { type: "dinner.pick" } };
+    const stuck = await callTool("show_widget", { widget: { type: "ListView", title: "Dinner", children: rows, confirm } }, context);
+    expect(stuck.isError).toBeUndefined();
+    expect(stuck.text).toMatch(/ For you only; never mention it to the person: No row of this list can be chosen: the person can only confirm or cancel it as a whole\. If they are meant to pick one row, show it again with its widget_id and give the ListView a name \(and each row a value\), so the rows become selectable and confirm sends the pick\.$/);
+    const choice = await callTool("show_widget", { widget: { type: "ListView", name: "dish", title: "Dinner", children: rows, confirm } }, context);
+    expect(choice.text).not.toContain("No row of this list can be chosen");
+    const pressable = await callTool("show_widget", { widget: WIDGET_SAMPLES.pullRequests }, context);
+    expect(pressable.text).not.toContain("No row of this list can be chosen");
+  });
+
+  it("sends fallback_text only when it is a string", async () => {
+    const { apiResponse, context } = harness();
+    await callTool("show_widget", { widget: WIDGET_SAMPLES.spendTable, fallback_text: "Spend by bot, last 7 days." }, context);
+    await callTool("show_widget", { widget: WIDGET_SAMPLES.spendTable, fallback_text: 7 }, context);
+    expect(apiResponse.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+      { tool: "show_widget", widget: WIDGET_SAMPLES.spendTable, fallback_text: "Spend by bot, last 7 days." },
+      { tool: "show_widget", widget: WIDGET_SAMPLES.spendTable },
+    ]);
+  });
+
+  it("returns the parser's sentence for a malformed widget without calling the harness", async () => {
+    const { api, apiResponse, context } = harness();
+    expect(await callTool("show_widget", { widget: { type: "Card", children: [{ type: "Select", name: "a", options: [] }] } }, context))
+      .toEqual({ text: "widget.children[0].options: needs 1 to 40 items.", isError: true });
+    expect(await callTool("show_widget", {}, context)).toEqual({ text: "widget: must be an object with a type.", isError: true });
+    expect(await callTool("show_widget", { widget: { type: "Card", children: [{ type: "Input", name: "pw", inputType: "password" }] } }, context))
+      .toEqual({ text: "widget.children[0].inputType: password fields are not allowed in a widget; use request_credential for secrets.", isError: true });
+    expect(apiResponse).not.toHaveBeenCalled();
+    expect(api).not.toHaveBeenCalled();
+  });
+
+  it("hands the harness's refusal to the model as an error", async () => {
+    const answered = harness({ ok: false, status: 409, body: { error: "The person already answered that widget. Show a new one." } });
+    expect(await callTool("show_widget", { widget: WIDGET_SAMPLES.pullRequests }, answered.context))
+      .toEqual({ text: "The person already answered that widget. Show a new one.", isError: true });
+    const silent = harness({ ok: false, status: 500, body: {} });
+    expect(await callTool("show_widget", { widget: WIDGET_SAMPLES.pullRequests }, silent.context)).toEqual({ text: "Could not show that widget.", isError: true });
+  });
+});
+
+describe("update_widget", () => {
+  it("names the widget it replaces", async () => {
+    const { apiResponse, context } = harness({ ok: true, status: 201, body: { messageId: "m7" } });
+    const result = await callTool("update_widget", { widget_id: "m7", widget: WIDGET_SAMPLES.buildStatus, fallback_text: "ignored" }, context);
+    expect(apiResponse).toHaveBeenCalledWith("/api/internal/options-card", {
+      method: "POST",
+      body: JSON.stringify({ tool: "update_widget", widget_id: "m7", widget: WIDGET_SAMPLES.buildStatus }),
+    });
+    expect(result).toEqual({ text: "Updated widget m7." });
+  });
+
+  it("checks the widget, then the id, before any round trip", async () => {
+    const { apiResponse, context } = harness();
+    expect(await callTool("update_widget", { widget_id: "m7", widget: "not json" }, context)).toEqual({ text: "widget: must be a JSON object, not text.", isError: true });
+    expect(await callTool("update_widget", { widget: WIDGET_SAMPLES.buildStatus }, context)).toEqual({ text: "widget_id: is required, the id show_widget returned.", isError: true });
+    expect(await callTool("update_widget", { widget_id: "  ", widget: WIDGET_SAMPLES.buildStatus }, context)).toMatchObject({ isError: true });
+    expect(apiResponse).not.toHaveBeenCalled();
+  });
+
+  it("hands a settled or unknown widget's refusal to the model", async () => {
+    const settled = harness({ ok: false, status: 409, body: { error: "The person already answered that widget. Show a new one." } });
+    expect(await callTool("update_widget", { widget_id: "m7", widget: WIDGET_SAMPLES.buildStatus }, settled.context))
+      .toEqual({ text: "The person already answered that widget. Show a new one.", isError: true });
+    const silent = harness({ ok: false, status: 500, body: {} });
+    expect(await callTool("update_widget", { widget_id: "m7", widget: WIDGET_SAMPLES.buildStatus }, silent.context)).toEqual({ text: "Could not update that widget.", isError: true });
+  });
+});
+
+describe("the chat-app tools", () => {
+  it("are in every catalog, after the widget tools, with schemas a model can fill and no read-only annotation", () => {
+    for (const profile of [PROFILE, { ...PROFILE, chief: true, skillAuthoring: true, sharedComputers: true, voiceNotes: true }, { ...PROFILE, cloudHome: true }]) {
+      const names = availableTools(profile).map((tool) => tool.name);
+      expect(names.slice(names.indexOf("show_widget"), names.indexOf("show_widget") + 2)).toEqual(["show_widget", "show_html"]);
+    }
+    const tools = new Map(availableTools(PROFILE).map((tool) => [tool.name, tool as { description: string; inputSchema: { required: string[] }; annotations?: unknown }]));
+    expect(tools.get("show_html")!.description).toMatch(/^Show a small self-contained web page in this chat, where the person watches it appear and can point at a part to change: /);
+    expect(tools.get("show_html")!.description).toContain("or `jsx`, one React component file with a default export");
+    // It points a dashboard at the bundled data-dashboards skill.
+    expect(tools.get("show_html")!.description).toMatch(/At most 256 KB\. To replace a page you showed, in place, call this again with the app_id it returned and new html, jsx or path \(was update_html\); it reloads, so anything the person did in it is lost\. Never put secrets in it\. In rooms everyone sees it, view-only: send and setContext do nothing\. For a data dashboard, follow the data-dashboards skill\. /);
+    // A claude.ai Artifact needs Claude's own claude.ai sign-in: the bot says so and offers our own pages instead.
+    expect(tools.get("show_html")!.description).toMatch(/Asked for a claude\.ai Artifact\? Those need Claude's own claude\.ai sign-in and are not available to bots here: say so in one line, then make it with this tool, or publish_page for a public link\.$/);
+    expect(tools.get("show_html")!.inputSchema).not.toHaveProperty("required");
+    expect(Object.keys((tools.get("show_html")!.inputSchema as unknown as { properties: object }).properties)).toEqual(expect.arrayContaining(["html", "jsx", "path", "title", "app_id"]));
+    expect(Buffer.byteLength(JSON.stringify(tools.get("show_html")))).toBeLessThan(12 * 1024);
+    expect(tools.get("show_html")).not.toHaveProperty("annotations");
+    expect(tools.has("update_html")).toBe(false);
+  });
+
+  it("show_html posts the page and tells the model how to change it", async () => {
+    const { apiResponse, context } = harness({ ok: true, status: 201, body: { messageId: "m9" } });
+    const result = await callTool("show_html", { html: "<p>hi</p>", title: "Hi", height: 200, fallback_text: "Hi", extra: true }, context);
+    expect(apiResponse).toHaveBeenCalledWith("/api/internal/options-card", {
+      method: "POST",
+      body: JSON.stringify({ tool: "show_html", html: "<p>hi</p>", title: "Hi", height: 200, fallback_text: "Hi" }),
+    });
+    expect(result).toEqual({ text: "Shown as app m9. To change it, call show_html again with app_id \"m9\"." });
+  });
+
+  it("passes frameless on to the page, for a new page and an update", async () => {
+    const { apiResponse, context } = harness({ ok: true, status: 201, body: { messageId: "m9" } });
+    await callTool("show_html", { html: "<p>hi</p>", title: "Hi", frameless: true }, context);
+    expect(apiResponse).toHaveBeenLastCalledWith("/api/internal/options-card", {
+      method: "POST", body: JSON.stringify({ tool: "show_html", html: "<p>hi</p>", title: "Hi", frameless: true }),
+    });
+    await callTool("show_html", { app_id: "m9", html: "<p>hi</p>", frameless: false }, context);
+    expect(JSON.parse(apiResponse.mock.lastCall![1]!.body as string)).toMatchObject({ app_id: "m9", frameless: false });
+  });
+
+  it("passes on the sentence naming the files a folder page left out", async () => {
+    const leftOut = "Left out land.foo (pages can't carry .foo files) and .env (hidden).";
+    const { context } = harness({ ok: true, status: 201, body: { messageId: "m9", leftOut } });
+    expect(await callTool("show_html", { path: "trails", title: "Trails" }, context)).toEqual({ text: `Shown as app m9. To change it, call show_html again with app_id "m9". ${leftOut}` });
+    expect(await callTool("show_html", { app_id: "m9", path: "trails" }, context)).toEqual({ text: `Updated app m9. ${leftOut}` });
+  });
+
+  it("says when something in the page was masked as a secret", async () => {
+    const { context } = harness({ ok: true, status: 201, body: { messageId: "m9", masked: true } });
+    expect((await callTool("show_html", { html: "<p>hi</p>", title: "Hi" }, context)).text).toContain("masked before it was stored");
+  });
+
+  it("checks the page before any round trip, and hands a refusal to the model", async () => {
+    const { apiResponse, context } = harness();
+    expect(await callTool("show_html", { title: "Hi" }, context)).toMatchObject({ isError: true, text: expect.stringMatching(/^html:/) });
+    expect(await callTool("show_html", { html: "x".repeat(262_145), title: "Hi" }, context)).toMatchObject({ isError: true });
+    expect(await callTool("update_html", { html: "<p>x</p>" }, context)).toEqual({ text: "app_id: is required, the id show_html returned.", isError: true });
+    expect(apiResponse).not.toHaveBeenCalled();
+    const fromMcp = harness({ ok: false, status: 409, body: { error: "That app came from an MCP server, not from show_html; it cannot be replaced. Show a new page instead." } });
+    expect(await callTool("show_html", { html: "<p>x</p>", title: "x" }, fromMcp.context))
+      .toEqual({ text: "That app came from an MCP server, not from show_html; it cannot be replaced. Show a new page instead.", isError: true });
+    const silent = harness({ ok: false, status: 500, body: {} });
+    expect(await callTool("update_html", { app_id: "m1", html: "<p>x</p>" }, silent.context)).toEqual({ text: "Could not update that page.", isError: true });
+  });
+
+  it("passes a jsx page on as jsx, never as html, and refuses both at once before any round trip", async () => {
+    const { apiResponse, context } = harness({ ok: true, status: 201, body: { messageId: "m9" } });
+    const jsx = "export default function Page() { return <p>hi</p>; }";
+    await callTool("show_html", { jsx, title: "Hi" }, context);
+    expect(apiResponse).toHaveBeenLastCalledWith("/api/internal/options-card", { method: "POST", body: JSON.stringify({ tool: "show_html", jsx, title: "Hi" }) });
+    await callTool("update_html", { app_id: "m9", jsx }, context);
+    expect(apiResponse).toHaveBeenLastCalledWith("/api/internal/options-card", { method: "POST", body: JSON.stringify({ tool: "update_html", app_id: "m9", jsx }) });
+    await callTool("show_html", { path: "site", title: "Site" }, context);
+    expect(apiResponse).toHaveBeenLastCalledWith("/api/internal/options-card", { method: "POST", body: JSON.stringify({ tool: "show_html", path: "site", title: "Site" }) });
+    expect(apiResponse).toHaveBeenCalledTimes(3);
+    expect(await callTool("show_html", { path: "site", html: "<p>x</p>", title: "Hi" }, context)).toEqual({ text: "Send one of html, jsx or path.", isError: true });
+    expect(await callTool("show_html", { jsx, html: "<p>x</p>", title: "Hi" }, context)).toEqual({ text: "Send one of html, jsx or path.", isError: true });
+    expect(await callTool("show_html", { jsx: "const x = 1;", title: "Hi" }, context)).toEqual({ text: "jsx: needs `export default` of the page's component.", isError: true });
+    expect(apiResponse).toHaveBeenCalledTimes(3);
+  });
+
+  it("update_html names the page it replaced", async () => {
+    const { apiResponse, context } = harness({ ok: true, status: 201, body: { messageId: "m1" } });
+    expect(await callTool("update_html", { app_id: "m1", html: "<p>x</p>", title: "New", height: 400 }, context)).toEqual({ text: "Updated app m1." });
+    expect(apiResponse).toHaveBeenCalledWith("/api/internal/options-card", { method: "POST", body: JSON.stringify({ tool: "update_html", app_id: "m1", html: "<p>x</p>", title: "New" }) });
+  });
+});

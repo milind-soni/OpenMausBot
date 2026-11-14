@@ -1,19 +1,9 @@
-// Refresh latest-mac.yml after notarization stapling has changed the bytes.
-//
-// electron-builder writes latest-mac.yml during packaging, but the release
-// flow then notarizes and STAPLES the dmg and the updater zip, which rewrites
-// both files — so every hash in the feed is stale by the time it is published.
-// Shipping the stale feed makes electron-updater reject the download (sha512
-// mismatch) and every update falls back to a full manual reinstall.
-//
-// This keeps the file list and ORDER exactly as electron-builder wrote them —
-// electron-updater filters that list by arch on macOS (files carrying an
-// "arm64" marker on Apple silicon, the unmarked x64 ones on Intel), and the
-// top-level path/sha512 is the legacy fallback taken from the first entry —
-// and only recomputes sha512 + size from the bytes on disk right now.
-//
-// Blockmaps are NOT handled here: regenerate them separately with
-// scripts/regenerate-blockmaps.mjs after stapling, for the same staleness reason.
+// Refresh latest-mac.yml after notarization stapling rewrote the dmg and the
+// updater zip: a stale sha512 makes electron-updater reject the download. The
+// file list and its ORDER stay exactly as electron-builder wrote them
+// (electron-updater filters it by arch on macOS, and the top-level path/sha512
+// is the legacy fallback from the first entry); only sha512 and size are
+// recomputed. Blockmaps go stale the same way: regenerate-blockmaps.mjs.
 import { createHash } from "node:crypto";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

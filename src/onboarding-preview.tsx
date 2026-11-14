@@ -1,164 +1,132 @@
-// Dev gallery for the welcome flow, like mascot-preview.html for the mascot:
-// every beat, in every skin, with reduced motion on or off, without touching
-// the workspace's real onboarding record. Served by Vite in dev at
-// /onboarding-preview.html; not part of the packaged app.
-//
-// The flow talks to whatever harness the dev proxy points at, so the engines
-// and phone beats show real data when `pnpm dev:server` is running and their
-// empty or error states when it is not. Saving the preview bot fails on
-// purpose (there is no such bot), which exercises the exit beat's error path.
-import { StrictMode, useEffect, useState } from "react";
+// Dev-only gallery of the first run's two screens, served at /onboarding-preview.html; not in the packaged app.
+// It answers the app's own requests from a fixture, so it needs no server and never touches one.
+import { Component, StrictMode, useEffect, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { WelcomeFlow } from "@/components/onboarding/WelcomeFlow";
-import type { MausMotion } from "@/lib/mascot";
-import { type BeatId, beatsFor } from "@/lib/onboarding";
+import { Select } from "@/components/Select";
+import { EMPTY_ONBOARDING, type BeatId } from "@/lib/onboarding";
 import { SKINS, type SkinId } from "@/lib/skins";
-import { StoreProvider, type Bot } from "@/state/store";
+import { StoreProvider } from "@/state/store";
 import "./styles.css";
 
-const PREVIEW_BOT = {
-  id: "preview-bot",
-  name: "Maus",
-  color: "green",
-  soul: "",
-} as unknown as Bot;
-
-const BEATS = beatsFor({ dictation: true, reel: true });
-
-/** ?beat=engines&skin=linen&reduced=1&all=1 — so a screenshot script can
- * open any state directly. Unknown values fall back to the defaults. */
+/** ?screen=chief&ai=0&bots=3&skin=daylight&reduced=1 opens any state directly; ?w=1338&h=870 sizes the stage. */
 function fromUrl() {
   const params = new URLSearchParams(location.search);
-  const beat = params.get("beat") as BeatId | null;
   const skin = params.get("skin") as SkinId | null;
   return {
-    beat: beat && BEATS.includes(beat) ? beat : ("hello" as BeatId),
+    screen: (params.get("screen") === "chief" ? "chief" : "meet") as BeatId,
     skin: skin && SKINS.some((s) => s.id === skin) ? skin : ("midnight" as SkinId),
+    ai: params.get("ai") !== "0",
+    bots: Math.max(0, Math.min(20, Number(params.get("bots")) || 0)),
     reduced: params.get("reduced") === "1",
-    all: params.get("all") === "1",
-    entrance: (params.get("entrance") ?? "arrive") as Exclude<MausMotion, "none">,
+    size: { width: Number(params.get("w")) || 1338, height: Number(params.get("h")) || 870 },
   };
 }
 
-/** One window-sized stage in one skin. The flow fills it via `embedded`. */
-function Stage({ skin, beat, run, scale = 1, entrance }: { skin: SkinId; beat: BeatId; run: number; scale?: number; entrance: Exclude<MausMotion, "none"> }) {
-  const width = 1100;
-  const height = 720;
-  return (
-    <div
-      data-skin={skin}
-      className="relative overflow-hidden rounded-xl border border-hairline/40 bg-app"
-      style={{ width: width * scale, height: height * scale }}
-    >
-      <div style={{ width, height, transform: `scale(${scale})`, transformOrigin: "top left" }}>
-        <WelcomeFlow
-          key={`${skin}-${beat}-${run}`}
-          embedded
-          dictation
-          entrance={entrance}
-          initialBeat={beat}
-          bot={PREVIEW_BOT}
-          onDone={() => {}}
-        />
-      </div>
-    </div>
-  );
+const NAMES = ["Research", "Inbox", "Writer", "Scout", "Ledger", "Atlas", "Pixel", "Harbor", "Juniper", "Quill"];
+const COLORS = ["blue", "orange", "purple", "teal", "pink", "green", "red", "cyan", "yellow", "coral"] as const;
+
+function bot(id: string, name: string, color: string, extra: Record<string, unknown> = {}) {
+  return {
+    id, threadId: `${id}-thread`, name, title: "", description: "", notifications: true, color, unread: false, createdAt: 1,
+    modelSelection: { instanceId: "claude", model: "sonnet" }, messages: [], tasks: [{ threadId: `${id}-thread`, title: "", createdAt: 1 }], ...extra,
+  };
+}
+
+function fixture(url: string, ai: boolean, bots: number): unknown {
+  const path = new URL(url, location.href).pathname;
+  if (path === "/api/bots") {
+    return { bots: [
+      bot("maus", "MausBot", "chrome", { defaultBot: {}, chiefOfStaff: true }),
+      ...Array.from({ length: bots }, (_, i) => bot(`bot-${i}`, NAMES[i % NAMES.length]!, COLORS[i % COLORS.length]!, { title: i % 3 === 0 ? "Finds and summarises" : "" })),
+    ], groups: [], sections: [] };
+  }
+  if (path === "/api/instances") {
+    return { instances: [{
+      instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", install: { docsUrl: "https://docs.anthropic.com" },
+      authentication: { method: "paste-code" }, capabilities: { agentsMcp: true },
+      snapshot: { state: "available", authenticated: ai }, models: { default: "sonnet", options: [] },
+    }, {
+      instanceId: "codex", driverKind: "codex", displayName: "Codex", install: { docsUrl: "https://example.test" },
+      snapshot: { state: "unavailable", authenticated: false }, models: { default: "m", options: [] },
+    }] };
+  }
+  if (path === "/api/config") return { onboarding: EMPTY_ONBOARDING, profile: { name: "", email: "", aboutMe: "" } };
+  if (path === "/api/auth/session") return { kind: "local" };
+  if (path.startsWith("/api/routines?since=")) return { routines: [], runs: [] };
+  if (path === "/api/notifications") return { notifications: [] };
+  if (path === "/api/webhooks") return { webhooks: [], attempts: [], ingress: null };
+  if (path === "/api/phones") return { phones: [] };
+  if (path === "/api/connectors/connected") return { services: {} };
+  if (path === "/api/connectors/catalog") return { cards: [] };
+  return {};
+}
+
+function answerFromFixture(ai: boolean, bots: number) {
+  const real = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (!new URL(url, location.href).pathname.startsWith("/api/")) return real(input, init);
+    return new Response(JSON.stringify(fixture(url, ai, bots)), { status: 200, headers: { "content-type": "application/json" } });
+  };
 }
 
 function Preview() {
   const initial = fromUrl();
   const [skin, setSkin] = useState<SkinId>(initial.skin);
-  const [beat, setBeat] = useState<BeatId>(initial.beat);
-  const [reduced, setReduced] = useState(initial.reduced);
-  const [all, setAll] = useState(initial.all);
+  const [screen, setScreen] = useState<BeatId>(initial.screen);
   const [run, setRun] = useState(0);
-
   useEffect(() => {
-    document.documentElement.dataset.reducedMotion = reduced ? "true" : "false";
-  }, [reduced]);
-
-  // ?debug=1 — after a few seconds, log what the guide's face was drawn as.
-  // Lets a headless run inspect the animation loop's output without DevTools.
-  useEffect(() => {
-    if (!new URLSearchParams(location.search).has("debug")) return;
-    const timer = setTimeout(() => {
-      const paths = document.querySelectorAll<SVGPathElement>(".welcome-maus svg path");
-      paths.forEach((el, i) => {
-        console.log(`[maus-debug] path ${i} d=${(el.getAttribute("d") ?? "").slice(0, 60)} transform=${el.getAttribute("transform") ?? ""} opacity=${el.style.opacity}`);
-      });
-      const groups = document.querySelectorAll<SVGGElement>(".welcome-maus svg g[transform]");
-      groups.forEach((el, i) => console.log(`[maus-debug] g ${i} transform=${el.getAttribute("transform")}`));
-    }, 3500);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const control =
-    "rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[13px] text-ink focus:outline-none";
-
+    document.documentElement.dataset.reducedMotion = initial.reduced ? "true" : "false";
+    document.documentElement.dataset.skin = skin;
+  }, [initial.reduced, skin]);
+  const { width, height } = initial.size;
   return (
-    <div data-skin="midnight" className="min-h-screen bg-app p-6 text-ink">
-      <header className="mb-5 flex flex-wrap items-center gap-3">
-        <h1 className="mr-2 text-[18px] font-semibold">Welcome flow</h1>
-        <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-          Beat
-          <select value={beat} onChange={(e) => setBeat(e.target.value as BeatId)} className={control}>
-            {BEATS.map((id) => (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            ))}
-          </select>
+    <div className="min-h-screen bg-app p-6 text-ink">
+      <header className="mb-5 flex flex-wrap items-center gap-3 text-[13px] text-ink-secondary">
+        <h1 className="mr-2 text-[18px] font-semibold text-ink">First run</h1>
+        <label className="flex items-center gap-1.5">Screen
+          <Select size="sm" value={screen} onChange={(e) => { setScreen(e.target.value as BeatId); setRun((r) => r + 1); }}>
+            <option value="meet">Meet</option>
+            <option value="chief">Chief of Staff</option>
+          </Select>
         </label>
-        <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-          Skin
-          <select value={skin} onChange={(e) => setSkin(e.target.value as SkinId)} className={control} disabled={all}>
-            {SKINS.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+        <label className="flex items-center gap-1.5">Skin
+          <Select size="sm" value={skin} onChange={(e) => setSkin(e.target.value as SkinId)}>
+            {SKINS.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </Select>
         </label>
-        <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-          <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> All skins
-        </label>
-        <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-          <input type="checkbox" checked={reduced} onChange={(e) => setReduced(e.target.checked)} /> Reduced motion
-        </label>
-        <button
-          onClick={() => setRun((r) => r + 1)}
-          className="rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
-        >
-          Replay entrance
-        </button>
-        <span className="ml-auto text-[12px] text-ink-secondary">
-          Use Back / Continue inside the card to walk the real transitions.
-        </span>
+        <button onClick={() => setRun((r) => r + 1)} className="rounded-lg bg-raised px-3 py-1.5 text-ink hover:bg-raised-hover">Replay</button>
+        <span className="ml-auto">?ai=0 for no AI, ?bots=3 for bots to choose from</span>
       </header>
-
-      {all ? (
-        <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
-          {SKINS.map((s) => (
-            <div key={s.id} className="flex flex-col gap-1.5">
-              <div className="text-[12px] text-ink-secondary">{s.name}</div>
-              <Stage skin={s.id} beat={beat} run={run} scale={0.42} entrance={initial.entrance} />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <Stage skin={skin} beat={beat} run={run} entrance={initial.entrance} />
-      )}
+      <div className="relative overflow-hidden rounded-xl border border-hairline/40 bg-app" style={{ width, height }}>
+        <WelcomeFlow key={`${screen}-${run}`} embedded initialBeat={screen} onDone={() => setRun((r) => r + 1)} />
+      </div>
     </div>
   );
 }
 
+class Crash extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    return this.state.error ? <pre className="whitespace-pre-wrap p-6 text-[12px] text-danger">{this.state.error.stack}</pre> : this.props.children;
+  }
+}
+
+const { ai, bots } = fromUrl();
+answerFromFixture(ai, bots);
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <DesktopCapabilitiesProvider>
-      <StoreProvider>
-        <Preview />
-      </StoreProvider>
-    </DesktopCapabilitiesProvider>
+    <Crash>
+      <DesktopCapabilitiesProvider>
+        <StoreProvider>
+          <Preview />
+        </StoreProvider>
+      </DesktopCapabilitiesProvider>
+    </Crash>
   </StrictMode>,
 );

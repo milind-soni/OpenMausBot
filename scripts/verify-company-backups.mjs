@@ -31,7 +31,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
   const checks = [], progressPhases = new Set();
   let win, origin, prepared = null, transferController = null;
   let state = { busy: false }, organization = { status: "signed-out" };
-  let cloudRequests = 0, createCalls = 0, restoreCalls = 0, deleteCalls = 0, objectRequests = 0;
+  let cloudRequests = 0, createCalls = 0, restoreCalls = 0, restartCalls = 0, deleteCalls = 0, objectRequests = 0;
   let scheduler, scheduleRecord = null, scheduleTimer = null, scheduleClock = Date.now(), scheduledRuns = 0, snapshotRequest = null;
   const metadata = entry => ({ id: entry.id, status: entry.status, sizeBytes: entry.sizeBytes, sha256: entry.sha256,
     passwordRequired: false,
@@ -194,6 +194,23 @@ if (process.versions.electron && process.argv.includes(flag)) {
     const result = await localJson("/api/workspace-backup/restore", input);
     publish({ busy: false, pendingRestore: true }); return { restoreId: result.id };
   });
+  handle("desktop:relaunch", async () => {
+    assert.equal((await localJson("/api/workspace-backup/status")).pendingRestore, true);
+    const marker = await win.webContents.executeJavaScript(`localStorage.getItem(${JSON.stringify(MARKER)})`);
+    assert.match(marker, /^[a-f0-9-]{36}$/);
+    assert.equal(++restartCalls, 1, "one user action requests exactly one owned restart");
+    // Exercise production preload/UI dispatch; only the main-process restart
+    // wiring is substituted so the smoke can keep collecting evidence.
+    const restarted = new Promise((done, reject) => {
+      const timer = setTimeout(() => reject(new Error("Owned runtime restart timed out")), 35_000);
+      process.once("message", message => { clearTimeout(timer); if (message.ok) done(message); else reject(new Error(message.error)); });
+    });
+    process.send({ type: "restart-fixture" }); await restarted;
+    assert.equal(await win.webContents.executeJavaScript(`localStorage.getItem(${JSON.stringify(MARKER)})`), marker, "restart action preserves the recovery marker until renderer recovery");
+    publish({ busy: false });
+    setTimeout(() => win.reload(), 50);
+    return true;
+  });
 
   app.whenReady().then(async () => {
     await scheduler.start();
@@ -299,7 +316,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     await evaluate("document.querySelector('dialog input').scrollIntoView({block:'center'}); document.querySelector('dialog input').focus();");
     await screenshot("company-backup-replace-narrow.png");
     await click("Replace installation");
-    await until(() => evaluate("document.body.textContent.includes('Fully quit OpenMausBot') && !document.querySelector('dialog[open]')"), "restart-required confirmation");
+    await until(() => evaluate(`Boolean(${button("Restart and restore")}) && !document.querySelector('dialog[open]')`), "restart-required confirmation");
     const restoreId = await evaluate(`localStorage.getItem(${JSON.stringify(MARKER)})`);
     assert.match(restoreId, /^[a-f0-9-]{36}$/); assert.equal(restoreCalls, 1);
     assert.equal((await localJson("/api/workspace-backup/status")).pendingRestore, true);
@@ -309,16 +326,13 @@ if (process.versions.electron && process.argv.includes(flag)) {
 
     // A new renderer instance, not the component's transient restart state.
     win.destroy(); win = await open(true); await win.loadURL(url);
-    await until(() => evaluate("document.body.textContent.includes('Fully quit OpenMausBot')"), "pending restore on reopen");
+    await until(() => evaluate(`Boolean(${button("Restart and restore")})`), "pending restore on reopen");
     assert.equal(await evaluate("document.body.textContent.includes('Back up this installation')"), false);
+    assert.equal(await evaluate(`Boolean(${button("Restart and restore")})`), true);
+    assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true);
+    await screenshot("company-backup-recovery-restart-action.png");
     checks.push("pending restore survives closing and reopening the renderer");
-    const restarted = new Promise((done, reject) => {
-      const timer = setTimeout(() => reject(new Error("Owned runtime restart timed out")), 35_000);
-      process.once("message", message => { clearTimeout(timer); if (message.ok) done(message); else reject(new Error(message.error)); });
-    });
-    process.send({ type: "restart-fixture" }); await restarted;
-    publish({ busy: false });
-    await win.reload();
+    await click("Restart and restore");
     await until(() => evaluate(`localStorage.getItem(${JSON.stringify(MARKER)}) === null && document.body.textContent.includes('Company cloud backups')`), "existing recovery restores drafts and clears marker");
     const afterIds = await botIds(); assert.ok(afterIds.includes(sourceBotId)); assert.equal(afterIds.includes(extra.bot.id), false);
     assert.equal(await evaluate("localStorage.getItem('omb-drafts')"), "fixture private draft");
@@ -326,7 +340,8 @@ if (process.versions.electron && process.argv.includes(flag)) {
     const afterStatus = await localJson("/api/workspace-backup/status");
     assert.equal(afterStatus.lastRestoreId, restoreId); assert.ok(afterStatus.safetyCopyPath);
     await screenshot("company-backup-restored-after-reopen.png");
-    checks.push("exact fixture runtime restart restores snapshot IDs, removes later bot, retains safety copy and runs existing draft recovery");
+    assert.equal(restartCalls, 1);
+    checks.push("Restart and restore invokes production preload desktop:relaunch once, restarts the exact owned fixture runtime, restores snapshot IDs, removes later bot, retains safety copy and recovers drafts");
 
     // Real schedule + renderer/preload + exporter. Only clock/store/authority are
     // synthetic. Setting a schedule must not create an archive immediately.
@@ -374,13 +389,14 @@ if (process.versions.electron && process.argv.includes(flag)) {
     assert.equal(scheduleTimer, null);
     checks.push("passwordless daily backups require explicit scope consent; start after 24h; production scheduler takes two encrypted snapshots with fresh private preload drafts; a week missed produces one catch-up; disable forgets the schedule");
     const remote = await open(false); await remote.loadURL(url);
-    assert.equal(await remote.webContents.executeJavaScript("typeof window.ogb.companyBackups"), "undefined"); remote.destroy();
-    checks.push("production preload omits company backup bridge from remote-origin windows");
+    assert.equal(await remote.webContents.executeJavaScript("typeof window.ogb.companyBackups"), "undefined");
+    assert.equal(await remote.webContents.executeJavaScript("typeof window.ogb.relaunch"), "undefined"); remote.destroy();
+    checks.push("production preload omits company backup and local relaunch bridges from remote-origin windows");
     assert.ok(progressPhases.has("uploading") && progressPhases.has("downloading") && progressPhases.has("preparing"));
-    const receipt = { passed: true, checks, createCalls, restoreCalls, deleteCalls, cloudRequests, objectRequests, scheduledRuns,
+    const receipt = { passed: true, checks, createCalls, restoreCalls, restartCalls, deleteCalls, cloudRequests, objectRequests, scheduledRuns,
       progressPhases: [...progressPhases], archiveBytes: objects.get(first).length,
       production: ["CompanyBackupSettings", "WorkspaceBackupRecovery", "electron/preload.cjs", "electron/company-backups.mjs", "electron/company-backup-schedule.mjs", "real local workspace-backup HTTP/archive/restart"],
-      limits: "Synthetic company state, schedule clock/credential store and fixture IPC wiring, loopback Admin/object store, one small real part; not production main integration, real Admin consent/auth, keychain, R2/TLS, multi-part scale or a 10 GiB stress test." };
+      limits: "Synthetic company state, schedule clock/credential store and fixture IPC wiring, loopback Admin/object store, one small real part; desktop:relaunch restarts the owned server and renderer, not the full production Electron main process; not real Admin consent/auth, keychain, R2/TLS, multi-part scale or a 10 GiB stress test." };
     writeFileSync(join(output, "receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
     console.log(JSON.stringify(receipt)); scheduler.close(); admin.close(); win.destroy(); app.exit(0);
   }).catch(async error => {

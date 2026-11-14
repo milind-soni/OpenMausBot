@@ -1,9 +1,3 @@
-// The decision log's own mechanics: what a row looks like on disk, that
-// credential-shaped content never reaches the file, that the file stays
-// private, that month files are kept for the retention window (and older
-// servers' single file is still read), that a person's answer names who
-// gave it, and the CSV export. The WIRING — which decisions get written at
-// all — is pinned separately in decision-log-wiring.test.ts.
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -62,9 +56,7 @@ describe("appendDecision / readDecisions", () => {
   });
 
   it("keeps credential-shaped content out of the written row", async () => {
-    // Both shapes redact.ts guards against: a known key prefix, and a
-    // KEY=value pair with a secret-shaped name. The summary is whatever
-    // the agent typed — this is exactly how a key ends up in a log.
+    // Both shapes redact.ts guards: a known key prefix, and KEY=value with a secret-shaped name; the summary is whatever the agent typed.
     const secret = "sk-live-abcdefghijklmnop1234";
     appendDecision(dir, row({ summary: `export STRIPE_API_KEY=${secret}` }));
     await flushDecisionLog(dir);
@@ -96,9 +88,7 @@ describe("appendDecision / readDecisions", () => {
     appendDecision(dir, row({ requestId: "new-1" }));
     await flushDecisionLog(dir);
     expect(readDecisions(dir, 10).map((r) => r.requestId)).toEqual(["old-1", "old-2", "new-1"]);
-    // the newest page is read from the newest month file backwards
     expect(readDecisions(dir, 1).map((r) => r.requestId)).toEqual(["new-1"]);
-    // the legacy files are read, never written
     expect(readFileSync(join(dir, "decisions.ndjson"), "utf8")).toBe(legacy("old-2"));
   });
 
@@ -141,6 +131,36 @@ describe("appendDecision / readDecisions", () => {
     expect(rows.find((r) => r.requestId === "answered")?.actor).toEqual({ kind: "session", sessionId: "s1", label: "Laptop", email: "ada@example.test" });
     expect(rows.find((r) => r.requestId === "rule")?.actor).toBeUndefined();
     expect(rows.find((r) => r.requestId === "outside")?.actor).toBeUndefined();
+  });
+
+  it("marks a person's decision made by voice on a Live call", async () => {
+    await withDecisionActor({ kind: "loopback" }, async () => {
+      appendDecision(dir, row({ requestId: "spoken", decision: "user-approved", source: "user" }));
+      appendDecision(dir, row({ requestId: "rule", decision: "auto-approved", source: "full-access" }));
+    }, "call");
+    await withDecisionActor({ kind: "loopback" }, async () => {
+      appendDecision(dir, row({ requestId: "tapped", decision: "user-approved", source: "user" }));
+    });
+    await flushDecisionLog(dir);
+    const rows = readDecisions(dir, 10);
+    expect(rows.find((r) => r.requestId === "spoken")).toMatchObject({ actor: { kind: "loopback" }, via: "call" });
+    expect(rows.find((r) => r.requestId === "rule")?.via).toBeUndefined();
+    expect(rows.find((r) => r.requestId === "tapped")?.via).toBeUndefined();
+    const csv = decisionsCsv(rows);
+    expect(csv).toContain("This computer (by voice)");
+    expect(csv.split("\n").filter((line) => line.includes("(by voice)"))).toHaveLength(1);
+  });
+
+  it("marks a person's decision made with a 👍 or 👎 on the card", async () => {
+    await withDecisionActor({ kind: "loopback" }, async () => {
+      appendDecision(dir, row({ requestId: "reacted", decision: "user-denied", source: "user" }));
+    }, "reaction");
+    await flushDecisionLog(dir);
+    const rows = readDecisions(dir, 10);
+    expect(rows.find((r) => r.requestId === "reacted")).toMatchObject({ actor: { kind: "loopback" }, via: "reaction" });
+    const csv = decisionsCsv(rows);
+    expect(csv).toContain("This computer (by reaction)");
+    expect(csv).not.toContain("(by voice)");
   });
 
   it("exports a date range as CSV with formula cells neutralised and secrets still redacted", async () => {

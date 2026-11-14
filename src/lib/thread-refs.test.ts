@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   parseThreadRefUrl,
@@ -7,6 +7,7 @@ import {
   resolveThreadRefs,
   serializeThreadRefs,
   splitThreadRefsForDisplay,
+  takeThreadLinkFromLocation,
   threadRefUrl,
   threadTokenFromPaste,
   threadTokenSpacing,
@@ -48,7 +49,6 @@ describe("resolveThreadRefs", () => {
     expect(linked("&#QA PR 245", threads)).toEqual([]);
     expect(linked("##QA PR 245", threads)).toEqual([]);
     expect(linked("#QA PR 2456 is different", [scout("qa", "QA PR 245")])).toEqual([]);
-    // with the shorter "QA" also known, that text still links the longest title that fits
     expect(linked("#QA PR 2456 is different", threads)).toEqual(["#QA->short"]);
     expect(linked("(#QA PR 245) and '#QA PR 245'.", threads)).toEqual(["#QA PR 245->qa", "#QA PR 245->qa"]);
     expect(linked("#QA PR 245", threads)).toEqual(["#QA PR 245->qa"]);
@@ -118,6 +118,32 @@ describe("remarkThreadRefs", () => {
   });
 });
 
+describe("a thread named in the web app's address", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const at = (search: string, hash = "") => {
+    const replaceState = vi.fn();
+    vi.stubGlobal("window", { location: { pathname: "/", search, hash }, history: { replaceState } });
+    return replaceState;
+  };
+
+  it("becomes the chat link it stands for and leaves the address with everything else", () => {
+    const replaceState = at("?lang=fr&thread=t%201&bot=scout", "#top");
+    expect(takeThreadLinkFromLocation()).toBe("openmausbot://thread/t%201?bot=scout");
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/?lang=fr#top");
+    expect(parseThreadRefUrl("openmausbot://thread/t%201?bot=scout")).toEqual({ threadId: "t 1", botId: "scout" });
+  });
+
+  it("works without a bot, and does nothing when no thread is named", () => {
+    at("?thread=t-1");
+    expect(takeThreadLinkFromLocation()).toBe("openmausbot://thread/t-1");
+    const untouched = at("?bot=scout");
+    expect(takeThreadLinkFromLocation()).toBeNull();
+    expect(untouched).not.toHaveBeenCalled();
+    vi.stubGlobal("window", {});
+    expect(takeThreadLinkFromLocation()).toBeNull();
+  });
+});
+
 describe("canonical thread links", () => {
   const uuid = "8b1b1d62-9d3c-4a1e-9f2a-3c5d7e9b1a04";
   const uuidThreads = [scout(uuid, "QA PR 245"), ada("0f0e0d0c-0b0a-4909-8807-060504030201", "Release notes")];
@@ -125,7 +151,6 @@ describe("canonical thread links", () => {
   it("copies and parses one spelling, and rejects near-misses", () => {
     const link = threadRefUrl({ botId: "scout", threadId: uuid });
     expect(link).toBe(`openmausbot://thread/${uuid}?bot=scout`);
-    // the paste path accepts exactly what copy emits
     expect(parseThreadRefUrl(link)).toEqual({ threadId: uuid, botId: "scout" });
     expect(parseThreadRefUrl(`openmausbot://thread/${uuid}`)).toEqual({ threadId: uuid });
     for (const miss of [
@@ -142,10 +167,8 @@ describe("canonical thread links", () => {
   it("turns a pasted link or raw UUID into the title token, and leaves unknown ids plain", () => {
     const link = threadRefUrl({ botId: "scout", threadId: uuid });
     expect(threadTokenFromPaste(link, uuidThreads)).toEqual({ token: "#QA PR 245", ref: expect.objectContaining({ threadId: uuid, botId: "scout" }) });
-    // the markdown shape a sent message carries pastes back the same way
     expect(threadTokenFromPaste(`[QA PR 245](${link})`, uuidThreads)?.token).toBe("#QA PR 245");
     expect(threadTokenFromPaste(uuid, uuidThreads)?.ref).toMatchObject({ threadId: uuid });
-    // unknown or not-a-reference pastes stay ordinary text
     expect(threadTokenFromPaste("openmausbot://thread/" + crypto.randomUUID(), uuidThreads)).toBeNull();
     expect(threadTokenFromPaste("not a uuid", uuidThreads)).toBeNull();
     expect(threadTokenFromPaste("see " + uuid, uuidThreads)).toBeNull();
@@ -154,11 +177,8 @@ describe("canonical thread links", () => {
   it("sends resolvable titles as canonical markdown and passes everything else through", () => {
     const link = threadRefUrl({ botId: "ada", threadId: "release" });
     expect(serializeThreadRefs("Done in #Release notes today", threads)).toBe(`Done in [Release notes](${link}) today`);
-    // an existing canonical link is kept verbatim, live or dead, and an
-    // unknown title stays the plain text the person typed
     const sent = `Already [Release notes](${link}) and [Gone](openmausbot://thread/dead?bot=ada)`;
     expect(serializeThreadRefs(sent + " plus #Nothing", threads)).toBe(sent + " plus #Nothing");
-    // brackets in a title survive the round trip
     const bracketed = [scout("b", "QA [PR] 245")];
     expect(serializeThreadRefs("see #QA [PR] 245", bracketed)).toBe("see [QA \\[PR\\] 245](openmausbot://thread/b?bot=scout)");
   });
@@ -176,18 +196,14 @@ describe("canonical thread links", () => {
   });
 
   it("resolves an address by its own bot first, then the mention preferences", () => {
-    // one thread id visible under two bots: the link's ?bot pins the owner
-    // regardless of who is open
     const shared = [ada("qa", "QA PR 245", 1), scout("qa", "QA PR 245", 9)];
     expect(resolveThreadRefAddress(shared, { threadId: "qa", botId: "ada" }, "scout"))
       .toMatchObject({ botId: "ada", ambiguous: false });
-    // without one, the same pick a #Title mention uses applies
     expect(resolveThreadRefAddress(shared, { threadId: "qa" }, "ada")).toMatchObject({ botId: "ada", ambiguous: false });
     expect(resolveThreadRefAddress(shared, { threadId: "qa" }, "nobody")).toMatchObject({ botId: "scout", ambiguous: false });
     const unstamped = [ada("qa", "QA PR 245"), scout("qa", "QA PR 245")];
     expect(resolveThreadRefAddress(unstamped, { threadId: "qa" }, "nobody"))
       .toMatchObject({ botId: "ada", botName: "Ada", ambiguous: true });
-    // an id with exactly one owner resolves there no matter who is open
     expect(resolveThreadRefAddress([ada("ada-qa", "QA PR 245")], { threadId: "ada-qa" }, "scout"))
       .toMatchObject({ botId: "ada", ambiguous: false });
     expect(resolveThreadRefAddress([], { threadId: "nope" })).toBeNull();
@@ -198,7 +214,6 @@ describe("canonical thread links", () => {
     expect(threadTokenSpacing("QA &", 4, 4)).toEqual({ lead: " ", trail: "" });
     expect(threadTokenSpacing("see ", 4, 4)).toEqual({ lead: "", trail: "" });
     expect(threadTokenSpacing("plain", 5, 5)).toEqual({ lead: " ", trail: "" });
-    // # and & only block a word start, so they never need a trail space
     expect(threadTokenSpacing("#QA", 1, 1)).toEqual({ lead: " ", trail: " " });
     expect(threadTokenSpacing("QA next", 0, 0)).toEqual({ lead: "", trail: " " });
     expect(threadTokenSpacing("x &", 3, 3)).toEqual({ lead: " ", trail: "" });
@@ -215,13 +230,10 @@ describe("canonical thread links", () => {
   });
 
   it("protects ordinary link labels and code spans when serializing titles", () => {
-    // a #Title inside another link's label must not nest links
     expect(serializeThreadRefs("[see #Release notes](https://example.test/a)", threads))
       .toBe("[see #Release notes](https://example.test/a)");
-    // inline and fenced code are quotes, not prose
     expect(serializeThreadRefs("run `#Release notes` now", threads)).toBe("run `#Release notes` now");
     expect(serializeThreadRefs("```\n#Release notes\n```", threads)).toBe("```\n#Release notes\n```");
-    // a plain run right next to a protected span still links
     const link = threadRefUrl({ botId: "ada", threadId: "release" });
     expect(serializeThreadRefs("#Release notes and `#Release notes`", threads))
       .toBe(`[Release notes](${link}) and \`#Release notes\``);
@@ -247,8 +259,7 @@ describe("canonical thread links", () => {
   });
 
   it("treats an unterminated inline link as a plain run instead of hanging", () => {
-    // a truncated paste must fall back to plain text on both the send and
-    // display paths — vitest's 5s timeout turns a scanner hang into a failure
+    // vitest's 5s timeout turns a scanner hang on a truncated paste into a failure.
     const truncated = [
       "[a](x,",
       "[a](",

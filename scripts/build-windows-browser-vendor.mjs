@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { executableTarget } from "./prepare-cloudflared.mjs";
 import { bundleInventory, releaseBytes } from "./prepare-browser.mjs";
 
-export const WINDOWS_VENDOR_VERSION = "0.36.0-omb.1";
+export const WINDOWS_VENDOR_VERSION = "0.36.0-omb.2";
 export const WINDOWS_VENDOR_TARGET = "x86_64-pc-windows-gnu";
 export const WINDOWS_VENDOR_SOURCE = {
   commit: "eb05921bad874cd2a1b4fa5d1149f1ed26576cae",
@@ -19,7 +19,7 @@ export const WINDOWS_VENDOR_SOURCE = {
   bytes: 1904718,
   sha256: "ed24a72a5260d9c1ea454cd849c44159bac570a6939ac645e4c5bdb98a421646",
 };
-export const WINDOWS_VENDOR_PATCH_SHA256 = "27a268a90de47603a473daefb5679ef9ddde3fad9152d52b04e563b3e192c9a9";
+export const WINDOWS_VENDOR_PATCH_SHA256 = "a08f3fdfca63db5358c5354716e4216c365d1d37c08b5f32215062f937c35819";
 export const WINDOWS_VENDOR_RUST = "1.97.1";
 export const WINDOWS_VENDOR_PNPM = "11.1.3";
 const repository = fileURLToPath(new URL("../", import.meta.url));
@@ -97,6 +97,10 @@ export async function buildWindowsBrowserVendor(output) {
     mkdirSync(output, { recursive: true });
     const asset = "agent-browser-win32-x64.exe";
     copyFileSync(binary, join(output, asset));
+    const testArtifacts = command("cargo", ["test", "--bin", "agent-browser", "--locked", "--release", "--no-run", "--message-format=json", "--manifest-path", "cli/Cargo.toml", "--target", WINDOWS_VENDOR_TARGET], source, { capture: true })
+      .split("\n").map((line) => JSON.parse(line)).filter((entry) => entry.reason === "compiler-artifact" && entry.profile?.test && entry.executable);
+    assert.equal(testArtifacts.length, 1, "Expected one native vendor regression-test binary");
+    copyFileSync(testArtifacts[0].executable, join(output, "agent-browser-tests.exe"));
     for (const [from, to] of [
       ["LICENSE", "agent-browser-LICENSE.txt"],
       ["cli/src/native/a11y/LICENSE-axe-core.txt", "LICENSE-axe-core.txt"],
@@ -107,7 +111,7 @@ export async function buildWindowsBrowserVendor(output) {
     const provenance = {
       schemaVersion: 1, version: WINDOWS_VENDOR_VERSION, target: WINDOWS_VENDOR_TARGET,
       source: WINDOWS_VENDOR_SOURCE,
-      patch: { upstream: "https://github.com/vercel-labs/agent-browser/pull/1781", commit: "81a98c349d04195396ffae6898bd375ad64280de", sha256: WINDOWS_VENDOR_PATCH_SHA256, scope: "Windows handle inheritance only; no MCP reader rewrite" },
+      patch: { upstream: "https://github.com/vercel-labs/agent-browser/pull/1781", commit: "81a98c349d04195396ffae6898bd375ad64280de", sha256: WINDOWS_VENDOR_PATCH_SHA256, scope: "Windows handle inheritance and console-free Chrome children; no MCP reader rewrite" },
       toolchain: { rust, cargo, pnpm, node: process.version, mingw, linker },
       cargoLockSha256: digest(readFileSync(join(source, "cli/Cargo.lock"))),
       pnpmLockSha256: digest(readFileSync(join(source, "pnpm-lock.yaml"))),

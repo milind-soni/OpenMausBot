@@ -54,7 +54,7 @@ describe("German approval cards", () => {
     }));
 
     expect(markup).toContain("Mochi möchte einen Befehl ausführen");
-    expect(markup).toContain('aria-label="Details zur Freigabe"');
+    expect(markup).toContain('class="sr-only"');
     expect(markup).toContain("Wartet unten auf deine Antwort");
   });
 
@@ -116,9 +116,10 @@ describe("German approval cards", () => {
   });
 });
 
-/** Skill approvals are the one place pt-BR needs a different shape than the
- * other packs: "Should I {action} it?" becomes an enclitic pronoun, so the
- * action strings carry it ("atualizá-la") instead of a bare infinitive. */
+/**
+ * pt-BR needs another shape for skill approvals: "Should I {action} it?" takes an enclitic pronoun, so the action
+ * strings carry it ("atualizá-la").
+ */
 function skillUpdateApproval(): Pending {
   const message: Message = {
     id: "skill-update-card",
@@ -164,7 +165,7 @@ describe("Brazilian Portuguese approval cards", () => {
     }));
 
     expect(markup).toContain("Mochi quer executar um comando");
-    expect(markup).toContain('aria-label="Detalhes da aprovação"');
+    expect(markup).toContain('class="sr-only"');
     expect(markup).toContain("Aguardando sua resposta abaixo");
   });
 
@@ -190,7 +191,7 @@ describe("Brazilian Portuguese approval cards", () => {
     expect(markup).toContain('aria-label="Aprovação pendente"');
     expect(markup).toContain("Aprovação pendente");
     expect(markup).toContain("2 de 3");
-    expect(markup).toContain("Aprovação de comando solicitada");
+    expect(markup).toContain("Pedido de aprovação: comando");
     expect(markup).toContain('aria-label="Detalhes da aprovação para revisar"');
   });
 
@@ -201,6 +202,53 @@ describe("Brazilian Portuguese approval cards", () => {
     expect(spokenApprovalPrompt(pending, "Mochi")).toBe(
       "Mochi quer executar um comando. pnpm test. Devo permitir?",
     );
+  });
+
+  it.each([
+    ["enable", "Turn on", "Ligar"],
+    ["update", "Change", "Alterar"],
+    ["remove", "Remove", "Remover"],
+  ] as const)("localizes the spoken and visible MCP %s actions while preserving wire options", (action, english, portuguese) => {
+    const { pending } = commandApproval();
+    const card = pending.message.card!;
+    card.title = `${english} linear?`;
+    card.options = [english];
+    card.mcpRequest = { requestId: "mcp-request", botId: "bot-1", threadId: "thread-1", action, name: "linear", targetHash: "0".repeat(64) };
+    expect(spokenApprovalPrompt(pending, "Mochi")).toBe(`Mochi: ${english} linear? Review the details and choose ${english} or Cancel.`);
+    setLocale("pt-br");
+    card.title = `${portuguese} linear?`;
+    expect(spokenApprovalPrompt(pending, "Mochi")).toBe(`Mochi: ${portuguese} linear? Confira os detalhes e escolha ${portuguese} ou Cancelar.`);
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(PendingApprovalActions, {
+      pending, threadId: "thread-1", onCancelTurn: () => undefined,
+    })));
+    expect(markup).toContain(`>${portuguese}</button>`);
+    expect(markup).toContain(">Cancelar</button>");
+    expect(card.options).toEqual([english]);
+  });
+
+  it.each([
+    [false, "Apply setup", "Aplicar configuração"],
+    [true, "Delete bot", "Excluir bot"],
+  ] as const)("localizes team setup actions with deletion=%s without translating wire options", (deletion, english, portuguese) => {
+    const { pending } = commandApproval();
+    const card = pending.message.card!;
+    card.title = "Review this change?";
+    card.options = [english, "Cancel"];
+    card.teamSetupRequest = {
+      version: 1, requestId: "team-request", botId: "bot-1", threadId: "thread-1", reason: "Team update", createdAt: 1,
+      requesterRevision: "rev-1", operations: [], newTeams: [],
+      ...(deletion ? { deletion: { botId: "bot-2", name: "Scout", expectedRevision: "rev-2" } } : {}),
+    };
+    expect(spokenApprovalPrompt(pending, "Mochi")).toBe(`Mochi: Review this change? Review the details and choose ${english} or Cancel.`);
+    setLocale("pt-br");
+    card.title = "Revisar esta alteração?";
+    expect(spokenApprovalPrompt(pending, "Mochi")).toBe(`Mochi: Revisar esta alteração? Confira os detalhes e escolha ${portuguese} ou Cancelar.`);
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(PendingApprovalActions, {
+      pending, threadId: "thread-1", onCancelTurn: () => undefined,
+    })));
+    expect(markup).toContain(`>${portuguese}</button>`);
+    expect(markup).toContain(">Cancelar</button>");
+    expect(card.options).toEqual([english, "Cancel"]);
   });
 
   it("speaks a skill approval with the pronoun attached to the verb", () => {
@@ -227,7 +275,7 @@ describe("Brazilian Portuguese approval cards", () => {
       }),
     ));
 
-    expect(markup).toContain("Cancelar execução");
+    expect(markup).toContain("Cancelar sessão");
     expect(markup).toContain("Negar");
     expect(markup).toContain("Sempre permitir");
     expect(markup).toContain("Permitir uma vez");

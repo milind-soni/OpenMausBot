@@ -1,21 +1,17 @@
 #!/usr/bin/env node
-// Fake of the pi coding agent's `--mode rpc --no-session` stdio surface, for
-// driver contract tests of server/drivers/pi.ts. Speaks pi's JSON-RPC-over-
-// stdio protocol: answers get_available_models / new_session / switch_session
-// / set_model / steer, and streams a scripted turn in response to `prompt`. Failure
-// modes mirror how the real CLI misbehaves:
-//
-//   FAKE_PI_MODE   happy (default) | tooluse | permission | interleave | question-select | question-input
-//                  | turn-error | no-models | exit-early | compaction | compaction-recovery
-//                  | compaction-recovery-upstream | prompt-reject
-//   FAKE_PI_MODELS comma-separated provider/model pairs (default "ollama-cloud/glm-5.2,openai/gpt-4o")
-//   FAKE_PI_DUMP   path to append {argv, env} JSON, so a test can assert argv shape
-//                  and env hygiene (no leaked secrets into the pi child).
-//   FAKE_PI_STEER_REFUSE script an explicit success:false steer refusal
-//   FAKE_PI_STEER_OUT_OF_ORDER hold the first steer's refusal until a second
-//                  frame arrives, then answer refusal-for-first / success-for-second
+// Fake of the pi coding agent's `--mode rpc --no-session` stdio surface for pi.ts tests. Env knobs:
+//   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (stream-script.ts)
+//   FAKE_PI_MODE  happy (default) | tooluse | priced | priced-stop | permission | interleave | question-select | question-input
+//     | turn-error | no-models | exit-early | compaction | compaction-recovery
+//     | compaction-recovery-upstream | prompt-reject | omp-chunk
+//     | session-slow (answers new_session after FAKE_PI_SESSION_DELAY_MS, default 800, and dumps {sessionReplied})
+//   FAKE_PI_MODELS  provider/model pairs (default "ollama-cloud/glm-5.2,openai/gpt-4o")
+//   FAKE_PI_DUMP  path to append {argv, env} JSON to
+//   FAKE_PI_STEER_REFUSE  answer a steer with an explicit success:false
+//   FAKE_PI_STEER_OUT_OF_ORDER  hold the first steer until a second arrives, then refuse the first and accept the second
 
 import { appendFileSync, readFileSync } from "node:fs";
+import { playStreamScript, streamScript, type StreamScript } from "./stream-script.ts";
 
 const mode = process.env.FAKE_PI_MODE ?? "happy";
 const modelPairs = (process.env.FAKE_PI_MODELS ?? "ollama-cloud/glm-5.2,openai/gpt-4o")
@@ -28,7 +24,6 @@ const modelPairs = (process.env.FAKE_PI_MODELS ?? "ollama-cloud/glm-5.2,openai/g
 
 const argv = process.argv.slice(2);
 
-// The driver probes `<cli> --version` for snapshot(); answer and exit clean.
 if (argv.includes("--version") || argv.includes("-v")) {
   process.stdout.write("pi 0.84.2 (fake)\n");
   process.exit(0);
@@ -36,17 +31,12 @@ if (argv.includes("--version") || argv.includes("-v")) {
 
 if (process.env.FAKE_PI_DUMP) {
   try {
-    // When the driver mounts integrations it hands the MCP config through
-    // OMB_MCP_CONFIG; read it here so a test can assert the mount contract
-    // (servers, proxy wrap, credential hygiene) without racing the temp file
-    // cleanup the driver runs at turn settle.
+    // Read OMB_MCP_CONFIG now: the driver deletes the temp file when the turn settles.
     let mcpConfig: unknown = null;
     if (process.env.OMB_MCP_CONFIG) {
       try {
         mcpConfig = JSON.parse(readFileSync(process.env.OMB_MCP_CONFIG, "utf8"));
-      } catch {
-        /* unreadable config dumps as null */
-      }
+      } catch {}
     }
     appendFileSync(
       process.env.FAKE_PI_DUMP,
@@ -58,30 +48,46 @@ if (process.env.FAKE_PI_DUMP) {
         mcpConfig,
       }) + "\n",
     );
-  } catch {
-    /* never let dumping break a run */
-  }
+  } catch {}
 }
 
-// Explicit model refresh is a short-lived command, separate from RPC mode.
 if (argv[0] === "update" && argv.includes("--models")) {
   process.exit(mode === "update-error" ? 1 : 0);
 }
 
-// exit-early: die before saying anything — a failed spawn surfaces as a
-// runtime.error + failed turn, never a hang.
 if (mode === "exit-early") {
   process.exit(1);
 }
 
 const send = (obj: any) => process.stdout.write(JSON.stringify(obj) + "\n");
+// omp's RPC v2: the runtime announces v1 with a 1 MiB frame cap and stubs bigger responses unless the
+// client negotiated protocol 2; v2 sends them as `rpc_chunk` frames to reassemble.
+const ompChunkMode = mode === "omp-chunk";
+let negotiatedV2 = false;
+let chunkSeq = 0;
+const sendChunked = (frame: any) => {
+  const bytes = Buffer.from(JSON.stringify(frame), "utf8");
+  const size = Math.ceil(bytes.length / 3);
+  const count = Math.max(2, Math.ceil(bytes.length / size));
+  const chunkId = `rpc-${++chunkSeq}`;
+  for (let index = 0; index < count; index++) {
+    send({
+      type: "rpc_chunk",
+      chunkId,
+      index,
+      count,
+      byteLength: bytes.length,
+      data: bytes.subarray(index * size, (index + 1) * size).toString("base64"),
+    });
+  }
+};
+if (ompChunkMode) {
+  send({ type: "ready", protocolVersion: 1, supportedProtocolVersions: [1, 2], maxFrameBytes: 1048576, maxReassembledFrameBytes: 67108864 });
+}
 let sessionCounter = 0;
 let currentSessionFile: string | null = null;
-// FAKE_PI_STEER_OUT_OF_ORDER parks the first steer frame until a second one
-// arrives, so a test can force both waiters to exist before any response.
 const heldSteerFrames: any[] = [];
 
-// A faithful happy turn: a couple of text deltas then a terminal turn_end.
 const streamTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
@@ -91,6 +97,50 @@ const streamTurn = () => {
   }
   send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 12, output: 3 } }, usage: { input: 12, output: 3 } });
   send({ type: "agent_end" });
+};
+
+let scriptRun = 0;
+const streamScriptTurn = (script: StreamScript) => {
+  const run = ++scriptRun;
+  let tools = 0;
+  const usage = { input: 0, output: 0 };
+  send({ type: "agent_start" });
+  send({ type: "turn_start" });
+  playStreamScript(script, {
+    cancelled: () => run !== scriptRun,
+    chunk: (step, piece) => send({ type: "message_update", usage, assistantMessageEvent: "think" in step
+      ? { type: "thinking_delta", contentIndex: 0, delta: piece } : { type: "text_delta", contentIndex: 0, delta: piece } }),
+    end: (step) => {
+      if (!("tool" in step)) return;
+      const id = `script_call_${++tools}`;
+      send({ type: "tool_execution_start", toolCallId: id, toolName: "bash", args: { command: step.tool } });
+      send({ type: "tool_execution_end", toolCallId: id, toolName: "bash", isError: false, result: { content: [{ type: "text", text: "ok" }] } });
+      send({ type: "turn_end", message: { stopReason: "toolUse", usage }, usage });
+      send({ type: "turn_start" });
+    },
+    done: (failure) => {
+      send({ type: "turn_end", message: failure ? { stopReason: "error", errorMessage: failure, usage } : { stopReason: "end_turn", usage: { input: 12, output: 3 } }, usage });
+      send({ type: "agent_end" });
+    },
+  });
+};
+
+// Un-negotiated, the v1 transport replaces each chunked frame with the `rpc_frame_error` stub.
+const streamChunkedTurn = () => {
+  for (const frame of [
+    { type: "agent_start" },
+    { type: "turn_start" },
+    { type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_start", contentIndex: 0 } },
+    { type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Hello" } },
+    { type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: " from" } },
+    { type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: " pi" } },
+    { type: "turn_end", message: { stopReason: "end_turn", usage: { input: 12, output: 3 } }, usage: { input: 12, output: 3 } },
+    { type: "agent_end" },
+  ]) {
+    if (negotiatedV2) sendChunked(frame);
+    else send({ type: "rpc_frame_error", originalType: frame.type, error: "RPC frame exceeded the transport limit" });
+  }
+  setTimeout(() => process.exit(0), 50);
 };
 
 const streamErrorTurn = () => {
@@ -108,27 +158,30 @@ const streamErrorTurn = () => {
   send({ type: "agent_end" });
 };
 
-// compaction: a happy turn whose context crosses the auto-compaction
-// threshold mid-run - compaction_start/end fire after the prompt ack and
-// before turn_end, the exact moment a receipt-based prompt split must
-// notice its delivery being summarized away.
 const streamCompactionTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
+  send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "before" } });
+  // A failed attempt (pi reports it with errorMessage, not aborted) and a skipped one (no result, no error, e.g. an
+  // expired credential); FAKE_PI_COMPACTION_FAILS_ONLY=1 stops there, otherwise one attempt succeeds with a summary.
+  send({ type: "compaction_start", reason: "threshold" });
+  send({ type: "compaction_end", reason: "threshold", result: undefined, aborted: false, willRetry: false, errorMessage: "Compaction failed" });
   send({ type: "compaction_start", reason: "threshold" });
   send({ type: "compaction_end", reason: "threshold", result: undefined, aborted: false, willRetry: false });
+  // An extension can also hand back a result with an empty or non-text summary: nothing usable was made, so no marker either.
+  send({ type: "compaction_start", reason: "threshold" });
+  send({ type: "compaction_end", reason: "threshold", result: { summary: " ", firstKeptEntryId: "e1", tokensBefore: 100 }, aborted: false, willRetry: false });
+  send({ type: "compaction_end", reason: "threshold", result: { summary: {}, firstKeptEntryId: "e1", tokensBefore: 100 }, aborted: false, willRetry: false });
+  if (process.env.FAKE_PI_COMPACTION_FAILS_ONLY !== "1") {
+    send({ type: "compaction_start", reason: "threshold" });
+    send({ type: "compaction_end", reason: "threshold", result: { summary: "fake summary", firstKeptEntryId: "e1", tokensBefore: 100 }, aborted: false, willRetry: false });
+  }
   send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "compacted" } });
   send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 12, output: 3 } }, usage: { input: 12, output: 3 } });
   send({ type: "agent_end" });
 };
 
-// compaction-recovery: post-run overflow recovery — the run "ends"
-// (turn_end + a non-terminal agent_end), then compaction summarises the
-// session and the run resumes for one more turn before the terminal
-// agent_end. The second half is delayed so it lands after the first
-// agent_end, exactly the sequence a driver must not treat as finished at
-// turn_end: killing the child there would silence the late compaction
-// events that invalidate the prompt-split receipt.
+// Post-run overflow recovery: turn_end and a non-terminal agent_end, compaction, one more turn, then the terminal agent_end.
 const streamCompactionRecoveryTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
@@ -146,10 +199,7 @@ const streamCompactionRecoveryTurn = () => {
   }, 30);
 };
 
-// compaction-recovery-upstream: the same post-run overflow recovery in
-// upstream pi's dialect — agent_end frames carry willRetry instead of
-// isTerminal, and the run closes with agent_settled after the final
-// agent_end.
+// The same in upstream pi's dialect: willRetry instead of isTerminal, closing with agent_settled.
 const streamCompactionRecoveryUpstreamTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
@@ -168,50 +218,61 @@ const streamCompactionRecoveryUpstreamTurn = () => {
   }, 30);
 };
 
-// tooluse: one tool turn (stopReason toolUse, pi auto-continues) then a text
-// turn — exactly the sequence that broke the settle-on-toolUse bug.
 const streamToolTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
   send({ type: "tool_execution_start", toolCallId: "call_1", toolName: "bash", args: { command: "echo hi", password: "pi-input-secret" } });
   send({ type: "tool_execution_end", toolCallId: "call_1", toolName: "bash", isError: false, result: { content: [{ type: "text", text: "hi" }], api_key: "pi-output-secret" } });
   send({ type: "turn_end", message: { stopReason: "toolUse", usage: { input: 5, output: 1 } }, usage: { input: 5, output: 1 } });
-  // pi auto-continues within the same prompt to synthesize the reply
   send({ type: "turn_start" });
   send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "done" } });
   send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 12, output: 2 } }, usage: { input: 12, output: 2 } });
   send({ type: "agent_end" });
 };
 
-// permission: open a select ask, hold the turn until extension_ui_response
-// arrives, then stream the reply.
+// pi's real Usage shape (pi-ai): cached tokens and the priced cost ride on message.usage, not a top-level usage.
+const piUsage = (input: number, output: number, cacheRead: number, cacheWrite: number, total: number) =>
+  ({ input, output, cacheRead, cacheWrite, totalTokens: input + output + cacheRead + cacheWrite,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total } });
+
+// Like pi, the assistant message_end carries the call's usage before its tool runs; turn_end repeats it.
+const startPricedToolTurn = () => {
+  send({ type: "agent_start" });
+  send({ type: "turn_start" });
+  send({ type: "message_end", message: { role: "assistant", stopReason: "toolUse", usage: piUsage(5, 1, 100, 20, 0.0021) } });
+  send({ type: "tool_execution_start", toolCallId: "call_1", toolName: "bash", args: { command: "echo hi" } });
+};
+
+const streamPricedTurn = () => {
+  startPricedToolTurn();
+  send({ type: "tool_execution_end", toolCallId: "call_1", toolName: "bash", isError: false, result: { content: [{ type: "text", text: "hi" }] } });
+  send({ type: "turn_end", message: { stopReason: "toolUse", usage: piUsage(5, 1, 100, 20, 0.0021) } });
+  send({ type: "turn_start" });
+  send({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "done" } });
+  send({ type: "message_end", message: { role: "assistant", stopReason: "stop", usage: piUsage(12, 2, 120, 0, 0.0004) } });
+  send({ type: "turn_end", message: { stopReason: "stop", usage: piUsage(12, 2, 120, 0, 0.0004) } });
+  send({ type: "agent_end" });
+};
+
 const streamPermissionTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
   send({ type: "extension_ui_request", id: "ask-1", method: "select", title: "Run bash: echo hi?", options: ["Allow once", "Deny"] });
-  // wait for the answer before finishing
 };
 
-// question-select: a select ask that is genuinely a question — named
-// options the driver must surface as choices + a structured question.
 const streamQuestionSelectTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
   send({ type: "extension_ui_request", id: "ask-select", method: "select", title: "Which color?",
     options: process.env.FAKE_PI_QUESTION_OPTIONS ? JSON.parse(process.env.FAKE_PI_QUESTION_OPTIONS) : ["Blue", "Green"] });
-  // wait for the answer before finishing
 };
 
-// question-input: a free-text ask — no options, the typed answer returns
-// verbatim.
 const streamQuestionInputTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
   send({ type: "extension_ui_request", id: "ask-input", method: "input", title: "Which city?" });
-  // wait for the answer before finishing
 };
 
-/** Scripted text → tool → text → tool → text turn for order-contract tests. */
 const streamInterleaveTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
@@ -256,13 +317,40 @@ process.stdin.on("end", () => process.exit(0));
 
 function handle(cmd: any) {
   switch (cmd.type) {
-    case "get_available_models":
-      send({
+    case "negotiate_protocol":
+      // Vanilla pi 1.0.2 refuses the unknown command and keeps working.
+      if (!ompChunkMode) {
+        send({ id: cmd.id, type: "response", command: "negotiate_protocol", success: false, error: "Unknown command: negotiate_protocol" });
+        return;
+      }
+      if (cmd.protocolVersion === 2) {
+        negotiatedV2 = true;
+        send({ type: "response", command: "negotiate_protocol", success: true, data: { protocolVersion: 2 } });
+      } else {
+        send({ type: "response", command: "negotiate_protocol", success: false, error: "fake pi: only protocol version 2 is supported" });
+      }
+      return;
+    case "get_available_models": {
+      const response = {
         type: "response",
         command: "get_available_models",
         success: true,
         data: { models: mode === "no-models" ? [] : modelPairs },
-      });
+      };
+      if (ompChunkMode && !negotiatedV2) {
+        send({ type: "response", command: "get_available_models", success: false, error: "RPC response exceeded the transport limit" });
+        return;
+      }
+      if (ompChunkMode) sendChunked(response);
+      else send(response);
+      return;
+    }
+    case "get_state":
+      send({ type: "response", command: "get_state", success: true, data: {
+        model: null, thinkingLevel: "off", isStreaming: false, isCompacting: false,
+        steeringMode: "one-at-a-time", followUpMode: "one-at-a-time", sessionFile: currentSessionFile,
+        sessionId: `s-${sessionCounter}`, autoCompactionEnabled: true, messageCount: 0, pendingMessageCount: 0,
+      } });
       return;
     case "new_session":
       if (mode === "session-error") {
@@ -271,7 +359,15 @@ function handle(cmd: any) {
       }
       sessionCounter += 1;
       currentSessionFile = `/fake/pi-session-${sessionCounter}.json`;
-      send({ type: "response", command: "new_session", success: true, data: { sessionId: `s-${sessionCounter}`, sessionFile: currentSessionFile } });
+      const sessionReply = { type: "response", command: "new_session", success: true, data: { sessionId: `s-${sessionCounter}`, sessionFile: currentSessionFile } };
+      if (mode !== "session-slow") {
+        send(sessionReply);
+        return;
+      }
+      setTimeout(() => {
+        if (process.env.FAKE_PI_DUMP) appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ sessionReplied: true }) + "\n");
+        send(sessionReply);
+      }, Number(process.env.FAKE_PI_SESSION_DELAY_MS ?? 800));
       return;
     case "switch_session":
       if (mode === "session-error") {
@@ -285,27 +381,22 @@ function handle(cmd: any) {
       if (process.env.FAKE_PI_DUMP) {
         try {
           appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ setModel: { provider: cmd.provider, modelId: cmd.modelId } }) + "\n");
-        } catch {
-          /* never let dumping break a run */
-        }
+        } catch {}
       }
       send({ type: "response", command: "set_model", success: true, data: { id: cmd.modelId, provider: cmd.provider } });
       return;
     }
     case "set_thinking_level":
-      // record the level so a test can assert what the driver pinned
       if (process.env.FAKE_PI_DUMP) {
         try {
           appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ thinkingLevel: cmd.level }) + "\n");
-        } catch {
-          /* never let dumping break a run */
-        }
+        } catch {}
       }
       send({ type: "response", command: "set_thinking_level", success: true });
       return;
     case "prompt":
       if (mode === "prompt-reject") {
-        // mirrors pi rejecting a prompt submitted while a compaction runs
+        // pi rejects a prompt submitted while a compaction runs.
         send({ type: "response", command: "prompt", success: false, error: "fake pi: compaction in progress" });
         return;
       }
@@ -315,13 +406,13 @@ function handle(cmd: any) {
             process.env.FAKE_PI_DUMP,
             JSON.stringify({ prompt: { message: cmd.message, ...(Array.isArray(cmd.images) ? { images: cmd.images } : {}) } }) + "\n",
           );
-        } catch {
-          /* never let dumping break a run */
-        }
+        } catch {}
       }
-      // acknowledge acceptance; the completion comes via events
       send({ type: "response", command: "prompt", success: true });
-      if (mode === "tooluse") streamToolTurn();
+      if (streamScript(String(cmd.message ?? ""))) streamScriptTurn(streamScript(String(cmd.message ?? ""))!);
+      else if (mode === "tooluse") streamToolTurn();
+      else if (mode === "priced") streamPricedTurn();
+      else if (mode === "priced-stop") startPricedToolTurn();
       else if (mode === "permission") streamPermissionTurn();
       else if (mode === "question-select") streamQuestionSelectTurn();
       else if (mode === "question-input") streamQuestionInputTurn();
@@ -330,20 +421,14 @@ function handle(cmd: any) {
       else if (mode === "compaction") streamCompactionTurn();
       else if (mode === "compaction-recovery") streamCompactionRecoveryTurn();
       else if (mode === "compaction-recovery-upstream") streamCompactionRecoveryUpstreamTurn();
+      else if (mode === "omp-chunk") streamChunkedTurn();
       else streamTurn();
       return;
     case "steer": {
-      // Mid-turn input frame: ack like the real runtime (success only after
-      // session.steer accepted it), echoing the frame's correlation id the
-      // way the real RPC runtime does. FAKE_PI_STEER_REFUSE scripts an
-      // explicit success:false refusal so the driver's tri-state mapping is
-      // testable.
       if (process.env.FAKE_PI_DUMP) {
         try {
           appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ steer: { id: cmd.id, message: cmd.message } }) + "\n");
-        } catch {
-          /* never let dumping break a run */
-        }
+        } catch {}
       }
       const steerAck = (frame: any, success: boolean) =>
         send({
@@ -357,10 +442,6 @@ function handle(cmd: any) {
           heldSteerFrames.push(cmd);
           return;
         }
-        // Both frames are now in flight: answer the FIRST with an explicit
-        // refusal and the SECOND with success, in that order, so a driver
-        // that keys waiters by command name alone hands the refusal to the
-        // wrong caller.
         steerAck(heldSteerFrames[0], false);
         steerAck(cmd, true);
         heldSteerFrames.length = 0;
@@ -373,14 +454,13 @@ function handle(cmd: any) {
       if (process.env.FAKE_PI_DUMP) {
         try {
           appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ uiResponse: cmd }) + "\n");
-        } catch {
-          /* never let dumping break a run */
-        }
+        } catch {}
       }
       if (cmd.id === "ask-1") finishPermissionTurn();
       else if (cmd.id === "ask-select" || cmd.id === "ask-input") finishPermissionTurn();
       return;
     case "abort":
+      scriptRun += 1;
       send({ type: "turn_end", message: { stopReason: "cancelled", usage: { input: 0, output: 0 } }, usage: { input: 0, output: 0 } });
       return;
     default:

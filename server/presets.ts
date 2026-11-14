@@ -1,31 +1,4 @@
-// Preset bots: named starting points in the New bot dialog, carried by a
-// shared package (a file someone sent, or the organization's shelf).
-//
-// A preset is an ALLOWLIST (critique #3): a name and a short description,
-// the new bot's name, title, description, standing instructions and look,
-// playbooks, skills (SKILL.md text only) and starter notes. It has no field
-// for a model, a folder, a computer, an approval level, connected apps, MCP
-// servers, a browser or anything else that grants reach, so nothing a
-// preset says can widen what a bot may do. The person creating the bot
-// keeps their own choices for all of that.
-//
-// Where presets live: `DATA_DIR/org-library/presets.json` (contract §3.4).
-// One row per preset, stamped with where it came from ("file" or "org") and
-// the install it belongs to, plus the skill and playbook definitions each
-// install's presets use, so a bot can be created from a preset long after
-// the file or the organization's release is gone. Every use re-reads a row
-// through the same package parser every import uses, so a hand-edited file
-// can still only say what the package format allows.
-//
-// Trust is where the preset came from, never what it says: skills from an
-// organization preset are added switched on (the organization's Admin
-// published them) and stamped with their install (contract §3.2, marked
-// `via: "preset"`), skills from a file preset switched off and unstamped.
-// Starter notes are written once, through the normal memory writers (which
-// scrub secrets).
-//
-// There is no confirm step anywhere: choosing a preset in New bot and
-// pressing Create is the decision.
+// A preset is an allowlist (persona, looks, playbooks, skills, notes): nothing it says can widen what a bot may do.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -57,20 +30,14 @@ import {
 import { parseSkillMd } from "../shared/skill-md.ts";
 
 export const PRESETS_FILE = join(DATA_DIR, "org-library", "presets.json");
-/** What this installation last shared as a preset file (skills + presets, no team). */
 export const PUBLISHED_LIBRARY_FILE = join(DATA_DIR, "published-library.json");
 
-/** Enough for every preset of ten full packages; a runaway import cannot grow the file without bound. */
 export const MAX_STORED_PRESETS = 200;
-/** The key "Include my New bot defaults as a preset" is shared under. Fixed,
- * so renaming the preset keeps its identity across releases. */
 export const DEFAULTS_PRESET_KEY = "new-bot-defaults";
 export const PRESET_UNAVAILABLE_MESSAGE = "That preset is no longer available. Choose another starting role.";
 export const ORG_PRESET_REMOVE_MESSAGE = "Presets from your organization are managed in Admin.";
 
 export type PresetSource = "file" | "org";
-
-// ── the stored file ─────────────────────────────────────────────────────────
 
 const text = (max: number) => z.string().max(max);
 const storedPresetSchema = z.object({
@@ -105,8 +72,6 @@ const fileSchema = z.object({
   content: z.record(z.string(), z.object({ skills: z.array(z.unknown()), playbooks: z.array(z.unknown()) })).optional(),
 });
 
-/** A preset exactly as the package carried it: what `preset:<key>` hashes
- * over (contract §1.6), with the row's bookkeeping left out. */
 export function storedPresetObject(row: StoredPreset): PackagePreset {
   return {
     key: row.key,
@@ -119,8 +84,7 @@ export function storedPresetObject(row: StoredPreset): PackagePreset {
   };
 }
 
-/** One preset and what it uses, ready to apply: re-validated by the package
- * parser, so a hand-edited presets.json still says only what a file may. */
+/** Re-validated by the package parser, so a hand-edited presets.json still says only what a file may. */
 export interface ResolvedPreset {
   row: StoredPreset;
   preset: PackagePreset;
@@ -168,24 +132,18 @@ export interface PresetInstallContext {
   org?: OrgImportContext;
 }
 
-/** The importer's view of the preset store (package-import.ts). */
 export interface PresetRegistry {
-  /** Store the package's presets. `added` are new rows (what a rollback
-   * removes); `existing` are identical file presets already here, or an
-   * organization install's rows refreshed in place. */
   register(document: PackageDocument, context: PresetInstallContext): {
     added: Array<{ id: string; key: string; name: string }>;
     existing: Array<{ id: string; key: string; name: string }>;
     skipped: Array<{ part: string; reason: "too_many_presets" }>;
   };
-  /** Undo `register` (a failed import leaves no preset behind). */
   remove(ids: readonly string[]): void;
 }
 
 export interface PresetStore extends PresetRegistry {
   list(): StoredPreset[];
   resolve(id: string): ResolvedPreset | null;
-  /** A person's own click in New bot; organization presets are Admin's to remove. */
   removeFilePreset(id: string): "removed" | "not_found" | "organization";
 }
 
@@ -206,14 +164,11 @@ export function createPresetStore(file: string = PRESETS_FILE): PresetStore {
       }
       return { version: 1, presets, content };
     } catch {
-      // An unreadable file offers no presets. It is left alone (never
-      // overwritten by a read), so nothing is lost to a transient error.
       return empty;
     }
   };
   const save = (state: PresetFile) => {
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-    // Content no preset uses any more is dropped with its last preset.
     const used = new Set(state.presets.map((row) => row.installId));
     const content: Record<string, InstallContent> = Object.create(null);
     for (const [installId, value] of Object.entries(state.content)) if (used.has(installId)) content[installId] = value;
@@ -246,12 +201,6 @@ export function createPresetStore(file: string = PRESETS_FILE): PresetStore {
         skills: (pkg.skills?.entries ?? []).filter((skill) => used.has(skill.name)),
         playbooks: (pkg.playbooks ?? []).filter((playbook) => usedPlaybooks.has(playbook.key)),
       };
-      // An organization install owns one set of rows. Adding it again (a
-      // removed team re-added, or an Add retried after the app stopped
-      // before state.json was written) refreshes them in place, keeping
-      // their ids, and drops keys the release no longer has. Nothing is
-      // duplicated, and nothing here decides whether it was added before:
-      // that is org-library.ts's index, rebuilt from the records.
       const ownRow = (row: StoredPreset) => row.source === "org" && row.installId === context.installId;
       let refreshed = false;
       if (org) {
@@ -286,7 +235,6 @@ export function createPresetStore(file: string = PRESETS_FILE): PresetStore {
           refreshed = true;
           continue;
         }
-        // The same file added twice offers its presets once.
         const same = state.presets.find((candidate) => sameFilePreset(candidate, row, state, content));
         if (same) {
           existing.push({ id: same.id, key: same.key, name: same.name });
@@ -333,24 +281,13 @@ function usedContent(row: StoredPreset, content: InstallContent | undefined): In
   };
 }
 
-// ── the organization's install statuses (W2-1) ─────────────────────────────
-
-/** An organization install's status (contract §3.4). The map comes from
- * OrgLibrary.installStatuses() (org-library.ts), the library's own state, so
- * New bot never disagrees with it. An install it does not know (or no
- * organization at all) has no entry: that preset is shown like any copy that
- * stays after sign-out. */
 export type OrgInstallStatus = "installed" | "withdrawn" | "removed";
 
-/** Whether New bot may use this preset: not one from an organization
- * release that was withdrawn or an install that was removed. */
 export function presetOffered(row: StoredPreset, statuses: ReadonlyMap<string, OrgInstallStatus>): boolean {
   if (row.source !== "org") return true;
   const status = statuses.get(row.installId);
   return status !== "withdrawn" && status !== "removed";
 }
-
-// ── New bot: what the dialog lists ─────────────────────────────────────────
 
 export interface WireBotPreset {
   id: string;
@@ -363,16 +300,11 @@ export interface WireBotPreset {
   publisherName?: string;
   bot: PackagePreset["bot"];
   skills: Array<{ name: string; description: string }>;
-  /** Skills from an organization preset arrive switched on; from a file, off. */
   skillsEnabled: boolean;
   playbooks: string[];
-  /** Starter note paths ("MEMORY.md", "memory/pricing.md"). */
   notes: string[];
 }
 
-/** Every preset the New bot dialog offers: the organization's first (by
- * publisher, then name), then imported files (newest first). A preset from a
- * release the organization withdrew, or an install removed, is not offered. */
 export function listBotPresets(store: Pick<PresetStore, "list" | "resolve">, statuses: ReadonlyMap<string, OrgInstallStatus>): WireBotPreset[] {
   const wire: Array<WireBotPreset & { addedAt: number }> = [];
   for (const row of store.list()) {
@@ -403,14 +335,11 @@ export function listBotPresets(store: Pick<PresetStore, "list" | "resolve">, sta
   return [...org, ...files].map(({ addedAt: _addedAt, ...preset }) => preset);
 }
 
-// ── creating a bot from a preset ───────────────────────────────────────────
-
 export interface PresetApplyDeps {
   store: Pick<Store, "patchBot">;
   skills: {
     install(botId: string, source: string, files: Array<{ path: string; content: string }>): SkillListing | { error: string };
     setEnabled(botId: string, name: string, enabled: boolean): SkillListing | { error: string };
-    /** skills.ts installOrgSkill: switched on, with the install's stamp. */
     installOrg(botId: string, source: string, skillMd: string, stamp: SkillPackageStamp): SkillListing | { error: string };
   };
   memory: {
@@ -419,21 +348,8 @@ export interface PresetApplyDeps {
   };
 }
 
-/** An organization install id (package-import.ts orgInstallId), the only
- * kind a skill-state stamp may carry. */
 const ORG_INSTALL_ID = /^[a-f0-9]{32}$/;
 
-/** The preset's content onto a bot that was just created: playbooks, skills
- * (switched on only for an organization preset), starter notes, and the
- * provenance stamp. Persona fields are the caller's: the New bot dialog
- * prefilled them from the preset and the person may have edited them.
- * Throws on failure; the caller removes the half-made bot.
- *
- * An organization preset's skills also get the skill-state stamp an Add
- * writes (contract §3.2: install, skill name, release, and the SKILL.md
- * hashes as released and as written), so an automatic update can tell the
- * person's edit from the publisher's change. It is marked `via: "preset"`,
- * and org-library.ts never counts a preset-made bot toward the install. */
 export function applyPresetToBot(botId: string, resolved: ResolvedPreset, deps: PresetApplyDeps): { skills: string[]; notes: number } {
   const { row, preset } = resolved;
   const org = row.source === "org";
@@ -462,7 +378,6 @@ export function applyPresetToBot(botId: string, resolved: ResolvedPreset, deps: 
     // The organization channel names its own source; a file's is display only.
     const source = org && row.ref ? `org:${row.ref}@${row.release}` : skill.source ?? `package:${row.packageId}`;
     if (stamped) {
-      // Written verbatim, so the text as written is the text as stored (§1.6 `skill:<name>`).
       const stamp: SkillPackageStamp = { installId: row.installId, key: skill.name, release: row.release, ...pair(skill.instructions, skill.instructions), via: "preset" };
       const added = deps.skills.installOrg(botId, source, skill.instructions, stamp);
       if ("error" in added) throw new Error(`The preset's skill "${name}" could not be added: ${added.error}`);
@@ -485,11 +400,8 @@ export function applyPresetToBot(botId: string, resolved: ResolvedPreset, deps: 
   return { skills, notes };
 }
 
-// ── sharing: my New bot defaults as a preset (the allowlist) ───────────────
-
 export interface DefaultsPreset {
   preset: PackagePreset;
-  /** The skills the preset names, as the exporter shares them. */
   skills: ExportablePackageSkill[];
 }
 
@@ -497,12 +409,7 @@ function isPortableSource(value: string): boolean {
   return !/^(?:[a-z]:[\\/]|[\\/]|\\\\|file:)/i.test(value);
 }
 
-/** "Include my New bot defaults as a preset": the saved defaults, reduced to
- * the preset allowlist. Name, look, standing instructions, skills and (when
- * `includeNotes`) starter notes. Never the model, folder, computer, approval
- * level, connected apps, MCP servers, browser, peers, Chief settings or
- * routines. Null when nothing is left worth sharing. `avatar` is the
- * picture the dialog prepared (a data URL), checked by the exporter. */
+/** The defaults reduced to the preset allowlist: never the model, folder, computer, approval level, apps, MCP servers, browser, peers, Chief or routines. */
 export function presetFromDefaults(defaults: NewBotDefaults | undefined, options: {
   name?: string;
   description?: string;
@@ -591,8 +498,6 @@ export function presetFromDefaults(defaults: NewBotDefaults | undefined, options
   };
 }
 
-// ── what this installation last shared as a preset file ────────────────────
-
 const publishedLibrarySchema = z.object({ version: z.literal(1), packageId: z.string().regex(/^[a-z0-9][a-z0-9-]*$/).max(80), lastRelease: z.string().min(1).max(30) });
 export interface PublishedLibrary { packageId: string; lastRelease: string }
 
@@ -601,7 +506,6 @@ export function readPublishedLibrary(file: string = PUBLISHED_LIBRARY_FILE): Pub
     const parsed = publishedLibrarySchema.parse(JSON.parse(readFileSync(file, "utf8")));
     return { packageId: parsed.packageId, lastRelease: parsed.lastRelease };
   } catch {
-    // Nothing shared yet (or unreadable): the next share starts at 1.0.0.
     return null;
   }
 }

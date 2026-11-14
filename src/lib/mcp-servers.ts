@@ -1,7 +1,3 @@
-// The app-wide MCP server list (Plugins → MCP servers), shared by every
-// place that shows it per bot, such as the Access section's switches.
-// One fetch, cached for the window; `refresh` after
-// the Plugins panel changes the list.
 import { useEffect, useSyncExternalStore } from "react";
 
 import { api } from "@/state/store";
@@ -9,6 +5,10 @@ import { api } from "@/state/store";
 export interface McpServerSummary {
   name: string;
   enabled: boolean;
+  /** The bot whose own server this is. */
+  bot?: string;
+  /** The bots it is off for, because it doesn't start for them. */
+  offFor?: string[];
 }
 
 let cached: { servers: McpServerSummary[] | null; error: boolean } = { servers: null, error: false };
@@ -21,11 +21,10 @@ const subscribe = (listener: () => void) => {
   return () => { listeners.delete(listener); };
 };
 
-/** Publish an authoritative read or mutation result without another request. */
 export function updateMcpServers(servers: McpServerSummary[]): void {
   generation += 1;
   inflight = null;
-  cached = { servers: servers.map(({ name, enabled }) => ({ name, enabled: Boolean(enabled) })), error: false };
+  cached = { servers: servers.map(({ name, enabled, bot, offFor }) => ({ name, enabled: Boolean(enabled), ...(bot ? { bot } : {}), ...(offFor?.length ? { offFor } : {}) })), error: false };
   for (const listener of listeners) listener();
 }
 
@@ -51,23 +50,27 @@ export function loadMcpServers(force = false): Promise<McpServerSummary[]> {
   return inflight;
 }
 
-/** The list, or null until the first load settles. Re-renders when any
- * caller refreshes it. */
 export function useMcpServers(): { servers: McpServerSummary[] | null; error: boolean; refresh: () => Promise<McpServerSummary[]> } {
   const current = useSyncExternalStore(subscribe, snapshot, snapshot);
   useEffect(() => {
-    // Keep the instant cached view, but pick up edits from another window
-    // or the config CLI whenever Access is opened again.
     void loadMcpServers(true);
   }, []);
   return { ...current, refresh: () => loadMcpServers(true) };
 }
 
-/** The servers a bot actually mounts: its own list when it has one (names
- * that no longer exist fall away), else every enabled server. Mirrors
- * server/config.ts customMcpServers so the controls and the turn agree. */
-export function mcpServersForBot(all: McpServerSummary[], own: string[] | null | undefined): McpServerSummary[] {
-  const enabled = all.filter((server) => server.enabled);
+/** The servers a bot can be given: every bot's, and its own. */
+export function mcpServersOfBot(all: McpServerSummary[], botId: string): McpServerSummary[] {
+  return all.filter((server) => !server.bot || server.bot === botId);
+}
+
+export function mcpServersForBot(all: McpServerSummary[], own: string[] | null | undefined, botId: string): McpServerSummary[] {
+  const enabled = mcpServersOfBot(all, botId).filter((server) => server.enabled);
   if (own == null) return enabled;
   return enabled.filter((server) => own.includes(server.name));
+}
+
+/** The explicit list after flipping `name`. An absent list means every enabled server, so the first flip starts from those. */
+export function mcpSwitch(servers: McpServerSummary[], own: string[] | null | undefined, name: string): string[] {
+  const current = own == null ? servers.filter((server) => server.enabled).map((server) => server.name) : own;
+  return current.includes(name) ? current.filter((item) => item !== name) : [...current, name];
 }

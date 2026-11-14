@@ -6,10 +6,12 @@ import {
   UNSEEN_MAX_BYTES,
   UNSEEN_MAX_MESSAGES,
   handedStateUsable,
+  isContextMessage,
   recordHanded,
   renderUnseen,
   sessionStart,
   unseenMessages,
+  UNSEEN_END,
   withUnseenMessages,
   type ContextMessage,
   type Handoff,
@@ -71,7 +73,6 @@ describe("record size", () => {
     expect(handedStateUsable(state, "s", order)).toBe(true);
     const over = recordHanded(state, order, received.slice(200));
     expect(handedStateUsable(over, "s", order)).toBe(false);
-    // the gap is never declared received
     expect(unseenIds(order, { ...over, session: "s" })).toContain("m1");
   });
 });
@@ -83,7 +84,6 @@ describe("sessionStart", () => {
     expect(start).toEqual({ omitted: "m5", sent: ["m6", "m7", "m8", "m9"] });
     const state = recordHanded({ session: "new", omitted: start.omitted, ids: [] }, order, start.sent);
     expect(state).toEqual({ session: "new", omitted: "m5", through: "m9", ids: [] });
-    // older history is neither offered nor received
     expect(unseenIds(order, state)).toEqual([]);
     expect(unseenIds([...order, "m10"], state)).toEqual(["m10"]);
   });
@@ -147,12 +147,16 @@ describe("renderUnseen", () => {
     expect(block).toContain("User (sent while an earlier turn was running; you may already have it): also cover costs");
   });
 
-  it("separates the block from the turn text with one blank line", () => {
-    expect(withUnseenMessages("[block]", "question")).toBe("[block]\n\nquestion");
+  it("ends the block with a marker, so the person's new message never reads as one more line of it", () => {
+    expect(withUnseenMessages("[block]", "question")).toBe(`[block]\n\n${UNSEEN_END}\n\nquestion`);
+    // A teammate's relayed reply is the block's last line; the person's next request comes after it.
+    const relayed = msg("r", "[Relayed from Sam]: I'll take the Berlin trip, you book the hotel.", { keep: true });
+    const text = withUnseenMessages(renderUnseen([relayed]).block, "Book the flight for Tuesday.");
+    expect(text.indexOf("you book the hotel.")).toBeLessThan(text.indexOf(UNSEEN_END));
+    expect(text.slice(text.lastIndexOf(UNSEEN_END) + UNSEEN_END.length).trim()).toBe("Book the flight for Tuesday.");
   });
 });
 
-// The acceptance fold, driven by runtime events against an in-memory store.
 describe("Handoffs", () => {
   const setup = (order: string[], record?: HandedState) => {
     const records = new Map<string, HandedState>(record ? [["claude", record]] : []);
@@ -191,6 +195,50 @@ describe("Handoffs", () => {
     expect(f.records.get("claude")).toEqual({ session: "s", through: "m5", ids: [] });
   });
 
+  it("counts nothing of a withheld turn as received, so the next turn offers its line and reply once", () => {
+    const order = ids(4);
+    const f = setup(order, { session: "s", through: "m1", ids: [] });
+    f.replies.set("turn", ["m3"]);
+    f.start({ resumeCursor: "s", carried: ["m2"], own: ["m2"] });
+    f.handoffs.withhold("t");
+    f.event({ type: "turn.started" });
+    f.event({ type: "item.started", itemType: "tool", title: "mcp__computer__click" });
+    f.event({ type: "item.completed", itemType: "assistant_text", text: "Done." });
+    f.event({ type: "turn.completed", ok: true });
+    expect(f.records.get("claude")).toEqual({ session: "s", through: "m1", ids: [] });
+    expect(unseenIds(order, f.records.get("claude")!)).toEqual(["m2", "m3"]);
+  });
+
+  it("hands a withheld turn on when its engine runs it after all", () => {
+    const f = setup(ids(4), { session: "s", through: "m1", ids: [] });
+    f.replies.set("turn", ["m3"]);
+    f.handoffs.begin("t", "claim", {
+      botId: "b", instanceId: "claude", config: "c", resumeCursor: "s", started: { sent: [] }, recovery: { sent: [] },
+      resumed: { sent: [] }, placed: [], carried: ["m2"], own: ["m2"],
+    });
+    f.handoffs.dispatching("t", "claim");
+    const handOn = f.handoffs.withhold("t");
+    f.handoffs.bindTurn("t", "claim", "turn");
+    expect(f.handoffs.current("t")).toBeUndefined();
+    handOn("turn");
+    f.event({ ...output, turnId: "other-turn" });
+    expect(f.records.get("claude")).toEqual({ session: "s", through: "m1", ids: [] });
+    f.event(output);
+    f.event({ type: "turn.completed", ok: true });
+    expect(f.records.get("claude")).toEqual({ session: "s", through: "m3", ids: [] });
+  });
+
+  it("never hands a withheld turn over a newer turn's handoff", () => {
+    const f = setup(ids(4), { session: "s", through: "m1", ids: [] });
+    f.start({ resumeCursor: "s", carried: ["m2"], own: ["m2"] });
+    const handOn = f.handoffs.withhold("t");
+    f.start({ resumeCursor: "s", carried: ["m3"], own: ["m3"] });
+    const newer = f.handoffs.current("t");
+    handOn("turn");
+    expect(f.handoffs.current("t")).toBe(newer);
+    expect(() => new Handoffs({ order: () => [], read: () => undefined, write: () => {}, replies: () => [] }).withhold("t")("turn")).not.toThrow();
+  });
+
   it("does not count provider-client error narration or a failed completion as acceptance", () => {
     const f = setup(ids(4), { session: "s", through: "m1", ids: [] });
     f.start({ resumeCursor: "s", placed: ["m2"], carried: ["m3"] });
@@ -208,7 +256,6 @@ describe("Handoffs", () => {
     expect(f.records.get("claude")).toEqual({ ids: [] });
     f.event(output);
     expect(f.records.get("claude")).toEqual({ session: "new", config: "c", omitted: "m4", through: "m7", ids: ["m9"] });
-    // m8 was only in the unseen block, which a rebuild does not carry
     expect(unseenIds(order, f.records.get("claude")!)).toEqual(["m8"]);
   });
 
@@ -241,6 +288,46 @@ describe("Handoffs", () => {
     expect(unseenIds(order, f.records.get("claude")!)).toEqual(["m4"]);
   });
 
+  it("counts a widget the turn showed itself as received, so the resumed session is not offered it at the next turn", () => {
+    // m3: the person's message. m4: the widget the turn showed with show_widget
+    // (a context row with no turnId, so not one of the turn's replies). m5: its reply.
+    const order = ids(6);
+    const shown = (authoredBy?: string) => {
+      const f = setup(order, { session: "s", through: "m2", ids: [] });
+      f.replies.set("turn", ["m5"]);
+      f.start({ resumeCursor: "s", carried: ["m3"], own: ["m3"] });
+      f.event({ type: "item.started", itemType: "tool", title: "show_widget" });
+      if (authoredBy) f.handoffs.authored("t", authoredBy, "m4");
+      f.event(output);
+      f.event({ type: "turn.completed", ok: true });
+      return f.records.get("claude")!;
+    };
+    expect(shown("claim")).toEqual({ session: "s", through: "m5", ids: [] });
+    expect(unseenIds(order, shown("claim"))).toEqual([]);
+    expect(shown()).toEqual({ session: "s", through: "m3", ids: ["m5"] });
+    expect(unseenIds(order, shown())).toEqual(["m4"]);
+    expect(unseenIds(order, shown("an-earlier-claim"))).toEqual(["m4"]);
+  });
+
+  it("credits an authored row once, and not on a turn the provider never acted on", () => {
+    const order = ids(5);
+    const f = setup(order, { session: "s", through: "m1", ids: [] });
+    f.start({ resumeCursor: "s", carried: ["m2"], own: ["m2"] });
+    f.handoffs.authored("t", "claim", "m3");
+    f.handoffs.authored("t", "claim", "m3");
+    f.event({ type: "turn.completed", ok: false });
+    expect(f.records.get("claude")).toEqual({ session: "s", through: "m1", ids: [] });
+
+    f.start({ resumeCursor: "s", carried: ["m2"], own: ["m2"] });
+    f.event(output);
+    f.handoffs.authored("t", "claim", "m3");
+    f.handoffs.authored("t", "claim", "m3");
+    f.event({ type: "turn.completed", ok: true });
+    expect(f.records.get("claude")).toEqual({ session: "s", through: "m3", ids: [] });
+    f.handoffs.authored("t", "claim", "m4");
+    expect(f.records.get("claude")).toEqual({ session: "s", through: "m3", ids: [] });
+  });
+
   it("takes the handoff of a turn decided again at dispatch, not the one it planned", () => {
     const order = ids(5);
     const f = setup(order, { session: "s", config: "c", through: "m2", ids: [] });
@@ -253,6 +340,24 @@ describe("Handoffs", () => {
     f.event({ type: "session.started", sessionId: "new" });
     f.event(output);
     expect(f.records.get("claude")).toMatchObject({ session: "new", config: "c2", through: "m4" });
+  });
+
+  it("keeps the last effort a session's thread was sent until a turn sends another", () => {
+    const f = setup(ids(3));
+    f.start({ effort: null, carried: ["m0"], started: { sent: ["m0"] } });
+    f.event({ type: "session.started", sessionId: "s" });
+    f.event(output);
+    f.event({ type: "turn.completed", ok: true });
+    expect(f.records.get("claude")).toEqual({ session: "s", config: "c", effort: null, through: "m0", ids: [] });
+    f.start({ resumeCursor: "s", effort: "high", carried: ["m1"] });
+    f.event(output);
+    f.event({ type: "turn.completed", ok: true });
+    expect(f.records.get("claude")).toEqual({ session: "s", config: "c", effort: "high", through: "m1", ids: [] });
+    // a turn that sends none leaves the thread on its last level
+    f.start({ resumeCursor: "s", effort: null, carried: ["m2"] });
+    f.event(output);
+    f.event({ type: "turn.completed", ok: true });
+    expect(f.records.get("claude")).toEqual({ session: "s", config: "c", effort: "high", through: "m2", ids: [] });
   });
 
   it("does not credit a steer written before a replacement session to that session", () => {
@@ -298,7 +403,6 @@ describe("Handoffs", () => {
     f.event({ ...output, providerInstanceId: "codex" });
     f.event({ ...output, turnId: "other" });
     expect(f.records.get("claude")).toEqual({ session: "s", through: "m1", ids: [] });
-    // the stale steer is not this turn's: Stop does not withdraw it
     f.handoffs.stoppedByPerson("t");
     f.event(output);
     f.event({ type: "turn.completed", ok: false, stopReason: "interrupted" });
@@ -362,4 +466,43 @@ describe("randomized record sequences", () => {
       expect(state).toEqual({ session: "s", through: order.at(-1), ids: [] });
     });
   }
+});
+
+describe("isContextMessage", () => {
+  it("is what a provider reads: text, compaction records and room results, never a Live call's row", () => {
+    expect(isContextMessage({ kind: "text", text: "what is six times seven" })).toBe(true);
+    expect(isContextMessage({ kind: "text", text: "" })).toBe(false);
+    // A voice-only reply: its words sit on the audio attachment, and the provider still reads them.
+    expect(isContextMessage({ kind: "text", text: "", attachments: [{ kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg", text: "Spoken words" }] })).toBe(true);
+    expect(isContextMessage({ kind: "text", text: "", attachments: [{ kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg" }] })).toBe(false);
+    expect(isContextMessage({ kind: "text", text: "", webhookPost: true, attachments: [{ kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg", text: "Spoken words" }] })).toBe(false);
+    expect(isContextMessage({ kind: "compaction" })).toBe(true);
+    // The engine condensed its own session: a marker for people, with nothing for a provider to read.
+    expect(isContextMessage({ kind: "compaction", engineCompaction: true })).toBe(false);
+    expect(isContextMessage({ kind: "text", roomRequest: { id: "r1", phase: "result" } })).toBe(true);
+    expect(isContextMessage({ kind: "activity", text: "Bash" })).toBe(false);
+    expect(isContextMessage({ kind: "call", text: "Call with Ada · 0:42" })).toBe(false);
+  });
+
+  it("keeps a digest row, and only one that carries its digest", () => {
+    expect(isContextMessage({
+      kind: "digest",
+      text: "[digest] · tools: Write ×1",
+      digest: { turnId: "t1", botId: "b1", threadId: "th1", at: 1, durationMs: 100, tools: [], memory: [], reply: "Done.", hookCoverage: "none" },
+    })).toBe(true);
+    expect(isContextMessage({ kind: "digest", text: "[digest] · tools: Write ×1" })).toBe(false);
+  });
+
+  it("keeps a widget row by its text fallback, so a replay still shows what was asked", () => {
+    expect(isContextMessage({ kind: "widget", text: "**Pull requests** · 3 open\n[Merge the two ready]" })).toBe(true);
+    expect(isContextMessage({ kind: "widget", text: "" })).toBe(false);
+    expect(isContextMessage({ kind: "widget" })).toBe(false);
+    expect(isContextMessage({ kind: "options", text: "Pick one" })).toBe(false);
+  });
+
+  it("keeps an app row by its text fallback", () => {
+    expect(isContextMessage({ kind: "app", text: "[App] Sales by month\nRevenue up 12%" })).toBe(true);
+    expect(isContextMessage({ kind: "app", text: "" })).toBe(false);
+    expect(isContextMessage({ kind: "app" })).toBe(false);
+  });
 });

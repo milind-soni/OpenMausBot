@@ -1,6 +1,3 @@
-// Image attachments: pasted/dropped images become files under
-// ~/.openmausbot/attachments so every CLI engine can open them by path —
-// the app never ships image bytes through the prompt itself.
 import { createHash, randomUUID } from "node:crypto";
 import {
   createReadStream,
@@ -8,32 +5,43 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { link, open, unlink } from "node:fs/promises";
-import { join, extname } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
+import { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
 import { DATA_DIR } from "./config.ts";
+import { boxUploadsDir } from "./bot-box/plan.ts";
 
+export { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
 export const ATTACHMENTS_DIR = join(DATA_DIR, "attachments");
 
-/** The spec's ceiling: a screenshot bigger than this is rejected before it
- * is ever buffered, matching the composer's existing size discipline. */
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
-/** Shared documents are deliberately smaller than Cloudflare's transport
- * ceiling. This is a local inbox, not unbounded remote storage. */
-export const FILE_MAX_BYTES = 25 * 1024 * 1024;
+export const DEFAULT_ATTACHMENTS_MAX_BYTES = 512 * 1024 * 1024;
+/** A person's own Cloud is the only home of everything their computers held, on a volume a move grows to fit. */
+export const CLOUD_HOME_ATTACHMENTS_MAX_BYTES = 8 * 1024 * 1024 * 1024;
 
-/** Attachments are durable because prompts refer to their paths. Never
- * silently evict them: once this ceiling is reached, a new upload gets an
- * explicit 507 and the person can decide what to remove. */
-export const ATTACHMENTS_MAX_BYTES = 512 * 1024 * 1024;
+/** A team server can raise the ceiling with OMB_ATTACHMENTS_MAX_BYTES; a missing or invalid value keeps 512 MB, or 8 GB on a Cloud home. */
+export function attachmentsMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.OMB_ATTACHMENTS_MAX_BYTES?.trim();
+  const parsed = raw ? Number(raw) : NaN;
+  if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
+  return env.OMB_CLOUD_ROLE === "home" || env.OMB_CLOUD_ROLE === "team" ? CLOUD_HOME_ATTACHMENTS_MAX_BYTES : DEFAULT_ATTACHMENTS_MAX_BYTES;
+}
 
-/** Interrupted streamed uploads use private partial files. A crash can leave
- * one behind, so future uploads remove only our stale partials — never a
- * committed attachment that a transcript may still reference. */
+/** Never evict: prompts refer to attachment paths, so at this ceiling a new upload gets an explicit 507. */
+export const ATTACHMENTS_MAX_BYTES = attachmentsMaxBytes();
+
+function formatStoreLimit(bytes: number): string {
+  const mb = Math.round(bytes / (1024 * 1024));
+  return mb >= 1 ? `${mb} MB` : `${bytes} bytes`;
+}
+
+/** Cleanup removes only our stale partial files, never a committed attachment a transcript may reference. */
 export const ATTACHMENT_PARTIAL_MAX_AGE_MS = 60 * 60 * 1000;
 
 const PARTIAL_NAME = /^\.openmaus-upload-[0-9a-f-]+-[0-9a-f-]+\.partial$/i;
@@ -43,30 +51,17 @@ const uploadLocks = new Map<string, Promise<void>>();
 let reservedAttachmentBytes = 0;
 const STREAM_RESERVATION_INCREMENT_BYTES = 1024 * 1024;
 
-/** Cached total of on-disk bytes that count against the quota: committed
- * attachments plus any partial file this process did not itself write (a
- * crash leftover, until it is cleaned up). `null` means a fresh scan is needed
- * after cold start or a cleanup failure. Every normal commit
- * and delete after that updates it in place instead of rescanning, which is
- * what makes reservation growth O(1) rather than O(directory size).
- *
- * This is single-process, in-memory state: it does not see files another
- * process adds or removes in ATTACHMENTS_DIR. That is an accepted limit
- * (the app runs one server per data dir; uploadLocks already assumes the
- * same), not a design gap this fix covers. */
+/** Cached quota usage (null: rescan needed); single-process state, since one server owns a data dir. */
 let committedAttachmentBytes: number | null = null;
-// An async link can finish while another upload invalidates or refreshes the
-// cache. Its bytes must not be added again if a scan may already include it.
+// An async link may finish after a scan already counted its file; the version keeps it from counting twice.
 let attachmentAccountingVersion = 0;
 
-/** Force a fresh disk total and invalidate any in-flight commit's snapshot. */
 function invalidateAttachmentAccounting(): void {
   committedAttachmentBytes = null;
   attachmentAccountingVersion += 1;
 }
 
-/** Mimes the endpoint accepts, mapped to the extension stored on disk.
- * Sniffing is not attempted — a lie here only changes the filename. */
+/** No sniffing: a lying mime only changes the filename. */
 const IMAGE_MIMES: Record<string, string> = {
   "image/png": ".png",
   "image/jpeg": ".jpg",
@@ -74,11 +69,7 @@ const IMAGE_MIMES: Record<string, string> = {
   "image/webp": ".webp",
 };
 
-/** Useful document and audio formats accepted by the upload endpoint.
- * Generic archives, binaries, HTML, SVG, and executable/script mimes stay
- * out. Office/OpenDocument packages are allowed because they are documents,
- * despite using ZIP internally. The claimed mime determines the extension;
- * an attacker-controlled filename never does. */
+/** No binaries, HTML, SVG or scripts; archives are kept as sent, never unpacked. The claimed mime picks the extension; an attacker's filename never does. */
 const FILE_MIMES: Readonly<Record<string, string>> = {
   "video/mp4": ".mp4",
   "video/webm": ".webm",
@@ -112,6 +103,14 @@ const FILE_MIMES: Readonly<Record<string, string>> = {
   "application/vnd.oasis.opendocument.text": ".odt",
   "application/vnd.oasis.opendocument.spreadsheet": ".ods",
   "application/vnd.oasis.opendocument.presentation": ".odp",
+  "application/zip": ".zip",
+  "application/vnd.rar": ".rar",
+  "application/x-7z-compressed": ".7z",
+  "application/x-tar": ".tar",
+  "application/gzip": ".gz",
+  "application/x-compressed-tar": ".tgz",
+  "application/x-bzip2": ".bz2",
+  "application/x-xz": ".xz",
 };
 
 export function extensionForMime(mime: string | undefined): string | null {
@@ -132,9 +131,6 @@ export function validateAttachmentUploadId(value: string | undefined): string | 
   return normalized;
 }
 
-/** The one full directory walk. Run from cold or invalidated accounting,
- * or from an explicit cleanup sweep — never
- * from the per-reservation hot path, which is what made PERF-03 quadratic. */
 function scanAttachmentUsageAndCleanup(now = Date.now()): { bytes: number; removed: number } {
   ensureAttachmentsDir();
   let bytes = 0;
@@ -142,9 +138,7 @@ function scanAttachmentUsageAndCleanup(now = Date.now()): { bytes: number; remov
   for (const entry of readdirSync(ATTACHMENTS_DIR, { withFileTypes: true })) {
     if (!entry.isFile()) continue;
     const path = join(ATTACHMENTS_DIR, entry.name);
-    // A live partial is represented by its in-memory reservation. A fresh
-    // orphan from a crashed process still occupies disk and therefore counts
-    // until this same scan is allowed to remove it.
+    // A live partial is counted by its reservation; a crashed process's orphan counts until this scan removes it.
     if (PARTIAL_NAME.test(entry.name) && activePartials.has(path)) continue;
     try {
       const stat = statSync(path);
@@ -155,14 +149,12 @@ function scanAttachmentUsageAndCleanup(now = Date.now()): { bytes: number; remov
         bytes += stat.size;
       }
     } catch {
-      // A concurrent cleanup or manual removal made this entry consume zero.
     }
   }
   return { bytes, removed };
 }
 
-/** Return cached usage, initializing it from disk after cold start or
- * invalidation. Reservations must use this rather than trusting a cold cache. */
+/** Reservations must use this rather than trust a cold cache. */
 function committedBytes(): number {
   if (committedAttachmentBytes === null) {
     committedAttachmentBytes = scanAttachmentUsageAndCleanup().bytes;
@@ -171,10 +163,7 @@ function committedBytes(): number {
   return committedAttachmentBytes;
 }
 
-/** A newly committed file (saveFile/saveImage success path only — never the
- * idempotent-retry branches, which reuse bytes already counted) adds to the
- * cache. If accounting changed during an async link, a scan may already have
- * counted that file. Let the next reservation rescan instead of adding twice. */
+/** Never for idempotent retries, which reuse bytes already counted; after an accounting change the next reservation rescans. */
 function addCommittedBytes(delta: number, version = attachmentAccountingVersion): void {
   if (version !== attachmentAccountingVersion || committedAttachmentBytes === null) {
     invalidateAttachmentAccounting();
@@ -183,11 +172,6 @@ function addCommittedBytes(delta: number, version = attachmentAccountingVersion)
   committedAttachmentBytes += delta;
 }
 
-/** Remove only abandoned temporary uploads, and refresh the cached usage
- * total from the same fresh scan. Outside accounting recovery, this is the
- * only full directory walk after start-up; nothing on the upload path calls it
- * per byte or per chunk anymore, so callers that want stale partials
- * reclaimed promptly should invoke it on their own schedule. */
 export function cleanupStaleAttachmentPartials(now = Date.now()): number {
   const { bytes, removed } = scanAttachmentUsageAndCleanup(now);
   committedAttachmentBytes = bytes;
@@ -195,37 +179,96 @@ export function cleanupStaleAttachmentPartials(now = Date.now()): number {
   return removed;
 }
 
-/** Delete a committed attachment (e.g. a generated image whose owning
- * message/turn was retired) and keep the quota cache in sync. Every caller
- * outside this module that removes a file saveImage/saveFile created must
- * route through here instead of a raw unlink, or the cache will overcount
- * forever and eventually reject uploads that should fit. */
+/** A removed upload also goes from every conversation's box uploads folder, where box-attachments.ts linked it, so no box
+ * can still read it and its space comes back. */
+function dropBoxUploadCopies(names: readonly string[], dataDir = DATA_DIR): void {
+  if (!names.length) return;
+  const root = join(dataDir, "box-uploads");
+  const dirs = (path: string) => { try { return readdirSync(path); } catch { return []; } };
+  for (const bot of dirs(root)) {
+    for (const thread of dirs(join(root, bot))) {
+      for (const name of names) {
+        try { rmSync(join(boxUploadsDir(dataDir, bot, thread), name), { force: true }); } catch { /* best effort: a file still in use stays */ }
+      }
+    }
+  }
+}
+
+/** Every removal of a file saveImage/saveFile created must come through here, or the cache overcounts and rejects uploads. */
 export function deleteAttachment(path: string): void {
   try {
-    // Only bother sizing it if the cache is already warm — if it isn't, the
-    // eventual first scan just won't see this file, which is correct.
     const size = committedAttachmentBytes !== null ? statSync(path).size : 0;
     unlinkSync(path);
     if (committedAttachmentBytes !== null) {
       committedAttachmentBytes = Math.max(0, committedAttachmentBytes - size);
     }
-  } catch {
-    // Already gone, or never existed — nothing to reconcile.
+  } catch (error) {
+    // An upload still on disk (a busy file on Windows) keeps its box copies; one already gone loses them.
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
   }
+  if (resolve(dirname(path)) === resolve(ATTACHMENTS_DIR)) dropBoxUploadCopies([basename(path)]);
 }
 
-/** Test-only: force the next quota check to rescan the directory instead of
- * trusting the cache. Needed because tests mutate ATTACHMENTS_DIR directly
- * (truncateSync, rmSync, writeFileSync) to simulate quota states, which the
- * cache can't observe. */
+/** Settings → General: what the store holds against its ceiling, rescanned so files removed outside the app count. */
+export function attachmentStorageUsage(): { usedBytes: number; maxBytes: number } {
+  invalidateAttachmentAccounting();
+  return { usedBytes: committedBytes(), maxBytes: ATTACHMENTS_MAX_BYTES };
+}
+
+/** What a Settings clear leaves, as stored names: pictures given by their /api/attachments/ url (bot and profile
+ * pictures), and files given by their path or bare name (the banner, routines' files). */
+export function keptAttachmentNames(urls: ReadonlyArray<string | null | undefined>, paths: ReadonlyArray<string | undefined>): Set<string> {
+  const kept = new Set<string>();
+  for (const url of urls) if (url?.startsWith("/api/attachments/")) kept.add(url.slice("/api/attachments/".length));
+  for (const path of paths) {
+    const name = path?.replaceAll("\\", "/").split("/").pop();
+    if (name) kept.add(name);
+  }
+  return kept;
+}
+
+let clearOffered = true;
+/** A Team Cloud has no Settings clear, so its full-store error must not point there. */
+export function offerAttachmentClear(offered: boolean): void {
+  clearOffered = offered;
+}
+
+/** A file this new may still be on its way into a message or a turn, so a clear leaves it. */
+export const ATTACHMENT_CLEAR_MIN_AGE_MS = 10 * 60 * 1000;
+
+/** The person's Clear in Settings: every stored file older than a few minutes goes, except the ones `kept` holds
+ * (pictures, routine files). A message that showed a removed file shows it missing. */
+export function clearAttachments(kept: ReadonlySet<string>, now = Date.now()): { removed: number; freedBytes: number; failed: number } {
+  ensureAttachmentsDir();
+  let removed = 0;
+  let freedBytes = 0;
+  let failed = 0;
+  const gone: string[] = [];
+  for (const entry of readdirSync(ATTACHMENTS_DIR, { withFileTypes: true })) {
+    if (!entry.isFile() || PARTIAL_NAME.test(entry.name) || kept.has(entry.name)) continue;
+    const path = join(ATTACHMENTS_DIR, entry.name);
+    try {
+      const { mtimeMs, size } = statSync(path);
+      if (now - mtimeMs < ATTACHMENT_CLEAR_MIN_AGE_MS) continue;
+      unlinkSync(path);
+      gone.push(entry.name);
+      removed += 1;
+      freedBytes += size;
+    } catch (error) {
+      // Gone already is fine; anything else (permissions, a busy file on Windows) the person is told about.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") failed += 1;
+    }
+  }
+  dropBoxUploadCopies(gone);
+  invalidateAttachmentAccounting();
+  return { removed, freedBytes, failed };
+}
+
 export function __resetAttachmentAccountingForTests(): void {
   invalidateAttachmentAccounting();
 }
 
-/** A retry owns the same UUID namespace as the interrupted attempt. Once it
- * holds that UUID's in-process lock, any inactive partial with the prefix is
- * from a crashed/failed process and can be replaced immediately instead of
- * consuming quota for an hour. */
+/** Holding the upload id's lock, any inactive partial with its prefix is a crashed attempt and can go now. */
 function cleanupAttachmentPartialsForUpload(uploadId: string): void {
   ensureAttachmentsDir();
   const prefix = `.openmaus-upload-${uploadId}-`;
@@ -234,16 +277,12 @@ function cleanupAttachmentPartialsForUpload(uploadId: string): void {
     const path = join(ATTACHMENTS_DIR, entry.name);
     if (activePartials.has(path)) continue;
     try {
-      // Only bother sizing it if the cache is already warm — if it isn't,
-      // the eventual first scan runs after this unlink and simply never
-      // sees the file, so there is nothing to reconcile.
       const size = committedAttachmentBytes !== null ? statSync(path).size : 0;
       unlinkSync(path);
       if (committedAttachmentBytes !== null) {
         committedAttachmentBytes = Math.max(0, committedAttachmentBytes - size);
       }
     } catch {
-      // A concurrent cleanup already removed the abandoned attempt.
     }
   }
 }
@@ -258,17 +297,18 @@ class AttachmentReservation {
   }
 
   private reserveAtLeast(required: number, preferred: number): void {
-    const used = committedBytes();
-    const available = ATTACHMENTS_MAX_BYTES - used - reservedAttachmentBytes;
+    let available = ATTACHMENTS_MAX_BYTES - committedBytes() - reservedAttachmentBytes;
+    if (available < required) {
+      // People free space by deleting attachments outside the app, which the cache never sees.
+      invalidateAttachmentAccounting();
+      available = ATTACHMENTS_MAX_BYTES - committedBytes() - reservedAttachmentBytes;
+    }
     if (available < required) {
       throw statusError(
         507,
-        `attachments storage is full (limit ${ATTACHMENTS_MAX_BYTES} bytes)`,
+        `attachments storage is full (${formatStoreLimit(ATTACHMENTS_MAX_BYTES)} limit)${clearOffered ? ". Clear old attachments in Settings → General." : ""}`,
       );
     }
-    // Unknown-length HTTP bodies reserve in bounded chunks. Taking whatever
-    // remains below the preferred increment avoids falsely rejecting a small
-    // final upload near the quota while still bounding directory scans.
     const granted = Math.min(preferred, available);
     reservedAttachmentBytes += granted;
     this.held += granted;
@@ -310,17 +350,11 @@ async function withUploadLock<T>(uploadId: string | undefined, operation: () => 
   }
 }
 
-/** Every committed attachment name is `${uuid}${extension}` for one of these
- * fixed extensions — saveFile/saveImage never write any other suffix — so
- * whether a given upload ID is already committed, and under which content
- * type, can be answered with a handful of direct stats instead of a scan
- * over every file in the directory. */
+/** saveFile/saveImage only ever write `${uuid}${extension}` with one of these extensions. */
 const KNOWN_ATTACHMENT_EXTENSIONS = Array.from(
   new Set([...Object.values(IMAGE_MIMES), ...Object.values(FILE_MIMES)]),
 );
 
-/** Missing or unreadable candidates count as absent here; the atomic link
- * still detects a collision if a file exists when an upload commits. */
 function statSizeIfFile(path: string): number | null {
   try {
     const stat = statSync(path);
@@ -330,8 +364,6 @@ function statSizeIfFile(path: string): number | null {
   }
 }
 
-/** Find an idempotent retry without listing the directory, rejecting an ID
- * already committed under a different accepted content type. */
 function committedPathForUpload(uploadId: string, extension: string): string | null {
   ensureAttachmentsDir();
   const exactPath = join(ATTACHMENTS_DIR, `${uploadId}${extension}`);
@@ -358,8 +390,6 @@ export interface SavedAttachment {
 }
 
 export interface SavedFile extends SavedAttachment {
-  /** Safe display name derived from the shared filename. The on-disk name is
-   * always the UUID at the end of `path`. */
   name: string;
 }
 
@@ -377,10 +407,7 @@ export function extensionForFileMime(mime: string | undefined): string | null {
   return value ? FILE_MIMES[value] ?? null : null;
 }
 
-/** Strip platform-reserved characters and replace any sender-provided
- * extension with the canonical one for the accepted mime. Separators and
- * encoded separators are rejected rather than massaged so traversal attempts
- * remain visible as bad requests. */
+/** Separators and encoded separators are rejected, not massaged, so traversal attempts stay visible as bad requests. */
 export function sanitizeSharedFileName(name: string, mime: string): string {
   const extension = extensionForFileMime(mime);
   if (!extension) throw statusError(400, "content-type must be a supported document or audio type");
@@ -408,9 +435,7 @@ export function sanitizeSharedFileName(name: string, mime: string): string {
   return `${boundedStem}${extension}`;
 }
 
-/** Stream one shared document to a generated file without ever collecting
- * the request in memory. A failed, empty, or oversized upload leaves no
- * partial file behind. */
+/** Never buffers the request; a failed, empty or oversized upload leaves no partial file. */
 export async function saveFile(
   chunks: AsyncIterable<Uint8Array>,
   originalName: string,
@@ -509,17 +534,56 @@ export async function saveFile(
       throw error;
     } finally {
       activePartials.delete(partialPath);
-      // A leftover partial was excluded from the cache while active. Rescan
-      // after releasing it so a retry cannot subtract bytes never counted.
+      // Rescan after releasing a leftover partial, so a retry cannot subtract bytes never counted.
       if (partialCleanupFailed) invalidateAttachmentAccounting();
       reservation.release();
     }
   });
 }
 
-/** Persist one image and return its path. The UUID filename means the name
- * is never attacker-controlled and never collides; the extension preserves
- * the format the sender claimed. */
+/** An attachment another computer's chats name, kept under that name: counted against the store's limit like any
+ * upload (507 when it is full), written under a partial name cleanup knows, never over a file already here, and never
+ * leaving a partial file behind. `stored`: false when the same file was here already. */
+export async function saveNamedAttachment(name: string, chunks: AsyncIterable<Uint8Array>, expectedBytes?: number): Promise<{ stored: boolean }> {
+  if (expectedBytes !== undefined && expectedBytes > FILE_MAX_BYTES) throw statusError(413, `attachments are limited to ${FILE_MAX_BYTES} bytes`);
+  ensureAttachmentsDir();
+  const path = join(ATTACHMENTS_DIR, name);
+  const partialPath = join(ATTACHMENTS_DIR, `.openmaus-upload-${randomUUID()}-${randomUUID()}.partial`);
+  const reservation = new AttachmentReservation();
+  activePartials.add(partialPath);
+  let file: Awaited<ReturnType<typeof open>> | undefined;
+  let partialCleanupFailed = false;
+  try {
+    if (expectedBytes) reservation.reserve(expectedBytes);
+    file = await open(partialPath, "wx", 0o600);
+    let bytes = 0;
+    for await (const value of chunks) {
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+      if (bytes + chunk.byteLength > FILE_MAX_BYTES) throw statusError(413, `attachments are limited to ${FILE_MAX_BYTES} bytes`);
+      reservation.ensure(bytes + chunk.byteLength);
+      await file.write(chunk);
+      bytes += chunk.byteLength;
+    }
+    await file.close();
+    file = undefined;
+    const accountingVersion = attachmentAccountingVersion;
+    try { await link(partialPath, path); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return { stored: false };
+      throw error;
+    }
+    addCommittedBytes(bytes, accountingVersion);
+    return { stored: true };
+  } finally {
+    if (file) await file.close().catch(() => undefined);
+    await unlink(partialPath).catch(() => { partialCleanupFailed = true; });
+    activePartials.delete(partialPath);
+    if (partialCleanupFailed) invalidateAttachmentAccounting();
+    reservation.release();
+  }
+}
+
+/** The UUID filename is never attacker-controlled and never collides. */
 export function saveImage(bytes: Buffer, mime: string, requestedUploadId?: string): SavedAttachment {
   const ext = extensionForMime(mime);
   if (!ext) throw Object.assign(new Error("unsupported image type"), { status: 400 });
@@ -574,23 +638,29 @@ export function saveImage(bytes: Buffer, mime: string, requestedUploadId?: strin
   }
 }
 
-/** Persist one synthesized audio note. Providers return audio/mpeg buffers;
- * the same atomic-write and quota discipline as saveImage applies, with a
- * fixed .mp3 extension because the accepted mime determines it exactly. */
+/** Cloud voices answer in MP3; the built-in Mac voices (`say`) and Chatterbox answer in WAV. */
+const AUDIO_MIMES: Readonly<Record<string, { mime: string; ext: string }>> = {
+  "audio/mpeg": { mime: "audio/mpeg", ext: ".mp3" },
+  "audio/wav": { mime: "audio/wav", ext: ".wav" },
+  "audio/x-wav": { mime: "audio/wav", ext: ".wav" },
+  "audio/wave": { mime: "audio/wav", ext: ".wav" },
+};
+
 export function saveAudio(bytes: Buffer, mime: string): SavedAttachment {
-  const normalized = mime.split(";")[0]!.trim().toLowerCase();
-  if (normalized !== "audio/mpeg") {
+  const format = AUDIO_MIMES[mime.split(";")[0]!.trim().toLowerCase()];
+  if (!format) {
     throw Object.assign(new Error("unsupported audio type"), { status: 400 });
   }
   if (bytes.byteLength === 0) throw Object.assign(new Error("empty audio"), { status: 400 });
-  if (bytes.byteLength > FILE_MAX_BYTES) {
-    throw Object.assign(new Error(`audio exceeds ${FILE_MAX_BYTES} bytes`), { status: 413 });
+  // Saved from memory and served whole by readAttachment, so held to the preview size, not the streamed store limit.
+  if (bytes.byteLength > PREVIEW_MAX_BYTES) {
+    throw Object.assign(new Error(`audio exceeds ${PREVIEW_MAX_BYTES} bytes`), { status: 413 });
   }
   ensureAttachmentsDir();
   const reservation = new AttachmentReservation();
   reservation.reserve(bytes.byteLength);
   const id = randomUUID();
-  const name = `${id}.mp3`;
+  const name = `${id}${format.ext}`;
   const path = join(ATTACHMENTS_DIR, name);
   const partialPath = join(ATTACHMENTS_DIR, `.openmaus-upload-${id}-${randomUUID()}.partial`);
   activePartials.add(partialPath);
@@ -608,7 +678,7 @@ export function saveAudio(bytes: Buffer, mime: string): SavedAttachment {
       }
     }
     unlinkSync(partialPath);
-    return { path, mime: normalized, bytes: bytes.byteLength };
+    return { path, mime: format.mime, bytes: bytes.byteLength };
   } catch (error) {
     try {
       unlinkSync(partialPath);
@@ -623,10 +693,7 @@ export function saveAudio(bytes: Buffer, mime: string): SavedAttachment {
   }
 }
 
-/** HTTP uploads take the same per-ID lock as streamed files. saveImage stays
- * synchronous for generated avatars, while this wrapper prevents an image
- * and a document using the same caller-supplied UUID from committing with
- * different extensions at the same time. */
+/** Takes the per-id lock, so an image and a document with one caller-supplied UUID cannot commit with different extensions. */
 export async function saveImageUpload(
   bytes: Buffer,
   mime: string,
@@ -639,8 +706,6 @@ export async function saveImageUpload(
   });
 }
 
-/** Existence check with the same name discipline as readAttachment, without
- * reading up to 10MB of pixels just to learn the file is there. */
 export function attachmentExists(name: string): boolean {
   if (!/^[A-Za-z0-9-]+\.(png|jpg|gif|webp)$/.test(name)) return false;
   try {
@@ -650,13 +715,11 @@ export function attachmentExists(name: string): boolean {
   }
 }
 
-/** Read an attachment back for serving. Only names that are exactly a bare
- * filename (no separators, no dotfiles) inside ATTACHMENTS_DIR resolve —
- * the route must never become a general file server for the data dir. */
+/** Only a bare filename inside ATTACHMENTS_DIR resolves: the route must never become a file server for the data dir. */
 export function readAttachment(name: string): { bytes: Buffer; mime: string } | null {
-  if (!/^[A-Za-z0-9-]+\.(png|jpg|jpeg|gif|webp|mp3)$/.test(name)) return null;
+  if (!/^[A-Za-z0-9-]+\.(png|jpg|jpeg|gif|webp|mp3|wav)$/.test(name)) return null;
   const path = join(ATTACHMENTS_DIR, name);
-  if (extname(path) === ".jpeg") return null; // saved as .jpg; .jpeg is not a name we write
+  if (extname(path) === ".jpeg") return null;
   try {
     return { bytes: readFileSync(path), mime: mimeForExt(extname(path)) };
   } catch {
@@ -676,28 +739,20 @@ function mimeForExt(ext: string): string {
       return "image/webp";
     case ".mp3":
       return "audio/mpeg";
+    case ".wav":
+      return "audio/wav";
     default:
       return "application/octet-stream";
   }
 }
 
-/** Verdict on a `Range` header for audio serving (#1745). `none` means
- * "answer as if the header was absent" — the pre-Range full 200 that
- * images and documents keep forever — and covers absent, malformed,
- * non-bytes, and multi-range headers alike. `unsatisfiable` is the one
- * malformed-but-meaningful case (a start at or past EOF) that must answer
- * 416 rather than silently degrade, so players learn the truth about the
- * file they are seeking inside. */
+/** `none`: answer as if no Range header (absent, malformed, non-bytes, multi-range); `unsatisfiable`: a start at or past EOF, answered 416. */
 export type AudioRange =
   | { kind: "none" }
   | { kind: "unsatisfiable" }
   | { kind: "range"; start: number; end: number };
 
-/** Parse a single `bytes=` range against a stored audio file. Only the
- * canonical shapes a player sends are honored: `a-b`, `a-`, and `-n`
- * (the last-n-bytes suffix). Anything else — commas, letters, reversed
- * bounds, internal spaces — reads as "not understood" and the caller sends
- * the whole file, which is always a correct answer to a GET. */
+/** Honours only `a-b`, `a-` and `-n`; anything else gets the whole file, always a correct answer to a GET. */
 export function parseAudioRange(header: string | undefined, size: number): AudioRange {
   const raw = header?.trim();
   if (!raw) return { kind: "none" };
@@ -705,11 +760,8 @@ export function parseAudioRange(header: string | undefined, size: number): Audio
   if (!m) return { kind: "none" };
   const [, rawStart, rawEnd] = m;
   if (rawStart === "") {
-    // `bytes=-` carries no bounds at all: malformed input, not a suffix
-    // range, so the caller answers with the whole file. A real zero-length
-    // suffix (`bytes=-0`) stays unsatisfiable below, per RFC 9110.
+    // `bytes=-` is malformed, not a suffix range; `bytes=-0` is unsatisfiable per RFC 9110.
     if (rawEnd === "") return { kind: "none" };
-    // suffix range: the final n bytes; zero is unsatisfiable by definition
     const suffix = Number(rawEnd);
     if (!suffix) return { kind: "unsatisfiable" };
     if (size === 0) return { kind: "unsatisfiable" };

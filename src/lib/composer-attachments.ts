@@ -1,6 +1,8 @@
-// What is attached to the next message: text too long for the input or a
-// file dropped onto the window. Chips fold back into a normal prompt on
-// send, so every driver receives the same message shape.
+import { isCitationAttachment, serializeCitation, type CitationAttachment } from "./citations.ts";
+import { randomUuid } from "./random-uuid.ts";
+import { FILE_MAX_BYTES } from "../../shared/upload-limits.ts";
+export { dataContextFor, type DataContext, type DataViewContext } from "../../shared/data-context.ts";
+
 export type PasteAttachment = {
   kind: "paste";
   id: string;
@@ -24,17 +26,16 @@ export type ImageAttachment = {
   name: string;
   size: number;
   mime: string;
-  /** Browser-local pixels shown immediately while the durable upload is in
-   * flight and briefly handed to the transcript after Send. Never persisted. */
   previewUrl?: string;
   uploading?: boolean;
 };
 
-export type Attachment = PasteAttachment | FileAttachment | ImageAttachment;
+export type Attachment = PasteAttachment | FileAttachment | ImageAttachment | CitationAttachment;
 
 export function isAttachment(value: unknown): value is Attachment {
   if (!value || typeof value !== "object") return false;
   const attachment = value as Record<string, unknown>;
+  if (attachment.kind === "citation") return isCitationAttachment(value);
   if (typeof attachment.id !== "string" || !validSize(attachment.size)) return false;
   if (attachment.kind === "paste") {
     return (
@@ -67,8 +68,6 @@ function validSize(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-/** Past this, a paste stops reading as typing and becomes an attachment.
- * Long-but-narrow (a stack trace, a log) counts by line, not just chars. */
 export const PASTE_CHARS = 900;
 export const PASTE_LINES = 12;
 
@@ -84,34 +83,79 @@ function newId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `a${Math.random().toString(36).slice(2)}`;
 }
 
-/** The upload id is a server-validated UUID and remains stable across the
- * one recovery attempt. That makes a lost success response safe to retry:
- * the server returns the already committed attachment instead of creating a
- * second file. */
-function newUploadId(): string {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  const bytes = new Uint8Array(16);
-  if (globalThis.crypto?.getRandomValues) {
-    globalThis.crypto.getRandomValues(bytes);
-  } else {
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = Math.floor(Math.random() * 256);
-    }
-  }
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
-  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
-}
+/** Stable across the one retry, so a lost success response cannot create a second file. */
+const newUploadId = randomUuid;
 
 export function fileAttachment(name: string, path: string, size: number): FileAttachment {
   return { kind: "file", id: newId(), path, name, size };
 }
 
-/** Matches the server's IMAGE_MAX_BYTES — checked client-side so an
- * oversized paste is refused before the upload starts, not mid-stream. */
+/** Must match the server's IMAGE_MAX_BYTES. */
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
-export const FILE_MAX_BYTES = 25 * 1024 * 1024;
+/** One limit for a sent file on every surface; previews read whole stay at PREVIEW_MAX_BYTES. */
+export { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../../shared/upload-limits.ts";
+/** Must match the server's TURN_IMAGE_MAX_COUNT: a message carrying more images is refused at send. */
+export const TURN_IMAGE_MAX_COUNT = 10;
+
+/** Must match the server's TURN_IMAGE_MAX_BYTES: a message whose images total more is refused at send. */
+export const TURN_IMAGE_MAX_BYTES = 4 * IMAGE_MAX_BYTES;
+
+export function imageLimitNotice(leftOut: readonly string[]): string {
+  return `A message takes up to ${TURN_IMAGE_MAX_COUNT} images, ${TURN_IMAGE_MAX_BYTES / (1024 * 1024)} MB in all. ${leftOut.join(", ")} ${leftOut.length === 1 ? "wasn't" : "weren't"} attached.`;
+}
+
+/** Splits images by the slots and bytes left: an image over IMAGE_MAX_BYTES is kept to fail with its own size error but takes no room. */
+export function fitImagesToSlots<T extends { size: number }>(images: readonly T[], slots: number, bytes = Infinity): { kept: T[]; leftOut: T[] } {
+  const kept: T[] = [];
+  const leftOut: T[] = [];
+  let room = slots;
+  let bytesRoom = bytes;
+  for (const image of images) {
+    if (image.size > IMAGE_MAX_BYTES) kept.push(image);
+    else if (room > 0 && image.size <= bytesRoom) {
+      room -= 1;
+      bytesRoom -= image.size;
+      kept.push(image);
+    } else leftOut.push(image);
+  }
+  return { kept, leftOut };
+}
+
+/** Images a draft holding these attachments can still take. */
+export function imageSlotsLeft(attachments: readonly Attachment[]): number {
+  return Math.max(0, TURN_IMAGE_MAX_COUNT - attachments.filter((attachment) => attachment.kind === "image").length);
+}
+
+/** Image bytes a draft holding these attachments can still take. */
+export function imageBytesLeft(attachments: readonly Attachment[]): number {
+  return Math.max(0, TURN_IMAGE_MAX_BYTES - attachments.reduce((total, attachment) => total + (attachment.kind === "image" ? attachment.size : 0), 0));
+}
+
+/** The images that fit the slots and bytes left; the rest are named in one notice. */
+export function imagesThatFit<T extends { name: string; size: number }>(images: readonly T[], slots: number, onNotice: (notice: string) => void, bytes = Infinity): T[] {
+  const { kept, leftOut } = fitImagesToSlots(images, slots, bytes);
+  if (leftOut.length) onNotice(imageLimitNotice(leftOut.map((image) => image.name)));
+  return kept;
+}
+
+export type AttachProblem =
+  | { kind: "too-large"; name: string; limitMb: number }
+  | { kind: "unsupported"; names: string[] }
+  | { kind: "image-limit"; names: string[] }
+  | { kind: "upload-failed"; name: string; reason: string };
+
+type TooLarge = Extract<AttachProblem, { kind: "too-large" }>;
+
+export class AttachError extends Error {
+  readonly problem: TooLarge;
+  readonly status = 413;
+  constructor(name: string, limitBytes: number) {
+    const limitMb = limitBytes / (1024 * 1024);
+    super(`${name} exceeds ${limitMb} MB`);
+    this.name = "AttachError";
+    this.problem = { kind: "too-large", name, limitMb };
+  }
+}
 
 const DOCUMENT_MIMES: Readonly<Record<string, string>> = {
   txt: "text/plain",
@@ -131,6 +175,7 @@ const DOCUMENT_MIMES: Readonly<Record<string, string>> = {
   odt: "application/vnd.oasis.opendocument.text",
   ods: "application/vnd.oasis.opendocument.spreadsheet",
   odp: "application/vnd.oasis.opendocument.presentation",
+  xmind: "application/vnd.xmind.workbook",
 };
 
 const ACCEPTED_DOCUMENT_MIMES = new Set(Object.values(DOCUMENT_MIMES));
@@ -145,6 +190,18 @@ const AUDIO_MIMES_BY_EXTENSION: Readonly<Record<string, string>> = {
   flac: "audio/flac",
   webm: "audio/webm",
 };
+/** Sent as plain files and never unpacked; typed by name alone, since browsers declare archives inconsistently. */
+const ARCHIVE_MIMES_BY_EXTENSION: Readonly<Record<string, string>> = {
+  zip: "application/zip",
+  rar: "application/vnd.rar",
+  "7z": "application/x-7z-compressed",
+  tar: "application/x-tar",
+  gz: "application/gzip",
+  tgz: "application/x-compressed-tar",
+  bz2: "application/x-bzip2",
+  xz: "application/x-xz",
+};
+
 const ACCEPTED_AUDIO_MIMES = new Set([
   ...Object.values(AUDIO_MIMES_BY_EXTENSION),
   "audio/x-m4a", "audio/x-wav", "audio/wave", "audio/x-flac",
@@ -157,12 +214,6 @@ export function documentMime(file: Pick<File, "name" | "type">): string | null {
   return DOCUMENT_MIMES[extension] ?? null;
 }
 
-/**
- * Checks if a given file or descriptor has a supported image MIME type.
- *
- * @param file - Object with a MIME `type` and optional `size`.
- * @returns `true` if the file is a supported image format (PNG, JPEG, GIF, WebP).
- */
 export function isImageFile(file: { type: string; size?: number }): boolean {
   return (
     file.type.startsWith("image/") &&
@@ -170,14 +221,7 @@ export function isImageFile(file: { type: string; size?: number }): boolean {
   );
 }
 
-/**
- * Extracts valid image files from clipboard data, checking items first because
- * Chromium on macOS exposes screenshots and copied image bitmaps via items
- * while clipboardData.files may remain empty.
- *
- * @param clipboardData - The clipboard DataTransfer object or mock data.
- * @returns Array of valid image File objects found in the clipboard.
- */
+/** Items first: Chromium on macOS exposes screenshots via items while clipboardData.files may stay empty. */
 export function clipboardImageFiles(
   clipboardData: {
     files?: Iterable<File> | null;
@@ -203,12 +247,6 @@ export function clipboardImageFiles(
   return [];
 }
 
-/**
- * Detects if the clipboard data contains any image items or files.
- *
- * @param clipboardData - The clipboard DataTransfer object or mock data.
- * @returns `true` if any image file or item is present in the clipboard.
- */
 export function clipboardHasImages(
   clipboardData: {
     files?: Iterable<{ type: string; size?: number }> | null;
@@ -244,9 +282,6 @@ function retryableUploadStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-/** Retry only failures where the server may already have committed the body.
- * A validation/authentication response is final, while a network failure or
- * transient response gets one replay with the same upload id. */
 async function uploadWithRetry<T>(url: string, init: RequestInit): Promise<T> {
   for (let attempt = 0; attempt < UPLOAD_ATTEMPTS; attempt += 1) {
     let response: Response;
@@ -289,12 +324,9 @@ function canonicalImageName(originalName: string, path: string, mime: string): s
   return `${stem}${extension}`;
 }
 
-/** Persist a pasted image server-side and return the attachment chip data.
- * The server writes ~/.openmausbot/attachments/<uuid>.<ext> and answers
- * with the path; the prompt references that path so every CLI can open it. */
 export function optimisticImageAttachment(file: File): ImageAttachment | null {
   if (!isImageFile(file)) return null;
-  if (file.size > IMAGE_MAX_BYTES) throw Object.assign(new Error(`${file.name} exceeds 10 MB`), { status: 413 });
+  if (file.size > IMAGE_MAX_BYTES) throw new AttachError(file.name, IMAGE_MAX_BYTES);
   const mime = file.type.split(";", 1)[0]!.trim().toLowerCase();
   const previewUrl = typeof URL.createObjectURL === "function" ? URL.createObjectURL(file) : undefined;
   return {
@@ -314,7 +346,7 @@ export async function imageAttachmentFromFile(
   optimistic?: Pick<ImageAttachment, "id" | "previewUrl">,
 ): Promise<ImageAttachment | null> {
   if (!isImageFile(file)) return null;
-  if (file.size > IMAGE_MAX_BYTES) throw Object.assign(new Error(`${file.name} exceeds 10 MB`), { status: 413 });
+  if (file.size > IMAGE_MAX_BYTES) throw new AttachError(file.name, IMAGE_MAX_BYTES);
   const bytes = new Uint8Array(await file.arrayBuffer());
   const uploadId = newUploadId();
   const saved = await uploadWithRetry<{ path: string; mime: string; bytes: number }>(
@@ -336,18 +368,15 @@ export async function imageAttachmentFromFile(
   };
 }
 
-/** Copy a supported document or audio file into the private attachment store. The prompt
- * then carries the same durable path for the local agent and paired phones,
- * instead of exposing an arbitrary Finder path to the companion route. */
+/** Copied into the private store so the companion route never sees an arbitrary Finder path. */
 export async function fileAttachmentFromFile(file: File): Promise<FileAttachment | null> {
   const declared = file.type.split(";", 1)[0]!.trim().toLowerCase();
   const extension = file.name.split(".").at(-1)?.toLowerCase() ?? "";
   const mime = documentMime(file) ??
-    (ACCEPTED_AUDIO_MIMES.has(declared) ? declared : AUDIO_MIMES_BY_EXTENSION[extension]);
+    (ACCEPTED_AUDIO_MIMES.has(declared) ? declared : AUDIO_MIMES_BY_EXTENSION[extension]) ??
+    ARCHIVE_MIMES_BY_EXTENSION[extension];
   if (!mime) return null;
-  if (file.size > FILE_MAX_BYTES) {
-    throw Object.assign(new Error(`${file.name} exceeds 25 MB`), { status: 413 });
-  }
+  if (file.size > FILE_MAX_BYTES) throw new AttachError(file.name, FILE_MAX_BYTES);
   const uploadId = newUploadId();
   const saved = await uploadWithRetry<{ path: string; name: string; bytes: number }>(
     `/api/files?name=${encodeURIComponent(file.name)}&uploadId=${encodeURIComponent(uploadId)}`,
@@ -362,13 +391,9 @@ export async function fileAttachmentFromFile(file: File): Promise<FileAttachment
 
 export function pasteAttachment(text: string): PasteAttachment {
   const id = newId();
-  // measured once, here: a chip re-renders on every keystroke in the
-  // composer, and encoding half a megabyte each time would be felt
   return { kind: "paste", id, text, size: byteLength(text), lines: countLines(text) };
 }
 
-/** Move a pasted attachment into the editable composer draft without
- * running the text back through the paste threshold. */
 export function appendPastedText(text: string, pasted: string): string {
   if (!text) return pasted;
   return `${text}${text.endsWith("\n") ? "" : "\n\n"}${pasted}`;
@@ -379,10 +404,6 @@ export const INLINE_DROP_LIMIT = 512 * 1024;
 export type DroppedFile = Pick<File, "name" | "size" | "type" | "text"> &
   Partial<Pick<File, "arrayBuffer">>;
 
-/** Turn a browser drop into composer attachments. Electron-backed files
- * keep their disk path; small pathless text drops keep their contents.
- * Promise.all preserves the user's drop order even when text reads finish
- * in a different order. */
 export async function attachmentsFromDroppedFiles<T extends DroppedFile>(
   files: readonly T[],
   getPath: (file: T) => string,
@@ -393,14 +414,12 @@ export async function attachmentsFromDroppedFiles<T extends DroppedFile>(
       try {
         path = getPath(file);
       } catch {
-        // A browser or older desktop shell has no disk path to expose.
       }
       if (path) return { attachment: fileAttachment(file.name, path, file.size) };
       if (isInlineText(file) && file.size <= INLINE_DROP_LIMIT) {
         try {
           return { attachment: pasteAttachment(await file.text()) };
         } catch {
-          // Treat an unreadable browser drag like any other pathless file.
         }
       }
       return { rejectedName: file.name };
@@ -421,31 +440,16 @@ function isInlineText(file: DroppedFile): boolean {
   return file.type.startsWith("text/") || file.type === "application/json";
 }
 
-/** What the paste actually weighs — String#length counts UTF-16 units, so
- * it reads a third under on accented text and half under on CJK. */
 export function byteLength(text: string): number {
   return new TextEncoder().encode(text).length;
 }
 
-/** "12 lines, 3.4 KB" — what the chip says under the preview. */
-export function pasteSummary(a: { lines: number; size: number }): string {
-  return `${a.lines} lines, ${formatSize(a.size)}`;
-}
-
-export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/** The prompt the bot receives: what was typed, then one block per
- * attachment. Tagged blocks rather than fences — pasted code and markdown
- * carry fences of their own, and nesting them loses the boundary. A file
- * carries its path for the agent and its original name for the transcript. */
 export function composeMessage(text: string, attachments: Attachment[]): string {
   const parts = [text.trim()];
   attachments.forEach((a, i) => {
-    if (a.kind === "paste") {
+    if (a.kind === "citation") {
+      parts.push(serializeCitation(a));
+    } else if (a.kind === "paste") {
       parts.push(`<pasted-text index="${i + 1}">\n${a.text}\n</pasted-text>`);
     } else if (a.kind === "image") {
       parts.push(`<attached-image path="${escapeAttribute(a.path)}" name="${escapeAttribute(a.name)}" />`);
@@ -456,8 +460,7 @@ export function composeMessage(text: string, attachments: Attachment[]): string 
   return parts.filter(Boolean).join("\n\n");
 }
 
-/** File paths are untrusted prompt content. Keep them inside the quoted
- * attribute even when a filename contains XML characters or line breaks. */
+/** File paths are untrusted prompt content: keep them inside the quoted attribute. */
 export function escapeAttribute(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -487,9 +490,8 @@ export type TranscriptAttachments = {
   files: TranscriptFileAttachment[];
 };
 
-/** Decode only entities emitted by escapeAttribute. A second encoded pass
- * stays encoded, rather than turning attacker-controlled text into markup. */
-function decodeAttachmentAttribute(value: string): string {
+/** A second encoded pass stays encoded rather than turning attacker-controlled text into markup. */
+export function decodeAttachmentAttribute(value: string): string {
   return value.replace(/&(quot|lt|gt|amp);|&#(9|10|13);/g, (entity, named: string | undefined, numeric: string | undefined) => {
     if (numeric === "9") return "\t";
     if (numeric === "10") return "\n";
@@ -502,9 +504,7 @@ function decodeAttachmentAttribute(value: string): string {
   });
 }
 
-/** Keep transcript-provided names compact and visually honest. File chips
- * are deliberately not links, but control and bidi characters can still
- * make an untrusted name misleading. */
+/** Control and bidi characters can make an untrusted name misleading. */
 function transcriptFileName(path: string, suppliedName?: string): string {
   const decoded = suppliedName ? decodeAttachmentAttribute(suppliedName) : attachmentBasename(path);
   const clean = (value: string) => Array.from(value, (character) => {
@@ -532,15 +532,10 @@ type TranscriptBlock =
   | { kind: "untilBlank" }
   | { kind: "untilToken"; closingToken: string; hiddenWrapper?: boolean };
 
-/** The exact wrapper lines composeMessage writes around a pasted block. The
- * bot needs them to tell pasted from typed text; a person reading their own
- * message does not. Anything else on the line keeps the tag visible. */
-const PASTED_TEXT_OPEN = /^ {0,3}<pasted-text(?:[\t ]+index="\d+")?[\t ]*>[\t ]*$/i;
-const PASTED_TEXT_CLOSE = /^[\t ]*<\/pasted-text>[\t ]*$/i;
+export const PASTED_TEXT_OPEN = /^ {0,3}<pasted-text(?:[\t ]+index="\d+")?[\t ]*>[\t ]*$/i;
+export const PASTED_TEXT_CLOSE = /^[\t ]*<\/pasted-text>[\t ]*$/i;
 
-/** Recognise CommonMark-style fenced code without pulling a Markdown parser
- * into the composer bundle. An unterminated fence deliberately protects the
- * rest of the message: examples must never turn into actionable attachments. */
+/** An unterminated fence protects the rest of the message: examples must never become actionable attachments. */
 function transcriptFenceMarker(line: string): (TranscriptFence & { remainder: string }) | null {
   let index = 0;
   while (index < line.length && index < 4 && line[index] === " ") index += 1;
@@ -575,10 +570,7 @@ const COMMONMARK_TYPE_7 = new RegExp(
   `^ {0,3}(?:<[A-Za-z][A-Za-z0-9-]*${HTML_ATTRIBUTE}*[\\t ]*/?>|</[A-Za-z][A-Za-z0-9-]*[\\t ]*>)[\\t ]*$`,
 );
 
-/** Attachment-looking examples inside CommonMark HTML blocks stay literal.
- * Types 1-5 use their specified terminator; types 6-7 last through the next
- * blank line. The app's pasted-text wrapper is deliberately stronger than a
- * generic custom tag and lasts through its closing tag, including blanks. */
+/** CommonMark HTML blocks: types 1-5 end at their terminator, types 6-7 at the next blank line. */
 function transcriptBlockStarting(line: string): TranscriptBlock | null {
   const lower = line.toLowerCase();
   const commentStart = lower.indexOf("<!--");
@@ -632,10 +624,6 @@ function transcriptBlockStarting(line: string): TranscriptBlock | null {
 const TRANSCRIPT_ATTACHMENT_TAG =
   /^<attached-(image|file)[\t ]+path="([^"\r\n]*)"(?:[\t ]+name="([^"\r\n]*)")?[\t ]*\/>[\t ]*$/;
 
-/** Split a stored user message into its display text and attachments for
- * transcript rendering. Markdown exports preserve whitespace; bubbles trim it.
- * Bubbles also hide the `<pasted-text>` wrapper lines and show only what was
- * pasted; exports keep the message exactly as the bot received it. */
 export function splitTranscriptAttachments(
   text: string,
   trimDisplay = true,
@@ -707,14 +695,19 @@ export function splitTranscriptAttachments(
   return { display: trimDisplay ? display.trim() : display, images, files };
 }
 
-/** Kept for callers outside the desktop bundle that used the old helper. */
 export function splitAttachedImages(text: string): { display: string; images: string[] } {
   const { display, images } = splitTranscriptAttachments(text);
   return { display, images: images.map((image) => image.path) };
 }
 
-/** The bare filename a saved attachment path ends in — what the serving
- * route expects. Works for POSIX and Windows separators. */
+/** A file uploaded for a message and taken off it before sending: the server keeps it only while a message uses it. */
+export function discardUnsentUpload(attachment: Attachment): void {
+  if ((attachment.kind !== "image" && attachment.kind !== "file") || !attachment.path) return;
+  const name = attachmentBasename(attachment.path);
+  if (!/^[A-Za-z0-9-]+\.[A-Za-z0-9]{1,10}$/.test(name)) return;
+  void fetch(`/api/attachments/${encodeURIComponent(name)}`, { method: "DELETE" }).catch(() => undefined);
+}
+
 export function attachmentBasename(path: string): string {
   const parts = path.split(/[\\/]/);
   return parts[parts.length - 1] ?? "";
@@ -728,8 +721,6 @@ function revokeBlobUrl(url: string | undefined): void {
   URL.revokeObjectURL(url);
 }
 
-/** Keep the already-decoded local image visible while the canonical message
- * and its cacheable server URL replace the optimistic row. */
 export function handoffAttachmentImagePreview(path: string, previewUrl: string | undefined): void {
   if (!path || !previewUrl?.startsWith("blob:")) return;
   const previous = previewHandoffs.get(path);
@@ -746,8 +737,6 @@ export function handoffAttachmentImagePreview(path: string, previewUrl: string |
   previewHandoffs.set(path, { url: previewUrl, timer });
 }
 
-/** Remove a draft image and its local pixels. Sent images deliberately skip
- * this path so their optimistic-to-server handoff can finish. */
 export function releaseAttachmentImagePreview(attachment: ImageAttachment): void {
   const handed = attachment.path ? previewHandoffs.get(attachment.path) : undefined;
   if (handed && handed.url === attachment.previewUrl) {
@@ -757,10 +746,7 @@ export function releaseAttachmentImagePreview(attachment: ImageAttachment): void
   revokeBlobUrl(attachment.previewUrl);
 }
 
-/** The renderer never loads a transcript-provided URL directly. Only names
- * the attachment server itself can have generated become same-origin image
- * URLs; malformed and executable-image paths render nothing, while a string
- * that looks remote can at most resolve to a local generated filename. */
+/** The renderer never loads a transcript-provided URL directly; only server-generated names become same-origin URLs. */
 export function attachmentImageUrl(path: string): string | null {
   const local = previewHandoffs.get(path);
   if (local) return local.url;
@@ -769,18 +755,12 @@ export function attachmentImageUrl(path: string): string | null {
   return `/api/attachments/${encodeURIComponent(name)}`;
 }
 
-/** Voice notes park as bare generated .mp3 filenames; anything else stays
- * out of an <audio> src rather than 404ing on a private path. */
 export function attachmentAudioUrl(path: string): string | null {
   const name = attachmentBasename(path);
-  if (!/^[A-Za-z0-9-]+\.mp3$/.test(name)) return null;
+  if (!/^[A-Za-z0-9-]+\.(?:mp3|wav)$/.test(name)) return null;
   return `/api/attachments/${encodeURIComponent(name)}`;
 }
 
-/** One intake path for files arriving by drop OR by the composer's attach
- * button, so a picked file and a dropped one can never behave differently.
- * Uploaders are injected for deterministic tests: callers own the network,
- * while this function owns ordering and the sentence shown on failure. */
 export async function intakeFiles<T extends DroppedFile & { type: string }>(
   _files: readonly T[],
   _opts: {
@@ -788,31 +768,38 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
     getPath: (file: T) => string;
     uploadImage: (file: T) => Promise<Attachment | null>;
     uploadFile?: (file: T) => Promise<FileAttachment | null>;
+    /** Images the message can still take; the rest are left out and named in the notice. */
+    imageSlots?: number;
+    /** Image bytes the message can still take; images past it are left out the same way. */
+    imageBytes?: number;
   },
-): Promise<{ attachments: Attachment[]; notice: string | null }> {
-  const files = [..._files];
+): Promise<{ attachments: Attachment[]; problems: AttachProblem[]; notice: string | null }> {
   const { allowImages, getPath, uploadImage } = _opts;
+  const images = allowImages ? _files.filter((file) => isImageFile(file)) : [];
+  const overflow = new Set(fitImagesToSlots(images, _opts.imageSlots ?? Infinity, _opts.imageBytes).leftOut);
+  const leftOut = [...overflow].map((file) => file.name);
+  const files = _files.filter((file) => !overflow.has(file));
   const uploadFile = _opts.uploadFile ?? (async (file: T) => {
     if (!file.arrayBuffer) return null;
     return fileAttachmentFromFile(file as unknown as File);
   });
-  // Promise.all starts every optimistic image preview immediately while its
-  // result array still preserves the order in which files were selected.
+  const failed = (file: T, err: unknown): { uploadError: AttachProblem; uploadErrorText: string } => ({
+    uploadError: err instanceof AttachError ? err.problem
+      : { kind: "upload-failed", name: file.name, reason: err instanceof Error ? err.message : "upload failed" },
+    uploadErrorText: `${file.name}: ${err instanceof Error ? err.message : "upload failed"}`,
+  });
   const results = await Promise.all(files.map(async (file): Promise<{
     attachments: Attachment[];
     rejectedNames: string[];
-    uploadError?: string;
+    uploadError?: AttachProblem;
+    uploadErrorText?: string;
   }> => {
     if (allowImages && isImageFile(file)) {
       try {
         const attachment = await uploadImage(file);
         return { attachments: attachment ? [attachment] : [], rejectedNames: [] };
       } catch (err) {
-        return {
-          attachments: [],
-          rejectedNames: [],
-          uploadError: `${file.name}: ${err instanceof Error ? err.message : "upload failed"}`,
-        };
+        return { attachments: [], rejectedNames: [], ...failed(file, err) };
       }
     }
     try {
@@ -821,11 +808,7 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
         return { attachments: [attachment], rejectedNames: [] };
       }
     } catch (err) {
-      return {
-        attachments: [],
-        rejectedNames: [],
-        uploadError: `${file.name}: ${err instanceof Error ? err.message : "upload failed"}`,
-      };
+      return { attachments: [], rejectedNames: [], ...failed(file, err) };
     }
     const result = await attachmentsFromDroppedFiles([file], getPath);
     return result;
@@ -836,20 +819,20 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
   const pathless = rejectedNames.length
     ? `Unable to attach ${rejectedNames.join(", ")}. Choose a supported image, document, or audio file.`
     : null;
-  const failed = uploadErrors.length ? uploadErrors.join("; ") : null;
+  const uploadErrorText = results.flatMap((result) => result.uploadErrorText ? [result.uploadErrorText] : []).join("; ") || null;
+  const notice = pathless && uploadErrorText ? `${pathless} (${uploadErrorText})` : (pathless ?? uploadErrorText);
+  const limited = leftOut.length ? imageLimitNotice(leftOut) : null;
   return {
     attachments,
-    notice: pathless && failed ? `${pathless} (${failed})` : (pathless ?? failed),
+    problems: [
+      ...(leftOut.length ? [{ kind: "image-limit" as const, names: leftOut }] : []),
+      ...(rejectedNames.length ? [{ kind: "unsupported" as const, names: rejectedNames }] : []),
+      ...uploadErrors,
+    ],
+    notice: limited && notice ? `${limited} ${notice}` : (limited ?? notice),
   };
 }
 
-/**
- * Whether the composer may pull keyboard focus back into its textarea after an
- * attachment lands. The draft was the writer's place when focus is still there,
- * has fallen to the page (a disabled element drops it), or sits on a control
- * inside the composer such as the paperclip button after the file dialog. A
- * focused control elsewhere — a dialog, the thread list — is left alone.
- */
 export function composerShouldRefocus(active: FocusNode | null, input: ComposerInputNode): boolean {
   if (!active || active === input) return true;
   const root = input.ownerDocument;
@@ -858,13 +841,6 @@ export function composerShouldRefocus(active: FocusNode | null, input: ComposerI
   return Boolean(composer?.contains(active));
 }
 
-/**
- * Whether a freshly opened thread's composer should take keyboard focus.
- * Opening a thread from the sidebar leaves focus on the row or the New thread
- * button, so the composer takes it from any plain control. It never takes it
- * from another text field (the sidebar search, a rename) or from an open
- * dialog, where the person is typing or deciding something else.
- */
 export function composerTakesFocusOnOpen(active: OpenFocusNode | null, input: ComposerInputNode): boolean {
   if (composerShouldRefocus(active, input)) return true;
   if (!active) return true;
@@ -873,18 +849,11 @@ export function composerTakesFocusOnOpen(active: OpenFocusNode | null, input: Co
   return !active.closest?.("[role=dialog], [role=alertdialog], [aria-modal=true]");
 }
 
-/**
- * Whether a change of reply target should put the caret in the composer.
- * Choosing a message to reply to means the next thing is typing the reply,
- * so a newly chosen target takes focus (MOCA-263). Clearing the reply, or the
- * same target arriving again as the draft re-renders, does not.
- */
 export function replyTargetTakesFocus(previousId: string | null | undefined, nextId: string | null | undefined): boolean {
   return Boolean(nextId) && nextId !== previousId;
 }
 
-// This file is also compiled for the server, which has no DOM types; the rule
-// only needs these members of the real elements.
+// Also compiled for the server, which has no DOM types.
 type FocusNode = object;
 interface OpenFocusNode {
   tagName?: string;

@@ -5,11 +5,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ home: "", script: "", socketReady: false, children: [], calls: [], embeddedDelays: [], hosts: [], handlers: new Map() }));
+const fixture = vi.hoisted(() => ({ home: "", script: "", socketReady: false, children: [], calls: [], embeddedDelays: [], hosts: [], hostOptions: [], handlers: new Map() }));
 vi.mock("electron", () => ({ app: { isPackaged: false, getPath: () => fixture.home }, ipcMain: { handle: (name, handler) => fixture.handlers.set(name, handler) } }));
 vi.mock("@trycua/cua-driver/embedded", () => ({
   EmbeddedCuaDriverHost: class {
     constructor() { this.delay = fixture.embeddedDelays.shift(); fixture.hosts.push(this); }
+    static withOptions(options) { fixture.hostOptions.push(options); return new this(); }
+    waitForExit() { return new Promise((resolve) => { this.exit = resolve; }); }
     async start({ signal }) {
       if (this.delay === "until-abort") {
         await new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
@@ -78,6 +80,7 @@ beforeEach(async () => {
   fixture.calls = [];
   fixture.embeddedDelays = [];
   fixture.hosts = [];
+  fixture.hostOptions = [];
   fixture.handlers.clear();
   vi.stubEnv("OPENMAUSBOT_CUA_EMBEDDED", "1");
   vi.stubEnv("CUA_DRIVER_PATH", "/fixture/cua-driver");
@@ -187,7 +190,6 @@ describe.skipIf(process.platform !== "darwin")("async standalone CUA launch (iso
     let attempts;
     try {
       attempts = [retry(event), retry(event)];
-      // Both complete IPC flows must wait for the same old host to stop.
       await new Promise((resolve) => setTimeout(resolve, 30));
       expect(fixture.hosts).toHaveLength(1);
       expect(fixture.hosts[0].stop).toHaveBeenCalledOnce();
@@ -208,6 +210,33 @@ describe.skipIf(process.platform !== "darwin")("async standalone CUA launch (iso
       expect(host.uniffiDestroy).toHaveBeenCalledOnce();
     }
     expect(JSON.parse(readFileSync(join(fixture.home, "cua-connection.json"), "utf8")).mode).toBe("unavailable");
+  });
+
+  it("restarts a helper that died by itself and says so while it is down", async () => {
+    fixture.embeddedDelays = [1, 1, 1];
+    const listener = vi.fn();
+    cua.setCuaStateListener(listener);
+    await expect(cua.startCua()).resolves.toMatchObject({ mode: "embedded" });
+    await expect.poll(() => typeof fixture.hosts[0].exit).toBe("function");
+
+    fixture.hosts[0].exit({ generation: "a", code: 1, success: false });
+    await expect.poll(() => JSON.parse(readFileSync(join(fixture.home, "cua-connection.json"), "utf8")).mode).toBe("unavailable");
+    expect(listener.mock.lastCall[0]).toMatchObject({ mode: "unavailable", reason: expect.stringContaining("restarting") });
+
+    await expect.poll(() => fixture.hosts.length, { timeout: 5_000 }).toBe(2);
+    await expect.poll(() => JSON.parse(readFileSync(join(fixture.home, "cua-connection.json"), "utf8")).mode, { timeout: 5_000 }).toBe("embedded");
+    expect(fixture.hostOptions[1].socketPath).toBe(fixture.hostOptions[0].socketPath);
+    expect(fixture.hostOptions[0].socketPath).toContain("cua-omb-");
+  });
+
+  it("does not restart a helper the app stopped", async () => {
+    fixture.embeddedDelays = [1, 1];
+    await cua.startCua();
+    await expect.poll(() => typeof fixture.hosts[0].exit).toBe("function");
+    await cua.stopCua();
+    fixture.hosts[0].exit({ generation: "a", code: 0, success: true });
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(fixture.hosts).toHaveLength(1);
   });
 
   it("cancels concurrent IPC retries during replacement startup", async () => {
@@ -238,9 +267,7 @@ describe.skipIf(process.platform !== "darwin")("async standalone CUA launch (iso
 
 it("does not add blocking subprocess calls to Electron runtime modules", () => {
   const root = dirname(fileURLToPath(import.meta.url));
-  // These existing synchronous ownership checks need separate lifecycle work:
-  // one cached boot ID read, one Windows process-creation-time query, and
-  // Linux's driver/private-group validation.
+  // These synchronous ownership checks need separate lifecycle work: the boot ID read, the Windows creation-time query, Linux group validation.
   const allowed = { "data-dir-lease.mjs": 3, "cua-linux.cjs": 2 };
   for (const entry of readdirSync(root, { recursive: true })) {
     const name = String(entry).replaceAll("\\", "/");

@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { readFileSync } from "node:fs";
-import { appPermissionAllowed, externalWebUrl } from "./app-permissions.mjs";
+import { appPermissionAllowed, appPermissionHandlers, emailDraftUrl, externalLinkUrl, externalWebUrl, remoteClipboardWriteAllowed } from "./app-permissions.mjs";
+import { boatClaimMailto } from "../src/lib/boat-offer.ts";
+import { cloudPlanSnapshot, createCloudAccountClient } from "./cloud-account.mjs";
+import { myCloudOrigin, rememberedCloudHome } from "./cloud-home.mjs";
 
 const LOCAL_ORIGIN = "http://127.0.0.1:5199";
 const LOCAL_PAGE = "http://127.0.0.1:5199/chat?botId=bot-1";
@@ -20,20 +23,16 @@ test("accepts a bare origin or a full URL on either side", () => {
 });
 
 test("allows media for audio (microphone) and guarded display-capture, denies video (camera)", () => {
-  // Audio only: allowed
   assert.equal(appPermissionAllowed("media", LOCAL_PAGE, LOCAL_ORIGIN, { mediaTypes: ["audio"] }), true);
   assert.equal(appPermissionAllowed("media", LOCAL_PAGE, LOCAL_ORIGIN, { mediaType: "audio" }), true);
 
-  // Guarded display-capture path: Electron 43 routes getDisplayMedia through permission="media"
-  // with an empty mediaTypes array before dispatching to setDisplayMediaRequestHandler
+  // Electron 43 routes getDisplayMedia through permission="media" with an empty mediaTypes array.
   assert.equal(appPermissionAllowed("media", LOCAL_PAGE, LOCAL_ORIGIN, { mediaTypes: [] }), true);
 
-  // Video / camera: strictly denied
   assert.equal(appPermissionAllowed("media", LOCAL_PAGE, LOCAL_ORIGIN, { mediaTypes: ["video"] }), false);
   assert.equal(appPermissionAllowed("media", LOCAL_PAGE, LOCAL_ORIGIN, { mediaTypes: ["audio", "video"] }), false);
   assert.equal(appPermissionAllowed("media", LOCAL_PAGE, LOCAL_ORIGIN, { mediaType: "video" }), false);
 
-  // Unknown or omitted details: fail closed
   assert.equal(appPermissionAllowed("media", LOCAL_PAGE, LOCAL_ORIGIN, { mediaType: "unknown" }), false);
   assert.equal(appPermissionAllowed("media", LOCAL_PAGE, LOCAL_ORIGIN, {}), false);
   assert.equal(appPermissionAllowed("media", LOCAL_PAGE, LOCAL_ORIGIN), false);
@@ -78,11 +77,35 @@ test("web links reject embedded credentials and non-web schemes", () => {
     assert.throws(() => externalWebUrl(url), /web address/);
 });
 
+test("an email link opens only as a draft to one address with a subject and a body", () => {
+  const draft = "mailto:support@example.com?subject=Hello%20there&body=Line%20one%0D%0ALine%20two";
+  assert.equal(emailDraftUrl(draft), draft);
+  assert.equal(externalLinkUrl(draft), draft);
+  assert.equal(externalLinkUrl("MAILTO:support@example.com?Subject=Hi"), "mailto:support@example.com?Subject=Hi");
+  assert.equal(externalLinkUrl("https://example.com/help"), "https://example.com/help");
+  for (const url of ["mailto:a@example.com,b@example.com", "mailto:a%2Cb@example.com", "mailto:?to=a@example.com", "mailto:", "mailto:nobody"])
+    assert.throws(() => externalLinkUrl(url), /one address/, url);
+  for (const url of ["mailto:a@example.com?attach=/etc/passwd", "mailto:a@example.com?subject=Hi&cc=b@example.com", "mailto:a@example.com?bcc=b@example.com",
+    "mailto:a@example.com?to=b@example.com", "mailto:a@example.com?Attachment=~/.ssh/id_rsa"])
+    assert.throws(() => externalLinkUrl(url), /only a subject and a body/, url);
+  assert.throws(() => emailDraftUrl("mailto:a%E0%A4%A@example.com"), /invalid/);
+  assert.throws(() => emailDraftUrl("https://example.com"), /Only email links/);
+  for (const url of ["file:///tmp/test", "javascript:alert(1)", "data:text/html,test", "tel:+15555550100", "sms:+15555550100"])
+    assert.throws(() => externalLinkUrl(url), /Only web/, url);
+  for (const url of [null, 123, "not a url"])
+    assert.throws(() => externalLinkUrl(url), /web address/);
+});
+
+test("the app's claim to Boat opens exactly as the app drafts it", () => {
+  assert.equal(externalLinkUrl(boatClaimMailto()), boatClaimMailto());
+});
+
 test("both external-link entry points use the policy and IPC retains the local-origin gate", () => {
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
   assert.match(main, /ipcMain\.handle\("desktop:open-external", localOnly\("desktop:open-external"/);
-  assert.match(main, /shell\.openExternal\(externalWebUrl\(rawUrl\)\)/);
-  assert.match(main, /shell\.openExternal\(externalWebUrl\(url\)\)/);
+  assert.match(main, /shell\.openExternal\(externalLinkUrl\(rawUrl\)\)/);
+  assert.match(main, /shell\.openExternal\(externalLinkUrl\(url\)\)/);
+  assert.doesNotMatch(main, /shell\.openExternal\(externalWebUrl\(/);
 });
 
 test("fails closed on unparsable or opaque origins", () => {
@@ -95,4 +118,440 @@ test("fails closed on unparsable or opaque origins", () => {
   // Opaque origins all serialise as "null"; two of them must never match.
   assert.equal(appPermissionAllowed("notifications", "data:text/html,x", "about:blank"), false);
   assert.equal(appPermissionAllowed("notifications", "javascript:alert(1)", LOCAL_ORIGIN), false);
+});
+
+const CLOUD = "https://omb-u-0123456789ab.fly.dev";
+function cloudFixture({ home = CLOUD } = {}) {
+  const main = { getURL: () => `${CLOUD}/chat?botId=bot-1` };
+  const state = { home, main, remote: false };
+  const handlers = appPermissionHandlers({
+    rendererOrigin: () => LOCAL_ORIGIN,
+    mainContents: () => state.main,
+    cloudHomeOrigin: () => state.home,
+  });
+  const ask = (permission, details, contents = state.main) => {
+    let granted;
+    handlers.request(contents, permission, (value) => { granted = value; }, details);
+    return granted;
+  };
+  const check = (permission, requestingOrigin, details, contents = state.main) => handlers.check(contents, permission, requestingOrigin, details);
+  return { state, ask, check };
+}
+const onCloud = (fields = {}) => ({ requestingUrl: `${CLOUD}/chat?botId=bot-1`, isMainFrame: true, ...fields });
+
+test("the verified Cloud open in this window may use the microphone", () => {
+  const { ask, check } = cloudFixture();
+  assert.equal(ask("media", onCloud({ mediaTypes: ["audio"] })), true);
+  assert.equal(check("media", CLOUD, { requestingUrl: `${CLOUD}/`, isMainFrame: true, mediaType: "audio" }), true);
+});
+
+test("the Cloud never gets the camera, screen capture or any other capability but clipboard writes", () => {
+  const { ask, check } = cloudFixture();
+  for (const mediaTypes of [["video"], ["audio", "video"], [], ["unknown"]]) {
+    assert.equal(ask("media", onCloud({ mediaTypes })), false, JSON.stringify(mediaTypes));
+  }
+  assert.equal(ask("media", onCloud()), false, "media with no type");
+  assert.equal(check("media", CLOUD, { isMainFrame: true, mediaType: "video" }), false);
+  assert.equal(check("media", CLOUD, { isMainFrame: true, mediaType: "unknown" }), false);
+  for (const permission of ["notifications", "clipboard-read", "fullscreen", "geolocation", "display-capture", "camera"]) {
+    assert.equal(ask(permission, onCloud()), false, permission);
+    assert.equal(check(permission, CLOUD, { isMainFrame: true }), false, permission);
+    assert.equal(ask(permission, onCloud({ mediaTypes: ["audio"] })), false, `${permission} with audio details`);
+    assert.equal(check(permission, CLOUD, { isMainFrame: true, mediaType: "audio" }), false, `${permission} with audio details`);
+  }
+});
+
+test("the Cloud's microphone is decided by this computer's media rule, never a copy of it", () => {
+  const { ask } = cloudFixture();
+  const shapes = [
+    {}, { mediaType: "audio" }, { mediaType: "video" }, { mediaTypes: ["audio"] }, { mediaTypes: ["audio", "audio"] },
+    { mediaTypes: ["video"] }, { mediaTypes: ["audio", "video"] }, { mediaTypes: ["audio"], mediaType: "video" },
+    { mediaTypes: null }, { mediaTypes: "audio" }, { mediaTypes: [""] },
+  ];
+  for (const shape of shapes) {
+    assert.equal(ask("media", onCloud(shape)), appPermissionAllowed("media", CLOUD, CLOUD, shape), JSON.stringify(shape));
+  }
+});
+
+test("a server that is not the verified Cloud never hears the microphone", () => {
+  const { state, ask, check } = cloudFixture();
+  const mic = { isMainFrame: true, mediaTypes: ["audio"] };
+  for (const other of ["https://my-vps.example.com", "http://omb-u-0123456789ab.fly.dev", "https://omb-u-0123456789ab.fly.dev:8443", "https://evil.fly.dev"]) {
+    assert.equal(ask("media", { ...mic, requestingUrl: `${other}/chat` }), false, other);
+    assert.equal(check("media", other, { isMainFrame: true, mediaType: "audio" }), false, other);
+  }
+  assert.equal(ask("media", onCloud({ mediaTypes: ["audio"], isMainFrame: false })), false, "a subframe");
+  assert.equal(ask("media", onCloud({ mediaTypes: ["audio"] }), { getURL: () => `${CLOUD}/` }), false, "another window");
+  assert.equal(check("media", CLOUD, { isMainFrame: true, mediaType: "audio" }, null), false, "no window");
+  state.main = null;
+  assert.equal(ask("media", onCloud({ mediaTypes: ["audio"] })), false, "the main window is gone");
+});
+
+test("signed out of Cloud, or the Cloud not running, its page loses the microphone at once", () => {
+  const { state, ask } = cloudFixture();
+  assert.equal(ask("media", onCloud({ mediaTypes: ["audio"] })), true);
+  state.home = null;
+  assert.equal(ask("media", onCloud({ mediaTypes: ["audio"] })), false);
+  state.home = "not a url";
+  assert.equal(ask("media", onCloud({ mediaTypes: ["audio"] })), false);
+});
+
+test("the verified Cloud open in this window may write the clipboard, by the remote server's rule", () => {
+  const write = "clipboard-sanitized-write";
+  const { state, ask, check } = cloudFixture();
+  assert.equal(ask(write, onCloud()), true);
+  assert.equal(check(write, CLOUD, { requestingUrl: `${CLOUD}/`, isMainFrame: true }), true);
+  assert.equal(ask("clipboard-read", onCloud()), false);
+  assert.equal(check("clipboard-read", CLOUD, { isMainFrame: true }), false);
+  assert.equal(ask(write, onCloud({ isMainFrame: false })), false, "a subframe");
+  assert.equal(check(write, CLOUD, { isMainFrame: false }), false, "a subframe");
+  assert.equal(check(write, CLOUD, {}), false, "no frame information");
+  for (const other of ["https://my-vps.example.com", "http://omb-u-0123456789ab.fly.dev", "https://omb-u-0123456789ab.fly.dev:8443", "https://evil.fly.dev"]) {
+    assert.equal(ask(write, { requestingUrl: `${other}/chat`, isMainFrame: true }), false, other);
+    assert.equal(check(write, other, { isMainFrame: true }), false, other);
+  }
+  assert.equal(ask(write, onCloud(), { getURL: () => `${CLOUD}/` }), false, "another window");
+  assert.equal(check(write, CLOUD, { isMainFrame: true }, null), false, "no window");
+  for (const home of [null, "not a url", "about:blank"]) {
+    state.home = home;
+    assert.equal(ask(write, onCloud()), false, String(home));
+    assert.equal(check(write, CLOUD, { isMainFrame: true }), false, String(home));
+  }
+  state.home = CLOUD;
+  state.main = null;
+  assert.equal(ask(write, onCloud(), { getURL: () => `${CLOUD}/` }), false, "the main window is gone");
+});
+
+test("once My Cloud is home its page may show notifications and go fullscreen, in the main window's main frame only; any other page still may not", () => {
+  const state = { home: null, main: { getURL: () => `${CLOUD}/chat` } };
+  const handlers = appPermissionHandlers({ rendererOrigin: () => LOCAL_ORIGIN, mainContents: () => state.main, cloudHomeOrigin: () => CLOUD, homeOrigin: () => state.home });
+  const ask = (details, contents = state.main) => { let granted; handlers.request(contents, "notifications", (value) => { granted = value; }, details); return granted; };
+  const check = (origin, details, contents = state.main) => handlers.check(contents, "notifications", origin, details);
+  assert.equal(ask(onCloud()), false, "a Cloud the move hasn't reached is not home");
+  state.home = CLOUD;
+  assert.equal(ask(onCloud()), true);
+  assert.equal(check(CLOUD, { isMainFrame: true }), true);
+  assert.equal(ask(onCloud({ isMainFrame: false })), false, "a frame inside it");
+  assert.equal(check(CLOUD, {}), false, "a frame it cannot vouch for");
+  assert.equal(ask(onCloud(), { getURL: () => `${CLOUD}/` }), false, "another window");
+  assert.equal(ask({ requestingUrl: "https://bots.example.test/", isMainFrame: true }), false, "another server");
+  let fullscreen; handlers.request(state.main, "fullscreen", (value) => { fullscreen = value; }, onCloud());
+  assert.equal(fullscreen, true, "a chat video's fullscreen button");
+  for (const permission of ["geolocation", "camera", "clipboard-read"]) {
+    let granted; handlers.request(state.main, permission, (value) => { granted = value; }, onCloud());
+    assert.equal(granted, false, permission);
+  }
+  state.home = null;
+  assert.equal(ask(onCloud()), false, "signed out or ended: at once");
+  for (const requesting of ["about:blank", "data:text/html,x", ""]) assert.equal(ask({ requestingUrl: requesting, isMainFrame: true }), false, `${requesting || "(empty)"}: no home is never a match for an opaque origin`);
+});
+
+test("this computer's own page keeps its permissions through the same handlers", () => {
+  const { ask, check } = cloudFixture({ home: null });
+  const local = { getURL: () => LOCAL_PAGE };
+  assert.equal(ask("media", { requestingUrl: LOCAL_PAGE, isMainFrame: true, mediaTypes: ["audio"] }, local), true);
+  assert.equal(ask("media", { requestingUrl: LOCAL_PAGE, isMainFrame: true, mediaTypes: [] }, local), true, "guarded display capture");
+  assert.equal(ask("media", { requestingUrl: LOCAL_PAGE, isMainFrame: true, mediaTypes: ["video"] }, local), false);
+  assert.equal(ask("notifications", { requestingUrl: LOCAL_PAGE, isMainFrame: true }, local), true);
+  assert.equal(ask("notifications", {}, local), true);
+  assert.equal(check("clipboard-read", "", { isMainFrame: true }, local), true);
+  assert.equal(check("clipboard-read", "https://other.example", { isMainFrame: true }, local), false);
+});
+
+test("the app installs these handlers, with its one rule for My Cloud and a wait for the saved sign-in", () => {
+  const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  assert.match(main, /setPermissionRequestHandler\(appPermissions\.request\)/);
+  assert.match(main, /setPermissionCheckHandler\(appPermissions\.check\)/);
+  assert.match(main, /ipcMain\.handle\("perm:status", \(event\) => \(\{[^}]*pageMic: appPermissions\?\.pageMicrophone\(event\) \?\? "refused",/s);
+  assert.match(main, /^let appPermissions = null;$/m);
+  assert.match(main, /^  appPermissions = appPermissionHandlers\(\{$/m);
+  assert.doesNotMatch(main, /(const|let|var) appPermissions = appPermissionHandlers/);
+  assert.match(main, /cloudHomeOrigin: myCloud,\n/);
+  assert.match(main, /homeOrigin: \(\) => homeWindow\.placeOrigin\(\),\n/, "notifications on the page the window shows: My Cloud's, or a team's Cloud's");
+  assert.match(main, /cloudHomeRestoring: \(\) => cloudAccountRestoring \? cloudAccountRestored\(\) : null,\n/);
+  assert.equal(main.match(/myCloudOrigin\(/g)?.length, 1);
+  assert.match(main, /cloudPageSenderAllowed\(event, \{ contents, homeOrigin: myCloud\(\),/);
+  assert.doesNotMatch(main, /rememberedHome\??\.accountId/);
+  assert.doesNotMatch(main, /remembered: true/);
+  assert.match(main, /cloudAccountRestoring = true;\n\s+cloudAccountStarted = ensureCloudAccount\(\)\.start\(\)\.catch\(\(\) => \{\}\)\.then\(\(\) => accountRing\(\)\?\.start\(\)\)\.finally\(\(\) => \{ cloudAccountRestoring = false; \}\);/);
+});
+
+const ADMIN = "http://127.0.0.1:9";
+const ACCOUNT = { id: "account-1", email: "person@example.test" };
+function myCloudFixture() {
+  const f = { now: 1_800_000_000_000, remembered: null, remoteAccess: null, restoring: null, admin: "ready", answers: [] };
+  const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86_400_000, device: { id: "device-1" }, account: ACCOUNT });
+  f.saved = { origin: ADMIN, token: `omc_${"T".repeat(43)}`, ...identity() };
+  delete f.saved.cloudContractVersion;
+  // `f.cloud`: the machine OpenMausBot Cloud names for this account (null: none).
+  f.cloud = { state: "ready", origin: CLOUD };
+  const session = () => ({ ...identity(), cloud: f.cloud,
+    entitlement: { plan: "pro", tier: "pro", status: "active", expiresAt: f.now + 30 * 86_400_000, version: 1 } });
+  // OpenMausBot Cloud answers now ("ready"), later (a promise the test releases), never ("down"), or with the sign-in ended ("ended").
+  const fetch = async (url, { method = "GET" } = {}) => {
+    if (!url.endsWith("/api/cloud/desktop/session")) return new Response(JSON.stringify({ error: "not_found" }), { status: 404 });
+    if (method === "DELETE") return Response.json({ revoked: true });
+    if (f.admin === "down") throw new TypeError("fetch failed");
+    if (f.admin === "ended") return new Response(JSON.stringify({ error: "invalid_token" }), { status: 401 });
+    if (f.admin !== "ready") await f.admin;
+    return Response.json(session());
+  };
+  f.client = createCloudAccountClient({ origin: ADMIN, fixture: true, deviceName: "Fixture computer", platform: "darwin", now: () => f.now, fetch,
+    store: { read: async () => f.saved, write: async (value) => { f.saved = value; } }, openBrowser: async () => {},
+    onState: (state) => { f.remembered = rememberedCloudHome(f.remembered, state); }, setTimer: () => 1, clearTimer: () => {} });
+  const main = { getURL: () => `${CLOUD}/chat?botId=bot-1` };
+  const handlers = appPermissionHandlers({
+    rendererOrigin: () => LOCAL_ORIGIN,
+    mainContents: () => main,
+    cloudHomeOrigin: () => myCloudOrigin({ account: f.client, remembered: f.remembered, remoteAccess: f.remoteAccess }),
+    cloudHomeRestoring: () => f.restoring,
+  });
+  f.restore = () => { f.restoring = f.client.start().finally(() => { f.restoring = null; }); return f.restoring; };
+  f.ask = (permission, details) => {
+    const answer = { value: undefined };
+    answer.done = new Promise((resolve) => handlers.request(main, permission, (granted) => { answer.value = granted; resolve(granted); }, details));
+    f.answers.push(answer);
+    return answer;
+  };
+  f.check = (details = { isMainFrame: true, mediaType: "audio" }) => handlers.check(main, "media", CLOUD, details);
+  return f;
+}
+const MIC = onCloud({ mediaTypes: ["audio"] });
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test("a Live call placed while the saved sign-in is still restoring hears the microphone once it has", async () => {
+  const f = myCloudFixture();
+  let answer;
+  f.admin = new Promise((resolve) => { answer = resolve; });
+  const restored = f.restore();
+  const mic = f.ask("media", MIC);
+  const camera = f.ask("media", onCloud({ mediaTypes: ["video"] }));
+  await settle();
+  assert.equal(mic.value, undefined, "decided once the sign-in has restored, not refused for being early");
+  assert.equal(camera.value, false, "anything but the microphone is refused at once, never waited on");
+  answer();
+  await restored;
+  assert.equal(await mic.done, true);
+  assert.equal(f.ask("media", MIC).value, true);
+  assert.equal(f.check(), true);
+});
+
+test("a restore that ends without this Cloud, or outlasts the wait, refuses rather than waiting on", async () => {
+  const f = myCloudFixture();
+  f.admin = "down";
+  const restored = f.restore();
+  const mic = f.ask("media", MIC);
+  await restored;
+  assert.equal(await mic.done, false);
+  f.admin = new Promise(() => {});
+  f.restore();
+  f.restoring = Promise.resolve();
+  assert.equal(await f.ask("media", MIC).done, false);
+});
+
+test("with OpenMausBot Cloud unreachable past the verified window, the same account's Cloud keeps the microphone", async () => {
+  const f = myCloudFixture();
+  await f.restore();
+  assert.equal(f.client.homeTarget()?.origin, CLOUD);
+  f.admin = "down";
+  f.now += 20 * 60_000;
+  await f.client.refresh();
+  assert.equal(f.client.state().message, "verification-expired");
+  assert.equal(f.client.homeTarget(), null, "no verified Cloud to connect to");
+  assert.equal(f.ask("media", MIC).value, true, "but this account's Cloud is still the person's own");
+  assert.equal(f.check(), true);
+  await f.client.signOut();
+  assert.equal(f.ask("media", MIC).value, false);
+  assert.equal(f.check(), false);
+});
+
+test("signed out, the Cloud's page never hears the microphone", async () => {
+  const f = myCloudFixture();
+  f.saved = null;
+  await f.restore();
+  assert.equal(f.client.state().status, "signed-out");
+  assert.equal(f.ask("media", MIC).value, false);
+  const g = myCloudFixture();
+  await g.restore();
+  assert.equal(g.ask("media", MIC).value, true);
+  await g.client.signOut();
+  assert.equal(g.ask("media", MIC).value, false);
+});
+
+test("a Cloud remembered for another account is not this account's Cloud", async () => {
+  const f = myCloudFixture();
+  f.admin = "down";
+  await f.restore();
+  assert.equal(f.client.state().account?.id, ACCOUNT.id);
+  f.remembered = { accountId: "someone-else", origin: CLOUD };
+  assert.equal(myCloudOrigin({ account: f.client, remembered: f.remembered, remoteAccess: null }), null);
+  assert.equal(f.ask("media", MIC).value, false);
+  f.remembered = { accountId: ACCOUNT.id, origin: CLOUD };
+  assert.equal(f.ask("media", MIC).value, true);
+});
+
+test("companion client mode has no Cloud of its own, so no Cloud page hears the microphone", async () => {
+  const f = myCloudFixture();
+  await f.restore();
+  assert.equal(f.ask("media", MIC).value, true);
+  f.remoteAccess = { endpoint: "https://relay.example.test", serverName: "Office Mac", deviceId: "device-2" };
+  assert.equal(myCloudOrigin({ account: f.client, remembered: f.remembered, remoteAccess: f.remoteAccess }), null);
+  assert.equal(f.ask("media", MIC).value, false);
+  assert.equal(f.check(), false);
+  assert.equal(myCloudOrigin({ account: null, remembered: f.remembered, remoteAccess: null }), null, "no Cloud sign-in on this computer");
+});
+
+test("a check that finds no Cloud for this account ends it, for the microphone and the Plan channels alike", async () => {
+  const f = myCloudFixture();
+  await f.restore();
+  assert.equal(f.ask("media", MIC).value, true);
+  f.cloud = null;
+  await f.client.refresh();
+  assert.equal(f.client.state().status, "connected");
+  assert.equal(myCloudOrigin({ account: f.client, remembered: f.remembered, remoteAccess: null }), null);
+  assert.equal(f.ask("media", MIC).value, false);
+  assert.equal(f.check(), false);
+  f.admin = "down";
+  await f.client.refresh();
+  assert.equal(f.ask("media", MIC).value, false);
+});
+
+test("a stopped Cloud named without its address is still this account's Cloud", async () => {
+  const f = myCloudFixture();
+  await f.restore();
+  f.cloud = { state: "stopped", origin: null };
+  await f.client.refresh();
+  assert.equal(f.client.homeTarget(), null);
+  assert.equal(f.ask("media", MIC).value, true);
+});
+
+test("after the sign-in has ended or expired, the same account's Cloud keeps the microphone until sign-out", async () => {
+  const ended = myCloudFixture();
+  await ended.restore();
+  ended.admin = "ended";
+  await ended.client.refresh();
+  assert.deepEqual([ended.client.state().status, ended.client.state().message], ["reauth-required", "access-ended"]);
+  assert.equal(cloudPlanSnapshot(ended.client.state()).status, "signin");
+  assert.equal(ended.ask("media", MIC).value, true);
+  await ended.client.signOut();
+  assert.equal(ended.ask("media", MIC).value, false);
+
+  const expired = myCloudFixture();
+  await expired.restore();
+  expired.now = expired.client.state().expiresAt + 1;
+  await expired.client.refresh();
+  assert.deepEqual([expired.client.state().status, expired.client.state().message], ["reauth-required", "expired"]);
+  assert.equal(expired.ask("media", MIC).value, true);
+  await expired.client.signOut();
+  assert.equal(expired.ask("media", MIC).value, false);
+});
+
+const ipcFrom = (contents, frameUrl, { mainFrame = true } = {}) => {
+  const frame = { url: frameUrl };
+  if (mainFrame) contents.mainFrame = frame;
+  else contents.mainFrame ??= { url: contents.getURL() };
+  return { sender: contents, senderFrame: frame };
+};
+const pageMicFixture = () => {
+  const state = { home: CLOUD, main: { getURL: () => `${CLOUD}/chat?botId=bot-1` } };
+  const handlers = appPermissionHandlers({ rendererOrigin: () => LOCAL_ORIGIN, mainContents: () => state.main, cloudHomeOrigin: () => state.home });
+  return { state, handlers };
+};
+
+test("a page asking about its microphone hears whether this app lets it use it", () => {
+  const { state, handlers } = pageMicFixture();
+  assert.equal(handlers.pageMicrophone(ipcFrom(state.main, `${CLOUD}/chat?botId=bot-1`)), "allowed", "the verified Cloud");
+  const local = { getURL: () => LOCAL_PAGE };
+  assert.equal(handlers.pageMicrophone(ipcFrom(local, LOCAL_PAGE)), "allowed", "this computer's own page");
+  state.main = { getURL: () => "https://my-vps.example.com/chat" };
+  assert.equal(handlers.pageMicrophone(ipcFrom(state.main, "https://my-vps.example.com/chat")), "refused", "another server");
+});
+
+test("the Cloud's page is refused where its microphone request would be", () => {
+  const { state, handlers } = pageMicFixture();
+  assert.equal(handlers.pageMicrophone(ipcFrom(state.main, `${CLOUD}/frame`, { mainFrame: false })), "refused", "a subframe");
+  const other = { getURL: () => `${CLOUD}/` };
+  assert.equal(handlers.pageMicrophone(ipcFrom(other, `${CLOUD}/`)), "refused", "another window");
+  assert.equal(handlers.pageMicrophone({ sender: state.main, senderFrame: null }), "refused", "a frame that is gone");
+  assert.equal(handlers.pageMicrophone(undefined), "refused", "no sender");
+  state.home = null;
+  assert.equal(handlers.pageMicrophone(ipcFrom(state.main, `${CLOUD}/chat`)), "refused", "signed out of Cloud");
+});
+
+// Electron's callback lets the request decide later, so the test waits for its answer.
+test("the page's answer is the request handler's answer for its microphone", async () => {
+  const { state, handlers } = pageMicFixture();
+  const local = { getURL: () => LOCAL_PAGE };
+  const other = { getURL: () => `${CLOUD}/` };
+  for (const home of [CLOUD, null, "https://evil.fly.dev"]) {
+    state.home = home;
+    for (const contents of [state.main, local, other]) {
+      for (const url of [`${CLOUD}/chat`, LOCAL_PAGE, "https://my-vps.example.com/", "http://omb-u-0123456789ab.fly.dev/"]) {
+        for (const mainFrame of [true, false]) {
+          const granted = await new Promise((resolve) => {
+            handlers.request(contents, "media", resolve, { requestingUrl: url, isMainFrame: mainFrame, mediaTypes: ["audio"] });
+          });
+          const label = JSON.stringify({ home, page: contents.getURL(), url, mainFrame });
+          assert.equal(await handlers.pageMicrophone(ipcFrom(contents, url, { mainFrame })), granted ? "allowed" : "refused", label);
+        }
+      }
+    }
+  }
+});
+
+const REMOTE = "https://viernes.tail1.ts.net:9444";
+
+test("a remote server may write clipboard text only as the active origin's main frame", () => {
+  const write = "clipboard-sanitized-write";
+  assert.equal(remoteClipboardWriteAllowed(write, `${REMOTE}/chat?x=1`, REMOTE, { isMainFrame: true }), true);
+  assert.equal(remoteClipboardWriteAllowed(write, REMOTE, `${REMOTE}/`, { isMainFrame: true }), true);
+  for (const permission of ["clipboard-read", "notifications", "fullscreen", "media", "geolocation", "camera", "openExternal", "unknown", undefined]) {
+    assert.equal(remoteClipboardWriteAllowed(permission, REMOTE, REMOTE, { isMainFrame: true }), false, String(permission));
+  }
+  for (const details of [{ isMainFrame: false }, {}, undefined, null, { isMainFrame: "true" }]) {
+    assert.equal(remoteClipboardWriteAllowed(write, REMOTE, REMOTE, details), false);
+  }
+  for (const requesting of [
+    "https://viernes.tail1.ts.net:9445/", "https://viernes.tail1.ts.net/", "http://viernes.tail1.ts.net:9444/",
+    "https://other.tail1.ts.net:9444/", "https://viernes.tail1.ts.net.evil.test:9444/", "https://evil.test/#https://viernes.tail1.ts.net:9444",
+    "about:blank", "data:text/html,x", "javascript:alert(1)", "not a url", "", null, undefined,
+  ]) assert.equal(remoteClipboardWriteAllowed(write, requesting, REMOTE, { isMainFrame: true }), false, String(requesting));
+  for (const active of [undefined, null, "", "not a url", "about:blank", "data:text/html,x"]) {
+    assert.equal(remoteClipboardWriteAllowed(write, REMOTE, active, { isMainFrame: true }), false, String(active));
+    assert.equal(remoteClipboardWriteAllowed(write, "about:blank", active, { isMainFrame: true }), false);
+  }
+});
+
+test("the base policy itself still grants a remote origin nothing", () => {
+  for (const permission of ["clipboard-sanitized-write", "clipboard-read", "notifications", "fullscreen"]) {
+    assert.equal(appPermissionAllowed(permission, REMOTE, LOCAL_ORIGIN, { isMainFrame: true }), false, permission);
+  }
+});
+
+test("the active remote server's page may show notifications and go fullscreen, in the main window's main frame only", () => {
+  const state = { remote: REMOTE, main: { getURL: () => `${REMOTE}/chat` } };
+  const handlers = appPermissionHandlers({ rendererOrigin: () => LOCAL_ORIGIN, mainContents: () => state.main, cloudHomeOrigin: () => null,
+    activeRemoteOrigin: () => state.remote });
+  const onRemote = (extra = {}) => ({ requestingUrl: `${REMOTE}/settings`, isMainFrame: true, ...extra });
+  const ask = (details, contents = state.main, permission = "notifications") => {
+    let granted; handlers.request(contents, permission, (value) => { granted = value; }, details); return granted;
+  };
+  assert.equal(ask(onRemote()), true);
+  assert.equal(handlers.check(state.main, "notifications", REMOTE, { isMainFrame: true }), true);
+  assert.equal(ask(onRemote({ isMainFrame: false })), false, "a frame inside it");
+  assert.equal(handlers.check(state.main, "notifications", REMOTE, {}), false, "a frame it cannot vouch for");
+  assert.equal(ask(onRemote(), { getURL: () => `${REMOTE}/` }), false, "another window");
+  assert.equal(ask(onRemote({ requestingUrl: "https://other.tail1.ts.net:9444/" })), false, "another server");
+  assert.equal(ask(onRemote(), state.main, "fullscreen"), true, "a chat video's fullscreen button");
+  assert.equal(handlers.check(state.main, "fullscreen", REMOTE, { isMainFrame: true }), true);
+  assert.equal(ask(onRemote({ isMainFrame: false }), state.main, "fullscreen"), false, "fullscreen from a frame inside it");
+  assert.equal(ask(onRemote({ requestingUrl: "https://other.tail1.ts.net:9444/" }), state.main, "fullscreen"), false, "fullscreen for another server");
+  assert.equal(ask(onRemote(), { getURL: () => `${REMOTE}/` }, "fullscreen"), false, "fullscreen in another window");
+  for (const permission of ["geolocation", "camera", "clipboard-read"]) {
+    assert.equal(ask(onRemote(), state.main, permission), false, permission);
+  }
+  state.remote = null;
+  assert.equal(ask(onRemote()), false, "no active remote: at once");
+  assert.equal(ask(onRemote(), state.main, "fullscreen"), false, "no active remote: no fullscreen");
+  for (const requesting of ["about:blank", "data:text/html,x", ""]) assert.equal(ask(onRemote({ requestingUrl: requesting })), false, `${requesting || "(empty)"}`);
 });

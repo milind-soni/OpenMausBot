@@ -1,15 +1,23 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { StoreProvider, type Bot } from "@/state/store";
+import { formatTime, initialState, type Bot } from "@/state/store";
 
 vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({}),
 }));
+// Advanced mode's rows: Simple mode keeps one conversation per bot, so its rows have no thread controls.
+vi.mock("@/lib/interface-mode", async (original) => ({
+  ...await original<typeof import("@/lib/interface-mode")>(),
+  useAdvancedMode: () => true,
+}));
 
 import { ConfirmDialogCard } from "./ConfirmDialog";
-import { BotDeleteMenuItem, BotListItem, botConfirmCopy, currentArchivableBot } from "./Sidebar";
+import { BotDeleteMenuItem } from "./BotMenuDelete";
+import { BotListItem, botConfirmCopy, botRowProps, currentArchivableBot } from "./Sidebar";
+import { endCall } from "@/lib/call";
+import { configureLiveMedia, resetLiveMedia, startLiveCall } from "@/lib/live-call-media";
 
 const bot = (overrides: Partial<Bot> = {}): Bot => ({
   id: "atlas",
@@ -25,20 +33,66 @@ const bot = (overrides: Partial<Bot> = {}): Bot => ({
   ...overrides,
 });
 
-function renderRow(candidate: Bot, quiet = false) {
-  return renderToStaticMarkup(createElement(
-    StoreProvider,
-    null,
-    createElement(BotListItem, {
-      bot: candidate,
-      density: "comfortable",
-      quiet,
-      onMenu: vi.fn(),
-    }),
-  ));
+function renderRow(candidate: Bot, density: "comfortable" | "icons" = "comfortable") {
+  return renderToStaticMarkup(createElement(BotListItem, botRowProps(initialState, vi.fn(), candidate, { density, query: "", onMenu: vi.fn() })));
 }
 
+afterEach(() => {
+  resetLiveMedia();
+  endCall();
+  vi.unstubAllGlobals();
+});
+
 describe("BotListItem", () => {
+  it("makes a bot waiting for you louder than a preview", () => {
+    const opening = (markup: string, testId: string) => {
+      const tag = markup.match(new RegExp(`<span[^>]*data-testid="${testId}"[^>]*>`))?.[0];
+      expect(tag, testId).toBeTruthy();
+      return tag ?? "";
+    };
+    const waiting = renderRow(bot({ activity: "waiting-on-you" }));
+    const badge = opening(waiting, "waiting-dot");
+    expect(badge).toContain('role="status"');
+    expect(badge).toContain('aria-label="Waiting for you…"');
+    expect(badge).toContain('title="Waiting for you…"');
+    expect(badge).toContain("size-4");
+    expect(badge).toContain("bg-warning");
+    expect(badge).toContain("border-2");
+    expect(badge).toContain("border-panel");
+    expect(badge).not.toContain("size-2.5");
+    expect(badge).not.toContain("size-3");
+    expect(waiting).toContain('aria-hidden="true">!</span>');
+    expect(waiting).toContain('class="flex min-w-0 items-center gap-1.5 truncate text-[13px] leading-[18px] font-semibold text-warning"');
+    expect(waiting).toContain('class="truncate">Waiting for you…</span>');
+
+    const icons = opening(renderRow(bot({ activity: "waiting-on-you" }), "icons"), "waiting-dot");
+    expect(icons).toContain("size-5");
+    expect(icons).toContain("bg-warning");
+    expect(icons).not.toContain("size-4");
+    expect(icons).not.toContain("size-2.5");
+
+    const teammate = renderRow(bot({ waitingForTeammates: true }));
+    const teammateDot = opening(teammate, "teammate-wait-dot");
+    expect(teammateDot).toContain("size-2.5");
+    expect(teammateDot).not.toContain("size-4");
+    expect(teammate).toContain('class="truncate">Waiting on a teammate…</span>');
+    expect(teammate).toContain("truncate text-[13px] leading-[18px] text-ink-secondary");
+    expect(teammate).not.toContain("font-semibold text-warning");
+
+    const working = renderRow(bot({ busy: true }));
+    expect(opening(working, "working-dot")).toContain("size-2.5");
+    expect(working).not.toContain("waiting-dot");
+    expect(working).not.toContain("font-semibold text-warning");
+
+    const preview = renderRow(bot({
+      messages: [{ id: "b1", role: "bot", kind: "text", text: "Created notes.txt", at: 2 }] as Bot["messages"],
+    }));
+    expect(preview).toContain('class="truncate">Created notes.txt</span>');
+    expect(preview).toContain("truncate text-[13px] leading-[18px] text-ink-secondary");
+    expect(preview).not.toContain("text-warning");
+    expect(preview).not.toContain("waiting-dot");
+  });
+
   it("offers direct New thread and New folder icons and a keyboard-accessible bot menu", () => {
     const markup = renderRow(bot());
     expect(markup).toContain('aria-label="New thread"');
@@ -51,11 +105,9 @@ describe("BotListItem", () => {
   });
 
   it("shows the thread toggle only once there is a list to open", () => {
-    // one thread is the bot itself: no disclosure, no duplicate row
     expect(renderRow(bot())).not.toContain("Expand Atlas threads");
     expect(renderRow(bot())).not.toContain('data-sidebar-thread-row=');
     expect(renderRow(bot(twoThreads()))).toContain("Expand Atlas threads");
-    // a folder is a list too, even with one thread in it
     expect(renderRow(bot({ projects: [{ id: "p1", name: "Research" }] }))).toContain("Expand Atlas threads");
   });
 
@@ -68,8 +120,6 @@ describe("BotListItem", () => {
     expect(toggle).not.toContain("hover:bg-");
   });
 
-  // Phase 0 writes a digest row after every turn, so the last row of an idle
-  // chat is now a receipt; the preview must still be the reply a person reads.
   it("previews the last reply, not the digest receipt that follows it", () => {
     const markup = renderRow(bot({
       messages: [
@@ -82,9 +132,67 @@ describe("BotListItem", () => {
     expect(markup).not.toContain("[digest]");
   });
 
-  // A turn can end on the approval card itself: Stop while it is open, or a
-  // provider that settles the ask without writing more. The card then reads
-  // Allowed or Denied, and the row must say the same, not "Approval needed".
+  describe("the record of a live call that ended last", () => {
+    const at = (minute: number) => new Date(2026, 9, 6, 10, minute).getTime();
+    const record = {
+      id: "r1", role: "bot", kind: "call", at: at(2), text: "Call with Atlas · 1:42",
+      call: { callId: "c1", botId: "atlas", client: "ios", startedAt: at(0), endedAt: at(2), seconds: 102, endReason: "hung-up" },
+    };
+    const spoken = { id: "u1", role: "user", kind: "text", text: "what is the weather", at: at(0), via: "call", callId: "c1" };
+    const draw = (candidate: Bot, { selected = false, query = "" } = {}) => renderToStaticMarkup(createElement(BotListItem, botRowProps(
+      selected ? { ...initialState, activeView: "chat", selectedId: candidate.id } : initialState,
+      vi.fn(), candidate, { density: "comfortable", query, onMenu: vi.fn() },
+    )));
+
+    it("previews the last reply, not the record that follows it", () => {
+      const markup = draw(bot({
+        messages: [spoken, { id: "b1", role: "bot", kind: "text", text: "Sunny in Pune.", at: at(1) }, record] as Bot["messages"],
+      }));
+      expect(markup).toContain("Sunny in Pune.");
+      expect(markup).not.toContain("Call with Atlas");
+    });
+
+    it("previews a failed turn's row when the record follows it", () => {
+      const markup = draw(bot({
+        messages: [spoken, { id: "e1", role: "bot", kind: "activity", at: at(1), tool: { name: "error: This computer isn't a place on your OMB Cloud: its bots run in the cloud.", ok: false } }, record] as Bot["messages"],
+      }));
+      expect(markup).toContain("This computer isn&#x27;t a place on your OMB Cloud: its bots run in the cloud.");
+      expect(markup).not.toContain("Call with Atlas");
+    });
+
+    it("times the open row by the last reply, not by the hang-up", () => {
+      const markup = draw(bot({
+        messages: [spoken, { id: "b1", role: "bot", kind: "text", text: "Sunny in Pune.", at: at(1) }, record] as Bot["messages"],
+      }), { selected: true });
+      expect(markup).toContain(formatTime(at(1)));
+      expect(markup).not.toContain(formatTime(at(2)));
+    });
+
+    it("names the step the bot is on while it works, when the call ended under it", () => {
+      const markup = draw(bot({
+        busy: true,
+        tasks: [{ threadId: "thread-atlas", title: "Current", createdAt: 2, busy: true, activity: "working" }, { threadId: "thread-earlier", title: "Earlier", createdAt: 1 }],
+        messages: [
+          { ...spoken, text: "run the tests" },
+          { id: "a1", role: "bot", kind: "activity", at: at(1), requestMessageId: "u1", tool: { name: "Bash", spoken: "running the tests" } },
+          record,
+        ] as Bot["messages"],
+      }), { query: "current" });
+      expect(markup).toContain("Running the tests");
+    });
+  });
+
+  it("previews a failed turn without its error marker", () => {
+    const markup = renderRow(bot({
+      messages: [
+        { id: "u1", role: "user", kind: "text", text: "check the site", at: 1 },
+        { id: "e1", role: "bot", kind: "activity", at: 2, tool: { name: "error: This computer isn't a place on your OMB Cloud: its bots run in the cloud.", ok: false } },
+      ] as Bot["messages"],
+    }));
+    expect(markup).toContain("This computer isn&#x27;t a place on your OMB Cloud: its bots run in the cloud.");
+    expect(markup).not.toContain("error:");
+  });
+
   describe("an approval card that ends the chat", () => {
     const approval = (card: Partial<NonNullable<Bot["messages"][number]["card"]>>): Bot => bot({
       messages: [
@@ -114,9 +222,9 @@ describe("BotListItem", () => {
       }
     });
 
-    it("says Expired once nothing can answer it", () => {
+    it("says it got no answer in time once nothing can answer it", () => {
       const markup = renderRow(approval({ expired: true, options: [] }));
-      expect(markup).toContain("Expired");
+      expect(markup).toContain("No answer in time");
       expect(markup).not.toContain("Approval needed");
     });
   });
@@ -128,63 +236,111 @@ describe("BotListItem", () => {
     expect(markup).not.toContain('aria-label="Archive Atlas"');
   });
 
-  it("shows the Chief of Staff label on its own line under the name", () => {
-    const withTitle = renderRow(bot({ chiefOfStaff: true, title: "Developer" }));
-    expect(withTitle).toContain("Chief of Staff</span>");
-    // the label sits after the name line, never inside it
-    expect(withTitle.indexOf("Chief of Staff</span>")).toBeGreaterThan(withTitle.indexOf(">Atlas<"));
-
-    const withoutTitle = renderRow(bot({ chiefOfStaff: true }));
-    expect(withoutTitle).toContain("Chief of Staff</span>");
-    expect(withoutTitle.indexOf("Chief of Staff</span>")).toBeGreaterThan(withoutTitle.indexOf(">Atlas<"));
+  it("marks the Chief of Staff with one crown after the name, not a line of its own", () => {
+    const markup = renderRow(bot({ chiefOfStaff: true, title: "Developer" }));
+    expect(markup).toContain('data-testid="chief-crown"');
+    expect(markup).toContain('aria-label="Chief of Staff"');
+    expect(markup.indexOf('data-testid="chief-crown"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
+    expect(markup.indexOf('data-testid="bot-role"')).toBeGreaterThan(markup.indexOf('data-testid="chief-crown"'));
+    expect(markup).not.toContain("Chief of Staff</span>");
+    expect(markup).toContain('title="Atlas · Developer · Chief of Staff"');
 
     expect(renderRow(bot())).not.toContain("Chief of Staff");
   });
 
-  // matches the title line's own class list (see Sidebar.tsx) — used to
-  // assert the marker element itself is present or absent, since checking
-  // for the title text alone can pass by accident when there's no title.
+  it("keeps the title in an icons-only row's name and tooltip", () => {
+    const icons = renderRow(bot({ chiefOfStaff: true, title: "  Developer " }), "icons");
+    expect(icons).toContain('aria-label="Atlas · Developer · Chief of Staff"');
+    expect(icons).toContain('title="Atlas · Developer"');
+    const untitled = renderRow(bot(), "icons");
+    expect(untitled).toContain('aria-label="Atlas"');
+    expect(untitled).toContain('title="Atlas"');
+  });
+
   const titleLine = /<div class="truncate text-\[11px\][^"]*">([^<]*)<\/div>/;
+  const roleOf = (markup: string) => /<span data-testid="bot-role"[^>]*><span title="([^"]*)" class="([^"]*)"><span class="sr-only">, <\/span>([^<]*)<\/span>/.exec(markup);
 
-  it("shows the bot's title on its own line above the name, not a badge beside it", () => {
-    // #866 / #871: a badge next to the name always had to fight the name for
-    // width — a long name crushed the badge, and a long title crushed a long
-    // name right back. Its own line above the name never competes with it.
-    const markup = renderRow(bot({ title: "Developer" }));
-
-    expect(titleLine.exec(markup)?.[1]).toBe("Developer");
-    expect(markup.indexOf(">Developer<")).toBeLessThan(markup.indexOf(">Atlas<"));
-    // the rename hint is unrelated to the bot's title
+  it("shows the bot's role beside its name as one muted, truncated line, read out after the name", () => {
+    const markup = renderRow(bot({ title: "  Developer ", messages: [{ id: "b1", role: "bot", kind: "text", text: "All set.", at: 1 }] as Bot["messages"] }));
+    const role = roleOf(markup);
+    expect(role?.[1]).toBe("Developer");
+    expect(role?.[3]).toBe("Developer");
+    expect(role?.[2].split(" ")).toEqual(expect.arrayContaining(["truncate", "text-[13px]", "font-normal", "text-ink-secondary"]));
+    expect(markup.indexOf('data-testid="bot-role"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
+    expect(markup.indexOf('data-testid="bot-role"')).toBeLessThan(markup.indexOf(">All set.<"));
+    expect(titleLine.test(markup)).toBe(false);
+    expect(markup).toContain('title="Atlas · Developer"');
     expect(markup).toContain('title="Double-click to rename"');
-
-    expect(titleLine.test(renderRow(bot()))).toBe(false);
-    expect(titleLine.test(renderRow(bot({ title: "  " })))).toBe(false);
   });
 
-  it("keeps the title line's own truncate class instead of a shared-line width cap", () => {
-    // renderToStaticMarkup keeps the full text regardless of CSS, so this
-    // can't observe an actual ellipsis — it asserts the title line still
-    // carries `truncate` (so a too-long title clips on its own line) and,
-    // unlike the #871 badge, never a max-width cap shared with the name.
-    const longTitle = "Meta-Agent — opensource team maintainer";
-    const markup = renderRow(bot({ name: "Team Maintainer", title: longTitle }));
-
-    expect(titleLine.exec(markup)?.[1]).toBe(longTitle);
-    expect(markup).toContain(">Team Maintainer<");
-    expect(markup).not.toContain("max-w-[45%]");
+  it("gives way to the name: the role takes only the room left and steps aside below a word's width", () => {
+    const wrapper = /<span data-testid="bot-role" class="([^"]*)"/.exec(renderRow(bot({ title: "Developer" })))?.[1].split(" ");
+    expect(wrapper).toEqual(expect.arrayContaining(["@container", "min-w-0", "grow"]));
+    expect(roleOf(renderRow(bot({ title: "Developer" })))?.[2]).toContain("@max-[3rem]:sr-only");
   });
 
-  it("shows typing dots instead of preview text while the bot works", () => {
-    const markup = renderRow(bot({ busy: true }));
+  it("draws no role for a bot without one", () => {
+    for (const title of ["", "  "]) {
+      const markup = renderRow(bot({ title }));
+      expect(markup).not.toContain('data-testid="bot-role"');
+      expect(markup).not.toContain('class="sr-only">, ');
+    }
+  });
 
-    expect(markup).toContain("animate-status-pulse");
-    expect(markup).toContain('class="sr-only">Working…');
+  it("gives the Chief of Staff the same row as every other bot", () => {
+    const portrait = (markup: string) => /width="(\d+)px" height="\d+px"/.exec(markup)?.[1];
+    const rowClass = (markup: string) => /data-sidebar-bot-row="atlas" class="([^"]*)"/.exec(markup)?.[1];
+    const chief = renderRow(bot({ chiefOfStaff: true, title: "Chief of staff" }));
+    const plain = renderRow(bot({ title: "Developer" }));
+    expect(portrait(chief)).toBe(portrait(plain));
+    expect(rowClass(chief)).toBe(rowClass(plain));
+  });
+
+  it("reads the name at 15px semibold and the preview at 13px", () => {
+    const markup = renderRow(bot({ messages: [{ id: "b1", role: "bot", kind: "text", text: "All set.", at: 1 }] as Bot["messages"] }));
+    expect(markup).toMatch(/class="[^"]*text-\[15px\] font-semibold[^"]*"/);
+    expect(markup).toMatch(/class="[^"]*truncate text-\[13px\][^"]*text-ink-secondary[^"]*"/);
+  });
+
+  it("previews the last reply as plain text, without its markdown", () => {
+    const markup = renderRow(bot({
+      messages: [{ id: "b1", role: "bot", kind: "text", text: "I read **[Prudctual/OpenMausBot](https://github.com/Prudctual/OpenMausBot)**. Run `pnpm install` first.", at: 1 }] as Bot["messages"],
+    }));
+    expect(markup).toContain(">I read Prudctual/OpenMausBot. Run pnpm install first.<");
+    expect(markup).not.toContain("**");
+    expect(markup).not.toContain("](https://");
+  });
+
+  it("says what the bot is doing in place of its preview text while it works, in a line as tall as the preview", () => {
+    const markup = renderRow(bot({ busy: true, messages: [{ id: "b1", role: "bot", kind: "text", text: "hello", at: 1 }] as Bot["messages"] }));
+
+    expect(markup).toContain('<span dir="auto" data-sidebar-working-phrase="" class="truncate">Thinking</span>');
+    expect(markup).not.toContain(">hello<");
+    expect(markup).not.toContain("animate-status-pulse");
   });
 
   it("marks the avatar with a green presence dot only while the bot works", () => {
     expect(renderRow(bot({ busy: true }))).toContain('data-testid="working-dot"');
     expect(renderRow(bot())).not.toContain('data-testid="working-dot"');
     expect(renderRow(bot({ busy: true, activity: "waiting-on-you" }))).not.toContain('data-testid="working-dot"');
+  });
+
+  it("marks the bot this window is on a Live call with by a green phone badge", () => {
+    expect(renderRow(bot())).not.toContain('data-testid="live-call-badge"');
+
+    vi.stubGlobal("window", { ogb: { speechStop: vi.fn(async () => {}) } });
+    configureLiveMedia({ getUserMedia: () => new Promise<MediaStream>(() => {}) });
+    void startLiveCall({ botId: "atlas", threadId: "thread-atlas" });
+
+    const markup = renderRow(bot());
+    expect(markup).toContain('data-testid="live-call-badge"');
+    expect(markup).toContain('aria-label="On a Live call"');
+    expect(markup.indexOf('data-testid="live-call-badge"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
+    expect(renderRow(bot({ id: "other" }))).not.toContain('data-testid="live-call-badge"');
+
+    const icons = renderRow(bot(), "icons");
+    expect(icons).toContain('data-testid="live-call-badge"');
+    expect(icons).toContain('aria-label="Atlas · On a Live call"');
   });
 
   it("marks an idle bot waiting on a teammate with a quiet dot, never the work signals", () => {
@@ -235,9 +391,9 @@ describe("archive / delete confirmation", () => {
 
     expect(copy.title).toContain("Willow");
     expect(copy.body).toMatch(/permanently/i);
-    expect(copy.body).toMatch(/any computer it owns/i);
+    expect(copy.body).toMatch(/any desktop it owns/i);
     expect(copy.body).toMatch(/files and browser sign-ins/i);
-    expect(copy.body).toMatch(/shared team computers remain/i);
+    expect(copy.body).toMatch(/shared department desktops stay/i);
     expect(copy.tone).toBe("danger");
   });
 
@@ -264,8 +420,8 @@ describe("bot deletion feedback", () => {
       onClick: vi.fn(),
     }));
 
-    expect(markup).toContain("Deleting bot and owned computer…");
-    expect(markup).toContain('title="Deleting this bot and any computer it owns"');
+    expect(markup).toContain("Deleting the bot and its desktop…");
+    expect(markup).toContain('title="Deleting this bot and any desktop it owns"');
     expect(markup).toContain('disabled=""');
     expect(markup).toContain('aria-busy="true"');
   });
@@ -278,46 +434,5 @@ describe("bot deletion feedback", () => {
 
     expect(markup).toContain(">Delete</button>");
     expect(markup).not.toContain('disabled=""');
-  });
-
-  describe("quiet rows", () => {
-    const titleLine = /<div class="truncate text-\[11px\][^"]*">([^<]*)<\/div>/;
-
-    it("reduces an idle bot to its name: no title line, no Chief line, no preview", () => {
-      const markup = renderRow(bot({
-        title: "Developer",
-        chiefOfStaff: true,
-        messages: [{ id: "b1", role: "bot", kind: "text", text: "Created notes.txt with three lines.", at: 2 }] as Bot["messages"],
-      }), true);
-      expect(titleLine.test(markup)).toBe(false);
-      expect(markup).not.toContain("Chief of Staff</span>");
-      expect(markup).not.toContain("Created notes.txt with three lines.");
-      expect(markup).toContain(">Atlas<");
-      // the crown stays, beside the name, with its label for assistive tech
-      expect(markup).toContain('data-testid="chief-crown"');
-      expect(markup).toContain('aria-label="Chief of Staff"');
-    });
-
-    it("keeps the status line while something is happening", () => {
-      expect(renderRow(bot({ busy: true }), true)).toContain('class="sr-only">Working…');
-      expect(renderRow(bot({ activity: "waiting-on-you" }), true)).toContain("Waiting for you…");
-      expect(renderRow(bot({ waitingForTeammates: true, busy: false }), true)).toContain("Waiting on a teammate…");
-    });
-
-    it("keeps the unread dot in the name line when the preview line is gone", () => {
-      const markup = renderRow(bot({ unread: true, messages: [{ id: "b1", role: "bot", kind: "text", text: "hello", at: 1 }] as Bot["messages"] }), true);
-      expect(markup).toContain('aria-label="Unread threads"');
-      expect(markup).not.toContain(">hello<");
-    });
-
-    it("puts the crown right after the name, inside the name line", () => {
-      const markup = renderRow(bot({ chiefOfStaff: true }), true);
-      expect(markup.indexOf('data-testid="chief-crown"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
-    });
-
-    it("changes nothing when off", () => {
-      expect(renderRow(bot({ title: "Developer", chiefOfStaff: true }))).toContain("Chief of Staff</span>");
-      expect(renderRow(bot({ title: "Developer", chiefOfStaff: true }))).not.toContain('data-testid="chief-crown"');
-    });
   });
 });

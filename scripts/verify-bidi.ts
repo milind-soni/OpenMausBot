@@ -1,10 +1,5 @@
-// Right-to-left message rendering in the real app, one disposable home.
-//
-// A unit test can only prove the markup; whether an Arabic answer actually
-// reads correctly is a question about the rendered bubble. This seeds a
-// scripted reply that exercises every block a bot reply can contain — prose
-// around inline code, a list, a table, a quote, a fenced block, and a trailing
-// English paragraph — and mounts the real renderer against it.
+// Right-to-left message rendering in the real app, one disposable home: a
+// scripted reply exercising every block a bot reply can contain.
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

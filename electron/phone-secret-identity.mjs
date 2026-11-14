@@ -24,12 +24,7 @@ export function phoneSecretKeyId(publicKey) {
   return createHash("sha256").update(raw).digest().subarray(0, 16).toString("base64url");
 }
 
-/**
- * Read the desktop's HPKE recipient identity from the OS-encrypted credential
- * document. The public point is reconstructed from the private JWK before the
- * record is trusted, so a partial/corrupt write can never advertise a key the
- * desktop cannot actually open.
- */
+/** The public point is rebuilt from the private JWK before the record is trusted, so a partial write never advertises an unopenable key. */
 export function readPhoneSecretIdentity(credentials) {
   const candidate = credentials?.[PHONE_SECRET_CREDENTIAL_KEY];
   if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
@@ -43,9 +38,7 @@ export function readPhoneSecretIdentity(credentials) {
   const d = decodeBase64URL(privateKey.d, 32);
   if (!x || !y || !d) return null;
 
-  // Derive the point directly from the scalar instead of round-tripping a
-  // JWK. Some OpenSSL builds preserve the JWK-supplied x/y on re-export even
-  // when they do not match d, so that round-trip is not a portable proof.
+  // From the scalar, not a JWK round-trip: some OpenSSL builds keep a supplied x/y on re-export even when it does not match d.
   try {
     const ecdh = createECDH("prime256v1");
     ecdh.setPrivateKey(d);
@@ -120,9 +113,7 @@ export function withPhoneSecretIdentity(credentials, identity) {
   return { ...credentials, [PHONE_SECRET_CREDENTIAL_KEY]: verified };
 }
 
-/** Only the embedded server receives the private half, through Electron's
- * in-memory utility-process port. It never enters argv, environment, logs,
- * renderer IPC, companion state, or a pairing QR. */
+/** The private half travels only over Electron's in-memory utility-process port: never argv, env, logs, renderer IPC, companion state or a QR. */
 export function phoneSecretPrivateKeyMessage(identity) {
   const verified = readPhoneSecretIdentity({ [PHONE_SECRET_CREDENTIAL_KEY]: identity });
   if (!verified) return null;
@@ -158,23 +149,12 @@ export function phoneSecretSaveResult(requestId, ok, error) {
   return result;
 }
 
-/**
- * Deduplicate the private desktop save by the stable envelope operation id.
- * This matters when the credential committed but a phone, tunnel, or proxy
- * lost the success response: the retry receives the cached result and never
- * starts a second provider validation/write. Only the non-secret target and
- * status are retained; the plaintext value falls out of scope as soon as the
- * save settles.
- */
+/** A retried operation id gets the cached result and never a second provider write; only the non-secret target and status are kept. */
 export function createPhoneSecretSaveCoordinator(save, maximumCompleted = 512) {
   const active = new Map();
   const completed = new Map();
   const limit = Math.max(1, Number.isSafeInteger(maximumCompleted) ? maximumCompleted : 512);
-  // The private IPC operation id is already the hash of the exact HPKE
-  // envelope. Keep a process-random-keyed fingerprint only while a save is
-  // active so a malformed duplicate cannot join with another plaintext.
-  // Completed entries retain target + status only, never a stable derivative
-  // of the user's secret.
+  // A process-random-keyed fingerprint only while a save is active; completed entries never keep a stable derivative of the secret.
   const activeSignatureKey = randomBytes(32);
   const signature = (request) => createHmac("sha256", activeSignatureKey)
     .update(request.target)
@@ -197,8 +177,6 @@ export function createPhoneSecretSaveCoordinator(save, maximumCompleted = 512) {
       if (prior.target !== request.target) {
         return phoneSecretSaveResult(request.requestId, false, "The credential save retry did not match");
       }
-      // Refresh insertion order so a genuinely retried operation is the last
-      // bounded cache entry to be evicted.
       completed.delete(request.requestId);
       completed.set(request.requestId, prior);
       return prior.result;
@@ -219,11 +197,7 @@ export function createPhoneSecretSaveCoordinator(save, maximumCompleted = 512) {
         )
         .then((result) => {
           active.delete(request.requestId);
-          // A committed save is safe to replay forever within the bounded
-          // cache: this is the lost-response case the operation id exists to
-          // cover. A failure is retryable (provider outage, locked keychain,
-          // validation timeout), so retaining it would strand this exact
-          // encrypted envelope until hundreds of unrelated saves evicted it.
+          // Only a committed save is cached; a failure is retryable and must not strand this envelope.
           if (result.ok) {
             completed.set(request.requestId, { target: request.target, result });
             while (completed.size > limit) completed.delete(completed.keys().next().value);

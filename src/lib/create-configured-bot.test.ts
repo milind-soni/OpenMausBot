@@ -8,7 +8,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("configured bot creation", () => {
   function fixture(mode: "ask" | "auto" | "full" | "custom", fail = 0, selection?: Bot["modelSelection"]) {
     const draft = new BotCreationDraft(EMPTY_BOT_DEFAULTS, vi.fn());
-    draft.patch({ name: "Fixture", approvalMode: mode, notifications: false, confirmFullAccess: true });
+    draft.patch({ name: "Fixture", approvalMode: mode, notifications: false });
     let bot = { ...draft.bot, id: "created", threadId: "initial", approvalMode: "ask" } as Bot;
     if (selection) bot.modelSelection = selection;
     const events: string[] = [];
@@ -37,14 +37,40 @@ describe("configured bot creation", () => {
     expect(f.bodies[0]).toMatchObject({ visibility: "admins", useDefaults: false });
   });
 
+  it("names who a new team bot reports to in the creation request, and nobody anywhere else", async () => {
+    const team = fixture("ask");
+    await createConfiguredBot(team.draft, team.request, persistBotUpdate, team.approvals, undefined, "bob@acme.test");
+    expect(team.bodies[0]).toMatchObject({ reportsTo: "bob@acme.test" });
+    const solo = fixture("ask");
+    await createConfiguredBot(solo.draft, solo.request, persistBotUpdate, solo.approvals);
+    expect(solo.bodies[0]).not.toHaveProperty("reportsTo");
+  });
+
+  it("applies tool restrictions atomically before a new bot is published", async () => {
+    const f = fixture("ask");
+    f.draft.patch({ toolScope: { allow: [], deny: ["mcp:mail:send"] } });
+    await createConfiguredBot(f.draft, f.request, persistBotUpdate, f.approvals);
+    expect(f.bodies[0]).toMatchObject({ settings: { toolScope: { allow: [], deny: ["mcp:mail:send"] } } });
+    expect(f.bodies[1]).not.toHaveProperty("toolScope");
+  });
+
   it("keeps the server-completed workspace effort when applying draft settings", async () => {
     const selection = { instanceId: "claude", model: "sonnet", effort: "high" as const };
     const f = fixture("ask", 0, selection);
     f.draft.setModel({ instanceId: selection.instanceId, model: selection.model });
     const result = await createConfiguredBot(f.draft, f.request, persistBotUpdate, f.approvals);
-    expect(f.bodies[0]).toMatchObject({ modelSelection: { instanceId: "claude", model: "sonnet" } });
-    expect(f.bodies[1]).toMatchObject({ modelSelection: selection });
+    expect(f.bodies[0]).toMatchObject({ modelSelection: { instanceId: "claude", model: "sonnet" }, requireAvailableModel: true });
+    expect(f.bodies[1]).not.toHaveProperty("modelSelection");
     expect(result.bot.modelSelection).toEqual(selection);
+  });
+
+  it("asks for no AI when none is set up, so the server makes the bot without one", async () => {
+    const f = fixture("ask");
+    f.draft.setModel({ instanceId: "", model: "" });
+    await createConfiguredBot(f.draft, f.request, persistBotUpdate, f.approvals);
+    expect(f.bodies[0]).not.toHaveProperty("modelSelection");
+    expect(f.bodies[0]).not.toHaveProperty("requireAvailableModel");
+    expect(f.events).not.toContain("DELETE /api/bots/created");
   });
 
   for (const mode of ["ask", "auto", "full", "custom"] as const) {
@@ -60,6 +86,22 @@ describe("configured bot creation", () => {
       expect(f.events).not.toContain("DELETE /api/bots/created");
     });
   }
+
+  it("applies Full to the bot and its first thread over the API when there is no desktop bridge", async () => {
+    const f = fixture("full");
+    const result = await createConfiguredBot(f.draft, f.request, persistBotUpdate, undefined);
+    expect(result.bot).toMatchObject({ approvalMode: "full" });
+    expect(f.events).toEqual(["POST /api/bots", "PATCH /api/bots/created", "PATCH /api/bots/created/tasks/initial"]);
+    expect(f.bodies[1]).toMatchObject({ approvalMode: "full" });
+    expect(f.bodies[2]).toEqual({ approvalMode: "full", acknowledgeLocalAuto: false });
+    for (const body of f.bodies) expect(body).not.toHaveProperty("confirmFullAccess");
+  });
+
+  it("still refuses Custom without the desktop bridge and removes the half-made bot", async () => {
+    const f = fixture("custom");
+    await expect(createConfiguredBot(f.draft, f.request, persistBotUpdate, undefined)).rejects.toThrow("packaged desktop app");
+    expect(f.events).toEqual(["POST /api/bots", "DELETE /api/bots/created"]);
+  });
 
   for (const fail of [1, 2]) {
     it(`rolls back when native grant ${fail} fails`, async () => {

@@ -12,8 +12,6 @@ const binary = resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.e
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(binary);
 if (!enabled) console.info("skipping reply focus UI e2e: set OMB_UI_E2E=1 to install the pinned browser");
 
-// MOCA-263: choosing Reply showed "Replying to …" but left the caret outside
-// the draft, so the reply could not be typed without clicking the box first.
 (enabled ? it : it.skip)("puts the caret in the draft when a message is chosen to reply to", async () => {
   let child: ChildProcess | undefined;
   let info: { ui: string } | undefined;
@@ -33,20 +31,17 @@ if (!enabled) console.info("skipping reply focus UI e2e: set OMB_UI_E2E=1 to ins
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
     const focused = () => evaluate("document.activeElement?.getAttribute('aria-label') || document.activeElement?.tagName");
 
-    // Keyboard path: focus sits on the Reply control itself, the case the
-    // rule must take focus from, and Enter activates it as a person would.
-    await expect.poll(() => evaluate("Boolean(document.querySelector('button[aria-label=\"Reply to message\"]'))"), { timeout: 15_000 }).toBe(true);
-    await evaluate("(() => { document.querySelector('button[aria-label=\"Reply to message\"]').focus(); return true; })()");
-    expect(await focused()).toBe("Reply to message");
+    await expect.poll(() => evaluate("Boolean(document.querySelector('button[aria-label=\"Message actions\"]'))"), { timeout: 15_000 }).toBe(true);
+    await evaluate("(() => { document.querySelector('button[aria-label=\"Message actions\"]').focus(); return true; })()");
+    await ui("press", "--keys", "Enter");
+    await expect.poll(() => evaluate("document.activeElement?.getAttribute('role') === 'menuitem' && document.activeElement.textContent.trim() === 'Reply'")).toBe(true);
     await ui("press", "--keys", "Enter");
     await expect.poll(() => evaluate("/Replying to Pepper/.test(document.body.innerText)"), { timeout: 5_000 }).toBe(true);
     await expect.poll(focused, { timeout: 5_000 }).toBe("Message Pepper");
-    // Typing goes straight into the reply.
     await ui("press", "--keys", "h");
     await ui("press", "--keys", "i");
     expect(await evaluate("document.querySelector('textarea[aria-label=\"Message Pepper\"]').value")).toBe("hi");
 
-    // Cancelling the reply does not pull focus anywhere new.
     await evaluate("(() => { document.activeElement.blur(); return true; })()");
     await evaluate("(() => { document.querySelector('button[aria-label=\"Cancel reply\"]').click(); return true; })()");
     await expect.poll(() => evaluate("/Replying to Pepper/.test(document.body.innerText)"), { timeout: 5_000 }).toBe(false);

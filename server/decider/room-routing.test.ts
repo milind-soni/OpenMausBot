@@ -25,8 +25,8 @@ function answering(result: DeciderResult<ChoiceAnswer>) {
   return { choose };
 }
 
-const picked = (choice: string, pTop: number): DeciderResult<ChoiceAnswer> =>
-  ({ ok: true, provider: "jev", latencyMs: 340, answers: { type: "choice", choice, pTop, margin: pTop - 0.05, probabilities: { [choice]: pTop } } });
+const picked = (choice: string, pTop: number, provider: "jev" | "openrouter" = "jev"): DeciderResult<ChoiceAnswer> =>
+  ({ ok: true, provider, latencyMs: 340, answers: { type: "choice", choice, pTop, margin: pTop - 0.05, probabilities: { [choice]: pTop } } });
 
 describe("room routing request", () => {
   it("offers every active member by id, plus __everyone__, in the bench's state shape", () => {
@@ -63,12 +63,19 @@ describe("room routing request", () => {
 describe("decideRoomResponder", () => {
   it("a confident pick answers alone", async () => {
     const decider = answering(picked("bot-theo", 0.94));
-    await expect(decideRoomResponder(decider, INPUT)).resolves.toEqual({ kind: "member", botId: "bot-theo", probability: 0.94 });
+    await expect(decideRoomResponder(decider, INPUT)).resolves.toEqual({ kind: "member", botId: "bot-theo", probability: 0.94, provider: "jev" });
     expect(decider.choose).toHaveBeenCalledWith("roomRouting", expect.any(Object), expect.any(Object), expect.objectContaining({ timeoutMs: ROOM_ROUTING_TIMEOUT_MS }));
   });
 
   it("__everyone__ at 0.6 or above sends it to everyone", async () => {
-    await expect(decideRoomResponder(answering(picked(EVERYONE_OPTION, 0.72)), INPUT)).resolves.toEqual({ kind: "everyone", probability: 0.72 });
+    await expect(decideRoomResponder(answering(picked(EVERYONE_OPTION, 0.72)), INPUT)).resolves.toEqual({ kind: "everyone", probability: 0.72, provider: "jev" });
+  });
+
+  it("the route says which provider decided", async () => {
+    await expect(decideRoomResponder(answering(picked("bot-theo", 0.9, "openrouter")), INPUT))
+      .resolves.toEqual({ kind: "member", botId: "bot-theo", probability: 0.9, provider: "openrouter" });
+    await expect(decideRoomResponder(answering(picked(EVERYONE_OPTION, 0.9, "openrouter")), INPUT))
+      .resolves.toMatchObject({ kind: "everyone", provider: "openrouter" });
   });
 
   it("exactly 0.6 is confident enough; below falls back", async () => {

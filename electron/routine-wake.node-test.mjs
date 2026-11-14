@@ -52,11 +52,9 @@ test("one assertion is taken while a hold is warranted and released when it is n
 
   assert.deepEqual(await hold.poll(), { hold: true, reason: "due", at: 42, keepAwake: true, onBattery: false });
   assert.equal(hold.holding(), true);
-  // a second warranted poll takes no second assertion
   await hold.poll();
   assert.deepEqual(calls, [["start", "prevent-app-suspension", 1]]);
 
-  // unplugged: released; plugged back in: taken again
   onBattery = true;
   assert.equal((await hold.poll()).reason, "battery");
   assert.equal(hold.holding(), false);
@@ -64,7 +62,6 @@ test("one assertion is taken while a hold is warranted and released when it is n
   await hold.poll();
   assert.equal(hold.holding(), true);
 
-  // the server going away releases; the toggle going off releases
   status = null;
   assert.equal((await hold.poll()).reason, "idle");
   assert.equal(hold.holding(), false);

@@ -14,6 +14,7 @@ import {
   type ProfileRequestStore,
 } from "./profile-requests.ts";
 import type { BotRecord } from "./store.ts";
+import { appliesNow, type DirectApplyCheck } from "./direct-apply.ts";
 
 interface StoredMessage {
   id: string;
@@ -95,9 +96,7 @@ function harness(options: { name: string; chiefOfStaff?: boolean }) {
       resumeCursors: {},
     } as unknown as BotRecord;
     store.bots.set(record.id, record);
-    // recordProfileChange (via resolve -> profile-versions.ts) skips its
-    // write when the bot's folder is gone, so a synthetic bot here needs
-    // one too — a real bot gets its folder at creation (writeSoulMirror).
+    // recordProfileChange skips its write when the bot's folder is gone, so a synthetic bot needs one too.
     mkdirSync(botFolder(record.id), { recursive: true, mode: 0o700 });
     return record;
   }
@@ -110,7 +109,7 @@ describe("ProfileRequestService", () => {
   it("applies Full Access from the source thread without exposing an unanswered card and claims replays", () => {
     const { store, bot } = harness({ name: "Scout" });
     bot.approvalMode = "full";
-    const autoApply = vi.fn((_botId: string, threadId: string) => threadId === "full-thread");
+    const autoApply = vi.fn((_botId: string, threadId: string, _target: string) => (threadId === "full-thread" ? "full-access" as const : null));
     const service = new ProfileRequestService({ store, autoApply });
     const appended: OptionCardLike[] = [];
     const append = store.appendMessage.bind(store);
@@ -127,7 +126,7 @@ describe("ProfileRequestService", () => {
     const full = service.submit({ botId: bot.id, threadId: "full-thread", changes: { name: "Kiwi" }, reason: "requested" });
     expect(full).toMatchObject({ state: "applied", result: { state: "applied", targetBotId: bot.id, fields: ["name"] } });
     expect(bot.name).toBe("Kiwi");
-    expect(autoApply).toHaveBeenLastCalledWith(bot.id, "full-thread");
+    expect(autoApply).toHaveBeenLastCalledWith(bot.id, "full-thread", bot.id);
     expect(appended[1]).toMatchObject({ options: [], dismissed: true });
     expect(store.messagesFor("full-thread")[0]?.card).toMatchObject({ answered: "allow", dismissed: true });
     expect(service.resolve({ botId: bot.id, threadId: "full-thread", requestId: full.requestId, behavior: "allow" }))
@@ -138,11 +137,13 @@ describe("ProfileRequestService", () => {
   it("retains Full Access validation and reports application failures without a pending approval", () => {
     const { store, bot, addBot } = harness({ name: "Chief" });
     const peer = addBot({ name: "Peer" });
-    const service = new ProfileRequestService({ store, autoApply: () => true, validateTarget: () => "Outside your team" });
+    const service = new ProfileRequestService({ store, autoApply: () => "full-access", validateTarget: () => "Outside your team" });
     expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, targetBotId: peer.id, changes: { name: "Changed" }, reason: "requested" }))
       .toThrow("Outside your team");
     expect(store.messagesFor(bot.threadId)).toHaveLength(0);
     expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, changes: { approvalMode: "full" }, reason: "requested" }))
+      .toThrow("unsupported profile field");
+    expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, changes: { toolScope: null }, reason: "requested" }))
       .toThrow("unsupported profile field");
     vi.spyOn(store, "patchBotProfile").mockImplementationOnce(() => { throw new Error("profile write failed"); });
     expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, changes: { name: "Kiwi" }, reason: "requested" }))
@@ -153,7 +154,7 @@ describe("ProfileRequestService", () => {
 
   it("reports a committed Full Access profile accurately when its receipt cannot settle", () => {
     const { store, bot } = harness({ name: "Scout" });
-    const service = new ProfileRequestService({ store, autoApply: () => true });
+    const service = new ProfileRequestService({ store, autoApply: () => "full-access" });
     const patch = vi.spyOn(store, "patchBotProfile");
     const settle = vi.spyOn(store, "patchMessage").mockImplementation(() => { throw new Error("receipt write failed"); });
     const result = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { name: "Kiwi" }, reason: "requested" });
@@ -226,7 +227,6 @@ describe("ProfileRequestService", () => {
     expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: spoken.requestId, behavior: "allow" }))
       .toMatchObject({ state: "applied" });
     expect(store.bot(bot.id)!.speakReplies).toBe(true);
-    // The toggles ride the same history rows as every other proposable field.
     await flushProfileHistory(bot.id);
     expect(readHistory(bot.id).map((row) => row.field)).toEqual(["speakReplies", "notifications"]);
     expect(readHistory(bot.id)[0].summary).toBe('speakReplies: "off" → "on"');
@@ -240,7 +240,6 @@ describe("ProfileRequestService", () => {
       expect(mixed.detail).toContain(`Working folder: its private workspace → ${dir}`);
       expect(mixed.detail).toContain("Notifications: on → off");
       expect(mixed.detail).toContain("Scout's tools will read and write files in that folder.");
-      // Neither change edits instructions, so the card must not claim it does.
       expect(mixed.detail).not.toContain("told on every turn");
       expect(mixed.detail).toContain("Nothing runs.");
     } finally {
@@ -259,20 +258,12 @@ describe("ProfileRequestService", () => {
     store.patchBot(bot.id, { notifications: false });
     const stale = service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: proposed.requestId, behavior: "allow" });
     expect(stale).toMatchObject({ claimed: true, state: "invalid", status: 409 });
-    // The toggle already matches the proposal's target state — it must not
-    // be re-applied through a card whose revision no longer holds.
     expect(store.bot(bot.id)!.notifications).toBe(false);
   });
 
   it("re-checks the cap after redaction, since a mask can be longer than the secret it replaces", () => {
     const { service, bot } = harness({ name: "Scout" });
-    // "token: sk-ant-AAAAAAAA" (22 bytes) matches the key=value secret
-    // pattern (its value is only 8 chars — too short for the standalone
-    // sk-ant-… shape, which needs 16+) and is masked to
-    // "token: «redacted 15 chars»" (28 bytes): +6 bytes of growth. Padding
-    // the rest of the soul with plain filler (separated by a newline so the
-    // pattern's word boundary still lands on "token") puts the RAW value
-    // exactly at the cap, so only the redaction growth can push it over.
+    // "token: sk-ant-AAAAAAAA" masks to "token: «redacted 15 chars»" (+6 bytes); the raw value sits exactly at the cap, so only redaction growth pushes it over.
     const secretish = "token: sk-ant-AAAAAAAA";
     const filler = "x".repeat(24_000 - secretish.length - 1);
     const soul = `${filler}\n${secretish}`;
@@ -314,8 +305,6 @@ describe("ProfileRequestService", () => {
     const stale = service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: b.requestId, behavior: "allow" });
     expect(stale).toMatchObject({ claimed: true, state: "invalid", status: 409 });
     expect((stale as { error: string }).error).toBe("This bot's profile changed after this card was prepared. Ask the bot to review it and propose again.");
-    // The dead card settles expired: no options left to press, one line
-    // telling the human to ask for a fresh proposal.
     const dead = store.messagesFor(bot.threadId).at(-1)!.card!;
     expect(dead.held).toContain("changed after this card");
     expect(dead.expired).toBe(true);
@@ -333,8 +322,6 @@ describe("ProfileRequestService", () => {
     const dead = store.messagesFor(bot.threadId).at(-1)!.card!;
     expect(dead.expired).toBe(true);
 
-    // The revision the card was prepared against comes back: the card stays
-    // dead for both decisions, and the proposal never applies.
     store.patchBot(bot.id, { description: "" });
     const expired = "This profile request expired before it was confirmed. Ask for a fresh proposal.";
     expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: proposed.requestId, behavior: "allow" }))
@@ -411,16 +398,11 @@ describe("ProfileRequestService", () => {
     service.validateTarget = () => refuse;
     const { requestId, title } = service.propose({ botId: bot.id, threadId: bot.threadId, targetBotId: peer.id, changes: { title: "Analyst" }, reason: "r" });
     expect(title).toBe("Update @Peer's profile?");
-    // A cross-bot card is shown in the PROPOSER's thread — it must name the
-    // target as its very first line, or the web card never says whose
-    // profile is on the line.
     const card = store.messagesFor(bot.threadId).at(-1)!.card!;
     expect(card.subtitle.split("\n")[0]).toBe("Whose profile: @Peer");
     refuse = "@Peer is no longer in this section";
     expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId, behavior: "allow" }))
       .toMatchObject({ claimed: true, state: "invalid", status: 404 });
-    // The refusal expired the card. The section comes back, but the card
-    // stays dead — a fresh proposal carries the same change instead.
     refuse = null;
     expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId, behavior: "allow" }))
       .toMatchObject({ claimed: true, state: "invalid", status: 409 });
@@ -433,20 +415,15 @@ describe("ProfileRequestService", () => {
   });
 
   it("bases isSetup on the target's whole profile, not just the fields this proposal touches", () => {
-    // An established bot (title already set) renamed by itself: only `name`
-    // is in `before`, so the old check ("every OTHER changed field is
-    // blank" over an empty list) vacuously said "setup".
     const established = harness({ name: "Kiwi" });
     established.store.patchBot(established.bot.id, { title: "Tracker" });
     const rename = established.service.propose({ botId: established.bot.id, threadId: established.bot.threadId, changes: { name: "Kiwi2" }, reason: "r" });
     expect(rename.title).toBe("Update Kiwi's profile?");
 
-    // A genuinely blank bot still reads as first-time setup.
     const blank = harness({ name: "Scout" });
     const first = blank.service.propose({ botId: blank.bot.id, threadId: blank.bot.threadId, changes: { title: "Tracker" }, reason: "r" });
     expect(first.title).toBe("Set up Scout?");
 
-    // Cross-bot phrasing never depends on isSetup at all.
     const chief = harness({ name: "Chief", chiefOfStaff: true });
     const peer = chief.addBot({ name: "Peer" });
     const cross = chief.service.propose({ botId: chief.bot.id, threadId: chief.bot.threadId, targetBotId: peer.id, changes: { name: "Peer2" }, reason: "r" });
@@ -487,7 +464,6 @@ describe("propose_profile working folder (cwd)", () => {
       const result = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { cwd: dir }, reason: "You said the site lives there." });
       expect(result.detail).toContain(`Working folder: its private workspace → ${dir}`);
       expect(result.detail).toContain("Scout's tools will read and write files in that folder.");
-      // A folder-only card does not change what the bot is told.
       expect(result.detail).not.toContain("told on every turn");
       expect(result.detail).toContain("Nothing runs.");
       expect(store.bot(bot.id)!.cwd).toBeUndefined();
@@ -495,7 +471,6 @@ describe("propose_profile working folder (cwd)", () => {
       expect(applied).toEqual({ claimed: true, state: "applied", targetBotId: bot.id, fields: ["cwd"] });
       expect(store.bot(bot.id)!.cwd).toBe(dir);
 
-      // Back to the private workspace: "" clears it, and the card names both ends.
       const clear = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { cwd: "" }, reason: "r" });
       expect(clear.detail).toContain(`Working folder: ${dir} → its private workspace`);
       service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: clear.requestId, behavior: "allow" });
@@ -510,7 +485,6 @@ describe("propose_profile working folder (cwd)", () => {
     const attempt = (cwd: string) => () => service.propose({ botId: bot.id, threadId: bot.threadId, changes: { cwd }, reason: "r" });
     expect(attempt("relative/path")).toThrow("working folder must be an absolute path");
     expect(attempt(join(tmpdir(), "omb-definitely-missing-" + Date.now()))).toThrow(/that folder doesn't exist/);
-    // No folder today and "" proposed: nothing to change.
     expect(attempt("")).toThrow("Nothing would change");
 
     const dir = mkdtempSync(join(tmpdir(), "omb-cwd-"));
@@ -627,5 +601,82 @@ describe("propose_profile color and avatar", () => {
     expect(result).toMatchObject({ claimed: true, state: "invalid", status: 409 });
     expect(store.bot(bot.id)!.avatarUrl).toBeUndefined();
     expect(store.messagesFor(bot.threadId).at(-1)!.card!).toMatchObject({ expired: true, options: [], held: expect.stringMatching(/no longer stored/) });
+  });
+});
+
+describe("a bot's profile changes below Full access", () => {
+  const rule: DirectApplyCheck = (_botId, threadId) => appliesNow({ fullAccess: false, ownerMustConfirm: threadId === "guest-thread" });
+
+  it("applies its own change and a peer's at Ask, each with an Undo", () => {
+    const { store, bot, addBot } = harness({ name: "Scout" });
+    const peer = addBot({ name: "Peer" });
+    const service = new ProfileRequestService({ store, autoApply: rule });
+    const own = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { title: "Researcher" }, reason: "asked" });
+    expect(own).toMatchObject({ state: "applied", appliedBy: "level" });
+    expect(bot.title).toBe("Researcher");
+    expect(store.messagesFor(bot.threadId)[0]?.card).toMatchObject({ autoApplied: true, answered: "allow", options: [] });
+    const other = service.submit({ botId: bot.id, threadId: bot.threadId, targetBotId: peer.id, changes: { title: "Changed" }, reason: "asked" });
+    expect(other).toMatchObject({ state: "applied", appliedBy: "level" });
+    expect(peer.title).toBe("Changed");
+    expect(store.messagesFor(bot.threadId)[1]?.card).toMatchObject({ autoApplied: true, answered: "allow", options: [] });
+    expect(service.undo({ botId: bot.id, threadId: bot.threadId, requestId: other.requestId })).toMatchObject({ state: "undone", targetBotId: peer.id });
+    expect(peer.title).toBe("");
+  });
+
+  it("applies its own working folder at Ask, and Undo puts the old one back", () => {
+    const { store, bot } = harness({ name: "Scout" });
+    const service = new ProfileRequestService({ store, autoApply: rule });
+    const dir = mkdtempSync(join(tmpdir(), "omb-cwd-"));
+    try {
+      const applied = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { cwd: dir, title: "Builder" }, reason: "asked" });
+      expect(applied).toMatchObject({ state: "applied", appliedBy: "level" });
+      expect(store.bot(bot.id)!.cwd).toBe(dir);
+      expect(service.undo({ botId: bot.id, threadId: bot.threadId, requestId: applied.requestId })).toMatchObject({ state: "undone" });
+      expect(store.bot(bot.id)!.cwd).toBeUndefined();
+      expect(store.bot(bot.id)!.title).toBe("");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("is not held back by the open-card budget, which still holds the owner's card", () => {
+    const { store, bot } = harness({ name: "Scout" });
+    const canPersist = vi.fn((_botId: string, _threadId: string, opensCard: boolean) =>
+      opensCard ? { ok: false as const, status: 429, error: "confirm or cancel an existing proposal first" } : { ok: true as const });
+    const service = new ProfileRequestService({ store, autoApply: rule, canPersist });
+    expect(service.submit({ botId: bot.id, threadId: bot.threadId, changes: { title: "Researcher" }, reason: "asked" }).state).toBe("applied");
+    expect(() => service.submit({ botId: bot.id, threadId: "guest-thread", changes: { title: "Changed" }, reason: "asked" }))
+      .toThrow("confirm or cancel an existing proposal first");
+    expect(canPersist.mock.calls.map((call) => call[2])).toEqual([false, true]);
+  });
+
+  it("undoes only the fields it changed, once, and not after the profile moved", async () => {
+    const { store, bot } = harness({ name: "Scout" });
+    const service = new ProfileRequestService({ store, autoApply: rule });
+    store.patchBot(bot.id, { description: "Keeps this" });
+    const applied = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { name: "Kiwi", soul: "Be brief." }, reason: "asked" });
+    const undo = () => service.undo({ botId: bot.id, threadId: bot.threadId, requestId: applied.requestId });
+    expect(undo()).toMatchObject({ state: "undone", targetBotId: bot.id });
+    expect(bot).toMatchObject({ name: "Scout", soul: "", description: "Keeps this" });
+    expect(undo()).toMatchObject({ state: "already_undone" });
+    expect(store.messagesFor(bot.threadId)[0]?.card).toMatchObject({ undone: true });
+    await flushProfileHistory(bot.id);
+    expect(readHistory(bot.id).some((row) => row.field === "name" && row.summary.includes("Kiwi"))).toBe(true);
+
+    const stale = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { title: "Bot's title" }, reason: "asked" });
+    store.patchBot(bot.id, { title: "Person's title" });
+    expect(service.undo({ botId: bot.id, threadId: bot.threadId, requestId: stale.requestId }))
+      .toMatchObject({ state: "invalid", stale: true, error: "Changed since, so it can't be undone here." });
+    expect(bot.title).toBe("Person's title");
+  });
+
+  it("offers no Undo when the old value could not be kept exactly", () => {
+    const { store, bot } = harness({ name: "Scout" });
+    store.patchBot(bot.id, { soul: "Use sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH for the API." });
+    const service = new ProfileRequestService({ store, autoApply: rule });
+    const applied = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { soul: "Be brief." }, reason: "asked" });
+    expect(applied.state).toBe("applied");
+    expect(store.messagesFor(bot.threadId)[0]?.card?.profileRequest?.undo).toBeUndefined();
+    expect(service.undo({ botId: bot.id, threadId: bot.threadId, requestId: applied.requestId })).toMatchObject({ state: "invalid", status: 409 });
   });
 });

@@ -34,7 +34,7 @@ describe("paired thread targets through an isolated HTTP fixture", () => {
     token = accepted.body.token;
     const catalog = (await api("GET", "/api/instances")).body.instances.find((instance: any) => instance.instanceId === "claude");
     models = catalog.models.options.map((model: any) => model.id);
-    expect(models.length).toBeGreaterThanOrEqual(2);
+    expect(models.length).toBeGreaterThanOrEqual(3);
   });
 
   afterAll(async () => {
@@ -71,7 +71,6 @@ describe("paired thread targets through an isolated HTTP fixture", () => {
       expect(result.status, `${method} ${suffix}`).toBe(409);
       expect(result.body.error).toMatch(/Update the OpenMausBot app on this device.*choose a thread/);
     }
-    // The native sidecar's existing marker only narrows local behavior.
     const legacyPhone = await api("POST", `/api/bots/${bot.id}/read`, undefined, { "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "fixture-phone" });
     expect(legacyPhone.status).toBe(409);
     expect((await page(threadA)).messages).toEqual(beforeA.messages);
@@ -102,9 +101,31 @@ describe("paired thread targets through an isolated HTTP fixture", () => {
     expect(missingGrant.status).toBe(409);
     expect(missingGrant.body.error).toMatch(/not on a pending approval/);
     expect((await paired("DELETE", `/api/bots/${bot.id}/queue/not-a-queued-message`, { threadId: threadA })).status).toBe(404);
-    // Local desktop/API compatibility remains intentionally selected-thread based.
     expect((await api("POST", `/api/bots/${bot.id}/read`)).status).toBe(200);
     expect((await api("PATCH", `/api/bots/${bot.id}/model`, selection(models[0]))).status).toBe(200);
+  }, 60_000);
+
+  it("lets a paired client change the bot's model when it names the thread it shows", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Panel default", modelSelection: selection(models[0]) })).body.bot;
+    const threadA = bot.threadId;
+    const threadB = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "B" })).body.task.threadId;
+    for (const threadId of [threadA, threadB]) {
+      expect((await paired("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: selection(models[1]) })).status).toBe(200);
+    }
+    // B is the server's selected thread; the panel shows A.
+    expect((await botState(bot.id)).threadId).toBe(threadB);
+
+    const changed = await paired("PATCH", `/api/bots/${bot.id}`, { modelSelection: selection(models[2]), threadId: threadA });
+    expect(changed.status, JSON.stringify(changed.body)).toBe(200);
+    expect(changed.body.bot.modelSelection).toEqual(selection(models[2]));
+    const tasks = (await botState(bot.id)).tasks;
+    // The named thread follows the bot from now on; the other keeps its own pick.
+    expect(tasks.find((task: any) => task.threadId === threadA)).toMatchObject({ modelSelection: selection(models[2]), followsBotModel: true });
+    expect(tasks.find((task: any) => task.threadId === threadB)).toMatchObject({ modelSelection: selection(models[1]), followsBotModel: false });
+
+    expect((await paired("PATCH", `/api/bots/${bot.id}`, { modelSelection: selection(models[0]), threadId: "th_missing" })).status).toBe(404);
+    expect((await paired("PATCH", `/api/bots/${bot.id}`, { color: "blue", threadId: threadA })).status).toBe(400);
+    expect((await botState(bot.id)).modelSelection).toEqual(selection(models[2]));
   }, 60_000);
 
   it("keeps single-thread paired clients compatible and never grants authority to a spoofed marker", async () => {

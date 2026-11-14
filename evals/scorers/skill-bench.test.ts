@@ -182,9 +182,7 @@ describe("skill bench scorers", () => {
       { promptId: "only-prompt", arm: "without", replicate: 1, result: fakeResult("d", [{ kind: "promptIncludes", pass: false }]) },
     ];
     const report = scoreSkillBench(mixed, runs);
-    // The old scorer mapped every run onto the first prompt's assertion
-    // list: the second prompt's assertion disappeared and its verdicts were
-    // counted under the first prompt's label.
+    // Each prompt keeps its own assertion list and label.
     expect(report.assertions).toHaveLength(2);
     expect(report.assertions[0]).toMatchObject({ promptId: "only-system", delta: 1, nonDiscriminating: false });
     expect(report.assertions[1]).toMatchObject({ promptId: "only-prompt", delta: 1, nonDiscriminating: false });

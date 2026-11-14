@@ -1,15 +1,5 @@
-// The decision log is only as good as its wiring: every row is written at
-// the request.opened fold or in answerRequest, and both of those keep
-// working (cards keep appearing, approvals keep flowing) even when the
-// logging silently rots away. So, in the style of unattended.test.ts,
-// these run the real server against the fake ACP CLI and assert the ROWS,
-// not the behavior the rows describe:
-//
-//   1. a rule-matched auto-approval writes a row naming the rule
-//   2. a card and the human's answer write two rows (allow and deny)
-//   3. an unattended block writes its row — the audit row that says "this
-//      would have auto-approved, and only the block stood in the way"
-//   4. GET /api/decisions pages newest-last with ?limit=
+// Rows are written at the request.opened fold or in answerRequest, and both keep working (cards appear, approvals flow)
+// while logging silently rots, so these run the real server on the fake ACP CLI and assert the rows themselves.
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,10 +9,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { DecisionRow } from "./decision-log.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
+const PORT = workerPort(18800, 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
 
@@ -39,7 +30,6 @@ const api = async (method: string, path: string, body?: unknown): Promise<{ stat
   return { status: res.status, body: await res.json() };
 };
 
-/** Newest matching decision row, or null when none shows up in time. */
 async function waitForDecision(pred: (r: DecisionRow) => boolean, ms = 30_000): Promise<DecisionRow | null> {
   const deadline = Date.now() + ms;
   for (;;) {
@@ -52,8 +42,6 @@ async function waitForDecision(pred: (r: DecisionRow) => boolean, ms = 30_000): 
   }
 }
 
-/** A live permission card on a bot's transcript (via /api/bots — the same
- * poll unattended.test.ts uses, since a bot's card lives on its thread). */
 async function waitForBotCard(botId: string, ms = 30_000) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
@@ -69,8 +57,7 @@ async function waitForBotCard(botId: string, ms = 30_000) {
   return null;
 }
 
-/** A live permission card on a THREAD — webhook turns run in detached
- * tasks, so their cards never appear on the bot's open conversation. */
+/** Webhook turns run in detached tasks, so their cards never appear on the bot's open conversation. */
 async function waitForThreadCard(threadId: string, ms = 30_000) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
@@ -84,7 +71,6 @@ async function waitForThreadCard(threadId: string, ms = 30_000) {
   return null;
 }
 
-/** The detached task a webhook delivery created. */
 async function waitForRunThread(runId: string, ms = 20_000) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
@@ -96,9 +82,7 @@ async function waitForRunThread(runId: string, ms = 20_000) {
   return null;
 }
 
-/** A bot whose fake engine asks permission to run `echo hi` (the ACP core
- * folds that to tool "shell", summary "echo hi" — so the always-allow key
- * is "shell:echo"). */
+/** The ACP core folds `echo hi` to tool "shell", summary "echo hi", so the always-allow key is "shell:echo". */
 async function makePermissionBot(patch: Record<string, unknown>) {
   const created = await api("POST", "/api/bots");
   expect(created.status).toBe(201);
@@ -150,7 +134,6 @@ posixOnly("authorization decisions are logged", () => {
       try {
         if ((await fetch(`${BASE}/api/health`)).ok) break;
       } catch {
-        /* not up yet */
       }
       if (Date.now() > deadline) throw new Error(`server never came up. stderr:\n${stderr}`);
       await new Promise((r) => setTimeout(r, 150));
@@ -165,8 +148,6 @@ posixOnly("authorization decisions are logged", () => {
   it(
     "an Auto bot's card is logged as the provider's own request",
     async () => {
-      // Auto passes the provider's mode through; a request that still
-      // reaches the harness is the reviewer's to leave, and the row says so.
       const bot = await makePermissionBot({ name: "Granted", autoApprove: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "run it" })).status).toBe(202);
 
@@ -190,7 +171,7 @@ posixOnly("authorization decisions are logged", () => {
   it(
     "a card and the human's allow write two rows",
     async () => {
-      const bot = await makePermissionBot({ name: "Askme" });
+      const bot = await makePermissionBot({ name: "Askme", approvalMode: "ask" });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "run it" })).status).toBe(202);
 
       const card = await waitForBotCard(bot.id);
@@ -220,7 +201,7 @@ posixOnly("authorization decisions are logged", () => {
   it(
     "a human deny writes its row too",
     async () => {
-      const bot = await makePermissionBot({ name: "Refused" });
+      const bot = await makePermissionBot({ name: "Refused", approvalMode: "ask" });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "run it" })).status).toBe(202);
 
       const card = await waitForBotCard(bot.id);
@@ -238,10 +219,6 @@ posixOnly("authorization decisions are logged", () => {
   it(
     "a question card carries its questions and logs the row without an origin",
     async () => {
-      // the same fake ACP CLI in question mode: the request is an ask, not a
-      // permission, so the card must arrive structured and the row must say
-      // a person owes the answer. A tool-call ask has no origin to record —
-      // only the BoatAgent transport ever sets one.
       const created = await api("POST", "/api/bots");
       expect(created.status).toBe(201);
       const patched = await api("PATCH", `/api/bots/${created.body.bot.id}`, {
@@ -254,9 +231,6 @@ posixOnly("authorization decisions are logged", () => {
 
       const card = await waitForBotCard(bot.id);
       expect(card, "no question card ever appeared").not.toBeNull();
-      // a question, not a permission: no tool on the card, the choices as
-      // options. (The structured questionRequest payload itself arrives with
-      // the ACP normalization change, which stacks independently of this one.)
       expect(card.card.tool).toBeUndefined();
       expect(card.card.options).toContain("Blue");
       expect(card.card.questionRequest?.origin).toBeUndefined();
@@ -277,8 +251,6 @@ posixOnly("authorization decisions are logged", () => {
   it(
     "a webhook turn's card is logged as unattended, in the bot's own mode",
     async () => {
-      // A webhook turn runs in the mode the bot has, like any other; the
-      // row only records that nobody was at the keyboard when it asked.
       const bot = await makePermissionBot({ name: "Nightshift", autoApprove: true });
 
       const hook = await api("POST", "/api/webhooks", {
@@ -322,11 +294,15 @@ posixOnly("authorization decisions are logged", () => {
 
   it("GET /api/decisions.csv exports a date range, one line per row, from the month files", async () => {
     const all = (await api("GET", "/api/decisions")).body.decisions as DecisionRow[];
-    const today = new Date().toISOString().slice(0, 10);
-    const res = await fetch(`${BASE}/api/decisions.csv?from=${today}&to=${today}`);
+    // Span the UTC days the rows were written on, not "today": a run that
+    // crosses midnight UTC writes rows on two days (and maybe two month files).
+    const days = all.map((row) => row.at.slice(0, 10)).sort();
+    const from = days[0];
+    const to = days.at(-1);
+    const res = await fetch(`${BASE}/api/decisions.csv?from=${from}&to=${to}`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toMatch(/^text\/csv/);
-    expect(res.headers.get("content-disposition")).toBe(`attachment; filename="decisions-${today}-${today}.csv"`);
+    expect(res.headers.get("content-disposition")).toBe(`attachment; filename="decisions-${from}-${to}.csv"`);
     const lines = (await res.text()).trim().split("\n");
     expect(lines[0]).toBe("time,decision,source,bot,tool,summary,rule,unattended,answered_by,thread,request");
     expect(lines).toHaveLength(all.length + 1);

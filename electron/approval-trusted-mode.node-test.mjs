@@ -2,6 +2,39 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import approvalModule from "./approval-trusted-mode.cjs";
+import nativeText from "./native-text.cjs";
+
+test("trusted refusals translate only canonical whitelisted errors from the matching process", async () => {
+  const text = nativeText.createNativeText({ saved: "pt-br" });
+  for (const [errorKey, nativeKey] of [
+    ["serverError.approval.allThreads", "native.approval.allThreads"],
+    ["serverError.approval.pending", "native.approval.pending"],
+    ["serverError.approval.provider", "native.approval.provider"],
+  ]) {
+    const english = nativeText.englishText.t(nativeKey);
+    for (const [key, error, expected] of [
+      [errorKey, english, text.t(nativeKey)],
+      [errorKey, "Changed server wording", "Changed server wording"],
+      ["native.update.installing", english, english],
+      ["constructor", english, english],
+      [undefined, english, english],
+    ]) {
+      const proc = fakeProcess();
+      const coordinator = createTrustedApprovalModeCoordinator({ randomId: () => REQUEST_ID, t: text.t });
+      const pending = coordinator.request(proc, "bot-1", "ask");
+      const result = { type: "approval-trusted-mode-result", requestId: REQUEST_ID, ok: false, error, errorKey: key };
+      coordinator.receive(fakeProcess(), result);
+      coordinator.receive(proc, result);
+      await assert.rejects(pending, { message: expected });
+      assert.equal(proc.messages.length, 1);
+    }
+    const proc = fakeProcess();
+    const coordinator = createTrustedApprovalModeCoordinator({ randomId: () => REQUEST_ID });
+    const pending = coordinator.request(proc, "bot-1", "ask");
+    coordinator.receive(proc, { type: "approval-trusted-mode-result", requestId: REQUEST_ID, ok: false, error: english, errorKey });
+    await assert.rejects(pending, { message: english });
+  }
+});
 
 const {
   createTrustedApprovalModeCoordinator,
@@ -39,9 +72,23 @@ test("all-thread grants wait for committed thread modes and compensate the same 
   }
 });
 
-test("all-thread grants reject mixed scopes", () => {
-  for (const mode of ["auto", "custom", "edits"]) assert.throws(() => trustedApprovalModeRequest(REQUEST_ID, "bot-1", mode, false, undefined, undefined, undefined, false, true), /all-threads/);
+test("all-thread grants take every level but Custom, and reject mixed scopes", () => {
+  for (const mode of ["ask", "edits", "auto", "full"]) {
+    assert.equal(trustedApprovalModeRequest(REQUEST_ID, "bot-1", mode, false, undefined, undefined, undefined, false, true).allThreads, true);
+  }
+  assert.throws(() => trustedApprovalModeRequest(REQUEST_ID, "bot-1", "custom", false, undefined, undefined, undefined, false, true), /all-threads/);
   assert.throws(() => trustedApprovalModeRequest(REQUEST_ID, "bot-1", "full", false, "thread", undefined, undefined, false, true), /all-threads/);
+});
+
+test("an all-thread Auto leaving Custom settles on its one reply, with no grant phases", async () => {
+  const proc = fakeProcess();
+  const coordinator = createTrustedApprovalModeCoordinator({ randomId: () => REQUEST_ID });
+  const pending = coordinator.request(proc, "bot-1", "auto", { allThreads: true, acknowledgeLocalAuto: true });
+  assert.deepEqual(proc.messages[0], { type: "approval-trusted-mode-set", requestId: REQUEST_ID, botId: "bot-1", mode: "auto", acknowledgeLocalAuto: true, allThreads: true });
+  const bot = { id: "bot-1", approvalMode: "auto", tasks: [{ threadId: "rules", approvalMode: "auto" }] };
+  coordinator.receive(proc, { type: "approval-trusted-mode-result", requestId: REQUEST_ID, ok: true, bot });
+  assert.deepEqual(await pending, bot);
+  assert.equal(proc.messages.length, 1);
 });
 
 test("scoped composer grants wait for the real commit and keep the bot default", async () => {
@@ -75,6 +122,16 @@ test("thread-only options reject missing or mixed scopes", () => {
   for (const mode of ["ask", "edits", "auto", "full", "custom"]) assert.equal(trustedApprovalModeRequest(REQUEST_ID, "bot-1", mode, false, "thread-1", undefined, undefined, true).threadOnly, true);
   assert.throws(() => trustedApprovalModeRequest(REQUEST_ID, "bot-1", "full", false, undefined, undefined, undefined, true), /thread-only/);
   assert.throws(() => trustedApprovalModeRequest(REQUEST_ID, "bot-1", "full", false, "thread-1", undefined, true, true), /thread-only/);
+});
+
+test("permission refresh stays on one thread", () => {
+  const message = trustedApprovalModeRequest(REQUEST_ID, "bot-1", "auto", false, "thread-1", undefined, undefined, true, false, true);
+  assert.equal(message.refreshPermissions, true);
+  assert.equal(message.threadOnly, true);
+  assert.equal(message.threadId, "thread-1");
+  assert.throws(() => trustedApprovalModeRequest(REQUEST_ID, "bot-1", "full", false, "thread-1", undefined, undefined, false, false, true), /permission refresh/);
+  assert.throws(() => trustedApprovalModeRequest(REQUEST_ID, "bot-1", "full", false, undefined, undefined, undefined, false, true, true), /permission refresh/);
+  assert.throws(() => trustedApprovalModeRequest(REQUEST_ID, "bot-1", "ask", false, undefined, undefined, undefined, false, false, "yes"), /permission refresh/);
 });
 
 function idSequence(...ids) {

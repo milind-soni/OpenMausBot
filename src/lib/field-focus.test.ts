@@ -1,9 +1,4 @@
-// styles.css strips the browser outline from every text field, because
-// Chromium matches :focus-visible on a pointer click and drew a sharp
-// rectangle inside the composer's rounded pill. That rule left each field to
-// supply its own focus state, and most either added none or added
-// `focus:border-hairline`, a step too small to see. A field a keyboard user
-// cannot find fails WCAG 2.4.7 without any error, so it gets a test.
+// styles.css strips the outline from text fields (Chromium matches :focus-visible on click), so each field must show focus itself (WCAG 2.4.7).
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
@@ -12,8 +7,7 @@ import { describe, expect, it } from "vitest";
 const src = join(dirname(fileURLToPath(import.meta.url)), "..");
 const css = readFileSync(join(src, "styles.css"), "utf8");
 
-/** The stylesheet with every `@layer … { … }` block cut out, so what is left
- * is the unlayered CSS that outranks Tailwind's utilities. */
+/** Cut every `@layer` block: unlayered CSS outranks Tailwind's utilities. */
 function unlayered(source: string): string {
   let out = "";
   let i = 0;
@@ -48,7 +42,6 @@ function sources(dir: string): string[] {
 
 describe("text field focus", () => {
   it("still keeps the browser outline off text fields", () => {
-    // non-text inputs (checkbox, radio, ...) are excluded so they keep the ring
     expect(css).toMatch(/:is\(input(?::not\([^)]*\))?, textarea, select\):focus-visible\s*\{\s*outline:\s*none;/);
   });
 
@@ -58,8 +51,6 @@ describe("text field focus", () => {
   });
 
   it("leaves a field that reports an error in its error colour while focused", () => {
-    // an invalid field marks itself with aria-invalid and a danger border;
-    // the focus colour must not paint over the red while the user fixes it
     const selectors = [...unlayered(css).matchAll(/([^{}]+)\{[^}]*border-color:\s*var\(--color-focus\)[^}]*\}/g)].map((match) => match[1].trim());
     expect(selectors.length).toBeGreaterThan(0);
     for (const selector of selectors) expect(selector).toContain(':not([aria-invalid="true"])');

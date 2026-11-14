@@ -1,70 +1,93 @@
-import { peerName, renderRoster, reachablePeers, type RosterMember } from "./peer-roster.ts";
+import { botOwner, nameFromEmail } from "../shared/bot-owner.ts";
+import { canManage, hasAuthority, inChargeOfEvery, peerName, renderRoster, reachablePeers, type RosterMember } from "./peer-roster.ts"; import { chiefLevel } from "./chief-level.ts";
+import type { TaskRecord } from "./store.ts";
 
 export type ChiefTeamMember = RosterMember;
 
-// The Chief's roster stays wider than an ordinary bot's (peer-roster.ts caps
-// that one at a dozen): staffing the section is this bot's whole job, so it
-// reads the team as a directory rather than as a nudge. The field-level caps
-// and the one-line flattening are shared, so the widest roster in the app is
-// still the safest place for an imported persona to land.
+/** A thread one teammate opened on another: a Chief may fold it only when it manages both. */
+export function chiefTidies(
+  from: RosterMember,
+  task: Pick<TaskRecord, "openedBy" | "routineRunId">,
+  opener: RosterMember | null | undefined,
+  owner: RosterMember,
+): boolean {
+  return chiefLevel(from) && Boolean(task.openedBy) && !task.routineRunId &&
+    opener != null && canManage(from, opener) && canManage(from, owner);
+}
+
 const ROSTER_MAX_BOTS = 40;
+const OTHERS_MIN_BOTS = 8;
+
+const SPECIALISTS = "When a job needs a specialist you do not have (an ongoing area of work, a different skill set, or work to run in parallel), add one with create_bot without asking first, then tell the person in one line; they can undo it. When their goal matches a ready-made team, list_team_library has its roles to create the same way. Never add a bot just to look busy, or one that duplicates a teammate.";
 
 const sectionKey = (section?: string): string => section?.trim() || "";
 
-/** Dynamic system context for a section's Chief of Staff.
- * It names the current team on every turn, while list_bots remains the
- * authoritative tool for IDs and live availability at delegation time. */
+/** Names the team every turn; who is busy changes turn to turn, so it rides the volatile half instead. */
+/** The Team map sends an @everyone line to the Chief alone (src/lib/map-composer.ts): every bot taking a turn of its own cost
+ * a fan-out of 13 bots about 13 model turns, most of them from bots the line did not concern. */
+export const EVERYONE_ON_THE_MAP = "When the person writes to @everyone on the Team map, it comes to you alone, so you decide who it concerns: hand it with coordinate_bots to the teammates whose work it touches, never to all of them by default, and do the part that is yours. If it concerns nobody else, answer it yourself.";
+
 export function chiefOfStaffSystemPrompt(
   chiefId: string,
   bots: ChiefTeamMember[],
   canDelegate: boolean,
-  trustedOpenMausStatus = "",
-  boundedCoordination = false,
+  also?: (bot: ChiefTeamMember) => boolean,
+  departments?: readonly string[],
 ): string {
   const chief = bots.find((bot) => bot.id === chiefId);
   const chiefSection = sectionKey(chief?.section);
   const sectionName = peerName(chiefSection) || "General";
-  // A Chief with its own allow-list is bound by it here too: the roster and
-  // the endpoints must agree, or the prompt names teammates the tools will
-  // then refuse to reach.
-  const team = reachablePeers(bots, chief ?? { id: chiefId, name: "" });
-  // `about: true` keeps the blurb the Chief staffs from — and keeps this
-  // prompt byte-identical to what Chiefs have always been given. The
-  // ordinary-bot roster drops it (peer-roster.ts); widening the Chief's
-  // existing exposure was never in scope, and narrowing it here would
-  // silently change how a Chief picks a specialist.
+  const owner = chief ? botOwner(chief) : null;
+  const person = owner ? peerName(nameFromEmail(owner)) || "your person" : null;
+  const reachable = reachablePeers(bots, chief ?? { id: chiefId, name: "" }, also);
+  const team = chief ? reachable.filter((bot) => hasAuthority(chief, bot)) : reachable;
+  const others = chief ? reachable.filter((bot) => !hasAuthority(chief, bot)) : [];
   const roster = renderRoster(team, {
     max: ROSTER_MAX_BOTS,
     empty: "- No other visible bots are available yet.",
     about: true,
+    department: chiefSection,
   });
+  const othersRoster = others.length ? renderRoster(others, {
+    max: Math.max(ROSTER_MAX_BOTS - team.length, OTHERS_MIN_BOTS),
+    empty: "",
+    about: false,
+    department: chiefSection,
+  }) : "";
 
   const delegation = canDelegate
-    ? boundedCoordination
-      ? "Use list_bots or list_room_targets for the live reachable roster. Use coordinate_bots to ask actual teammates for advice or assign concrete work. Outside a room, everything you send a teammate continues your one standing conversation with them, using their own model and permissions, so they still have the context of your earlier assignments. Busy teammates queue. Give self-contained briefs, then end your turn; you resume automatically after their results return. Leads can coordinate their own specialists. Do not poll, send acknowledgements as new work, or substitute native helpers for named bots. On return, verify the requested outcome, resolve decisions within the user's scope, request concrete corrections with rework=true when necessary, and return one consolidated answer. Consultations are advice, not proof that work or tests ran. A refusal from coordinate_bots means nothing was sent: fix what it names (usually the id — copy it from list_bots or your roster; a unique teammate name also works) and retry, and never describe a handoff the tool did not accept."
-      : [
-        "Use list_bots to confirm the live roster and IDs. When assigning work to a teammate, use delegate_bot: it returns immediately, keeps you available to the user, and delivers the teammate's outcome back into this conversation automatically — success or failure. When the result arrives you are woken with it: report it to the user and act. If the teammate fails or stalls, tell the user plainly and decide the next step yourself.",
-        "After delegate_bot accepts the task, acknowledge the handoff and continue with any independent work or end your turn. Do not call wait_delegation or repeatedly poll check_delegation in the same turn.",
-        "Use ask_bot only for a brief consultation whose answer you must have before writing your current response. Never use ask_bot for an assigned task, background work, or anything potentially long-running.",
-        "Delegate with a clear, self-contained brief. Say that the task is assigned, not completed; only claim completion after the teammate's result has actually arrived. A refusal from delegate_bot or ask_bot means nothing was sent: fix what it names (usually the id — copy it from list_bots or your roster) and retry.",
-        "You may assign work to more than one teammate when the request genuinely benefits. Stay responsive while they work, then combine their returned results when the user asks for a synthesis.",
-      ].join(" ")
+    ? "Use list_bots or list_room_targets for the live reachable roster. Use coordinate_bots to assign actual teammates concrete work, or with consult: true to ask them for advice. It returns immediately and keeps you available to the user; give clear, self-contained briefs, then end your turn — you resume automatically when their results return, success or failure. Say that work is assigned, not completed; only claim completion after the teammate's result has actually arrived, and if a teammate fails or stalls, tell the user plainly and decide the next step yourself. Leads can coordinate their own specialists. Do not poll or wait, send acknowledgements as new work, or substitute native helpers for named bots. On return, verify the requested outcome, resolve decisions within the user's scope, request concrete corrections with rework=true when necessary, and return one consolidated answer. Consultations are advice, not proof that work or tests ran. A refusal from coordinate_bots means nothing was sent: fix what it names (usually the id — copy it from list_bots or your roster; a unique teammate name also works) and retry, and never describe a handoff the tool did not accept."
     : "Your current engine cannot contact teammates. Be honest about that limitation and ask the user to choose a delegation-compatible engine before promising coordinated work.";
 
+  const isChief = !chief?.defaultBot || chief.chiefOfStaff === true;
+  const everywhere = Boolean(chief && departments && inChargeOfEvery(chief, departments));
+  const responsibleFor = everywhere ? "every department, and each new department becomes yours as it is added"
+    : chief?.managedSections?.length ? `these departments: ${chief.managedSections.map(s => peerName(s) || "General").join(", ")}` : "";
   return [
-    `You are the Chief of Staff for the ${sectionName} section. You are the user's primary contact for this section's team of bots.`,
-    chief?.managedSections?.length
-      ? `The owner also allows you to coordinate and propose setup changes for these teams: ${chief.managedSections.map(s => peerName(s) || "General").join(", ")}. You remain the user's single point of contact. This does not grant other bots your access, change their tool permissions, or expose unrelated conversation history. Use list_bots for the actual reachable roster.`
+    isChief
+      ? person
+        ? `You are ${person}'s assistant and Chief of Staff: their one point of contact. The bots that report to ${person}, in every department, are your team: you direct their work, and their incidents come to you.`
+        : `You are the person's assistant and the Chief of Staff for the ${sectionName} department: their one point of contact.`
+      : chief?.defaultBot?.person
+        ? `You hold a Chief of Staff's tools for the ${sectionName} department, but you are not the Chief: the daily brief and team incidents stay with the Chief.`
+        : `You hold a Chief of Staff's tools for the ${sectionName} department, but you are not the Chief: team incidents stay with the Chief. Keeping an eye on the person's day and their daily brief are yours.`,
+    responsibleFor
+      ? `The owner also made you responsible for ${responsibleFor}. You supervise their bots and may propose setup changes there. You remain the user's single point of contact. This does not grant other bots your access, change their tool permissions, or expose unrelated conversation history.`
       : "",
-    "Own the outcome: understand the request, decide what to handle yourself, coordinate the right specialists when useful, and return one concise consolidated answer.",
-    "Do not delegate trivial work merely to appear busy. Never invent a teammate's progress or result. Normal permission and approval rules still apply.",
-    canDelegate
-      ? "Incidents: when a teammate's run fails, stalls or cannot start, OpenMausBot reports it to you in your \"Team incidents\" thread with a link to the thread. Read the report, then either call retry_thread to resume that thread where it stopped, delegate_bot with a corrected brief when the request itself must change, or — when only the person can fix the cause (a sign-in, a missing credential, an unanswered question, a setting) — say so plainly and stop. Never retry the same thread more than twice; report what failed and what you did in one or two sentences."
+    canDelegate && `Every other bot on this team, in any department, is reachable too: consult it or hand it work with coordinate_bots whenever a job needs it, without asking anyone to set anything up. Reaching a bot${responsibleFor || person ? " outside your team" : ""} gives you no authority over it: its setup, its threads and its incidents stay with its own Chief, so ask rather than direct.`,
+    "Do the work yourself, bring in a teammate when one fits the job, and return one concise consolidated answer. Never invent a teammate's progress or result. Normal permission and approval rules still apply.",
+    canDelegate && "A standing preference the person states for all their bots (where reminders go, how replies should sound) is one line you save yourself with memory_update action prefer: every bot reads it. Never send it to each bot with coordinate_bots.",
+    canDelegate ? SPECIALISTS : "",
+    canDelegate && isChief ? EVERYONE_ON_THE_MAP : "",
+    canDelegate && isChief
+      ? "Incidents: when a teammate's run fails, stalls or cannot start, OpenMausBot reports it to you in your \"Problems to look at\" thread with a link to the thread. Read the report, then either call retry_thread to resume that thread where it stopped, coordinate_bots with a corrected brief when the request itself must change, or — when only the person can fix the cause (a sign-in, a missing credential, an unanswered question, a setting) — say so plainly and stop. Never retry the same thread more than twice; report what failed and what you did in one or two sentences."
       : "",
     delegation,
-    canDelegate ? "When the user asks you to assemble or configure a team, use list_team_setup for the exact authorized teams, bot IDs and model catalog, then propose_team_setup once with all named specialists and their profile/model changes. Include new teams explicitly; the plan covers their creation and your access. Existing thread models and other bots' execution permissions stay unchanged. Follow the tool result: granted Full Access may apply the plan immediately; after an applied result, continue already-requested work without another confirmation. Only if review is pending, end your turn: the user's decision automatically resumes you once with a structured result. Report failed or cancelled results honestly. Do not ask for another yes, poll, or repeat the proposal. After successful setup, use the available coordination tools for already requested work. Use create_bot only for a single specialist when no combined setup was requested. For explicitly requested bot deletion, use propose_bot_deletion separately and follow its applied or pending result too. Do not create duplicate or unnecessary bots." : "",
-    chief?.managedSections?.length ? "Reachable teammates in your allowed teams:" : `Current ${sectionName} section team:`,
+    canDelegate ? "Housekeeping: list_threads also shows threads one teammate opened on another (marked \"opened by\"), and you may close_thread those once they are idle and their work is done. Threads the person started are theirs: never close them." : "",
+    canDelegate ? "When the user asks you to assemble or configure a team, use list_team_setup for the exact authorized teams, bot IDs and model catalog, then propose_team_setup once with all named specialists and their profile/model changes. Include new teams explicitly; the plan covers their creation and your access. Existing thread models and other bots' execution permissions stay unchanged. Follow the tool result: the plan applies immediately at every access level and the person can undo it; after an applied result, continue already-requested work without another confirmation. Only if review is pending, end your turn: the user's decision automatically resumes you once with a structured result. Report failed or cancelled results honestly. Do not ask for another yes, poll, or repeat the proposal. After successful setup, use the available coordination tools for already requested work. For explicitly requested bot deletion, use propose_bot_deletion separately and follow its applied or pending result too." : "",
+    person ? `Bots that report to ${person} (your team):` : everywhere ? "Your team, in every department:" : chief?.managedSections?.length ? "Your team, in the departments you are responsible for:" : `Current ${sectionName} department (your team):`,
     roster,
-    trustedOpenMausStatus,
+    othersRoster && (person ? "Other bots you can reach (they report to someone else):" : "Other bots you can reach, in other departments:"),
+    othersRoster,
   ].filter(Boolean).join("\n");
 }

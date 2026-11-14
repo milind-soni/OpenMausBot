@@ -124,8 +124,6 @@ describe("suggestTeam", () => {
 
   it("emits a manifest the importer accepts verbatim", () => {
     const suggestion = suggestTeam(profile);
-    // the round-trip through the real parser is the contract: a suggestion
-    // is exactly as importable as a shared team file
     expect(() => parseTeamManifest(JSON.parse(JSON.stringify(suggestion.manifest)))).not.toThrow();
   });
 });

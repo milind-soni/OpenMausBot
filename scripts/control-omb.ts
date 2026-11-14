@@ -1,50 +1,41 @@
 #!/usr/bin/env -S node --experimental-strip-types
-// Thin, agent-friendly CLI over the same guarded MCP operations exposed to
-// external clients. It deliberately owns no second API client or wait loop.
+// The openmausbot headless verbs for verifying an isolated fixture. A verb that
+// changes something never runs on a server it merely found.
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, mkdirSync, mkdtempSync, openSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 
-import { handleToolCall, request, validateBaseUrl } from "./mcp-server.ts";
+import { EXIT, HeadlessError } from "../server/headless/args.ts";
+import { runHeadlessCommand } from "../server/headless/main.ts";
+import type { handleToolCall, request } from "./mcp-server.ts";
 import { launchUi, runControlOmbUi } from "./testing/control-omb-ui.ts";
 import { removeTempDir, waitForExit } from "../server/testing/cleanup.ts";
+import { hostTimeout } from "../server/testing/host-timeout.ts";
 import { freePortBlock } from "../server/testing/ports.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-/** Deterministic name for the seeded starter bot of a verification fixture,
- * deliberately outside the server/names.ts pool so no suite can plan a bot
- * that collides with the starter (#1257). */
+/** Outside the bot name pool, so no suite can plan a bot that collides with the
+ * starter. */
 export const FIXTURE_STARTER_BOT_NAME = "Fixture Starter";
 const FAKE_CLI = join(ROOT, "server", "testing", "fake-claude-cli.ts");
-// `ui` verbs never discover anything: each takes the handle its launch printed.
-const MUTATING = new Set([
-  "new-bot", "new-channel", "send", "send-channel", "interrupt", "set-model", "edit",
-  "ui click", "ui type", "ui press", "ui flag", "ui eval",
-]);
 
-export class ControlOmbError extends Error {
-  readonly hint?: string;
-
+export class ControlOmbError extends HeadlessError {
   constructor(message: string, hint?: string) {
-    super(message);
-    this.hint = hint;
+    super(message, EXIT.failed, hint);
   }
 }
 
-type ToolCaller = typeof handleToolCall;
-type Requester = typeof request;
-
 export interface ControlOmbDependencies {
-  callTool?: ToolCaller;
-  request?: Requester;
+  callTool?: typeof handleToolCall;
+  request?: typeof request;
   env?: NodeJS.ProcessEnv;
 }
 
 export const HELP_UI = `renderer (needs a ui launch handle; every verb takes --ui HANDLE, never discovery):
-  node --experimental-strip-types scripts/control-omb.ts ui launch [--entry threads] [--tool-calls JSON] [--mode happy]
+  node --experimental-strip-types scripts/control-omb.ts ui launch [--entry threads] [--tool-calls JSON] [--mode happy] [--engine codex|acp|cline|copilot|opencode]
   ui snapshot --ui HANDLE [--interactive]
   ui click --ui HANDLE (--ref @eN | --name NAME)
   ui type --ui HANDLE (--ref @eN | --name NAME) --text TEXT
@@ -56,40 +47,43 @@ export const HELP_UI = `renderer (needs a ui launch handle; every verb takes --u
   ui wait-settle --ui HANDLE [--timeout 30]
   ui help`;
 
-export const HELP = `control-omb — verify a running OpenMausBot instance through its shared MCP core
+export const HELP = `control-omb — the openmausbot headless verbs (docs/headless-cli.md), for verifying a fixture
 
-read-only:
-  doctor [--url URL]
-  bots [--url URL]
-  channels [--url URL]
-  models [--url URL]
-  messages --bot ID [--task ID] [--limit 30] [--url URL]
-  messages --channel ID [--task ID] [--limit 30] [--url URL]
-  wait --bot ID [--task ID] [--timeout 30] [--url URL]
-  wait --channel ID [--task ID] [--timeout 30] [--url URL]
+read-only (every verb also takes --url URL):
+  doctor
+  bots
+  channels
+  models
+  messages --bot ID [--task ID] [--limit 30]
+  messages --channel ID [--task ID] [--limit 30]
+  wait --bot ID [--task ID] [--timeout 30] [--for job|turn]
+  wait --channel ID [--task ID] [--timeout 30]
+  export --thread ID --out DIR
+  events --job THREAD_ID --until-settled
 
 mutating (an explicit --url or OPENMAUSBOT_URL/OMB_PORT is required):
-  new-bot --name NAME [--url URL]
-  new-channel --name NAME --members ID,ID [--url URL]
-  send --bot ID --text TEXT [--task ID] [--dry-run] [--url URL]
-  send-channel --channel ID --text TEXT [--task ID] [--dry-run] [--url URL]
-  interrupt --bot ID [--task ID] [--dry-run] [--url URL]
-  interrupt --channel ID [--task ID] [--dry-run] [--url URL]
-  edit --bot ID --message ID --text TEXT [--task ID] [--dry-run] [--url URL]
-  set-model --bot ID --instance ID --model ID [--task ID] [--effort LEVEL] [--dry-run] [--url URL]
+  new-bot --name NAME [--section TEAM]
+  new-channel --name NAME --members ID,ID
+  send --bot ID --text TEXT [--task ID] [--dry-run]
+  send-channel --channel ID --text TEXT [--task ID] [--dry-run]
+  run --bot ID --text TEXT [--wait job|turn|none] [--timeout 5m] [--export DIR]
+  interrupt --bot ID [--task ID] [--tree] [--dry-run]
+  interrupt --channel ID [--task ID] [--dry-run]
+  edit --bot ID --message ID --text TEXT [--task ID] [--dry-run]
+  set-model --bot ID --instance ID --model ID [--task ID] [--effort LEVEL] [--dry-run]
+  team apply FILE [--dry-run | --check]
 
 ${HELP_UI}
 
 isolated fixture:
   node --experimental-strip-types scripts/control-omb.ts launch
 
-Output is JSON. launch and ui launch own a temporary fake-engine server until interrupted.`;
+Output is JSON. wait defaults to 30 seconds here. launch and ui launch own a temporary fake-engine server until interrupted.`;
 
 const commonOptions = {
   url: { type: "string" },
 } satisfies ParseArgsOptionsConfig;
 
-/** Strict flag parsing for one command; `ui` verbs parse their tail the same way. */
 export function parse(
   command: string,
   args: string[],
@@ -110,50 +104,6 @@ export function parse(
   }
 }
 
-function required(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new ControlOmbError(`${name} is required`);
-  return value.trim();
-}
-
-function positiveInteger(value: unknown, name: string, fallback: number, maximum: number): number {
-  if (value === undefined) return fallback;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > maximum) {
-    throw new ControlOmbError(`${name} must be an integer from 1 to ${maximum}`);
-  }
-  return parsed;
-}
-
-function configuredUrl(raw: unknown, env: NodeJS.ProcessEnv, requiredForMutation: boolean): string | undefined {
-  const explicit = typeof raw === "string" && raw.trim()
-    ? raw.trim()
-    : env.OPENMAUSBOT_URL?.trim() || (env.OMB_PORT ? `http://127.0.0.1:${env.OMB_PORT}` : "");
-  if (!explicit) {
-    if (requiredForMutation) {
-      throw new ControlOmbError(
-        "mutating commands require an explicit OpenMausBot instance",
-        "start `control-omb launch`, then pass its URL with --url",
-      );
-    }
-    return undefined;
-  }
-  return validateBaseUrl(explicit);
-}
-
-function target(values: Record<string, unknown>): { type: "bot" | "channel"; id: string } {
-  const bot = typeof values.bot === "string" ? values.bot.trim() : "";
-  const channel = typeof values.channel === "string" ? values.channel.trim() : "";
-  if (Boolean(bot) === Boolean(channel)) {
-    throw new ControlOmbError("provide exactly one of --bot ID or --channel ID");
-  }
-  return bot ? { type: "bot", id: bot } : { type: "channel", id: channel };
-}
-
-function dryRun(command: string, values: Record<string, unknown>, tool: string, args: Record<string, unknown>) {
-  return values["dry-run"] === true ? { ok: true, dryRun: true, command, tool, arguments: args } : null;
-}
-
-/** Map friendly CLI commands onto the already-tested MCP tool boundary. */
 export async function runControlOmb(
   argv: string[],
   dependencies: ControlOmbDependencies = {},
@@ -161,165 +111,14 @@ export async function runControlOmb(
   const [command = "help", ...args] = argv;
   if (command === "help" || command === "--help" || command === "-h") return HELP;
   if (command === "launch") throw new ControlOmbError("launch is available only from the executable CLI");
-  // The first positional after `ui` is the verb; its tail is parsed strictly per verb.
   if (command === "ui") return runControlOmbUi(args);
-
-  const env = dependencies.env ?? process.env;
-  const callTool = dependencies.callTool ?? handleToolCall;
-  const requester = dependencies.request ?? request;
-  const mutation = MUTATING.has(command);
-  const call = async (tool: string, input: Record<string, unknown>, rawUrl: unknown) => {
-    const url = configuredUrl(rawUrl, env, mutation);
-    const fetcher = url
-      ? (path: string, options: RequestInit = {}) => requester(path, options, url)
-      : requester;
-    return callTool(tool, input, fetcher);
-  };
-
-  if (command === "doctor") {
-    const values = parse(command, args);
-    const endpoint = configuredUrl(values.url, env, false);
-    const [rawHealth, models] = await Promise.all([
-      call("get_system_health", {}, values.url),
-      call("list_available_models", {}, values.url),
-    ]);
-    const health = rawHealth as { status: string; endpoint?: string; app: string; packaged: boolean };
-    const instances = (models as { instances?: Array<{ instanceId?: string; snapshot?: { state?: string } }> }).instances ?? [];
-    return {
-      ok: health.app === "openmausbot"
-        && instances.some((instance) => instance.snapshot?.state === "available"),
-      health: endpoint ? { ...health, endpoint } : health,
-      availableEngines: instances
-        .filter((instance) => instance.snapshot?.state === "available")
-        .map((instance) => instance.instanceId),
-      instances,
-    };
-  }
-
-  if (command === "bots" || command === "channels" || command === "models") {
-    const values = parse(command, args);
-    const tool = command === "bots" ? "list_bots" : command === "channels" ? "list_channels" : "list_available_models";
-    return call(tool, {}, values.url);
-  }
-
-  if (command === "new-bot") {
-    const values = parse(command, args, {
-      name: { type: "string" },
-      title: { type: "string" },
-      section: { type: "string" },
-    });
-    return call("create_bot", {
-      name: required(values.name, "--name"),
-      ...(values.title ? { title: values.title } : {}),
-      ...(values.section ? { section: values.section } : {}),
-    }, values.url);
-  }
-
-  if (command === "new-channel") {
-    const values = parse(command, args, {
-      name: { type: "string" },
-      members: { type: "string" },
-      section: { type: "string" },
-    });
-    const memberIds = required(values.members, "--members").split(",").map((id) => id.trim()).filter(Boolean);
-    if (!memberIds.length || new Set(memberIds).size !== memberIds.length) {
-      throw new ControlOmbError("--members must contain unique comma-separated bot IDs");
-    }
-    return call("create_channel", {
-      name: required(values.name, "--name"),
-      member_ids: memberIds,
-      ...(values.section ? { section: values.section } : {}),
-    }, values.url);
-  }
-
-  if (command === "send" || command === "send-channel") {
-    const values = parse(command, args, {
-      bot: { type: "string" },
-      channel: { type: "string" },
-      text: { type: "string" },
-      task: { type: "string" },
-      "dry-run": { type: "boolean", default: false },
-    });
-    const expected = command === "send" ? "bot" : "channel";
-    const destination = target(values);
-    if (destination.type !== expected) throw new ControlOmbError(`${command} requires --${expected} ID`);
-    const tool = expected === "bot" ? "send_bot_message" : "send_channel_message";
-    const input = {
-      [`${expected}_id`]: destination.id,
-      text: required(values.text, "--text"),
-      ...(values.task !== undefined ? { task_id: required(values.task, "--task") } : {}),
-    };
-    return dryRun(command, values, tool, input) ?? call(tool, input, values.url);
-  }
-
-  if (command === "edit") {
-    // The rewind a person performs in the composer: edit an earlier user
-    // message, fork the thread there, and answer again. It is the only
-    // mapped way to make the harness REBUILD a thread rather than resume
-    // the provider's session, which is what a replay path needs to be
-    // observable from the control surface at all.
-    const values = parse(command, args, {
-      bot: { type: "string" }, message: { type: "string" }, text: { type: "string" },
-      task: { type: "string" }, "dry-run": { type: "boolean", default: false },
-    });
-    const input = {
-      bot_id: required(values.bot, "--bot"),
-      message_id: required(values.message, "--message"),
-      text: required(values.text, "--text"),
-      ...(values.task !== undefined ? { task_id: required(values.task, "--task") } : {}),
-    };
-    return dryRun(command, values, "edit_bot_message", input) ?? call("edit_bot_message", input, values.url);
-  }
-
-  if (command === "set-model") {
-    const values = parse(command, args, {
-      bot: { type: "string" }, task: { type: "string" }, instance: { type: "string" },
-      model: { type: "string" }, effort: { type: "string" },
-      "dry-run": { type: "boolean", default: false },
-    });
-    const input = {
-      bot_id: required(values.bot, "--bot"),
-      instance_id: required(values.instance, "--instance"),
-      model: required(values.model, "--model"),
-      ...(values.task !== undefined ? { task_id: required(values.task, "--task") } : {}),
-      ...(values.effort !== undefined ? { effort: required(values.effort, "--effort") } : {}),
-    };
-    return dryRun(command, values, "set_bot_model", input) ?? call("set_bot_model", input, values.url);
-  }
-
-  if (command === "wait" || command === "messages" || command === "interrupt") {
-    const values = parse(command, args, {
-      bot: { type: "string" },
-      channel: { type: "string" },
-      task: { type: "string" },
-      timeout: { type: "string" },
-      limit: { type: "string" },
-      "dry-run": { type: "boolean", default: false },
-    });
-    const destination = target(values);
-    const pinned = values.task !== undefined ? { task_id: required(values.task, "--task") } : {};
-    if (command === "wait") {
-      return call("wait_for_conversation", {
-        target_type: destination.type,
-        target_id: destination.id,
-        ...pinned,
-        timeout_seconds: positiveInteger(values.timeout, "--timeout", 30, 120),
-      }, values.url);
-    }
-    if (command === "messages") {
-      const tool = destination.type === "bot" ? "get_bot_messages" : "get_channel_messages";
-      return call(tool, {
-        [`${destination.type}_id`]: destination.id,
-        ...pinned,
-        limit: positiveInteger(values.limit, "--limit", 30, 200),
-      }, values.url);
-    }
-    const tool = "interrupt_conversation";
-    const input = { target_type: destination.type, target_id: destination.id, ...pinned };
-    return dryRun(command, values, tool, input) ?? call(tool, input, values.url);
-  }
-
-  throw new ControlOmbError(`unknown command ${JSON.stringify(command)}`, "run control-omb help");
+  return runHeadlessCommand(argv, {
+    env: dependencies.env ?? process.env,
+    ...(dependencies.callTool ? { callTool: dependencies.callTool } : {}),
+    ...(dependencies.request ? { request: dependencies.request } : {}),
+    requireExplicitForMutations: true,
+    defaultWaitMs: 30_000,
+  });
 }
 
 export interface VerificationServer {
@@ -329,10 +128,8 @@ export interface VerificationServer {
   close(): Promise<void>;
 }
 
-/** The environment of a verification server child: a temporary home in
- * `dataDir`, the fake engine's knobs from `parentEnv`, node on PATH, and
- * nothing else from the parent shell. A test that restarts its own fixture
- * server on the same data uses this too. */
+/** A temporary home in `dataDir`, the fake engine's knobs from `parentEnv`, node
+ * on PATH, and nothing else from the parent shell or this machine's CLIs. */
 export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, dataDir: string, port: number): NodeJS.ProcessEnv {
   const childEnv: NodeJS.ProcessEnv = {};
   const platformKeys = new Set(["SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ"]);
@@ -356,32 +153,125 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
     OMB_DATA_DIR: dataDir,
     OMB_PORT: String(port),
     OMB_WEBHOOK_PORT: String(port + 1),
-    // The fixture's default CLI behaviour; a caller that sets
-    // FAKE_CLAUDE_MODE explicitly overrides it below to drive the CLI's
-    // failure paths (exit-early, dead-session, hang...) through the real
-    // server. Nothing else from the parent shell reaches the fixture.
+    // A caller's FAKE_CLAUDE_MODE overrides this below to drive failure paths.
     FAKE_CLAUDE_MODE: parentEnv.FAKE_CLAUDE_MODE || "happy",
     FAKE_CLAUDE_DUMP: join(dataDir, "fake-claude-dump.json"),
-    // Keep the environment hermetic while allowing POSIX to resolve the
-    // fake CLI's `#!/usr/bin/env node` shebang. Windows resolves that same
-    // fixture through spawnCli without a shell.
+    // POSIX resolves the fake CLI's `#!/usr/bin/env node` shebang through PATH;
+    // Windows resolves it through spawnCli without a shell.
     PATH: dirname(process.execPath),
+    // Without it the server also scans /opt/homebrew/bin, /usr/local/bin and the
+    // login shell's PATH, finding a developer's own engine CLIs that CI lacks.
+    OMB_TEST_SEALED_PATH: "1",
+    // The project's live announcement cards would sit over the corner the UI tests click in.
+    OMB_DISABLE_ANNOUNCEMENTS: "1",
   });
-  // The fake engine's own knobs (mode, replies, tool calls) are the one thing
-  // a caller may script into the child: FAKE_CLAUDE_* crosses, nothing else.
+  // The fake engines' knobs are the one thing a caller may script into the child.
   for (const [key, value] of Object.entries(parentEnv)) {
     // FAKE_CLAUDE_DUMP stays the launcher's: assertions read fixtureDumpPath.
-    if (key.startsWith("FAKE_CLAUDE_") && key !== "FAKE_CLAUDE_DUMP" && value) childEnv[key] = value;
+    if ((key.startsWith("FAKE_CLAUDE_") || key.startsWith("FAKE_CODEX_TEXT_") || key.startsWith("FAKE_CODEX_COMMAND") || key.startsWith("FAKE_STREAM_") || key === "FAKE_ACP_HANG_ON") && key !== "FAKE_CLAUDE_DUMP" && value) childEnv[key] = value;
   }
-  // A test's key for relaying an organization library into the fixture
-  // (POST /api/testing/org-library); the route does not exist without it.
+  // Enables POST /api/testing/org-library; the route does not exist without it.
   if (parentEnv.OMB_TEST_ORG_LIBRARY_KEY) childEnv.OMB_TEST_ORG_LIBRARY_KEY = parentEnv.OMB_TEST_ORG_LIBRARY_KEY;
-  // Voice-note e2e fault injection: arms the one-shot audio-append failure
-  // prelude inside the fixture server (see fail-audio-append-once.mjs).
+  // Enables POST /api/testing/internal-capability (a bot's own tool routes, such as publish_page); the route refuses without it.
+  if (parentEnv.OMB_TEST_INTERNAL_CAPABILITY_KEY) childEnv.OMB_TEST_INTERNAL_CAPABILITY_KEY = parentEnv.OMB_TEST_INTERNAL_CAPABILITY_KEY;
+  // One log line per browser call and preview frame.
+  if (parentEnv.OMB_BROWSER_TIMING === "1") childEnv.OMB_BROWSER_TIMING = "1";
+  // A share on the tailnet (server/tailnet-listener.ts): a test names one of this machine's own addresses as its stand-in.
+  for (const key of ["OMB_TAILNET_NAME", "OMB_TAILNET_ADDRESSES", "OMB_TEST_TAILNET_STAND_IN"]) if (parentEnv[key]) childEnv[key] = parentEnv[key];
+  // Warm summaries' minutes as seconds (server/warm-summary.ts), and the switch that turns them off.
+  for (const key of ["OMB_WARM_SUMMARY_TIME_SCALE", "OMB_WARM_SUMMARY"]) if (parentEnv[key]) childEnv[key] = parentEnv[key];
+  // A loopback fake only: the key never reaches a real provider.
+  const liveUrl = parentEnv.OMB_OPENAI_LIVE_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(liveUrl)) {
+    childEnv.OMB_OPENAI_LIVE_URL = liveUrl;
+    if (parentEnv.OMB_OPENAI_LIVE_KEY) childEnv.OMB_OPENAI_LIVE_KEY = parentEnv.OMB_OPENAI_LIVE_KEY;
+  }
+  // A loopback stand-in for Postiz Cloud only (server/testing/fake-postiz.ts): no test signs in to the real one.
+  const postizUrl = parentEnv.OMB_POSTIZ_CLOUD_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(postizUrl)) childEnv.OMB_POSTIZ_CLOUD_URL = postizUrl;
+  // A loopback stand-in for Netlify only (server/testing/fake-netlify.ts): the Published apps page then lists and
+  // deletes sites there, never on Netlify.
+  const netlifyUrl = parentEnv.OMB_NETLIFY_API_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}\/api\/v1$/.test(netlifyUrl)) childEnv.OMB_NETLIFY_API_URL = netlifyUrl;
+  // A loopback connected-apps service only (server/testing/broker-fake.ts): its token never reaches the real one.
+  const brokerUrl = parentEnv.OMB_COMPOSIO_BROKER_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(brokerUrl) && parentEnv.OMB_COMPOSIO_BROKER_TOKEN) {
+    childEnv.OMB_COMPOSIO_BROKER_URL = brokerUrl;
+    childEnv.OMB_COMPOSIO_BROKER_TOKEN = parentEnv.OMB_COMPOSIO_BROKER_TOKEN;
+  }
+  // Research against loopback stubs only (server/x-research.e2e.test.ts): the relay token crosses only with its stub,
+  // and a treg stand-in replaces treg.to, so no test reaches a real relay or treg.
+  const xUrl = parentEnv.OMB_CLOUD_X_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}(?:\/[A-Za-z0-9_-]+)*$/.test(xUrl)) {
+    childEnv.OMB_CLOUD_X_URL = xUrl;
+    if (parentEnv.OMB_CLOUD_X_TOKEN) childEnv.OMB_CLOUD_X_TOKEN = parentEnv.OMB_CLOUD_X_TOKEN;
+  }
+  // Included app hosting against a loopback stand-in only (server/testing/fake-app-hosting.ts): its token crosses only with it.
+  const hostingUrl = parentEnv.OMB_CLOUD_HOSTING_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}(?:\/[A-Za-z0-9_-]+)*$/.test(hostingUrl) && parentEnv.OMB_CLOUD_HOSTING_TOKEN) {
+    childEnv.OMB_CLOUD_HOSTING_URL = hostingUrl;
+    childEnv.OMB_CLOUD_HOSTING_TOKEN = parentEnv.OMB_CLOUD_HOSTING_TOKEN;
+  }
+  // @devs reports reach a loopback fake only, else a closed port: never the MausBot team.
+  const bugReportUrl = parentEnv.OMB_BUG_REPORT_URL?.trim() ?? "";
+  childEnv.OMB_BUG_REPORT_URL = /^http:\/\/127\.0\.0\.1:\d{1,5}\/[A-Za-z0-9/_-]*$/.test(bugReportUrl) ? bugReportUrl : "http://127.0.0.1:9/api/bug-reports";
+  const tregUrl = parentEnv.OMB_TREG_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(tregUrl)) childEnv.OMB_TREG_URL = tregUrl;
+  // Loopback only, for harness mechanics: a fake ElevenLabs the measurement
+  // substrate can drive without a key. Never a real address.
+  const elevenApi = parentEnv.OMB_ELEVENLABS_API?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(elevenApi)) childEnv.OMB_ELEVENLABS_API = elevenApi;
+  // Live calls need Pro; without it the fixture refuses a call with 402 needsPro.
+  if (parentEnv.OMB_PRO_PLAN?.trim() === "1") childEnv.OMB_PRO_PLAN = "1";
+  // Arms the one-shot audio-append failure inside the fixture server.
   if (parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE) {
     childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE = parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE;
   }
+  // The Claude broker's approval deadline fires on a marker file, not after 15 minutes.
+  if (parentEnv.OMB_TEST_APPROVAL_CLOCK === "1") childEnv.OMB_TEST_APPROVAL_CLOCK = "1";
+  // The stall watchdog fires on a marker file, not after 20 minutes of silence.
+  if (parentEnv.OMB_TEST_STALL_CLOCK === "1") childEnv.OMB_TEST_STALL_CLOCK = "1";
+  // Date.now() jumps when a marker file says so, as it does when a suspended machine wakes; timers don't.
+  if (parentEnv.OMB_TEST_RESUME_CLOCK === "1") childEnv.OMB_TEST_RESUME_CLOCK = "1";
+  // The memory gate runs here too, on the memory a fixture file says this machine has.
+  if (parentEnv.OMB_TEST_MEMORY_GATE === "1") childEnv.OMB_TEST_MEMORY_GATE = "1";
+  // The first-reply rescue's delay in ms, so a check need not sit through 20 s of silence.
+  if (/^\d{1,6}$/.test(parentEnv.OMB_FIRST_REPLY_NOTICE_MS ?? "")) childEnv.OMB_FIRST_REPLY_NOTICE_MS = parentEnv.OMB_FIRST_REPLY_NOTICE_MS;
+  // How long a tool call may hold the person's message unread, in ms, so a check need not sit through a minute.
+  if (/^\d{1,6}$/.test(parentEnv.OMB_PERSON_FIRST_MS ?? "")) childEnv.OMB_PERSON_FIRST_MS = parentEnv.OMB_PERSON_FIRST_MS;
+  // How often @devs reports are asked about, in ms, so a check sees a fix arrive without an hour's wait.
+  if (/^\d{1,7}$/.test(parentEnv.OMB_DEVS_STATUS_MS ?? "")) childEnv.OMB_DEVS_STATUS_MS = parentEnv.OMB_DEVS_STATUS_MS;
+  // The quiet-status knobs in ms, so a long tool call shows its sign of life without a minute's wait.
+  for (const knob of ["OMB_ACP_QUIET_NOTICE_MS", "OMB_ACP_QUIET_TICK_MS"] as const) {
+    if (/^\d{1,7}$/.test(parentEnv[knob] ?? "")) childEnv[knob] = parentEnv[knob];
+  }
+  // The UI checks drive this fixture from a real browser, as `pnpm dev` does; OMB_DEV_TRUST_LOCAL_BROWSER=0 tests the sign-in.
+  if (parentEnv.OMB_DEV_TRUST_LOCAL_BROWSER !== "0") childEnv.OMB_DEV_TRUST_LOCAL_BROWSER = "1";
+  // Desktop mode: the owner capability the app would hand the server.
+  if (parentEnv.OMB_TEST_DESKTOP_OWNER_TOKEN) {
+    childEnv.OMB_TEST_DESKTOP_OWNER_TOKEN = parentEnv.OMB_TEST_DESKTOP_OWNER_TOKEN;
+    childEnv.OMB_DESKTOP_PARENT = "1";
+    if (parentEnv.OMB_TEST_DESKTOP_PAGES_ACCESS) childEnv.OMB_TEST_DESKTOP_PAGES_ACCESS = parentEnv.OMB_TEST_DESKTOP_PAGES_ACCESS;
+    if (parentEnv.OMB_TEST_DESKTOP_TAILNET_SHARE) childEnv.OMB_TEST_DESKTOP_TAILNET_SHARE = parentEnv.OMB_TEST_DESKTOP_TAILNET_SHARE;
+  }
+  // The driver record the app hands its own server: without it, no server may use this computer.
+  if (parentEnv.OMB_TEST_DESKTOP_CUA_CONNECTION) childEnv.OMB_TEST_DESKTOP_CUA_CONNECTION = parentEnv.OMB_TEST_DESKTOP_CUA_CONNECTION;
   return childEnv;
+}
+
+/** The fixture hooks its environment asks for, then the server. */
+export function verificationServerArgs(childEnv: NodeJS.ProcessEnv): string[] {
+  const hook = (file: string) => ["--import", pathToFileURL(join(ROOT, "server", "testing", file)).href];
+  return [
+    "--experimental-strip-types",
+    ...(childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE === "1" ? hook("fail-audio-append-once.mjs") : []),
+    ...(childEnv.OMB_TEST_DESKTOP_OWNER_TOKEN || childEnv.OMB_TEST_DESKTOP_CUA_CONNECTION ? hook("desktop-parent.mjs") : []),
+    ...(childEnv.OMB_TEST_APPROVAL_CLOCK === "1" ? hook("approval-clock-hooks.mjs") : []),
+    ...(childEnv.OMB_TEST_STALL_CLOCK === "1" ? hook("stall-clock-hooks.mjs") : []),
+    ...(childEnv.OMB_TEST_RESUME_CLOCK === "1" ? hook("resume-clock-hooks.mjs") : []),
+    ...(childEnv.OMB_TEST_MEMORY_GATE === "1" ? hook("memory-gate-hooks.mjs") : []),
+    join(ROOT, "server", "index.ts"),
+  ];
 }
 
 /** Start one foreground-owned, fake-engine server with no access to user data. */
@@ -395,9 +285,11 @@ export async function launchVerificationServer(
   enterprise?: { dir: string; licenseKey: string },
   room?: { scripted: boolean },
   /** Optional repository-owned fake providers for multi-engine setup checks. */
-  extraProviders: Array<"codex"> = [],
+  extraProviders: Array<"codex" | "cline" | "copilot" | "customAcp" | "opencode"> = [],
   /** Programmatic tests only: an owned loopback Boat provider, never a live account. */
   boatFixtureApi?: string,
+  /** Programmatic web UI qualification against the fixture's static server. */
+  staticDir?: string,
 ): Promise<VerificationServer> {
   if (boatFixtureApi) {
     if (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(boatFixtureApi)) {
@@ -412,11 +304,13 @@ export async function launchVerificationServer(
       throw new ControlOmbError("Local VM verification requires an explicit loopback Podman machine");
     }
   }
-  const port = await freePortBlock([0, 1]);
+  // OMB_TEST_PORTS=19975-19999 keeps a recipe's fixture in a range of its own.
+  const range = /^(\d+)-(\d+)$/.exec((parentEnv.OMB_TEST_PORTS ?? process.env.OMB_TEST_PORTS)?.trim() ?? "");
+  const port = range ? await freePortBlock([0, 1], Number(range[1]), Number(range[2]) - Number(range[1])) : await freePortBlock([0, 1]);
   if (signal?.aborted) throw new ControlOmbError("verification launch cancelled");
   const url = `http://127.0.0.1:${port}`;
-  // Native browser daemons use UNIX sockets; a macOS temp home can exceed
-  // their path limit. This is still an owned, randomly named fixture only.
+  // Native browser daemons use UNIX sockets, and a macOS temp home can exceed
+  // their path limit.
   const dataDir = mkdtempSync(join(browser && process.platform !== "win32" ? "/tmp" : tmpdir(), "openmausbot-verify-data-"));
   const fixtureTemp = join(dataDir, "tmp");
   const fixtureDumpPath = join(dataDir, "fake-claude-dump.json");
@@ -424,14 +318,39 @@ export async function launchVerificationServer(
   const evidenceDir = join(tmpdir(), "openmausbot-verification-evidence");
   mkdirSync(evidenceDir, { recursive: true });
   const logPath = join(evidenceDir, `server-${Date.now()}-${process.pid}.log`);
+  const imageApi = parentEnv.OMB_FAKE_IMAGE_API_URL?.trim() ?? "";
+  const imageGen = /^http:\/\/127\.0\.0\.1:\d{1,5}\/v1$/.test(imageApi)
+    ? { primary: { provider: "openai" }, fallback: { provider: "custom", model: "fixture-image" }, customUrl: imageApi }
+    : undefined;
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     ...(boatFixtureApi ? { box: { token: "box_verification_fixture" } } : {}),
+    ...(imageGen ? { imageGen } : {}),
+    // A setup card's answers would be one more engine call at every new bot, taking replies a test scripts for its turns.
+    features: { smartSetupChoices: false },
     instances: {
-      // The synthetic map omits the default computer engine. Register it
-      // only when an owned Boat provider backs this fixture's cloud panel.
-      ...(boatFixtureApi ? { computer: { driver: "boxAgent" } } : {}),
       ...(extraProviders.includes("codex") ? { codex: {
         driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
+      } } : {}),
+      ...(extraProviders.includes("cline") ? { cline: {
+        driver: "clineAgent", displayName: "Verification Cline",
+        config: { cli: fileURLToPath(new URL("../server/testing/fake-acp-cli.ts", import.meta.url)) },
+        environment: { CLINE_PROVIDER: "openai-compatible", CLINE_MODEL: "fixture-model", CLINE_API_KEY: "fixture-only",
+          FAKE_ACP_DUMP: join(dataDir, "cline-launch.json") },
+      } } : {}),
+      ...(extraProviders.includes("copilot") ? { githubCopilot: {
+        driver: "copilotAgent", displayName: "Verification Copilot",
+        config: { cli: fileURLToPath(new URL("../server/testing/fake-acp-cli.ts", import.meta.url)) },
+        environment: { FAKE_ACP_MODELS: "auto,claude-haiku-4.5,gpt-5.6-luna", FAKE_ACP_REJECT_STDIO_MCP: "1",
+          FAKE_ACP_DUMP: join(dataDir, "copilot-launch.json") },
+      } } : {}),
+      // A real OpenCode the recipe downloaded and verified itself; it runs in this fixture's temporary home.
+      ...(extraProviders.includes("opencode") && parentEnv.OMB_VERIFY_OPENCODE_CLI ? { opencode: {
+        driver: "opencodeGo", displayName: "Verification OpenCode", config: { cli: parentEnv.OMB_VERIFY_OPENCODE_CLI },
+      } } : {}),
+      ...(extraProviders.includes("customAcp") ? { myAgent: {
+        driver: "customAcp", displayName: "Verification custom ACP",
+        config: { cli: fileURLToPath(new URL("../server/testing/fake-acp-cli.ts", import.meta.url)) },
+        environment: { FAKE_ACP_MODELS: "fixture-fast,fixture-deep", FAKE_ACP_DUMP: join(dataDir, "custom-acp-launch.json") },
       } } : {}),
       claude: {
         driver: "claudeAgent",
@@ -457,25 +376,29 @@ export async function launchVerificationServer(
     OMB_AGENT_BROWSER_PATH: browser.binaryPath,
     AGENT_BROWSER_EXECUTABLE_PATH: browser.executablePath,
   });
-  if (boatFixtureApi) childEnv.OMB_BOX_API = boatFixtureApi;
-  const serverArgs = ["--experimental-strip-types"];
-  if (childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE === "1") {
-    serverArgs.push("--import", pathToFileURL(join(ROOT, "server", "testing", "fail-audio-append-once.mjs")).href);
-  }
-  serverArgs.push(join(ROOT, "server", "index.ts"));
-  const child = spawn(process.execPath, serverArgs, {
+  if (boatFixtureApi) childEnv.OMB_BOAT_API = boatFixtureApi;
+  if (staticDir) childEnv.OMB_STATIC_DIR = staticDir;
+  const child = spawn(process.execPath, verificationServerArgs(childEnv), {
     cwd: ROOT,
     env: childEnv,
     stdio: ["ignore", log, log],
   });
   closeSync(log);
 
-  const deadline = Date.now() + 20_000;
+  // A CI runner's temporary folder goes with the runner, so a failed start carries the end of the server's log.
+  const logTail = () => {
+    try {
+      return `\n${readFileSync(logPath, "utf8").slice(-2_000)}`;
+    } catch {
+      return "";
+    }
+  };
+  const deadline = Date.now() + hostTimeout(20_000);
   try {
     for (;;) {
       if (signal?.aborted) throw new ControlOmbError("verification launch cancelled");
       if (child.exitCode !== null || child.signalCode !== null) {
-        throw new Error(`verification server exited before it was ready; see ${logPath}`);
+        throw new Error(`verification server exited before it was ready; see ${logPath}${logTail()}`);
       }
       try {
         const timeout = AbortSignal.timeout(1_000);
@@ -485,9 +408,8 @@ export async function launchVerificationServer(
         const body = response.ok ? await response.json() as { app?: string } : null;
         if (body?.app === "openmausbot") break;
       } catch {
-        // The server is still starting.
       }
-      if (Date.now() >= deadline) throw new Error(`verification server did not become ready; see ${logPath}`);
+      if (Date.now() >= deadline) throw new Error(`verification server did not become ready; see ${logPath}${logTail()}`);
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
   } catch (error) {
@@ -496,15 +418,9 @@ export async function launchVerificationServer(
     throw error;
   }
 
-  // The first-run seed gives the starter a random friendly name from
-  // server/names.ts, and that pool shares names with bots e2e suites plan
-  // ("Quill" among them). A name-based assertion then reports the starter as
-  // a phantom leaked bot and flakes (#1257). Pin the name so fixture state is
-  // deterministic for every suite built on this launcher; identity remains
-  // the honest comparison in tests either way.
+  // Pinned: the random starter name shares a pool with names e2e suites plan.
   try {
-    // Seeding is part of launch, not a one-second health probe. First-run
-    // filesystem work can exceed a second on Windows; keep the launch deadline.
+    // First-run filesystem work can exceed a second on Windows.
     const timeout = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
     const list = await fetch(`${url}/api/bots`, {
       headers: { origin: url },
@@ -546,7 +462,7 @@ export async function launchVerificationServer(
 export function controlResultSucceeded(command: string, result: unknown): boolean {
   if (command === "doctor") return (result as { ok?: unknown })?.ok === true;
   if (command === "wait") return (result as { status?: unknown })?.status === "settled";
-  if (command === "ui") return (result as { ok?: unknown })?.ok !== false;
+  if (command === "ui" || command === "run" || command === "team") return (result as { ok?: unknown })?.ok !== false;
   return true;
 }
 
@@ -611,7 +527,7 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
-    const failure = error instanceof ControlOmbError
+    const failure = error instanceof HeadlessError
       ? { ok: false, error: error.message, ...(error.hint ? { hint: error.hint } : {}) }
       : { ok: false, error: error instanceof Error ? error.message : String(error) };
     process.stderr.write(`${JSON.stringify(failure, null, 2)}\n`);

@@ -1,22 +1,15 @@
-// First-run state and the welcome flow's beat machine, kept pure so the
-// decisions (show the tour? which beat is next? what to persist?) are unit
-// tested without React. The record itself lives in the workspace config on
-// the server, never in browser storage: clearing site data or opening a
-// second profile must not replay the tour, and a phone paired later should
-// see the same hints as already dismissed.
+import { ONBOARDING_CLOUD_HINT, WELCOME_VERSION } from "../../electron/onboarding-record.mjs";
+import { freeFallback, rankAis, type AiTestState, type RankableAi } from "../../shared/ai-ranking";
 
 export interface OnboardingStatus {
-  /** ISO timestamp; "" until the welcome flow has been finished or skipped. */
   completedAt: string;
-  /** Which welcome flow was completed; a newer flow may re-show itself. */
   version: number;
   reelSeen: boolean;
   hintsSeen: string[];
+  firstTurnAt?: string;
 }
 
-/** Bump when the welcome flow changes enough that existing users should see
- * it again. Completions at an older version count as not done. */
-export const WELCOME_VERSION = 1;
+export { ONBOARDING_CLOUD_HINT, WELCOME_VERSION };
 
 export const EMPTY_ONBOARDING: OnboardingStatus = {
   completedAt: "",
@@ -25,57 +18,40 @@ export const EMPTY_ONBOARDING: OnboardingStatus = {
   hintsSeen: [],
 };
 
-/** Who is opening the app, as far as first run cares. */
 export interface WelcomeViewer {
-  /** A hosted team workspace: its organisation's Admin assigns the models. */
   hosted: boolean;
-  /** This session may write the workspace config. Finishing the welcome
-   * flow is such a write, and `PUT /api/config` is admin-only. */
   canSave: boolean;
-  /** An OMB Cloud home (docs/cloud-pro.md): its first run is the engine
-   * sign-in, not the welcome flow, which describes the person's computer. */
   cloudHome?: boolean;
+  /** On a Team Cloud: the person's role there (owner, admin, member). */
+  teamRole?: string;
 }
 
-/** The desktop app's own window talking to its own server: never hosted,
- * always the owner. Known without asking, so its first run never waits. */
 export const LOCAL_VIEWER: WelcomeViewer = { hosted: false, canSave: true };
 
-/** A hosted workspace's member. The workspace config is its admins', so no
- * first-run surface that writes it (the flow, the spotlights) is offered;
- * the member gets a note instead. Anywhere else a session without admin
- * scope is often the owner's own paired browser, and nothing is added. */
 export function hostedMember(viewer: WelcomeViewer | null): boolean {
   return Boolean(viewer?.hosted && !viewer.canSave);
 }
 
-/** First-conversation spotlights wait for the viewer to be known, and never
- * show to a hosted member, who could not dismiss them for good. */
 export function spotlightsQuiet(viewer: WelcomeViewer | null): boolean {
   return viewer === null || hostedMember(viewer);
 }
 
-/** Read `GET /api/auth/session` defensively. A server that sends no scopes
- * reads as today (the owner); one that predates `hosted` reads as not
- * hosted, which is also what it always was to the welcome flow. */
 export function welcomeViewer(session: unknown): WelcomeViewer {
-  const record = session && typeof session === "object" ? (session as { hosted?: unknown; scopes?: unknown; cloudHome?: unknown }) : {};
+  const record = session && typeof session === "object" ? (session as { hosted?: unknown; scopes?: unknown; cloudHome?: unknown; team?: { role?: unknown } | null }) : {};
+  const teamRole = record.team?.role;
   return {
     hosted: record.hosted === true,
     canSave: Array.isArray(record.scopes) ? record.scopes.includes("admin") : true,
     ...(record.cloudHome === true ? { cloudHome: true } : {}),
+    ...(typeof teamRole === "string" ? { teamRole } : {}),
   };
 }
 
-/** Whether the welcome flow should open on launch. Null config means the
- * server has not answered yet; showing the tour on a guess would flash it at
- * every returning user, so the answer is no until the record arrives.
- *
- * A session that cannot save the workspace config never gets it: it would
- * fail to save and come back on every visit. On a hosted workspace the tour
- * waits until the session is known to be an admin's. A Cloud home opens on
- * its engine sign-in instead (cloudSignInDue); the flow can still be replayed
- * from Settings. Callers that pass none of these fields keep the old answer. */
+/** Whose setup a Cloud's welcome and setup list are: whoever can change the Cloud, and on a team its Owner alone. */
+export function setsUpCloud(viewer: WelcomeViewer | null): boolean {
+  return Boolean(viewer?.cloudHome && viewer.canSave && (viewer.teamRole === undefined || viewer.teamRole === "owner"));
+}
+
 export function welcomeDue(
   config: { onboarding?: OnboardingStatus } | null | undefined,
   options: { remoteClient: boolean; legacyDone: boolean; hosted?: boolean; canSave?: boolean; cloudHome?: boolean },
@@ -86,24 +62,31 @@ export function welcomeDue(
   if (!config) return false;
   const record = config.onboarding ?? EMPTY_ONBOARDING;
   if (record.completedAt && record.version >= WELCOME_VERSION) return false;
-  // One release of grace for installs that finished the old localStorage
-  // gate: they are not new, so they are not shown the new flow either.
   if (!record.completedAt && options.legacyDone) return false;
   return true;
 }
 
-/** The config patch that marks the welcome flow done. Sent through the same
- * `PUT /api/config` path as the profile; sections merge server-side, so
- * hints already seen survive a replay. */
 export function completionPatch(now: Date = new Date()): { onboarding: { completedAt: string; version: number } } {
   return { onboarding: { completedAt: now.toISOString(), version: WELCOME_VERSION } };
+}
+
+/** Kept by an install whose first run ended by meeting its Chief of Staff: its first conversation stays quiet (no
+ * corner notices until a reply, no spotlights). */
+export const MET_CHIEF_HINT = "met-chief-v1";
+
+/** The first run's record: done, and marked as the one that met the Chief (MET_CHIEF_HINT). */
+export function firstRunPatch(
+  record: OnboardingStatus | undefined,
+  now: Date = new Date(),
+): { onboarding: { completedAt: string; version: number; hintsSeen?: string[] } } {
+  const have = record?.hintsSeen ?? [];
+  return { onboarding: { ...completionPatch(now).onboarding, ...(have.includes(MET_CHIEF_HINT) ? {} : { hintsSeen: [...have, MET_CHIEF_HINT] }) } };
 }
 
 export function hintSeen(record: OnboardingStatus | undefined, id: string): boolean {
   return (record?.hintsSeen ?? []).includes(id);
 }
 
-/** Null when nothing needs saving, so callers never issue a no-op write. */
 export function hintSeenPatch(
   record: OnboardingStatus | undefined,
   id: string,
@@ -112,75 +95,60 @@ export function hintSeenPatch(
   return { onboarding: { hintsSeen: [...(record?.hintsSeen ?? []), id] } };
 }
 
-// ── beats ──────────────────────────────────────────────────────────────
 
-export type BeatId = "hello" | "reel" | "engines" | "permissions" | "phone" | "bot";
+export type BeatId = "meet" | "chief";
 
-export interface BeatOptions {
-  /** The desktop app can ask for the microphone; a browser cannot. */
-  dictation: boolean;
-  /** The feature reel ships in a later phase; it is a beat the machine
-   * already knows so that turning it on is one flag. */
-  reel: boolean;
-  /** A hosted team workspace: nothing is installed or granted on this
-   * computer, and there is no phone to pair to it. */
-  hosted?: boolean;
+/** Every screen the first run can show, in the order it shows them. */
+export const BEAT_ORDER: readonly BeatId[] = ["meet", "chief"];
+
+/** Two screens, then the chat: meeting the app (and connecting an AI when none works), then the Chief of Staff. A hosted
+ * place's admin only meets the app: their team's bots and Chief are already set up. */
+export function beatsFor(options: { hosted?: boolean }): BeatId[] {
+  return options.hosted ? ["meet"] : ["meet", "chief"];
 }
 
-/** Beats in order for this session. The exit beat is always last so the
- * seeded bot is named even when everything else was skipped. A hosted
- * workspace gets a greeting and the bot: its organisation assigns the models,
- * and the reel, engines, microphone and phone beats all describe this
- * computer, which a hosted workspace is not. */
-export function beatsFor(options: BeatOptions): BeatId[] {
-  if (options.hosted) return ["hello", "bot"];
-  const beats: BeatId[] = ["hello"];
-  if (options.reel) beats.push("reel");
-  beats.push("engines");
-  if (options.dictation) beats.push("permissions");
-  beats.push("phone", "bot");
-  return beats;
+/** Where a reloaded first run opens: the saved screen while it is offered, else the first. */
+export function resumeBeat(beats: readonly BeatId[], saved: BeatId | undefined): BeatId {
+  return saved && beats.includes(saved) ? saved : beats[0] ?? "meet";
 }
 
-export function nextBeat(beats: readonly BeatId[], current: BeatId): BeatId | null {
-  const index = beats.indexOf(current);
-  if (index < 0 || index + 1 >= beats.length) return null;
-  return beats[index + 1]!;
+export function onboardingCloudOffered(record: OnboardingStatus | undefined): boolean {
+  return hintSeen(record, ONBOARDING_CLOUD_HINT);
 }
 
-export function previousBeat(beats: readonly BeatId[], current: BeatId): BeatId | null {
-  const index = beats.indexOf(current);
-  if (index <= 0) return null;
-  return beats[index - 1]!;
+let welcomeShown = 0;
+/** The welcome flow is on screen (WelcomeFlow, until it closes): a Cloud sheet over it never switches the window away. */
+export function showWelcome(): () => void {
+  welcomeShown++;
+  let gone = false;
+  return () => { if (!gone) { gone = true; welcomeShown--; } };
+}
+export function welcomeOnScreen(): boolean {
+  return welcomeShown > 0;
 }
 
-/** The card is one element for the whole flow; its width is the one thing
- * that morphs between beats. Engines lays tiles out two across and needs
- * the room; the rest read best narrow. */
-export function beatWidth(beat: BeatId): number {
-  switch (beat) {
-    case "engines":
-      return 680;
-    case "phone":
-      return 620;
-    case "reel":
-      return 720;
-    case "bot":
-      return 520;
-    default:
-      return 460;
+const WELCOME_FINISHED_KEY = "omb.onboarding.welcomeFinished";
+/** The first-run welcome ended in this app session (never a replay): the full-screen Cloud Pro popup waits for a later
+ * launch rather than following it. Kept for the window's session, so a reload counts as the same launch. */
+// Where browser storage is blocked, this page's memory stands in for it.
+let welcomeFinishedRemembered = false;
+export function markWelcomeFinished(): void {
+  try {
+    sessionStorage.setItem(WELCOME_FINISHED_KEY, "1");
+  } catch {
+    welcomeFinishedRemembered = true;
+  }
+}
+export function welcomeFinishedThisLaunch(): boolean {
+  try {
+    return sessionStorage.getItem(WELCOME_FINISHED_KEY) === "1";
+  } catch {
+    return welcomeFinishedRemembered;
   }
 }
 
-// ── engines and organisation sign-in ───────────────────────────────────
-
-/** The Admin portal the welcome flow signs in to. Another address is an
- * advanced choice made in Settings → Organisation, never here. */
 export const DEFAULT_ADMIN_ORIGIN = "https://admin.openmausbot.com";
 
-/** The organisation sign-in bridge, when this window may offer it. Only the
- * packaged local desktop has one; a desktop acting as a remote client of
- * another server, a browser and a hosted workspace never do. */
 export function organisationSignIn<Bridge>(
   ogb: { organization?: Bridge; remoteClient?: { active?: boolean } } | undefined,
   options: { hosted: boolean },
@@ -189,39 +157,60 @@ export function organisationSignIn<Bridge>(
   return ogb.organization;
 }
 
-/** How many models the organisation approved for this computer. */
 export function companyModelCount(state: { providers?: Array<{ configured: boolean; models: string[] }> } | null): number {
   return (state?.providers ?? []).reduce((total, provider) => total + (provider.configured ? provider.models.length : 0), 0);
 }
 
-interface SummaryInstance {
-  install?: unknown;
-  /** Set on Company instances: the organisation this desktop signed in to. */
-  managed?: unknown;
+interface AiChoice {
+  driverKind: string;
+  access?: string;
+  readOnly?: boolean;
+  snapshot?: { freeFallback?: boolean };
 }
 
-/** What the engines beat counts. Personal engines are the rows; Company
- * instances have nothing to install and are not rows, but one that is signed
- * in means bots can run, so an employee with only company models has nothing
- * left to set up. `company` is off wherever organisation sign-in is not
- * offered, which keeps those counts exactly as they were. */
-export function engineSummary<Instance extends SummaryInstance>(
+/** The one way the welcome recommends to connect an AI, in the new-bot default's own order (shared/ai-ranking.ts: a Claude
+ * account first, then a ChatGPT plan), and every other way. */
+export function aiChoices<Instance extends AiChoice>(instances: readonly Instance[]): { recommended?: Instance; others: Instance[] } {
+  const plan = (instance: Instance) => !instance.readOnly && instance.access !== "api" && instance.access !== "custom";
+  const recommended = rankAis(instances.filter(plan))[0] ?? instances.find((instance) => !instance.readOnly);
+  return { recommended, others: instances.filter((instance) => instance !== recommended) };
+}
+
+/** The AI the welcome's Connect an AI step stands on: the best ready AI (the same ranking) that isn't OpenCode's free
+ * backup, passing over one whose test message got no answer. An AI not tested yet is `testing`; none ready is null. */
+export function welcomeAi<Instance extends RankableAi>(
   instances: readonly Instance[],
   ready: (instance: Instance) => boolean,
-  options: { company: boolean },
-): { ready: Instance[]; setup: Instance[]; company: number; allReady: boolean } {
-  const engines = instances.filter((instance) => instance.install);
-  const personal = engines.filter(ready);
-  const setup = engines.filter((instance) => !ready(instance));
-  const company = options.company ? instances.filter((instance) => instance.managed && ready(instance)).length : 0;
-  return { ready: personal, setup, company, allReady: company > 0 || (personal.length > 0 && setup.length === 0) };
+  test: (instance: Instance) => AiTestState | undefined,
+): { instance: Instance; state: AiTestState } | null {
+  let silent: Instance | undefined;
+  for (const instance of rankAis(instances.filter((candidate) => ready(candidate) && !freeFallback(candidate)))) {
+    const state = test(instance) ?? "testing";
+    if (state !== "failed") return { instance, state };
+    silent ??= instance;
+  }
+  return silent ? { instance: silent, state: "failed" } : null;
 }
 
-/** Whether a Cloud home shows its engine sign-in in place of a chat: the
- * person connected from the desktop app (an admin session), and nothing there
- * can run a bot yet. The default bot then shows the sign-in card rather than
- * failing its first turn. Like the no-engines screen, this waits for the
- * first /api/instances answer rather than flashing on a guess. */
+/** It answered its test, or has no way to be tested and is trusted as before. */
+export function aiWorks(found: { state: AiTestState } | null): boolean {
+  return found?.state === "passed" || found?.state === "untestable";
+}
+
+interface SignInStep {
+  snapshot: { state: string; authenticated?: boolean };
+  authentication?: unknown;
+  install?: { server?: unknown; managed?: unknown };
+}
+
+/** Whether the welcome's plain sign-in line fits this setup: a sign-in on the provider's own website, or a setup the app
+ * does by itself before one. A step finished in Terminal keeps the setup's own instructions. */
+export function plainSignIn(instance: SignInStep): boolean {
+  return instance.snapshot.state === "available" && instance.snapshot.authenticated === false
+    ? Boolean(instance.authentication)
+    : Boolean(instance.install?.server || instance.install?.managed);
+}
+
 export function cloudSignInDue<Instance>(
   viewer: WelcomeViewer | null,
   state: { connected: boolean; instances: readonly Instance[] },
@@ -230,10 +219,7 @@ export function cloudSignInDue<Instance>(
   return Boolean(viewer?.cloudHome && viewer.canSave) && state.connected && state.instances.length > 0 && !state.instances.some(ready);
 }
 
-// ── motion ─────────────────────────────────────────────────────────────
 
-/** The OS preference, plus a dev hook the preview page uses to show the
- * reduced variant without changing system settings. */
 export function reducedMotion(): boolean {
   if (typeof document !== "undefined" && document.documentElement.dataset.reducedMotion === "true") return true;
   return globalThis.window?.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;

@@ -1,27 +1,42 @@
-// Skills: durable behavior the bot learned or imported, so the user needs a
-// normal way to inspect, disable, and remove it after the one-time approval
-// card is gone. Moved from SettingsPanel.tsx's LearnedSkillsCard (79-295),
-// its nested review dialog raised from z-[80] to z-[90] to float above this
-// dialog's own z-50, plus: an Import from GitHub row, a static "when it's
-// used" line on every row (learned skills have no triggers to show), and a
-// read-only click-through view of a skill's full text.
 import { BookOpen, Trash2 } from "lucide-react";
 import { t } from "@/lib/i18n";
+import { skillImportLines } from "@/lib/skill-import";
+import type { SkillImportSummary } from "../../../shared/skill-import";
 import { useEffect, useRef, useState } from "react";
 
 import { useStore, type Bot } from "@/state/store";
 import { useBotEditor } from "./BotEditorContext";
-import { skillAuthoringEnabled } from "@/lib/feature-flags";
+import { skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
 import { Switch } from "../SettingsPrimitives";
 import { inputCls } from "./field";
 import { OrgSkillsCard } from "./OrgSkillsCard";
+import { WriteCommandCard } from "./WriteCommandCard";
+import { Select } from "../Select";
 
-interface ManagedSkill {
+export interface ManagedSkill {
   name: string;
   description: string;
   enabled: boolean;
   source: string;
   warnings: string[];
+  /** "imported": one copy brought in from this computer for every bot, switched per bot and never removed from one.
+   * "native": loaded by the bot's engine from a skills folder of its own; changed only there.
+   * "project": shipped in the folder the bot works in; used while the owner trusts project skills, changed only there. */
+  origin?: "private" | "library" | "imported" | "native" | "project";
+  /** An imported skill that is on but not in this bot's list: the bot finds it when a task needs it. */
+  listed?: boolean;
+}
+
+/** A skill that lives in a folder of the person's, read only here. */
+const inFolder = (skill: ManagedSkill): boolean => skill.origin === "native" || skill.origin === "project";
+
+/** A skill's switch: on whenever the skill is on, including an imported one the bot finds only when a task needs it,
+ * so one click always turns it fully off. */
+export const skillSwitchOn = (skill: ManagedSkill): boolean => skill.enabled;
+
+interface LibraryPoolSkill {
+  name: string;
+  description: string;
 }
 
 interface StagedSkillSummary {
@@ -30,22 +45,261 @@ interface StagedSkillSummary {
   gist: string;
 }
 
-export function SkillsSection({ bot }: { bot: Bot }) {
+export function useManagedSkills(bot: Bot) {
   const { request: api } = useBotEditor();
-  const { state } = useStore();
-  const featureEnabled = skillAuthoringEnabled(state.config);
   const [skills, setSkills] = useState<ManagedSkill[]>([]);
+  const [assignedSkills, setAssignedSkills] = useState<string[]>([]);
+  const [libraryPool, setLibraryPool] = useState<LibraryPoolSkill[]>([]);
+  const [addFromLibrary, setAddFromLibrary] = useState("");
   const [staged, setStaged] = useState<StagedSkillSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState("");
   const [error, setError] = useState("");
   const [reviewing, setReviewing] = useState<{ skill: ManagedSkill; text: string } | null>(null);
+  const assignmentBusy = useRef(false);
+
+  const refresh = async (cancelled?: () => boolean) => {
+    try {
+      const result = (await api(`/api/bots/${bot.id}/skills`)) as {
+        skills?: ManagedSkill[];
+        staged?: StagedSkillSummary[];
+        library?: LibraryPoolSkill[];
+        assignedSkills?: string[];
+      };
+      if (cancelled?.()) return;
+      setSkills(result.skills ?? []);
+      setStaged(result.staged ?? []);
+      setLibraryPool(result.library ?? []);
+      setAssignedSkills(result.assignedSkills ?? []);
+      setAddFromLibrary("");
+      setError("");
+    } catch (cause) {
+      if (!cancelled?.()) setError(cause instanceof Error ? cause.message : t("skills.error.loadLearned"));
+    } finally {
+      if (!cancelled?.()) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setReviewing(null);
+    void refresh(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [bot.id]);
+
+  const putAssignments = async (name: string, remove = false) => {
+    const listing = (await api(`/api/bots/${bot.id}/skills`)) as { assignedSkills?: string[] };
+    const current = listing.assignedSkills ?? assignedSkills;
+    const next = remove ? current.filter((skill) => skill !== name) : [...new Set([...current, name])];
+    await api(`/api/bots/${bot.id}/skills-library`, {
+      method: "PUT",
+      body: JSON.stringify({ skills: next }),
+    });
+    await refresh();
+  };
+
+  const addToBot = async () => {
+    const name = addFromLibrary.trim();
+    if (!name || assignmentBusy.current) return;
+    assignmentBusy.current = true;
+    setWorking(name);
+    setError("");
+    try {
+      await putAssignments(name);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("skills.error.assign"));
+    } finally {
+      assignmentBusy.current = false;
+      setWorking("");
+    }
+  };
+
+  const toggle = async (skill: ManagedSkill) => {
+    setWorking(skill.name);
+    setError("");
+    try {
+      // Native skills live in the engine's own folders; the switch only affects this bot.
+      if (skill.origin === "native") {
+        await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ enabled: !skill.enabled }),
+        });
+        await refresh();
+        return;
+      }
+      if (skill.origin === "library" && skill.enabled) {
+        await api(`/api/skills-library/${encodeURIComponent(skill.name)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ enabled: !skill.enabled }),
+        });
+        await refresh();
+        return;
+      }
+      if (!skill.enabled) {
+        // Security: a disabled import has not necessarily been reviewed; its integrity-checked bytes need one explicit
+        // review before they reach the prompt.
+        const result = (await api(skill.origin === "library" ? `/api/skills-library/${encodeURIComponent(skill.name)}` : `/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`)) as { text?: string };
+        if (!result.text) throw new Error(t("skills.error.contentsRelearn"));
+        setReviewing({ skill, text: result.text });
+        return;
+      }
+      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: false }),
+      });
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("skills.error.update"));
+    } finally {
+      setWorking("");
+    }
+  };
+
+  const enableReviewed = async () => {
+    if (!reviewing) return;
+    const { skill } = reviewing;
+    setWorking(skill.name);
+    setError("");
+    try {
+      await api(skill.origin === "library" ? `/api/skills-library/${encodeURIComponent(skill.name)}` : `/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: true }),
+      });
+      setReviewing(null);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("skills.error.enable"));
+    } finally {
+      setWorking("");
+    }
+  };
+
+  return {
+    skills, staged, loading, working, setWorking, error, setError, reviewing, setReviewing, refresh, toggle, enableReviewed,
+    libraryPool, addFromLibrary, setAddFromLibrary, assignmentBusy, putAssignments, addToBot,
+  };
+}
+
+export function SkillReviewDialog({
+  skill,
+  text,
+  error,
+  working,
+  onCancel,
+  onEnable,
+}: {
+  skill: ManagedSkill;
+  text: string;
+  error: string;
+  working: boolean;
+  onCancel: () => void;
+  onEnable: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancel = useRef(onCancel);
+  cancel.current = onCancel;
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    const parentDialog = dialog?.parentElement?.closest<HTMLElement>('[role="dialog"]');
+    dialog?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (!working) cancel.current();
+      }
+      if (event.key !== "Tab" || !dialog) return;
+      const controls = dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]');
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (!first || !last) return;
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (previousFocus && previousFocus !== document.body && previousFocus.isConnected) previousFocus.focus();
+      else parentDialog?.focus();
+    };
+  }, [working]);
+
+  return (
+    <div
+      ref={dialogRef}
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="skill-review-title"
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-6"
+    >
+      <div className="flex max-h-[min(760px,90vh)] w-full max-w-2xl flex-col rounded-2xl bg-card p-5 shadow-2xl">
+        <div id="skill-review-title" className="text-[16px] font-semibold text-ink">
+          {t("skills.reviewTitle", { name: skill.name })}
+        </div>
+        <div className="mt-1 break-all text-[12px] text-ink-secondary">
+          {t("skills.source", { source: skill.source })}
+        </div>
+        {skill.warnings.length > 0 && (
+          <div className="mt-2 rounded-lg bg-warning/10 px-3 py-2 text-[12px] text-warning">
+            {skill.warnings.join(" · ")}
+          </div>
+        )}
+        <pre
+          tabIndex={0}
+          aria-label={t("skills.fullSkill", { name: skill.name })}
+          className="mt-3 min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink"
+        >
+          {text}
+        </pre>
+        {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            disabled={working}
+            onClick={onCancel}
+            className="rounded-lg px-4 py-2 text-[13px] font-medium text-ink-secondary hover:bg-raised disabled:opacity-40"
+          >
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            disabled={working}
+            onClick={onEnable}
+            className="rounded-lg bg-accent px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-40"
+          >
+            {t("skills.enableReviewed")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function SkillsSection({ bot }: { bot: Bot }) {
+  const { request: api } = useBotEditor();
+  const { state } = useStore();
+  const featureEnabled = skillAuthoringEnabled(state.config);
+  const libraryOn = skillsLibraryEnabled(state.config);
+  const {
+    skills, staged, loading, working, setWorking, error, setError, reviewing, setReviewing, refresh, toggle, enableReviewed,
+    libraryPool, addFromLibrary, setAddFromLibrary, assignmentBusy, addToBot,
+  } = useManagedSkills(bot);
   const [viewing, setViewing] = useState<{ name: string; text: string } | null>(null);
   const [source, setSource] = useState("");
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState("");
   const skillDialogRef = useRef<HTMLDivElement>(null);
-  const skillDialogOpen = Boolean(viewing || reviewing);
+  const skillDialogOpen = Boolean(viewing);
 
   useEffect(() => {
     if (!skillDialogOpen) return;
@@ -56,10 +310,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        if (!working) {
-          setViewing(null);
-          setReviewing(null);
-        }
+        if (!working) setViewing(null);
       }
       if (event.key !== "Tab" || !dialog) return;
       const controls = dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]');
@@ -82,87 +333,36 @@ export function SkillsSection({ bot }: { bot: Bot }) {
     };
   }, [skillDialogOpen, working]);
 
-  const refresh = async (cancelled?: () => boolean) => {
-    try {
-      const result = (await api(`/api/bots/${bot.id}/skills`)) as {
-        skills?: ManagedSkill[];
-        staged?: StagedSkillSummary[];
-      };
-      if (cancelled?.()) return;
-      setSkills(result.skills ?? []);
-      setStaged(result.staged ?? []);
-      setError("");
-    } catch (cause) {
-      if (!cancelled?.()) setError(cause instanceof Error ? cause.message : "Could not load learned skills.");
-    } finally {
-      if (!cancelled?.()) setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setReviewing(null);
     setViewing(null);
-    void refresh(() => cancelled);
-    return () => {
-      cancelled = true;
-    };
   }, [bot.id]);
 
-  const toggle = async (skill: ManagedSkill) => {
-    setWorking(skill.name);
-    setError("");
-    try {
-      if (!skill.enabled) {
-        // A disabled import has not necessarily been reviewed. Fetch the
-        // integrity-checked bytes and require one explicit review step before
-        // they can reach the bot's prompt or native skill discovery.
-        const result = (await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`)) as { text?: string };
-        if (!result.text) throw new Error("The skill contents are unavailable; remove and import or learn it again.");
-        setReviewing({ skill, text: result.text });
-        return;
-      }
-      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ enabled: false }),
-      });
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not update this skill.");
-    } finally {
-      setWorking("");
-    }
-  };
-
-  const enableReviewed = async () => {
-    if (!reviewing) return;
-    const { skill } = reviewing;
-    setWorking(skill.name);
-    setError("");
-    try {
-      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ enabled: true }),
-      });
-      setReviewing(null);
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not enable this skill.");
-    } finally {
-      setWorking("");
-    }
-  };
-
   const remove = async (skill: ManagedSkill) => {
-    if (!window.confirm(`Remove the learned skill “${skill.name}”?`)) return;
+    if (skill.origin === "library") {
+      if (assignmentBusy.current) return;
+      if (!window.confirm(t("skills.unassignConfirm", { name: skill.name }))) return;
+      assignmentBusy.current = true;
+      setWorking(skill.name);
+      setError("");
+      try {
+        await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
+        await refresh();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : t("skills.error.unassign"));
+      } finally {
+        assignmentBusy.current = false;
+        setWorking("");
+      }
+      return;
+    }
+    if (!window.confirm(t("skills.removeLearnedConfirm", { name: skill.name }))) return;
     setWorking(skill.name);
     setError("");
     try {
       await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
       await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not remove this skill.");
+      setError(cause instanceof Error ? cause.message : t("skills.error.remove"));
     } finally {
       setWorking("");
     }
@@ -171,10 +371,12 @@ export function SkillsSection({ bot }: { bot: Bot }) {
   const view = async (skill: ManagedSkill) => {
     setError("");
     try {
-      const result = (await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`)) as { text?: string };
+      const result = skill.origin === "library"
+        ? ((await api(`/api/skills-library/${encodeURIComponent(skill.name)}`)) as { text?: string })
+        : ((await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`)) as { text?: string });
       setViewing({ name: skill.name, text: result.text ?? "" });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not load this skill.");
+      setError(cause instanceof Error ? cause.message : t("skills.error.load"));
     }
   };
 
@@ -188,13 +390,12 @@ export function SkillsSection({ bot }: { bot: Bot }) {
       const result = (await api(`/api/bots/${bot.id}/skills`, {
         method: "POST",
         body: JSON.stringify({ source: trimmed }),
-      })) as { installed?: unknown[] };
-      const count = (result.installed ?? []).length;
-      setImportMessage(`Imported ${count} skill${count === 1 ? "" : "s"} — review and enable below.`);
+      })) as { imported?: SkillImportSummary[] };
+      setImportMessage([...skillImportLines(result.imported ?? []), t("skills.import.reviewBelow")].join(" "));
       setSource("");
       await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not import that skill.");
+      setError(cause instanceof Error ? cause.message : t("skills.error.import"));
     } finally {
       setImporting(false);
     }
@@ -205,40 +406,73 @@ export function SkillsSection({ bot }: { bot: Bot }) {
       <div className="rounded-xl bg-card p-4">
         <div className="flex items-center gap-2">
           <BookOpen size={16} className="text-ink-secondary" />
-          <div className="text-[15px] font-medium text-ink">Learned skills</div>
+          <div className="text-[15px] font-medium text-ink">{t("skills.learned.title")}</div>
         </div>
         <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
           {featureEnabled ? t("skills.learned.hintOn") : t("skills.learned.hintOff")}
         </div>
 
-        <form
-          className="mt-3 flex items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void importSkill();
-          }}
-        >
-          <input
-            className={inputCls}
-            placeholder="owner/repo, https://github.com/…/SKILL.md, or https://skills.sh/…"
-            aria-label="Import a skill"
-            value={source}
-            onChange={(e) => setSource(e.target.value)}
-          />
-          <button
-            type="submit"
-            disabled={importing || !source.trim()}
-            className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
-          >
-            {importing ? "Importing…" : "Import"}
-          </button>
-        </form>
-        {importMessage && <div className="mt-1 text-[12px] text-ink-secondary">{importMessage}</div>}
+        {libraryOn ? (
+          <div className="mt-3 flex flex-col gap-1.5">
+            {libraryPool.length > 0 ? (
+              <div className="flex items-center gap-2">
+                <Select size="lg" className="flex-1"
+                  aria-label={t("skills.library.addLabel")}
+                  value={addFromLibrary}
+                  disabled={Boolean(working)}
+                  onChange={(e) => setAddFromLibrary(e.target.value)}
+                >
+                  <option value="">{t("skills.library.addPlaceholder")}</option>
+                  {libraryPool.map((skill) => (
+                    <option key={skill.name} value={skill.name}>{skill.name}</option>
+                  ))}
+                </Select>
+                <button
+                  type="button"
+                  disabled={!addFromLibrary || Boolean(working)}
+                  onClick={() => void addToBot()}
+                  className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                >
+                  {t("common.add")}
+                </button>
+              </div>
+            ) : (
+              <div className="text-[12px] text-ink-secondary">{t("skills.library.allAssigned")}</div>
+            )}
+            <div className="text-[12px] text-ink-secondary">{t("skills.library.manageHint")}</div>
+          </div>
+        ) : (
+          <>
+            <form
+              className="mt-3 flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void importSkill();
+              }}
+            >
+              <input
+                className={inputCls}
+                placeholder={t("skills.import.placeholder")}
+                aria-label={t("skills.import.label")}
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+              />
+              <button
+                type="submit"
+                disabled={importing || !source.trim()}
+                className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+              >
+                {importing ? t("skills.import.importing") : t("skills.import.button")}
+              </button>
+            </form>
+            {importMessage && <div className="mt-1 text-[12px] text-ink-secondary">{importMessage}</div>}
+          </>
+        )}
 
         {loading ? (
-          <div className="mt-3 text-[12px] text-ink-secondary">Loading…</div>
+          <div className="mt-3 text-[12px] text-ink-secondary">{t("skills.loading")}</div>
         ) : skills.length === 0 ? (
-          <div className="mt-3 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink-secondary">No installed skills yet.</div>
+          <div className="mt-3 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink-secondary">{t("skills.empty")}</div>
         ) : (
           <div className="mt-3 divide-y divide-hairline/40 overflow-hidden rounded-lg border border-hairline/40">
             {skills.map((skill) => (
@@ -249,93 +483,67 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                     onClick={() => void view(skill)}
                     className="min-w-0 flex-1 text-left"
                   >
-                    <div className="truncate font-mono text-[12.5px] text-ink">{skill.name}</div>
-                    <div className="mt-0.5 line-clamp-2 text-[11.5px] text-ink-secondary">{skill.description}</div>
-                    <div className="mt-0.5 text-[10.5px] text-ink-secondary">Used when the bot decides it's relevant</div>
+                    <div className="truncate font-mono text-[13px] text-ink">{skill.name}</div>
+                    {(libraryOn || skill.origin === "imported" || inFolder(skill)) && (
+                      <span
+                        className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[10px] uppercase tracking-wide text-ink-secondary"
+                        title={skill.origin === "imported" ? t("skills.origin.importedHint") : skill.origin === "native" ? t("skills.origin.nativeHint") : skill.origin === "project" ? t("skills.origin.projectHint") : undefined}
+                      >
+                        {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "native" ? t("skills.origin.native") : skill.origin === "project" ? t("skills.origin.project") : skill.origin === "library" ? t("skills.origin.library") : t("skills.origin.private")}
+                      </span>
+                    )}
+                    <div className="mt-0.5 line-clamp-2 text-[12px] text-ink-secondary">{skill.description}</div>
+                    <div className="mt-0.5 text-[11px] text-ink-secondary">{t(skill.enabled && skill.listed === false ? "skills.foundWhenNeeded" : "skills.usedWhenRelevant")}</div>
                   </button>
-                  <Switch
-                    checked={skill.enabled}
-                    aria-label={`${skill.enabled ? "Disable" : "Enable"} ${skill.name}`}
-                    disabled={working === skill.name}
-                    onClick={() => void toggle(skill)}
-                  />
-                  <button
-                    aria-label={`Remove ${skill.name}`}
-                    title="Remove skill"
-                    disabled={working === skill.name}
-                    onClick={() => void remove(skill)}
-                    className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40"
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                  {skill.origin !== "project" && (
+                    <Switch
+                      checked={skillSwitchOn(skill)}
+                      aria-label={t(skillSwitchOn(skill) ? "skills.disableName" : "skills.enableName", { name: skill.name })}
+                      disabled={Boolean(working)}
+                      onClick={() => void toggle(skill)}
+                    />
+                  )}
+                  {skill.origin !== "imported" && !inFolder(skill) && (
+                    <button
+                      aria-label={t("skills.removeName", { name: skill.name })}
+                      title={t("skills.remove")}
+                      disabled={Boolean(working)}
+                      onClick={() => void remove(skill)}
+                      className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
                 </div>
-                <div className="mt-1 truncate text-[10.5px] text-ink-secondary" title={skill.source}>Source: {skill.source}</div>
+                <div className="mt-1 truncate text-[11px] text-ink-secondary" title={skill.source}>{t("skills.source", { source: skill.source })}</div>
                 {skill.warnings.length > 0 && (
-                  <div className="mt-1 text-[10.5px] text-warning">{skill.warnings.join(" · ")}</div>
+                  <div className="mt-1 text-[11px] text-warning">{skill.warnings.join(" · ")}</div>
                 )}
               </div>
             ))}
           </div>
         )}
         {staged.length > 0 && (
-          <div className="mt-2 text-[11.5px] text-warning">
-            {staged.length} proposal{staged.length === 1 ? " is" : "s are"} waiting for a decision in chat.
+          <div className="mt-2 text-[12px] text-warning">
+            {staged.length === 1 ? t("skills.stagedOne") : t("skills.stagedMany", { count: staged.length })}
           </div>
         )}
         {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
       </div>
 
+      <WriteCommandCard bot={bot} taken={skills.map((skill) => skill.name)} onSaved={() => void refresh()} />
+
       <OrgSkillsCard bot={bot} onAdded={() => void refresh()} />
 
       {reviewing && (
-        <div
-          ref={skillDialogRef}
-          tabIndex={-1}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="skill-review-title"
-          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-6"
-        >
-          <div className="flex max-h-[min(760px,90vh)] w-full max-w-2xl flex-col rounded-2xl bg-card p-5 shadow-2xl">
-            <div id="skill-review-title" className="text-[16px] font-semibold text-ink">
-              Review {reviewing.skill.name} before enabling
-            </div>
-            <div className="mt-1 break-all text-[11.5px] text-ink-secondary">
-              Source: {reviewing.skill.source}
-            </div>
-            {reviewing.skill.warnings.length > 0 && (
-              <div className="mt-2 rounded-lg bg-warning/10 px-3 py-2 text-[11.5px] text-warning">
-                {reviewing.skill.warnings.join(" · ")}
-              </div>
-            )}
-            <pre
-              tabIndex={0}
-              aria-label={`Full SKILL.md for ${reviewing.skill.name}`}
-              className="mt-3 min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink"
-            >
-              {reviewing.text}
-            </pre>
-            {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={working === reviewing.skill.name}
-                onClick={() => setReviewing(null)}
-                className="rounded-lg px-4 py-2 text-[13px] font-medium text-ink-secondary hover:bg-raised disabled:opacity-40"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={working === reviewing.skill.name}
-                onClick={() => void enableReviewed()}
-                className="rounded-lg bg-accent px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-40"
-              >
-                Enable reviewed skill
-              </button>
-            </div>
-          </div>
-        </div>
+        <SkillReviewDialog
+          skill={reviewing.skill}
+          text={reviewing.text}
+          error={error}
+          working={working === reviewing.skill.name}
+          onCancel={() => setReviewing(null)}
+          onEnable={() => void enableReviewed()}
+        />
       )}
 
       {viewing && (
@@ -355,12 +563,12 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                 onClick={() => setViewing(null)}
                 className="rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-control hover:text-ink"
               >
-                Close
+                {t("common.close")}
               </button>
             </div>
             <pre
               tabIndex={0}
-              aria-label={`Full SKILL.md for ${viewing.name}`}
+              aria-label={t("skills.fullSkill", { name: viewing.name })}
               className="mt-3 min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink"
             >
               {viewing.text}

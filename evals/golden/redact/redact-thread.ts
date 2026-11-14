@@ -351,6 +351,7 @@ export function redactThread(exported: GoldenThreadExport): RedactionResult {
     behavior: exported.meta.behavior ?? "The redacted golden thread replays its recorded tool trace and outcome unchanged.",
     world: "coordination",
     gates: [],
+    librarySkills: [],
     bots,
     steps: waitSteps,
     assertions,

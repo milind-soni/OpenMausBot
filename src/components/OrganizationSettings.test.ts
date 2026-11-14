@@ -2,7 +2,8 @@ import { Children, createElement, isValidElement, type EffectCallback, type Reac
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ManagedDesktopBridge, ManagedDesktopState } from "../../electron/managed-desktop.mjs";
-import { setLocale } from "@/lib/i18n";
+import { setLocale, t } from "@/lib/i18n";
+import { locales } from "@/locales";
 
 const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], updating: false,
   store: { bots: [] as unknown[], instances: [] as unknown[], dispatch: (() => {}) as (action: unknown) => void, flushBotPatches: (async () => null) as (botId: string) => Promise<unknown> } }));
@@ -102,18 +103,15 @@ describe("optional desktop Organisation settings", () => {
     expect(bridge.begin).not.toHaveBeenCalled();
   });
 
-  it("uses the default portal from one sign-in action and keeps custom setup advanced", async () => {
+  it("uses the default portal from one sign-in action and keeps custom setup in a fold", async () => {
     await ready();
     let view = render();
-    expect(view.html).toContain("https://admin.openmausbot.com");
     expect(view.html).toContain("Sign in with your organization");
-    expect(view.html).toContain("<summary");
-    expect(view.html).toContain("Advanced");
-    expect(view.html).not.toMatch(/<details[^>]*\bopen/);
-    expect(view.html).toContain("personal and local models");
-    expect(view.html).toContain("does not upload your chat history");
+    expect(view.html).toContain("Use another sign-in address");
+    expect(view.html).not.toContain("<details");
+    expect(view.html).toContain("Your chats are not uploaded.");
     expect(bridge.begin).not.toHaveBeenCalled();
-    const signIn = () => view.nodes.find(node => node.type === "button" && node.props.children === "Sign in with your organization")!.props.onClick!();
+    const signIn = () => view.nodes.find(node => node.type === "button" && (node.props as { "data-organization-sign-in"?: string })["data-organization-sign-in"] === "")!.props.onClick!();
     signIn(); signIn(); await flush();
     expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://admin.openmausbot.com" });
     expect(fetch).not.toHaveBeenCalled();
@@ -188,7 +186,6 @@ describe("optional desktop Organisation settings", () => {
     expect(fixture.store.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "setModel", botId: "stuck-bot", selection: { instanceId: "company.fixture.anthropic", model: "model-a" } });
     button("Disconnect…").props.onClick!(); button("Disconnect from organization").props.onClick!(); await flush();
     expect(bridge.disconnect).toHaveBeenCalledOnce();
-    // Disconnecting changes no bot: the only model change is the one clicked above.
     expect(fixture.store.dispatch).toHaveBeenCalledOnce();
     expect(fixture.store.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ botId: "personal-bot" }));
   });
@@ -228,7 +225,7 @@ describe("optional desktop Organisation settings", () => {
     const cleanup = await ready();
     let resolveBegin!: (state: ManagedDesktopState) => void;
     vi.mocked(bridge.begin).mockImplementation(() => new Promise(resolve => { resolveBegin = resolve; }));
-    button("Sign in with your organization").props.onClick!();
+    render().nodes.find(node => (node.props as { "data-organization-sign-in"?: string })["data-organization-sign-in"] === "")!.props.onClick!();
     if (typeof cleanup === "function") cleanup();
     push(connected); resolveBegin(connecting); await flush();
     expect(unsubscribe).toHaveBeenCalledOnce();
@@ -236,15 +233,22 @@ describe("optional desktop Organisation settings", () => {
     expect(render().html).not.toContain("ABCDE-FGHIJ");
   });
 
-  it("shows safe errors and a usable empty-model state with English fallback", async () => {
-    setLocale("ja");
-    await ready({ ...connected, providers: [] });
-    expect(render().html).toContain("No company models are available yet");
-    vi.mocked(bridge.refresh).mockRejectedValueOnce(new Error("Private /path token-secret"));
-    button("Refresh").props.onClick!(); await flush();
-    expect(render().html).toContain("Could not complete this action");
-    expect(render().html).not.toContain("token-secret");
-    expect(render().html).not.toContain("organization.noModels");
+  it.each(["ja", "zz"])("shows safe errors and a usable empty-model state in %s", async (locale) => {
+    // Test fallback with a genuinely incomplete pack, not a shipped translation.
+    locales.zz = {};
+    try {
+      setLocale(locale);
+      await ready({ ...connected, providers: [] });
+      expect(render().html).toContain(t("organization.noModels"));
+      vi.mocked(bridge.refresh).mockRejectedValueOnce(new Error("Private /path token-secret"));
+      button(t("organization.refresh")).props.onClick!(); await flush();
+      expect(render().html).toContain(t("organization.actionFailed"));
+      expect(render().html).not.toContain("token-secret");
+      expect(render().html).not.toContain("organization.noModels");
+    } finally {
+      delete locales.zz;
+      setLocale("en");
+    }
   });
 
   it("keeps an action error across same-status heartbeats and clears it after a real status change", async () => {

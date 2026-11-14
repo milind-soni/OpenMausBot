@@ -24,7 +24,6 @@ export function applyWorkspaceClientState(value: unknown, storage: Pick<Storage,
       if (Object.hasOwn(values, key)) storage.setItem(key, values[key] as string);
     }
   } catch (error) {
-    // A full browser quota must not silently leave half-restored drafts.
     for (const key of WORKSPACE_BACKUP_CLIENT_KEYS) storage.removeItem(key);
     for (const key of WORKSPACE_BACKUP_CLIENT_KEYS) {
       if (original[key] !== undefined) storage.setItem(key, original[key]);

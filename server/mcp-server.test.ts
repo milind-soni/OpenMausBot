@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// scripts/mcp-server.ts snapshots process.env at import time — scrub ambient
-// OMB_* / OPENMAUSBOT_* values before it is evaluated (#1676).
+// scripts/mcp-server.ts snapshots process.env at import time: scrub ambient OMB_* / OPENMAUSBOT_* values first.
 import "./testing/scrub-ambient-omb-env.ts";
 
 import {
   handleToolCall,
+  OpenMausBotApiError,
   probeBaseUrls,
   processMcpMessage,
   request,
@@ -31,7 +31,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   globalThis.fetch = ORIGINAL_FETCH;
   delete process.env.OPENMAUSBOT_TOKEN;
-  delete process.env.ALLOW_INSECURE_HTTP;
 });
 
 describe("MCP JSON-RPC protocol", () => {
@@ -335,9 +334,6 @@ describe("MCP tool execution", () => {
   });
 
   it("rewinds a thread by editing an earlier message, and refuses while busy", async () => {
-    // The composer rewind. It forks the conversation and answers again,
-    // which is the only mapped way to make the harness REBUILD context
-    // rather than resume the provider's own session.
     const busyFetcher = vi.fn(async () => ({ bots: [{ id: "bot-1", busy: true }] }));
     await expect(handleToolCall("edit_bot_message", {
       bot_id: "bot-1", message_id: "m-9", text: "say that again",
@@ -371,7 +367,6 @@ describe("MCP tool execution", () => {
       }
       throw new Error(`unexpected path ${path}`);
     });
-    // the bot is busy on task-1, but task-2 is idle: the edit lands there
     await expect(handleToolCall("edit_bot_message", {
       bot_id: "bot-1", message_id: "m-9", text: "again", task_id: "task-2",
     }, fetcher)).resolves.toMatchObject({ success: true });
@@ -436,20 +431,6 @@ describe("MCP tool execution", () => {
     expect(JSON.stringify(result)).not.toContain("pixels");
   });
 
-  it("waits on a bot conversation and returns a compact attention tail", async () => {
-    const fetcher = vi.fn(async (path: string) => {
-      if (path === "/api/bots?messages=0") return {
-        bots: [{ id: "bot-1", name: "Mira", busy: true, activity: "waiting-on-you", threadId: "task-1", tasks: [] }],
-      };
-      if (path === "/api/threads/task-1/messages?limit=10") return { messages: [{ id: "m1", at: 1, role: "bot", kind: "text", text: "Approve?" }] };
-      throw new Error(`unexpected path ${path}`);
-    });
-    const result: any = await handleToolCall("wait_for_conversation", {
-      target_type: "bot", target_id: "bot-1", timeout_seconds: 1,
-    }, fetcher);
-    expect(result).toMatchObject({ status: "needs-user", messages: [{ text: "Approve?" }] });
-  });
-
   it("changes an idle task model while another task of the same bot works", async () => {
     const modelSelection = { instanceId: "codex", model: "gpt-5.6-sol" };
     const fetcher = vi.fn(async (path: string, options?: RequestInit) => {
@@ -478,30 +459,6 @@ describe("MCP tool execution", () => {
     expect(result.task).not.toHaveProperty("resumeCursors");
   });
 
-  it("keeps waiting on task A after selection moves to B and does not wait for B", async () => {
-    let reads = 0;
-    const fetcher = vi.fn(async (path: string) => {
-      if (path === "/api/bots?messages=0") {
-        reads += 1;
-        return { bots: [{
-          id: "bot-1", threadId: reads === 1 ? "task-a" : "task-b", busy: true, activity: "waiting-on-you",
-          tasks: [
-            { threadId: "task-a", busy: reads < 3, activity: reads < 3 ? "working" : "idle" },
-            { threadId: "task-b", busy: true, activity: "waiting-on-you" },
-          ],
-        }], groups: [] };
-      }
-      if (path === "/api/threads/task-a/messages?limit=10") return { messages: [{ role: "bot", kind: "text", text: "A done" }] };
-      throw new Error(`unexpected path ${path}`);
-    });
-    const result: any = await handleToolCall("wait_for_conversation", {
-      target_type: "bot", target_id: "bot-1", timeout_seconds: 3,
-    }, fetcher);
-    expect(reads).toBe(3);
-    expect(result).toMatchObject({ status: "settled", taskId: "task-a", messages: [{ text: "A done" }] });
-    expect(result.target).toMatchObject({ activeTaskId: "task-b", busy: true });
-  });
-
   it("interrupts pinned task A while B is selected and refuses an unowned task", async () => {
     const fetcher = vi.fn(async (path: string, options?: RequestInit) => {
       if (path === "/api/bots?messages=0") return { bots: [{
@@ -526,203 +483,31 @@ describe("MCP tool execution", () => {
     expect(fetcher.mock.calls.filter(([path]) => path.endsWith("/interrupt"))).toHaveLength(1);
   });
 
-  it("reports no-signal as stalled and keeps the frozen task tail", async () => {
-    const fetcher = vi.fn(async (path: string) => {
-      if (path === "/api/bots?messages=0") return {
-        bots: [{
-          id: "bot-1", name: "Mira", busy: true, activity: "no-signal",
-          threadId: "task-active", tasks: [{ threadId: "task-active" }, { threadId: "task-old" }],
-        }],
-        groups: [],
-      };
-      if (path === "/api/threads/task-old/messages?limit=10") {
-        return { messages: [{ id: "old", at: 1, role: "bot", kind: "text", text: "Old task" }] };
-      }
-      throw new Error(`unexpected path ${path}`);
-    });
-    const historical: any = await handleToolCall("wait_for_conversation", {
-      target_type: "bot", target_id: "bot-1", task_id: "task-old", timeout_seconds: 1,
-    }, fetcher);
-    expect(historical).toMatchObject({ status: "settled", taskId: "task-old", messages: [{ text: "Old task" }] });
-
-    const stalledFetcher = vi.fn(async (path: string) => {
-      if (path === "/api/bots?messages=0") return {
-        bots: [{ id: "bot-1", name: "Mira", busy: true, activity: "no-signal", threadId: "task-active", tasks: [] }],
-        groups: [],
-      };
-      if (path === "/api/threads/task-active/messages?limit=10") return { messages: [] };
-      throw new Error(`unexpected path ${path}`);
-    });
-    const stalled: any = await handleToolCall("wait_for_conversation", {
-      target_type: "bot", target_id: "bot-1", timeout_seconds: 1,
-    }, stalledFetcher);
-    expect(stalled.status).toBe("stalled");
-  });
-
-  it("reports asynchronous bot and channel dispatch failures", async () => {
-    const errorMessages = {
-      messages: [
-        { id: "u1", at: 1, role: "user", kind: "text", text: "Start" },
-        { id: "e1", at: 2, role: "bot", kind: "activity", tool: { name: "error: provider failed to start", ok: false } },
-      ],
-    };
-    const botFetcher = vi.fn(async (path: string) => {
-      if (path === "/api/bots?messages=0") return {
-        bots: [{ id: "bot-1", name: "Mira", busy: false, activity: "idle", threadId: "task-1", tasks: [] }],
-        groups: [],
-      };
-      if (path === "/api/threads/task-1/messages?limit=10") return errorMessages;
-      throw new Error(`unexpected path ${path}`);
-    });
-    const botResult: any = await handleToolCall("wait_for_conversation", {
-      target_type: "bot", target_id: "bot-1", timeout_seconds: 1,
-    }, botFetcher);
-    expect(botResult.status).toBe("failed");
-
-    const channelFetcher = vi.fn(async (path: string) => {
-      if (path === "/api/bots?messages=0") return {
-        bots: [],
-        groups: [{
-          id: "channel-1", name: "Launch", memberIds: [], threadId: "task-1",
-          tasks: [], working: false, busyBotId: null,
-        }],
-      };
-      if (path === "/api/threads/task-1/messages?limit=10") return errorMessages;
-      throw new Error(`unexpected path ${path}`);
-    });
-    const channelResult: any = await handleToolCall("wait_for_conversation", {
-      target_type: "channel", target_id: "channel-1", timeout_seconds: 1,
-    }, channelFetcher);
-    expect(channelResult.status).toBe("failed");
-
-    const partialFetcher = vi.fn(async (path: string) => {
-      if (path === "/api/bots?messages=0") return {
-        bots: [],
-        groups: [{
-          id: "channel-1", name: "Launch", memberIds: [], threadId: "task-1",
-          tasks: [], working: false, busyBotId: null,
-        }],
-      };
-      if (path === "/api/threads/task-1/messages?limit=10") return {
-        messages: [
-          ...errorMessages.messages,
-          { id: "m2", at: 3, role: "bot", kind: "text", text: "Another responder completed the task." },
-        ],
-      };
-      throw new Error(`unexpected path ${path}`);
-    });
-    const partialResult: any = await handleToolCall("wait_for_conversation", {
-      target_type: "channel", target_id: "channel-1", timeout_seconds: 1,
-    }, partialFetcher);
-    expect(partialResult.status).toBe("settled");
-  });
-
-  it.each([
-    { terminal: true, status: "failed", name: "explicit terminal operation failure" },
-    { terminal: undefined, status: "settled", name: "legacy cancellation diagnostic" },
-  ])("preserves $name after the model has produced text", async ({ terminal, status }) => {
-    const fetcher = vi.fn(async (path: string) => {
-      if (path === "/api/bots?messages=0") return {
-        bots: [{ id: "bot-1", name: "Mira", busy: false, activity: "idle", threadId: "task-1", tasks: [] }],
-        groups: [],
-      };
-      if (path === "/api/threads/task-1/messages?limit=10") return {
-        messages: [
-          { id: "u1", at: 1, role: "user", kind: "text", text: "Create the requested file" },
-          { id: "m1", at: 2, role: "bot", kind: "text", text: "The operation was denied; the file was not created." },
-          { id: "e1", at: 3, role: "bot", kind: "activity", tool: { name: "error: A requested tool operation failed or was denied", ok: false, terminal } },
-        ],
-      };
-      throw new Error(`unexpected path ${path}`);
-    });
-    const result: any = await handleToolCall("wait_for_conversation", {
-      target_type: "bot", target_id: "bot-1", timeout_seconds: 1,
-    }, fetcher);
-    expect(result.status).toBe(status);
-    expect(result.messages.some((message: any) => message.text?.includes("operation was denied"))).toBe(true);
-    if (terminal) expect(result.messages.some((message: any) => message.tool?.terminal === true)).toBe(true);
-  });
-
-  it("detects durable channel blockers and interrupts the exact target thread", async () => {
+  it("guards a bot speaking in a room thread, sends to a room's parallel thread, and stops a room on its exact thread", async () => {
+    const sent: Array<{ path: string; body: unknown }> = [];
     const fetcher = vi.fn(async (path: string, options?: RequestInit) => {
       if (path === "/api/bots?messages=0") return {
-        bots: [{ id: "bot-1", activity: "waiting-on-you" }],
-        groups: [{ id: "channel-1", name: "Launch", memberIds: ["bot-1"], threadId: "task-1", tasks: [], busyBotId: "bot-1" }],
+        bots: [{ id: "bot-1", threadId: "own", busy: true, activity: "working", tasks: [] }],
+        groups: [{ id: "channel-1", name: "Launch", memberIds: ["bot-1"], threadId: "task-1", busyBotId: null, tasks: [
+          { threadId: "task-1", title: "Open", working: false, busyBotId: null },
+          { threadId: "task-2", title: "Background", working: true, busyBotId: "bot-1" },
+        ] }],
       };
-      if (path === "/api/threads/task-1/messages?limit=10") return {
-        messages: [{ id: "m1", at: 1, role: "bot", kind: "options", card: { title: "Approve?", requestId: "private", allowKey: "Bash:git" } }],
-      };
-      if (path === "/api/groups/channel-1/interrupt") {
-        expect(JSON.parse(String(options?.body))).toEqual({ threadId: "task-1" });
+      if (path === "/api/groups/channel-1/messages" || path === "/api/groups/channel-1/interrupt") {
+        sent.push({ path, body: JSON.parse(String(options?.body)) });
         return { ok: true };
       }
       throw new Error(`unexpected path ${path}`);
     });
-    const waited: any = await handleToolCall("wait_for_conversation", {
-      target_type: "channel", target_id: "channel-1", timeout_seconds: 1,
-    }, fetcher);
-    expect(waited.status).toBe("needs-user");
-    expect(waited.messages[0].card).not.toHaveProperty("requestId");
-    expect(waited.messages[0].card).not.toHaveProperty("allowKey");
-
-    const interrupted: any = await handleToolCall("interrupt_conversation", {
-      target_type: "channel", target_id: "channel-1",
-    }, fetcher);
-    expect(interrupted).toEqual({
-      success: true, targetType: "channel", targetId: "channel-1", taskId: "task-1",
-    });
-  });
-
-  it("keeps waiting for teammates without describing the Chief as busy", async () => {
-    let reads = 0;
-    const fetcher = vi.fn(async (path: string) => {
-      if (path === "/api/bots?messages=0") {
-        reads++;
-        return { bots: [{ id: "chief", threadId: "task", busy: false, activity: "idle",
-          tasks: [{ threadId: "task", busy: false, activity: "idle", waitingForTeammates: reads < 3 }] }], groups: [] };
-      }
-      if (path.startsWith("/api/threads/task/messages")) return { messages: [] };
-      throw new Error(path);
-    });
-    const result: any = await handleToolCall("wait_for_conversation", {
-      target_type: "bot", target_id: "chief", task_id: "task", timeout_seconds: 3,
-    }, fetcher);
-    expect(reads).toBeGreaterThanOrEqual(3);
-    expect(result.status).toBe("settled");
-    expect(result.target.busy).toBe(false);
-  });
-
-  it("keeps waiting while a channel operation is between responders", async () => {
-    let fleetReads = 0;
-    const fetcher = vi.fn(async (path: string) => {
-      if (path === "/api/bots?messages=0") {
-        fleetReads += 1;
-        return {
-          bots: [],
-          groups: [{
-            id: "channel-1",
-            name: "Launch",
-            memberIds: ["bot-1", "bot-2"],
-            threadId: "task-1",
-            tasks: [],
-            working: fleetReads === 1,
-            busyBotId: null,
-          }],
-        };
-      }
-      if (path === "/api/threads/task-1/messages?limit=10") return {
-        messages: fleetReads === 1
-          ? [{ id: "m1", at: 1, role: "user", kind: "text", text: "Ask everyone" }]
-          : [{ id: "m2", at: 2, role: "bot", kind: "text", text: "Done" }],
-      };
-      throw new Error(`unexpected path ${path}`);
-    });
-
-    const result: any = await handleToolCall("wait_for_conversation", {
-      target_type: "channel", target_id: "channel-1", timeout_seconds: 1,
-    }, fetcher);
-    expect(fleetReads).toBe(2);
-    expect(result).toMatchObject({ status: "settled", target: { working: false } });
+    await expect(handleToolCall("send_bot_message", { bot_id: "bot-1", text: "hi" }, fetcher)).rejects.toThrow("is working in channel 'channel-1'");
+    await expect(handleToolCall("send_channel_message", { channel_id: "channel-1", task_id: "task-2", text: "More" }, fetcher))
+      .resolves.toMatchObject({ success: true, taskId: "task-2" });
+    await expect(handleToolCall("interrupt_conversation", { target_type: "channel", target_id: "channel-1", task_id: "task-2" }, fetcher))
+      .resolves.toEqual({ success: true, targetType: "channel", targetId: "channel-1", taskId: "task-2" });
+    expect(sent).toEqual([
+      { path: "/api/groups/channel-1/messages", body: { text: "More", threadId: "task-2" } },
+      { path: "/api/groups/channel-1/interrupt", body: { threadId: "task-2" } },
+    ]);
   });
 
   it("does not expose executable paths from the model catalog", async () => {
@@ -738,6 +523,183 @@ describe("MCP tool execution", () => {
   });
 });
 
+describe("waiting on a conversation's job", () => {
+  function server(options: { fleet: unknown; jobs: Array<Record<string, unknown>>; tail?: unknown[]; thread?: string; sent?: unknown[] }) {
+    const thread = options.thread ?? "task-1";
+    const reads: URLSearchParams[] = [];
+    const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === "/api/bots?messages=0") return options.fleet;
+      if (path.startsWith(`/api/threads/${thread}/job?`)) {
+        reads.push(new URLSearchParams(path.slice(path.indexOf("?") + 1)));
+        return { since: 100, ...options.jobs[Math.min(reads.length - 1, options.jobs.length - 1)] };
+      }
+      if (path === `/api/threads/${thread}/messages?limit=10`) return { messages: options.tail ?? [] };
+      if (path.endsWith("/messages") && init?.method === "POST") { options.sent?.push(JSON.parse(String(init.body))); return { ok: true }; }
+      throw new Error(`unexpected path ${path}`);
+    });
+    return { fetcher, reads };
+  }
+  const bot = (patch: Record<string, unknown> = {}) => ({ bots: [{ id: "bot-1", name: "Mira", threadId: "task-1", busy: false, activity: "idle", tasks: [], ...patch }], groups: [] });
+
+  it("asks again only with the version it saw, held by the server, until the job is done", async () => {
+    const { fetcher, reads } = server({ fleet: bot(), tail: [{ id: "m1", at: 1, role: "bot", kind: "text", text: "Report ready" }], jobs: [
+      { state: "running", version: "v1", reason: "Waiting on 2 teammate tasks: Priya, Marcus" },
+      { state: "running", version: "v2", reason: "Waiting on 1 teammate task: Marcus" },
+      { state: "completed", version: "v3", reason: "Mira finished" },
+    ] });
+    const progress: string[] = [];
+    const result: any = await handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1", timeout_seconds: 30 },
+      fetcher, undefined, { onProgress: (job) => progress.push(job.reason) });
+    expect(result).toMatchObject({ status: "settled", state: "completed", taskId: "task-1", messages: [{ text: "Report ready" }],
+      job: { state: "completed", version: "v3" } });
+    expect(progress).toEqual(["Waiting on 2 teammate tasks: Priya, Marcus", "Waiting on 1 teammate task: Marcus", "Mira finished"]);
+    expect(reads.map((params) => Object.fromEntries(params))).toEqual([
+      { scope: "job" },
+      { scope: "job", since: "100", wait: expect.stringMatching(/^\d+$/), version: "v1" },
+      { scope: "job", since: "100", wait: expect.stringMatching(/^\d+$/), version: "v2" },
+    ]);
+  });
+
+  it("reports the person's turn, failures and stalls in the legacy words, with the job", async () => {
+    const needs = server({ fleet: bot({ activity: "waiting-on-you" }), tail: [{ id: "m1", at: 1, role: "bot", kind: "text", text: "Approve?" }],
+      jobs: [{ state: "needs-input", version: "v1", needsInput: [{ botName: "Priya", question: "Which tier?" }] }] });
+    expect(await handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1", timeout_seconds: 1 }, needs.fetcher))
+      .toMatchObject({ status: "needs-user", state: "needs-input", messages: [{ text: "Approve?" }], job: { needsInput: [{ question: "Which tier?" }] } });
+    for (const [activity, state] of [["dead", "failed"], ["no-signal", "stalled"]] as const) {
+      const ended = server({ fleet: bot(), jobs: [{ state, version: "v1", conversation: { kind: "bot", busy: false, activity, queued: 0 } }] });
+      expect(await handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1", timeout_seconds: 1 }, ended.fetcher))
+        .toMatchObject({ status: state, state });
+    }
+    const stopped = server({ fleet: bot(), tail: [{ id: "m1", at: 1, role: "bot", kind: "text", text: "Partial answer" }],
+      jobs: [{ state: "failed", version: "v1", conversation: { kind: "bot", busy: false, activity: "idle", queued: 0 } }] });
+    expect(await handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1", timeout_seconds: 1 }, stopped.fetcher))
+      .toMatchObject({ status: "settled", state: "failed" });
+    const undispatched = server({ fleet: bot(), tail: [{ id: "u1", at: 1, role: "user", kind: "text", text: "Go" },
+      { id: "m2", at: 2, role: "bot", kind: "activity", tool: { name: "Error: could not start", ok: false, terminal: true } }],
+    jobs: [{ state: "completed", version: "v1" }] });
+    expect(await handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1", timeout_seconds: 1 }, undispatched.fetcher))
+      .toMatchObject({ status: "failed", state: "failed" });
+    const idle = server({ fleet: bot(), jobs: [{ state: "idle", version: "v1" }] });
+    expect(await handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1", timeout_seconds: 1 }, idle.fetcher))
+      .toMatchObject({ status: "settled", state: "idle" });
+  });
+
+  it("times out with the job as it stands", async () => {
+    const { fetcher } = server({ fleet: bot({ busy: true }), jobs: [{ state: "running", version: "v1" }] });
+    const result: any = await handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1", timeout_seconds: 1 }, fetcher);
+    expect(result).toMatchObject({ status: "timed-out", state: "timed-out", job: { state: "running" } });
+  });
+
+  it("waits past a state it was already told about, and keeps the job it was given", async () => {
+    const { fetcher, reads } = server({ fleet: bot(), jobs: [{ state: "needs-input", version: "v1" }, { state: "running", version: "v2" }, { state: "completed", version: "v3" }] });
+    const result: any = await handleToolCall("wait_for_conversation", {
+      target_type: "bot", target_id: "bot-1", timeout_seconds: 30, since_ms: 42, after_version: "v1", scope: "turn",
+    }, fetcher);
+    expect(result).toMatchObject({ status: "settled", job: { version: "v3" } });
+    expect(Object.fromEntries(reads[0]!)).toMatchObject({ scope: "turn", since: "42", version: "v1", wait: expect.any(String) });
+  });
+
+  it("reads what the transcript shows: an open card, or a dispatch that failed after the last message", async () => {
+    const card = server({ fleet: { bots: [{ id: "bot-1", activity: "waiting-on-you" }],
+      groups: [{ id: "channel-1", name: "Launch", memberIds: ["bot-1"], threadId: "task-1", tasks: [], busyBotId: "bot-1" }] },
+      tail: [{ id: "m1", at: 1, role: "bot", kind: "options", card: { title: "Approve?", requestId: "private", allowKey: "Bash:git" } }],
+      jobs: [{ state: "completed", version: "v1" }] });
+    const waited: any = await handleToolCall("wait_for_conversation", { target_type: "channel", target_id: "channel-1", timeout_seconds: 1 }, card.fetcher);
+    expect(waited.status).toBe("needs-user");
+    expect(waited.messages[0].card).not.toHaveProperty("requestId");
+    expect(waited.messages[0].card).not.toHaveProperty("allowKey");
+    const failure = [
+      { id: "u1", at: 1, role: "user", kind: "text", text: "Start" },
+      { id: "e1", at: 2, role: "bot", kind: "activity", tool: { name: "error: provider failed to start", ok: false } },
+    ];
+    const failed = server({ fleet: bot(), tail: failure, jobs: [{ state: "completed", version: "v1" }] });
+    expect(await handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1", timeout_seconds: 1 }, failed.fetcher))
+      .toMatchObject({ status: "failed" });
+    for (const [terminal, status] of [[undefined, "settled"], [true, "failed"]] as const) {
+      const tail = [{ id: "u1", at: 1, role: "user", kind: "text", text: "Create the file" },
+        { id: "m1", at: 2, role: "bot", kind: "text", text: "The operation was denied." },
+        { id: "e1", at: 3, role: "bot", kind: "activity", tool: { name: "error: A requested tool operation failed or was denied", ok: false, terminal } }];
+      const answered = server({ fleet: bot(), tail, jobs: [{ state: "completed", version: "v1" }] });
+      expect(await handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1", timeout_seconds: 1 }, answered.fetcher))
+        .toMatchObject({ status });
+    }
+  });
+
+  it("reads a failed turn that left a quota-switch offer as failed: nothing waits on the offer", async () => {
+    const failure = [
+      { id: "u1", at: 1, role: "user", kind: "text", text: "Summarise the quarter" },
+      { id: "e1", at: 2, role: "bot", kind: "activity", tool: { name: "error: This Claude account has reached its usage limit.", ok: false } },
+    ];
+    const wait = (card: Record<string, unknown>) => handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1", timeout_seconds: 1 },
+      server({ fleet: bot(), tail: [...failure, { id: "c1", at: 3, role: "bot", kind: "options", card }], jobs: [{ state: "completed", version: "v1" }] }).fetcher);
+    const question = { title: "Which quarter?", subtitle: "", options: ["Q3", "Q4"], requestId: "r1" };
+    expect(await wait(question)).toMatchObject({ status: "needs-user" });
+    expect(await wait({
+      ...question, title: "Claude is out of quota", options: ["Codex", "Not now"], fixedOptions: true,
+      quotaSwitch: { engines: [{ instanceId: "codex", name: "Codex" }], messageId: "u1" },
+    })).toMatchObject({ status: "failed" });
+  });
+
+  it("waits on a pinned task and projects the bot as it is at the end", async () => {
+    let fleetReads = 0;
+    const { fetcher } = server({ thread: "task-a", fleet: undefined, jobs: [{ state: "running", version: "v1" }, { state: "completed", version: "v2" }],
+      tail: [{ role: "bot", kind: "text", text: "A done" }] });
+    const wrapped = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path !== "/api/bots?messages=0") return fetcher(path, init);
+      fleetReads += 1;
+      return { bots: [{ id: "bot-1", threadId: fleetReads === 1 ? "task-a" : "task-b", busy: true, activity: "working",
+        tasks: [{ threadId: "task-a", busy: fleetReads === 1 }, { threadId: "task-b", busy: true }] }], groups: [] };
+    });
+    const result: any = await handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1", task_id: "task-a", timeout_seconds: 30 }, wrapped);
+    expect(result).toMatchObject({ status: "settled", taskId: "task-a", messages: [{ text: "A done" }], target: { activeTaskId: "task-b", busy: true } });
+    await expect(handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1", task_id: "not-owned" }, wrapped))
+      .rejects.toThrow("does not belong");
+  });
+
+  it("names an older server that cannot report a job, and a conversation that is gone as gone", async () => {
+    const answering = (body: string) => vi.fn(async (path: string) => {
+      if (path === "/api/bots?messages=0") return bot();
+      throw new OpenMausBotApiError(404, `OpenMausBot API error (404): ${body}`);
+    });
+    await expect(handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1" }, answering("not found")))
+      .rejects.toThrow("cannot report a conversation's job");
+    await expect(handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1" }, answering('{"error":"no such conversation"}')))
+      .rejects.toThrow('OpenMausBot API error (404): {"error":"no such conversation"}');
+  });
+
+  it("sends with the caller's send id, returns the receipt, and refuses a malformed id before sending", async () => {
+    const sent: unknown[] = [];
+    const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === "/api/bots?messages=0") return { bots: [{ id: "bot-1", threadId: "task-1", tasks: [] }],
+        groups: [{ id: "channel-1", threadId: "room-1", tasks: [{ threadId: "room-1", working: true }] }] };
+      sent.push(JSON.parse(String(init?.body)));
+      return path.startsWith("/api/bots/")
+        ? { ok: true, threadId: "task-1", message: { id: "msg-1", at: 1234, text: "Go" } }
+        : { ok: true, queued: true, queueId: "q-1", threadId: "room-1" };
+    });
+    expect(await handleToolCall("send_bot_message", { bot_id: "bot-1", text: "Go", send_id: "run-0123456789abcdef" }, fetcher))
+      .toEqual({ success: true, botId: "bot-1", taskId: "task-1", messageId: "msg-1", at: 1234 });
+    expect(await handleToolCall("send_channel_message", { channel_id: "channel-1", text: "Go", send_id: "run-0123456789abcdef" }, fetcher))
+      .toEqual({ success: true, channelId: "channel-1", taskId: "room-1", queued: true, queueId: "q-1" });
+    expect(sent).toEqual([{ text: "Go", threadId: "task-1", sendId: "run-0123456789abcdef" }, { text: "Go", threadId: "room-1", sendId: "run-0123456789abcdef" }]);
+    await expect(handleToolCall("send_bot_message", { bot_id: "bot-1", text: "Go", send_id: "short" }, fetcher)).rejects.toThrow("send_id must be");
+    expect(sent).toHaveLength(2);
+  });
+
+  it("sends a channel message with the ids of the bots it means when two share a name", async () => {
+    const sent: unknown[] = [];
+    const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === "/api/bots?messages=0") return { bots: [], groups: [{ id: "channel-1", threadId: "room-1", tasks: [] }] };
+      sent.push(JSON.parse(String(init?.body)));
+      return { ok: true, threadId: "room-1", message: { id: "msg-1", at: 1, text: "@Quill go" } };
+    });
+    await handleToolCall("send_channel_message", { channel_id: "channel-1", text: "@Quill go", mentions: ["quill-chief"] }, fetcher);
+    expect(sent).toEqual([{ text: "@Quill go", threadId: "room-1", mentions: ["quill-chief"] }]);
+    await expect(handleToolCall("send_channel_message", { channel_id: "channel-1", text: "@Quill go", mentions: "quill-chief" }, fetcher))
+      .rejects.toThrow("arguments.mentions must be array");
+  });
+});
+
 describe("connection security and discovery", () => {
   it("accepts loopback HTTP and HTTPS origins, but rejects unsafe URL shapes", () => {
     expect(validateBaseUrl("http://127.0.0.1:8799/")).toBe("http://127.0.0.1:8799");
@@ -746,7 +708,11 @@ describe("connection security and discovery", () => {
     expect(() => validateBaseUrl("ftp://maus.example.com")).toThrow("http:// or https://");
     expect(() => validateBaseUrl("https://maus.example.com/api")).toThrow("origin without a path");
     expect(() => validateBaseUrl("https://user:pass@maus.example.com")).toThrow("must not contain credentials");
-    expect(() => validateBaseUrl("http://0.0.0.0:8799")).toThrow("Insecure cleartext HTTP");
+    expect(() => validateBaseUrl("http://0.0.0.0:8799")).toThrow("open internet");
+    expect(() => validateBaseUrl("http://203.0.113.9:8799")).toThrow("put HTTPS in front");
+    expect(validateBaseUrl("http://192.168.1.20:8799")).toBe("http://192.168.1.20:8799");
+    expect(validateBaseUrl("http://100.101.102.103:8799")).toBe("http://100.101.102.103:8799");
+    expect(validateBaseUrl("http://box.tail1234.ts.net:8799")).toBe("http://box.tail1234.ts.net:8799");
   });
 
   it("skips a foreign process and discovers the real fallback port", async () => {
@@ -776,6 +742,16 @@ describe("connection security and discovery", () => {
       method: "POST",
       body: JSON.stringify({ text: "hello" }),
     }, "http://127.0.0.1:8799")).rejects.toThrow("paired session token");
+  });
+
+  it("says a shared server refused, not a desktop app, when the server says so", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse(
+      { error: "forbidden: on this shared server a local request without a session may only use the service routes; sign in to change settings, people or access" },
+      { ok: false, status: 403, statusText: "Forbidden" },
+    )) as any;
+    const refused = request("/api/instances", {}, "http://127.0.0.1:8799");
+    await expect(refused).rejects.toThrow("This is a shared server, so a program on it without a paired session token may only check its health");
+    await expect(refused).rejects.not.toThrow("desktop app");
   });
 
   it("requires an explicit destination before sending a bearer token", async () => {

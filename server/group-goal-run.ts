@@ -1,10 +1,16 @@
+import type { ServerText } from "../shared/server-text.ts";
+import { noticeFailure } from "./chat-notices.ts";
+import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { GroupDefaultResponder } from "./store.ts";
 
-// Odd by design: coordinator/worker alternation must always leave the final
-// bounded turn to the coordinator for an honest completion decision.
+// Odd so the final bounded turn always falls to the coordinator for the completion decision.
 export const GROUP_GOAL_MAX_TURNS = 13;
+export const GROUP_GOAL_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_GOAL_WAIT_MAX_MS) || 30 * 60_000);
+const GROUP_GOAL_MAX_WAIT_EXHAUSTIONS = 3;
 export const GROUP_GOAL_CONTROL_OPEN = "<openmaus-goal>";
 export const GROUP_GOAL_CONTROL_CLOSE = "</openmaus-goal>";
+/** A close tag the model sometimes escapes; it ends an envelope exactly like the plain one. */
+const ESCAPED_GOAL_CONTROL_CLOSE = "<\\/openmaus-goal>";
 
 export type GroupGoalDecision =
   | { status: "continue"; next: string; instruction: string; detail?: string }
@@ -22,9 +28,6 @@ export interface ParsedGroupGoalDecision {
   decision: GroupGoalDecision | null;
 }
 
-/** Turn-scoped events normally identify themselves. A coordinator completion
- * can omit that field after its guard was already bound by turn.started; keep
- * the bound identity so its public transcript message still settles cleanly. */
 export function groupGoalCompletionTurnId(
   eventTurnId: string | undefined,
   boundTurnId: string | undefined,
@@ -35,62 +38,137 @@ export function groupGoalCompletionTurnId(
 const bounded = (value: unknown, max: number): string =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
 
-function visibleCoordinatorText(text: string): string {
+/** A reply without its private goal envelopes; a turn outside the goal's own (a teammate's result waking the lead) can write one too. */
+export function visibleCoordinatorText(text: string): string {
   let visible = text;
   for (;;) {
-    const closeAt = visible.indexOf(GROUP_GOAL_CONTROL_CLOSE);
+    // An envelope ends at the earliest plain or escaped close tag, so an escaped
+    // envelope is stripped exactly like a plain one and any visible text after it is kept.
+    let closeAt = -1;
+    let closeLen = 0;
+    for (const close of [GROUP_GOAL_CONTROL_CLOSE, ESCAPED_GOAL_CONTROL_CLOSE]) {
+      const at = visible.indexOf(close);
+      if (at >= 0 && (closeAt < 0 || at < closeAt)) {
+        closeAt = at;
+        closeLen = close.length;
+      }
+    }
     if (closeAt < 0) break;
     const openAt = visible.lastIndexOf(GROUP_GOAL_CONTROL_OPEN, closeAt);
     if (openAt < 0) {
-      visible = `${visible.slice(0, closeAt)}${visible.slice(closeAt + GROUP_GOAL_CONTROL_CLOSE.length)}`;
+      visible = `${visible.slice(0, closeAt)}${visible.slice(closeAt + closeLen)}`;
       continue;
     }
-    visible = `${visible.slice(0, openAt)}${visible.slice(closeAt + GROUP_GOAL_CONTROL_CLOSE.length)}`;
+    visible = `${visible.slice(0, openAt)}${visible.slice(closeAt + closeLen)}`;
   }
-  // A truncated final envelope is private protocol too. Keep the prose that
-  // preceded it, but never expose a half-written marker or JSON fragment.
+  // Never expose a half-written control marker or JSON fragment.
   const danglingOpen = visible.indexOf(GROUP_GOAL_CONTROL_OPEN);
   if (danglingOpen >= 0) visible = visible.slice(0, danglingOpen);
-  return visible.replaceAll(GROUP_GOAL_CONTROL_CLOSE, "").trim();
+  return visible.replaceAll(GROUP_GOAL_CONTROL_CLOSE, "").replaceAll(ESCAPED_GOAL_CONTROL_CLOSE, "").trim();
 }
 
-/** Keep the orchestration envelope out of the human transcript while still
- * accepting ordinary prose before it. The last complete envelope wins: a
- * quoted example earlier in the reply cannot accidentally steer the run. */
-export function parseGroupGoalDecision(text: string): ParsedGroupGoalDecision {
-  const closeAt = text.lastIndexOf(GROUP_GOAL_CONTROL_CLOSE);
-  const openAt = closeAt < 0 ? -1 : text.lastIndexOf(GROUP_GOAL_CONTROL_OPEN, closeAt);
-  if (openAt < 0 || closeAt < 0) return { visibleText: visibleCoordinatorText(text), decision: null };
-
-  const visibleText = visibleCoordinatorText(text);
-  const payload = text.slice(openAt + GROUP_GOAL_CONTROL_OPEN.length, closeAt).trim();
-  try {
-    const raw = JSON.parse(payload) as Record<string, unknown>;
-    const status = raw.status;
-    const detail = bounded(raw.detail, 500);
-    if (status === "continue") {
-      const next = bounded(raw.next, 100);
-      const instruction = bounded(raw.instruction, 2_000);
-      if (!next || !instruction) return { visibleText, decision: null };
-      return {
-        visibleText,
-        decision: { status, next, instruction, ...(detail ? { detail } : {}) },
-      };
+/** The first balanced {...} object at the start of s (after whitespace), or null if none is complete. */
+function leadingJsonObject(s: string): string | null {
+  let i = 0;
+  while (i < s.length && /\s/.test(s[i] as string)) i++;
+  if (s[i] !== "{") return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let k = i; k < s.length; k++) {
+    const c = s[k] as string;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === "\"") inString = false;
+    } else if (c === "\"") inString = true;
+    else if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) return s.slice(i, k + 1);
     }
-    if (status === "completed" || status === "needs-input" || status === "blocked") {
-      if (!detail) return { visibleText, decision: null };
-      return { visibleText, decision: { status, detail } };
-    }
-  } catch {
-    // A malformed control envelope is a safe pause, never permission to keep
-    // an autonomous loop running on a guess.
   }
-  return { visibleText, decision: null };
+  return null;
 }
 
-/** Explicit room lead (or an Auto room's fallback) wins. Otherwise prefer
- * an in-room Chief, then the first active member. A goal run never recruits
- * somebody outside the room. */
+/** Validate one decision object against the goal protocol; null when it is not a usable decision. */
+function parseDecisionPayload(payload: string): GroupGoalDecision | null {
+  const object = leadingJsonObject(payload);
+  if (!object) return null;
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(object) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  // Only minor prose may follow the first decision object. A second decision object or a
+  // control marker means the reply contradicts itself (a correction that cancels the first),
+  // so reject rather than silently take the first object.
+  const rest = payload.slice(object.length);
+  if (
+    rest.includes(GROUP_GOAL_CONTROL_OPEN) ||
+    rest.includes(GROUP_GOAL_CONTROL_CLOSE) ||
+    rest.includes(ESCAPED_GOAL_CONTROL_CLOSE) ||
+    rest.includes("{")
+  ) {
+    return null;
+  }
+  const status = raw.status;
+  const detail = bounded(raw.detail, 500);
+  if (status === "continue") {
+    const next = bounded(raw.next, 100);
+    const instruction = bounded(raw.instruction, 2_000);
+    if (!next || !instruction) return null;
+    return { status, next, instruction, ...(detail ? { detail } : {}) };
+  }
+  if (status === "completed" || status === "needs-input" || status === "blocked") {
+    if (!detail) return null;
+    return { status, detail };
+  }
+  return null;
+}
+
+/** True when the open tag at index sits at the start of its line (only whitespace precedes it). */
+function isAtLineStart(text: string, index: number): boolean {
+  for (let i = index - 1; i >= 0; i--) {
+    const c = text[i] as string;
+    if (c === "\n" || c === "\r") return true;
+    if (!/\s/.test(c)) return false;
+  }
+  return true;
+}
+
+/** The last complete envelope wins, so a quoted example earlier in the reply cannot steer the run. */
+export function parseGroupGoalDecision(text: string): ParsedGroupGoalDecision {
+  const visibleText = visibleCoordinatorText(text);
+  const fail = (): ParsedGroupGoalDecision => ({ visibleText, decision: null });
+
+  // An envelope ends at the later of the plain or escaped close tag.
+  const closeAt = Math.max(
+    text.lastIndexOf(GROUP_GOAL_CONTROL_CLOSE),
+    text.lastIndexOf(ESCAPED_GOAL_CONTROL_CLOSE),
+  );
+  const openAt = closeAt < 0 ? -1 : text.lastIndexOf(GROUP_GOAL_CONTROL_OPEN, closeAt);
+  if (openAt >= 0 && closeAt > openAt) {
+    const payload = text.slice(openAt + GROUP_GOAL_CONTROL_OPEN.length, closeAt);
+    const decision = parseDecisionPayload(payload);
+    if (decision) return { visibleText, decision };
+  }
+
+  // Truncation recovery: the close tag never arrived (EOF), or the chosen envelope carried
+  // trailing prose. Recover only from a single unambiguous open tag on its own line whose
+  // following text is exactly one complete, valid decision object, so a quoted example
+  // (an open tag preceded by prose on the same line) or a second envelope cannot steer
+  // the run.
+  const open = text.lastIndexOf(GROUP_GOAL_CONTROL_OPEN);
+  if (open >= 0 && open === text.indexOf(GROUP_GOAL_CONTROL_OPEN) && isAtLineStart(text, open)) {
+    const decision = parseDecisionPayload(text.slice(open + GROUP_GOAL_CONTROL_OPEN.length));
+    if (decision) return { visibleText, decision };
+  }
+  return fail();
+}
+
+/** A goal run never recruits somebody outside the room. */
 export function selectGroupGoalCoordinator<Member extends GoalRunMember>(
   members: Member[],
   responder: GroupDefaultResponder,
@@ -104,8 +182,6 @@ export function selectGroupGoalCoordinator<Member extends GoalRunMember>(
   return active.find((member) => member.chiefOfStaff) ?? active[0] ?? null;
 }
 
-/** Resolve a model-selected teammate without letting fuzzy or duplicate
- * names choose the wrong person. IDs always work; names work only if unique. */
 export function resolveGroupGoalMember(reference: string, members: GoalRunMember[]): GoalRunMember | null {
   const wanted = reference.trim().replace(/^@/, "").toLocaleLowerCase();
   if (!wanted) return null;
@@ -116,31 +192,35 @@ export function resolveGroupGoalMember(reference: string, members: GoalRunMember
   return nameMatches.length === 1 ? nameMatches[0]! : null;
 }
 
+/** `solo` is a room of one: the lead does the work in its own turns, and "continue" names itself for its next turn. */
 export function groupGoalCoordinatorInstructions(args: {
   goal: string;
   members: GoalRunMember[];
   turn: number;
   maxTurns: number;
   remainingTurns: number;
-  /** A harness observation the coordinator must act on this turn — e.g. a
-   * teammate stayed busy past the wait cap. Returned as data rather than
-   * ending the run, so the lead can reassign or report blocked itself. */
   note?: string;
+  solo?: boolean;
 }): string {
-  const roster = args.members
-    .filter((member) => !member.hidden)
+  const active = args.members.filter((member) => !member.hidden);
+  const roster = active
     .map((member) => `${member.name} (${member.id})`)
     .join(", ");
+  const self = args.solo ? active[0] : undefined;
   return [
-    "You are the lead coordinator for a bounded team goal run.",
+    self ? "You are working alone toward a bounded goal." : "You are the lead coordinator for a bounded team goal run.",
     `Goal: ${args.goal}`,
-    `Available room members: ${roster}.`,
-    `This is team turn ${args.turn} of ${args.maxTurns}; ${args.remainingTurns} turn(s) remain after this one.`,
+    ...(self ? [] : [`Available room members: ${roster}.`]),
+    `This is ${self ? "" : "team "}turn ${args.turn} of ${args.maxTurns}; ${args.remainingTurns} turn(s) remain after this one.`,
     ...(args.note ? [`Harness note: ${args.note}`] : []),
-    "Use the conversation as the progress ledger. Decide whether the goal is genuinely complete, needs the human, is blocked, or needs one named teammate next.",
+    self
+      ? "Use the conversation as the progress ledger. Do the next concrete piece of work now, then decide whether the goal is genuinely complete, needs the human, is blocked, or needs another turn."
+      : "Use the conversation as the progress ledger. Decide whether the goal is genuinely complete, needs the human, is blocked, or needs one named teammate next.",
     "Do not continue merely to generate discussion. Do not claim completion unless the requested deliverable or answer is present in the conversation.",
     "Write a brief human-facing update or final answer, then end with exactly one private control envelope on its own line.",
-    `${GROUP_GOAL_CONTROL_OPEN}{"status":"continue","next":"Exact member id from the roster","instruction":"Concrete next assignment","detail":"Short progress note"}${GROUP_GOAL_CONTROL_CLOSE}`,
+    self
+      ? `${GROUP_GOAL_CONTROL_OPEN}{"status":"continue","next":"${self.id}","instruction":"Your next step","detail":"Short progress note"}${GROUP_GOAL_CONTROL_CLOSE}`
+      : `${GROUP_GOAL_CONTROL_OPEN}{"status":"continue","next":"Exact member id from the roster","instruction":"Concrete next assignment","detail":"Short progress note"}${GROUP_GOAL_CONTROL_CLOSE}`,
     `Or use status "completed", "needs-input", or "blocked" with a non-empty "detail" and omit next/instruction.`,
     "Never mention, quote, or explain the control envelope in your human-facing text.",
   ].join("\n");
@@ -165,4 +245,185 @@ export function groupGoalWorkerInstructions(args: {
 
 export function groupGoalAssignmentKey(memberId: string, instruction: string): string {
   return `${memberId}:${instruction.trim().toLocaleLowerCase().replace(/\s+/g, " ")}`;
+}
+
+export type GoalStepOutcome =
+  | "settled"
+  | "provider_failed"
+  | "dispatch_failed"
+  | "spend_capped"
+  | "stalled"
+  | "timed_out"
+  | "cancelled"
+  | "busy"
+  | "parked"
+  | "unavailable";
+
+export interface GoalStepResult {
+  ran: boolean;
+  replyText: string;
+  outcome?: GoalStepOutcome;
+  stopReason?: string | null;
+  stopReasonText?: ServerText;
+}
+
+export type GoalRunEnd = Exclude<GroupGoalRunStatus, "working">;
+
+export interface GoalRunDeps<Bot extends GoalRunMember> {
+  run: { goal: string; turnCount: number; maxTurns: number; finished: boolean };
+  coordinator: Bot;
+  members: readonly Bot[];
+  solo?: boolean;
+  cancelled(): boolean;
+  /** The member as the store has it now. */
+  current(botId: string): Bot | undefined;
+  /** One member turn; a step counts against the run's turns once its member is claimed. */
+  step(bot: Bot, coordinator: boolean, instructions: string): Promise<GoalStepResult>;
+  finish(status: GoalRunEnd, detail: string, text?: ServerText): void;
+  progress(detail: string, text?: ServerText): void;
+  /** An activity row in the conversation, from the coordinator. */
+  note(text: string): void;
+}
+
+// spend_capped is deliberately absent: a cap refusal is deterministic.
+const TRANSIENT_STEP: ReadonlySet<GoalStepOutcome | undefined> = new Set(["provider_failed", "dispatch_failed", "stalled", "timed_out"]);
+
+async function stepOnceRetried<Bot extends GoalRunMember>(deps: GoalRunDeps<Bot>, bot: Bot, coordinator: boolean, instructions: string): Promise<GoalStepResult> {
+  const first = await deps.step(bot, coordinator, instructions);
+  if (!TRANSIENT_STEP.has(first.outcome) || deps.cancelled()) return first;
+  const why = { provider_failed: "chat.notice.part.providerFailed", dispatch_failed: "chat.notice.part.dispatchFailed", stalled: "chat.notice.part.goalStalled", timed_out: "chat.notice.part.goalTimedOut" }[first.outcome as "provider_failed" | "dispatch_failed" | "stalled" | "timed_out"];
+  const retry = noticeFailure("chat.notice.goalRetry", { name: bot.name, why });
+  deps.progress(retry.message, retry.text);
+  return deps.step(bot, coordinator, instructions);
+}
+
+/** The goal run loop, the same for a room and a one-on-one chat (a room of one). */
+export async function runGoalRun<Bot extends GoalRunMember>(deps: GoalRunDeps<Bot>): Promise<void> {
+  const { run, coordinator } = deps;
+  const assignmentCounts = new Map<string, number>();
+  const goalMembers: GoalRunMember[] = deps.members.map((member) => ({
+    id: member.id,
+    name: member.name,
+    hidden: member.hidden,
+    chiefOfStaff: member.chiefOfStaff,
+  }));
+
+  let coordinatorNote: string | undefined;
+  let waitExhaustions = 0;
+  while (!deps.cancelled() && run.turnCount < run.maxTurns) {
+    const coordinatorTurn = run.turnCount + 1;
+    const note = coordinatorNote;
+    coordinatorNote = undefined;
+    const coordinatorResult = await stepOnceRetried(deps, coordinator, true, groupGoalCoordinatorInstructions({
+      goal: run.goal,
+      members: goalMembers,
+      turn: coordinatorTurn,
+      maxTurns: run.maxTurns,
+      remainingTurns: run.maxTurns - coordinatorTurn,
+      note,
+      solo: deps.solo,
+    }));
+    if (deps.cancelled()) return;
+    if (coordinatorResult.outcome === "unavailable") {
+      deps.finish("blocked", `${coordinator.name} is not available.`);
+      return;
+    }
+    if (coordinatorResult.outcome === "spend_capped") {
+      deps.finish("blocked", coordinatorResult.stopReason ?? `${coordinator.name} hit the workspace spend cap.`);
+      return;
+    }
+    if (coordinatorResult.outcome === "busy") {
+      const code = coordinatorResult.stopReasonText;
+      const busy = code?.key === "chat.notice.goalBusyOne" || code?.key === "chat.notice.goalBusyMany"
+        ? noticeFailure(code.key === "chat.notice.goalBusyOne" ? "chat.notice.goalBusyOneAgain" : "chat.notice.goalBusyManyAgain", code.params as Record<string, string>) : undefined;
+      deps.finish("blocked", busy?.message ?? `${coordinatorResult.stopReason ?? `${coordinator.name} stayed busy`} — send the goal again when they are free.`, busy?.text);
+      return;
+    }
+    if (coordinatorResult.outcome === "parked") {
+      deps.finish(
+        "blocked",
+        `${coordinatorResult.stopReason ?? `${coordinator.name} parked waiting for the computer`} — send the goal again when the computer is free.`,
+      );
+      return;
+    }
+    if (!coordinatorResult.ran || coordinatorResult.outcome !== "settled") {
+      const reason = coordinatorResult.stopReason?.trim().slice(0, 120);
+      deps.finish("failed", `${coordinator.name} could not complete the coordination step${reason ? ` — ${reason}` : ""}.`);
+      return;
+    }
+
+    const decision = parseGroupGoalDecision(coordinatorResult.replyText).decision;
+    if (!decision) {
+      deps.finish("blocked", `${coordinator.name} did not provide a valid next-step decision.`);
+      return;
+    }
+    if (decision.status !== "continue") {
+      deps.finish(decision.status, decision.detail);
+      return;
+    }
+    if (run.turnCount >= run.maxTurns) break;
+
+    const worker = resolveGroupGoalMember(decision.next, goalMembers);
+    if (!worker) {
+      deps.finish("blocked", `${coordinator.name} selected a teammate who is not an active member of this channel.`);
+      return;
+    }
+    const workerBot = deps.current(worker.id);
+    if (!workerBot || workerBot.hidden) {
+      deps.finish("blocked", `${worker.name} is not available.`);
+      return;
+    }
+    const assignmentKey = groupGoalAssignmentKey(worker.id, decision.instruction);
+    const repeated = (assignmentCounts.get(assignmentKey) ?? 0) + 1;
+    assignmentCounts.set(assignmentKey, repeated);
+    if (repeated >= 3) {
+      deps.finish("blocked", `The team repeated the same assignment three times without resolving the goal.`);
+      return;
+    }
+    if (deps.solo && workerBot.id === coordinator.id) {
+      coordinatorNote = `Your next step: ${decision.instruction}`;
+      continue;
+    }
+
+    const workerTurn = run.turnCount + 1;
+    const workerResult = await stepOnceRetried(deps, workerBot, false, groupGoalWorkerInstructions({
+      goal: run.goal,
+      coordinatorName: coordinator.name,
+      assignment: decision.instruction,
+      turn: workerTurn,
+      maxTurns: run.maxTurns,
+    }));
+    if (deps.cancelled()) return;
+    if (workerResult.outcome === "unavailable") {
+      deps.finish("blocked", `${workerBot.name} is not available.`);
+      return;
+    }
+    if (workerResult.outcome === "spend_capped") {
+      deps.finish("blocked", workerResult.stopReason ?? `${workerBot.name} hit the workspace spend cap.`);
+      return;
+    }
+    if (workerResult.outcome === "busy" || workerResult.outcome === "parked") {
+      waitExhaustions += 1;
+      if (waitExhaustions >= GROUP_GOAL_MAX_WAIT_EXHAUSTIONS) {
+        deps.finish("blocked", `Teammates stayed busy past the wait limit ${waitExhaustions} times — try again when the team is free.`);
+        return;
+      }
+      const reason = workerResult.stopReason?.trim().slice(0, 120) ?? `${workerBot.name} stayed busy`;
+      deps.note(`${reason} — asking ${coordinator.name} to reassign`);
+      deps.progress(`${reason}. ${coordinator.name} is reassigning.`);
+      coordinatorNote =
+        `${reason} and could not take the assignment "${decision.instruction.slice(0, 160)}". ` +
+        "Reassign it to another available member, do it yourself if you can, or report blocked.";
+      continue;
+    }
+    if (!workerResult.ran || workerResult.outcome !== "settled" || !workerResult.replyText.trim()) {
+      const reason = workerResult.stopReason?.trim().slice(0, 120);
+      deps.finish("failed", `${workerBot.name} could not return a result to ${coordinator.name}${reason ? ` — ${reason}` : ""}.`);
+      return;
+    }
+  }
+
+  if (!deps.cancelled() && !run.finished) {
+    deps.finish("limit-reached", `Paused at the ${run.maxTurns}-turn safety limit. Send the goal again to continue with a fresh bounded run.`);
+  }
 }

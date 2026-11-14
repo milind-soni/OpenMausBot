@@ -1,13 +1,3 @@
-// "#QA PR 245" in prose becomes a link to that thread. Bots are asked to
-// write a thread's title as #Title when they mention one, and the person
-// may type the same. Resolution mirrors @mention resolution for bots:
-// word-start, longest known title first, case-insensitive — titles hold
-// spaces, so the longest known title following the "#" wins. Nothing else
-// is a link: "#123" issue numbers, "# Heading" markers (the parser never
-// hands those here) and unknown titles all stay plain text.
-
-/** A thread the person can see: any bot's task, or a room's. `activeAt`
- * orders threads that share a title (newest wins) after the current bot. */
 export interface ThreadRefCandidate {
   botId: string;
   botName: string;
@@ -21,11 +11,9 @@ export interface ResolvedThreadRef {
   botName: string;
   threadId: string;
   title: string;
-  /** another visible thread shares this title; the tooltip names the bot */
   ambiguous: boolean;
 }
 
-/** One run of text, linked when `ref` is set. */
 export interface ThreadRefSpan {
   text: string;
   ref?: ResolvedThreadRef;
@@ -37,13 +25,8 @@ interface TitleGroup {
 }
 
 const WORD_CHAR = /[\p{L}\p{N}_]/u;
-/** a "#" glued to one of these is not a word start: C#Title, &#39;, ##x */
 const NOT_WORD_START = /[\p{L}\p{N}_#&]/u;
 
-/** Spacing a pasted thread token needs on each side: a lead space after
- * any char the resolver refuses as a word start — word chars, but also #
- * and &, so a paste after them cannot glue into ##Title — and a trail
- * space before a plain word char. */
 export function threadTokenSpacing(text: string, start: number, end: number): { lead: string; trail: string } {
   return {
     lead: start > 0 && NOT_WORD_START.test(text[start - 1] ?? "") ? " " : "",
@@ -51,14 +34,10 @@ export function threadTokenSpacing(text: string, start: number, end: number): { 
   };
 }
 
-/** Only a title that is a real name can be linked: "123" would turn every
- * issue number into a thread link. */
 function linkable(title: string): boolean {
   return title.length > 0 && !/^\d+$/.test(title);
 }
 
-/** Known titles, longest first, each with every thread that carries it in
- * the caller's (recency) order. */
 function groupTitles(threads: ThreadRefCandidate[]): TitleGroup[] {
   const groups = new Map<string, TitleGroup>();
   const seen = new Set<string>();
@@ -75,9 +54,6 @@ function groupTitles(threads: ThreadRefCandidate[]): TitleGroup[] {
   return [...groups.values()].sort((a, b) => b.lower.length - a.lower.length);
 }
 
-/** Which of several same-titled threads a mention means: the current
- * bot's, else the most recently active, else the first — flagged so the
- * link can say which bot it landed on. */
 function pick(candidates: ThreadRefCandidate[], currentBotId: string | undefined): ResolvedThreadRef {
   const resolved = (thread: ThreadRefCandidate, ambiguous: boolean): ResolvedThreadRef => ({
     botId: thread.botId, botName: thread.botName, threadId: thread.threadId, title: thread.title, ambiguous,
@@ -95,8 +71,6 @@ function pick(candidates: ThreadRefCandidate[], currentBotId: string | undefined
   return resolved(pool[0], true);
 }
 
-/** Split `text` into plain runs and linked "#Title" runs. The linked run
- * keeps the person's own spelling ("#qa pr 245" stays as typed). */
 export function resolveThreadRefs(text: string, threads: ThreadRefCandidate[], currentBotId?: string): ThreadRefSpan[] {
   const groups = groupTitles(threads);
   if (!groups.length || !text.includes("#")) return [{ text }];
@@ -130,20 +104,13 @@ export function resolveThreadRefs(text: string, threads: ThreadRefCandidate[], c
   return spans.length ? spans : [{ text }];
 }
 
-// ── canonical thread links ─────────────────────────────────────────────
-// openmausbot://thread/<id>?bot=<owner> is the one spelling a copied
-// reference has, in the clipboard and inside sent messages. The bot id is
-// optional when parsing — a bare link or a raw UUID resolves by preference
-// — but copy always emits it, so a paste round-trips to the exact thread.
-
-/** Where a canonical link points. `botId` is the owner the link was copied
- * from, when it carries one. */
 export interface ThreadRefAddress {
   threadId: string;
   botId?: string;
 }
 
 const THREAD_URL_PREFIX = "openmausbot://thread/";
+const BOT_URL_PREFIX = "openmausbot://bot/";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ID_LIMIT = 256;
 
@@ -153,13 +120,25 @@ const plainId = (value: string): string | null => {
   return value;
 };
 
-/** The canonical link for a thread a person can copy. */
 export function threadRefUrl(ref: { botId: string; threadId: string }): string {
   return THREAD_URL_PREFIX + encodeURIComponent(ref.threadId) + "?bot=" + encodeURIComponent(ref.botId);
 }
 
-/** Parse a canonical thread link; null for anything else, including
- * near-misses with extra path, extra query or a foreign scheme. */
+/** `?thread=<threadId>&bot=<botId>` on the web app's address: a chat link that works outside the app. */
+export function takeThreadLinkFromLocation(): string | null {
+  const location = window.location;
+  if (!location) return null;
+  const params = new URLSearchParams(location.search);
+  const thread = params.get("thread");
+  if (thread === null) return null;
+  const bot = params.get("bot");
+  params.delete("thread");
+  params.delete("bot");
+  const search = params.toString();
+  window.history.replaceState(null, "", location.pathname + (search ? `?${search}` : "") + location.hash);
+  return THREAD_URL_PREFIX + encodeURIComponent(thread) + (bot === null ? "" : "?bot=" + encodeURIComponent(bot));
+}
+
 export function parseThreadRefUrl(value: string): ThreadRefAddress | null {
   const raw = value.trim();
   if (!raw.toLowerCase().startsWith(THREAD_URL_PREFIX)) return null;
@@ -188,22 +167,38 @@ export function parseThreadRefUrl(value: string): ThreadRefAddress | null {
   return owner ? { threadId: thread, botId: owner } : { threadId: thread };
 }
 
-/** Whether a value is shaped like a thread link at all — even one that
- * fails strict parsing. Markdown must never hand such a URL to the shell
- * as an external link, live or dead. */
+export function parseBotRefUrl(value: string): { botId: string } | null {
+  const raw = value.trim();
+  if (!raw.toLowerCase().startsWith(BOT_URL_PREFIX)) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.username || url.password || url.port || url.hash) return null;
+  if (url.hostname.toLowerCase() !== "bot") return null;
+  if ([...url.searchParams.keys()].length) return null;
+  let botId: string;
+  try {
+    botId = decodeURIComponent(url.pathname.slice(1));
+  } catch {
+    return null;
+  }
+  if (!botId || botId.includes("/") || url.pathname.slice(1) !== encodeURIComponent(botId)) return null;
+  const bot = plainId(botId);
+  return bot ? { botId: bot } : null;
+}
+
+/** Even a link that fails strict parsing must never reach the shell as an external link. */
 export function looksLikeThreadRefUrl(value: string): boolean {
   return value.trim().toLowerCase().startsWith(THREAD_URL_PREFIX);
 }
 
-/** A raw thread id on its own: the UUID form the server mints. */
 export function isThreadUuid(value: string): boolean {
   return UUID.test(value.trim());
 }
 
-/** Resolve an address (or bare UUID) against the visible threads. The
- * link's own bot wins when it names one; otherwise the same preference a
- * #Title mention uses: the open bot's thread, then the newest, then a
- * deterministic first — flagged ambiguous so the chip can name the bot. */
 export function resolveThreadRefAddress(
   threads: ThreadRefCandidate[],
   address: ThreadRefAddress,
@@ -214,43 +209,29 @@ export function resolveThreadRefAddress(
   const pinned = address.botId ? candidates.filter((thread) => thread.botId === address.botId) : [];
   if (pinned.length === 1) return { ...pinned[0], title: pinned[0].title.trim(), ambiguous: false };
   if (pinned.length > 1) return pick(pinned, currentBotId);
-  // a pinned owner missing from the visible threads is a dead reference:
-  // never fall through to another bot's same-id thread
+  // A pinned owner missing from the visible threads is a dead reference; never fall through to another bot's thread.
   if (address.botId) return null;
   return pick(candidates, currentBotId);
 }
-
-// ── sent-message serialization ─────────────────────────────────────────
-// A resolvable #Title becomes a markdown link whose URL carries the thread
-// id, so bots and API consumers keep the machine-readable reference. The
-// label keeps the title readable; escapes keep brackets in titles parseable.
 
 const escapeThreadLabel = (title: string): string =>
   title.replace(/[[\]\\]/g, "\\$&");
 const unescapeThreadLabel = (label: string): string => label.replace(/\\(.)/g, "$1");
 
-/** The markdown shape a thread reference is sent as. */
 export function threadRefMarkdown(ref: ResolvedThreadRef): string {
   return "[" + escapeThreadLabel(ref.title) + "](" + threadRefUrl(ref) + ")";
 }
 
 interface MarkdownLinkSpan {
-  /** exact source text of the run */
   raw: string;
-  /** a markdown link to a thread: label plus parsed address when valid */
   link?: { label: string; address: ThreadRefAddress | null };
-  /** inline or fenced code: quoted text, never rewritten */
   code?: boolean;
 }
 
 const MARKDOWN_LINK_LABEL = /\[((?:\\.|[^\\\]])*)\]\(/y;
 const INLINE_LINK_SPACE = " \t\n\r";
 
-/** The CommonMark inline-link tail after "[label](": optional whitespace,
- * an angle-bracket destination (spaces allowed) or a bare destination with
- * balanced parentheses, optional whitespace, an optional quoted title, and
- * the closing ")". Returns the tail length plus the bare destination for
- * resolution, or null when no complete link closes here. */
+/** The CommonMark inline-link tail after "[label](", or null when no complete link closes here. */
 function inlineLinkTail(rest: string, from: number): { tail: number; destination: string } | null {
   let at = from;
   while (at < rest.length && INLINE_LINK_SPACE.includes(rest.charAt(at))) at += 1;
@@ -297,10 +278,6 @@ function inlineLinkTail(rest: string, from: number): { tail: number; destination
   return { tail: at + 1 - from, destination };
 }
 
-/** Split text into plain runs and the spans resolution must never touch.
- * Every markdown link is kept verbatim — a #Title inside a label would
- * nest links — and so is code: inline backticks and fenced blocks quote
- * their contents, so only plain runs carry #Title mentions. */
 function splitThreadLinkMarkdown(text: string): MarkdownLinkSpan[] {
   if (!text.includes("](") && !text.includes("`")) return [{ raw: text }];
   const spans: MarkdownLinkSpan[] = [];
@@ -346,8 +323,6 @@ function splitThreadLinkMarkdown(text: string): MarkdownLinkSpan[] {
 }
 
 
-/** The text a send carries: resolvable #Title runs become canonical links;
- * existing links and unknown titles pass through untouched. */
 export function serializeThreadRefs(text: string, threads: ThreadRefCandidate[], currentBotId?: string): string {
   if (!groupTitles(threads).length) return text;
   return splitThreadLinkMarkdown(text)
@@ -357,9 +332,6 @@ export function serializeThreadRefs(text: string, threads: ThreadRefCandidate[],
     .join("");
 }
 
-/** One run of display text, linked when `ref` is set. Covers both forms a
- * message holds: a canonical markdown link (label shown, dead link kept as
- * raw text) and a #Title mention (the person's own spelling). */
 export interface ThreadRefDisplaySpan {
   text: string;
   ref?: ResolvedThreadRef;
@@ -380,11 +352,6 @@ export function splitThreadRefsForDisplay(text: string, threads: ThreadRefCandid
   return spans.length ? spans : [{ text }];
 }
 
-/** The whole paste is one thread reference — a canonical link, the markdown
- * link shape messages carry, or a raw UUID — and it resolves to a visible
- * thread: the #Title token the composer holds, plus what it resolved to.
- * null when the paste is not a reference or names no known thread, so an
- * unknown id stays plain text. */
 export function threadTokenFromPaste(
   pasted: string,
   threads: ThreadRefCandidate[],
@@ -399,18 +366,10 @@ export function threadTokenFromPaste(
   if (!address) return null;
   const ref = resolveThreadRefAddress(threads, address, currentBotId);
   if (!ref) return null;
-  // '#Title' is the token of choice, but a numeric or '#' prefixed title
-  // can never re-resolve through that spelling — those pastes hold the
-  // canonical markdown link instead, which sends and displays the same.
   const title = ref.title.trim();
   const token = linkable(title) && !title.startsWith("#") ? `#${title}` : threadRefMarkdown(ref);
   return { token, ref };
 }
-
-// ── remark plugin ──────────────────────────────────────────────────────
-// Splits markdown text nodes into thread-link nodes that render through
-// the markdown `span` component as data-thread-* attributes. Code, links
-// and images are left alone: a title inside backticks is being quoted.
 
 interface MdNode {
   type: string;
@@ -440,7 +399,6 @@ function linkNode(text: string, ref: ResolvedThreadRef): MdNode {
   };
 }
 
-/** A unified attacher: `remarkPlugins={[remarkThreadRefs(threads, botId)]}`. */
 export function remarkThreadRefs(threads: ThreadRefCandidate[], currentBotId?: string) {
   return () => (tree: MdNode) => {
     if (!threads.length) return;

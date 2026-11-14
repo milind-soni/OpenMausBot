@@ -89,9 +89,9 @@ connections or directly invoke switching, forgetting, or host-only controls.
 
 ## Optional computer sharing
 
-**Computer sharing is disabled by default.** The exception is lending a Mac
-to the person's own OMB Cloud home, which has its own switch and gate; see
-`docs/cloud-pro.md`, "Let my Cloud use this Mac".
+**Computer sharing is disabled by default.** The exception is a Mac lending
+itself to the person's own Clouds, which happens by itself with a gate of its
+own; see `docs/cloud-pro.md`, "This computer works for your Clouds".
 Connecting and switching hosted workspaces still works, but does not offer
 local file, terminal, or screen access. The flow below is maintainer-only
 verification with `features.sharedComputers: true` on both servers, not a
@@ -149,16 +149,24 @@ them as `protected`. Writes are refused inside any `.git` directory, because
 git runs commands from its configuration and hooks. Other files that programs
 later run (scripts, build files) can still be edited in a writable folder.
 
-**Computer control** offers only on-screen tools: observing windows and
-operating apps (`LENT_SCREEN_TOOLS`). The local driver's other tools
-(uploading a local file into a page by path, recording or replaying to a path,
-changing or updating its configuration, installing a binary, opening a
-DevTools port, killing a process) are refused and hidden from the tool list.
+**Computer control** offers only on-screen tools and, for each, only the
+arguments that observe or operate the screen (`LENT_SCREEN_ARGUMENTS` in
+`electron/lent-screen-tools.mjs`, derived from the driver's own schemas and
+checked against a snapshot of them in `electron/fixtures`). The local driver's
+other tools (uploading a local file into a page by path, recording or
+replaying to a path, changing or updating its configuration, installing a
+binary, opening a DevTools port, killing a process, raising permission
+prompts) are refused and hidden, and so is every argument that names a file
+(`screenshot_out_file`, `debug_image_out`, `image_path`, a path as a cursor
+icon or as a URL to open), a command line or a port. Unknown arguments are
+refused, never forwarded.
 
 **Activity log.** The desktop records every request it receives (time, server,
 action, folder name and relative path, tool name or command text, and whether
 it ran or was refused) in `lending-activity.jsonl` next to the grants, owner
-only, last 500 entries. It never records file contents, output or typed text.
+only. It only ever appends (never through a link); a full file of 500 entries
+is moved aside intact as `lending-activity.jsonl.1`. It never records file
+contents, output or typed text.
 **Computer access** shows the recent entries for that server.
 
 The connector runs in Electron main, outbound to the paired server; there is

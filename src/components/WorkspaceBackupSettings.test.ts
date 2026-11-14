@@ -13,18 +13,20 @@ vi.mock("react", async (original) => ({ ...await original<typeof import("react")
   useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
 }));
 vi.mock("@/state/store", () => ({ api: fixture.api }));
-import { WorkspaceBackupRecovery, WorkspaceBackupSettings, WorkspaceBackupSummaryView } from "./WorkspaceBackupSettings";
+import { WorkspaceBackupRecovery, WorkspaceBackupRestartNotice, WorkspaceBackupSettings, WorkspaceBackupSummaryView } from "./WorkspaceBackupSettings";
 
 type Node = ReactElement<{ children?: ReactNode; type?: string; disabled?: boolean; value?: string; onChange?: (event: unknown) => void; onSubmit?: (event: unknown) => void; onClick?: () => void }>;
 function nodes(value: ReactNode): Node[] {
   if (!isValidElement(value)) return [];
   const node = value as Node;
-  return [node, ...Children.toArray(node.props.children).flatMap(nodes)];
+  // A row's description and message lines hold controls too (Learn more).
+  const extra = node.props as { subtitle?: ReactNode; message?: ReactNode };
+  return [node, ...Children.toArray(node.props.children).flatMap(nodes), ...Children.toArray(extra.subtitle).flatMap(nodes), ...Children.toArray(extra.message).flatMap(nodes)];
 }
-function render(recovery = false) {
+function render(recovery: boolean | "restart" | "cloud" = false) {
   fixture.index = 0; fixture.effects = [];
   let tree: ReactNode;
-  function Capture() { tree = recovery ? WorkspaceBackupRecovery({ children: createElement("p", null, "Normal app") }) : WorkspaceBackupSettings(); return tree; }
+  function Capture() { tree = recovery === "restart" ? WorkspaceBackupRestartNotice() : recovery === "cloud" ? WorkspaceBackupRestartNotice({ serverRestarts: true }) : recovery ? WorkspaceBackupRecovery({ children: createElement("p", null, "Normal app") }) : WorkspaceBackupSettings(); return tree; }
   const html = renderToStaticMarkup(createElement(Capture));
   return { html, nodes: nodes(tree) };
 }
@@ -41,13 +43,23 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 async function ready() { fixture.api.mockResolvedValueOnce({ busy: false }); render(); fixture.effects[0](); await flush(); }
+/** Each backup action is a row whose button opens its own small dialog. */
+const open = (which: "export" | "import") => { render().nodes.find((node) => (node.props as Record<string, unknown>)[`data-backup-${which}`] === "")!.props.onClick!(); };
+const formOf = (id: string) => render().nodes.find((node) => node.type === "form" && (node.props as { id?: string }).id === id)!;
 
 describe("Settings full backups", () => {
-  it("shows a native file input, password fields and validated summary with warnings", () => {
-    const html = render().html;
+  it("shows two rows, each opening a dialog with its file input or password fields, the details behind Learn more, and a validated summary with warnings", async () => {
+    await ready();
+    let html = render().html;
+    expect(html).toContain("Password-protected. Saved logins are not included.");
+    expect(html).not.toContain('type="password"');
+    expect(html).not.toContain('type="file"');
+    render().nodes.find((node) => (node.type as { name?: string }).name === "LearnMore")!.props.onClick!();
+    open("export"); open("import");
+    html = render().html;
     expect(html).toContain('type="file" accept=".ombbackup"');
     expect(html.match(/type="password"/g)).toHaveLength(3);
-    expect(html).toContain("remote VM disks");
+    expect(html).toContain("the disks of remote desktops");
     expect(html).toContain("Saved account credentials and connections are not included");
     expect(html).toContain("existing credentials on the destination stay unchanged");
     expect(html).toContain("not automatically redacted");
@@ -59,6 +71,7 @@ describe("Settings full backups", () => {
   it("exports encrypted state by POST and downloads without putting the password in a URL or storage", async () => {
     await ready();
     storage.set("omb-drafts", "private draft"); storage.set("auth-token", "not exported"); storage.set("omb-webhook-credentials", "not exported either");
+    open("export");
     let view = render();
     const passwords = view.nodes.filter((node) => node.type === "input" && node.props.type === "password");
     change(passwords[0], "correct horse battery"); change(passwords[1], "correct horse battery");
@@ -66,7 +79,7 @@ describe("Settings full backups", () => {
     const link = { href: "", download: "", click: vi.fn(), remove: vi.fn() };
     vi.stubGlobal("document", { createElement: () => link, body: { append: vi.fn() } });
     fixture.api.mockResolvedValueOnce({ id: "download-id", filename: "fixture.ombbackup" });
-    const form = view.nodes.find((node) => node.type === "form")!;
+    const form = formOf("backup-export");
     submit(form); submit(form); await flush();
     expect(fixture.api).toHaveBeenCalledTimes(2); // one status, one export
     const [path, init] = fixture.api.mock.calls[1];
@@ -76,16 +89,30 @@ describe("Settings full backups", () => {
     expect(link.click).toHaveBeenCalledOnce();
     expect([...storage.values()]).not.toContain("correct horse battery");
     expect(render().html).not.toContain('value="correct horse battery"');
+    expect(render().html).not.toContain('id="backup-export"');
+  });
+
+  it("keeps the export dialog open with its reason when the export fails, so it can be tried again", async () => {
+    await ready();
+    open("export");
+    const passwords = render().nodes.filter((node) => node.type === "input" && node.props.type === "password");
+    change(passwords[0], "correct horse battery"); change(passwords[1], "correct horse battery");
+    fixture.api.mockRejectedValueOnce(new Error("Disk full"));
+    submit(formOf("backup-export")); await flush();
+    const html = render().html;
+    expect(html).toContain('id="backup-export"');
+    expect(html).toMatch(/role="alert"[^>]*>Disk full</);
   });
 
   it("uploads a raw file, validates it, and requires exact REPLACE with the staged ID", async () => {
     await ready();
     const file = new File(["encrypted fixture"], "fixture.ombbackup");
+    open("import");
     render().nodes.find((node) => node.props.type === "file")!.props.onChange!({ target: { files: [file] } });
     let view = render();
-    change(view.nodes.filter((node) => node.props.type === "password")[2], "correct horse battery");
+    change(view.nodes.filter((node) => node.props.type === "password")[0], "correct horse battery");
     fixture.api.mockResolvedValueOnce({ id: "upload-id" }).mockResolvedValueOnce({ id: "stage-id", summary });
-    submit(render().nodes.filter((node) => node.type === "form")[1]); await flush();
+    submit(formOf("backup-import")); await flush();
     expect(fixture.api.mock.calls[1]).toEqual(["/api/workspace-backup/upload", { method: "POST", headers: { "content-type": "application/octet-stream" }, body: file }]);
     expect(JSON.parse(fixture.api.mock.calls[2][1].body)).toEqual({ id: "upload-id", password: "correct horse battery" });
     view = render();
@@ -98,15 +125,16 @@ describe("Settings full backups", () => {
     replace().props.onClick!(); await flush();
     expect(JSON.parse(fixture.api.mock.calls[3][1].body)).toEqual({ id: "stage-id", confirmation: "REPLACE" });
     expect(storage.get("omb-pending-workspace-restore")).toBe("stage-id");
-    expect(render().html).toContain("Fully quit OpenMausBot");
+    expect(render().html).toContain("Fully quit MausBot");
   });
 
   it("does not offer a replacement after failed password validation", async () => {
     await ready();
+    open("import");
     render().nodes.find((node) => node.props.type === "file")!.props.onChange!({ target: { files: [new File(["archive"], "file.ombbackup")] } });
-    change(render().nodes.filter((node) => node.props.type === "password")[2], "wrong password");
+    change(render().nodes.filter((node) => node.props.type === "password")[0], "wrong password");
     fixture.api.mockResolvedValueOnce({ id: "upload" }).mockRejectedValueOnce(new Error("Wrong password"));
-    submit(render().nodes.filter((node) => node.type === "form")[1]); await flush();
+    submit(formOf("backup-import")); await flush();
     const html = render().html;
     expect(html).toContain('role="alert"'); expect(html).toContain("Wrong password"); expect(html).not.toContain("Replace installation");
   });
@@ -114,8 +142,9 @@ describe("Settings full backups", () => {
   it("reuploads the selected file if its upload or validated stage expires", async () => {
     await ready();
     const file = new File(["archive"], "file.ombbackup");
+    open("import");
     render().nodes.find((node) => node.props.type === "file")!.props.onChange!({ target: { files: [file] } });
-    const validate = async () => { change(render().nodes.filter((node) => node.props.type === "password")[2], "correct horse battery"); submit(render().nodes.filter((node) => node.type === "form")[1]); await flush(); };
+    const validate = async () => { change(render().nodes.filter((node) => node.props.type === "password")[0], "correct horse battery"); submit(formOf("backup-import")); await flush(); };
     const expired = Object.assign(new Error("Backup expired; upload again"), { status: 404 });
     fixture.api.mockResolvedValueOnce({ id: "upload-old" }).mockRejectedValueOnce(expired);
     await validate();
@@ -136,7 +165,7 @@ describe("Settings full backups", () => {
     fixture.api.mockResolvedValueOnce({ busy: true, pendingRestore: true });
     expect(render(true).html).not.toContain("Continue without restoring drafts");
     fixture.effects[0](); await flush();
-    expect(render(true).html).toContain("Fully quit OpenMausBot");
+    expect(render(true).html).toContain("Fully quit MausBot");
     expect(render(true).html).not.toContain("Continue without restoring drafts");
     expect(fixture.api).toHaveBeenCalledOnce(); expect(storage.get("omb-drafts")).toBe("old");
     fixture.values = [];
@@ -144,6 +173,112 @@ describe("Settings full backups", () => {
     render(true); fixture.effects[0](); await flush();
     expect(storage.get("omb-drafts")).toBe("restored"); expect(storage.get("auth-token")).toBe("keep");
     expect(storage.has("omb-pending-workspace-restore")).toBe(false); expect(window.location.reload).toHaveBeenCalledOnce();
+  });
+
+  it("on a server that restarts itself, waits instead of asking to quit, then carries on once the restore is installed", async () => {
+    storage.set("omb-pending-workspace-restore", "stage-id");
+    fixture.api.mockResolvedValueOnce({ busy: true, pendingRestore: true, restarts: true });
+    render(true); fixture.effects[0](); await flush();
+    expect(render(true).html).toContain("is restarting to finish it");
+    expect(render(true).html).not.toContain("Fully quit");
+    vi.useFakeTimers();
+    try {
+      fixture.values = [];
+      const view = render("cloud");
+      expect(view.html).toContain("is restarting to finish it");
+      expect(view.nodes.some(node => node.type === "button")).toBe(false);
+      const stop = fixture.effects[0]() as () => void;
+      fixture.api.mockResolvedValueOnce({ busy: true, pendingRestore: true });
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(window.location.reload).not.toHaveBeenCalled();
+      fixture.api.mockResolvedValueOnce({});
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(window.location.reload).not.toHaveBeenCalled();
+      fixture.api.mockRejectedValueOnce(new DOMException("The operation timed out.", "TimeoutError"));
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(window.location.reload).not.toHaveBeenCalled();
+      fixture.api.mockResolvedValueOnce({ busy: false, pendingRestore: false, lastRestoreId: "stage-id" });
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(window.location.reload).toHaveBeenCalledOnce();
+      expect(fixture.api.mock.calls.filter(([path, init]) => path === "/api/workspace-backup/status" && init?.timeoutMs === 10_000)).toHaveLength(4);
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(window.location.reload).toHaveBeenCalledOnce();
+      stop();
+    } finally { vi.useRealTimers(); }
+    expect(storage.get("omb-pending-workspace-restore")).toBe("stage-id");
+  });
+
+  it("on a server that restarts itself, says so when the restart takes much longer, and keeps waiting", async () => {
+    storage.set("omb-pending-workspace-restore", "stage-id");
+    vi.useFakeTimers();
+    try {
+      expect(render("cloud").html).not.toContain("longer than usual");
+      const stop = fixture.effects[0]() as () => void;
+      fixture.api.mockRejectedValue(new Error("Server unavailable"));
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(render("cloud").html).toContain("longer than usual");
+      expect(window.location.reload).not.toHaveBeenCalled();
+      stop();
+    } finally { vi.useRealTimers(); }
+    expect(storage.get("omb-pending-workspace-restore")).toBe("stage-id");
+  });
+
+  it("on a server that restarts itself, reloads to sign-in when the restored workspace does not know this browser", async () => {
+    vi.useFakeTimers();
+    try {
+      render("cloud");
+      const stop = fixture.effects[0]() as () => void;
+      fixture.api.mockRejectedValueOnce(Object.assign(new Error("Sign in"), { status: 401 }));
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(window.location.reload).toHaveBeenCalledOnce();
+      stop();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("offers a real desktop restart without clearing the restore marker or drafts, once only", async () => {
+    const relaunch = vi.fn().mockResolvedValue(true);
+    vi.stubGlobal("window", { ...window, ogb: { relaunch } });
+    storage.set("omb-pending-workspace-restore", "stage-id"); storage.set("omb-drafts", "keep");
+    fixture.api.mockResolvedValueOnce({ busy: true, pendingRestore: true });
+    render(true); fixture.effects[0](); await flush();
+    expect(render(true).html).toContain("Restart and restore");
+    expect(render(true).html).not.toContain(">Retry<");
+    fixture.values = [];
+    const restart = render("restart").nodes.find(node => node.type === "button")!;
+    restart.props.onClick!(); restart.props.onClick!(); await flush();
+    expect(relaunch).toHaveBeenCalledOnce();
+    expect(render("restart").nodes.find(node => node.type === "button")!.props.disabled).toBe(true);
+    expect(storage.get("omb-pending-workspace-restore")).toBe("stage-id");
+    expect(storage.get("omb-drafts")).toBe("keep");
+    expect(window.location.reload).not.toHaveBeenCalled();
+  });
+
+  it.each([false, new Error("Fixture restart unavailable")])("keeps recovery intact and offers a retry when native restart fails (%s)", async result => {
+    const relaunch = result === false ? vi.fn().mockResolvedValue(false) : vi.fn().mockRejectedValue(result);
+    vi.stubGlobal("window", { ...window, ogb: { relaunch } });
+    storage.set("omb-pending-workspace-restore", "stage-id");
+    render("restart").nodes.find(node => node.type === "button")!.props.onClick!(); await flush();
+    const view = render("restart");
+    expect(view.html).toContain("Could not restart MausBot");
+    expect(view.nodes.find(node => node.type === "button")!.props.disabled).toBe(false);
+    expect(storage.get("omb-pending-workspace-restore")).toBe("stage-id");
+    expect(window.location.reload).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, { relaunch: vi.fn(), remoteClient: { active: true } }])("never restarts the local app for a browser or remote workspace", bridge => {
+    window.ogb = bridge as Window["ogb"];
+    const view = render("restart");
+    expect(view.html).toContain("restart the server process");
+    expect(view.html).not.toContain("Restart and restore");
+    expect(view.nodes.filter(node => node.type === "button")).toHaveLength(0);
+  });
+
+  it("retains the server-status retry for browser recovery", async () => {
+    storage.set("omb-pending-workspace-restore", "stage-id");
+    fixture.api.mockResolvedValueOnce({ busy: true, pendingRestore: true });
+    render(true); fixture.effects[0](); await flush();
+    expect(render(true).html).toContain(">Retry<");
+    expect(render(true).html).not.toContain("Restart and restore");
   });
 
   it("never imports a different restore's browser state", async () => {

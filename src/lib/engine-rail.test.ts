@@ -1,18 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import type { InstanceInfo } from "@/state/store";
-import { configuredModelInstances, splitEngineRail } from "./engine-rail";
+import { backupNote, configuredModelInstances, isClaudeAccount, modelsAwaitEngine, signInFamily, splitEngineRail } from "./engine-rail";
 
 describe("splitEngineRail", () => {
-  it("keeps Cloud engines above Local engines", () => {
-    const { subscription, custom } = splitEngineRail([
+  it("groups sign-in plans, pasted provider keys and Local engines", () => {
+    const { subscription, api, custom } = splitEngineRail([
       { access: "subscription", instanceId: "claude" },
       { access: "custom", instanceId: "hermes" },
       { instanceId: "grok" },
       { access: "api", instanceId: "mistral" },
       { access: "custom", instanceId: "qwen" },
     ]);
-    expect(subscription.map((row) => row.instanceId)).toEqual(["claude", "grok", "mistral"]);
+    expect(subscription.map((row) => row.instanceId)).toEqual(["claude", "grok"]);
+    expect(api.map((row) => row.instanceId)).toEqual(["mistral"]);
     expect(custom.map((row) => row.instanceId)).toEqual(["hermes", "qwen"]);
   });
 
@@ -77,7 +78,6 @@ describe("configuredModelInstances", () => {
 
     expect(configuredModelInstances([missing, ready, empty], "missing")).toEqual([missing, ready]);
     expect(configuredModelInstances([missing, ready, empty], "empty")).toEqual([ready, empty]);
-    // An empty selection (a bot sent to setup) keeps nothing extra.
     expect(configuredModelInstances([missing, ready, empty], "")).toEqual([ready]);
   });
 
@@ -120,9 +120,6 @@ describe("configuredModelInstances", () => {
   });
 });
 
-// The Discord report: a person could no longer pick Claude at all. Claude
-// vanished from every picker when `claude auth status` did not answer
-// loggedIn:true in time, or when `claude --version` failed.
 describe("Claude in the picker when Claude Code is signed out or not found", () => {
   const official = [{ id: "claude-opus-5-5", label: "Opus 5.5" }, { id: "claude-sonnet-5", label: "Sonnet 5" }];
   const ollama = { id: "ollama:qwen3", label: "qwen3", custom: true, provider: "Ollama" };
@@ -152,5 +149,54 @@ describe("Claude in the picker when Claude Code is signed out or not found", () 
     expect(configuredModelInstances([missing], "claude")).toEqual([missing]);
     expect(configuredModelInstances([missing])).toEqual([]);
     expect(configuredModelInstances([missing], "codex")).toEqual([]);
+  });
+});
+
+describe("modelsAwaitEngine", () => {
+  const snapshot = { state: "available" as const, authenticated: true };
+
+  it("asks a signed-in engine whose list it never gave", () => {
+    expect(modelsAwaitEngine({ modelsUnconfirmed: true, snapshot })).toBe(true);
+  });
+
+  it("leaves a confirmed list, a signed-out engine and an unavailable one alone", () => {
+    expect(modelsAwaitEngine({ snapshot })).toBe(false);
+    expect(modelsAwaitEngine({ modelsUnconfirmed: true, snapshot: { ...snapshot, authenticated: false } })).toBe(false);
+    expect(modelsAwaitEngine({ modelsUnconfirmed: true, snapshot: { state: "unavailable", reason: "missing" } })).toBe(false);
+  });
+});
+
+describe("signInFamily", () => {
+  it("groups official Claude sign-ins but keeps custom endpoints and Bedrock apart", () => {
+    expect(signInFamily({ driverKind: "claudeAgent" })).toBe("claude");
+    expect(signInFamily({ driverKind: "claudeAgent", access: "subscription" })).toBe("claude");
+    expect(signInFamily({ driverKind: "claudeAgent", access: "custom" })).toBeUndefined();
+    expect(signInFamily({ driverKind: "claudeAgent", access: "api" })).toBeUndefined();
+    expect(isClaudeAccount({ driverKind: "claudeAgent", access: "custom" })).toBe(false);
+    expect(signInFamily({ driverKind: "codex" })).toBe("openai");
+  });
+});
+
+describe("backupNote", () => {
+  const engine = (instanceId: string, driverKind: string, overrides: Partial<InstanceInfo> = {}): InstanceInfo => ({
+    instanceId, driverKind, displayName: instanceId, snapshot: { state: "available" },
+    models: { default: "m", options: [{ id: "m", label: "M" }] }, ...overrides,
+  });
+  const main = engine("codex", "codex");
+
+  it("says another sign-in to the main subscription AI is used only while the main one is signed out", () => {
+    expect(backupNote(main, engine("codex-sub1", "codex"))).toBe(
+      "Another sign-in to the main AI: used only while the main one is signed out, never at its usage limit (provider terms).");
+    expect(backupNote(engine("claude", "claudeAgent"), engine("claude-2", "claudeAgent"))).toMatch(/^Another sign-in/);
+    // A key the CLI stored itself is not pay-per-use to the server's limit rule, so the note still applies.
+    expect(backupNote(main, engine("codex-stored-key", "codex", { snapshot: { state: "available", account: { method: "api-key" } } }))).toMatch(/^Another sign-in/);
+  });
+
+  it("keeps the same-account note and says nothing for other AIs or pay-per-use keys", () => {
+    expect(backupNote(main, main)).toBe("Same account as the main AI: it shares the usage limit.");
+    expect(backupNote(main, engine("claude", "claudeAgent"))).toBeUndefined();
+    expect(backupNote(main, engine("codex-key", "codex", { access: "api" }))).toBeUndefined();
+    expect(backupNote(engine("ollama", "openaiChat"), engine("ollama-2", "openaiChat"))).toBeUndefined();
+    expect(backupNote(undefined, engine("codex-sub1", "codex"))).toBeUndefined();
   });
 });

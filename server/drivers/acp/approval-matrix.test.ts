@@ -1,6 +1,5 @@
-// Exercise real provider adapters against the existing scripted ACP peer.
-// These tests prove OMB's flags/settings and handling of residual requests,
-// not a native engine's risk classifier or a model's willingness to use tools.
+// Real provider adapters against the scripted ACP peer: proves OMB's flags and residual-request handling,
+// not a native engine's classifier.
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -18,7 +17,7 @@ import { DroidAgentDriver } from "./droid.ts";
 import { GeminiAgentDriver } from "./gemini.ts";
 import { HermesAgentDriver } from "./hermes.ts";
 import { KimiAgentDriver } from "./kimi.ts";
-import { createOpenCodeDriver } from "./opencode-go.ts";
+import { createOpenCodeDriver, openCodeOwnedDirectories } from "./opencode-go.ts";
 import { QwenAgentDriver } from "./qwen.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
@@ -28,11 +27,7 @@ const OpenCodeDriver = createOpenCodeDriver(async () => ({
 }));
 
 describe("remaining ACP approval mappings", () => {
-  // Engines that own an approval ladder spell the turn's level on argv, so the
-  // expected command line varies per mode; every other row keeps one fixed argv
-  // and steers the whole ladder through OMB. The instance below always stores
-  // fullAuto: true, so a mode with no entry here is the proof that the legacy
-  // instance flag on its own never adds a bypass flag.
+  // A mode without an argv entry here proves the stored fullAuto: true never adds a bypass flag on its own.
   const cases: {
     driver: ProviderDriver<AcpConfig>;
     argv: string[];
@@ -72,11 +67,6 @@ describe("remaining ACP approval mappings", () => {
     const recorder = recordEvents(instance.adapter);
     const pidOf = () => JSON.parse(readFileSync(dump, "utf8")).pid as number;
     try {
-      // The residual request reaches the user at every level, including the
-      // ones an engine claims natively. Full is unsupported on most rows here
-      // and must stay interactive even though the instance stored
-      // fullAuto=true; where Full is supported the flag tracks the turn's own
-      // mode, so the legacy instance value still cannot outrank Ask or Auto.
       for (const approvalMode of ["full", "auto", "ask"] as const) {
         const pidBefore = existsSync(dump) ? pidOf() : null;
         const methodsBefore = existsSync(rpcDump) ? (JSON.parse(readFileSync(rpcDump, "utf8")) as string[]).length : 0;
@@ -91,24 +81,19 @@ describe("remaining ACP approval mappings", () => {
         expect(opened).toMatchObject({ requestType: "permission", tool: "shell" });
         expect(recorder.events.some((event) => event.type === "turn.completed" && event.turnId === turnId)).toBe(false);
         const respawned = pidOf() !== pidBefore;
-        // a pooled child never rewrites its spawn dump, so argv and env are
-        // evidence only for a turn that really spawned a process
+        // A pooled child never rewrites its spawn dump: argv and env are evidence only for a real spawn.
         if (respawned) {
           expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual([...argv, ...(native?.[approvalMode] ?? [])]);
           if (driver === OpenCodeDriver) {
             const permission = JSON.parse(JSON.parse(readFileSync(dump, "utf8")).env.OPENCODE_PERMISSION);
-            expect(permission).toMatchObject({ external_directory: approvalMode === "full" ? "allow" : "ask" });
-            if (approvalMode === "full") expect(permission).toMatchObject({ "*": "allow", read: "allow", bash: "allow", edit: "allow" });
-            else expect(permission).toEqual({ external_directory: "ask" });
+            if (approvalMode === "full") expect(permission).toMatchObject({ "*": "allow", external_directory: "allow", read: "allow", bash: "allow", edit: "allow" });
+            else expect(permission).toEqual({ external_directory: {
+              "*": "ask",
+              ...Object.fromEntries(openCodeOwnedDirectories().flatMap((directory) => [[directory, "allow"], [join(directory, "*"), "allow"]])),
+            } });
           }
         }
-        // Agent processes are pooled per spawn contract: a turn whose mode
-        // changed the contract respawns (fresh dump pid) and must establish
-        // its session — session/new for the cursorless full turn, the
-        // cursor's session/load otherwise. A reused pooled child skips
-        // establishment and prompts the live session instead. A respawn
-        // rewrites the rpc dump, a reuse appends to it, so only the methods
-        // past the pre-turn baseline are this turn's.
+        // A respawn rewrites the rpc dump and a reuse appends to it, so only methods past the baseline are this turn's.
         const methods = JSON.parse(readFileSync(rpcDump, "utf8")) as string[];
         const turnMethods = respawned ? methods : methods.slice(methodsBefore);
         if (respawned) {
@@ -122,7 +107,7 @@ describe("remaining ACP approval mappings", () => {
           const settings = JSON.parse(readFileSync(`${dump}.config.json`, "utf8"));
           expect(settings[0]).toEqual({
             method: "session/set_mode",
-            params: { sessionId: "fake-acp-session", modeId: "normal" },
+            params: { sessionId: "fake-acp-session", modeId: approvalMode === "full" ? "auto-high" : "normal" },
           });
         }
         expect(await instance.adapter.respondToRequest("approval-matrix-thread", opened.requestId!, { behavior: "deny" }))

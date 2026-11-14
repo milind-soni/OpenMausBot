@@ -21,9 +21,9 @@ const sdkPackage = JSON.parse(await readFile(join(sdkRoot, "package.json"), "utf
 const expectedVersion = String(sdkPackage.version);
 
 const release = {
-  version: "0.28.2",
-  file: "cua-driver-rs-0.28.2-windows-x86_64-binary.zip",
-  sha256: "1f4bfceeab64cb7f56be7aad774c3dc2d2910d1427e4be1d79939c706e8029ba",
+  version: "0.45.4",
+  file: "cua-driver-rs-0.45.4-windows-x86_64-binary.zip",
+  sha256: "949927b4cb0519c6fb1377878d67d79a8d6fae7bc56cbed17c7aa26448d82cb5",
 };
 
 if (expectedVersion !== release.version) {
@@ -145,10 +145,9 @@ await build({
   outfile: bundle,
   logLevel: "silent",
 });
-// Same redirect as prepare-cua.mjs: the SDK resolves its native library
-// through @ubjs at runtime; patch the bundled resolver so
-// OPENMAUSBOT_CUA_SDK_LIBRARY (set by electron/cua.mjs to the staged DLL)
-// wins over the node_modules lookups that do not exist in the packaged app.
+// The SDK resolves its native library through @ubjs at runtime; the bundled
+// resolver is patched so OPENMAUSBOT_CUA_SDK_LIBRARY (the staged DLL) wins over
+// node_modules lookups that do not exist in the packaged app.
 const bundledSource = await readFile(bundle, "utf8");
 const resolverPattern = /function resolveLibPath\d*\(opts\) \{/g;
 const resolvers = bundledSource.match(resolverPattern) ?? [];

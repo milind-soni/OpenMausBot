@@ -1,43 +1,26 @@
-// The sidecar in front of a real harness.
-//
-// These boot the actual server and talk to it through the actual proxy,
-// because every bug this design can have lives in the seam between them and
-// none of them are visible to a unit test. In particular: SSE arriving but
-// never terminating an event, a resume cursor being dropped on the way
-// through, and the harness's loopback gate rejecting a proxied request.
+// Boots the real harness behind the real proxy: the bugs this design can have
+// live in the seam between them.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, request, type IncomingMessage, type Server } from "node:http";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createProxyHandler } from "../src/proxy.ts";
+import { MAX_SSE_EVENT_BYTES } from "../src/wire.ts";
 import { createConnectedDeviceTracker } from "../src/connected-devices.ts";
 import type { CompanionEndpoint } from "../src/endpoints.ts";
+import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
+import { workerPort } from "../../server/testing/worker-port.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
 
-/** Ports nothing is listening on.
- *
- * Two requirements here pull against each other. The port has to be
- * *verified* free — picking at random and hoping fails whenever something
- * else is on it, and the failure reads as a bug in the code under test rather
- * than as bad luck. And it must not come from the operating system's own
- * ephemeral range, because a port the kernel hands out is a port the kernel
- * hands out again: anything opening an outbound socket between this probe
- * closing and the harness binding can take it.
- *
- * `listen(0)` — the obvious way to ask for a free port — gives exactly the
- * wrong half of that. It lands at 49152+ on macOS and Windows, which is that
- * churn, and it turned a rare collision into a reliable one. Only Linux
- * survived, its range starting higher up and quieter.
- *
- * So: candidates from a fixed range below every platform's dynamic range,
- * each verified by binding it, retried when taken. `span` reserves that many
- * consecutive ports — the harness opens a webhook receiver one above itself. */
+/** Candidates from a fixed range below every platform's ephemeral range
+ * (`listen(0)` lands in the 49152+ churn on macOS and Windows), each verified
+ * by binding. `span` reserves consecutive ports. */
 const freePorts = async (span = 1): Promise<number> => {
   const hold = (port: number): Promise<Server> =>
     new Promise((resolve, reject) => {
@@ -47,14 +30,14 @@ const freePorts = async (span = 1): Promise<number> => {
     });
 
   for (let attempt = 0; attempt < 40; attempt++) {
-    const candidate = 20_000 + Math.floor(Math.random() * 9_000);
+    const candidate = workerPort(20_000, 9_000);
     const held: Server[] = [];
     let free = true;
     for (let i = 0; i < span; i++) {
       try {
         held.push(await hold(candidate + i));
       } catch {
-        free = false; // taken — somewhere else, then
+        free = false;
         break;
       }
     }
@@ -76,7 +59,6 @@ let home: string;
 let stderr = "";
 const connectedDevices = createConnectedDeviceTracker();
 
-/** a request as a device makes it: a token, and a Host that is not loopback */
 const device = async (
   method: string,
   path: string,
@@ -97,15 +79,17 @@ const device = async (
   try {
     body = JSON.parse(text);
   } catch {
-    /* not JSON */
   }
   return { status: res.status, body, headers: res.headers };
 };
 
-/** raw request with a chosen Host header — fetch will not let us set one */
+/** fetch will not set a Host header */
+const CONTROL_TOKEN = "fixture-control-token";
+const controlHeaders = { "x-openmausbot-control-token": CONTROL_TOKEN };
+
 const withHost = (port: number, host: string, path = "/api/health", headers: Record<string, string> = {}) =>
   new Promise<number>((resolve, reject) => {
-    const r = request({ hostname: "127.0.0.1", port, path, headers: { host, ...headers } }, (res) => {
+    const r = request({ hostname: "127.0.0.1", port, path, headers: { host, ...controlHeaders, ...headers } }, (res) => {
       res.resume();
       resolve(res.statusCode ?? 0);
     });
@@ -114,15 +98,8 @@ const withHost = (port: number, host: string, path = "/api/health", headers: Rec
   });
 
 beforeAll(async () => {
-  // Three in a row, from one call: the harness, its webhook receiver one
-  // above it, and the sidecar above that.
-  //
-  // One call rather than two, because two are not independent the way they
-  // look. Each verifies its ports by binding and then releases them for the
-  // real thing to take, so by the time a second call runs, the first call's
-  // ports are free again — and free is exactly what it goes looking for. It
-  // can hand back a port already spoken for, which is the collision this
-  // helper exists to rule out.
+  // One call for all three (harness, its webhook receiver one above, the
+  // sidecar): a second call could hand back the first call's released ports.
   const base = await freePorts(3);
   HARNESS_PORT = base;
   SIDECAR_PORT = base + 2;
@@ -149,18 +126,13 @@ beforeAll(async () => {
   });
   harness.stderr!.on("data", (c) => (stderr += c));
 
-  // Generous, because a cold Windows or macOS runner is much slower than a
-  // laptop at starting a Node process that strips types as it loads.
+  // Cold Windows and macOS runners are slow to start a type-stripping Node.
   const deadline = Date.now() + 45_000;
   for (;;) {
     try {
-      // With a deadline of its own. A bare fetch to a port where something
-      // accepts but never answers hangs forever, and the loop below never
-      // gets to notice its own deadline — which is how a boot failure ends up
-      // reported as "hook timed out" with nothing else to go on.
+      // A bare fetch to a port that accepts but never answers hangs forever.
       if ((await fetch(`${HARNESS}/api/health`, { signal: AbortSignal.timeout(2_000) })).ok) break;
     } catch {
-      /* not up yet */
     }
     if (Date.now() > deadline) throw new Error(`harness never came up:\n${stderr}`);
     if (harness.exitCode !== null) throw new Error(`harness exited ${harness.exitCode}:\n${stderr}`);
@@ -170,7 +142,7 @@ beforeAll(async () => {
   sidecar = createServer(
     createProxyHandler({
       harnessPort: HARNESS_PORT,
-      authenticate: (t) => (t === TOKEN ? { id: "d1", cloudDesktopAccess: true } : null),
+      authenticate: (t) => (t === TOKEN ? { id: "d1", cloudDesktopAccess: true, browserControlAccess: false } : null),
       redeem: (code, deviceName) =>
         code === "424242"
           ? { token: TOKEN, device: { id: "d1", name: String(deviceName) } }
@@ -179,9 +151,7 @@ beforeAll(async () => {
       connected: connectedDevices.open,
     }),
   );
-  // Not `listen(port, host, resolve)` alone: a bind failure emits `error` and
-  // never calls back, so the hook would sit there until the runner's timeout
-  // and report nothing about why.
+  // A bind failure emits `error` and never calls back.
   await new Promise<void>((resolve, reject) => {
     sidecar.once("error", reject);
     sidecar.listen(SIDECAR_PORT, "127.0.0.1", () => resolve());
@@ -190,33 +160,14 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((r) => (sidecar ? sidecar.close(() => r()) : r()));
-  harness?.kill("SIGTERM");
-  await new Promise<void>((resolve) => {
-    if (!harness || harness.exitCode !== null) return resolve();
-    harness.on("close", () => resolve());
-    // SIGKILL, then keep waiting for `close`. Resolving in the same tick as
-    // the signal — which is what this did — starts deleting the home
-    // directory out from under a process that has not died yet, and the
-    // delete is what fails. A loaded CI runner loses that race; a laptop
-    // wins it every time, which is why it reads as a phantom.
-    setTimeout(() => harness.kill("SIGKILL"), 5_000).unref?.();
-    // and a floor, so a process that somehow survives SIGKILL cannot hang
-    // the suite instead
-    setTimeout(resolve, 10_000).unref?.();
-  });
-  rmSync(home, { recursive: true, force: true });
+  await waitForExit(harness, { signal: "SIGTERM" });
+  await removeTempDir(home);
 });
 
 describe("the sidecar in front of an unmodified harness", () => {
   it("reaches the harness with a Host the harness itself would refuse", async () => {
-    // The premise of the whole design. Current upstream rejects a
-    // non-loopback Host outright (DNS rebinding); a phone's Host is a LAN
-    // address or a tailnet name and can never satisfy that. The sidecar
-    // speaks to loopback as itself, so the device's Host never travels.
-    //
-    // Written so it passes against an older harness too: what is being
-    // asserted is that the *sidecar* answers, whatever the harness's own
-    // policy happens to be.
+    // Asserts only that the sidecar answers, whatever the harness's own Host
+    // policy.
     expect(await withHost(SIDECAR_PORT, "macbook.tail1234.ts.net:8800", "/api/bots", {
       authorization: `Bearer ${TOKEN}`,
     })).toBe(200);
@@ -228,7 +179,6 @@ describe("the sidecar in front of an unmodified harness", () => {
   it("refuses anything carrying an Origin, before looking at the token", async () => {
     const { status } = await device("GET", "/api/bots", { headers: { origin: "https://evil.example" } });
     expect(status).toBe(403);
-    // even a loopback origin, which the harness itself would allow
     const local = await device("GET", "/api/bots", { headers: { origin: `http://127.0.0.1:${HARNESS_PORT}` } });
     expect(local.status).toBe(403);
   });
@@ -252,7 +202,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const connections = createConnectedDeviceTracker();
     const delayedProxy = createServer(createProxyHandler({
       harnessPort: delayedHarnessPort,
-      authenticate: () => valid ? { id: "phone-delayed", cloudDesktopAccess: false } : null,
+      authenticate: () => valid ? { id: "phone-delayed", cloudDesktopAccess: false, browserControlAccess: false } : null,
       redeem: () => ({ error: "not pairing" }),
       serverName: () => "Test computer",
       connected: connections.open,
@@ -298,36 +248,22 @@ describe("the sidecar in front of an unmodified harness", () => {
   });
 
   it("refuses what a device has no business doing, by default", async () => {
-    // settings and credentials stay on the machine
     expect((await device("PUT", "/api/config", { body: { xai: { apiKey: "x" } } })).status).toBe(403);
     expect((await device("GET", "/api/devices")).status).toBe(403);
     expect((await device("GET", "/api/companion")).status).toBe(403);
     expect((await device("POST", "/api/local-computer/start")).status).toBe(403);
-    // the internal peer-comms API does not exist off-machine
     expect((await device("GET", "/api/internal/peers")).status).toBe(404);
-    // nor does the desktop UI
     expect((await device("GET", "/")).status).toBe(404);
-    // but reading config is fine — it is booleans, not keys
     expect((await device("GET", "/api/config")).status).toBe(200);
 
-    // General-purpose PATCH routes can change execution policy, connected
-    // apps, working directories and computer targets. The phone gets narrow
-    // verbs instead, so a stolen device token cannot smuggle those fields.
     const { body } = await device("GET", "/api/bots");
     const botId = body.bots[0].id;
-    expect((await device("PATCH", `/api/bots/${botId}`, { body: { autoApprove: true } })).status).toBe(404);
+    expect((await device("PATCH", `/api/bots/${botId}`, { body: { autoApprove: true } })).status).toBe(403);
     expect((await device("PATCH", `/api/groups/not-a-room`, { body: { unread: false } })).status).toBe(404);
   });
 
   it("lets a device answer an approval, and manage its own chats", async () => {
-    // The approval path is the product: a card raised on the computer,
-    // answered on the phone, and the bot carries on. What is checked here is
-    // that the allowlist carries these routes to the harness at all — the
-    // harness's own "no such pending request" is proof it arrived, and is a
-    // far better signal than a 403 from the sidecar would be.
-    //
-    // Worth pinning separately from sending a message, because these are the
-    // routes a default-deny allowlist is most likely to omit by accident.
+    // The harness's own "no such pending request" proves the route arrived.
     const { body } = await device("GET", "/api/bots");
     const bot = body.bots[0];
 
@@ -338,10 +274,130 @@ describe("the sidecar in front of an unmodified harness", () => {
       ["POST", `/api/bots/${bot.id}/read`, undefined],
     ] as const) {
       const res = await device(method, path, payload ? { body: payload } : {});
-      // whatever the harness decides, the sidecar must not be the one saying no
       expect(res.status, `${method} ${path} was blocked by the sidecar`).not.toBe(403);
       expect(res.status, `${method} ${path} never reached the harness`).not.toBe(404);
     }
+  });
+
+  it("saves a paired device's bot appearance and returns it to other clients", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    const appearance = { color: "teal", mascotBody: "star", mascotExpression: "happy" };
+    const saved = await device("PATCH", `/api/bots/${bot.id}`, { body: appearance });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    expect(saved.body.bot).toMatchObject(appearance);
+
+    const refreshed = await device("GET", "/api/bots");
+    expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id))
+      .toMatchObject(appearance);
+    const host = await fetch(`${HARNESS}/api/bots`).then((response) => response.json()) as { bots: Array<{ id: string }> };
+    expect(host.bots.find((candidate: { id: string }) => candidate.id === bot.id))
+      .toMatchObject(appearance);
+  });
+
+  it("refuses unauthenticated appearance saves and protected fields without changing the bot", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    const path = `/api/bots/${bot.id}`;
+    const appearance = { color: "coral", mascotBody: "diamond", mascotExpression: "sleeping" };
+    for (const token of [null, "omb_wrong"]) {
+      expect((await device("PATCH", path, { token, body: appearance })).status).toBe(401);
+    }
+    for (const protectedPatch of [
+      { autoApprove: true },
+      { approvalMode: "full" },
+      { soul: "not permitted" },
+      { computer: "local" },
+      { modelSelection: { instanceId: "ghost", model: "other" } },
+      { unexpected: true },
+    ]) {
+      const refused = await device("PATCH", path, { body: { ...appearance, ...protectedPatch } });
+      expect(refused.status, JSON.stringify(protectedPatch)).toBe(403);
+      expect(refused.body.error).toContain(Object.keys(protectedPatch)[0]);
+      expect(refused.body.error).toContain("host computer");
+      const refreshed = await device("GET", "/api/bots");
+      expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id)).toEqual(bot);
+    }
+  });
+
+  it("refuses a new bot's protected settings from a paired device without making the bot", async () => {
+    const ids = async () => ((await device("GET", "/api/bots")).body.bots as Array<{ id: string }>).map((bot) => bot.id);
+    const before = await ids();
+    const settings: Array<[string, unknown]> = [
+      ["approvalMode", "full"], ["approvalMode", "ask"], ["alwaysAllow", ["Bash(*)"]], ["chiefOfStaff", true], ["computer", "local"],
+      ["cwd", "/"], ["peers", []], ["approvePeerComms", false], ["mcpServers", ["github"]], ["browserProfile", "guest"],
+      ["toolScope", { allow: ["native:*"] }], ["composio", true], ["browser", true],
+    ];
+    const fields: Array<[string, unknown]> = [
+      ["section", "Ops"], ["preset", "chief-of-staff"], ["visibility", { audience: "members" }], ["reportsTo", "someone@example.test"], ["unexpected", true],
+    ];
+    for (const [field, body] of [
+      ...settings.map(([field, value]) => [field, { name: "From the phone", settings: { [field]: value } }] as const),
+      ...fields.map(([field, value]) => [field, { name: "From the phone", [field]: value }] as const),
+    ]) {
+      const refused = await device("POST", "/api/bots", { body });
+      expect(refused.status, JSON.stringify(body)).toBe(403);
+      expect(refused.body.error).toContain(field);
+      expect(refused.body.error).toContain("host computer");
+    }
+    expect(await ids()).toEqual(before);
+
+    const made = await device("POST", "/api/bots", {
+      body: { name: "From the phone", settings: { soul: "Plans trips.", color: "teal", mascotBody: "star" } },
+    });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    expect(made.body.bot).toMatchObject({ name: "From the phone", color: "teal", mascotBody: "star" });
+  });
+
+  it("saves the avatar panel's reset and shape choices from a paired device", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    const path = `/api/bots/${bot.id}`;
+    const shape = await device("PATCH", path, { body: { color: "purple", avatarCrop: "square", avatarZoom: 1.5, avatarFocusX: 0.25, avatarFocusY: 0.75 } });
+    expect(shape.status, JSON.stringify(shape.body)).toBe(200);
+    expect(shape.body.bot).toMatchObject({ color: "purple", avatarCrop: "square", avatarZoom: 1.5, avatarFocusX: 0.25, avatarFocusY: 0.75 });
+
+    const reset = await device("PATCH", path, { body: { avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor" } });
+    expect(reset.status, JSON.stringify(reset.body)).toBe(200);
+    const host = await fetch(`${HARNESS}/api/bots`).then((response) => response.json()) as { bots: Array<{ id: string }> };
+    expect(host.bots.find((candidate) => candidate.id === bot.id))
+      .toMatchObject({ avatarCrop: "mascot", color: "green", mascotBody: "cursor" });
+    expect((await device("PATCH", path, { body: { avatarUrl: "/etc/passwd" } })).status).toBe(400);
+  });
+
+  it("refuses appearance values clients cannot draw without changing the bot", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    for (const invalid of [
+      { color: "#168aad" },
+      { color: "<script>" },
+      { color: { nested: true } },
+      { mascotExpression: 12345 },
+      { mascotExpression: "x".repeat(81) },
+      { mascotBody: "nope" },
+      { pinned: [1, 2] },
+      { avatarCrop: "triangle" },
+      { avatarFocusX: "left" },
+    ]) {
+      const refused = await device("PATCH", `/api/bots/${bot.id}`, { body: invalid });
+      expect(refused.status, JSON.stringify(invalid)).toBe(400);
+      expect(refused.body.error).toContain(Object.keys(invalid)[0]);
+      const refreshed = await device("GET", "/api/bots");
+      expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id)).toEqual(bot);
+    }
+  });
+
+  it("does not let a device suppress the companion marker to change protected fields", async () => {
+    const { body } = await device("GET", "/api/bots");
+    const bot = body.bots[0];
+    const refused = await device("PATCH", `/api/bots/${bot.id}`, {
+      headers: { "x-openmausbot-companion": "0" },
+      body: { color: "coral", autoApprove: true },
+    });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toContain("autoApprove");
+    const refreshed = await device("GET", "/api/bots");
+    expect(refreshed.body.bots.find((candidate: { id: string }) => candidate.id === bot.id)).toEqual(bot);
   });
 
   it("files bots through only the narrow atomic organizer route", async () => {
@@ -387,7 +443,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     expect(after).toHaveLength(before.length + 1);
     expect(after.some((bot: { id: string }) => bot.id === id)).toBe(true);
     expect((await device("GET", "/api/bot-defaults")).status).toBe(404);
-    expect((await device("PATCH", `/api/bots/${id}`, { body: { soul: "not permitted" } })).status).toBe(404);
+    expect((await device("PATCH", `/api/bots/${id}`, { body: { soul: "not permitted" } })).status).toBe(403);
   });
 
   it("only remembers an always-allow key carried by a pending card", async () => {
@@ -411,12 +467,8 @@ describe("the sidecar in front of an unmodified harness", () => {
       for (const task of bot.tasks ?? []) expect(task).not.toHaveProperty("resumeCursors");
     }
 
-    // Whether the harness sent any is deliberately NOT asserted: some
-    // versions leak them, some do not, and the sidecar scrubs either way.
-    // Asserting on the harness's behaviour here would make this test pass
-    // or fail on which harness happens to be checked out. That the scrubber
-    // is not a no-op is pinned in wire.test.ts, against a payload built to
-    // contain them.
+    // Whether the harness sent any is not asserted: versions differ, and the
+    // sidecar scrubs either way.
   });
 
   it("streams events through, terminated and scrubbed, keeping the resume cursor", async () => {
@@ -433,7 +485,6 @@ describe("the sidecar in front of an unmodified harness", () => {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buffered = "";
-    /** read until `want` finds a complete event, or give up */
     const nextEvent = async (want: (event: string) => boolean): Promise<string | null> => {
       const deadline = Date.now() + 10_000;
       for (;;) {
@@ -452,15 +503,13 @@ describe("the sidecar in front of an unmodified harness", () => {
     };
 
     try {
-      // The blank-line terminator is the thing worth asserting: an SSE
-      // transform that normalises whitespace produces a stream that parses
-      // to nothing while looking perfectly healthy at both ends.
+      // A transform that normalises whitespace loses the blank-line
+      // terminator and parses to nothing.
       const hello = await nextEvent((e) => e.includes('"kind":"hello"'));
       expect(hello).not.toBeNull();
       expect(JSON.parse(hello!.replace(/^data:\s*/, ""))).toMatchObject({ kind: "hello" });
 
-      // A broadcast frame, which is the one that carries `id:` — the resume
-      // cursor. Rewriting the payload must not disturb it.
+      // Broadcast frames carry `id:`, the resume cursor.
       const { body } = await device("GET", "/api/bots");
       const botId = body.bots[0].id;
       await device("POST", `/api/bots/${botId}/read`);
@@ -483,7 +532,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const orphan = createServer(
       createProxyHandler({
         harnessPort: 1,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
       }),
@@ -501,24 +550,17 @@ describe("the sidecar in front of an unmodified harness", () => {
     }
   });
 
-  // A harness that is *down* is the easy case — the connection is refused and
-  // the phone hears about it immediately. A harness that accepts the socket
-  // and then says nothing is the case with no natural end: `http.request` has
-  // no deadline for the headers phase, so without one the phone waits on a
-  // spinner until the person kills the app.
   it("gives up on a harness that accepts a connection and then goes quiet", async () => {
     const mute = createServer(() => {
-      /* accepted, and deliberately never answered */
     });
     await new Promise<void>((r) => mute.listen(0, "127.0.0.1", r));
     const mutePort = (mute.address() as { port: number }).port;
     const stalled = createServer(
       createProxyHandler({
         harnessPort: mutePort,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
-        // the shipped value is 30s; the behaviour under test is the same one
         headersTimeoutMs: 300,
       }),
     );
@@ -539,26 +581,17 @@ describe("the sidecar in front of an unmodified harness", () => {
     }
   });
 
-  // A phone that walks out of range mid-download leaves the harness talking
-  // to nobody. The SSE path already hung up on the upstream; these two did
-  // not, so a large response kept being produced — and, on the JSON path,
-  // kept being buffered.
   it("hangs up on the harness when the device disappears", async () => {
     let upstreamClosed: () => void;
     let upstreamReached: () => void;
     const closed = new Promise<void>((r) => (upstreamClosed = r));
-    // The disconnect only means anything once the request has actually
-    // arrived upstream. Waiting a fixed 250ms for that is a bet on how fast
-    // the machine is, and this file has already lost one of those.
     const reached = new Promise<void>((r) => (upstreamReached = r));
     const slow = createServer((_req, res) => {
       res.on("error", () => {
-        /* the sidecar hanging up is the pass condition */
       });
       res.on("close", () => upstreamClosed());
       res.writeHead(200, { "content-type": "application/json" });
       res.write('{"bots":[');
-      // and then keeps the response open, as a slow endpoint does
       upstreamReached();
     });
     await new Promise<void>((r) => slow.listen(0, "127.0.0.1", r));
@@ -566,7 +599,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const relay = createServer(
       createProxyHandler({
         harnessPort: slowPort,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
       }),
@@ -575,20 +608,15 @@ describe("the sidecar in front of an unmodified harness", () => {
     const port = (relay.address() as { port: number }).port;
     const abort = new AbortController();
     try {
-      // Not awaited: a JSON response is buffered whole before any of it
-      // reaches the device, so this request has no headers to resolve until
-      // the stub ends — and the stub never ends. The disconnect under test
-      // is one that happens while the request is still in flight.
+      // Not awaited: a JSON response is buffered whole, so it has no headers
+      // until the stub ends, and the stub never ends.
       const pending = fetch(`http://127.0.0.1:${port}/api/bots`, {
         headers: { authorization: `Bearer ${TOKEN}` },
         signal: abort.signal,
       }).catch(() => {
-        /* aborted on purpose */
       });
       await reached;
       abort.abort();
-      // the upstream response closes because the sidecar dropped it, not
-      // because the stub finished — it never finishes
       await closed;
       await pending;
     } finally {
@@ -599,21 +627,17 @@ describe("the sidecar in front of an unmodified harness", () => {
     }
   }, 20_000);
 
-  // The scrubber holds a partial event until its terminator arrives, which is
-  // correct and bounded by nothing. An upstream that opens a `data:` line and
-  // never closes it would otherwise be a memory leak with a straight face.
   it("ends a stream whose event never terminates, rather than buffering it", async () => {
-    const TWO_MIB = 2 * 1024 * 1024;
+    const OVER_CEILING = MAX_SSE_EVENT_BYTES + 512 * 1024;
     const flood = createServer((_req, res) => {
       res.on("error", () => {
-        /* the sidecar hangs up on us — that is the pass condition */
       });
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.write("data: ");
       const blob = "x".repeat(64 * 1024);
       let sent = 0;
       const pump = () => {
-        while (sent < TWO_MIB) {
+        while (sent < OVER_CEILING) {
           sent += blob.length;
           if (!res.write(blob)) return void res.once("drain", pump);
         }
@@ -625,7 +649,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const relay = createServer(
       createProxyHandler({
         harnessPort: floodPort,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
       }),
@@ -637,8 +661,6 @@ describe("the sidecar in front of an unmodified harness", () => {
         headers: { authorization: `Bearer ${TOKEN}` },
       });
       expect(res.status).toBe(200);
-      // Terminates, and forwards nothing: half an event cannot go out
-      // scrubbed, and must not go out unscrubbed.
       const text = await res.text();
       expect(text).toBe("");
     } finally {
@@ -661,18 +683,15 @@ describe("live companion endpoint refresh", () => {
     ];
     const endpointServer = createServer(
       createProxyHandler({
-        // A successful response with no harness on this port also proves the
-        // sidecar terminated the route locally.
+        // No harness on port 1: a 200 proves the sidecar answered locally.
         harnessPort: 1,
-        authenticate: (token) => token === TOKEN ? { cloudDesktopAccess: false } : null,
+        authenticate: (token) => token === TOKEN ? { cloudDesktopAccess: false, browserControlAccess: false } : null,
         redeem: () => ({ error: "not used" }),
         serverName: () => "Test computer",
         endpoints: () => endpoints,
       }),
     );
     await new Promise<void>((resolve) => endpointServer.listen(0, "127.0.0.1", resolve));
-    // SAFETY: an IP server that has completed listen() has an AddressInfo
-    // object with a numeric port.
     const port = (endpointServer.address() as { port: number }).port;
     const load = (token?: string) =>
       fetch(`http://127.0.0.1:${port}/api/companion/endpoints`, {
@@ -712,8 +731,6 @@ describe("live companion endpoint refresh", () => {
         url: `http://192.168.1.${index + 1}:8810`,
         internal: `private-${index}`,
       }));
-      // SAFETY: the endpoint route has just returned 200 JSON and this shape
-      // is asserted immediately below; the cast grants no runtime behavior.
       const bounded = await (await load(TOKEN)).json() as {
         endpoints: CompanionEndpoint[];
         serverName: string;
@@ -731,11 +748,6 @@ describe("live companion endpoint refresh", () => {
   });
 });
 
-// The whole loop, with the real registry rather than a stub: open a pairing
-// window on the control surface, redeem its QR credential the way the phone
-// does, and
-// use the token that comes back. This is the path that has no unit-test
-// equivalent — every piece is real except the phone.
 describe("pairing, end to end", () => {
   it("turns a QR credential into a working device token", async () => {
     const { DeviceRegistry } = await import("../src/devices.ts");
@@ -761,33 +773,27 @@ describe("pairing, end to end", () => {
     const port = (paired.address() as { port: number }).port;
     const control = createControlServer({
       devices: registry,
+      controlToken: () => CONTROL_TOKEN,
       companionPort: port,
       discovery: () => ({ advertising: false, name: "OpenMausBot" }),
       connectedDeviceIds: connections.ids,
       disconnectDevice: connections.disconnect,
     });
     await new Promise<void>((r) => control.listen(0, "127.0.0.1", r));
-    // SAFETY: address() is AddressInfo — an object with a port — for any
-    // IP server that is listening, which the awaited listen guarantees.
     const controlPort = (control.address() as { port: number }).port;
     const base = `http://127.0.0.1:${port}`;
     const ctl = `http://127.0.0.1:${controlPort}`;
 
     try {
-      // before pairing, the phone gets nowhere
       expect((await fetch(`${base}/api/bots`)).status).toBe(401);
 
-      // the person clicks "Start pairing" on the computer
-      // SAFETY: POST /pairing is this sidecar's own API and always answers
-      // with both credentials; the matches below fail if the shape drifts.
-      const opened = (await (await fetch(`${ctl}/pairing`, { method: "POST" })).json()) as {
+      const opened = (await (await fetch(`${ctl}/pairing`, { method: "POST", headers: controlHeaders })).json()) as {
         code: string;
         token: string;
       };
       expect(opened.code).toMatch(/^\d{6}$/);
       expect(opened.token).toMatch(/^omb_pair_[A-Za-z0-9_-]{43}$/);
 
-      // a wrong code is refused, and does not burn the window
       const wrong = await fetch(`${base}/api/pair`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -795,7 +801,6 @@ describe("pairing, end to end", () => {
       });
       expect(wrong.status).toBe(401);
 
-      // The QR token is redeemed exactly once and never forwarded upstream.
       const pairRequestId = "4c825d5b-cf40-4db7-aac5-2455f805a8ec";
       const pairBody = JSON.stringify({
         credential: opened.token,
@@ -808,8 +813,6 @@ describe("pairing, end to end", () => {
         body: pairBody,
       });
       expect(res.status).toBe(201);
-      // SAFETY: a 201 from /api/pair carries exactly this shape — the
-      // sidecar's own contract, pinned by the expects that follow.
       const body = (await res.json()) as {
         token: string;
         serverName: string;
@@ -818,17 +821,14 @@ describe("pairing, end to end", () => {
       };
       expect(body.serverName).toBe("Ada's computer");
       expect(body.token).toMatch(/^omb_/);
-      // The fallback list rides on the redeem response so a phone that paired
-      // by typed address learns the other ways to reach this computer too.
       expect(body.hosts).toEqual(["macbook.tail1234.ts.net", "192.168.1.42", "openmausbot-abcd1234.local"]);
       expect(body.endpoints).toEqual([
         { url: "https://device-123.companion.example", kind: "hosted", priority: 0 },
         { url: "http://192.168.1.42:8810", kind: "lan", priority: 200 },
       ]);
 
-      // Losing the first response after it reached the Mac must not strand an
-      // orphan device. The same logical request can arrive through a fallback
-      // address and receives the exact token already committed to disk.
+      // A lost first response: the same request via a fallback address gets
+      // the token already committed.
       const replay = await fetch(`${base}/api/pair`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -837,7 +837,6 @@ describe("pairing, end to end", () => {
       expect(replay.status).toBe(201);
       expect((await replay.json() as { token: string }).token).toBe(body.token);
 
-      // and the token works on the real API, through the real proxy
       const bots = await fetch(`${base}/api/bots`, { headers: { authorization: `Bearer ${body.token}` } });
       expect(bots.status).toBe(200);
       expect(await bots.text()).not.toContain("resumeCursors");
@@ -855,20 +854,15 @@ describe("pairing, end to end", () => {
       eventStream.resume();
       const eventStreamClosed = new Promise<void>((resolve) => eventStream.once("close", resolve));
 
-      // the computer can see the phone, and take it away again
-      // SAFETY: /state's shape is this sidecar's own API, asserted by the
-      // control-server tests above; a drifted shape fails the expects below.
-      const state = (await (await fetch(`${ctl}/state`)).json()) as {
+      const state = (await (await fetch(`${ctl}/state`, { headers: controlHeaders })).json()) as {
         devices: Array<{ id: string; name: string }>;
         connectedDeviceIds: string[];
       };
       expect(state.devices.map((d) => d.name)).toContain("Ada's iPhone");
-      // By name, not by index: `devices[0]` is whichever record the registry
-      // happens to have loaded first, and revoking the wrong one would leave
-      // this test passing for the wrong reason.
+      // By name: `devices[0]` is load order.
       const ada = state.devices.find((d) => d.name === "Ada's iPhone")!;
       expect(state.connectedDeviceIds).toContain(ada.id);
-      const revoked = await fetch(`${ctl}/devices/${ada.id}`, { method: "DELETE" });
+      const revoked = await fetch(`${ctl}/devices/${ada.id}`, { method: "DELETE", headers: controlHeaders });
       expect(revoked.status).toBe(200);
       expect((await revoked.json() as { connectedDeviceIds: string[] }).connectedDeviceIds).not.toContain(ada.id);
       await eventStreamClosed;
@@ -884,15 +878,13 @@ describe("pairing, end to end", () => {
     const { createControlServer } = await import("../src/control.ts");
     const control = createControlServer({
       devices: new DeviceRegistry(),
+      controlToken: () => CONTROL_TOKEN,
       companionPort: 8800,
       discovery: () => ({ advertising: false, name: "OpenMausBot" }),
     });
     await new Promise<void>((r) => control.listen(0, "127.0.0.1", r));
-    // SAFETY: address() is AddressInfo — an object with a port — for any
-    // IP server that is listening, which the awaited listen guarantees.
     const port = (control.address() as { port: number }).port;
     try {
-      // pairing and revocation are exactly what a phone must never reach
       expect(await withHost(port, "macbook.tail1234.ts.net:8801", "/state")).toBe(403);
       expect(await withHost(port, `127.0.0.1:${port}`, "/state")).toBe(200);
     } finally {
@@ -900,9 +892,6 @@ describe("pairing, end to end", () => {
     }
   });
 
-  // A browser handed `http://[::1]:8811` sends `Host: [::1]:8811`, and the
-  // colons in the literal are not the port separator. Splitting on the first
-  // one refuses the address the person was told to use.
   it("understands an IPv6 loopback Host", async () => {
     const { DeviceRegistry } = await import("../src/devices.ts");
     const { createControlServer, hostOf } = await import("../src/control.ts");
@@ -910,27 +899,20 @@ describe("pairing, end to end", () => {
     expect(hostOf("[::1]:8811")).toBe("::1");
     expect(hostOf("127.0.0.1:8811")).toBe("127.0.0.1");
     expect(hostOf("localhost")).toBe("localhost");
-    // a malformed authority fails the allowlist rather than skipping it
     expect(hostOf("[::1")).toBe("[::1");
 
     const control = createControlServer({
       devices: new DeviceRegistry(),
+      controlToken: () => CONTROL_TOKEN,
       companionPort: 8800,
       discovery: () => ({ advertising: false, name: "OpenMausBot" }),
     });
     await new Promise<void>((r) => control.listen(0, "127.0.0.1", r));
-    // SAFETY: address() is AddressInfo — an object with a port — for any
-    // IP server that is listening, which the awaited listen guarantees.
     const port = (control.address() as { port: number }).port;
     try {
       expect(await withHost(port, `[::1]:${port}`, "/state")).toBe(200);
-      // and the bracket parsing did not open a door: a real name is still out
       expect(await withHost(port, "[::1].evil.example", "/state")).toBe(403);
 
-      // An authority the parser cannot make sense of is refused, not waved
-      // through. Both of these are malformed — an IPv6 literal has to be
-      // bracketed, and a port needs a host in front of it — and both used to
-      // parse to the empty string, which the check then skipped.
       expect(await withHost(port, "::1", "/state")).toBe(403);
       expect(await withHost(port, ":8811", "/state")).toBe(403);
       expect(await withHost(port, "[]:8811", "/state")).toBe(403);
@@ -939,47 +921,43 @@ describe("pairing, end to end", () => {
     }
   });
 
-  // Loopback is not a boundary a browser respects: any page the person is
-  // reading can POST to 127.0.0.1 with a correct Host, unpreflighted, and
-  // CORS only stops it reading the answer. It does not need the answer —
-  // opening a pairing window and revoking a phone both land on the way in.
   it("refuses a write from a page the person happened to be reading", async () => {
     const { DeviceRegistry } = await import("../src/devices.ts");
     const { createControlServer } = await import("../src/control.ts");
     const registry = new DeviceRegistry();
     const control = createControlServer({
       devices: registry,
+      controlToken: () => CONTROL_TOKEN,
       companionPort: 8800,
       discovery: () => ({ advertising: false, name: "OpenMausBot" }),
     });
     await new Promise<void>((r) => control.listen(0, "127.0.0.1", r));
-    // SAFETY: address() is AddressInfo — an object with a port — for any
-    // IP server that is listening, which the awaited listen guarantees.
     const port = (control.address() as { port: number }).port;
     const base = `http://127.0.0.1:${port}`;
     try {
       const evil = await fetch(`${base}/pairing`, {
         method: "POST",
-        headers: { origin: "https://evil.example" },
+        headers: { origin: "https://evil.example", ...controlHeaders },
       });
       expect(evil.status).toBe(403);
-      // and no window opened on the way to being refused
       expect(registry.pairing()).toBe(null);
 
-      // A same-origin write is the control page itself, and must still work:
-      // the browser sends Origin on any method that is not GET or HEAD, so a
-      // blanket refusal would break the one legitimate browser there is.
+      // A page served from the control port itself, as a bot's browser would open it, has no token.
+      const tokenless = await fetch(`${base}/pairing`, { method: "POST", headers: { origin: base } });
+      expect(tokenless.status).toBe(403);
+      expect(registry.pairing()).toBe(null);
+
+      // Browsers send Origin on any write, so the control page's own must pass.
       const ours = await fetch(`${base}/pairing`, {
         method: "POST",
-        headers: { origin: base },
+        headers: { origin: base, ...controlHeaders },
       });
       expect(ours.status).toBe(201);
       expect(registry.pairing()).not.toBe(null);
 
-      // Revocation is the other write worth stealing.
       const stolen = await fetch(`${base}/devices/whatever`, {
         method: "DELETE",
-        headers: { origin: "https://evil.example" },
+        headers: { origin: "https://evil.example", ...controlHeaders },
       });
       expect(stolen.status).toBe(403);
     } finally {
@@ -987,46 +965,78 @@ describe("pairing, end to end", () => {
     }
   });
 
-  // The Host check above is not enough on its own. A page anywhere can POST
-  // to 127.0.0.1 without a preflight — it is a simple request — and it
-  // arrives with a loopback Host like everything else. It cannot read the
-  // reply, but opening a pairing window is already the damage: the code is
-  // then on screen for whoever asked for it.
   it("refuses a cross-origin request even though its Host is loopback", async () => {
     const { DeviceRegistry } = await import("../src/devices.ts");
     const { createControlServer } = await import("../src/control.ts");
     const registry = new DeviceRegistry();
     const control = createControlServer({
       devices: registry,
+      controlToken: () => CONTROL_TOKEN,
       companionPort: 8800,
       discovery: () => ({ advertising: false, name: "OpenMausBot" }),
     });
     await new Promise<void>((r) => control.listen(0, "127.0.0.1", r));
-    // SAFETY: address() is AddressInfo — an object with a port — for any
-    // IP server that is listening, which the awaited listen guarantees.
     const port = (control.address() as { port: number }).port;
     const host = `127.0.0.1:${port}`;
     try {
       for (const origin of ["https://evil.example", "http://127.0.0.1.evil.example", "null"]) {
         expect(await withHost(port, host, "/state", { origin })).toBe(403);
       }
-      // no pairing window was opened by any of that
       expect(registry.pairing()).toBeNull();
 
-      // A loopback origin is not enough either, which is the rule that got
-      // stricter: `http://localhost:<port>` reaches the same socket by the
-      // same route, and is still some other program's page rather than the
-      // one this server serves. Only the exact authority the request was
-      // addressed to passes, because the alternative is putting a name
-      // resolver inside a CSRF check.
+      // Only the exact authority passes: `localhost` is some other program's page.
       expect(await withHost(port, host, "/state", { origin: `http://localhost:${port}` })).toBe(403);
 
-      // the control page itself is same-origin, and a native client sends
-      // no Origin at all — both keep working
       expect(await withHost(port, host, "/state", { origin: `http://${host}` })).toBe(200);
       expect(await withHost(port, host, "/state")).toBe(200);
     } finally {
       await new Promise<void>((r) => control.close(() => r()));
     }
+  });
+});
+
+describe("revoking a capability mid-stream", () => {
+  it("closes a browser-live stream the device already has open", async () => {
+    const upstream = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write("event: ready\ndata: {\"viewerId\":\"v1\"}\n\n");
+    });
+    await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", r));
+    const upstreamPort = (upstream.address() as { port: number }).port;
+
+    const handler = createProxyHandler({
+      harnessPort: upstreamPort,
+      authenticate: () => ({ id: "phone-1", cloudDesktopAccess: false, browserControlAccess: true }),
+      redeem: () => null,
+      endpoints: () => [],
+    } as never);
+    const relay = createServer(handler);
+    await new Promise<void>((r) => relay.listen(0, "127.0.0.1", r));
+    const relayPort = (relay.address() as { port: number }).port;
+
+    const response = await fetch(
+      `http://127.0.0.1:${relayPort}/api/bots/b1/browser/live`,
+      { headers: { authorization: "Bearer t" } },
+    );
+    expect(response.status).toBe(200);
+
+    const reader = response.body!.getReader();
+    await reader.read();
+
+    handler.disconnectDevice?.("phone-1");
+
+    // The reader may end cleanly or throw "terminated"; either means the
+    // connection is gone.
+    let ended = false;
+    try {
+      while (!(await reader.read()).done) { /* drain */ }
+      ended = true;
+    } catch {
+      ended = true;
+    }
+    expect(ended).toBe(true);
+
+    relay.close();
+    upstream.close();
   });
 });

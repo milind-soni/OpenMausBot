@@ -1,14 +1,7 @@
 /**
- * Where does the face go, and how big can it be?
- *
- * Constraint: every point of every expression — eye outlines and mouth curve — must sit
- * inside the silhouette with a little clearance. The face is placed by an anchor and a
- * uniform scale, so the search space is only three numbers.
- *
- * This module supplies the pieces: `buildClouds` precomputes each expression's points once
- * (which is what makes a few hundred thousand tests cheap), `maxScaleAt` binary-searches
- * the largest face that fits at one anchor, and `report` says which expressions clip at a
- * given placement. The search that drives them is `scripts/gen-mascot-bodies.ts`.
+ * Where the face goes and how big it can be: every expression point must sit
+ * inside the silhouette with clearance, and the face is an anchor plus a uniform
+ * scale.
  */
 
 import {
@@ -40,11 +33,8 @@ export interface Aim {
   y: number
 }
 
-/**
- * Builds the point cloud per expression. `lookAround` and `aim` must match what the
- * engine renders, or the clipping report will disagree with what people can plainly see:
- * aiming the eyes at an edge moves every face point toward it.
- */
+/** `lookAround` and `aim` must match what the engine renders: aiming the eyes at
+ * an edge moves every face point toward it. */
 export function buildClouds(
   lookAround: number,
   mouthStroke = MOUTH_STROKE,
@@ -128,7 +118,7 @@ export function maxScaleAt(clouds: Cloud[], sdf: Sdf, ax: number, ay: number, ca
   return lo
 }
 
-/** Which expressions clip at a given placement, and by how much. Used by the live UI. */
+/** Which expressions clip at a given placement, and by how much. */
 export function report(
   clouds: Cloud[],
   sdf: Sdf,

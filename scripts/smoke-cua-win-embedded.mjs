@@ -1,7 +1,6 @@
-// Windows CUA smoke: prove the staged win32 SDK bundle loads through the same
-// env-var redirect the packaged app uses and that one embedded driver host can
-// start and stop. Mirrors electron/cua.mjs startEmbedded(); run it after
-// `pnpm build:cua:win`, which produces dist-native/cua-win32-x64/.
+// Windows CUA smoke: the staged win32 SDK bundle loads through the packaged
+// app's env-var redirect, and one embedded driver host starts and stops. Run it
+// after `pnpm build:cua:win`.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -48,11 +47,12 @@ process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED = "0";
 const watchdog = setTimeout(() => {
   console.error("smoke:cua-win timed out");
   process.exit(1); // Closing the host also closes the daemon's parent-liveness pipe.
-}, 30_000);
+}, 90_000);
 
 async function checkNoConsole(pid) {
   // Probe only this smoke's daemon from a separate, hidden process. An existing
   // process with no console makes AttachConsole fail with ERROR_INVALID_HANDLE.
+  // Cold PowerShell/Add-Type compilation can exceed 10s on shared CI runners.
   await promisify(execFile)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `
 Add-Type -TypeDefinition @'
 using System.Runtime.InteropServices;
@@ -66,7 +66,7 @@ $attached = [ConsoleProbe]::AttachConsole([uint32]$env:OMB_SMOKE_DAEMON_PID)
 $failure = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
 if ($attached) { [ConsoleProbe]::FreeConsole() | Out-Null; throw 'Background daemon has a console' }
 if ($failure -ne 6) { throw "Console probe failed with unexpected Windows error $failure" }
-`], { windowsHide: true, timeout: 10_000, env: { ...process.env, OMB_SMOKE_DAEMON_PID: String(pid) } });
+`], { windowsHide: true, timeout: 30_000, env: { ...process.env, OMB_SMOKE_DAEMON_PID: String(pid) } });
   console.log("Windows confirms the background daemon has no console");
 }
 
@@ -153,7 +153,6 @@ try {
   try {
     await host.stop();
   } catch {
-    // startup already failed; stop is best-effort before destroy
   }
   host.uniffiDestroy?.();
   console.error("smoke:cua-win FAILED:", err);

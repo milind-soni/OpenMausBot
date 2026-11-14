@@ -1,15 +1,5 @@
-// `openmausbot serve --domain maus.example.com`: HTTPS on your own domain
-// with nothing to configure. The server downloads a pinned Caddy once into
-// the data dir (the same way it fetches cloudflared and the browser engine),
-// writes the Caddyfile the Docker stack ships, and runs Caddy as its child:
-// Caddy gets and renews the certificate from Let's Encrypt and forwards to
-// the loopback server with the real Host and the forwarded headers the
-// server's remote-session rules expect. The loopback bind never changes.
-//
-// What the operator still owns: a DNS record for the domain pointing at this
-// machine, and ports 80 and 443 reachable. Binding those ports needs a
-// privilege on Linux; `serve` says exactly which command grants it to the
-// downloaded binary when Caddy reports the refusal.
+// `serve --domain`: a pinned Caddy, run as a child, gets and renews the Let's Encrypt certificate and forwards with the real
+// Host and forwarded headers; the loopback bind never changes. The operator owns DNS and reachable ports 80 and 443.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -55,14 +45,12 @@ export function resolveCaddyBinary(options: { dataDir: string; env?: NodeJS.Proc
   return null;
 }
 
-/** Download the pinned release once, verify its digest, extract the binary. */
 export async function ensureCaddy(options: {
   dataDir: string;
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   arch?: string;
   fetchImpl?: typeof fetch;
-  /** Tests pin their own asset and URL; production resolves the release table. */
   asset?: { name: string; sha512: string; url?: string };
   log?: (line: string) => void;
 }): Promise<string> {
@@ -107,8 +95,7 @@ export async function ensureCaddy(options: {
   return destination;
 }
 
-/** The Docker stack's Caddyfile with this server's ports; certificates and
- * state live under the data dir so they survive restarts and upgrades. */
+/** Certificates and state live under the data dir, so they survive restarts and upgrades. */
 export function caddyfileFor(input: { domain: string; appPort: number; webhookPort: number }): string {
   return [
     "# Written by openmausbot serve --domain. Edit the command, not this file.",
@@ -155,8 +142,6 @@ export function portPermissionHint(binary: string): string {
     : "Caddy may not bind ports 80 and 443 as this user. Run the server as an administrator, or put your own HTTPS proxy in front.";
 }
 
-/** Run Caddy as a child with the Caddyfile for this domain. Resolves once
- * Caddy has stayed up for a moment; rejects with its output if it exits first. */
 export async function startCaddy(options: {
   binary: string;
   dataDir: string;
@@ -209,7 +194,6 @@ export async function startCaddy(options: {
   };
 }
 
-/** `--domain` takes a bare hostname; the same shape Settings → Custom domain accepts. */
 export function normalizeDomainOption(raw: string): string | { error: string } {
   const value = raw.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
   const label = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;

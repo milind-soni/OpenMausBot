@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Plus, TabletSmartphone } from "lucide-react";
+import { Plus, Smartphone } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { Action } from "@/state/store";
+import { phonePairingSettingsAction } from "@/lib/phone-pairing";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
-import { companionBridge, type CompanionState } from "./PhoneSetupFlow";
+import { companionBridge } from "@/lib/companion-bridge";
+import type { CompanionState } from "./PhoneSetupFlow";
 
 export const SIDEBAR_PHONE_RECENT_MS = 2 * 60_000;
 const SIDEBAR_PHONE_POLL_MS = 15_000;
@@ -31,9 +32,6 @@ export interface SidebarPhoneStatus {
   connectedCount: number;
 }
 
-/** Current sidecars report authenticated live event streams, so green means a
- * phone is connected now. The timestamp fallback is deliberately neutral and
- * exists only for an older unpackaged development sidecar. */
 export function deriveSidebarPhoneStatus(
   snapshot: SidebarPhoneSnapshot | null | undefined,
   now: number,
@@ -88,8 +86,6 @@ export function deriveSidebarPhoneStatus(
     };
   }
 
-  // Compatibility with a sidecar from an older unpackaged development build.
-  // Recent activity stays neutral because it is not proof of a live stream.
   const recentCount = snapshot.devices.filter((device) => {
     const age = now - device.lastSeenAt;
     return Number.isFinite(device.lastSeenAt) && age >= 0 && age <= SIDEBAR_PHONE_RECENT_MS;
@@ -113,13 +109,7 @@ export function deriveSidebarPhoneStatus(
   };
 }
 
-type ToggleAppSettingsAction = Extract<Action, { type: "toggleAppSettings" }>;
-
-export const phoneSettingsAction = (): ToggleAppSettingsAction => ({
-  type: "toggleAppSettings",
-  open: true,
-  section: "companion",
-});
+export const phoneSettingsAction = phonePairingSettingsAction;
 
 export function useSidebarPhoneStatus(): SidebarPhoneStatus {
   const [snapshot, setSnapshot] = useState<SidebarPhoneSnapshot | null>();
@@ -176,12 +166,12 @@ export function SidebarPhoneStatusButton({
       data-phone-status={status.kind}
       data-sidebar-density={density}
       className={cn(
-        "relative flex size-10 shrink-0 items-center justify-center rounded-md hover:bg-raised",
+        "relative flex size-[46px] shrink-0 items-center justify-center rounded-xl hover:bg-raised",
         density === "icons" && "mx-auto",
         connected ? "text-success" : "text-ink-secondary hover:text-ink",
       )}
     >
-      <TabletSmartphone size={18} strokeWidth={1.8} />
+      <Smartphone size={18} strokeWidth={1.75} />
       {status.kind === "unpaired" && (
         <span
           aria-hidden="true"

@@ -1,7 +1,4 @@
-// The chat column writes several of its lines in pure helpers rather than in
-// JSX. Each of them holds its English in a module-scope table or a switch, so
-// each is a place where a label can be resolved once at import time and then
-// never follow the language again.
+// Pure helpers that hold English in module-scope tables can resolve a label once at import and never follow the language.
 import { afterEach, describe, expect, it } from "vitest";
 
 import { activeLocale, setLocale } from "./i18n";
@@ -22,7 +19,7 @@ describe("live activity label", () => {
     setLocale("pt-br");
     expect(liveActivityLabel()).toBe("Pensando");
     expect(liveActivityLabel(activity("Bash: pnpm test"))).toBe("Executando um comando");
-    expect(liveActivityLabel(activity("mcp__computer__click"))).toBe("Usando o computador");
+    expect(liveActivityLabel(activity("mcp__computer__click"))).toBe("Usando a tela");
 
     setLocale("ja");
     expect(liveActivityLabel(activity("web_search"))).toBe("ウェブを検索中");
@@ -30,8 +27,6 @@ describe("live activity label", () => {
   });
 
   it("leaves the server's own narration alone", () => {
-    // the sentence comes from the server in its own words; translating it
-    // here would mean inventing one
     setLocale("pt-br");
     expect(liveActivityLabel(activity("Edit", { spoken: "editando um arquivo" }))).toBe(
       "Editando um arquivo",
@@ -41,8 +36,7 @@ describe("live activity label", () => {
 
 describe("the memo key the transcript uses", () => {
   it("reports the locale that took effect, after fallback", () => {
-    // MessagesList is memoized on its props; this is the only one that
-    // changes when the language does
+    // MessagesList is memoized on its props; this is the only one that changes with the language.
     expect(setLocale("pt-BR")).toBe("pt-br");
     expect(activeLocale()).toBe("pt-br");
     setLocale("de-AT");
@@ -56,17 +50,14 @@ describe("usage chip", () => {
   const usage = { input: 2000, output: 500, costUsd: 0.02, turns: 2 };
 
   it("translates the units and the cost caption", () => {
+    expect(usageChip(usage)).toBe("$0.02");
     setLocale("pt-br");
     expect(usageDetail(usage)).toContain("entrada");
     expect(usageDetail(usage)).toContain("saída");
-    // Cost outranks tokens in the chip (usage.ts:140), so this fixture — which
-    // carries a costUsd — shows the cost. The translated token unit, which is
-    // what this i18n test is really guarding, appears only when the engine
-    // reports no cost.
-    expect(usageChip(usage)).toBe("$0.02");
+    expect(usageChip(usage)).toBe("US$\u00a00,02");
     expect(usageChip({ ...usage, costUsd: null })).toContain("entrada");
-    expect(costCaption("subscription")).toBe("equivalente — está na sua assinatura, não é cobrado");
-    expect(costCaption(undefined)).toBe("conforme informado pelo mecanismo");
+    expect(costCaption("subscription")).toBe("equivalente (incluído na assinatura, sem cobrança)");
+    expect(costCaption(undefined)).toBe("segundo o provedor");
   });
 });
 

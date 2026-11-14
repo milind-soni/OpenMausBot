@@ -6,8 +6,6 @@ export class SearchUnavailable extends Error {
   readonly status = 503;
 }
 
-/** One read-only worker, not a worker per keystroke. Bound outstanding scans
- * so a burst of searches cannot build an unbounded queue behind the database. */
 export class MessageSearchWorker {
   private worker: Worker | undefined;
   private stopping: Promise<void> = Promise.resolve();

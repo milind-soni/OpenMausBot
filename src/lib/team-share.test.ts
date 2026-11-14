@@ -77,8 +77,6 @@ describe("skill choices", () => {
   });
 
   it("starts without a name a bot left out over its limit, even when another bot's copy is in the file", () => {
-    // Lead holds pricing-policy over its 30; Scout's copy is in the file.
-    // Ticked, it would be asked for on both bots and refused.
     expect(includedSkills(full)).toEqual(["pricing-policy", "research-brief", "objection-handling"]);
     expect(startingTicks({ document: full, skipped: [
       leadOverLimit,
@@ -115,7 +113,6 @@ describe("the dialog's state", () => {
       { body: { error: "Morgan has more than 30 skills.", choices: { skills: ["a", "b", "c"] } } });
     expect(shareRefused(counted, refusal)).toEqual({ preview: null, available: ["a", "b", "c"], included: [],
       error: "Morgan has more than 30 skills. Choose fewer skills and try again." });
-    // A refusal that names no skills (a network error) keeps the boats already drawn.
     expect(shareRefused(counted, new Error("offline"))).toEqual({ preview: null, available: ["a", "b"], included: [], error: "offline" });
     expect(shareRefused(SHARE_VIEW_START, "down")).toEqual({ ...SHARE_VIEW_START, error: "down" });
   });
@@ -172,6 +169,6 @@ describe("part names", () => {
     expect(describeSkip({ part: "agents[scout].skills[step-31]", reason: "bot_skill_limit" }, document))
       .toBe("Scout · skill · step-31 — a bot can share at most 30 skills (switched-on skills go first)");
     expect(describeSkip({ part: "skills[pricing]", reason: "skill_conflict" }, document)).toBe("pricing · skill — two bots have different skills with this name");
-    expect(describeSkip({ part: "skills[extra]", reason: "team_skill_limit" }, document)).toBe("extra · skill — a team can share at most 60 skills");
+    expect(describeSkip({ part: "skills[extra]", reason: "team_skill_limit" }, document)).toBe("extra · skill — a department can share at most 60 skills");
   });
 });

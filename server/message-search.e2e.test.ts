@@ -20,8 +20,7 @@ it("keeps independent fixture chats and health requests usable during queued his
       const result = await control(["new-bot", "--name", name]) as { bot: { id: string; activeTaskId: string } };
       bots.push({ id: result.bot.id, threadId: result.bot.activeTaskId });
     }
-    // Only the new fixture's database. Seed an unowned historical thread:
-    // searched by SQL, never returned to a viewer or used as a provider prompt.
+    // Seed an unowned historical thread: searched by SQL, never returned to a viewer or used as a prompt.
     const db = new DatabaseSync(join(fixture.info.dataDir, "messages.db"));
     try {
       const insert = db.prepare("INSERT INTO messages(thread_id,id,at,role,kind,text,json) VALUES('synthetic-history',?,1,'user','text',?,?)");
@@ -29,8 +28,7 @@ it("keeps independent fixture chats and health requests usable during queued his
       db.exec("BEGIN");
       for (let i = 0; i < 50_000; i++) {
         insert.run(`m-${i}`, text, JSON.stringify({ id: `m-${i}`, at: 1, role: "user", kind: "text", text }));
-        // Slow CI disks can outlast HTTP keep-alive during fixture setup.
-        // Let the client process closed sockets before it sends chat requests.
+        // Slow CI disks can outlast HTTP keep-alive during setup: let the client process closed sockets.
         if (i % 1000 === 999) await setImmediate();
       }
       db.exec("COMMIT");
@@ -52,8 +50,7 @@ it("keeps independent fixture chats and health requests usable during queued his
       expect(body).toEqual({ hits: [] });
     });
     const allScans = Promise.all(scans);
-    // Busy proves eight scans were admitted before health is sent. Merely
-    // starting fetches could let health win before any search reached HTTP.
+    // Busy proves eight scans were admitted before health is sent; merely starting fetches could let health win.
     await Promise.race([saturated, allScans.then(() => { throw new Error("Fixture never reached the bounded search queue"); })]);
     const at = performance.now();
     const health = await fetch(`${fixture.info.url}/api/health`);

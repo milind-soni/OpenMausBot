@@ -4,8 +4,6 @@ import { parseOrganizationBranding } from "../../electron/organization-branding.
 
 /** Native enrollment only: never apply this computer's branding to a remote workspace. */
 export function useOrganizationBranding() {
-  // Rendered without a window in the server-rendered component tests, so the
-  // bridge lookup has to tolerate its absence rather than throw at render.
   const ogb = typeof window === "undefined" ? undefined : window.ogb;
   const bridge = ogb?.remoteClient?.active ? undefined : ogb?.organization;
   const [state, setState] = useState<ManagedDesktopState | null>(null);

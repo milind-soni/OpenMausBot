@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 
-// Persisted journal filenames keep their historical box-* names.
 const FILE = join(DATA_DIR, "box-delete-requests.json");
 const LOCK_FILE = join(DATA_DIR, "box-delete-requests.lock");
 const MAX_RECORDS = 4_096;
@@ -17,6 +16,9 @@ const BOT_ID = /^[A-Za-z0-9_-]{1,120}$/;
 const BOAT_ID = /^bx_[23456789abcdefghjkmnpqrstuvwxyz]{8}$/;
 const OPERATION_ID = /^bdop_[a-f0-9]{32}$/;
 const PROVIDER_STATUSES = new Set(["pending", "processing", "blocked", "completed"]);
+
+/** Codes of a create refused while the bot's previous computer is being removed, or right after its removal finished. */
+export const BOAT_DELETING = "computer_deleting", BOAT_DELETION_FINISHED = "previous_deletion_finished";
 
 export type BoatDeletionPhase = "prepared" | "accepted" | "blocked";
 export type BoatDeletionStatus = "pending" | "processing" | "blocked" | "completed";
@@ -40,7 +42,7 @@ export interface BoatDeletionIdentity {
 
 export interface BoatDeletionOperationReceipt {
   id: string;
-  kind: "box";
+  kind: "sandbox";
   targetId: string;
   status: BoatDeletionStatus;
 }
@@ -384,7 +386,7 @@ function parseOperation(
   if (
     typeof operation.id !== "string"
     || !OPERATION_ID.test(operation.id)
-    || operation.kind !== "box"
+    || operation.kind !== "sandbox"
     || operation.targetId !== boxId
     || typeof operation.status !== "string"
     || !PROVIDER_STATUSES.has(operation.status)
@@ -393,8 +395,7 @@ function parseOperation(
   return operation as unknown as BoatDeletionOperationReceipt;
 }
 
-/** Write the immutable target before sending DELETE to the provider. Existing
- * in-flight work wins; a blocked operation may be explicitly retried. */
+/** The immutable target is written before DELETE is sent; in-flight work wins, and a blocked operation may be retried explicitly. */
 export function prepareBoatDeletion(identity: BoatDeletionIdentity): BoatDeletionRecord {
   validateIdentity(identity);
   return withJournalLock((records) => {
@@ -418,8 +419,7 @@ export function prepareBoatDeletion(identity: BoatDeletionIdentity): BoatDeletio
   });
 }
 
-/** Bind a provider receipt to the exact immutable Boat target. A caller cannot
- * accidentally attach another Boat's operation to this deletion fence. */
+/** Binds a provider receipt to this exact target, so another Boat's operation can never attach to the fence. */
 export function markBoatDeletionAccepted(boxId: string, value: unknown): BoatDeletionRecord {
   if (!BOAT_ID.test(boxId)) throw new Error("invalid cloud computer id for deletion");
   const operation = parseOperation(boxId, value);
@@ -459,9 +459,7 @@ export function markBoatDeletionAccepted(boxId: string, value: unknown): BoatDel
   });
 }
 
-/** Record an explicit provider block without discarding the target. The
- * target remains fenced from normal use; only a deliberate deletion retry
- * may prepare the same immutable target again. */
+/** The target stays fenced; only a deliberate deletion retry may prepare it again. */
 export function markBoatDeletionBlocked(boxId: string, value?: unknown): BoatDeletionRecord {
   if (!BOAT_ID.test(boxId)) throw new Error("invalid cloud computer id for deletion");
   const operation = value === undefined ? null : parseOperation(boxId, value, "blocked");
@@ -487,12 +485,9 @@ export function markBoatDeletionBlocked(boxId: string, value?: unknown): BoatDel
   });
 }
 
-/** A fresh, lock-protected copy suitable for server reconciliation. */
 export function boatDeletionSnapshot(): BoatDeletionRecord[] {
   return withJournalLock((records) => records.map(clone));
 }
-
-export const listBoatDeletions = boatDeletionSnapshot;
 
 export function getBoatDeletion(boxId: string): BoatDeletionRecord | null {
   if (!BOAT_ID.test(boxId)) throw new Error("invalid cloud computer id for deletion");
@@ -502,17 +497,12 @@ export function getBoatDeletion(boxId: string): BoatDeletionRecord | null {
   });
 }
 
-export function isBoatDeletionPending(boxId: string): boolean {
-  return getBoatDeletion(boxId) !== null;
-}
-
 export function hasPendingBoatDeletionForBot(botId: string): boolean {
   if (!BOT_ID.test(botId)) throw new Error("invalid bot id for cloud computer deletion");
   return withJournalLock((records) => records.some((record) => record.ownerBotId === botId));
 }
 
-/** Remove a record only after direct absence or a completed target-bound
- * provider operation proves the immutable Boat identity is gone. */
+/** Only after a direct absence or a completed target-bound operation proves the Boat is gone. */
 export function retireBoatDeletion(boxId: string): void {
   if (!BOAT_ID.test(boxId)) throw new Error("invalid deleted cloud computer id");
   withJournalLock((records) => {

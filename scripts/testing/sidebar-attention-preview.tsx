@@ -1,19 +1,21 @@
-// The sidebar attention popover geometry fixture: the real Sidebar through the
-// shared StoreProvider, pinned to the density named in ?density= before the
-// first render (Sidebar seeds its density state from localStorage once, at
-// mount, and never re-reads it). Driven headlessly by
-// scripts/testing/sidebar-attention-ui-smoke.cjs.
+// The sidebar attention popover geometry fixture: the real Sidebar pinned to the
+// ?density= before the first render, since Sidebar reads its density from
+// localStorage once, at mount, as it shows on a server with no inbox, the only
+// place the popover still opens.
 import { createRoot } from "react-dom/client";
 import { saveSidebarDensity } from "../../src/lib/sidebar-preferences";
 import { Sidebar } from "../../src/components/Sidebar";
+import { setInboxSupport } from "../../src/state/inbox";
 import { StoreProvider } from "../../src/state/store";
 import { applySkin, readSkin } from "../../src/lib/skins";
 import "../../src/styles.css";
 
 const density = new URLSearchParams(window.location.search).get("density");
-if (density === "compact" || density === "comfortable" || density === "icons") {
+if (density === "comfortable" || density === "icons") {
   saveSidebarDensity(density);
 }
+
+setInboxSupport("no");
 
 function Fixture() {
   return <div className="flex h-screen">

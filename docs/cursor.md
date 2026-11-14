@@ -19,27 +19,80 @@ key.
 
    Windows (native): `irm 'https://cursor.com/install?win32=true' | iex`
 
-2. Sign in with `cursor-agent login`, or set `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`
-   in the environment of the Cursor instance.
+   On Windows, OpenMausBot does not spawn cursor-agent.cmd (Node rejects a .cmd). It starts the powershell.exe -File launch from that shim’s sibling cursor-agent.ps1. After installing from the terminal, use Refresh engines so the version check runs again.
 
-3. Confirm `cursor-agent --version` works. The binary installs to `~/.local/bin` by
-   default; OpenMausBot already looks there when launched from a GUI.
+2. Sign in from Cursor's card in the app (**Sign in to Cursor**), or with `cursor-agent login`
+   in a terminal, or set `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN` in the environment of the
+   Cursor instance. The card runs `cursor-agent login` where OpenMausBot runs, with
+   `NO_OPEN_BROWSER` set, and shows the one link Cursor prints
+   (`https://cursor.com/loginDeepControl?…`): open it on any device and sign in, and the
+   CLI where the bots run finishes the sign-in. Only a cursor.com sign-in link carrying
+   Cursor's request (`challenge`, `uuid` and its own flags) is ever shown.
 
-The engine stays unavailable until the `cursor-agent` executable is on PATH. A
-missing login shows as unauthenticated rather than crashing the fleet.
+3. Confirm `cursor-agent --version` works. Cursor's docs call the command `agent`;
+   the installer adds `cursor-agent` beside it, and OpenMausBot runs that name,
+   because other tools also install an `agent`. The binary installs to
+   `~/.local/bin` by default (`%LOCALAPPDATA%\cursor-agent` on Windows);
+   OpenMausBot already looks in both, so a CLI installed while the app is open
+   is found without restarting.
+
+The engine stays unavailable until the `cursor-agent` executable is found, and
+until it answers `--version` with Cursor's own build number (`2026.10.22-27dcf5f`).
+A CLI path that runs another program is reported as not Cursor's CLI: an install
+command pasted as the path (`curl https://cursor.com/install -fsS | bash`) runs curl,
+which answers `--version` with its own banner. Settings' CLI test refuses such a path
+the same way. A missing login shows as
+unauthenticated rather than crashing the fleet.
+
+## MausBot Cloud
+
+A Cloud has no terminal, so on Linux Cursor's card installs Cursor's own build itself
+(**Install Cursor here**): the build `https://cursor.com/install` downloads, pinned to the
+version above and checked against its SHA-256 (`server/drivers/acp/cursor-release.ts`). It goes
+into the app's own folder on the data volume (`tools/standalone/cursor-agent/<version>`, about
+560 MB; every bot's box sees it read-only), and `bin/cursor-agent` there is a link to its
+launcher, which runs the node and scripts beside it. That `bin/` goes last on PATH, at start-up
+too, only while the link and the launcher are the pinned ones, so a Cursor the person installs
+themselves comes first. Nothing is added to the Cloud image.
+
+A saved CLI path that answers `--version` as another program gives way by itself to Cursor's own
+CLI once one is installed (the app's copy or one on PATH), as Set CLI would; until then the card
+offers the install. Cursor is then signed in from its card, as above; the login lands in the
+Cloud's home on its volume. Cursor runs on the Cloud itself, so signing in on the person's own
+computer, or on their cloud computer, never signs in the Cursor their bots use; the Cloud's bots
+are told so.
+
+On a Cloud, a card never offers a command to copy or a CLI path to set: an engine the Cloud can't
+install says so in one line.
 
 ## Models
 
-The picker starts from a small static catalog and refreshes from plain
-`cursor-agent models` output (`slug - Label`, with `(default)` / `(current)` markers).
-Live ids are merged into the main cloud rail (not the local-models pane). A
-failed listing keeps the last usable catalog (then the static fallback) rather
-than emptying the rail.
+The picker starts from a small static catalog and refreshes from the models an
+ACP session advertises: OpenMausBot opens `cursor-agent acp`, sends
+`initialize` and `session/new` in an empty folder, and stops, so the refresh
+sends no prompt. Each advertised model shows once under its plain slug
+(`grok-4.7[...]` as `grok-4.7`, `default[]` as `auto`). A static entry stays
+only when the session offers its model. `cursor-agent models` lists only `auto`
+on CLI 2026.10.22, so it answers only when no session opens (`slug - Label`,
+with `(default)` / `(current)` markers). Live ids are merged into the main cloud
+rail (not the local-models pane). A failed listing keeps the last usable
+catalog (then the static fallback) rather than emptying the rail.
 
-`--model <id>` is passed as a global CLI flag before `acp`. When the running
-CLI also implements ACP `session/set_model`, OpenMausBot pins the same id over
-the wire. If that method is missing (`-32601`), the argv pin is left to stand
-and the turn continues.
+`--model <id>` is passed as a global CLI flag before `acp`. Current CLIs
+(checked with 2026.09.28) ignore that flag in ACP sessions: every session
+starts on `default[]` (Auto). The pick only lands through ACP
+`session/set_model`, which accepts only the parameterised ids the session
+advertises, such as `grok-4.7[context=256k,reasoning_effort=high,fast=true]`.
+OpenMausBot maps the picker slug onto that list: `auto` to `default[]`, a
+plain slug to its Standard variant, `-fast` to `fast=true`, and an effort
+slug such as `grok-4.7-high-fast` to the variant with that effort. The
+session advertises one variant per base, so a slug with another effort
+(`grok-4.7-medium-fast`) gets that variant and a notice in the conversation.
+
+If `session/set_model` is missing (`-32601`), the argv pin is left to stand
+and the turn continues. If Cursor refuses the id (`-32602`), the turn also
+continues, on the model the session started with, and the conversation shows
+a notice that names it.
 
 ## Autonomy
 
@@ -50,13 +103,34 @@ one: both **Ask for approval** and **Approve for me** launch Cursor without
 `--force`, then OpenMausBot handles its permission requests according to the
 bot's current level.
 
+## Questions
+
+Cursor's AskQuestion tool sends `cursor/ask_question`. OpenMausBot shows all
+of its questions on one question card, including multi-select questions, and
+answers with the option ids the person picked. Cursor's reply format has no
+free text. If any answer is in the person's own words, OpenMausBot replies
+`skipped` and puts every answer in the reason, which Cursor gives the model
+as it is. An unanswered card replies `cancelled`. A question that arrives as
+one `session/request_permission` per question (Cursor's fallback) still
+becomes the one-question card it was before.
+
+## Team tools (agents MCP)
+
+OpenMausBot mounts its own coordination and team-setup tools (`coordinate_bots`,
+`create_bot`, `list_team_setup`, `propose_team_setup`, …) on Cursor turns the
+same way as on other ACP engines. The driver:
+
+- passes `--approve-mcps` on every ACP launch so Cursor accepts those
+  session-provided servers without a silent approval gate;
+- sends OpenMausBot's own servers over HTTP (`ownMcpOverHttp`) when the harness
+  is on `127.0.0.1`, matching Cursor's advertised `mcpCapabilities.http`;
+- restarts the CLI process when MCP credentials change between turns.
+
 ## What this driver does not do yet
 
-- Cursor ACP extension methods (`cursor/ask_question`, `cursor/create_plan`,
+- The other Cursor ACP extension methods (`cursor/create_plan`,
   todos/tasks/images) are not given a dedicated UI. Unknown JSON-RPC requests
   are rejected with method-not-found so the CLI is not left blocked.
-- MCP servers passed in `session/new` follow Cursor's ACP limitations; prefer
-  project or user `.cursor/mcp.json` where needed.
 - Live smoke (`cursor-agent login`, `cursor-agent models`, one real turn) should be run on
   a machine with the CLI installed and signed in before relying on this in
   production.

@@ -1,4 +1,3 @@
-// containerExec: one shell command in a Local VM, as text, with a real time limit.
 import { describe, expect, it } from "vitest";
 import { clipExecOutput, containerExec, perBotLocalVmTarget } from "./container-computer.ts";
 
