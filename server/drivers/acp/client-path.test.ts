@@ -12,10 +12,10 @@ describe("ACP client paths", () => {
     let skill = join(profile, "omb-skills", "hash");
     mkdirSync(cwd, { recursive: true });
     mkdirSync(join(skill, "references"), { recursive: true });
-    skill = realpathSync(skill);
+    skill = realpathSync.native(skill);
     const file = join(skill, "references", "guide.md");
     writeFileSync(file, "reviewed");
-    await expect(resolveAcpClientPath(file, cwd, [skill])).resolves.toBe(realpathSync(file));
+    await expect(resolveAcpClientPath(file, cwd, [skill])).resolves.toBe(realpathSync.native(file));
     await expect(resolveAcpClientPath(file, cwd)).rejects.toThrow("outside");
     await expect(resolveAcpClientPath(join(profile, "acp_token.json"), cwd, [skill])).rejects.toThrow("outside");
     await expect(resolveAcpClientPath(join(skill + "-other", "SKILL.md"), cwd, [skill])).rejects.toThrow("outside");
@@ -30,14 +30,14 @@ describe("ACP client paths", () => {
     const parent = join(base, "omb-skills");
     mkdirSync(cwd, { recursive: true });
     mkdirSync(join(parent, "hash"), { recursive: true });
-    const root = realpathSync(join(parent, "hash"));
+    const root = realpathSync.native(join(parent, "hash"));
     const file = join(root, "secret.md");
     writeFileSync(file, "reviewed");
     await expect(resolveAcpClientPath(file, cwd, [root])).resolves.toBe(file);
     const outside = join(base, "outside");
     mkdirSync(part === "parent" ? join(outside, "hash") : outside, { recursive: true });
     writeFileSync(join(outside, ...(part === "parent" ? ["hash", "secret.md"] : ["secret.md"])), "private");
-    const swapped = part === "parent" ? realpathSync(parent) : root;
+    const swapped = part === "parent" ? realpathSync.native(parent) : root;
     renameSync(swapped, swapped + "-original");
     symlinkSync(outside, swapped, process.platform === "win32" ? "junction" : "dir");
     await expect(resolveAcpClientPath(file, cwd, [root])).rejects.toThrow("expected location");
@@ -49,6 +49,6 @@ describe("ACP client paths", () => {
     mkdirSync(real, { recursive: true });
     writeFileSync(join(real, "note.md"), "workspace");
     symlinkSync(real, linked, process.platform === "win32" ? "junction" : "dir");
-    await expect(resolveAcpClientPath(join(linked, "note.md"), linked)).resolves.toBe(realpathSync(join(real, "note.md")));
+    await expect(resolveAcpClientPath(join(linked, "note.md"), linked)).resolves.toBe(realpathSync.native(join(real, "note.md")));
   });
 });

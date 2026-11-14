@@ -962,7 +962,7 @@ describe("Antigravity driver over shared ACP", () => {
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
     const prompt = JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8"));
     const stagedFile = JSON.parse(prompt[0].text.slice(5)) as string;
-    expect(stagedFile.startsWith(join(realpathSync(antigravityProfileDirectory(instanceId)), "omb-skills") + (process.platform === "win32" ? "\\" : "/"))).toBe(true);
+    expect(stagedFile.startsWith(join(realpathSync.native(antigravityProfileDirectory(instanceId)), "omb-skills") + (process.platform === "win32" ? "\\" : "/"))).toBe(true);
     expect(readFileSync(stagedFile, "utf8")).toBe("Read references/guide.md.");
     expect(readFileSync(join(dirname(stagedFile), "references", "guide.md"), "utf8")).toBe("Reviewed instructions");
     await fileRequestsFinished;
