@@ -21,7 +21,7 @@ const FULL =
 function desktop() {
   let companion: CompanionState = { enabled: false, keepAwake: false, port: 8810, devices: [], pairing: null };
   let account: CompanionAccountState = { available: true, status: "ready", email: "ada@example.com" };
-  let finishPrepare: (outcome: "ready" | "full") => void = () => {};
+  let finishPrepare: (outcome: "ready" | "full" | "relay") => void = () => {};
   const withHosted = () => ({
     ...companion,
     endpoints: [{ kind: "hosted" as const, url: HOSTED, priority: 0 }],
@@ -60,6 +60,9 @@ function desktop() {
           if (outcome === "ready") {
             companion = withHosted();
             account = { ...account, endpoint: HOSTED };
+          } else if (outcome === "relay") {
+            // 409 relay_capable: the stored address is forgotten and phones connect through the relay.
+            account = { available: true, status: "ready", email: "ada@example.com" };
           } else {
             account = { available: true, status: "error", email: "ada@example.com", message: FULL };
           }
@@ -70,7 +73,24 @@ function desktop() {
   };
   return {
     bridge,
-    finishPrepare: (outcome: "ready" | "full") => finishPrepare(outcome),
+    finishPrepare: (outcome: "ready" | "full" | "relay") => finishPrepare(outcome),
+    /** Signed in with an address stored from before, which the control plane has since removed. */
+    staleAddress() {
+      account = { ...account, endpoint: HOSTED };
+    },
+    /** Same Wi-Fi and Anywhere on, as the start without explicit routes turns them on. */
+    relayRoute(e2e = false) {
+      companion = {
+        ...companion,
+        routes: {
+          wifi: { on: true, since: Date.now() },
+          relay: { on: true, since: Date.now() },
+          tailscale: { on: false, since: null },
+          https: { on: true, since: Date.now() },
+        },
+        ...(e2e ? { e2e: { enabled: true, relay: "connected" as const, node: null, descriptor: null } } : {}),
+      };
+    },
     alreadyHosted() {
       companion = { ...withHosted(), enabled: true };
       account = { ...account, endpoint: HOSTED };
@@ -207,5 +227,56 @@ describe("pairing on a computer that already holds its HTTPS address", () => {
     await vi.waitFor(() => expect(host.querySelector('[aria-label="Device pairing QR code"]')).not.toBeNull());
     expect(fake.bridge.companionAccount.prepare).toHaveBeenCalledOnce();
     expect(fake.bridge.companion.pairing).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("pairing on a computer the relay carries", () => {
+  it("opens the code through the relay at once while a stored address is still being checked", async () => {
+    const fake = desktop();
+    fake.staleAddress();
+    fake.relayRoute();
+    await startPairing(fake);
+    // prepare() has not answered: the stored address is neither verified nor forgotten yet, and nothing waits on it.
+    await vi.waitFor(
+      () => expect(host.querySelector('[aria-label="Device pairing QR code"]')).not.toBeNull(),
+      { timeout: 5_000 },
+    );
+    expect(fake.bridge.companionAccount.prepare).toHaveBeenCalledOnce();
+    expect(fake.bridge.companion.pairing).toHaveBeenCalledWith(true);
+    expect(text()).not.toContain("Creating secure remote access");
+
+    // The control plane answers that the relay carries this computer: the open code stays.
+    fake.finishPrepare("relay");
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(host.querySelector('[aria-label="Device pairing QR code"]')).not.toBeNull();
+    expect(text()).not.toContain("Secure access needs attention");
+    flushSync(() => button("Reveal")?.click());
+    expect(text()).not.toContain(HOSTED);
+    expect(fake.bridge.companion.pairing).toHaveBeenCalledOnce();
+  });
+
+  it("does not wait on a stored address that is not answering when the encrypted connection is on", async () => {
+    const fake = desktop();
+    fake.staleAddress();
+    fake.relayRoute(true);
+    await startPairing(fake);
+    // prepare() is still checking the address in the background; the code is open already.
+    await vi.waitFor(
+      () => expect(host.querySelector('[aria-label="Device pairing QR code"]')).not.toBeNull(),
+      { timeout: 5_000 },
+    );
+    expect(fake.bridge.companion.pairing).toHaveBeenCalledWith(true);
+    expect(fake.bridge.companionAccount.prepare).toHaveBeenCalledOnce();
+    expect(text()).not.toContain("Creating secure remote access");
+  });
+
+  it("still waits for an HTTPS address when Anywhere is off", async () => {
+    const fake = desktop();
+    await startPairing(fake);
+    await vi.waitFor(() => expect(fake.bridge.companionAccount.prepare).toHaveBeenCalledOnce());
+    fake.finishPrepare("relay");
+    await vi.waitFor(() => expect(fake.bridge.companionAccount.state).toHaveBeenCalled());
+    expect(fake.bridge.companion.pairing).not.toHaveBeenCalled();
+    expect(text()).toContain("Creating secure remote access");
   });
 });

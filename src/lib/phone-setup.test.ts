@@ -18,6 +18,7 @@ import {
   preparePhonePairingRoute,
   invalidatePhonePairingAttempt,
   queuePhonePairingAttempt,
+  relayServesPairing,
   releasePhonePairingAttempt,
   secureAddressRequestLapsed,
   shouldArmPhoneSetupProvisioningTimeout,
@@ -220,6 +221,24 @@ describe("phone setup flow", () => {
     expect(secureAddressRequestLapsed(account("ready"), { enabled: false })).toBe(false);
     expect(secureAddressRequestLapsed(null, waiting)).toBe(false);
     expect(secureAddressRequestLapsed({ ...account("ready"), available: false }, waiting)).toBe(false);
+  });
+
+  it("lets the relay carry a pairing instead of waiting on an HTTPS address", () => {
+    const on = { on: true };
+    const relayOn = { enabled: true, endpoints: [], routes: { relay: on } };
+    const withAddress = { ...account("ready"), endpoint: "https://c-opaque.openmausbot.com" };
+    // The control plane holds no address for this computer: the relay is how phones reach it.
+    expect(relayServesPairing(account("ready"), relayOn)).toBe(true);
+    // A stored address that has not answered (yet) does not hold the code either.
+    expect(relayServesPairing(withAddress, relayOn)).toBe(true);
+    expect(relayServesPairing(account("ready"), { ...relayOn, routes: { relay: { on: false } } })).toBe(false);
+    expect(relayServesPairing(account("ready"), { enabled: true, endpoints: [] })).toBe(false);
+    expect(relayServesPairing(account("ready"), { ...relayOn, enabled: false })).toBe(false);
+    for (const status of ["connecting", "error", "signed-out"] as const) {
+      expect(relayServesPairing(account(status), relayOn)).toBe(false);
+    }
+    expect(relayServesPairing({ ...account("ready"), available: false }, relayOn)).toBe(false);
+    expect(relayServesPairing(null, relayOn)).toBe(false);
   });
 
   it("opens local pairing only after the explicit Wi-Fi fallback", () => {

@@ -69,6 +69,10 @@ const WATCHDOG_CHECK_STATES = new Set(["starting", "ready", "retrying", "error"]
 
 const CONNECTOR_FAILING_STATES = new Set(["retrying", "error"]);
 
+/** Verify failures in a row after which a stored address is asked for again, whatever its status reads. */
+const REPROVISION_AFTER_FAILURES = 2;
+const DEFAULT_REPROVISION_INTERVAL_MS = 10 * 60_000;
+
 const defaultSetTimer = (callback, milliseconds) => {
   const timer = setTimeout(callback, milliseconds);
   timer.unref?.();
@@ -236,6 +240,9 @@ export function createCompanionAccountService({
   relay = { capable: () => false, legacyDevices: async () => null },
   releaseGraceMs = DEFAULT_RELEASE_GRACE_MS,
   releaseJitterMs = DEFAULT_RELEASE_JITTER_MS,
+  reprovisionIntervalMs = DEFAULT_REPROVISION_INTERVAL_MS,
+  /** A new installation credential was stored: the relay token can be asked for now. */
+  installationChanged = () => {},
   // Only the code, HTTP status, request id and retry delay: never an email, token, credential or address.
   log = () => {},
 } = {}) {
@@ -251,6 +258,8 @@ export function createCompanionAccountService({
   let lastEndpointCheck = null;
   let requestedAt = null;
   let disposed = false;
+  let connectorFailures = 0;
+  let lastForcedReprovision = null;
 
   const serialize = (work) => {
     const next = transition.then(work, work);
@@ -500,7 +509,8 @@ export function createCompanionAccountService({
     });
   };
 
-  const provision = async ({ accountToken, user }) => {
+  /** `addressGone`: the stored address is known gone or unanswered, so it is forgotten even when no tunnel is asked for. */
+  const provision = async ({ accountToken, user, addressGone = false }) => {
     const clientInstanceId = await ensureClientIdentity();
     await finishPendingRelease();
     const before = credentials();
@@ -524,7 +534,20 @@ export function createCompanionAccountService({
       }
       throw error;
     }
+    if (previous?.installationCredential !== installation.credential) {
+      try {
+        installationChanged();
+      } catch {
+      }
+    }
+    // The control plane answers for the address below: no separate check is due.
+    lastEndpointCheck = now();
     const withoutTunnel = async () => {
+      if (addressGone && managedCompanionTunnelAccess(credentials())) {
+        await stopManagedEndpoint();
+        await updateCredentials(withoutManagedCompanionTunnelAccess);
+        writeLog("companion account: forgot a secure address that is gone; phones connect through the relay");
+      }
       await updateCredentials((document) => withAuthenticatedAccount(document, { accountToken, user, clientInstanceId }));
       resetAutoRetry();
       return (phase = null), settledState();
@@ -693,7 +716,7 @@ export function createCompanionAccountService({
     }
   });
 
-  const retryWork = async () => {
+  const retryWork = async ({ addressGone = false } = {}) => {
     if (!configured) return settledState();
     const account = storedAccount(credentials());
     if (!account) {
@@ -716,6 +739,7 @@ export function createCompanionAccountService({
       return await provision({
         accountToken: account.accountToken,
         user: { id: account.userId, email: account.email },
+        addressGone: addressGone === true,
       });
     } catch (error) {
       failAction(error, { email: account.email, expiredSessionIsSignedOut: true });
@@ -730,19 +754,15 @@ export function createCompanionAccountService({
   });
 
   /** Re-provisions only on a definitive "no endpoint" answer; a network or service failure keeps everything as is. */
-  const reconcileIfEndpointGone = async ({ onGone = retryWork } = {}) => {
+  const reconcileIfEndpointGone = async ({ onGone = () => retryWork({ addressGone: true }) } = {}) => {
     const document = credentials();
     const account = storedAccount(document);
     const access = managedCompanionTunnelAccess(document);
-    if (
-      !account ||
-      !access ||
-      !account.installationCredential ||
-      companionAccountCleanupPending(document) ||
-      typeof client.getEndpoint !== "function"
-    ) {
-      return null;
-    }
+    if (!account || !access || companionAccountCleanupPending(document)) return null;
+    // A stored address without a usable installation credential can never be checked, released or given a relay
+    // token: provisioning again (with the account) is the only way it is ever asked about.
+    if (!account.installationCredential) return onGone();
+    if (typeof client.getEndpoint !== "function") return null;
     lastEndpointCheck = now();
     let endpoint;
     try {
@@ -909,14 +929,67 @@ export function createCompanionAccountService({
     if (!managedCompanionTunnelAccess(document)) return retryWork();
     await cancelRelease();
     const connection = managedConnectionState?.() ?? {};
-    if (["stopped", "unconfigured"].includes(connection.status)) {
-      await activatePersistedEndpoint();
-    } else if (CONNECTOR_FAILING_STATES.has(connection.status)) {
+    // A stored address may have been removed while this computer was away: ask before a pairing waits on it, so a
+    // gone one is provisioned again (or forgotten for the relay) instead of being dialled.
+    if (connection.status !== "ready" && (CONNECTOR_FAILING_STATES.has(connection.status) || endpointCheckDue())) {
       const repaired = await reconcileIfEndpointGone();
       if (repaired) return repaired;
     }
+    if (["stopped", "unconfigured"].includes(managedConnectionState?.()?.status)) {
+      await activatePersistedEndpoint();
+    }
     return settledState();
   });
+
+  /** Before the connector dials a stored address: ask the control plane whether it still exists, at most once per
+   * half check interval. A gone address is provisioned again, which on `relay_capable` forgets it. */
+  const checkStoredAddress = () => serialize(async () => {
+    const document = credentials();
+    if (
+      !configured ||
+      disposed ||
+      !companionIsOn() ||
+      !managedCompanionTunnelAccess(document) ||
+      !endpointCheckDue()
+    ) {
+      return null;
+    }
+    return reconcileIfEndpointGone();
+  });
+
+  /** The connector's status, as it changes. A verify failure checks the address; failures in a row provision it
+   * again even when the control plane still lists it, at most once per `reprovisionIntervalMs`. */
+  const connectorChanged = (status) => {
+    if (disposed || !configured) return;
+    if (status?.status === "ready" || status?.status === "stopped" || status?.status === "unconfigured") {
+      connectorFailures = 0;
+      return;
+    }
+    if (status?.status !== "retrying") return;
+    connectorFailures += 1;
+    void serialize(async () => {
+      const document = credentials();
+      if (
+        !companionIsOn() ||
+        !storedAccount(document) ||
+        !managedCompanionTunnelAccess(document) ||
+        companionAccountCleanupPending(document) ||
+        autoRetryTimer !== null ||
+        !CONNECTOR_FAILING_STATES.has(managedConnectionState?.()?.status)
+      ) {
+        return null;
+      }
+      const forcedDue = lastForcedReprovision === null || now() - lastForcedReprovision >= reprovisionIntervalMs;
+      if (connectorFailures >= REPROVISION_AFTER_FAILURES && forcedDue) {
+        if (!(await probeControlPlane({ force: true }))) return null;
+        lastForcedReprovision = now();
+        connectorFailures = 0;
+        writeLog("companion account: the secure address did not answer; asking for it again");
+        return retryWork({ addressGone: true });
+      }
+      return endpointCheckDue() ? reconcileIfEndpointGone() : null;
+    }).catch(() => {});
+  };
 
   const watchdogTick = () => {
     watchdogTimer = null;
@@ -993,6 +1066,8 @@ export function createCompanionAccountService({
     verifyCode,
     retry,
     prepare,
+    checkStoredAddress,
+    connectorChanged,
     signOut,
     restore,
     dispose,

@@ -192,6 +192,20 @@ export function shouldPrepareSecureAddress(
     && (account.status === "ready" || account.status === "connecting");
 }
 
+/** Automatic pairing goes through MausBot Relay instead of waiting on an HTTPS address whenever the relay can carry
+ * the phone: the phone link runs with Anywhere on and the account is signed in (the relay token comes with the
+ * sign-in, and is asked for as soon as a code is open). A stored HTTPS address that has not answered yet never holds
+ * the code: it opens on the direct route at once, and its QR carries the relay. */
+export function relayServesPairing(
+  account: CompanionAccountState | null,
+  companion: (PhoneSetupCompanionSnapshot & { routes?: { relay?: { on: boolean } } }) | null,
+): boolean {
+  return account?.available === true
+    && account.status === "ready"
+    && companion?.enabled === true
+    && companion.routes?.relay?.on === true;
+}
+
 export function secureAddressRequestLapsed(
   account: CompanionAccountState | null,
   companion: PhoneSetupCompanionSnapshot | null,

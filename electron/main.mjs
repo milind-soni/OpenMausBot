@@ -601,6 +601,7 @@ function ensureManagedCompanionConnector() {
     runtimeRoot: path.join(app.getPath("userData"), "managed-companion-tunnel"),
     onChange: (status) => {
       slog(`managed companion connection ${status.status}`);
+      companionAccountService?.connectorChanged(status);
       if (!companionDesiredThisLaunch) return;
       void reconcileCompanionAdvertisement(status.ready ? status.endpoint : null);
     },
@@ -663,7 +664,18 @@ async function startDesktopCompanion({ waitForHosted = true, remember = true, ro
   }
   if (remember) for (const route of routes.filter((name) => ["wifi", "relay"].includes(name))) await rememberCompanionRoute(route, true);
   phoneLinkRoutes.touched();
-  await startManagedCompanionConnection({ waitForVerification: waitForHosted });
+  // A stored address may have been removed while this computer was away: ask before dialling it, so a gone one is
+  // provisioned again (or forgotten for the relay) rather than retried for nothing.
+  const checked = companionRouteOn("https") && managedCompanionTunnelAccess(secureCredentials)
+    ? (companionAccountService?.checkStoredAddress() ?? Promise.resolve(null)).catch(() => null)
+    : Promise.resolve(null);
+  // With Anywhere on, pairing goes through the relay: the start never waits on the HTTPS address verifying.
+  if (waitForHosted && !companionRouteOn("relay")) {
+    await checked;
+    await startManagedCompanionConnection({ waitForVerification: true });
+  } else {
+    void checked.then(() => (companionDesiredThisLaunch ? startManagedCompanionConnection({ waitForVerification: false }) : null)).catch(() => {});
+  }
   return desktopCompanionState();
 }
 
@@ -749,6 +761,7 @@ function ensureCompanionAccountService() {
     managedEndpointNeeded: async () =>
       companionRunning() ? managedEndpointNeed(await companionState().catch(() => null)) : null,
     relay: { capable: () => companionE2E?.enabled === true, legacyDevices: async () => (companionRunning() ? deviceCounts(await companionState().catch(() => null)).legacy : null) },
+    installationChanged: () => companionE2E?.tokenRejected(),
     log: (line) => slog(line),
   });
   return companionAccountService;
