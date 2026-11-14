@@ -85,13 +85,13 @@ const FULL = "skills+shared+voice+x+team+images+hosting";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 63197,
-  "voice": 63978,
+  "default": 63245,
+  "voice": 64026,
   "shared": 65462,
   "shared+voice": 66243,
   "skills": 66273,
   "skills+voice": 67054,
-  "skills+shared": 68443,
+  "skills+shared": 68491,
   "skills+shared+voice": 69224,
   "non-chief": 54087,
   "voice+non-chief": 54868,
@@ -103,8 +103,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+shared+voice+non-chief": 60209,
   "skills+shared+voice+cloud-home": 68990,
   "skills+shared+voice+non-chief+cloud-home": 59975,
-  "default+legacy-switches": 63197,
-  "default+mausbot": 63848,
+  "default+legacy-switches": 63245,
+  "default+mausbot": 63896,
   "skills+shared+voice+mausbot": 69875,
   "skills+shared+voice+x": 73048,
   "skills+shared+voice+x+team": 73048,
@@ -112,7 +112,7 @@ const BUDGET_BASELINE: Record<string, number> = {
   "default+room": 59680,
   "non-chief+room": 50526,
   "skills+shared+voice+x+team+images": 73821,
-  "default+images": 63970,
+  "default+images": 64018,
   "skills+shared+voice+x+team+images+hosting": 75660,
   "default+hosting": 65205,
 };

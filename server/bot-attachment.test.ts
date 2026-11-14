@@ -111,7 +111,7 @@ describe("saveBotAttachment", () => {
   });
 
   it("names what is supported when the type is not", async () => {
-    for (const name of ["page.html", "logo.svg", "run.exe", "bundle.zip", "noextension"]) {
+    for (const name of ["page.html", "logo.svg", "run.exe", "bundle.cab", "data.tar.zst", "noextension"]) {
       writeFileSync(join(WORK, name), "x");
       await expect(saveBotAttachment({ path: name, roots: [WORK] }), name).rejects.toMatchObject({
         status: 415,
@@ -124,6 +124,46 @@ describe("saveBotAttachment", () => {
     await expect(saveBotAttachment({ path: "nope.pdf", roots: [WORK] })).rejects.toMatchObject({ status: 404 });
     await expect(saveBotAttachment({ path: "  ", roots: [WORK] })).rejects.toMatchObject({ status: 400 });
     expect(existsSync(ATTACHMENTS_DIR)).toBe(true);
+  });
+});
+
+describe("saveBotAttachment for an archive", () => {
+  // Typed by the name's last extension, like a person's upload: build.tar.gz is a .gz.
+  const archives: Array<[string, string, string]> = [
+    ["project.zip", "application/zip", ".zip"],
+    ["photos.rar", "application/vnd.rar", ".rar"],
+    ["dump.7z", "application/x-7z-compressed", ".7z"],
+    ["site.tar", "application/x-tar", ".tar"],
+    ["log.gz", "application/gzip", ".gz"],
+    ["src.tgz", "application/x-compressed-tar", ".tgz"],
+    ["data.bz2", "application/x-bzip2", ".bz2"],
+    ["db.xz", "application/x-xz", ".xz"],
+    ["build.tar.gz", "application/gzip", ".gz"],
+    ["BUNDLE.ZIP", "application/zip", ".zip"],
+    ["Release.TAR.GZ", "application/gzip", ".gz"],
+  ];
+
+  it.each(archives)("attaches %s as a plain file, stored as sent", async (name, mime, extension) => {
+    const bytes = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from(`not unpacked: ${name}`)]);
+    writeFileSync(join(WORK, name), bytes);
+    const saved = await saveBotAttachment({ path: name, roots: [WORK] });
+    expect(saved.attachment).toMatchObject({ kind: "file", mime });
+    if (saved.attachment.kind === "file") expect(saved.attachment.name.toLowerCase()).toBe(name.toLowerCase());
+    expect(saved.attachment.path.startsWith(ATTACHMENTS_DIR)).toBe(true);
+    expect(saved.attachment.path.endsWith(extension)).toBe(true);
+    expect(readFileSync(saved.attachment.path)).toEqual(bytes);
+    expect(saved.bytes).toBe(bytes.byteLength);
+  });
+
+  it("keeps the file size limit and the folder rules", async () => {
+    const big = join(WORK, "huge.zip");
+    writeFileSync(big, "PK");
+    truncateSync(big, FILE_MAX_BYTES + 1);
+    await expect(saveBotAttachment({ path: "huge.zip", roots: [WORK] })).rejects.toMatchObject({ status: 413, code: "file_too_large" });
+    rmSync(big);
+    writeFileSync(join(DATA_ROOT, "outside.zip"), "PK");
+    await expect(saveBotAttachment({ path: join(DATA_ROOT, "outside.zip"), roots: [WORK] })).rejects.toMatchObject({ status: 403 });
+    await expect(saveBotAttachment({ path: "../outside.zip", roots: [WORK] })).rejects.toMatchObject({ status: 403 });
   });
 });
 
@@ -198,8 +238,8 @@ describe("saveBotAttachment for a file a turn saved outside its folders", () => 
     const since = Date.now();
     const turn = { roots: [WORK], savedThisTurn: { since, refuse } };
     await expect(saveBotAttachment({ path: DESIGNS, ...turn })).rejects.toMatchObject({ status: 400 });
-    writeFileSync(join(DESIGNS, "bundle.zip"), "PK");
-    await expect(saveBotAttachment({ path: join(DESIGNS, "bundle.zip"), ...turn })).rejects.toMatchObject({ status: 415 });
+    writeFileSync(join(DESIGNS, "bundle.cab"), "MSCF");
+    await expect(saveBotAttachment({ path: join(DESIGNS, "bundle.cab"), ...turn })).rejects.toMatchObject({ status: 415 });
     const big = join(DESIGNS, "big.mp4");
     writeFileSync(big, "x");
     truncateSync(big, FILE_MAX_BYTES + 1);
