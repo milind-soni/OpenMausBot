@@ -74,7 +74,8 @@ export function createSignInMail(options: { url: string; from?: string; now?: ()
       const sender = from();
       transport ??= import("nodemailer").then(({ createTransport }) => createTransport(smtpOptions(options.url)));
       const code = String(randomInt(0, 100_000_000)).padStart(8, "0");
-      pending.set(email, { hash: digest(code), sentAt: now(), tries: 0 });
+      const entry = { hash: digest(code), sentAt: now(), tries: 0 };
+      pending.set(email, entry);
       try {
         await (await transport).sendMail({
           from: sender, to: email, subject: target ? `Your MausBot sign-in code for ${target}` : "Your MausBot sign-in code",
@@ -82,7 +83,7 @@ export function createSignInMail(options: { url: string; from?: string; now?: ()
             + "If you did not ask to sign in, ignore this email: nobody gets in without the code.\n",
         });
       } catch (error) {
-        pending.delete(email);
+        if (pending.get(email) === entry) pending.delete(email);
         throw error;
       }
       return "sent";

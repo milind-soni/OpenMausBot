@@ -73,6 +73,39 @@ describe("sign-in codes through the server's own mail server", () => {
       .rejects.toThrow("OMB_SIGNIN_SMTP_FROM");
   });
 
+  it.each(["success", "failure"])("keeps a resent code after an older delivery ends in %s", async (outcome) => {
+    let clock = 1_000_000;
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    let delivered!: () => void;
+    let refused!: (error: Error) => void;
+    const delivery = new Promise<void>((resolve, reject) => { delivered = resolve; refused = reject; });
+    const box = mailbox();
+    const mail = createSignInMail({ url: URL_, now: () => clock, transport: {
+      sendMail: async (message) => {
+        box.sent.push(message);
+        if (box.sent.length === 1) {
+          started();
+          await delivery;
+        }
+      },
+    } });
+    const first = mail.send("her@example.test");
+    const finished = outcome === "failure"
+      ? expect(first).rejects.toThrow("550 relay denied")
+      : expect(first).resolves.toBe("sent");
+    await ready;
+    clock += SIGNIN_CODE_RESEND_MS;
+    expect(await mail.send("her@example.test")).toBe("sent");
+    const code = box.code();
+    if (outcome === "failure") refused(new Error("550 relay denied"));
+    else delivered();
+    await finished;
+
+    expect(mail.check("her@example.test", code)).toBe("ok");
+    expect(mail.check("her@example.test", code)).toBe("wrong");
+  });
+
   it("is what email sign-in uses when OMB_SIGNIN_SMTP_URL is set: no account service, the allow-list as before", async () => {
     const box = mailbox();
     const signIn = createEmailSignIn({
