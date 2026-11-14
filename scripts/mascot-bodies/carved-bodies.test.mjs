@@ -8,7 +8,7 @@ import { CARVED_BODIES, CARVED_BODY_IDS, DIWALI_BODY_IDS, HALLOWEEN_BODY_IDS } f
 import { MASCOT_BODY_IDS } from "../../shared/mascot-bodies.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const CATALOG = new URL("../../shared/carved-bodies.ts", import.meta.url);
+const CATALOG = new URL("../../packages/phone-protocol/src/carved-bodies.ts", import.meta.url);
 const read = () => readFileSync(CATALOG, "utf8").replace(/\r\n/g, "\n");
 
 /** Even-odd point-in-path over the flattened outline. */
@@ -35,7 +35,7 @@ describe("carved catalog", () => {
     }
     const after = read();
     writeFileSync(CATALOG, before);
-    expect(after === before, "shared/carved-bodies.ts was hand-edited or the generator is non-deterministic").toBe(true);
+    expect(after === before, "packages/phone-protocol/src/carved-bodies.ts was hand-edited or the generator is non-deterministic").toBe(true);
   }, 120_000);
 
   it("uses ids that never collide with each other or the gradient catalog", () => {
