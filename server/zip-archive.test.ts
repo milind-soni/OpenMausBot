@@ -78,6 +78,32 @@ describe("extracting a verified zip", () => {
     expect(readFileSync(join(out, "empty"), "utf8")).toBe("");
   });
 
+  it("rejects stored payload corruption that preserves the declared size", async () => {
+    const { file, out } = archive([{ name: "content.json", data: '{"title":"plan"}', method: 0 }]);
+    const bytes = readFileSync(file);
+    bytes[bytes.indexOf(Buffer.from("plan"))] = "s".charCodeAt(0);
+    writeFileSync(file, bytes);
+    await expect(extractZip(file, out, { maxEntries: 10 })).rejects.toThrow(/checksum/);
+  });
+
+  it.each([0, 8] as const)("checks the directory CRC for compression method %s", async (method) => {
+    const { file, out } = archive([{ name: "content", data: "unchanged content".repeat(10_000), method }]);
+    const bytes = readFileSync(file);
+    const directory = bytes.readUInt32LE(bytes.length - 6);
+    bytes.writeUInt32LE((bytes.readUInt32LE(directory + 16) ^ 1) >>> 0, directory + 16);
+    writeFileSync(file, bytes);
+    await expect(extractZip(file, out, { maxEntries: 10 })).rejects.toThrow(/checksum/);
+  });
+
+  it("rejects an empty member with a nonzero directory CRC", async () => {
+    const { file, out } = archive([{ name: "empty", data: "", method: 0 }]);
+    const bytes = readFileSync(file);
+    const directory = bytes.readUInt32LE(bytes.length - 6);
+    bytes.writeUInt32LE(1, directory + 16);
+    writeFileSync(file, bytes);
+    await expect(extractZip(file, out, { maxEntries: 10 })).rejects.toThrow(/checksum/);
+  });
+
   it("refuses a file that is not a zip", async () => {
     scratch = mkdtempSync(join(tmpdir(), "omb-zip-archive-"));
     const file = join(scratch, "not.zip");

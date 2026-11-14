@@ -6,7 +6,7 @@ import { mkdir, open, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { createInflateRaw } from "node:zlib";
+import { crc32, createInflateRaw } from "node:zlib";
 
 export interface ZipMember {
   name: string;
@@ -15,6 +15,7 @@ export interface ZipMember {
   uncompressedBytes: number;
   localHeaderOffset: number;
   externalAttributes: number;
+  checksum: number;
 }
 
 const EOCD_SIGNATURE = 0x06054b50;
@@ -94,6 +95,7 @@ export async function readZipDirectory(path: string, maxEntries: number): Promis
         uncompressedBytes,
         localHeaderOffset,
         externalAttributes,
+        checksum: directory.readUInt32LE(cursor + 16),
       });
       cursor = next;
     }
@@ -134,9 +136,11 @@ export async function extractZipMember(archivePath: string, entry: ZipMember, de
   const dataOffset = await memberDataOffset(archivePath, entry);
   const expectedBytes = entry.uncompressedBytes;
   let bytes = 0;
+  let checksum = 0;
   const counter = new Transform({
     transform(chunk, _encoding, callback) {
       bytes += chunk.length;
+      checksum = crc32(chunk, checksum);
       callback(bytes <= expectedBytes ? null : new Error("An extracted file exceeded its declared size."), chunk);
     },
   });
@@ -153,6 +157,7 @@ export async function extractZipMember(archivePath: string, entry: ZipMember, de
     else await pipeline(source, counter, writer);
   }
   if (bytes !== expectedBytes) throw new Error("An extracted file was truncated.");
+  if (checksum !== entry.checksum) throw new Error("An extracted file failed its checksum.");
 }
 
 // Windows opens these as devices whatever the extension or folder, and ignores spaces before the extension: `NUL.txt`,
