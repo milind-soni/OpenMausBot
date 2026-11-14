@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 import { describe, expect, it } from "vitest";
 
 import en from "./en.json";
@@ -38,6 +38,7 @@ function retiredIn(text: string, boat: RegExp = BOAT): string[] {
 }
 
 const PENDING_KEY_PREFIXES: string[] = [];
+const CHECKED_PACKS = ["pt-br"];
 const EN_ALLOWED: Record<string, string> = {
   "botAccess.cloud.boat": "the own-key provider picker names its two providers, Boat and a VPS",
   "botAccess.cloud.hostedBackendDescription": "the own-key provider picker names its two providers, Boat and a VPS",
@@ -48,14 +49,14 @@ const EN_ALLOWED: Record<string, string> = {
 };
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const SCANNED = ["src", "server", "electron", "shared"];
+const SCANNED = ["src", "server", "electron", "shared", "packages/phone-protocol/src"];
 // Test fixtures and generated output are not copy anyone reads.
 const SKIPPED_DIRS = new Set(["node_modules", "resources", "testing", "dist"]);
 const isSource = (name: string) => /\.(?:ts|tsx|mjs|cjs|js)$/.test(name) && !/\.test\.|\.node-test\.|\.d\.ts$/.test(name);
 
 /** No snippet keeps the word file-wide; otherwise only literals containing the snippet. */
 const ALLOWED: ReadonlyArray<{ file: string; snippet?: string; why: string }> = [
-  { file: "shared/credential-request.ts", snippet: "when Boat is selected", why: "the card that asks for a person's own Boat key" },
+  { file: "packages/phone-protocol/src/credential-request.ts", snippet: "when Boat is selected", why: "the card that asks for a person's own Boat key" },
   { file: "server/boat-create-idempotency.ts", snippet: "unnamed Boat", why: "own-key repair: boat.dev's own name for a machine" },
   { file: "src/lib/boat-offer.ts", snippet: "MausBot introduced me", why: "the email a person sends Boat to claim its credit" },
   { file: "server/workspace-backup.ts", snippet: "OMB-WORKSPACE-1", why: "a backup file's format marker" },
@@ -154,19 +155,32 @@ describe("one name per thing", () => {
     const e = en as Record<string, string>;
     const source = (file: string) => readFileSync(join(ROOT, file), "utf8");
     const myCloud = /CLOUD_HOME_NAME = "([^"]+)"/.exec(source("electron/cloud-home.mjs"))?.[1];
-    const thisComputer = /id: "workspace-local", label: "([^"]+)"/.exec(source("electron/environments.cjs"))?.[1];
-    const serverMenuLocal = /\{ label: "([^"]+)", type: "radio", checked: !active/.exec(source("electron/menu.mjs"))?.[1];
-    expect([myCloud, thisComputer, serverMenuLocal]).toEqual([e["cloudSetup.myCloud"], e["place.local"], e["place.local"]]);
-    const pointers: Array<[string, string[]]> = [
-      ["cloudHome.connectHelp", [e["place.local"]!]],
-      ["cloudPhone.step1", [myCloud!]],
-      ["cloudAccount.onCloudSignIn", [e["cloudAccount.signInAgain"]!]],
-      ["cloudAccount.storageFailed", [e["cloudAccount.signOut"]!]],
-      ["cloudAccount.codeExpired", [e["cloudAccount.signIn"]!]],
-      ["computer.routines.offWarning", [e["routines.runsOn.boat"]!]],
+    const thisComputer = /id: "workspace-local", label: t\("([^"]+)"\)/.exec(source("electron/environments.cjs"))?.[1];
+    const serverMenuLocal = /\{ label: t\("([^"]+)"\), type: "radio", checked: !active/.exec(source("electron/menu.mjs"))?.[1];
+    expect([myCloud, thisComputer, serverMenuLocal]).toEqual([e["cloudSetup.myCloud"], "place.local", "place.local"]);
+    type Text = (key: string) => string;
+    const label = (key: string) => (text: Text) => text(key);
+    const settings = (section: string) => (text: Text) => `${text("settings.title")} → ${text(section)}`;
+    const withoutEllipsis = (key: string) => (text: Text) => text(key).replace(/…$/, "");
+    const pointers: Array<[string, Array<(text: Text) => string>]> = [
+      ["cloudAccount.onCloudSignIn", [label("cloudAccount.signInAgain")]],
+      ["cloudAccount.storageFailed", [label("settings.account.signOutShort")]],
+      ["cloudAccount.codeExpired", [label("settings.account.signIn")]],
+      ["computer.routines.offWarning", [label("routines.runsOn.boat")]],
+      ["native.dialog.org.consHosted", [label("native.menu.server")]],
+      ["native.dialog.unreachable.detail", [label("native.menu.server")]],
+      ["native.boot.folderMissing.body", [label("native.menu.server")]],
+      ["native.boot.unhealthy.body", [label("native.menu.server")]],
+      ["native.dialog.connectFailed.detail", [withoutEllipsis("native.menu.connect")]],
+      ["native.dialog.share.detail", [settings("settings.app.computers")]],
     ];
-    const stale = pointers.flatMap(([key, labels]) => labels.filter((label) => !e[key]!.includes(label)).map((label) => `${key} → ${label}`));
-    expect(stale).toEqual([]);
+    const staleIn = (text: Text, prefix: string) => pointers.flatMap(([key, labels]) => labels.map((of) => of(text))
+      .filter((shown) => !text(key).includes(shown)).map((shown) => `${prefix}${key} → ${shown}`));
+    expect(staleIn((key) => e[key]!, "")).toEqual([]);
+    for (const code of CHECKED_PACKS) {
+      const pack = locales[code] as Record<string, string | undefined>;
+      expect(staleIn((key) => pack[key] ?? e[key]!, `${code}: `)).toEqual([]);
+    }
   });
 
   it("the check catches each retired word, and lets own-key Boat and env names through", () => {

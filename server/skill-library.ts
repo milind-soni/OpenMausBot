@@ -1,12 +1,15 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdirSync, renameSync } from "node:fs";
 import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR, type AppConfig } from "./config.ts";
+import { githubSkillOriginSchema, skillFolderDigest, skillFolderRecordSchema, writeSkillFolder } from "./skill-folder.ts";
+import { entryExistsWithoutFollowing } from "./skill-storage.ts";
+import type { GitHubSkillOrigin } from "../shared/skill-import.ts";
 import { isSkillName, parseSkillMd, SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
 import type { SkillPackageStamp } from "./skills.ts";
 
@@ -151,6 +154,10 @@ export interface SkillLibraryEntry {
   warnings: string[];
   skippedFiles: string[];
   package?: SkillPackageStamp;
+  /** The files beside SKILL.md and skillFolderDigest over them; absent for a skill that is SKILL.md alone. */
+  files?: string[];
+  filesSha256?: string;
+  github?: GitHubSkillOrigin;
   /** Replaced descriptions, oldest first, with when each was replaced, so a running conversation keeps its prompt. */
   descriptionHistory?: Array<{ description: string; until: number }>;
 }
@@ -178,6 +185,8 @@ export interface LibrarySkillListing {
   tags: string[];
   warnings: string[];
   skippedFiles: string[];
+  files?: string[];
+  github?: GitHubSkillOrigin;
 }
 
 const skillLibraryEntrySchema = z.object({
@@ -201,6 +210,8 @@ const skillLibraryEntrySchema = z.object({
     w: z.string().regex(/^[a-f0-9]{64}$/),
     via: z.literal("preset").optional(),
   }).optional(),
+  ...skillFolderRecordSchema,
+  github: githubSkillOriginSchema.optional(),
   descriptionHistory: z.array(z.object({ description: z.string(), until: z.number() })).optional(),
 });
 const skillLibraryIndexSchema = z.record(z.string(), skillLibraryEntrySchema);
@@ -262,8 +273,8 @@ function sha256Hex(text: string): string {
 function libraryContentMatches(root: string, entry: SkillLibraryEntry): boolean {
   try {
     const file = join(librarySkillDirectory(root, entry.name), "SKILL.md");
-    if (!existsSync(file)) return false;
-    return sha256Hex(readFileSync(file, "utf8")) === entry.sha256;
+    if (!existsSync(file) || sha256Hex(readFileSync(file, "utf8")) !== entry.sha256) return false;
+    return !entry.filesSha256 || skillFolderDigest(librarySkillDirectory(root, entry.name), entry.files ?? []) === entry.filesSha256;
   } catch {
     return false;
   }
@@ -285,9 +296,90 @@ function librarySkillListing(root: string, entry: SkillLibraryEntry): LibrarySki
     tags: entry.tags ?? [],
     warnings: intact
       ? entry.warnings
-      : [...entry.warnings, "stored SKILL.md changed after review — enablement is blocked"],
+      : [...entry.warnings, "stored skill files changed after review — enablement is blocked"],
     skippedFiles: entry.skippedFiles,
+    ...(entry.files ? { files: entry.files } : {}),
+    ...(entry.github ? { github: entry.github } : {}),
   };
+}
+
+const libraryOptOutSchema = z.array(z.string());
+
+function libraryOptOutPath(botId: string): string | null {
+  if (!/^[\w-]+$/.test(botId)) return null;
+  return join(DATA_DIR, "skill-state", botId, "library-opt-out.json");
+}
+
+const unreadableOptOutsWarned = new Set<string>();
+
+function noLibraryOptOuts(path: string, why: string): ReadonlySet<string> {
+  if (!unreadableOptOutsWarned.has(path)) {
+    unreadableOptOutsWarned.add(path);
+    console.warn(`Library opt-outs at ${path} can't be read (${why}); every every-bot skill stays on for that bot until one is switched off again.`);
+  }
+  return new Set();
+}
+
+/** Names this bot has taken off its own list. An explicit assignment still wins; the shared copy stays. A list that is
+ * there but cannot be read counts as none, so the bot keeps working with every every-bot skill; the server logs it once. */
+export function librarySkillOptOuts(botId: string): ReadonlySet<string> {
+  const path = libraryOptOutPath(botId);
+  if (!path) return new Set();
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return new Set();
+    return noLibraryOptOuts(path, code ?? "read failed");
+  }
+  try {
+    const parsed = libraryOptOutSchema.safeParse(JSON.parse(text));
+    if (parsed.success) return new Set(parsed.data.filter(isSkillName));
+  } catch {}
+  return noLibraryOptOuts(path, "not a list of skill names");
+}
+
+export function setLibrarySkillOptOut(botId: string, name: string, optedOut: boolean): void {
+  if (!isSkillName(name)) return;
+  const path = libraryOptOutPath(botId);
+  if (!path) return;
+  const names = new Set(librarySkillOptOuts(botId));
+  if (names.has(name) === optedOut) return;
+  if (optedOut) names.add(name);
+  else names.delete(name);
+  mkdirSync(join(DATA_DIR, "skill-state", botId), { recursive: true, mode: 0o700 });
+  writeFileAtomic(path, `${JSON.stringify([...names].sort(), null, 2)}\n`, { mode: 0o600 });
+}
+
+/** Library skills this bot has: an explicit assignment, or every bot unless this bot opted out. */
+export function librarySkillsForBot(botId: string, assigned: ReadonlySet<string>, owned: ReadonlySet<string>): LibrarySkillListing[] {
+  const optedOut = librarySkillOptOuts(botId);
+  return listLibrarySkills().filter((skill) => !owned.has(skill.name) && (assigned.has(skill.name) || (skill.everyBot && !optedOut.has(skill.name))));
+}
+
+/** Library skills this bot can still add: not owned, not assigned, and not already on for every bot. */
+export function librarySkillsToOffer(botId: string, assigned: ReadonlySet<string>, owned: ReadonlySet<string>): LibrarySkillListing[] {
+  const optedOut = librarySkillOptOuts(botId);
+  return listLibrarySkills().filter((entry) => !owned.has(entry.name) && !assigned.has(entry.name) && (!entry.everyBot || optedOut.has(entry.name)));
+}
+
+/** Drops one bot's assignment. A skill on for every bot is opted out here so the others keep it. */
+export function unassignLibrarySkill(
+  botId: string,
+  name: string,
+  assigned: readonly string[] | undefined,
+): { unassigned: true; assignedSkills?: string[] } | { absent: true } {
+  if (!isSkillName(name)) return { absent: true };
+  const listing = listLibrarySkills().find((skill) => skill.name === name);
+  if (!listing) return { absent: true };
+  const explicit = assigned?.includes(name) === true;
+  const viaEvery = listing.everyBot && !librarySkillOptOuts(botId).has(name);
+  if (!explicit && !viaEvery) return { absent: true };
+  setLibrarySkillOptOut(botId, name, true);
+  return explicit
+    ? { unassigned: true, assignedSkills: assigned!.filter((skill) => skill !== name) }
+    : { unassigned: true };
 }
 
 export function setLibrarySkillEveryBot(
@@ -324,6 +416,10 @@ export function installLibrarySkill(input: {
   warnings?: string[];
   reviewState?: LibraryReviewState;
   package?: SkillPackageStamp;
+  /** The files beside SKILL.md, from prepareSkillFolder; with them the skill is stored and checked as a whole folder. */
+  files?: ReadonlyArray<{ path: string; content: string | Uint8Array; executable?: boolean }>;
+  skippedFiles?: string[];
+  github?: GitHubSkillOrigin;
   root?: string;
 }): LibrarySkillListing | { error: string } {
   const root = input.root ?? skillsLibraryRoot();
@@ -355,16 +451,50 @@ export function installLibrarySkill(input: {
     ...(input.compatibility ? { compatibility: input.compatibility } : {}),
     ...(tags?.length ? { tags } : {}),
     warnings: input.warnings ?? [],
-    skippedFiles: [],
+    skippedFiles: input.skippedFiles ?? [],
     ...(input.package ? { package: { ...input.package } } : {}),
+    ...(input.github ? { github: input.github } : {}),
   };
   // Bytes first, index second: the index is the commit point, so a crash leaves unreferenced bytes, never a dangling entry.
-  mkdirSync(librarySkillDirectory(root, input.name), { recursive: true, mode: 0o700 });
-  writeFileAtomic(join(librarySkillDirectory(root, input.name), "SKILL.md"), input.instructions, { mode: 0o600 });
+  if (input.files?.length) {
+    const stored = storeLibraryFolder(root, input.name, input.instructions, input.files);
+    if ("error" in stored) return stored;
+    entry.files = input.files.map((file) => file.path);
+    entry.filesSha256 = stored.filesSha256;
+  } else {
+    mkdirSync(librarySkillDirectory(root, input.name), { recursive: true, mode: 0o700 });
+    writeFileAtomic(join(librarySkillDirectory(root, input.name), "SKILL.md"), input.instructions, { mode: 0o600 });
+  }
   index[input.name] = entry;
   writeSkillLibraryIndex(root, index);
   skillLibraryEvents.emit("invalidate", { kind: "install", name: input.name });
   return librarySkillListing(root, entry);
+}
+
+/** Written beside the library and renamed into place; bytes a crash left under the name, which no entry names, are set aside. */
+function storeLibraryFolder(
+  root: string,
+  name: string,
+  skillMd: string,
+  files: NonNullable<Parameters<typeof installLibrarySkill>[0]["files"]>,
+): { filesSha256: string } | { error: string } {
+  const directory = librarySkillDirectory(root, name);
+  const staged = join(root, "skills", `.install-${name}-${randomUUID()}`);
+  try {
+    mkdirSync(join(root, "skills"), { recursive: true, mode: 0o700 });
+    writeSkillFolder(staged, skillMd, files);
+    const filesSha256 = skillFolderDigest(staged, files.map((file) => file.path), { remember: false });
+    if (!filesSha256) throw new Error("the stored skill folder could not be read back");
+    if (entryExistsWithoutFollowing(directory)) {
+      mkdirSync(join(root, "archive", "unreferenced"), { recursive: true, mode: 0o700 });
+      renameSync(directory, join(root, "archive", "unreferenced", `${name}.${randomUUID()}`));
+    }
+    renameSync(staged, directory);
+    return { filesSha256 };
+  } catch (error) {
+    rmSync(staged, { recursive: true, force: true });
+    return { error: `the skill could not be stored: ${error instanceof Error ? error.message : String(error)}` };
+  }
 }
 
 export function readLibrarySkillFile(name: string, root: string = skillsLibraryRoot()): string | null {
@@ -389,7 +519,7 @@ export function setLibrarySkillReviewState(
   const entry = index[name];
   if (!entry) return { error: `no library skill named "${name}"` };
   if (reviewState === "approved" && !libraryContentMatches(root, entry)) {
-    return { error: "stored SKILL.md changed after review — the library entry cannot be approved" };
+    return { error: "stored skill files changed after review — the library entry cannot be approved" };
   }
   entry.reviewState = reviewState;
   writeSkillLibraryIndex(root, index);

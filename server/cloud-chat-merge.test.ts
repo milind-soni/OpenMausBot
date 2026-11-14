@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { activePath, mergeStagedChats, mergeThread, planChatMerge, type ChatsSide, type ThreadRows } from "./cloud-chat-merge.ts";
+import { activePath, applyChatMerge, mergeStagedChats, mergeThread, planChatMerge, type ChatsSide, type ChatStore, type ThreadRows } from "./cloud-chat-merge.ts";
 import { DATA_DIR } from "./config.ts";
 import { Store, type Message, type TaskRecord } from "./store.ts";
 
@@ -59,6 +59,13 @@ describe("one conversation both have", () => {
     const first = mergeThread(thread(desktop), thread(cloud));
     const after = landed(cloud, first);
     expect(mergeThread(thread(desktop), thread(after, first.leaf))).toMatchObject({ added: [], relinked: [], leaf: first.leaf });
+  });
+
+  it("carries a Start fresh divider across, so the next turn on the other computer stops at it too", () => {
+    const desktop = [...shared, line("d1", 10, "m2"), line("fresh", 11, "d1", "bot", { kind: "compaction", compaction: { summary: "", firstKeptId: "", foldedThroughId: "d1", tokensBefore: 0, by: "person", fresh: true } }), line("d2", 12, "fresh", "bot")];
+    const merged = mergeThread(thread(desktop), thread(shared));
+    expect(merged.added.map((row) => row.id)).toEqual(["d1", "fresh", "d2"]);
+    expect(merged.added.find((row) => row.id === "d2")?.parentId).toBe("fresh");
   });
 
   it("keeps an edit branch this computer made as a branch, and its context summary stays behind with its children re-linked", () => {
@@ -178,5 +185,18 @@ describe("applied to a live store", () => {
     expect(readFileSync(join(DATA_DIR, "attachments", image), "utf8")).toBe("picture bytes");
     expect(reopened.messagesFor("desk-new")).toHaveLength(2);
     expect(existsSync(join(DATA_DIR, "routines.json"))).toBe(false);
+  });
+});
+
+describe("work from outside", () => {
+  it("keeps the record when its lines merge into a conversation the other side already has", () => {
+    const own = (more: Partial<TaskRecord> = {}) => ({ threadId: "chat", title: "Chat", createdAt: 1, resumeCursors: {}, ...more }) as TaskRecord;
+    const bot = { id: "bot", threadId: "chat", tasks: [own()] };
+    const plan = planChatMerge(side([{ id: "bot", threadId: "chat", tasks: [own({ outside: true })] }], [], { chat: [line("a", 1, null), line("b", 2, "a", "bot")] }),
+      side([{ id: "bot", threadId: "chat", tasks: [own()] }], [], { chat: [line("a", 1, null)] }));
+    expect(plan.threads).toEqual([expect.objectContaining({ threadId: "chat", outside: true })]);
+    const store = { bots: [bot], groups: [], bot: () => bot, importTranscript: () => {}, patchBot: () => null, patchGroup: () => null } as unknown as ChatStore;
+    applyChatMerge(store, plan);
+    expect(bot.tasks[0]!.outside).toBe(true);
   });
 });

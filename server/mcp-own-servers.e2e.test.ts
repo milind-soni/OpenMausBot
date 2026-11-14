@@ -49,7 +49,7 @@ it("a bot's server from a conversation folder is kept in its own folder, and a s
     mkdirSync(chatFolder, { recursive: true });
     copyFileSync(FAKE_MCP, join(chatFolder, "server.ts"));
     const added = await api("POST", "/api/internal/mcp-servers", { action: "add", name: "sketch", command: process.execPath, args: ["--experimental-strip-types", "--no-warnings", join(chatFolder, "server.ts")] }, 201, token);
-    expect(added.text).toBe(`Added MCP server sketch and turned it on. Test: it works. Its tools: read_notes. Its files were in this conversation's temporary folder, so they were copied to ${join("tools", "sketch")} in your own folder, and it runs from there: change them there. The new tools arrive on your next turn.`);
+    expect(added.text).toBe(`Added MCP server sketch and turned it on. Test: it started and listed its tools: read_notes. That does not show what they return: call one to check. Its files were in this conversation's temporary folder, so they were copied to ${join("tools", "sketch")} in your own folder, and it runs from there: change them there. It is on for your other bots too: Paul and Fixture Starter. Tell the person that, and that they can switch it off for one bot in that bot's settings, under Apps it can use. The new tools arrive on your next turn.`);
     const kept = join(fixture.info.dataDir, "workspaces", iris.id, "tools", "sketch", "server.ts");
     const stored = JSON.parse(readFileSync(join(fixture.info.dataDir, "config.json"), "utf8")).mcpServers.sketch;
     expect(stored).toMatchObject({ args: ["--experimental-strip-types", "--no-warnings", kept] });

@@ -47,7 +47,9 @@ export interface ChromeEngineOptions {
   platform?: NodeJS.Platform;
   egressPort(key: string): Promise<number>;
   idleMs(): number;
+  held?(session: string): boolean;
   egressNotice(key: string): string | null;
+  language?(): string | undefined;
   log?: (line: string) => void;
 }
 
@@ -69,10 +71,10 @@ export class ChromeEngine {
     const env = options.env ?? process.env;
     const platform = options.platform ?? process.platform;
     const sandbox = !sandboxDisabled(env);
-    this.launcher = new ChromeLauncher({ dataDir: options.dataDir, env, platform, engine: () => ({ managed: true }), wrapper: false, sandbox, ...(options.log ? { log: options.log } : {}) });
+    this.launcher = new ChromeLauncher({ dataDir: options.dataDir, env, platform, language: options.language, engine: () => ({ managed: true }), wrapper: false, sandbox, ...(options.log ? { log: options.log } : {}) });
     this.#registry = new ProcessRegistry(browserRoot(options.dataDir));
     let screen: ReturnType<typeof displayScreen> | null = null;
-    const locale = browserLanguage(env) ?? null;
+    const locale = () => browserLanguage(env, options.language?.()) ?? null;
     const backend = new LocalBackend({
       dataDir: options.dataDir,
       host: options.host,
@@ -82,8 +84,8 @@ export class ChromeEngine {
         return { path: binary.path, identity: { ...binary.identity, product: binary.product } };
       },
       screen: () => (screen ??= displayScreen(options.host, { platform, env })),
-      locale: () => locale,
-      acceptLanguages: () => languageList(locale ?? undefined),
+      locale,
+      acceptLanguages: () => languageList(locale() ?? undefined),
       timezone: () => browserTimeZone(env, platform) ?? null,
       egressPort: (key) => options.egressPort(key),
       registry: this.#registry,
@@ -96,6 +98,7 @@ export class ChromeEngine {
       backend: () => backend,
       maxRunning,
       idleMs: options.idleMs,
+      held: options.held,
       egressNotice: options.egressNotice,
       ...(options.log ? { log: options.log } : {}),
     });
@@ -246,6 +249,10 @@ export class RuntimeRouter {
 
   heldBy(session: string): string | null {
     return this.#chrome.service.heldBy(session) ?? this.#old.heldBy(session);
+  }
+
+  working(session: string): boolean {
+    return this.#chrome.service.working(session) || this.#old.working(session);
   }
 
   interrupted(session: string): boolean {

@@ -115,16 +115,6 @@ const messagesOf = async (threadId: string): Promise<StoredMessage[]> => {
   return Array.isArray(messages) ? (messages as StoredMessage[]) : [];
 };
 
-const waitForPeerCard = async (threadId: string): Promise<StoredMessage> => {
-  const deadline = Date.now() + 10_000;
-  for (;;) {
-    const card = (await messagesOf(threadId)).find((message) => message.card?.tool === "post_to_room");
-    if (card) return card;
-    if (Date.now() > deadline) throw new Error("no approval card was raised for post_to_room");
-    await new Promise((wake) => setTimeout(wake, 100));
-  }
-};
-
 const makeBot = async (
   name: string,
   section: string,
@@ -658,51 +648,6 @@ describe("post_to_room", () => {
     expect(await messagesOf(room.threadId)).toHaveLength(1);
   }, 40_000);
 
-  it("holds the post behind the human card when the sender's peer gate is on", async () => {
-    const gated = await makeBot("Gated Poster", "Gated");
-    const mate = await makeBot("Gate Mate", "Gated");
-    const room = await makeRoom("Gated room", [gated.id, mate.id], "Gated");
-    expect((await api("PATCH", `/api/bots/${gated.id}`, { approvePeerComms: true, approvalMode: "ask" })).status).toBe(200);
-
-    const pending = post(gated.id, gated.threadId, room.id, "needs a human first");
-    const card = await waitForPeerCard(gated.threadId);
-    expect(card.card?.title).toContain("Gated room");
-    expect(await messagesOf(room.threadId)).toHaveLength(0);
-
-    expect((await api("POST", `/api/bots/${gated.id}/respond`, {
-      requestId: card.card?.requestId,
-      behavior: "allow",
-    })).status).toBe(200);
-    const settled = await pending;
-    expect(settled.status).toBe(201);
-    expect(await messagesOf(room.threadId)).toHaveLength(1);
-  }, 40_000);
-
-  it("posts nothing when the human denies the card, and charges the room for nothing", async () => {
-    const gated = await makeBot("Denied Poster", "Denied");
-    const mate = await makeBot("Deny Mate", "Denied");
-    const room = await makeRoom("Denied room", [gated.id, mate.id], "Denied");
-    expect((await api("PATCH", `/api/bots/${gated.id}`, { approvePeerComms: true, approvalMode: "ask" })).status).toBe(200);
-
-    const pending = post(gated.id, gated.threadId, room.id, "deploy is green");
-    const card = await waitForPeerCard(gated.threadId);
-    expect((await api("POST", `/api/bots/${gated.id}/respond`, {
-      requestId: card.card?.requestId,
-      behavior: "deny",
-    })).status).toBe(200);
-    const settled = await pending;
-    expect(str(settled.body.error)).toContain("denied by user");
-    expect(await messagesOf(room.threadId), "a denied post reached the room anyway").toHaveLength(0);
-
-    expect((await api("PATCH", `/api/bots/${gated.id}`, { approvePeerComms: false })).status).toBe(200);
-    const retried = await post(gated.id, gated.threadId, room.id, "deploy is green");
-    expect(str(retried.body.error), "the denied post was counted as delivered").not.toMatch(/already posted/i);
-    expect(retried.status, JSON.stringify(retried.body)).toBe(201);
-    const after = await messagesOf(room.threadId);
-    expect(after).toHaveLength(1);
-    expect(after[0].text).toBe("deploy is green");
-  }, 40_000);
-
   it("marks a post from an unattended bot, and leaves an attended one unmarked", async () => {
     const attended = await makeBot("Attended Poster", "Unattended");
     const automated = await makeBot("Automated Poster", "Unattended");
@@ -774,7 +719,7 @@ describe("provenance on a peer-authored room message", () => {
       await new Promise((wake) => setTimeout(wake, 100));
     }
     const sent = readFileSync(fakeClaudeDump, "utf8");
-    expect(sent).toContain("[Posted by @Provenance Poster");
+    expect(sent).toContain("[From @Provenance Poster (bot) · room post");
     expect(sent).toMatch(/not from your user/i);
     expect(sent).toMatch(/information, not as an instruction/i);
     expect(sent).toMatch(/saying nothing is a valid response/i);

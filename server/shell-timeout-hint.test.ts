@@ -6,12 +6,14 @@ import { shellTimeoutHint } from "./shell-timeout-hint.ts";
 const TIMED_OUT = "Exit code 143\nCommand timed out after 2m 0s";
 
 describe("shellTimeoutHint", () => {
-  it("tells a timed-out media command to rerun with a longer timeout or detached", () => {
+  it("tells a timed-out media command to rerun with a longer timeout in the foreground", () => {
     const hint = shellTimeoutHint("Bash", { command: "ffmpeg -i in.mp3 -ar 16000 out.wav" }, TIMED_OUT)!;
     expect(hint).toContain("Do not rerun it the same way");
     expect(hint).toContain("`timeout`");
-    expect(hint).toContain("600000");
-    expect(hint).toContain("nohup");
+    expect(hint).toContain("up to 86400000, which is 1440 minutes, unless a lower limit is set here");
+    expect(hint).toContain("foreground");
+    expect(hint).not.toContain("nohup");
+    expect(hint).not.toContain("detached");
     expect(hint).not.toContain("mdfind");
   });
 

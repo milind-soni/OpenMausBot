@@ -80,7 +80,7 @@ function watchRoutine(id: string) {
   const done = (async () => {
     while (!stop) {
       try {
-        const [mine, theirs] = await Promise.all([fx.onCloud("GET", "/api/routines"), onTeam("olive")("GET", "/api/routines")]);
+        const [mine, theirs] = await Promise.all([fx.onCloud("GET", "/api/routines"), onTeam("ada")("GET", "/api/routines")]);
         const find = (body: any) => (body?.routines as Array<{ id: string; enabled: boolean }> | undefined)?.find((routine) => routine.id === id)?.enabled ?? null;
         seen.push({ mine: find(mine.body), theirs: find(theirs.body) });
       } catch {}
@@ -114,15 +114,18 @@ it("moves Scout with its two chats, its routine and its files; its notes about A
   fx.beforeTeamJournalWrite = null;
   expect(phaseOf(scout.bot.id)?.phase).toBe("check");
   const routineOn = async (side: CloudSendFixture["onCloud"]) => ((await side("GET", "/api/routines")).body.routines as Array<{ id: string; enabled: boolean }>).find((routine) => routine.id === scout.routine)?.enabled;
-  expect([await routineOn(fx.onCloud), await routineOn(onTeam("olive"))], "off on both sides until the switch").toEqual([false, false]);
+  expect([await routineOn(fx.onCloud), await routineOn(onTeam("ada"))], "off on both sides until the switch").toEqual([false, false]);
   expect(fx.teamMove.view()?.phase).toBe("moving");
   await fx.teamMove.kick();
   await watch.stop();
   expect(phaseOf(scout.bot.id)?.phase, JSON.stringify(fx.teamMove.journal())).toBe("done");
   expect(fx.teamMove.view()).toEqual({ bot: { id: scout.bot.id, name: "Scout" }, team: ACME, phase: "done" });
 
-  // Everyone in Acme has Scout.
-  for (const who of ["olive", "ben", "ada", "cleo"]) expect((await teamBots(who)).some((bot) => bot.id === scout.bot.id && bot.name === "Scout"), who).toBe(true);
+  // Scout is Ada's until she shares it: she and Acme's admins have it, and another User does not.
+  for (const who of ["olive", "ben", "ada"]) expect((await teamBots(who)).some((bot) => bot.id === scout.bot.id && bot.name === "Scout"), who).toBe(true);
+  expect(((await teamBots("ada")).find((bot) => bot.id === scout.bot.id) as { access?: unknown }).access).toEqual({ everyone: "none", people: {} });
+  expect((await teamBots("cleo")).some((bot) => bot.id === scout.bot.id), "cleo").toBe(false);
+  expect((await onTeam("cleo")("POST", `/api/bots/${scout.bot.id}/messages`, { text: "hello" })).status, "nor reaches it by id").toBe(404);
   // Its two chats are Ada's own there: private, never the team's main chat, with her lines as hers.
   const there = (await teamBots("ada")).find((bot) => bot.id === scout.bot.id)!;
   expect(there.threadId === scout.main || (there as { mainThreadId?: string }).mainThreadId === scout.main, "its main chat in Acme is a new one of the team's").toBe(false);
@@ -135,7 +138,7 @@ it("moves Scout with its two chats, its routine and its files; its notes about A
     expect((await onTeam("olive")("GET", `/api/threads/${threadId}/messages`)).status, "nor does the Owner").toBe(404);
     expect((await onTeam("cleo")("GET", `/api/threads/${threadId}/messages`)).status, "another Member never does").toBe(404);
   }
-  expect((await teamBots("cleo")).find((bot) => bot.id === scout.bot.id)!.tasks?.some((task) => [scout.main, scout.budget].includes(task.threadId))).toBe(false);
+  expect((await teamBots("ben")).find((bot) => bot.id === scout.bot.id)!.tasks?.some((task) => [scout.main, scout.budget].includes(task.threadId))).toBe(false);
 
   // The routine arrived off and was switched on after the check; it is gone from My Cloud, never on in both places.
   const routines = (await onTeam("ada")("GET", "/api/routines")).body.routines as Array<{ id: string; enabled: boolean; resultsThreadId?: string; botId: string }>;
@@ -143,10 +146,13 @@ it("moves Scout with its two chats, its routine and its files; its notes about A
   expect(carried).toMatchObject({ enabled: true, botId: scout.bot.id });
   expect(carried.resultsThreadId).not.toBe((there as { mainThreadId?: string }).mainThreadId);
   expect(there.tasks?.find((task) => task.threadId === carried.resultsThreadId)?.private, "its results conversation came with it, as Ada's").toBe(true);
-  // It reports into Ada's own conversation there, never the team's main chat.
-  const ran = await onTeam("olive")("POST", `/api/routines/${scout.routine}/run`);
+  // It reports into Ada's own conversation there, never the team's main chat, so it is hers alone: the Owner neither
+  // sees it nor runs it.
+  expect(((await onTeam("olive")("GET", "/api/routines")).body.routines as Array<{ id: string }>).some((routine) => routine.id === scout.routine)).toBe(false);
+  expect((await onTeam("olive")("POST", `/api/routines/${scout.routine}/run`)).status).toBe(404);
+  const ran = await onTeam("ada")("POST", `/api/routines/${scout.routine}/run`);
   expect(ran.status, JSON.stringify(ran.body)).toBeLessThan(300);
-  // Its run is Ada's: she sees it, and the Owner who started it never reads what it said.
+  // Its run is Ada's: she sees it, and nobody else reads what it said.
   await expect.poll(async () => ((await onTeam("ada")("GET", "/api/routines")).body.runs as Array<{ routineId: string; status: string }>)
     .some((run) => run.routineId === scout.routine && run.status === "completed"), { timeout: 60_000, interval: 200 }).toBe(true);
   const report = ((await onTeam("ada")("GET", "/api/routines")).body.runs as Array<{ routineId: string; threadId?: string; resultsThreadId?: string }>).find((run) => run.routineId === scout.routine)!;
@@ -224,7 +230,7 @@ it("a move cut short, by the app killed while My Cloud holds the bot and by a dr
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toEqual((await rows(fx.onCloud, threadId)).map((row) => row.id));
   }
-  const routines = ((await onTeam("olive")("GET", "/api/routines")).body.routines as Array<{ id: string; enabled: boolean }>).filter((routine) => routine.id === quill.routine);
+  const routines = ((await onTeam("ada")("GET", "/api/routines")).body.routines as Array<{ id: string; enabled: boolean }>).filter((routine) => routine.id === quill.routine);
   expect(routines).toEqual([expect.objectContaining({ enabled: true })]);
   expect(watch.seen.some((sample) => sample.mine && sample.theirs), JSON.stringify(watch.seen)).toBe(false);
 }, hostTimeout(300_000));
@@ -236,8 +242,8 @@ it("a bot whose name Acme already uses arrives as \"Scout (Ada)\"", async () => 
   await say(bot, bot.threadId, "Hello, second Scout.");
   await move(bot);
   expect(phaseOf(bot.id)?.phase).toBe("done");
-  expect((await teamBots("cleo")).find((entry) => entry.id === bot.id)?.name).toBe("Scout (Ada)");
-  expect((await teamBots("cleo")).find((entry) => entry.id === scout.bot.id)?.name).toBe("Scout");
+  expect((await teamBots("ben")).find((entry) => entry.id === bot.id)?.name).toBe("Scout (Ada)");
+  expect((await teamBots("ben")).find((entry) => entry.id === scout.bot.id)?.name).toBe("Scout");
 }, hostTimeout(180_000));
 
 it("refuses a team the person isn't in, any page but My Cloud's, and Ada leaving Acme mid-move lets the bot go on on My Cloud", async () => {
@@ -288,14 +294,14 @@ it("refuses someone else's bot: Acme's own, one another person moves, and anythi
   expect((await onTeam("cleo")("GET", "/api/cloud-send/manifest")).status).toBe(403);
   // Its bot arrives as who it is, with what Acme gives any new bot: never a Chief reporting to the Owner.
   const made = await moveIn("POST", "/api/bots", { id, name: "Mine", reportsTo: OWNER.email, acknowledgePeerScope: true, acknowledgeLocalAuto: true,
-    settings: { soul: "Plans trips.", chiefOfStaff: true, approvalMode: "auto", alwaysAllow: ["Bash(*)"], approvePeerComms: false, cwd: team.home } });
+    settings: { soul: "Plans trips.", chiefOfStaff: true, approvalMode: "auto", alwaysAllow: ["Bash(*)"], cwd: team.home } });
   expect(made.status, JSON.stringify(made.body)).toBe(201);
-  type Settings = Bot & { chiefOfStaff?: boolean; approvalMode?: string; alwaysAllow?: string[]; cwd?: string; reportsTo?: string; approvePeerComms?: boolean };
+  type Settings = Bot & { chiefOfStaff?: boolean; approvalMode?: string; alwaysAllow?: string[]; cwd?: string; reportsTo?: string };
   const acme = await teamBots("olive") as Settings[];
   const [arrived, inbox] = [acme.find((bot) => bot.id === id)!, acme.find((bot) => bot.id === olives.id)!];
   expect(arrived.chiefOfStaff).toBeFalsy();
   expect(arrived.reportsTo).not.toBe(OWNER.email);
-  const settings = ({ approvalMode, alwaysAllow, cwd, approvePeerComms }: Settings) => ({ approvalMode, alwaysAllow: alwaysAllow ?? [], cwd, approvePeerComms });
+  const settings = ({ approvalMode, alwaysAllow, cwd }: Settings) => ({ approvalMode, alwaysAllow: alwaysAllow ?? [], cwd });
   expect(settings(arrived)).toEqual(settings(inbox));
 }, hostTimeout(120_000));
 

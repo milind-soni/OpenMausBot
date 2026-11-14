@@ -1,4 +1,5 @@
 import * as boat from "../boat.ts";
+import { boatHealth } from "../boat-health.ts";
 import type { ComputerControl } from "../computer-control.ts";
 import type { MapComputer, MapComputersPayload } from "../../shared/map-computer.ts";
 import { createComputerFrames, mapComputerState, type ComputerFrames, type FrameMachine } from "../computer-frames.ts";
@@ -92,7 +93,7 @@ export function createComputerFramesRoutes(deps: ComputerFramesRouteDeps, frames
       const inventory = await boat.listManagedBoats(cfg, deps.managedBoatOwners(), { adoptLegacy: false });
       if (!inventory.available) return null;
       return inventory.instances.flatMap((instance) => instance.ownerBotId && instance.state !== "removing"
-        ? [{ owner: instance.ownerBotId, boxId: instance.boxId, state: instance.state }] : []);
+        ? [{ owner: instance.ownerBotId, boxId: instance.boxId, state: boatHealth.notRespondingSince(instance.boxId) === null ? instance.state : "error" }] : []);
     },
     capture: (boxId, signal) => captureThumbnail(cfg, boxId, signal),
     turnFrame: (boxId) => {

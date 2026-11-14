@@ -273,3 +273,34 @@ one sent while the turn waits on the person or a computer
 was stopped 1.5 s after the steered question, and the fake engine answered the
 question in the next turn. With the steered message's watch removed, the
 question stayed unanswered for 30 s and the test failed.
+
+## Several people in one shared chat
+
+```sh
+pnpm exec vitest run server/cloud-team-asker-owns.e2e.test.ts server/host/run-owner.test.ts src/components/SharedQueueLine.test.ts
+```
+
+On a Team Cloud, whoever asked owns the run ([team-cloud.md](../team-cloud.md#whoever-asked-owns-the-run)). The
+e2e test pairs an Owner and three members, holds Priya's request in the same scripted CI poll, and checks with
+`OMB_PERSON_FIRST_MS=1500`: Tom's line is queued (never steered, never cut short to be answered first) and runs after
+hers as his own turn; everyone sees the waiting lines with their writers, in order; only a line's writer removes it
+and nobody joins someone else's run; Tom's Stop and typed stop answer 403 "Only Priya or an admin can stop this.",
+while Priya and the Owner stop it; Priya's own addition is steered and answered first, in the shared chat and in her
+private chat; and a routine run started mid-run leaves its report between her answer and Tom's line.
+
+## Threads of one bot at the same time
+
+Different threads of one bot run at once. A saved `threads.maxConcurrentPerBot` sets how many. With none saved, a Cloud
+runs up to 16 and its memory gate decides; a machine without the gate runs one per 2 GB of memory, 3 to 16. The bot's main
+chat always starts, and takes a slot. On a Starter Cloud a person's or routine's work runs one thread per bot whatever is
+saved; work a bot's own turn started goes through, so a turn can never wait on a child queued behind itself.
+`server/parallel-threads.e2e.test.ts` holds a turn open in each thread with a gate only
+the test releases, as a desktop, personal Cloud and Team Cloud server, on the Claude CLI, ACP and OpenAI-compatible
+engines. What stays one at a time, and what the person sees:
+
+- One thread's own turns stay in order: a later send queues or steers.
+- One bot's browser: a call from another thread waits, the row says who has it, and a holder quiet for a minute gives it
+  to the waiter. The holder's next call is refused once, so nothing lands on a page it did not open.
+- One computer: a turn takes it at its first screen call, not when it starts, and keeps it until it ends.
+- Memory on a Linux Cloud: a turn that would run the machine out says "Waiting for memory", with what runs and what is ahead of it, and starts by itself. `OMB_TEST_MEMORY_GATE=1` runs the gate in a fixture on any OS, on the memory `<data dir>/host-memory.json` says; `server/memory-order.e2e.test.ts` shows whose turn goes next.
+- A Cloud that just woke: a hand-off starts at once. `OMB_TEST_RESUME_CLOCK=1` lets a fixture move `Date.now()` on as a wake does, by writing milliseconds to `<data dir>/resume-clock-ms`; `server/handoff-wake.e2e.test.ts` uses it.

@@ -7,14 +7,18 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, BotSettingsSection } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), settingsOpen: false }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), settingsOpen: false, bots: [] as Bot[], team: null as null | { admin: boolean; me: { email: string } } }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return {
     ...original,
-    useStore: () => ({ state: { ...original.initialState, settingsOpen: fixture.settingsOpen }, dispatch: fixture.dispatch, flushBotPatches: () => Promise.resolve(null) }),
+    useStore: () => ({ state: { ...original.initialState, settingsOpen: fixture.settingsOpen, bots: fixture.bots }, dispatch: fixture.dispatch, flushBotPatches: () => Promise.resolve(null) }),
   };
 });
+vi.mock("@/state/team-people", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/state/team-people")>(),
+  useTeamPeople: () => fixture.team,
+}));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, readAdvancedMode: () => false, setAdvancedMode: vi.fn() }));
 vi.mock("../DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("../DesktopCapabilities")>(),
@@ -78,6 +82,8 @@ const onWindowKey = (event: KeyboardEvent) => {
 
 beforeEach(() => {
   fixture.dispatch.mockReset();
+  fixture.bots = [];
+  fixture.team = null;
   onClose.mockReset();
   dialogCloses.mockReset();
   window.addEventListener("keydown", onWindowKey);
@@ -107,10 +113,10 @@ describe("named links into the bot panel", () => {
     await settle();
     expect(page()).toBe("folder");
 
-    // Simple mode has no MCP page: the link lands where Access does.
+    // MCP servers are listed on the apps page.
     flushSync(() => openBotSettings(fixture.dispatch, "access", { page: "mcp" }));
     await settle();
-    expect([tab(), page()]).toEqual(["computer", null]);
+    expect(page()).toBe("apps");
 
     flushSync(() => openBotSettings(fixture.dispatch, "access"));
     await settle();
@@ -171,8 +177,9 @@ describe("the panel's tabs", () => {
       .toEqual([["details", "Details"], ["library", "Library"], ["computer", "Computer"]]);
     expect(tab()).toBe("details");
     const strip = host.querySelector('[role="tablist"]')!.className.split(" ");
-    expect(strip).toEqual(expect.arrayContaining(["sticky", "top-0", "bg-app", "gap-0.5"]));
-    expect(host.querySelector('[role="tab"]')!.className.split(" ")).toEqual(expect.arrayContaining(["h-[26px]", "text-[13px]", "bg-ink/[0.07]"]));
+    expect(strip).toEqual(expect.arrayContaining(["sticky", "top-0", "bg-app"]));
+    expect(host.querySelector('[role="tab"]')!.parentElement!.className.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "bg-ink/[0.05]"]));
+    expect(host.querySelector('[role="tab"]')!.className.split(" ")).toEqual(expect.arrayContaining(["h-[26px]", "text-[13px]", "bg-ink/[0.1]", "font-medium"]));
     for (const id of ["library", "computer", "details"]) {
       click(host.querySelector(`[data-panel-tab="${id}"]`));
       expect(tab()).toBe(id);
@@ -274,7 +281,7 @@ describe("the chat header's pill", () => {
     }
     const untitled = pill({ bot: { ...withTasks, mainThreadId: "other", tasks: [{ ...withTasks.tasks![0]!, title: "New thread" }, withTasks.tasks![1]!] } });
     try {
-      expect(untitled.header.querySelector("[data-chathead-conversation]")!.textContent).toBe("New conversation");
+      expect(untitled.header.querySelector("[data-chathead-conversation]")!.textContent).toBe("Untitled chat");
     } finally {
       untitled.done();
     }
@@ -384,4 +391,52 @@ describe("focus around the hero", () => {
       expect(dialogCloses).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe("one body for every bot", () => {
+  const roundBot: Bot = { ...bot, mascotBody: "circle" };
+  const everywhere = () => host.querySelector("[data-avatar-body-everywhere]");
+  const openEditor = async (shown: Bot) => {
+    flushSync(() => root.render(createElement("aside", { role: "dialog" }, createElement(BotPanel, { bot: shown, derived, linkedSection: null, onClose }))));
+    await settle();
+    click(host.querySelector("[data-panel-avatar]"));
+    await settle();
+  };
+
+  it("gives this bot's body to every other bot that wears another one", async () => {
+    fixture.bots = [roundBot, { ...bot, id: "ada", mascotBody: "cursor" }, { ...bot, id: "bob" }, { ...bot, id: "cara", mascotBody: "circle" }];
+    await openEditor(roundBot);
+    expect(everywhere()?.textContent).toBe("Give this body to the other bots (2)");
+    click(everywhere());
+    expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([
+      { type: "updateBot", botId: "ada", patch: { mascotBody: "circle" } },
+      { type: "updateBot", botId: "bob", patch: { mascotBody: "circle" } },
+    ]);
+  });
+
+  it("on a Team Cloud, leaves out the bots this person may not restyle", async () => {
+    fixture.team = { admin: false, me: { email: "me@example.test" } };
+    fixture.bots = [
+      roundBot,
+      { ...bot, id: "edits", yourAccess: "edit" },
+      { ...bot, id: "chats", yourAccess: "chat" },
+      { ...bot, id: "my-mausbot", yourAccess: "chat", defaultBot: { person: "me@example.test" } },
+      { ...bot, id: "their-mausbot", yourAccess: "chat", defaultBot: { person: "ada@example.test" } },
+    ] as Bot[];
+    await openEditor(roundBot);
+    expect(everywhere()?.textContent).toBe("Give this body to the other bots (2)");
+    click(everywhere());
+    expect(fixture.dispatch.mock.calls.map(([action]) => action.botId)).toEqual(["edits", "my-mausbot"]);
+  });
+
+  it("is not offered once every bot wears this body, or while the bot shows a picture", async () => {
+    fixture.bots = [roundBot, { ...bot, id: "cara", mascotBody: "circle" }];
+    await openEditor(roundBot);
+    expect(everywhere()).toBeNull();
+    flushSync(() => root.unmount());
+    root = createRoot(host);
+    fixture.bots = [roundBot, { ...bot, id: "ada" }];
+    await openEditor({ ...roundBot, avatarUrl: "/avatars/scout.png", avatarCrop: "circle" });
+    expect(everywhere()).toBeNull();
+  });
 });

@@ -12,15 +12,46 @@ authentication, and runtime temporary-folder behavior from T3 Code, Copyright
 Selected-text citation matching adapts T3 Code's assistant citation selection,
 Copyright 2026 T3 Tools Inc., used under the MIT License.
 
+Streaming reply rendering (src/state/live-reply.ts), its Markdown block
+splitting (src/lib/markdown-stream-blocks.ts), the transcript's follow and
+per-visit scroll restore (src/lib/transcript-follow.ts), and the server's
+per-message ids for streamed reply text (server/harness/text-items.ts) adapt
+T3 Code's chat timeline, provider text-delta coalescing and ACP assistant
+segments, Copyright 2026 T3 Tools Inc., used under the MIT License
+(third_party/t3-code/LICENSE).
+
 The egress gate for the bots' browser (server/browser/egress/) adapts T3 Code's
 public-only SOCKS5 proxy for HTML previews and the Linux listener-ownership
 scan of its preview port scanner, Copyright 2026 T3 Tools Inc., used under the
 MIT License (third_party/t3-code/LICENSE).
 
+The updatable model manifest (server/model-manifest/) adapts the model manifest
+cache and schema of an MIT-licensed project, Copyright 2026 T3 Tools Inc., used
+under the MIT License (third_party/t3-code/LICENSE).
+
 Prompt-cache keep-warm (server/cache-keepwarm.ts and
 server/drivers/claude-keepwarm.ts) ports the design of Cache Tax,
 https://github.com/karanb192/claude-code-mods, Copyright (c) 2026 Karan
 Bansal, used under the MIT License (third_party/cache-tax/LICENSE).
+
+Moving a Grok Bot (shared/grok-import.ts and server/grok-local.ts) adapts the
+export message, reader repairs, credential refusal and desktop cache reading of
+the agent-importers plugin in hermes-official-plugins,
+https://github.com/NousResearch/hermes-official-plugins, Copyright (c) 2026
+Nous Research, used under the MIT License: Permission is hereby granted, free
+of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use, copy, modify,
+merge, publish, distribute, sublicense, and/or sell copies of the Software, and
+to permit persons to whom the Software is furnished to do so, subject to the
+following conditions: The above copyright notice and this permission notice
+shall be included in all copies or substantial portions of the Software. THE
+SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 The secure phone credential transport uses @hpke/core and @hpke/common from
 hpke-js, Copyright 2023-2024 Ajitomi Daisuke, used under the MIT License.
@@ -57,6 +88,13 @@ viewers and screencast pacing, tool definitions and snapshot bound
 (apps/server/src/preview and apps/server/src/mcp), Copyright 2026 T3 Tools
 Inc., used under the MIT License (third_party/t3-code/LICENSE).
 
+The social post previews template (skills/social-posts/posts.html) adapts the
+post card markup and platform styling of MiniMock,
+https://github.com/minianon/MiniMock, Copyright (c) 2026 Tushar Bhardwaj, used
+under the MIT License (third_party/minimock/LICENSE). Its icon paths are from
+Lucide, https://lucide.dev, Copyright Lucide Contributors, used under the ISC
+License; the template carries both notices, so every copy of it keeps them.
+
 The browser desktop viewer bundles the unmodified noVNC 1.7.0 library,
 Copyright the noVNC authors, under MPL-2.0 and its accompanying licenses.
 Attribution, license terms and the corresponding source location are in
@@ -65,3 +103,12 @@ The iOS companion app bundles a prebuilt WebRTC library for Live calls
 (stasel/WebRTC), built from the WebRTC project, Copyright (c) 2011, The WebRTC
 project authors, used under the BSD 3-Clause License. WebRTC includes
 third-party components under their own licenses, listed with the library.
+
+The meeting bot (server/meetings/meetbot.ts) adapts parts of the Google Meet and
+Microsoft Teams page handling of Vexa, https://github.com/vexa-ai/vexa (its
+meeting join, Google Meet capture and Teams capture modules): lobby, refusal
+and removal wording, chat panel and message selectors, speaking indicators and
+Teams' display-name rule. Copyright 2025-2026 Vexa.ai Inc. and the Vexa
+contributors, used under the Apache License, Version 2.0
+(third_party/vexa/LICENSE). The adapted parts were rewritten in our own code;
+no Vexa file is included unmodified.

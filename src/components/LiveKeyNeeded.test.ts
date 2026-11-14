@@ -2,9 +2,9 @@ import { Children, createElement, isValidElement, type ReactElement, type ReactN
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, it, vi } from "vitest";
 
-const f = vi.hoisted(() => ({ dispatch: vi.fn(), dismiss: vi.fn(), cloudHome: false }));
+const f = vi.hoisted(() => ({ dispatch: vi.fn(), dismiss: vi.fn(), cloudHome: false, live: undefined as Record<string, unknown> | undefined }));
 vi.mock("react", async (original) => ({ ...await original<typeof import("react")>(), useId: () => "live-key-title" }));
-vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: { cloudHome: f.cloudHome } }, dispatch: f.dispatch }) }));
+vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: { cloudHome: f.cloudHome, live: f.live } }, dispatch: f.dispatch }), api: vi.fn() }));
 vi.mock("@/lib/live-call-media", () => ({ dismissLiveNotice: f.dismiss }));
 import { LiveKeyNeeded } from "./LiveKeyNeeded";
 import { finishKeyFocus, useKeyFocus } from "./keys/key-focus";
@@ -12,6 +12,7 @@ import { finishKeyFocus, useKeyFocus } from "./keys/key-focus";
 beforeEach(() => {
   vi.clearAllMocks();
   f.cloudHome = false;
+  f.live = undefined;
 });
 
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void }>;
@@ -21,7 +22,7 @@ it("says one plain thing, names OpenAI, and offers only the way to Settings → 
   const html = renderToStaticMarkup(createElement(LiveKeyNeeded));
   expect(html).toContain('<h2 id="live-key-title"');
   expect(html).toContain("Live calls use your own OpenAI key. Add it in Settings → API keys.");
-  expect(html).toContain(">Open API keys</button>");
+  expect(html).toContain(">Open AI › Other services</button>");
   expect(html.match(/<button/g)).toHaveLength(1);
   expect(html).toContain("The OpenAI key stays on your computer.");
   for (const gone of ["Pro", "plan", "<input", "$15"]) expect(html).not.toContain(gone);
@@ -39,4 +40,23 @@ it("opens Settings at the OpenAI key in Voice and calls, and puts the prompt awa
   expect(request).toMatchObject({ id: "openai", row: "liveCalls" });
   finishKeyFocus(request!);
   expect(f.dismiss).toHaveBeenCalledOnce();
+});
+
+it("with Azure chosen, asks for the endpoint, deployment and resource key in place, and names Azure rather than OpenAI", () => {
+  f.live = { configured: false, provider: "azure", azureEndpoint: "https://my-res.openai.azure.com", voice: "", readTypedReplies: true, idleMinutes: 5 };
+  const html = renderToStaticMarkup(createElement(LiveKeyNeeded));
+  expect(html).toContain("Live calls through Azure OpenAI need the resource endpoint");
+  expect(html).toContain('value="https://my-res.openai.azure.com"');
+  expect(html).toContain('placeholder="gpt-live-1"');
+  expect(html).toContain('aria-label="Azure OpenAI key for Live calls"');
+  expect(html).toContain("The Azure key stays on your computer.");
+  expect(html).not.toContain("Open AI › Other services");
+  expect(html).not.toContain("OpenAI key stays");
+});
+
+it("with Azure chosen and no endpoint yet, asks for the endpoint first: a key is tied to it", () => {
+  f.live = { configured: false, provider: "azure", voice: "", readTypedReplies: true, idleMinutes: 5 };
+  const html = renderToStaticMarkup(createElement(LiveKeyNeeded));
+  expect(html).toContain('placeholder="https://my-resource.openai.azure.com"');
+  expect(html).not.toContain('aria-label="Azure OpenAI key for Live calls"');
 });

@@ -13,7 +13,7 @@ export const BOT_PARTS = Object.freeze({
   voice: ["speakReplies", "replyStyle", "voice", "voiceNotes"],
   tools: ["browser", "composio", "connectorTools", "connectorScopes", "outbound", "xResearch", "mcpServers", "toolScope"],
   memory: ["memoryEnabled", "memoryUpkeep"],
-  team: ["section", "approvePeerComms", "peers"],
+  team: ["section"],
   habits: ["notifications", "parkDirectMessages", "helperModel", "cacheKeepWarm", "recordBrowserSteps"],
 });
 /** A bot's parts only a move compares and carries: My Cloud sets them over its own move route, under the same ids. */
@@ -34,15 +34,16 @@ export const SETTINGS = Object.freeze(["profile", "language"]);
 /** What only a move carries, each by its own id: automations go last, after the chats, and arrive switched off. */
 export const AUTOMATION_KINDS = Object.freeze(["routine", "call", "webhook", "app-event"]);
 export const MOVE_KINDS = Object.freeze([...AUTOMATION_KINDS, "imported-skill", "library-skill"]);
-export const KINDS = Object.freeze(["bot", "skill", "login", "1password", "setting", ...MOVE_KINDS]);
+export const KINDS = Object.freeze(["bot", "skill", "login", "1password", "secret", "setting", ...MOVE_KINDS]);
 /** A part a server has no value for. */
 export const EMPTY = "-";
 /** What either page closes the one-time move's own line by (cloud-send:dismiss). */
 export const MOVE_LINE = "one-home";
 /** What My Cloud's page closes the line of a bot moving into a team by. */
 export const TEAM_MOVE_LINE = "team-move";
-/** Logins and 1Password are compared by when they changed, never by their secrets: two sides that both have one were
- * set up on their own, and from then on a change here goes. */
+export const BOT_MOVE_LINE = "bot-move";
+/** Logins, 1Password and saved secrets are compared by when they changed, never by their secrets: two sides that both
+ * have one were set up on their own, and from then on a change here goes. */
 const CONTENT_COMPARED = new Set(["bot", "skill", "setting", ...MOVE_KINDS]);
 
 export const itemKey = Object.freeze({
@@ -51,13 +52,15 @@ export const itemKey = Object.freeze({
   /** A login kept to one exact host is its own account there, so the host is part of its key. */
   login: (site, username, exactHost) => `login:${site}|${String(username).toLowerCase()}${exactHost ? `|${exactHost}` : ""}`,
   onePassword: () => "1password",
+  /** A saved Vault secret, by its id here: it keeps that id on My Cloud, so an MCP server's `vault:<id>` moves with it. */
+  secret: (id) => `secret:${id}`,
   setting: (name) => `setting:${name}`,
   /** A move's kinds: `routine`, `call`, `webhook`, `app-event` by id, `imported-skill` and `library-skill` by name. */
   moved: (kind, id) => `${kind}:${id}`,
 });
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-const KEY = /^(?:bot:[\w-]{1,128}|skill:[\w-]{1,128}:[a-z0-9-]{1,64}|login:[^|\s]{1,253}\|[^\n]{0,512}|1password|setting:[a-z]{1,40}|(?:routine|call|webhook|app-event):[\w-]{1,128}|(?:imported|library)-skill:[a-z0-9-]{1,64})$/u;
+const KEY = /^(?:bot:[\w-]{1,128}|skill:[\w-]{1,128}:[a-z0-9-]{1,64}|login:[^|\s]{1,253}\|[^\n]{0,512}|1password|secret:[\w-]{1,128}|setting:[a-z]{1,40}|(?:routine|call|webhook|app-event):[\w-]{1,128}|(?:imported|library)-skill:[a-z0-9-]{1,64})$/u;
 const PART = /^[a-z]{1,20}$/u;
 const HASH = /^[\w:.-]{1,80}$/u;
 
@@ -65,7 +68,7 @@ const HASH = /^[\w:.-]{1,80}$/u;
 export function parseSendSummary(value) {
   if (!record(value) || value.v !== 1 || !Array.isArray(value.items)) return null;
   const items = [];
-  for (const item of value.items.slice(0, 20_000)) {
+  for (const item of value.items.slice(0, 200_000)) {
     if (!record(item) || typeof item.key !== "string" || !KEY.test(item.key) || !KINDS.includes(item.kind) || !record(item.parts)) continue;
     const parts = Object.fromEntries(Object.entries(item.parts).filter(([part, hash]) => PART.test(part) && typeof hash === "string" && HASH.test(hash)));
     items.push({
@@ -76,7 +79,7 @@ export function parseSendSummary(value) {
       parts,
     });
   }
-  return { v: 1, appVersion: typeof value.appVersion === "string" ? value.appVersion.slice(0, 40) : null, items, ...(value.chats === 1 ? { chats: true } : {}) };
+  return { v: 1, appVersion: typeof value.appVersion === "string" ? value.appVersion.slice(0, 40) : null, items, ...(value.chats === 1 ? { chats: true } : {}), ...(value.vault === 1 ? { vault: true } : {}) };
 }
 
 /**
@@ -158,6 +161,7 @@ export function failedSummary(outcome) {
     else if (entry.kind === "connection") what.connections++;
     else if (entry.kind === "skill") what.skills++;
     else if (entry.kind === "login") what.logins++;
+    else if (entry.kind === "secret") what.secrets = (what.secrets ?? 0) + 1;
     else if (entry.kind === "setting") what.settings++;
     else if (entry.kind === "1password") what.onePassword = true;
     else if (entry.kind === "chats") what.chats = true;

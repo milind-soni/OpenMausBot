@@ -214,9 +214,9 @@ test("native entry checks owned server readiness before creating, sending to, or
 test("startup delivers a pending organisation action before default navigation and falls back after cancellation", () => {
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
   const startup = main.slice(main.indexOf("  let restoredOrganizationEntry = false;"), main.indexOf("  // Reconcile incomplete setup"));
-  assert.ok(startup.indexOf("await deliverOrganizationEntry()") < startup.indexOf("await showHome()"));
+  assert.ok(startup.indexOf("await deliverOrganizationEntry()") < startup.indexOf("await showStartPlace()"));
   // A launch from the login item lending added opens no window: lending runs out of sight until the person opens it.
-  assert.match(startup, /if \(!hiddenStart && !restoredOrganizationEntry && !deliveredOrganizationEntry && !deliveredCloudEntry\) await showHome\(\);/);
+  assert.match(startup, /if \(!hiddenStart && !restoredOrganizationEntry && !deliveredOrganizationEntry && !deliveredCloudEntry\) await showStartPlace\(\);/);
 });
 
 test("concurrent links share one confirmation and stale confirmations cannot change a new selection", async () => {

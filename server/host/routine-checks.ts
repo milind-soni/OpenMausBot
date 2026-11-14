@@ -1,3 +1,4 @@
+import type { ServerText } from "../../shared/server-text.ts";
 // A routine's checks: plain code that reads Calendar and Gmail and other routines' runs on each tick, with no AI. What
 // needs no judgement goes to the brief straight away; what needs judgement goes to one run, and the cursors move only
 // once that run's answer is kept. State is ids and times only, one entry per routine, in routine-checks.json.
@@ -62,7 +63,7 @@ export interface CheckReport {
   /** Other routines' runs that finished since the last check. */
   runs?: RoutineRun[];
   /** Apps that could not be read, and whether reconnecting fixes it. */
-  trouble?: Array<{ app: ReadApp; signedOut: boolean }>;
+  trouble?: ReadTrouble[];
   /** New emails that wait for a later run, or true when there were more than one check reads. */
   waiting?: number | true;
   /** Mail and meetings that need an AI this bot's engine cannot fence, so they were not sorted. */
@@ -72,7 +73,7 @@ export interface CheckReport {
   /** Whether Gmail is connected, and the person's address once read: the add-a-key suggestion's cue. */
   gmail?: { connected: boolean; address?: string };
   /** Emails the helper models picked for the brief, with a why built in plain code. */
-  picked?: Array<{ email: EmailHeader; why: string; needsReply: boolean }>;
+  picked?: Array<{ email: EmailHeader; why: string; whyText?: ServerText; needsReply: boolean }>;
   /** The reads of this check, for the brief's own follow-ups (a reply already sent). */
   session?: ReadSession;
 }
@@ -101,10 +102,15 @@ const ACTIVE = new Set(["queued", "running", "waiting"]);
 const appName: Record<ReadApp, string> = { gmail: "Gmail", googlecalendar: "Google Calendar" };
 const addressOf = (from: string): string => (/<([^<>\s]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
 
-export function troubleSentence(trouble: ReadonlyArray<{ app: ReadApp; signedOut: boolean }>): string | undefined {
+/** A read that failed; `severalAccounts` when it named one of the app's several connected accounts. */
+export interface ReadTrouble { app: ReadApp; signedOut: boolean; severalAccounts?: boolean }
+
+export function troubleSentence(trouble: ReadonlyArray<ReadTrouble>): string | undefined {
   if (!trouble.length) return undefined;
   const names = trouble.map((one) => appName[one.app]).join(" or ");
-  return trouble.some((one) => one.signedOut) ? `Couldn't read ${names}. Reconnect it in Connected apps.` : `Couldn't read ${names}. I'll try again soon.`;
+  if (trouble.some((one) => one.signedOut)) return `Couldn't read ${names}. Reconnect it in Connected apps.`;
+  if (trouble.some((one) => one.severalAccounts)) return `Couldn't read ${names}. Several accounts are connected, so I read the newest one; check or reconnect it in Connected apps.`;
+  return `Couldn't read ${names}. I'll try again soon.`;
 }
 
 export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
@@ -181,12 +187,13 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
   }
 
   /** A read that failed counts toward its app's failure streak, so the brief says so once and reads back off. */
-  function failed(entry: RoutineState, app: ReadApp, error: unknown): { app: ReadApp; signedOut: boolean } {
+  function failed(entry: RoutineState, app: ReadApp, error: unknown): ReadTrouble {
     const signedOut = error instanceof SourceError && error.signedOut;
+    const severalAccounts = error instanceof SourceError && error.severalAccounts;
     const previous = entry.failures?.[app];
     entry.failures = { ...entry.failures, [app]: { since: previous?.since ?? now(), count: (previous?.count ?? 0) + 1, lastAt: now(), ...(signedOut ? { signedOut } : {}) } };
     console.warn(`checks: could not read ${appName[app]}: ${error instanceof Error ? error.message : String(error)}`);
-    return { app, signedOut };
+    return { app, signedOut, ...(severalAccounts ? { severalAccounts } : {}) };
   }
   const readsBackOff = (entry: RoutineState, app: ReadApp): boolean => {
     const failure = entry.failures?.[app];
@@ -209,7 +216,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     const brief = routine.deliver === "brief";
     const aiAllowed = !context.hold && (routine.access !== "read-and-draft" || deps.fenced(routine.botId));
     const report: CheckReport = { routine, at };
-    const trouble: Array<{ app: ReadApp; signedOut: boolean }> = [];
+    const trouble: ReadTrouble[] = [];
     const items: CheckItems = { mail: [], prep: [], runs: [] };
     const pending: Omit<Pending, "at"> = { mail: [], prep: [], replies: [] };
     const held = new Set(Object.values(entry.pending ?? {}).flatMap((one) => [...one.mail, ...one.prep]));
@@ -273,7 +280,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
           // Sorted with no AI turn: every email of the batch is judged, and the picks become brief rows.
           report.picked = picked.flatMap((pick) => {
             const email = plan.batch.find((one) => one.id === pick.id);
-            return email ? [{ email, why: pick.why, needsReply: pick.needsReply }] : [];
+            return email ? [{ email, why: pick.why, ...(pick.whyText ? { whyText: pick.whyText } : {}), needsReply: pick.needsReply }] : [];
           });
           entry.judged = keepNewest([...new Set([...(entry.judged ?? []), ...plan.batch.map((email) => email.id), ...plan.quiet.map((email) => email.id)])], MAX_JUDGED);
           if (plan.batch.length) deps.sorted?.(routine.id, plan.batch.length);

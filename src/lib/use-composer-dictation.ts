@@ -1,19 +1,26 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { withOpenSettings } from "@/components/OpenSystemSettings";
+import { useStoreSelector } from "@/state/store-select";
 import { t } from "./i18n";
+import { fishSpeech } from "./fish-speech";
+import { listensHere, speechBridge } from "./speech";
 
-export function useComposerDictation({ draftId, text, onText, available }: {
+export function useComposerDictation({ draftId, text, onText }: {
   draftId: string;
   text: string;
   onText: (text: string) => void;
-  available: boolean;
 }) {
+  const { capabilities } = useDesktopCapabilities();
+  const ready = listensHere(capabilities, useStoreSelector((state) => state.config));
   const [recording, setRecording] = useState(false);
   const [speechError, setSpeechError] = useState<ReactNode>(null);
   const draft = useRef({ id: draftId, text });
   draft.current = { id: draftId, text };
   const session = useRef({ draftId: "", base: "" });
   const cancel = useRef<(() => void) | null>(null);
+  // Fish Audio hears the clip only at its end, so stopping the mic must finish it.
+  const finish = useRef<(() => void) | null>(null);
   const stop = useCallback(() => {
     cancel.current?.();
     setRecording(false);
@@ -21,7 +28,7 @@ export function useComposerDictation({ draftId, text, onText, available }: {
 
   useEffect(() => {
     if (!recording) return;
-    const bridge = window.ogb;
+    const bridge = speechBridge();
     if (!bridge || session.current.draftId !== draftId) {
       setRecording(false);
       return;
@@ -37,6 +44,7 @@ export function useComposerDictation({ draftId, text, onText, available }: {
       setRecording(false);
     };
     cancel.current = cancelSession;
+    finish.current = bridge === fishSpeech ? () => void fishSpeech.speechFinish() : null;
     const offTranscript = bridge.onSpeechTranscript((line) => {
       if (!active || draft.current.id !== draftId) return;
       if (draft.current.text !== lastText) {
@@ -48,7 +56,7 @@ export function useComposerDictation({ draftId, text, onText, available }: {
       draft.current.text = lastText;
       onText(lastText);
     });
-    const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
+    const offEnd = bridge.onSpeechEnd(({ code, reason, message }) => {
       if (!active || draft.current.id !== draftId) return;
       active = false;
       setRecording(false);
@@ -56,8 +64,8 @@ export function useComposerDictation({ draftId, text, onText, available }: {
         setSpeechError(t("composer.dictation.macOnly"));
       } else if (code === 1) {
         // A refused permission comes with a way to the pane that grants it.
-        setSpeechError(reason === "speech-not-authorized" ? withOpenSettings(t("composer.dictation.permission"), "speech")
-          : t(reason === "dictation-disabled" ? "composer.dictation.disabled" : "composer.dictation.failed"));
+        setSpeechError(message ?? (reason === "speech-not-authorized" ? withOpenSettings(t("composer.dictation.permission"), "speech")
+          : t(reason === "dictation-disabled" ? "composer.dictation.disabled" : "composer.dictation.failed")));
       }
     });
     void bridge.speechStart().catch(() => {
@@ -67,6 +75,7 @@ export function useComposerDictation({ draftId, text, onText, available }: {
     });
     return () => {
       if (cancel.current === cancelSession) cancel.current = null;
+      finish.current = null;
       offTranscript();
       offEnd();
       if (active) {
@@ -77,14 +86,15 @@ export function useComposerDictation({ draftId, text, onText, available }: {
   }, [recording, draftId, onText]);
 
   const toggle = () => {
-    if (!available || !window.ogb) {
+    if (!ready || !speechBridge()) {
       setSpeechError(t("composer.dictation.unavailable"));
     } else if (recording) {
-      stop();
+      if (finish.current) finish.current();
+      else stop();
     } else {
       session.current = { draftId, base: text };
       setRecording(true);
     }
   };
-  return { recording, speechError, toggle, stop };
+  return { recording, ready, speechError, toggle, stop };
 }

@@ -1,5 +1,9 @@
-// Claude Code's `[1m]` suffix selects a model's 1M-token context.
-const CLAUDE_MODEL_ID = /^[a-z0-9][a-z0-9._:/-]*(?:\[1m\])?$/i;
+import type { ModelCatalog } from "../contracts.ts";
+import { bundledEngineCatalog } from "../model-manifest/bundled.ts";
+import { CLAUDE_MODEL_ID } from "../model-manifest/schema.ts";
+
+export { CLAUDE_MODEL_ID };
+export { currentEngineCatalog, withCliVersionGate } from "../model-manifest/manifest.ts";
 const OFFICIAL_CLAUDE_ID = /^claude-[a-z0-9.-]+$/;
 const official = (id: string) => OFFICIAL_CLAUDE_ID.test(id.replace(/\[1m\]$/i, ""));
 
@@ -49,4 +53,12 @@ export function claudeModelExtras(settings: Record<string, unknown>, env: Record
     }
   }
   return { extras, envModel };
+}
+
+/** The bundled list, before any download: the picker reads `currentEngineCatalog("claude")`, which starts from this. */
+export const STATIC_CLAUDE_MODELS: ModelCatalog = bundledEngineCatalog("claude");
+
+/** An endpoint serves only its own models, each flagged `custom` so a `custom` instance's picker lists it. */
+export function endpointModelCatalog(models: string[] | undefined): ModelCatalog | null {
+  return models ? { default: models[0], options: models.map((id) => ({ id, label: id, custom: true })) } : null;
 }

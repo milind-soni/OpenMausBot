@@ -1,8 +1,14 @@
 # CI job selection
 
 Every PR still runs the workflow, its `static` job and the `CI` gate: locale
-validation, lint, the CI-selection tests and the verification-documentation
-checks always run. Selection never skips the entire workflow.
+validation, lint, the announcements file's check
+(`scripts/check-announcements.mjs`, which installs download from main within
+the hour, so it fails on any invalid edit), the CI-selection tests, the
+verification-documentation checks and the source guards always run. Selection never skips the entire
+workflow. The source guards are the tests that only read the source (the
+vocabulary and locale checks, the size and route ratchets, and the like): they
+take seconds, and they run in `static` as well as in the shards, so a change
+that breaks one fails before the run asks for its runners.
 
 `scripts/ci-scope.mjs` sorts a pull request's changed files (a local
 merge-base diff, rename detection off, so a moved file selects its old path
@@ -18,10 +24,15 @@ too) into areas, and runs only the jobs some area can affect:
 | Windows computer control | the `electron/` modules that start computer control and lend a PC's screen: `cua`, `cua-failure`, `cua-connection`, `capabilities`, `screen-status`, `shared-cua-connection`, `shared-computer-access`, `lent-screen-tools`, `lent-screen-failures`, `paced-typing` | the same as server, and Windows CUA |
 | desktop | the rest of `electron/`, `build/`, `electron-builder.yml`, `index.html` | the same as server |
 | control plane | `cloudflare/control-plane/` | the control-plane job |
+| announcements | `announcements/`: the cards file, its JSON Schema and pictures | nothing beyond `static`, which validates them |
 | everything | anything else: `.github/` workflows, `package.json`, the lockfile and workspace, tsconfig, vite and vitest config, `third_party/`, `scripts/` code, unknown paths | every job |
 
-The build is static's typecheck, Electron syntax check and UI build. Several
-areas run the union of their jobs. Why the mapping is what it is:
+`static` also validates `server/model-manifest/model-manifest.json` with `scripts/check-model-manifest.mjs`: installs
+download that file from main within hours of a change, so it is checked on every event and fails on any invalid edit.
+
+The build is the `build` job: typecheck, Electron syntax check and UI build,
+about three minutes, beside the shards rather than ahead of them. Several areas
+run the union of their jobs. Why the mapping is what it is:
 
 - The server imports a few renderer files (`SRC_OUTSIDE_RENDERER`), and the
   renderer imports Electron modules, so a server or desktop change can affect
@@ -50,7 +61,7 @@ sets (`laneOf` in `scripts/ci-scope.mjs`):
 | Event | Lane | What runs |
 | --- | --- | --- |
 | `pull_request` | its areas | the table above, with Linux shards, and Windows jobs only for a change that can break Windows (Windows below) |
-| `push` to main, `merge_group` | main | static (typecheck, lint, the build), the eight Linux and eight Windows shards with the Electron node tests, the macOS smokes job, behavior evals, the Linux and Windows packaged server smokes, the open-source edition, the control plane, the renderer smoke and Linux and Windows browser identity |
+| `push` to main, `merge_group` | main | static (lint and the CI checks), the build, the eight Linux and eight Windows shards with the Electron node tests, the macOS smokes job, behavior evals, the Linux and Windows packaged server smokes, the open-source edition, the control plane, the renderer smoke and Linux and Windows browser identity |
 | `schedule` (nightly, 21:17 UTC), `workflow_dispatch` (manual runs, the release branch's CI that `prepare-release.yml` starts, and the release lane) | full | every job on every platform: also the Windows and macOS shards, the Windows packaged server and Windows CUA smokes, Windows and macOS browser identity, the browser driver on all three, the Linux package and the Linux ARM64 installer |
 
 The main lane runs Linux, Windows and one macOS job. The macOS shards, the
@@ -77,8 +88,8 @@ lane, which only an emergency `ship_without_ci` release skips.
   main lane; a pull request whose diff cannot be read falls back to every job
   on every platform.
 
-The single `CI` gate keeps the existing required dependencies. `static`
-outputs the selected job ids; the gate wants each required job to have passed
+The single `CI` gate keeps the existing required dependencies, and adds
+`build`. `static` outputs the selected job ids; the gate wants each required job to have passed
 when it was selected and to have been skipped when it was not. Failures,
 cancellations, a missing or malformed selection and unexpected runs or skips
 fail the gate. Advisory jobs remain advisory. A new push to a PR cancels that
@@ -89,10 +100,21 @@ run in the Windows Vitest/Electron jobs.
 
 ## Vitest shards
 
-The suite runs one file at a time, so a shard takes as long as its files added
-up, and the slowest shard sets how long a PR and a release wait. Linux and
-Windows run eight shards each, macOS four (the full lane only);
-`scripts/ci-scope.mjs` builds the matrix.
+The slowest shard sets how long a PR and a release wait. Linux and Windows run
+eight shards each, macOS four (the full lane only); `scripts/ci-scope.mjs`
+builds the matrix.
+
+**Files at once.** A Linux shard runs four files at a time (`VITEST_WORKERS`,
+`OMB_VITEST_WORKERS` in `vite.config.ts`), one for each of the runner's vCPUs.
+Most of a shard's time is waiting on real servers and fake engines: one file at
+a time it took 16 minutes with the machine 70% idle, and four at a time 5.
+A Windows shard runs two files at a time: one at a time it took 9 to 14
+minutes and was the last job of every run that had one. macOS shards, and
+every local run, still run one file at a time. So
+that files side by side never share a port, each worker picks from its own
+(`server/testing/worker-port.ts`); a test that picks a port some other way can
+meet another file's. Files share the runner's CPU, so test and hook
+timeouts double there, as on Windows (`server/testing/host-timeout.ts`).
 
 **Which files run where.** Linux runs every file. Most e2e files drive
 OMB's own logic through a real server and fake engines, which is the same on
@@ -134,8 +156,8 @@ To reproduce a failing Vitest job locally:
 2. Use the same OS. Shard weights are platform-specific, so Windows shard 3
    and Linux shard 3 do not contain the same files.
 3. Copy the expanded command from **Run tests**, including any file filters
-   and the complete `--shard=n/count` fraction. Copy its `OMB_VITEST_E2E`
-   and `OMB_VITEST_SUBSET` environment values too. On Boat, the static job
+   and the complete `--shard=n/count` fraction. Copy its `OMB_VITEST_E2E`,
+   `OMB_VITEST_SUBSET` and `OMB_VITEST_WORKERS` environment values too. On Boat, the static job
    contains each shard's output in a `vitest (ubuntu-latest, ...)` lane's
    log group; the lane uses the same matrix values.
 
@@ -144,13 +166,14 @@ For example, a full Windows shard 3/8 uses PowerShell syntax:
 ```powershell
 $env:OMB_VITEST_E2E = "host"
 $env:OMB_VITEST_SUBSET = ""
+$env:OMB_VITEST_WORKERS = "2"
 pnpm exec vitest run --shard=3/8
 ```
 
 The full Linux shard 3/8 uses a POSIX shell:
 
 ```sh
-OMB_VITEST_E2E=all OMB_VITEST_SUBSET= pnpm exec vitest run --shard=3/8
+OMB_VITEST_E2E=all OMB_VITEST_SUBSET= OMB_VITEST_WORKERS=4 pnpm exec vitest run --shard=3/8
 ```
 
 Docs and locale jobs select smaller file lists and have their own shard
@@ -370,7 +393,7 @@ instead (Settings → Secrets and variables → Actions → Variables; anything 
   list and to the condition in `ci.yml`'s `static` job. To run Windows on a PR
   as well, label it `windows` (Windows above).
 - **What changes.** `static` runs on `boat-xlarge` (16 vCPU, 32 GB) and is
-  named "typecheck + lint + Linux tests (Boat)". After its usual checks it
+  named "preflight + Linux tests (Boat)". After its usual checks it
   runs the Linux vitest shards, behavior evals and the Linux packaged server
   smoke side by side as lanes of that VM (`scripts/ci-linux-lanes.mjs`, the
   same commands as their GitHub jobs), and prints each lane's log in a group

@@ -20,7 +20,7 @@ const ALL = ["macos-latest", "ubuntu-latest", "windows-latest"];
 const PR = ["ubuntu-latest", "windows-latest"];
 const LINUX = ["ubuntu-latest"];
 const MAIN = ["ubuntu-latest", "windows-latest"];
-const SERVER_JOBS = ["vitest", "behavior-evals", "packaged-server", "electron-smokes", "foss", "ui-smoke", "browser-identity", "package-linux", "browser-driver"];
+const SERVER_JOBS = ["build", "vitest", "behavior-evals", "packaged-server", "electron-smokes", "foss", "ui-smoke", "browser-identity", "package-linux", "browser-driver"];
 const temporaryDirectories: string[] = [];
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
@@ -66,11 +66,11 @@ function outputs(text: string) {
 }
 
 const packaged = (oses: string[]) => oses.filter((os) => os !== "macos-latest");
-const everything = (oses: string[]) => ({ build: true, jobs: SELECTABLE_JOBS, vitest_os: oses, packaged_server_os: packaged(oses), vitest_matrix: vitestMatrix(oses) });
-const staticOnly = (oses: string[], build: boolean) => ({ build, jobs: [], vitest_os: oses, packaged_server_os: packaged(oses), vitest_matrix: vitestMatrix(oses) });
+const everything = (oses: string[]) => ({ jobs: SELECTABLE_JOBS, vitest_os: oses, packaged_server_os: packaged(oses), vitest_matrix: vitestMatrix(oses) });
+const staticOnly = (oses: string[], build: boolean) => ({ jobs: build ? ["build"] : [], vitest_os: oses, packaged_server_os: packaged(oses), vitest_matrix: vitestMatrix(oses) });
 /** What a push to main and a merge group run: Linux's and Windows' shards, the macOS smokes and the short Linux checks. */
-const MAIN_JOBS = ["vitest", "behavior-evals", "packaged-server", "electron-smokes", "foss", "control-plane", "ui-smoke", "browser-identity"];
-const mainLane = () => ({ build: true, jobs: MAIN_JOBS, vitest_os: MAIN, packaged_server_os: MAIN, vitest_matrix: vitestMatrix(MAIN) });
+const MAIN_JOBS = ["build", "vitest", "behavior-evals", "packaged-server", "electron-smokes", "foss", "control-plane", "ui-smoke", "browser-identity"];
+const mainLane = () => ({ jobs: MAIN_JOBS, vitest_os: MAIN, packaged_server_os: MAIN, vitest_matrix: vitestMatrix(MAIN) });
 
 describe("vitest matrix", () => {
   it("gives Linux and Windows eight shards each and macOS four, and only Linux every e2e file", () => {
@@ -78,7 +78,7 @@ describe("vitest matrix", () => {
     const count = (os: string) => include.filter((entry) => entry.os === os).length;
     expect([count("ubuntu-latest"), count("windows-latest"), count("macos-latest")]).toEqual([8, 8, 4]);
     expect(include.find((entry) => entry.os === "windows-latest" && entry.shard === 8))
-      .toEqual({ os: "windows-latest", part: "shard 8/8", shard: 8, shards: 8, files: "", e2e: "host", node_tests: false });
+      .toEqual({ os: "windows-latest", part: "shard 8/8", shard: 8, shards: 8, files: "", e2e: "host", node_tests: false, workers: 2 });
     expect(include.filter((entry) => entry.node_tests).map((entry) => [entry.os, entry.shard]))
       .toEqual([["macos-latest", 1], ["ubuntu-latest", 1], ["windows-latest", 1]]);
     expect(include.filter((entry) => entry.e2e === "all").every((entry) => entry.os === "ubuntu-latest")).toBe(true);
@@ -133,8 +133,24 @@ describe("CI path scope", () => {
     expect(selectCiScope([file])).toEqual({ areas: ["desktop"], checks: checks("server") });
   });
 
+  it("runs nothing beyond static, which validates them, for the announcements file, its schema and pictures", () => {
+    expect(selectCiScope(["announcements/announcements.json", "announcements/announcements.schema.json", "announcements/images/phone.png"]))
+      .toEqual({ areas: ["announcements"], checks: [] });
+    expect(selectCiScope(["announcements/announcements.json", "docs/announcements.md"])).toEqual({ areas: ["announcements", "docs"], checks: ["docs-tests"] });
+  });
+
   it("runs only the control-plane job for the control plane", () => {
     expect(selectCiScope(["cloudflare/control-plane/src/index.ts"])).toEqual({ areas: ["control-plane"], checks: ["control-plane"] });
+  });
+
+  it.each([["relay/src/server.ts"], ["relay/pnpm-lock.yaml"], ["relay/Dockerfile"], ["relay/deploy/Caddyfile"], ["relay/README.md"]])(
+    "runs only the relay job for the relay's %j", (file) => {
+      expect(selectCiScope([file])).toEqual({ areas: ["relay"], checks: ["relay"] });
+    });
+
+  it("runs the server's checks and the relay's for the shared E2E vectors, which the relay keeps a pinned copy of", () => {
+    expect(selectCiScope(["companion/src/e2e/vectors/v1.json"])).toEqual({ areas: ["e2e-vectors"], checks: [...checks("server"), "relay"].sort() });
+    expect(selectCiScope(["companion/src/e2e/noise.ts"])).toEqual({ areas: ["server"], checks: checks("server") });
   });
 
   it("selects every area's checks for a change across areas", () => {
@@ -166,29 +182,160 @@ describe("CI path scope", () => {
 describe("CI outputs", () => {
   it("runs a renderer change's tests on Linux only", () => {
     const out = ciOutputs(selectCiScope(["src/App.tsx"]), PR);
-    expect(out).toEqual({ build: true, jobs: ["vitest", "ui-smoke"], vitest_os: PR, packaged_server_os: PR, vitest_matrix: vitestMatrix(["ubuntu-latest"]) });
+    expect(out).toEqual({ jobs: ["build", "vitest", "ui-smoke"], vitest_os: PR, packaged_server_os: PR, vitest_matrix: vitestMatrix(["ubuntu-latest"]) });
   });
 
   it("runs a server change's tests on Linux and Windows, and its other checks", () => {
-    expect(ciOutputs(selectCiScope(["server/index.ts"]), PR)).toEqual({ build: true, jobs: SERVER_JOBS, vitest_os: PR, packaged_server_os: PR, vitest_matrix: vitestMatrix(PR) });
+    expect(ciOutputs(selectCiScope(["server/index.ts"]), PR)).toEqual({ jobs: SERVER_JOBS, vitest_os: PR, packaged_server_os: PR, vitest_matrix: vitestMatrix(PR) });
   });
 
   it("runs the locale tests in their own shards, with the Electron node tests, when no full Linux run covers them", () => {
     const out = ciOutputs(selectCiScope(["src/locales/de.json"]), PR);
-    expect(out.jobs).toEqual(["vitest"]);
-    expect(VITEST_SUBSETS["locale-tests"].files).toEqual(expect.arrayContaining(["src/", "scripts/generate-locale.test.mjs", "scripts/testing/key-readback.e2e.test.ts"]));
+    expect(out.jobs).toEqual(["build", "vitest"]);
+    expect(VITEST_SUBSETS["locale-tests"].files).toEqual([
+      "src/",
+      "electron/cua-launch.test.mjs",
+      "electron/cua-watch-restart.test.mjs",
+      "electron/cua-windows-isolation.test.mjs",
+      "electron/menu.test.mjs",
+      "electron/updater.test.mjs",
+      "scripts/generate-locale.test.mjs",
+      "scripts/testing/bot-tools-ui.e2e.test.ts",
+      "scripts/testing/key-readback.e2e.test.ts",
+      "scripts/testing/one-workspace-ui.e2e.test.ts",
+      "scripts/testing/rail-profile-ui.e2e.test.ts",
+      "scripts/testing/secret-card-descriptions.test.ts",
+      "scripts/testing/team-conversation-share-ui.e2e.test.ts",
+      "scripts/testing/team-own-chat.e2e.test.ts",
+      "scripts/testing/team-private-default-ui.e2e.test.ts",
+      "scripts/testing/team-side-switch-ui.e2e.test.ts",
+      "server/body-thread-guards.e2e.test.ts",
+      "server/client-notifications.e2e.test.ts",
+      "server/cloud-connections.e2e.test.ts",
+      "server/cloud-lending-browser.e2e.test.ts",
+      "server/cloud-lending-chrome.e2e.test.ts",
+      "server/cloud-lending-memory.e2e.test.ts",
+      "server/cloud-lending.e2e.test.ts",
+      "server/cloud-lent-mcp.e2e.test.ts",
+      "server/cloud-send-kinds.e2e.test.ts",
+      "server/cloud-send-move.e2e.test.ts",
+      "server/cloud-send-rooms.e2e.test.ts",
+      "server/cloud-send-routine-merge.e2e.test.ts",
+      "server/cloud-send-store.e2e.test.ts",
+      "server/cloud-send.e2e.test.ts",
+      "server/cloud-sync.e2e.test.ts",
+      "server/cloud-team-asker-owns.e2e.test.ts",
+      "server/cloud-team-away.e2e.test.ts",
+      "server/cloud-team-browser.e2e.test.ts",
+      "server/cloud-team-connections.e2e.test.ts",
+      "server/cloud-team-conversation-share.e2e.test.ts",
+      "server/cloud-team-engine-homes.e2e.test.ts",
+      "server/cloud-team-gateway-mcp.e2e.test.ts",
+      "server/cloud-team-inbox.e2e.test.ts",
+      "server/cloud-team-included-hosting.e2e.test.ts",
+      "server/cloud-team-mausbot-reach.e2e.test.ts",
+      "server/cloud-team-member-secrets.e2e.test.ts",
+      "server/cloud-team-new-chat-private.e2e.test.ts",
+      "server/cloud-team-open-reach.e2e.test.ts",
+      "server/cloud-team-own-key-apps.e2e.test.ts",
+      "server/cloud-team-owners.e2e.test.ts",
+      "server/cloud-team-people.e2e.test.ts",
+      "server/cloud-team-per-person.e2e.test.ts",
+      "server/cloud-team-phones.e2e.test.ts",
+      "server/cloud-team-pictures.e2e.test.ts",
+      "server/cloud-team-presence.e2e.test.ts",
+      "server/cloud-team-privacy-holes.e2e.test.ts",
+      "server/cloud-team-private-default.e2e.test.ts",
+      "server/cloud-team-private.e2e.test.ts",
+      "server/cloud-team-profile.e2e.test.ts",
+      "server/cloud-team-published-apps.e2e.test.ts",
+      "server/cloud-team-requests.e2e.test.ts",
+      "server/cloud-team-routines.e2e.test.ts",
+      "server/cloud-team-setup-request.e2e.test.ts",
+      "server/cloud-team.e2e.test.ts",
+      "server/host/brief-words.test.ts",
+      "server/host/lending-lifts.test.ts",
+      "server/lent-folders.e2e.test.ts",
+      "server/move-chosen-bots.e2e.test.ts",
+      "server/one-home-keep.e2e.test.ts",
+      "server/one-home-outdated.e2e.test.ts",
+      "server/one-home-retry.e2e.test.ts",
+      "server/one-home-session.e2e.test.ts",
+      "server/one-home-trial-key.e2e.test.ts",
+      "server/one-home-two-desks.e2e.test.ts",
+      "server/one-home.e2e.test.ts",
+      "server/parked-cards.e2e.test.ts",
+      "server/question-cards.e2e.test.ts",
+      "server/shared-computers.e2e.test.ts",
+      "server/shared-computers.gate.test.ts",
+      "server/team-move.e2e.test.ts",
+      "server/team-welcome.e2e.test.ts",
+      "server/use-my-mac.e2e.test.ts",
+      "server/workspace-banner.e2e.test.ts",
+      "scripts/server-locale-plugin.test.ts",
+      "server/server-lines.test.ts",
+      "server/host/devs-reports.test.ts",
+      "server/automation-reports.test.ts",
+      "server/incidents.test.ts",
+      "server/routine-run-card.test.ts",
+      "server/host/chief-notices-retry.test.ts",
+      "server/connector-card-text.test.ts",
+      "server/host/secret-cards.test.ts",
+      "server/notify.test.ts",
+      "server/room-lines.test.ts",
+      "server/post-to-room.test.ts",
+      "server/teammate-lines.test.ts",
+      "server/chat-notices.test.ts",
+      "server/recall-disclosure.test.ts",
+      "server/routine-cron-text.test.ts",
+      "server/routine-cron-text-zh.test.ts",
+      "server/routine-requests.test.ts",
+      "server/cloud-send-arrived.test.ts",
+      "server/cloud-team-bot-access.e2e.test.ts",
+      "server/cloud-team-one-answer.e2e.test.ts",
+      "server/cloud-team-preference.e2e.test.ts",
+      "server/cloud-team-rules.e2e.test.ts",
+      "server/cloud-team-rules-running-turn.e2e.test.ts",
+      "server/outside-work-threads.e2e.test.ts",
+      "server/own-home.e2e.test.ts",
+      "server/places-elsewhere.e2e.test.ts",
+      "server/question-routing.e2e.test.ts",
+      "server/team-protocol.e2e.test.ts",
+      "server/team-small-fixes.e2e.test.ts",
+      "server/team-mausbot-followup.e2e.test.ts",
+      "server/team-no-ai.e2e.test.ts",
+      "server/team-phone-data.e2e.test.ts",
+      "server/team-refused-handoff.e2e.test.ts",
+      "server/two-places.e2e.test.ts",
+      "scripts/ci-workflow.test.ts",
+      "scripts/pre-push-check.test.ts",
+      "server/host/wait-words.test.ts",
+      "server/place-inbox.e2e.test.ts",
+      "server/bot-api-team.e2e.test.ts",
+      "server/cloud-team-conversation-share.e2e.test.ts",
+      "server/cloud-team-first-look.e2e.test.ts",
+      "server/cloud-team-mausbot-own-chat.e2e.test.ts",
+      "server/connector-stayed.e2e.test.ts",
+      "server/email/host.test.ts",
+      "server/email/inline-images.test.ts",
+      "server/host/outside-lineage.test.ts",
+      "server/memory-move.test.ts",
+      "server/outside-lineage.e2e.test.ts",
+      "server/same-name-mentions.e2e.test.ts",
+      "server/skill-switch.test.ts",
+    ]);
     expect(out.vitest_matrix.include).toEqual([1, 2].map((shard) => ({
       os: "ubuntu-latest", part: `locale tests ${shard}/2`, shard, shards: 2,
-      files: VITEST_SUBSETS["locale-tests"].files.join(" "), e2e: "all", node_tests: shard === 1,
+      files: VITEST_SUBSETS["locale-tests"].files.join(" "), e2e: "all", node_tests: shard === 1, workers: 4,
     })));
     expect(ciOutputs(selectCiScope(["src/locales/de.json", "src/App.tsx"]), PR).vitest_matrix).toEqual(vitestMatrix(["ubuntu-latest"]));
   });
 
   it("runs the docs tests in one job for docs, and skips the build", () => {
     const out = ciOutputs(selectCiScope(["docs/analytics.md"]), PR);
-    expect(out).toMatchObject({ build: false, jobs: ["vitest"] });
+    expect(out).toMatchObject({ jobs: ["vitest"] });
     expect(out.vitest_matrix.include).toEqual([{
-      os: "ubuntu-latest", part: "docs tests", shard: 1, shards: 1, files: VITEST_SUBSETS["docs-tests"].files.join(" "), e2e: "all", node_tests: false,
+      os: "ubuntu-latest", part: "docs tests", shard: 1, shards: 1, files: VITEST_SUBSETS["docs-tests"].files.join(" "), e2e: "all", node_tests: false, workers: 4,
     }]);
     expect(ciOutputs(selectCiScope(["docs/analytics.md", "src/locales/de.json"]), PR).vitest_matrix.include.map((entry: { part: string }) => entry.part))
       .toEqual(["locale tests 1/2", "locale tests 2/2", "docs tests"]);
@@ -388,7 +535,7 @@ describe("the repository's import graph", () => {
     const frameSmoke = readFileSync(join(ROOT, "scripts/smoke-app-frames.mjs"), "utf8");
     expect(frameSmoke).toContain('resolveDir: join(ROOT, "src/components/app")');
     expect(frameSmoke).toContain("from \\\"./app-frame-host.ts\\\"");
-    const runtime = ["server", "shared", "electron", "companion", "enterprise", "evals", "cloudflare"]
+    const runtime = ["server", "shared", "packages", "electron", "companion", "enterprise", "evals", "cloudflare"]
       .flatMap((directory) => codeFiles(join(ROOT, directory)))
       .filter((file) => !TEST_FILE.test(relative(ROOT, file).split("\\").join("/")));
     expect(runtime.length).toBeGreaterThan(500);
@@ -399,13 +546,14 @@ describe("the repository's import graph", () => {
   });
 
   it("runs every test outside the renderer that reads a translation other than English with the locale tests", () => {
-    const files = ["server", "shared", "electron", "companion", "enterprise", "evals", "scripts", "cloudflare"]
+    const files = ["server", "shared", "packages", "electron", "companion", "enterprise", "evals", "scripts", "cloudflare"]
       .flatMap((directory) => codeFiles(join(ROOT, directory)))
       // The selection names the catalogs without reading them.
       .filter((file) => !/[/\\]ci-scope\.(?:mjs|test\.ts)$/.test(file));
     const mentionsTranslations = (file: string) => {
       const text = readFileSync(file, "utf8");
-      return [...text.matchAll(/locales/g)].some((match) => !/^locales\W{1,6}en\.json/.test(text.slice(match.index, match.index + 24)));
+      // A browser extension's own _locales folder is not one of ours.
+      return [...text.matchAll(/(?<!_)locales/g)].some((match) => !/^locales\W{1,6}en\.json/.test(text.slice(match.index, match.index + 24)));
     };
     const readers = new Set(files.filter(mentionsTranslations));
     const affected = files
@@ -413,6 +561,7 @@ describe("the repository's import graph", () => {
       .filter((file) => importClosure([file]).some((loaded) => /^src\/locales\/(?!en\.json$)/.test(loaded) || readers.has(join(ROOT, loaded))))
       .map((file) => relative(ROOT, file).split("\\").join("/"));
     expect(affected).toContain("scripts/generate-locale.test.mjs");
+    expect(affected).toContain("server/host/brief-words.test.ts");
     // The Electron node tests, which compare their own copy of some strings with every catalog, run on the locale tests' first shard.
     expect(affected.filter((file) => !VITEST_SUBSETS["locale-tests"].files.some((filter) => file.includes(filter)))).toEqual([]);
   });
@@ -423,7 +572,7 @@ describe("the repository's import graph", () => {
     expect(inStatic).toContain("scripts/testing/verification-docs.test.ts");
     // A docs path a test reads from the repository root: join(ROOT, "docs", ...), new URL("docs/...", ROOT) or read("docs/...").
     const DOCS_READ = /(?:(?:join|resolve)\(\s*ROOT\s*,\s*|new URL\(\s*|\bread\w*\(\s*)["'`]((?:apps\/docs|docs)\b[^"'`]*|[A-Z][A-Z_]+\.md)["'`]/g;
-    const readers = ["server", "shared", "electron", "companion", "enterprise", "evals", "scripts", "src", "cloudflare"]
+    const readers = ["server", "shared", "packages", "electron", "companion", "enterprise", "evals", "scripts", "src", "cloudflare"]
       .flatMap((directory) => codeFiles(join(ROOT, directory)))
       .filter((file) => /\.(?:test|node-test)\.[cm]?[jt]sx?$/.test(file) && !file.endsWith("ci-scope.test.ts"))
       .filter((file) => [...readFileSync(file, "utf8").replace(/(["'`])\s*,\s*(["'`])/g, "/").matchAll(DOCS_READ)]
@@ -434,7 +583,7 @@ describe("the repository's import graph", () => {
   });
 
   it("never loads a test file from other code, so a test under scripts/ affects only the jobs that run it", () => {
-    const code = ["server", "shared", "electron", "companion", "enterprise", "evals", "scripts", "src", "cloudflare"]
+    const code = ["server", "shared", "packages", "electron", "companion", "enterprise", "evals", "scripts", "src", "cloudflare"]
       .flatMap((directory) => codeFiles(join(ROOT, directory)));
     const loaders = code.filter((file) => imports(file).some((target) => /\.test\.[cm]?[jt]sx?$/.test(target)));
     expect(loaders.map((file) => relative(ROOT, file))).toEqual([]);
@@ -450,7 +599,7 @@ describe("CI scope CLI", () => {
       pull_request: { base: { sha: base }, head: { sha: git("rev-parse", "HEAD") } },
     });
     expect(output).toEqual(ciOutputs({ checks: ["docs-tests"] }, LINUX));
-    expect(output).toMatchObject({ build: false, jobs: ["vitest"] });
+    expect(output).toMatchObject({ jobs: ["vitest"] });
     expect(stderr).toBe("");
   });
 
@@ -467,7 +616,7 @@ describe("CI scope CLI", () => {
       pull_request: { base: { sha: base }, head: { sha: git("rev-parse", "HEAD") } },
     });
     expect(output).toEqual(ciOutputs({ checks: ["docs-tests"] }, LINUX));
-    expect(output).toMatchObject({ build: false, jobs: ["vitest"] });
+    expect(output).toMatchObject({ jobs: ["vitest"] });
     expect(stderr).toBe("");
   });
 
@@ -481,12 +630,12 @@ describe("CI scope CLI", () => {
       pull_request: { base: { sha: base }, head: { sha: git("rev-parse", "HEAD") } },
     });
     // A server change that cannot break Windows first: its Windows jobs wait for main.
-    expect(output).toEqual({ build: true, jobs: SERVER_JOBS, vitest_os: LINUX, packaged_server_os: LINUX, vitest_matrix: vitestMatrix(LINUX) });
+    expect(output).toEqual({ jobs: SERVER_JOBS, vitest_os: LINUX, packaged_server_os: LINUX, vitest_matrix: vitestMatrix(LINUX) });
     expect(stderr).toBe("");
   });
 
   it("runs a renderer pull request's tests on Linux, and a translation pull request's locale tests", () => {
-    for (const [source, jobs, oses] of [["src/App.tsx", ["vitest", "ui-smoke"], ["ubuntu-latest"]], ["src/locales/de.json", ["vitest"], []]] as const) {
+    for (const [source, jobs, oses] of [["src/App.tsx", ["build", "vitest", "ui-smoke"], ["ubuntu-latest"]], ["src/locales/de.json", ["build", "vitest"], []]] as const) {
       const { directory, git, base } = fixture(source);
       writeFileSync(join(directory, source), "changed\n");
       git("commit", "--quiet", "-am", "change");
@@ -759,7 +908,7 @@ describe("CI scope CLI on a pull request's Windows jobs", () => {
     return { output: outputs(readFileSync(outputPath, "utf8")), stdout, stderr };
   }
 
-  const serverJobs = (oses: string[]) => ({ build: true, jobs: SERVER_JOBS, vitest_os: oses, packaged_server_os: oses, vitest_matrix: vitestMatrix(oses) });
+  const serverJobs = (oses: string[]) => ({ jobs: SERVER_JOBS, vitest_os: oses, packaged_server_os: oses, vitest_matrix: vitestMatrix(oses) });
 
   it("runs the Windows jobs for a changed line that names Windows, and says why", async () => {
     const { directory, payload } = serverChange('if (process.platform === "win32") quote();\n');

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { loginFingerprints } from "./cloud-send-verify.ts";
 import { LOGIN_HANDOFF_REQUEST, LOGIN_HANDOFF_RESULT, ONE_PASSWORD_DEAD_HERE, receiveLoginHandoff, totpAddress, type ConnectionHandoffAnswer, type LoginHandoffResult } from "./login-handoff.ts";
-import { LoginStore } from "./login-store.ts";
+import { VaultStore } from "./vault-store.ts";
 import { ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED } from "./onepassword.ts";
 import { parseTotpKey } from "./totp.ts";
 
@@ -18,7 +18,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 function setup(onePasswordProblem?: () => string | undefined) {
   const dir = mkdtempSync(join(tmpdir(), "omb-login-handoff-"));
   dirs.push(dir);
-  const store = new LoginStore({ dataDir: dir });
+  const store = new VaultStore({ dataDir: dir });
   const posted: LoginHandoffResult[] = [];
   const ask = (message: unknown) => receiveLoginHandoff(message, store, (reply) => { posted.push(reply); return true; }, onePasswordProblem);
   return { store, posted, ask };
@@ -35,16 +35,17 @@ describe("the private login handoff to the desktop's main process", () => {
     expect(parseTotpKey((posted[0] as { login: { totp: string } }).login.totp)).toEqual(totp);
   });
 
-  it("hands the 1Password token with its vaults' bots, and says plainly when there is nothing to hand", () => {
+  it("hands the 1Password token with its vaults' and items' bots, and says plainly when there is nothing to hand", () => {
     const { store, posted, ask } = setup();
     ask({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0002", what: { kind: "1password" } });
     store.setOnePasswordToken(TOKEN);
     store.setOnePasswordGrant("v1", ["pepper"]);
+    store.setOnePasswordItemGrant("v1:i1", []);
     ask({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0003", what: { kind: "1password" } });
     ask({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0004", what: { kind: "login", id: "gone" } });
     expect(posted).toEqual([
       { type: LOGIN_HANDOFF_RESULT, requestId: "request-0002", ok: false, error: "1Password is not connected on this computer." },
-      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0003", ok: true, onePassword: { token: TOKEN, grants: { v1: ["pepper"] } } },
+      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0003", ok: true, onePassword: { token: TOKEN, grants: { v1: ["pepper"] }, itemGrants: { "v1:i1": [] } } },
       { type: LOGIN_HANDOFF_RESULT, requestId: "request-0004", ok: false, error: "This login is no longer saved on this computer." },
     ]);
   });
@@ -62,9 +63,20 @@ describe("the private login handoff to the desktop's main process", () => {
     expect(posted).toEqual([
       { type: LOGIN_HANDOFF_RESULT, requestId: "request-0101", ok: false, error: ONE_PASSWORD_DEAD_HERE },
       { type: LOGIN_HANDOFF_RESULT, requestId: "request-0102", ok: false, error: ONE_PASSWORD_DEAD_HERE },
-      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0103", ok: true, onePassword: { token: TOKEN, grants: {} } },
+      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0103", ok: true, onePassword: { token: TOKEN, grants: {}, itemGrants: {} } },
     ]);
     expect(JSON.stringify(posted.slice(0, 2))).not.toContain(TOKEN);
+  });
+
+  it("hands one saved secret with its bots under its own id, only over this port, and never a linked item", () => {
+    const { store, posted, ask } = setup();
+    const secret = store.saveSecret({ name: "Stripe secret key", value: "sk_fake-handoff-value", source: "card", bots: ["pepper"], refOnly: true });
+    ask({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0301", what: { kind: "secret", id: secret.id } });
+    ask({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0302", what: { kind: "secret", id: "linked-".concat("0".repeat(32)) } });
+    expect(posted).toEqual([
+      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0301", ok: true, secret: { id: secret.id, name: "Stripe secret key", value: "sk_fake-handoff-value", bots: ["pepper"], source: "card", refOnly: true } },
+      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0302", ok: false, error: "This secret is no longer saved on this computer." },
+    ]);
   });
 
   it("answers nothing to a malformed ask, and leaves every other private message to its own handler", () => {

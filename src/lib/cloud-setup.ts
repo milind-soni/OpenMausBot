@@ -1,4 +1,4 @@
-import { hintSeen, type OnboardingStatus, type WelcomeViewer } from "@/lib/onboarding";
+import { hintSeen, setsUpCloud, type OnboardingStatus, type WelcomeViewer } from "@/lib/onboarding";
 import { CLOUD_WELCOME_DONE } from "../../shared/cloud-hints";
 
 export { CLOUD_WELCOME_DONE };
@@ -35,11 +35,11 @@ export interface CloudSetupFacts {
 type StageFacts = Pick<CloudSetupFacts, "viewer" | "connected" | "enginesKnown" | "onboarding">;
 
 /**
- * "none" off the owner's Cloud home, and on a Cloud set up before the welcome: one that answered the first-job
+ * "none" off the owner's Cloud home, for a team's invited admins, and on a Cloud set up before the welcome: one that answered the first-job
  * question or worked without the welcome ever showing there. Once shown, a chat (from a phone, say) does not end it.
  */
 export function cloudWelcomeStage(facts: StageFacts): "none" | "waiting" | "pending" | "ended" {
-  if (!facts.viewer?.cloudHome || !facts.viewer.canSave) return "none";
+  if (!setsUpCloud(facts.viewer)) return "none";
   if (!facts.connected || !facts.enginesKnown || !facts.onboarding) return "waiting";
   const record = facts.onboarding;
   const started = hintSeen(record, CLOUD_WELCOME_SHOWN) || WELCOME_STEPS.some((step) => welcomeStepFinished(record, step));
@@ -58,7 +58,7 @@ export function welcomeViewAfter(onboarding: OnboardingStatus | undefined, finis
 }
 
 export function cloudSetupStage(facts: CloudSetupFacts): "none" | "waiting" | "hidden" | "welcome" | "done" | "shown" {
-  if (!facts.viewer?.cloudHome || !facts.viewer.canSave) return "none";
+  if (!setsUpCloud(facts.viewer)) return "none";
   if (!facts.connected || !facts.enginesKnown || !facts.onboarding) return "waiting";
   if (hintSeen(facts.onboarding, CLOUD_SETUP_HIDDEN)) return "hidden";
   const welcome = cloudWelcomeStage(facts);

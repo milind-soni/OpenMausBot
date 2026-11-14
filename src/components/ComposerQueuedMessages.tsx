@@ -50,8 +50,12 @@ export function QueuedComposerMessages({
   steerInterrupts = false,
   onCancel,
   onEdit,
+  oneThreadPerBot = false,
+  onSeePlans,
 }: {
   items: Array<{ queueId: string; text: string; reason?: SteerQueueReason }>;
+  oneThreadPerBot?: boolean;
+  onSeePlans?: () => void;
   onSteer?: () => void;
   steerMode?: "all" | "next";
   steering?: boolean;
@@ -64,11 +68,15 @@ export function QueuedComposerMessages({
   const multiple = items.length > 1;
   const steerLabel = steering
     ? t("composer.queued.steering")
-    : multiple
-      ? steerMode === "all"
-        ? t("composer.queued.steerAll")
-        : t("composer.queued.steerNext")
-      : t("composer.queued.steer");
+    : steerInterrupts
+      ? multiple
+        ? t(steerMode === "all" ? "composer.queued.stopAndSendAll" : "composer.queued.stopAndSendNext")
+        : t("composer.queued.stopAndSend")
+      : multiple
+        ? steerMode === "all"
+          ? t("composer.queued.steerAll")
+          : t("composer.queued.steerNext")
+        : t("composer.queued.steer");
   const steerDescription = steerInterrupts
     ? multiple
       ? steerMode === "all"
@@ -95,7 +103,10 @@ export function QueuedComposerMessages({
         <p className="px-3 pt-2 text-[12px] text-ink-secondary">{t("composer.queued.groupTurn")}</p>
       )}
       {items.some((item) => item.reason === "capacity") && (
-        <p className="px-3 pt-2 text-[12px] text-ink-secondary">{t("composer.queued.capacity")}</p>
+        <p className="px-3 pt-2 text-[12px] text-ink-secondary">
+          {t(oneThreadPerBot ? "composer.queued.capacityStarter" : "composer.queued.capacity")}
+          {oneThreadPerBot && onSeePlans && <>{" "}<button type="button" className="underline" onClick={onSeePlans}>{t("composer.queued.seePlans")}</button></>}
+        </p>
       )}
       <ul className="divide-y divide-hairline/25" aria-label={t("composer.queued.list")}>
         {items.map((item, index) => {
@@ -115,7 +126,7 @@ export function QueuedComposerMessages({
                 type="button"
                 onClick={onSteer}
                 disabled={steering}
-                aria-label={steering ? t("composer.queued.steeringAria") : steerDescription}
+                aria-label={steering ? t("composer.queued.steeringAria") : steerInterrupts ? steerLabel : steerDescription}
                 title={steerDescription}
                 className="flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-[13px] font-medium text-ink-secondary outline-none hover:bg-raised-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-wait disabled:opacity-60"
               >

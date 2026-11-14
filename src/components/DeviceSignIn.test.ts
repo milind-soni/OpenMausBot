@@ -157,3 +157,32 @@ describe("Grok Build device sign-in UI", () => {
     expect(html).not.toContain("href=");
   });
 });
+
+describe("Cursor sign-in, which prints only a link", () => {
+  const link = "https://cursor.com/loginDeepControl?challenge=Jx1fQ3-Vq8kP0Yb_5rT2aWm7nC4dE6gH9iL0oS1uZ2y&uuid=3f2b8c1d-4e5a-4b6c-8d7e-9f0a1b2c3d4e&mode=login&redirectTarget=cli&supportsSelectedTeamLogin=true";
+  const cursor: DeviceSignInStatus = { phase: "waiting", flowId: "fixture-flow", authorizationUrl: link, expiresAt: "2030-01-01T12:00:00.000Z" };
+  const renderCursor = (auth: DeviceSignInStatus) => renderToStaticMarkup(createElement(DeviceSignInProgress, { auth, provider: "cursor" }));
+
+  it("is Cursor's own sign-in for the Cursor engine", () => {
+    expect(deviceSignInProvider("cursorAgent")).toBe("cursor");
+  });
+
+  it("shows Cursor's link to open on any device, with no code and no terminal command", () => {
+    const html = renderCursor(cursor);
+    expect(html).toContain(`href="${link.replaceAll("&", "&amp;")}"`);
+    expect(html).toContain("Open Cursor sign-in");
+    expect(html).not.toContain("Copy sign-in code");
+    expect(html).not.toContain("cursor-agent login");
+    expect(html).not.toContain('role="alert"');
+  });
+
+  it.each([
+    "https://cursor.com.evil.test/loginDeepControl?challenge=Jx1fQ3-Vq8kP0Yb_5rT2aWm7nC4dE6gH9iL0oS1uZ2y&uuid=3f2b8c1d-4e5a-4b6c-8d7e-9f0a1b2c3d4e",
+    `${link}&token=secret`,
+    "javascript:alert(1)",
+  ])("does not expose an unexpected Cursor sign-in URL: %s", (url) => {
+    const html = renderCursor({ ...cursor, authorizationUrl: url });
+    expect(html).toContain("Cursor did not return a valid sign-in link");
+    expect(html).not.toContain("href=");
+  });
+});

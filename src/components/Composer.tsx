@@ -1,12 +1,16 @@
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
+import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { Mic, Paperclip, Square, X } from "lucide-react";
-import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
+import { visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { useMenuMotion } from "./MenuMotion";
 import { ELEVATED_CARD, ELEVATED_FLOAT } from "./elevated";
+import { uploadDraftImage } from "@/lib/composer-uploads";
+import { intakeFilesWithNotice } from "@/lib/attach-notice";
 import { activeLocale, t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { imeComposing, sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
@@ -20,7 +24,6 @@ import {
   prependComposerDraft,
   recoverFailedComposerSend,
   rememberFailedComposerSend,
-  replaceDraftAttachment,
   restoredSendId,
   restoredRequestText,
   useComposerDraft,
@@ -30,12 +33,13 @@ import {
   type ComposerSendSnapshot,
   type FailedComposerSend,
 } from "@/lib/drafts";
-import { DEVS_CHOICE, MentionMenu, teammateChoices, type MentionChoice } from "./MentionMenu"; import { useTeammates } from "@/state/team-people"; import { hiddenFromSidebar, useViewerEmail } from "@/lib/default-bot";
+import { DEVS_CHOICE, MentionMenu, teammateChoices, type MentionChoice } from "./MentionMenu"; import { useTeammates } from "@/state/team-people"; import { hiddenFromSidebar, useViewerEmail } from "@/lib/default-bot"; import { useMayAct } from "./SharedQueueLine";
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import { MentionTextarea } from "./MentionTextarea";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { PointedChips } from "./app/PointedChips"; import { SetupRequestChip, setupRequestPlaceholder } from "./SetupOffer";
 import { takePointedChips } from "@/lib/pointed-chips";
+import { openPageFor } from "@/lib/open-page";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { PlaceChip } from "./PlaceChip";
 import { ApprovalModeSelector } from "./ApprovalModeSelector";
@@ -44,7 +48,7 @@ import { useOnCall } from "@/lib/call";
 import { isLiveCallRunning, useLiveMedia } from "@/lib/live-call-media";
 import {
   appendPastedText,
-  handoffAttachmentImagePreview,
+  clipboardFilesToAttach,
   clipboardHasImages,
   clipboardImageFiles,
   composeMessage,
@@ -52,28 +56,25 @@ import {
   discardUnsentUpload,
   composerShouldRefocus,
   composerTakesFocusOnOpen,
-  imageAttachmentFromFile,
+  imageBytesLeft,
   imageSlotsLeft,
   imagesThatFit,
   replyTargetTakesFocus,
-  intakeFiles,
   isLongPaste,
-  optimisticImageAttachment,
   pasteAttachment,
   releaseAttachmentImagePreview,
   type Attachment,
   type PasteAttachment,
 } from "@/lib/composer-attachments";
-import { goalCoordinatorForComposer, jevRoomRoutingOn, openTaskWorking, roomRespondersForComposer } from "@/lib/group-routing";
+import { goalCoordinatorForComposer, jevRoomRoutingOn, openTaskWorking, roomRouteForComposer } from "@/lib/group-routing";
 import { composerPlaceholder, sendLabels, SIMPLE_COMPOSER, SIMPLE_CONTROL, slotColors } from "./composer-simple"; import { ComposerSendButton } from "./ComposerSendButton";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
 import { GroupCallButton } from "./GroupCallView";
-import { ApprovalChip, ComposerPlusMenu, GoalToggle } from "./ComposerPlusMenu";
+import { ApprovalChip, ComposerPlusMenu, GoalToggle, TeachTaskButton } from "./ComposerPlusMenu";
 import { PhonePlus } from "./PhonePlus";
 import { useThreadApproval } from "./thread-approval";
 import { useStackedField, useTallPill } from "./composer-wrap";
-import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ComposerReplyStrip } from "./ReplyQuote";
 import { escapeCancelsReply } from "@/lib/replies";
 import { useThreadRefs } from "./ThreadRefs";
@@ -84,17 +85,19 @@ import {
   doubleEnterSteersQueue,
 } from "./ComposerQueuedMessages";
 import { skillAuthoringEnabled } from "@/lib/feature-flags";
-import { mentionChoicesForQuery, mentionQueryAt } from "@/lib/mentions";
+import { mentionChoicesForQuery, mentionQueryAt } from "@/lib/mentions"; import { mentionPicksFor, restoreMentionPicks } from "@/lib/mention-picks";
 import { serializeThreadRefs, threadTokenFromPaste, threadTokenSpacing } from "@/lib/thread-refs";
 import {
   composerSlashTrigger,
   goalTextFromComposer,
+  builtInCommandText,
   replaceComposerSlashTrigger,
   skillSlashCommands,
   slashCommandMatches,
   type ComposerSlashCommand,
 } from "@/lib/composer-commands";
 import { useSlashSkills } from "@/lib/use-slash-skills";
+import { randomUuid } from "@/lib/random-uuid";
 
 const supportsAgents = (instances: InstanceInfo[], candidate?: Bot) =>
   Boolean(candidate && instances.find((instance) => instance.instanceId === candidate.modelSelection.instanceId)?.capabilities?.agentsMcp);
@@ -126,9 +129,8 @@ export function Composer({
 }) {
   const bot = profile ? currentTaskBot(profile) : undefined;
   const locked = setupLocked || Boolean(bot?.awaitingThreadSnapshot);
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances, config: s.config, queued: s.pendingQueued[group?.threadId ?? bot?.threadId ?? ""] }), sameFields), dispatch = useStoreDispatch(), store = useStoreRef(), bots = useStoreSelector((s) => s.bots, sameDrawnBots);
   const { threads, currentBotId } = useThreadRefs();
-  const { capabilities } = useDesktopCapabilities();
   const advanced = useAdvancedMode();
   // On a phone the composer is a dock: a round + (attach and every other tool), then one pill with the field, the mic and the voice button.
   const singleRow = useMediaQuery(PHONE_LAYOUT);
@@ -153,10 +155,10 @@ export function Composer({
   const approval = approvals[0];
   // A Turn on card can wait while the person walks to their computer: they can still write meanwhile.
   const blocking = Boolean(approval && !approval.message.card?.computerAsk);
-  const approvalBot = group
+  const asker = useStoreSelector((s) => s.bots.find((one) => one.id === approval?.message.inbox?.from.botId)), approvalBot = group
     ? members?.find((member) => member.id === approval?.message.from?.botId) ??
       members?.find((member) => member.id === groupBusyBotId)
-    : state.bots.find((one) => one.id === approval?.message.inbox?.from.botId) ?? bot;
+    : asker ?? bot;
   const busyName = group
     ? (members?.find((b) => b.id === groupBusyBotId)?.name ??
       (groupWorking ? t("composer.busy.team") : t("composer.busy.aBot")))
@@ -166,10 +168,10 @@ export function Composer({
     : `bot:${bot?.id ?? ""}:${bot?.threadId ?? ""}`;
   const [text, setText, attachments, setAttachments] = useComposerDraft(
     draftId,
-    !group && bot ? `bot:${bot.id}` : undefined,
+    !group && bot && !state.config?.team ? `bot:${bot.id}` : undefined,
   );
   const attachmentPending = useDraftAttachmentPending(draftId);
-  const failedSends = useFailedComposerSends(draftId);
+  const failedSends = useFailedComposerSends(draftId); const picks = mentionPicksFor(draftId);
   const [channelMode, setChannelMode] = useComposerChannelMode(draftId);
   const editText = useCallback(
     (next: string) => {
@@ -188,7 +190,7 @@ export function Composer({
   const restoreDraft = useCallback(
     (sent: ComposerDraftSnapshot) => {
       if (recoverFailedComposerSend(sent) === "restored") {
-        if (sent.reply) onRestoreReply?.(sent.reply, sent.threadId);
+        restoreMentionPicks(sent.draftId, sent.mentions); if (sent.reply) onRestoreReply?.(sent.reply, sent.threadId);
       }
     },
     [onRestoreReply],
@@ -222,9 +224,7 @@ export function Composer({
     },
     [text, editText, editAttachments],
   );
-  const { recording, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({
-    draftId, text, onText: editText, available: capabilities.dictation.available,
-  });
+  const { recording, ready: micReady, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({ draftId, text, onText: editText });
   const [caret, setCaret] = useState(0);
   const shellRef = useRef<HTMLDivElement>(null);
   const tall = useTallPill(shellRef, simpleDock);
@@ -284,10 +284,10 @@ export function Composer({
   const imageTargetsSupport = (message: string, mode: "chat" | "goal") => {
     if (!group) return botSupportsImages(bot);
     if (mode === "goal") {
-      return botSupportsImages(goalCoordinatorForComposer(message, members ?? [], group) ?? undefined);
+      return botSupportsImages(goalCoordinatorForComposer(message, members ?? [], group, picks.ids(message)) ?? undefined);
     }
-    const responders = roomRespondersForComposer(message, members ?? [], group);
-    return responders.length > 0 && responders.every(botSupportsImages);
+    const route = roomRouteForComposer(message, members ?? [], group, picks.ids(message));
+    return route.ambiguous || (route.responders.length > 0 && route.responders.every(botSupportsImages));
   };
   const typedGoalText = !group?.dm ? goalTextFromComposer(text) : null;
   const effectiveText = typedGoalText ?? text;
@@ -302,13 +302,14 @@ export function Composer({
   const commandCandidates = useMemo(() => {
     if (!slash || slash.start === dismissedSlashAt) return [];
     const available: ComposerSlashCommand[] = [];
-    if (!group?.dm) available.push({
+    const builtIns = slash.start === 0; // Built-in commands only work at the start of a message; skills can be named anywhere.
+    if (builtIns && !group?.dm) available.push({
       kind: "command",
       id: "goal",
       label: "/goal",
       description: t(group ? "composer.command.goalDesc" : "composer.command.goalBotDesc"),
     });
-    if (canLearn) {
+    if (builtIns && canLearn) {
       available.push({
         kind: "command",
         id: "learn",
@@ -316,12 +317,12 @@ export function Composer({
         description: t("composer.command.learnDesc"),
       });
     }
-    if (!group && supportsAgents(state.instances, bot)) available.push({
+    if (builtIns && !group && supportsAgents(state.instances, bot)) available.push({
       kind: "command",
       id: "setup",
       label: "/setup",
       description: t("composer.command.setupDesc"),
-    });
+    }, { kind: "command", id: "burst", label: "/burst", description: t("composer.command.burstDesc") });
     available.push(...skillSlashCommands(slashSkills));
     return available.filter((command) => slashCommandMatches(command, slash.query));
   }, [slash, dismissedSlashAt, group, bot, canLearn, state.instances, locale, slashSkills]);
@@ -335,11 +336,11 @@ export function Composer({
           ...(!group.dm ? [{ id: "__everyone__", name: "everyone" }] : []),
           ...(members ?? []).map((member) => ({ id: member.id, name: member.name, bot: member })),
         ]
-      : state.bots
+      : bots
           .filter((member) => member.id !== bot?.id && !member.hidden && !hiddenFromSidebar(member, viewer))
           .map((member) => ({ id: member.id, name: member.name, bot: member }));
     return mentionChoicesForQuery([...pool, ...teammateChoices(teammates.people), DEVS_CHOICE], mention.query);
-  }, [mention, dismissedAt, state.bots, bot?.id, group, members, teammates, viewer]);
+  }, [mention, dismissedAt, bots, bot?.id, group, members, teammates, viewer]);
   const mentionEveryoneCount = (members ?? []).filter((member) => !member.hidden).length;
   const mentionPickerOpen = candidates.length > 0;
   const commandMotion = useMenuMotion(commandPickerOpen);
@@ -373,7 +374,7 @@ export function Composer({
     if (!mention) return;
     const after = text.slice(caret);
     const next = `${text.slice(0, mention.start)}@${peer.name} ${after}`;
-    editText(next);
+    picks.pick(peer); editText(next);
     const newCaret = mention.start + peer.name.length + 2;
     setCaret(newCaret);
     setDismissedAt(mention.start);
@@ -385,8 +386,9 @@ export function Composer({
 
   const pickCommand = (command: ComposerSlashCommand | undefined) => {
     if (!slash || !command) return;
-    const replacement = command.kind === "skill" ? `${command.label} `
-      : command.id === "learn" ? "/learn " : command.id === "setup" ? "/setup " : "";
+    const spaceAfter = /^\s/.test(text.slice(slash.end)) ? "" : " ";
+    const replacement = command.kind === "skill" ? `${command.label}${spaceAfter}`
+      : builtInCommandText(command.id);
     const next = replaceComposerSlashTrigger(text, slash, replacement);
     editText(next.text);
     setCaret(next.caret);
@@ -402,14 +404,12 @@ export function Composer({
     editText(learn + text.replace(/^\/learn\s*/, "").trimStart());
     setCaret(learn.length);
     setChannelMode("chat");
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(learn.length, learn.length);
-    });
+    requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.setSelectionRange(learn.length, learn.length); });
   };
 
-  const pendingCount = (state.pendingQueued[threadId] ?? []).length;
-  const queuedMessages = state.pendingQueued[threadId] ?? [];
+  const sharedChat = Boolean(state.config?.team && !group && profile?.tasks?.some((task) => task.threadId === threadId && !task.private));
+  const queuedMessages = sharedChat ? [] : state.queued ?? [];
+  const pendingCount = queuedMessages.length;
   const canSteerQueued = composerCanSteerQueuedMessages(
     busy,
     locked,
@@ -482,37 +482,17 @@ export function Composer({
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const modeBot = group ? undefined : bot;
   const { choice: approvalChoice, dialogs: approvalDialogs } = useThreadApproval(modeBot);
-  const uploadImage = useCallback(async (file: File): Promise<Attachment | null> => {
-    const optimistic = optimisticImageAttachment(file);
-    if (!optimistic) return null;
-    appendDraftAttachments(draftId, [optimistic]);
-    try {
-      const completed = await imageAttachmentFromFile(file, optimistic);
-      if (!completed) {
-        replaceDraftAttachment(draftId, optimistic.id, null);
-        releaseAttachmentImagePreview(optimistic);
-        return null;
-      }
-      handoffAttachmentImagePreview(completed.path, completed.previewUrl);
-      if (!replaceDraftAttachment(draftId, optimistic.id, completed)) {
-        releaseAttachmentImagePreview(completed);
-      }
-      return null;
-    } catch (error) {
-      replaceDraftAttachment(draftId, optimistic.id, null);
-      releaseAttachmentImagePreview(optimistic);
-      throw error;
-    }
-  }, [draftId]);
-  const pickFiles = async (picked: FileList | null) => {
+  const uploadImage = useCallback((file: File) => uploadDraftImage(draftId, file), [draftId]);
+  const pickFiles = async (picked: FileList | readonly File[] | null) => {
     if (!picked?.length) return;
     changeDraftAttachmentPending(draftId, true);
     try {
-      const { attachments: added, notice } = await intakeFiles(Array.from(picked), {
+      const { attachments: added, notice } = await intakeFilesWithNotice(Array.from(picked), {
         allowImages: engineSupportsImages,
         getPath: pathForFile,
         uploadImage,
         imageSlots: imageSlotsLeft(attachments),
+        imageBytes: imageBytesLeft(attachments),
       });
       if (added.length) addAttachments(added);
       if (notice) setAttachmentNotice(notice);
@@ -527,7 +507,8 @@ export function Composer({
   const media = useLiveMedia();
   const callTarget = group?.id ?? bot?.id;
   const calling = callTarget !== undefined && (onCall === callTarget || (isLiveCallRunning(media.phase) && media.botId === callTarget));
-  const stoppable = busy || Boolean(!group && bot?.waitingForTeammates);
+  const mayAct = useMayAct(), mayStop = !sharedChat || mayAct(profile?.tasks?.find((task) => task.threadId === threadId)?.askedBy);
+  const stoppable = (busy || Boolean(!group && bot?.waitingForTeammates)) && mayStop;
   // Simple mode's round button is the call, Send while there is text, and Stop while the bot works.
   const stopInSlot = simpleDock && stoppable && !locked && !hasContent && !calling;
   const callShown = !simpleDock || (!hasContent && !stopInSlot);
@@ -547,22 +528,23 @@ export function Composer({
       sendId: failed.sendId,
       text: failed.requestText,
       replyToId: failed.replyToId,
-      threadId: failed.threadId,
+      threadId: failed.threadId, mentions: failed.mentions,
       onError: () => {
         rememberFailedComposerSend(draftId, {
           sendId: failed.sendId,
           text: failed.text,
           requestText: failed.requestText,
           replyToId: failed.replyToId,
-          threadId: failed.threadId,
+          threadId: failed.threadId, mentions: failed.mentions,
           channelMode: failed.channelMode,
+          followUp: failed.followUp,
         });
       },
     };
     if (group) {
       dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...retry });
     } else if (bot) {
-      dispatch({ type: "send", botId: bot.id, mode: failedMode, ...retry });
+      dispatch({ type: "send", botId: bot.id, mode: failedMode, followUp: failed.followUp, ...retry });
     }
   };
   const send = (followUp: FollowUp | undefined = followUpFor(false)) => {
@@ -578,20 +560,21 @@ export function Composer({
     if (!composed) return;
     stopDictation();
     const body = restoredRequestText(draftId) ?? composed;
-    const dataContext = dataContextFor(body, state.computerOpen ? state.dataView : null, !group && bot ? { botId: bot.id, threadId } : undefined);
+    const dataContext = dataContextFor(body, store.state().computerOpen ? store.state().dataView : null, !group && bot ? { botId: bot.id, threadId } : undefined);
     const sentDraft: ComposerDraftSnapshot = {
       draftId,
       revision: draftRevision(draftId),
-      sendId: restoredSendId(draftId) ?? crypto.randomUUID(),
+      sendId: restoredSendId(draftId) ?? randomUuid(),
       text,
       requestText: body,
       attachments: [...attachments],
       reply: replyTo ?? null,
       replyToId: replyTo?.id,
       threadId,
-      channelMode: effectiveChannelMode,
+      channelMode: effectiveChannelMode, mentions: picks.ids(body), followUp,
     };
     if (group) {
+      const points = effectiveChannelMode === "goal" ? null : takePointedChips(threadId);
       dispatch({
         type: "sendGroup",
         groupId: group.id,
@@ -599,26 +582,34 @@ export function Composer({
         sendId: sentDraft.sendId,
         replyToId: replyTo?.id,
         threadId,
-        mode: effectiveChannelMode,
-        onError: () => restoreDraft(sentDraft),
+        mode: effectiveChannelMode, mentions: sentDraft.mentions,
+        ...(points ? { pointed: points.pointed } : {}),
+        onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
       roomMessageSent(effectiveChannelMode, busy);
     } else if (bot) {
       const points = effectiveChannelMode === "goal" ? null : takePointedChips(threadId);
+      const page = effectiveChannelMode === "goal" ? undefined : openPageFor(threadId);
       dispatch({
-        type: "send", botId: bot.id, text: body, sendId: sentDraft.sendId, replyToId: replyTo?.id, threadId, dataContext, mode: effectiveChannelMode,
-        ...(points ? { pointed: points.pointed } : {}), ...(followUp ? { followUp } : {}),
+        type: "send", botId: bot.id, text: body, sendId: sentDraft.sendId, replyToId: replyTo?.id, threadId, dataContext, mode: effectiveChannelMode, mentions: sentDraft.mentions,
+        ...(points ? { pointed: points.pointed } : {}), ...(page ? { openPage: page } : {}), ...(followUp ? { followUp } : {}),
         onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
       directMessageSent(state.instances, bot.modelSelection?.instanceId, busy && followUp !== "steer");
     }
     setText("");
-    setAttachments([]);
+    setAttachments([]); picks.clear();
     onConsumeReply?.();
     setChannelMode("chat");
   };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const pastedFiles = clipboardFilesToAttach(e.clipboardData);
+    if (pastedFiles.length > 0) {
+      e.preventDefault();
+      void pickFiles(pastedFiles);
+      return;
+    }
     const imageFiles = clipboardImageFiles(e.clipboardData);
     if (imageFiles.length > 0 || clipboardHasImages(e.clipboardData)) {
       e.preventDefault();
@@ -633,7 +624,7 @@ export function Composer({
         dispatch({ type: "error", message: t("composer.error.clipboardImage") });
         return;
       }
-      const kept = imagesThatFit(imageFiles, imageSlotsLeft(attachments), setAttachmentNotice);
+      const kept = imagesThatFit(imageFiles, imageSlotsLeft(attachments), setAttachmentNotice, imageBytesLeft(attachments));
       changeDraftAttachmentPending(draftId, true);
       void (async () => {
         try {
@@ -738,7 +729,7 @@ export function Composer({
         <MentionMenu listRef={mentionListRef} motion={mentionMotion} choices={candidates} highlight={highlight}
           everyoneCount={mentionEveryoneCount} onPick={pickMention} onHighlight={setHighlight} />
         {approval && (
-          <div className={cn("mb-2 overflow-hidden rounded-[24px]", ELEVATED_CARD)}>
+          <div className={cn("mb-2 overflow-hidden rounded-[18px]", ELEVATED_CARD)}>
             <PendingApprovalPanel
               key={approval.requestId}
               pending={approval}
@@ -751,7 +742,7 @@ export function Composer({
             />
           </div>
         )}
-        {!group && <PointedChips threadId={threadId} />}{!group && bot && <SetupRequestChip bot={bot} threadId={threadId} />}
+        <PointedChips threadId={threadId} />{!group && bot && <SetupRequestChip bot={bot} threadId={threadId} />}
         <ComposerAttachments
           items={attachments}
           onAdd={addAttachments}
@@ -766,6 +757,8 @@ export function Composer({
         />
         <QueuedComposerMessages
           items={queuedMessages}
+          oneThreadPerBot={state.config?.cloudStarter === true}
+          onSeePlans={() => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" })}
           onSteer={canSteerQueued ? steerQueued : undefined}
           steerInterrupts={!canSteer}
           steerMode={group ? "next" : "all"}
@@ -775,7 +768,7 @@ export function Composer({
             else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, threadId, queueId });
           }}
           onEdit={locked ? undefined : editQueued}
-        />
+        /><TeamAudienceLabel bot={bot} group={group} />
         <div className="relative">
           {/* Plain canvas behind the composer and the strip below it, so the transcript ends at the composer
               with no fade. Simple mode starts it at the composer's top edge, Advanced at its middle. */}
@@ -790,7 +783,7 @@ export function Composer({
             <PhonePlus
               onAttach={() => fileInput.current?.click()}
               goal={goal}
-              teach={!advanced && canLearn ? teachTask : undefined}
+              teach={canLearn ? teachTask : undefined}
               approval={approvalChoice && modeBot && { name: modeBot.name, choice: approvalChoice }}
               callBotId={bot && !group ? bot.id : undefined}
               place={modeBot && !remoteClient && advanced ? {
@@ -828,6 +821,7 @@ export function Composer({
               >
                 <Paperclip size={16} strokeWidth={1.75} absoluteStrokeWidth />
               </button>}
+              {advanced && canLearn && <TeachTaskButton onClick={teachTask} />}
               {/* Simple mode shows a mode's chip only while it is on, so a choice made in the + menu or the bot panel stays in view. */}
               {goal && (advanced || goal.on) && <GoalToggle {...goal} compact={simpleDock} />}
               {advanced && approvalChoice && <ApprovalModeSelector {...approvalChoice} />}
@@ -846,7 +840,7 @@ export function Composer({
           <MentionTextarea
           wrapperClassName={singleRow || simpleDock ? undefined : cn("@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full", stacked && "order-first basis-full")}
           inputRef={inputRef}
-          peers={[...(group ? members ?? [] : state.bots.filter((member) => member.id !== bot?.id)), ...teammates.peers]}
+          peers={[...(group ? members ?? [] : bots.filter((member) => member.id !== bot?.id)), ...teammates.peers]}
           everyone={Boolean(group && !group.dm)}
           dir="auto"
           rows={1}
@@ -944,7 +938,7 @@ export function Composer({
             )}
           />
           <div data-composer-actions className={cn("flex items-center", simpleDock ? "gap-2" : "gap-1", !singleRow && !simpleDock && "@max-[30rem]/composer:ml-auto", stacked && "ml-auto")}>
-          {(simpleDock ? stoppable : busy) && !locked && (
+          {(simpleDock ? stoppable : busy && mayStop) && !locked && (
           <button
             onClick={interruptTurn}
             aria-label={t("chat.stopTurn")}
@@ -961,7 +955,7 @@ export function Composer({
             <Square size={simpleDock ? 10 : 14} className="fill-current" />
           </button>
         )}
-        {!locked && !busy && capabilities.dictation.available && (
+        {!locked && !busy && micReady && (
           <button
             onClick={toggleMic}
             aria-label={recording ? t("composer.dictation.stop") : t("composer.dictation.start")}

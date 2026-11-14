@@ -3,19 +3,21 @@ import { Check, Clock3, ShieldCheck, Undo2, X } from "lucide-react";
 import { api, ApiError, StoreContext, type Bot, type Message, type OptionCardData } from "@/state/store";
 import { shareLearnedSkillsMode } from "@/lib/feature-flags";
 import { cn } from "@/lib/cn";
-import { t, tFromServer } from "@/lib/i18n";
+import { activeLocale, t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
-import { composioActionPhrase, outboundSummary } from "@/lib/approval-summary";
+import { approvalDetailText, composioActionPhrase, outboundSummary } from "@/lib/approval-summary";
 import { niceDate, niceTime, scheduleLabel } from "@/lib/schedule-label";
-import { cronScheduleLabel } from "../../shared/cron-label";
+import { cronPresetText, cronText } from "@/lib/cron-text";
 import { PROFILE_REQUEST_FIELDS, type ProfileRequestField } from "../../shared/profile-request";
+import { RESERVED_MCP_NAMES } from "../../shared/mcp-name";
 import type { RoutineRequestSchedule } from "../../shared/routine-request";
-import type { SkillShareRecord } from "../../shared/skill-request";
+import { isSkillSwitchAction, type SkillShareRecord } from "../../shared/skill-request";
 import { cardAutomation } from "@/lib/automations";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { yourComputerAsk } from "@/lib/your-computer";
 import { computerAskWords } from "@/lib/computer-ask";
+import { mcpRequestActionLabel } from "@/lib/mcp-request-label";
 import { TriggerCard } from "./TriggerCard";
 import { CardHint } from "./CardHint";
 
@@ -35,6 +37,9 @@ const ROUTINE_SETTLED_LABEL = {
 const SKILL_SETTLED_LABEL = {
   create: "approval.status.skillEnabled",
   update: "approval.status.skillUpdated",
+  enable: "approval.status.skillTurnedOn",
+  disable: "approval.status.skillTurnedOff",
+  delete: "approval.status.skillDeleted",
 } as const;
 
 /** Schedules and webhooks alike are "automations" to a person. */
@@ -56,6 +61,9 @@ const WAIT_APPLIED_LINE = {
 const SKILL_APPLIED_LINE = {
   create: "approval.applied.skill.create",
   update: "approval.applied.skill.update",
+  enable: "approval.applied.skill.enable",
+  disable: "approval.applied.skill.disable",
+  delete: "approval.applied.skill.delete",
 } as const;
 
 const PROFILE_FIELD_LABEL: Record<ProfileRequestField, LocaleKey> = {
@@ -71,8 +79,15 @@ const PROFILE_FIELD_LABEL: Record<ProfileRequestField, LocaleKey> = {
 /** A routine card no one answered is from before Triggers v2 applied changes on their own: nothing can confirm it now. */
 const staleRoutineCard = (card: OptionCardData) => Boolean(card.routineRequest && !card.answered);
 
-/** The card brings its own question and answer words (its title and first option): team setup and MCP server changes. */
-export const titledCard = (card: OptionCardData | undefined) => Boolean(card?.teamSetupRequest || card?.mcpRequest);
+/** Cards whose server-written title and first option say what approving does. */
+export const titledCard = (card: OptionCardData | undefined) =>
+  Boolean(card?.teamSetupRequest || card?.mcpRequest || card?.lendingLift || isSkillSwitchAction(card?.skillRequest?.action));
+
+export function titledCardAction(card: OptionCardData): string {
+  if (card.mcpRequest) return mcpRequestActionLabel(card.mcpRequest.action);
+  if (card.teamSetupRequest) return t(card.teamSetupRequest.deletion ? "approval.action.deleteBot" : "approval.action.applySetup");
+  return card.options[0] ?? t("approval.action.confirm");
+}
 
 export function approvalCardOutcome(card: OptionCardData): string | undefined {
   const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || titledCard(card));
@@ -80,7 +95,7 @@ export function approvalCardOutcome(card: OptionCardData): string | undefined {
   if (!card.answered) return undefined;
   if (card.undone === true) return t("approval.status.undone");
   if (card.answered !== "allow") return isProposal ? t("approval.status.cancelled") : t("approval.status.denied");
-  if (card.teamSetupRequest) return card.teamSetupRequest.deletion ? "Bot deleted" : "Team setup applied";
+  if (card.teamSetupRequest) return t(card.teamSetupRequest.deletion ? "approval.status.botDeleted" : "approval.status.teamApplied");
   const routineAction = card.routineRequest?.operation.action;
   if (routineAction) return t(ROUTINE_SETTLED_LABEL[routineAction]);
   const skillAction = card.skillRequest?.action;
@@ -94,7 +109,11 @@ export function approvalCardOutcome(card: OptionCardData): string | undefined {
 
 export function toolLabel(tool?: string): string {
   if (!tool) return t("approval.tool.takeAction");
-  const bare = tool.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ");
+  // MCP tool names are `mcp__<server>__<name>`; a server name may itself carry underscores, so the server is the
+  // second `__`-split segment and everything after it is the tool.
+  const mcp = tool.startsWith("mcp__") ? tool.split("__") : undefined;
+  const server = mcp?.[1];
+  const action = (mcp ? mcp.slice(2).join("__") : tool).replace(/_/g, " ");
   const nice: ToolLabels = {
     Bash: "approval.tool.runCommand",
     Read: "approval.tool.readFile",
@@ -120,7 +139,9 @@ export function toolLabel(tool?: string): string {
   };
   const key = nice[tool];
   if (key) return t(key);
-  return composioActionPhrase(tool.replace(/^mcp__[^_]+__/, "")) ?? bare;
+  // A custom MCP server's tools read like the app's own unless the card names the server asking.
+  const phrase = mcp ? composioActionPhrase(mcp.slice(2).join("__")) ?? action : action;
+  return server && !RESERVED_MCP_NAMES.has(server) ? `${server} · ${phrase}` : phrase;
 }
 
 function plainWhen(schedule: RoutineRequestSchedule): string {
@@ -130,8 +151,7 @@ function plainWhen(schedule: RoutineRequestSchedule): string {
       : `${niceDate(schedule.at)}, ${niceTime(schedule.at)}`;
   }
   if (schedule.type === "cron") {
-    const label = cronScheduleLabel(schedule);
-    return label.startsWith("Cron ") ? "" : label;
+    return cronPresetText(schedule) ? cronText(schedule) : "";
   }
   if (schedule.type === "interval") return scheduleLabel({ ...schedule, anchorAt: schedule.anchorAt ?? 0 });
   if (schedule.type === "limit_reset") return scheduleLabel({ ...schedule, at: null });
@@ -139,6 +159,8 @@ function plainWhen(schedule: RoutineRequestSchedule): string {
 }
 
 export function appliedChange(card: OptionCardData, name: string): { line: string; canUndo: boolean; cancels?: boolean } | undefined {
+  const setting = card.appSettingRequest;
+  if (setting) return { line: t("approval.applied.appSetting", { name, title: `${setting.label}: ${approvalDetailText(card)}` }), canUndo: true };
   const routine = card.routineRequest;
   if (routine) {
     const operation = routine.operation;
@@ -168,7 +190,7 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
   if (skill) {
     return {
       line: t(SKILL_APPLIED_LINE[skill.action], { name, title: skill.name }),
-      canUndo: skill.action === "create" || Boolean(skill.previous),
+      canUndo: skill.action === "create" || skill.action === "enable" || skill.action === "disable" || Boolean(skill.previous),
     };
   }
   const profile = card.profileRequest;
@@ -205,11 +227,13 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
 function AppliedChangeLine({
   card,
   name,
+  originalName,
   threadId,
   summary,
 }: {
   card: OptionCardData;
   name: string;
+  originalName?: string;
   threadId?: string;
   summary: { line: string; canUndo: boolean; cancels?: boolean };
 }) {
@@ -226,7 +250,7 @@ function AppliedChangeLine({
   const cancels = summary.cancels === true;
   const skill = card.skillRequest;
   const shared = skill?.shared ?? (sharedNow && sharedNow.requestId === card.requestId ? sharedNow.shared : undefined);
-  const canShare = Boolean(skill && !shared && !undone && threadId && card.requestId)
+  const canShare = Boolean(skill && !isSkillSwitchAction(skill.action) && !shared && !undone && threadId && card.requestId)
     && shareLearnedSkillsMode(config) === "ask";
   const share = () => {
     const requestId = card.requestId;
@@ -310,7 +334,7 @@ function AppliedChangeLine({
           aria-label={t("approval.aria.appliedDetails")}
           className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-inset px-4 py-3 font-mono text-[13px] leading-relaxed text-ink"
         >
-          {card.subtitle}
+          {activeLocale() !== "en" && card.waitRequest ? t("approval.applied.waitFollowUp", { name: originalName ?? name, followUp: card.waitRequest.followUp ?? "" }) : card.subtitle}
         </pre>
       )}
     </div>
@@ -430,7 +454,7 @@ export function ApprovalCard({
   const applied = card.autoApplied === true && card.answered === "allow" && !card.held
     ? appliedChange(card, bot?.name ?? t("approval.someone"))
     : undefined;
-  if (applied) return <AppliedChangeLine card={card} name={bot?.name ?? t("approval.someone")} threadId={threadId} summary={applied} />;
+  if (applied) return <AppliedChangeLine card={card} name={bot?.name ?? t("approval.someone")} originalName={message.from?.name} threadId={threadId} summary={applied} />;
   const settled = card.answered;
   const expired = card.expired === true || staleRoutineCard(card);
   const via = card.answeredBy?.via;
@@ -450,6 +474,9 @@ export function ApprovalCard({
       ? skillAction === "update" ? "update_skill" : "stage_skill"
     : isProfileRequest
       ? "update_profile"
+    // An ACP permission request without a tool kind carries the qualified MCP tool name as its title: label the
+    // action with it instead of "use a tool".
+    : (!card.tool || card.tool === "tool") && (card.title ?? "").startsWith("mcp__") ? card.title
     : card.tool;
   const profileHeader = isProfileRequest && card.profileRequest
     ? card.profileRequest.targetBotId === card.profileRequest.botId
@@ -483,7 +510,7 @@ export function ApprovalCard({
       <CompactApprovalRow
         header={header}
         summary={outbound?.summary || undefined}
-        detail={ask?.detail ?? card.subtitle}
+        detail={ask?.detail ?? approvalDetailText(card)}
         showDetailInline={!outbound}
         outcome={outcome}
         allowed={settled === "allow" && !expired}
@@ -531,7 +558,7 @@ export function ApprovalCard({
         }
         className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 font-mono text-[13px] leading-relaxed text-ink"
       >
-        {card.subtitle}
+        {approvalDetailText(card)}
       </pre>
 
       {card.skillRequest && <SkillRequestPreview request={card.skillRequest} />}

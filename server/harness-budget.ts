@@ -8,4 +8,11 @@ export const HARNESS_CALL_BUDGET_MS = 120_000;
  * Written out rather than imported, so the stdio proxy that reads this file loads neither the hold nor zod;
  * harness-mcp-proxy.test.ts holds it to the sum of the real constants. */
 export const DEVICE_PROXY_TIMEOUT_MS = 9 * 60_000 + 120_000 + 15_000 + 30_000;
-export const HARNESS_PROXY_TIMEOUTS_MS: Partial<Record<"browser" | "computer" | "data" | "highlevel" | "device", number>> = { device: DEVICE_PROXY_TIMEOUT_MS };
+/** A cloud computer file copy streams up to 2 GiB, so it gets longer than other calls, still under the chat engine's
+ * 10-minute limit on one tool call. */
+export const COMPUTER_COPY_BUDGET_MS = 9 * 60_000;
+/** Outwaits the longest cloud computer call; Codex, which ends a tool call itself, waits a little longer still. */
+export const COMPUTER_PROXY_TIMEOUT_MS = COMPUTER_COPY_BUDGET_MS + 10_000;
+export const HARNESS_PROXY_TIMEOUTS_MS: Partial<Record<"browser" | "computer" | "data" | "email" | "device", number>> = {
+  device: DEVICE_PROXY_TIMEOUT_MS, computer: COMPUTER_PROXY_TIMEOUT_MS,
+};

@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { useStore, visibleMessages, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { mcpRequestActionLabel } from "@/lib/mcp-request-label";
 import { isPersistentQuestionCard, parseChoices } from "../../shared/ask-question";
 import { ASK_QUIET_BUTTON, AskCard, AskChoices, AskReply, AskSettledLine, returnFocusToComposer, settledAnswer } from "./AskCard";
 import { ExpandableText } from "./ExpandableText";
@@ -42,11 +43,22 @@ export function OptionCard({
   const [custom, setCustom] = useState("");
   const card = message.card;
   const bot = state.bots.find((candidate) => candidate.id === botId);
-  const transcript = bot ? visibleMessages(bot) : [];
+  const panel = state.forkPanel;
+  const transcript = panel && panel.threadId === threadId && panel.kind === (groupId ? "group" : "bot") && panel.ownerId === (groupId ?? botId)
+    ? visibleMessages(panel)
+    : groupId
+      ? state.groups.find((group) => group.id === groupId && group.threadId === threadId)?.messages ?? []
+      : bot && (!threadId || bot.threadId === threadId) ? visibleMessages(bot) : [];
   // Full thread, not the mounted window: a search-focus slice can omit the later message that hides this quiz.
   if (!card || shouldHideOnboardingCard(message, transcript) || (card.requestId && card.dismissed && card.answered)) return null;
 
   const options = parseChoices(card.options, MAX_CHOICES) ?? [];
+  const optionLabel = (option: string): string => {
+    if (!card.mcpRequest) return option;
+    if (option === "Cancel") return t("mcp.cancel");
+    return option === options[0] ? mcpRequestActionLabel(card.mcpRequest.action) : option;
+  };
+  const labels = options.map(optionLabel);
   const index = transcript.findIndex((entry) => entry.id === message.id);
   const quiet = !card.answered && index >= 0 && transcript.slice(index + 1).some((later) => later.role === "user" && later.kind === "text");
 
@@ -73,7 +85,7 @@ export function OptionCard({
           </button>
         )}
       >
-        {closed ? t("question.status.closed") : picked ? settledAnswer(picked, options) : <span>{card.title} · {t("question.status.answered")}</span>}
+        {closed ? t("question.status.closed") : picked ? settledAnswer(optionLabel(picked), labels) : <span>{card.title} · {t("question.status.answered")}</span>}
       </AskSettledLine>
     );
   }
@@ -88,12 +100,12 @@ export function OptionCard({
     >
       {options.length > 0 && (
         <AskChoices
-          choices={options.map((label) => ({ label }))}
+          choices={labels.map((label) => ({ label }))}
           label={card.title}
-          picked={card.answeredText ?? card.answered ? [card.answeredText ?? card.answered!] : []}
+          picked={card.answeredText ?? card.answered ? [optionLabel(card.answeredText ?? card.answered!)] : []}
           disabled={Boolean(card.answered)}
           quiet={quiet}
-          onPick={answer}
+          onPick={(label) => answer(options[labels.indexOf(label)] ?? label)}
         />
       )}
       {!card.answered && !card.tool && !card.fixedOptions && (

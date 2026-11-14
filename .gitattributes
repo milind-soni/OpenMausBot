@@ -3,7 +3,7 @@
 # compares the result to what is checked in, so if git hands Windows a CRLF
 # checkout every line differs and the drift guard fails for a reason that has
 # nothing to do with drift. Pin them to LF on every platform.
-shared/mascot-bodies.ts text eol=lf
+packages/phone-protocol/src/mascot-bodies.ts text eol=lf
 # git runs hooks through sh; a CRLF shebang line is "/bin/sh^M: bad interpreter" on every platform.
 scripts/git-hooks/* text eol=lf
 deploy/podman/*.sh text eol=lf
@@ -19,6 +19,10 @@ third_party/browser/** text eol=lf
 # on Windows fails both for a reason that has nothing to do with the evals.
 evals/live/judge/prompts/** text eol=lf
 evals/golden/**/*.json text eol=lf
+# The announcements file and its JSON Schema: scripts/check-announcements.mjs compares the committed schema with the one
+# it generates (LF), and installs read the file as main serves it. The comparison ignores line endings too; this keeps a
+# Windows checkout identical to what installs download.
+announcements/*.json text eol=lf
 # The bundled model catalog is compared byte for byte with what
 # scripts/build-model-catalog.mjs writes (LF), and its licence text with the
 # LICENSE files, in scripts/build-model-catalog.test.mjs and by --check.
@@ -39,3 +43,23 @@ shared/app-frame/app-host.html text eol=lf
 
 # Imported by a vitest test: a CRLF checkout of its first lines broke the import on Windows.
 scripts/tighten-ratchets.mjs text eol=lf
+
+# The E2E wire vectors are pinned by SHA-256 and compared byte for byte with what companion/src/e2e/gen-vectors.ts
+# writes (LF), in companion/test/e2e/vectors.test.ts; the relay and the phone apps keep pinned copies. A CRLF checkout
+# on Windows fails every one of those checks for a reason that has nothing to do with the wire.
+companion/src/e2e/vectors/** text eol=lf
+relay/test/vectors/** text eol=lf
+
+# server/cloud-home.test.ts matches the edge's Caddy configs line by line with "\n", and Caddy reads them as written;
+# a CRLF checkout on Windows fails every match for a reason that has nothing to do with the edge.
+deploy/fly/Caddyfile* text eol=lf
+deploy/fly/*.caddy text eol=lf
+
+# Imported by scripts/sync-phone-protocol.test.mjs through vitest, which fails with "Invalid or unexpected token" on a
+# file that starts with a shebang and has CRLF line endings (a Windows checkout), as with tighten-ratchets.mjs above.
+scripts/sync-phone-protocol.mjs text eol=lf
+
+# Bundled skills ship to Linux Clouds as they are, and server/skill-publish-to-netlify.test.ts imports a skill's helper
+# through vitest: Vite's transform (vitest 4.1.11) fails with "Invalid or unexpected token" on a file that starts
+# with a shebang and has CRLF line endings, which is what a Windows checkout made of it.
+skills/** text eol=lf

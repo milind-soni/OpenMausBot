@@ -4,14 +4,17 @@ import { openBot, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { mentionChoicesForQuery, mentionQueryAt } from "@/lib/mentions";
-import { mapMessageTargets, sentToSummary } from "@/lib/map-composer";
+import { mapDelivery, mapMessageTargets, sentToSummary } from "@/lib/map-composer";
+import { api } from "@/state/api";
 import { imeComposing, sendsMessage, useSendKey } from "@/lib/send-key";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { MentionMenu, type MentionChoice } from "./MentionMenu";
 import { MentionTextarea } from "./MentionTextarea";
 import { useMenuMotion } from "./MenuMotion";
+import { randomUuid } from "@/lib/random-uuid";
 
-/** Message bots from the Team map: tag bots, a team or @everyone; each tagged bot gets it as a normal message in its own chat. */
+/** Message bots from the Team map: tag bots, a team or @everyone; each bot it goes to gets it as a normal message in its own
+ * chat. @everyone goes to the Chief, which passes it on (mapDelivery). */
 export function MapComposer({ bots, teams, onTagged, onSent }: {
   bots: Bot[];
   teams: Array<{ key: string; name: string; count: number }>;
@@ -28,11 +31,13 @@ export function MapComposer({ bots, teams, onTagged, onSent }: {
   const [caret, setCaret] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
   const [highlight, setHighlight] = useState(0);
-  const [sent, setSent] = useState<{ botIds: string[]; expanded: boolean } | null>(null);
+  const [sent, setSent] = useState<{ botIds: string[]; expanded: boolean; chiefId?: string } | null>(null);
 
   const visible = useMemo(() => bots.filter((bot) => !bot.hidden), [bots]);
   const targets = useMemo(() => mapMessageTargets(text, visible, teams), [text, visible, teams]);
-  const targetKey = targets.botIds.join(",");
+  // Before sending, a line is taken for what it says; only the server knows a stop when it sees one.
+  const preview = useMemo(() => mapDelivery(targets, visible, false), [targets, visible]);
+  const targetKey = preview.botIds.join(",");
   useEffect(() => { onTagged(targetKey ? targetKey.split(",") : []); }, [targetKey, onTagged]);
   useEffect(() => () => onTagged([]), [onTagged]);
 
@@ -67,27 +72,36 @@ export function MapComposer({ bots, teams, onTagged, onSent }: {
   };
 
   const canSend = text.trim().length > 0 && targets.botIds.length > 0;
-  const send = () => {
+  const send = async () => {
     if (!canSend) return;
     const message = text.trim();
-    for (const botId of targets.botIds) dispatch({ type: "send", botId, text: message, sendId: crypto.randomUUID() });
-    onSent(targets.botIds);
-    setSent({ botIds: targets.botIds, expanded: false });
+    const typed = targets;
     setText("");
     setCaret(0);
     setDismissedAt(null);
+    // A stop must reach every bot: when the server can't say, the line goes to every bot as it always did.
+    const stop = preview.chief
+      ? await api<{ stop?: unknown }>("/api/stop-line", { method: "POST", body: JSON.stringify({ text: typed.words }) }).then((answer) => answer.stop === true, () => null)
+      : false;
+    const delivery = stop === null ? { botIds: typed.botIds } : mapDelivery(typed, visible, stop);
+    for (const botId of delivery.botIds) dispatch({ type: "send", botId, text: delivery.text || message, sendId: randomUuid() });
+    onSent(delivery.botIds);
+    setSent({ botIds: delivery.botIds, expanded: false, ...(delivery.chief ? { chiefId: delivery.chief.id } : {}) });
   };
 
-  const names = (sent?.botIds ?? []).flatMap((id) => visible.find((bot) => bot.id === id) ?? []);
+  const chief = sent?.chiefId ? visible.find((bot) => bot.id === sent.chiefId) : undefined;
+  const names = (sent?.botIds ?? []).filter((id) => id !== chief?.id).flatMap((id) => visible.find((bot) => bot.id === id) ?? []);
   const summary = sentToSummary(names.map((bot) => bot.name));
   const shownNames = sent?.expanded ? names : names.slice(0, summary.names.length);
-  const hint = text.trim() && !targets.botIds.length ? t("mapComposer.tagHint") : null;
+  const hint = text.trim() && !targets.botIds.length ? t("mapComposer.tagHint")
+    : preview.chief ? t("mapComposer.willSendViaChief", { name: preview.chief.name }) : null;
 
   return <>
     <div className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
       <div className="pointer-events-auto w-full max-w-[620px]">
-        {sent && names.length > 0 && <p role="status" className="mb-2 flex flex-wrap items-center gap-x-1 gap-y-0.5 rounded-xl bg-panel/95 px-3 py-1.5 text-[12px] text-ink-secondary shadow-sm ring-1 ring-hairline/50">
-          <span>{t("mapComposer.sentTo")}</span>
+        {sent && (chief || names.length > 0) && <p role="status" className="mb-2 flex flex-wrap items-center gap-x-1 gap-y-0.5 rounded-xl bg-panel/95 px-3 py-1.5 text-[12px] text-ink-secondary shadow-sm ring-1 ring-hairline/50">
+          {chief && <span>{t("mapComposer.sentViaChief", { name: chief.name })}{names.length > 0 ? " ·" : ""}</span>}
+          {names.length > 0 && <span>{t("mapComposer.sentTo")}</span>}
           {shownNames.map((bot, index) => <span key={bot.id}>
             <button className="font-medium text-ink underline-offset-2 hover:underline" onClick={() => openBot(dispatch, bot, showThreads)}>{bot.name}</button>
             {index < shownNames.length - 1 ? "," : ""}
@@ -115,16 +129,16 @@ export function MapComposer({ bots, teams, onTagged, onSent }: {
                 if (event.key === "Enter" || event.key === "Tab") { event.preventDefault(); pick(choices[highlight]); return; }
                 if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDismissedAt(mention?.start ?? null); return; }
               }
-              if (sendsMessage(event.nativeEvent, sendKey)) { event.preventDefault(); send(); }
+              if (sendsMessage(event.nativeEvent, sendKey)) { event.preventDefault(); void send(); }
             }} />
-          <button onClick={send} disabled={!canSend} aria-label={t("mapComposer.send")}
-            title={!canSend ? t("mapComposer.tagHint") : targets.botIds.length === 1 ? t("mapComposer.sendToOne") : t("mapComposer.sendTo", { count: targets.botIds.length })}
+          <button onClick={() => void send()} disabled={!canSend} aria-label={t("mapComposer.send")}
+            title={!canSend ? t("mapComposer.tagHint") : preview.botIds.length === 1 ? t("mapComposer.sendToOne") : t("mapComposer.sendTo", { count: preview.botIds.length })}
             className={cn("mb-0.5 flex size-8 shrink-0 items-center justify-center rounded-full text-white transition-opacity", canSend ? "bg-accent hover:brightness-110" : "bg-ink-secondary/30")}>
             <ArrowUp size={16} />
           </button>
         </div>
         {(hint || targets.botIds.length > 0) && <p className="mt-1.5 px-3 text-[11px] text-ink-secondary">
-          {hint ?? (targets.botIds.length === 1 ? t("mapComposer.willSendOne") : t("mapComposer.willSend", { count: targets.botIds.length }))}
+          {hint ?? (preview.botIds.length === 1 ? t("mapComposer.willSendOne") : t("mapComposer.willSend", { count: preview.botIds.length }))}
         </p>}
       </div>
     </div>

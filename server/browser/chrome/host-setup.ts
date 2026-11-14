@@ -4,15 +4,20 @@
 // OMB's command and environment names, and an AppArmor profile pinned to one
 // exact executable instead of a wildcard path.
 //
-// OMB never turns Chrome's sandbox off by itself. A host that cannot give it one
-// gets the setup command instead, and only an operator's explicit
-// OMB_BROWSER_SANDBOX=0 launches without it.
+// OMB never turns Chrome's sandbox off by itself on a host. A host that cannot
+// give it one gets the manual setup steps instead, and only an operator's explicit
+// OMB_BROWSER_SANDBOX=0 launches without it. The computer container image (also
+// run on a VPS) is the exception: it drops capabilities, so its Chrome runs
+// without its own sandbox and the container is the isolation boundary.
 
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
-export const SETUP_COMMAND = "sudo openmausbot browser setup";
+/** Installs the Linux libraries Chrome needs (as root, once). */
+export const LIBRARIES_COMMAND = "sudo openmausbot browser install --with-deps";
+/** There is no command for the sandbox: an administrator allows one root-owned Chrome by hand. */
+export const SANDBOX_STEPS_URL = "https://github.com/milind-soni/OpenMausBot/blob/main/docs/deploy-vps.md#ubuntu-2404-browser-sandbox";
 
 /** What Chrome prints before aborting when it cannot sandbox itself. */
 export const NO_SANDBOX_SIGNATURE = "No usable sandbox";
@@ -35,7 +40,7 @@ export function appArmorProfile(executable: string): string {
   if (!isAbsolute(executable) || /[\s*?[\]{}"'\\^]/.test(executable) || !executable.startsWith("/opt/")) {
     throw new Error(`The browser's AppArmor exemption is only for a root-owned path under /opt, not ${executable}.`);
   }
-  return `# Written by \`openmausbot browser setup\`: lets OpenMausBot's Chrome use its sandbox.
+  return `# Written for OpenMausBot: lets its Chrome use its sandbox.
 abi <abi/4.0>,
 include <tunables/global>
 
@@ -81,8 +86,8 @@ export class BrowserHostError extends Error {
 
   constructor(kind: "sandbox" | "libraries", libraries: readonly string[] = []) {
     super(kind === "sandbox"
-      ? `This host blocks the sandbox the browser runs in (AppArmor on Ubuntu 23.10+). Run \`${SETUP_COMMAND}\` on the host once to allow it, then try again.`
-      : `This host is missing libraries the browser needs (${libraries.join(", ")}). Run \`${SETUP_COMMAND}\` on the host to install them, then try again.`);
+      ? `This host blocks the sandbox the browser runs in (AppArmor on Ubuntu 23.10+). An administrator can allow it for one root-owned copy of Chrome, following ${SANDBOX_STEPS_URL}, then try again.`
+      : `This host is missing libraries the browser needs (${libraries.join(", ")}). Run \`${LIBRARIES_COMMAND}\` on the host to install them, then try again.`);
     this.name = "BrowserHostError";
     this.kind = kind;
     this.libraries = libraries;
@@ -92,6 +97,11 @@ export class BrowserHostError extends Error {
 const MISSING_LIBRARY = /^\s*(\S+) => not found$/gm;
 /** glibc's loader abort, naming the first library it could not load. */
 const LOADER_ERROR = /error while loading shared libraries: ([^:\s]+)/;
+
+/** The library glibc's loader names in a failed launch's output, if any. */
+export function loaderMissingLibrary(output: string): string | undefined {
+  return LOADER_ERROR.exec(output)?.[1];
+}
 
 function run(command: string, args: readonly string[], env: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolve) => {
@@ -106,7 +116,7 @@ function run(command: string, args: readonly string[], env: NodeJS.ProcessEnv): 
  * libraries a host provides another way (NixOS's nix-ld).
  */
 export async function missingLibraries(executable: string, env: NodeJS.ProcessEnv = process.env): Promise<string[]> {
-  const loaderError = LOADER_ERROR.exec(await run(executable, ["--version"], env))?.[1];
+  const loaderError = loaderMissingLibrary(await run(executable, ["--version"], env));
   if (loaderError === undefined) return [];
   const listed = [...(await run("ldd", [executable], env)).matchAll(MISSING_LIBRARY)].map((match) => match[1]!);
   return listed.length > 0 ? listed : [loaderError];

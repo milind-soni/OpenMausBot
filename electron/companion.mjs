@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCompanionEntry } from "./companion-entry.mjs";
+import { anyRouteOn, COMPANION_SETTINGS_VERSION, countPairedPhones, directRoutesOn, hasTailnetAddress, phoneLinkStartsAtLaunch, readCompanionSettings, readPairedDevices, setRoute } from "./companion-settings.mjs";
 import {
   cleanupCompanionOriginEndpoint,
   companionOriginHealth,
@@ -33,29 +34,47 @@ const entryPoint = (resourcesPath) =>
 
 const settingsFile = () => path.join(app.getPath("userData"), "companion-settings.json");
 
-function companionSettings() {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(settingsFile(), "utf8"));
-    return { enabled: parsed?.enabled === true, keepAwake: parsed?.keepAwake === true };
-  } catch {
-    return { enabled: false, keepAwake: false };
-  }
+let migrationFacts = () => ({});
+
+/** Main's part of the one-time update: whether this computer has its managed HTTPS address. */
+export function setCompanionMigrationFacts(read) {
+  migrationFacts = read;
 }
 
-/** Anything unreadable is "off": the flag opens a network listener, so it fails closed. */
+export function companionSettings() {
+  let raw = null;
+  try {
+    raw = JSON.parse(fs.readFileSync(settingsFile(), "utf8"));
+  } catch {
+  }
+  if (raw?.version === COMPANION_SETTINGS_VERSION) return readCompanionSettings(raw);
+  const settings = readCompanionSettings(raw, raw?.enabled === true ? { devices: readPairedDevices() ?? [], tailnetAddress: hasTailnetAddress(), ...migrationFacts() } : {});
+  if (raw) writeCompanionSettings(settings);
+  return settings;
+}
+
+/** Any way in turned on: the old single switch reads this. */
 export function companionEnabledAtRest() {
-  return companionSettings().enabled;
+  return anyRouteOn(companionSettings());
+}
+
+export function companionRouteOn(route) {
+  return companionSettings().routes[route]?.on === true;
+}
+
+/** The launch rule, with this computer's paired devices read from the companion's store. */
+export function companionStartsAtLaunch({ remoteClient, serverReady }) {
+  return phoneLinkStartsAtLaunch({ remoteClient, serverReady, settings: companionSettings(), pairedPhones: countPairedPhones() });
 }
 
 export function companionKeepAwakeAtRest() {
   return companionSettings().keepAwake;
 }
 
-function rememberCompanionSettings(patch) {
+function writeCompanionSettings(next) {
   const file = settingsFile();
   const temporary = `${file}.${process.pid}.tmp`;
   try {
-    const next = { ...companionSettings(), ...patch };
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(temporary, JSON.stringify(next, null, 2));
     fs.renameSync(temporary, file);
@@ -67,13 +86,24 @@ function rememberCompanionSettings(patch) {
   }
 }
 
-
-export function rememberCompanionEnabled(enabled) {
-  rememberCompanionSettings({ enabled });
+export function rememberCompanionKeepAwake(keepAwake) {
+  writeCompanionSettings({ ...companionSettings(), keepAwake: keepAwake === true });
 }
 
-export function rememberCompanionKeepAwake(keepAwake) {
-  rememberCompanionSettings({ keepAwake });
+/** Turns one way in on or off for good, and tells a running sidecar which direct ways in to listen on. */
+export async function rememberCompanionRoute(route, on, extra) {
+  const next = setRoute(companionSettings(), route, on, extra);
+  writeCompanionSettings(next);
+  if (proc && (route === "wifi" || route === "tailscale")) {
+    await control("PUT", "/routes", { ...directRoutesOn(next), tailnetName: next.routes.tailscale.name ?? null }).catch(() => {});
+  }
+  return next;
+}
+
+/** The person saw the update's note about a route kept on. */
+export function dismissCompanionNotice(route) {
+  const settings = companionSettings();
+  writeCompanionSettings({ ...settings, notices: settings.notices.filter((notice) => notice !== route) });
 }
 
 async function control(method, urlPath, body, { timeoutMs = 4_000 } = {}) {
@@ -124,6 +154,25 @@ const serialize = (work) => {
 };
 
 /** Resolves with the panel's state; a failed start is a message, never a thrown error. */
+let e2eHooks = { initialMessage: () => null, tokenRejected: () => {}, changed: () => {} };
+
+/** The end-to-end connection's part: its configuration goes to every new sidecar over the port, a refused relay token
+ * comes back the same way, and pairing changes may need the relay. */
+export function setCompanionE2EHooks(hooks) {
+  e2eHooks = { ...e2eHooks, ...hooks };
+}
+
+/** In-memory port only. False when no sidecar runs. */
+export function postCompanionMessage(message) {
+  if (!proc) return false;
+  try {
+    proc.postMessage(message);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function startCompanion(options) {
   return serialize(() => start(options));
 }
@@ -163,6 +212,12 @@ async function start({ resourcesPath, harnessPort, mutationToken, hostedUrl = nu
   delete childEnvironment.OMB_COMPANION_HOSTED_URL;
   delete childEnvironment.OMB_COMPANION_INTERNAL_ORIGIN;
   delete childEnvironment.OMB_PHONE_SECRET_PUBLIC_KEY;
+  delete childEnvironment.OMB_COMPANION_TAILNET_NAME;
+  childEnvironment.OMB_APP_VERSION = app.getVersion();
+  const settings = companionSettings();
+  const direct = directRoutesOn(settings);
+  childEnvironment.OMB_COMPANION_ROUTES = Object.keys(direct).filter((route) => direct[route]).join(",");
+  if (direct.tailscale && settings.routes.tailscale.name) childEnvironment.OMB_COMPANION_TAILNET_NAME = settings.routes.tailscale.name;
   if (hostedUrl) childEnvironment.OMB_COMPANION_HOSTED_URL = hostedUrl;
   childEnvironment.OMB_COMPANION_INTERNAL_ORIGIN = allocatedOrigin.socketPath;
   if (/^[A-Za-z0-9_-]{87}$/.test(String(secretPublicKey ?? ""))) {
@@ -191,10 +246,15 @@ async function start({ resourcesPath, harnessPort, mutationToken, hostedUrl = nu
     // Never expose this capability in argv, environment, logs or the renderer.
     try {
       child.postMessage({ type: "openmausbot:companion-mutation-token", token: mutationToken, controlToken });
+      const e2e = e2eHooks.initialMessage();
+      if (e2e) child.postMessage(e2e);
     } catch {
       log?.("companion authorization could not be initialized");
       child.kill();
     }
+  });
+  child.on("message", (message) => {
+    if (message?.type === "openmausbot:companion-e2e-token-rejected") e2eHooks.tokenRejected();
   });
   child.stdout?.on("data", (d) => log?.(`[companion] ${String(d).trimEnd()}`));
   child.stderr?.on("data", (d) => log?.(`[companion err] ${String(d).trimEnd()}`));
@@ -290,14 +350,24 @@ export function setCompanionHostedUrl(endpoint) {
   });
 }
 
+/** Paired devices as the sidecar would list them, read from its store while it sleeps. */
+function devicesAtRest() {
+  return (readPairedDevices() ?? []).map(({ tokenHash: _secret, ...device }) => device);
+}
+
+function restState() {
+  const settings = companionSettings();
+  return { keepAwake: settings.keepAwake, routes: settings.routes, notices: settings.notices };
+}
+
 export async function companionState() {
-  const keepAwake = companionKeepAwakeAtRest();
+  const rest = restState();
   if (!proc) {
     const state = {
       enabled: false,
-      keepAwake,
+      ...rest,
       port: COMPANION_PORT,
-      devices: [],
+      devices: devicesAtRest(),
       connectedDeviceIds: [],
       pairing: null,
     };
@@ -306,35 +376,16 @@ export async function companionState() {
   }
   try {
     const state = await control("GET", "/state");
-    return { enabled: true, keepAwake, ...state };
+    return { enabled: true, ...rest, ...state };
   } catch {
     return {
       enabled: true,
-      keepAwake,
+      ...rest,
       port: COMPANION_PORT,
       devices: [],
       connectedDeviceIds: [],
       pairing: null,
       error: "the companion is not responding",
-    };
-  }
-}
-
-export async function companionRefreshTailscale() {
-  if (!proc) return companionState();
-  try {
-    // The sidecar's Tailscale CLI hunt is bounded to 5 s; allow more here.
-    const state = await control("POST", "/tailscale/refresh", undefined, { timeoutMs: 6_000 });
-    return {
-      enabled: true,
-      keepAwake: companionKeepAwakeAtRest(),
-      ...state,
-    };
-  } catch {
-    const state = await companionState();
-    return {
-      ...state,
-      error: state.error ?? "Tailscale could not be checked.",
     };
   }
 }
@@ -352,9 +403,10 @@ export async function companionPairing(open, expectedToken) {
     : "/pairing";
   try {
     const state = await control(open ? "POST" : "DELETE", path);
+    e2eHooks.changed();
     return {
       enabled: true,
-      keepAwake: companionKeepAwakeAtRest(),
+      ...restState(),
       ...state,
     };
   } catch {
@@ -371,6 +423,26 @@ export async function companionRevoke(deviceId) {
   // the id came from the renderer, so it does not get to shape a path
   if (!/^[\w-]{1,64}$/.test(String(deviceId ?? ""))) return companionState();
   await control("DELETE", `/devices/${deviceId}`).catch(() => {});
+  e2eHooks.changed();
+  return companionState();
+}
+
+/** A fresh code while the pairing screen stays open; the previous one keeps its last seconds. */
+export async function companionPairingRenew() {
+  if (!proc) return companionState();
+  try {
+    return { enabled: true, ...restState(), ...(await control("POST", "/pairing/renew")) };
+  } catch {
+    return companionPairing(true);
+  }
+}
+
+/** "any" or "local" (Wi-Fi and Tailscale only). */
+export async function companionDeviceRoutes(deviceId, routes) {
+  if (!proc) return companionState();
+  if (!/^[\w-]{1,64}$/.test(String(deviceId ?? "")) || (routes !== "any" && routes !== "local")) return companionState();
+  await control("PUT", `/devices/${deviceId}/routes`, { routes }).catch(() => {});
+  e2eHooks.changed();
   return companionState();
 }
 

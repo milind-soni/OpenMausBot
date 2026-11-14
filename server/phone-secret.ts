@@ -1,6 +1,6 @@
 import { createECDH, createHash, type webcrypto } from "node:crypto";
 
-import { desktopCredentialSlot, isCredentialTargetId } from "../shared/credential-request.ts";
+import { isCredentialTargetId, isProviderCredentialTarget } from "../shared/credential-request.ts";
 import type { CipherSuite } from "@hpke/core";
 
 export const PHONE_SECRET_PROTOCOL_VERSION = 1 as const;
@@ -139,7 +139,7 @@ export function assertPhoneSecretRequestMatches(
     throw new PhoneSecretError("Paste the 1Password token in OpenMausBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
   }
   // An AI provider key lives in the server's settings, which only the computer's own app writes.
-  if (isCredentialTargetId(expected.target) && !desktopCredentialSlot(expected.target)) {
+  if (isCredentialTargetId(expected.target) && isProviderCredentialTarget(expected.target)) {
     throw new PhoneSecretError("Paste this key in OpenMausBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
   }
   if (
@@ -314,21 +314,31 @@ function decodeSaveResult(raw: unknown): { requestId: string; ok: boolean; error
 /** The HTTP route hands this ciphertext only; plaintext exists only after HPKE opens it on the desktop and never reaches HTTP, chat, SQLite, SSE or logs. */
 export class PhoneSecretBridge {
   private identity: Promise<PhoneSecretIdentity> | null = null;
+  private imported = false;
   private readonly pending = new Map<string, PendingSave>();
   private active = 0;
   private readonly send: SendPrivateMessage;
   private readonly timeoutMs: number;
   private readonly maximumPending: number;
+  private readonly desktopManaged: boolean;
 
   constructor(
     send: SendPrivateMessage,
     // Outlives every provider's validation deadline but stays below the HTTPS proxy and phone deadlines (Cloudflare's boundary).
     timeoutMs = 90_000,
     maximumPending = 8,
+    /** False on a self-hosted server: no desktop app ever hands it a key, so reopening the app cannot help. */
+    desktopManaged = true,
   ) {
     this.send = send;
+    this.desktopManaged = desktopManaged;
     this.timeoutMs = timeoutMs;
     this.maximumPending = maximumPending;
+  }
+
+  /** Whether a phone can seal a secret for this computer: only after the desktop app has handed over its key. */
+  get ready(): boolean {
+    return this.imported;
   }
 
   receive(raw: unknown): boolean {
@@ -336,8 +346,11 @@ export class PhoneSecretBridge {
     if (!message || typeof message !== "object" || Array.isArray(message)) return false;
     const record = message as Record<string, unknown>;
     if (record.type === "openmausbot:phone-secret-key") {
-      this.identity = importIdentity(record);
-      void this.identity.catch(() => {});
+      const identity = importIdentity(record);
+      this.identity = identity;
+      this.imported = false;
+      // Ready only once this key imports; a failed or superseded import never counts.
+      identity.then(() => { if (this.identity === identity) this.imported = true; }, () => {});
       return true;
     }
     const result = decodeSaveResult(record);
@@ -375,7 +388,9 @@ export class PhoneSecretBridge {
   private async openWithinLimit(context: PhoneSecretContext): Promise<string> {
     if (!this.identity) {
       throw new PhoneSecretError(
-        "Secure phone entry is not ready on this computer. Reopen OpenMausBot and try again.",
+        this.desktopManaged
+          ? "Secure phone entry is not ready on this computer. Reopen OpenMausBot and try again."
+          : "This server cannot take secrets from a phone. Enter it on the web or on your computer instead.",
         503,
       );
     }

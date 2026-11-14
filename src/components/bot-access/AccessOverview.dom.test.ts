@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // Settings → Bot access in a real DOM: the team's bots, each row opening the Share dialog; the team's people, each with
-// their bots at quiet level menus; and a viewer's "Ask Ada to chat".
+// the bots they were added to and a Remove; and a viewer's "Ask Ada to chat".
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -83,7 +83,7 @@ it("lists each team bot once with its owner and a plain summary, leaving out eac
   expect(botRows().map((row) => row.dataset.accessRow)).toEqual(["helpdesk", "payroll"]);
   expect(document.querySelector('[data-access-row="payroll"]')!.textContent).toContain("Owner: Cara");
   expect(summaryOf("payroll")).toBe("Only people added");
-  expect(summaryOf("helpdesk")).toBe("Everyone can chat");
+  expect(summaryOf("helpdesk")).toBe("Everyone can use it");
   expect(document.querySelector("[data-access-overview] table, [data-access-overview] select")).toBeNull();
 });
 
@@ -91,7 +91,7 @@ it("says a bot nobody owns has no owner yet", async () => {
   server.bots = [bot({ id: "orphan", name: "Orphan", createdBy: undefined, access: { everyone: "view", people: {} } })];
   await overview();
   expect(document.querySelector('[data-access-row="orphan"]')!.textContent).toContain("No owner yet");
-  expect(summaryOf("orphan")).toBe("Everyone can view");
+  expect(summaryOf("orphan"), "one column: a stored level reads the same").toBe("Everyone can use it");
 });
 
 it("stacks up to four faces of those with their own access, then +N, naming them all", async () => {
@@ -110,10 +110,10 @@ it("opens the bot's Share dialog from its row, and a change there applies at onc
   document.querySelector<HTMLElement>('[data-access-row="payroll"]')!.click();
   await settle();
   expect(document.querySelector("[data-share-bot]")!.getAttribute("data-share-bot")).toBe("payroll");
-  await choose("What Bob can do", "edit");
-  expect(server.calls.at(-1)).toEqual({ path: "/api/bots/payroll/access", body: { everyone: "none", people: { [BOB.email]: "edit" } } });
+  await choose("Bob's access", "remove");
+  expect(server.calls.at(-1)).toEqual({ path: "/api/bots/payroll/access", body: { everyone: "none", people: {} } });
   const toast = document.querySelector<HTMLElement>("[data-access-toast]")!;
-  expect(toast.textContent).toContain("Bob · Can edit");
+  expect(toast.textContent).toContain("Removed Bob");
   toast.querySelector("button")!.click();
   await settle();
   expect(server.calls.at(-1)).toEqual({ path: "/api/bots/payroll/access", body: payroll.access });
@@ -143,37 +143,32 @@ it("lists every User by person with how many bots they have, and the search foll
   expect(document.querySelector("[data-access-overview]")!.textContent).toContain("Nobody in the team matches");
 });
 
-it("shows a person's bots with the same level menus and Remove, Undo after each, and goes back to their row", async () => {
+it("shows a person's bots with a Remove on each they were added to, Undo after it, and goes back to their row", async () => {
   await overview();
   await byPerson();
   await openPerson(BOB.email);
   expect([...document.querySelectorAll<HTMLElement>("[data-access-person-bot]")].map((row) => row.dataset.accessPersonBot)).toEqual(["helpdesk", "payroll"]);
-  expect(document.querySelector('button[aria-label="What Bob can do with Payroll"]')!.textContent).toBe("Can view");
-  await choose("What Bob can do with Payroll", "edit");
-  expect(server.calls.at(-1)).toEqual({ path: "/api/bots/payroll/access", body: { everyone: "none", people: { [BOB.email]: "edit" } } });
+  expect(document.querySelector('[data-access-person-bot="payroll"]')!.textContent).not.toContain("Can view");
+  document.querySelector<HTMLElement>('button[aria-label="Remove Bob from Payroll"]')!.click();
+  await settle();
+  expect(server.calls.at(-1)).toEqual({ path: "/api/bots/payroll/access", body: { everyone: "none", people: {} } });
   const toast = document.querySelector<HTMLElement>("[data-access-toast]")!;
-  expect(toast.textContent).toContain("Payroll: Bob · Can edit");
+  expect(toast.textContent).toContain("Payroll: removed Bob");
   toast.querySelector("button")!.click();
   await settle();
   expect(server.calls.at(-1)!.body).toEqual(payroll.access);
-  await choose("What Bob can do with Payroll", "remove");
-  expect(server.calls.at(-1)!.body).toEqual({ everyone: "none", people: {} });
-  expect(document.querySelector("[data-access-toast]")!.textContent).toContain("Payroll: removed Bob");
   document.querySelector<HTMLElement>("[data-access-back]")!.click();
   await settle();
   expect(document.activeElement).toBe(document.querySelector(`[data-access-person="${BOB.email}"]`));
 });
 
-it("offers no Remove for access that comes from everyone, nothing below it, and says Owner on the bots they own", async () => {
+it("offers no Remove for access that comes from everyone, and marks the bots they own", async () => {
   await overview();
   await byPerson();
   await openPerson(BOB.email);
-  expect(document.querySelector('[data-access-person-bot="helpdesk"]')!.textContent).toContain("Everyone in Acme");
-  document.querySelector<HTMLElement>('button[aria-label="What Bob can do with Helpdesk"]')!.click();
-  await settle();
-  const keys = [...document.querySelectorAll<HTMLButtonElement>('[role="menu"] [data-menu-key]')];
-  expect(keys.map((row) => row.dataset.menuKey)).toEqual(["view", "chat", "edit"]);
-  expect(keys.filter((row) => row.disabled).map((row) => row.dataset.menuKey)).toEqual(["view"]);
+  const shared = document.querySelector('[data-access-person-bot="helpdesk"]')!;
+  expect(shared.textContent).toContain("Everyone in Acme can use it");
+  expect(shared.querySelector("button")).toBeNull();
   document.querySelector<HTMLElement>("[data-access-back]")!.click();
   await settle();
   await openPerson(CARA.email);

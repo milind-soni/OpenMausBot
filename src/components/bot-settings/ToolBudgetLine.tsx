@@ -4,7 +4,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import { api } from "@/state/store";
 import type { ToolBudget } from "../../../shared/tool-budget";
 
-export function ToolBudgetView({ budget }: { budget: ToolBudget }) {
+export function ToolBudgetView({ budget }: { budget: ToolBudget & { limit: number } }) {
   const searched = budget.servers.filter((server) => !server.direct).map((server) => server.name);
   return (
     <div data-tool-budget className="mt-3 text-[12px] text-ink-secondary">
@@ -29,5 +29,5 @@ export function ToolBudgetLine({ botId, busy }: { botId: string; busy: boolean }
       .catch(() => { if (current) setBudget(null); });
     return () => { current = false; };
   }, [botId, busy]);
-  return budget ? <ToolBudgetView budget={budget} /> : null;
+  return budget?.limit != null ? <ToolBudgetView budget={{ ...budget, limit: budget.limit }} /> : null;
 }

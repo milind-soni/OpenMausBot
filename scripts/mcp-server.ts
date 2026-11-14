@@ -2,15 +2,17 @@
 // Model Context Protocol (MCP) server for OpenMausBot over JSON-RPC 2.0 stdio,
 // for external agents (Hermes, Claude Desktop, Cursor, etc.).
 import readline from "node:readline";
+import { allowedServerOrigin, EXAMPLE_ADDRESS } from "../electron/server-address.mjs";
 import { isRecord, projectMessage } from "./mcp-message-projection.ts";
 
+/** A server's base URL: https anywhere, http only on loopback or a private network (LAN, Tailscale). */
 export function validateBaseUrl(url: string): string {
-  const trimmed = url.replace(/\/+$/, "");
+  const trimmed = url.trim().replace(/\/+$/, "");
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
   } catch {
-    throw new Error(`Invalid OpenMausBot URL: '${url}'`);
+    throw new Error(`Invalid OpenMausBot URL: '${url}'. Start it with http:// or https://, like ${EXAMPLE_ADDRESS}`);
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("OpenMausBot URL must use http:// or https://");
@@ -21,12 +23,8 @@ export function validateBaseUrl(url: string): string {
   if ((parsed.pathname !== "/" && parsed.pathname !== "") || parsed.search || parsed.hash) {
     throw new Error("OpenMausBot URL must be an origin without a path, query, or fragment");
   }
-  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  const isLoopback = hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
-  if (parsed.protocol === "http:" && !isLoopback && process.env.ALLOW_INSECURE_HTTP !== "true") {
-    throw new Error(
-      `Insecure cleartext HTTP origin '${parsed.origin}' is rejected. Use https:// or set ALLOW_INSECURE_HTTP=true.`,
-    );
+  if (!allowedServerOrigin(parsed.origin)) {
+    throw new Error(`${parsed.origin} is on the open internet and plain http isn't encrypted. Use the server's https:// address, or put HTTPS in front (cloudflared, Caddy or Tailscale).`);
   }
   return parsed.origin;
 }
@@ -76,10 +74,9 @@ async function fetchJson(url: string, options: RequestInit = {}): Promise<any> {
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     if (response.status === 403 && !new Headers(headers).has("Authorization")) {
-      throw new OpenMausBotApiError(403,
-        "OpenMausBot refused this write because the installed desktop app requires a paired session token. " +
-        "Set OPENMAUSBOT_TOKEN as described in docs/mcp-server.md.",
-      );
+      throw new OpenMausBotApiError(403, /on this shared server/.test(text) // the server says which kind refused it
+        ? "This is a shared server, so a program on it without a paired session token may only check its health. Set OPENMAUSBOT_TOKEN to a paired session (openmausbot connect), as described in docs/mcp-server.md."
+        : "OpenMausBot refused this request because the installed desktop app requires a paired session token. Set OPENMAUSBOT_TOKEN as described in docs/mcp-server.md.");
     }
     throw new OpenMausBotApiError(response.status, `OpenMausBot API error (${response.status}): ${text || response.statusText}`);
   }
@@ -275,7 +272,7 @@ export const TOOLS: McpToolDefinition[] = [
         channel_id: { type: "string", description: "The ID of the channel." },
         task_id: { type: "string", description: "Optional expected active task/thread ID." },
         text: { type: "string", description: "The message content to post." },
-        send_id: SEND_ID_SCHEMA,
+        send_id: SEND_ID_SCHEMA, mentions: { type: "array", items: { type: "string" }, maxItems: 20, description: "When an @name in text is shared by several bots in the channel: the ids of the ones you mean." },
       },
       required: ["channel_id", "text"],
       additionalProperties: false,
@@ -938,7 +935,7 @@ export async function handleToolCall(
       }
       const receipt = await fetcher(`/api/groups/${encodeURIComponent(channelId)}/messages`, {
         method: "POST",
-        body: JSON.stringify({ text, threadId: taskId, ...sendIdArg(args) }),
+        body: JSON.stringify({ text, threadId: taskId, ...sendIdArg(args), ...(args.mentions !== undefined ? { mentions: stringArrayArg(args, "mentions") } : {}) }),
       });
       return { success: true, channelId, taskId, ...sendReceipt(receipt) };
     }

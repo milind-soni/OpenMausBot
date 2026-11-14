@@ -33,6 +33,18 @@ const family = (address: string) => (isIP(address) === 6 ? "ipv6" : "ipv4");
 const FAKE_IP = new BlockList();
 FAKE_IP.addSubnet("198.18.0.0", 15, "ipv4");
 
+const SOCKS5_PROXY = /^socks5:\/\/(?:\[([0-9a-f:]+)\]|([A-Za-z0-9.-]+)):([0-9]{1,5})$/i;
+export interface Socks5Proxy { host: string; port: number }
+export function parseSocks5Proxy(value: string | undefined): Socks5Proxy | null {
+  if (!value) return null;
+  const match = SOCKS5_PROXY.exec(value.trim());
+  const port = Number(match?.[3]);
+  const host = match?.[1] ?? match?.[2];
+  if (!match || !host || !Number.isInteger(port) || port < 1 || port > 65_535) return null;
+  if (match[1] ? isIP(host) !== 6 : host.length > 253 || host.split(".").some((label) => label.length > 63 || !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/u.test(label))) return null;
+  return { host, port };
+}
+
 /** An address literal, or a name RFC 6761 and Chrome resolve to loopback themselves. */
 export function namesThisMachine(host: string): boolean {
   return isIP(host) !== 0 || /^(?:[^.]+\.)*localhost\.?$/i.test(host);
@@ -40,13 +52,19 @@ export function namesThisMachine(host: string): boolean {
 
 /** `browserEngine.egress` in config.json. */
 export const browserEgressConfigSchema = z.object({
+  /** Owner-configured unauthenticated SOCKS5 upstream for public destinations only. */
+  proxy: z.string().trim().max(512).refine((value) => value === "" || parseSocks5Proxy(value) !== null, {
+    message: "must be an unauthenticated socks5://host:port URL",
+  }).optional(),
   /** Self-hosted servers only: local-network or this-computer destinations bots' browsers may reach, as
    * `10.0.0.5`, `192.168.1.0/24`, `10.0.0.5:8080`, `fd12::/48` or `[fd12::1]:443`. OpenMausBot's own ports,
    * cloud metadata and link-local addresses stay closed. MausBot Cloud ignores it. */
   allow: z.array(z.string().trim().max(64).refine((entry) => parseAllowEntry(entry) !== null, {
     message: "must be an IP address or CIDR range, with an optional :port",
   })).max(64).optional(),
-  /** Desktop only: false keeps bots' browsers off the local network (the default lets them reach it). */
+  /** Desktop: false keeps bots' browsers off the local network (the default lets them reach it). Self-hosted
+   * servers: true lets them open this server's own sites and its local network (off by default); OpenMausBot's
+   * own ports, cloud metadata and link-local addresses stay closed. MausBot Cloud ignores it. */
   localNetwork: z.boolean().optional(),
 });
 export type BrowserEgressConfig = z.output<typeof browserEgressConfigSchema>;
@@ -75,6 +93,9 @@ export function allowList(entries: readonly string[] | undefined): (address: str
     if (!parsed) return [];
     const list = new BlockList();
     list.addSubnet(parsed.network, parsed.prefix, family(parsed.network));
+    // `localhost` resolves to both 127.0.0.1 and ::1, so an entry for one loopback address and port also covers the other.
+    if (parsed.port !== null && parsed.prefix === 32 && list.check("127.0.0.1", "ipv4")) list.addAddress("::1", "ipv6");
+    else if (parsed.port !== null && parsed.prefix === 128 && list.check("::1", "ipv6")) list.addAddress("127.0.0.1", "ipv4");
     return [{ list, port: parsed.port }];
   });
   return (raw, port) => {
@@ -89,7 +110,7 @@ export interface EgressRules {
   ownPort(port: number): boolean;
   /** Whether every listener on this loopback port belongs to a bot's processes. */
   botPort(port: number): Promise<boolean>;
-  /** Desktop: the person's local network. */
+  /** Desktop: the person's local network. Self-hosted servers: this server's own sites and its local network. */
   localNetwork: boolean;
   /** Self-hosted servers: `browserEngine.egress.allow`. */
   allowed(address: string, port: number): boolean;
@@ -117,8 +138,12 @@ export async function refusalFor(
     if (kind === "public") continue;
     if (kind === "metadata" || kind === "link-local" || kind === "reserved") return kind;
     if (kind === "private") {
-      const open = rules.host === "desktop" ? rules.localNetwork : rules.host === "server" && rules.allowed(address, port);
-      if (open) continue;
+      if (rules.host === "desktop" ? rules.localNetwork : rules.host === "server" && rules.allowed(address, port)) continue;
+      // The owner's switch opens the local network, but never OpenMausBot's own ports through it (a Docker host's gateway).
+      if (rules.host === "server" && rules.localNetwork) {
+        if (rules.ownPort(port)) return "omb";
+        continue;
+      }
       return "local-network";
     }
     if (rules.ownPort(port)) return "omb";
@@ -127,6 +152,9 @@ export async function refusalFor(
       if (namesThisMachine(host)) continue;
       return "rebinding";
     }
+    // The owner's switch opens this server's own sites, but a public name pointing at loopback (DNS rebinding) stays
+    // shut: loopback-only services are reached by localhost or an address.
+    if (rules.host === "server" && rules.localNetwork && (kind === "this-machine" || namesThisMachine(host))) continue;
     if (rules.host === "server" && rules.allowed(address, port)) continue;
     if (await rules.botPort(port)) continue;
     return "this-computer";

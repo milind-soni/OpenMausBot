@@ -9,7 +9,7 @@ import { botEngineSessions } from "../../procs.ts";
 import { openGate, resolveTarget, type EgressGate, type GateTarget, type GateUpstream, type ResolvedAddress } from "./gate.ts";
 import { opensFromHome } from "./home-sites.ts";
 import { ListenerOwnership } from "./ownership.ts";
-import { allowList, REFUSAL_TEXT, refusalFor, type BrowserEgressConfig, type EgressHost, type EgressRules, type Refusal } from "./policy.ts";
+import { allowList, parseSocks5Proxy, REFUSAL_TEXT, refusalFor, type BrowserEgressConfig, type EgressHost, type EgressRules, type Refusal } from "./policy.ts";
 import { opensReddit, REDDIT_REFUSAL, refusesReddit } from "./reddit.ts";
 
 /** The server (and its fallbacks), webhooks, the desktop client relay, the companion, its control page and its
@@ -142,7 +142,7 @@ export class BrowserEgress {
       host: setup.host,
       ownPort: (port) => setup.listeners.has(port),
       botPort: (port) => setup.ownership.botOwned(port),
-      localNetwork: config?.localNetwork !== false,
+      localNetwork: setup.host === "server" ? config?.localNetwork === true : config?.localNetwork !== false,
       allowed: allowList(setup.host === "server" ? config?.allow : undefined),
     };
   }
@@ -169,7 +169,8 @@ export class BrowserEgress {
         decide: (target, addresses) => refusalFor(target, addresses, this.rules()),
         onRefusal: (target, reason) => this.note(session, target, reason as Refusal),
         resolve: this.setup.resolve,
-        upstream: (target) => opensFromHome(target.host) ? this.through(session) : null,
+        upstreamProxy: () => parseSocks5Proxy(this.setup?.config()?.proxy),
+        upstream: (target) => !this.setup?.config()?.proxy && opensFromHome(target.host) ? this.through(session) : null,
       });
       this.gates.set(session, gate);
       gate.then((opened) => this.setup?.listeners.add(opened.port), () => this.gates.delete(session));

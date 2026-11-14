@@ -1,24 +1,6 @@
 import { accessFromVisibility, type BotAccess, type BotAccessLevel, type GrantedLevel } from "../../../shared/bot-access";
 import { api, type Bot } from "@/state/store";
-import { t } from "@/lib/i18n";
 import type { TeamPeople, TeamPerson } from "@/state/team-people";
-
-const LEVEL_KEYS = {
-  none: "botAccess.level.none",
-  view: "botAccess.level.view",
-  chat: "botAccess.level.chat",
-  edit: "botAccess.level.edit",
-} as const;
-
-export const levelLabel = (level: BotAccessLevel): string => t(LEVEL_KEYS[level]);
-
-const HINT_KEYS = {
-  view: "botAccess.levelHint.view",
-  chat: "botAccess.levelHint.chat",
-  edit: "botAccess.levelHint.edit",
-} as const;
-
-export const levelHint = (level: GrantedLevel): string => t(HINT_KEYS[level]);
 
 /** The sharing this copy of the bot carries; an admin's copy from an older server carries only its visibility. */
 export function accessOfBot(bot: Pick<Bot, "access" | "visibility">): BotAccess {

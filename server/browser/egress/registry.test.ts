@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { createServer, type AddressInfo } from "node:net";
+import { createServer, isIP, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -72,7 +72,10 @@ describe("one gate per browser session", () => {
   const ownership = { botOwned: async () => false } as unknown as ListenerOwnership;
   const egress = (config = {}) => {
     const value = new BrowserEgress();
-    value.configure({ host: "server", config: () => config, listeners: new OwnListeners("server", { env: {}, ...noScans }), ownership });
+    value.configure({ host: "server", config: () => config, listeners: new OwnListeners("server", { env: {}, ...noScans }), ownership, resolve: async (host) => {
+      const family = isIP(host);
+      return family ? [{ address: host, family }] : [];
+    } });
     return value;
   };
 
@@ -93,14 +96,15 @@ describe("one gate per browser session", () => {
     }
   });
 
-  it("applies the admin allow-list only on a self-hosted server", () => {
+  it("applies the admin allow-list and the owner's local-sites switch only on a self-hosted server", () => {
     const allow = { allow: ["10.0.0.0/8"] };
     expect(egress(allow).rules().allowed("10.1.2.3", 80)).toBe(true);
     const cloud = new BrowserEgress();
     cloud.configure({ host: "cloud", config: () => allow, listeners: new OwnListeners("cloud", { env: {}, ...noScans }), ownership });
     expect(cloud.rules().allowed("10.1.2.3", 80)).toBe(false);
-    expect(egress({ localNetwork: false }).rules().localNetwork).toBe(false);
-    expect(egress().rules().localNetwork).toBe(true);
+    // On a server the switch is off unless the owner turned it on.
+    expect(egress().rules().localNetwork).toBe(false);
+    expect(egress({ localNetwork: true }).rules().localNetwork).toBe(true);
   });
 
   it("turns a session's refusals into one page-health line, once", async () => {

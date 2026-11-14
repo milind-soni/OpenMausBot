@@ -2,7 +2,8 @@ import { Children, createElement, isValidElement, type ReactElement, type ReactN
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigStatus } from "@/state/store";
-import { DecisionModelSettings, deciderFailureText } from "./DecisionModelSettings";
+import { setLocale } from "@/lib/i18n";
+import { DecisionModelSettings, deciderFailureText, helpersStatusLine } from "./DecisionModelSettings";
 import { Switch } from "./SettingsPrimitives";
 
 const fixture = vi.hoisted(() => ({
@@ -79,13 +80,13 @@ beforeEach(() => {
   vi.stubGlobal("window", {});
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { setLocale("en"); vi.unstubAllGlobals(); });
 
 describe("DecisionModelSettings", () => {
   it("explains itself, then the switch, the key, and what it decides", () => {
     const view = render();
-    const order = ["Small, fast models that sort and read things for your bots", "Decisions: not set up · Extraction: not set up", "Cloudflare Workers AI (free tier)",
-      "Use fast decisions and extraction", "Jev API key", "What it decides", "Who answers in rooms"]
+    const order = ["Small, fast models that sort and read things for your bots", "Use fast decisions and extraction", "Decisions: not set up · Extraction: not set up",
+      "Cloudflare Workers AI (free tier)", "Jev API key", "What it decides", "Who answers in rooms"]
       .map((text) => view.html.indexOf(text));
     expect(order.every((at) => at >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -96,10 +97,15 @@ describe("DecisionModelSettings", () => {
     expect(view.html).toContain("Save a key below to turn this on.");
   });
 
-  it("offers both providers, with Jev selected for an existing install and no model picker", () => {
+  it("uses an invariable status for missing decisions and extraction in pt-BR", () => {
+    setLocale("pt-br");
+    expect(helpersStatusLine(null)).toBe("Decisões: sem configuração · Extração: sem configuração");
+  });
+
+  it("offers every provider, with Jev selected for an existing install and no model picker", () => {
     const view = render();
     expect(view.provider!.props.value).toBe("jev");
-    expect(optionsOf(view.provider!)).toEqual(["jev", "openrouter"]);
+    expect(optionsOf(view.provider!)).toEqual(["jev", "openrouter", "custom"]);
     expect(view.html).toContain("TypeSafe Jev");
     expect(view.model).toBeUndefined();
     expect(fixture.effects).toHaveLength(1);
@@ -107,10 +113,26 @@ describe("DecisionModelSettings", () => {
     expect(fixture.api).not.toHaveBeenCalled();
   });
 
-  it("lists the coming-soon jobs with no switch", () => {
+  it("asks a custom endpoint for its base URL, model and protocol, and saves its key in its own slot", async () => {
+    fixture.config = status({ provider: "custom", model: "m-1", api: "decisions", baseUrl: "https://gw.example.com/v1", configured: false, enabled: false, jobs: { roomRouting: true } });
+    let view = render();
+    expect(view.html).toContain('value="https://gw.example.com/v1"');
+    expect(view.html).toContain('value="m-1"');
+    expect(view.html).toContain("Endpoint API key");
+    expect(view.html).not.toContain("typesafe.ai");
+    fixture.api.mockResolvedValue(fixture.config);
+    type(view.input, "gw-key");
+    view = render();
+    click(view.save);
+    await flush();
+    expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { customKey: "gw-key" } }) });
+    expect(deciderFailureText({ reason: "malformed" }, false, "custom")).toContain("Check the protocol and model ID.");
+    expect(deciderFailureText({ reason: "http_error", status: 500 }, false, "custom")).toBe("Your endpoint sent back an error (500).");
+  });
+
+  it("lists only the jobs that work: no coming-soon rows", () => {
     const view = render();
-    for (const label of ["Browser clicks", "Tool selection", "Where work runs"]) expect(view.html).toContain(label);
-    expect(view.html.match(/Coming soon/g)).toHaveLength(3);
+    for (const label of ["Browser clicks", "Tool selection", "Where work runs", "Coming soon"]) expect(view.html).not.toContain(label);
     expect(view.switches).toHaveLength(2);
   });
 

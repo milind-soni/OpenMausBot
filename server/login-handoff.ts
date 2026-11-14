@@ -1,17 +1,17 @@
-// "Also use on My Cloud": the desktop app's main process asks this server for one login's secrets, to send them to the
-// person's own Cloud. The ask and the answer travel only over Electron's private utility-process port, which no page,
+// "Also use on My Cloud": the desktop app's main process asks this server for one login's secrets, or a saved secret, to
+// send to the person's own Cloud. The ask and the answer travel only over Electron's private utility-process port, which no page,
 // bot, browser or other local process can reach (a plain Node server has no such port, so this never answers there).
 // Nothing here is an HTTP answer, a log line or a chat message, and nothing is kept.
 import type { LoginBots } from "../shared/logins.ts";
 import { loginFingerprints, VERIFY_NONCE } from "./cloud-send-verify.ts";
-import type { LoginStore } from "./login-store.ts";
+import type { VaultStore } from "./vault-store.ts";
 import { ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED } from "./onepassword.ts";
 import type { TotpKey } from "./totp.ts";
 
 export const LOGIN_HANDOFF_REQUEST = "openmausbot:login-handoff";
 export const LOGIN_HANDOFF_RESULT = "openmausbot:login-handoff-result";
 
-export type LoginHandoffWhat = { kind: "1password" } | { kind: "login"; id: string } | { kind: "verify-secrets"; nonce: string };
+export type LoginHandoffWhat = { kind: "1password" } | { kind: "login"; id: string } | { kind: "secret"; id: string } | { kind: "verify-secrets"; nonce: string };
 /** For a move to the person's own Cloud: one connection's secrets, a code for that Cloud to act as this computer's
  * connected-apps account, or letting go of a sign-in that moved there (cloud-connections.ts). */
 export type ConnectionHandoffWhat =
@@ -36,16 +36,27 @@ export interface HandedLogin {
   bots: LoginBots;
 }
 
+/** A saved secret as the Cloud's own POST /api/vault/secrets takes it, under this computer's id. */
+export interface HandedSecret {
+  id: string;
+  name: string;
+  value: string;
+  bots: LoginBots;
+  source: "card" | "settings";
+  refOnly?: true;
+}
+
 export type LoginHandoffAnswer =
-  | { ok: true; onePassword: { token: string; grants: Record<string, LoginBots> } }
+  | { ok: true; onePassword: { token: string; grants: Record<string, LoginBots>; itemGrants: Record<string, LoginBots> } }
   | { ok: true; login: HandedLogin }
+  | { ok: true; secret: HandedSecret }
   | { ok: true; secrets: Record<string, string> }
   | { ok: false; error: string };
 export type LoginHandoffResult = { type: typeof LOGIN_HANDOFF_RESULT; requestId: string } & (LoginHandoffAnswer | ConnectionHandoffAnswer);
 
 const REQUEST_ID = /^[\w-]{8,64}$/u;
 const LOGIN_ID = /^[\w-]{1,128}$/u;
-const CONNECTION_ID = /^(?:mcp:[a-z][a-z0-9_-]{0,31}|key:\w{1,40}|composio|highlevel)$/u;
+const CONNECTION_ID = /^(?:mcp:[a-z][a-z0-9_-]{0,31}|key:\w{1,40}|composio|email)$/u;
 const INSTALLATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const DIGEST = /^[0-9a-f]{64}$/u;
 
@@ -64,6 +75,7 @@ function parse(raw: unknown): { requestId: string; what: Ask } | null {
   const what = message.what as Record<string, unknown> | null;
   if (what?.kind === "1password") return { requestId: message.requestId, what: { kind: "1password" } };
   if (what?.kind === "login" && typeof what.id === "string" && LOGIN_ID.test(what.id)) return { requestId: message.requestId, what: { kind: "login", id: what.id } };
+  if (what?.kind === "secret" && typeof what.id === "string" && LOGIN_ID.test(what.id)) return { requestId: message.requestId, what: { kind: "secret", id: what.id } };
   if (what?.kind === "connection" && typeof what.id === "string" && CONNECTION_ID.test(what.id)) return { requestId: message.requestId, what: { kind: "connection", id: what.id } };
   if (what?.kind === "composio-share" && typeof what.for === "string" && INSTALLATION_ID.test(what.for)) return { requestId: message.requestId, what: { kind: "composio-share", for: what.for } };
   if (what?.kind === "connection-release" && typeof what.id === "string" && CONNECTION_ID.test(what.id) && typeof what.digest === "string" && DIGEST.test(what.digest)) {
@@ -73,7 +85,7 @@ function parse(raw: unknown): { requestId: string; what: Ask } | null {
   return null;
 }
 
-type HandoffStore = Pick<LoginStore, "changes" | "get" | "onePasswordToken" | "onePasswordGrants">;
+type HandoffStore = Pick<VaultStore, "changes" | "get" | "secret" | "listSecrets" | "onePasswordToken" | "onePasswordGrants" | "onePasswordItemGrants">;
 /** This computer's own 1Password problem, from its last read of the vaults (OnePasswordLogins.status().error). */
 type OnePasswordProblem = () => string | undefined;
 
@@ -86,7 +98,12 @@ export function answerLoginHandoff(store: HandoffStore, what: Exclude<LoginHando
     // 1Password itself refused this token here: My Cloud would only refuse it too, in words meant for its own page.
     const problem = onePasswordProblem();
     if (problem === ONE_PASSWORD_REFUSED || problem === ONE_PASSWORD_MALFORMED) return { ok: false, error: ONE_PASSWORD_DEAD_HERE };
-    return { ok: true, onePassword: { token, grants: store.onePasswordGrants() } };
+    return { ok: true, onePassword: { token, grants: store.onePasswordGrants(), itemGrants: store.onePasswordItemGrants() } };
+  }
+  if (what.kind === "secret") {
+    const secret = store.secret(what.id);
+    if (!secret || secret.person) return { ok: false, error: "This secret is no longer saved on this computer." };
+    return { ok: true, secret: { id: secret.id, name: secret.name, value: secret.value, bots: secret.bots, source: secret.source, ...(secret.refOnly ? { refOnly: true } : {}) } };
   }
   const login = store.get(what.id);
   if (!login) return { ok: false, error: "This login is no longer saved on this computer." };

@@ -234,7 +234,7 @@ const BASE_STYLE = [
   "html,body{margin:0}",
   "body{font-family:var(--font-sans,system-ui,sans-serif);color:var(--color-text-primary,#1d1d1f);",
   "background:var(--color-background-primary,#fff);-webkit-font-smoothing:antialiased}",
-  "#mausbot-root:empty::before{content:\"Loading\\2026\";display:block;padding:24px;font:14px/20px system-ui,sans-serif;opacity:.6}",
+  "#mausbot-root:empty::before{content:\"Loading\\2026\";display:block;box-sizing:border-box;min-height:100vh;padding:24px;font:14px/20px system-ui,sans-serif;opacity:.6}",
   ".mausbot-problem{position:fixed;inset:12px;overflow:auto;z-index:2147483646;border-radius:12px;padding:16px 18px;",
   "font:14px/1.5 system-ui,sans-serif;background:#fff6f5;color:#5c1712;border:1px solid #f3c2bd;box-shadow:0 8px 24px rgba(0,0,0,.12)}",
   "[data-theme=dark] .mausbot-problem{background:#2a1513;color:#ffd9d4;border-color:#6b2a24}",

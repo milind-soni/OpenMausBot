@@ -9,13 +9,14 @@ import { t } from "@/lib/i18n";
 import { useStore, type Bot } from "@/state/store";
 import { mayChangeOwner, ownerChanged, ownerOf, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
 import { MENU_SHEET } from "../menu-recipe";
-import { accessOfBot, addablePeople, canShare, levelLabel, levelWhenAdded, nameOf, personOf, saveAccess, saveOwner, withPerson } from "./access";
-import { choiceItem, EntryFace, LevelMenu, QuietMenu } from "./ShareControls";
+import { accessOfBot, addablePeople, canShare, levelWhenAdded, nameOf, personOf, saveAccess, saveOwner, withPerson } from "./access";
+import { choiceItem, EntryFace, PersonMenu, QuietMenu } from "./ShareControls";
 
 export interface AccessChange { before: BotAccess; after: BotAccess; text: string }
 
-/** A bot's Share dialog on a team: who has access and at what level, and what everyone in the team gets. A change
- * applies at once; the caller shows it with Undo. `headerMenu` holds what else the opener offers there. */
+/** A bot's Share dialog on a team: whether everyone in the team can use it or only the people added, and who those
+ * are. A change applies at once; the caller shows it with Undo. `headerMenu` holds what else the opener offers there.
+ * A person's stored level (view, chat or edit) stays as it is until they are removed; the dialog does not show it. */
 export function ShareBotDialog({ bot, teamName, onClose, onChanged, headerMenu }: {
   bot: Bot;
   teamName: string;
@@ -71,7 +72,7 @@ export function ShareBotDialog({ bot, teamName, onClose, onChanged, headerMenu }
   };
 
   const yourRow = !editable && team?.me && bot.yourAccess && bot.yourAccess !== "none"
-    ? <PersonRow person={team.me} you data-share-yours trailing={<span className="px-2 text-[13px] text-ink-secondary">{levelLabel(bot.yourAccess)}</span>} /> : null;
+    ? <PersonRow person={team.me} you data-share-yours trailing={null} /> : null;
 
   return createPortal(
     <div className="ui-scrim fixed inset-0 z-[60] flex items-center justify-center p-4" onMouseDown={(event) => {
@@ -96,23 +97,22 @@ export function ShareBotDialog({ bot, teamName, onClose, onChanged, headerMenu }
           {editable && team && (
             <div className="relative z-10 shrink-0 px-5 pb-1">
               <AddPerson team={team} access={access} owner={botOwner(bot)} disabled={busy}
-                onAdd={(person, level) => void apply(withPerson(access, person.email, level), t("botAccess.toast.added", { name: person.name, level: levelLabel(level) }))} />
+                onAdd={(person, level) => void apply(withPerson(access, person.email, level), t("botAccess.toast.addedPlain", { name: person.name }))} />
             </div>
           )}
           <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-2 pt-3">
             <h3 className="mb-1 text-[13px] font-semibold">{t("botAccess.people")}</h3>
             <ul data-share-people className="flex max-h-[min(264px,40vh)] flex-col overflow-y-auto">
-              {owner && <PersonRow person={owner} you={owner.you === true} trailing={<span className="px-2 text-[13px] text-ink-secondary">{t("botAccess.owner")}</span>} />}
+              {owner && <PersonRow person={owner} you={owner.you === true} trailing={<span className="px-2 text-[13px] text-ink-secondary">{t("lookedAfter.badge")}</span>} />}
               {yourRow}
-              {editable && Object.entries(access.people).sort(([a], [b]) => nameOf(a, team).localeCompare(nameOf(b, team))).map(([entry, level]) => {
+              {editable && Object.keys(access.people).sort((a, b) => nameOf(a, team).localeCompare(nameOf(b, team))).map((entry) => {
                 const person = personOf(entry, team);
                 return (
                   <PersonRow key={entry} entry={entry} person={person} you={team?.me?.email === entry}
-                    trailing={<LevelMenu value={level} floor={access.everyone} removable disabled={busy} label={t("botAccess.levelFor", { name: nameOf(entry, team) })}
+                    trailing={<PersonMenu disabled={busy} label={t("botAccess.personMenu", { name: nameOf(entry, team) })}
                       onMakeOwner={handsOver && person ? () => { setError(""); setNewOwner(person); } : undefined}
-                      onChange={(next) => void apply(withPerson(access, entry, next), next
-                        ? t("botAccess.toast.changed", { name: nameOf(entry, team), level: levelLabel(next) })
-                        : t("botAccess.toast.removed", { name: nameOf(entry, team) }))} />} />
+                      makeOwnerLabel={person ? t("lookedAfter.make", { name: person.name }) : undefined}
+                      onRemove={() => void apply(withPerson(access, entry, null), t("botAccess.toast.removed", { name: nameOf(entry, team) }))} />} />
                 );
               })}
             </ul>
@@ -122,7 +122,7 @@ export function ShareBotDialog({ bot, teamName, onClose, onChanged, headerMenu }
               <GeneralAccess access={access} teamName={teamName} disabled={busy}
                 onChange={(everyone) => void apply({ everyone, people: access.people }, everyone === "none"
                   ? t("botAccess.toast.onlyAdded")
-                  : t("botAccess.toast.everyone", { team: teamName, level: levelLabel(everyone) }))} />
+                  : t("botAccess.toast.everyoneUse", { team: teamName }))} />
             </>}
             {error && <p role="alert" className="mt-3 text-[13px] text-danger">{error}</p>}
           </div>
@@ -149,12 +149,12 @@ function MakeOwner({ person, bot, busy, error, onCancel, onConfirm }: {
 }) {
   return (
     <div data-share-make-owner={person.email} className="px-5 pb-4 pt-4">
-      <h2 id="share-bot-title" className="text-[17px] font-semibold">{t("botAccess.makeOwnerTitle", { name: person.name })}</h2>
-      <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">{t("botAccess.makeOwnerBody", { name: person.name, bot: bot.name })}</p>
+      <h2 id="share-bot-title" className="text-[17px] font-semibold">{t("lookedAfter.makeTitle", { name: person.name, bot: bot.name })}</h2>
+      <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">{t("lookedAfter.makeBody", { name: person.name, bot: bot.name })}</p>
       {error && <p role="alert" className="mt-3 text-[13px] text-danger">{error}</p>}
       <div className="mt-5 flex justify-end gap-2">
         <button type="button" autoFocus disabled={busy} onClick={onCancel} className="ui-button rounded-full px-4">{t("common.cancel")}</button>
-        <button type="button" disabled={busy} onClick={onConfirm} className="ui-button ui-button-primary rounded-full px-4">{t("botAccess.makeOwner")}</button>
+        <button type="button" disabled={busy} onClick={onConfirm} className="ui-button ui-button-primary rounded-full px-4">{t("lookedAfter.make", { name: person.name })}</button>
       </div>
     </div>
   );
@@ -181,7 +181,7 @@ function GeneralAccess({ access, teamName, disabled, onChange }: {
   const hint = access.everyone === "view" ? t("botAccess.everyoneHint.view", { team: teamName })
     : access.everyone === "chat" ? t("botAccess.everyoneHint.chat", { team: teamName })
       : access.everyone === "edit" ? t("botAccess.everyoneHint.edit", { team: teamName }) : t("botAccess.onlyAddedHint");
-  const only = t("botAccess.onlyAdded"), all = t("botAccess.everyone", { team: teamName });
+  const only = t("botAccess.onlyAdded"), all = t("botAccess.everyoneUse", { team: teamName });
   return (
     <div className="flex items-center gap-3" data-share-general={access.everyone}>
       <span aria-hidden="true" className={cn("inline-flex size-8 shrink-0 items-center justify-center rounded-full", everyone ? "bg-accent/15 text-accent" : "bg-ink/[0.08] text-ink-secondary")}>
@@ -197,7 +197,6 @@ function GeneralAccess({ access, teamName, disabled, onChange }: {
         </div>
         <p className="text-[12px] leading-4 text-ink-secondary">{hint}</p>
       </div>
-      {everyone && <span className="shrink-0"><LevelMenu value={access.everyone as GrantedLevel} disabled={disabled} label={t("botAccess.everyoneLevel", { team: teamName })} onChange={(level) => { if (level) onChange(level); }} /></span>}
     </div>
   );
 }

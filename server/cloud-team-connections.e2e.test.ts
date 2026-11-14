@@ -44,7 +44,7 @@ beforeAll(async () => {
   admin = (await team.pair(ADMIN)).token!;
   ada = (await team.pair(ADA)).token!;
   cleo = (await team.pair(CLEO)).token!;
-  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout" });
+  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   bot = created.body.bot;
   // The Team Cloud registered its own installation as it started: the team's Gmail is connected there.
@@ -152,7 +152,8 @@ it("lets Ada connect her own Gmail and mail key, and nobody reads them back", as
   // Admins see that she connected, never what with.
   const read = await team.signed("GET", "/api/cloud/team/admin");
   expect(read.body.scopes).toEqual({ apps: ["gmail"], mcp: ["mail"] });
-  expect(read.body.people).toEqual({ apps: { gmail: [ADA.email] }, mcp: { mail: [ADA.email] } });
+  const states = Object.fromEntries([OWNER, ADMIN, ADA, CLEO].map((member) => [member.email, member === ADA ? "connected" : "not-connected"]));
+  expect(read.body.people).toEqual({ apps: { gmail: [ADA.email] }, mcp: { mail: [ADA.email] }, states: { apps: { gmail: states }, mcp: { mail: states } } });
   const held = JSON.parse(readFileSync(join(team.home, ".openmausbot", "people-connections", "apps.json"), "utf8")).people[personKey({ id: "", email: ADA.email })].token as string;
   for (const answer of [read.body, (await team.as(owner, "GET", "/api/mcp/servers")).body, (await team.as(admin, "GET", "/api/config")).body,
     (await team.as(owner, "GET", "/api/connectors/connected")).body, (await team.as(admin, "GET", "/api/team/my-connections")).body]) {
@@ -222,7 +223,7 @@ it("never uses her own Gmail or mail where others read, even for her own line in
 }, hostTimeout(180_000));
 
 it("gives work her own message hands to another bot her own Gmail, and never work Cleo's message hands on", async () => {
-  const created = await team.as(owner, "POST", "/api/bots", { name: "Helper" });
+  const created = await team.as(owner, "POST", "/api/bots", { name: "Helper", visibility: "everyone" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   const helper = created.body.bot as { id: string; mainThreadId: string };
   const handOn = (who: string) => ({ name: "coordinate_bots", server: "agents", input: { bot_ids: [helper.id], message: `Fetch ${who}'s latest email.` } });
@@ -282,7 +283,7 @@ it("runs work her group-chat line hands on in the receiving bot's chat with her,
   const SECRET = "Q3 salary review 7731";
   writeFileSync(join(team.home, "marker-replies.json"), JSON.stringify({ "Brief from @Scout:": `Ada's latest email: ${SECRET}.` }));
   try {
-    const created = await team.as(owner, "POST", "/api/bots", { name: "Clerk" });
+    const created = await team.as(owner, "POST", "/api/bots", { name: "Clerk", visibility: "everyone" });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     const clerk = created.body.bot as { id: string; mainThreadId: string };
     const clerkWork = () => (JSON.parse(readFileSync(join(team.home, ".openmausbot", "bots.json"), "utf8")) as Array<{ id: string; tasks: Array<{ threadId: string }> }>)

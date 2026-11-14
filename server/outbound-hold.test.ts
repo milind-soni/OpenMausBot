@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Notification } from "../shared/notification.ts";
 import { flushDecisionLog, readDecisions } from "./decision-log.ts";
-import { OutboundCounts } from "./outbound-counts.ts";
 import { createOutboundHold, type OutboundHold, type OutboundHoldDeps } from "./outbound-hold.ts";
 import { OutboundRequestService } from "./outbound-requests.ts";
 
@@ -50,12 +49,10 @@ function setup(bot: HoldBot) {
     taskByThread: () => ({ busy: true }),
   };
   const outboundRequests = new OutboundRequestService();
-  const outboundCounts = new OutboundCounts(join(dataDir, "outbound-counts.json"));
   const deps: OutboundHoldDeps = {
     store: store as unknown as OutboundHoldDeps["store"],
     dataDir,
     outboundRequests,
-    outboundCounts,
     holdMs: 1_000,
     connectorThread: () => ({ group: undefined }),
     activeGroupTurnForBot: () => null,
@@ -67,28 +64,36 @@ function setup(bot: HoldBot) {
 
 const bot = (outbound: HoldBot["outbound"], notifications = true): HoldBot => ({ id: "b1", name: "Scout", color: "green", outbound, notifications });
 
+/** One send as the relay makes it: the hold, then the check at dispatch. */
+const send = async (held: ReturnType<typeof setup>, options: { fullAccess?: boolean; opaque?: boolean } = {}) => {
+  const input = { ...held.input, ...options };
+  const answer = await held.hold.hold({ ...input, active: () => true });
+  if (answer.ok) held.hold.beforeDispatch({ ...input, approved: answer.approved });
+  return answer;
+};
+
 describe("createOutboundHold", () => {
-  it("allow policy under the cap approves without a card and records the row", async () => {
-    const { hold, dataDir, appended, notified, input } = setup(bot({ policy: "allow", dailyCap: 2 }));
-    await expect(hold.hold({ ...input, active: () => true })).resolves.toEqual({ ok: true, approved: false });
-    expect(appended).toEqual([]);
-    expect(notified).toEqual([]);
+  it("Send without asking sends 40 in a day with no card and no refusal, and records each one", async () => {
+    const held = setup(bot({ policy: "allow" }));
+    for (let sent = 0; sent < 40; sent++) await expect(send(held)).resolves.toEqual({ ok: true, approved: false });
+    expect(held.appended).toEqual([]);
+    expect(held.notified).toEqual([]);
 
-    hold.reserve({ ...input, approved: false });
-    hold.reserve({ ...input, approved: false });
-    expect(() => hold.reserve({ ...input, approved: false })).toThrow(/daily outbound limit/);
+    await flushDecisionLog(held.dataDir);
+    const rows = readDecisions(held.dataDir, 100);
+    expect(rows).toHaveLength(40);
+    expect(rows.every((row) => row.decision === "auto-approved" && row.source === "outbound" && row.rule === "allow")).toBe(true);
+    expect(rows[0]).toMatchObject({ threadId: "t1", botId: "b1", botName: "Scout", tool: "GMAIL_SEND_EMAIL" });
+  });
 
-    await flushDecisionLog(dataDir);
-    const rows = readDecisions(dataDir, 10);
-    expect(rows.map((row) => row.rule)).toEqual(["daily-allowance:1/2", "daily-allowance:2/2"]);
-    expect(rows[0]).toMatchObject({ threadId: "t1", botId: "b1", botName: "Scout", tool: "GMAIL_SEND_EMAIL", decision: "auto-approved", source: "outbound" });
-
-    // The cap is spent: the next hold refuses before any card.
-    await expect(hold.hold({ ...input, active: () => true })).resolves.toMatchObject({ ok: false, text: expect.stringMatching(/daily limit of 2 outbound actions/) });
+  it("ignores a daily cap an older app stored on the rule", async () => {
+    const held = setup(bot({ policy: "allow", dailyCap: 2 } as HoldBot["outbound"]));
+    for (let sent = 0; sent < 5; sent++) await expect(send(held)).resolves.toEqual({ ok: true, approved: false });
+    expect(held.appended).toEqual([]);
   });
 
   it("ask policy posts the card and resolves on allow", async () => {
-    const { hold, dataDir, appended, activity, notified, outboundRequests, input } = setup(bot({ policy: "ask", dailyCap: 10 }));
+    const { hold, dataDir, appended, activity, notified, outboundRequests, input } = setup(bot({ policy: "ask" }));
     const pending = hold.hold({ ...input, active: () => true });
 
     expect(appended).toHaveLength(1);
@@ -117,11 +122,10 @@ describe("createOutboundHold", () => {
 
     await flushDecisionLog(dataDir);
     expect(readDecisions(dataDir, 10)).toMatchObject([{ requestId, decision: "card-shown", source: "outbound", tool: "GMAIL_SEND_EMAIL" }]);
-    // An approved hold lets the dispatch through without spending the allowance.
-    expect(() => hold.reserve({ ...input, bot: bot({ policy: "ask", dailyCap: 10 }), approved: true })).not.toThrow();
+    expect(() => hold.beforeDispatch({ ...input, bot: bot({ policy: "ask" }), approved: true })).not.toThrow();
 
     // A bot the user muted still posts the card, but sends no notification.
-    const muted = setup(bot({ policy: "ask", dailyCap: 10 }, false));
+    const muted = setup(bot({ policy: "ask" }, false));
     const mutedPending = muted.hold.hold({ ...muted.input, active: () => true });
     expect(muted.appended).toHaveLength(1);
     expect(muted.notified).toEqual([null]);
@@ -146,13 +150,53 @@ describe("createOutboundHold", () => {
     expect(timed.patches[0]).toMatchObject({ threadId: "t1", messageId: timed.appended[0].message.id, patch: { card: { answered: "unavailable", dismissed: true, title: "Send on your behalf?" } } });
   });
 
-  it("reserve refuses when the hold was not approved and the policy is ask", async () => {
-    const { hold, dataDir, input } = setup(bot({ policy: "ask", dailyCap: 10 }));
-    expect(() => hold.reserve({ ...input, fullAccess: false, approved: false })).toThrow(/outbound policy changed/);
+  it("refuses at dispatch when the hold was not approved and the policy is ask", async () => {
+    const { hold, input } = setup(bot({ policy: "ask" }));
+    expect(() => hold.beforeDispatch({ ...input, fullAccess: false, approved: false })).toThrow(/outbound policy changed/);
+  });
+});
 
-    // Full access sends freely and logs it.
-    expect(() => hold.reserve({ ...input, fullAccess: true, approved: false })).not.toThrow();
-    await flushDecisionLog(dataDir);
-    expect(readDecisions(dataDir, 10)).toMatchObject([{ decision: "auto-approved", source: "outbound", rule: "full-access" }]);
+describe("Full access with no sending rule of its own", () => {
+  it("sends 40 in a day without a card or a refusal", async () => {
+    const held = setup(bot(undefined));
+    for (let sent = 0; sent < 40; sent++) await expect(send(held, { fullAccess: true })).resolves.toEqual({ ok: true, approved: false });
+    expect(held.appended, "never a card").toEqual([]);
+    expect(held.notified).toEqual([]);
+    expect(held.outboundRequests.pending("t1")).toEqual([]);
+    await flushDecisionLog(held.dataDir);
+    const rules = readDecisions(held.dataDir, 100).map((row) => row.rule);
+    expect(rules).toEqual(Array(40).fill("full-access"));
+  });
+
+  it("keeps a stored rule exactly as set: ask still asks, allow sends without asking", async () => {
+    const asking = setup(bot({ policy: "ask" }));
+    for (let round = 0; round < 3; round++) {
+      const pending = send(asking, { fullAccess: true });
+      expect(asking.appended).toHaveLength(round + 1);
+      asking.outboundRequests.resolve({ threadId: "t1", requestId: asking.appended[round].message.card!.requestId as string, behavior: "allow" });
+      await expect(pending).resolves.toEqual({ ok: true, approved: true });
+    }
+
+    const allowing = setup(bot({ policy: "allow" }));
+    for (let sent = 0; sent < 40; sent++) await expect(send(allowing, { fullAccess: true })).resolves.toEqual({ ok: true, approved: false });
+    expect(allowing.appended).toEqual([]);
+  });
+
+  it("at Full access sends a call it cannot inspect without a card, with no rule or Send without asking", async () => {
+    const held = setup(bot(undefined));
+    for (let sent = 0; sent < 30; sent++) await expect(send(held, { fullAccess: true, opaque: true })).resolves.toEqual({ ok: true, approved: false });
+    expect(held.appended).toEqual([]);
+
+    const allowingFull = setup(bot({ policy: "allow" }));
+    await expect(send(allowingFull, { fullAccess: true, opaque: true })).resolves.toEqual({ ok: true, approved: false });
+    expect(allowingFull.appended).toEqual([]);
+  });
+
+  it("below Full access, Send without asking still asks before a call it cannot inspect", async () => {
+    const allowing = setup(bot({ policy: "allow" }));
+    const pending = allowing.hold.hold({ ...allowing.input, opaque: true, fullAccess: false, active: () => true });
+    expect(allowing.appended).toHaveLength(1);
+    allowing.outboundRequests.resolve({ threadId: "t1", requestId: allowing.appended[0].message.card!.requestId as string, behavior: "deny" });
+    await expect(pending).resolves.toMatchObject({ ok: false });
   });
 });

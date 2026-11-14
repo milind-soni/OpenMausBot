@@ -48,6 +48,14 @@ describe("a bot's tool budget", () => {
     expect(host.querySelector("[data-tool-budget-searched]")?.textContent).toBe("Found through tool search instead: sogni and context7");
   });
 
+  it("shows nothing when the bot's AI takes any number of tools", async () => {
+    fixture.budget = { limit: null, listed: 140, servers: [{ name: "basicmemory", tools: 12, direct: true }] };
+    render();
+    await settle();
+    expect(fixture.asked).toEqual(["/api/bots/scout/tool-budget"]);
+    expect(host.querySelector("[data-tool-budget]")).toBeNull();
+  });
+
   it("leaves out the search line when every server was listed, and shows nothing before a turn ran", async () => {
     fixture.budget = { limit: 128, listed: 20, servers: [{ name: "basicmemory", tools: 12, direct: true }] };
     render();

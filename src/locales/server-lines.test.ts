@@ -11,14 +11,14 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 import { describe, expect, it } from "vitest";
 
 import de from "./de.json";
 import en from "./en.json";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const SCANNED = ["server", "shared"];
+const SCANNED = ["server", "shared", "packages/phone-protocol/src"];
 const SKIPPED_DIRS = new Set(["node_modules", "testing", "dist", "resources"]);
 const isSource = (name: string) => name.endsWith(".ts") && !/\.test\.|\.d\.ts$/.test(name);
 
@@ -41,6 +41,8 @@ interface Source {
   sf: ts.SourceFile;
   decls: Map<string, ts.FunctionDeclaration | ts.VariableDeclaration>;
   imports: Map<string, { file: string; name: string }>;
+  /** The files of its `export * from "./x.ts"` lines. */
+  reexports: string[];
   calls?: Map<string, ts.CallExpression[]>;
 }
 
@@ -77,7 +79,9 @@ export function findServerLines(paths: readonly string[], read: (path: string) =
       const file = resolve(dirname(path), specifier);
       for (const element of bindings.elements) imports.set(element.name.text, { file, name: (element.propertyName ?? element.name).text });
     }
-    const source = { sf, decls, imports };
+    const reexports = sf.statements.flatMap((statement) => ts.isExportDeclaration(statement) && !statement.exportClause && statement.moduleSpecifier
+      && ts.isStringLiteral(statement.moduleSpecifier) && statement.moduleSpecifier.text.startsWith(".") ? [resolve(dirname(path), statement.moduleSpecifier.text)] : []);
+    const source = { sf, decls, imports, reexports };
     sources.set(path, source);
     return source;
   }
@@ -156,9 +160,19 @@ export function findServerLines(paths: readonly string[], read: (path: string) =
     const local = declarationOf(source, node, name);
     if (local) return { source, decl: local };
     const imported = source.imports.get(name);
-    const target = imported ? load(imported.file) : null;
-    const decl = imported && target ? target.decls.get(imported.name) : undefined;
-    return target && decl ? { source: target, decl } : null;
+    return imported ? exportedFrom(imported.file, imported.name, 0) : null;
+  }
+
+  function exportedFrom(file: string, name: string, depth: number): { source: Source; decl: ts.FunctionDeclaration | ts.VariableDeclaration } | null {
+    const target = depth > 4 ? null : load(file);
+    if (!target) return null;
+    const decl = target.decls.get(name);
+    if (decl) return { source: target, decl };
+    for (const next of target.reexports) {
+      const found = exportedFrom(next, name, depth + 1);
+      if (found) return found;
+    }
+    return null;
   }
 
   const functionOf = (decl: ts.FunctionDeclaration | ts.VariableDeclaration): FunctionLike | null =>
@@ -380,12 +394,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["shared/plain-time-zone.ts", "every day"],
   ],
   "rooms and teammates": [
-    ["server/escalations.ts", "in the room \" … \""],
-    ["server/escalations.ts", "in its thread # …"],
-    ["server/escalations.ts", "in its main conversation"],
-    ["server/escalations.ts", "… 's work  …  is parked at a gate:  … ."],
-    ["server/host/delegated-level.ts", "…  — delegated by  … ,  … a Chief of Staff on  …"],
-    ["server/peer-approval.ts", "@ …  wants to  …   …"],
+    ["server/host/delegated-level.ts", "…  — handed on by  … ,  … a Chief of Staff on  …"],
     ["server/store.ts", "needs your input"],
     ["server/store.ts", "reached its turn limit"],
   ],
@@ -411,10 +420,6 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/drivers/acp/cursor.ts", "Cursor did not accept  …  in this session, so it runs  … ."],
     ["server/drivers/acp/cursor.ts", "its default model"],
     ["server/drivers/acp/cursor.ts", "Choose another model for this bot to stop seeing this."],
-    ["server/drivers/codex-unsupported-calls.ts", "Codex could not run  …   …  (\"unsupported call\"): the AI provider sent"],
-    ["server/drivers/codex-unsupported-calls.ts", "the tool"],
-    ["server/drivers/codex-unsupported-calls.ts", "the tools"],
-    ["server/drivers/codex-unsupported-calls.ts", "the call back without the tool's app name, so it never reached the too"],
     ["server/index.ts", "notice: This thread's model ( … ) isn't available, so it now uses  … '"],
     ["server/index.ts", "Company connection changed — choose whether to reconnect or use a pers"],
     ["server/quota-switch.ts", "while  …  is signed out"],
@@ -497,18 +502,13 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/team-setup-requests.ts", "Team setup not applied"],
   ],
   "restarts, stops and context": [
-    ["server/host/person-stop.ts", "Stopped here —  …  is still working; open to stop it too"],
-    ["server/index.ts", "Resuming after a restart"],
-    ["server/index.ts", "…  was cut off by a restart; resuming"],
     ["server/index.ts", "context compaction started ( … )"],
     ["server/index.ts", "context compacted — re-sent the last  …  digest …"],
     ["server/index.ts", "generated image could not be attached —  …"],
     ["server/index.ts", "invalid image"],
-    ["server/index.ts", "Queued follow-up interrupted by restart or restore — it may have alrea"],
-    ["shared/first-reply-rescue.ts", "notice:  …  hasn't heard back from  …  yet."],
+    ["packages/phone-protocol/src/first-reply-rescue.ts", "notice:  …  hasn't heard back from  …  yet."],
   ],
   "moves to the Cloud": [
-    ["server/cloud-send-arrived.ts", "I'm back on this computer, so my webhook \" … \" has an address here aga"],
   ],
   "calls": [
     ["shared/live-call.ts", "Call with  …  ·  …"],

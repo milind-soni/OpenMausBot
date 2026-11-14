@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { link, unlink } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -43,12 +43,18 @@ process.env.OMB_DATA_DIR = join(DATA_ROOT, "data");
 const {
   ATTACHMENTS_DIR,
   ATTACHMENTS_MAX_BYTES,
+  ATTACHMENT_CLEAR_MIN_AGE_MS,
   ATTACHMENT_PARTIAL_MAX_AGE_MS,
   DEFAULT_ATTACHMENTS_MAX_BYTES,
   FILE_MAX_BYTES,
   IMAGE_MAX_BYTES,
+  PREVIEW_MAX_BYTES,
   __resetAttachmentAccountingForTests,
+  attachmentStorageUsage,
   attachmentsMaxBytes,
+  clearAttachments,
+  keptAttachmentNames,
+  offerAttachmentClear,
   cleanupStaleAttachmentPartials,
   deleteAttachment,
   extensionForFileMime,
@@ -195,7 +201,7 @@ describe("saveAudio", () => {
   it("rejects other audio mimes, empty bodies, and oversize bodies", () => {
     expect(() => saveAudio(Buffer.from("x"), "audio/ogg")).toThrow(/unsupported audio type/);
     expect(() => saveAudio(Buffer.alloc(0), "audio/mpeg")).toThrow(/empty/);
-    expect(() => saveAudio(Buffer.alloc(FILE_MAX_BYTES + 1), "audio/mpeg")).toThrow(/exceeds/);
+    expect(() => saveAudio(Buffer.alloc(PREVIEW_MAX_BYTES + 1), "audio/mpeg")).toThrow(/exceeds/);
   });
 
   it("rejects at the aggregate ceiling without leaving partials and releases its reservation", () => {
@@ -257,7 +263,7 @@ describe("aggregate attachment storage", () => {
       throw new Error("expected quota rejection");
     } catch (error) {
       expect(error).toMatchObject({ status: 507 });
-      expect(error).toHaveProperty("message", "attachments storage is full (512 MB limit)");
+      expect(error).toHaveProperty("message", "attachments storage is full (512 MB limit). Clear old attachments in Settings → General.");
     }
     expect(existsSync(referenced.path)).toBe(true);
     expect(statSync(referenced.path).size).toBe(ATTACHMENTS_MAX_BYTES);
@@ -529,11 +535,15 @@ describe("shared files", () => {
     resetDir();
   });
 
-  it("allows useful document mimes but not executables, archives, or active markup", () => {
+  it("allows useful document and archive mimes but not executables or active markup", () => {
     expect(extensionForFileMime("text/plain; charset=utf-8")).toBe(".txt");
     expect(extensionForFileMime("application/pdf")).toBe(".pdf");
     expect(extensionForFileMime("application/vnd.openxmlformats-officedocument.wordprocessingml.document")).toBe(".docx");
-    expect(extensionForFileMime("application/zip")).toBeNull();
+    expect(extensionForFileMime("application/zip")).toBe(".zip");
+    expect(extensionForFileMime("application/x-compressed-tar")).toBe(".tgz");
+    expect(extensionForFileMime("application/x-zip-compressed")).toBe(".zip");
+    expect(extensionForFileMime("Application/X-RAR-Compressed")).toBe(".rar");
+    expect(extensionForFileMime("application/x-gzip")).toBe(".gz");
     expect(extensionForFileMime("application/x-msdownload")).toBeNull();
     expect(extensionForFileMime("application/octet-stream")).toBeNull();
     expect(extensionForFileMime("text/html")).toBeNull();
@@ -546,7 +556,8 @@ describe("shared files", () => {
     expect(() => sanitizeSharedFileName("../../secret.txt", "text/plain")).toThrow(/filename, not a path/);
     expect(() => sanitizeSharedFileName("..\\..\\secret.txt", "text/plain")).toThrow(/filename, not a path/);
     expect(() => sanitizeSharedFileName("..%2F..%2Fsecret.txt", "text/plain")).toThrow(/filename, not a path/);
-    expect(() => sanitizeSharedFileName("notes.txt", "application/zip")).toThrow(/supported document/);
+    expect(sanitizeSharedFileName("logs.tar.gz", "application/gzip")).toBe("logs.tar.gz");
+    expect(() => sanitizeSharedFileName("notes.txt", "application/x-msdownload")).toThrow(/supported document/);
   });
 
   it("streams a file under a generated name with private permissions", async () => {
@@ -585,6 +596,18 @@ describe("shared files", () => {
     expect(readdirSync(ATTACHMENTS_DIR)).toEqual([`${UPLOAD_A}${extension}`]);
   });
 
+  it.each([
+    ["Project.ZIP", "application/x-zip-compressed", ".zip", "Project.zip"],
+    ["logs.tar.gz", "application/x-gzip", ".gz", "logs.tar.gz"],
+    ["dump.rar", "application/x-rar-compressed", ".rar", "dump.rar"],
+  ])("stores %s sent as %s unchanged, under its archive extension", async (name, mime, extension, shown) => {
+    const bytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 1, 2]);
+    const saved = await saveFile((async function* () { yield bytes; })(), name, mime, { uploadId: UPLOAD_A });
+    expect(saved.path).toBe(join(ATTACHMENTS_DIR, `${UPLOAD_A}${extension}`));
+    expect(saved.name).toBe(shown);
+    expect(readFileSync(saved.path)).toEqual(bytes);
+  });
+
   it("rejects empty and oversized streams without leaving partial files", async () => {
     await expect(saveFile((async function* () {})(), "empty.txt", "text/plain")).rejects.toThrow(/empty file/);
     expect(readdirSync(ATTACHMENTS_DIR)).toEqual([]);
@@ -595,6 +618,18 @@ describe("shared files", () => {
     }
     await expect(saveFile(tooLarge(), "large.pdf", "application/pdf")).rejects.toMatchObject({ status: 413 });
     expect(readdirSync(ATTACHMENTS_DIR)).toEqual([]);
+  });
+
+  it("keeps a file larger than a preview: only what is read whole stays at the preview size", async () => {
+    const bytes = PREVIEW_MAX_BYTES + 1;
+    async function* reel() {
+      yield Buffer.alloc(PREVIEW_MAX_BYTES);
+      yield Buffer.from("x");
+    }
+    const saved = await saveFile(reel(), "reel.mp4", "video/mp4", { expectedBytes: bytes });
+    expect(saved).toMatchObject({ name: "reel.mp4", mime: "video/mp4", bytes });
+    expect(statSync(saved.path).size).toBe(bytes);
+    expect(FILE_MAX_BYTES).toBeGreaterThan(PREVIEW_MAX_BYTES);
   });
 
   it("deduplicates concurrent and later file retries by upload ID", async () => {
@@ -636,5 +671,114 @@ describe("shared files", () => {
     await expect(document).resolves.toMatchObject({ bytes: 11 });
     await expect(image).rejects.toMatchObject({ status: 409 });
     expect(readdirSync(ATTACHMENTS_DIR)).toEqual([`${UPLOAD_A}.pdf`]);
+  });
+});
+
+describe("clearing attachments from Settings", () => {
+  beforeEach(() => {
+    resetDir();
+  });
+  afterEach(() => {
+    resetDir();
+  });
+
+  const nameOf = (path: string) => path.split(/[\\/]/).pop()!;
+
+  it("keeps pictures by their url and files by their path, on any platform", () => {
+    const kept = keptAttachmentNames(
+      ["/api/attachments/bot.png", null, undefined, "https://example.com/face.png"],
+      ["banner.webp", "C:\\Users\\me\\data\\attachments\\routine.pdf", "/home/me/data/attachments/run.png", undefined],
+    );
+    expect([...kept].sort()).toEqual(["banner.webp", "bot.png", "routine.pdf", "run.png"]);
+  });
+
+  const age = (path: string, ms: number) => {
+    const at = new Date(Date.now() - ms);
+    utimesSync(path, at, at);
+  };
+
+  it("frees a full store so the next upload works, keeping pictures, routine files and fresh uploads", () => {
+    const old = saveImage(Buffer.from("old"), "image/png");
+    const picture = saveImage(Buffer.from("avatar"), "image/png");
+    const fresh = saveImage(Buffer.from("fresh"), "image/png");
+    truncateSync(old.path, ATTACHMENTS_MAX_BYTES - 64);
+    age(old.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    age(picture.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    __resetAttachmentAccountingForTests();
+    expect(() => saveImage(Buffer.from("x".repeat(100)), "image/png")).toThrow(/storage is full.*Settings/);
+
+    const cleared = clearAttachments(new Set([nameOf(picture.path)]));
+
+    expect(cleared).toEqual({ removed: 1, freedBytes: ATTACHMENTS_MAX_BYTES - 64, failed: 0 });
+    expect(existsSync(old.path)).toBe(false);
+    expect(existsSync(picture.path)).toBe(true);
+    expect(existsSync(fresh.path)).toBe(true);
+    expect(attachmentStorageUsage()).toEqual({ usedBytes: "avatar".length + "fresh".length, maxBytes: ATTACHMENTS_MAX_BYTES });
+    expect(() => saveImage(Buffer.from("x".repeat(100)), "image/png")).not.toThrow();
+  });
+
+  it("removes a deleted or cleared upload from every conversation's box uploads folder too, so no box can still read it", () => {
+    const deleted = saveImage(Buffer.from("deleted"), "image/png");
+    const cleared = saveImage(Buffer.from("cleared"), "image/png");
+    const kept = saveImage(Buffer.from("kept"), "image/png");
+    const boxUploads = join(dirname(ATTACHMENTS_DIR), "box-uploads");
+    const shown = [join(boxUploads, "bot-a", "thread-1"), join(boxUploads, "bot-b", "thread-2")];
+    for (const dir of shown) {
+      mkdirSync(dir, { recursive: true });
+      for (const upload of [deleted, cleared, kept]) writeFileSync(join(dir, nameOf(upload.path)), "copy");
+    }
+    deleteAttachment(deleted.path);
+    age(cleared.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    clearAttachments(new Set([nameOf(kept.path)]));
+    for (const dir of shown) expect(readdirSync(dir)).toEqual([nameOf(kept.path)]);
+    rmSync(boxUploads, { recursive: true, force: true });
+  });
+
+  it("keeps an upload's box copies while the upload itself could not be deleted", () => {
+    const busy = saveImage(Buffer.from("busy"), "image/png");
+    const dir = join(dirname(ATTACHMENTS_DIR), "box-uploads", "bot-a", "thread-1");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, nameOf(busy.path)), "copy");
+    vi.mocked(unlinkSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error("resource busy"), { code: "EBUSY" });
+    });
+    deleteAttachment(busy.path);
+    expect(existsSync(busy.path)).toBe(true);
+    expect(readdirSync(dir)).toEqual([nameOf(busy.path)]);
+    rmSync(join(dirname(ATTACHMENTS_DIR), "box-uploads"), { recursive: true, force: true });
+  });
+
+  it("does not point a Team Cloud, which has no clear, to Settings", () => {
+    const full = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(full.path, ATTACHMENTS_MAX_BYTES);
+    __resetAttachmentAccountingForTests();
+    offerAttachmentClear(false);
+    try {
+      expect(() => saveImage(Buffer.from("y"), "image/png")).toThrow(/^attachments storage is full \(512 MB limit\)$/);
+    } finally {
+      offerAttachmentClear(true);
+    }
+  });
+
+  it("counts files it could not remove instead of hiding them", () => {
+    const busy = saveImage(Buffer.from("busy"), "image/png");
+    const gone = saveImage(Buffer.from("gone"), "image/png");
+    age(busy.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    age(gone.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    vi.mocked(unlinkSync).mockImplementation((path) => {
+      throw Object.assign(new Error("failed"), { code: String(path) === busy.path ? "EBUSY" : "ENOENT" });
+    });
+
+    expect(clearAttachments(new Set())).toEqual({ removed: 0, freedBytes: 0, failed: 1 });
+  });
+
+  it("leaves upload partials to their own cleanup", () => {
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    const partial = join(ATTACHMENTS_DIR, `.openmaus-upload-${UPLOAD_A}-${UPLOAD_B}.partial`);
+    writeFileSync(partial, "part");
+    age(partial, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+
+    expect(clearAttachments(new Set())).toEqual({ removed: 0, freedBytes: 0, failed: 0 });
+    expect(existsSync(partial)).toBe(true);
   });
 });

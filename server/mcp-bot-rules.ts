@@ -175,6 +175,7 @@ export function botListing(
     signIn: extra.authState,
     forThisBot: extra.forThisBot,
     ...(extra.managedBy ? { managedBy: extra.managedBy } : {}),
+    ...(server.runsOn ? { runsOn: server.runsOn.label } : {}),
   };
   if (isRemoteMcpServer(server)) {
     return { ...common, transport: server.type ?? "http", url: botAddress(server.url), headerKeys: Object.keys(server.headers ?? {}) };

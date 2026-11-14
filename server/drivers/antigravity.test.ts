@@ -9,6 +9,8 @@ import { TurnNotStartedError, type ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import * as procs from "../procs.ts";
+import { botBox } from "../bot-box/box.ts";
+import { dialRelay, openBoxRelay } from "../bot-box/relay.ts";
 import * as envPath from "../env-path.ts";
 import * as managedRuntime from "./antigravity-runtime.ts";
 import {
@@ -42,6 +44,7 @@ import {
 } from "./antigravity.ts";
 
 const FAKE_ACP = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-acp-cli.ts");
+const FAKE_SIGNIN = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-antigravity-signin.ts");
 const scratch: string[] = [];
 
 function fakeRuntime(startupDelayMs = 0): { directory: string; executable: string; harness: string } {
@@ -163,6 +166,38 @@ describe("Antigravity sign-in lifecycle", () => {
     }
   });
 
+  it("signs out by forgetting only this account's stored Google sign-in", async () => {
+    ensureDirs();
+    const fake = fakeRuntime();
+    const instanceId = "antigravity-sign-out";
+    const profile = antigravityProfileDirectory(instanceId);
+    const token = join(profile, "antigravity-acp", "acp_token.json");
+    const other = join(antigravityProfileDirectory("antigravity-other"), "antigravity-acp", "acp_token.json");
+    for (const file of [token, other]) {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, "{}", { mode: 0o600 });
+    }
+    const instance = await AntigravityDriver.create({
+      instanceId, displayName: "Antigravity", enabled: true,
+      config: { cli: fake.executable, fullAuto: false },
+      environment: { FAKE_ACP_AUTH_METHOD: "oauth-personal" },
+    });
+    try {
+      expect((await instance.snapshot()).authenticated).toBe(true);
+      expect(instance.signOut).toBeTypeOf("function");
+      await instance.signOut!();
+      expect(existsSync(token)).toBe(false);
+      expect(existsSync(join(profile, "antigravity-acp", "settings.json"))).toBe(true);
+      expect(existsSync(other)).toBe(true);
+      expect((await instance.snapshot()).authenticated).toBe(false);
+      await instance.signOut!();
+    } finally {
+      await instance.dispose();
+      rmSync(profile, { recursive: true, force: true });
+      rmSync(antigravityProfileDirectory("antigravity-other"), { recursive: true, force: true });
+    }
+  });
+
   it("uses the same discovered PATH for readiness and Google sign-in", async () => {
     const fake = fakeRuntime();
     const executable = join(fake.directory, process.platform === "win32" ? "agy_acp_server.exe" : "agy_acp_server.par");
@@ -208,7 +243,8 @@ createInterface({ input: process.stdin }).on('line', line => {
 `);
     const runtime = await resolveAntigravityRuntime(fake.executable);
     const profile = await prepareAntigravityProfile({ instanceId: "auth-lifecycle", runtime, baseDir: fake.directory });
-    const controller = new AntigravityAuthController();
+    const signedIn = vi.fn();
+    const controller = new AntigravityAuthController(signedIn);
     try {
       const flow = await controller.start(runtime, profile);
       expect(flow.phase).toBe("waiting");
@@ -217,6 +253,79 @@ createInterface({ input: process.stdin }).on('line', line => {
       await new Promise((resolve) => setTimeout(resolve, 300));
       await expect(controller.complete(flow.flowId!, "http://127.0.0.1:54321/?code=test&state=fixture"))
         .rejects.toThrow(/no longer active/u);
+      expect(signedIn).not.toHaveBeenCalled();
+    } finally {
+      controller.cancel();
+    }
+  });
+
+  it("delivers a redirect pasted from another computer to the runtime's own callback listener, and the sign-in finishes", async () => {
+    const fake = fakeRuntime();
+    writeFileSync(fake.executable, readFileSync(FAKE_SIGNIN));
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const profile = await prepareAntigravityProfile({ instanceId: "auth-pasted", runtime, baseDir: fake.directory });
+    const signedIn = vi.fn();
+    const controller = new AntigravityAuthController(signedIn);
+    try {
+      const flow = await controller.start(runtime, profile);
+      const redirect = new URL(flow.authorizationUrl!).searchParams.get("redirect_uri")!;
+      await controller.complete(flow.flowId!, `${redirect}?state=fixture&code=pasted`);
+      expect(await antigravityProfileAuthenticated(profile)).toBe(true);
+      expect(signedIn).toHaveBeenCalledOnce();
+    } finally {
+      controller.cancel();
+    }
+  });
+
+  // A Cloud home runs the runtime in a bot box with its own network, where only the box's relay reaches its listener
+  // (proved against a real box in antigravity-box.linux.test.ts); here the relay's box side runs in this process.
+  it.skipIf(process.platform === "win32")("delivers the redirect through the box's relay when sign-in runs in a bot box, and closes the relay after", async () => {
+    const fake = fakeRuntime();
+    writeFileSync(fake.executable, readFileSync(FAKE_SIGNIN));
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const profile = await prepareAntigravityProfile({ instanceId: "auth-relayed", runtime, baseDir: fake.directory });
+    const relay = await openBoxRelay(join(fake.directory, "relay.sock"));
+    const inBox = dialRelay(relay.socketPath, 20);
+    const reach = vi.spyOn(relay, "connect");
+    vi.spyOn(botBox, "openRelay").mockResolvedValue(relay);
+    const spawned = vi.spyOn(procs, "spawnCli");
+    const controller = new AntigravityAuthController();
+    try {
+      const flow = await controller.start(runtime, profile);
+      expect(spawned.mock.calls[0]![2]).toMatchObject({ box: { relay: relay.socketPath } });
+      const redirect = new URL(new URL(flow.authorizationUrl!).searchParams.get("redirect_uri")!);
+      await controller.complete(flow.flowId!, `${redirect.href}?state=fixture&code=pasted`);
+      expect(reach).toHaveBeenCalledWith(Number(redirect.port));
+      expect(await antigravityProfileAuthenticated(profile)).toBe(true);
+      await vi.waitFor(() => expect(existsSync(relay.socketPath)).toBe(false));
+    } finally {
+      controller.cancel();
+      inBox.close();
+      relay.close();
+    }
+  });
+
+  it("reports a sign-in Google finishes on its own, so the account's models are read", async () => {
+    const fake = fakeRuntime();
+    const url = "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&state=fixture&redirect_uri=http%3A%2F%2F127.0.0.1%3A54321%2F";
+    writeFileSync(fake.executable, `#!/usr/bin/env node
+import { createInterface } from 'node:readline';
+createInterface({ input: process.stdin }).on('line', line => {
+  const message = JSON.parse(line);
+  if (message.method === 'authenticate') {
+    console.error(${JSON.stringify(ANTIGRAVITY_AUTH_PREFIX + url)});
+    setTimeout(() => console.log(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} })), 100);
+  } else console.log(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }));
+});
+`);
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const profile = await prepareAntigravityProfile({ instanceId: "auth-finishes", runtime, baseDir: fake.directory });
+    let signedIn!: () => void;
+    const reported = new Promise<void>((resolve) => { signedIn = resolve; });
+    const controller = new AntigravityAuthController(() => signedIn());
+    try {
+      expect((await controller.start(runtime, profile)).phase).toBe("waiting");
+      await expect(reported).resolves.toBeUndefined();
     } finally {
       controller.cancel();
     }
@@ -480,6 +589,33 @@ describe("official Antigravity runtime", () => {
     });
     await expect(probeAntigravityModels({ runtime, profile, fallbackDefault: "account-model" }))
       .resolves.toMatchObject({ options: [{ id: "account-model" }] });
+  }, 20_000);
+
+  it("discovers thinking levels for every account model, not only the one a new session starts on", async () => {
+    const fake = fakeRuntime();
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const levels = [{ value: "low", name: "Low" }, { value: "high", name: "High" }];
+    const profile = await prepareAntigravityProfile({
+      instanceId: "thinking-levels", runtime, baseDir: fake.directory,
+      baseEnv: {
+        PATH: process.env.PATH,
+        FAKE_ACP_AUTH_METHOD: "oauth-personal",
+        FAKE_ACP_MODELS: "gemini-flash,gemini-argon,gemini-plain",
+        FAKE_ACP_VARIANTS: JSON.stringify({
+          "gemini-flash": { id: "thought_level", currentValue: "low", options: levels },
+          "gemini-argon": { id: "thought_level", currentValue: "high", options: levels },
+        }),
+      },
+    });
+    const variants = [{ id: "low", label: "Low" }, { id: "high", label: "High" }];
+    await expect(probeAntigravityModels({ runtime, profile, fallbackDefault: "gemini-flash" })).resolves.toEqual({
+      default: "gemini-flash",
+      options: [
+        { id: "gemini-flash", label: "gemini-flash", variants },
+        { id: "gemini-argon", label: "gemini-argon", variants },
+        { id: "gemini-plain", label: "gemini-plain" },
+      ],
+    });
   }, 20_000);
 
   it("rejects a download redirected to insecure HTTP", async () => {
@@ -794,13 +930,11 @@ describe("Antigravity driver over shared ACP", () => {
       environment: {
         FAKE_ACP_AUTH_METHOD: "oauth-personal",
         FAKE_ACP_MODELS: sessionModels,
-        FAKE_ACP_VARIANTS: JSON.stringify({
-          "gemini-3.8-flash": {
-            id: "thinking_level",
-            currentValue: "high",
-            options: [{ value: "low", name: "Low" }, { value: "medium", name: "Medium" }, { value: "high", name: "High" }],
-          },
-        }),
+        FAKE_ACP_VARIANTS: JSON.stringify(Object.fromEntries(["gemini-3.8-flash", "gemini-4-argon"].map((id) => [id, {
+          id: "thinking_level",
+          currentValue: "high",
+          options: [{ value: "low", name: "Low" }, { value: "medium", name: "Medium" }, { value: "high", name: "High" }],
+        }]))),
         FAKE_ACP_MODES: "default,yolo,auto_edit",
         FAKE_ACP_DUMP: dump,
       },
@@ -835,12 +969,16 @@ describe("Antigravity driver over shared ACP", () => {
     });
   });
 
+  it("runs a saved Gemini 4 Argon (High) pick as the base model at High thinking when the runtime offers only the base", async () => {
+    const { calls, selection } = await legacyPickTurn("antigravity-legacy-argon", "gemini-3.8-flash,gemini-4-argon", "gemini-4-argon-high");
+    expect(selection).toEqual({ sessionId: expect.any(String), model: "gemini-4-argon", variant: "high" });
+    expect(calls.some((call: any) => call.params.value === "gemini-4-argon-high")).toBe(false);
+  });
+
   it("keeps a suffixed Gemini 3.8 Flash pick unchanged when the runtime still offers it", async () => {
     const { calls, selection } = await legacyPickTurn("antigravity-suffixed-offered", "gemini-3.8-flash,gemini-3.8-flash-medium", "gemini-3.8-flash-medium");
     expect(selection).toEqual({ sessionId: expect.any(String), model: "gemini-3.8-flash-medium" });
-    expect(calls.filter((call: any) => call.params.configId !== "mode")).toEqual([
-      { method: "session/set_config_option", params: { sessionId: selection.sessionId, configId: "model", value: "gemini-3.8-flash-medium" } },
-    ]);
+    expect(calls.filter((call: any) => call.params.configId !== "mode")).toEqual([]);
   });
 
   it("maps only a retired suffixed id the session lacks, and never overrides a chosen thinking level", () => {
@@ -849,7 +987,9 @@ describe("Antigravity driver over shared ACP", () => {
     expect(normalizeAntigravityTurn(turn, ["gemini-3.8-flash", "gemini-3.8-flash-low"])).toBe(turn);
     expect(normalizeAntigravityTurn(turn, ["gemini-3.7-flash"])).toBe(turn);
     expect(normalizeAntigravityTurn({ ...turn, variant: "high" }, ["gemini-3.8-flash"])).toMatchObject({ model: "gemini-3.8-flash-low", variant: "high" });
-    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-3.8-pro-high" }, ["gemini-3.8-flash", "gemini-3.8-pro"])).toMatchObject({ model: "gemini-3.8-pro-high" });
+    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-medium" }, ["gemini-3.8-flash", "gemini-4-argon"])).toEqual({ ...turn, model: "gemini-4-argon", variant: "medium" });
+    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-high" }, ["gemini-4-argon", "gemini-4-argon-high"])).toEqual({ ...turn, model: "gemini-4-argon-high" });
+    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-high" }, ["gemini-3.8-flash"])).toEqual({ ...turn, model: "gemini-4-argon-high" });
   });
 
   it("keeps one process across approval and model changes, starting on OMB's model", async () => {
@@ -875,6 +1015,8 @@ describe("Antigravity driver over shared ACP", () => {
       enabled: true,
       config: { cli: fake.executable, fullAuto: false },
     });
+    await instance.startupModelRefresh;
+    rmSync(launches, { force: true });
     recorder = recordEvents(instance.adapter);
     const run = async (approvalMode: "ask" | "full" | "edits", model: string, threadId = "thread-pooled") => {
       const { turnId } = await instance!.adapter.sendTurn({
@@ -1021,6 +1163,8 @@ describe("Antigravity driver over shared ACP", () => {
       enabled: true,
       config: { cli: fake.executable, fullAuto: true },
     });
+    await instance.startupModelRefresh;
+    rmSync(launches, { force: true });
     recorder = recordEvents(instance.adapter);
     const promptModes = () => readFileSync(`${dump}.prompts.jsonl`, "utf8").trim().split("\n")
       .map((line) => JSON.parse(line).mode as string);
@@ -1074,6 +1218,8 @@ describe("Antigravity driver over shared ACP", () => {
         enabled: true,
         config: { cli: fake.executable, fullAuto: false },
       });
+      await instance.startupModelRefresh;
+      rmSync(launches, { force: true });
       recorder = recordEvents(instance.adapter);
       const promptModes = () => existsSync(`${dump}.prompts.jsonl`)
         ? readFileSync(`${dump}.prompts.jsonl`, "utf8").trim().split("\n").map((line) => JSON.parse(line).mode as string)

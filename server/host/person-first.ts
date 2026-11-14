@@ -2,9 +2,12 @@
 // turn or waits in the queue, and the engine reads a steered message only once the tool call it is in returns: a command
 // that polls CI can keep it unread for ten minutes. So once a tool call has run PERSON_FIRST_MS while the person's message
 // waits unanswered, the turn is stopped and the message runs next, ahead of anything else queued in that chat. Only a
-// person's own message does this: rooms, routines, teammates and apps wait their turn. A turn waiting on the person (a
-// question, a sign-in) or on a computer is never stopped this way.
+// person's own message does this: rooms, routines, teammates and apps wait their turn. Where several people write (a Team
+// Cloud's shared chat), only the person whose request runs does it; anyone else's line waits in the queue
+// and never reaches this. A turn waiting on the person (a question, a sign-in) or on a computer is
+// never stopped this way.
 import type { RuntimeEvent } from "../contracts.ts";
+import { conversationLanguage, serverLine } from "../server-lines.ts";
 
 export const PERSON_FIRST_MS = 60_000;
 /** How soon a turn that was waiting on the person or a computer when its time came is looked at again. */
@@ -48,8 +51,10 @@ export function ranFor(ms: number): string {
   return ms < 90_000 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.round(ms / 60_000)} min`;
 }
 
-export function stoppedLine(ms: number): string {
-  return `Stopped a step that had run for ${ranFor(ms)}, to answer you first`;
+export function stoppedLine(ms: number, language?: string): string {
+  return ms < 90_000
+    ? serverLine(language, "server.personFirst.stoppedSeconds", { seconds: Math.max(1, Math.round(ms / 1000)) })
+    : serverLine(language, "server.personFirst.stoppedMinutes", { minutes: Math.round(ms / 60_000) });
 }
 
 /** What the model is told after the person's words, in the turn that answers them. */
@@ -96,7 +101,7 @@ export function createPersonFirst(deps: PersonFirstDeps) {
     const waits = watch.waits.splice(0);
     const noted = waits.findLast((wait) => wait.requeue);
     for (const wait of waits) wait.requeue?.(wait === noted ? stoppedNote(tool.label, ran) : undefined);
-    void Promise.resolve().then(() => deps.stop(threadId, stoppedLine(ran))).catch(() => {});
+    void Promise.resolve().then(() => deps.stop(threadId, stoppedLine(ran, conversationLanguage(threadId)))).catch(() => {});
   };
 
   /** Acts once the oldest running tool call has held a waiting message for `firstMs`, else looks again then. */

@@ -3,11 +3,12 @@
 import { Check } from "lucide-react";
 import { SKINS, applySkin, resolveSkin, type SkinId } from "@/lib/skins";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
-import { setDressUp, useDressUp } from "@/lib/halloween-dress";
-import type { HalloweenBodyId } from "../../shared/halloween-bodies";
+import { t, tFromServer } from "@/lib/i18n";
+import { setDressUp, useDressUp } from "@/lib/festival-dress";
+import { FESTIVALS, isFestival, type CostumeColor, type FestivalId } from "../../shared/bot-body";
 import { MausAvatar } from "./Avatar";
-import { Switch } from "./SettingsPrimitives";
+import { useContext } from "react";
+import { SettingsLook, Switch } from "./SettingsPrimitives";
 import { useSkinChoice } from "./ThemeRow";
 
 function Miniature({ skin }: { skin: SkinId }) {
@@ -53,21 +54,19 @@ function Miniature({ skin }: { skin: SkinId }) {
   );
 }
 
-const DRESS_UP_PREVIEW: ReadonlyArray<[HalloweenBodyId, "orange" | "purple" | "teal" | "red"]> = [
-  ["pumpkin", "orange"],
-  ["ghost", "purple"],
-  ["witch", "teal"],
-  ["bat", "red"],
-];
+const DRESS_UP_PREVIEW: Record<FestivalId, readonly CostumeColor[]> = {
+  halloween: ["orange", "purple", "teal", "red"],
+  diwali: ["red", "orange", "pink", "coral"],
+};
 
-export function DressUpRow() {
+export function DressUpRow({ festival }: { festival: FestivalId }) {
   const dressed = useDressUp();
   const title = t("settings.skin.dressUp.title");
   return (
     <div data-dress-up className="mt-4 flex items-center gap-4 rounded-xl border border-accent-border/40 bg-accent/[0.06] p-3">
       <div className="flex shrink-0 -space-x-1.5" aria-hidden="true">
-        {DRESS_UP_PREVIEW.map(([body, color]) => (
-          <MausAvatar key={body} color={color} bodyId={body} size={30} animated={false} trackPointer={false} />
+        {DRESS_UP_PREVIEW[festival].map((color) => (
+          <MausAvatar key={color} color={color} bodyId={FESTIVALS[festival].costumes[color]} size={30} animated={false} trackPointer={false} />
         ))}
       </div>
       <div className="min-w-0 flex-1">
@@ -81,6 +80,34 @@ export function DressUpRow() {
 
 export function SkinPicker() {
   const active = resolveSkin(useSkinChoice());
+  const settings = useContext(SettingsLook);
+  if (settings) {
+    // Settings: no tile borders; an 80 px preview, the name under it, and the chosen one ringed in ink.
+    return (
+      <>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-4" role="radiogroup" aria-label={t("settings.theme.title")}>
+          {SKINS.map((skin) => {
+            const selected = skin.id === active;
+            return (
+              <button key={skin.id} type="button" role="radio" aria-checked={selected} onClick={() => applySkin(skin.id)}
+                title={tFromServer(`skins.tagline.${skin.id}`, skin.tagline)}
+                className="group flex cursor-pointer flex-col gap-2 rounded-lg text-left focus-visible:outline-none">
+                {/* Every preview: a 0.5 px frame. The chosen one adds the 2 px ink ring and a 16 px check at its top right. */}
+                <span className={cn("relative block rounded-lg ring-offset-2 ring-offset-(--color-menu) [&>[data-skin-preview]]:h-20 [&>[data-skin-preview]]:ring-0",
+                  "after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_0.5px_var(--settings-edge)] after:content-['']",
+                  selected ? "ring-2 ring-ink" : "group-hover:ring-[0.5px] group-hover:ring-ink/25 group-focus-visible:ring-2 group-focus-visible:ring-focus")}>
+                  <Miniature skin={skin.id} />
+                  {selected && <span aria-hidden="true" data-skin-check="" className="absolute -right-2 -top-2 flex size-4 items-center justify-center rounded-full bg-ink text-app"><Check size={12} strokeWidth={2.5} /></span>}
+                </span>
+                <span className="truncate text-[13px] leading-[18px] text-ink">{skin.name}</span>
+              </button>
+            );
+          })}
+        </div>
+        {isFestival(active) && <DressUpRow festival={active} />}
+      </>
+    );
+  }
 
   return (
     <>
@@ -107,7 +134,7 @@ export function SkinPicker() {
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium text-ink">{skin.name}</div>
                   <div className="mt-0.5 text-[11px] leading-snug text-ink-secondary">
-                    {skin.tagline}
+                    {tFromServer(`skins.tagline.${skin.id}`, skin.tagline)}
                   </div>
                 </div>
                 {selected && <Check size={13} className="mt-0.5 shrink-0 text-accent-text" />}
@@ -116,7 +143,7 @@ export function SkinPicker() {
           );
         })}
       </div>
-      {active === "halloween" && <DressUpRow />}
+      {isFestival(active) && <DressUpRow festival={active} />}
     </>
   );
 }

@@ -6,6 +6,7 @@ import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-
 import { drainCoalesceHead, DRAIN_COALESCE_MAX_ITEMS } from "./admission.ts";
 import type { ResolvedSender } from "../shared/wire.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
+import type { RoomPick } from "./room-pointed.ts";
 
 export interface ChannelQueueItem {
   id: string;
@@ -17,6 +18,10 @@ export interface ChannelQueueItem {
   sender?: ResolvedSender;
   trigger?: UsageTrigger;
   reaction?: string;
+  /** Bot ids picked from the @ list; the turn that drains this line reads its @names with them. */
+  mentions?: string[];
+  /** What the person pointed at in a member's page; only that page's bot reads it. */
+  pointed?: RoomPick;
   queuedAt: number;
 }
 
@@ -62,6 +67,8 @@ export function queueChannelMessage(
     sender?: ResolvedSender;
     trigger?: UsageTrigger;
     reaction?: string;
+    mentions?: string[];
+    pointed?: RoomPick;
   } = {},
 ): QueuedChannelMessage {
   const entry = queues.get(threadId) ?? { groupId, items: [] };
@@ -76,6 +83,8 @@ export function queueChannelMessage(
     sender: options.sender,
     trigger: options.trigger,
     ...(options.reaction ? { reaction: options.reaction } : {}),
+    ...(options.mentions?.length ? { mentions: options.mentions } : {}),
+    ...(options.pointed ? { pointed: options.pointed } : {}),
     queuedAt: Date.now(),
   };
   saveChatFollowup({ id: item.id, kind: "channel", ownerId: groupId, threadId, payload: item });
@@ -92,6 +101,15 @@ export function queuedChannelMessage(
   const entry = queues.get(threadId);
   if (!entry || entry.groupId !== groupId) return null;
   return entry.items.find((item) => item.sendId === sendId) ?? null;
+}
+
+/** The waiting line under that id, and the conversation it waits in. */
+export function channelQueueItem(groupId: string, queueId: string): { threadId: string; item: ChannelQueueItem } | null {
+  for (const [threadId, entry] of queues) {
+    const item = entry.groupId === groupId ? entry.items.find((candidate) => candidate.id === queueId) : undefined;
+    if (item) return { threadId, item };
+  }
+  return null;
 }
 
 export function cancelChannelMessage(groupId: string, queueId: string): boolean {
@@ -177,7 +195,9 @@ export function drainChannelMessages(
     settleChatFollowups(ids, "dispatching");
     entry.items.splice(0, group.length);
     if (entry.items.length === 0) queues.delete(threadId);
-    const running = run({ groupId: entry.groupId, threadId, items: group });
+    let running: void | Promise<void>;
+    try { running = run({ groupId: entry.groupId, threadId, items: group }); }
+    catch (error) { console.warn("channel-queue: queued dispatch threw", error); running = Promise.reject(error); }
     void Promise.resolve(running).then(
       () => settleChatFollowups(ids, null),
       () => settleChatFollowups(ids, "interrupted"),
@@ -193,6 +213,7 @@ export function headChannelGroup(items: readonly ChannelQueueItem[]): ChannelQue
 function coalesceIdentity(item: ChannelQueueItem): string {
   if (item.via === "api") return `api:${item.id}`;
   if (item.mode !== "chat") return `mode:${item.mode}:${item.id}`;
+  if (item.pointed) return `pointed:${item.id}`;
   if (item.sender) return `person:${item.sender.id ?? item.sender.name}`;
   return "person:local";
 }

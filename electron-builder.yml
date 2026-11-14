@@ -45,6 +45,8 @@ files:
   - "!electron/resources/recorder-helper-Info.plist"
   - "!electron/resources/OpenMausBot Recorder.app/**"
   - "!**/node_modules/**"
+  - src/locales/*.json
+  - "!src/locales/source-hashes.json"
   - package.json
 
 asar: true
@@ -134,7 +136,11 @@ mac:
     NSMicrophoneUsageDescription: OpenMausBot uses the microphone for voice dictation into the composer.
     NSSpeechRecognitionUsageDescription: OpenMausBot transcribes your voice on-device to type messages for you.
     NSAccessibilityUsageDescription: OpenMausBot uses Accessibility when you let a bot control this Mac.
+    NSLocalNetworkUsageDescription: OpenMausBot connects to your phones and your other computers on this network and on Tailscale.
+    NSBonjourServices:
+      - _openmausbot._tcp
     NSScreenCaptureUsageDescription: OpenMausBot uses Screen Recording so bots can see this Mac before acting.
+    NSDownloadsFolderUsageDescription: OpenMausBot looks in Downloads for the file your Grok Bot saved when you move it here.
   # Notarization runs manually after the build (notarytool + staple),
   # mirroring the BlueyLite ship_release.sh flow.
   notarize: false
@@ -240,6 +246,12 @@ deb:
   fpm: ["--depends", "apparmor"]
   # dpkg can preserve legacy directory modes during an upgrade. This
   # idempotent hook repairs only the exact package-owned CUA path.
+  afterInstall: build/linux-after-install.sh
+  afterRemove: build/linux-after-remove.sh
+
+pacman:
+  packageCategory: utils
+  fpm: ["--depends", "fuse3", "--depends", "gtk3", "--depends", "nss", "--depends", "alsa-lib", "--depends", "libcups", "--depends", "mesa"]
   afterInstall: build/linux-after-install.sh
   afterRemove: build/linux-after-remove.sh
 

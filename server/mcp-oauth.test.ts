@@ -176,6 +176,30 @@ describe("McpOAuthManager tokens", () => {
     manager.forget("docs");
     expect(manager.authState("docs", mcp.url)).toBe("none");
   });
+
+  it("records that a sign-in is required for a server with no record", async () => {
+    await setup();
+    manager.requireSignIn("docs", mcp.url);
+    expect(manager.authState("docs", mcp.url)).toBe("needs-sign-in");
+  });
+
+  it("leaves a signed-in server signed in and never revokes", async () => {
+    await signedIn();
+    const token = await manager.accessToken("docs", mcp.url);
+    manager.requireSignIn("docs", mcp.url);
+    manager.requireSignIn("docs", mcp.url);
+    expect(manager.authState("docs", mcp.url)).toBe("signed-in");
+    expect(await manager.accessToken("docs", mcp.url)).toBe(token);
+    expect(oauth.counts.revoke).toBe(0);
+  });
+
+  it("keeps a requirement it already recorded", async () => {
+    await setup();
+    manager.requireSignIn("docs", mcp.url);
+    manager.requireSignIn("docs", mcp.url);
+    expect(manager.authState("docs", mcp.url)).toBe("needs-sign-in");
+    expect(oauth.counts.revoke).toBe(0);
+  });
 });
 
 describe("turn servers", () => {

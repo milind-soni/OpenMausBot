@@ -2,14 +2,15 @@
 // person. These are main's own dialogs, which no page (this computer's or a server's) can draw or answer, and each one
 // defaults to Cancel.
 import { randomUUID } from "node:crypto";
+import nativeText from "./native-text.cjs";
 
-export function serverAccessDetail(env, { folders, terminal, computer }) {
+export function serverAccessDetail(env, { folders, terminal, computer }, t = nativeText.englishText.t) {
   return [
-    `Server: ${env.origin}`,
-    ...folders.map(folder => `${folder.write ? "Read and write" : "Read only"}: ${folder.path}${folder.home ? " (your whole home folder)" : ""}`),
-    terminal === true ? "Terminal: UNRESTRICTED commands as your user. Can access files outside the folders above, including credentials." : "Terminal: off",
-    computer === true ? "Computer control: can view your screen and operate logged-in apps. Can access information outside the folders above." : "Computer control: off",
-    "Shared content is sent to this server and may reach its model provider. Bots on this server can use these permissions until you revoke them. Closing the desktop stops access.",
+    t("native.lend.server", { origin: env.origin }),
+    ...folders.map(folder => `${t(folder.write ? "native.lend.readWrite" : "native.lend.readOnly", { path: folder.path })}${folder.home ? ` ${t("native.lend.wholeHome")}` : ""}`),
+    t(terminal === true ? "native.lend.terminalOn" : "native.lend.terminalOff"),
+    t(computer === true ? "native.lend.computerOn" : "native.lend.computerOff"),
+    t("native.lend.footer"),
   ].join("\n\n");
 }
 
@@ -19,9 +20,10 @@ export function serverAccessDetail(env, { folders, terminal, computer }) {
  *   window: () => ({ isDestroyed(): boolean } | null),
  *   validate: (folders: Array<{ id: string, path: string, write: boolean, home?: boolean }>) => Promise<Array<{ id: string, path: string, name: string, write: boolean, home?: boolean }>>,
  *   isHome?: (path: string) => Promise<boolean>,
+ *   t?: (key: string, params?: Record<string, string | number>) => string,
  * }} deps
  */
-export function createLendingDialogs({ dialog, window, validate, isHome = async () => false }) {
+export function createLendingDialogs({ dialog, window, validate, isHome = async () => false, t = nativeText.englishText.t }) {
   let askingTerminal = false;
   return {
     /** Turning the terminal on runs `lend` only once the person confirms, one question at a time; turning it off never asks.
@@ -32,9 +34,9 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
         askingTerminal = true;
         try {
           const { response } = await dialog.showMessageBox({
-            type: "warning", buttons: ["Let them run commands", "Cancel"], defaultId: 1, cancelId: 1,
-            message: "Let your Clouds run commands on this computer?",
-            detail: "Bots on your own Clouds could run any command on this computer as you, including reading and changing any file you can. You can turn this off from the OpenMausBot icon's menu.",
+            type: "warning", buttons: [t("native.lend.terminalAllow"), t("native.common.cancel")], defaultId: 1, cancelId: 1,
+            message: t("native.lend.terminalTitle"),
+            detail: t("native.lend.terminalDetail"),
           });
           if (response !== 0) return false;
         } finally { askingTerminal = false; }
@@ -51,16 +53,17 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
       if (await isHome(folder.path)) {
         // What stays private is `personalSecretPaths` and this app's own data (computer-sharing.mjs `protectedRoots`),
         // refused inside any lent folder, the home folder included.
-        const { response } = await dialog.showMessageBox(window(), { type: "warning", message: "Share your whole home folder?",
-          detail: "Everything in your home folder becomes readable by the bots you allow. The places that hold keys, passwords and browser data, like .ssh and your browsers' profiles, always stay private.",
-          buttons: ["Share home folder", "Cancel"], defaultId: 1, cancelId: 1 });
+        const { response } = await dialog.showMessageBox(window(), { type: "warning", message: t("native.lend.home.title"),
+          detail: t("native.lend.home.detail"),
+          buttons: [t("native.lend.home.button"), t("native.common.cancel")], defaultId: 1, cancelId: 1 });
         if (response !== 0) return null;
         folder.home = true;
       }
       return (await validate([folder]))[0];
     },
     async confirmServerAccess(env, grant) {
-      const { response } = await dialog.showMessageBox(window(), { type: "warning", message: `Allow computer access for ${env.name}?`, detail: serverAccessDetail(env, grant), buttons: ["Allow access", "Cancel"], defaultId: 1, cancelId: 1 });
+      const { response } = await dialog.showMessageBox(window(), { type: "warning", message: t("native.lend.allow.title", { name: env.name }), detail: serverAccessDetail(env, grant, t),
+        buttons: [t("native.lend.allow.button"), t("native.common.cancel")], defaultId: 1, cancelId: 1 });
       return response === 0;
     },
   };

@@ -57,6 +57,7 @@ function world(options: { inboxThread?: string; live?: string[] } = {}) {
       return { ok: true as const };
     }),
     answeredIn: (threadId, requestId) => (threadId === "inbox" && requestId.startsWith("req") ? "work" : threadId),
+    now: () => 0,
     answerNode: (id, text) => {
       const parked = nodes.get(id);
       if (!parked || parked.status !== "waiting") return false;
@@ -68,7 +69,7 @@ function world(options: { inboxThread?: string; live?: string[] } = {}) {
   const cards = createAskCards(deps);
   const node = (over: Partial<HandoffView> = {}): HandoffView => {
     const made = { id: "as_1", rootId: "root", parentId: "root", threadId: "work", botId: "ledger", key: "ledger", text: "Fix it", createdAt: 1_000,
-      startedAt: 1_000, status: "waiting", result: "", reported: false, executions: 1, lastProgressAt: 1_000, approvalGranted: false, kind: "work",
+      startedAt: 1_000, status: "waiting", result: "", reported: false, executions: 1, lastProgressAt: 1_000, kind: "work",
       restarts: 0, mode: "work", reply: "resume", ...over } as HandoffView;
     nodes.set(made.id, made);
     return made;
@@ -89,6 +90,16 @@ describe("a teammate's NEEDS INPUT question", () => {
       card: { subtitle: QUESTION, options: [], requestId: "needs-input-as_1-1", requestType: "question" } });
     expect(w.rows("inbox").map((row) => row.tool?.name)).toEqual([`Ledger needs your input: ${QUESTION}`]);
     expect(w.notified.map((notification) => [notification.kind, notification.threadId])).toEqual([["question", "work"]]);
+  });
+
+  it("keeps the localized chip's question identical to its English fallback, without the default answer", () => {
+    const w = world();
+    w.cards.park(w.node(), "CSV or Excel?\nDefault: CSV");
+    expect(w.rows("inbox")[0]?.tool).toMatchObject({
+      name: "Ledger needs your input: CSV or Excel?",
+      nameCode: "chat.notice.teammateNeedsInput",
+      nameParams: { name: "Ledger", question: "CSV or Excel?" },
+    });
   });
 
   it("turns a reply that is only the question into the card itself", () => {
@@ -151,11 +162,11 @@ describe("a teammate's NEEDS INPUT question", () => {
     expect(room.cards.answerParked("work", "needs-input-as_1-1", "once more")).toBe(false);
   });
 
-  it("keeps a parked card's wait as it was: a chip and the work's notice", () => {
+  it("keeps a parked card's chip, and leaves telling the person to the card itself", () => {
     const card = world({ inboxThread: "inbox" });
     card.cards.park(card.node({ cards: ["m9"] }), "Waiting on the person: connect Gmail");
     expect(card.rows("inbox").map((row) => row.tool?.name)).toEqual(["Ledger needs your input: Waiting on the person: connect Gmail"]);
-    expect(card.notified.map((notification) => notification.kind)).toEqual(["delegation-settled"]);
+    expect(card.notified).toEqual([]);
   });
 });
 
@@ -212,7 +223,7 @@ describe("nothing stale waits on the person", () => {
     w.say("inbox", "Scout: something else");
     w.cards.park(node, "Waiting on the person: sign in to notion.so", true);
     expect(w.rows("inbox").filter((row) => row.tool?.name.includes("needs your input"))).toHaveLength(1);
-    expect(w.notified).toHaveLength(1);
+    expect(w.notified).toEqual([]);
   });
 
   it("a newer question closes the bot's older one that no turn waits on any more, but not one a turn still waits on", () => {
@@ -348,6 +359,28 @@ describe("a typed line answers a question card", () => {
     w.refuse({ status: 403, error: "This question is Ben's to answer." });
     expect(await w.cards.typed(AUTH, "work", "Yes", undefined, {})).toEqual({ status: 403, error: "This question is Ben's to answer." });
     expect(w.rows("work").filter((row) => row.role === "user")).toEqual([]);
+  });
+});
+
+describe("a reminder of work parked on the person", () => {
+  const closesAt = 2 * 24 * 60 * 60_000;
+
+  it("names the question and when it closes, and adds no second row", () => {
+    const w = world();
+    const node = w.node({ status: "waiting", question: "Which region?\nDefault: eu-west" });
+    w.cards.remind(node, closesAt);
+    expect(w.notified).toHaveLength(1);
+    expect(w.notified[0]).toMatchObject({ kind: "question", botId: "ledger", threadId: "work", body: expect.stringContaining("Which region?") });
+    expect(w.notified[0]!.body).toContain("2 days");
+    expect(w.notified[0]!.body).not.toContain("eu-west");
+    expect(w.rows("work")).toEqual([]);
+  });
+
+  it("does not read a card's internal wait description to the person", () => {
+    const w = world();
+    w.cards.remind(w.node({ status: "waiting", question: "Waiting on the person: provide API key", cards: ["m1"] }), closesAt);
+    expect(w.notified[0]!.body).not.toContain("Waiting on the person");
+    expect(w.notified[0]!.body).toContain("2 days");
   });
 });
 

@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from "react";
 
 import { hasPriorRun } from "./prior-run";
+import { SIMPLE_ONLY } from "./simple-only";
+import { windowPrefChanged } from "./window-pref-changes";
 
 export const ADVANCED_MODE_KEY = "omb-advanced-mode";
 
@@ -16,6 +18,7 @@ function storage(): Storage | undefined {
 }
 
 export function readAdvancedMode(): boolean {
+  if (SIMPLE_ONLY) return false;
   if (sessionChoice !== undefined) return sessionChoice;
   try {
     const store = storage();
@@ -60,12 +63,14 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function setAdvancedMode(enabled: boolean): void {
+  if (SIMPLE_ONLY) return;
   sessionChoice = enabled;
   try {
     storage()?.setItem(ADVANCED_MODE_KEY, enabled ? "1" : "0");
   } catch {
   }
   notify();
+  windowPrefChanged();
 }
 
 export function useAdvancedMode(): boolean {

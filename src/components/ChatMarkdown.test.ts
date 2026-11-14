@@ -30,6 +30,7 @@ import { BotEditorStore, initialState, StoreProvider } from "@/state/store";
 import { setLocale } from "@/lib/i18n";
 import { ThreadRefsContext } from "./ThreadRefs";
 import * as AttachmentPreview from "./AttachmentPreview";
+import { messageReferencesFile } from "../../server/message-file";
 
 // Most of this file pins Advanced mode's chrome; the Simple code block has its own tests below.
 const mode = vi.hoisted(() => ({ advanced: true }));
@@ -58,6 +59,9 @@ vi.mock("shiki/core", () => ({
 vi.mock("shiki/engine/javascript", () => ({
   createJavaScriptRegexEngine: () => ({}),
 }));
+// These tests pin how a block is coloured, not when: without an observer a block counts as near the screen at once.
+// Tests below undo every stubbed global, so the observer is deleted instead.
+delete (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
 
 describe("soft line breaks", () => {
   it("keeps a reply's single line breaks as line breaks, outside code", () => {
@@ -65,6 +69,16 @@ describe("soft line breaks", () => {
     expect(html).toContain('<p dir="ltr">1<br/>\n2<br/>\n3</p>');
     expect(html).toMatch(/>a<\/code><br\/>\nb<\/p>/);
     expect(html).toContain(">x\ny</pre>");
+  });
+});
+
+describe("spoilers", () => {
+  it("hides only double-tilde spans, not text between ranges written with a single tilde", () => {
+    const ranges = renderToStaticMarkup(createElement(ChatMarkdown, { text: "Episodes 77~82 first, then 77~80." }));
+    expect(ranges).not.toContain("Reveal spoiler");
+    expect(ranges).toContain("Episodes 77~82 first, then 77~80.");
+    const spoiler = renderToStaticMarkup(createElement(ChatMarkdown, { text: "The answer is ~~42~~." }));
+    expect(spoiler).toContain("Reveal spoiler");
   });
 });
 
@@ -339,7 +353,7 @@ describe("repaired tables", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
       text: "Pros | Cons\n---\n\n| a \\| b | c |\n| --- | --- |\n| 1 | 2 |",
     }));
-    expect(html).toContain('font-semibold">Pros | Cons</div>');
+    expect(html).toContain('tracking-[-0.005em]">Pros | Cons</div>');
     expect(html.match(/<table\b/g)).toHaveLength(1);
     expect(html).toContain(">a | b</span>");
     expect(html.match(/<th\b/g)).toHaveLength(2);
@@ -542,7 +556,7 @@ describe("#Title thread links in markdown", () => {
     const markup = render("`#QA PR 245` in code, [#QA PR 245](https://example.test) as a link, #123 an issue\n\n# QA PR 245\n\nplain");
     expect(markup).not.toContain("data-thread-link");
     expect(markup).toContain("<code");
-    expect(markup).toContain('font-semibold">QA PR 245</div>');
+    expect(markup).toContain('tracking-[-0.01em]">QA PR 245</div>');
   });
 
   it("does nothing without any visible threads", () => {
@@ -755,7 +769,7 @@ describe("ChatMarkdown attachments", () => {
       text: "[macOS](file:///Users/milind/report.md) [Windows](C:/Users/Maus/report.md)",
       message: { threadId: "thread-1", messageId: "message-1" },
     }));
-    expect(html).toContain('title="Save a copy"');
+    expect(html).toContain('title="Preview: report.md"');
     expect(html).not.toContain("/Users/milind/report.md");
     expect(html).not.toContain("C:/Users/Maus/report.md");
   });
@@ -797,7 +811,7 @@ describe("ChatMarkdown attachments", () => {
         text: "[Report](C:\\Users\\Maus\\.openmausbot\\report.md)\n\n![Chart](C:\\Users\\Maus\\.openmausbot\\chart.png)",
         message: { threadId: "thread-1", messageId: "message-1" },
       }));
-      expect(html).toContain('title="Save a copy"');
+      expect(html).toContain('title="Preview: report.md"');
       expect(html).not.toContain('href=""');
       expect(html).not.toContain("Image unavailable");
       expect(save.mock.calls[0]?.[0]).toBe("C:\\Users\\Maus\\.openmausbot\\report.md");
@@ -821,6 +835,34 @@ describe("ChatMarkdown attachments", () => {
     }
   });
 
+  it("links a path written as plain text, and the server authorizes the very path the link asks for", () => {
+    const cases: Array<[string, string]> = [
+      ["I saved the report to /Users/maus/reports/q3.md, have a look.", "/Users/maus/reports/q3.md"],
+      ["It's in `/Users/maus/My Reports/q3 final.md`.", "/Users/maus/My Reports/q3 final.md"],
+      [String.raw`Written to C:\Users\Maus\.openmausbot\report.md.`, String.raw`C:\Users\Maus\.openmausbot\report.md`],
+      [String.raw`It's on \\fileserver\team\plans\roadmap.docx now.`, String.raw`\\fileserver\team\plans\roadmap.docx`],
+      [String.raw`Saved /tmp/out/my\_notes.md`, "/tmp/out/my_notes.md"],
+    ];
+    for (const [text, expected] of cases) {
+      const save = vi.spyOn(AttachmentPreview, "useLocalFileSave");
+      try {
+        renderToStaticMarkup(createElement(ChatMarkdown, { text, message: { threadId: "thread-1", messageId: "message-1" } }));
+        const requested = save.mock.calls[0]?.[0];
+        // Spaces travel percent-encoded, as in any Markdown link, and the server decodes them once.
+        expect(requested!.replace(/%20/g, " ")).toBe(expected);
+        expect(messageReferencesFile(text, requested!)).toBe(true);
+      } finally {
+        save.mockRestore();
+      }
+    }
+  });
+
+  it("does not authorize a path the message never rendered as a link", () => {
+    expect(messageReferencesFile("Use and/or here, or /etc alone.", "/etc")).toBe(false);
+    expect(messageReferencesFile("```\ncat /Users/maus/notes.md\n```", "/Users/maus/notes.md")).toBe(false);
+    expect(messageReferencesFile(String.raw`On \\fileserver\team\a.md`, String.raw`\fileserver\team\a.md`.slice(1))).toBe(false);
+  });
+
   it("keeps an unscoped legacy file link inert", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
       text: "[Download the report](/workspace/final-report.pdf)",
@@ -838,6 +880,7 @@ describe("ChatMarkdown attachments", () => {
       reason: "",
       savedTo: "",
       outsideWorkspace: false,
+      retryable: false,
       folder: {
         name: "04_post",
         entries: [{ name: "cover.png", bytes: 2048, mime: "image/png" }],
@@ -865,6 +908,7 @@ describe("ChatMarkdown attachments", () => {
         reason: "the linked file is outside this conversation's workspace",
         savedTo: "",
         outsideWorkspace,
+        retryable: !outsideWorkspace,
         folder: null,
         save: vi.fn(async () => undefined),
       });
@@ -1208,7 +1252,7 @@ describe("bidi: message content carries its own direction", () => {
       ].join("\n"),
     }));
 
-    expect(html).toContain('<div dir="rtl" class="mt-3 text-[18px] font-semibold">');
+    expect(html).toContain('<div dir="rtl" class="md-heading mt-3 text-[20px] font-semibold leading-[26px] tracking-[-0.01em]">');
     expect(html).toContain('<p dir="rtl">');
     expect(html).toContain('<p dir="ltr">An English paragraph');
     expect(html).toContain('<blockquote dir="rtl"');
@@ -1370,13 +1414,16 @@ describe("Simple mode's code block", () => {
 
   it("drops the header bar for a quiet surface, with Copy and a ⋯ menu on a hover plate", () => {
     const html = simple(() => renderToStaticMarkup(createElement(CodeBlock, { code: "const a = 1;", lang: "js" })));
-    expect(html).toMatch(/class="chat-code-block group\/code relative my-2\.5 overflow-hidden rounded-lg bg-ink\/\[0\.04\]"/);
+    expect(html).toMatch(/class="chat-code-block group\/code relative my-2\.5 overflow-hidden rounded-xl bg-ink\/\[0\.04\]"/);
     expect(html).not.toContain("border-hairline");
     expect(html).not.toContain('aria-label="Wrap long lines"');
     const plate = html.match(/<div data-code-plate="[^"]*" class="([^"]*)"/)?.[1] ?? "";
     expect(plate.split(" ")).toEqual(expect.arrayContaining(["opacity-0", "group-hover/code:opacity-100", "focus-within:opacity-100", "touch:opacity-100"]));
     expect(html).toContain('aria-label="Copy code"');
     expect(html).toContain('aria-label="More"');
+    // A finger-sized target on touch screens, and a ring on the menu's button for the keyboard.
+    expect(html.match(/<button[^>]*aria-label="Copy code"[^>]*>/)?.[0]).toContain("touch:size-11");
+    expect(html.match(/<button[^>]*aria-label="More"[^>]*>/)?.[0]).toContain("focus-visible:ring-2");
     expect(html).toMatch(/<pre class="[^"]*leading-5 px-3 py-2 text-ink-secondary/);
   });
 
@@ -1385,5 +1432,33 @@ describe("Simple mode's code block", () => {
     expect(html).toContain("data-code-plate");
     expect(html).toContain('aria-label="Copy diagram source"');
     expect(html).not.toContain('title="Mermaid diagram"');
+  });
+});
+
+describe("a code block far from the screen", () => {
+  it("stays plain until it comes near the screen, then is coloured", async () => {
+    let report: IntersectionObserverCallback | undefined;
+    (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = class {
+      constructor(callback: IntersectionObserverCallback) { report = callback; }
+      observe() {}
+      unobserve() {}
+    };
+    shiki.codeToHtml.mockReset();
+    shiki.codeToHtml.mockImplementation(async (code: string) => `<pre class="near-probe">${code}</pre>`);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(createElement(ChatMarkdown, { text: "```ts\nconst farAway = 1;\n```" })));
+      expect(shiki.codeToHtml).not.toHaveBeenCalled();
+      expect(host.textContent).toContain("const farAway = 1;");
+      await act(async () => report!([{ target: host.querySelector(".chat-code-block")!, isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
+      await vi.waitFor(() => expect(host.querySelector(".near-probe")?.textContent).toBe("const farAway = 1;"));
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      delete (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
+      shiki.codeToHtml.mockReset();
+    }
   });
 });

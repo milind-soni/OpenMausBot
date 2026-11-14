@@ -10,6 +10,7 @@ import type * as DuckDB from "@duckdb/node-api";
 import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
 import { botFolder as defaultBotFolder } from "../bot-folder.ts";
 import { DATA_DIR } from "../config.ts";
+import { tableIdentifierParts } from "./identifiers.ts";
 import {
   DataFailure,
   type BotDatabase,
@@ -165,7 +166,7 @@ function missingTableName(message: string): string | null {
 
 type InterruptCause = "timeout" | "cancelled";
 
-type RunState = { interrupted: InterruptCause | null; retry?: NodeJS.Timeout };
+type RunState = { interrupted: InterruptCause | null; deadline: number; retry?: NodeJS.Timeout };
 
 function failureFrom(error: unknown, sql: string, interrupted: InterruptCause | null, timeoutMs: number): DataFailure {
   if (error instanceof DataFailure) return error;
@@ -195,27 +196,10 @@ export class Lane {
   private async execute<T>(sql: string, options: { timeoutMs?: number; signal?: AbortSignal }, work: (connection: DuckDB.DuckDBConnection) => Promise<T>): Promise<T> {
     const timeoutMs = options.timeoutMs ?? DATA_LIMITS.sqlTimeoutMs;
     if (options.signal?.aborted) throw new DataFailure({ code: "cancelled", message: "Cancelled before it ran.", sql });
-    const state: RunState = { interrupted: null };
-    const deadline = Date.now() + timeoutMs;
+    const state: RunState = { interrupted: null, deadline: Date.now() + timeoutMs };
     this.running = state;
-    // DuckDB honours an interrupt only once its statement is dispatched, so a cause keeps re-delivering
-    // until the statement settles: one that lands first is not lost, and no cause blocks the next.
-    const interrupt = (cause: InterruptCause) => {
-      state.interrupted ??= cause;
-      this.connection.interrupt();
-      if (state.retry || Date.now() >= deadline) return;
-      const retry = setInterval(() => {
-        if (Date.now() >= deadline) {
-          clearInterval(retry);
-          state.retry = undefined;
-          return;
-        }
-        this.connection.interrupt();
-      }, INTERRUPT_DELIVERY_MS);
-      state.retry = retry;
-    };
-    const timer = setTimeout(() => interrupt("timeout"), timeoutMs);
-    const onAbort = () => interrupt("cancelled");
+    const timer = setTimeout(() => this.stop(state, "timeout"), timeoutMs);
+    const onAbort = () => this.stop(state, "cancelled");
     options.signal?.addEventListener("abort", onAbort, { once: true });
     try {
       return await work(this.connection);
@@ -230,9 +214,24 @@ export class Lane {
   }
 
   interrupt(): void {
-    if (!this.running) return;
-    this.running.interrupted ??= "cancelled";
+    if (this.running) this.stop(this.running, "cancelled");
+  }
+
+  // DuckDB honours an interrupt only once its statement is dispatched, so a cause keeps re-delivering
+  // until the statement settles: one that lands first is not lost, and no cause blocks the next.
+  private stop(state: RunState, cause: InterruptCause): void {
+    state.interrupted ??= cause;
     this.connection.interrupt();
+    if (state.retry || Date.now() >= state.deadline) return;
+    const retry = setInterval(() => {
+      if (Date.now() >= state.deadline) {
+        clearInterval(retry);
+        state.retry = undefined;
+        return;
+      }
+      this.connection.interrupt();
+    }, INTERRUPT_DELIVERY_MS);
+    state.retry = retry;
   }
 }
 
@@ -452,7 +451,7 @@ class BotDb implements BotDatabase {
   }
 
   private async lookup(name: string): Promise<CatalogEntry> {
-    const parts = this.splitIdentifier(name.trim()).slice(-2);
+    const parts = (tableIdentifierParts(name) ?? this.splitIdentifier(name.trim())).slice(-2);
     const table = parts[parts.length - 1];
     const schema = parts.length === 2 ? parts[0] : null;
     if (!table) throw new DataFailure({ code: "invalid_input", message: "A table name is required." });
@@ -521,8 +520,10 @@ class BotDb implements BotDatabase {
 
   private async source(target: string): Promise<string> {
     const text = target.trim().replace(/;+\s*$/, "");
-    const looksLikeName = /^[\w."$ -]+$/.test(text) && !/\s(?:from|select|with|values)\s/i.test(text) && !/^(?:select|with|from|values|pivot|unpivot|show|describe)\b/i.test(text);
-    if (looksLikeName) return this.resolveTable(text);
+    // Keep accepting the display names callers could pass before quoted SQL
+    // identifiers were recognized here (for example, Order Items).
+    const displayName = /^[\w."$ -]+$/.test(text) && !/\s(?:from|select|with|values)\s/i.test(text) && !/^(?:select|with|from|values|pivot|unpivot|show|describe)\b/i.test(text);
+    if (tableIdentifierParts(text) || displayName) return this.resolveTable(text);
     return `(${text}) AS omb_described`;
   }
 

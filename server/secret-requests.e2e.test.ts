@@ -1,7 +1,8 @@
 // A real Cloud home and its agents tools: a bot asks for two secrets OpenMausBot does not keep, the person types each
 // into its card, and the bot uses them. Each recognisable value is then searched for in everything the server wrote (the
 // data folder, its events, transcripts, usage spans and logs), every answer it gave, every tool result and its own log.
-// The file secret is found only in its private file; the ref secret only in the MCP server settings it was saved into.
+// Both are saved to the Vault for the bot, sealed, so asking again needs no card. The file secret is found only in its
+// private files; the ref secret only in the MCP server settings it was saved into.
 import { randomBytes } from "node:crypto";
 import { type ChildProcess, spawn } from "node:child_process";
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -151,7 +152,7 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Set up Stripe test charges and Notion's MCP." })).status).toBe(202);
   });
   const listed = (await tools.list()).tools.find((tool: any) => tool.name === "request_credential");
-  expect(Object.keys(listed.inputSchema.properties)).toEqual(["credential_id", "label", "reason", "placeholder", "delivery"]);
+  expect(Object.keys(listed.inputSchema.properties)).toEqual(["credential_id", "address", "label", "reason", "placeholder", "delivery", "replace"]);
   expect(listed.inputSchema.properties.credential_id.enum).toEqual(expect.arrayContaining(["composioApiKey", "openaiApiKey", "anthropicApiKey"]));
   const cards = async () => (await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages.filter((message: any) => message.kind === "secret");
   const save = (cardId: string, value: unknown) => api("POST", `/api/bots/${bot.id}/secret-cards/${cardId}/save`, { threadId: bot.threadId, value });
@@ -159,16 +160,19 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   // A file for the bot's own commands.
   expect((await tools.call("request_credential", { label: "Stripe secret key", reason: "To create test charges." })).text).toMatch(/needs delivery/u);
   const askedFile = await tools.call("request_credential", { label: "Stripe secret key", reason: "To create test charges.", placeholder: "sk_test_…", delivery: "file" });
-  expect(askedFile).toEqual({ isError: false, text: expect.stringMatching(/^A secure card for Stripe secret key is ready/u) });
+  expect(askedFile).toEqual({ isError: false, text: expect.stringMatching(/^A secure card for Stripe secret key is now in this conversation/u) });
   const fileCard = (await cards()).at(-1);
   expect(fileCard.secret).toMatchObject({ target: "customSecret", label: "Stripe secret key", placeholder: "sk_test_…", helpUrl: "", delivery: "file", reason: "To create test charges." });
-  expect(fileCard.secret.description).toBe("To create test charges. Ledger's commands can read it from a private file for 24 hours; it is never added to chat.");
+  expect(fileCard.secret.description).toBe("To create test charges. Ledger's commands can read it from a private file for 24 hours; it is never added to chat. OpenMausBot keeps it safely, so Ledger can use it again without asking you.");
   expect(await save(fileCard.id, "")).toMatchObject({ status: 400 });
   expect(await save(fileCard.id, FILE_CANARY)).toMatchObject({ status: 200, body: { provided: true } });
   expect(await save(fileCard.id, FILE_CANARY)).toMatchObject({ status: 409, body: { error: "this secret was already saved" } });
+  const cardFile = join(home, ".openmausbot", "workspaces", bot.id, ".openmausbot-secrets", bot.threadId, fileCard.id);
+  expect(readFileSync(cardFile, "utf8")).toBe(FILE_CANARY);
   const fileText = (await tools.call("request_credential", { label: "Stripe secret key", reason: "To create test charges.", delivery: "file" })).text;
-  const secretFile = join(home, ".openmausbot", "workspaces", bot.id, ".openmausbot-secrets", bot.threadId, fileCard.id);
-  expect(fileText).toContain(`saved Stripe secret key to the file ${secretFile}`);
+  expect((await cards()).at(-1).id, "the Vault answers with no card").toBe(fileCard.id);
+  const secretFile = /saved Stripe secret key to the file (\S+vault-[\w-]+)\./u.exec(fileText)?.[1] ?? "";
+  expect(secretFile.startsWith(dirname(cardFile)), fileText).toBe(true);
   expect(fileText).toContain("never print, echo, log or copy it anywhere else");
   expect(readFileSync(secretFile, "utf8")).toBe(FILE_CANARY);
   expect(statSync(secretFile).mode & 0o777).toBe(0o600);
@@ -176,7 +180,7 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   // A one-use secretRef for mcp_server.
   await tools.call("request_credential", { label: "Notion key", reason: "For Notion's MCP server.", delivery: "ref" });
   const refCard = (await cards()).at(-1);
-  expect(refCard.secret.description).toBe("For Notion's MCP server. Ledger gets a one-use reference for OpenMausBot's own tools and never sees it.");
+  expect(refCard.secret.description).toBe("For Notion's MCP server. Ledger gets a one-use reference for OpenMausBot's own tools and never sees it. OpenMausBot keeps it safely, so Ledger can use it again without asking you.");
   expect(await save(refCard.id, REF_CANARY)).toMatchObject({ status: 200, body: { provided: true } });
   const refText = (await tools.call("request_credential", { label: "Notion key", reason: "For Notion's MCP server.", delivery: "ref" })).text;
   const ref = /secret-ref:[0-9a-f]{32}/u.exec(refText)?.[0];
@@ -189,7 +193,8 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   const added = await tools.call("mcp_server", { action: "add", name: "notion", url: "https://mcp.notion.test/mcp", headers: { Authorization: `Bearer ${ref}`, "Notion-Version": "2022-06-28" } });
   expect(added).toEqual({ isError: false, text: expect.stringMatching(/^Added MCP server notion and turned it on\. Test: /u) });
   const config = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-  expect(config.mcpServers.notion.headers).toEqual({ Authorization: `Bearer ${REF_CANARY}`, "Notion-Version": "2022-06-28" });
+  expect(config.mcpServers.notion.headers).toEqual({ Authorization: expect.stringMatching(/^Bearer vault:[0-9a-f-]{36}$/u), "Notion-Version": "2022-06-28" });
+  expect(JSON.stringify(config)).not.toContain(REF_CANARY);
   const reused = await tools.call("mcp_server", { action: "add", name: "notion2", url: "https://mcp.notion.test/mcp", headers: { Authorization: `Bearer ${ref}` } });
   expect(reused).toEqual({ isError: true, text: `${ref} was already used: each secretRef works once. Ask again with request_credential.` });
   const pathAsRef = await tools.call("mcp_server", { action: "add", name: "stripe", command: "npx", env: { STRIPE_SECRET_KEY: secretFile } });
@@ -199,9 +204,9 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   // A bot that disobeys and writes a value into its memory still leaves it out of every record.
   expect((await tools.call("memory_update", { action: "append", text: `Stripe test key: ${FILE_CANARY}` })).isError).toBe(false);
 
-  // Only the secret file holds one value, and only the MCP server's settings the other.
-  expect(filesHolding(home, FILE_CANARY)).toEqual([relative(home, secretFile)]);
-  expect(filesHolding(home, REF_CANARY)).toEqual([join(".openmausbot", "config.json")]);
+  // Only the secret files hold one value, and nothing plain holds the other: the Vault keeps both sealed.
+  expect(filesHolding(home, FILE_CANARY).sort()).toEqual([relative(home, cardFile), relative(home, secretFile)].sort());
+  expect(filesHolding(home, REF_CANARY)).toEqual([]);
   for (const where of [...said, log]) {
     expect(where).not.toContain(FILE_CANARY);
     expect(where).not.toContain(REF_CANARY);

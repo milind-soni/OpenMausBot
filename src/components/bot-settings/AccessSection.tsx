@@ -7,20 +7,22 @@ import { useBotEditor } from "./BotEditorContext";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { mcpServersForBot, mcpServersOfBot, useMcpServers } from "@/lib/mcp-servers";
-import { placeFacts, placeViewFor, usePlaceSeat } from "@/lib/place-view";
+import { mcpServersForBot, mcpServersOfBot, mcpSwitch, useMcpServers } from "@/lib/mcp-servers";
+import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable } from "@/lib/local-computer";
+import { placeBlocked, placeFacts, placeHasIssue, placeViewFor, usePlaceSeat, type PlaceSeat } from "@/lib/place-view";
 import { shortPath } from "@/lib/short-path";
 import { isOwnThreadFolder } from "../../../shared/thread-folder";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { CloudBackendPicker } from "../CloudBackendPicker";
+import { placeManagedBy, worksOnChoices, WorksOnGrid, worksOnSelected, type WorksOnMode } from "../WorksOnGrid";
 import { Switch } from "../SettingsPrimitives";
 import { PhoneAppsCard } from "./PhoneAppsCard";
 import { ProposalStatus } from "./ProposalStatus";
 import { ToolSelectionCard } from "./ToolSelectionCard";
+import { BotApiCard } from "./BotApiCard";
 import { ToolBudgetLine } from "./ToolBudgetLine";
 import { useCloudPlan } from "../ProIntroduction";
 import { xResearchAction } from "@/lib/cloud-plan";
-import { HIGHLEVEL_SLUG } from "@/lib/highlevel-sign-in";
 import { useBotApps } from "./useBotApps";
 import {
   classifyConnectorTool,
@@ -134,9 +136,7 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
 
   const toggle = (name: string) => {
     if (!servers || bot.busy || error) return;
-    const current = usesAll ? servers.filter((server) => server.enabled).map((server) => server.name) : [...(bot.mcpServers ?? [])];
-    const next = current.includes(name) ? current.filter((item) => item !== name) : [...current, name];
-    patch({ mcpServers: next });
+    patch({ mcpServers: mcpSwitch(servers, bot.mcpServers, name) });
   };
   const openPlugins = () => {
     dispatch({ type: "toggleSettings", open: false });
@@ -601,7 +601,7 @@ export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<ty
   if (!cloudPreferenceShown(bot, state.config)) return null;
   return (
     <>
-      {!bot.computer && (
+      {!bot.computer && !draft && (
         <div className="mt-3 rounded-lg bg-inset px-3 py-2.5 text-[12px] leading-relaxed text-ink-secondary">
           <span className="font-medium text-ink">{t("botAccess.cloud.autoTitle")}</span>{" "}
           {t("botAccess.cloud.autoDescription")}
@@ -632,6 +632,37 @@ export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<ty
   );
 }
 
+function DraftWorksOn({ bot, patch, seat }: { bot: Bot; patch: ReturnType<typeof useBotSettingsDerived>["patch"]; seat: PlaceSeat }) {
+  const { state } = useStore();
+  const { capabilities } = useDesktopCapabilities();
+  const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
+  const localReason = localComputerDisabledReason({ capabilities, providerSupportsLocal });
+  const named = { ...bot, name: bot.name || t("sidebar.newBotSimple") };
+  const options = worksOnChoices(state.config, capabilities).map(([mode, labelKey, descriptionKey, Icon]) => {
+    const view = placeViewFor(placeFacts({
+      bot: named, place: mode ?? "auto", seat, config: state.config, instances: state.instances,
+      local: {
+        ready: localComputerSelectable({ capabilities, providerSupportsLocal }),
+        reason: localReason ?? t("computer.unavailableLocal"),
+      },
+    }));
+    const managedBy = placeManagedBy(mode, bot.cloudBackend, state.config?.managedPolicy);
+    return {
+      mode, labelKey, descriptionKey, Icon, view, managedBy,
+      selected: worksOnSelected(mode, bot.computer, capabilities),
+      disabled: Boolean(managedBy) || placeBlocked(view),
+      issue: !managedBy && placeHasIssue(view),
+      note: placeHasIssue(view) ? view.line : mode === "local" ? localReason ?? undefined : undefined,
+    };
+  });
+  const choose = (mode: WorksOnMode) => patch(mode === "browser" ? { computer: mode, browser: true } : { computer: mode });
+  return <>
+    <div className="text-[15px] font-medium text-ink">{t("computer.worksOn")}</div>
+    <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{t(state.config?.cloudHome ? "computer.worksOnHintCloudHome" : "computer.worksOnHint")}</p>
+    <WorksOnGrid options={options} onSelect={choose} />
+  </>;
+}
+
 export type AccessPart = "worksOn" | "folder" | "apps" | "phone" | "xResearch" | "mcp" | "tools" | "browser" | "webhooks" | "always";
 
 export function AccessSection({
@@ -660,11 +691,11 @@ export function AccessSection({
   } = derived;
   const browserInstallable = state.config?.browserEngine?.installable === true;
   const { capabilities } = useDesktopCapabilities();
-  const placeSeat = usePlaceSeat(state.config, capabilities.host?.platform ?? "other");
+  const placeSeat = usePlaceSeat(state.config, capabilities);
   const worksOn = placeViewFor(placeFacts({
     bot, place: bot.computer ?? "auto", seat: placeSeat, config: state.config, instances: state.instances,
   }));
-  // The same list the Vault tab shows: Composio's connected accounts plus the native HighLevel connection.
+  // The same list the Vault tab shows: Composio's connected accounts plus the native Email connection.
   const apps = useBotApps(bot);
   const inventoryReady = apps.phase === "ready";
   const connectedSlugs = apps.connectedSlugs;
@@ -677,18 +708,20 @@ export function AccessSection({
   return (
     <div className="flex flex-col gap-4">
       {shows("worksOn") && <div className="rounded-xl bg-card p-4" data-testid="access-works-on">
-        <div className="text-[15px] font-medium text-ink">{t("access.worksOn", { name: bot.name, short: worksOn.short })}</div>
-        <ProposalStatus bot={bot} kind="owner" />
-        <button
-          type="button"
-          onClick={() => {
-            dispatch({ type: "toggleSettings", open: false });
-            dispatch({ type: "toggleComputer", open: true });
-          }}
-          className="mt-3 rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
-        >
-          {t("place.action.openComputerPanel")}
-        </button>
+        {draft ? <DraftWorksOn bot={bot} patch={patch} seat={placeSeat} /> : <>
+          <div className="text-[15px] font-medium text-ink">{t("access.worksOn", { name: bot.name, short: worksOn.short })}</div>
+          <ProposalStatus bot={bot} kind="owner" />
+          <button
+            type="button"
+            onClick={() => {
+              dispatch({ type: "toggleSettings", open: false });
+              dispatch({ type: "toggleComputer", open: true });
+            }}
+            className="mt-3 rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
+          >
+            {t("place.action.openComputerPanel")}
+          </button>
+        </>}
         <CloudPreference bot={bot} patch={patch} />
       </div>}
 
@@ -733,8 +766,7 @@ export function AccessSection({
         {connectedAppsEnabled && inventoryReady && (
           <>
             {!draft && <ConnectorScopesControl connectedSlugs={connectedSlugs} labels={appLabels} scopes={bot.connectorScopes} onChange={(connectorScopes) => patch({ connectorScopes })} />}
-            {/* Tool-level grants list Composio's tools; HighLevel's tools are scoped by read/write above. */}
-            <ConnectorToolsGrants bot={bot} patch={patch} slugs={connectedSlugs.filter((slug) => slug !== HIGHLEVEL_SLUG)} />
+            <ConnectorToolsGrants bot={bot} patch={patch} slugs={connectedSlugs} />
           </>
         )}
         {connectedAppsEnabled && connectedAppsConfigured && (
@@ -799,6 +831,8 @@ export function AccessSection({
       </div>}
 
       {!draft && shows("xResearch") && <ResearchCard bot={bot} patch={patch} />}
+
+      {!draft && shows("webhooks") && <BotApiCard bot={bot} />}
 
       {!draft && shows("webhooks") && <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">{t("botAccess.webhooks.title")}</div>

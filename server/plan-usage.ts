@@ -2,13 +2,14 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
 
-export type PlanDriver = "claude" | "codex" | "grok";
+export type PlanDriver = "claude" | "codex" | "grok" | "opencode";
 
 export interface PlanWindow {
   available: boolean;
@@ -71,6 +72,8 @@ export interface PlanAccount {
   driver: PlanDriver;
   environment: Record<string, string | undefined>;
   configDir?: string;
+  /** No usage reading: a ChatGPT plan signed in through OpenMausBot has no CLI login on disk, and a Claude instance whose config sets `usageMeter: false` keeps its login unread (a refused turn still fails over). */
+  noUsage?: true;
 }
 
 export interface PlanCredential {
@@ -123,6 +126,8 @@ const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const GROK_CREDITS_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
 const GROK_BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing";
 const GROK_SETTINGS_URL = "https://cli-chat-proxy.grok.com/v1/settings";
+// OpenCode Go's own allowance: the rolling window, the weekly one and the month's, as the CLI reads them.
+const OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage";
 
 const FIVE_HOUR_MIN_SECONDS = 3 * 3600;
 const FIVE_HOUR_MAX_SECONDS = 8 * 3600;
@@ -135,12 +140,14 @@ const DRIVER_OF: Record<string, PlanDriver> = {
   claudeAgent: "claude",
   codex: "codex",
   grokAgent: "grok",
+  opencodeGo: "opencode",
 };
 
 const PRODUCT_NAME: Record<PlanDriver, string> = {
   claude: "Claude",
   codex: "Codex",
   grok: "Grok",
+  opencode: "OpenCode",
 };
 
 export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAccount[] {
@@ -156,6 +163,8 @@ export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAcc
       driver,
       environment: { ...entry.environment },
       ...(configDir ? { configDir } : {}),
+      // Reading ~/.codex/auth.json for a ChatGPT-plan provider would report (and hold it on) another account's limit.
+      ...(config?.authMode === "chatgpt-plan" || (driver === "claude" && config?.usageMeter === false) ? { noUsage: true as const } : {}),
     });
   }
   return accounts;
@@ -231,6 +240,26 @@ export function parseGrokUsage(credits: unknown, billing?: unknown, settings?: u
   return { plan: grokPlan(settings), fiveHour, weekly, extra, models };
 }
 
+/** OpenCode Go answers with a meter per window: the running one, the week's and the month's. */
+export function parseOpenCodeUsage(body: unknown): PlanWindows {
+  const usage = asRecord(asRecord(body)?.usage);
+  const [rolling, weekly, monthly] = [usage?.rolling, usage?.weekly, usage?.monthly].map(openCodeMeter);
+  return {
+    plan: rolling || weekly || monthly ? "Go" : null,
+    fiveHour: rolling ?? closedWindow(),
+    weekly: weekly ?? closedWindow(),
+    extra: monthly ? [extraLine("Monthly", monthly)] : [], models: [],
+  };
+}
+
+/** One meter of Go's allowance: `percent` is what it has used, and `resetsAt` comes as an ISO stamp. */
+function openCodeMeter(value: unknown): PlanWindow | null {
+  const record = asRecord(value);
+  const used = finiteNumber(record?.percent);
+  if (used == null) return null;
+  return openWindow(used, isoOrNull(record?.resetsAt));
+}
+
 export function fileCredentialReader(source: CredentialSource): CredentialReader {
   const env = source.env ?? process.env;
   const now = source.now ?? Date.now;
@@ -240,6 +269,7 @@ export function fileCredentialReader(source: CredentialSource): CredentialReader
       const at = now();
       if (account.driver === "claude") return readClaudeCredential(account, merged, source, at);
       if (account.driver === "codex") return readCodexCredential(merged, source.readText, at);
+      if (account.driver === "opencode") return readOpenCodeCredential(merged, source.readText, at);
       return readGrokCredential(merged, source.readText, at);
     },
   };
@@ -263,7 +293,7 @@ export function defaultCredentialReader(env: NodeJS.ProcessEnv = process.env): C
 
 export async function fetchPlanUsage(accounts: PlanAccount[], deps: PlanUsageDeps): Promise<PlanUsageReport> {
   const now = deps.now?.() ?? Date.now();
-  const providers = await Promise.all(accounts.map((account) => fetchProvider(account, deps)));
+  const providers = (await Promise.all(accounts.filter((account) => !account.noUsage).map((account) => fetchProvider(account, deps)))).filter((row) => row !== null);
   return { fetchedAt: new Date(now).toISOString(), providers };
 }
 
@@ -460,6 +490,14 @@ function currencyDigits(currency: string): number | null {
   } catch {
     return null;
   }
+}
+
+/** Whether Claude's paid extra usage is on and not used up, on a plan with rolling windows: sends then go on past a
+ * full window and are paid from it. */
+export function claudeHasExtraUsageRoom(row: Pick<PlanProviderRow, "driver" | "fiveHour" | "weekly" | "extra">): boolean {
+  if (row.driver !== "claude" || !(row.fiveHour.available || row.weekly.available)) return false;
+  const budget = row.extra[0];
+  return !!budget && (budget.label === EXTRA_USAGE || budget.label === MONTHLY_SPEND) && budget.usedPercent < 100;
 }
 
 /** A plan with no rolling windows lives on its monthly budget (Claude Enterprise); on others that budget is the extra usage
@@ -671,7 +709,7 @@ function planUsageCacheKey(accounts: PlanAccount[]): string {
       .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([name, value]) => `${name}=${value}`)
       .join("\n");
-    return [account.id, account.driver, account.name, account.configDir ?? "", environment].join("\u0000");
+    return [account.id, account.driver, account.name, account.configDir ?? "", environment, account.noUsage ? "no-usage" : "usage"].join("\u0000");
   }).join("\n");
 }
 
@@ -824,6 +862,33 @@ function readGrokCredential(
   return sawExpired ? expiredCredential() : missingCredential();
 }
 
+/** The key saved in Settings, or the login `opencode auth login` keeps. `auth.json` is where OpenCode v1 wrote one; v2 keeps credentials in its own database, so this path covers installs migrated from v1 (the saved key covers v2). */
+function readOpenCodeCredential(env: NodeJS.ProcessEnv, readText: (path: string) => string | null, now: number): PlanCredential {
+  const key = secretString(env.OPENCODE_API_KEY);
+  if (key) return { token: key, accountId: null, expired: false };
+  const raw = env.OPENCODE_AUTH_CONTENT?.trim() || openCodeAuthText(env, readText);
+  const stored = asRecord(parseJson(raw));
+  // A Go login lives under "opencode-go", a Zen one under "opencode"; the CLI lists Go first too.
+  const entry = [stored?.["opencode-go"], stored?.opencode].map((value) => asRecord(value))
+    .find((record) => secretString(record?.access) ?? secretString(record?.key));
+  const token = secretString(entry?.access) ?? secretString(entry?.key);
+  if (!token) return missingCredential();
+  const expiry = timeMs(entry?.expires ?? entry?.expires_at ?? entry?.expiresAt);
+  if (expiry != null && expiry <= now) return expiredCredential();
+  return { token, accountId: null, expired: false };
+}
+
+/** The CLI is xdg-flavoured on every platform, so the xdg data folder comes first. */
+function openCodeAuthText(env: NodeJS.ProcessEnv, readText: (path: string) => string | null): string | null {
+  const home = env.HOME || env.USERPROFILE || homedir();
+  const roots = [
+    env.XDG_DATA_HOME || join(home, ".local", "share"),
+    process.platform === "darwin" ? join(home, "Library", "Application Support") : "",
+    process.platform === "win32" ? env.LOCALAPPDATA || join(home, "AppData", "Local") : "",
+  ].filter(Boolean);
+  for (const root of roots) { const text = readText(join(root, "opencode", "auth.json")); if (text) return text; }
+  return null;
+}
 function errorRow(account: PlanAccount, error: string): PlanProviderRow {
   return {
     id: account.id,
@@ -854,17 +919,18 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
   };
 }
 
-async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow> {
+async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow | null> { // null: OpenCode, in every fleet, with no key of its own
   let credential: PlanCredential;
   try {
     credential = await deps.credentials.read(account);
   } catch {
-    return errorRow(account, signInAgain(account.driver));
+    return account.driver === "opencode" ? null : errorRow(account, signInAgain(account.driver));
   }
-  if (credential.expired || !credential.token) return errorRow(account, signInAgain(account.driver));
+  if (credential.expired || !credential.token) return account.driver === "opencode" && !credential.expired ? null : errorRow(account, signInAgain(account.driver));
   try {
     if (account.driver === "claude") return await fetchClaude(account, credential.token, deps);
     if (account.driver === "codex") return await fetchCodex(account, credential.token, credential.accountId, deps);
+    if (account.driver === "opencode") return await fetchOpenCode(account, credential.token, deps);
     return await fetchGrok(account, credential.token, deps);
   } catch {
     return errorRow(account, couldNotReach(account.driver));
@@ -965,4 +1031,16 @@ async function fetchGrok(account: PlanAccount, token: string, deps: PlanUsageDep
   }
   const windows = parseGrokUsage(creditsBody, billingBody ?? undefined, settings.ok ? settings.body : undefined);
   return okRow(account, windows);
+}
+
+/** Go's allowance, read with the account's own key or login. A key without a Go subscription answers 403. */
+async function fetchOpenCode(account: PlanAccount, token: string, deps: PlanUsageDeps): Promise<PlanProviderRow> {
+  const result = await fetchJson(deps.fetch, OPENCODE_GO_USAGE_URL, { Authorization: `Bearer ${token}`, Accept: "application/json" }, deps.timeoutMs ?? PROVIDER_TIMEOUT_MS);
+  // 403 is Go's own answer for a key without a Go subscription: the account works and has no allowance to report.
+  if (result.status === 403) return okRow(account, { plan: null, fiveHour: closedWindow(), weekly: closedWindow(), extra: [], models: [] });
+  if (authRejected(result.status)) return errorRow(account, "OpenCode refused the saved credentials");
+  if (!result.ok || result.body === null || typeof result.body !== "object") return errorRow(account, result.status === 0 || result.status >= 500 ? couldNotReach("opencode") : unexpectedUsage("opencode"));
+  const windows = parseOpenCodeUsage(result.body);
+  // A 200 with no meter at all is not an allowance: it is an answer this row cannot read.
+  return windows.plan ? okRow(account, windows) : errorRow(account, unexpectedUsage("opencode"));
 }

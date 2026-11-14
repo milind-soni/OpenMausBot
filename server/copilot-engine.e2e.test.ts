@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
@@ -71,3 +71,65 @@ it("moves one bot and one conversation between Claude, GitHub Copilot and a cust
     await fixture.close();
   }
 }, 120_000);
+
+/** Verifies routine create and update calls through Copilot's scoped launcher-owned MCP server. */
+async function createAndUpdateRoutineThroughCopilotTools() {
+  const fixture = await launchVerificationServer({}, undefined, undefined, undefined, undefined, undefined, ["copilot"]);
+  const { url, dataDir, logPath } = fixture.info;
+  const evidence: unknown[] = [{ fixture: fixture.info }];
+  const api = async (method: string, path: string, body?: unknown) => {
+    const response = await fetch(url + path, { method, headers: { "content-type": "application/json", origin: url },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(30_000) });
+    const result = await response.json() as any;
+    expect(response.status, `${method} ${path}: ${JSON.stringify(result)}`).toBe(200);
+    return result;
+  };
+  const cli = async (...args: string[]) => {
+    const result = await runControlOmb([...args, "--url", url]) as any;
+    evidence.push({ command: args, result });
+    return result;
+  };
+  try {
+    expect((await cli("doctor")).ok).toBe(true);
+    const calls = join(dataDir, "copilot-calls.json");
+    const wrapper = join(dataDir, "copilot-fixture.mjs");
+    writeFileSync(wrapper, [
+      "#!/usr/bin/env node",
+      'process.env.FAKE_ACP_MODE = "mcp-calls";',
+      `process.env.FAKE_ACP_MCP_CALLS_FILE = ${JSON.stringify(calls)};`,
+      `await import(${JSON.stringify(new URL("./testing/fake-acp-cli.ts", import.meta.url).href)});`,
+    ].join("\n"), { mode: 0o700 });
+    await api("PATCH", "/api/instances/githubCopilot", { cli: wrapper });
+    const bot = (await cli("new-bot", "--name", "Copilot routines")).bot;
+    const threadId = bot.activeTaskId;
+    await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "githubCopilot", model: "auto" } });
+    const schedule = { type: "cron", expression: "0 9 1 * *", timeZone: "UTC" };
+    const turn = async (text: string, args: object) => {
+      writeFileSync(calls, JSON.stringify([{ server: "agents", name: "trigger", arguments: args }]));
+      await cli("send", "--bot", bot.id, "--task", threadId, "--text", text);
+      expect((await cli("wait", "--bot", bot.id, "--task", threadId, "--timeout", "25")).status).toBe("settled");
+      const messages = await cli("messages", "--bot", bot.id, "--task", threadId);
+      const launch = JSON.parse(readFileSync(join(dataDir, "copilot-launch.json"), "utf8"));
+      expect(launch.argv).toContain("--additional-mcp-config");
+      expect(launch.mcpServers).toEqual([]);
+      evidence.push({ messages });
+    };
+    await turn("Create a monthly report routine.", { action: "create", when: "schedule", name: "Copilot report",
+      instructions: "Summarize synthetic fixture activity without external services.", schedule });
+    const routine = (await api("GET", "/api/routines")).routines.find((routine: any) => routine.botId === bot.id);
+    expect(routine).toMatchObject({ name: "Copilot report", enabled: true, schedule });
+    await turn("Rename the report routine.", { action: "update", trigger_id: routine.id, name: "Updated Copilot report" });
+    const saved = (await api("GET", "/api/routines")).routines.find((row: any) => row.id === routine.id);
+    expect(saved).toMatchObject({ name: "Updated Copilot report", schedule });
+    const persisted = JSON.parse(readFileSync(join(dataDir, "routines.json"), "utf8"));
+    expect(persisted.routines.find((row: any) => row.id === routine.id)).toMatchObject({ name: "Updated Copilot report", schedule });
+    evidence.push({ saved });
+  } finally {
+    const evidencePath = `${logPath}.copilot-tools.json`;
+    writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
+    console.info(JSON.stringify({ logPath, evidencePath }));
+    await fixture.close();
+  }
+}
+
+it("creates and updates a routine through Copilot's launcher-owned tools", createAndUpdateRoutineThroughCopilotTools, 90_000);

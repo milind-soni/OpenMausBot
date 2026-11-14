@@ -1,0 +1,14 @@
+[
+  { "id": "trigger-on-new-mail", "tools": ["trigger", "trigger_info"], "text": "Bitte nicht mehr regelmäßig nachsehen. Starte dich automatisch, sobald eine neue Mail eintrifft.", "why": "Asked for an event trigger in place of polling." },
+  { "id": "my-own-computer", "tools": ["ask_for_computer", "list_shared_computers", "select_computer", "shared_computer"], "text": "Mach das bitte über meinen Mac mini.", "why": "Asked for a named computer in two words." },
+  { "id": "what-did-we-decide", "tools": ["session_search"], "text": "Was hatten wir letzte Woche mit dem Lieferanten vereinbart?", "why": "Asked about an earlier conversation." },
+  { "id": "is-it-still-running", "tools": ["assignment_status", "list_threads", "list_bots"], "text": "Is anything you handed to a teammate still running? Check, don't guess.", "why": "Asked for the state of hand-offs." },
+  { "id": "tell-the-team", "tools": ["report_bug"], "text": "Please report this to the OpenMausBot team: the password card never showed up on my desktop.", "why": "Filed a bug with the people who make the app." },
+  { "id": "which-triggers", "tools": ["trigger_info", "trigger"], "text": "Which automations do you have set up right now?", "why": "Asked what runs on its own." },
+  { "id": "how-close-to-my-limit", "tools": ["usage_limits"], "text": "How close am I to my Claude limit right now?", "why": "Worried about spending his window." },
+  { "id": "show-a-chart", "tools": ["show_widget", "show_html"], "text": "Show me a tiny bar chart right here in the chat: Monday 3, Tuesday 5, Wednesday 2.", "why": "Asked for something drawn in the chat." },
+  { "id": "ask-the-chief", "tools": ["coordinate_bots"], "text": "Frag MausBot, ob der Zugang zum Postfach schon hinterlegt ist.", "why": "Asked a teammate for a login." },
+  { "id": "give-a-password", "tools": ["request_credential"], "text": "I need to give you the mailbox password for office@example.com so you can read mail. How do I hand it over safely?", "why": "Had to hand over a secret." },
+  { "id": "log-in-for-me", "tools": ["request_sign_in", "fill_login"], "text": "Log in to bookkeeping.example.com for me and tell me when you're in.", "why": "Asked to sign in at a site." },
+  { "id": "remember-this", "tools": ["memory_update"], "text": "Remember that invoices always go to accounting@example.com.", "why": "Asked to remember a fact." }
+]

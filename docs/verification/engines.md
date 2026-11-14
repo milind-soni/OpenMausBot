@@ -49,6 +49,38 @@ prove real OAuth login or native Windows execution.
   provider.
 - Model-picker rendering is Electron UI and remains outside this first map.
 
+## OMP (Oh My Pi)
+
+Install with `npm install -g @oh-my-pi/pi-coding-agent`, then run `omp login` or configure a provider in `~/.omp/agent/models.yml`. OpenMausBot launches `omp acp`, discovers its advertised models and per-model thinking choices, and resumes each thread's native OMP session. OMP remains responsible for its own provider credentials and approvals; OpenMausBot answers ACP permission requests through the normal approval cards.
+
+```sh
+pnpm exec vitest run server/drivers/acp/omp.test.ts server/drivers/acp/custom-model-catalog.test.ts server/runtime/capabilities.test.ts server/drivers/tool-scope-coverage.test.ts server/agents-bridge-switch.test.ts server/engine-updates.test.ts server/built-in-instances.test.ts src/lib/analytics-allowlist.test.ts server/engine-memory.test.ts
+```
+
+The contract tests use the repository's fake ACP CLI and disposable folders. They cover fresh and existing fleets, catalogs larger than 128 models without per-model discovery prompts, temporary discovery-session cleanup, model selection, local credential forwarding and denied permissions. Model discovery uses `PI_CODING_AGENT_SESSION_DIR` in a temporary directory so refreshes do not add empty sessions to the person's OMP history.
+
+The following is a one-time author qualification against OMP 18.13.1, not a checked-in repeatable native fixture: with isolated homes and keyless synthetic providers, ACP initialization and authentication, model and thinking selection, a 2,000-model catalog, discovery-session isolation, a streamed turn through the production driver, and a second turn after recreating that driver with the same native session. The loopback provider received both turns and the resumed request contained the first turn's history. These checks do not prove a real provider account, a paid turn, native Windows behavior or packaged desktop integration.
+
+## Slow or empty CLI version responses
+
+```sh
+pnpm exec vitest run server/cli-version-probe.test.ts server/procs.test.ts server/engine-status-reads.e2e.test.ts src/App.engine-status.test.ts
+```
+
+The disposable server fixture runs a synthetic Claude CLI that takes nine
+seconds to report its version, and another that returns empty output once.
+Concurrent engine-list reads must report it available and signed in, using
+one version process for the slow case and two for the empty-response retry.
+Both cases send two chat turns through the control surface and retain the
+bot's saved model selection.
+
+The probe tests cover the thirty-second total budget, overlapping checks,
+temporary failures, and clearing a remembered version when the executable is
+missing or cannot be executed. The renderer test keeps an existing chat
+visible while engine status is unavailable and retains setup when there is
+no conversation. These checks do not prove a real provider's login or a
+packaged Windows window.
+
 ## Groq API setup
 
 ```sh
@@ -66,6 +98,21 @@ the row reports catalog reachability without claiming chat authentication. Selec
 Groq model in the bot's picker, send a fixture turn, then clear the key and
 confirm the engine is unavailable. Never use the live app or a real key for
 this recipe.
+
+## ModelGo API setup
+
+```sh
+pnpm exec vitest run server/drivers/modelgo.test.ts server/provider-key-check.test.ts server/credential-request.test.ts src/components/keys/key-catalog.test.ts
+```
+
+These use a local stand-in for `https://api.modelgo.ai/v1`. They check the
+preset endpoint, that the server's key never goes to another host, the live
+model list, streaming and tool calls over chat completions, the plain sentences
+for HTTP 402 `billing_insufficient` and 403 `first_recharge_required`, and that
+a refused key never shows in events. They never call ModelGo. A chat and a tool
+call through this driver against the real API have not been run; use a real key
+before relying on them. `/models` has no field for tool support, so the picker
+keeps every model whose `output_modalities` includes text.
 
 ## Greenference API setup
 
@@ -105,3 +152,24 @@ OMB_LIVE_MUSE=1 pnpm exec vitest run server/drivers/muse-code.live.test.ts
 It lists the account's models (Muse Wonder 1.0), answers on Muse Wonder, runs
 a shell command as a tool step, and resumes the session on a fresh instance
 after the first one is gone, the way an app restart does.
+
+## Direct API endpoints for native agents
+
+```sh
+pnpm exec vitest run server/claude-account-api.test.ts server/claude-endpoints.test.ts server/codex-endpoints.test.ts server/drivers/codex.test.ts server/drivers/codex-background-text.test.ts src/components/AgentEndpoints.dom.test.ts src/components/ClaudeEndpoints.test.ts server/agent-endpoint-models.test.ts
+```
+
+The API fixture launches a disposable server and synthetic CLIs. It checks
+Codex endpoint creation, persistence, updates, removal guards, admin-only
+mutations and write-only keys. Driver fixtures check direct routing across
+native thread restarts, background calls, missing-key refusal, and exclusion
+of the key from shell environments and command arguments. Renderer tests
+check that both forms start empty (the official URL is only a placeholder;
+an empty Codex URL saves OpenAI), send a typed model, and save a custom
+gateway URL. Discovery tests check that the key never goes to a plain-HTTP
+host off this computer.
+
+These fixtures do not prove a real gateway's Responses or Messages protocol,
+streaming, tool execution, TLS, DNS, or account authentication. Verify those
+against a separately provisioned test gateway before marking the draft ready.
+Never use the person's live workspace or credentials for fixture verification.

@@ -23,6 +23,7 @@ import { roomMemberQueueTitle } from "./RoomQueueList";
 import { RoomWorkingFolderChip } from "./RoomWorkingFolder";
 import { Select } from "./Select";
 import { GroupTaskPicker } from "./TaskPicker";
+import { ThreadPresenceFaces } from "./TeamPresence";
 
 export function DefaultResponderSelect({ group, members }: { group: Group; members: Bot[] }) {
   const { state, dispatch } = useStore();
@@ -80,7 +81,7 @@ function memberMauses(group: Group, members: Bot[]) {
             ? t("room.holds.avatarHeld", { name: b.name })
             : queueTitle ?? (busyElsewhere
               ? t("room.memberWorkingElsewhere", { name: b.name })
-              : `${b.name}${busy ? " — working…" : ""}${contextWarning ? ` — ${t("contextWarning.short", { percent: contextWarning.percent })}` : ""}`)
+              : `${b.name}${busy ? ` — ${t("room.member.working")}` : ""}${contextWarning ? ` — ${t("contextWarning.short", { percent: contextWarning.percent })}` : ""}`)
         }
         className={cn(
           "relative inline-flex rounded-full",
@@ -171,7 +172,8 @@ export function RoomHeader({
             </button>
             {group.description && <p className="max-w-full truncate text-[12px] leading-4 text-ink-secondary">{group.description}</p>}
           </div>
-          <div data-roomhead-controls className="flex shrink-0 items-center">
+          <div data-roomhead-controls className="flex shrink-0 items-center gap-1.5">
+            <ThreadPresenceFaces threadId={group.threadId} />
             <button
               ref={membersTriggerRef}
               type="button"
@@ -219,6 +221,7 @@ export function RoomHeader({
           data-roomhead-controls
           className="flex items-center gap-1.5 @max-3xl/roomhead:ml-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end"
         >
+          <ThreadPresenceFaces threadId={group.threadId} />
           <button
             type="button"
             onClick={onToggleFind}

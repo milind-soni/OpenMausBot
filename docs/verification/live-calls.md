@@ -53,6 +53,135 @@ start answer 409 `needsKey`; after the OpenAI key is saved through
 `PUT /api/config`, a phone's call starts with that key; a separate Live key
 then wins; neither key appears in the config or the log.
 
+## Azure OpenAI as the Live provider
+
+With `live.provider: "azure"` (`OMB_LIVE_PROVIDER=azure`) a call creates its
+GPT-Live session on the person's Azure OpenAI / Foundry resource:
+`POST {endpoint}/openai/v1/live/sessions` with the deployment name
+(`live.azureDeployment`, `OMB_AZURE_OPENAI_LIVE_DEPLOYMENT`, default
+`gpt-live-1`) as `session.model`, and the sideband attaches to
+`wss://{endpoint}/openai/v1/live/sessions/{id}/attach`. Both send the resource
+key as `api-key`, never as a bearer token, and the session request refuses a
+redirect, since `fetch` would carry `api-key` to another host. The key is only
+`live.key`; the OpenAI API key is never used for Azure. `live.azureEndpoint`
+(`OMB_AZURE_OPENAI_LIVE_ENDPOINT`) must be `https` on an Azure OpenAI host
+(`azureOpenAiRoot` in `server/live-call.ts`), and `PATCH /api/live/settings`
+refuses any other.
+
+`live.key` goes only where it was saved for. Saving a key records `live.keyFor`:
+`openai` or `azure:<host>` (`liveKeyTarget` in `server/live-config.ts`), and
+`usableLiveKey` hands the key out only while calls go there. Switching the
+Service or changing the endpoint's host, through `PATCH /api/live/settings` or
+`PUT /api/config`, forgets the key and asks for it again, even after changing
+back (`liveSavePatch`). A new path or deployment on the same host keeps it.
+`keyFor` is never taken from a request. A key saved with Azure chosen and no
+endpoint answers `400`. A key with no `keyFor` is from before Azure was offered,
+so OpenAI's. In the environment, `OMB_OPENAI_LIVE_KEY` with `OMB_LIVE_PROVIDER=azure`
+and `OMB_AZURE_OPENAI_LIVE_ENDPOINT` is the operator's own pairing, unless the
+file already says where the key may go. So a key the app forgot stays forgotten
+until one is saved again, including the desktop's copy in the OS store, and a
+different key in the environment takes no pairing from the file.
+
+Without the key, or with a missing or invalid endpoint,
+`POST /api/live/session` answers `409` with `needsKey` and the Azure setup
+sentence before anything leaves the harness. A call keeps the endpoint it
+started with even if the settings change mid-call.
+
+Azure refuses `session.client` (`400 Unknown parameter`), so an Azure call goes
+without `LIVE_DATA_CHANNEL`: the caller's data channel keeps Azure's default
+events instead of "may only hang up". This is read from the code and was not
+checked against Azure: assume the caller could send session or item events and
+receive events holding the bot's instructions. So an Azure call is limited to
+an admin, or the owner of a single-owner server (`azureLiveCallRefusal` in
+`server/live-access.ts`, asked by `LiveCallController.start`, the only place a
+session is created):
+
+| Caller | Azure call |
+| --- | --- |
+| Desktop app's window; the owner's phone through the companion | yes |
+| Single-owner server: local request, or a paired admin device | yes |
+| My Cloud: the owner's session | yes |
+| Team Cloud: Super admin, Admin | yes |
+| Shared company workspace: admin | yes |
+| Self-hosted with a sign-in list: admin session | yes |
+| Team Cloud User, on the app or their phone; a workspace non-admin; a chat-only device | no, plain sentence |
+| A local request where others use the server (a bot's shell): Team Cloud, shared workspace, sign-in list, a chat-only device or code | no |
+| A sign-in that only moves a bot in | no |
+| A published or inline page, with or without an admin's cookie | no |
+
+The refused answer is `403 { "error": "Live calls here go through Azure OpenAI, so only an admin or the owner of this server can start one. Ask an admin if you need a call." }`,
+with no `needsKey`. Nothing reaches Azure or OpenAI: a refused call never falls
+back to another provider. `GET /api/config` and the stream tell a session
+without the admin scope `live.provider`, never `azureEndpoint` or
+`azureDeployment`. `server/live-access.test.ts` runs each caller above through
+the sign-in gate and the limit. `server/live-azure-access.e2e.test.ts` does it on
+the full server with a made-up key and its `fetch` stubbed.
+`server/hosted-access.test.ts` does it for a shared workspace, with no key saved,
+so a caller who gets through stops at the setup prompt.
+
+## Fish Audio Live 3 as the Live provider
+
+With `live.provider: "fish"` (`OMB_LIVE_PROVIDER=fish`) a call uses the Fish
+Audio key from Settings → API keys (`tts.fishKey`, `OMB_FISH_AUDIO_API_KEY`),
+the same key Fish voices use; nothing else is asked. On the first call the
+harness sets up an agent on that key's account (`server/live-fish.ts`
+`setUpFishAgent`): a client tool `delegate` (`POST /v1/agent/tools`), an agent
+named "<product> Live calls" (`productName` in `server/brand.ts`: MausBot, or a
+white-label brand's name) on the `live3` engine in English with that tool (`POST /v1/agent/agents`),
+`overrides_allowed: ["system_prompt"]` (`PATCH /v1/agent/agents/{id}`), and a
+publish. It saves the agent as `live.fishAgentId` with `live.fishAgentFor`, a
+short SHA-256 print of the key, so a key for another account sets up its own
+agent. A saved agent that Fish answers `404` for is set up again once.
+`OMB_FISH_LIVE_AGENT_ID` names an operator's own agent, used with any key and
+never replaced. A Fish key saved as the Live key (`keyFor: "fish"`) is read as
+the Fish Audio key while none is saved.
+
+Each call is `POST https://api.fish.audio/v1/agent/sessions` with
+`{ agent_id, overrides: { system_prompt } }` and the key as a bearer token,
+redirects refused. Fish answers with a LiveKit token, which goes to the client
+as `transport: { type: "fish", session, relayToken }`; the client joins with
+`@fishaudio/agent-client` 1.0.0, which holds the microphone and the agent's
+audio. The agent's voice is its own; the Voice setting is hidden. Hanging up
+also calls `POST /v1/agent/sessions/{id}/end`. `OMB_FISH_LIVE_URL` points the
+harness at a fake Fish for tests and is honoured only as `http://127.0.0.1:<port>`;
+anything else falls back to Fish's own host.
+
+An OpenAI or Azure key is never sent to Fish, and the Fish key never to them.
+Without a Fish Audio key, `POST /api/live/session` answers `409` with
+`needsKey` and the Fish setup sentence.
+
+Fish has no server sideband. The client reports what it hears (final user
+transcripts, the agent's speaking spans, the `delegate` tool call, the end) to
+`POST /api/live/relay` with the call's random relay token, and long-polls the
+same route for the bot's answers. `FishRelay` (`server/live-fish.ts`) turns the
+reports into the GPT-Live sideband events `LiveCallController` already reads
+and the controller's appends into commands the client hands the agent: the
+answer to a pending `delegate` call as its tool result, anything later as a
+user message prefixed `[OpenMausBot]`. Every report is a strict, bounded zod
+shape; a wrong token or session answers `404`; the route needs the admin scope.
+The `delegate` tool's arguments are ignored: the request is what the client
+heard, as on GPT-Live.
+
+Because the harness hears a Fish call only through its client's reports, a
+Fish call is limited exactly like Azure (`fishLiveCallRefusal`), with the words
+`Live calls here go through Fish Audio, so only an admin or the owner of this
+server can start one.` The phone apps do not carry the Fish SDK yet, so a call
+from iOS or Android answers `400`. The client must report `connected` within
+`FISH_ATTACH_TIMEOUT_MS` (25 s, to allow a first microphone prompt).
+
+The person needs a Fish Audio API key with Agent credit (about $0.07 per
+minute of call). Live 3 speaks English only.
+
+Checked with fixtures only: `server/live-fish.test.ts` (agent setup, session request,
+errors, relay), `server/live-session-wiring.test.ts` (first-call setup, a
+removed agent, an operator's agent), `server/live-call-controller.test.ts` "with Fish Audio chosen"
+(a real `FishRelay` as the sideband: heard, delegated, the bot's answer back as
+the delegate result, End and Fish's own end), `server/routes/live.test.ts`
+(relay route), `server/live-settings.test.ts`, `server/live-access.test.ts`,
+`src/lib/live-call-fish.test.ts` (client relay with a fake SDK session) and
+`src/components/keys/KeysPage.dom.test.ts`. No call has been placed against
+Fish Audio's live service.
+
 ## User path
 
 Start a Live call from the call button's menu, say something the bot must act

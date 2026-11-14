@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { serverAnswers, serverOpens } from "./saved-server.mjs";
+import { reopenSavedServer, serverAnswers, serverOpens } from "./saved-server.mjs";
 
 const office = { id: "vps", name: "pro cloud", origin: "https://omb-u-gone.fly.dev" };
 const answering = (status) => async () => new Response("{}", { status });
@@ -42,4 +42,21 @@ test("one that doesn't answer is the person's choice: Cancel stays put, Remove f
   const retry = asked([0]);
   assert.equal(await serverOpens(office, { fetch: back, dialog: retry.dialog, forget: () => assert.fail("not asked to") }), true, "it answered the second time");
   assert.equal(retry.shown.length, 1);
+});
+
+test("the way back opens a saved server that answers, and gives up on one that left the list or a newer show() took over", async () => {
+  const entry = { id: "vps", origin: office.origin };
+  let opened = null;
+  const open = (more = {}) => ({ saved: () => [entry], fetch: answering(200), opened: (found) => { opened = found; return true; }, ...more });
+  assert.equal(await reopenSavedServer({ origin: office.origin }, open()), true, "saved here and answering: it opens");
+  assert.equal(opened.id, "vps");
+  assert.equal(await reopenSavedServer({ origin: "https://elsewhere.example.test" }, open()), false, "not saved here any more");
+  assert.equal(await reopenSavedServer({ origin: office.origin }, open({ fetch: gone })), false, "nothing answers at it");
+  assert.equal(await reopenSavedServer({ origin: office.origin }, open({ still: () => false })), false, "a newer show() took over");
+  assert.equal(await reopenSavedServer({ origin: null }, open()), false, "no server named");
+  let looks = 0;
+  opened = null;
+  const left = () => { looks += 1; return looks === 1 ? [entry] : []; };
+  assert.equal(await reopenSavedServer({ origin: office.origin }, { saved: left, fetch: answering(200), opened: (found) => { opened = found; return true; } }), false, "forgotten while it was asked");
+  assert.equal(opened, null, "never opened the environment that is now active");
 });

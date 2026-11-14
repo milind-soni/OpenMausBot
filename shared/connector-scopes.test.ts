@@ -27,6 +27,15 @@ describe("isReadOnlyAction", () => {
     expect(isReadOnlyAction("GMAIL_CREATE_EMAIL_DRAFT")).toBe(false);
     expect(isReadOnlyAction("COMPOSIO_PROXY_EXECUTE")).toBe(false);
   });
+
+  it("takes the second word as the verb only for toolkits that name the resource first", () => {
+    expect(isReadOnlyAction("HIGHLEVEL_MCP_CONTACTS_GET_CONTACTS", "highlevel_mcp")).toBe(true);
+    expect(isReadOnlyAction("HIGHLEVEL_MCP_CONTACTS_GET_CONTACTS")).toBe(true);
+    expect(isReadOnlyAction("HIGHLEVEL_MCP_CONTACTS_ADD_TAGS", "highlevel_mcp")).toBe(false);
+    expect(isReadOnlyAction("MAILCHIMP_CREATE_LIST")).toBe(false);
+    expect(isReadOnlyAction("SOMEAPP_CONTACTS_GET_CONTACTS")).toBe(false);
+    expect(isReadOnlyAction("HIGHLEVEL_MCP_CONTACTS_GET_CONTACTS", "highlevel")).toBe(false);
+  });
 });
 
 describe("normalizeConnectorScopes", () => {
@@ -80,6 +89,16 @@ describe("connectorAccessDecision", () => {
       toolkit: "gmail",
       reason: "write",
     });
+  });
+
+  it("reads HighLevel MCP actions, which name the resource before the verb, on a read-only grant", () => {
+    const highlevel = { apps: { highlevel_mcp: "read" as const } };
+    for (const slug of ["HIGHLEVEL_MCP_CONTACTS_GET_CONTACTS", "HIGHLEVEL_MCP_OPPORTUNITIES_GET_PIPELINES", "HIGHLEVEL_MCP_OPPORTUNITIES_SEARCH_OPPORTUNITY"]) {
+      expect(connectorAccessDecision(highlevel, calls(slug), ["highlevel_mcp"])).toEqual({ ok: true });
+    }
+    for (const slug of ["HIGHLEVEL_MCP_CONTACTS_UPDATE_CONTACT", "HIGHLEVEL_MCP_CONVERSATIONS_SEND_A_NEW_MESSAGE", "HIGHLEVEL_MCP_SOCIAL_MEDIA_POSTING_GET_POSTS"]) {
+      expect(connectorAccessDecision(highlevel, calls(slug), ["highlevel_mcp"])).toMatchObject({ ok: false, reason: "write" });
+    }
   });
 
   it("never lets a raw API proxy through a scoped bot", () => {

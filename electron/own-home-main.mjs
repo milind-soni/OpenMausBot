@@ -9,6 +9,7 @@
 import { createCloudSend } from "./cloud-send.mjs";
 import { freezeAnswer } from "./one-home-main.mjs";
 import { awayIn, createOneHome, parseJournal } from "./one-home.mjs";
+import nativeText from "./native-text.cjs";
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const ORIGIN = /^https?:\/\/[^/\s]+$/u;
@@ -45,13 +46,15 @@ export const handSaved = (entry) => record(entry) && entry.kind === "remote" && 
  * @param {typeof fetch} fetchImpl
  */
 export function serverRequests(place, fetchImpl) {
-  const request = (method, route, init = {}) => fetchImpl(`${place.origin}${route}`, {
-    method, redirect: "error", credentials: "include", cache: "no-store", signal: AbortSignal.timeout(120_000), ...init,
+  const request = (method, route, { timeoutMs = 120_000, ...init } = {}) => fetchImpl(`${place.origin}${route}`, {
+    method, redirect: "error", credentials: "include", cache: "no-store", signal: AbortSignal.timeout(timeoutMs), ...init,
     headers: { accept: "application/json", origin: place.origin, ...init.headers },
   });
   return {
     request,
-    call: async (method, route, body) => answer(await request(method, route, body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) })),
+    /** `timeoutMs`: how long this request may take, sized to the work it asks for. */
+    call: async (method, route, body, options) => answer(await request(method, route, { ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+      ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) })),
     async who() {
       const [session, described] = await Promise.all([request("GET", "/api/auth/session").then(answer), request("GET", "/.well-known/openmausbot/environment").then(answer)]);
       const signedIn = session.ok && session.body?.kind === "session";
@@ -62,12 +65,12 @@ export function serverRequests(place, fetchImpl) {
 }
 
 /** The move's session at the chosen server: this window's own sign-in, checked to be its owner's, at the server chosen. */
-export async function openServerSession(chosen, fetchImpl) {
+export async function openServerSession(chosen, fetchImpl, t = nativeText.englishText.t) {
   const server = serverRequests(chosen, fetchImpl);
   const who = await server.who();
-  if (!who.signedIn) throw tagged(`This app isn't signed in to ${chosen.name}. Open ${chosen.name} in this app, then try again.`, "signed_out", { status: who.status === 403 ? 403 : 401 });
-  if (who.environmentId !== chosen.environmentId) throw tagged(`The server at ${chosen.name}'s address is another one now, so nothing more goes there.`, "other_server");
-  if (!who.own) throw tagged(`${chosen.name} has other people on it now, so your bots can't move there.`, "not_own");
+  if (!who.signedIn) throw tagged(t("native.home.signedOut", { name: chosen.name }), "signed_out", { status: who.status === 403 ? 403 : 401 });
+  if (who.environmentId !== chosen.environmentId) throw tagged(t("native.home.serverChanged", { name: chosen.name }), "other_server");
+  if (!who.own) throw tagged(t("native.home.otherPeople", { name: chosen.name }), "not_own");
   return {
     call: server.call,
     upload: async (route, bytes, type) => answer(await server.request("POST", route, { headers: { "content-type": type }, body: bytes })),
@@ -91,7 +94,7 @@ function jsonStore(store) {
  *   sendState: { read(): unknown, write(value: unknown): void },
  *   cloudJournal(): unknown,
  *   lend?(projects: string[], place: any): Promise<unknown>,
- *   phone?: { paired(): boolean, stop(): Promise<void>, start(): Promise<void> },
+ *   phone?: { paired(): boolean, start(): Promise<void> },
  *   openHome?(place: any): void,
  *   lastInput?(): number,
  *   version?: string,
@@ -103,7 +106,7 @@ function jsonStore(store) {
  * to My Cloud's journal: while it is under way or done, no server of the person's own is chosen.
  */
 export function installOwnHome({ localRequest, fetch: fetchImpl, environments, handoff, journal: journalStore, choice: choiceStore, sendState, cloudJournal, lend, phone, openHome, lastInput,
-  version, onChange = () => {}, now = Date.now, log = () => {} }) {
+  version, onChange = () => {}, now = Date.now, log = () => {}, t = nativeText.englishText.t }) {
   const journal = jsonStore(journalStore), choice = jsonStore(choiceStore);
   const chosen = () => parseChoice(choice.read());
   const placeOf = (picked = chosen()) => (picked ? environments().find((entry) => handSaved(entry) && entry.origin === picked.origin) ?? null : null);
@@ -114,24 +117,26 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
       ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) })),
     async json(route) {
       const got = await local.call("GET", route);
-      if (!got.ok) throw new Error("OpenMausBot on this computer did not answer. Try again in a moment.");
+      if (!got.ok) throw new Error(t("native.home.localNoAnswer"));
       return got.body;
     },
   };
   const send = createCloudSend({
-    local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }),
+    local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(init?.timeoutMs ?? 30_000) }),
     cloud: {
       origin: () => chosen()?.origin ?? null,
       asleep: () => false,
       read: (route) => serverRequests(chosen(), fetchImpl).request("GET", route),
-      open: () => openServerSession(chosen(), fetchImpl),
+      open: () => openServerSession(chosen(), fetchImpl, t),
     },
     handoff,
     store: jsonStore(sendState),
     onChange: () => onChange(),
+    t,
   });
   /** The chosen server as the move sees a Cloud: always ready, never ended once home is there, since nothing ends it; until
-   * then, a server forgotten in this app ends the move before anything runs there. */
+   * then, a server forgotten in this app ends the move before anything runs there. Once the move is done the bots' files
+   * stay there: this copy is never deleted, so a later pass must not send them again. */
   const target = () => {
     const picked = chosen();
     if (!picked) return null;
@@ -141,17 +146,23 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
   const home = createOneHome({
     journal,
     cloud: target,
-    send: { move: (options) => send.send({ reason: "move", final: options?.final === true }), check: () => send.check(), switches: () => send.switches(), snapshot: () => send.snapshot() },
+    send: {
+      move(options) {
+        const done = parseJournal(journal.read())?.phase === "done";
+        return send.send({ reason: "move", final: options?.final === true, ...(options?.files === false || done ? { files: false } : {}) });
+      },
+      check: () => send.check(), switches: () => send.switches(), snapshot: () => send.snapshot(),
+    },
     local: {
       ...local,
       freeze: async (origin) => freezeAnswer(await local.call("POST", "/api/move/freeze", { cloud: origin, place: chosen()?.name })),
       async unfreeze(options) {
         const got = await local.call("DELETE", "/api/move/freeze", options?.automations === "off" ? { automations: "off" } : undefined);
-        if (!got.ok) throw Object.assign(new Error("OpenMausBot on this computer could not go on again."), { status: got.status });
+        if (!got.ok) throw Object.assign(new Error(t("native.home.localResumeFailed")), { status: got.status });
       },
       frozen: async () => (await local.json("/api/move/freeze"))?.frozen === true,
     },
-    session: () => openServerSession(chosen(), fetchImpl),
+    session: () => openServerSession(chosen(), fetchImpl, t),
     ...(lend ? { lend: (projects) => lend(projects, placeOf()) } : {}),
     ...(phone ? { phone } : {}),
     openHome: () => { const place = placeOf(); if (place) openHome?.(place); },
@@ -159,6 +170,7 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
     ...(version ? { version } : {}),
     onChange: () => onChange(),
     log,
+    t,
   });
 
   /** The asks under way, one per server. */
@@ -247,13 +259,13 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
     /** The person chose this server as their home: asked once more, then the move starts. */
     async start(id) {
       const place = environments().find((entry) => entry.id === id && handSaved(entry));
-      if (!place) throw new Error("That server isn't in this app any more.");
-      if (moving() || chosen()) throw new Error("Your bots are already moving.");
-      if (cloudMoving()) throw new Error("Your bots are moving to My Cloud.");
+      if (!place) throw new Error(t("native.home.serverGone"));
+      if (moving() || chosen()) throw new Error(t("native.home.alreadyMoving"));
+      if (cloudMoving()) throw new Error(t("native.home.movingToCloud"));
       const who = await serverRequests(place, fetchImpl).who().catch(() => null);
-      if (!who?.signedIn) throw new Error(`This app isn't signed in to ${place.name}. Open ${place.name} in this app, then try again.`);
-      if (!who.own) throw new Error(`${place.name} has other people on it, so your bots stay here. Only a server that's yours alone can be your bots' home.`);
-      if (!who.takesMove || !who.environmentId) throw new Error(`Update OpenMausBot on ${place.name} first, then try again.`);
+      if (!who?.signedIn) throw new Error(t("native.home.signedOut", { name: place.name }));
+      if (!who.own) throw new Error(t("native.home.personalServerOnly", { name: place.name }));
+      if (!who.takesMove || !who.environmentId) throw new Error(t("native.home.updateServer", { name: place.name }));
       choice.write({ v: 1, id: place.id, origin: place.origin, environmentId: who.environmentId, name: place.name, at: now() });
       onChange();
       void kick().catch((error) => log(`own home: ${error?.message ?? error}`));

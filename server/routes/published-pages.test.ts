@@ -9,6 +9,7 @@ function fakePublisher() {
     publish: vi.fn(async () => ({ status: 200, text: "Published “Bake sale” at https://abcdefghijklmnopqrstuvwxyz.mausbot.page/" })),
     unpublish: vi.fn(async () => ({ status: 200, text: "Unpublished.", card: { state: "unpublished" as const, title: "Bake sale" } })),
     publishFiles: vi.fn(async () => ({ status: 200, text: "Published." })),
+    refreshLive: vi.fn(async () => 0),
   } satisfies PagePublisher;
 }
 
@@ -40,6 +41,15 @@ describe("the page tools' internal routes", () => {
     expect(answer).toMatchObject({ status: 200, body: { ok: true, text: expect.stringContaining("Published") } });
     expect(publisher.publish).toHaveBeenCalledWith(expect.objectContaining({ botId: "bot-1", threadId: "thread-1", path: "site", title: "Bake sale",
       pageId: "abcdefghijklmnopqrstuvwxyz", roots: ["/work/bot-1"], call: expect.objectContaining({ assertActive: expect.any(Function) }) }));
+  });
+
+  it("passes live on, and only when the tool was given it", async () => {
+    const publisher = fakePublisher(), handler = createPagesInternalRoutes(publisher);
+    await internal(handler, { body: { path: "site", title: "Sales", live: true } });
+    expect(publisher.publish).toHaveBeenLastCalledWith(expect.objectContaining({ live: true }));
+    await internal(handler, { body: { path: "site", title: "Sales" } });
+    expect(publisher.publish).toHaveBeenLastCalledWith(expect.not.objectContaining({ live: expect.anything() }));
+    expect(await internal(handler, { body: { path: "site", title: "Sales", live: "yes" } })).toMatchObject({ status: 400 });
   });
 
   it("reads a path inside the bot's private desktop as the same file on this computer", async () => {

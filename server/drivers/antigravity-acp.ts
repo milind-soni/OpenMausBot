@@ -7,10 +7,13 @@ import { delimiter, join, resolve } from "node:path";
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
+import { botBox } from "../bot-box/box.ts";
+import type { BoxRelay } from "../bot-box/relay.ts";
 import type { ModelCatalog } from "../contracts.ts";
 import type { ChildProcess } from "node:child_process";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
-import { acpVariantOption } from "./acp/config-options.ts";
+import { acpVariantOption, surveyModelVariants } from "./acp/config-options.ts";
+import { StderrTail, exitDetail } from "./acp/exit-report.ts";
 import {
   VERIFICATION_TEMP_KEY,
   antigravityTempDir,
@@ -28,6 +31,8 @@ const STARTUP_TIMEOUT_MS = 90_000;
 // startup gets another window while that folder grows, up to this cap.
 const STARTUP_CAP_MS = 5 * 60_000;
 const UNPACK_COUNT_BUDGET_MS = 5_000;
+// A new session names thinking levels only for its current model, so discovery switches through the rest (~1.5 s each).
+const VARIANT_SURVEY_MS = 15_000;
 const MAX_PROTOCOL_LINE_BYTES = 16 * 1024 * 1024;
 // Past the 16 KiB ceiling parseAntigravityAuthorizationUrl accepts, so no partial link is dropped.
 const MAX_DIAGNOSTIC_LINE_CHARS = 64 * 1024;
@@ -121,6 +126,11 @@ export async function removeAntigravityProfile(instanceId: string, baseDir = DAT
     });
 }
 
+/** Signing out forgets only this account's stored Google sign-in; its profile stays for the next sign-in. */
+export async function removeAntigravitySignIn(instanceId: string, baseDir = DATA_DIR): Promise<void> {
+  await rm(join(antigravityProfileDirectory(instanceId, baseDir), "antigravity-acp", "acp_token.json"), { force: true, maxRetries: 4, retryDelay: 250 });
+}
+
 /** An isolated Google profile per instance; foreign Google credentials are stripped so the account
  * and billing never change silently. */
 export async function prepareAntigravityProfile(input: {
@@ -209,6 +219,8 @@ export class AntigravityAcpClient {
   private startupOutputBytes = 0;
   private startupDiagnosticBytes = 0;
   private nativeStartupHint?: string;
+  /** What it printed since it last answered, masked (sign-in links are taken out before), for the exit message. */
+  private readonly stderrTail = new StderrTail();
   private closed = false;
   private stopping?: Promise<boolean>;
   private readonly onAuthorizationUrl?: (url: string) => void;
@@ -221,27 +233,28 @@ export class AntigravityAcpClient {
     profile: AntigravityProfile,
     cwd: string,
     onAuthorizationUrl?: (url: string) => void,
+    relay?: BoxRelay,
   ) {
     this.onAuthorizationUrl = onAuthorizationUrl;
     this.tempDirectory = profile.tempDirectory;
     this.child = spawnCli(
       runtime.executablePath,
       process.platform === "linux" ? ["--uid="] : [],
-      { cwd, env: profile.environment, stdio: ["pipe", "pipe", "pipe"] },
+      { cwd, env: profile.environment, stdio: ["pipe", "pipe", "pipe"], ...(relay ? { box: { relay: relay.socketPath } } : {}) },
       "bot",
     );
     this.child.stdout!.setEncoding("utf8");
     this.child.stdout!.on("data", (chunk: string) => this.consume(chunk));
-    // Never surface raw stderr: it can contain authorization codes.
+    // Never surface raw stderr: it can contain authorization codes. Only masked last lines reach the exit message.
     this.child.stderr!.setEncoding("utf8");
     this.child.stderr!.on("data", (chunk: string) => this.consumeDiagnostics(chunk));
     this.child.once("error", (error) => this.failAll(error));
     this.exited = new Promise((resolve) => {
       this.child.once("close", (code, signal) => {
-        this.noteStartupDiagnostic(this.diagnosticBuffer);
+        if (authorizationUrlFromLine(this.diagnosticBuffer) === null) this.noteDiagnostic(this.diagnosticBuffer);
         this.diagnosticBuffer = "";
         if (!this.closed) this.failAll(new Error(
-          `Antigravity ACP exited ${code ?? signal ?? "unexpectedly"}.${this.nativeStartupHint ? ` ${this.nativeStartupHint}` : ""}`,
+          `Antigravity ACP exited ${code ?? signal ?? "unexpectedly"}${exitDetail(code, signal, this.stderrTail.text)}.${this.nativeStartupHint ? ` ${this.nativeStartupHint}` : ""}`,
         ));
         resolve();
       });
@@ -298,8 +311,13 @@ export class AntigravityAcpClient {
     const { lines, rest } = takeLines(this.diagnosticBuffer + chunk);
     this.diagnosticBuffer = rest.length > MAX_DIAGNOSTIC_LINE_CHARS ? "" : rest;
     for (const line of lines) {
-      if (!this.announceAuthorizationUrl(line)) this.noteStartupDiagnostic(line);
+      if (!this.announceAuthorizationUrl(line)) this.noteDiagnostic(line);
     }
+  }
+
+  private noteDiagnostic(line: string) {
+    this.noteStartupDiagnostic(line);
+    this.stderrTail.note(line);
   }
 
   private noteStartupDiagnostic(line: string) {
@@ -379,6 +397,7 @@ export class AntigravityAcpClient {
     }, Math.min(windowMs, Math.max(0, deadline - Date.now())), expired);
     this.initializationComplete = true;
     this.nativeStartupHint = undefined;
+    this.stderrTail.clear();
     return initialized;
   }
 
@@ -476,7 +495,10 @@ export function validateAntigravityCallbackUrl(
   return callback;
 }
 
-export function forwardAntigravityCallback(callback: URL): Promise<void> {
+/** Delivers the callback to the runtime's listener on 127.0.0.1, which is the box's own loopback when the runtime runs in
+ * a bot box with its own network: `relay` reaches it there. */
+export async function forwardAntigravityCallback(callback: URL, relay?: Pick<BoxRelay, "connect">): Promise<void> {
+  const socket = relay ? await relay.connect(Number(callback.port)) : null;
   return new Promise((resolveForward, reject) => {
     const req = httpRequest({
       protocol: "http:",
@@ -484,7 +506,7 @@ export function forwardAntigravityCallback(callback: URL): Promise<void> {
       port: callback.port,
       path: `${callback.pathname}${callback.search}`,
       method: "GET",
-      agent: false,
+      ...(socket ? { createConnection: () => socket } : { agent: false }),
       timeout: 10_000,
     }, (response) => {
       response.resume();
@@ -559,7 +581,16 @@ export async function probeAntigravityModels(input: {
     );
     const catalog = catalogFromAntigravityConfigOptions(session?.configOptions, input.fallbackDefault);
     if (!catalog) throw new Error("Antigravity did not return a model catalog for this Google account.");
-    return catalog;
+    const budget = Math.min(VARIANT_SURVEY_MS, deadline - Date.now());
+    if (budget <= 0) return catalog;
+    const surveyed = await surveyModelVariants((method, params) => client.request(method, params, budget), session, budget);
+    return {
+      ...catalog,
+      options: catalog.options.map((option) => {
+        const variants = surveyed.get(option.id);
+        return !option.variants?.length && variants?.length ? { ...option, variants } : option;
+      }),
+    };
   } finally {
     client.close();
   }
@@ -653,6 +684,7 @@ export interface AntigravityAuthStart {
 interface AuthFlow {
   id: string;
   client: AntigravityAcpClient;
+  relay: BoxRelay | null;
   completed: Promise<void>;
   pending: { redirectUri: string; state: string };
   expiresAt: number;
@@ -660,6 +692,11 @@ interface AuthFlow {
 
 export class AntigravityAuthController {
   private flow: AuthFlow | null = null;
+  private readonly onSignedIn: () => void;
+
+  constructor(onSignedIn: () => void = () => {}) {
+    this.onSignedIn = onSignedIn;
+  }
 
   async start(runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<AntigravityAuthStart> {
     this.cancel();
@@ -669,10 +706,21 @@ export class AntigravityAuthController {
       foundUrl = resolveUrl;
       failUrl = reject;
     });
-    const client = new AntigravityAcpClient(runtime, profile, profile.directory, (url) => {
-      try { foundUrl(parseAntigravityAuthorizationUrl(url)); }
-      catch (error) { failUrl(error instanceof Error ? error : new Error(String(error))); }
-    });
+    const relay = await botBox.openRelay();
+    let client: AntigravityAcpClient;
+    try {
+      client = new AntigravityAcpClient(runtime, profile, profile.directory, (url) => {
+        try { foundUrl(parseAntigravityAuthorizationUrl(url)); }
+        catch (error) { failUrl(error instanceof Error ? error : new Error(String(error))); }
+      }, relay ?? undefined);
+    } catch (error) {
+      relay?.close();
+      throw error;
+    }
+    const closeAll = () => {
+      client.close();
+      relay?.close();
+    };
     try {
       await client.initialize();
       const authenticated = client.request("authenticate", { methodId: "oauth-personal" }, AUTH_TIMEOUT_MS);
@@ -689,21 +737,23 @@ export class AntigravityAuthController {
         if (startupTimer) clearTimeout(startupTimer);
       });
       if (outcome.kind === "done") {
-        client.close();
+        closeAll();
+        this.onSignedIn();
         return { phase: "succeeded", flowId: null, authorizationUrl: null, expiresAt: null };
       }
       const flow: AuthFlow = {
         id: randomUUID(),
         client,
+        relay,
         completed: authenticated,
         pending: { redirectUri: outcome.request.redirectUri, state: outcome.request.state },
         expiresAt: Date.now() + AUTH_TIMEOUT_MS,
       };
       this.flow = flow;
-      void authenticated.finally(() => {
+      void authenticated.then(() => this.onSignedIn(), () => {}).finally(() => {
         if (this.flow === flow) this.flow = null;
-        client.close();
-      }).catch(() => {});
+        closeAll();
+      });
       return {
         phase: "waiting",
         flowId: flow.id,
@@ -711,7 +761,7 @@ export class AntigravityAuthController {
         expiresAt: new Date(flow.expiresAt).toISOString(),
       };
     } catch (error) {
-      client.close();
+      closeAll();
       throw error;
     }
   }
@@ -721,12 +771,13 @@ export class AntigravityAuthController {
     if (!flow || flow.id !== flowId || Date.now() >= flow.expiresAt) {
       throw new Error("This Google sign-in is no longer active. Start again.");
     }
-    await forwardAntigravityCallback(validateAntigravityCallbackUrl(flow.pending, callbackUrl));
+    await forwardAntigravityCallback(validateAntigravityCallbackUrl(flow.pending, callbackUrl), flow.relay ?? undefined);
     await flow.completed;
   }
 
   cancel(): void {
     this.flow?.client.close();
+    this.flow?.relay?.close();
     this.flow = null;
   }
 }

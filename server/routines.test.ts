@@ -1,11 +1,14 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { previousEventThread } from "./routine-same-conversation.ts";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import { isRoutineProblemRun } from "../shared/routines.ts";
 import { ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED } from "./routine-execution.ts";
+import { offAfterNoStarts } from "./routine-outcomes.ts";
+import { RUN_PROGRESS_WINDOW_MS } from "./routine-progress-save.ts";
 import {
   nextOccurrence,
   RoutineManager,
@@ -288,6 +291,26 @@ describe("bounded scheduled overlap and run health", () => {
     await h.manager.tick();
   });
 
+  it("keeps a run that failed only on a step, after its reply came back, failed but marked partly done", async () => {
+    const h = harness(start);
+    const routine = h.manager.create({ ...input(), enabled: false });
+    const event = (threadId: string, patch: Record<string, unknown>) => h.manager.handleRuntimeEvent({ eventId: `e-${Math.random()}`, provider: "fake", threadId, createdAt: new Date().toISOString(), ...patch } as Parameters<typeof h.manager.handleRuntimeEvent>[0]);
+    const attempt = async (threadId: string, partial: boolean, { reply = true, cutOff = false } = {}) => {
+      h.manager.runNow(routine.id); await h.manager.tick();
+      if (reply) event(threadId, { type: "item.completed", itemType: "assistant_text", itemId: "reply", text: "Here is the summary." });
+      event(threadId, { type: "runtime.error", message: "Stopped because the tool call “read_file” failed.", terminal: true, ...(partial ? { partial: true } : {}) });
+      if (cutOff) h.manager.failThread(threadId, "Provider settings changed");
+      else event(threadId, { type: "turn.completed", ok: false, stopReason: partial ? "tool_error" : "refusal" });
+    };
+    await attempt("thread-1", true);
+    await attempt("thread-2", false);
+    await attempt("thread-3", true, { reply: false });
+    await attempt("thread-4", true, { cutOff: true });
+    const [partly, failed, silent, cutOff] = h.manager.listRuns().sort((a, b) => a.threadId!.localeCompare(b.threadId!));
+    expect(partly).toMatchObject({ status: "failed", partial: true, output: "Here is the summary.", error: expect.stringContaining("read_file") });
+    expect([failed, silent, cutOff].map((run) => [run.status, run.partial])).toEqual([["failed", undefined], ["failed", undefined], ["queued", undefined]]);
+  });
+
   it("tells of a failure once per streak, and again when it changes or after a run completes", async () => {
     const h = harness(start);
     const alerts: unknown[] = [];
@@ -305,6 +328,42 @@ describe("bounded scheduled overlap and run health", () => {
     await attempt("thread-5", "Bridge rejected the chat id");
     expect(h.manager.listRuns().map(run => run.status)).toEqual(["failed", "failed", "failed", "completed", "failed"]);
     expect(alerts).toEqual([undefined, null, undefined, undefined]);
+  });
+
+  it("turns a routine off after three runs in a row on a cloud computer that didn't start, and counts afresh once turned on", async () => {
+    const h = harness(start);
+    const alerts: unknown[] = [];
+    h.options.onRunFailed = (_run, alert) => alerts.push(alert);
+    const routine = h.manager.create({ ...input(), schedule: { type: "interval", everyMinutes: 60, anchorAt: start + 3_600_000 } });
+    const noStart = "Maus's cloud desktop didn't start. Change where this routine runs.";
+    let thread = 0;
+    const attempt = async (error: string) => {
+      h.manager.runNow(routine.id); await h.manager.tick();
+      h.manager.failThread(`thread-${++thread}`, error, { cause: "refused" });
+    };
+    await attempt(noStart);
+    await attempt("Cloud computers are busy right now. Try again in a few minutes.");
+    await attempt(noStart);
+    await attempt(noStart);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: true });
+    await attempt(noStart);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: false, nextRunAt: null });
+    expect(alerts.at(-1)).toEqual({ detail: expect.stringContaining("turned off after 3 runs in a row") });
+    h.manager.update(routine.id, { enabled: true });
+    await attempt(noStart);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: true });
+    expect(alerts.at(-1)).toBeNull();
+  });
+
+  it("does not count a run that started before the routine was last changed toward turning it off", () => {
+    const error = "Maus's cloud desktop didn't start. Change where this routine runs.";
+    const run = (id: string, createdAt: number) => ({ id, routineId: "r", status: "failed", error, createdAt, finishedAt: createdAt + 50 });
+    const afterEdit = [run("a", 150), run("b", 160)];
+    const routine = () => ({ enabled: true, nextRunAt: 1, updatedAt: 100 });
+    const queuedBeforeEdit = run("old", 50);
+    expect(offAfterNoStarts(routine(), [...afterEdit, queuedBeforeEdit], queuedBeforeEdit, 300)).toBeUndefined();
+    const third = run("c", 170);
+    expect(offAfterNoStarts(routine(), [...afterEdit, third], third, 300)?.routine).toMatchObject({ enabled: false, nextRunAt: null });
   });
 
   it("counts restart recovery only once and sanitizes obsolete or invalid health metadata", async () => {
@@ -411,6 +470,43 @@ describe("a run left waiting for the person", () => {
     expect(h.started).toHaveLength(1);
     expect(h.manager.listRuns()).toHaveLength(1);
     if (change === "rescheduled") expect(h.manager.listRoutines()[0].nextRunAt).toBe(monday + minutes(240));
+  });
+
+  it.each(["paused", "deleted"] as const)("stops a run still waiting for the person when its routine is %s, so the bot stops waiting", async (change) => {
+    const h = harness(monday);
+    const routine = h.manager.create(daily);
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    h.setNow(routine.nextRunAt! + minutes(2)); parkOnPerson(h, "thread-1");
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "waiting" });
+
+    h.setNow(routine.nextRunAt! + minutes(30));
+    if (change === "paused") h.manager.update(routine.id, { enabled: false });
+    else h.manager.remove(routine.id);
+    const why = change === "paused" ? "The routine was paused while this run waited for you" : "The routine was deleted while this run waited for you";
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "cancelled", error: why, finishedAt: routine.nextRunAt! + minutes(30), threadId: "thread-1" });
+    expect(h.manager.listRuns()[0].attention).toBeUndefined();
+    await vi.waitFor(() => expect(h.interruptedTurns).toEqual([{ botId: "maus-1", threadId: "thread-1" }]));
+  });
+
+  it("leaves a turn the person started in the waiting run's conversation running when its routine is paused", async () => {
+    const h = harness(monday);
+    const routine = h.manager.create(daily);
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    h.setNow(routine.nextRunAt! + minutes(2)); parkOnPerson(h, "thread-1");
+    h.options.personTurn = (threadId) => threadId === "thread-1";
+    h.manager.update(routine.id, { enabled: false });
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "cancelled", error: "The routine was paused while this run waited for you" });
+    await Promise.resolve();
+    expect(h.interruptedTurns).toEqual([]);
+  });
+
+  it("leaves a run that is still working alone when its routine is paused", async () => {
+    const h = harness(monday);
+    const routine = h.manager.create(daily);
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    h.manager.update(routine.id, { enabled: false });
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running" });
+    expect(h.interruptedTurns).toEqual([]);
   });
 
   it.each(["skip", "queue"] as const)("keeps today's %s overlap behind a run that was answered and is still working", async (overlap) => {
@@ -572,7 +668,11 @@ describe("a run waiting on an approval nobody is there to give", () => {
     const h = harness();
     const at = await started(h);
     h.setNow(at + minutes(1));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     h.manager.handleRuntimeEvent(opened("thread-1", "r1", "mcp__composio__COMPOSIO_SEARCH_TOOLS"));
+    // The two minutes waited outlast the progress window: the ask is on disk.
+    vi.advanceTimersByTime(RUN_PROGRESS_WINDOW_MS);
+    vi.useRealTimers();
     h.options.hasPendingDelegations = (threadId) => threadId === "thread-1";
     h.setNow(at + minutes(3));
     const restarted = new RoutineManager(h.options);
@@ -1192,6 +1292,64 @@ describe("RoutineManager", () => {
       receivedAt: Date.now(),
     })).toThrow(expect.objectContaining({ status: 503 }));
     expect(readFileSync(file, "utf8")).toBe(corrupt);
+  });
+
+  it("names the files of unloaded routines and runs for an attachments clear, and none while the file is unreadable", () => {
+    const h = harness();
+    const file = h.options.file as string;
+    const routine = h.manager.create({
+      name: "Review attachment",
+      prompt: "Review the supplied context",
+      botId: "maus-1",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+      attachments: [{ id: "file-1", kind: "file", name: "brief.pdf", path: "/tmp/brief.pdf", size: 4_096 }],
+    });
+    h.manager.runNow(routine.id);
+    expect(h.manager.attachmentPaths()).toEqual(["/tmp/brief.pdf", "/tmp/brief.pdf"]);
+
+    const disk = JSON.parse(readFileSync(file, "utf8")) as { routines: Array<{ schedule: unknown }>; runs: Array<{ attachments?: unknown }> };
+    disk.routines[0]!.schedule = { type: "never" };
+    delete disk.runs[0]!.attachments;
+    writeFileSync(file, JSON.stringify(disk));
+    const unloaded = new RoutineManager(h.options);
+    expect(unloaded.listRoutines()).toEqual([]);
+    expect(unloaded.attachmentPaths()).toEqual(["/tmp/brief.pdf"]);
+
+    writeFileSync(file, "{ not json");
+    expect(new RoutineManager(h.options).attachmentPaths()).toBeNull();
+  });
+
+  it("names no files for a clear when an unloaded routine's attachments are malformed", () => {
+    for (const attachments of [{ path: "/tmp/brief.pdf" }, [null], [{ id: "file-1" }], "brief.pdf"]) {
+      const h = harness();
+      const file = h.options.file as string;
+      h.manager.create({ name: "Review", prompt: "Review it", botId: "maus-1", schedule: { type: "daily", time: "09:00", weekdays: [1] } });
+      const disk = JSON.parse(readFileSync(file, "utf8")) as { routines: Array<{ schedule: unknown; attachments?: unknown }> };
+      disk.routines[0]!.schedule = { type: "never" };
+      disk.routines[0]!.attachments = attachments;
+      writeFileSync(file, JSON.stringify(disk));
+      const unloaded = new RoutineManager(h.options);
+      expect(unloaded.listRoutines()).toEqual([]);
+      expect(unloaded.attachmentPaths()).toBeNull();
+    }
+  });
+
+  it("names no files for a clear when a loaded routine's or run's attachment list holds a bad entry", () => {
+    for (const owner of ["routines", "runs"] as const) {
+      const h = harness();
+      const file = h.options.file as string;
+      const routine = h.manager.create({
+        name: "Review", prompt: "Review it", botId: "maus-1", schedule: { type: "daily", time: "09:00", weekdays: [1] },
+        attachments: [{ id: "file-1", kind: "file", name: "brief.pdf", path: "/tmp/brief.pdf", size: 4_096 }],
+      });
+      h.manager.runNow(routine.id);
+      const disk = JSON.parse(readFileSync(file, "utf8")) as Record<typeof owner, Array<{ attachments?: unknown[] }>>;
+      disk[owner][0]!.attachments!.push(null);
+      writeFileSync(file, JSON.stringify(disk));
+      const reloaded = new RoutineManager(h.options);
+      expect(reloaded.listRoutines()).toHaveLength(1);
+      expect(reloaded.attachmentPaths()).toBeNull();
+    }
   });
 
   it("treats a routines file with a damaged top-level shape as unreadable", () => {
@@ -1883,7 +2041,7 @@ describe("RoutineManager", () => {
     await h.manager.tick();
     const base = { eventId: "delegating", provider: "fake", threadId: "thread-1", createdAt: new Date().toISOString() };
     h.manager.handleRuntimeEvent({ ...base, type: "turn.completed", ok: true, cost: 0.02 });
-    expect(h.manager.runForThread("thread-1")).toMatchObject({ id: queued.id, status: "waiting", attention: "Waiting for delegated work to finish" });
+    expect(h.manager.runForThread("thread-1")).toMatchObject({ id: queued.id, status: "waiting", attention: "Waiting for work it handed on to finish" });
     expect(h.manager.runForThread("thread-1")?.finishedAt).toBeUndefined();
     expect(h.manager.isActiveThread("thread-1")).toBe(true);
     pending = false;
@@ -3894,6 +4052,24 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
     expect(h.manager.listRuns()).toEqual([]);
     expect(h.started).toEqual([]);
   });
+
+  it("fails a paused bot's runs at once in the person's words, making no conversation and waking nothing for them", async () => {
+    const h = harness(start);
+    let paused: string | null = "Paused: Starter keeps 5 bots awake.";
+    h.options.pausedText = (botId) => (botId === "maus-1" ? paused : null);
+    h.manager.create(once(start + 60_000));
+    expect(h.manager.nextDueAt()).toBeNull();
+    h.setNow(start + 60_000);
+    await h.manager.tick();
+    h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "maus-1", runOn: "maus", deliveryId: "d1", receivedAt: start });
+    await h.manager.tick();
+    expect([h.taskTitles, h.started]).toEqual([[], []]);
+    expect(h.manager.listRuns().map((run) => [run.status, run.error])).toEqual([["failed", "Paused: Starter keeps 5 bots awake."], ["failed", "Paused: Starter keeps 5 bots awake."]]);
+
+    paused = null;
+    h.manager.create(once(start + 120_000));
+    expect(h.manager.nextDueAt()).toBe(start + 120_000);
+  });
 });
 
 describe("runs that report into a chat", () => {
@@ -3999,5 +4175,65 @@ describe("the scheduler wakes only when work is due", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("event automations that keep one conversation", () => {
+  const event = (h: ReturnType<typeof harness>, deliveryId: string, sameConversation = true) => h.manager.enqueueWebhook({
+    webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "maus-1", runOn: "maus", deliveryId, receivedAt: Date.now(),
+    ...(sameConversation ? { sameConversation } : {}),
+  });
+  const done = (h: ReturnType<typeof harness>, threadId: string) => h.manager.handleRuntimeEvent({
+    eventId: `done-${threadId}`, provider: "fake", threadId, createdAt: new Date().toISOString(), type: "turn.completed", ok: true,
+  });
+  const keepOne = (h: ReturnType<typeof harness>) => {
+    h.options.joinConversation = (run) => run.sameConversation ? previousEventThread(h.manager.listRuns(), run) : null;
+  };
+
+  it("continues the previous run's conversation, one run at a time", async () => {
+    const h = harness();
+    keepOne(h);
+    const first = event(h, "d1");
+    const second = event(h, "d2");
+    await h.manager.tick();
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1"]);
+    expect(h.manager.listRuns().find((run) => run.id === second.id)?.status).toBe("queued");
+
+    done(h, "thread-1");
+    await h.manager.tick();
+    expect(h.taskTitles).toHaveLength(1);
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1", "thread-1"]);
+    expect(h.manager.listRuns().find((run) => run.id === first.id)).toMatchObject({ status: "completed", threadId: "thread-1" });
+    expect(h.manager.listRuns().find((run) => run.id === second.id)).toMatchObject({ status: "running", threadId: "thread-1", sameConversation: true });
+    expect(new RoutineManager(h.options).listRuns().find((run) => run.id === second.id)?.sameConversation).toBe(true);
+  });
+
+  it("finds no earlier conversation for the first run, a run of another trigger, or another bot", () => {
+    const h = harness();
+    const first = event(h, "d1");
+    expect(previousEventThread(h.manager.listRuns(), first as never)).toBeNull();
+    expect(previousEventThread(h.manager.listRuns(), { id: "x", botId: "maus-1" })).toBeNull();
+  });
+
+  it("starts a new conversation for every run when the option is off", async () => {
+    const h = harness();
+    keepOne(h);
+    event(h, "d1", false);
+    await h.manager.tick();
+    done(h, "thread-1");
+    event(h, "d2", false);
+    await h.manager.tick();
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1", "thread-2"]);
+    expect(h.manager.listRuns().every((run) => run.sameConversation === undefined)).toBe(true);
+  });
+
+  it("joins a burst only into a waiting run with the same conversation setting", () => {
+    const h = harness();
+    const queued = event(h, "d1", false);
+    const add = (prompt: string) => `${prompt}\n+event`;
+    // The option was turned on after the first event: the next one must not ride along in the old run.
+    expect(h.manager.mergeIntoQueuedRun("hook", "d2", true, add)).toBeNull();
+    expect(h.manager.mergeIntoQueuedRun("hook", "d3", false, add)).toEqual({ id: queued.id });
+    expect(h.manager.listRuns().find((run) => run.id === queued.id)?.prompt).toBe("Handle it\n+event");
   });
 });

@@ -110,11 +110,12 @@ async function installation(from?: string) {
   };
   const posted: any[] = [];
   const stamps = vi.fn(skills.skillPackageStamps);
-  const open = () => new OrgLibrary({
+  const open = (over: { read?: (botId: string, name: string) => string | null; installOrg?: typeof skills.installOrgSkill } = {}) => new OrgLibrary({
     dataDir: DATA_DIR,
     store,
     routines,
-    skills: { list: skills.listSkills, stamps, setEnabled: skills.setSkillEnabled, installOrg: skills.installOrgSkill },
+    skills: { list: skills.listSkills, stamps, setEnabled: skills.setSkillEnabled, installOrg: over.installOrg ?? skills.installOrgSkill, read: over.read ?? skills.readSkillFile, remove: skills.removeSkill },
+    sections: { read: (section) => sections.readSectionContext(section)?.text ?? "", write: (section, text) => void sections.writeSectionContext(section, text) },
     presets: presetStore,
     postState: (message) => posted.push(structuredClone(message)),
   });
@@ -223,6 +224,33 @@ describe("release files", () => {
     expect(library.add(TEAM_ID, app.importDeps)).toMatchObject({ ok: false, status: 422, code: "invalid_package" });
     expect(app.store.bots).toHaveLength(0);
     expect(app.posted.at(-1).packages[0]).toMatchObject({ state: "failed", reason: "invalid_package" });
+  });
+});
+
+describe("adding from the shelf past five bots", () => {
+  it("adds a team to a Cloud that has five already, and refuses one past the workspace's ceiling as no broken package", async () => {
+    const app = await installation();
+    for (let i = 0; i < 5; i++) app.store.createBot({ name: `Bot ${i}` });
+    let maxBots = 7;
+    const deps = () => ({ ...app.importDeps, maxBots });
+    const library = app.open();
+    const team = release("full-team.v2.json");
+    app.writeBlob(team.bytes);
+    library.applyRelay(relay(catalog([entry(TEAM_ID, team)])));
+    await library.settled();
+    const before = app.store.bots.length;
+    app.posted.length = 0;
+
+    expect(library.add(TEAM_ID, deps())).toMatchObject({ ok: false, status: 409, code: "too_many_bots" });
+    await library.settled();
+    expect(app.store.bots).toHaveLength(before);
+    expect(app.posted.flatMap((report: { packages: Array<{ state: string }> }) => report.packages).filter((row) => row.state === "failed")).toEqual([]);
+    expect(app.readState().adding ?? {}).toEqual({});
+
+    maxBots = 100;
+    const added = library.add(TEAM_ID, deps());
+    expect(added).toMatchObject({ ok: true, status: 201 });
+    expect(app.store.bots.length).toBe(before + 3);
   });
 });
 
@@ -942,3 +970,143 @@ describe("presets from the shelf", () => {
     expect(app.skills.listSkills(made.id)[0]!.enabled).toBe(true);
   });
 });
+
+describe("a newer release of an added team", () => {
+  const NEXT = (document: any) => {
+    const pkg = document.package;
+    pkg.release = "1.4.0";
+    const lead = pkg.agents.find((agent: any) => agent.key === "lead");
+    lead.soul = "You run the desk. Quote the 2027 price list.";
+    lead.title = "Desk lead";
+    pkg.playbooks[0].instructions = `${pkg.playbooks[0].instructions} Then confirm the seat count.`;
+    pkg.skills.entries.find((skill: any) => skill.name === "pricing-policy").instructions += "\nSeats are 59 from January.";
+    pkg.rooms[0].bulletin = "Cite sources. Lead answers first.";
+    pkg.routines.find((routine: any) => routine.key === "daily-digest").prompt = "Summarise yesterday's deals, biggest first.";
+    pkg.team.brief = "We sell a team plan at 59 per seat.";
+  };
+
+  async function addedTeam(over: Parameters<Awaited<ReturnType<typeof installation>>["open"]>[0] = {}) {
+    const app = await installation();
+    const library = app.open(over);
+    const first = release("full-team.v2.json");
+    app.writeBlob(first.bytes);
+    library.applyRelay(relay(catalog([entry(TEAM_ID, first)])));
+    await library.settled();
+    const added = library.add(TEAM_ID, app.importDeps) as any;
+    const botOf = (key: string) => app.store.bots.find((bot) => bot.installedPackage?.agentKey === key)!;
+    const routineOf = (key: string) => app.routines.packageStamps().find((routine) => routine.stamp.key === key)!;
+    const update = async (next = release("full-team.v2.json", NEXT), patch: Record<string, unknown> = {}, write = true) => {
+      if (write) app.writeBlob(next.bytes);
+      library.applyRelay(relay(catalog([entry(TEAM_ID, next, patch)], { libraryVersion: 4 })));
+      await library.settled();
+      return next;
+    };
+    return { app, library, first, installId: added.value.result.installId as string, botOf, routineOf, update };
+  }
+
+  it("takes every part the publisher changed and the person did not, and moves the install to the new release", async () => {
+    const { app, library, installId, botOf, routineOf, update } = await addedTeam();
+    const before = botOf("lead");
+    const next = await update();
+    const lead = botOf("lead");
+    expect(lead).toMatchObject({ soul: "You run the desk. Quote the 2027 price list.", title: "Desk lead", name: before.name });
+    expect(lead.approvalMode, "an update never raises approval").toBe(before.approvalMode);
+    expect(lead.playbooks![0]!.instructions).toMatch(/Then confirm the seat count\.$/);
+    expect(lead.installedPackage).toMatchObject({ release: "1.4.0", sha256: next.sha256 });
+    expect(app.skills.readSkillFile(lead.id, "pricing-policy")).toMatch(/Seats are 59 from January\./);
+    expect(app.skills.skillPackageStamps(lead.id).find((skill) => skill.name === "pricing-policy")!.stamp.release).toBe("1.4.0");
+    expect(app.store.groups[0]!.bulletin).toBe("Cite sources. Lead answers first.");
+    const daily = app.routines.listRoutines().find((routine) => routine.id === routineOf("daily-digest").routineId)!;
+    expect(daily).toMatchObject({ prompt: "Summarise yesterday's deals, biggest first.", enabled: false });
+    expect(app.sections.readSectionContext(lead.section)?.text).toBe("We sell a team plan at 59 per seat.");
+    expect(app.readState().installs[installId]).toMatchObject({ release: "1.4.0", sha256: next.sha256, status: "installed" });
+    expect(app.posted.at(-1).packages).toEqual([{ packageId: TEAM_ID, release: "1.4.0", sha256: next.sha256, state: "installed" }]);
+    expect(library.list().packages[0]!.installed).toMatchObject({ release: "1.4.0" });
+
+    // Nothing changes when the same catalog comes again.
+    const stamped = structuredClone(botOf("lead").packageBase);
+    await update(next);
+    expect(botOf("lead").packageBase).toEqual(stamped);
+  });
+
+  it("keeps every part the person changed, and takes the rest", async () => {
+    const edited = "My own pricing notes.";
+    const { app, botOf, routineOf, update } = await addedTeam({ read: (botId, name) => (name === "pricing-policy" ? edited : app.skills.readSkillFile(botId, name)) });
+    const lead = botOf("lead");
+    app.store.patchBotProfile(lead.id, { soul: "My own instructions." });
+    app.store.patchGroup(app.store.groups[0]!.id, { bulletin: "Our own room rules." });
+    const daily = routineOf("daily-digest").routineId;
+    app.routines.update(daily, { prompt: "My own digest.", enabled: true });
+    await update();
+    const after = botOf("lead");
+    expect(after.soul).toBe("My own instructions.");
+    expect(after.title).toBe("Desk lead");
+    expect(app.skills.readSkillFile(after.id, "pricing-policy")).not.toMatch(/Seats are 59/);
+    expect(app.store.groups[0]!.bulletin).toBe("Our own room rules.");
+    expect(app.routines.listRoutines().find((routine) => routine.id === daily)).toMatchObject({ prompt: "My own digest.", enabled: true });
+
+    // A later release that changes the soul again still leaves the person's version alone.
+    await update(release("full-team.v2.json", (document) => { NEXT(document); document.package.release = "1.5.0"; document.package.agents[0].soul = "Third version."; }));
+    expect(botOf("lead").soul).toBe("My own instructions.");
+  });
+
+  it("adds a skill new to a bot in this release, never one the person took off, and keeps a skill switched off", async () => {
+    const { app, botOf, update } = await addedTeam();
+    const lead = botOf("lead");
+    const scout = botOf("scout");
+    app.skills.setSkillEnabled(lead.id, "pricing-policy", false);
+    const scoutHad = app.skills.listSkills(scout.id).map((skill) => skill.name);
+    app.skills.removeSkill(scout.id, scoutHad[0]!);
+    await update(release("full-team.v2.json", (document) => {
+      NEXT(document);
+      document.package.agents.find((agent: any) => agent.key === "lead").skills.push("objection-handling");
+    }));
+    expect(app.skills.listSkills(lead.id).map((skill) => [skill.name, skill.enabled]).sort()).toEqual([["objection-handling", true], ["pricing-policy", false]]);
+    expect(app.skills.readSkillFile(lead.id, "pricing-policy")).toMatch(/Seats are 59 from January\./);
+    expect(app.skills.listSkills(scout.id).map((skill) => skill.name)).not.toContain(scoutHad[0]);
+  });
+
+  it("puts a skill back when its new text can't be written, and finishes the update with the next catalog", async () => {
+    let fail = false;
+    const { app, installId, botOf, update } = await addedTeam({
+      installOrg: (...args) => {
+        if (fail && args[2].includes("Seats are 59")) { fail = false; return { error: "disk full" }; }
+        return app.skills.installOrgSkill(...args);
+      },
+    });
+    const lead = botOf("lead");
+    const original = app.skills.readSkillFile(lead.id, "pricing-policy");
+    fail = true;
+    const next = await update();
+    expect(app.skills.readSkillFile(lead.id, "pricing-policy")).toBe(original);
+    expect(app.readState().installs[installId].release, "not moved while a part failed").toBe("1.3.0");
+    await update(next);
+    expect(app.skills.readSkillFile(lead.id, "pricing-policy")).toMatch(/Seats are 59 from January\./);
+    expect(app.readState().installs[installId].release).toBe("1.4.0");
+  });
+
+  it("waits while the new release isn't downloaded or needs a newer app, and never moves to a withdrawn one", async () => {
+    const { app, installId, botOf, update } = await addedTeam();
+    const soul = botOf("lead").soul;
+    const next = await update(undefined, {}, false);
+    expect(botOf("lead").soul).toBe(soul);
+    expect(app.readState().installs[installId].release).toBe("1.3.0");
+    await update(next, { release: { ...entry(TEAM_ID, next).release, formatVersion: 99 } });
+    expect(app.readState().installs[installId].release).toBe("1.3.0");
+    await update(next, { withdrawnReleases: [{ version: "1.4.0", sha256: next.sha256 }] });
+    expect(botOf("lead").soul).toBe(soul);
+    expect(app.readState().installs[installId].release).toBe("1.3.0");
+  });
+
+  it("leaves a team another organization added, and a removed team, alone", async () => {
+    const { app, library, installId, botOf } = await addedTeam();
+    const next = release("full-team.v2.json", NEXT);
+    app.writeBlob(next.bytes);
+    const soul = botOf("lead").soul;
+    library.applyRelay(relay({ ...catalog([entry(TEAM_ID, next)]), organization: { id: OTHER_ORG, name: "Other Co" } }, { organizationId: OTHER_ORG }));
+    await library.settled();
+    expect(botOf("lead").soul).toBe(soul);
+    expect(app.readState().installs[installId].release).toBe("1.3.0");
+  });
+});
+

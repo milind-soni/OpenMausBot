@@ -28,6 +28,28 @@ export function cleanAttachments(value: unknown): RoutineContextAttachment[] {
   });
 }
 
+/** The file paths the owners' attachments name; null when any saved list is malformed, so a clear that relies on it refuses. */
+export function attachmentPathsOf(owners: ReadonlyArray<{ attachments?: unknown }>): string[] | null {
+  const paths: string[] = [];
+  for (const { attachments } of owners) {
+    if (attachments === undefined) continue;
+    if (!Array.isArray(attachments)) return null;
+    for (const file of attachments as unknown[]) {
+      const path = file && typeof file === "object" ? (file as { path?: unknown }).path : undefined;
+      if (typeof path !== "string") return null;
+      paths.push(path);
+    }
+  }
+  return paths;
+}
+
+/** True when any saved list would not load as it is: loading drops such a list, so its files are no longer named. */
+export function attachmentsMalformed(owners: ReadonlyArray<{ attachments?: unknown }>): boolean {
+  return owners.some(({ attachments }) => {
+    try { cleanAttachments(attachments); return false; } catch { return true; }
+  });
+}
+
 export function cleanTimeoutMinutes(value: unknown): number | undefined {
   if (value == null) return undefined;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 5 || value > 240) {

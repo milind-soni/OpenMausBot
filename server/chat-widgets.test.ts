@@ -75,7 +75,7 @@ describe("show_widget", () => {
   });
 
   it("tells the caller which row it wrote, on a show and on an update, and never on a refusal", () => {
-    const fake = fakeStore(["thread-room"]);
+    const fake = fakeStore();
     const authored = vi.fn();
     const call = (input: unknown, threadId = THREAD) => createAgentCard({ store: fake.store, bot: SCOUT, threadId, input, authored });
     expect(call({ tool: "show_widget", widget: WIDGET_SAMPLES.buildStatus })).toEqual({ ok: true, messageId: "m1" });
@@ -83,7 +83,6 @@ describe("show_widget", () => {
     expect(authored.mock.calls).toEqual([["m1"], ["m1"]]);
     expect(call({ tool: "show_widget", widget: { type: "Carousel" } }).ok).toBe(false);
     expect(call({ tool: "update_widget", widget_id: "nope", widget: WIDGET_SAMPLES.buildStatus }).ok).toBe(false);
-    expect(call({ tool: "show_widget", widget: WIDGET_SAMPLES.buildStatus }, "thread-room").ok).toBe(false);
     expect(call({ title: "Deploy now?", subtitle: "The build is green.", options: ["Yes", "No"] }).ok).toBe(false);
     expect(authored).toHaveBeenCalledTimes(2);
   });
@@ -94,15 +93,15 @@ describe("show_widget", () => {
     expect(fake.rows(THREAD)[0]).toMatchObject({ text: "Deploy finished.", widget: { root: { type: "Card", children: [{ type: "Text", value: "Deploy finished." }] } } });
   });
 
-  it("is refused in a room, before anything is read or written", () => {
+  it("shows in a room as the bot's own row, which only that bot can replace", () => {
     const fake = fakeStore(["thread-room"]);
-    expect(show(fake, WIDGET_SAMPLES.pullRequests, {}, "thread-room")).toEqual({
-      ok: false, status: 409, error: "Widgets are not available in rooms yet. Answer in text.",
-    });
-    expect(createAgentCard({ store: fake.store, bot: SCOUT, threadId: "thread-room", input: { tool: "update_widget", widget_id: "m1", widget: WIDGET_SAMPLES.pullRequests } }))
-      .toMatchObject({ ok: false, status: 409 });
-    expect(fake.appendMessage).not.toHaveBeenCalled();
-    expect(fake.patchMessage).not.toHaveBeenCalled();
+    expect(show(fake, WIDGET_SAMPLES.pullRequests, {}, "thread-room")).toEqual({ ok: true, messageId: "m1" });
+    expect(fake.rows("thread-room")[0]).toMatchObject({ role: "bot", kind: "widget", from: { botId: SCOUT.id, name: "Scout", color: "blue" } });
+    const other = { id: "bot-other", name: "Other", color: "red" as const };
+    expect(createAgentCard({ store: fake.store, bot: other, threadId: "thread-room", input: { tool: "update_widget", widget_id: "m1", widget: WIDGET_SAMPLES.buildStatus } }))
+      .toEqual({ ok: false, status: 404, error: "No widget with that id in this conversation." });
+    expect(createAgentCard({ store: fake.store, bot: SCOUT, threadId: "thread-room", input: { tool: "update_widget", widget_id: "m1", widget: WIDGET_SAMPLES.buildStatus } }))
+      .toEqual({ ok: true, messageId: "m1" });
   });
 
   it("answers malformed input with the parser's sentence and posts nothing", () => {
@@ -199,6 +198,23 @@ describe("show_widget", () => {
       { type: "Button", label: other, onClickAction: { type: "b" } },
     ] })).toMatchObject({ ok: false, status: 400, error: expect.stringContaining("read the same once secrets were removed") });
     expect(fake.appendMessage).not.toHaveBeenCalled();
+  });
+
+  it("refuses a button or option that would tag @devs, and keeps a widget that only tells the person to type it (email 1a1bc2fa)", () => {
+    const fake = fakeStore();
+    const refused = { ok: false, status: 400, error: expect.stringContaining("type @devs") };
+    expect(show(fake, { type: "Card", children: [{ type: "Button", label: "@devs report this", onClickAction: { type: "report" } }] })).toMatchObject(refused);
+    expect(show(fake, { type: "Card", children: [{ type: "Text", value: "Report?" }], confirm: { label: "Send to @devs", action: { type: "send" } } })).toMatchObject(refused);
+    expect(show(fake, { type: "Card", children: [{ type: "Form", onSubmitAction: { type: "pick" }, children: [
+      { type: "RadioGroup", name: "what", label: "What next", options: [{ label: "Tell @devs", value: "@devs it broke" }, { label: "Nothing", value: "none" }] },
+      { type: "Button", label: "Send", submit: true },
+    ] }] })).toMatchObject(refused);
+    expect(fake.appendMessage).not.toHaveBeenCalled();
+    expect(show(fake, { type: "Card", children: [
+      { type: "Text", value: "To report this, type @devs and what went wrong." },
+      { type: "Button", label: "Open docs", onClickAction: { type: "open_url", payload: { url: "https://example.com/@devs" } } },
+      { type: "Button", label: "Retry", onClickAction: { type: "retry" } },
+    ] })).toMatchObject({ ok: true });
   });
 
   it("uses fallback_text when it is given: trimmed, redacted and held to the limit", () => {

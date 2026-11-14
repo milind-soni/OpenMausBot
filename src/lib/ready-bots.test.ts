@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { MAUS_COLORS } from "./mascot";
-import { CLASSIC_ROLE_IDS, READY_BOT_CATEGORIES, READY_BOTS, matchesReadyBot, readyBot, readyBotTemplate } from "./ready-bots";
+import { CLASSIC_ROLE_IDS, READY_BOT_CATEGORIES, READY_BOTS, matchesReadyBot, readyBot, readyBotCopy, readyBotTemplate } from "./ready-bots";
+import { setLocale } from "./i18n";
+import en from "@/locales/en.json";
 import { MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
 import type { NewBotDefaults } from "../../shared/new-bot-defaults";
 
@@ -85,6 +87,20 @@ describe("matchesReadyBot", () => {
   });
 });
 
+describe("readyBotCopy", () => {
+  it("reads each bot's words from the catalog, and keeps a bot's own English when the catalog has none", () => {
+    for (const bot of READY_BOTS) for (const field of ["title", "description", "try"]) expect(Object.hasOwn(en, `readyBots.bot.${bot.id}.${field}`), `${bot.id}.${field}`).toBe(true);
+    const unlisted = { ...readyBot("humanizer")!, id: "not-in-the-catalog", title: "Its title", description: "Its words", tryAsking: ["Its ask"] };
+    try {
+      setLocale("pt-br");
+      expect(readyBotCopy(unlisted)).toEqual({ title: "Its title", description: "Its words", tryAsking: "Its ask" });
+      expect(readyBotCopy(readyBot("humanizer")!).title).not.toBe(readyBot("humanizer")!.title);
+    } finally {
+      setLocale("en");
+    }
+  });
+});
+
 describe("the social media manager", () => {
   const social = readyBot("social")!;
 
@@ -92,6 +108,7 @@ describe("the social media manager", () => {
     expect(social).toMatchObject({ title: "Social media manager", category: "work", apps: ["postiz"] });
     expect(social.soul).toContain("Add every post to Postiz as a draft, unless the user gave it a time to go out: then schedule it for that time.");
     expect(social.soul).toContain("Never publish a post straight away (type now) unless the user asks for that post to go out now.");
+    expect(social.soul).toContain("show a preview of it with show_html, then add it to Postiz without waiting for a reply.");
     expect(social.routines).toEqual([expect.objectContaining({ name: "Weekly post plan", enabled: false })]);
     expect(social.routines![0]!.prompt).toContain("as drafts");
   });

@@ -12,6 +12,7 @@ export type BotUpdatePatch = Partial<
     | "autoStartVps"
     | "color"
     | "mascotExpression"
+    | "mascotBody"
     | "mascotFaceColor"
     | "avatarUrl"
     | "avatarCrop"
@@ -26,6 +27,7 @@ export type BotUpdatePatch = Partial<
     | "replyStyle"
     | "voice"
     | "voiceNotes"
+    | "voiceNoteEveryReply"
     | "xResearch"
     | "pinned"
     | "hidden"
@@ -34,7 +36,6 @@ export type BotUpdatePatch = Partial<
     | "section"
     | "pinnedMessageId"
     | "chiefOfStaff"
-    | "approvePeerComms"
     | "composio"
     | "browser"
     | "browserProfile"
@@ -48,25 +49,28 @@ export type BotUpdatePatch = Partial<
   connectorTools?: Bot["connectorTools"] | null;
   connectorScopes?: Bot["connectorScopes"] | null;
   phoneApps?: Bot["phoneApps"] | null;
-  /** null: talks to every bot again. */
-  peers?: string[] | null;
+  /** null demotes a default bot to a regular one; the server clears the mark. Body only: bot state drops the field. */
+  defaultBot?: Bot["defaultBot"] | null;
   /** The server's proof the local-auto warning was shown: wire-only, never folded into bot state. */
   acknowledgeLocalAuto?: boolean;
   applyToAllThreads?: boolean;
   keepThreadModels?: boolean;
   /** With modelSelection: the thread this client shows. Body only: Bot.threadId is the server's selection. */
   threadId?: string;
+  /** The conversation to make main ("Set as main thread"); null clears it. Body only: the bot shows it as mainThreadId. */
+  mainThreadChoice?: string | null;
 };
 
 export type BotStatePatch = Omit<
   BotUpdatePatch,
-  "computer" | "connectorTools" | "connectorScopes" | "phoneApps" | "peers" | "acknowledgeLocalAuto" | "applyToAllThreads" | "keepThreadModels" | "threadId"
+  "computer" | "connectorTools" | "connectorScopes" | "phoneApps" | "defaultBot" | "acknowledgeLocalAuto" | "applyToAllThreads" | "keepThreadModels" | "threadId" | "mainThreadChoice"
 > & {
-  peers?: string[];
+  mainThreadId?: string;
   computer?: Bot["computer"];
   connectorTools?: Bot["connectorTools"];
   connectorScopes?: Bot["connectorScopes"];
   phoneApps?: Bot["phoneApps"];
+  defaultBot?: Bot["defaultBot"];
 };
 
 interface BotPatchQueueEntry {
@@ -120,23 +124,27 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
     applyToAllThreads: _allThreads,
     keepThreadModels: _keepThreadModels,
     threadId: _threadId,
+    mainThreadChoice,
     computer,
     connectorTools,
     connectorScopes,
     phoneApps,
-    peers,
+    defaultBot,
     ...fields
   } = patch;
   const normalized: BotStatePatch = { ...fields };
   if (computer === null) normalized.computer = undefined;
   else if (computer !== undefined) normalized.computer = computer;
+  if (defaultBot === null) normalized.defaultBot = undefined;
+  else if (defaultBot !== undefined) normalized.defaultBot = defaultBot;
   if (connectorTools === null) normalized.connectorTools = undefined;
   else if (connectorTools !== undefined) normalized.connectorTools = connectorTools;
   if (connectorScopes === null) normalized.connectorScopes = undefined;
   else if (connectorScopes !== undefined) normalized.connectorScopes = connectorScopes;
   if (phoneApps === null) normalized.phoneApps = undefined;
   else if (phoneApps !== undefined) normalized.phoneApps = phoneApps;
-  if (peers !== undefined) normalized.peers = peers ?? undefined;
+  // A pending choice shows as the bot's main thread, so a broadcast during the save does not revert it.
+  if (typeof mainThreadChoice === "string") normalized.mainThreadId = mainThreadChoice;
   return normalized;
 };
 

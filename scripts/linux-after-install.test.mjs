@@ -254,6 +254,36 @@ describe.skipIf(process.platform !== "linux")("Linux DEB upgrade hook", () => {
     expect(result.stdout).not.toContain("profile operation");
   });
 
+  it("installs in a Docker container on a restricted host, staging the policy for the host", () => {
+    // Docker shows the host's restriction sysctl but not the host's AppArmor:
+    // a clean ubuntu:24.04 container on a stock Ubuntu 24.04 host.
+    const { appRoot, systemRoot, apparmorStatus, apparmorDir } = fixture();
+    fs.writeFileSync(apparmorStatus, "#!/bin/sh\nexit 1\n");
+    fs.writeFileSync(path.join(systemRoot, "container"), "docker\n");
+    const result = runHook(appRoot);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain("AppArmor belongs to this container's host");
+    expect(result.stdout).not.toContain("profile operation");
+    expect(fs.readFileSync(path.join(apparmorDir, "openmausbot-browser"), "utf8")).toBe(fs.readFileSync(browserPolicy, "utf8"));
+  });
+
+  it("still loads the policy in a container that has its own AppArmor", () => {
+    const { appRoot, systemRoot, apparmorDir } = fixture();
+    fs.writeFileSync(path.join(systemRoot, "container"), "lxc\n");
+    const result = runHook(appRoot);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(`profile operation: -r ${apparmorDir}/openmausbot-browser`);
+  });
+
+  it("still fails closed in a container whose host restricts namespaces but that lacks AppArmor tools", () => {
+    const { appRoot, systemRoot, parser } = fixture();
+    fs.unlinkSync(parser);
+    fs.writeFileSync(path.join(systemRoot, "container"), "docker\n");
+    const result = runHook(appRoot);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("needs apparmor and apparmor_parser");
+  });
+
   it("refuses an AppArmor destination symlink without overwriting its target", () => {
     const { appRoot, apparmorDir } = fixture();
     const external = path.join(appRoot, "external-policy");
@@ -279,6 +309,15 @@ describe.skipIf(process.platform !== "linux")("Linux DEB upgrade hook", () => {
     expect(fs.existsSync(profile)).toBe(false);
     expect(fs.readFileSync(unrelated, "utf8")).toBe("unrelated policy");
     expect(runRemoveHook(appRoot, "purge").status).toBe(0);
+  });
+
+  it("treats pacman's post_remove, which passes the old version, as an uninstall", () => {
+    const { appRoot, apparmorDir } = fixture();
+    expect(runHook(appRoot).status).toBe(0);
+    const profile = path.join(apparmorDir, "openmausbot-browser");
+    const removed = runRemoveHook(appRoot, "0.1.149-1");
+    expect(removed.status, removed.stderr).toBe(0);
+    expect(fs.existsSync(profile)).toBe(false);
   });
 
   it("removes an already unloaded profile without asking the kernel again", () => {

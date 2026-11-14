@@ -15,9 +15,9 @@ export const WHATS_NEW_POPUP = "[data-whats-new]";
 
 const WORDS: Record<WhatsNewSlide, { title: LocaleKey; body: LocaleKey }> = {
   pro: { title: "whatsNew.cloud.title", body: "whatsNew.cloud.body" },
-  team: { title: "whatsNew.team.title", body: "whatsNew.team.body" },
+  team: { title: "whatsNew.team.title", body: "whatsNew.team.bodyInbox" },
 };
-const TEAM_POINTS: readonly LocaleKey[] = ["whatsNew.team.apps", "whatsNew.team.groupChats", "whatsNew.team.memory", "whatsNew.team.handoff", "whatsNew.team.access"];
+const TEAM_POINTS: readonly LocaleKey[] = ["whatsNew.team.apps", "whatsNew.team.groupChats", "whatsNew.team.memory", "whatsNew.team.handoff", "whatsNew.team.accessUse"];
 const NAV = "ui-button ui-button-pill min-h-9 gap-1 px-3";
 
 const focusLost = (focus: Element | null) => !focus || focus === document.body || !focus.isConnected;

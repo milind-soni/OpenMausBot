@@ -7,6 +7,7 @@ import { engineHomes } from "../engine-homes/engine-homes.ts";
 import { audienceHome } from "../engine-homes/layout.ts";
 import * as procs from "../procs.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
+import { recordEvents } from "../testing/events.ts";
 import {
   MuseCodeDriver, museApprovalMode, museCatalog, museChoice, museModelLabel, museQuestions, museServeArgs,
   museToolOutput, museToolStart,
@@ -130,6 +131,23 @@ describe.skipIf(process.platform === "win32")("Muse Code's process", () => {
     return { cli, log };
   };
 
+  it("keeps discovery failures from an unavailable temp directory inside the instance and can retry", async () => {
+    const { cli } = fakeMuse();
+    const previousTmp = process.env.TMPDIR;
+    vi.stubEnv("TMPDIR", join(root, "missing-temp-directory"));
+    const instance = await MuseCodeDriver.create({ instanceId: "museCode", displayName: "Muse Code", enabled: true,
+      environment: {}, config: MuseCodeDriver.decodeConfig({ cli }) });
+    try {
+      await expect(instance.refreshModels!()).resolves.toBeUndefined();
+      expect(instance.models.default).toBe(MuseCodeDriver.models.default);
+      vi.stubEnv("TMPDIR", previousTmp);
+      await instance.refreshModels!();
+      expect(instance.models.default).toBe("muse-fake-1.0");
+    } finally {
+      await instance.dispose();
+    }
+  });
+
   it("starts through the shared launcher, in the conversation's engine home, and stops with the instance", async () => {
     const { cli, log } = fakeMuse();
     const home = join(root, "home");
@@ -174,15 +192,22 @@ describe.skipIf(process.platform === "win32")("Muse Code's process", () => {
         const engine: ReturnType<typeof procs.spawnCli> = spawned.mock.results[bot]!.value;
         return engine.exitCode !== null || engine.signalCode !== null;
       };
-      const settled: { started?: boolean; completed?: RuntimeEvent; hostExited?: boolean } = {};
+      const settled: { completed?: RuntimeEvent; hostExited?: boolean } = {};
       instance.adapter.onEvent((event) => {
-        if (event.type === "turn.started") settled.started = true;
         if (event.type !== "turn.completed") return;
         settled.completed = event;
         settled.hostExited = exited();
       });
-      await instance.adapter.sendTurn({ threadId: "t-stop", text: "work", cwd: root, approvalMode: "full" });
-      await vi.waitFor(() => expect(settled.started).toBe(true));
+      const events = recordEvents(instance.adapter);
+      try {
+        await instance.adapter.sendTurn({ threadId: "t-stop", text: "work", cwd: root, approvalMode: "full" });
+        await events.until((event) => event.type === "turn.started");
+      } catch (error) {
+        await instance.dispose();
+        throw error;
+      } finally {
+        events.stop();
+      }
       return { instance, settled, exited };
     };
 

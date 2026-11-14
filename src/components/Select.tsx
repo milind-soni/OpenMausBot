@@ -1,4 +1,5 @@
-import type { ComponentProps } from "react";
+import { useContext, type ComponentProps } from "react";
+import { SettingsLook } from "./SettingsPrimitives";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -24,12 +25,17 @@ export function Select({
   size = "md",
   ...props
 }: Omit<ComponentProps<"select">, "size"> & { variant?: keyof typeof VARIANTS; size?: keyof typeof SIZES }) {
+  // Settings has one select: the ghost one, 160 to 240 wide, so the selects in a card line up on their left edges.
+  const settings = useContext(SettingsLook);
+  if (settings) variant = "ghost";
   return (
-    <div className={cn("relative inline-flex min-w-0", className)}>
+    <div data-settings-select={settings ? "" : undefined} className={cn("relative inline-flex min-w-0", settings ? "min-w-[160px] max-w-[240px] [width:var(--settings-select-width,auto)]" : className)}>
+      {/* The platform draws the open list (white by default) while the options inherit the skin's ink, so they get the menu colour. */}
       <select
         {...props}
         className={cn(
-          "peer w-full min-w-0 cursor-pointer appearance-none truncate disabled:cursor-default disabled:opacity-50",
+          "peer min-w-0 cursor-pointer appearance-none truncate [color-scheme:var(--code-color-scheme)] [&_option]:bg-menu [&_option]:text-ink disabled:cursor-default disabled:opacity-50",
+          settings ? "w-auto min-w-full max-w-[min(240px,var(--settings-select-width,240px))]" : "w-full",
           VARIANTS[variant],
           variant === "ghost" ? GHOST.select : SIZES[size].select,
         )}

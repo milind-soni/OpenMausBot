@@ -14,7 +14,7 @@ export const WORKSPACES_DIR = join(DATA_DIR, "workspaces");
 export const TASK_WORKSPACES_DIR = join(DATA_DIR, "task-workspaces");
 
 export function supportsWorkspaceFiles(driverKind: string): boolean {
-  return !["grok", "openai-compat", "minimax", "mistral", "cerebras", "groq", "greenference", "meta"].includes(driverKind);
+  return !["grok", "openai-compat", "minimax", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta"].includes(driverKind);
 }
 
 /** Directory organization, not a shell sandbox. */
@@ -58,6 +58,12 @@ Las notas más largas van en memory/<tema>.md y se leen cuando es necesario.
 세션을 시작할 때마다 불러와요 — 이 파일은 짧고 잘 정리된 상태로 유지하세요.
 더 긴 메모는 memory/<주제>.md 파일에 두고, 필요할 때 읽어요.
 `,
+  "zh-tw": `# 記憶
+
+這個機器人在不同任務之間保留的長期筆記。前 ${MEMORY_MAX_LINES} 行
+會在每次工作階段開始時載入 — 請讓這個檔案保持簡短、整理好。
+較長的筆記放在 memory/<主題>.md 檔案裡，需要時再讀取。
+`,
 };
 
 const MEMORY_SEED_VALUES = new Set(Object.values(MEMORY_SEEDS));
@@ -71,6 +77,7 @@ function memorySeedFor(language?: string): string {
   if (normalized === "pt" || normalized.startsWith("pt-")) return MEMORY_SEEDS["pt-br"];
   if (normalized === "es" || normalized.startsWith("es-")) return MEMORY_SEEDS.es;
   if (normalized === "ko" || normalized.startsWith("ko-")) return MEMORY_SEEDS.ko;
+  if (/^zh-(?:tw|hant|hk|mo)(?:-|$)/.test(normalized)) return MEMORY_SEEDS["zh-tw"];
   return MEMORY_SEEDS[normalized] ?? MEMORY_SEEDS.en;
 }
 
@@ -557,6 +564,7 @@ export function memoryTopicIndex(botId: string): string {
 
 export const REMEMBER_AND_FORGET =
   " When the person asks you to remember something, save it now with memory_update append, one fact per call, as a plain statement about them, then confirm in one short line of their words what you will do (\"Got it: short answers, and times in India time.\")." +
+  " When it changes or replaces something already in your memory (a new instruction instead of an older one), use memory_update supersede on that old entry instead of append, carrying into the new text whatever in the old entry still holds (if it had an until date that still applies, pass its until date again), so your memory never keeps both." +
   " When they ask you to forget something, call memory_update with action forget and a few words that name it, once per thing: it removes it from your notes, your topic notes and About me, and it is not learned again. Then confirm in one plain line what you forgot." +
   " A standing preference meant for all their bots (where reminders go, how replies should sound) is saved once with memory_update action prefer: one line in their About me, which every bot reads. Never pass it on to each bot.";
 
@@ -573,7 +581,7 @@ export function memorySystemPrompt(botId: string, opts: { managedWrites?: boolea
   const topicDir = join(workspaceDir(botId), "memory");
   if (opts.writesRefused || (opts.fileTools === false && !opts.managedWrites)) {
     const lead = opts.writesRefused ? NOTES_IN_RESULT : " Your saved memory is supplied as context; this turn has no memory editing tools.";
-    if (!memory) return opts.writesRefused ? lead : "";
+    if (!memory) return opts.writesRefused ? `${lead}${topicIndexBlock(botId, opts.fileTools !== false)}` : "";
     return `${lead}\n\nYour memory (MEMORY.md):\n${memory.text}${memory.truncated ? " [Only the initial memory excerpt is visible.]" : ""}${topicIndexBlock(botId, opts.fileTools !== false)}`;
   }
   const writeGuidance = opts.managedWrites
@@ -596,8 +604,9 @@ export function memorySystemPrompt(botId: string, opts: { managedWrites?: boolea
 function topicIndexBlock(botId: string, fileTools: boolean): string {
   const index = memoryTopicIndex(botId);
   if (!index) return "";
+  // Every turn reaches this, including one whose prompt names no other memory path, and a turn runs in a task folder.
   const how = fileTools
-    ? "when a request touches one of these topics, read that file with your file tools before you answer"
+    ? `paths are relative to ${JSON.stringify(workspaceDir(botId))}, not your working folder; when a request touches one of these topics, read that file with your file tools before you answer`
     : "when a request touches one of these topics, look it up with session_search before you answer";
   return `\n\nYour topic notes (not loaded; ${how}):\n${index}`;
 }

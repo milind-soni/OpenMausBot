@@ -114,4 +114,15 @@ describe("remote desktop panel entry focus", () => {
     flushSync(() => close.click());
     expect(document.activeElement).toBe(opener);
   });
+
+  it("opens on the Browser view only when Watch asked for it during a browser call", async () => {
+    const pressed = () => document.querySelector<HTMLElement>('[aria-pressed="true"]')?.textContent;
+    rememberComputerPanelOpen({ botId: "scout", opener: null, tabs: false, browser: true });
+    await open(makeBot());
+    expect(pressed()).toBe("Browser");
+    root!.unmount();
+    rememberComputerPanelOpen({ botId: "scout", opener: null, tabs: false });
+    await open(makeBot());
+    expect(pressed()).toBe("Desktop");
+  });
 });

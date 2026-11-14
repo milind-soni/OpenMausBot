@@ -33,6 +33,20 @@ no longer offers a saved model, and a missing login reported as a sign-in step.
 They also check that `COPILOT_ALLOW_ALL` and a server-wide `GITHUB_TOKEN` never
 reach the child, while a token set on the engine itself does.
 
+Copilot CLI 1.0.105 rejects stdio servers in ACP `session/new` and
+`session/load` with `Rejecting non-http/sse MCP server "agents" from client`.
+The driver supplies the same scoped servers through
+`--additional-mcp-config @FILE` instead. Each thread has a private temporary
+file, credentials stay out of argv, changed tools or credentials restart the
+process, and disposal removes the files without changing the person's Copilot
+configuration. On Linux bot boxes, the `@FILE` path is mounted read-only into
+the box so the launcher can load it without exposing other temporary files.
+ACP permissions still go through OpenMausBot's approval broker.
+The fake Copilot rejects client-supplied stdio servers too: the driver tests
+require the real agents proxy's routine tools and a synthetic browser's tools
+to be discoverable, and check narrowed selections, credential refresh,
+revocation, thread isolation and cleanup.
+
 The end-to-end test launches an isolated server with `launchVerificationServer`,
 which uses a disposable home, data directory and port pair, and fake engines
 only. It refreshes the Copilot and custom ACP catalogs, then moves one bot from
@@ -40,6 +54,21 @@ Claude to Copilot through the picker's bot route and the strict model route,
 moves one conversation to a custom ACP agent through the conversation route,
 and moves both back to Claude. Each turn's effective model is read from the fake
 agents' prompt receipts, so a saved setting alone cannot pass.
+
+A second scenario scripts Copilot's actual MCP calls to create and update a
+routine through the native configuration. It requires the updated routine in
+both the server response and `routines.json`, and preserves `send`, `wait` and
+`messages` results at the printed `evidencePath` beside the fixture's server log.
+It does not use a real Copilot account or execute a scheduled routine.
+
+An offline Linux check against the actual Copilot CLI 1.0.105 reproduced the
+stdio rejection with a disposable home and synthetic MCP server. The same
+server connected through `--additional-mcp-config`. Through the production
+driver, two turns with changed server environments both reported the server
+connected and the server recorded `initialize` and `tools/list` with each
+turn's environment. This used `COPILOT_OFFLINE=true` and a loopback-only BYOK
+route, with no inference or GitHub login. These checks do not prove the
+packaged Windows app or a real browser session.
 
 The renderer test passes the production Copilot catalog resolver's output
 (against the same fake) into the full ModelPicker. It requires the advertised

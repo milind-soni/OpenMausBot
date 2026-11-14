@@ -26,7 +26,7 @@ const SEAT_FREE = "the computer this conversation waited for is free again";
 const SIGNED_IN = "OpenMausBot sign-in update: the person finished signing in to";
 const INTERRUPTED_OUTWARD = "Interrupted by an OpenMausBot restart after it already";
 const SETTLED = "Your downstream room requests have settled.";
-const REPORT_FROM_MIRA = "[OpenMausBot report from @Mira";
+const REPORT_FROM_MIRA = "[From @Mira (bot) · report on assignment";
 
 const jsonl = (path: string): any[] => existsSync(path)
   ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
@@ -254,7 +254,7 @@ it("T2 parks the root on a credential card and runs it again with the provided l
   expect(f.eventsOf(parked.id)).toContain("parked");
   await f.settle(500);
   expect(f.turns(f.clive.id).map((record: any) => record.planKey)).toEqual(["C0"]);
-  expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "idle" });
+  expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "waiting-on-you" });
   f.script(f.clive.id, { key: "C-TYPED", match: ["T2-TYPED"], reply: "T2-TYPED-DONE: hello back." });
   await f.say(f.clive.id, job, "T2-TYPED: hello while the card waits.");
   await f.final(job, "T2-TYPED-DONE");
@@ -300,7 +300,7 @@ it("T3 parks the root on connector cards and runs it again once when both connec
       await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("needs_input");
       const parked = f.roots()[0];
       expect(parked.cards).toEqual([gmail, slack]);
-      expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "idle" });
+      expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "waiting-on-you" });
       composio.connect("gmail");
       const first = await f.api("GET", `/api/bots/${f.clive.id}/connector-cards/${gmail}/status?threadId=${job}`);
       expect(first.body).toMatchObject({ connected: true });
@@ -461,13 +461,13 @@ itHost("T7 queues a root on the computer seat at the wait ceiling and continues 
       try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
     }, Boolean);
 
-    const { bot: holder } = await apiOk("POST", "/api/bots", { name: "Seat Holder" });
+    const { bot: holder } = await apiOk("POST", "/api/bots", { name: "Seat Holder", settings: { approvalMode: "ask" } });
     const { task: held } = await apiOk("POST", `/api/bots/${holder.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${holder.id}/messages`, { text: "Hold the screen slowly.", threadId: held.threadId });
     await until(() => taskOf(holder.id, held.threadId), (task) => task?.busy === true);
-    // On Auto the person is asked once before each turn first uses their computer.
+    // Below Full access (these bots ask), the person is asked once before each turn first uses their computer.
     expect(await withAnswer(base, held.threadId, gate(await dumpFor(holder.id)))).toEqual({ held: false, helpOpen: false });
-    const { bot: waiter } = await apiOk("POST", "/api/bots", { name: "Seat Waiter" });
+    const { bot: waiter } = await apiOk("POST", "/api/bots", { name: "Seat Waiter", settings: { approvalMode: "ask" } });
     const { task: wait } = await apiOk("POST", `/api/bots/${waiter.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${waiter.id}/messages`, { text: "T7-JOB: use the screen too.", threadId: wait.threadId });
     await until(() => taskOf(waiter.id, wait.threadId), (task) => task?.busy === true);
@@ -481,7 +481,7 @@ itHost("T7 queues a root on the computer seat at the wait ceiling and continues 
     const parkedChip = chat.find((message) => chipText(message).includes("Parked — it continues automatically when the computer is free"));
     expect(parkedChip, JSON.stringify(chat.map(chipText))).toBeDefined();
     expect(chipText(parkedChip)).toContain("Seat Holder");
-    const { bot: second } = await apiOk("POST", "/api/bots", { name: "Seat Second" });
+    const { bot: second } = await apiOk("POST", "/api/bots", { name: "Seat Second", settings: { approvalMode: "ask" } });
     const { task: wait2 } = await apiOk("POST", `/api/bots/${second.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${second.id}/messages`, { text: "T7-JOB-2: use the screen as well.", threadId: wait2.threadId });
     await until(() => taskOf(second.id, wait2.threadId), (task) => task?.busy === true);
@@ -635,7 +635,7 @@ it("T9 parks the root on a sign-in card and runs it again with the signed-in lin
   const parked = f.roots()[0];
   expect(parked).toMatchObject({ status: "needs_input", cards: [card.id], executions: 1, question: expect.stringContaining("sign in to example.com") });
   expect(card.signIn.resumed).toBeUndefined();
-  expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "idle" });
+  expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "waiting-on-you" });
   const done = await f.api("POST", `/api/bots/${f.clive.id}/sign-in-cards/${card.id}/done`, { threadId: job });
   expect(done.status, JSON.stringify(done.body)).toBe(200);
   expect(done.body).toEqual({ done: true, resumed: true });
@@ -659,7 +659,7 @@ it("T10 parks a teammate's turn on its credential card, tells the Chief at once,
   const brief = "T10-BRIEF: set up the Grok model for the export; ask for the key you need.";
   f.script(f.clive.id,
     { key: "C0", match: ["T10-JOB"], steps: [{ arguments: { bot_ids: [mira.id], message: brief } }], reply: "C0: Mira is on it." },
-    { key: "C-WAITS", match: ["[OpenMausBot note from @Mira", "T10-JOB"], reply: "C-WAITS: Mira waits on the key; nothing else is open." },
+    { key: "C-WAITS", match: ["[From @Mira (bot) · note on assignment", "T10-JOB"], reply: "C-WAITS: Mira waits on the key; nothing else is open." },
     { key: "C1", match: [SETTLED, REPORT_FROM_MIRA, "T10-RESULT"], reply: "T10-FINAL: the export model is set up." });
   f.script(mira.id,
     { key: "M2", match: ["T10-BRIEF", SECRET_PROVIDED], reply: "T10-RESULT: the key is in and the export runs." },
@@ -740,7 +740,9 @@ type CardState = { status?: string; stopped?: boolean; resumed?: boolean };
 type StallFixture = {
   dataDir: string;
   clive: { id: string };
-  roots(): Array<{ status: string; outcome?: string; executions: number; cards?: string[] }>;
+  roots(): Array<{ status: string; outcome?: string; executions: number; cards?: string[]; assignee: { botId: string } }>;
+  api(method: string, path: string): Promise<{ body: { bots: Array<{ id: string; chiefOfStaff?: boolean; managedSections?: string[] }> } }>;
+  own(record: unknown): string;
   messages(threadId: string): Promise<Array<{ id: string; kind: string; tool?: { name: string }; secret?: CardState; connector?: CardState; signIn?: CardState }>>;
   turns(botId: string): Array<{ planKey?: string }>;
   open(name: string): void;
@@ -759,14 +761,20 @@ const stallOverCards = async (f: StallFixture, job: string, ids: string[]) => {
     .toEqual(["error: no activity for 20 minutes — the turn was stopped"]);
   const cards = (await f.messages(job)).filter((message) => ids.includes(message.id));
   expect(cards.map((message) => (message.secret ?? message.connector ?? message.signIn)?.stopped)).toEqual(ids.map(() => true));
+  // The main Chief got Clive's department when it was made, so it also hears of the stall, in a run of its own.
+  const chief = (await f.api("GET", "/api/bots?messages=0")).body.bots.find((bot) => bot.chiefOfStaff)!;
+  expect(chief.managedSections).toEqual(["Leadership"]);
+  await expect.poll(() => f.roots().filter((row) => row.assignee.botId === chief.id).map((row) => row.status), { timeout: 30_000 }).toEqual(["completed"]);
+  expect(f.turns(chief.id).map((record) => /incident report[\s\S]*Clive's run .* stopped after showing no activity/.test(f.own(record)))).toEqual([true]);
 };
 
 const answerStartsNothing = async (f: StallFixture, job: string) => {
   f.open("c0");
   f.script(f.clive.id, { key: "C-AFTER", match: ["AFTER-ANSWER"], reply: "AFTER-ANSWER-DONE: hello back." });
   await f.say(f.clive.id, job, "AFTER-ANSWER: hello after the card was answered.");
-  await expect.poll(() => f.roots().map((row) => row.status), { timeout: 30_000 }).toEqual(["failed", "completed"]);
-  expect(f.roots().map((row) => [row.outcome, row.executions])).toEqual([["stalled", 1], ["done", 1]]);
+  const roots = () => f.roots().filter((row) => row.assignee.botId === f.clive.id);
+  await expect.poll(() => roots().map((row) => row.status), { timeout: 30_000 }).toEqual(["failed", "completed"]);
+  expect(roots().map((row) => [row.outcome, row.executions])).toEqual([["stalled", 1], ["done", 1]]);
   expect(await f.said(job, "AFTER-ANSWER-DONE")).toBe(1);
   expect(f.turns(f.clive.id).map((record) => record.planKey)).toEqual(["C-AFTER"]);
 };

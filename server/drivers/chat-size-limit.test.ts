@@ -13,6 +13,13 @@ import type { OpenAIChatMessage } from "./openai-chat.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
 const NGINX_413 = "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n";
+const CONTEXT_CODE = '{"error":{"code":"context_length_exceeded","message":"This model\'s maximum context length is 262142 tokens. Your messages resulted in 555619 tokens."}}';
+const CONTEXT_TYPE = '{"error":{"type":"context_length_exceeded","message":"prompt is too long: 300000 tokens > 262144 maximum"}}';
+const SIZE_REFUSALS = [
+  { name: "HTTP 413", status: 413, body: NGINX_413 },
+  { name: "HTTP 400 error.code", status: 400, body: CONTEXT_CODE },
+  { name: "HTTP 400 error.type", status: 400, body: CONTEXT_TYPE },
+];
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jBv0AAAAASUVORK5CYII=";
 const image = (bytes: number) => ({ type: "image_url" as const, image_url: { url: `data:image/png;base64,${"A".repeat(bytes)}` } });
 const bytesOf = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
@@ -24,12 +31,28 @@ describe("refusesRequestSize", () => {
     [400, '{"error":{"message":"request entity too large","type":"entity.too.large"}}'],
     [400, '{"error":{"message":"Payload Too Large"}}'],
     [429, '{"error":{"message":"Request too large for gpt-4o in organization org-fixture on tokens per min (TPM): Limit 30000, Requested 45000."}}'],
+    [400, CONTEXT_CODE],
+    [400, CONTEXT_TYPE],
   ])("reads HTTP %i %j as a size refusal", (status, body) => {
     expect(refusesRequestSize(status, body)).toBe(true);
   });
 
   it.each([
     [400, '{"error":{"message":"invalid model"}}'],
+    [400, '{"error":{"code":"invalid_api_key","message":"Invalid API key provided"}}'],
+    [400, "context_length_exceeded"],
+    [400, '{"error":{"code":"invalid_request_error","message":"context_length_exceeded"}}'],
+    [400, '{"code":"context_length_exceeded"}'],
+    [400, '{"error":[{"code":"context_length_exceeded"}]}'],
+    [400, '{"error":{"code":"context_length_exceeded_extra"}}'],
+    [400, '{"error":{"type":"context_length_exceeded_extra"}}'],
+    [400, "null"],
+    [400, "[]"],
+    [400, '{"error":'],
+    [200, CONTEXT_CODE],
+    [401, CONTEXT_CODE],
+    [429, CONTEXT_CODE],
+    [500, CONTEXT_CODE],
     [412, "Precondition Failed"],
     [429, '{"error":{"message":"Rate limit reached for requests"}}'],
     [500, "Internal Server Error"],
@@ -159,12 +182,12 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
 
   const transcript = (count: number, bytes: number) => Array.from({ length: count }, (_, index) =>
     ({ role: index % 2 ? "assistant" as const : "user" as const, text: `earlier ${index} ${"x".repeat(bytes)}` }));
-  const above = (limit: number) => (bytes: number) => bytes > limit ? { status: 413, body: NGINX_413 } : null;
+  const above = (limit: number, refusal: { status: number; body: string }) => (bytes: number) => bytes > limit ? refusal : null;
 
-  it("resends once with the oldest history dropped and finishes the turn", async () => {
+  it.each(SIZE_REFUSALS)("$name resends once with the oldest history dropped and finishes the turn", async (refusal) => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const limit = 40_000;
-    const f = await provider(above(limit));
+    const f = await provider(above(limit, refusal));
     const done = await f.run({ system: "Fixture system prompt.", transcript: transcript(20, 3_000) });
     expect(done).toMatchObject({ ok: true });
     expect(f.requests).toHaveLength(2);
@@ -186,19 +209,20 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
     expect(logged[0]).not.toMatch(/earlier \d|Summarize|Fixture system/);
   });
 
-  it("fails with one plain message when the smaller resend is still too large", async () => {
+  it.each(SIZE_REFUSALS)("$name fails with one plain message when the smaller resend is still too large", async (refusal) => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const f = await provider(above(10_000));
+    const f = await provider(above(10_000, refusal));
     const done = await f.run({ system: `Fixture system prompt. ${"s".repeat(12_000)}`, transcript: transcript(6, 2_000) });
     expect(done).toMatchObject({ ok: false });
     expect(f.requests).toHaveLength(2);
     expect(f.requests[1]!.bytes).toBeLessThan(f.requests[0]!.bytes);
+    expect(f.retries()).toHaveLength(1);
     expect(f.errors()).toEqual([requestTooLargeMessage("Fixture Flash")]);
   });
 
-  it("does not resend when nothing but the system prompt and the message could shrink", async () => {
+  it.each(SIZE_REFUSALS)("$name does not resend when nothing but the system prompt and the message could shrink", async (refusal) => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const f = await provider(above(10_000));
+    const f = await provider(above(10_000, refusal));
     const done = await f.run({ system: `Fixture system prompt. ${"s".repeat(12_000)}` });
     expect(done).toMatchObject({ ok: false });
     expect(f.requests).toHaveLength(1);
@@ -208,14 +232,25 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
 
   it.each([
     [400, '{"error":{"message":"invalid model"}}', "upstream HTTP 400: invalid model"],
-    [500, "Internal Server Error", "upstream HTTP 500: Internal Server Error"],
-    [429, '{"error":{"message":"Rate limit reached for requests"}}', "upstream HTTP 429: Rate limit reached for requests"],
+    [400, '{"error":{"code":"invalid_request_error","message":"context_length_exceeded"}}', "upstream HTTP 400: context_length_exceeded (invalid_request_error)"],
   ])("leaves an HTTP %i failure as it was", async (status, body, message) => {
     const f = await provider(() => ({ status, body }));
     const done = await f.run({ transcript: transcript(20, 3_000) });
     expect(done).toMatchObject({ ok: false });
     expect(f.requests).toHaveLength(1);
     expect(f.retries()).toEqual([]);
+    expect(f.errors()).toEqual([message]);
+  });
+
+  it.each([
+    [500, "Internal Server Error", "upstream HTTP 500: Internal Server Error"],
+    [429, '{"error":{"message":"Rate limit reached for requests"}}', "upstream HTTP 429: Rate limit reached for requests"],
+  ])("retries an HTTP %i failure at full size, and doesn't take it for a request that is too large", async (status, body, message) => {
+    const f = await provider(() => ({ status, body }));
+    const done = await f.run({ transcript: transcript(20, 3_000) });
+    expect(done).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(3);
+    expect(new Set(f.requests.map((request) => request.bytes)).size).toBe(1);
     expect(f.errors()).toEqual([message]);
   });
 });

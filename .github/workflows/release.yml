@@ -277,17 +277,32 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
+          trap 'rm -f "$RUNNER_TEMP/notary.p8"' EXIT
           echo "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/notary.p8"
-          for f in release/*.dmg release/*.zip; do
-            out=$(xcrun notarytool submit "$f" \
+          notary() {
+            xcrun notarytool "$@" \
               --key "$RUNNER_TEMP/notary.p8" \
               --key-id "$APPLE_API_KEY_ID" \
-              --issuer "$APPLE_API_ISSUER_ID" \
-              --wait 2>&1)
-            echo "$out" | tail -2
-            echo "$out" | grep -q "status: Accepted" || { echo "::error::notarization not Accepted for $f"; exit 1; }
+              --issuer "$APPLE_API_ISSUER_ID"
+          }
+          for f in release/*.dmg release/*.zip; do
+            # notarytool exits non-zero when Apple refuses the request (an agreement to accept, a bad key): keep its
+            # output and exit code so the step says why instead of ending in silence
+            rc=0
+            out=$(notary submit "$f" --wait 2>&1) || rc=$?
+            if [ "$rc" -eq 0 ] && echo "$out" | grep -q "status: Accepted"; then
+              echo "$out" | tail -2
+              continue
+            fi
+            echo "$out"
+            echo "::error::notarization not Accepted for $f (notarytool exit code $rc)"
+            id=$(echo "$out" | sed -n 's/^ *id: *\([0-9A-Fa-f-]\{1,\}\) *$/\1/p' | head -1)
+            if [ -n "$id" ]; then
+              echo "notarytool log $id:"
+              notary log "$id" 2>&1 || echo "could not fetch the notarization log for $id"
+            fi
+            exit 1
           done
-          rm "$RUNNER_TEMP/notary.p8"
 
       - name: Staple, re-zip, regenerate blockmaps and the feed
         run: |
@@ -427,7 +442,7 @@ jobs:
       - name: Install package validation and native smoke tools
         run: >-
           sudo apt-get update && sudo apt-get install -y
-          at-spi2-core dbus-x11 desktop-file-utils libxi6 libxkbcommon0 squashfs-tools x11-utils xdotool xvfb
+          at-spi2-core dbus-x11 desktop-file-utils libxi6 libxkbcommon0 openbox squashfs-tools x11-utils xdotool xvfb
       - run: pnpm install --frozen-lockfile
       - name: Clean generated output
         run: pnpm clean

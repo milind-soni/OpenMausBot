@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 
 export type ConfirmTone = "danger" | "neutral";
 
@@ -20,7 +21,11 @@ export interface ConfirmDialogProps {
   /** A gentler way to the same end, offered beside the confirm button ("Archive instead"). */
   alternative?: { label: string; onClick: () => void };
   pending?: boolean;
+  /** The confirm button waits for a choice the body asks for. */
+  confirmDisabled?: boolean;
   returnFocusRef?: RefObject<HTMLElement | null>;
+  /** Where it sits among open dialogs, when another one above the usual layer asked it. */
+  layer?: string;
 }
 
 /**
@@ -44,7 +49,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
         return;
       }
       if (event.key === "Tab") {
-        const controls = dialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled])");
+        const controls = dialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled]), select:not([disabled]), textarea:not([disabled])");
         if (!controls?.length) { event.preventDefault(); dialogRef.current?.focus(); return; }
         const first = controls[0]!;
         const last = controls[controls.length - 1]!;
@@ -76,7 +81,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-6"
+      className={`fixed inset-0 ${props.layer ?? "z-50"} flex items-center justify-center bg-black/55 p-6`}
       onMouseDown={(event) => event.target === event.currentTarget && onCancel()}
     >
       <ConfirmDialogCard ref={dialogRef} cancelRef={cancelRef} {...props} />
@@ -91,13 +96,14 @@ export function ConfirmDialogCard({
   title,
   body,
   confirmLabel,
-  cancelLabel = "Cancel",
+  cancelLabel = t("common.cancel"),
   tone = "danger",
   icon,
   onCancel,
   onConfirm,
   alternative,
   pending = false,
+  confirmDisabled = false,
 }: ConfirmDialogProps & {
   ref?: React.Ref<HTMLDivElement>;
   cancelRef?: React.Ref<HTMLButtonElement>;
@@ -145,7 +151,7 @@ export function ConfirmDialogCard({
         <button
           type="button"
           onClick={onConfirm}
-          disabled={pending}
+          disabled={pending || confirmDisabled}
           className={cn(
             "rounded-xl px-4 py-2 text-[13px] font-medium",
             danger ? "bg-danger text-white hover:brightness-110" : "bg-accent text-white hover:brightness-110",

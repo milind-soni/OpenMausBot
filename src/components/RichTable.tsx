@@ -2,8 +2,8 @@ import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type Rea
 import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, ArrowUp, Check, Copy, Download, Maximize2, Search, WrapText, X } from "lucide-react";
-import { isTableNumber, tableCsv, tableRowOrder, type TableSort } from "@/lib/table-data";
-import { t } from "@/lib/i18n";
+import { isTableAmount, tableCsv, tableRowOrder, type TableSort } from "@/lib/table-data";
+import { intlLocale, t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
 import { columnMinimums, fitsColumns } from "@/lib/table-fit";
 import { cn } from "@/lib/cn";
@@ -50,7 +50,7 @@ const SMALL_TABLE_ROWS = 8;
 /** Simple mode's table card: the composer surface with a hairline edge and no footer. Its header row starts at the
  * top; the hover plate floats over the header's right end and takes no room. Only touch screens, where the plate is
  * always shown and its buttons keep 40px targets, give it a band of its own. */
-const TABLE_CARD = "group/table relative w-full overflow-hidden rounded-[24px] bg-composer text-ink shadow-[0_0_0_0.5px_var(--color-composer-ring),0_2px_8px_rgb(28_28_28/0.035)] touch:pt-11";
+const TABLE_CARD = "group/table relative w-fit min-w-[min(100%,20rem)] max-w-full overflow-hidden rounded-[18px] bg-card text-ink touch:pt-11";
 
 export function RichTable({ columns, rows, name = t("table.title"), expanded = false, direction = "ltr", headless = false, card: asCard = true }: RichTableProps) {
   const simple = !useAdvancedMode();
@@ -127,7 +127,7 @@ export function RichTable({ columns, rows, name = t("table.title"), expanded = f
       <footer className={small
         ? "flex items-center justify-end gap-0.5 border-t border-hairline/30 px-1.5 py-1 text-[11px] text-ink-tertiary"
         : "flex flex-wrap items-center justify-between gap-2 border-t border-hairline/40 px-3 py-2 text-[11px] text-ink-secondary"}>
-        {!small && <span role="status">{t("table.count", { shown: order.length.toLocaleString(), total: rows.length.toLocaleString(), columns: columns.length })}</span>}
+        {!small && <span role="status">{t("table.count", { shown: order.length.toLocaleString(intlLocale()), total: rows.length.toLocaleString(intlLocale()), columns: columns.length })}</span>}
         {copyState !== "idle" && <span role={copyState === "failed" ? "alert" : "status"} className={small ? "me-auto ps-1.5" : undefined}>{t(copyState === "failed" ? "table.copyFailed" : "table.copied")}</span>}
         {small && actions}
       </footer>
@@ -170,7 +170,7 @@ function TableViewport({ columns, rows, order, name, wrap, large, sort, onSort, 
   ))), [columns, rows]);
   const numeric = useMemo(() => columns.map((_, index) => {
     const nonempty = rows.slice(0, 200).map((row) => row[index]?.text.trim() ?? "").filter(Boolean);
-    return nonempty.length > 0 && nonempty.every(isTableNumber);
+    return nonempty.length > 0 && nonempty.every(isTableAmount);
   }), [columns, rows]);
   const virtualizer = useVirtualizer({ count: order.length, getScrollElement: () => scroll.current, estimateSize: () => 42,
     getItemKey: (index) => order[index]!, overscan: 6, enabled: virtual, initialRect: { width: 800, height: 400 }, scrollMargin: headingHeight });
@@ -183,19 +183,21 @@ function TableViewport({ columns, rows, order, name, wrap, large, sort, onSort, 
   const sortLabel = (column: TableColumn, index: number) => t("table.sort", { column: column.text || index + 1 });
   const header = (column: TableColumn, index: number) => column.content ?? (column.text || t("table.column", { number: index + 1 }));
   const arrow = (index: number, className?: string) => sort?.column === index && sort.descending ? <ArrowDown size={12} className={className} /> : <ArrowUp size={12} className={cn(className, sort?.column !== index && !card && "opacity-35")} />;
+  const cardArrow = (index: number) => arrow(index, cn("shrink-0 text-ink-tertiary transition-opacity", sort?.column === index ? "opacity-100" : "opacity-0 group-hover/th:opacity-100 group-focus-within/th:opacity-100 touch:opacity-100"));
   return <div ref={scroll} tabIndex={0} role="region" aria-label={name}
     className={cn("overflow-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60", card && !fit && "[mask-image:linear-gradient(90deg,#000_calc(100%-40px),transparent)]")}
     style={{ maxHeight: large ? "65dvh" : virtual || !wrap ? 400 : undefined }} data-fit={fit || undefined}>
     <table dir={direction} aria-label={name} aria-rowcount={order.length + 1} className={cn("w-full border-separate border-spacing-0 text-[14px]", fit ? "table-auto" : "table-fixed", card && "leading-5")} style={fit ? undefined : { minWidth: widths.reduce((a, b) => a + b, 0) }}>
       {!fit && <colgroup>{widths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>}
-      <thead ref={heading} hidden={headless} className={cn("sticky top-0 z-10", look === "panel" ? "bg-raised" : "bg-composer")}><tr aria-rowindex={1}>
+      <thead ref={heading} hidden={headless} className={cn("sticky top-0 z-10", look === "panel" ? "bg-raised" : look === "card" ? "bg-card" : "bg-composer")}><tr aria-rowindex={1}>
         {columns.map((column, index) => <th key={index} scope="col" aria-sort={sort?.column === index ? sort.descending ? "descending" : "ascending" : "none"}
           className={card ? "px-4 py-2.5 align-bottom font-semibold" : "h-10 border-b border-hairline/60 px-3 py-2 font-medium"} style={{ textAlign: alignment(column, index) }}>
           <div className="break-words [overflow-wrap:anywhere]" style={fit ? { minWidth: minimums[index] } : undefined}>
             {card ? (
-              <button type="button" className="group/th inline-flex max-w-full items-center gap-1 text-start font-semibold [text-align:inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60" aria-label={sortLabel(column, index)} title={sortLabel(column, index)} onClick={() => onSort(index)}>
+              <button type="button" className="group/th inline-flex max-w-full items-center gap-1 align-top text-start font-semibold [text-align:inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60" aria-label={sortLabel(column, index)} title={sortLabel(column, index)} onClick={() => onSort(index)}>
+                {alignment(column, index) === "right" && cardArrow(index)}
                 <span dir="auto">{header(column, index)}</span>
-                {arrow(index, cn("shrink-0 text-ink-tertiary transition-opacity", sort?.column === index ? "opacity-100" : "opacity-0 group-hover/th:opacity-100 group-focus-within/th:opacity-100 touch:opacity-100"))}
+                {alignment(column, index) !== "right" && cardArrow(index)}
               </button>
             ) : <>
               <span dir="auto">{header(column, index)}</span>

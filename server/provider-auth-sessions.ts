@@ -10,6 +10,7 @@ type Flow = {
   busy: boolean;
   starting: boolean;
   revoked: boolean;
+  revision: number;
 };
 
 const failure = (message: string, status: number) => Object.assign(new Error(message), { status });
@@ -35,7 +36,7 @@ export class ProviderAuthSessions {
       throw failure("A sign-in is already in progress. Finish or cancel it in the browser that started it, or wait for it to expire.", 409);
     }
     const resuming = existing && existing.owner === owner && existing.expiresAt > Date.now() && !existing.revoked;
-    const flow: Flow = resuming ? existing : { instance, owner, flowId: null, expiresAt: Date.now() + 15 * 60_000, busy: false, starting: false, revoked: false };
+    const flow: Flow = resuming ? existing : { instance, owner, flowId: null, expiresAt: Date.now() + 15 * 60_000, busy: false, starting: false, revoked: false, revision: 0 };
     flow.busy = true;
     flow.starting = true;
     this.flows.set(instance.instanceId, flow);
@@ -74,8 +75,9 @@ export class ProviderAuthSessions {
   async status(instanceId: string, owner: string, flowId: string) {
     const flow = this.owned(instanceId, owner, flowId);
     if (!flow.instance.getAuthentication) throw failure("Sign-in status is unavailable for this provider.", 404);
+    const revision = flow.revision;
     const status = await flow.instance.getAuthentication(flowId);
-    if (flow.revoked) throw failure("This sign-in session ended.", 404);
+    if (flow.revoked || this.flows.get(instanceId) !== flow || flow.flowId !== flowId || flow.revision !== revision) throw failure("This sign-in session ended.", 404);
     if (status.phase !== "waiting") flow.expiresAt = 0;
     if (status.phase === "succeeded") this.signedIn(instanceId);
     return status;
@@ -87,7 +89,8 @@ export class ProviderAuthSessions {
     flow.busy = true;
     try {
       await flow.instance.completeAuthentication(flowId, callbackUrl);
-      if (this.flows.get(instanceId) === flow) this.flows.delete(instanceId);
+      if (flow.revoked || this.flows.get(instanceId) !== flow) throw failure("This sign-in session ended.", 404);
+      this.flows.delete(instanceId);
       this.signedIn(instanceId);
     } finally { flow.busy = false; }
   }
@@ -95,6 +98,8 @@ export class ProviderAuthSessions {
   async cancel(instanceId: string, owner: string, flowId: string) {
     const flow = this.owned(instanceId, owner, flowId);
     flow.busy = true;
+    // Invalidate polls already in flight, but let a later poll read the provider's cancelled status.
+    flow.revision++;
     try { await flow.instance.cancelAuthentication?.(); }
     finally { flow.busy = false; flow.expiresAt = 0; }
   }
@@ -106,7 +111,7 @@ export class ProviderAuthSessions {
     if (existing && (existing.busy || (existing.owner !== owner && existing.expiresAt > Date.now() && !existing.revoked))) {
       throw failure("A sign-in is in progress. Finish or cancel it in the browser that started it, or wait for it to expire.", 409);
     }
-    const flow: Flow = { instance, owner, flowId: null, expiresAt: Date.now() + 60_000, busy: true, starting: false, revoked: false };
+    const flow: Flow = { instance, owner, flowId: null, expiresAt: Date.now() + 60_000, busy: true, starting: false, revoked: false, revision: 0 };
     this.flows.set(instance.instanceId, flow);
     try {
       if (existing) await existing.instance.cancelAuthentication?.();

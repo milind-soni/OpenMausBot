@@ -1,5 +1,8 @@
 // A pairing code lives in main-process memory for one navigation: never persisted, never sent to a renderer, only in a link's hash.
 import environments from "./environments.cjs";
+import nativeText from "./native-text.cjs";
+
+const { englishText } = nativeText;
 
 export { createCloudPowerGate, openSleepingCloud } from "./cloud-power.mjs";
 
@@ -22,6 +25,15 @@ export function homeOrigin(value) {
   } catch {
     return null;
   }
+}
+
+const MAX_FORMER_ORIGINS = 8;
+/** A Cloud's `formerOrigins` beside its `origin` (contract v1, additive; absent from an older Admin): the addresses it
+ * answered at before it moved to another provider. Each a valid home origin, once, never its address now; anything else is
+ * left out, never the Cloud. */
+export function parseFormerOrigins(input, origin) {
+  if (!Array.isArray(input)) return [];
+  return [...new Set(input.slice(0, MAX_FORMER_ORIGINS).map(homeOrigin).filter(former => former && former !== origin))];
 }
 
 export const CLOUD_SETUP_STEPS = Object.freeze(["reserving", "storage", "starting", "checking"]);
@@ -64,19 +76,21 @@ export function parseCloudSummary(input) {
   const power = parseCloudPower(input.power);
   const homecoming = record(input.hold) ? parseHomecoming(input.hold.homecoming) : null;
   const hold = record(input.hold) && moment(input.hold.until) ? { until: input.hold.until, ...(homecoming ? { homecoming } : {}) } : null;
-  return { status, ...(origin ? { origin } : {}), ...(setup ? { setup } : {}), ...(retryAt ? { retryAt } : {}), ...(disk ? { disk } : {}), ...(unreachable ? { unreachable } : {}), ...(power ? { power } : {}),
+  const formerOrigins = parseFormerOrigins(input.formerOrigins, origin);
+  return { status, ...(origin ? { origin } : {}), ...(formerOrigins.length ? { formerOrigins } : {}), ...(setup ? { setup } : {}), ...(retryAt ? { retryAt } : {}), ...(disk ? { disk } : {}), ...(unreachable ? { unreachable } : {}), ...(power ? { power } : {}),
     ...(input.moves === true ? { moves: true } : {}), ...(hold ? { hold } : {}) };
 }
 
-const UNREACHABLE_TEXT = Object.freeze({
-  host: "The server My Cloud runs on is being restarted by our hosting provider. My Cloud and its files are safe, and it comes back on its own, usually within about 20 minutes.",
-  no_answer: "My Cloud hasn't answered for a few minutes. Nothing was lost, and we've been told.",
-});
-/** Why My Cloud can't be reached when the Admin says so, for main's dialogs; with `origin`, only for that server. */
-export function cloudUnreachableText(state, origin = null) {
+const UNREACHABLE_TEXT = Object.freeze({ host: "native.cloud.unreachable.host", no_answer: "native.cloud.unreachable.noAnswer" });
+/** Why My Cloud can't be reached when the Admin says so ("host" or "no_answer"); with `origin`, only for that server. */
+export function cloudUnreachableCause(state, origin = null) {
   const machine = state?.status === "connected" ? state.machine : null;
   if (!machine?.unreachable || (origin !== null && machine.origin !== origin)) return null;
-  return UNREACHABLE_TEXT[machine.unreachable.cause] ?? null;
+  return Object.hasOwn(UNREACHABLE_TEXT, machine.unreachable.cause) ? machine.unreachable.cause : null;
+}
+export function cloudUnreachableText(state, origin = null, t = englishText.t) {
+  const cause = cloudUnreachableCause(state, origin);
+  return cause ? t(UNREACHABLE_TEXT[cause]) : null;
 }
 
 const PURCHASE_STATES = Object.freeze(["confirming", "held"]);
@@ -152,7 +166,8 @@ function planAllowances(input) {
   if (!record(input) || !["cpus", "memoryMb", "diskGb", "maxDiskGb", "computers", "computerHours", "voiceCharacters"].every(key => count(input[key]))) return null;
   return { cpus: input.cpus, ...(["shared", "performance"].includes(input.cpuKind) ? { cpuKind: input.cpuKind } : {}), memoryMb: input.memoryMb, diskGb: input.diskGb, maxDiskGb: Math.max(input.maxDiskGb, input.diskGb),
     computers: input.computers, computerHours: input.computerHours, voiceCharacters: input.voiceCharacters, ...(input.sleeps === true ? { sleeps: true } : {}),
-    ...(count(input.swapMb) && input.swapMb > 0 ? { swapMb: input.swapMb } : {}), ...(days(input.snapshotDays, 365) ? { snapshotDays: input.snapshotDays } : {}) };
+    ...(count(input.swapMb) && input.swapMb > 0 ? { swapMb: input.swapMb } : {}), ...(days(input.snapshotDays, 365) ? { snapshotDays: input.snapshotDays } : {}),
+    ...(days(input.seats, 1_000) ? { seats: input.seats } : {}) };
 }
 /** Monthly price before tax in US cents; a plan without one is not sold here. */
 function offerPlan(input) {
@@ -302,6 +317,13 @@ export function parseCloudTeams(input) {
   return teams;
 }
 
+/** The session's `landing` (additive): the team an account with no Cloud of its own was invited into, only while the session
+ * lists that team. Null otherwise. */
+export function parseCloudLanding(input, teams) {
+  const teamId = record(input) && typeof input.teamId === "string" ? input.teamId : null;
+  return teamId && teams.some((team) => team.id === teamId) ? { teamId } : null;
+}
+
 export function parsePairingGrant(input, origin, now) {
   if (!input || typeof input !== "object" || input.cloudContractVersion !== 1 || input.origin !== origin) return null;
   if (typeof input.code !== "string" || !CODE.test(input.code)) return null;
@@ -320,7 +342,7 @@ export function withCloudHome(state, machine, makeId, look = null) {
 
 /** The one-time code goes in the hash, never a query. `route`: a path of the Cloud's own to land on after signing in. */
 export function cloudHomeConnectUrl(target, now, open = null, route = null) {
-  const params = new URLSearchParams(open === "phone" ? { "desktop-settings": "phone" } : {});
+  const params = new URLSearchParams(open === "phone" ? { "desktop-settings": "phone", pair: "open" } : {});
   const back = typeof route === "string" && /^\/(?!\/)/.test(route) ? route : null;
   if (target.grant && target.grant.origin === target.origin && target.grant.expiresAt > now) {
     if (back) params.set("next", back);

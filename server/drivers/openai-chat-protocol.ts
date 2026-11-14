@@ -1,13 +1,21 @@
 // Structured chat-completions calls. Assistant content becomes a tool call only for a local model, in chat-text-tool-calls.ts.
+import { randomUUID } from "node:crypto";
+
 export interface ChatToolCall {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
+  /** Gemini's thought signature (`{ google: { thought_signature } }`): sent back with the call, or Gemini rejects the
+   * next round with "Function call is missing a thought_signature". */
+  extra_content?: Record<string, unknown>;
 }
 
 /** Calls one model reply may carry (its index bound). */
 const MAX_REPLY_TOOL_CALLS = 32;
 const MAX_ARGUMENT_CHARS = 256_000;
+/** One completion's reasoning blocks, as JSON. Streamed blocks repeat their type/format/index on every delta, so this
+ * counts many times the reasoning text itself; a long tool chain on a reasoning model can pass 256 KB. */
+export const MAX_REASONING_DETAIL_CHARS = 4_000_000;
 
 export class ChatProtocolError extends Error {}
 
@@ -28,8 +36,9 @@ export class ChatReasoningDetails {
       throw new ChatProtocolError("provider returned invalid reasoning details");
     }
     this.chars += JSON.stringify(value).length;
-    if (this.chars > 256_000) throw new ChatProtocolError("provider reasoning details exceeded the size limit");
-    this.blocks.push(...value);
+    if (this.chars > MAX_REASONING_DETAIL_CHARS) throw new ChatProtocolError("provider reasoning details exceeded the size limit");
+    // One push per block: spreading a huge array into push() can pass the engine's argument limit.
+    for (const block of value) this.blocks.push(block);
   }
 }
 
@@ -37,11 +46,38 @@ export class ChatReasoningDetails {
 export class ChatToolCalls {
   private calls = new Map<number, ChatToolCall>();
   private argumentChars = 0;
+  /** The pre-tools `function_call` field some OpenAI-compatible relays still answer with: one call, no ID. */
+  private legacy = { name: "", arguments: "" };
+  /** Why the legacy call can't be used; reported only when it is the reply's call, so a mirror can't reject tool_calls. */
+  private legacyError = "";
+
+  addLegacy(value: unknown): void {
+    if (value === undefined || value === null || this.legacyError) return;
+    const fn = object(value);
+    if (!fn) {
+      this.legacyError = "provider returned an invalid function_call";
+      return;
+    }
+    for (const field of ["name", "arguments"] as const) {
+      if (fn[field] === undefined || fn[field] === null) continue;
+      if (typeof fn[field] !== "string") {
+        this.legacyError = "provider returned invalid function_call arguments or name";
+        return;
+      }
+      this.legacy[field] += fn[field];
+    }
+    if (this.legacy.name.length > 64 || this.legacy.arguments.length > MAX_ARGUMENT_CHARS) {
+      this.legacyError = "provider tool calls exceeded the size limit";
+      this.legacy = { name: "", arguments: "" };
+    }
+  }
 
   add(value: unknown, streaming: boolean): void {
     if (value === undefined || value === null) return;
     if (!Array.isArray(value)) throw new ChatProtocolError("provider returned invalid tool_calls");
-    const omitted = (field: unknown) => field === undefined || (streaming && field === null);
+    // Streamed continuation chunks may repeat a field as null, or as "" (DashScope/Qwen sends the id only on a call's
+    // first chunk).
+    const omitted = (field: unknown) => field === undefined || (streaming && (field === null || field === ""));
     for (const [position, raw] of value.entries()) {
       const delta = object(raw);
       const index = !streaming ? position : delta?.index ?? this.slotOf(delta?.id);
@@ -66,6 +102,13 @@ export class ChatToolCalls {
           if (field === "arguments") this.argumentChars += fn[field].length;
         }
       }
+      const extra = object(delta.extra_content);
+      if (extra) {
+        // A later chunk replaces the earlier value, so count only the size change.
+        const previous = call.extra_content ? JSON.stringify(call.extra_content).length : 0;
+        call.extra_content = extra;
+        this.argumentChars += JSON.stringify(extra).length - previous;
+      }
       if (call.function.name.length > 64 || this.argumentChars > MAX_ARGUMENT_CHARS) {
         throw new ChatProtocolError("provider tool calls exceeded the size limit");
       }
@@ -84,10 +127,20 @@ export class ChatToolCalls {
   finish(reason: string | null, malformedFrame: boolean): ChatToolCall[] {
     const calls = [...this.calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
     if (malformedFrame) throw new ChatProtocolError("provider stream contained a malformed completion frame");
-    if (reason === "function_call") throw new ChatProtocolError("legacy function_call is unsupported; use structured tool_calls");
-    if (reason === "tool_calls" && !calls.length) throw new ChatProtocolError("provider ended for tool calls without a complete call");
+    // A legacy call counts only alone: relays that mirror tool_calls or send an empty placeholder add nothing.
+    if (!calls.length) {
+      if (this.legacyError) throw new ChatProtocolError(this.legacyError);
+      if (this.legacy.name) {
+        calls.push({ id: `call_${randomUUID().replaceAll("-", "")}`, type: "function", function: { ...this.legacy } });
+      } else if (this.legacy.arguments) {
+        throw new ChatProtocolError("provider ended for tool calls without a complete call");
+      }
+    }
+    if ((reason === "tool_calls" || reason === "function_call") && !calls.length) {
+      throw new ChatProtocolError("provider ended for tool calls without a complete call");
+    }
     if (!calls.length) return calls;
-    if (reason !== null && reason !== "tool_calls" && reason !== "stop") {
+    if (reason !== null && reason !== "tool_calls" && reason !== "function_call" && reason !== "stop") {
       throw new ChatProtocolError("provider tool calls were truncated or malformed");
     }
     const ids = new Set<string>();

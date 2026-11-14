@@ -1,0 +1,528 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "cards": {
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 40,
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "sponsor",
+              "product",
+              "tip"
+            ]
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "enum": [
+                    "en",
+                    "de",
+                    "es",
+                    "fr",
+                    "hi",
+                    "ja",
+                    "pt-br",
+                    "zh",
+                    "zh-tw",
+                    "uk",
+                    "vi",
+                    "tr",
+                    "pl",
+                    "ru",
+                    "it",
+                    "ko"
+                  ]
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 16
+                }
+              }
+            ]
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "enum": [
+                    "en",
+                    "de",
+                    "es",
+                    "fr",
+                    "hi",
+                    "ja",
+                    "pt-br",
+                    "zh",
+                    "zh-tw",
+                    "uk",
+                    "vi",
+                    "tr",
+                    "pl",
+                    "ru",
+                    "it",
+                    "ko"
+                  ]
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 60
+                }
+              }
+            ]
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "enum": [
+                    "en",
+                    "de",
+                    "es",
+                    "fr",
+                    "hi",
+                    "ja",
+                    "pt-br",
+                    "zh",
+                    "zh-tw",
+                    "uk",
+                    "vi",
+                    "tr",
+                    "pl",
+                    "ru",
+                    "it",
+                    "ko"
+                  ]
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240
+                }
+              }
+            ]
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "alt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string",
+                          "enum": [
+                            "en",
+                            "de",
+                            "es",
+                            "fr",
+                            "hi",
+                            "ja",
+                            "pt-br",
+                            "zh",
+                            "zh-tw",
+                            "uk",
+                            "vi",
+                            "tr",
+                            "pl",
+                            "ru",
+                            "it",
+                            "ko"
+                          ]
+                        },
+                        "additionalProperties": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        }
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "mark": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "grok",
+                      "kimi",
+                      "modelgo",
+                      "greenference",
+                      "deepseek",
+                      "copilot",
+                      "kiro"
+                    ]
+                  }
+                },
+                "required": [
+                  "mark"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "primary": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 24
+                  },
+                  {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "enum": [
+                        "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "hi",
+                        "ja",
+                        "pt-br",
+                        "zh",
+                        "zh-tw",
+                        "uk",
+                        "vi",
+                        "tr",
+                        "pl",
+                        "ru",
+                        "it",
+                        "ko"
+                      ]
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 24
+                    }
+                  }
+                ]
+              },
+              "action": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "open_url": {
+                        "type": "string",
+                        "maxLength": 500
+                      }
+                    },
+                    "required": [
+                      "open_url"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "open": {
+                        "type": "string",
+                        "enum": [
+                          "api_keys",
+                          "ai_engines",
+                          "connected_apps",
+                          "new_bot",
+                          "my_cloud"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "open"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "required": [
+              "label",
+              "action"
+            ],
+            "additionalProperties": false
+          },
+          "secondary": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 24
+                  },
+                  {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "enum": [
+                        "en",
+                        "de",
+                        "es",
+                        "fr",
+                        "hi",
+                        "ja",
+                        "pt-br",
+                        "zh",
+                        "zh-tw",
+                        "uk",
+                        "vi",
+                        "tr",
+                        "pl",
+                        "ru",
+                        "it",
+                        "ko"
+                      ]
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 24
+                    }
+                  }
+                ]
+              },
+              "action": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "open_url": {
+                        "type": "string",
+                        "maxLength": 500
+                      }
+                    },
+                    "required": [
+                      "open_url"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "open": {
+                        "type": "string",
+                        "enum": [
+                          "api_keys",
+                          "ai_engines",
+                          "connected_apps",
+                          "new_bot",
+                          "my_cloud"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "open"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "required": [
+              "label",
+              "action"
+            ],
+            "additionalProperties": false
+          },
+          "starts": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "ends": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "audience": {
+            "type": "object",
+            "properties": {
+              "minVersion": {
+                "type": "string",
+                "pattern": "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}$"
+              },
+              "maxVersion": {
+                "type": "string",
+                "pattern": "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}$"
+              },
+              "platforms": {
+                "minItems": 1,
+                "maxItems": 5,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "mac",
+                    "windows",
+                    "linux",
+                    "ios",
+                    "android"
+                  ]
+                }
+              },
+              "surfaces": {
+                "minItems": 1,
+                "maxItems": 3,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "desktop",
+                    "cloud",
+                    "server"
+                  ]
+                }
+              },
+              "plans": {
+                "minItems": 1,
+                "maxItems": 3,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "cloud",
+                    "team"
+                  ]
+                }
+              },
+              "people": {
+                "type": "string",
+                "enum": [
+                  "new",
+                  "existing"
+                ]
+              },
+              "languages": {
+                "minItems": 1,
+                "maxItems": 16,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "en",
+                    "de",
+                    "es",
+                    "fr",
+                    "hi",
+                    "ja",
+                    "pt-br",
+                    "zh",
+                    "zh-tw",
+                    "uk",
+                    "vi",
+                    "tr",
+                    "pl",
+                    "ru",
+                    "it",
+                    "ko"
+                  ]
+                }
+              },
+              "when": {
+                "minItems": 1,
+                "maxItems": 3,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "no_api_key",
+                    "one_bot_only",
+                    "no_routine"
+                  ]
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "body",
+          "primary",
+          "ends"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "version",
+    "updatedAt",
+    "cards"
+  ],
+  "additionalProperties": false
+}

@@ -2,10 +2,15 @@
 import type { ValidateFunction } from "ajv";
 import { isolatedRemoteCommand, runCommand, screenshotBoat } from "./boat.ts";
 import { isRedditAddress, REDDIT_REFUSAL } from "./browser/egress/reddit.ts";
+import {
+  backgroundStatus, commandLateText, EXEC_LATE, PROCESS_ID_PATTERN, startInBackground, STATUS_WAIT_MAX_SECONDS, STDERR_TAIL_CHARS, STDOUT_TAIL_CHARS,
+} from "./cloud-computer-background.ts";
+import { copyFromComputer, copyToComputer } from "./cloud-computer-files.ts";
 import type { AppConfig } from "./config.ts";
 import { controlRefusal, type ControlState } from "./control-client.ts";
-import { HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
+import { COMPUTER_COPY_BUDGET_MS, HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
 import { compileToolSchema } from "./mcp-schema-validator.ts";
+import { CLOUD_COMPUTER_NO_ANSWER } from "../shared/cloud-computer-recovery.ts";
 
 const coordinate = { type: "integer", minimum: 0, maximum: 32767 };
 const tool = (name: string, description: string, properties: Record<string, unknown> = {}, required: string[] = []) =>
@@ -20,11 +25,30 @@ export const CLOUD_COMPUTER_TOOLS = [
   tool("key_press", "Press an X11 key or shortcut.", { key: { type: "string", pattern: "^[A-Za-z0-9_+]+$", minLength: 1, maxLength: 100 } }, ["key"]),
   tool("scroll", "Scroll at a point on the cloud desktop.", { x: coordinate, y: coordinate, direction: { type: "string", enum: ["up", "down", "left", "right"] }, amount: { type: "integer", minimum: 1, maximum: 30 } }, ["x", "y", "direction"]),
   tool("open_url", "Request opening an HTTP or HTTPS URL in the cloud desktop browser; inspect the screen to confirm it loaded.", { url: { type: "string", pattern: "^https?://", maxLength: 2000 } }, ["url"]),
-  tool("exec", "Run a shell command on the assigned cloud computer.", { command: { type: "string", minLength: 1, maxLength: 4000 } }, ["command"]),
+  tool("exec", "Run a shell command on the assigned cloud computer and wait for its result. For a command that may run long (downloads, installs, builds, data jobs), set background: true: it starts the command and answers at once with a process_id to follow with exec_status, and the computer stays on for it for up to two hours. Completion does not automatically resume this turn or notify a delegator. If the result is needed for this task, use exec_status with wait_seconds in this turn until it finishes, then check its exit code and output. If you cannot finish checking in this turn, report the work as unfinished with the process_id; do not claim completion or start another copy blindly.", {
+    command: { type: "string", minLength: 1, maxLength: 4000 },
+    background: { type: "boolean", description: "Start the command and answer at once with a process_id, instead of waiting for it to finish." },
+  }, ["command"]),
+  tool("exec_status", `Check a command started with exec and background: true: running or finished, its exit code, and the end of its stdout and stderr (the last ${STDOUT_TAIL_CHARS.toLocaleString("en-US")} and ${STDERR_TAIL_CHARS.toLocaleString("en-US")} characters).`, {
+    process_id: { type: "string", pattern: PROCESS_ID_PATTERN },
+    wait_seconds: { type: "integer", minimum: 0, maximum: STATUS_WAIT_MAX_SECONDS, description: "Wait up to this many seconds for the command to finish before answering. A running result can arrive before the full interval because the last status read needs time to respond." },
+  }, ["process_id"]),
+  tool("copy_from_computer", "Copy one file of up to 2 GiB from the cloud computer into your working folder, for example to load it with data_load or use it in a page. A file already there is replaced.", {
+    path: { type: "string", minLength: 1, maxLength: 4096, description: "The file on the cloud computer, under /home/user or /tmp." },
+    to: { type: "string", minLength: 1, maxLength: 1000, description: "Where it goes, relative to your working folder. Default: the file's own name." },
+  }, ["path"]),
+  tool("copy_to_computer", "Copy one file of up to 2 GiB from your working folder to the cloud computer. A file already there is replaced.", {
+    from: { type: "string", minLength: 1, maxLength: 1000, description: "The file, relative to your working folder." },
+    path: { type: "string", minLength: 1, maxLength: 4096, description: "Where it goes on the cloud computer, under /home/user or /tmp." },
+  }, ["from", "path"]),
 ];
 /** A call the gate let through while no Boat had landed for the turn. */
 export const CLOUD_COMPUTER_NOT_READY = "The cloud computer is not ready. This call was not performed. Take a fresh screenshot in a moment.";
 export const CLOUD_COMPUTER_LATE = "The cloud computer did not answer in time. This call may still have run; take a fresh screenshot before repeating it.";
+export const CLOUD_COMPUTER_COPY_LATE = "The copy did not finish within 9 minutes and was stopped; nothing was changed. Make the file smaller on the cloud computer first (filter, compress or split it), then copy the parts.";
+const COPY_TOOLS = new Set(["copy_from_computer", "copy_to_computer"]);
+export const cloudComputerCallBudgetMs = (name: unknown): number =>
+  typeof name === "string" && COPY_TOOLS.has(name) ? COMPUTER_COPY_BUDGET_MS : HARNESS_CALL_BUDGET_MS;
 const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
 const buttons: Record<string, number> = { left: 1, middle: 2, right: 3 };
 const scrollButtons: Record<string, number> = { up: 4, down: 5, left: 6, right: 7 };
@@ -49,17 +73,25 @@ export type CloudComputerResult = {
   isError?: boolean;
 };
 
-/** The caller has already checked the arguments and the person's control. */
+/** The caller has already checked the arguments and the person's control. `folder` is the bot's working folder for this turn. */
 export async function runCloudComputerTool(
   cfg: AppConfig,
   boxId: string,
   name: string,
   args: Record<string, unknown>,
   signal: AbortSignal,
+  folder?: string | null,
 ): Promise<CloudComputerResult> {
   const problem = cloudComputerCallProblem(name, args);
   if (problem) return { isError: true, content: [{ type: "text", text: problem }] };
   signal.throwIfAborted();
+  if (COPY_TOOLS.has(name)) {
+    if (!folder) return { isError: true, content: [{ type: "text", text: "This turn has no working folder to copy into or out of." }] };
+    const copied = name === "copy_from_computer"
+      ? await copyFromComputer(cfg, boxId, folder, args as { path: string; to?: string }, signal)
+      : await copyToComputer(cfg, boxId, folder, args as { from: string; path: string }, signal);
+    return "error" in copied ? { isError: true, content: [{ type: "text", text: copied.error }] } : { content: [{ type: "text", text: JSON.stringify(copied) }] };
+  }
   if (name === "screenshot") {
     const shot = await screenshotBoat(cfg, "", boxId, { signal, nativeSize: true });
     signal.throwIfAborted();
@@ -77,12 +109,15 @@ export async function runCloudComputerTool(
     case "key_press": command = `xdotool key --clearmodifiers ${quote(String(a.key))}`; break;
     case "scroll": command = `${mouse} click --repeat ${a.amount ?? 3} --delay 80 ${scrollButtons[String(a.direction)]}`; break;
     case "open_url": command = `nohup xdg-open ${quote(String(a.url))} >/dev/null 2>&1 </dev/null &`; break;
-    case "exec": command = String(a.command); break;
+    case "exec": if (a.background === true) return startInBackground(cfg, boxId, String(a.command), signal); command = String(a.command); break;
+    case "exec_status": return backgroundStatus(cfg, boxId, a as { process_id: string; wait_seconds?: number }, signal);
     default: return { isError: true, content: [{ type: "text", text: "Unknown cloud computer tool." }] };
   }
   const result = await runCommand(cfg, boxId, isolatedRemoteCommand(command), { signal });
   signal.throwIfAborted();
   if (name === "open_url" && result.ok) return { content: [{ type: "text", text: "Browser launch requested. Page loading is not confirmed; inspect the screen before continuing." }] };
+  if (name === "exec" && result.timedOut) return { isError: true, content: [{ type: "text", text: EXEC_LATE }] };
+  if (result.unanswered) return { isError: true, content: [{ type: "text", text: CLOUD_COMPUTER_NO_ANSWER }] };
   return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result) }] };
 }
 
@@ -94,14 +129,18 @@ export async function cloudComputerRpc(
     cfg: AppConfig;
     /** The Boat this call acts on, read after the gate. */
     boxId(): string | null | undefined;
+    /** The bot's working folder, which the copy tools read from and write into. */
+    folder?(): string | null | undefined;
     gate(): Promise<Pick<ControlState, "held" | "reason" | "blockedReason">>;
     assertActive(): void;
     signal: AbortSignal;
     /** The whole call, the gate's wait included, answers within this. */
     budgetMs?: number;
+    /** A computer that stopped answering (server/boat-recovery.ts): what the bot is told instead, and once after it was replaced. */
+    recovery?: { refusal(boxId: string, phase: "before" | "after"): string | null; notice(boxId: string): string | null };
   },
 ): Promise<{ tools: typeof CLOUD_COMPUTER_TOOLS } | CloudComputerResult> {
-  const deadline = Date.now() + (deps.budgetMs ?? HARNESS_CALL_BUDGET_MS);
+  const started = Date.now();
   if (request?.method === "tools/list") {
     deps.assertActive();
     return { tools: CLOUD_COMPUTER_TOOLS };
@@ -109,21 +148,36 @@ export async function cloudComputerRpc(
   if (request?.method !== "tools/call") throw Object.assign(new Error("unsupported computer method"), { status: 400 });
   const params = (request.params && typeof request.params === "object" ? request.params : {}) as { name?: unknown; arguments?: unknown };
   const args = params.arguments ?? {};
+  const copy = typeof params.name === "string" && COPY_TOOLS.has(params.name);
+  const deadline = started + (deps.budgetMs ?? cloudComputerCallBudgetMs(params.name));
   const problem = cloudComputerCallProblem(params.name, args);
   if (problem) return { isError: true, content: [{ type: "text", text: problem }] };
   const control = await deps.gate();
-  deps.assertActive();
+  // A refusal acts on no Boat, so it answers even when the turn has ended meanwhile.
   if (control.held) return { isError: true, content: [{ type: "text", text: controlRefusal(control) }] };
+  deps.assertActive();
   const boxId = deps.boxId();
   if (!boxId) return { isError: true, content: [{ type: "text", text: CLOUD_COMPUTER_NOT_READY }] };
+  const refused = (phase: "before" | "after"): CloudComputerResult | null => {
+    const text = deps.recovery?.refusal(boxId, phase);
+    return text ? { isError: true, content: [{ type: "text", text }] } : null;
+  };
+  const before = refused("before");
+  if (before) return before;
   const late = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
   let result: CloudComputerResult;
   try {
-    result = await runCloudComputerTool(deps.cfg, boxId, params.name as string, args as Record<string, unknown>, AbortSignal.any([deps.signal, late]));
+    result = await runCloudComputerTool(deps.cfg, boxId, params.name as string, args as Record<string, unknown>, AbortSignal.any([deps.signal, late]), deps.folder?.());
   } catch (error) {
-    if (!late.aborted || deps.signal.aborted) throw error;
-    return { isError: true, content: [{ type: "text", text: CLOUD_COMPUTER_LATE }] };
+    if (deps.signal.aborted) throw error;
+    const after = refused("after");
+    if (after) return after;
+    if (!late.aborted) throw error;
+    return { isError: true, content: [{ type: "text", text: commandLateText(params.name, args) ?? (copy ? CLOUD_COMPUTER_COPY_LATE : CLOUD_COMPUTER_LATE) }] };
   }
   deps.assertActive();
-  return result;
+  const unanswered = result.isError && result.content.some((part) => part.type === "text" && part.text === CLOUD_COMPUTER_NO_ANSWER);
+  if (unanswered) result = refused("after") ?? result;
+  const notice = deps.recovery?.notice(boxId);
+  return notice ? { ...result, content: [{ type: "text", text: notice }, ...result.content] } : result;
 }

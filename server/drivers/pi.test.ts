@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
 import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
+import { publishedMessages, replyProblems } from "../harness/text-items.testkit.ts";
+import { caseTokens, LIVE_REPLY_CASES, liveReplyScripts } from "../testing/live-reply-cases.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { encodeInjectId, localHost } from "./local-inject.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
@@ -538,6 +540,21 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(first.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
     const second = await send("second", first.cursor);
     expect(second.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nsecond");
+    // Each turn condensed the session once; the chat marks each one.
+    const mine = recorder.events.filter((e) => e.threadId === threadId);
+    expect(mine.filter((e) => e.type === "context.compacted")).toHaveLength(2);
+    // Text streamed before the compaction is saved ahead of the marker, not joined to later text.
+    const before = mine.findIndex((e) => e.type === "item.completed" && (e as { text?: string }).text === "before");
+    expect(before).toBeGreaterThan(-1);
+    expect(before).toBeLessThan(mine.findIndex((e) => e.type === "context.compacted"));
+  });
+
+  it("adds no condensed marker when pi's compaction fails or is skipped", async () => {
+    await create("compaction", { FAKE_PI_COMPACTION_FAILS_ONLY: "1" });
+    const threadId = "t-pi-compaction-fails-" + randomUUID();
+    const { turnId } = await instance.adapter.sendTurn({ threadId, text: "first", system: "Standing rules." });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    expect(recorder.events.filter((e) => e.type === "context.compacted" && e.threadId === threadId)).toHaveLength(0);
   });
 
   it("keeps pi alive through post-run compaction recovery and re-establishes the full prompt", async () => {
@@ -862,6 +879,28 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(servers.composio).toMatchObject({ command: "node", args: ["connector-proxy.js"], env: { COMPOSIO_KEY: "ck" } });
   });
 
+  it("reports pi's priced cost and cached tokens summed over the whole run", async () => {
+    await create("priced");
+    await instance.adapter.sendTurn({ threadId: "t-priced", text: "run it", model: "synthetic/hf:moonshotai/Kimi-K3" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+
+    expect(done).toMatchObject({ ok: true });
+    // input counts every prompt token, cached ones included, as the other drivers do.
+    expect((done as { usage: unknown }).usage).toEqual({ input: 257, output: 3, cachedInput: 220 });
+    expect((done as { cost: number }).cost).toBeCloseTo(0.0025, 10);
+  });
+
+  it("books a model call's cost when the turn is stopped while its tool runs", async () => {
+    await create("priced-stop");
+    await instance.adapter.sendTurn({ threadId: "t-priced-stop", text: "run it", model: "synthetic/hf:moonshotai/Kimi-K3" });
+    await recorder.until((e) => e.type === "item.started");
+    await instance.adapter.interruptTurn("t-priced-stop");
+    const done = await recorder.until((e) => e.type === "turn.completed");
+
+    expect(done).toMatchObject({ ok: true, stopReason: "cancelled", usage: { input: 125, output: 1, cachedInput: 100 } });
+    expect((done as { cost: number }).cost).toBeCloseTo(0.0021, 10);
+  });
+
   it("rides the toolUse auto-continue and only settles on the final end_turn", async () => {
     await create("tooluse");
     await instance.adapter.sendTurn({ threadId: "t-tool", text: "run it" });
@@ -907,7 +946,29 @@ describe("PiDriver turns (fake CLI)", () => {
       .filter((e) => e.type === "item.completed" && (e as { itemType: string }).itemType === "assistant_text")
       .map((e) => (e as { text: string }).text);
     expect(texts).toEqual(["before one", "before two", "after"]);
+    expect(publishedMessages(recorder.events).map(({ streamed, completed }) => ({ streamed, completed }))).toEqual([
+      { streamed: "before one", completed: "before one" },
+      { streamed: "before two", completed: "before two" },
+      { streamed: "after", completed: "after" },
+    ]);
+    expect(new Set(publishedMessages(recorder.events).map((message) => message.itemId)).size).toBe(3);
   });
+
+  it.each(LIVE_REPLY_CASES.filter((entry) => entry.action === undefined || entry.action === "stop").map((entry) => ({ entry, name: entry.name })))(
+    "streams the $name reply with one id per message and nothing doubled, lost or glued", async ({ entry }) => {
+      const scripts = join(mkdtempSync(join(tmpdir(), "omb-pi-live-")), "scripts.json");
+      writeFileSync(scripts, JSON.stringify(liveReplyScripts()));
+      await create(undefined, { FAKE_STREAM_SCRIPT: scripts, FAKE_STREAM_CADENCE: entry.action === "stop" ? "6:5" : "7:0" });
+      const threadId = `t-live-${entry.name}`;
+      const { turnId } = await instance.adapter.sendTurn({ threadId, text: `Please answer ${entry.marker}`, model: "ollama-cloud/glm-5.2" });
+      if (entry.action === "stop") {
+        await recorder.until((e) => e.type === "content.delta" && e.turnId === turnId);
+        await instance.adapter.interruptTurn(threadId);
+      }
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId, 30_000);
+      const events = recorder.events.filter((e) => e.turnId === turnId);
+      expect(replyProblems(events, caseTokens(entry), { stopped: entry.action === "stop" })).toEqual([]);
+    }, 60_000);
 
   it("brokers a permission ask through request.opened → respondToRequest", async () => {
     await create("permission");

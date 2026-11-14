@@ -6,9 +6,9 @@ import { DATA_DIR } from "./config.ts";
 import { CaptureBuffer, capturePrompt, newCandidates, parseCandidates, topicFileName, type CaptureTurn } from "./memory-capture.ts";
 import { passageMatcher } from "./memory-entries.ts";
 import { mergeTopicText, parseTopicHeader } from "./memory-topics.ts";
-import { applyMoves, MAX_MOVES, organizeCandidates, ORGANIZE_MARKER, parseMoves } from "./memory-organize.ts";
-import { flushMemoryJournal, readMemoryJournal } from "./memory-journal.ts";
-import { applyTidy, contradictionBudget, contradictionCandidates, parseContradictions, planTidy } from "./memory-tidy.ts";
+import { applyMoves, MAX_MOVES, organizeCandidates, ORGANIZE_MARKER, organizePrompt, parseMoves } from "./memory-organize.ts";
+import { flushMemoryJournal, readMemoryJournal, revertMemoryChange } from "./memory-journal.ts";
+import { applyTidy, contradictionBudget, contradictionCandidates, contradictionPrompt, parseContradictions, planTidy } from "./memory-tidy.ts";
 import { createMemoryUpkeep, MAX_PENDING_THREADS, NO_TEXT_ENGINE, type UpkeepBot, type UpkeepEngine } from "./memory-upkeep.ts";
 import { closeMessageDb } from "./message-db.ts";
 import { aboutMeLine, appendAboutMe, clearForgotten, commitLearned, listLearnedFacts, planLearned, rememberForgotten, removeLearned } from "./profile-learned.ts";
@@ -163,6 +163,25 @@ describe("tidy plan", () => {
       { a: 2, b: 1, keep: "b" },
     ]);
   });
+
+  it("never supersedes a note outside the contradiction prompt", () => {
+    const text = Array.from({ length: 205 }, (_, index) => `- 2026-09-01 · Project ${index} has its own deadline`).join("\n");
+    const candidates = contradictionCandidates(text, TODAY);
+    const prompt = contradictionPrompt(candidates);
+    expect(candidates).toHaveLength(205);
+    expect(prompt).toContain("[199] (2026-09-01) Project 199");
+    expect(prompt).not.toContain("[200]");
+    const pairs = parseContradictions(JSON.stringify({ pairs: [
+      { a: 0, b: 200, keep: "a" },
+      { a: 204, b: 1, keep: "b" },
+      { a: 2, b: 199, keep: "b" },
+    ] }), candidates.length);
+    expect(pairs).toEqual([{ a: 2, b: 199, keep: "b" }]);
+    const next = applyTidy(text, planTidy(text, TODAY, pairs), TODAY).text;
+    expect(next).toContain("- 2026-09-01 · Project 200 has its own deadline");
+    expect(next).toContain("- 2026-09-01 · Project 204 has its own deadline");
+    expect(next).toContain("~~Project 2 has its own deadline~~");
+  });
 });
 
 describe("About me, learned on its own", () => {
@@ -204,6 +223,18 @@ describe("organizing MEMORY.md", () => {
     const { text: left, byTopic } = applyMoves(text, parseMoves('{"moves":[{"i":0,"topic":"x","aliases":["q"]}]}', candidates)!);
     expect(left).toBe("- 2026-09-26 · A\n- 2026-09-20 · Trip · until 2026-09-21\n");
     expect(byTopic.get("x.md")).toEqual({ lines: ["- 2026-09-26 · B"], aliases: ["q"] });
+  });
+});
+
+describe("filing finished work", () => {
+  it("offers a finished work log for filing with its date, and never a rule the person gave", () => {
+    const text = "- 2026-09-01 · PR #12 for the billing page merged\n- 2026-09-20 · Never book red-eye flights\n- 2026-09-20 · Don't email Asha after 9pm\n";
+    const candidates = organizeCandidates(text, TODAY, new Set());
+    expect(candidates.map((e) => e.body)).toEqual(["PR #12 for the billing page merged"]);
+    const prompt = organizePrompt(candidates, "", TODAY);
+    expect(prompt).toContain("(today is 2026-09-25)");
+    expect(prompt).toContain("[0] PR #12 for the billing page merged (noted 2026-09-01)");
+    expect(prompt).toContain('otherwise under "work-log"');
   });
 });
 
@@ -482,6 +513,108 @@ describe("the upkeep loop", () => {
     const rows = readMemoryJournal(BOT.id, 10);
     expect(rows.filter((row) => row.actor === "upkeep" && row.via === "tidy").map((row) => row.path)).toEqual(["MEMORY.md", "memory/archive.md"]);
     expect(rows[0]!.path).toBe("MEMORY.md");
+  });
+
+  it("files a finished work log out of MEMORY.md, undoable from Changes, and keeps the person's rules", async () => {
+    ensureWorkspace(BOT.id);
+    writeMemoryFile(BOT.id, ["- 2026-09-01 · Release 0.1.40 shipped to every computer", "- 2026-09-20 · Always answer in British English", ""].join("\n"));
+    organizeAnswer = '{"moves":[{"i":0,"topic":"work-log","aliases":["releases"]}]}';
+    const report = await upkeep().tidy(BOT.id);
+    expect(report.organized).toBe(1);
+    expect(organizePrompts[0]).not.toContain("British English");
+    expect(memory()).toBe("- 2026-09-20 · Always answer in British English\n");
+    expect(readMemoryTopic(BOT.id, "work-log.md")).toContain("- 2026-09-01 · Release 0.1.40 shipped to every computer");
+    await flushMemoryJournal(BOT.id);
+    const row = readMemoryJournal(BOT.id, 10).find((entry) => entry.path === "MEMORY.md" && entry.via === "organize")!;
+    expect(row).toMatchObject({ actor: "upkeep", canRevert: true });
+    expect(revertMemoryChange(BOT.id, row.id).ok).toBe(true);
+    expect(memory()).toContain("Release 0.1.40 shipped to every computer");
+  });
+
+  it.each(["MEMORY.md", "memory/travel.md"])("archives expired continuations from %s without leaving live fragments", async (path) => {
+    ensureWorkspace(BOT.id);
+    const expired = [
+      "- 2026-09-01 · Temporary deployment · until 2026-09-07",
+      "  ```sh",
+      "  deploy --temporary",
+      "",
+      "  ```",
+      "  Remove the temporary deployment.",
+    ];
+    const live = "- 2026-09-20 · Current deployment\n  Keep this detail.\n";
+    const before = `${expired.join("\n")}\n${live}`;
+    if (path === "MEMORY.md") writeMemoryFile(BOT.id, before);
+    else writeMemoryTopic(BOT.id, "travel.md", before);
+    const report = await upkeep().tidy(BOT.id);
+    await flushMemoryJournal(BOT.id);
+    expect(report.expired).toBe(1);
+    expect(readFileSync(join(workspaceDir(BOT.id), path), "utf8")).toBe(live);
+    expect(readMemoryTopic(BOT.id, "archive.md"))
+      .toContain([`${expired[0]} · expired ${TODAY}`, ...expired.slice(1)].join("\n"));
+    const row = readMemoryJournal(BOT.id, 10).find((entry) => entry.path === path && entry.via === "tidy")!;
+    expect(row.canRevert).toBe(true);
+    const reverted = revertMemoryChange(BOT.id, row.id);
+    await flushMemoryJournal(BOT.id);
+    expect(reverted.ok).toBe(true);
+    expect(readFileSync(join(workspaceDir(BOT.id), path), "utf8")).toBe(before);
+  });
+
+  it("keeps a source entry when its topic only shares the heading, while completing other moves", async () => {
+    ensureWorkspace(BOT.id);
+    const kept = "- 2026-09-25 · Deployment steps\n  deploy --new-environment\n";
+    const moved = "- 2026-09-25 · Release notes\n  Version two is ready.\n";
+    writeMemoryFile(BOT.id, `${kept}${moved}- 2026-09-25 · Short note\n`);
+    writeMemoryTopic(BOT.id, "project.md", "- 2026-09-20 · Deployment steps\n  deploy --old-environment\n- Short note\n");
+    organizeAnswer = '{"moves":[{"i":0,"topic":"project"},{"i":1,"topic":"project"},{"i":2,"topic":"project"}]}';
+    const report = await upkeep().tidy(BOT.id);
+    await flushMemoryJournal(BOT.id);
+    expect(report.organized).toBe(2);
+    expect(memory()).toBe(kept);
+    const topic = readMemoryTopic(BOT.id, "project.md")!;
+    expect(topic).toContain("deploy --old-environment");
+    expect(topic).not.toContain("deploy --new-environment");
+    expect(topic).toContain(moved);
+    expect(topic.match(/Short note/g)).toHaveLength(1);
+  });
+
+  it("completes a move without duplicating a topic that already holds the full entry", async () => {
+    ensureWorkspace(BOT.id);
+    const details = "  ```sh\n  deploy --current\n\n  ```\n  Keep the release tag.\n";
+    writeMemoryFile(BOT.id, `- 2026-09-25 · Deployment steps\n${details}`);
+    const topic = `- 2026-09-20 · Deployment steps\n${details}`;
+    writeMemoryTopic(BOT.id, "project.md", topic);
+    organizeAnswer = '{"moves":[{"i":0,"topic":"project"}]}';
+    const report = await upkeep().tidy(BOT.id);
+    await flushMemoryJournal(BOT.id);
+    expect(report.organized).toBe(1);
+    expect(memory()).toBe("");
+    expect(readMemoryTopic(BOT.id, "project.md")).toBe(topic);
+  });
+
+  it.each(["2026-09-07", "2026-09-26"].flatMap((until) => [
+    { until, details: "  deploy --current\n" },
+    { until, details: "" },
+  ]))("keeps a permanent entry when its topic copy expires on $until (details: $details)", async ({ until, details }) => {
+    ensureWorkspace(BOT.id);
+    const source = `- 2026-09-25 · Deployment steps\n${details}`;
+    writeMemoryFile(BOT.id, source);
+    writeMemoryTopic(BOT.id, "project.md", `- 2026-09-01 · Deployment steps · until ${until}\n${details}`);
+    organizeAnswer = '{"moves":[{"i":0,"topic":"project"}]}';
+    const report = await upkeep().tidy(BOT.id);
+    await flushMemoryJournal(BOT.id);
+    expect(report.organized ?? 0).toBe(0);
+    expect(memory()).toBe(source);
+  });
+
+  it("retains both code blocks when their identical headings hide meaningful whitespace differences", async () => {
+    const source = "- 2026-09-25 · Cedar command\n  ```sh\n  printf 'a b'\n  ```\n";
+    const topic = "- 2026-09-20 · Cedar command\n  ```sh\n  printf 'a  b'\n  ```\n";
+    writeMemoryFile(BOT.id, source);
+    writeMemoryTopic(BOT.id, "cedar.md", topic);
+    organizeAnswer = '{"moves":[{"i":0,"topic":"cedar"}]}';
+    expect((await upkeep().tidy(BOT.id)).organized ?? 0).toBe(0);
+    expect(memory()).toBe(source);
+    expect(readMemoryTopic(BOT.id, "cedar.md")).toBe(topic);
   });
 
   it("moves detail the bot wrote itself out of MEMORY.md into topics, keeping core facts", async () => {

@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
-import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { ENABLE_ADVANCED_UI, UI_TOOLS_DIR } from "./control-omb-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env }));
@@ -38,6 +38,7 @@ describe("trust controls in the real renderer", () => {
     }, { timeout: 300_000, interval: 250 }).toBe(true);
 
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", info.ui, ...args]) as Promise<Record<string, any>>;
+    await ui("eval", "--js", ENABLE_ADVANCED_UI);
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
     const click = (name: string) => ui("click", "--name", name);
     const type = async (name: string, text: string) => {
@@ -74,12 +75,12 @@ describe("trust controls in the real renderer", () => {
     expect(profile).toBeDefined();
     await ui("click", "--ref", `@${profile![0]}`);
     await click("Permissions");
-    await click("Allow a daily amount");
-    await type("Daily outbound limit", "7");
-    await ui("press", "--keys", "Tab");
-    await expect.poll(async () => (await saved()).outbound, { timeout: 10_000 }).toEqual({ policy: "allow", dailyCap: 7 });
+    await click("Send without asking");
+    await expect.poll(async () => (await saved()).outbound, { timeout: 10_000 }).toEqual({ policy: "allow" });
+    expect(await evaluate("[...document.querySelectorAll('div')].find(el => el.firstElementChild?.textContent === 'Sending on your behalf')?.querySelectorAll('input').length")).toBe(0);
+    expect(await snapshot()).not.toContain("used today");
     await click("Ask every time");
-    await expect.poll(async () => (await saved()).outbound, { timeout: 10_000 }).toEqual({ policy: "ask", dailyCap: 7 });
+    await expect.poll(async () => (await saved()).outbound, { timeout: 10_000 }).toEqual({ policy: "ask" });
 
     // Only this page's inventory reads are synthetic; policy writes still
     // pass through the real bot queue and server validation.
@@ -112,7 +113,7 @@ describe("trust controls in the real renderer", () => {
     });
     expect(seeded.ok).toBe(true);
     await click("Model");
-    expect(await snapshot()).toContain("Automatic recovery is off. This list stays inactive");
+    expect(await snapshot()).toContain("Backup models for this bot");
     expect(await snapshot()).toContain("Work that may have run is not replayed");
     await expect.poll(() => evaluate("Boolean(document.querySelector('button[aria-label$=\"from the fallback list\"]'))"), { timeout: 10_000 }).toBe(true);
     await evaluate("document.querySelector('button[aria-label$=\"from the fallback list\"]').click(); true");
@@ -120,9 +121,9 @@ describe("trust controls in the real renderer", () => {
     expect((await saved()).modelSelection).toEqual(bot.modelSelection);
     await ui("press", "--keys", "Escape");
 
-    await evaluate(`(() => { localStorage.setItem('omb-advanced-mode','1'); window.dispatchEvent(new StorageEvent('storage', {key:'omb-advanced-mode'})); return true; })()`);
     await click("Team map");
     const openMemory = async () => {
+      await expect.poll(() => evaluate('Boolean(document.querySelector(\'[data-team-key=""] details\'))'), { timeout: 10_000 }).toBe(true);
       await evaluate(`(() => { const menu = document.querySelector('[data-team-key=""] details'); if (!menu) throw new Error('No General team menu'); if (!menu.open) menu.querySelector('summary').click(); return true; })()`);
       await click("General department memory");
     };

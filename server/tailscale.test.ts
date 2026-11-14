@@ -1,14 +1,21 @@
+import { EventEmitter } from "node:events";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { classifyTailscaleStderr, explainTailscaleFailure, parseTailscaleStatus } from "./tailscale.ts";
+import { classifyTailscaleStderr, clearLeftoverTailscaleServe, explainTailscaleFailure, parseTailscaleStatus, tailnetListenFallback, tailscaleMarker, tailscaleServe, type TailscaleStatus } from "./tailscale.ts";
 
 describe("tailscale helpers", () => {
   it("reads the MagicDNS name, addresses and state from status --json", () => {
     const status = parseTailscaleStatus("/usr/bin/tailscale", JSON.stringify({
       BackendState: "Running",
+      CertDomains: ["mini.tail1234.ts.net"],
       Self: { DNSName: "mini.tail1234.ts.net.", TailscaleIPs: ["100.64.0.7", "fd7a:115c:a1e0::7"] },
     }));
-    expect(status).toEqual({ cli: "/usr/bin/tailscale", dnsName: "mini.tail1234.ts.net", addresses: ["100.64.0.7", "fd7a:115c:a1e0::7"], backendState: "Running" });
+    expect(status).toEqual({ cli: "/usr/bin/tailscale", dnsName: "mini.tail1234.ts.net", addresses: ["100.64.0.7", "fd7a:115c:a1e0::7"], backendState: "Running", httpsEnabled: true });
+    expect(parseTailscaleStatus("t", JSON.stringify({ BackendState: "Running" }))?.httpsEnabled).toBe(false);
+    expect(parseTailscaleStatus("t", JSON.stringify({ BackendState: "Running", Self: { CapMap: { https: null } } }))?.httpsEnabled).toBe(true);
     expect(parseTailscaleStatus("t", "{}")?.dnsName).toBeNull();
     expect(parseTailscaleStatus("t", "not json")).toBeNull();
   });
@@ -22,6 +29,90 @@ describe("tailscale helpers", () => {
     for (const reason of ["not-installed", "not-logged-in", "not-running", "no-magicdns", "needs-operator", "https-not-enabled", "unknown"] as const) {
       expect(explainTailscaleFailure(reason).length).toBeGreaterThan(20);
       expect(explainTailscaleFailure(reason)).not.toContain("tskey");
+    }
+  });
+});
+
+describe("serve --tailscale without HTTPS", () => {
+  const status: TailscaleStatus = { cli: "/usr/bin/tailscale", dnsName: "nuc.tail1234.ts.net", addresses: ["100.70.0.9", "fd7a:115c:a1e0::9"], backendState: "Running", httpsEnabled: false };
+  const interfaces = { eth0: [{ address: "192.168.1.30" }], tailscale0: [{ address: "100.70.0.9" }, { address: "fd7a:115c:a1e0::9" }] };
+
+  it("listens on this machine's own tailnet addresses at http://<name>:<port>, and says how to get https", () => {
+    const fallback = tailnetListenFallback("https-not-enabled", status, 8799, interfaces);
+    expect(fallback?.origin).toBe("http://nuc.tail1234.ts.net:8799");
+    // The name alone: the server follows Tailscale's interface, so a restart of Tailscale needs no restart here.
+    expect(fallback?.env).toEqual({ OMB_TAILNET_NAME: "nuc.tail1234.ts.net" });
+    expect(fallback?.line).toContain("login.tailscale.com/admin/dns");
+    expect(tailnetListenFallback("needs-operator", status, 8799, interfaces)?.line).toContain("--operator=$USER");
+  });
+
+  it("fails as before where listening would not help: another failure, no name, or no Tailscale interface", () => {
+    expect(tailnetListenFallback("not-running", status, 8799, interfaces)).toBeNull();
+    expect(tailnetListenFallback("https-not-enabled", { ...status, dnsName: null }, 8799, interfaces)).toBeNull();
+    expect(tailnetListenFallback("https-not-enabled", status, 8799, { eth0: interfaces.eth0 })).toBeNull();
+  });
+});
+
+describe("serve --tailscale", () => {
+  const status: TailscaleStatus = { cli: "/usr/bin/tailscale", dnsName: "mini.tail1234.ts.net", addresses: [], backendState: "Running", httpsEnabled: true };
+  const fakeServe = (exitCode: number | null, stderr = "") => {
+    const calls: string[][] = [];
+    const children: Array<EventEmitter & { kill(signal: string): void; killed: string[] }> = [];
+    const spawnImpl = ((_cli: string, args: string[]) => {
+      calls.push(args);
+      const child: EventEmitter & { stderr: EventEmitter; killed: string[]; kill(signal: string): void } = Object.assign(new EventEmitter(), {
+        stderr: new EventEmitter(), killed: [] as string[], kill(signal: string) { child.killed.push(signal); setImmediate(() => child.emit("exit", null)); },
+      });
+      children.push(child);
+      if (exitCode !== null) setImmediate(() => { child.stderr.emit("data", Buffer.from(stderr)); child.emit("exit", exitCode); });
+      return child;
+    }) as never;
+    return { calls, children, spawnImpl };
+  };
+
+  it("serves in the foreground, notes it, and turns it off when serve stops", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-ts-"));
+    try {
+      const fake = fakeServe(null);
+      const served = await tailscaleServe(status, 8799, { dataDir: dir, settleMs: 20, spawnImpl: fake.spawnImpl });
+      if ("failure" in served) throw new Error(served.failure);
+      expect(served.origin).toBe("https://mini.tail1234.ts.net");
+      expect(fake.calls).toEqual([["serve", "--https=443", "http://127.0.0.1:8799"]]);
+      expect(fake.calls[0]).not.toContain("--bg");
+      expect(existsSync(tailscaleMarker(dir))).toBe(true);
+      await served.stop();
+      expect(fake.children[0]!.killed).toEqual(["SIGTERM"]);
+      expect(existsSync(tailscaleMarker(dir))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("checks first: HTTPS certificates on, and no other MausBot server already on this name; a serve that exits says why", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-ts-"));
+    try {
+      const fake = fakeServe(null);
+      expect(await tailscaleServe({ ...status, httpsEnabled: false }, 8799, { dataDir: dir, spawnImpl: fake.spawnImpl })).toEqual({ failure: "https-not-enabled" });
+      expect(await tailscaleServe(status, 8799, { dataDir: dir, spawnImpl: fake.spawnImpl, otherServer: async () => true })).toEqual({ failure: "other-server" });
+      expect(fake.calls).toEqual([]);
+      const refused = fakeServe(1, "Access denied: serve config denied");
+      expect(await tailscaleServe(status, 8799, { dataDir: dir, settleMs: 500, spawnImpl: refused.spawnImpl })).toEqual({ failure: "needs-operator" });
+      expect(existsSync(tailscaleMarker(dir))).toBe(false);
+      expect(explainTailscaleFailure("other-server")).toContain("different MausBot server");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("turns off a share a crashed run left behind, and nothing without its note", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-ts-"));
+    try {
+      expect(await clearLeftoverTailscaleServe(dir)).toBe(false);
+      writeFileSync(tailscaleMarker(dir), JSON.stringify({ cli: process.execPath, httpsPort: 443, localPort: 8799 }));
+      expect(await clearLeftoverTailscaleServe(dir)).toBe(true);
+      expect(existsSync(tailscaleMarker(dir))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

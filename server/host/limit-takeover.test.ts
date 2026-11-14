@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +7,7 @@ import type { RuntimeEvent } from "../../shared/runtime-events.ts";
 import type { ModelSelection } from "../../shared/wire.ts";
 import type { InstanceConfigMap } from "../contracts.ts";
 import { LimitResetClock, UNNAMED_LIMIT_MS } from "../limit-resets.ts";
-import { MODEL_HOLD_MS, SIGNED_OUT_RECHECK_MS, createLimitTakeover, signedOutStop, type LimitTakeoverDeps, type TakeoverEngine } from "./limit-takeover.ts";
+import { MODEL_HOLD_MS, SIGNED_OUT_RECHECK_MS, SIGNED_OUT_REPEAT_MS, createLimitTakeover, signedOutStop, type LimitTakeoverDeps, type TakeoverEngine } from "./limit-takeover.ts";
 
 const NOW = Date.parse("2026-10-27T10:00:00Z");
 const HOUR = 3_600_000;
@@ -129,6 +129,16 @@ describe("a model's own limit", () => {
     expect(instance.modelHeld(on("claude", "claude-opus-5-5"))).toBeNull();
     now.at = NOW + UNNAMED_LIMIT_MS + 1;
     expect(instance.modelHeld(on("claude", "claude-sonnet-5"))).toBeNull();
+  });
+
+  it("holds every model one shared allowance covers", () => {
+    const { instance } = takeover();
+    instance.noteRuntimeEvent("kai", on("claude", "claude-opus-5-5"),
+      { ...error("model", NOW + 2 * HOUR), limitModels: ["claude-opus-5-5", "claude-sonnet-5"] } as RuntimeEvent);
+    expect(instance.modelHeld(on("claude", "claude-opus-5-5"))).toEqual({ until: NOW + 2 * HOUR, resetsAt: NOW + 2 * HOUR, scope: "model" });
+    expect(instance.modelHeld(on("claude", "claude-sonnet-5")), "the same allowance holds it too")
+      .toEqual({ until: NOW + 2 * HOUR, resetsAt: NOW + 2 * HOUR, scope: "model" });
+    expect(instance.modelHeld(on("codex", "gpt-6")), "another AI is untouched").toBeNull();
   });
 });
 
@@ -269,6 +279,55 @@ describe("a new conversation once an AI is known to be at its limit", () => {
   });
 });
 
+describe("a sign-out that goes on", () => {
+  const CLAUDE_ON = on("claude", "claude-opus-5-5");
+  const ROSA = { id: "rosa", name: "Rosa" };
+
+  it("says it again once a day across all bots, however often turns are refused in between, until it is signed in", () => {
+    const { instance, told, now } = takeover({ where: "on the Cloud" });
+    expect(instance.tell(KAI, CLAUDE_ON, { scope: "signed-out" })).not.toBeNull();
+    for (let turn = 0; turn < 8; turn += 1) {
+      now.at += 2 * HOUR;
+      expect(instance.tell(KAI, CLAUDE_ON, { scope: "signed-out" })).toBeNull();
+    }
+    expect(told).toHaveLength(1);
+    now.at += SIGNED_OUT_REPEAT_MS - 16 * HOUR + 1;
+    expect(instance.tell(KAI, CLAUDE_ON, { scope: "signed-out" }), "a day after it was last said").not.toBeNull();
+    expect(instance.tell(KAI, CLAUDE_ON, { scope: "signed-out" })).toBeNull();
+    expect(instance.tell(ROSA, CLAUDE_ON, { scope: "signed-out" }), "another bot's first time is still its own").not.toBeNull();
+    now.at += SIGNED_OUT_REPEAT_MS + 1;
+    expect(instance.tell(KAI, CLAUDE_ON, { scope: "signed-out" })).not.toBeNull();
+    expect(instance.tell(ROSA, CLAUDE_ON, { scope: "signed-out" }), "the day's one reminder went to Kai").toBeNull();
+    instance.signedIn("claude");
+    expect(told).toHaveLength(4);
+  });
+
+  it("speaks up when a bot had gone quiet under a long mark, and starts afresh after signing in", () => {
+    const dir = freshDir();
+    const before = takeover({}, dir);
+    before.instance.noteSignedOut("claude");
+    expect(before.instance.tell(KAI, CLAUDE_ON, { scope: "signed-out" })).not.toBeNull();
+    expect(before.instance.tell(KAI, CLAUDE_ON, { scope: "signed-out" })).toBeNull();
+    writeFileSync(join(dir, "limit-notices.json"), JSON.stringify({ [`kai\u0000signed-out\u0000claude`]: NOW + 29 * 24 * HOUR }));
+    const after = takeover({}, dir);
+    after.now.at = NOW + HOUR;
+    expect(after.instance.tell(KAI, CLAUDE_ON, { scope: "signed-out" }), "once after the update, then on the schedule").not.toBeNull();
+    expect(after.instance.tell(KAI, CLAUDE_ON, { scope: "signed-out" })).toBeNull();
+    after.instance.noteSignedOut("claude");
+    after.instance.signedIn("claude");
+    after.instance.noteSignedOut("claude");
+    expect(after.instance.tell(KAI, CLAUDE_ON, { scope: "signed-out" }), "a new sign-out is told at once").not.toBeNull();
+  });
+
+  it("names the bots with nothing to carry on for them, and leaves out those with a backup", () => {
+    const mira = { id: "mira", name: "Mira", modelSelection: CLAUDE_ON };
+    const lin = { id: "lin", name: "Lin", modelSelection: CLAUDE_ON };
+    const { instance } = takeover({ where: "on the Cloud", botsOn: () => [mira, lin] as never, signedOutChosen: (botId) => botId === "lin" ? [on("codex", "gpt-6")] : [] });
+    expect(instance.tell(KAI, CLAUDE_ON, { scope: "signed-out" }))
+      .toBe("Claude is signed out on the Cloud. Sign in again in Settings → AI to keep using it. Until then Mira can't run: it has no backup.");
+  });
+});
+
 describe("an AI that is signed out", () => {
   const event = (type: string, extra: Record<string, unknown> = {}) =>
     ({ eventId: "e", provider: "claudeAgent", createdAt: new Date(NOW).toISOString(), threadId: "t1", type, ...extra }) as RuntimeEvent;
@@ -288,7 +347,7 @@ describe("an AI that is signed out", () => {
     expect(instance.tell(KAI, CLAUDE_ON, { scope: "signed-out", backup: on("codex", "gpt-6") }), "once, not once a turn").toBeNull();
     signedOut(instance);
     expect(instance.carriedOn(KAI, "t2", CLAUDE_ON, on("codex", "gpt-6"), { scope: "signed-out" }))
-      .toEqual([{ name: "recovery: Claude is signed out, so Codex took over.", ok: true }]);
+      .toEqual([{ name: "recovery: Claude is signed out, so Codex took over.", nameCode: "chat.notice.failoverSignedOut", nameParams: { from: "Claude", to: "Codex" }, ok: true }]);
     expect(told.map((entry) => entry.text)).toEqual(["Claude is signed out on the Cloud. Sign in again in Settings → AI to keep using it."]);
     expect(record.mock.calls.at(-1)![0]).toMatchObject({ threadId: "t2", why: "signed-out", resetsAt: null });
 
@@ -297,7 +356,7 @@ describe("an AI that is signed out", () => {
     expect(instance.stillSignedOut("claude")).toBe(false);
     signedOut(instance);
     expect(instance.carriedOn(KAI, "t3", CLAUDE_ON, on("codex", "gpt-6"), { scope: "signed-out" }), "a new sign-out is told again").toEqual([
-      { name: "recovery: Claude is signed out, so Codex took over.", ok: true },
+      { name: "recovery: Claude is signed out, so Codex took over.", nameCode: "chat.notice.failoverSignedOut", nameParams: { from: "Claude", to: "Codex" }, ok: true },
       { name: "notice: Claude is signed out on the Cloud, so Kai is using Codex meanwhile. Sign in again in Settings → AI to keep using Claude.", ok: true, setup: true },
     ]);
   });

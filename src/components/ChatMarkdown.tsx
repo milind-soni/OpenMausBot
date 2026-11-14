@@ -1,22 +1,25 @@
 // Security: model output never reaches the DOM as raw HTML (no rehype-raw); Shiki's output is generator-escaped.
-import { createContext, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { createContext, Fragment, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform, type Components, type ExtraProps, type Options as MarkdownOptions } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { fromMarkdown, type Options as MarkdownParseOptions } from "mdast-util-from-markdown";
-import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText, X } from "lucide-react";
+import { Check, Copy, Download, Eye, LoaderCircle, RotateCcw, WrapText, X } from "lucide-react";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { remarkMentions, sameMentionPerson, type MentionPeer, type MentionPerson } from "@/lib/mentions";
 import { createMarkdownRenderCache } from "@/lib/markdown-render-cache";
+import { closedFence, openFence, splitMarkdownBlocks } from "@/lib/markdown-stream-blocks";
+import { StreamingReplyContext } from "@/state/live-reply";
 
 import { parseFenceInfo } from "../lib/code-block";
 import { markdownImageName, markdownImageOpenUrl } from "../lib/markdown-image";
 import { repairMarkdownTables } from "../lib/markdown-tables";
 import { TRANSCRIPT_WINDOW_SIZE } from "../lib/transcript-window";
 import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
+import { linkPlainPaths } from "../../shared/markdown-plain-paths";
 import { GITHUB_REF_CLASS, isUseMyComputerUrl, LINK_CLASS, UseMyComputerLink, usePageOpener, withPageOpen } from "./ChatLinks";
 import { githubRefFromProps, remarkGithubRefs } from "@/lib/github-refs";
 import { GITHUB_REF_ICONS, LinkHoverCard } from "@/components/LinkHoverCard";
@@ -28,6 +31,8 @@ import { MarkdownTable } from "./MarkdownTable";
 import { CodeBlock, CodePlate, codeHash } from "./CodeBlock";
 export { CodeBlock, HIGHLIGHT_CACHE_MAX, HIGHLIGHT_CACHE_MAX_CHARS, HIGHLIGHT_MAX_CHARS, type CodeBlockProps } from "./CodeBlock";
 import { FilePreviewButton } from "./FilePreviewButton";
+import { SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
+import { useRevealOriginalMenu } from "./RevealOriginalMenu";
 
 const mermaidCache = new Map<string, string>();
 const MERMAID_CACHE_MAX = 50;
@@ -68,7 +73,7 @@ export function chatUrlTransform(value: string, key = "href"): string {
   if (looksLikeThreadRefUrl(value) || isUseMyComputerUrl(value)) return value;
   // Markdown-to-HTML percent-encodes a destination's backslashes (C:%5CUsers…); restore them and leave other escapes
   // for the server's single decode.
-  const url = /^[a-zA-Z]:%5C/i.test(value) ? value.replace(/%5C/gi, "\\") : value;
+  const url = /^(?:[a-zA-Z]:%5C|%5C%5C)/i.test(value) ? value.replace(/%5C/gi, "\\") : value;
   if (/^file:\/\//i.test(url) || WINDOWS_PATH.test(url) || url.startsWith("\\\\")) {
     return localFilePath(url) ? url : "";
   }
@@ -82,11 +87,19 @@ function remarkWindowsPathDestinations(this: { data(): object }) {
   (data.fromMarkdownExtensions ??= []).push(windowsPathDestinations);
 }
 
+function remarkPlainPaths() {
+  return (tree: object, file: { value?: unknown }) => {
+    if (typeof file.value === "string") linkPlainPaths(tree, file.value);
+  };
+}
+
 const gfmParseData: {
   micromarkExtensions?: MarkdownParseOptions["extensions"];
   fromMarkdownExtensions?: MarkdownParseOptions["mdastExtensions"];
 } = {};
-remarkGfm.call({ data: () => gfmParseData });
+// A spoiler is "~~text~~" only: a lone "~" in a range such as "77~82" must not hide what follows it.
+const GFM_OPTIONS = { singleTilde: false };
+remarkGfm.call({ data: () => gfmParseData }, GFM_OPTIONS);
 const normalizationParseOptions: MarkdownParseOptions = {
   extensions: gfmParseData.micromarkExtensions,
   mdastExtensions: [...(gfmParseData.fromMarkdownExtensions ?? []), windowsPathDestinations],
@@ -243,7 +256,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
   const diagram = <>
     {error && (
       <p role="alert" className="px-3 pt-2 text-[12px] text-danger">
-        Diagram could not be rendered: {error}
+        {t("chat.mermaid.failed", { error })}
       </p>
     )}
     {markup && <div className="overflow-x-auto p-3 [&_svg]:!max-w-full" dangerouslySetInnerHTML={markup} />}
@@ -253,7 +266,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
   </>;
   if (simple) {
     return (
-      <div ref={frame} dir="ltr" className="group/code relative my-2.5 overflow-hidden rounded-lg bg-ink/[0.04]">
+      <div ref={frame} dir="ltr" className="group/code relative my-2.5 overflow-hidden rounded-xl bg-ink/[0.04]">
         <CodePlate copied={copied} onCopy={copy} copyLabel={t("code.copySource")} items={[
           { key: "source", label: t(showSource ? "code.hideSource" : "code.showSource"), icon: <WrapText size={14} aria-hidden="true" />, active: showSource, onSelect: () => setShowSource((shown) => !shown) },
           { key: "about", label: t("code.mermaid"), disabled: true, separatorBefore: true, onSelect: () => {} },
@@ -265,8 +278,8 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
   return (
     <div ref={frame} dir="ltr" className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
       <div className="flex items-center justify-between gap-2 border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">
-        <span title="Mermaid diagram" className="min-w-0 truncate rounded border border-hairline/40 bg-raised px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-ink select-none">
-          Mermaid diagram
+        <span title={t("chat.mermaid.title")} className="min-w-0 truncate rounded border border-hairline/40 bg-raised px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-ink select-none">
+          {t("chat.mermaid.title")}
         </span>
         <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
           <button
@@ -277,19 +290,19 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
                 ? "bg-accent/15 text-accent font-medium"
                 : "text-ink-secondary hover:bg-raised hover:text-ink"
             }`}
-            title={showSource ? "Hide diagram source" : "Show diagram source"}
-            aria-label={showSource ? "Hide diagram source" : "Show diagram source"}
+            title={t(showSource ? "chat.mermaid.hideSourceTitle" : "chat.mermaid.showSourceTitle")}
+            aria-label={t(showSource ? "chat.mermaid.hideSourceTitle" : "chat.mermaid.showSourceTitle")}
             aria-pressed={showSource}
           >
             <WrapText size={12} aria-hidden="true" />
-            <span className="hidden sm:inline">{showSource ? "Hide source" : "Show source"}</span>
+            <span className="hidden sm:inline">{t(showSource ? "chat.mermaid.hideSource" : "chat.mermaid.showSource")}</span>
           </button>
           <button
             type="button"
             onClick={copy}
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink transition-colors"
-            title={copied === "copied" ? "Copied to clipboard" : copied === "failed" ? t("common.copyFailed") : "Copy diagram source"}
-            aria-label={copied === "copied" ? "Diagram source copied to clipboard" : copied === "failed" ? t("common.copyFailed") : "Copy diagram source to clipboard"}
+            title={copied === "copied" ? t("chat.code.copied") : copied === "failed" ? t("common.copyFailed") : t("chat.mermaid.copy")}
+            aria-label={copied === "copied" ? t("chat.mermaid.copiedLabel") : copied === "failed" ? t("common.copyFailed") : t("chat.mermaid.copyLabel")}
           >
             {copied === "failed" ? (
               <>
@@ -299,12 +312,12 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
             ) : copied === "copied" ? (
               <>
                 <Check size={12} className="text-success" aria-hidden="true" />
-                <span className="text-success font-medium hidden sm:inline">Copied!</span>
+                <span className="text-success font-medium hidden sm:inline">{t("chat.code.copiedShort")}</span>
               </>
             ) : (
               <>
                 <Copy size={12} aria-hidden="true" />
-                <span className="hidden sm:inline">Copy</span>
+                <span className="hidden sm:inline">{t("common.copy")}</span>
               </>
             )}
           </button>
@@ -317,36 +330,44 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
 
 // Security: no href at all, since an <a href="file://…"> reaches setWindowOpenHandler on a middle or modifier click,
 // which calls shell.openExternal without main's containment check.
-function LocalFileLink({ filePath, name, children, message }: { filePath: string; name?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
+// source: the original a delivered copy came from, offered on right-click (Show in Finder) like in the gallery.
+function LocalFileLink({ filePath, name, source, children, message }: { filePath: string; name?: string; source?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
   const save = useLocalFileSave(filePath, name, message);
+  const preview = useHtmlPreview(filePath, name ?? fileName(filePath), message);
+  const revealMenu = useRevealOriginalMenu();
   if (!message) {
-    return <span title="Unavailable legacy file reference" className="break-words text-ink-secondary">{children}</span>;
+    return <span title={t("chat.file.legacy")} className="break-words text-ink-secondary">{children}</span>;
   }
   const label = save.state === "saving"
-    ? "Saving…"
+    ? t("common.saving")
     : save.state === "saved"
-      ? "Saved"
+      ? t("common.saved")
       : save.state === "failed"
-        ? "Retry"
+        ? t("chat.retry")
         : null;
 
   return (
-    <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]">
-      <FilePreviewButton path={filePath} name={name ?? fileName(filePath)} message={message} />
+    <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]" {...revealMenu.targetProps(source)}>
+      {revealMenu.menu}
+      {preview.opens
+        ? <SaveIconButton name={name ?? fileName(filePath)} save={save} retryable={save.retryable} />
+        : <FilePreviewButton path={filePath} name={name ?? fileName(filePath)} message={message} />}
       <button
         type="button"
-        onClick={() => void save.save()}
-        disabled={save.state === "saving"}
-        title="Save a copy"
+        onClick={preview.opens ? preview.show : () => void save.save()}
+        disabled={!preview.opens && save.state === "saving"}
+        title={preview.opens ? preview.label : t("chat.file.saveCopy")}
         className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
       >
         {children}
-        {save.state === "saving" ? (
+        {preview.opens ? (
+          <Eye size={12} className="shrink-0" aria-hidden="true" />
+        ) : save.state === "saving" ? (
           <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />
         ) : save.state === "saved" ? (
           <Check size={12} className="shrink-0 text-success" aria-hidden="true" />
         ) : save.state === "failed" ? (
-          !save.outsideWorkspace && <RotateCcw size={12} className="shrink-0" aria-hidden="true" />
+          save.retryable && <RotateCcw size={12} className="shrink-0" aria-hidden="true" />
         ) : (
           <Download size={12} className="shrink-0" aria-hidden="true" />
         )}
@@ -366,6 +387,7 @@ function LocalFileLink({ filePath, name, children, message }: { filePath: string
         </span>
       )}
       {save.folder && <MessageFolderFiles folderPath={filePath} listing={save.folder} message={message} />}
+      {preview.dialog}
     </span>
   );
 }
@@ -383,8 +405,8 @@ function Spoiler({ children }: { children?: ReactNode }) {
         </span>
         <button
           type="button"
-          aria-label="Reveal spoiler"
-          title="Reveal spoiler"
+          aria-label={t("chat.spoiler.reveal")}
+          title={t("chat.spoiler.reveal")}
           onClick={() => setRevealed(true)}
           className="absolute inset-0 rounded bg-raised/90"
         />
@@ -396,12 +418,12 @@ function Spoiler({ children }: { children?: ReactNode }) {
       {children}
       <button
         type="button"
-        aria-label="Hide spoiler"
-        title="Hide spoiler"
+        aria-label={t("chat.spoiler.hide")}
+        title={t("chat.spoiler.hide")}
         onClick={() => setRevealed(false)}
         className="ms-1 rounded px-0.5 text-[11px] text-ink-secondary hover:text-ink"
       >
-        Hide
+        {t("chat.spoiler.hideShort")}
       </button>
     </span>
   );
@@ -500,16 +522,19 @@ export function normalizeMathDelimiters(text: string, imageOffsets?: Map<number,
 const normalizedCache = new Map<string, Pick<MessageScope, "imageOffsets"> & { source: string }>();
 const NORMALIZED_CACHE_MAX = TRANSCRIPT_WINDOW_SIZE * 2;
 
+function normalizeMarkdown(text: string) {
+  const imageOffsets = text.includes(MARKDOWN_IMAGE) ? new Map<number, number>() : undefined;
+  return { source: normalizeMathDelimiters(imageOffsets ? text : repairMarkdownTables(text), imageOffsets), imageOffsets };
+}
+
 function normalizeMessageMarkdown(text: string) {
   const cached = normalizedCache.get(text);
   if (cached) return cached;
-  const imageOffsets = text.includes(MARKDOWN_IMAGE) ? new Map<number, number>() : undefined;
-  const source = normalizeMathDelimiters(imageOffsets ? text : repairMarkdownTables(text), imageOffsets);
+  const normalized = normalizeMarkdown(text);
   if (normalizedCache.size >= NORMALIZED_CACHE_MAX) {
     const first = normalizedCache.keys().next().value;
     if (first !== undefined) normalizedCache.delete(first);
   }
-  const normalized = { source, imageOffsets };
   normalizedCache.set(text, normalized);
   return normalized;
 }
@@ -564,6 +589,7 @@ interface MessageScope {
   threads: ThreadRefsValue["threads"];
   currentBotId?: string;
   delivered?: DeliveredFiles;
+  originals?: DeliveredFiles;
 }
 
 export type DeliveredFiles = Readonly<Record<string, string>>;
@@ -571,18 +597,23 @@ export type DeliveredFiles = Readonly<Record<string, string>>;
 const fileName = (path: string) => path.split(/[\\/]/).at(-1) ?? path;
 
 const MessageScopeContext = createContext<MessageScope>({ threads: [] });
+/** The source of the block still being written, whose last fence may be open; null for finished text. */
+const StreamSourceContext = createContext<string | null>(null);
 
 function MarkdownCode({ node, children }: BlockProps) {
+  const streamSource = use(StreamSourceContext);
+  const position = (node as { position?: { start: { offset?: number }; end: { offset?: number } } } | undefined)?.position;
+  const open = streamSource !== null && !closedFence(streamSource, position?.start.offset, position?.end.offset);
   const child: any = Array.isArray(children) ? children[0] : children;
   const className: string = child?.props?.className ?? "";
   const { lang, wrap } = parseFenceInfo(/language-([^\s]+)/.exec(className)?.[1] ?? "", (node as { children?: { data?: { meta?: unknown } }[] })?.children?.[0]?.data?.meta);
   const flat = (n: any): string =>
     typeof n === "string" ? n : Array.isArray(n) ? n.map(flat).join("") : (n?.props?.children ? flat(n.props.children) : "");
   const code = flat(child?.props?.children).replace(/\n$/, "");
-  if (lang.trim().toLowerCase() === "mermaid") {
+  if (lang.trim().toLowerCase() === "mermaid" && !open) {
     return <MermaidDiagram code={code} />;
   }
-  return <CodeBlock code={code} lang={lang} initialWrap={wrap} />;
+  return <CodeBlock code={code} lang={lang} initialWrap={wrap} open={open} />;
 }
 
 function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
@@ -608,8 +639,8 @@ function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
 function MarkdownLink({ href, children, ...rest }: { href?: string; children?: ReactNode }) {
   // SAFETY: react-markdown hands hast data-* attributes through as string props
   const props = rest as Record<string, unknown>;
-  const { threads, currentBotId, message, delivered } = useContext(MessageScopeContext);
-  const linkMenu = useThreadLinkMenu(href), openPage = usePageOpener();
+  const { threads, currentBotId, message, delivered, originals } = useContext(MessageScopeContext);
+  const linkMenu = useThreadLinkMenu(href), openPage = usePageOpener({ beside: true });
   if (!href) return <span className="break-words">{children}</span>;
   if (isUseMyComputerUrl(href)) return <UseMyComputerLink>{children}</UseMyComputerLink>;
   const address = parseThreadRefUrl(href);
@@ -619,7 +650,8 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
   const localPath = localFilePath(href);
   if (localPath) {
     const copy = delivered && Object.hasOwn(delivered, fileName(localPath)) ? delivered[fileName(localPath)] : undefined;
-    return <LocalFileLink filePath={copy ?? localPath} name={copy ? fileName(localPath) : undefined} message={message}>{children}</LocalFileLink>;
+    const source = copy && originals && Object.hasOwn(originals, copy) ? originals[copy] : undefined;
+    return <LocalFileLink filePath={copy ?? localPath} name={copy ? fileName(localPath) : undefined} source={source} message={message}>{children}</LocalFileLink>;
   }
   if (!/^https?:\/\//i.test(href)) {
     return (
@@ -683,10 +715,10 @@ const MARKDOWN_COMPONENTS: Components = {
     return <ol dir={blockDirection(node)} className="list-decimal space-y-1 ps-5">{children}</ol>;
   },
   h1({ node, children }: BlockProps) {
-    return <div dir={blockDirection(node)} className="mt-3 text-[18px] font-semibold">{children}</div>;
+    return <div dir={blockDirection(node)} className="md-heading mt-3 text-[20px] font-semibold leading-[26px] tracking-[-0.01em]">{children}</div>;
   },
   h2({ node, children }: BlockProps) {
-    return <div dir={blockDirection(node)} className="mt-2 text-[16px] font-semibold">{children}</div>;
+    return <div dir={blockDirection(node)} className="md-heading mt-2 text-[17px] font-semibold leading-6 tracking-[-0.005em]">{children}</div>;
   },
   h3({ node, children }: BlockProps) {
     return <div dir={blockDirection(node)} className="mt-1.5 font-semibold">{children}</div>;
@@ -719,7 +751,7 @@ const NO_THREAD_REFS: ThreadRefsValue = { threads: [] };
 
 // One plugin list for everything every message shares; a message adds mentions only when it has an "@" and thread
 // links only when it may name one, so most messages render the same way whatever the bot list holds.
-const BASE_REMARK_PLUGINS: NonNullable<MarkdownOptions["remarkPlugins"]> = [remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, remarkSoftBreaks, remarkGithubRefs];
+const BASE_REMARK_PLUGINS: NonNullable<MarkdownOptions["remarkPlugins"]> = [[remarkGfm, GFM_OPTIONS], remarkMath, remarkWindowsPathDestinations, remarkPlainPaths, unwrapLinkedImages, remarkSoftBreaks, remarkGithubRefs];
 const NO_REHYPE_PLUGINS: NonNullable<MarkdownOptions["rehypePlugins"]> = [];
 let katexPlugins: { plugin: KatexPlugin; list: NonNullable<MarkdownOptions["rehypePlugins"]> } | null = null;
 const rehypePluginsFor = (math: KatexPlugin | null) => {
@@ -752,15 +784,41 @@ export function clearChatMarkdownCache(): void {
   markdownCache.clear();
 }
 
-function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS, everyone = false, mentionPerson, delivered }: {
+interface MarkdownPart {
+  text: string;
+  source: string;
+  imageOffsets?: Map<number, number>;
+  /** Finished text, whose drawing is kept for the next render. */
+  finished: boolean;
+  /** A code fence still being written, drawn without parsing. */
+  fence?: { lang: string; wrap: boolean; code: string };
+}
+
+/** A finished message is one part. A streaming one is its blocks: the finished ones are parsed once and kept, and only
+ * the last is parsed again as text arrives. */
+function markdownParts(text: string, streaming: boolean): MarkdownPart[] {
+  if (!streaming) return [{ text, ...normalizeMessageMarkdown(text), finished: true }];
+  const blocks = splitMarkdownBlocks(text) ?? [text];
+  return blocks.map((block, index): MarkdownPart => {
+    if (index < blocks.length - 1) return { text: block, ...normalizeMessageMarkdown(block), finished: true };
+    const fence = openFence(block);
+    if (!fence) return { text: block, ...normalizeMarkdown(block), finished: false };
+    const [info = "", ...meta] = fence.info.split(/\s+/);
+    return { text: block, source: block, finished: false, fence: { ...parseFenceInfo(info, meta.join(" ")), code: fence.code } };
+  });
+}
+
+function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS, everyone = false, mentionPerson, delivered, originals }: {
   text: string; message?: MessageAttachmentContext;
   mentionPeers?: readonly MentionPeer[]; everyone?: boolean; mentionPerson?: MentionPerson;
-  delivered?: DeliveredFiles;
+  /** Delivered copies by file name, and the originals those copies came from (copy path -> original). */
+  delivered?: DeliveredFiles; originals?: DeliveredFiles;
 }) {
   // use() may be called conditionally: only a message that can hold a thread link subscribes to the thread list.
   const { threads, currentBotId } = MAY_LINK_THREAD.test(text) ? use(ThreadRefsContext) : NO_THREAD_REFS;
-  const { source, imageOffsets } = normalizeMessageMarkdown(text);
-  const needsMath = normalizedSourceHasMath(source);
+  const streaming = use(StreamingReplyContext);
+  const parts = useMemo(() => markdownParts(text, streaming), [text, streaming]);
+  const needsMath = parts.some((part) => !part.fence && normalizedSourceHasMath(part.source));
   const [katexReady, setKatexReady] = useState(() => katexPlugin !== null);
   useEffect(() => {
     if (!needsMath) return;
@@ -778,18 +836,30 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
     };
   }, [needsMath]);
   const mathPlugin = needsMath && katexReady ? katexPlugin : null;
-  const mentions = source.includes("@"), linksThreads = threads.length > 0;
-  const variant = `${mathPlugin ? "math" : ""}\u0003${mentions ? `${peerSignature(mentionPeers)}\u0001${everyone ? 1 : 0}\u0001${mentionPerson?.profileName ?? ""}` : ""}\u0003${linksThreads ? `${threadListId(threads)}\u0001${currentBotId ?? ""}` : ""}`;
-  // Markdown is a plain function of its options (no hooks), so its elements can be kept and drawn again.
-  const markdown = markdownCache.render(text, variant, () => {
-    const remarkPlugins = [...BASE_REMARK_PLUGINS];
-    if (mentions) remarkPlugins.push([remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }]);
-    if (linksThreads) remarkPlugins.push(remarkThreadRefs(threads, currentBotId));
-    return Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
-  });
+  const linksThreads = threads.length > 0;
+  const draw = ({ text: partText, source, finished }: MarkdownPart) => {
+    const mentions = source.includes("@");
+    const variant = `${mathPlugin ? "math" : ""}\u0003${mentions ? `${peerSignature(mentionPeers)}\u0001${everyone ? 1 : 0}\u0001${mentionPerson?.profileName ?? ""}` : ""}\u0003${linksThreads ? `${threadListId(threads)}\u0001${currentBotId ?? ""}` : ""}`;
+    // Markdown is a plain function of its options (no hooks), so its elements can be kept and drawn again.
+    const render = () => {
+      const remarkPlugins = [...BASE_REMARK_PLUGINS];
+      if (mentions) remarkPlugins.push([remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }]);
+      if (linksThreads) remarkPlugins.push(remarkThreadRefs(threads, currentBotId));
+      return Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
+    };
+    // Streamed text grows each render; keeping its drawing would only fill the cache with prefixes.
+    return finished ? markdownCache.render(partText, variant, render) : <StreamSourceContext value={source}>{render()}</StreamSourceContext>;
+  };
+  // A message still streaming has no saved files to fetch yet.
+  const scope = { message: streaming ? undefined : message, imageOffsets: streaming ? undefined : parts[0]?.imageOffsets, threads, currentBotId, delivered, originals };
   return (
-    <MessageScopeContext.Provider value={{ message, imageOffsets, threads, currentBotId, delivered }}>
-      <div className="chat-md min-w-0 [&>*+*]:mt-2">{markdown}</div>
+    <MessageScopeContext.Provider value={scope}>
+      <div className="chat-md min-w-0 [&>*+*]:mt-2">
+        {parts.map((part, index) => (
+          // The whole text's tree puts a line break between its top-level blocks; the parts keep it.
+          <Fragment key={index}>{index > 0 && "\n"}{part.fence ? <CodeBlock code={part.fence.code} lang={part.fence.lang} initialWrap={part.fence.wrap} open /> : draw(part)}</Fragment>
+        ))}
+      </div>
     </MessageScopeContext.Provider>
   );
 }
@@ -809,7 +879,7 @@ export const ChatMarkdown = memo(ChatMarkdownComponent, (previous, next) => (
   && previous.everyone === next.everyone && sameMentionPerson(previous.mentionPerson, next.mentionPerson)
   && previous.message?.threadId === next.message?.threadId
   && previous.message?.messageId === next.message?.messageId
-  && sameDelivered(previous.delivered, next.delivered)
+  && sameDelivered(previous.delivered, next.delivered) && sameDelivered(previous.originals, next.originals)
 ));
 
 function sameDelivered(previous: DeliveredFiles | undefined, next: DeliveredFiles | undefined): boolean {

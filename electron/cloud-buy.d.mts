@@ -5,7 +5,6 @@ export declare const CLOUD_NAME_MAX: number;
 export declare const CLOUD_COLOR_HEX: Readonly<Record<CloudColor, string>>;
 export declare function cleanCloudName(value: unknown): string | null;
 export declare function cleanCloudColor(value: unknown): CloudColor | null;
-export declare function colorDotPng(hex: string, size: number, diameter?: number): string;
 export declare function colorDotIcons<T extends { addRepresentation(options: { scaleFactor: number; dataURL: string }): void; isEmpty(): boolean }>(nativeImage: { createEmpty(): T }): (color: unknown) => T | null;
 export interface CloudLookRecord { accountId: string; name: string; color: CloudColor }
 export declare function lookFile(file: () => string, fs: { readFileSync(path: string, encoding: "utf8"): string; writeFileSync(path: string, data: string, options: { mode: number }): void }): { read(): CloudLookRecord | null; write(value: CloudLookRecord): void };
@@ -20,6 +19,7 @@ export declare function createCloudReadyNotice(options: {
   focused(): boolean; sheetOpen(): boolean; name(): string; open(): void;
   /** Told once the notification is shown (main marks the checkout done). */
   shown?(): void;
+  t?(key: string, params?: Record<string, string | number>): string;
 }): (state: unknown) => boolean;
 export declare function installCloudBuy(options: {
   ipcMain: { handle(channel: string, handler: (...args: any[]) => unknown): void };

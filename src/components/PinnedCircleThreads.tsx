@@ -1,9 +1,9 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type DragEvent, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, FolderPlus, Plus } from "lucide-react";
-import { openBot, visibleMessages, type Bot, type Message } from "@/state/store";
+import { openBotRow, visibleMessages, type Bot, type Message } from "@/state/store";
 import { avatarCropRadius, botAvatarProfile } from "../../shared/bot-avatar";
-import { liveActivityLabel } from "@/lib/live-activity";
+import { liveActivityLabel, sidebarMessage } from "@/lib/live-activity";
 import { BotAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
@@ -60,7 +60,7 @@ export function PinnedCircleThreadPanel(props: BotRowProps) {
   if (!showThreads) return null;
   return (
     <div id={pinnedCircleThreadPanelId(bot.id)} data-sidebar-pinned-circle-thread-list={bot.id} className="mt-1">
-      <BotThreadList {...props} activityLabel={liveActivityLabel(last)} query={threadListQuery(bot, query)} />
+      <BotThreadList {...props} activityLabel={liveActivityLabel(sidebarMessage(last))} query={threadListQuery(bot, query)} />
       <div className="flex items-center gap-1 pl-6">
         <button type="button" aria-label={t("task.newShort")} title={t("task.newShort")} onClick={() => dispatch({ type: "newTask", botId: bot.id })}
           className="inline-flex h-7 items-center gap-1 rounded px-1 text-[13px] font-medium text-ink-secondary outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-accent/60">
@@ -95,7 +95,7 @@ function pinnedCircleDropClass({ axis, place }: PinnedCircleDrop): string {
 }
 
 export function pinnedCircleDragClass({ drag, dragging = false, drop = null }: PinnedCircleDragProps): string {
-  return cn(drag && "cursor-grab select-none active:cursor-grabbing", dragging && "opacity-40", drop && !dragging && pinnedCircleDropClass(drop));
+  return cn(drag && "cursor-pointer select-none active:cursor-grabbing", dragging && "opacity-40", drop && !dragging && pinnedCircleDropClass(drop));
 }
 
 export function pinnedCircleDragHandlers(botId: string, { drag, dragging = false, prevId, nextId }: PinnedCircleDragProps) {
@@ -203,14 +203,14 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
         aria-keyshortcuts={drag ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
         aria-label={`${bot.name}${waiting ? ` · ${t("sidebar.preview.waiting")}` : working ? ` · ${t("chat.activity.working")}` : ""}${unread ? ` · ${t("task.unread")}` : ""}`}
         title={bot.name}
-        onClick={() => openBot(dispatch, bot, showThreads)}
+        onClick={() => openBotRow(dispatch, bot, showThreads, selected)}
         {...pinnedCircleDragHandlers(bot.id, { drag, dragging, prevId, nextId })}
         onContextMenu={(event) => {
           event.preventDefault();
           onMenu({ botId: bot.id, x: event.clientX, y: event.clientY });
         }}
         className={cn(
-          "flex w-full min-w-0 flex-col items-center gap-1 rounded-lg px-1 py-1 text-center outline-none focus-visible:ring-1 focus-visible:ring-accent/60",
+          "flex w-full min-w-0 cursor-pointer flex-col items-center gap-1 rounded-lg px-1 py-1 text-center outline-none focus-visible:ring-1 focus-visible:ring-accent/60",
           pinnedCircleDragClass({ drag, dragging, drop }),
         )}
       >

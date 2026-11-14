@@ -5,7 +5,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { OPENCODE_PROVIDER_ENV, PROVIDER_CREDENTIAL_ENV, WORKSPACE_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "./config.ts";
+import { DATA_DIR, OPENCODE_PROVIDER_ENV, PROVIDER_CREDENTIAL_ENV, WORKSPACE_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "./config.ts";
+import { newClaudeEndpoint } from "./claude-endpoints.ts";
 import { discoverOpenCodeModels, ensureOpenCodeInjectModel, resetOpenCodeModelCache } from "./drivers/acp/opencode-go.ts";
 import { readClaudeAuthSettings, readClaudeModelCatalog } from "./drivers/claude.ts";
 import { OPENROUTER_FAILURES, freeLabel } from "./drivers/openrouter-free.ts";
@@ -88,7 +89,7 @@ describe("Claude Code section", () => {
     expect(label).toBe("Use a local model");
     const text = section("### Claude Code");
     expect(text).toContain(`If you also set \`ANTHROPIC_MODEL\` there, that model appears under **${label}** in the Claude model picker; pick it.`);
-    expect(text).toContain("FireConnect's model list doesn't show up in OpenMausBot, so add `ANTHROPIC_MODEL` yourself.");
+    expect(text).toContain("FireConnect's model list doesn't show up in MausBot, so add `ANTHROPIC_MODEL` yourself.");
     expect(text).toContain("So do `ANTHROPIC_CUSTOM_MODEL_OPTION` and each `ANTHROPIC_DEFAULT_*_MODEL` that isn't a Claude model.");
     expect(text).toContain("`ANTHROPIC_DEFAULT_*_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL` aren't carried over.");
     expect(text).not.toMatch(/such as `ANTHROPIC_MODEL`, aren't carried/u);
@@ -98,6 +99,27 @@ describe("Claude Code section", () => {
     const home = settingsHome(providerEnv);
     expect(readClaudeAuthSettings({ HOME: home }, { ANTHROPIC_API_KEY: "connections-fake-key" })).toEqual({});
     expect(section("### Claude Code")).toContain("It applies only while no Anthropic API key is saved in Connections.");
+  });
+
+  it("runs a bot on a custom endpoint without this computer's Claude settings", () => {
+    const home = settingsHome(providerEnv);
+    const created = newClaudeEndpoint({ instances: {} } as never, {
+      displayName: "DeepSeek", baseUrl: "https://api.deepseek.com/anthropic", token: "sk-fake", model: "deepseek-chat",
+    });
+    const entry = created.instances[created.instanceId] as {
+      config: { configDir: string; endpointModels: string[] };
+      environment: Record<string, string>;
+    };
+    expect(entry.config.configDir).toBe(join(DATA_DIR, "providers", created.instanceId));
+    expect(readClaudeAuthSettings({ HOME: home }, entry.environment)).toEqual({});
+    expect(entry.environment.ANTHROPIC_MODEL).toBe("deepseek-chat");
+    expect(entry.config.endpointModels).toEqual(["deepseek-chat"]);
+
+    const text = section("### Claude Code");
+    expect(text).toContain("add a **custom endpoint** in Settings → Engines, in the Claude card");
+    expect(text).toContain("It never reads or writes this computer's `~/.claude`, and the Claude Code on this computer keeps its own sign-in.");
+    expect(text).toContain("Each bot can choose a different model from the endpoint's catalog.");
+    expect(text).toContain("The token is saved in MausBot's own `config.json` and sent only to the base URL you enter. Removing an endpoint removes only that entry.");
   });
 });
 
@@ -115,7 +137,7 @@ describe("OpenCode 2.x section", () => {
       "openrouter/deepseek/deepseek-chat", "opencode/longcat-2.5-preview-free",
     ]);
     expect(catalog.options.map((option) => option.variants)).toEqual([[{ id: "high", label: "High" }], undefined]);
-    expect(section("### OpenCode")).toContain("OpenMausBot reads the model list from an ACP session on both OpenCode 1.x and 2.x, and each model's effort levels the same way");
+    expect(section("### OpenCode")).toContain("MausBot reads the model list from an ACP session on both OpenCode 1.x and 2.x, and each model's effort levels the same way");
     expect(section("## OpenCode 2.x")).not.toContain("picker shows only OpenCode's free models");
   });
 });
@@ -155,7 +177,7 @@ describe("OpenCode config file", () => {
     expect(after.provider.myrouter).toBeUndefined();
 
     expect(section("### OpenCode")).toContain(
-      "Keep this file plain JSON, with no comments or trailing commas. OpenMausBot edits it when an OpenCode bot uses a model running on this computer.",
+      "Keep this file plain JSON, with no comments or trailing commas. MausBot edits it when an OpenCode bot uses a model running on this computer.",
     );
   });
 });

@@ -55,12 +55,12 @@ export interface AppTriggerManagerOptions {
   now?: () => number;
   broker: AppTriggerBroker;
   /** Whether app events can work here at all, and why not. Checked on every loop, since access arrives late. */
-  service: () => { available: true } | { available: false; reason: "self-hosted" | "unavailable" };
+  service: () => { available: true } | { available: false; reason: "self-hosted" | "unavailable" | "off" };
   connectedApps: () => Promise<ConnectedApps>;
   botState: (botId: string) => "ready" | "busy" | "missing";
   runs: {
-    enqueue(input: { webhookId: string; webhookName: string; prompt: string; botId: string; runOn: RoutineRunOn; deliveryId: string; receivedAt: number; eventSource: "app" }): { id: string };
-    merge(triggerId: string, eventId: string, merge: (prompt: string) => string | null): { id: string } | null;
+    enqueue(input: { webhookId: string; webhookName: string; prompt: string; botId: string; runOn: RoutineRunOn; deliveryId: string; receivedAt: number; eventSource: "app"; sameConversation?: boolean }): { id: string };
+    merge(triggerId: string, eventId: string, sameConversation: boolean, merge: (prompt: string) => string | null): { id: string } | null;
     receipt(triggerId: string, eventId: string): { id: string } | null;
     pending(triggerId: string): number;
     cancelQueued(triggerId: string, message: string): void;
@@ -100,6 +100,7 @@ const storedSchema = z.object({
     z.object({ kind: z.literal("error"), text: z.string(), at: z.number() }),
   ]).optional().catch(undefined),
   sourceThreadId: z.string().optional(),
+  sameConversation: z.boolean().optional().catch(undefined),
   received: z.number().int().nonnegative(),
   filtered: z.number().int().nonnegative(),
   skipped: skippedSchema.optional().catch(undefined),
@@ -142,6 +143,7 @@ export interface AppTriggerInput {
   runOn?: RoutineRunOn;
   enabled?: boolean;
   sourceThreadId?: string;
+  sameConversation?: boolean;
   /** Another server's automation, made here under its own id. */
   id?: string;
 }
@@ -153,6 +155,7 @@ export interface AppTriggerPatch {
   filter?: AppTriggerFilter | null;
   config?: Record<string, unknown>;
   enabled?: boolean;
+  sameConversation?: boolean;
   /** Undo: the config exactly as it was saved, filter already folded in. */
   restoreConfig?: Record<string, unknown>;
 }
@@ -279,6 +282,7 @@ export class AppTriggerManager {
       app, appName: appLabel(app), event: type.slug, eventName: type.name || type.slug, delivery: type.type === "poll" ? "poll" : "instant",
       accountId: account.id, ...(account.alias ? { accountLabel: account.alias } : {}), config, ...(filter ? { filter } : {}),
       remote: { state: "pending" }, ...(input.sourceThreadId ? { sourceThreadId: input.sourceThreadId } : {}),
+      ...(input.sameConversation ? { sameConversation: true } : {}),
       received: 0, filtered: 0, createdAt: now, updatedAt: now,
     };
     await this.exclusive(async () => {
@@ -303,10 +307,12 @@ export class AppTriggerManager {
   async adopt(record: AppTrigger): Promise<AppTrigger> {
     const config = Object.fromEntries(Object.entries(record.config).filter(([key, value]) => value !== undefined && !(record.app === GMAIL_APP && key === "query")));
     if (this.triggers.some((candidate) => candidate.id === record.id)) {
-      return (await this.update(record.id, { name: record.name, prompt: record.prompt, runOn: record.runOn, filter: record.filter ?? null, config }))!;
+      return (await this.update(record.id, { name: record.name, prompt: record.prompt, runOn: record.runOn, filter: record.filter ?? null, config,
+        sameConversation: record.sameConversation === true }))!;
     }
     return this.create({ id: record.id, botId: record.botId, name: record.name, prompt: record.prompt, app: record.app, event: record.event, account: record.accountId,
-      ...(record.filter ? { filter: record.filter } : {}), config, runOn: record.runOn, enabled: false, ...(record.sourceThreadId ? { sourceThreadId: record.sourceThreadId } : {}) });
+      ...(record.filter ? { filter: record.filter } : {}), config, runOn: record.runOn, enabled: false, ...(record.sourceThreadId ? { sourceThreadId: record.sourceThreadId } : {}),
+      ...(record.sameConversation ? { sameConversation: true } : {}) });
   }
 
   async update(id: string, patch: AppTriggerPatch): Promise<AppTrigger | null> {
@@ -339,6 +345,8 @@ export class AppTriggerManager {
       });
       if (filter) trigger.filter = filter;
       else delete trigger.filter;
+      if (patch.sameConversation === true) trigger.sameConversation = true;
+      else if (patch.sameConversation === false) delete trigger.sameConversation;
       if (patch.enabled === false) this.options.runs.cancelQueued(trigger.id, "The automation was paused before this event's run started");
       try {
         if (reconfigure && (!previous || JSON.stringify(config) !== previousConfig)) {
@@ -415,7 +423,7 @@ export class AppTriggerManager {
     const eventId = `test_${randomUUID()}`;
     const run = this.options.runs.enqueue({
       webhookId: trigger.id, webhookName: trigger.name, botId: trigger.botId, runOn: trigger.runOn, deliveryId: eventId, receivedAt: this.now(),
-      eventSource: "app", prompt: eventPrompt(trigger.prompt, eventBlock(trigger, { id: eventId, receivedAt: this.now(), test: true, data })),
+      eventSource: "app", sameConversation: trigger.sameConversation, prompt: eventPrompt(trigger.prompt, eventBlock(trigger, { id: eventId, receivedAt: this.now(), test: true, data })),
     });
     return { via: "here", runId: run.id };
   }
@@ -505,7 +513,7 @@ export class AppTriggerManager {
         continue;
       }
       const block = eventBlock(trigger, { id: event.id, receivedAt: event.receivedAt, test: event.kind === "test", data });
-      const joined = this.options.runs.merge(trigger.id, event.id, (prompt) => mergeEventBlock(prompt, block));
+      const joined = this.options.runs.merge(trigger.id, event.id, trigger.sameConversation === true, (prompt) => mergeEventBlock(prompt, block));
       let runId = joined?.id;
       if (!runId) {
         if (this.options.runs.pending(trigger.id) >= DEFAULT_MAX_PENDING_RUNS) {
@@ -516,6 +524,7 @@ export class AppTriggerManager {
         runId = this.options.runs.enqueue({
           webhookId: trigger.id, webhookName: trigger.name, prompt: eventPrompt(trigger.prompt, block), botId: trigger.botId,
           runOn: trigger.runOn, deliveryId: event.id, receivedAt: event.receivedAt, eventSource: "app",
+          sameConversation: trigger.sameConversation,
         }).id;
       }
       trigger.received += 1;
@@ -618,7 +627,7 @@ export class AppTriggerManager {
     if (!binding || binding.remote?.state === "missing") {
       trigger.remote = { state: "pending" };
       await this.bind(trigger);
-      if (!trigger.enabled) await this.options.broker.setEnabled(trigger.remote.triggerId!, false);
+      if (!trigger.enabled && trigger.remote.triggerId) await this.options.broker.setEnabled(trigger.remote.triggerId, false);
       return;
     }
     trigger.remote = { triggerId: binding.triggerId, state: "active", syncedAt: this.now() };
@@ -669,6 +678,7 @@ export class AppTriggerManager {
   }
 
   private async bind(trigger: StoredTrigger): Promise<void> {
+    if (this.serviceOutOfReach()) return;
     const { triggerId } = await this.options.broker.create({ slug: trigger.event, connectedAccountId: trigger.accountId, config: trigger.config });
     trigger.remote = { triggerId, state: "active", syncedAt: this.now() };
     if (trigger.problem?.kind === "error") delete trigger.problem;
@@ -677,11 +687,21 @@ export class AppTriggerManager {
   /** Several automations with the same settings share one service copy; it goes only when the last one does. */
   private async release(triggerId: string | undefined): Promise<void> {
     if (!triggerId || this.triggers.some((trigger) => trigger.remote.triggerId === triggerId)) return;
+    if (this.serviceOutOfReach()) {
+      this.releasePending = true;
+      return;
+    }
     await this.options.broker.remove(triggerId);
   }
 
   private async applyEnabled(triggerId: string | undefined): Promise<void> {
-    if (triggerId) await this.options.broker.setEnabled(triggerId, this.wantsEnabled(triggerId));
+    if (triggerId && !this.serviceOutOfReach()) await this.options.broker.setEnabled(triggerId, this.wantsEnabled(triggerId));
+  }
+
+  /** The owner's own key, or the service switched off. A service merely not reached yet still gets its calls and retries. */
+  private serviceOutOfReach(): boolean {
+    const service = this.options.service();
+    return !service.available && service.reason !== "unavailable";
   }
 
   private wantsEnabled(triggerId: string): boolean {

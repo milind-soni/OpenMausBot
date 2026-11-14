@@ -70,8 +70,31 @@ describe("Upgrade", () => {
       .toBe("Max is $99 a month and starts right away. Today you pay $23.40, the difference for the rest of this billing month. From Nov 18 it's $99 a month, plus any tax.");
     expect(upgradeConfirmBody({ plan: "pro", trial: false, price: 4900, chargeNow: 2574, tax: 234 }))
       .toBe("Pro is $49 a month and starts right away. Today you pay $25.74 with tax, the difference for the rest of this billing month.");
-    expect(upgradeConfirmBody({ plan: "max", trial: true, price: 9900, chargeNow: 0, tax: 0, nextBillingAt: next }))
+    expect(upgradeConfirmBody({ plan: "max", trial: true, price: 9900, chargeNow: 0, tax: 0, nextBillingAt: next }, { now: Date.UTC(2026, 10, 1) }))
       .toBe("Your free trial moves to Max now, and nothing is charged today. Your first payment on Nov 18 will be $99, plus any tax.");
+  });
+
+  describe("on a free trial", () => {
+    const now = Date.UTC(2026, 10, 4, 9), HOUR = 3_600_000, DAY = 24 * HOUR;
+    const preview = (nextBillingAt?: number) => ({ plan: "max", trial: true, price: 9900, chargeNow: 0, tax: 0, ...(nextBillingAt ? { nextBillingAt } : {}) });
+
+    it("promises nothing about today when the first charge is a day away or less, as a 1-day trial's always is", () => {
+      for (const left of [DAY, 5 * HOUR]) {
+        const said = upgradeConfirmBody(preview(now + left), { now });
+        expect(said).toMatch(/^Your free trial moves to Max now\. Your first payment on Nov \d+ will be \$99, plus any tax\.$/);
+        expect(said).not.toContain("charged today");
+      }
+      expect(upgradeConfirmBody(preview(), { trialEndsAt: now + DAY, now })).toBe("Your free trial moves to Max now. When it ends, Max is $99 a month, plus any tax.");
+    });
+
+    it("reads as it always did on a 3-day trial", () => {
+      expect(upgradeConfirmBody(preview(now + 3 * DAY), { now })).toBe("Your free trial moves to Max now, and nothing is charged today. Your first payment on Nov 7 will be $99, plus any tax.");
+      expect(upgradeConfirmBody(preview(), { trialEndsAt: now + 3 * DAY, now })).toBe("Your free trial moves to Max now, and nothing is charged today. When it ends, Max is $99 a month, plus any tax.");
+    });
+
+    it("promises nothing about today when nobody here knows when the charge is", () => {
+      expect(upgradeConfirmBody(preview(), { now })).toBe("Your free trial moves to Max now. When it ends, Max is $99 a month, plus any tax.");
+    });
   });
 });
 

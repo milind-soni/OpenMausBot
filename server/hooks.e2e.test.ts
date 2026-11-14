@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
@@ -19,12 +20,14 @@ interface Msg {
   text?: string;
   tool?: { name: string; itemId?: string; fullResult?: boolean; output?: string };
   digest?: { hookCoverage: string; tools: Array<{ name: string; count: number }> };
+  compaction?: unknown;
+  engineCompaction?: true;
 }
 
 const BIG = `line ${"x".repeat(80)}\n`.repeat(200); // ~17 KB: past the 6 KB preview
 
 function harness(label: string, serverEnv: Record<string, string>, instanceEnv: Record<string, string> = {}) {
-  const PORT = 18800 + Math.floor(Math.random() * 10_000);
+  const PORT = workerPort(18800, 10_000);
   const BASE = `http://127.0.0.1:${PORT}`;
   let child: ChildProcess;
   let home: string;
@@ -156,6 +159,11 @@ posixOnly("engine hooks e2e: compaction", () => {
       "context compaction started (auto)",
       "context compacted — re-sent the last 1 digest",
     ]);
+    // Those rows hide with tool calls; the chat also gets one marker people always see, with nothing for the engine.
+    const markers: Msg[] = after.messages.filter((m: Msg) => m.kind === "compaction");
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({ role: "bot", engineCompaction: true });
+    expect(markers[0]!.compaction).toBeUndefined();
     // The fake echoes what SessionStart's stdout gave it: the first turn's digest line.
     const replies: Msg[] = after.messages.filter((m: Msg) => m.role === "bot" && m.kind === "text" && m.text);
     expect(replies.at(-1)!.text).toContain("[What ");
@@ -181,14 +189,14 @@ posixOnly("engine hooks e2e: a shell call that hit its time limit", () => {
     const bot = await h.runTurn();
     const reply: Msg = bot.messages.filter((m: Msg) => m.role === "bot" && m.kind === "text" && m.text).at(-1);
     expect(reply.text!.match(/hit the shell time limit/g)).toHaveLength(2);
-    expect(reply.text).toContain("up to 600000");
+    expect(reply.text).toContain("up to 86400000");
     expect(reply.text).toContain("mdfind -name");
     const preview = await h.api("GET", `/api/bots/${bot.id}/system-prompt`);
     const shell = preview.body.sections.find((s: { id: string }) => s.id === "shell");
     expect(shell?.text).toContain("Long-running shell commands");
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.systemPrompt).toContain(shell.text.trim());
-    expect(seen.env.BASH_MAX_TIMEOUT_MS).toBe("600000");
+    expect(seen.env.BASH_MAX_TIMEOUT_MS).toBe("86400000");
   }, 60_000);
 });
 

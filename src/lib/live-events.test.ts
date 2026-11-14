@@ -6,6 +6,7 @@ import {
   listenLiveFrames,
   liveEventsUrl,
   openLiveEvents,
+  retryLiveEvents,
   shouldReconnectLiveEvents,
   type LiveEventSourceLike,
   type LiveEventsPlatform,
@@ -97,10 +98,10 @@ afterEach(() => { vi.useRealTimers(); resetCloudPowerForTests(); });
 
 describe("live events URL", () => {
   it("builds cold and resumable stream URLs", () => {
-    expect(liveEventsUrl()).toBe("/api/events");
-    expect(liveEventsUrl({ since: "ab12cd34:9" })).toBe("/api/events?since=ab12cd34%3A9");
-    expect(liveEventsUrl({ since: "ab12cd34:9", screens: false })).toBe("/api/events?since=ab12cd34%3A9&screens=off");
-    expect(liveEventsUrl({ screens: true })).toBe("/api/events");
+    expect(liveEventsUrl()).toBe("/api/events?window=1");
+    expect(liveEventsUrl({ since: "ab12cd34:9" })).toBe("/api/events?since=ab12cd34%3A9&window=1");
+    expect(liveEventsUrl({ since: "ab12cd34:9", screens: false })).toBe("/api/events?since=ab12cd34%3A9&screens=off&window=1");
+    expect(liveEventsUrl({ screens: true })).toBe("/api/events?window=1");
   });
 });
 
@@ -123,6 +124,57 @@ describe("the chat's status line", () => {
 });
 
 describe("live events supervisor", () => {
+  it("retries immediately with its saved cursor, cancels backoff, and removes the retry listener on stop", () => {
+    const test = harness();
+    vi.stubGlobal("window", {
+      dispatchEvent: (event: Event) => test.windowTarget.emit(event.type),
+      addEventListener: test.windowTarget.addEventListener.bind(test.windowTarget),
+      removeEventListener: test.windowTarget.removeEventListener.bind(test.windowTarget),
+    });
+    const onFrame = vi.fn();
+    const stop = openLiveEvents({ onFrame, onSnapshotRequired: async () => true }, test.platform);
+    try {
+      test.sources[0].open();
+      test.sources[0].message({ kind: "message" }, "run00000:4");
+      test.sources[0].error();
+      retryLiveEvents();
+      expect(test.sources).toHaveLength(2);
+      expect(test.sources[1].url).toBe("/api/events?since=run00000%3A4&screens=off&window=1");
+      test.sources[1].open();
+      test.sources[1].message({ kind: "ping" });
+      vi.advanceTimersByTime(500);
+      expect(test.sources).toHaveLength(2);
+      expect(onFrame).toHaveBeenCalledOnce();
+      stop();
+      retryLiveEvents();
+      expect(test.sources).toHaveLength(2);
+      expect(test.windowTarget.count("omb:retry-live-events")).toBe(0);
+    } finally {
+      stop();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(["offline", "hidden", "asleep"])("does not manually reconnect while %s", (state) => {
+    const test = harness();
+    vi.stubGlobal("window", {
+      dispatchEvent: (event: Event) => test.windowTarget.emit(event.type),
+      addEventListener: test.windowTarget.addEventListener.bind(test.windowTarget),
+      removeEventListener: test.windowTarget.removeEventListener.bind(test.windowTarget),
+    });
+    const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => true }, test.platform);
+    try {
+      if (state === "offline") test.setOnline(false);
+      if (state === "hidden") test.setVisible(false);
+      if (state === "asleep") test.sources[0].message({ kind: "power", state: "sleeping" });
+      retryLiveEvents();
+      expect(test.sources).toHaveLength(1);
+    } finally {
+      stop();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("uses data pings as liveness without forwarding them", () => {
     const test = harness();
     const onFrame = vi.fn();
@@ -144,7 +196,7 @@ describe("live events supervisor", () => {
     test.setNow(1_900);
     vi.advanceTimersByTime(500);
     expect(test.sources).toHaveLength(2);
-    expect(test.sources[1].url).toBe("/api/events?since=run00000%3A4&screens=off");
+    expect(test.sources[1].url).toBe("/api/events?since=run00000%3A4&screens=off&window=1");
     expect(test.sources[0].close).toHaveBeenCalledOnce();
     stop();
   });
@@ -186,19 +238,19 @@ describe("live events supervisor", () => {
     test.sources[0].message({ kind: "message" }, "oldrun00:10");
     test.sources[0].error();
     vi.advanceTimersByTime(100);
-    expect(test.sources[1].url).toBe("/api/events?since=oldrun00%3A10&screens=off");
+    expect(test.sources[1].url).toBe("/api/events?since=oldrun00%3A10&screens=off&window=1");
 
     test.sources[1].message({ kind: "hello", resumed: true, cursor: "oldrun00:13" });
     test.sources[1].error();
     vi.advanceTimersByTime(100);
-    expect(test.sources[2].url).toBe("/api/events?since=oldrun00%3A10&screens=off");
+    expect(test.sources[2].url).toBe("/api/events?since=oldrun00%3A10&screens=off&window=1");
 
     test.sources[2].message({ kind: "hello", resumed: false, cursor: "newrun00:7" });
     test.sources[2].message({ kind: "message", value: "behind failed snapshot" }, "newrun00:8");
     snapshotResolutions.shift()?.(false);
     await Promise.resolve();
     vi.advanceTimersByTime(100);
-    expect(test.sources[3].url).toBe("/api/events?since=oldrun00%3A10&screens=off");
+    expect(test.sources[3].url).toBe("/api/events?since=oldrun00%3A10&screens=off&window=1");
 
     test.sources[3].message({ kind: "hello", resumed: false, cursor: "newrun00:8" });
     test.sources[3].message({ kind: "message", value: "after snapshot" }, "newrun00:9");
@@ -206,7 +258,7 @@ describe("live events supervisor", () => {
     await Promise.resolve();
     test.sources[3].error();
     vi.advanceTimersByTime(100);
-    expect(test.sources[4].url).toBe("/api/events?since=newrun00%3A9&screens=off");
+    expect(test.sources[4].url).toBe("/api/events?since=newrun00%3A9&screens=off&window=1");
     expect(frames).toEqual([
       { kind: "message" },
       { kind: "message", value: "behind failed snapshot" },
@@ -371,7 +423,7 @@ describe("a Cloud home that goes to sleep", () => {
     expect(test.sources).toHaveLength(1);
     markCloudAwake();
     expect(test.sources).toHaveLength(2);
-    expect(test.sources[1].url).toBe("/api/events?since=run00000%3A4&screens=off");
+    expect(test.sources[1].url).toBe("/api/events?since=run00000%3A4&screens=off&window=1");
     stop();
   });
 
@@ -413,7 +465,7 @@ describe("a Cloud home that goes to sleep", () => {
     loading.sources[0].message(sleeping, "run00000:5");
     expect(cloudAsleep()).toBe(true);
     markCloudAwake();
-    expect(loading.sources[1].url).toBe("/api/events?screens=off");
+    expect(loading.sources[1].url).toBe("/api/events?screens=off&window=1");
     stopLoading();
   });
 
@@ -431,7 +483,7 @@ describe("live screens", () => {
   it("leave screens out until a view that draws them listens, then reopen from the cursor both ways", async () => {
     const test = harness();
     const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => true }, test.platform);
-    expect(test.sources[0].url).toBe("/api/events?screens=off");
+    expect(test.sources[0].url).toBe("/api/events?screens=off&window=1");
     test.sources[0].open();
     test.sources[0].message({ kind: "hello", resumed: true, cursor: "run00000:3" });
     test.sources[0].message({ kind: "message" }, "run00000:4");
@@ -442,7 +494,7 @@ describe("live screens", () => {
     const viewer = listenLiveFrames({ screens: true, onFrame: () => {} });
     const second = listenLiveFrames({ screens: true, onFrame: () => {} });
     await Promise.resolve();
-    expect(test.sources.map((source) => source.url)).toEqual(["/api/events?screens=off", "/api/events?since=run00000%3A4"]);
+    expect(test.sources.map((source) => source.url)).toEqual(["/api/events?screens=off&window=1", "/api/events?since=run00000%3A4&window=1"]);
     expect(test.sources[0].close).toHaveBeenCalledOnce();
 
     viewer();
@@ -450,7 +502,7 @@ describe("live screens", () => {
     expect(test.sources).toHaveLength(2);
     second();
     await Promise.resolve();
-    expect(test.sources[2].url).toBe("/api/events?since=run00000%3A4&screens=off");
+    expect(test.sources[2].url).toBe("/api/events?since=run00000%3A4&screens=off&window=1");
     quiet();
     stop();
   });

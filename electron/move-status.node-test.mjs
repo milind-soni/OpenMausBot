@@ -4,7 +4,7 @@ import test from "node:test";
 import { CloudSendError } from "./cloud-send.mjs";
 import { failureCode, safeSentence, SENTENCE_MAX } from "./move-failure.mjs";
 import { createMoveStatusReport, MOVE_STATUS_GAP_MS, MOVE_STATUS_HEARTBEAT_MS, MOVE_STATUS_OFF_MS, MOVE_STATUS_SETTLE_MS, moveStatus } from "./move-status.mjs";
-import { CHECK_PASSES, createOneHome, parseJournal, QUIET_MS } from "./one-home.mjs";
+import { CHECK_PASSES, createOneHome, INCOMPLETE, parseJournal, QUIET_MS } from "./one-home.mjs";
 import { installOneHome, oneHomeCloud } from "./one-home-main.mjs";
 
 const CLOUD = "https://omb-t-1.fly.dev";
@@ -39,7 +39,7 @@ function world({ state = signedIn(), moves = [], checks = [], busy = [] } = {}) 
     cloud: () => oneHomeCloud(w.state),
     send: {
       async move() { const failure = moves.shift(); if (failure) throw failure; },
-      async check() { return { ok: checks.shift() ?? true }; },
+      async check() { const next = checks.shift(); return next && typeof next === "object" ? next : { ok: next ?? true }; },
       switches: () => ({ "routine:r1": true }),
       snapshot: () => ({}),
     },
@@ -155,7 +155,7 @@ test("every phase's failure has its own code", async () => {
     { name: "My Cloud answering nothing usable", moves: [new CloudSendError("unreachable", "My Cloud said: Bot \"Sales team\" can't be read")], expect: { phase: "copy", code: "unreachable", message: "My Cloud said: …" } },
     { name: "My Cloud refusing the final pass", moves: [undefined, new CloudSendError("refused", "My Cloud could not add the chats.")], expect: { phase: "final", code: "refused" } },
     { name: "something unforeseen", moves: [new Error("Cannot read properties of undefined (reading 'items')")], expect: { phase: "copy", code: "error" } },
-    { name: "the check still missing things after three passes", checks: [false, false, false], expect: { phase: "check", code: "incomplete", message: "Some of this computer's things did not reach My Cloud." } },
+    { name: "the check still missing things after three passes", checks: [false, false, false], expect: { phase: "check", code: "incomplete", message: "Missing: something. " + INCOMPLETE } },
     { name: "this computer's server refusing to pause", freezeError: Object.assign(new Error("OpenMausBot on this computer could not pause."), { status: 500 }), expect: { phase: "freeze", code: "freeze" } },
     { name: "My Cloud refusing to switch an automation on", cloudAnswer: (method) => (method === "PATCH" ? reply(500, { error: "Routines are busy." }) : null), expect: { phase: "switch", code: "switch_refused", message: "Routines are busy." } },
   ];
@@ -172,6 +172,18 @@ test("every phase's failure has its own code", async () => {
     assert.equal(report.failure.count, 1, name);
     if (expect.phase === "check") assert.equal(report.passes, 0, "the passes start again with the copy");
   }
+});
+
+test("a check's failure tells the Admin what it found missing first, by kind and count, so it is never cut off", async () => {
+  // Seen on a customer's PC: 94 failures in a week, and all the Admin knew was that "some things" did not arrive.
+  const missing = { ok: false, gaps: { memory: [{ bot: "b1", path: "memory/notes.md" }] }, chats: [{ threadId: "t-1", missing: 0, unstamped: 0, path: "broken" }],
+    attachments: ["a1.mp3", "a2.png"], secrets: { equal: [], differs: [], missing: [] }, names: { b1: "Scout" }, owners: { "t-1": "b1" } };
+  const w = world({ checks: [missing, missing, missing] });
+  await w.home.kick();
+  const { message } = w.report().failure;
+  assert.ok(message.startsWith("Missing: 1 memory, 1 chats (1 broken paths), 2 attachments. "), message);
+  assert.ok(message.length <= 200);
+  assert.doesNotMatch(message, /Scout|notes\.md|a1\.mp3|t-1/u);
 });
 
 test("a frozen move whose Cloud stops being ready, or whose account changes, says so", async () => {

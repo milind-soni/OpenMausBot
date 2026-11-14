@@ -54,7 +54,7 @@ function manager(overrides: Partial<AppTriggerManagerOptions> = {}) {
         if (failure === "after-save") throw new Error("crashed after the run was saved");
         return run;
       },
-      merge: (triggerId, eventId, merge) => routines.mergeIntoQueuedRun(triggerId, eventId, merge),
+      merge: (triggerId, eventId, sameConversation, merge) => routines.mergeIntoQueuedRun(triggerId, eventId, sameConversation, merge),
       receipt: (triggerId, eventId) => routines.webhookRunReceipt(triggerId, eventId),
       pending: (triggerId) => routines.activeWebhookRunCount(triggerId),
       cancelQueued: (triggerId, message) => routines.cancelQueuedWebhook(triggerId, message),
@@ -166,6 +166,14 @@ describe("AppTriggerManager", () => {
     expect(triggers.get(trigger.id)?.enabled).toBe(false);
     const client = brokerClient(() => ({ url: broker.url, token: owner.token }));
     expect((await client.inventory()).triggers.find((binding) => binding.triggerId === trigger.remote.triggerId)?.enabled).toBe(false);
+  });
+
+  it("says an event that needs setup on our side can't be used yet, and an unknown one can't be watched", async () => {
+    const triggers = manager();
+    const create = (event: string) => triggers.create({ botId: "bot-1", name: "New mail", prompt: "Summarize it.", app: "gmail", event });
+    await expect(create("GMAIL_OWN_ENDPOINT")).rejects.toThrow("GMAIL_OWN_ENDPOINT can't be used yet: this event needs webhook setup on our side first. Pick another event this app offers.");
+    await expect(create("GMAIL_NOT_A_THING")).rejects.toThrow("GMAIL_NOT_A_THING is not an event OpenMausBot can watch.");
+    expect(triggers.list()).toEqual([]);
   });
 
   it("keeps an automation pending while the service is unreachable, and finishes it on its own", async () => {
@@ -314,5 +322,112 @@ describe("instructions in the person's words", () => {
       .toContain("in the person's plain words (\"draft a reply\"), never \"event data\", \"payload\", \"webhook\" or \"trigger\"");
     expect(eventPrompt("Draft a reply.", "[UNTRUSTED APP EVENT DATA]\n{}\n[/UNTRUSTED APP EVENT DATA]"))
       .toContain("The email, message or record these instructions mean is in the UNTRUSTED APP EVENT DATA below.");
+  });
+});
+
+describe("automations made before the owner kept the managed service out", () => {
+  type Service = ReturnType<AppTriggerManagerOptions["service"]>;
+
+  function spied() {
+    let service: Service = { available: true };
+    const fetches: string[] = [];
+    const triggers = manager({
+      service: () => service,
+      broker: brokerClient(() => ({ url: broker.url, token: owner.token }), (input, init) => {
+        fetches.push(`${init?.method ?? "GET"} ${new URL(String(input)).pathname}`);
+        return fetch(input, init);
+      }),
+    });
+    return { triggers, fetches, setService: (next: Service) => { service = next; fetches.length = 0; } };
+  }
+
+  it.each(["self-hosted", "off"] as const)("%s: pausing, deleting, restoring and syncing change this server's copy and call nothing", async (reason) => {
+    const { triggers, fetches, setService } = spied();
+    const trigger = await gmailTrigger(triggers);
+    const copy = trigger.remote.triggerId!;
+    setService({ available: false, reason });
+
+    expect(await triggers.update(trigger.id, { enabled: false })).toMatchObject({ enabled: false, remote: { triggerId: copy, state: "active" } });
+    expect(await triggers.update(trigger.id, { restoreConfig: { query: "from:other.com" } })).toMatchObject({ config: { query: "from:other.com" }, remote: { state: "pending" } });
+    await triggers.reconcile();
+    expect(await triggers.remove(trigger.id)).toBe(true);
+    expect(triggers.get(trigger.id)).toBeNull();
+    const restored = await triggers.restore(trigger.id);
+    expect(restored).toMatchObject({ id: trigger.id, remote: { state: "pending" } });
+    expect(restored?.remote.triggerId).toBeUndefined();
+    await triggers.reconcile();
+    expect(fetches).toEqual([]);
+    await expect(triggers.create({ botId: "bot-1", name: "New", prompt: "Tell me.", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE" })).rejects.toMatchObject({ status: 409 });
+    expect(fetches).toEqual([]);
+    expect(triggers.snapshot().service).toEqual({ available: false, reason });
+  });
+
+  it("when the managed service comes back, the automation is made again and the old copy is removed", async () => {
+    const { triggers, fetches, setService } = spied();
+    const trigger = await gmailTrigger(triggers);
+    const copy = trigger.remote.triggerId!;
+    setService({ available: false, reason: "self-hosted" });
+    await triggers.update(trigger.id, { restoreConfig: { query: "from:other.com" } });
+    setService({ available: true });
+    await triggers.reconcile();
+    expect(triggers.get(trigger.id)).toMatchObject({ remote: { state: "active" } });
+    expect(triggers.get(trigger.id)?.remote.triggerId).not.toBe(copy);
+    expect(fetches).toContain(`DELETE /v1/triggers/${encodeURIComponent(copy)}`);
+  });
+
+  it("with no key and no switch, a service not reached yet still gets the calls, and a failed delete is retried", async () => {
+    const { triggers, fetches, setService } = spied();
+    const trigger = await gmailTrigger(triggers);
+    const copy = trigger.remote.triggerId!;
+    setService({ available: false, reason: "unavailable" });
+    await triggers.update(trigger.id, { enabled: false });
+    expect(fetches).toEqual([`PATCH /v1/triggers/${encodeURIComponent(copy)}`]);
+    fetches.length = 0;
+    await triggers.remove(trigger.id);
+    expect(fetches).toEqual([`DELETE /v1/triggers/${encodeURIComponent(copy)}`]);
+    fetches.length = 0;
+    const restored = await triggers.restore(trigger.id);
+    expect(fetches).toContain("POST /v1/triggers");
+    expect(restored?.remote.state).toBe("active");
+  });
+
+  it("the host reports the switch as off, for the app and for a bot's event list, and calls nothing", async () => {
+    vi.stubEnv("OMB_COMPOSIO_BROKER", "off");
+    try {
+      const { createAppTriggerHost } = await import("./app-trigger-host.ts");
+      const fetches = vi.fn();
+      const host = createAppTriggerHost({
+        file: join(dir, "off-app-triggers.json"),
+        store: { bot: () => undefined } as never,
+        connectionMode: () => "unavailable", access: () => ({ url: broker.url, token: owner.token }),
+        connectedApps: async () => connected, routines: () => routines, webhooks: { list: () => [] } as never,
+        webhookBase: () => "http://127.0.0.1:8800", botState: () => "ready", timeZone: () => "UTC", visibleBot: () => true,
+        emit: () => {}, audit: () => {}, broker: brokerClient(() => null, fetches as unknown as typeof fetch),
+      });
+      expect(host.manager.service()).toEqual({ available: false, reason: "off" });
+      await host.manager.reconcile();
+      expect(fetches).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe("app-event automation that keeps one conversation", () => {
+  it("saves the option, hands it to each run, and turns it off again", async () => {
+    const triggers = manager();
+    const trigger = await triggers.create({ botId: "bot-1", name: "Order replies", prompt: "Draft a reply.", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", sameConversation: true });
+    expect(trigger.sameConversation).toBe(true);
+    await broker.deliver(trigger.remote.triggerId!, { subject: "Order #1" }, "msg_same_1");
+    await drain(triggers);
+    expect(runsOf(trigger.id)[0]).toMatchObject({ eventSource: "app", sameConversation: true });
+    expect(manager().get(trigger.id)?.sameConversation).toBe(true);
+
+    expect(await triggers.update(trigger.id, { sameConversation: false })).not.toHaveProperty("sameConversation");
+    routines.cancelQueuedWebhook(trigger.id, "test");
+    await broker.deliver(trigger.remote.triggerId!, { subject: "Order #2" }, "msg_same_2");
+    await drain(triggers);
+    expect(runsOf(trigger.id)[0]).toMatchObject({ deliveryId: "msg_same_2", status: "queued" });
+    expect(runsOf(trigger.id)[0]).not.toHaveProperty("sameConversation");
   });
 });

@@ -16,6 +16,7 @@ import {
   antigravityProfileAuthenticated,
   prepareAntigravityProfile,
   probeAntigravityModels,
+  removeAntigravitySignIn,
   validateAntigravityRuntime,
 } from "./antigravity-acp.ts";
 import {
@@ -26,28 +27,17 @@ import {
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravity-temp.ts";
 import { augmentedPath } from "../env-path.ts";
+import { bundledEngineCatalog } from "../model-manifest/bundled.ts";
+import { currentEngineCatalog } from "../model-manifest/manifest.ts";
 
-export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = {
-  default: "gemini-3.8-flash",
-  options: [
-    {
-      id: "gemini-3.8-flash",
-      label: "Gemini 3.8 Flash",
-      variants: [
-        { id: "low", label: "Low" },
-        { id: "medium", label: "Medium" },
-        { id: "high", label: "High" },
-      ],
-    },
-  ],
-};
+export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = bundledEngineCatalog("antigravity");
 
-/** Bots saved before the thinking-level option hold `gemini-3.8-flash-{low,medium,high}`; the official runtime
- * offers only the base model with that option, so run the base at the saved level. A runtime that still offers
- * the suffixed id, or a turn that chose its own level, keeps its selection. */
+/** Bots saved before the thinking-level option hold ids like `gemini-3.8-flash-medium` or `gemini-4-argon-high`;
+ * the official runtime offers only the base model with that option, so run the base at the saved level. A runtime
+ * that still offers the suffixed id, or lacks the base, or a turn that chose its own level, keeps its selection. */
 export function normalizeAntigravityTurn(turn: SendTurnInput, offeredModels: readonly string[]): SendTurnInput {
   if (turn.variant !== undefined) return turn;
-  const match = turn.model?.match(/^(gemini-3\.8-flash)-(low|medium|high)$/u);
+  const match = turn.model?.match(/^(.+)-(low|medium|high)$/u);
   return match && offeredModels.includes(match[1]) && !offeredModels.includes(match[0])
     ? { ...turn, model: match[1], variant: match[2] }
     : turn;
@@ -65,7 +55,7 @@ const support: AcpSupport = {
   driverKind: "antigravityAgent",
   // Named for what people look for: Google moved personal Gemini subscriptions (free, AI Pro, AI Ultra) from Gemini CLI to Antigravity on 2026-06-18.
   displayName: "Google Gemini (Antigravity)",
-  models: STATIC_ANTIGRAVITY_MODELS,
+  get models() { return currentEngineCatalog("antigravity"); },
   defaultCli: "agy", // migration alias: resolveAntigravityRuntime treats it as managed
   nativeSource: "antigravity.acp",
   loginNote: "Antigravity needs a Google account — choose Sign in with Google in engine setup",
@@ -86,9 +76,7 @@ const support: AcpSupport = {
   sessionScopedApproval: true,
   resumeMethod: "resume",
   clientFileSystem: true,
-  redactStderr: true,
   sanitizeToolPayload: true,
-  resolveModelsOnCreate: false,
 
   resolveCommand: async (env, config, instanceId) => {
     const runtime = await resolveAntigravityRuntime(config.cli, env);
@@ -108,7 +96,7 @@ const support: AcpSupport = {
     return probeAntigravityModels({
       runtime,
       profile,
-      fallbackDefault: STATIC_ANTIGRAVITY_MODELS.default,
+      fallbackDefault: currentEngineCatalog("antigravity").default,
     });
   },
 
@@ -166,7 +154,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     const base = await AcpAntigravityDriver.create(input);
     scheduleAntigravityTempSweep(input.instanceId);
     scheduleAntigravityTempSweep(VERIFICATION_TEMP_KEY);
-    const auth = new AntigravityAuthController();
+    const auth = new AntigravityAuthController(() => void base.refreshModels?.());
     let installFailure: string | undefined;
     const runtimeAndProfile = async () => {
       // A GUI launch's raw PATH may omit the official runtime the model picker found.
@@ -183,6 +171,9 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       ...base,
       get models() {
         return base.models;
+      },
+      get modelsUnconfirmed() {
+        return base.modelsUnconfirmed;
       },
       snapshot: async () => {
         const snapshot = await base.snapshot();
@@ -210,6 +201,10 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       },
       completeAuthentication: async (flowId, callbackUrl) => auth.complete(flowId, callbackUrl),
       cancelAuthentication: async () => auth.cancel(),
+      signOut: async () => {
+        auth.cancel();
+        await removeAntigravitySignIn(input.instanceId);
+      },
       dispose: async () => {
         auth.cancel();
         await base.dispose();

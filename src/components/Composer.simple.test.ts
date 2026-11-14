@@ -14,6 +14,7 @@ import { BOT_BUTTON, botButtonTone } from "@/lib/bot-button";
 
 const fixture = vi.hoisted(() => ({
   advanced: false,
+  agentsMcp: true,
   dispatch: vi.fn(),
   call: null as Record<string, unknown> | null,
   groupCall: null as Record<string, unknown> | null,
@@ -25,7 +26,7 @@ vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({
     state: { ...original.initialState, config: fixture.config ?? original.initialState.config, bots: [bot, peer], liveCall: fixture.liveCall, instances: [{
-      instanceId: ENGINE, driverKind: "claudeAgent", displayName: "Claude", capabilities: { agentsMcp: true },
+      instanceId: ENGINE, driverKind: "claudeAgent", displayName: "Claude", capabilities: { agentsMcp: fixture.agentsMcp },
     }] },
     dispatch: fixture.dispatch,
   }) };
@@ -86,6 +87,7 @@ function openPlus() {
 
 beforeEach(() => {
   fixture.advanced = false;
+  fixture.agentsMcp = true;
   fixture.liveCall = null;
   fixture.config = undefined;
   setCallMode("turns");
@@ -128,7 +130,7 @@ describe("the Simple composer in a bot chat", () => {
     expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.textContent)).toEqual(["Attach files", "Work until done", "Teach a task"]);
     const row = menu()!.querySelector("[data-menu-key='attach']")!.className.split(" ");
     expect(row).toEqual(expect.arrayContaining(["h-[34px]", "gap-2", "px-3", "text-[15px]"]));
-    expect(menu()!.className.split(" ")).toEqual(expect.arrayContaining(["popover-surface", "rounded-[14px]", "w-max", "min-w-[200px]", "max-w-[280px]"]));
+    expect(menu()!.className.split(" ")).toEqual(expect.arrayContaining(["popover-surface", "rounded-[12px]", "w-max", "min-w-[200px]", "max-w-[280px]"]));
   });
 
   it("starts a /learn draft from Teach a task, ahead of anything already typed", () => {
@@ -296,6 +298,30 @@ describe("the Advanced composer", () => {
     expect(fixture.call).toMatchObject({ placement: "composer" });
     expect(fixture.call?.fill).toBeUndefined();
     expect(container.querySelector("[data-composer-backdrop]")!.className.split(" ")).toContain("top-1/2");
+  });
+
+  it("offers Teach a task as its own button, which starts a /learn draft ahead of anything typed", () => {
+    fixture.advanced = true;
+    restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "how I file expenses", attachments: [] });
+    render({ bot });
+    const teach = container.querySelector<HTMLButtonElement>('button[aria-label="Teach a task"]');
+    expect(teach).not.toBeNull();
+    click(teach);
+    expect(container.querySelector("textarea")!.value).toBe("/learn how I file expenses");
+  });
+
+  it("leaves Teach a task out when skill authoring is off", () => {
+    fixture.advanced = true;
+    fixture.config = { features: { skillAuthoring: false } };
+    render({ bot });
+    expect(container.querySelector('button[aria-label="Teach a task"]')).toBeNull();
+  });
+
+  it("leaves Teach a task out when the bot's engine can't run agents", () => {
+    fixture.advanced = true;
+    fixture.agentsMcp = false;
+    render({ bot });
+    expect(container.querySelector('button[aria-label="Teach a task"]')).toBeNull();
   });
 
   it("sends with the bot's own button too, and keeps the accent in a room", () => {

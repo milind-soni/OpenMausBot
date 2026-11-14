@@ -1,3 +1,4 @@
+import { type ServerToolText } from "../../shared/server-text.ts";
 // When the AI a bot runs on reaches its usage limit, or is signed out, the bot carries on with another AI the person has
 // set up until that limit resets or the AI is signed in again, without anyone being asked, and the person hears it once
 // for that stretch. What is held (an engine's limit on the reset clock, one model's own limit, a sign-in that expired)
@@ -27,8 +28,11 @@ export const MODEL_HOLD_MS = 6 * 60 * 60_000;
 /** A signed-out AI is tried again by a new turn no sooner than this after its last refusal, in case it signed in again
  * some way this server did not see; a finished sign-in in the app, or a turn on it that works, ends the hold at once. */
 export const SIGNED_OUT_RECHECK_MS = UNNAMED_LIMIT_MS;
-/** A sign-out's one notice stands until the AI is signed in again or works; past this it is said again. */
+/** A sign-out's first notice to a bot stands until the AI is signed in again or works. */
 const SIGNED_OUT_STRETCH_MS = 30 * 24 * 60 * 60_000;
+/** Refusals never end a sign-out's stretch, so the person is told again this often, once across all bots. */
+export const SIGNED_OUT_REPEAT_MS = 24 * 60 * 60_000;
+const EVERY_BOT = "every-bot";
 
 /** A model held by its own limit: until when, when the limit said it resets, and which limit it is. */
 export interface ModelHold { until: number; resetsAt?: number; scope: "model" | "credits" }
@@ -67,6 +71,8 @@ export interface LimitTakeoverDeps {
   signedOutNow?(instanceId: string): boolean;
   /** A sign-out was first noticed: what the app shows of that AI's sign-in is read again. */
   signedOutNoticed?(instanceId: string): void;
+  /** The bots that run on this AI, for the sign-out notice's list of those with nothing to carry on for them. */
+  botsOn?(instanceId: string): Array<ThreadBot & { modelSelection: ModelSelection }>;
   now?(): number;
 }
 
@@ -78,7 +84,7 @@ export function signedOutStop(stopReason: string | null | undefined, said: strin
   return stopReason === "auth_required" && !(said && (engineFailureKind(said) === "credits" || classifyError({ text: said }).reason === "quota"));
 }
 /** A row a conversation shows when its turn carried on elsewhere: `setup` marks the one signing in fixes. */
-export interface CarriedOnRow { name: string; ok: boolean; setup?: boolean }
+export interface CarriedOnRow extends ServerToolText { name: string; ok: boolean; setup?: boolean }
 
 export function createLimitTakeover(deps: LimitTakeoverDeps) {
   const now = deps.now ?? Date.now;
@@ -198,14 +204,17 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
   const refusedName = (from: ModelSelection, scope: TakeoverScope) => (scope === "model" || scope === "credits"
     ? `${deps.engineName(from.instanceId)} ${from.model}` : deps.engineName(from.instanceId));
 
-  /** Once for this stretch of `from`'s limit or sign-out: which AI carries on for `bot` meanwhile, or that it waits.
-   * The words told, or null when this stretch was told already. */
+  /** Once for this stretch of `from`'s limit or sign-out, and for a sign-out again every SIGNED_OUT_REPEAT_MS: which AI carries
+   * on for `bot` meanwhile, or that it waits. The words told, or null when there is nothing to say now. */
   const tell = (bot: Bot, from: ModelSelection, facts: { resetsAt?: number; scope?: TakeoverScope; backup?: ModelSelection }): string | null => {
     const scope = facts.scope ?? "engine";
     const signOut = scope === "signed-out";
-    if (!notices.first(bot.id, limitedKey(from, scope), signOut ? now() + SIGNED_OUT_STRETCH_MS : facts.resetsAt)) return null;
+    const first = notices.first(bot.id, limitedKey(from, scope), signOut ? now() + SIGNED_OUT_STRETCH_MS : facts.resetsAt);
+    const scheduled = signOut && notices.due(EVERY_BOT, limitedKey(from, scope), SIGNED_OUT_REPEAT_MS);
+    if (!first && !scheduled) return null;
     const backup = facts.backup ? { backup: label(facts.backup, from) } : {};
-    const text = signOut ? signedOutNoticeText({ engine: refusedName(from, scope), bot: bot.name, where: deps.where ?? "on this computer", ...backup })
+    const stuck = signOut && !facts.backup ? (deps.botsOn?.(from.instanceId) ?? []).filter((one) => backups(one.id, one.modelSelection, "signed-out", approvalModeFor(one)).length === 0).map((one) => one.name) : [];
+    const text = signOut ? signedOutNoticeText({ engine: refusedName(from, scope), bot: bot.name, where: deps.where ?? "on this computer", ...backup, ...(stuck.length ? { stuck } : {}) })
       : limitNoticeText({ engine: refusedName(from, scope), bot: bot.name, ...(facts.resetsAt ? { resetsAt: facts.resetsAt } : {}), ...(scope === "credits" ? { credits: true } : {}), ...backup });
     deps.tell(bot, text);
     return text;
@@ -260,7 +269,9 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
       const said = event.type === "turn.completed" || event.type === "session.exited" ? setupSaid.get(event.threadId) : undefined;
       if (said !== undefined) setupSaid.delete(event.threadId);
       if (!selection) return;
-      if (event.type === "runtime.error" && (event.limit === "model" || event.limit === "credits")) holdModel(selection, event.limit, event.limitResetsAt);
+      if (event.type === "runtime.error" && (event.limit === "model" || event.limit === "credits")) {
+        for (const model of event.limitModels?.length ? event.limitModels : [selection.model]) holdModel({ ...selection, model }, event.limit, event.limitResetsAt);
+      }
       else if (event.type === "turn.completed" && event.ok) worked(botId, selection);
       else if (event.type === "turn.completed" && signedOutStop(event.stopReason, said)) noteSignedOut(selection.instanceId);
     },
@@ -274,7 +285,7 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
       const told = tell(bot, from, { ...facts, backup: to });
       const line = facts.scope === "signed-out" ? signedOutLine(refusedName(from, facts.scope), label(to, from))
         : failoverLine(refusedName(from, facts.scope), label(to, from), facts.resetsAt);
-      return [{ name: `recovery: ${line}`, ok: true }, ...(told && facts.scope === "signed-out" ? [{ name: `notice: ${told}`, ok: true, setup: true }] : [])];
+      return [{ name: `recovery: ${line}`, ok: true, ...(facts.scope === "signed-out" ? { nameCode: "chat.notice.failoverSignedOut", nameParams: { from: refusedName(from, facts.scope), to: label(to, from) } } : {}) }, ...(told && facts.scope === "signed-out" ? [{ name: `notice: ${told}`, ok: true, setup: true }] : [])];
     },
     /** True once per bot for each stretch of this limit or sign-out: the one incident its Chief is told about, not one per
      * refused turn. */

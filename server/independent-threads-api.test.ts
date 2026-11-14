@@ -242,16 +242,16 @@ describe("independent bot tasks through the isolated control surface", () => {
     ]);
 
     writeFileSync(modelFile(models[1], "gate"), "finish");
-    await expect.poll(() => handoff()?.status, { timeout: 20_000 }).toBe("completed");
-    const result: string = handoff()!.result;
-    expect(result.startsWith("[OpenMausBot: nobody answered the approval for “Bash: npm run release-check” in time, so it did not run. Do not report it as done;")).toBe(true);
-    expect(result).toContain("reply to:");
-    expect(result).not.toContain("git push");
-    expect(result).not.toContain("npm run lint");
+    await expect.poll(() => handoff()?.status, { timeout: 20_000 }).toBe("waiting");
+    const question = handoff()!.question ?? "";
+    expect(question).toContain("“Bash: npm run release-check”");
+    expect(question).not.toContain("git push");
+    expect(question).not.toContain("npm run lint");
+    await expect.poll(async () => (await api("GET", `/api/threads/${workThread}/messages?limit=100`)).body.messages
+      .some((message: any) => message.card?.requestId?.startsWith("needs-input-") && message.card.options?.includes("Try again"))).toBe(true);
     await expect.poll(async () => (await api("GET", `/api/threads/${chief.activeTaskId}/messages?limit=100`)).body.messages
-      .find((message: any) => message.roomRequest?.id === requestId && message.roomRequest.phase === "result")?.tool?.output ?? "")
-      .toContain("nobody answered the approval for “Bash: npm run release-check”");
-    evidence.push({ requestId, result: result.slice(0, 400) });
+      .some((message: any) => message.tool?.name?.includes("needs your input") && message.tool.name.includes("npm run release-check"))).toBe(true);
+    evidence.push({ requestId, question: question.slice(0, 400) });
   }, 60_000);
 
   it.each(["finish", "fail"] as const)("tells a delegating bot that its teammate's approval went unanswered, so the step did not run (turn ends: %s)", async (ending) => {
@@ -307,7 +307,7 @@ describe("independent bot tasks through the isolated control surface", () => {
       await expect.poll(() => handoff()?.status, { timeout: 20_000 }).toBe("failed");
     }
     const woken = async () => JSON.stringify((await dump(models[0])).prompt);
-    await expect.poll(woken, { timeout: 20_000 }).toContain("[OpenMausBot report from @Delegated Peer on assignment");
+    await expect.poll(woken, { timeout: 20_000 }).toContain("[From @Delegated Peer (bot) · report on assignment");
     expect(await woken()).toContain("nobody answered the approval for “Bash: npm run release-check” in time, so it did not run. Do not report it as done; it needs the person's approval.");
   }, 60_000);
 
@@ -321,7 +321,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     });
     expect(created.status).toBe(201);
     const room = created.body.group;
-    expect((await api("POST", `/api/groups/${room.id}/messages`, { threadId: room.threadId, text: "Have the reviewer run the release checks." })).status).toBe(202);
+    expect((await api("POST", `/api/groups/${room.id}/messages`, { threadId: room.threadId, text: "Have the reviewer run the release checks." }, true)).status).toBe(202);
     const token = (await dump(models[0])).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
     const sent = await internal(token, "POST", "/api/internal/coordinate-bots", { botIds: [peer.id], message: "RELEASE_CHECKS: run the release checks." });
     expect(sent.status).toBe(200);
@@ -337,8 +337,8 @@ describe("independent bot tasks through the isolated control surface", () => {
     await expect.poll(() => unanswered.find((answer) => answer.id === "unanswered-room")).toMatchObject({ behavior: "deny", source: "timeout" });
     rmSync(expiry, { force: true });
     writeFileSync(modelFile(models[1], "gate"), "finish");
-    await expect.poll(() => handoff()?.status, { timeout: 20_000 }).toBe("completed");
-    expect(handoff()!.result.startsWith("[OpenMausBot: nobody answered the approval for “Bash: npm run release-check” in time, so it did not run.")).toBe(true);
+    await expect.poll(() => handoff()?.status, { timeout: 20_000 }).toBe("waiting");
+    expect(handoff()!.question).toContain("“Bash: npm run release-check”");
   }, 60_000);
 
   it("ends a one-way notice whose recipient thread was deleted before it started, without restarting the sender", async () => {

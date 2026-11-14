@@ -85,18 +85,22 @@ interface BindingRow {
 
 type RemoteResult = "done" | "missing" | { error: string };
 
+/** A known event type the shared subscription can never fire: it needs the project's own webhook endpoint first. */
+const NEEDS_SETUP = "needs_setup";
+type TypeLookup = TriggerType | typeof NEEDS_SETUP | null;
+
 /** The catalog is the same for every installation. Cache API calls do nothing on a workers.dev host, so each
  *  isolate keeps its own copy. */
-const typeCache = new Map<string, { value: TriggerType[] | TriggerType | null; expiresAt: number }>();
+const typeCache = new Map<string, { value: TriggerType[] | TypeLookup; expiresAt: number }>();
 
-function cachedType<T extends TriggerType[] | TriggerType | null>(key: string): T | undefined {
+function cachedType<T extends TriggerType[] | TypeLookup>(key: string): T | undefined {
   const entry = typeCache.get(key);
   if (entry && Date.now() < entry.expiresAt) return entry.value as T;
   typeCache.delete(key);
   return undefined;
 }
 
-function rememberType(key: string, value: TriggerType[] | TriggerType | null) {
+function rememberType(key: string, value: TriggerType[] | TypeLookup) {
   typeCache.delete(key);
   typeCache.set(key, { value, expiresAt: Date.now() + TYPE_CACHE_MS });
   for (const oldest of typeCache.keys()) {
@@ -156,8 +160,14 @@ async function typesForToolkit(env: Env, toolkit: string): Promise<TriggerType[]
 }
 
 export async function triggerType(env: Env, slug: string): Promise<TriggerType | null> {
+  const type = await lookupTriggerType(env, slug);
+  return type === NEEDS_SETUP ? null : type;
+}
+
+/** Tells a type that needs setup on our side apart from one Composio does not know, so the person hears which. */
+async function lookupTriggerType(env: Env, slug: string): Promise<TypeLookup> {
   const key = `type:${slug.toUpperCase()}`;
-  const hit = cachedType<TriggerType | null>(key);
+  const hit = cachedType<TypeLookup>(key);
   if (hit !== undefined) return hit;
   const response = await composioRequest(env, `/triggers_types/${encodeURIComponent(slug)}?toolkit_versions=latest`);
   // Composio answers 400, not 404, for a slug it does not know.
@@ -167,7 +177,8 @@ export async function triggerType(env: Env, slug: string): Promise<TriggerType |
     return null;
   }
   if (!response.ok) throw new Error(await upstreamError(response, `Event type unavailable (${response.status})`));
-  const type = usableType(await response.json());
+  const item = await response.json();
+  const type = usableType(item) ?? (triggerTypeSchema.safeParse(item).data?.requires_webhook_endpoint_setup === true ? NEEDS_SETUP : null);
   rememberType(key, type);
   return type;
 }
@@ -198,7 +209,10 @@ export async function listTriggerTypes(url: URL, installation: EventInstallation
 }
 
 export async function getTriggerType(slug: string, env: Env) {
-  const type = await triggerType(env, slug);
+  const type = await lookupTriggerType(env, slug);
+  if (type === NEEDS_SETUP) {
+    return json({ error: `${slug.toUpperCase()} can't be used yet: this event needs webhook setup on our side first. Pick another event this app offers.` }, 422);
+  }
   return type ? json(type) : json({ error: "unknown or unsupported event type" }, 404);
 }
 
@@ -219,7 +233,7 @@ export async function setRemoteEnabled(env: Env, triggerId: string, enabled: boo
   return { error: await upstreamError(response, `Composio could not ${enabled ? "enable" : "disable"} the trigger (${response.status})`) };
 }
 
-async function deleteRemote(env: Env, triggerId: string): Promise<RemoteResult> {
+export async function deleteRemote(env: Env, triggerId: string): Promise<RemoteResult> {
   const response = await composioRequest(env, `/trigger_instances/manage/${encodeURIComponent(triggerId)}`, { method: "DELETE" });
   if (response.ok || response.status === 404) {
     await response.body?.cancel();
@@ -228,7 +242,7 @@ async function deleteRemote(env: Env, triggerId: string): Promise<RemoteResult> 
   return { error: await upstreamError(response, `Composio could not delete the trigger (${response.status})`) };
 }
 
-async function listRemoteInstances(env: Env, userId: string): Promise<RemoteInstance[]> {
+export async function listRemoteInstances(env: Env, userId: string): Promise<RemoteInstance[]> {
   const instances: RemoteInstance[] = [];
   const seen = new Set<string>();
   let cursor: string | undefined;
@@ -258,7 +272,7 @@ async function binding(env: Env, installationId: string, triggerId: string) {
 
 /** Bindings other installations hold on the same instance: a desktop and its Cloud that act as one Composio user may
  *  both listen to it. The remote instance is changed only for the last one. */
-async function otherBindings(env: Env, installationId: string, triggerId: string, enabledOnly: boolean) {
+export async function otherBindings(env: Env, installationId: string, triggerId: string, enabledOnly: boolean) {
   const row = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM trigger_bindings WHERE composio_trigger_id = ? AND installation_id != ?${enabledOnly ? " AND disabled_at IS NULL" : ""}`,
   ).bind(triggerId, installationId).first<{ n: number }>();

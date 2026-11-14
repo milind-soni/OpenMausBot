@@ -2,11 +2,14 @@
 import { findCliCandidates } from "../env-path.ts";
 import { installNpmEngine, npmAvailable, serverInstallFor, standaloneLookupPath } from "../engine-install.ts";
 import { installStandaloneEngine, isAppStandaloneCopy, type StandaloneInstalled } from "../engine-standalone.ts";
+import { pinnedNpmVersion } from "../engine-versions.ts";
 import { withEngineMemory } from "../engine-memory.ts";
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
 import { withLocalContext } from "../drivers/local-inject.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
 import { withUnaskedStops } from "./unasked-stop.ts";
+import { withWslNotice } from "./wsl-launch.ts";
+import { modelManifest, startModelManifestRefresh } from "../model-manifest/manifest.ts";
 export { engineMemory } from "../engine-memory.ts";
 import { clientInstall } from "../contracts.ts";
 import type {
@@ -101,6 +104,9 @@ export function enginesByUse(selections: ReadonlyArray<{ instanceId: InstanceId 
 
 type SharedRead = { generation: number; settledAt?: number; read: Promise<ProviderSnapshot> };
 
+/** Engines that rebuild their model list from the manifest without starting a CLI, so a downloaded change applies at once. */
+const MANIFEST_REBUILT_DRIVERS = new Set(["claudeAgent", "grokAgent", "kimiAgent"]);
+
 export class ProviderRegistry {
   private byId = new Map<InstanceId, RegistryEntry>();
   private cliByInstance = new Map<InstanceId, string>();
@@ -110,6 +116,8 @@ export class ProviderRegistry {
   /** Engines the start-up read has not probed yet; null outside that read. */
   private unread: Set<InstanceId> | null = null;
   private snapshotGeneration = 0;
+  private manifestWatched = false;
+  private readonly signedInListeners = new Set<(instanceId: InstanceId) => void>();
   /** Per instance object: settings that reload an engine make a new one, so its status is read afresh. */
   private readsOf = new WeakMap<ProviderInstance, { snapshot: ProviderSnapshot; at: number; generation: number }>();
   private driversByKind: Map<string, AnyProviderDriver>;
@@ -129,7 +137,19 @@ export class ProviderRegistry {
     this.driversByKind = new Map(drivers.map((d) => [d.driverKind, d]));
   }
 
+  private watchModelManifest(): void {
+    if (this.manifestWatched) return;
+    this.manifestWatched = true;
+    modelManifest().onChange(() => {
+      for (const instance of this.instances()) {
+        if (MANIFEST_REBUILT_DRIVERS.has(instance.driverKind)) void this.refreshModels(instance.instanceId).catch(() => {});
+      }
+    });
+    startModelManifestRefresh();
+  }
+
   async load(configs: InstanceConfigMap, decorate?: (instance: ProviderInstance) => ProviderInstance) {
+    this.watchModelManifest();
     const slots = [...this.byId.keys()];
     const loaded = await Promise.all(
       Object.entries(configs).map(async ([instanceId, entry]) => {
@@ -343,7 +363,7 @@ export class ProviderRegistry {
         return (await this.appCopyAdvice(instanceId, driver, installed)) ?? true;
       }
       if (!server?.package) return false;
-      await installNpmEngine(server.package, { baseDir: this.enginesBaseDir, cli: cliDefaultOf(driver) });
+      await installNpmEngine(server.package, { baseDir: this.enginesBaseDir, cli: cliDefaultOf(driver), version: driver ? pinnedNpmVersion(driver.driverKind) : undefined });
       return true;
     } finally {
       this.forgetSnapshots();
@@ -380,18 +400,42 @@ export class ProviderRegistry {
   private async appCopyAdvice(instanceId: InstanceId, driver: AnyProviderDriver, installed: StandaloneInstalled): Promise<{ useCli: string } | null> {
     const live = this.get(instanceId);
     const cli = cliDefaultOf(driver);
-    // A CLI the person set with Set CLI is theirs to change; only the default name gets pointed elsewhere.
+    // A CLI the person set with Set CLI is theirs to change, unless it runs another program altogether (an install
+    // command pasted as the path); otherwise only the default name gets pointed elsewhere.
     const configured = this.cliByInstance.get(instanceId);
-    if (configured !== undefined && configured !== cli) return null;
-    if (!live || !cli || !installed.executablePath || this.appStandaloneCopy(driver, cli)) return null;
+    const theirs = configured !== undefined && configured !== cli;
+    if (!live || !cli || !installed.executablePath || (!theirs && this.appStandaloneCopy(driver, cli))) return null;
     this.forgetSnapshots();
-    let state: ProviderSnapshot["state"];
+    let snapshot: ProviderSnapshot;
     try {
-      state = (await live.snapshot()).state;
+      snapshot = await live.snapshot();
     } catch {
-      state = "unavailable";
+      snapshot = { state: "unavailable" };
     }
-    return state === "available" ? null : { useCli: installed.executablePath };
+    if (snapshot.state === "available" || (theirs && snapshot.notEngineCli !== true)) return null;
+    return { useCli: installed.executablePath };
+  }
+
+  /** Set by the instance routes: points an engine whose saved CLI path runs another program at its own installed CLI, as
+   * Set CLI would, and reloads it. */
+  private cliHealer: ((instanceId: InstanceId, cli: string) => Promise<unknown>) | null = null;
+  private healing = new Set<InstanceId>();
+  onWrongCli(heal: (instanceId: InstanceId, cli: string) => Promise<unknown>): void {
+    this.cliHealer = heal;
+  }
+
+  /** A saved CLI path that answered as another program, while the engine's own CLI is installed (the app's copy, or one
+   * on PATH): the engine runs its own instead, with nobody having to Reset the path. */
+  private healWrongCli(instanceId: InstanceId, snapshot: ProviderSnapshot): void {
+    const driver = this.driversByKind.get(this.byId.get(instanceId)?.live?.driverKind ?? "");
+    const cli = cliDefaultOf(driver);
+    const saved = this.cliByInstance.get(instanceId);
+    if (snapshot.notEngineCli !== true || !this.cliHealer || !cli || saved === undefined || saved === cli || this.healing.has(instanceId)) return;
+    const own = findCliCandidates(cli, driver?.install?.standalone ? standaloneLookupPath(this.enginesBaseDir) : undefined)[0];
+    // The path found is the one already saved: it is that one that answers as another program.
+    if (!own || own === saved) return;
+    this.healing.add(instanceId);
+    void this.cliHealer(instanceId, own).catch(() => {}).finally(() => this.healing.delete(instanceId));
   }
 
   /** Whether this engine's CLI runs the app's own standalone copy, looked up the way its spawns look it up. */
@@ -427,11 +471,22 @@ export class ProviderRegistry {
     }
     // Only while this is still the live instance: a reload may have replaced it during the read.
     if (this.byId.get(instance.instanceId)?.live === instance) {
+      const before = this.lastSnapshots.get(instance.instanceId) ?? this.seeds.get(instance.instanceId);
       this.lastSnapshots.set(instance.instanceId, snapshot);
       this.unread?.delete(instance.instanceId);
       this.saveStatus();
+      this.healWrongCli(instance.instanceId, snapshot);
+      if (before?.authenticated === false && snapshot.state === "available" && snapshot.authenticated === true) {
+        for (const listener of this.signedInListeners) listener(instance.instanceId);
+      }
     }
     return snapshot;
+  }
+
+  /** `listener` hears of each engine whose status read turns from signed out to signed in, however the sign-in happened:
+   * in the app, in the engine's own browser callback, or in a terminal. */
+  onSignedIn(listener: (instanceId: InstanceId) => void): void {
+    this.signedInListeners.add(listener);
   }
 
   private saveStatus(): void {
@@ -472,13 +527,15 @@ export class ProviderRegistry {
           };
         }
         const inst = entry.live;
-        const snapshot = await statusOf(inst);
+        const cli = this.cliByInstance.get(inst.instanceId);
+        const snapshot = withWslNotice(await statusOf(inst), cli);
         return {
           instanceId: inst.instanceId,
           driverKind: inst.driverKind,
           displayName: inst.displayName ?? inst.driverKind,
           snapshot,
           models: inst.models,
+          ...(inst.modelsUnconfirmed ? { modelsUnconfirmed: true } : {}),
           capabilities: {
             computerMcp: inst.adapter.capabilities.computerMcp === true,
             agentsMcp: inst.adapter.capabilities.agentsMcp === true,
@@ -486,7 +543,7 @@ export class ProviderRegistry {
             phoneMcp: inst.adapter.capabilities.phoneMcp === true,
             deviceMcp: inst.adapter.capabilities.deviceMcp === true,
             dataMcp: inst.adapter.capabilities.dataMcp === true,
-            highlevelMcp: inst.adapter.capabilities.highlevelMcp === true,
+            emailMcp: inst.adapter.capabilities.emailMcp === true,
             browserMcp: inst.adapter.capabilities.browserMcp === true,
             images: inst.adapter.capabilities.images === true,
             effortLevels: inst.adapter.capabilities.effortLevels,
@@ -497,7 +554,7 @@ export class ProviderRegistry {
             backgroundText: inst.generateText !== undefined || inst.generateMemoryText !== undefined,
           },
           access: driver?.metadata.access ?? "subscription",
-          install: withServerInstall(driver?.install, npmPresent, this.appStandaloneCopy(driver, this.cliByInstance.get(inst.instanceId) ?? cliDefaultOf(driver))),
+          install: withServerInstall(driver?.install, npmPresent, this.appStandaloneCopy(driver, cli ?? cliDefaultOf(driver))),
           authentication: inst.startAuthentication
             ? {
                 method: inst.authenticationMethod ?? (inst.getAuthentication && inst.completeAuthentication
@@ -508,7 +565,7 @@ export class ProviderRegistry {
                 signOut: inst.signOut !== undefined,
               }
             : undefined,
-          cli: this.cliByInstance.get(inst.instanceId),
+          cli,
           cliDefault: cliDefaultOf(driver),
           cliCandidates: candidatesFor(driver),
         };

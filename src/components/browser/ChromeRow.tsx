@@ -1,7 +1,7 @@
 // The tab strip and address bar above a bot's browser. The address bar follows pingdotgg/t3code@00cdceb1
 // apps/web/src/components/preview/PreviewChromeRow.tsx, MIT License, Copyright (c) 2026 T3 Tools Inc. (full text in
 // third_party/t3-code/LICENSE); modified: OpenMausBot's tabs, control pill and profile button.
-import { ArrowLeft, ArrowRight, Expand, Globe, Hand, Loader2, Maximize2, Minimize2, Plus, RotateCw, Shrink, UserRound, X } from "lucide-react";
+import { AppWindow, ArrowLeft, ArrowRight, Globe, Hand, Loader2, Maximize, Minimize, Plus, RotateCw, Shrink, UserRound, X } from "lucide-react";
 import { forwardRef, useState, type ReactNode } from "react";
 
 import type { PreviewStreamControl } from "@/lib/browser-stream-client";
@@ -39,13 +39,13 @@ export function controlPill(connected: boolean, control: PreviewStreamControl | 
 }
 
 const PILL_TEXT: Record<PillState, (bot: string) => string> = {
-  connecting: () => "Connecting…",
-  watching: () => "Watching",
-  bot: (bot) => `${bot} has control`,
-  yours: () => "You have control",
-  held: (bot) => `${bot} is paused for you`,
-  elsewhere: () => "Held on another device",
-  taking: () => "Taking control…",
+  connecting: () => t("browser.panel.connecting"),
+  watching: () => t("browser.control.watching"),
+  bot: (bot) => t("browser.control.botHas", { name: bot }),
+  yours: () => t("vm.workspace.youHaveControl"),
+  held: (bot) => t("browser.control.held", { name: bot }),
+  elsewhere: () => t("browser.control.elsewhere"),
+  taking: () => t("browser.control.taking"),
   waiting: (bot) => t("browser.control.waiting", { name: bot }),
 };
 
@@ -86,15 +86,15 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
   return (
     <div className="shrink-0 border-b border-hairline/40">
       <div className="flex min-h-10 items-center gap-1 px-2 pt-1">
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto" role="tablist" aria-label="Browser tabs">
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto" role="tablist" aria-label={t("browser.panel.tabs")}>
           {tabs.length ? tabs.map((tab) => (
             <div key={tab.tabId} className={`flex max-w-52 shrink-0 items-center gap-1 rounded-xl px-1 text-[12px] ${tab.active ? "bg-inset text-ink" : "text-ink-secondary"}`}>
               <Globe size={13} className="ml-1.5 shrink-0 opacity-60" aria-hidden="true" />
-              <button role="tab" aria-selected={tab.active} className="truncate px-1 py-1.5 text-left disabled:cursor-default" disabled={!commandsReady} onClick={() => props.onCommand({ type: "tabSelect", tabId: tab.tabId })} title={tab.title || tab.url}>{tab.title || "New tab"}</button>
-              {(tabs.length > 1 || props.closesLastTab) && <button className={button} aria-label={`Close ${tab.title || "tab"}`} disabled={!commandsReady} onClick={() => props.onCommand({ type: "tabClose", tabId: tab.tabId })}><X size={13} /></button>}
+              <button role="tab" aria-selected={tab.active} className="truncate px-1 py-1.5 text-left disabled:cursor-default" disabled={!commandsReady} onClick={() => props.onCommand({ type: "tabSelect", tabId: tab.tabId })} title={tab.title || tab.url}>{tab.title || t("browser.panel.newTab")}</button>
+              {(tabs.length > 1 || props.closesLastTab) && <button className={button} aria-label={t("browser.panel.closeTab", { title: tab.title || t("browser.panel.tab") })} disabled={!commandsReady} onClick={() => props.onCommand({ type: "tabClose", tabId: tab.tabId })}><X size={13} /></button>}
             </div>
-          )) : <div className="flex items-center gap-2 rounded-xl bg-inset px-3 py-1.5 text-[12px] text-ink-secondary"><Globe size={13} aria-hidden="true" />New tab</div>}
-          <button className={`${button} shrink-0`} disabled={!commandsReady} aria-label="New tab" title="New tab" onClick={() => props.onCommand({ type: "tabNew" })}><Plus size={16} /></button>
+          )) : <div className="flex items-center gap-2 rounded-xl bg-inset px-3 py-1.5 text-[12px] text-ink-secondary"><Globe size={13} aria-hidden="true" />{t("browser.panel.newTab")}</div>}
+          <button className={`${button} shrink-0`} disabled={!commandsReady} aria-label={t("browser.panel.newTab")} title={t("browser.panel.newTab")} onClick={() => props.onCommand({ type: "tabNew" })}><Plus size={16} /></button>
         </div>
         <button
           type="button"
@@ -111,9 +111,9 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
           <span className="truncate">{PILL_TEXT[pill](botName)}</span>
           {pill === "bot" || pill === "watching" ? <span className="shrink-0 text-ink">· {t("browser.control.take")}</span> : handsBack ? <span className="shrink-0">· {t("browser.control.handBack")}</span> : null}
         </button>
-        <button className={button} title={props.maximized ? "Restore size" : "Maximize"} aria-label={props.maximized ? "Restore size" : "Maximize"} onClick={props.onMaximize}>{props.maximized ? <Shrink size={15} /> : <Expand size={15} />}</button>
-        <button className={button} title={props.fullscreen ? "Exit full screen" : "Full screen"} aria-label={props.fullscreen ? "Exit full screen" : "Full screen"} onClick={props.onFullscreen}>{props.fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
-        <button className={`${button} rounded-xl bg-inset p-1.5`} title={`Browser profile: ${props.profileName}`} aria-label="Browser profiles" onClick={props.onProfiles}><UserRound size={15} /></button>
+        <button className={button} title={t(props.maximized ? "browser.panel.restore" : "browser.panel.maximizeHint")} aria-label={t(props.maximized ? "browser.panel.restore" : "browser.panel.maximize")} onClick={props.onMaximize}>{props.maximized ? <Shrink size={15} /> : <AppWindow size={15} />}</button>
+        <button className={button} title={t(props.fullscreen ? "browser.panel.exitFullscreen" : "browser.panel.fullscreenHint")} aria-label={t(props.fullscreen ? "browser.panel.exitFullscreen" : "browser.panel.fullscreen")} onClick={props.onFullscreen}>{props.fullscreen ? <Minimize size={15} /> : <Maximize size={15} />}</button>
+        <button className={`${button} rounded-xl bg-inset p-1.5`} title={t("browser.panel.profileTitle", { name: props.profileName })} aria-label={t("browser.panel.profiles")} onClick={props.onProfiles}><UserRound size={15} /></button>
       </div>
       <form
         className="relative flex h-10 items-center gap-1 px-2"
@@ -123,16 +123,16 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
           (addressRef && typeof addressRef === "object" ? addressRef.current : null)?.blur();
         }}
       >
-        <div className="flex shrink-0 items-center" role="group" aria-label="Navigation">
-          <button type="button" className={button} disabled={!commandsReady || !nav.canGoBack} aria-label="Back" title="Back" onClick={() => props.onCommand({ type: "history", delta: -1 })}><ArrowLeft size={16} /></button>
-          <button type="button" className={button} disabled={!commandsReady || !nav.canGoForward} aria-label="Forward" title="Forward" onClick={() => props.onCommand({ type: "history", delta: 1 })}><ArrowRight size={16} /></button>
-          <button type="button" className={button} disabled={!commandsReady} aria-label={nav.loading ? "Loading, reload page" : "Reload page"} title="Reload" onClick={() => props.onCommand({ type: "reload" })}>
+        <div className="flex shrink-0 items-center" role="group" aria-label={t("browser.panel.navigation")}>
+          <button type="button" className={button} disabled={!commandsReady || !nav.canGoBack} aria-label={t("browser.panel.back")} title={t("browser.panel.back")} onClick={() => props.onCommand({ type: "history", delta: -1 })}><ArrowLeft size={16} /></button>
+          <button type="button" className={button} disabled={!commandsReady || !nav.canGoForward} aria-label={t("browser.panel.forward")} title={t("browser.panel.forward")} onClick={() => props.onCommand({ type: "history", delta: 1 })}><ArrowRight size={16} /></button>
+          <button type="button" className={button} disabled={!commandsReady} aria-label={t(nav.loading ? "browser.panel.loadingReload" : "browser.panel.reload")} title={t("browser.panel.reloadShort")} onClick={() => props.onCommand({ type: "reload" })}>
             {nav.loading ? <Loader2 size={16} className="animate-spin" /> : <RotateCw size={16} />}
           </button>
         </div>
         <input
           ref={addressRef}
-          aria-label="Browser address"
+          aria-label={t("browser.panel.address")}
           readOnly={!commandsReady}
           value={editing ? draft : shown}
           onChange={(event) => setDraft(event.target.value)}
@@ -148,7 +148,7 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
             setDraft(shown);
             event.currentTarget.blur();
           }}
-          placeholder={connected ? "Search or enter address" : "Connecting…"}
+          placeholder={t(connected ? "browser.panel.searchOrAddress" : "browser.panel.connecting")}
           spellCheck={false}
           className="mx-1 min-w-0 flex-1 rounded-lg bg-transparent px-2 py-1.5 text-center text-[12px] outline-none placeholder:text-ink-secondary focus:bg-inset focus:text-left"
         />

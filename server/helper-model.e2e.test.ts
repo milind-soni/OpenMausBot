@@ -10,6 +10,7 @@ import { CAPTURE_MARKER } from "./memory-capture.ts";
 import { NO_TEXT_ENGINE } from "./memory-upkeep.ts";
 import { SKILL_REVIEW_MARKER } from "./skill-review.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const fake = (name: string) => join(SERVER_DIR, "testing", name);
@@ -40,7 +41,7 @@ interface Row {
  * whatever else the test puts in config.json. */
 async function boot(extraConfig: Record<string, unknown>) {
   for (const name of FAKES) chmodSync(fake(name), 0o755);
-  const port = 18800 + Math.floor(Math.random() * 10_000);
+  const port = workerPort(18800, 10_000);
   const base = `http://127.0.0.1:${port}`;
   const home = mkdtempSync(join(tmpdir(), "omb-helper-model-"));
   mkdirSync(join(home, ".openmausbot"), { recursive: true });

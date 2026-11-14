@@ -1,4 +1,10 @@
-import type { Group } from "@/state/store";
+import type { Group, GroupDefaultResponder } from "@/state/store";
+
+export type RoomResponderMode = "lead" | "everyone" | "mentions" | "auto";
+
+export function setupResponderMode(responder: GroupDefaultResponder): RoomResponderMode {
+  return responder.kind === "member" ? "lead" : responder.kind;
+}
 
 type RoomSetupFields = {
   setupPending?: boolean;

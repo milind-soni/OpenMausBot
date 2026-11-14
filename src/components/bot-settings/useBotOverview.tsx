@@ -5,6 +5,7 @@ import type { BotOverview } from "@/lib/bot-overview-types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import type { HistoryRow } from "./HistorySection";
 import type { PromptPreviewData } from "./PromptPreview";
+import { t } from "@/lib/i18n";
 
 /**
  * Reads the bot's overview and prompt preview while `want` asks for them. By default every change to the bot's facts
@@ -30,8 +31,6 @@ export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: bool
         bot.cloudBackend,
         bot.cwd,
         bot.autoApprove,
-        bot.approvePeerComms,
-        bot.peers,
         bot.section,
         bot.composio,
         bot.browser,
@@ -49,8 +48,6 @@ export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: bool
       bot.cloudBackend,
       bot.cwd,
       bot.autoApprove,
-      bot.approvePeerComms,
-      bot.peers,
       bot.section,
       bot.composio,
       bot.browser,
@@ -147,7 +144,7 @@ export function useBotHistory(bot: Bot, active: boolean) {
         body: JSON.stringify(target),
       });
     } catch (e: unknown) {
-      dispatch({ type: "error", message: e instanceof Error ? e.message : "Couldn't undo that change." });
+      dispatch({ type: "error", message: e instanceof Error ? e.message : t("botOverview.undoFailed") });
     } finally {
       await load();
       setRollingBack(false);
@@ -169,9 +166,9 @@ export function HistoryRollbackDialog({ history, returnFocusRef }: {
   return (
     <ConfirmDialog
       open={rollbackTarget !== null}
-      title="Restore previous instructions?"
-      body="Replaces current SOUL with the version before this change. Current version stays in History."
-      confirmLabel="Restore instructions"
+      title={t("botOverview.restoreSoul.title")}
+      body={t("botOverview.restoreSoul.body")}
+      confirmLabel={t("botOverview.restoreSoul.confirm")}
       tone="neutral"
       returnFocusRef={returnFocusRef}
       onCancel={() => setRollbackTarget(null)}

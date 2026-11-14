@@ -4,7 +4,7 @@ import { setLocale, t } from "@/lib/i18n";
 import type { ConfigStatus } from "@/state/store";
 import { WORKSPACE_CREDENTIAL_ENV } from "../../../server/credential-env.ts";
 import { CREDENTIAL_TARGETS, credentialConfigPatch, desktopCredentialSlot, isConfigCredentialTarget } from "../../../shared/credential-request";
-import { KEY_CATALOG, KEY_SECTIONS, keyEntry, keyForInstance, keyMatches, looksLikeOtherKey, savedState, type KeyId } from "./key-catalog";
+import { KEY_CATALOG, KEY_SECTIONS, keyEntry, keyForInstance, keyHidden, keyMatches, looksLikeOtherKey, savedState, type KeyId } from "./key-catalog";
 
 const NOT_A_PERSONS_KEY: Record<string, string> = {
   OMB_ANTHROPIC_API_URL: "the address the Anthropic key goes to, set by a hosted install",
@@ -16,6 +16,7 @@ const NOT_A_PERSONS_KEY: Record<string, string> = {
   OMB_CLOUD_DECIDER_TOKEN: "MausBot Cloud's included decisions",
   OMB_CLOUD_AI_TOKEN: "MausBot Cloud's included AI",
   OMB_CLOUD_X_TOKEN: "MausBot Cloud's included X research",
+  OMB_CLOUD_HOSTING_TOKEN: "MausBot Cloud's included app hosting",
   OMB_CLOUD_CONNECTED_APPS_GRANT: "MausBot Cloud's connected apps",
   OMB_BROWSER_CONNECTION: "the app's own browser, not a credential",
   OMB_USER_DATA: "the app's own data folder, not a credential",
@@ -54,10 +55,10 @@ describe("every credential has one home on the keys page", () => {
   // A key saved from a bot's card lands exactly where its Settings row puts it: the same desktop slot, or the same config.
   it("covers every credential a bot can ask for in a chat, saved where Settings saves it", () => {
     const homes: Record<keyof typeof CREDENTIAL_TARGETS, KeyId> = {
-      xaiApiKey: "xai", boxToken: "box", opencodeGoApiKey: "opencodeGo", ttsKey: "elevenlabs", fishAudioKey: "fishAudio",
+      xaiApiKey: "xai", boxToken: "box", opencodeGoApiKey: "opencodeGo", ttsKey: "elevenlabs", fishAudioKey: "fishAudio", geminiTtsKey: "geminiTts",
       openaiImageApiKey: "imageOpenai", onePasswordToken: "onePassword", composioApiKey: "composio", openaiApiKey: "openai",
       anthropicApiKey: "anthropic", openrouterApiKey: "openrouter", mistralApiKey: "mistral", cerebrasApiKey: "cerebras", groqApiKey: "groq",
-      greenferenceApiKey: "greenference", metaApiKey: "meta", deepseekApiKey: "deepseek",
+      greenferenceApiKey: "greenference", modelgoApiKey: "modelgo", metaApiKey: "meta", deepseekApiKey: "deepseek",
     };
     expect(Object.keys(homes).sort()).toEqual(Object.keys(CREDENTIAL_TARGETS).sort());
     for (const [name, id] of Object.entries(homes) as Array<[keyof typeof CREDENTIAL_TARGETS, KeyId]>) {
@@ -107,7 +108,24 @@ describe("searching the keys", () => {
     expect(found("voice")).toEqual(expect.arrayContaining(["liveCalls", "liveKey", "elevenlabs", "fishAudio"]));
     expect(found("openai")).toEqual(expect.arrayContaining(["openai", "liveCalls", "liveKey", "imageOpenai"]));
     expect(found("gmail")).toEqual(["composio"]);
+    expect(found("gemini")).toEqual(["openaiCompat", "geminiTts", "imageGemini"]);
     expect(found("no such key anywhere")).toEqual([]);
+  });
+
+  it("matches the Live key row by the provider Live calls use", () => {
+    const shown = (query: string, provider: "fish" | "azure") =>
+      KEY_CATALOG.filter((entry) => keyMatches(entry, query, { live: { provider } } as never)).map((entry) => entry.id);
+    expect(shown("fish", "fish")).toEqual(expect.arrayContaining(["fishAudio", "liveKey"]));
+    expect(shown("azure", "azure")).toContain("liveKey");
+    expect(found("fish")).not.toContain("liveKey");
+  });
+
+  it("hides the Live calls row while Live calls use Azure or Fish Audio", () => {
+    expect(keyHidden("liveCalls", { live: { provider: "fish" } } as never)).toBe(true);
+    expect(keyHidden("liveCalls", { live: { provider: "azure" } } as never)).toBe(true);
+    expect(keyHidden("liveCalls", { live: { provider: "openai" } } as never)).toBe(false);
+    expect(keyHidden("liveCalls", null)).toBe(false);
+    expect(keyHidden("liveKey", { live: { provider: "fish" } } as never)).toBe(false);
   });
 });
 

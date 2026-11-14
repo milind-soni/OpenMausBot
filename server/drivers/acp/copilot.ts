@@ -5,14 +5,15 @@
 // Auto (the stored id stays `auto`; the picker may show Copilot Fusion and an autoTier instead). Its own
 // `allow_all` option stays at its `off` default: the ACP broker answers every permission request.
 import { createHash } from "node:crypto";
-import { readFile, realpath, rm } from "node:fs/promises";
-import { homedir } from "node:os";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { createAcpDriver, type AccountErrorCode, type AcpConfig, type AcpSupport } from "./core.ts";
 import { AcpDiscoveryRpcError, discoverAcpModels, DISCOVERY_CLIENT_NAME, type AcpDiscoveryOptions } from "./custom-model-catalog.ts";
 import { offeredModels } from "./config-options.ts";
+import { writeFileAtomicIfChanged } from "../../atomic.ts";
 
 const AUTO = "auto";
 const MODELS: ModelCatalog = { default: AUTO, options: [{ id: AUTO, label: "Auto" }] };
@@ -215,12 +216,67 @@ const SUPPORT: AcpSupport = {
     return offered.includes(AUTO) ? AUTO : null;
   },
   restartOnMcpChange: true,
+  mcpServersFromLaunch: true,
   pickAuthMethod: () => null,
   authFailure: "continue",
   isAuthenticated: (env, config) => copilotSignedIn(env, config),
   classifyError: classifyCopilotError,
   describeAccountError: describeCopilotAccountError,
+  accountErrorText: code => code === "invalid_credentials" ? undefined : { key: "chat.notice.copilotAccountRefused" },
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };
 
-export const CopilotAgentDriver = createAcpDriver(SUPPORT);
+// Copilot refuses every function in the reserved `browser` and `computer` namespaces with an HTTP 400 on each turn,
+// and names an MCP server's namespace after its config key: only those two keys get a prefix, so other servers keep theirs.
+const COPILOT_RESERVED_SERVER_NAMES: ReadonlySet<string> = new Set(["browser", "computer"]);
+
+/** The config key Copilot gets for each server, in order: a reserved name becomes `maus_<name>` (numbered if taken). */
+export function copilotServerNames(names: readonly string[]): string[] {
+  const taken = new Set(names);
+  return names.map((name) => {
+    if (!COPILOT_RESERVED_SERVER_NAMES.has(name.toLowerCase())) return name;
+    let key = `maus_${name}`;
+    for (let n = 2; taken.has(key); n++) key = `maus_${name}_${n}`;
+    taken.add(key);
+    return key;
+  });
+}
+
+export const CopilotAgentDriver = {
+  ...createAcpDriver(SUPPORT),
+  /** Creates an instance with thread-isolated launcher config files, removed when the instance is disposed. */
+  async create(input: Parameters<ReturnType<typeof createAcpDriver>["create"]>[0]) {
+    // Copilot CLI 1.0.105 rejects stdio servers from ACP clients; --additional-mcp-config accepts them from its launcher.
+    const directory = await mkdtemp(join(tmpdir(), "omb-copilot-mcp-"));
+    const cleanup = () => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    try {
+      const instance = await createAcpDriver({
+        ...SUPPORT,
+        applyTurnEnv(env, { threadId, mcpServers }) {
+          const path = join(directory, `${createHash("sha256").update(threadId).digest("hex")}.json`);
+          const names = copilotServerNames(mcpServers.map((server) => server.name));
+          const servers = Object.fromEntries(mcpServers.map((server, index) => [names[index], "command" in server
+            ? { type: "local", command: server.command, args: server.args,
+              env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])), tools: ["*"] }
+            : { type: server.type, url: server.url,
+              headers: Object.fromEntries(server.headers.map(({ name, value }) => [name, value])), tools: ["*"] }]));
+          writeFileAtomicIfChanged(path, JSON.stringify({ mcpServers: servers }), { mode: 0o600, durable: false });
+          env.OMB_COPILOT_MCP_CONFIG = path;
+        },
+        resolveCommand(env, config) {
+          const path = env.OMB_COPILOT_MCP_CONFIG;
+          if (!path) throw new Error("GitHub Copilot's tool configuration was not prepared.");
+          return Promise.resolve({ command: config.cli, args: ["--additional-mcp-config", `@${path}`] });
+        },
+      }).create(input);
+      const dispose = instance.dispose;
+      instance.dispose = async () => {
+        try { await dispose(); } finally { await cleanup(); }
+      };
+      return instance;
+    } catch (error) {
+      await cleanup();
+      throw error;
+    }
+  },
+};

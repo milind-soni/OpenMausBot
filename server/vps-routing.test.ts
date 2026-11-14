@@ -19,10 +19,11 @@ import { VPS_CONTAINER_LABEL, VPS_IMAGE, VPS_MANAGED_LABEL, VPS_VIEWER_LABEL, vp
 import { CONTROL_BUSY, CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import type { RoutineSchedule } from "../shared/routines.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
+const PORT = workerPort(18800, 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const IMAGE_ID = `sha256:${"a".repeat(64)}`;
 const CONTAINER_ID = "b".repeat(64);
@@ -203,6 +204,7 @@ posixOnly("VPS turn routing e2e (fake ACP fleet + fake docker over SSH)", () => 
     writeFileSync(join(fakeBin, "ssh"), `#!${process.execPath}
 import { createServer } from 'node:net';
 const args = process.argv.slice(2);
+if (!args.includes('-L')) process.exit(0);
 const forward = args[args.indexOf('-L') + 1];
 const port = Number(forward.split(':')[1]);
 createServer(socket => socket.end()).listen(port, '127.0.0.1');

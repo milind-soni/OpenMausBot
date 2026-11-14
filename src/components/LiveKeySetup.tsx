@@ -1,12 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api, useStore, type ConfigStatus } from "@/state/store";
-import { liveDisclosure } from "@/lib/call-mode";
+import { liveDisclosure, liveKeyCopy } from "@/lib/call-mode";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
-export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void; compact?: boolean }) {
+/**
+ * The server binds a key to the provider set when the key arrives, so the provider select is held while a save is
+ * pending (`onSaving`), and no key is sent while a provider change is (`locked`).
+ */
+export function LiveKeySetup({ onSaved, onSaving, locked = false, compact = false }: {
+  onSaved: () => void;
+  onSaving?: (saving: boolean) => void;
+  locked?: boolean;
+  compact?: boolean;
+}) {
   const { state, dispatch } = useStore();
+  const provider = state.config?.live?.provider;
+  const azure = provider === "azure";
+  const fish = provider === "fish";
+  const copy = liveKeyCopy(provider);
   const [key, setKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -17,13 +30,14 @@ export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void
   }, []);
   const save = async () => {
     const value = key.trim();
-    if (!value || saving) return;
+    if (!value || saving || locked) return;
     setSaving(true);
+    onSaving?.(true);
     setError(null);
     try {
       const status: ConfigStatus = window.ogb?.setCredential
-        ? await window.ogb.setCredential("openaiLiveKey", value)
-        : await api("/api/config", { method: "PUT", body: JSON.stringify({ live: { key: value } }) });
+        ? await window.ogb.setCredential(fish ? "fishAudioKey" : "openaiLiveKey", value)
+        : await api("/api/config", { method: "PUT", body: JSON.stringify(fish ? { tts: { fishKey: value } } : { live: { key: value } }) });
       dispatch({ type: "configStatus", config: status });
       // The save may finish after the prompt was dismissed; never turn it into a call the user already cancelled.
       if (!mounted.current) return;
@@ -33,6 +47,7 @@ export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void
       if (mounted.current) setError(saveError instanceof Error ? saveError.message : String(saveError));
     } finally {
       if (mounted.current) setSaving(false);
+      onSaving?.(false);
     }
   };
   return (
@@ -46,23 +61,23 @@ export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void
         void save();
       }}
     >
-      <div className="text-[14px] font-medium text-ink">{t("call.live.keyTitle")}</div>
-      <div className="text-[13px] leading-[1.45] text-ink-secondary">{t("call.live.keyExplain")}</div>
-      <div className="text-[13px] leading-[1.45] text-ink-secondary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true })}</div>
+      <div className="text-[14px] font-medium text-ink">{t(copy.title)}</div>
+      <div className="text-[13px] leading-[1.45] text-ink-secondary">{t(copy.explain)}</div>
+      <div className="text-[13px] leading-[1.45] text-ink-secondary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, fish })}</div>
       <input
         type="password"
         autoComplete="off"
         spellCheck={false}
         value={key}
         onChange={(event) => setKey(event.target.value)}
-        placeholder="sk-…"
-        aria-label={t("call.live.keyField")}
+        placeholder={azure || fish ? "…" : "sk-…"}
+        aria-label={t(copy.field)}
         className="rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent/60"
       />
       {error && <div className="text-[12px] text-danger">{error}</div>}
       <button
         type="submit"
-        disabled={!key.trim() || saving}
+        disabled={!key.trim() || saving || locked}
         className="self-start rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
       >
         {saving ? t("call.live.keySaving") : compact ? t("common.save") : t("call.live.keySaveAndCall")}

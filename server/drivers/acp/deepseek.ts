@@ -23,7 +23,6 @@
 // Picker ids are `<provider>/<model>` so bot settings, badges and config.json
 // stay readable; resolveTurnModel turns them into dsh's wire pair just before
 // the core selects the model.
-import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,8 +30,9 @@ import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
-import { resolveCli } from "../../procs.ts";
+import { resolveCli, spawnCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { acpVariantOption } from "./config-options.ts";
 
 export const DEEPSEEK_MODELS: ModelCatalog = {
   default: "deepseek-official/deepseek-v4-flash",
@@ -163,6 +163,9 @@ export function parseDeepSeekCatalog(sessionResult: unknown): ModelCatalog {
   collect(option?.options, undefined);
   if (!out.length) throw new Error("dsh advertised no models");
   const current = typeof option?.currentValue === "string" ? deepseekPickerId(option.currentValue) : null;
+  const selected = out.find((model) => model.id === current);
+  const variants = acpVariantOption(sessionResult)?.options;
+  if (selected && variants?.length) selected.variants = variants;
   return {
     default: current && out.some((row) => row.id === current) ? current : out[0]!.id,
     options: out,
@@ -181,19 +184,24 @@ function catalogTimeoutMs(env: Record<string, string | undefined>): number {
   return Number.isInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647 ? parsed : DEEPSEEK_MODELS_DEFAULT_TIMEOUT_MS;
 }
 
+const VARIANT_DISCOVERY_MODEL_LIMIT = 128;
+
 /** Ask the installed dsh what it offers: initialize, session/new in `cwd`,
- * read the catalog, session/close. Rejects on any failure so the core keeps
- * the last usable catalog; never resolves to an empty or guessed list. */
+ * read each model's thinking choices (a model dsh won't switch to keeps none), session/close.
+ * Rejects on any other failure so the core keeps the last usable catalog; never resolves to an
+ * empty or guessed list. */
 export function fetchDeepSeekCatalog(
   cli: string,
   env: Record<string, string | undefined>,
   cwd: string,
+  allowEnv: readonly string[] = [],
 ): Promise<ModelCatalog> {
   return new Promise((resolve, reject) => {
-    let child: ReturnType<typeof spawn>;
+    let child: ReturnType<typeof spawnCli>;
     try {
-      const resolved = resolveCli(cli, ["--profile", "acp"], env);
-      child = spawn(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, windowsHide: true });
+      // Security: while the bot box is on, dsh runs in it, as a bot's turn does: it reads ~/.dsh, which a bot can write.
+      const resolved = resolveCli(cli, ["--profile", "acp"], env as NodeJS.ProcessEnv);
+      child = spawnCli(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: { ...env, ...resolved.env }, box: { allowEnv } });
     } catch (error) {
       return reject(error instanceof Error ? error : new Error(String(error)));
     }
@@ -242,6 +250,18 @@ export function fetchDeepSeekCatalog(
     let sessionReqId = 0;
     let closeId = 0;
     let catalog: ModelCatalog | null = null;
+    let sessionId: string | null = null;
+    let selectId = 0;
+    let selectedModel: ModelCatalog["options"][number] | undefined;
+    const pendingModels: ModelCatalog["options"] = [];
+    const nextModel = () => {
+      selectedModel = pendingModels.shift();
+      if (selectedModel) {
+        selectId = send("session/set_config_option", { sessionId, configId: "model", value: deepseekWireValue(selectedModel.id) });
+      } else {
+        closeId = send("session/close", { sessionId });
+      }
+    };
     child.stdout?.on("data", (chunk) => {
       buf += String(chunk);
       let nl: number;
@@ -258,7 +278,7 @@ export function fetchDeepSeekCatalog(
           if (!msg.result) return finish({ error: new Error(`dsh rejected initialize: ${JSON.stringify(msg.error ?? msg)}`) });
           sessionReqId = send("session/new", { cwd, mcpServers: [] });
         } else if (sessionReqId && msg?.id === sessionReqId) {
-          const sessionId = typeof msg.result?.sessionId === "string" ? msg.result.sessionId : null;
+          sessionId = typeof msg.result?.sessionId === "string" ? msg.result.sessionId : null;
           try {
             catalog = parseDeepSeekCatalog(msg.result);
           } catch (error) {
@@ -267,8 +287,17 @@ export function fetchDeepSeekCatalog(
             return finish({ error: error instanceof Error ? error : new Error(String(error)) });
           }
           if (!sessionId) return finish({ catalog });
-          // Leave no half-open session behind in dsh's persisted list.
-          closeId = send("session/close", { sessionId });
+          if (catalog.options.length <= VARIANT_DISCOVERY_MODEL_LIMIT) {
+            const current = offeredWireValues(msg.result, "model").current;
+            pendingModels.push(...catalog.options.filter((model) => deepseekWireValue(model.id) !== current));
+          }
+          nextModel();
+        } else if (selectId && msg?.id === selectId && selectedModel) {
+          if (offeredWireValues(msg.result, "model").current === deepseekWireValue(selectedModel.id)) {
+            const variants = acpVariantOption(msg.result)?.options;
+            if (variants?.length) selectedModel.variants = variants;
+          }
+          nextModel();
         } else if (closeId && msg?.id === closeId) {
           finish({ catalog: catalog! });
         }
@@ -308,8 +337,11 @@ export const deepseekSupport: AcpSupport = {
   selectModel: { configId: "model" },
   modelVariants: true,
   resumeMethod: "resume",
+  // dsh 0.2 rejects session/resume of a session still open in the same process
+  // ("session is already active"), so a turn with new tools needs a new process.
+  restartOnMcpChange: true,
   // Refresh only: a fresh profile boot can take long, and startup must not wait on it.
-  resolveModels: (env, config) => fetchDeepSeekCatalog(config.cli || "dsh", env, tmpdir()),
+  resolveModels: (env, config, _instanceId, _fresh, allowEnv) => fetchDeepSeekCatalog(config.cli || "dsh", env, tmpdir(), allowEnv),
   resolveModelsOnCreate: false,
 
   // initialize advertises no auth methods; the key rides in the child env or

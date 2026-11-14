@@ -29,9 +29,10 @@ import { memberBotPatchViolation, requestSource, type RequestAuth } from "../req
 import type { RoutineManager } from "../routines.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import { parseConnectorTools } from "../connector-tools.ts";
-import { sectionKey, type BotRecord, type GroupRecord, type Store } from "../store.ts";
+import { sectionKey, type BotRecord, type GroupRecord, type Store, type TaskRecord } from "../store.ts";
 import * as vps from "../vps-computer.ts";
 import { vpsSshAliasForBot } from "../vps-hosts.ts";
+import { refusalBody, userError } from "../user-errors.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import type { ModelSelectionCheck } from "./bots-create.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -53,7 +54,6 @@ export interface BotPatchRouteDeps {
   hostedWorkspace: boolean;
   hostedFullAccessRefusal: string;
   desktopManaged: boolean;
-  maxWorkspaceBots: number;
   broadcast(payload: Record<string, unknown>): void;
   wireBot(bot: BotRecord): WireBot;
   publicGroupState(group: GroupRecord): WireGroup;
@@ -76,12 +76,20 @@ export interface BotPatchRouteDeps {
   levelOf(auth: RequestAuth, botId: string): "none" | "view" | "chat" | "edit";
   /** A Team Cloud, where a bot's sharing follows its visibility. */
   team: boolean;
+  /** The bot's conversations the main-thread resolver may pick: a Team Cloud keeps only team-visible ones. */
+  mainThreadTasks(botId: string): readonly TaskRecord[];
+  /** A Team Cloud: marks a bot's shared conversation read or unread for this person alone; false for a private chat. */
+  personMarkThread?(auth: RequestAuth, threadId: string, unread: boolean): boolean;
+  /** The conversation this session sees the bot on (on a Team Cloud never someone else's private chat). */
+  shownThread?(auth: RequestAuth, bot: BotRecord): string;
+  /** The Chief of Staff of a scope changed: these bots' flags did. */
+  chiefChanged?(changed: readonly BotRecord[]): void;
 }
 
 export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, browserRuntime, browserLive, memoryUpkeep, cacheKeepWarm, hostedModels, supportsApprovalMode, activeVpsThreads,
-    hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED, maxWorkspaceBots: MAX_WORKSPACE_BOTS,
+    hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED,
     broadcast, wireBot, publicGroupState, audienceChanged, storedAvatarExists, requestedTaskBot, threadBusy, activeGroupTurnForBot,
     checkedModelSelection, engineSwitchNeedsAsk, currentBrowserSession, interruptAllDirectThreads, cancelGroupTurnOperations,
     revokeInternalCapabilitiesForThread, runningTurnInstance, closeOpenApprovals, assertTeamComputerChangeIdle, forgetTemporaryBrowser,
@@ -124,6 +132,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       const existingBot = store.bot(m[1]); const defaultBotRefused = defaultBotPatchRefusal(existingBot, body);
       if (defaultBotRefused) return json(res, 400, { error: defaultBotRefused });
+      if (existingBot && typeof body.unread === "boolean" && deps.shownThread && deps.personMarkThread?.(auth, deps.shownThread(auth, existingBot), body.unread)) {
+        delete body.unread;
+        if (!Object.keys(body).length) return json(res, 200, { bot: wireBot(existingBot) });
+      }
       const rawSelection = (body as Record<string, unknown>).modelSelection;
       if (body.threadId !== undefined && rawSelection === undefined) {
         return json(res, 400, { error: "threadId goes with modelSelection" });
@@ -161,11 +173,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           movedTask ? { selection: movedTask.modelSelection, busy: threadBusy(movedTask.id, movedTask.threadId) } : undefined,
           body.requireAvailableModel === true,
         );
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
         normalizedSelection = checked.selection;
         if (existingBot && activeGroupTurnForBot(existingBot.id)) {
           const groupChecked = checkedModelSelection(normalizedSelection, { selection: existingBot.modelSelection, busy: true });
-          if (!groupChecked.ok) return json(res, groupChecked.status, { error: groupChecked.error });
+          if (!groupChecked.ok) return json(res, groupChecked.status, refusalBody(groupChecked));
         }
       }
       const profile = parseBotProfilePatch(body);
@@ -189,6 +201,8 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       for (const key of ["unread", "cloudBackend", "color", "mascotExpression", "mascotBody", "pinned", "hidden", "sidebarHidden", "welcomed"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
       }
+      // null clears the default-bot mark, demoting the bot to a regular (deletable) one.
+      if (body.defaultBot === null && existingBot?.defaultBot) patch.defaultBot = undefined;
       const computerSpecified = Object.prototype.hasOwnProperty.call(body, "computer");
       let requestedComputer = existingBot?.computer;
       if (computerSpecified) {
@@ -214,6 +228,14 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           patch.pinnedMessageId = body.pinnedMessageId;
         } else return json(res, 400, { error: "pinnedMessageId must be a message id" });
       }
+      // null clears the choice; otherwise an open conversation the main-thread resolver may pick, never a routine run or archived.
+      // Same 400 for unknown and ineligible ids, so a private thread's existence is not revealed.
+      if (body.mainThreadChoice !== undefined) {
+        const chosen = typeof body.mainThreadChoice === "string" ? deps.mainThreadTasks(m[1]).find((task) => task.threadId === body.mainThreadChoice) : null;
+        if (body.mainThreadChoice === null) patch.mainThreadChoice = undefined;
+        else if (chosen && !chosen.routineRunId && chosen.archivedAt === undefined) patch.mainThreadChoice = chosen.threadId;
+        else return json(res, 400, { error: "mainThreadChoice must be one of this bot's conversations" });
+      }
       if (section !== undefined) patch.section = section ?? undefined;
       if (body.chiefOfStaff === false) patch.chiefOfStaff = false;
       if (body.fallback !== undefined) {
@@ -227,8 +249,9 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
             return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
           }
           if (!registry.get(row.instanceId)) return json(res, 400, { error: `fallback engine "${row.instanceId}" is not available` });
-          if (chain.some((seen) => seen.instanceId === row.instanceId)) continue;
-          chain.push({ instanceId: row.instanceId, model: row.model.trim() });
+          const model = row.model.trim();
+          if (chain.some((seen) => seen.instanceId === row.instanceId && seen.model === model)) continue;
+          chain.push({ instanceId: row.instanceId, model });
         }
         patch.fallback = chain;
       }
@@ -251,7 +274,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       if (body.outbound !== undefined) {
         const policy = normalizeOutboundPolicy(body.outbound);
-        if (!policy) return json(res, 400, { error: "outbound must be { policy: ask | allow, dailyCap: 1..1000 }" });
+        if (!policy) return json(res, 400, { error: "outbound must be { policy: ask | allow }" });
         patch.outbound = policy;
       }
       if (body.composio !== undefined) {
@@ -262,6 +285,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (body.voiceNotes !== undefined) {
         if (typeof body.voiceNotes !== "boolean") return json(res, 400, { error: "voiceNotes must be true or false" });
         patch.voiceNotes = body.voiceNotes;
+      }
+      // null: follow the Voice setting again.
+      if (body.voiceNoteEveryReply !== undefined) {
+        if (body.voiceNoteEveryReply !== null && typeof body.voiceNoteEveryReply !== "boolean") return json(res, 400, { error: "voiceNoteEveryReply must be true, false or null" });
+        patch.voiceNoteEveryReply = body.voiceNoteEveryReply ?? undefined;
       }
       // Spends the Cloud plan's monthly X research calls: an admin decision too.
       if (body.xResearch !== undefined) {
@@ -520,49 +548,19 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           error: "Auto mode on this computer requires confirming the warning first (acknowledgeLocalAuto)",
         });
       }
-      if (body.approvePeerComms !== undefined) {
-        if (typeof body.approvePeerComms !== "boolean") {
-          return json(res, 400, { error: "approvePeerComms must be true or false" });
-        }
-        patch.approvePeerComms = body.approvePeerComms;
-      }
-      // null: every visible bot; an array (even empty) is the explicit wiring. Narrowing is free;
-      // widening needs acknowledgePeerScope, since any loopback caller (a bot with Bash) gets admin.
-      if (body.peers !== undefined) {
-        let nextPeers: string[] | undefined;
-        if (body.peers === null) nextPeers = undefined;
-        else if (
-          !Array.isArray(body.peers) ||
-          body.peers.some((peerId: unknown) => typeof peerId !== "string")
-        ) {
-          return json(res, 400, { error: "peers must be a list of bot ids, or null for every bot" });
-        } else {
-          nextPeers = [...new Set<string>(body.peers)].slice(0, MAX_WORKSPACE_BOTS);
-        }
-        const currentPeers = existingBot?.peers;
-        const widensReach =
-          Array.isArray(currentPeers) &&
-          (nextPeers === undefined || nextPeers.some((peerId) => !currentPeers.includes(peerId)));
-        if (widensReach && body.acknowledgePeerScope !== true) {
-          return json(res, 400, {
-            error: "Letting a bot talk to more bots requires confirming it first (acknowledgePeerScope)",
-          });
-        }
-        patch.peers = nextPeers;
-      }
       if (body.managedSections !== undefined) {
         const parsed = z.array(z.string().trim().max(60)).max(100).safeParse(body.managedSections);
         if (!parsed.success) return json(res, 400, { error: "managedSections must be a list of up to 100 department names (60 characters each)" });
         const sections = [...new Set(parsed.data)];
         const newSections = sections.filter(section => !(existingBot?.managedSections ?? []).includes(section));
         if (newSections.some(section => section !== "" && !store.sections.includes(section))) {
-          return json(res, 400, { error: "Create the named department before making a Chief responsible for it" });
+          return json(res, 400, userError("serverError.department.createFirst"));
         }
         if (sections.length && !(body.chiefOfStaff === true || (existingBot?.chiefOfStaff && body.chiefOfStaff !== false))) {
-          return json(res, 400, { error: "Only a Chief of Staff can be made responsible for additional departments" });
+          return json(res, 400, userError("serverError.department.chiefResponsibility"));
         }
         if (newSections.length && body.acknowledgePeerScope !== true) {
-          return json(res, 400, { error: "Confirm which additional departments this Chief is responsible for (acknowledgePeerScope)" });
+          return json(res, 400, userError("serverError.department.confirmResponsibility"));
         }
         patch.managedSections = sections;
       }
@@ -585,8 +583,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       // the bot they constrain. An originless, session-less loopback caller may loosen only while every bot is idle.
       const loosened: string[] = [];
       const trustPatch = patch as Pick<Partial<BotRecord>, "outbound" | "connectorScopes" | "fallback">;
-      if (body.outbound !== undefined && trustPatch.outbound?.policy === "allow" &&
-          (existingBot?.outbound?.policy !== "allow" || trustPatch.outbound.dailyCap > existingBot.outbound.dailyCap)) loosened.push("outbound");
+      if (body.outbound !== undefined && trustPatch.outbound?.policy === "allow" && existingBot?.outbound?.policy !== "allow") loosened.push("outbound");
       if (body.connectorScopes !== undefined && existingBot?.connectorScopes &&
           (!trustPatch.connectorScopes || Object.entries(trustPatch.connectorScopes.apps).some(([slug, scope]) =>
             !existingBot.connectorScopes!.apps[slug] || (scope === "write" && existingBot.connectorScopes!.apps[slug] === "read")))) loosened.push("connectorScopes");
@@ -603,15 +600,8 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       // A shell can forge an Origin header: new cross-team authority from local scripts only while every bot is idle.
       if (loosened.includes("managedSections") && auth.kind === "loopback" && !DESKTOP_MANAGED && store.bots.some(bot => bot.busy)) {
-        return json(res, 409, { error: "Stop running bots before granting access to another department, or use the desktop app or a paired Full-access session." });
+        return json(res, 409, userError("serverError.department.stopBots"));
       }
-      if (body.peers !== undefined && Array.isArray(existingBot?.peers)) {
-        const nextPeers = patch.peers;
-        if (nextPeers === undefined || (Array.isArray(nextPeers) && nextPeers.some((peerId) => !existingBot.peers!.includes(peerId)))) {
-          loosened.push("peers");
-        }
-      }
-      if (body.approvePeerComms === false && existingBot?.approvePeerComms === true) loosened.push("approvePeerComms");
       if (section !== undefined && sectionKey(existingBot?.section) !== sectionKey(section)) loosened.push("section");
       if (Array.isArray(patch.alwaysAllow) && patch.alwaysAllow.some((key) => !(existingBot?.alwaysAllow ?? []).includes(key))) {
         loosened.push("alwaysAllow");
@@ -687,10 +677,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         const current = store.projectBotForTask(movedTask.id, movedTask.threadId);
         if (!current) return json(res, 404, { error: "no such task" });
         const checked = checkedModelSelection(normalizedSelection, { selection: current.modelSelection, busy: threadBusy(current.id, current.threadId) });
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
         if (freshBrowserBot && activeGroupTurnForBot(freshBrowserBot.id)) {
           const groupChecked = checkedModelSelection(normalizedSelection, { selection: freshBrowserBot.modelSelection, busy: true });
-          if (!groupChecked.ok) return json(res, groupChecked.status, { error: groupChecked.error });
+          if (!groupChecked.ok) return json(res, groupChecked.status, refusalBody(groupChecked));
         }
       }
       if (freshBrowserBot && body.browserProfile !== undefined &&
@@ -727,6 +717,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           ? store.setChiefOfStaff(bot.id)
           : [];
       if (chiefChanges === null) return json(res, 404, { error: "no such bot" });
+      if (chiefChanges.length) deps.chiefChanged?.(chiefChanges);
       if (beforeProfile) {
         const now = store.bot(bot.id)!;
         recordProfileChange(bot.id, "user", "api", beforeProfile, profileSnapshot(now));

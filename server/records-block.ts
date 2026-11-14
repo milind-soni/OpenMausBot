@@ -1,6 +1,8 @@
 // One sanitiser for text the server hands a model from outside: mail and invites in records blocks, connected-app
 // events, webhook payloads, and connected-app results inside an unattended run. It cannot make a model ignore what the
 // text says; it only keeps the text from passing for our own markers.
+import { escapeNotes } from "./peer-provenance.ts";
+
 export const RECORDS_END = "[end of records]";
 // Characters with no width: dropped, so a marker split by one is whole again before it is checked.
 const INVISIBLE = /[\u00ad\u200b-\u200f\u2060-\u2064\ufeff\u061c\u180e\u115f\u3164\u{e0000}-\u{e007f}]|\u034f|[\ufe00-\ufe0f]/gu;
@@ -17,7 +19,7 @@ const defuseMarkers = (text: string): string => text.replace(FORGED_END, "(end o
 /** Outside text with its lines kept: no invisible or control characters but newlines and tabs, and none of our markers. */
 export function defuse(text: string): string {
   const visible = Array.from(text.replace(INVISIBLE, ""), (ch) => ch !== "\n" && ch !== "\t" && isControl(ch.codePointAt(0)!) ? " " : ch).join("");
-  return defuseMarkers(visible.replace(LINE_AND_BIDI, " "));
+  return escapeNotes(defuseMarkers(visible.replace(LINE_AND_BIDI, " ")));
 }
 
 /** `defuse` on one line of at most `max` code points. */
@@ -41,8 +43,11 @@ export function recordsText(source: string, text: string, max = 48_000): string 
 }
 
 export const CARD_RECORDS_SOURCE = "a card shown to the person in this chat, built from their mail, calendar or other bots' work; not your own words";
+/** The app's own tip: say so, so the bot neither disowns it as a stranger's message nor calls it suspicious when asked about it. */
+export const SETUP_RECORDS_SOURCE =
+  "a tip MausBot (the app) itself showed to the person in this chat, labelled as such; genuine, not your own words and not from a stranger. Jev (typesafe.ai) and Cloudflare Workers AI are helper-model services whose key is added in Settings";
 
 /** Security invariant: a card the server built from records replays into a turn only through this block. */
-export function cardRecords(text: string): string {
-  return recordsBlock(CARD_RECORDS_SOURCE, text.split("\n"));
+export function cardRecords(text: string, source = CARD_RECORDS_SOURCE): string {
+  return recordsBlock(source, text.split("\n"));
 }

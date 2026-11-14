@@ -165,13 +165,13 @@ describe("what a row records", () => {
   });
 
   it("splits a bot's audience from its other permissions and ignores display fields", () => {
-    const before = botAuditSnapshot({ id: "b", color: "red", approvalMode: "ask", peers: ["x"] });
-    const after = botAuditSnapshot({ id: "b", color: "blue", approvalMode: "ask", peers: [], visibility: { people: ["ada@example.test"] } });
+    const before = botAuditSnapshot({ id: "b", color: "red", approvalMode: "ask" });
+    const after = botAuditSnapshot({ id: "b", color: "blue", approvalMode: "auto", visibility: { people: ["ada@example.test"] } });
     const rows = botChangeRows({ id: "b", name: "Payroll" }, before, after);
     expect(rows).toEqual([
       { category: "visibility", action: "visibility.update", target: { kind: "bot", id: "b", name: "Payroll" }, changed: ["visibility"],
         before: { visibility: "everyone" }, after: { visibility: { people: ["ada@example.test"] } } },
-      { category: "bot", action: "bot.update", target: { kind: "bot", id: "b", name: "Payroll" }, changed: ["peers"], before: { peers: ["x"] }, after: { peers: [] } },
+      { category: "bot", action: "bot.update", target: { kind: "bot", id: "b", name: "Payroll" }, changed: ["approvalMode"], before: { approvalMode: "ask" }, after: { approvalMode: "auto" } },
     ]);
     expect(botChangeRows({ id: "b" }, botAuditSnapshot({ color: "red" }), botAuditSnapshot({ color: "blue" }))).toEqual([]);
   });
@@ -242,6 +242,13 @@ describe("the Activity view", () => {
     expect(parseActivityWhat(null)).toBe("all");
     expect(parseActivityWhat("budget")).toBe("budget");
     expect(parseActivityWhat("nonsense")).toBeNull();
+  });
+
+  it("carries coded phone summaries into the global activity view without changing CSV words", () => {
+    const row: DecisionRow = { ...decisions[0]!, summary: "allowed PHONE_CREATE_EVENT", summaryCode: "chat.notice.phone.allowed", summaryParams: { tool: "PHONE_CREATE_EVENT" } };
+    const entries = activityEntries([row], [], { what: "decisions" });
+    expect(entries).toEqual([expect.objectContaining({ summary: row.summary, summaryCode: row.summaryCode, summaryParams: row.summaryParams })]);
+    expect(activityCsv(entries)).toContain("allowed PHONE_CREATE_EVENT");
   });
 
   it("exports CSV with formula cells neutralised", () => {

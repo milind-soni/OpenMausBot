@@ -10,7 +10,7 @@ import type { TeamConnectionsHost } from "./team-connections-host.ts";
 
 const remote = (url = "https://data.example.com/mcp"): StoredMcpServer => ({ type: "http", url, headers: {}, enabled: false }) as StoredMcpServer;
 
-function fixture(options: { refuse?: (name: string) => string | undefined } = {}) {
+function fixture(options: { refuse?: (name: string) => string | undefined; personal?: string[]; keys?: Parameters<typeof createMcpConfig>[0]["keys"] } = {}) {
   const cfg: Pick<AppConfig, "mcpServers" | "postiz"> = { mcpServers: {} };
   const mcpOAuth = new McpOAuthManager({ file: join(DATA_DIR, "mcp-config-oauth.json") });
   const forget = vi.spyOn(mcpOAuth, "forget");
@@ -20,7 +20,7 @@ function fixture(options: { refuse?: (name: string) => string | undefined } = {}
     cfg,
     sessions: { isLive: () => true },
     mcpOAuth,
-    teamConnections: { personMcp: () => [], people: {} as TeamConnectionsHost["people"] },
+    teamConnections: { personMcp: () => options.personal ?? [], people: {} as TeamConnectionsHost["people"] },
     cloudHome: null,
     fallbackPublicUrl: null,
     mcpConfigBusy: { get: () => busy, set: (value) => { busy = value; } },
@@ -29,11 +29,61 @@ function fixture(options: { refuse?: (name: string) => string | undefined } = {}
     persistMcpServers: (next) => { cfg.mcpServers = next; },
     savedCustomDomain: () => null,
     changed,
+    ...(options.keys ? { keys: options.keys } : {}),
   });
   return { cfg, config, changed, forget, setBusy: (value: boolean) => { busy = value; } };
 }
 
+describe("an MCP server's key kept in the Vault", () => {
+  const server = { command: "npx", args: ["x"], env: { KEY: "vault:88888888-8888-4888-8888-888888888888" }, enabled: true };
+  const off = { ok: false as const, reason: "removed" as const, why: "its key is no longer in the Vault." };
+
+  it("Test reads it when it runs, and without it answers like a missing key instead of starting the server", async () => {
+    const warm = vi.fn(async () => {});
+    const resolve = vi.fn((_name: string, target: StoredMcpServer) => ({ ok: true as const, server: { ...target, env: { KEY: "sk_fake-tested" } } }));
+    const { cfg, config } = fixture({ keys: { warm, resolve } as never });
+    cfg.mcpServers = { keyed: server as never };
+    const probe = vi.spyOn(probeModule, "probeMcpServer").mockResolvedValue({ ok: true, tools: [] });
+    expect(await config.test("keyed", { signal: new AbortController().signal, asBot: { id: "b", cwd: "/" } })).toMatchObject({ status: 200, body: { ok: true } });
+    expect(warm).toHaveBeenCalledOnce();
+    expect(resolve).toHaveBeenCalledWith("keyed", expect.anything(), "b");
+    expect((probe.mock.calls[0]![0] as { env: Record<string, string> }).env.KEY).toBe("sk_fake-tested");
+    resolve.mockReturnValueOnce(off as never);
+    probe.mockClear();
+    expect(await config.test("keyed", { signal: new AbortController().signal })).toEqual({ status: 200, body: { ok: false, reason: "keys", error: "its key is no longer in the Vault." } });
+    expect(probe).not.toHaveBeenCalled();
+    probe.mockRestore();
+  });
+
+  it("a server added or replaced by a move is given its items before it is saved, and removing it forgets them", () => {
+    const grant = vi.fn();
+    const forgetServer = vi.fn();
+    const { cfg, config } = fixture({ keys: { grant, forgetServer } as never });
+    expect("body" in config.add("keyed", server as never, ["88888888-8888-4888-8888-888888888888"])).toBe(true);
+    expect(grant).toHaveBeenCalledWith("keyed", ["88888888-8888-4888-8888-888888888888"]);
+    expect(cfg.mcpServers).toHaveProperty("keyed");
+    grant.mockClear();
+    expect("body" in config.replace("keyed", server as never, ["99999999-9999-4999-8999-999999999999"])).toBe(true);
+    expect(grant).toHaveBeenCalledWith("keyed", ["99999999-9999-4999-8999-999999999999"]);
+    expect("body" in config.remove("keyed")).toBe(true);
+    expect(forgetServer).toHaveBeenCalledWith("keyed");
+  });
+});
+
 describe("shared MCP config", () => {
+  it("keeps personal header and test sign-in refusals coded without changing English or status", async () => {
+    const { cfg, config } = fixture({ personal: ["personal"] });
+    const entry = { ...remote(), headers: { Authorization: "Bearer fixture-secret" } } as StoredMcpServer;
+    const refusal = { status: 400, error: "Personal MCP header values cannot be saved in shared configuration. Save your key in your personal connection.", errorKey: "serverError.mcp.personalHeadersShared" };
+    expect(config.add("personal", entry)).toEqual(refusal);
+    cfg.mcpServers = { personal: remote() as never };
+    expect(config.replace("personal", entry)).toEqual(refusal);
+    cfg.mcpServers = {};
+    expect(await config.addMany(async () => ({ servers: { personal: entry } }))).toEqual(refusal);
+    cfg.mcpServers = { personal: { ...remote(), headers: { Authorization: "" } } as never };
+    expect(await config.test("personal", { signal: new AbortController().signal })).toEqual({ status: 403, error: "Sign in to the team to test your own connection.", errorKey: "serverError.mcp.testSignInFirst" });
+  });
+
   it("enabling a server the policy refuses returns 403 managed_policy and leaves it off", () => {
     const { cfg, config } = fixture({ refuse: (name) => name === "blocked" ? "Your admin hasn't approved this server." : undefined });
     cfg.mcpServers = { blocked: remote() as never };
@@ -97,6 +147,13 @@ describe("shared MCP config", () => {
     await config.test("notes", { signal: new AbortController().signal, asBot: { id: "bot-1", cwd: "/tmp/bot-1" } });
     expect(probe.mock.calls[0]?.[3]).toMatchObject({ asBot: { id: "bot-1", cwd: "/tmp/bot-1" } });
     probe.mockRestore();
+  });
+
+  it("says which server it could not find", async () => {
+    const { config } = fixture();
+    const missing = { status: 404, error: 'MCP server "mail" not found. It may have been removed: check Apps → MCP servers.' };
+    expect(config.remove("mail")).toEqual(missing);
+    await expect(config.test("mail", { signal: new AbortController().signal })).resolves.toEqual(missing);
   });
 
   it("a write while busy returns 409 \"MCP servers are already being updated.\"", () => {

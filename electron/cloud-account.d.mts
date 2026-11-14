@@ -24,6 +24,9 @@ export interface CloudAccountState {
   machine?: import("./cloud-home.mjs").CloudMachine;
   /** Connected: the teams this account is in, each with its Cloud; absent while it is in none. */
   teams?: import("./cloud-home.mjs").CloudTeam[];
+  /** Connected, with no Cloud of the account's own: the team it was invited into, which opens first, before any plan is
+   * offered (the Admin's `landing`). */
+  landing?: { teamId: string };
   /** Connected to an Admin that lists every Cloud of the person's (contract v1 `clouds`): each of them, My Cloud first.
    * Absent from an older Admin, whose `machine` and `teams` say everything. */
   clouds?: import("./cloud-list.mjs").CloudListEntry[];
@@ -172,6 +175,37 @@ export interface CloudAccountBridge {
   onState(callback: (state: CloudAccountState) => void): () => void;
   files?: import("./cloud-sync.mjs").CloudFilesBridge;
 }
+/** Who is signed in on this device, as the You menu shows it. `signIn`: this account's sign-in has ended here. */
+export interface AccountRow { id: string; email: string; signIn?: true }
+export interface AccountsView { active: AccountRow | null }
+export interface AccountSwitchResult { outcome: "switched" | "signed-out" | "moving" | "sign-in" | "gone" | "failed"; email?: string; view: AccountsView }
+/** What a click on a place of another account answers when it didn't switch: nothing moved. `sign-in`: that sign-in has ended. */
+export interface RailOpenResult { outcome: "switched" | "moving" | "sign-in" | "gone" | "failed"; email?: string }
+/** `added`: kept signed in, not switched to, while this computer's move finishes; `already`: that account is the one signed in. */
+export type AccountAddResult =
+  | { outcome: "switched" | "added" | "already"; email?: string; view: AccountsView }
+  | { outcome: "wrong-code"; triesLeft: number }
+  | { outcome: Exclude<import("./cloud-signin.mjs").CloudSignInVerifyFailure, "wrong-code"> };
+/** This app's own pages only: main refuses any other page. Absent on an older app. */
+export interface AccountsBridge {
+  list(): Promise<AccountsView>;
+  /** Removes that account from this device; the window goes to another signed in here, else the app is signed out. */
+  signOut(id: string): Promise<AccountSwitchResult>;
+  /** Add another account: the active account goes on until this succeeds. The attempt and the token stay in main. */
+  addStart(email: string): Promise<CloudSignInStart>;
+  addVerify(code: string): Promise<AccountAddResult>;
+  addBrowser(): Promise<{ outcome: "browser" | "failed"; code?: string }>;
+  addReopen(): Promise<void>;
+  /** How the browser's way ended, asked once the list changes: null until it has. */
+  addResult(): Promise<{ outcome: "switched" | "added" | "already" | "failed"; email?: string } | null>;
+  addCancel(): Promise<void>;
+  sheetPending(): Promise<boolean>;
+  sheetClosed(): Promise<void>;
+  onChanged(callback: () => void): () => void;
+  onOpenSheet(callback: () => void): () => void;
+}
+/** Any place's own page, from the person's click: the accounts sheet opens on the rail's page, and this page learns nothing of them. */
+export interface AccountSheetBridge { offered(): Promise<boolean>; open(): Promise<void> }
 /** On the person's own Cloud, open in this app's window: the plan, read
  * only, Manage in the browser, and Sign in again. No account, credential or address. */
 /** `signin`: this computer's sign-in ended; `tier` names the plan last verified, if any. */
@@ -217,7 +251,7 @@ export declare const STAGING_CLOUD_ORIGIN: string;
 export declare function cloudTarget(env?: Record<string, string | undefined>): {
   origin: string; staging: boolean;
   /** Under userData: the sign-in, saved servers, Files' folder, the Cloud's chosen name. */
-  file: string; environments: string; sync: string; look: string;
+  file: string; saved: string; places: string; environments: string; sync: string; look: string;
 };
 export declare const CHECKOUT_SOURCES: readonly string[];
 export declare const UPGRADE_SOURCES: readonly string[];
@@ -328,6 +362,12 @@ export interface CloudAccountClient {
   /** No sign-in needed: returns the Admin's receipt for this email-only answer. */
   updatesConsentByEmail(input: { email: string; installId: string; textVersion: string }): Promise<string>;
   withdrawUpdatesConsent(input: { status: "declined" | "withdrawn"; receipt: string }): Promise<void>;
+  /** Another account takes over: nothing more is asked or written for this sign-in. */
+  quiesce(): void;
+  /** Reads the sign-in saved in `store` afresh, keeping nothing of the one before. */
+  reload(): Promise<CloudAccountState>;
+  /** Ends a sign-in that waits on this device, at the Admin. */
+  revokeSaved(record: unknown): Promise<void>;
   close(): void;
 }
 export declare function createCloudAccountClient(options: {
@@ -346,7 +386,8 @@ export declare function createCloudAccountClient(options: {
   warn?: (message: string) => void;
   /** Files or lending waits for a sleeping Cloud to wake: the session is read every 15 s. */
   awaitingWake?: () => boolean;
+  t?: (key: string, params?: Record<string, string | number>) => string;
 }): CloudAccountClient;
 export declare function cloudPlanSnapshot(state: CloudAccountState | null | undefined, extra?: { notice?: import("./cloud-home.mjs").CloudTrialState | null }): CloudPlanSnapshot;
 /** My Cloud's line under its name in the server menus, or null for none. */
-export declare function cloudMenuSublabel(state: CloudAccountState | null | undefined, date: (value: number) => string): string | null;
+export declare function cloudMenuSublabel(state: CloudAccountState | null | undefined, date: (value: number) => string, t?: (key: string, params?: Record<string, string | number>) => string): string | null;

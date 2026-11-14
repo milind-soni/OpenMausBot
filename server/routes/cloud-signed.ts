@@ -2,6 +2,7 @@
 // log their headers, bodies or codes. A bad pairing signature counts against the pairing lockout; a health or power read
 // opens nothing, so each route has its own nonces and never locks the Admin out of pairing. The power routes are the sleep
 // handshake of a plan that sleeps (server/cloud-power.ts); the Admin calls them for no other plan.
+import { CLOUD_TIER } from "../host/cloud-plan-tier.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { BoxReport } from "../bot-box/box.ts";
 import { boxSummary } from "../cloud-health.ts";
@@ -24,8 +25,8 @@ export const CLOUD_BOX_PATH = "/api/cloud/box";
  * theirs alone is deleted here (host/team-member-left.ts). */
 export const CLOUD_TEAM_MEMBER_LEFT_PATH = "/api/cloud/team/member-left";
 
-/** The plan was cancelled, or renews again: `{"v":1,"cancelled":true|false}`, signed with the body like the sleep request.
- * While it is cancelled the home's routines wait (host/routine-holds-host.ts). */
+/** The Admin's word on the plan, signed with the body like the sleep request: `{"v":1,"cancelled":true|false}`, `{"v":1,"tier":"starter"}`,
+ * or both. While it is cancelled the home's routines wait (host/routine-holds-host.ts); the tier is kept by host/cloud-plan-tier.ts. */
 export const CLOUD_PLAN_PATH = "/api/cloud/plan";
 
 export function createCloudSignedRoutes(deps: {
@@ -33,6 +34,10 @@ export function createCloudSignedRoutes(deps: {
   sessions: Pick<SessionRegistry, "openPairing" | "revokeMember" | "attemptAllowed" | "noteFailure" | "clearFailures">;
   /** A Team Cloud: every pairing body must carry the Admin's member claim (cloud-team.ts). */
   team?: CloudTeam | null;
+  /** A pairing's `member.invitedBy`: who invited that member (team-welcome.ts); absent on a My Cloud. */
+  invited?: (member: string, by: string) => void;
+  /** The team's rule turned remote access off: no browser sign-in for a User. */
+  memberBrowserOff?: () => boolean;
   health: Pick<CloudHealth, "report">;
   /** The home's power once the server listens (null before, and on a server that is not a Cloud home). */
   power?: () => Pick<CloudPower, "report" | "prepareSleep"> | null;
@@ -46,9 +51,11 @@ export function createCloudSignedRoutes(deps: {
   policyChanged?: (() => void) | null;
   /** The plan was cancelled (true) or renews again (false); absent on a server that is not a Cloud home. */
   plan?: ((cancelled: boolean) => void) | null;
+  /** Which plan this Cloud is on now; absent on a server that is not a Cloud home. */
+  planTier?: ((tier: string) => void) | null;
   now?: () => number;
 }) {
-  const pairing = createCloudPairing({ secret: deps.secret, sessions: deps.sessions, team: deps.team ?? null, now: deps.now });
+  const pairing = createCloudPairing({ secret: deps.secret, sessions: deps.sessions, team: deps.team ?? null, ...(deps.invited ? { invited: deps.invited } : {}), ...(deps.memberBrowserOff ? { memberBrowserOff: deps.memberBrowserOff } : {}), now: deps.now });
   const healthRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   const powerReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   const sleepRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
@@ -62,7 +69,7 @@ export function createCloudSignedRoutes(deps: {
     const power = path === CLOUD_POWER_PATH || path === CLOUD_POWER_SLEEP_PATH ? deps.power?.() ?? null : null;
     const teamAdmin = path === CLOUD_TEAM_ADMIN_PATH && deps.team ? deps.teamAdmin ?? null : null;
     const memberLeft = path === CLOUD_TEAM_MEMBER_LEFT_PATH && deps.team ? deps.memberLeft ?? null : null;
-    const plan = path === CLOUD_PLAN_PATH ? deps.plan ?? null : null;
+    const plan = path === CLOUD_PLAN_PATH && (deps.plan || deps.planTier) ? true : null;
     const policyChanged = path === CLOUD_TEAM_POLICY_CHANGED_PATH && deps.team ? deps.policyChanged ?? null : null;
     if (path !== CLOUD_PAIRING_PATH && path !== CLOUD_HEALTH_PATH && path !== CLOUD_BOX_PATH && !power && !teamAdmin && !memberLeft && !plan && !policyChanged) return false;
     res.setHeader("cache-control", "no-store");
@@ -128,9 +135,11 @@ export function createCloudSignedRoutes(deps: {
       if (!verdict.ok) { console.warn(`cloud plan request refused from ${source}: ${verdict.error}`); json(res, verdict.status, { error: verdict.error }); return true; }
       let parsed: unknown;
       try { parsed = JSON.parse(body.toString("utf8")); } catch { json(res, 400, { error: "invalid_body" }); return true; }
-      const cancelled = (parsed as { cancelled?: unknown } | null)?.cancelled;
-      if (typeof cancelled !== "boolean") { json(res, 400, { error: "invalid_plan" }); return true; }
-      plan(cancelled);
+      const { cancelled, tier } = (parsed ?? {}) as { cancelled?: unknown; tier?: unknown };
+      const saysCancelled = typeof cancelled === "boolean", saysTier = typeof tier === "string" && CLOUD_TIER.test(tier);
+      if ((cancelled !== undefined && !saysCancelled) || (tier !== undefined && !saysTier) || (!saysCancelled && !saysTier)) { json(res, 400, { error: "invalid_plan" }); return true; }
+      if (saysCancelled) deps.plan?.(cancelled);
+      if (saysTier) deps.planTier?.(tier);
       json(res, 200, { ok: true });
       return true;
     }

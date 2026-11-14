@@ -6,8 +6,9 @@ import {
 } from "../shared/live-approval.ts";
 import { clampAppend, commentaryChunks, LiveTranscript } from "../shared/live-call.ts";
 import { signInWaits } from "../shared/sign-in-request.ts";
-import type { LiveCallRecord, LiveCallState, LiveClient, LiveEndReason } from "../shared/wire.ts";
-import { LIVE_NEEDS_KEY, liveCallSummaryLine, LiveSessionError, liveVoice } from "./live-call.ts";
+import type { LiveCallRecord, LiveCallState, LiveClient, LiveEndReason, LiveFishTransport, LiveProvider } from "../shared/wire.ts";
+import { FISH_AGENT_VOICE } from "./live-fish.ts";
+import { LIVE_NEEDS_KEY, liveAuthHeaders, liveCallSummaryLine, liveProviderName, LiveSessionError, liveVoice, spokenHangUp, type LiveEndpoint } from "./live-call.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
 
@@ -15,9 +16,13 @@ export const DELEGATION_SETTLE_MS = 700;
 export const CONSENT_SETTLE_MS = 1_200;
 export const PROGRESS_INTERVAL_MS = 4_000;
 export const ATTACH_TIMEOUT_MS = 10_000;
+/** Fish's client asks for the microphone only after the session exists, so its first report can wait on a permission prompt. */
+export const FISH_ATTACH_TIMEOUT_MS = 25_000;
 export const CLOSE_TIMEOUT_MS = 5_000;
 export const IDLE_CHECK_MS = 15_000;
 export const STATUS_INTERVAL_MS = 30_000;
+/** Time for the voice to say goodbye before a call the person asked to end is closed. */
+export const GOODBYE_MS = 4_000;
 const SOCKET_OPEN = 1;
 const MAX_ERRORS = 5;
 const MAX_REVOKED_DEVICES = 200;
@@ -35,6 +40,9 @@ export interface LiveSocket {
 }
 
 export type LiveActivity = "idle" | "working" | "waiting";
+export type LiveSessionAnswer = { sessionId: string; sdp: string } | { sessionId: string; fish: LiveFishTransport };
+export type LiveCallStarted = { call: LiveCallState; sdp: string; fish?: undefined } | { call: LiveCallState; sdp?: undefined; fish: LiveFishTransport };
+export const LIVE_FISH_NEEDS_APP = "Live calls through Fish Audio work in the desktop app or a web browser, not in the phone app yet.";
 export type LiveSendResult = { kind: "started" | "steered"; messageId: string } | { kind: "queued"; queueId: string };
 export type LiveRespondResult = { ok: true } | { ok: false; error: string };
 
@@ -47,10 +55,16 @@ export interface LiveCallDeps {
   personKey?(auth: RequestAuth): string | undefined;
   activity(botId: string, threadId: string): LiveActivity;
   broadcast(frame: { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }): void;
-  settings(): { key: string; voice: string; readTypedReplies: boolean; idleMinutes: number };
-  createSession(input: { key: string; sdp: string; botId: string; threadId: string; voice: string }): Promise<{ sessionId: string; sdp: string }>;
-  openSocket(url: string, key: string): LiveSocket;
-  attachUrl(sessionId: string): string;
+  /** `endpoint` null, or a `setupProblem`, refuses the call with that message (409). */
+  settings(): { key: string; endpoint: LiveEndpoint | null; setupProblem?: string | null; provider?: LiveProvider; voice: string; readTypedReplies: boolean; idleMinutes: number };
+  /** Why this caller may not hold a call through Azure OpenAI; null when they may. Required, so no wiring can leave it out. */
+  azureRefusal(auth: RequestAuth): string | null;
+  /** The same for Fish Audio, where the harness hears the call only through its client's reports. Required too. */
+  fishRefusal(auth: RequestAuth): string | null;
+  /** `sdp` is "" on Fish Audio, which answers with `fish` instead of an SDP answer. */
+  createSession(input: { key: string; endpoint: LiveEndpoint; sdp: string; botId: string; threadId: string; voice: string }): Promise<LiveSessionAnswer>;
+  openSocket(url: string, key: string, endpoint: LiveEndpoint): LiveSocket;
+  attachUrl(sessionId: string, endpoint: LiveEndpoint): string;
   speakable(text: string): string[];
   recordCall?(input: { threadId: string; botName: string; record: LiveCallRecord }): void;
   log(line: string): void;
@@ -71,6 +85,10 @@ export class LiveCallSignedOutError extends LiveSessionError {
   }
 }
 
+// Node's WebSocket (undici) accepts headers in its second argument.
+export const openLiveSocket: LiveCallDeps["openSocket"] = (url, key, endpoint) =>
+  new WebSocket(url, { headers: liveAuthHeaders(endpoint.provider, key) } as unknown as string[]) as unknown as LiveSocket;
+
 type AppendKind = "instructions" | "thinking" | "commentary";
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -88,6 +106,7 @@ interface Call {
   personKey: string | undefined;
   botName: string;
   key: string;
+  endpoint: LiveEndpoint;
   sessionId: string;
   socket: LiveSocket | null;
   attached: boolean;
@@ -116,6 +135,8 @@ interface Call {
   drainBatch: string[] | null;
   spokenAnswers: Set<string>;
   pendingEnd: LiveEndReason | null;
+  /** The person asked to hang up; the voice is saying goodbye before the call closes. */
+  goodbye: boolean;
   timers: Set<Timer>;
   consentTimer: Timer | null;
   idleTimer: ReturnType<typeof setInterval> | null;
@@ -144,26 +165,41 @@ export class LiveCallController {
     return this.call && this.call.state.status !== "ended" ? { ...this.call.state } : null;
   }
 
-  async start(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient; sdp: string }): Promise<{ call: LiveCallState; sdp: string }> {
+  async start(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient; sdp?: string }): Promise<LiveCallStarted> {
+    const settings = this.deps.settings();
+    // First: someone refused here is not told about a running call, or sent to set Azure or Fish Audio up.
+    const limited = settings.provider === "azure" || settings.endpoint?.provider === "azure" ? "azure"
+      : settings.provider === "fish" || settings.endpoint?.provider === "fish" ? "fish" : null;
+    if (limited) {
+      const refusal = limited === "azure" ? this.deps.azureRefusal(input.auth) : this.deps.fishRefusal(input.auth);
+      if (refusal) {
+        this.deps.log(`[live] call refused bot=${input.botId} client=${input.client} provider=${limited}`);
+        throw new LiveSessionError(refusal, 403);
+      }
+    }
+    const fish = limited === "fish";
+    if (fish && (input.client === "ios" || input.client === "android")) throw new LiveSessionError(LIVE_FISH_NEEDS_APP, 400);
+    if (!fish && !input.sdp) throw new LiveSessionError("The call request was not valid.", 400);
     if (this.call && this.call.state.status !== "ended") throw new LiveCallBusyError({ ...this.call.state });
     if (input.device && this.revokedDevices.has(input.device)) throw new LiveCallSignedOutError();
-    const settings = this.deps.settings();
     const key = settings.key.trim();
-    if (!key) throw new LiveSessionError(LIVE_NEEDS_KEY, 409);
-    const voice = liveVoice(settings.voice);
-    const call = this.newCall(input, key, voice);
+    const endpoint = settings.endpoint;
+    if (settings.setupProblem || !key || !endpoint) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409);
+    if (fish !== (endpoint.provider === "fish")) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409);
+    const voice = fish ? FISH_AGENT_VOICE : liveVoice(settings.voice);
+    const call = this.newCall(input, key, endpoint, voice);
     // Taken before the first await: a second start in the same tick is refused.
     this.call = call;
-    let session: { sessionId: string; sdp: string };
+    let session: LiveSessionAnswer;
     try {
-      session = await this.deps.createSession({ key, sdp: input.sdp, botId: input.botId, threadId: input.threadId, voice });
+      session = await this.deps.createSession({ key, endpoint, sdp: fish ? "" : input.sdp ?? "", botId: input.botId, threadId: input.threadId, voice });
     } catch (error) {
       if (this.call === call) this.call = null;
       this.deps.log(`[live] call failed bot=${input.botId} client=${input.client} status=${error instanceof LiveSessionError ? error.status : "error"}`);
       throw error;
     }
     if (this.call !== call) {
-      this.closeOrphan(session.sessionId, key);
+      this.closeOrphan(session.sessionId, key, endpoint);
       throw new LiveSessionError("The call was cancelled.", 503);
     }
     try {
@@ -182,10 +218,10 @@ export class LiveCallController {
     } catch (error) {
       const sidebandOpened = call.socket !== null;
       this.finish(call, "error", "The call could not start.");
-      if (!sidebandOpened) this.closeOrphan(session.sessionId, key);
+      if (!sidebandOpened) this.closeOrphan(session.sessionId, key, endpoint);
       throw error;
     }
-    return { call: { ...call.state }, sdp: session.sdp };
+    return "fish" in session ? { call: { ...call.state }, fish: session.fish } : { call: { ...call.state }, sdp: session.sdp };
   }
 
   async end(callId: string): Promise<LiveCallState | null> {
@@ -217,7 +253,7 @@ export class LiveCallController {
   }
 
 
-  private newCall(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient }, key: string, voice: string): Call {
+  private newCall(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient }, key: string, endpoint: LiveEndpoint, voice: string): Call {
     return {
       state: { callId: randomUUID(), botId: input.botId, threadId: input.threadId, client: input.client, voice, startedAt: this.now(), status: "connecting" },
       auth: input.auth,
@@ -225,6 +261,7 @@ export class LiveCallController {
       personKey: this.deps.personKey?.(input.auth),
       botName: input.botName,
       key,
+      endpoint,
       sessionId: "",
       socket: null,
       attached: false,
@@ -253,6 +290,7 @@ export class LiveCallController {
       drainBatch: null,
       spokenAnswers: new Set(),
       pendingEnd: null,
+      goodbye: false,
       timers: new Set(),
       consentTimer: null,
       idleTimer: null,
@@ -265,15 +303,15 @@ export class LiveCallController {
   private attach(call: Call): void {
     let socket: LiveSocket;
     try {
-      socket = this.deps.openSocket(this.deps.attachUrl(call.sessionId), call.key);
+      socket = this.deps.openSocket(this.deps.attachUrl(call.sessionId, call.endpoint), call.key, call.endpoint);
     } catch {
-      this.finish(call, "sideband-lost", "The call could not connect to OpenAI.");
+      this.finish(call, "sideband-lost", `The call could not connect to ${liveProviderName(call.endpoint.provider)}.`);
       return;
     }
     call.socket = socket;
     const attachTimer = this.later(call, () => {
-      if (!call.attached) this.finish(call, "sideband-lost", "The call could not connect to OpenAI.");
-    }, ATTACH_TIMEOUT_MS);
+      if (!call.attached) this.finish(call, "sideband-lost", `The call could not connect to ${liveProviderName(call.endpoint.provider)}.`);
+    }, call.endpoint.provider === "fish" ? FISH_ATTACH_TIMEOUT_MS : ATTACH_TIMEOUT_MS);
     socket.onopen = () => {
       call.attached = true;
       this.clear(call, attachTimer);
@@ -285,19 +323,19 @@ export class LiveCallController {
     socket.onmessage = (event) => this.guarded(call, () => this.onSideband(call, event.data));
     // Node's WebSocket reports a refused handshake as an error without a close.
     socket.onerror = () => {
-      if (!call.attached) this.finish(call, "sideband-lost", "The call could not connect to OpenAI.");
+      if (!call.attached) this.finish(call, "sideband-lost", `The call could not connect to ${liveProviderName(call.endpoint.provider)}.`);
     };
     socket.onclose = () => {
       if (call.state.status === "ended") return;
       if (call.pendingEnd) this.finish(call, call.pendingEnd);
-      else this.finish(call, "sideband-lost", "The call connection to OpenAI dropped.");
+      else this.finish(call, "sideband-lost", `The call connection to ${liveProviderName(call.endpoint.provider)} dropped.`);
     };
   }
 
-  private closeOrphan(sessionId: string, key: string): void {
+  private closeOrphan(sessionId: string, key: string, endpoint: LiveEndpoint): void {
     let socket: LiveSocket;
     try {
-      socket = this.deps.openSocket(this.deps.attachUrl(sessionId), key);
+      socket = this.deps.openSocket(this.deps.attachUrl(sessionId, endpoint), key, endpoint);
     } catch {
       return;
     }
@@ -460,9 +498,16 @@ export class LiveCallController {
 
 
   private async delegate(call: Call, id: string, offsetMs: number): Promise<void> {
-    if (call.state.status !== "live") return;
+    if (call.state.status !== "live" || call.goodbye) return;
     const heard = call.transcript.takeRequestParts(offsetMs);
     const said = heard.text;
+    // Only the person's own words, never what the voice said back, and all of them: "don't" may be lost in the echo.
+    if (spokenHangUp(heard.withoutEcho) && spokenHangUp(said)) {
+      call.goodbye = true;
+      this.append(call, "instructions", LIVE_COPY.goodbye, id);
+      this.later(call, () => this.hangUp(call, "hung-up"), GOODBYE_MS);
+      return;
+    }
     if (call.approval && !call.approval.submitted) {
       await this.decide(call, heard.withoutEcho, id, said);
       return;
@@ -474,7 +519,7 @@ export class LiveCallController {
       call.stats.answers += 1;
       const answer = heard.withoutEcho || said;
       const result = await this.respond(call, { auth: call.auth, threadId: call.state.threadId, requestId: question.requestId, behavior: "answer", message: answer, callId: call.state.callId }, id);
-      if (!result) return;
+      if (!result || call.goodbye) return;
       if (result.ok) {
         this.append(call, "thinking", LIVE_COPY.answerPassed, id);
       } else if (call.question === question) {
@@ -510,12 +555,13 @@ export class LiveCallController {
       }
       const detail = error instanceof Error ? error.message.trim().slice(0, 200) : "";
       this.recordError(call, "send-failed");
+      if (call.goodbye) return;
       this.append(call, "commentary", `The request could not be sent to ${call.botName}${detail ? `: ${detail}` : "."}`, id);
     }
   }
 
   private async decide(call: Call, said: string, delegationId: string | null, heard: string = said): Promise<void> {
-    if (call.state.status !== "live") return;
+    if (call.state.status !== "live" || call.goodbye) return;
     const open = call.approval;
     if (!open || open.submitted) return;
     const decision = spokenConsent(said, "live");
@@ -536,7 +582,7 @@ export class LiveCallController {
       behavior: decision,
       message: decision === "deny" ? LIVE_COPY.deniedMessage : undefined,
     }, delegationId);
-    if (!result) return;
+    if (!result || call.goodbye) return;
     if (!result.ok && call.approval === open) {
       open.submitted = false;
       this.append(call, "commentary", LIVE_COPY.saveFailed(result.error.trim().slice(0, 200)), delegationId);
@@ -573,7 +619,7 @@ export class LiveCallController {
     if (activity === "working") this.touch(call);
     if (activity === "working" && (was === "idle" || call.workStartedAt === null)) this.beginWork(call);
     if (activity === "idle") call.workStartedAt = null;
-    if (was === "idle" || activity !== "idle") return;
+    if (was === "idle" || activity !== "idle" || call.goodbye) return;
     this.forgetUnqueued(call);
     if (call.approval || call.question || call.queuedIds.size) return;
     if (!call.pendingCall.size && !call.claimNextTerminal) return;
@@ -602,6 +648,7 @@ export class LiveCallController {
       }
       return;
     }
+    if (call.goodbye) return;
     if (message.kind === "options") {
       this.onCard(call, message);
       return;

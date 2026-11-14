@@ -6,6 +6,7 @@ import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } f
 import { basename, delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { StdioMcpSpec } from "./contracts.ts";
+import { engineInstallRoots } from "./engine-roots.ts";
 import { addDisabledMcpServer, isRemoteMcpServer, parseStoredMcpServer, type DisabledMcpServerAdd, type StoredStdioMcpServer } from "./mcp-registry.ts";
 
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -54,6 +55,19 @@ export function botFolderUse(server: StdioMcpSpec, dataDir: string): BotFolderUs
     }
   }
   return botId ? { botId, temporary } : null;
+}
+
+/** A path of this server's that is in the data folder and is no bot's folder and no engine OpenMausBot installed: the
+ * server's own files (settings, sessions, saved logins), which no bot's command may name. */
+export function serverFileUse(server: StdioMcpSpec, dataDir: string): string | null {
+  const root = resolve(dataDir);
+  const open = [join(root, "workspaces"), join(root, "task-workspaces"), ...engineInstallRoots(root).map((path) => resolve(path))];
+  for (const value of values(server)) {
+    const full = resolve(value);
+    if (full !== root && segments(full, root) === null) continue;
+    if (!open.some((folder) => segments(full, folder) !== null)) return full;
+  }
+  return null;
 }
 
 /** Bytes and files under `path`, never following a link; null once past the limits. */
@@ -131,6 +145,11 @@ export type BotKept =
  * `boxed`: no bot reaches another's folders, so a server using this bot's files becomes its own, and one using another
  * bot's files is refused; unboxed, every bot reaches them and the server stays every bot's. */
 export function keepForBot(server: StoredStdioMcpServer, botId: string, dataDir: string, boxed: boolean): BotKept {
+  // Security: boxed, the data folder is not there for a bot; a command that names the server's own files is asking the
+  // server to show them (the box shows none of them, whatever a command line says: bot-box/plan.ts).
+  if (boxed && serverFileUse(server, dataDir)) {
+    return { ok: false, status: 400, error: "That command names a file of the server's own, which no bot can reach. Use files in your own folder." };
+  }
   const use = botFolderUse(server, dataDir);
   const theirs = use !== null && (use === "several" || use.botId !== botId);
   if (theirs && boxed) {

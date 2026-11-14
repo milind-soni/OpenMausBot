@@ -1,5 +1,5 @@
 // Security: Shiki's output is generator-escaped; nothing else reaches the DOM as HTML.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { HighlighterCore } from "shiki/core";
 import { Check, Copy, Download, MoreHorizontal, WrapText, X } from "lucide-react";
 
@@ -7,6 +7,7 @@ import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { useNearScreen } from "@/lib/on-screen";
 import { countLines, downloadSnippetFile, formatLineCount, getLanguageDisplayName, getSnippetFileName } from "../lib/code-block";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 
@@ -166,9 +167,11 @@ export interface CodeBlockProps {
   code: string;
   lang: string;
   initialWrap?: boolean;
+  /** The fence is still being written: no colouring and no actions until it closes. */
+  open?: boolean;
 }
 
-const PLATE_BUTTON = "inline-flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
+const PLATE_BUTTON = "inline-flex size-7 touch:size-11 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
 
 /** Simple mode's hover plate on a code block or diagram: Copy, and a ⋯ menu for the rest. It shows on hover, on
  * keyboard focus and always on touch screens, and stays while its menu is open. */
@@ -188,16 +191,21 @@ export function CodePlate({ copied, onCopy, copyLabel, items }: {
             : <Copy size={14} aria-hidden="true" />}
       </button>
       {copied !== "idle" && <span role="status" className="sr-only">{copied === "failed" ? t("common.copyFailed") : t("code.copiedTitle")}</span>}
-      <SidebarPopoverMenu items={items} ariaLabel={t("chat.more")} placement="below" triggerClassName="rounded-full" triggerTitle={t("chat.more")}
+      <SidebarPopoverMenu items={items} ariaLabel={t("chat.more")} placement="above" align="end" triggerTitle={t("chat.more")}
+        triggerClassName="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
         renderTrigger={() => <span className={PLATE_BUTTON}><MoreHorizontal size={14} aria-hidden="true" /></span>} />
     </div>
   );
 }
 
-export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
+export function CodeBlock({ code, lang, initialWrap = false, open = false }: CodeBlockProps) {
   const simple = !useAdvancedMode();
-  const highlightable = code.length <= HIGHLIGHT_MAX_CHARS;
-  const [html, setHtml] = useState<string | null>(() => highlightable ? highlightCache.get(highlightKey(lang, code)) ?? null : null);
+  const frame = useRef<HTMLDivElement>(null);
+  // A long chat can hold dozens of blocks: coloured ones are thousands of spans to style and lay out on every switch,
+  // so a block is coloured only once it comes near the screen.
+  const near = useNearScreen(frame);
+  const highlightable = !open && code.length <= HIGHLIGHT_MAX_CHARS;
+  const [html, setHtml] = useState<string | null>(() => highlightable && near ? highlightCache.get(highlightKey(lang, code)) ?? null : null);
   // React compares dangerouslySetInnerHTML by identity: a fresh object each render rebuilds the highlighted DOM.
   const markup = useMemo(() => (html ? { __html: html } : null), [html]);
   const { state: copied, copy } = useCopyFeedback(code);
@@ -208,6 +216,7 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
 
   useEffect(() => {
     if (!highlightable) return setHtml(null);
+    if (!near) return;
     const key = highlightKey(lang, code);
     const cached = highlightCache.get(key);
     if (cached) return setHtml(cached);
@@ -223,7 +232,7 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
     return () => {
       alive = false;
     };
-  }, [code, lang, highlightable]);
+  }, [code, lang, highlightable, near]);
 
   const download = () => {
     const filename = getSnippetFileName(lang);
@@ -247,19 +256,19 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
 
   if (simple) {
     return (
-      <div dir="ltr" className="chat-code-block group/code relative my-2.5 overflow-hidden rounded-lg bg-ink/[0.04]">
-        <CodePlate copied={copied} onCopy={copy} copyLabel={t("code.copyTitle")} items={[
+      <div ref={frame} dir="ltr" className="chat-code-block group/code relative my-2.5 overflow-hidden rounded-xl bg-ink/[0.04]">
+        {!open && <CodePlate copied={copied} onCopy={copy} copyLabel={t("code.copyTitle")} items={[
           { key: "wrap", label: t("code.wrapLines"), icon: <WrapText size={14} aria-hidden="true" />, active: wrapLines, onSelect: () => setWrapLines((wrap) => !wrap) },
           { key: "save", label: t("code.saveAsFile"), icon: <Download size={14} aria-hidden="true" />, onSelect: download },
           { key: "about", label: t("code.caption", { language: displayLanguage, lines: formatLineCount(lineCount) }), disabled: true, separatorBefore: true, onSelect: () => {} },
-        ]} />
+        ]} />}
         {body("leading-5 [&_pre]:px-3 [&_pre]:py-2", "text-ink-secondary")}
       </div>
     );
   }
 
   return (
-    <div dir="ltr" className="chat-code-block my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
+    <div ref={frame} dir="ltr" className="chat-code-block my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span title={displayLanguage} className="min-w-0 truncate rounded border border-hairline/40 bg-raised px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-ink select-none">
@@ -271,7 +280,7 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
             </span>
           )}
         </div>
-        <div className="chat-code-actions flex shrink-0 items-center gap-1 whitespace-nowrap">
+        <div className={cn("chat-code-actions flex shrink-0 items-center gap-1 whitespace-nowrap", open && "invisible")} inert={open || undefined}>
           <button
             type="button"
             onClick={() => setWrapLines((w) => !w)}

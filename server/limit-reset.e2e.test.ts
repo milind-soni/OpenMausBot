@@ -4,7 +4,7 @@
 // another sign-in to the same engine is never used. The limit clock hook shortens the minute after a reset to a
 // second, so each run is watched without waiting.
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
@@ -30,7 +30,7 @@ interface Fixture {
   restart: () => Promise<void>;
 }
 
-async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: boolean; codex?: false; signedOut?: boolean }, check: (fixture: Fixture) => Promise<void>) {
+async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: boolean; codex?: false; signedOut?: boolean; claudeEnv?: Record<string, string> }, check: (fixture: Fixture) => Promise<void>) {
   const fixture = await launchVerificationServer({});
   const { dataDir, url, logPath } = fixture.info;
   const limitedFile = join(dataDir, "claude-limited.json");
@@ -59,7 +59,7 @@ async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: bool
     const configPath = join(dataDir, "config.json");
     const config = JSON.parse(readFileSync(configPath, "utf8"));
     config.instances.claude.environment = { ...config.instances.claude.environment, FAKE_CLAUDE_LIMITED_FILE: limitedFile, FAKE_CLAUDE_PROMPTS: promptsFile, FAKE_CLAUDE_TOOL_CALLS: "[]",
-      ...(setup.signedOut ? { FAKE_CLAUDE_MODE: "not-logged-in" } : {}) };
+      ...(setup.signedOut ? { FAKE_CLAUDE_MODE: "not-logged-in" } : {}), ...setup.claudeEnv };
     if (setup.codex !== false) config.instances.codex = { driver: "codex", config: { cli: fileURLToPath(new URL("./testing/fake-codex-app-server.ts", import.meta.url)) } };
     if (setup.secondClaude) config.instances.claudeWork = { ...config.instances.claude, displayName: "Second Claude sign-in" };
     if (setup.recovery) config.automaticRecovery = setup.recovery;
@@ -85,7 +85,7 @@ async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: bool
       }, { timeout: 20_000 }).toBe(true);
     };
     await start();
-    // Chief first makes the starter its team's Chief, which answers a teammate's failed run with a Team incidents turn
+    // Chief first makes the starter its team's Chief, which answers a teammate's failed run with a Problems to look at turn
     // of its own on Claude, whose prompts these tests count. Stepped down, only the conversations under test run.
     const { bots } = await api("GET", "/api/bots") as { bots: Array<{ id: string; chiefOfStaff?: boolean }> };
     const starter = bots.find((bot) => bot.chiefOfStaff)!;
@@ -334,7 +334,7 @@ it("a signed-out Claude with Automatic recovery on: its turns go to the chosen b
     const first = await messagesOf(api, threadId);
     const told = "Verification fixture is signed out on this computer, so Kai is using Codex meanwhile. Sign in again in Settings → AI to keep using Verification fixture.";
     expect(first.flatMap((message) => message.tool?.name?.match(/^(?:recovery|notice):/) ? [message.tool] : [])).toEqual([
-      { name: "recovery: Verification fixture is signed out, so Codex took over.", ok: true },
+      { name: "recovery: Verification fixture is signed out, so Codex took over.", nameCode: "chat.notice.failoverSignedOut", nameParams: { from: "Verification fixture", to: "Codex" }, ok: true },
       { name: `notice: ${told}`, ok: true, setup: true },
     ]);
     expect(first.some((message) => message.tool?.ok === false), "no failed turn").toBe(false);
@@ -343,7 +343,7 @@ it("a signed-out Claude with Automatic recovery on: its turns go to the chosen b
     const { task: other } = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Another thing" });
     await control("send", "--bot", bot.id, "--task", other.threadId, "--text", "And the budget");
     expect((await control("wait", "--bot", bot.id, "--task", other.threadId, "--timeout", "30")).status).toBe("settled");
-    const next = await messagesOf(api, other.threadId);
+    const next = await messagesOf(api, other.threadId); console.log("DEBUG", JSON.stringify(next.map((m) => [m.role, m.kind, m.text?.slice(0, 120), m.tool?.name?.slice(0, 200)])), JSON.stringify(await messagesOf(api, bot.activeTaskId).then((ms) => ms.map((m) => [m.role, m.kind, m.text?.slice(0, 80), m.tool?.name?.slice(0, 200)]))));
     expect(recoveryLines(next)).toEqual(["recovery: Verification fixture is signed out, so Codex took over."]);
     expect(next.some((message) => message.tool?.name?.startsWith("notice:")), "said once, not again").toBe(false);
     expect(await reply(other.threadId)).toBe("done from fake codex");
@@ -351,6 +351,47 @@ it("a signed-out Claude with Automatic recovery on: its turns go to the chosen b
     const notified = (await api("GET", "/api/notifications")).notifications as any[];
     expect(notified.filter((entry) => entry.kind === "notice").map((entry) => entry.body)).toEqual([told]);
     evidence.push({ first, next, notified });
+  });
+}, 180_000);
+
+it("a Claude signed out and in again outside the app: once its status reads signed in, new conversations start on it again", async () => {
+  // FAKE_CLAUDE_HOME_FILES: a turn is refused unless the CLI's own sign-in file exists; FAKE_CLAUDE_AUTH=file: `auth status`
+  // says signed in while its file exists. Both are written and removed here as a terminal's `claude auth login`/`logout` would.
+  await withLimitFixture({ claudeEnv: { FAKE_CLAUDE_HOME_FILES: "1", FAKE_CLAUDE_AUTH: "file" }, recovery: { enabled: true, backup: codex } }, async ({ api, control, dataDir, claudePrompts, evidence }) => {
+    const claudeHome = join(dataDir, ".claude");
+    const signIn = () => {
+      mkdirSync(claudeHome, { recursive: true });
+      writeFileSync(join(claudeHome, ".credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: "fixture-token-not-a-credential" } }));
+      writeFileSync(join(claudeHome, "fake-auth.json"), JSON.stringify({ email: "fixture@example.com" }));
+    };
+    const signOut = () => {
+      for (const file of [".credentials.json", "fake-auth.json"]) rmSync(join(claudeHome, file), { force: true });
+    };
+    const signedIn = async () => ((await api("GET", "/api/instances?fresh=1")).instances as any[]).find((instance) => instance.instanceId === "claude")?.snapshot.authenticated;
+    const reply = async (id: string) => (await messagesOf(api, id)).findLast((message) => message.role === "bot" && message.kind === "text")?.text;
+
+    signIn();
+    await expect.poll(signedIn, { timeout: 20_000 }).toBe(true);
+    const { bot } = await control("new-bot", "--name", "Kai");
+    expect(bot.modelSelection.instanceId).toBe("claude");
+    signOut();
+    await expect.poll(signedIn, { timeout: 20_000 }).toBe(false);
+    await control("send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "Draft the launch plan");
+    expect((await control("wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "30")).status).toBe("settled");
+    expect(recoveryLines(await messagesOf(api, bot.activeTaskId))).toEqual(["recovery: Verification fixture is signed out, so Codex took over."]);
+    expect(await reply(bot.activeTaskId)).toBe("done from fake codex");
+    const asked = claudePrompts().length;
+
+    signIn();
+    await expect.poll(signedIn, { timeout: 20_000 }).toBe(true);
+    const { task: other } = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "After signing in" });
+    await control("send", "--bot", bot.id, "--task", other.threadId, "--text", "And the budget");
+    expect((await control("wait", "--bot", bot.id, "--task", other.threadId, "--timeout", "30")).status).toBe("settled");
+    const next = await messagesOf(api, other.threadId);
+    expect(recoveryLines(next), "no other AI took it").toEqual([]);
+    expect(claudePrompts(), "the signed-in Claude answered").toHaveLength(asked + 1);
+    expect(await reply(other.threadId)).not.toBe("done from fake codex");
+    evidence.push({ next });
   });
 }, 180_000);
 
@@ -362,7 +403,8 @@ it.each([
     const { bot } = await control("new-bot", "--name", "Kai");
     const threadId = bot.activeTaskId;
     if (recovering) await api("PUT", "/api/config", { automaticRecovery: { enabled: true, backup: bot.modelSelection } });
-    const told = "Verification fixture is signed out on this computer. Sign in again in Settings → AI to keep using it.";
+    // The fixture's starter bot is on the same Claude with no backup too, so the one notice names both as bots that can't run.
+    const told = "Verification fixture is signed out on this computer. Sign in again in Settings → AI to keep using it. Until then Kai and Fixture Starter can't run: they have no backup.";
     await control("send", "--bot", bot.id, "--task", threadId, "--text", "Draft the launch plan");
     expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("failed");
     await control("send", "--bot", bot.id, "--task", threadId, "--text", "Are you there?");

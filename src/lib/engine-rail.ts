@@ -1,4 +1,8 @@
 import type { InstanceInfo } from "@/state/store";
+import { otherSignInOfSameSubscription } from "../../shared/limit-backup";
+import { t } from "@/lib/i18n";
+
+export { engineDisplayName } from "@/lib/engine-name";
 
 export function configuredModelInstances(instances: readonly InstanceInfo[], selectedInstanceId?: string): InstanceInfo[] {
   return instances.filter((instance) =>
@@ -10,11 +14,19 @@ export function isCustomOnly(instance: { access?: InstanceInfo["access"] } | und
   return instance?.access === "custom";
 }
 
+/** A signed-in engine whose list it never gave is worth asking: a signed-out one would only refuse. */
+export function modelsAwaitEngine(instance: Pick<InstanceInfo, "modelsUnconfirmed" | "snapshot"> | undefined): boolean {
+  return instance?.modelsUnconfirmed === true
+    && instance.snapshot.state === "available"
+    && instance.snapshot.authenticated !== false;
+}
+
 export type SignInFamily = "claude" | "openai";
 
 export function signInFamily(instance: { driverKind: string; access?: InstanceInfo["access"] } | undefined): SignInFamily | undefined {
   if (!instance || instance.access === "api") return undefined;
-  if (instance.driverKind === "claudeAgent") return "claude";
+  // A custom Anthropic-compatible endpoint or Bedrock is its own provider, not another Claude sign-in.
+  if (instance.driverKind === "claudeAgent") return instance.access === "custom" ? undefined : "claude";
   if (instance.driverKind === "codex") return "openai";
   return undefined;
 }
@@ -40,4 +52,16 @@ export function splitEngineRail<T>(instances: readonly T[]): {
     else subscription.push(instance);
   }
   return { subscription, api, custom };
+}
+
+/** What a person should know about `backup` as a backup for the main AI `main`, if anything. Another subscription
+ * sign-in to the main AI takes over only while the main one is signed out, never at its usage limit (the server's
+ * limitBackupAllowed rule); a pay-per-use key on it still does. */
+export function backupNote(main: InstanceInfo | undefined, backup: InstanceInfo): string | undefined {
+  if (!main) return undefined;
+  if (backup.instanceId === main.instanceId) return t("botPanel.backups.sameAccount");
+  // Same rule as the server's billsEachUse: only an API-access engine counts as pay-per-use here. A key the CLI stored
+  // itself (account method "api-key") does not, so the server still keeps it from taking over at the usage limit.
+  if (otherSignInOfSameSubscription(main, backup) && backup.access !== "api") return t("botPanel.backups.otherSignIn");
+  return undefined;
 }

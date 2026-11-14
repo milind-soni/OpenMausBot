@@ -13,6 +13,7 @@ import type { AdminActionRow } from "../admin-activity.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
 import type { TeamPeople } from "../team-people.ts";
+import { userError } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 const ONE_BOT = /^\/api\/bots\/([\w-]{1,128})\/access$/;
@@ -28,6 +29,8 @@ export interface BotAccessRouteDeps {
   audienceChanged(): void;
   /** Settings → Activity: the request is client-scoped, so the admin audit never sees it. */
   record?(auth: RequestAuth, row: Omit<AdminActionRow, "at" | "actor">): void;
+  /** The sharing was written: whoever it newly names is told. */
+  shared?(auth: RequestAuth, bot: BotRecord, before: BotAccess, after: BotAccess): void;
 }
 
 /** The bot's sharing with `next` applied: the owner is never listed (they always edit), and nobody new comes in from
@@ -66,19 +69,20 @@ export function createBotAccessRoutes(deps: BotAccessRouteDeps): RouteHandler {
     const { team, people, store } = deps;
     if (!team || !people) return json(res, 400, { error: "Only a team's bots are shared." });
     const bot = store.bot(one[1]!);
-    if (!bot) return json(res, 404, { error: "no such bot" });
-    if (deps.levelOf(auth, bot.id) !== "edit") return json(res, 403, { error: refusalFor(bot.name, "edit") });
+    if (!bot) return json(res, 404, userError("serverError.bot.missing"));
+    if (deps.levelOf(auth, bot.id) !== "edit") return json(res, 403, refusalFor(bot.name, "edit"));
     const parsed = parseBotAccess(await readBody(req));
     if (!parsed.ok) return json(res, 400, { error: parsed.error });
     const current = store.bot(bot.id);
-    if (!current) return json(res, 404, { error: "no such bot" });
+    if (!current) return json(res, 404, userError("serverError.bot.missing"));
     const settled = settledAccess(current, parsed.access, (email) => people.has(email));
     if (!settled.ok) return json(res, 400, { error: settled.error });
     const before = accessOf(current);
     const updated = writeAccess(deps, current, settled.access);
     if (updated && !sameAccess(before, settled.access)) {
       deps.record?.(auth, { category: "visibility", action: "access.update", target: { kind: "bot", id: updated.id, name: updated.name }, before: { access: before }, after: { access: settled.access } });
+      deps.shared?.(auth, updated, before, settled.access);
     }
-    return updated ? json(res, 200, { bot: deps.wireBot(updated) }) : json(res, 404, { error: "no such bot" });
+    return updated ? json(res, 200, { bot: deps.wireBot(updated) }) : json(res, 404, userError("serverError.bot.missing"));
   };
 }

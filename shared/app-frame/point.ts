@@ -3,6 +3,10 @@
 //   host → frame  { jsonrpc: "2.0", method: "mausbot/point", params: { on: boolean } }
 //   frame → host  { jsonrpc: "2.0", method: "mausbot/pointed", params: { tag, role, text, selector, html } }
 //                 { jsonrpc: "2.0", method: "mausbot/point-ended", params: {} }   Escape in the page
+//   host → frame  { jsonrpc: "2.0", method: "mausbot/marks", params: { selectors: string[] } }   numbered outlines on the
+//                 parts waiting in the composer, so the person sees what they already picked
+//
+// Point stays on after a pick, so the person can mark several parts in one pass; Escape or Point again ends it.
 //
 // The script below runs inside the page, beside the helper. The page's own scripts can post the same messages, so
 // everything a pick carries is the page's word: the host keeps only the frame's own window, clips every field, and
@@ -11,13 +15,16 @@
 export const POINT_METHOD = "mausbot/point";
 export const POINTED_METHOD = "mausbot/pointed";
 export const POINT_ENDED_METHOD = "mausbot/point-ended";
+export const MARKS_METHOD = "mausbot/marks";
 
 export const POINT_LIMITS = {
   text: 200,
   selector: 300,
   html: 600,
-  /** Chips one message carries. */
-  perMessage: 5,
+  /** Chips one message carries; a pick past it is refused, so earlier picks are never dropped. */
+  perMessage: 30,
+  /** The person's own note on one chip. */
+  note: 300,
   label: 40,
 } as const;
 
@@ -35,12 +42,19 @@ export interface PointedPart {
 export interface PointedElement extends PointedPart {
   appId: string;
   rev: number;
+  /** What the person wrote about this part; absent when they wrote nothing. */
+  note?: string;
 }
 
 export type PointEvent = { kind: "pointed"; part: PointedPart } | { kind: "ended" };
 
 export function pointMessage(on: boolean): { jsonrpc: "2.0"; method: string; params: { on: boolean } } {
   return { jsonrpc: "2.0", method: POINT_METHOD, params: { on } };
+}
+
+/** Selectors of the parts waiting in the composer, in chip order; the page outlines each one with its number. */
+export function marksMessage(selectors: readonly string[]): { jsonrpc: "2.0"; method: string; params: { selectors: string[] } } {
+  return { jsonrpc: "2.0", method: MARKS_METHOD, params: { selectors: [...selectors] } };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -95,6 +109,7 @@ export const APP_POINT_SOURCE = `(function () {
   var box = null;
   var tagLabel = null;
   var current = null;
+  var marks = [];
   var ROLES = { a: "link", button: "button", h1: "heading", h2: "heading", h3: "heading", h4: "heading", h5: "heading", h6: "heading",
     img: "img", svg: "img", input: "textbox", textarea: "textbox", select: "combobox", li: "listitem", ul: "list", ol: "list", nav: "navigation",
     table: "table", tr: "row", td: "cell", th: "columnheader", form: "form", header: "banner", footer: "contentinfo", main: "main",
@@ -121,9 +136,44 @@ export const APP_POINT_SOURCE = `(function () {
     }
     return parts.join(" > ");
   };
+  // state.start is true at a word start (after a space or hyphen: "Foo-Bar"); punctuation before the first letter keeps it, as CSS capitalize does ("(Note)"),
+  // and it carries across inline tags so a word split by them gets one capital.
+  var cased = function (text, transform, state) {
+    if (transform === "uppercase") return text.toUpperCase();
+    if (transform === "lowercase") return text.toLowerCase();
+    return text.replace(/[\\s\\S]/g, function (letter) {
+      if (/\\s/.test(letter) || letter === "-") { state.start = true; return letter; }
+      if (!/[\\p{L}\\p{N}]/u.test(letter)) return letter;
+      var start = state.start;
+      state.start = false;
+      return start && transform === "capitalize" ? letter.toUpperCase() : letter;
+    });
+  };
+  // innerText runs a badge (an inline-block span) into the next word ("CloudRestore"): any box that is not plain inline
+  // is a word break on screen, so it is one here too.
+  var wordsOf = function (node, state) {
+    if (node.nodeType !== 1 || /^(script|style|noscript|template)$/i.test(node.tagName)) return "";
+    var style = window.getComputedStyle(node);
+    var display = style.display;
+    if (display === "none") return "";
+    // A hidden wrapper's own text stays out, but a descendant set visible again is on screen.
+    var hidden = style.visibility === "hidden" || style.visibility === "collapse";
+    var closed = node.tagName === "DETAILS" && !node.open;
+    var summary = closed && Array.prototype.find.call(node.children, function (child) { return child.tagName === "SUMMARY"; });
+    var shown = style.contentVisibility === "hidden" ? [] : closed ? (summary ? [summary] : []) : node.childNodes;
+    var block = !/^(inline|contents)?$/.test(display) || node.tagName === "BR";
+    if (block) state.start = true;
+    var words = Array.prototype.map.call(shown, function (child) {
+      return child.nodeType === 3 ? (hidden ? "" : cased(child.data, style.textTransform, state)) : wordsOf(child, state);
+    }).join("");
+    if (block) state.start = true;
+    return block ? " " + words + " " : words;
+  };
   var describe = function (element) {
     var tag = element.tagName.toLowerCase();
-    var text = element.innerText || element.textContent || element.getAttribute("aria-label") || element.getAttribute("alt") ||
+    // A closed single select shows only its chosen option, not every option.
+    var chosen = tag === "select" && !element.multiple && !(element.size > 1);
+    var text = (chosen ? (element.selectedOptions[0] ? element.selectedOptions[0].text : "") : wordsOf(element, { start: true })).trim() || element.getAttribute("aria-label") || element.getAttribute("alt") ||
       element.getAttribute("placeholder") || element.getAttribute("title") || "";
     return { tag: tag, role: element.getAttribute("role") || ROLES[tag] || "", text: clip(text, 200), selector: clip(selectorOf(element), 300),
       html: clip(element.outerHTML, 600) };
@@ -152,8 +202,55 @@ export const APP_POINT_SOURCE = `(function () {
     box.style.display = "block";
   };
   var pickable = function (node) {
-    return node && node.nodeType === 1 && node !== root && node !== document.body && node !== box && !(box && box.contains(node)) ? node : null;
+    return node && node.nodeType === 1 && node !== root && node !== document.body && !(node.closest && node.closest("[data-mausbot-point]")) ? node : null;
   };
+  var drawMarks = function () {
+    marks.forEach(function (mark) {
+      var rect = mark.element.isConnected ? mark.element.getBoundingClientRect() : null;
+      if (rect && (rect.width <= 0 || rect.height <= 0)) rect = null;
+      mark.box.style.display = rect ? "block" : "none";
+      if (!rect) return;
+      mark.box.style.left = rect.left + "px";
+      mark.box.style.top = rect.top + "px";
+      mark.box.style.width = rect.width + "px";
+      mark.box.style.height = rect.height + "px";
+    });
+  };
+  // Each part waiting in the composer, outlined with its chip's number; a selector the page no longer matches draws nothing.
+  var setMarks = function (selectors) {
+    marks.forEach(function (mark) { mark.box.remove(); });
+    marks = [];
+    selectors.slice(0, ${POINT_LIMITS.perMessage}).forEach(function (selector, index) {
+      var element = null;
+      try { element = typeof selector === "string" ? document.querySelector(selector) : null; } catch (error) { element = null; }
+      if (!element) return;
+      var mark = document.createElement("div");
+      mark.setAttribute("data-mausbot-point", "mark");
+      mark.setAttribute("aria-hidden", "true");
+      mark.style.cssText = "position:fixed;z-index:2147483646;pointer-events:none;box-sizing:border-box;border:2px dashed #f59e0b;" +
+        "background:rgba(245,158,11,0.10);border-radius:4px";
+      var number = document.createElement("span");
+      number.textContent = String(index + 1);
+      number.style.cssText = "position:absolute;right:-2px;top:-2px;font:600 11px/16px system-ui,sans-serif;color:#fff;background:#f59e0b;" +
+        "padding:0 5px;border-radius:0 4px 0 4px";
+      mark.appendChild(number);
+      root.appendChild(mark);
+      marks.push({ element: element, box: mark });
+    });
+    drawMarks();
+  };
+  var redrawing = false;
+  var redraw = function () {
+    if (!marks.length || redrawing) return;
+    redrawing = true;
+    requestAnimationFrame(function () { redrawing = false; drawMarks(); });
+  };
+  window.addEventListener("scroll", redraw, true);
+  window.addEventListener("resize", redraw);
+  // A page can move a marked part without a scroll or resize (a section opens). The outlines sit outside body.
+  if (typeof MutationObserver === "function" && document.body) {
+    new MutationObserver(redraw).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+  }
   var post = function (method, params) { parent.postMessage({ jsonrpc: "2.0", method: method, params: params }, "*"); };
   var set = function (next) {
     on = next;
@@ -178,10 +275,10 @@ export const APP_POINT_SOURCE = `(function () {
   window.addEventListener("click", function (event) {
     if (!on) return;
     swallow(event);
-    var element = pickable(event.target) || current;
+    // A hovered part the page has since removed is not on screen any more, so it is not what the person picked.
+    var element = pickable(event.target) || (current && current.isConnected ? current : null);
     if (!element) return;
     post("${POINTED_METHOD}", describe(element));
-    set(false);
   }, true);
   window.addEventListener("keydown", function (event) {
     if (on && event.key === "Escape") { swallow(event); set(false); post("${POINT_ENDED_METHOD}", {}); }
@@ -189,6 +286,8 @@ export const APP_POINT_SOURCE = `(function () {
   window.addEventListener("message", function (event) {
     if (event.source !== parent) return;
     var message = event.data;
-    if (message && message.jsonrpc === "2.0" && message.method === "${POINT_METHOD}" && message.params) set(message.params.on === true);
+    if (!message || message.jsonrpc !== "2.0" || !message.params) return;
+    if (message.method === "${POINT_METHOD}") set(message.params.on === true);
+    if (message.method === "${MARKS_METHOD}" && Array.isArray(message.params.selectors)) setMarks(message.params.selectors);
   });
 })();`;

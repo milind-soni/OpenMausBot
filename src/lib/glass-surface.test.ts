@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { glassPopupTopInset } from "./glass-popup";
+import { SKIN_IDS } from "./skins";
 
 const src = join(dirname(fileURLToPath(import.meta.url)), "..");
 const css = readFileSync(join(src, "styles.css"), "utf8");
@@ -35,16 +36,16 @@ describe("glass surface", () => {
     }
   });
 
-  it("is an opaque sheet for Settings in Midnight and Daylight in both modes, 900 by 700 with radius 12 in Simple", () => {
+  it("is an opaque sheet for Settings in Midnight and Daylight in both modes, 920 by 720 at most with radius 16", () => {
     const sheet = rule(':root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-surface');
     expect(sheet).toContain("background: var(--color-app)");
     expect(sheet).toContain("backdrop-filter: none");
     expect(sheet).toContain("box-shadow: none");
     expect(css.indexOf("[data-settings-look] .glass-surface {")).toBeGreaterThan(css.indexOf(".glass-surface {"));
     const size = rule('.glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup');
-    expect(size).toContain("width: min(900px, 100%)");
-    expect(size).toContain("height: min(700px, 100%)");
-    expect(size).toContain("border-radius: 12px");
+    expect(size).toContain("width: min(920px, 100%)");
+    expect(size).toContain("height: min(720px, 100%)");
+    expect(size).toContain("border-radius: 16px");
   });
 
   it("falls back to the opaque menu colour when transparency is reduced", () => {
@@ -55,9 +56,17 @@ describe("glass surface", () => {
     expect(surface).toContain("backdrop-filter: none");
   });
 
+  it("is the opaque menu colour, without a blur, when the desktop app renders without a GPU", () => {
+    const surface = rule(":root[data-software-rendering] .glass-surface");
+    expect(surface).toContain("background: var(--color-menu)");
+    expect(surface).toContain("-webkit-backdrop-filter: none");
+    expect(surface).toContain("backdrop-filter: none");
+    expect(css.indexOf(":root[data-software-rendering] .glass-surface {")).toBeGreaterThan(css.indexOf(".glass-surface {"));
+  });
+
   it("lives outside every skin block, and every skin still defines the tokens it reads", () => {
     const blocks = skinBlocks();
-    expect(blocks).toHaveLength(11);
+    expect(blocks).toHaveLength(SKIN_IDS.length);
     for (const block of blocks) {
       expect(block).not.toContain("glass");
       for (const token of ["--color-menu", "--color-card", "--color-ink"]) expect(block).toContain(`${token}:`);
@@ -65,7 +74,7 @@ describe("glass surface", () => {
   });
 
   it("is what the Settings and Apps pop-ups are drawn on", () => {
-    for (const file of ["SettingsModal.tsx", "PluginsPanel.tsx"]) {
+    for (const file of ["settings/SettingsWindow.tsx", "PluginsPanel.tsx"]) {
       const source = readFileSync(join(src, "components", file), "utf8");
       expect(source, file).toContain("glass-surface");
       // The scrim is a sibling: a backdrop-filter on an ancestor would hide the app from the pane's own blur.
@@ -83,10 +92,10 @@ describe("glass surface", () => {
     expect(glassPopupTopInset("mac-inset")).toBe(56);
     expect(glassPopupTopInset("win-caption")).toBe(56);
     expect(glassPopupTopInset("native")).toBe(24);
-    for (const file of ["SettingsModal.tsx", "PluginsPanel.tsx"]) {
+    for (const file of ["settings/SettingsWindow.tsx", "PluginsPanel.tsx"]) {
       const source = readFileSync(join(src, "components", file), "utf8");
       expect(source, file).toContain('className="glass-popup-frame"');
-      expect(source, file).toContain("style={glassPopupFrameStyle()}");
+      expect(source, file).toMatch(/style=\{(\{ \.\.\.)?glassPopupFrameStyle\(\)/);
       expect(source, file).toMatch(/className="glass-surface glass-popup /);
       expect(source, file).not.toMatch(/100dvh/);
     }

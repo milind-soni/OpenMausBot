@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 
 /** Why a home is not idle, as fixed codes (the Admin keeps the latest one for its operator page). */
-export type CloudPowerBusy = "turn" | "run" | "live-call" | "computer" | "maintenance" | "recent-activity" | "recent-work" | "just-woke" | "due-soon" | "team";
+export type CloudPowerBusy = "turn" | "run" | "handoff" | "live-call" | "computer" | "maintenance" | "recent-activity" | "recent-work" | "just-woke" | "due-soon";
 
 export interface CloudPowerReport {
   v: 1; at: number; bootedAt: number; wokeAt: number;
@@ -32,6 +32,9 @@ export interface CloudPowerProbes {
   turn(): boolean;
   /** A routine run is queued to start now, starting or running. One waiting for a person's answer is not: the answer wakes the home. */
   run(): boolean;
+  /** Work one bot handed another moves on without anyone: an assignment queued, running or due to resume its requester, or a
+   * report to send. One parked on a person's answer is not: the answer wakes the home. */
+  handoff(): boolean;
   liveCall(): boolean;
   /** A cloud computer is on, starting or within its own idle window: its idle timer lives in this process. */
   computer(): boolean;
@@ -102,18 +105,25 @@ export function wokeFromSleep(dataDir: string): boolean {
 
 export function createCloudPower(options: {
   dataDir: string; probes: CloudPowerProbes;
-  /** A Team Cloud: the Admin never sleeps a team plan, and a sleep request is refused as busy with `team`. */
-  team?: boolean;
   /** Tells connected clients the home is going to sleep (`{ kind: "power", state: "sleeping" }`). */
   broadcast(payload: Record<string, unknown>): void;
   now?: () => number;
   log?: (line: string) => void;
+  /** It woke from a sleep it was stopped for: this boot, like a resume, is a wake. */
+  bootedFromSleep?: boolean;
+  /** It just woke: the Admin hears at once, not at its next read (`createWokeNotifier`). */
+  onWoke?: () => void;
+  /** The first request after a boot from a stopped sleep reached the server, at this time: when that wake ended. */
+  onBootWakeRequest?: (at: number) => void;
 }) {
   const now = options.now ?? Date.now;
   const bootedAt = now();
   let wokeAt = bootedAt, lastActivityAt: number | null = null, lastWorkAt: number | null = null;
+  /** The last wake from sleep; null while this process has only ever booted normally. */
+  let sleptUntil: number | null = options.bootedFromSleep ? bootedAt : null;
+  if (options.bootedFromSleep) options.onWoke?.();
   /** The first request since `wokeAt` (`arrived`), and whether one came. */
-  let wokeBy: CloudPowerReport["wokeBy"] = null, wokeSeen = false;
+  let wokeBy: CloudPowerReport["wokeBy"] = null, wokeSeen = false, bootWake = Boolean(options.bootedFromSleep);
   let sleepingSince: number | null = null, inFlight = 0;
   let sleepAbort = new AbortController();
   let lastTick = now();
@@ -134,6 +144,7 @@ export function createCloudPower(options: {
     const { probes } = options;
     if (probes.turn()) busy.push("turn");
     if (probes.run()) busy.push("run");
+    if (probes.handoff()) busy.push("handoff");
     if (probes.liveCall()) busy.push("live-call");
     if (probes.computer()) busy.push("computer");
     if (probes.maintenance() || inFlight > 0) busy.push("maintenance");
@@ -146,7 +157,10 @@ export function createCloudPower(options: {
     wokeAt = at;
     wokeBy = null;
     wokeSeen = false;
+    bootWake = false;
+    sleptUntil = at;
     endSleep();
+    options.onWoke?.();
   };
   /** Samples work (so "finished two minutes ago" needs no hook in every kind of work) and notices a resume. */
   const tick = () => {
@@ -194,6 +208,7 @@ export function createCloudPower(options: {
       if (wokeSeen || at - wokeAt > WOKE_BY_MS) return;
       wokeSeen = true;
       wokeBy = { by: wakeCode(path), background: !countsAsActivity(path, headers) };
+      if (bootWake) options.onBootWakeRequest?.(at);
     },
     /** An authenticated request: someone using the home (`countsAsActivity`), and work in progress until it ends. */
     request(path: string, headers: IncomingHttpHeaders, res: Pick<ServerResponse, "once">) {
@@ -207,7 +222,7 @@ export function createCloudPower(options: {
     /** The Admin is about to suspend or stop this machine: yes only when idle now. From here until a resume, someone's
      * use or CLOUD_SLEEP_PENDING_MS, held polls answer "asleep" and new ones are refused (`sleeping`). */
     prepareSleep(activityMs = CLOUD_IDLE_ACTIVITY_MS): { ok: true; nextDueAt: number | null } | { ok: false; busy: CloudPowerBusy[] } {
-      const busy = options.team ? ["team" as const, ...busyNow(activityMs)] : busyNow(activityMs);
+      const busy = busyNow(activityMs);
       if (busy.length) return { ok: false, busy };
       sleepingSince = now();
       try { writeFileAtomic(join(options.dataDir, MARKER), JSON.stringify({ at: sleepingSince })); }
@@ -217,6 +232,8 @@ export function createCloudPower(options: {
       return { ok: true, nextDueAt: options.probes.nextDueAt() };
     },
     sleeping,
+    /** The last wake from sleep (a resume, or a boot from one), kept current by the tick and each request; null otherwise. */
+    sleptUntil: () => sleptUntil,
     /** Aborted the moment the home agrees to sleep: held long-polls end with it and answer "asleep". */
     sleepSignal: () => sleepAbort.signal,
     /** Tests: the clock tick, without waiting for the timer. */
@@ -228,6 +245,6 @@ export function createCloudPower(options: {
 export type CloudPower = ReturnType<typeof createCloudPower>;
 
 /** The running home's power, for route modules built before it (Files sync); null on any server that is not a Cloud home. */
-let registered: Pick<CloudPower, "sleeping" | "sleepSignal"> | null = null;
-export function registerCloudPower(power: Pick<CloudPower, "sleeping" | "sleepSignal"> | null) { registered = power; }
+let registered: Pick<CloudPower, "sleeping" | "sleepSignal" | "sleptUntil"> | null = null;
+export function registerCloudPower(power: Pick<CloudPower, "sleeping" | "sleepSignal" | "sleptUntil"> | null) { registered = power; }
 export const cloudPowerNow = () => registered;
