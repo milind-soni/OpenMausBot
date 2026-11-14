@@ -537,4 +537,52 @@ describe("WaitManager", () => {
     h.manager.stop();
     error.mockRestore();
   });
+
+  it.each(["fired", "expired"] as const)("does not post an unsaved %s notice on a later tick while storage still fails", async (status) => {
+    const h = harness();
+    await h.create({ kind: "file_exists", path: "/r" }, { followUp: "Use the report.", hours: 1 });
+    h.advance(status === "expired" ? 3_600_000 : 5_000);
+    if (status === "fired") h.stamp = { size: 1, mtimeMs: 1 };
+    const save = vi.spyOn(h.manager as unknown as { save(): void }, "save");
+    save.mockImplementation(() => { throw new Error("disk full"); });
+    await expect(h.manager.tick()).rejects.toThrow("disk full");
+    h.advance(5_000);
+    await expect(h.manager.tick()).rejects.toThrow("disk full");
+    expect(h.post).not.toHaveBeenCalled();
+    expect(h.followUp).not.toHaveBeenCalled();
+    expect(h.settleCard).not.toHaveBeenCalled();
+    save.mockRestore();
+  });
+
+  it("saves a previously failed decision before posting it after storage recovers", async () => {
+    const h = harness();
+    const { wait } = await h.create({ kind: "file_exists", path: "/r" }, { followUp: "Use the report." }) as { wait: WaitRecord };
+    h.stamp = { size: 1, mtimeMs: 1 };
+    h.advance(5_000);
+    const save = vi.spyOn(h.manager as unknown as { save(): void }, "save");
+    save.mockImplementationOnce(() => { throw new Error("disk full"); });
+    await expect(h.manager.tick()).rejects.toThrow("disk full");
+    expect(h.waitOf(wait.id).ending).toBeUndefined();
+    const onDiskAtPost: Array<WaitNotice | undefined> = [];
+    h.post.mockImplementation(() => { onDiskAtPost.push(h.waitOf(wait.id).ending); return true; });
+    h.stamp = null; // Preserve the decision that already observed the condition, even if it changes again.
+    h.advance(5_000);
+    await h.manager.tick();
+    expect(onDiskAtPost).toEqual([{ status: "fired", text: "the report: done. /r is there now." }]);
+    expect(h.followUp).toHaveBeenCalledTimes(1);
+    expect(h.settleCard).toHaveBeenCalledTimes(1);
+    expect(h.manager.all()).toEqual([]);
+    save.mockRestore();
+  });
+
+  it("does not rewrite an already saved decision while its chat remains busy", async () => {
+    const h = harness();
+    await h.create({ kind: "file_exists", path: "/r" });
+    h.stamp = { size: 1, mtimeMs: 1 }; h.postOk = false;
+    h.advance(5_000); await h.manager.tick();
+    const save = vi.spyOn(h.manager as unknown as { save(): void }, "save");
+    h.advance(5_000); await h.manager.tick();
+    expect(save).not.toHaveBeenCalled();
+    save.mockRestore();
+  });
 });
