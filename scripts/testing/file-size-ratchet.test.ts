@@ -49,7 +49,7 @@ const LINES: Record<string, number> = {
 };
 
 function sourceFiles(): string[] {
-  const out = execFileSync("git", ["ls-files", "server", "shared", "src", "scripts", "evals", "electron", "companion"], { cwd: ROOT, encoding: "utf8" });
+  const out = execFileSync("git", ["ls-files", "server", "shared", "packages", "src", "scripts", "evals", "electron", "companion"], { cwd: ROOT, encoding: "utf8" });
   return out.split("\n").filter((file) => /\.(ts|tsx|mjs|cjs)$/.test(file))
     .filter((file) => !file.includes(".test.") && !file.includes("/testing/") && !file.includes("goldens") && !file.startsWith("electron/vendor/"));
 }

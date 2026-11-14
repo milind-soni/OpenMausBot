@@ -39,7 +39,7 @@
     "eval": "node --experimental-strip-types evals/runners/run-evals.ts",
     "dev:desktop": "node scripts/prepare-cloudflared.mjs --current && electron .",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
-    "typecheck": "tsc -b && tsc -p tsconfig.server.json",
+    "typecheck": "tsc -b && tsc -p tsconfig.server.json && tsc -p packages/phone-protocol/tsconfig.json",
     "test": "vitest run && pnpm broker:test && pnpm test:electron && pnpm test:packaged-server",
     "test:electron": "node --test \"electron/*.node-test.mjs\"",
     "bench:observation": "node --experimental-strip-types scripts/bench-observation.ts",
