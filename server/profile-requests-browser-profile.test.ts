@@ -48,6 +48,7 @@ const fullAccess: DirectApplyCheck = () => appliesNow({ fullAccess: true, ownerM
 function harness(options: { autoApply?: DirectApplyCheck; chiefs?: string[] } = {}) {
   const store = new MemoryStore();
   const held = new Set<string>();
+  const running = new Set<string>();
   const closeForBot = vi.fn<(botId: string) => void>();
   const forgetTemporaryBrowser = vi.fn(async (_botId: string) => {});
   const addBot = (name: string, fields: Partial<BotRecord> = {}): BotRecord => {
@@ -66,11 +67,11 @@ function harness(options: { autoApply?: DirectApplyCheck; chiefs?: string[] } = 
     autoApply: options.autoApply,
     validateTarget: (proposer) => (chiefs.has(proposer) ? null : "Only a Chief of Staff can change another bot's profile."),
     browserProfile: {
-      guards: { profiles: () => PROFILES, heldBy: (session) => held.has(session), currentBrowserSession: (botId, profile) => `${botId}:${profile ?? "own"}` },
+      guards: { profiles: () => PROFILES, heldBy: (session) => held.has(session), currentBrowserSession: (botId, profile) => `${botId}:${profile ?? "own"}`, turnRunning: (botId) => running.has(botId) },
       cleanup: { closeForBot, forgetTemporaryBrowser },
     },
   });
-  return { store, service, chief, addBot, held, closeForBot, forgetTemporaryBrowser };
+  return { store, service, chief, addBot, held, running, closeForBot, forgetTemporaryBrowser };
 }
 
 describe("propose_profile browserProfile", () => {
@@ -125,6 +126,33 @@ describe("propose_profile browserProfile", () => {
     expect(idle.service.resolve({ botId: idle.chief.id, threadId: idle.chief.threadId, requestId: card.requestId, behavior: "allow" }))
       .toMatchObject({ state: "applied" });
     expect(later.browserProfile).toBe("work");
+  });
+
+  it.each(["a room turn", "a routine run", "a turn just handed to it"])("refuses a teammate that is not marked busy but runs %s, at proposal, at confirm and at Undo", () => {
+    const { service, chief, addBot, running } = harness();
+    const peer = addBot("Peer");
+    running.add(peer.id);
+    expect(() => service.propose({ botId: chief.id, threadId: chief.threadId, targetBotId: peer.id, changes: { browserProfile: "work" }, reason: "asked" }))
+      .toThrow("@Peer: stop this bot's turn before changing its browser profile");
+
+    running.delete(peer.id);
+    const card = service.propose({ botId: chief.id, threadId: chief.threadId, targetBotId: peer.id, changes: { browserProfile: "work" }, reason: "asked" });
+    running.add(peer.id);
+    expect(service.resolve({ botId: chief.id, threadId: chief.threadId, requestId: card.requestId, behavior: "allow" }))
+      .toMatchObject({ state: "invalid", status: 409 });
+    expect(peer.browserProfile).toBeUndefined();
+
+
+    const applying = harness({ autoApply: fullAccess });
+    const other = applying.addBot("Other");
+    const applied = applying.service.submit({ botId: applying.chief.id, threadId: applying.chief.threadId, targetBotId: other.id, changes: { browserProfile: "work" }, reason: "asked" });
+    applying.running.add(other.id);
+    expect(applying.service.undo({ botId: applying.chief.id, threadId: applying.chief.threadId, requestId: applied.requestId }))
+      .toMatchObject({ state: "invalid", status: 409, error: "stop this bot's turn before changing its browser profile" });
+    expect(other.browserProfile).toBe("work");
+    applying.running.delete(other.id);
+    expect(applying.service.undo({ botId: applying.chief.id, threadId: applying.chief.threadId, requestId: applied.requestId })).toMatchObject({ state: "undone" });
+    expect(other.browserProfile).toBeUndefined();
   });
 
   it("refuses a profile that does not exist and never creates one", () => {

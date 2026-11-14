@@ -14,6 +14,8 @@ export interface BrowserProfileGuards {
   profiles(): readonly Pick<BrowserProfile, "id" | "name">[];
   heldBy(session: string): unknown;
   currentBrowserSession(botId: string, profile: string | undefined): string;
+  /** Work the bot runs beyond its own busy flag: a room turn, a routine run, a turn just handed to it. */
+  turnRunning?(botId: string): boolean;
 }
 
 type GuardedBot = { id: string; busy?: boolean; browserProfile?: string };
@@ -21,7 +23,7 @@ type GuardedBot = { id: string; busy?: boolean; browserProfile?: string };
 /** The one gate on a bot's browserProfile: null or "" selects the bot's own browser. */
 export function checkBrowserProfileChange(bot: GuardedBot | null | undefined, requested: unknown, guards: BrowserProfileGuards): BrowserProfileChange {
   const profile = requested === null || requested === "" ? undefined : requested;
-  if (bot?.busy && profile !== bot.browserProfile) {
+  if (bot && (bot.busy || guards.turnRunning?.(bot.id)) && profile !== bot.browserProfile) {
     return { ok: false, status: 409, error: "stop this bot's turn before changing its browser profile" };
   }
   if (bot && profile !== bot.browserProfile && guards.heldBy(guards.currentBrowserSession(bot.id, bot.browserProfile))) {
