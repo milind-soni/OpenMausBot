@@ -69,6 +69,8 @@ export const USER_ERROR = {
   "serverError.decider.jevRejected": "Jev rejected this key. Check it at typesafe.ai and paste it again.",
   "serverError.decider.workersRejected": "Cloudflare rejected this token. Check that it has Workers AI permission and belongs to this account ID.",
   "serverError.decider.routerRejected": "OpenRouter rejected this key. Check it at openrouter.ai/keys and paste it again.",
+  "serverError.decider.customRejected": "Your endpoint rejected this key. Check it with the endpoint's owner and paste it again.",
+  "serverError.decider.baseUrlRequired": "Add the endpoint's base URL (https, or http to this machine) with the key.",
   "serverError.decider.accountId": "A Cloudflare account ID is 32 letters and digits.",
   "serverError.decider.accountFormat": "decider.workersAiAccountId a Cloudflare account ID is 32 letters and digits",
   "serverError.voice.utteranceTooLong": "voice utterances are limited to 500 characters",

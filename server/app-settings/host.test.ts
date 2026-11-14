@@ -379,6 +379,14 @@ describe("every other setting applies at once with Undo, Full access or not", ()
     expect(JSON.stringify(fx.messages)).not.toContain(OPENAI_KEY);
   });
 
+  it("picks a custom decision endpoint with Undo, but never sets its address", async () => {
+    const { set, saved } = fixture();
+    expect((await set("ai.routing", JSON.stringify({ provider: "custom", customModel: "m-1", customApi: "decisions" }))).status).toBe(200);
+    expect(saved).toEqual([{ decider: { provider: "custom", customModel: "m-1", customApi: "decisions" } }]);
+    expect((await set("ai.routing", JSON.stringify({ customBaseUrl: "https://elsewhere.example.com" }))).status).toBe(400);
+    expect(saved).toHaveLength(1);
+  });
+
   it("a window preference is refused while no window is open, and nothing is posted", async () => {
     const fx = fixture({ window: false });
     expect((await fx.set("general.openAtLogin", true)).body.error).toContain("Open MausBot on this computer first");

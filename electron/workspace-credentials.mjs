@@ -20,6 +20,7 @@ export const WORKSPACE_CREDENTIALS = [
   { section: "decider", field: "key", name: "jevApiKey", env: "OMB_JEV_API_KEY" },
   { section: "decider", field: "openrouterKey", name: "openrouterDeciderKey", env: "OMB_OPENROUTER_DECIDER_KEY" },
   { section: "decider", field: "workersAiToken", name: "workersAiToken", env: "OMB_WORKERS_AI_TOKEN" },
+  { section: "decider", field: "customKey", name: "customDeciderKey", env: "OMB_CUSTOM_DECIDER_KEY" },
   { section: "imageGen", field: "key", name: "openaiImageApiKey", env: "OMB_OPENAI_IMAGE_KEY" },
   { section: "imageGen", field: "customApiKey", name: "customImageApiKey", env: "OMB_CUSTOM_IMAGE_KEY" },
   { section: "imageGen", field: "geminiKey", name: "geminiImageApiKey", env: "OMB_GEMINI_IMAGE_KEY" },

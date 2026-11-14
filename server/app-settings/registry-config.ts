@@ -49,10 +49,11 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
       says: ({ enabled, backup }) => (enabled && backup ? `Turn on automatic recovery: a bot whose engine fails before any work starts tries once more on ${backup.instanceId} / ${backup.model}` : "Turn off automatic recovery"),
     }),
     section({
-      id: "ai.routing", label: "Decision and extraction", help: "The small model that decides who answers in rooms and sorts the inbox (Jev or OpenRouter). Its keys are set with keys.* or in Settings.", where: "Settings → AI",
-      synonyms: ["decision", "extraction", "routing", "who answers", "jev", "openrouter", "workers ai", "cloudflare"],
-      value: nonEmpty(withoutKeys(F.decider.unwrap().omit({ key: true, openrouterKey: true, workersAiToken: true }).strict())),
-      allowed: '{"enabled"?,"provider"?:"jev"|"openrouter"|"off","openrouterModel"?,"openrouterApi"?:"chat"|"decisions","jobs"?:{"roomRouting"?,"inboxTriage"?},"workersAiAccountId"?, addresses?}',
+      id: "ai.routing", label: "Decision and extraction", help: "The small model that decides who answers in rooms and sorts the inbox (Jev, OpenRouter or the person's custom endpoint). Its keys, and a custom endpoint's address, are set only in Settings.", where: "Settings → AI",
+      synonyms: ["decision", "extraction", "routing", "who answers", "jev", "openrouter", "workers ai", "cloudflare", "custom endpoint", "system one"],
+      // Security: a custom endpoint's address is where its key goes, so only the person sets it.
+      value: nonEmpty(withoutKeys(F.decider.unwrap().omit({ key: true, openrouterKey: true, workersAiToken: true, customKey: true, customBaseUrl: true }).strict())),
+      allowed: '{"enabled"?,"provider"?:"jev"|"openrouter"|"custom"|"off","openrouterModel"?,"openrouterApi"?:"chat"|"decisions","customModel"?,"customApi"?:"systemone"|"decisions","jobs"?:{"roomRouting"?,"inboxTriage"?},"workersAiAccountId"?, addresses?}',
       current: () => cfg().decider ?? {}, patch: (decider) => ({ decider }),
       says: (decider) => `Decision and extraction: ${fields(decider)}. Decisions send conversation text to the chosen provider, off this computer`,
     }),
