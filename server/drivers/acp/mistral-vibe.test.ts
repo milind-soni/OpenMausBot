@@ -70,6 +70,12 @@ describe("Mistral (Vibe) ACP driver", () => {
     expect(vibeSignedIn({ VIBE_HOME: join(scratch, "absent"), MISTRAL_API_KEY: "fixture-key" })).toBe(true);
   });
 
+  it("treats an injected keychain probe as a sign-in marker (orchestration of the fresh sign-in)", () => {
+    const env = { VIBE_HOME: join(scratch, "absent") };
+    expect(vibeSignedIn(env, () => false)).toBe(false);
+    expect(vibeSignedIn(env, () => true)).toBe(true);
+  });
+
   it("reads live models from a throwaway discovery session that sets no model itself", async () => {
     const rpc = join(scratch, "discovery-rpc.json");
     const dump = join(scratch, "discovery.json");

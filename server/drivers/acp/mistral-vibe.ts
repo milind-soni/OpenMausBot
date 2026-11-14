@@ -15,7 +15,7 @@
 //     `model`, and `thinking` (off | high). `thinking` follows the chosen model's own default;
 //     item-specific thought levels prove nothing here, so variants stay off.
 //   - `vibe-acp --version` prints "vibe-acp 3.1.1".
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -48,16 +48,32 @@ const nonEmpty = (value: unknown): boolean => typeof value === "string" && value
 
 /** A populated `whoami_cache.json` is the sign-in marker (fresh installs do not have it); the
  * provider key rides in the child env either way. */
-export function vibeSignedIn(env: Record<string, string | undefined>): boolean {
-  if (nonEmpty(env.MISTRAL_API_KEY)) return true;
-  const path = join(vibeHome(env), "whoami_cache.json");
-  if (!existsSync(path)) return false;
+const MISTRAL_VIBE_KEYCHAIN_SERVICE = "ai.mistral.vibe";
+
+/** The fresh-signed-in marker on macOS: the browser sign-in stores the token in the login keychain right away,
+ * while `whoami_cache.json` only reappears after the CLI's next session validates it — so right after a sign-in
+ * the keychain entry is the only reliable one. The service is overridable for tests. */
+export function macKeychainSignIn(env: Record<string, string | undefined>): boolean {
+  if (process.platform !== "darwin") return false;
   try {
-    const content = readFileSync(path, { encoding: "utf8" });
-    return content.includes("customer_id") || content.includes("api_base");
+    execFileSync("security", ["find-generic-password", "-s", env.VIBE_KEYCHAIN_SERVICE || MISTRAL_VIBE_KEYCHAIN_SERVICE],
+      { stdio: "ignore", timeout: 2_000, windowsHide: true });
+    return true;
   } catch {
     return false;
   }
+}
+
+export function vibeSignedIn(env: Record<string, string | undefined>, keychainProbe = macKeychainSignIn): boolean {
+  if (nonEmpty(env.MISTRAL_API_KEY)) return true;
+  const path = join(vibeHome(env), "whoami_cache.json");
+  if (existsSync(path)) {
+    try {
+      const content = readFileSync(path, { encoding: "utf8" });
+      if (content.includes("customer_id") || content.includes("api_base")) return true;
+    } catch {}
+  }
+  return keychainProbe(env);
 }
 
 /** session/new's `model` option: ids are the picker's wire values verbatim. */
