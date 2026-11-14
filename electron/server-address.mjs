@@ -73,7 +73,8 @@ export function plainHttpServerOrigins(environments) {
   for (const env of environments ?? []) {
     if (typeof env?.origin !== "string" || !allowedServerOrigin(env.origin)) continue;
     const url = new URL(env.origin);
-    if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) origins.add(url.origin);
+    // Chromium splits the switch on commas: a host holding one would vouch for a different, public host too.
+    if (url.protocol === "http:" && !isLoopbackHost(url.hostname) && !url.hostname.includes(",")) origins.add(url.origin);
   }
   return [...origins];
 }

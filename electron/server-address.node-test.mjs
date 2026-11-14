@@ -106,6 +106,8 @@ test("only saved servers at a private-network http address are vouched for, so L
     { id: "g", kind: "remote", origin: "http://maus.example.com" },
     { id: "h", kind: "local", dataDir: "/tmp/work" },
     { id: "i", kind: "remote", origin: "http://192.168.1.20:8799" },
+    // Chromium splits the switch on commas, so this would also vouch for the public http://example.com.
+    { id: "j", kind: "remote", origin: "http://example.com,.local" },
   ];
   assert.deepEqual(plainHttpServerOrigins(environments), ["http://192.168.1.20:8799", "http://box.tail1234.ts.net:8799"]);
   assert.deepEqual(plainHttpServerOrigins([]), []);
