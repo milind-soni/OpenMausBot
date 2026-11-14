@@ -367,6 +367,15 @@ export function mimeFor(path: string): string {
     case ".odt": return "application/vnd.oasis.opendocument.text";
     case ".ods": return "application/vnd.oasis.opendocument.spreadsheet";
     case ".odp": return "application/vnd.oasis.opendocument.presentation";
+    // Archives are typed by name only and stay downloads: never previewed, never unpacked. foo.tar.gz is a .gz.
+    case ".zip": return "application/zip";
+    case ".rar": return "application/vnd.rar";
+    case ".7z": return "application/x-7z-compressed";
+    case ".tar": return "application/x-tar";
+    case ".gz": return "application/gzip";
+    case ".tgz": return "application/x-compressed-tar";
+    case ".bz2": return "application/x-bzip2";
+    case ".xz": return "application/x-xz";
     default: return "application/octet-stream";
   }
 }
