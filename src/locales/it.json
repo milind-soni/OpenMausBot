@@ -7123,5 +7123,6 @@
   "computer.recovery.restart": "Riavvia computer",
   "computer.recovery.restartTitle": "Ferma e riavvia questo computer cloud. I programmi aperti vengono chiusi; i suoi file restano.",
   "computer.recovery.replace": "Sostituisci computer",
-  "computer.recovery.replaceTitle": "Elimina questo computer cloud e ne dà uno nuovo al bot. I file che sono solo lì vanno persi."
+  "computer.recovery.replaceTitle": "Elimina questo computer cloud e ne dà uno nuovo al bot. I file che sono solo lì vanno persi.",
+  "composer.command.burstDesc": "Esegui molte parti di un lavoro insieme, poi unisci i risultati"
 }
