@@ -116,6 +116,20 @@ describe("pinned pages in the window's top bar", () => {
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "showWebPanel", id: "panel-1" });
   });
 
+  it("decides again once main names the place, which arrives after the bar draws", async () => {
+    setWebPanels(PANELS);
+    layout(1400, 1200, 104, 300);
+    let answer: (place: unknown) => void = () => {};
+    const pending = new Promise((resolve) => { answer = resolve; });
+    Object.assign(window, { ogb: { workspaces: { state: () => pending, onChanged: () => () => {}, menu: async () => {} } } });
+    await mount(createElement(WindowFrameBar));
+    expect(host.querySelector("[data-frame-bar-page]"), "no place name yet: the names fit").toBeTruthy();
+    await act(async () => { answer({ local: true, name: "This computer" }); await pending; });
+    await act(async () => { await Promise.resolve(); });
+    expect(host.querySelector("[data-frame-bar-page]"), "with the place name in, the names fold into one button").toBeNull();
+    expect(host.querySelector("[data-frame-bar-pages] [aria-haspopup]")).toBeTruthy();
+  });
+
   it("names the open page", async () => {
     setWebPanels(PANELS);
     fixture.activeView = "web-panel";

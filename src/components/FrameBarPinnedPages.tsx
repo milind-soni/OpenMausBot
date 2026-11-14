@@ -7,6 +7,7 @@ import { useWebPanels } from "@/lib/web-panel-preferences";
 import { useStore } from "@/state/store";
 import type { WebPanel } from "@/lib/web-panels";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
+import { useWindowPlace } from "./WindowPlaceTitle";
 
 /** The frame bar's own button recipe, as WindowFrameBar draws its buttons (kept here so this file does not import
  * the bar it is rendered by). */
@@ -33,6 +34,8 @@ function PageIcon({ panel, size }: { panel: WebPanel; size: number }) {
  * pinned, so the bar reads as the official one until the person keeps a page. */
 export function FrameBarPinnedPages() {
   const panels = useWebPanels();
+  // Main names the place after this page mounts: until it does, the bar has no place name to keep clear of.
+  const place = useWindowPlace();
   const { state, dispatch } = useStore();
   const wrapRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
@@ -46,8 +49,8 @@ export function FrameBarPinnedPages() {
       const bar = wrap.closest("[data-window-frame-bar]") as HTMLElement | null;
       if (!bar) return setRoomy(false);
       const barBox = bar.getBoundingClientRect();
-      const place = bar.querySelector<HTMLElement>("[data-window-place]");
-      const placeWidth = place?.getBoundingClientRect().width ?? 0;
+      const placeEl = bar.querySelector<HTMLElement>("[data-window-place]");
+      const placeWidth = placeEl?.getBoundingClientRect().width ?? 0;
       const left = wrap.getBoundingClientRect().left - barBox.left;
       const needed = measure.getBoundingClientRect().width;
       setRoomy(pagesFitInBar(barBox.width, placeWidth, left, needed));
@@ -57,11 +60,11 @@ export function FrameBarPinnedPages() {
     const observer = new ResizeObserver(decide);
     const bar = wrap.closest("[data-window-frame-bar]");
     if (bar) observer.observe(bar);
-    const place = bar?.querySelector("[data-window-place]");
-    if (place) observer.observe(place);
+    const placeEl = bar?.querySelector("[data-window-place]");
+    if (placeEl) observer.observe(placeEl);
     observer.observe(measure);
     return () => observer.disconnect();
-  }, [panels]);
+  }, [panels, place]);
 
   if (!panels.length) return null;
   const activeId = state.activeView === "web-panel" ? state.webPanelId : undefined;
