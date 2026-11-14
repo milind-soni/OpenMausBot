@@ -150,6 +150,8 @@ export class RuntimeCoordinator implements Coordinator {
   private readonly log: (line: string) => void;
   /** The person's stops, remembered: which bots' work on which request they stopped, and when. */
   private readonly stops: Array<{ at: number; request: string; bots: Set<string> }> = [];
+  /** The cause of the stop running now, if any (stopFor). */
+  private stopCause: string | undefined;
   private opened = false;
   private prunedAt: number | undefined;
 
@@ -381,7 +383,7 @@ export class RuntimeCoordinator implements Coordinator {
   /** Nothing can answer what this parked turn waits on any more. */
   releaseParked(id: string, reason: string): void {
     this.ready();
-    if (this.store.get(id)?.status === "needs_input") this.runtime.cancel(id, reason, "stopped");
+    if (this.store.get(id)?.status === "needs_input") this.stopFor(reason, () => this.runtime.cancel(id, reason, "stopped"));
   }
 
   parkedFor(botId: string): HandoffView[] {
@@ -414,25 +416,38 @@ export class RuntimeCoordinator implements Coordinator {
     return { id: batch[0]!.id, botIds: batch.map(c => c.assignee.botId) };
   }
 
-  cancelRoom(groupId: string, threadId?: string, reason = "Stopped by user", status: "failed" | "cancelled" = "cancelled"): void {
+  cancelRoom(groupId: string, threadId?: string, reason = STOPPED_BY_USER, status: "failed" | "cancelled" = "cancelled"): void {
     this.ready();
-    for (const n of this.live()) {
-      if (n.assignee.destination.groupId !== groupId || (threadId && n.assignee.destination.threadId !== threadId)) continue;
-      this.runtime.cancel(n.id, reason, status === "failed" ? "failed" : "stopped");
-    }
+    this.stopFor(reason, () => {
+      for (const n of this.live()) {
+        if (n.assignee.destination.groupId !== groupId || (threadId && n.assignee.destination.threadId !== threadId)) continue;
+        this.runtime.cancel(n.id, reason, status === "failed" ? "failed" : "stopped");
+      }
+    });
   }
 
-  cancelDirect(threadId: string, reason = "Stopped by user"): void {
+  cancelDirect(threadId: string, reason = STOPPED_BY_USER): void {
     this.ready();
-    for (const n of this.live()) if (this.direct(n, threadId)) this.runtime.cancel(n.id, reason, "stopped");
+    this.stopFor(reason, () => { for (const n of this.live()) if (this.direct(n, threadId)) this.runtime.cancel(n.id, reason, "stopped"); });
   }
 
-  stopAwaitingDirect(threadId: string, reason = STOPPED_BY_USER): void {
+  /** With no reason given, the stop is the person's, unless it is part of a stop already under way: see stopFor. */
+  stopAwaitingDirect(threadId: string, reason?: string): void {
     this.ready();
-    const stopping = reason === STOPPED_BY_USER ? this.live().filter(n => n.assignee.destination.threadId === threadId) : [];
+    const cause = reason ?? this.stopCause ?? STOPPED_BY_USER;
+    const stopping = cause === STOPPED_BY_USER ? this.live().filter(n => n.assignee.destination.threadId === threadId) : [];
     const trees = stopping.map(n => ({ root: this.store.get(n.rootId), work: this.subtree(n).filter(a => !isTerminal(a)) }));
-    this.runtime.stopRequester({ threadId }, reason);
+    this.stopFor(cause, () => this.runtime.stopRequester({ threadId }, cause));
     for (const { root, work } of trees) if (root) this.rememberStop(root, work);
+  }
+
+  /** Runs a stop with its cause. A teammate's turn it ends stops that teammate's thread as well (the host's abort handler
+   * calls stopAwaitingDirect with no reason), and that is still this stop: a cut the system made (a waiting line going
+   * first, a restart, a deleted conversation) is never remembered as the person's stop. */
+  private stopFor(cause: string, stop: () => void): void {
+    const outer = this.stopCause;
+    this.stopCause = cause;
+    try { stop(); } finally { this.stopCause = outer; }
   }
 
   /** The person's stop, remembered (scoped to that request): the bots whose work on it the stop ended don't take the same

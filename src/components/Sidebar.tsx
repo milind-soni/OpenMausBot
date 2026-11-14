@@ -60,6 +60,7 @@ import {
 } from "@/lib/sidebar-layout";
 import { stepKey, type BotDropPlace } from "@/lib/sidebar-bot-drop";
 import { BotDropLine, botRowDropClass, useSidebarBotDrag, type BotRowDrag } from "./SidebarBotDrag";
+import { useSidebarRoomDrag } from "./SidebarRoomDrag";
 import { useSidebarSections } from "./SidebarSections";
 import { departmentNames, moveBotsToSection } from "./bot-sections";
 import { sidebarSectionAttention } from "@/lib/sidebar-attention";
@@ -1085,7 +1086,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const q = query.trim().toLowerCase();
   const sections = useSidebarSections({ simple, rail, density, query: q, label: sectionLabel, sidebarRef });
   const botDrag = useSidebarBotDrag({ dispatch, announce: sections.announce, onNamed: sections.focusHeader, onRenamed: sections.renamed,
-    onError: (text) => setTeamFeedback({ error: true, text }), onCancelled: () => sidebarRef.current?.focus() });
+    onError: (text) => setTeamFeedback({ error: true, text }), onCancelled: () => sidebarRef.current?.focus() }), roomDrag = useSidebarRoomDrag({ dispatch, announce: sections.announce, enabled: (sections.interactive || density === "icons") && !phone && !q, groups: state.groups });
 
   const sideLists = useTeamSideLists(state), matchingBots = sideLists.bots
     .filter((b) => !b.hidden)
@@ -1392,14 +1393,13 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             const sectionChiefItems = sectionName
               ? sectionChiefs.filter((bot) => bot.section === sectionName)
               : [];
-            const sectionGroupItems =
-              id === CHANNELS_SECTION_ID
+            const sectionGroupItems = roomDrag.list(id === CHANNELS_SECTION_ID
                 ? unsectionedRooms
                 : id === BOT_CHATS_SECTION_ID
                   ? botChats
                   : sectionName
                     ? sectionedRooms.filter((group) => group.section === sectionName)
-                    : [];
+                    : []);
             const sectionBotItems =
               id === PINNED_SECTION_ID
                 ? pinnedBots
@@ -1459,7 +1459,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                   <>
                     {id === BOTS_SECTION_ID && drops.slot}
                     {sectionChiefItems.map((bot) => <BotListItem key={bot.id} {...botRow(bot)} />)}
-                    {sectionGroupItems.map((group) => (
+                    {sectionGroupItems.map((group) => roomDrag.wrap(group.id, (
                       <GroupListItem
                         key={group.id}
                         group={group}
@@ -1467,7 +1467,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                         query={q}
                         onMenu={setRoomMenu}
                       />
-                    ))}
+                    )))}
                     {id === PINNED_SECTION_ID ? (
                       <PinnedBotRoster
                         bots={sectionBotItems}

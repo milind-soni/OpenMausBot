@@ -1,0 +1,15 @@
+{
+  "name": "@openmausbot/phone-protocol",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The wire contract a MausBot phone app shares with the desktop: frame and response types, cards, widgets, mascot and pairing.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*"
+  },
+  "peerDependencies": {
+    "croner": "10.0.1",
+    "zod": "4.6.7"
+  }
+}

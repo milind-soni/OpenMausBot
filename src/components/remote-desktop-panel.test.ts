@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { boatCapableEngine, isActiveTurnRefusal, isRemoteScreenshotContention, remoteScreenshotSource } from "@/lib/remote-desktop";
+import { boatCapableEngine, isActiveTurnRefusal, isRemoteScreenshotContention, localVmScreenshotSource, remoteScreenshotSource } from "@/lib/remote-desktop";
 import type { InstanceInfo } from "@/state/store";
 import { CLOUD_COMPUTER_BUSY_ERROR } from "../../shared/computer-contention";
 
@@ -43,5 +43,16 @@ describe("remote VPS preview", () => {
     expect(remoteScreenshotSource({ png: "aGVsbG8=", format: "image/svg+xml" })).toBeNull();
     expect(remoteScreenshotSource({ format: "png" })).toBeNull();
     expect(remoteScreenshotSource(null)).toBeNull();
+  });
+});
+
+describe("remote Local VM preview", () => {
+  it("shows only a PNG or JPEG data URL from the host's Local VM", () => {
+    expect(localVmScreenshotSource({ image: "data:image/png;base64,iVBORw0KGgo=" })).toBe("data:image/png;base64,iVBORw0KGgo=");
+    expect(localVmScreenshotSource({ image: "data:image/jpeg;base64,/9j/4AAQ" })).toBe("data:image/jpeg;base64,/9j/4AAQ");
+    for (const raw of [null, "x", {}, { image: "" }, { image: "data:image/svg+xml;base64,PHN2Zz4=" }, { image: "javascript:alert(1)" },
+      { image: "data:image/png;base64,abc\"><" }, { png: "iVBORw0KGgo=", format: "png" }]) {
+      expect(localVmScreenshotSource(raw)).toBeNull();
+    }
   });
 });

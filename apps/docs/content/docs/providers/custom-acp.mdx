@@ -1,0 +1,57 @@
+---
+title: Custom engines
+description: Run a bot on any agent CLI that speaks the Agent Client Protocol, from one entry in your config file.
+icon: Terminal
+---
+
+An agent CLI that speaks [ACP](https://agentclientprotocol.com) over stdio — an agent that ships its own `acp` mode, a Zed-style agent server, or a small wrapper of your own — runs as a MausBot engine without a code change. MausBot starts the CLI, signs in with the account it already has, and shows its models, approvals and questions in the chat like any built-in engine.
+
+This is for a CLI that has its own ACP entry point. If the CLI only speaks chat completions, use an OpenAI-compatible provider instead: see [Other model providers](./model-providers.mdx).
+
+## Add the instance
+
+Add an entry under `"instances"` in `~/.openmausbot/config.json`, then restart the app. Instance entries are read at boot, so an engine added while the app runs is not picked up until the restart.
+
+```json
+{
+  "instances": {
+    "my-agent": {
+      "driver": "customAcp",
+      "displayName": "My Agent",
+      "config": { "cli": "my-agent acp" }
+    }
+  }
+}
+```
+
+`config.cli` is the whole command, arguments included, so `"npx -y some-agent acp"` is valid. Use the executable's full path when it lives somewhere the app does not have on its `PATH` — `/home/you/.local/bin/vibe-acp`, or a Windows `.cmd` shim — because a desktop app started from the dock or the Start menu usually has a shorter `PATH` than your terminal.
+
+Every instance needs its own `driver`, `displayName` and `config.cli`. Give `displayName` the name you want to see in the model picker; the per-bot picker lists the instance, not a generic driver name.
+
+You can also set the command without editing the file: **Settings → Engines**, then **Set CLI…** on the instance's row. An instance that has no command yet stays visible with that hint instead of failing on its first message.
+
+## Sign in once from a terminal
+
+The custom driver has no sign-in flow of its own. Run the CLI once in a terminal and complete its login; MausBot spawns the CLI with that login intact. A chat that reports a missing sign-in or authentication error means the CLI itself has none — repeat that login step in a terminal and send the message again.
+
+## Choose the engine and its models
+
+Pick the instance in a bot's model picker. The picker lists the models the agent advertises, which MausBot reads in a temporary ACP session before a prompt is sent. Use **Refresh models** to read the catalog again after you sign in, upgrade the CLI, or change plan. A failed refresh keeps the last catalog that worked.
+
+**Agent default** leaves the model the CLI would use itself, and it is the only choice an agent makes when it advertises no models. Where the agent offers thinking levels, the picker lists them next to each model. A bot's default model and a single conversation's override are saved separately.
+
+## What MausBot passes to the CLI
+
+- **Environment.** Add an `"environment"` object to the instance to give the CLI variables. They reach the child process, except the names in the next point, which MausBot removes even when the instance sets them here. `PATH` is the one name the instance cannot set — MausBot sets it itself — so give the executable's full path in `config.cli` instead. When the bot runs in a box, the picker's catalog read is a separate process that gets none of these variables, so an agent that needs one to list its models may show only **Agent default** there while answering chats normally.
+- **No borrowed keys.** MausBot removes three groups from the child's environment: its own provider keys, including the ones saved for other engines; workspace credentials such as `BOX_TOKEN` or the `OMB_…` names; and control-plane variables such as `OMB_CLOUD_…` and the license key. A built-in engine keeps the provider and workspace names its own settings need; this driver keeps none of them. Nothing else is removed: a CLI that reads its own files, or that can be pointed at another provider through its own variables, still uses whatever that provider bills. The names are matched as spelled, so on Windows, where environment names are case-insensitive, a differently-cased copy of one of them in the server's own environment is not removed.
+- **Your files.** The CLI starts in the folder the bot works in, exactly as a built-in engine does. That is its working folder, not a boundary on what it may read: a CLI with its own configuration, such as `~/.vibe/.env`, reads it from your home folder.
+
+## Approvals and questions
+
+Tool permissions ride ACP's own `session/request_permission`. When the agent asks, the request becomes a normal approval card in the chat, and Ask and Full access keep their usual meaning for that bot. An agent that never asks is never asked to; MausBot cannot add approvals a CLI does not offer.
+
+## More than one agent
+
+Add one instance per agent, each with its own `displayName` and command, and one bot can use each. Instances are independent: a different build, or two versions of the same CLI side by side, all work. Instances of one CLI that signs in through its home folder share that sign-in; to use a different account, give the second instance its own `HOME` in `environment`.
+
+Vendor-written ACP modes work the same way, for example Mistral Vibe's `vibe-acp` with a Vibe sign-in, or Command Code's `cmd acp` with a `cmd login`.

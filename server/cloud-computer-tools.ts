@@ -10,6 +10,7 @@ import type { AppConfig } from "./config.ts";
 import { controlRefusal, type ControlState } from "./control-client.ts";
 import { COMPUTER_COPY_BUDGET_MS, HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
 import { compileToolSchema } from "./mcp-schema-validator.ts";
+import { CLOUD_COMPUTER_NO_ANSWER } from "../shared/cloud-computer-recovery.ts";
 
 const coordinate = { type: "integer", minimum: 0, maximum: 32767 };
 const tool = (name: string, description: string, properties: Record<string, unknown> = {}, required: string[] = []) =>
@@ -116,6 +117,7 @@ export async function runCloudComputerTool(
   signal.throwIfAborted();
   if (name === "open_url" && result.ok) return { content: [{ type: "text", text: "Browser launch requested. Page loading is not confirmed; inspect the screen before continuing." }] };
   if (name === "exec" && result.timedOut) return { isError: true, content: [{ type: "text", text: EXEC_LATE }] };
+  if (result.unanswered) return { isError: true, content: [{ type: "text", text: CLOUD_COMPUTER_NO_ANSWER }] };
   return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result) }] };
 }
 
@@ -134,6 +136,8 @@ export async function cloudComputerRpc(
     signal: AbortSignal;
     /** The whole call, the gate's wait included, answers within this. */
     budgetMs?: number;
+    /** A computer that stopped answering (server/boat-recovery.ts): what the bot is told instead, and once after it was replaced. */
+    recovery?: { refusal(boxId: string, phase: "before" | "after"): string | null; notice(boxId: string): string | null };
   },
 ): Promise<{ tools: typeof CLOUD_COMPUTER_TOOLS } | CloudComputerResult> {
   const started = Date.now();
@@ -154,14 +158,26 @@ export async function cloudComputerRpc(
   deps.assertActive();
   const boxId = deps.boxId();
   if (!boxId) return { isError: true, content: [{ type: "text", text: CLOUD_COMPUTER_NOT_READY }] };
+  const refused = (phase: "before" | "after"): CloudComputerResult | null => {
+    const text = deps.recovery?.refusal(boxId, phase);
+    return text ? { isError: true, content: [{ type: "text", text }] } : null;
+  };
+  const before = refused("before");
+  if (before) return before;
   const late = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
   let result: CloudComputerResult;
   try {
     result = await runCloudComputerTool(deps.cfg, boxId, params.name as string, args as Record<string, unknown>, AbortSignal.any([deps.signal, late]), deps.folder?.());
   } catch (error) {
-    if (!late.aborted || deps.signal.aborted) throw error;
+    if (deps.signal.aborted) throw error;
+    const after = refused("after");
+    if (after) return after;
+    if (!late.aborted) throw error;
     return { isError: true, content: [{ type: "text", text: commandLateText(params.name, args) ?? (copy ? CLOUD_COMPUTER_COPY_LATE : CLOUD_COMPUTER_LATE) }] };
   }
   deps.assertActive();
-  return result;
+  const unanswered = result.isError && result.content.some((part) => part.type === "text" && part.text === CLOUD_COMPUTER_NO_ANSWER);
+  if (unanswered) result = refused("after") ?? result;
+  const notice = deps.recovery?.notice(boxId);
+  return notice ? { ...result, content: [{ type: "text", text: notice }, ...result.content] } : result;
 }

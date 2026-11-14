@@ -25,7 +25,7 @@ describe("why a queued handoff has not started", () => {
   });
 
   it("says when it waits for a computer, an earlier turn in its thread, or a room turn", () => {
-    expect(reason({ waitsForComputer: () => true })(node())).toBe("waiting for the computer it needs, which another turn is using");
+    expect(reason({ waitsForComputer: () => true })(node())).toBe("waiting for the computer it needs, which another turn or a person is using");
     expect(reason({ threadBusy: (_bot, threadId) => threadId === "t-new" })(node())).toBe("waiting for an earlier turn in that thread to finish");
     expect(reason({ slots: () => ({ busy: [], limit: 2 }), groupTurn: () => true })(node())).toBe("waiting for Ops to finish its turn in a room");
   });

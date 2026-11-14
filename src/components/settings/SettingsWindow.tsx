@@ -58,7 +58,6 @@ export function SettingsWindow() {
   const [anchor, setAnchor] = useState<string | null>(target.anchor ?? null);
   const [narrowPage, setNarrowPage] = useState(state.appSettingsSection !== "overview");
   const [query, setQuery] = useState("");
-  const [scrolled, setScrolled] = useState(false);
   const pages = visiblePages(ctx);
   const page = pageById(target.page);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -186,10 +185,10 @@ export function SettingsWindow() {
               {(!narrow || !showList) && (
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
                   {!narrow && closeButton}
-                  <div ref={scrollRef} data-settings-scroll data-settings-content="" onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 0)}
+                  <div ref={scrollRef} data-settings-scroll data-settings-content=""
                     className={cn("settings-scroll min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]", narrow ? "pb-12" : "px-8 pb-12")}>
                     <div className={cn("flex max-w-[640px] flex-col", narrow && "max-w-none")}>
-                      <SettingsPageHeader page={page} ctx={ctx} place={place} scrolled={scrolled} narrow={narrow} missing={missing} />
+                      <SettingsPageHeader page={page} ctx={ctx} place={place} narrow={narrow} missing={missing} />
                       <div key={target.page} data-settings-page-body={target.page} className={cn("flex flex-col gap-6", narrow && "px-4")}>
                         <LicenseExpiryBanner config={state.config} />
                         {page.owner === "place" && state.config === null

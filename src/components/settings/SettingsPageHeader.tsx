@@ -54,8 +54,8 @@ export function ScopeLine({ page, ctx, place }: { page: SettingsPage; ctx: Setti
   );
 }
 
-export function SettingsPageHeader({ page, ctx, place, scrolled, narrow, missing }: {
-  page: SettingsPage; ctx: SettingsContext; place: SettingsPlace; scrolled: boolean; narrow: boolean; missing?: string;
+export function SettingsPageHeader({ page, ctx, place, narrow, missing }: {
+  page: SettingsPage; ctx: SettingsContext; place: SettingsPlace; narrow: boolean; missing?: string;
 }) {
   // A browser has no updates of its own, so its This app intro leaves them out.
   const intro = page.id !== "app" ? INTRO[page.id]
@@ -63,8 +63,8 @@ export function SettingsPageHeader({ page, ctx, place, scrolled, narrow, missing
     : ctx.advanced ? INTRO.app : "settings.app.introSimple";
   const title = page.id === "account" ? t("settings.page.account") : pageLabel(page, place, ctx.desktop);
   return (
-    <header data-settings-header="" className={cn("sticky top-0 z-10 flex flex-col gap-1 bg-(--settings-sheet) pb-5", narrow ? "px-8 pt-1" : "pl-4 pt-4",
-      scrolled && "shadow-[0_0.5px_0_var(--settings-edge)]")}>
+    // No fill and not sticky: on a glass skin any opaque fill reads as a white block over the sheet.
+    <header data-settings-header="" className={cn("flex flex-col gap-1 pb-5", narrow ? "px-8 pt-1" : "pl-4 pt-4")}>
       {!narrow && <h2 id="settings-page-title" className="truncate pr-12 text-[18px] font-semibold leading-6 tracking-[-0.01em] text-ink">{title}</h2>}
       <ScopeLine page={page} ctx={ctx} place={place} />
       {intro && <p data-settings-intro={intro} className="text-[13px] leading-[18px] text-ink-secondary">{t(intro, { place: place.name, app: productName() })}</p>}

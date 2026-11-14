@@ -7,7 +7,7 @@ import type { ModelSelection } from "./store";
 /** A saved credential: whether it is set and, for admins, its last four characters. The key itself never comes back. */
 export interface SavedKey { configured: boolean; last4?: string }
 
-export type NestedKeyName = "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "geminiImageApiKey";
+export type NestedKeyName = "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "customDeciderKey" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "geminiImageApiKey";
 
 export interface ImageSlotStatus { provider: ImageProvider; model: string; configured: boolean }
 
@@ -101,9 +101,13 @@ export interface ConfigStatus {
    * saved. OpenRouter only: `keySource` says which key is in use (its own, or
    * the one under Settings → API keys); `sharedKey`: that one is on file. */
   decider?: {
-    provider: "jev" | "workersai" | "openrouter";
-    /** The OpenRouter model in use; present only while OpenRouter is the provider. */
+    provider: "jev" | "workersai" | "openrouter" | "custom";
+    /** The OpenRouter or custom model in use; present only while that is the provider. */
     model?: string;
+    /** The custom endpoint's protocol, or the OpenRouter API. */
+    api?: "chat" | "decisions" | "systemone";
+    /** The custom endpoint's base URL (the person's own setting, not a secret); custom only. */
+    baseUrl?: string;
     configured: boolean;
     keySource?: "own" | "shared";
     sharedKey?: boolean;
@@ -203,6 +207,12 @@ export interface BrowserEngineSummary {
   /** Self-hosted servers only: whether bots' browsers may open this server's own sites and its local network
    * (browserEngine.egress.localNetwork, off by default). Absent on the desktop and on MausBot Cloud. */
   serverSites?: boolean;
+  /** Whether an owner-configured SOCKS5 upstream is active; the endpoint is never exposed in config status. */
+  proxyConfigured?: boolean;
+  /** Whether an owner-configured SOCKS5 upstream is saved, even if the current browser engine cannot use it. */
+  proxySaved?: boolean;
+  /** Team Cloud only: whether this caller may change the shared SOCKS5 upstream. */
+  proxyEditable?: boolean;
 }
 
 export interface BrowserProfile {

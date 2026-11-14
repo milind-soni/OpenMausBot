@@ -5,7 +5,7 @@ type ShownChatState = Pick<AppState, "activeView" | "selectedId" | "bots" | "gro
 export function shownChatIsUnread(state: ShownChatState): boolean {
   if (state.activeView !== "chat" || !state.selectedId) return false;
   const group = state.groups.find((candidate) => candidate.id === state.selectedId);
-  if (group) return group.unread;
+  if (group) return group.tasks?.find((task) => task.threadId === group.threadId)?.unread ?? group.unread;
   const bot = state.bots.find((candidate) => candidate.id === state.selectedId);
   if (!bot) return false;
   const shown = bot.switchingTo ?? bot.threadId;

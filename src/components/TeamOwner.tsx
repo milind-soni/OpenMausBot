@@ -115,7 +115,7 @@ export function pickOwnerOf(bot: Bot, team: TeamPeople, at: { x: number; y: numb
 /** A tag or passed message is done once its person opens it, even in a shared chat someone else already read. */
 function readConversation(groups: ReadonlyArray<{ id: string; threadId: string; tasks?: ReadonlyArray<{ threadId: string }> }>, botId: string, threadId: string) {
   const group = groups.find((one) => one.threadId === threadId || one.tasks?.some((task) => task.threadId === threadId));
-  void (group ? api(`/api/groups/${group.id}/read`, { method: "POST" }) : api(`/api/bots/${botId}/read`, { method: "POST", body: JSON.stringify({ threadId }) }))
+  void (group ? api(`/api/groups/${group.id}/read`, { method: "POST", body: JSON.stringify({ threadId }) }) : api(`/api/bots/${botId}/read`, { method: "POST", body: JSON.stringify({ threadId }) }))
     .then(() => refreshNeedsYou()).catch(() => {});
 }
 
