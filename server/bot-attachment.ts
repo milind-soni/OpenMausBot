@@ -102,20 +102,44 @@ export async function saveBotAttachment(input: SaveBotAttachmentInput): Promise<
 }
 
 /** The chat's link rule: search from the reply back to the last non-bot message; only the reply's author counts, and a
- * name delivered twice matches neither. */
-export function deliveredCopy(messages: readonly Message[], reply: Message, name: string): Exclude<BotAttachment, { kind: "audio" }> | null {
+ * delivery matched twice is refused. A link to the source the bot saved resolves the delivered copy by its source path
+ * first, so a renamed attachment still opens; the display name is the fallback for records without a source. */
+export function deliveredCopy(
+  messages: readonly Message[],
+  reply: Message,
+  name: string,
+  href?: string,
+): Exclude<BotAttachment, { kind: "audio" }> | null {
   const byId = new Map(messages.map((message) => [message.id, message]));
   const author = reply.from?.botId;
-  let found: Exclude<BotAttachment, { kind: "audio" }> | null = null;
+  let wanted: string | undefined;
+  if (href) {
+    try {
+      wanted = referencedPathIdentity(href);
+    } catch { }
+  }
+  const inScope: Exclude<BotAttachment, { kind: "audio" }>[] = [];
   for (let message: Message | undefined = reply; message?.role === "bot"; message = message.parentId ? byId.get(message.parentId) : undefined) {
     if (message.from?.botId !== author) continue;
     for (const attachment of message.attachments ?? []) {
-      if (attachment.kind === "audio" || attachment.name !== name) continue;
-      if (found) return null;
-      found = attachment;
+      if (attachment.kind === "audio") continue;
+      inScope.push(attachment);
     }
   }
-  return found;
+  if (wanted !== undefined) {
+    const bySource = inScope.filter((attachment) => {
+      if (!attachment.source) return false;
+      try {
+        return referencedPathIdentity(attachment.source) === wanted;
+      } catch {
+        return false;
+      }
+    });
+    if (bySource.length > 1) return null;
+    if (bySource.length === 1) return bySource[0]!;
+  }
+  const byName = inScope.filter((attachment) => attachment.name === name);
+  return byName.length === 1 ? byName[0]! : null;
 }
 
 export function attachedFileLine(attachment: BotAttachment, sentInTurn: string | undefined, from?: Message["from"]): Omit<Message, "id" | "at"> {
