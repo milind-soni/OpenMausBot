@@ -90,6 +90,23 @@ export interface ActiveTheme {
   id: string | null;
   theme: ThemeFile | null;
 }
+/** How many of a person's look changes are kept to go back to. */
+export const LOOK_HISTORY_LIMIT = 30;
+/** What one look change did: a theme made, edited or deleted while worn, a theme or built-in skin worn, back to the
+ * default look, or earlier changes gone back on. */
+export const LOOK_CHANGE_KINDS = ["made", "edited", "deleted", "wore", "skin", "default", "undid"] as const;
+export interface LookChange {
+  kind: (typeof LOOK_CHANGE_KINDS)[number];
+  /** The theme's name, or the built-in skin's id. */
+  name?: string;
+  /** undid: how many changes it went back on. */
+  count?: number;
+}
+/** GET /api/themes/history, newest first; POST it `{ index }` to go back to how things looked right after that change. */
+export interface ThemeHistoryItem extends LookChange {
+  index: number;
+  at: string;
+}
 export const THEME_EXPORT_VERSION = 1;
 /** One file: the theme with its files inlined as data: addresses. */
 export const themeExportSchema = z.object({
@@ -248,8 +265,11 @@ export function themeGuide(): string {
     ...THEME_HOOKS.map((hook) => `- ${hook.selector}: ${hook.what}`),
     "",
     "Calls: theme (optional id: also return that saved theme). set_theme with id and theme (the theme as JSON) saves and wears it; with only id it wears a saved theme, a built-in skin, or none. add_theme_asset with id and path.",
+    `theme_history lists the person's last ${LOOK_HISTORY_LIMIT} look changes, newest first, each with its index and the look right after it. undo_theme goes back: steps (default 1) undoes that many changes; index returns to the look right after that entry, theme file and all. An undo is itself a change, so undoing it again is a redo.`,
     "",
     "You cannot see the result. Make one small change at a time, then ask the person how it looks.",
-    `Undo: set_theme with a built-in skin id, or "none" to drop the custom theme; the card in the conversation also has Undo. If a theme hides what the person needs, tell them: ${SHORTCUT} resets to the default look, and opening the app with ?${SAFE_LOOK_PARAM} in its address starts it without the theme.`,
+    "Going back: \"undo that\", \"go back\", \"go back two changes\", \"how it was before\" → undo_theme with steps. \"The purple one from earlier\", \"the one from this morning\" → theme_history, then undo_theme with that index.",
+    "\"Revert\" or \"reset\" to the original, default or normal look → set_theme with id \"none\". Wear a built-in skin only when the person names one.",
+    `If a theme hides what the person needs, tell them: ${SHORTCUT} resets to the default look, and opening the app with ?${SAFE_LOOK_PARAM} in its address starts it without the theme. The card in the conversation has Undo too.`,
   ].join("\n");
 }

@@ -17,6 +17,16 @@ A theme only changes the look for you. On a team, your teammates keep theirs.
 
 The bot cannot see the result. It makes small changes and asks you how it looks. Every change has **Undo** on the card in the chat.
 
+## Going back
+
+MausBot keeps your last 30 look changes, from a bot or from Settings. Say what you want in the chat:
+
+- "Undo that" or "go back two changes" goes back that many steps.
+- "Go back to the purple one from earlier" makes the bot look through the recent changes and return to that one, with the theme's colours and CSS as they were then.
+- "Reset to the default look" takes your theme off.
+
+Going back is itself a change, so "undo that" right after it puts things back again. **Recent changes** in Settings → Appearance lists the same changes with **Restore** beside each.
+
 ## Nothing loads from the internet
 
 A theme's CSS could otherwise send what is on your screen to another site. So a theme loads only its own pictures and fonts, kept with your workspace, and pictures written into the CSS itself. Anything else is removed before the CSS is used: links to other sites, `@import`, `image-set()` and escaped characters that hide them.
@@ -31,4 +41,4 @@ If a theme hides something you need:
 
 - Press **Cmd+Option+Shift+R** on a Mac or **Ctrl+Alt+Shift+R** on Windows and Linux. It works anywhere in the app and goes back to the default look.
 - On the web app, open the address with `?safe-look` at the end, such as `https://you.mausbot.cloud/?safe-look`. That window starts without your theme.
-- Ask the bot to switch back to a built-in look.
+- Ask the bot to undo, or to reset to the default look.
