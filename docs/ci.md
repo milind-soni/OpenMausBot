@@ -53,6 +53,17 @@ run the union of their jobs. Why the mapping is what it is:
   Linux ARM64 cloudflared installer tests only its own script and pinned
   download.
 
+## Linux fixture runner
+
+The Vitest and browser-driver matrices keep their logical Linux platform name,
+`ubuntu-latest`, but execute it on `ubuntu-24.04`. Their fixtures depend on the
+runner's installed engines and unprivileged user-namespace behavior. The last
+passing baseline used Ubuntu 24.04; the transition to Ubuntu 26.04 produced
+missing-AI and engine-home isolation failures across all eight Linux shards
+on upstream main before the automation-instruction change. The pinned image
+keeps the full test selection and assertions in place while Ubuntu 26.04
+compatibility is assessed. Other platform matrix entries are unchanged.
+
 ## Lanes: pull requests, main and the full lane
 
 Only pull requests use the areas. Every other event runs one of two fixed

@@ -1469,7 +1469,7 @@
           },
           "trigger_id": {
             "type": "string",
-            "description": "list: one trigger's details and recent fires."
+            "description": "Full instructions and fires; edit redactions in Automations."
           },
           "include_address": {
             "type": "boolean",
