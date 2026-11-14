@@ -53,10 +53,11 @@ function readJson(path: string): unknown {
   }
 }
 
-/** An env value the turn's own folder sets in the settings Claude Code reads there itself (project, then local), or undefined. */
-export function folderSettingsEnv(cwd: string, name: string): string | undefined {
+/** An env value the turn's own folder sets in the settings Claude Code reads there itself (project, then local unless the
+ * launch loads project settings only), or undefined. */
+export function folderSettingsEnv(cwd: string, name: string, projectOnly = false): string | undefined {
   let found: string | undefined;
-  for (const file of ["settings.json", "settings.local.json"]) {
+  for (const file of projectOnly ? ["settings.json"] : ["settings.json", "settings.local.json"]) {
     const parsed = readJson(join(cwd, ".claude", file));
     const value = isObject(parsed) && isObject(parsed.env) ? parsed.env[name] : undefined;
     if (typeof value === "string") found = value;

@@ -1719,6 +1719,21 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       expect(JSON.parse(readFileSync(dump, "utf8")).env.MAX_MCP_OUTPUT_TOKENS).toBeUndefined();
     });
 
+    it("skips the folder's settings.local.json limit when the launch loads project settings only", async () => {
+      const dump = join(scratch, "bot-settings-local-mcp-limit.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create();
+      const { bot, file } = botFolders("local-mcp-limit", {});
+      writeFileSync(join(bot, ".claude", "settings.local.json"), JSON.stringify({ env: { MAX_MCP_OUTPUT_TOKENS: "40000" } }));
+      await instance.adapter.sendTurn({ threadId: "t-bot-settings-local-mcp-limit", text: "hi", cwd: bot, botSettingsFile: file,
+        integrations: { custom: { docs: { type: "http", url: "https://docs.example/mcp", headers: {} } } } });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      // --setting-sources project leaves settings.local.json out, so its limit never reaches the CLI.
+      expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
+      expect(seen.env.MAX_MCP_OUTPUT_TOKENS).toBe(String(UNGATED_MCP_OUTPUT_TOKENS));
+    });
+
     it("is left to Claude Code when the turn runs in the folder that holds it", async () => {
       const dump = join(scratch, "bot-settings-own-folder.json");
       process.env.FAKE_CLAUDE_DUMP = dump;
