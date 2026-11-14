@@ -112,7 +112,7 @@ export function ConfirmDialogCard({
   return (
     <div
       ref={ref}
-      role="alertdialog"
+      role="alertdialog" data-look="dialog"
       tabIndex={-1}
       aria-modal="true"
       aria-busy={pending}

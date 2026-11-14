@@ -190,7 +190,7 @@ export function LinkHoverCard({ href, github, children }: { href: string; github
         <div
           ref={cardRef}
           id={id}
-          role="tooltip"
+          role="tooltip" data-look="tooltip"
           data-link-preview=""
           className="fixed z-50"
           style={{ left: 0, top: 0, visibility: "hidden" }}

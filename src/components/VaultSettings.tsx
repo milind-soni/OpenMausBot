@@ -223,7 +223,7 @@ export function VaultSettings() {
             {t("settings.vault.add")}<ChevronDown size={12} aria-hidden="true" />
           </button>
           {menu && (
-            <div className="popover-surface absolute end-0 top-full z-10 mt-1 flex min-w-[11rem] flex-col rounded-[12px] p-1" data-vault-add>
+            <div className="popover-surface absolute end-0 top-full z-10 mt-1 flex min-w-[11rem] flex-col rounded-[12px] p-1" data-vault-add data-look="popover">
               {ADD_CHOICES.map(([kind, key]) => (
                 <button key={kind} type="button" className="h-8 rounded-lg px-2 text-start text-[14px] leading-5 text-ink hover:bg-menu-hover" onClick={() => startAdding(kind)}>{t(key)}</button>
               ))}

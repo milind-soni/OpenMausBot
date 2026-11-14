@@ -224,7 +224,7 @@ export function WidgetTimePicker({ node, bare }: { node: WidgetNode; bare: boole
           ref={list}
           id={listId}
           role="listbox"
-          aria-label={t("widget.time.options", { label: control["aria-label"] })}
+          aria-label={t("widget.time.options", { label: control["aria-label"] })} data-look="popover"
           // preventDefault on mousedown keeps the focus on the trigger.
           onMouseDown={(event) => event.preventDefault()}
           style={{ position: "fixed", ...place, visibility: place ? undefined : "hidden" }}

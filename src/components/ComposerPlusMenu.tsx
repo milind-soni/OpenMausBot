@@ -316,7 +316,7 @@ function ComposerMenu({ items, renderTrigger }: { items: SidebarMenuItem[]; rend
         <div
           ref={menuRef}
           id={menuId}
-          role="menu"
+          role="menu" data-look="menu"
           aria-label={t("common.add")}
           data-composer-menu
           {...motion.exitProps}

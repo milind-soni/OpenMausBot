@@ -294,7 +294,7 @@ export function BotContextMenu({
         ref={menuRef}
         data-bot-menu
         data-sidebar
-        role="menu"
+        role="menu" data-look="menu"
         aria-label={t("sidebar.bot.actions", { name: bot.name })}
         onKeyDown={navigateThreadMenu}
         onPointerOver={(event) => {
@@ -340,7 +340,7 @@ export function BotContextMenu({
         data-bot-menu
         data-bot-menu-flyout={flyout}
         data-sidebar
-        role="menu"
+        role="menu" data-look="menu"
         aria-label={flyout === "more" ? t("sidebar.bot.more") : t("sidebar.bot.moveToSection")}
         onPointerEnter={() => { more.enterSubmenu(); setMoreEngaged(true); }}
         onPointerLeave={() => setMoreEngaged(false)}
@@ -371,7 +371,7 @@ export function BotContextMenu({
       ref={menuRef}
       data-bot-menu
       data-sidebar
-      role="menu"
+      role="menu" data-look="menu"
       aria-label={t("sidebar.bot.actions", { name: bot.name })}
       onKeyDown={navigateThreadMenu}
       style={{ top: shown.y, left: shown.x }}

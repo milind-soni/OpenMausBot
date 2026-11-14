@@ -104,7 +104,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
     <div
       role="dialog"
       aria-label={t("botPanel.avatar.edit")}
-      data-panel-avatar-editor
+      data-panel-avatar-editor data-look="popover"
       onKeyDown={onKeyDown}
       className="popover-surface absolute inset-x-[-5px] top-[80px] z-30 overflow-hidden rounded-2xl border border-ink/[0.08] bg-menu text-left shadow-2xl shadow-black/50"
     >

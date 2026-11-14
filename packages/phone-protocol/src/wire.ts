@@ -981,7 +981,7 @@ export type ServerFrame =
   | DataBroadcast
   | { kind: "bot.deleted"; botId: string }
   /** The whole fleet (PUT /api/bots/order) or every room (PUT /api/groups/order) in its new order; a member is sent only the ones they see. */
-  | { kind: "bots.order"; botIds: string[] } | { kind: "groups.order"; groupIds: string[] } | WindowPrefFrame
+  | { kind: "bots.order"; botIds: string[] } | { kind: "groups.order"; groupIds: string[] } | WindowPrefFrame | { kind: "theme"; skin?: string }
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
   /** A job is waiting for the phone whose registry key this is; it polls now. */
   | { kind: "device.job"; phone: string; id: string }
