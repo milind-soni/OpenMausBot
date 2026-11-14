@@ -41,6 +41,7 @@ export function createCreditMoves(options: CreditMovesOptions) {
   const file = () => join(credit.storage(), "moved.json");
   const onCredit = (chosen?: ModelSelection) => Boolean(chosen && credit.owns(chosen.instanceId));
   let hadOwn: boolean | undefined;
+  let ownSavePending = false;
 
   /** Whether an engine of the person's own was ever signed in here: kept beside moved.json once it was. */
   function everOwn(): boolean {
@@ -50,10 +51,12 @@ export function createCreditMoves(options: CreditMovesOptions) {
     return hadOwn;
   }
   function sawOwn(): void {
-    if (everOwn()) return;
+    if (everOwn() && !ownSavePending) return;
     hadOwn = true;
+    ownSavePending = true;
     try {
       writeFileAtomic(join(credit.storage(), "own.json"), JSON.stringify({ at: Date.now() }), { mode: 0o600 });
+      ownSavePending = false;
     } catch (error) {
       options.log?.(`[trial credit] could not remember that the person's own AI was signed in (${error instanceof Error ? error.name : "error"})`);
     }
@@ -83,8 +86,9 @@ export function createCreditMoves(options: CreditMovesOptions) {
   /** `settling`: what this reads is acted on, so a sign-in it finds is remembered. */
   function plan(instances: readonly SelectableInstance[], settling = false): Plan {
     const own = signedIn(instances);
+    // Retry a failed save even after sign-out: a restart must still remember the person's own engine.
+    if (settling && (own.length || ownSavePending)) sawOwn();
     if (own.length) {
-      if (settling) sawOwn();
       return { kind: "off", own };
     }
     const engine = instances.find(instance => credit.owns(instance.instanceId));
