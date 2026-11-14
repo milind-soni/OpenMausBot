@@ -234,7 +234,13 @@ export function shownKeyEntry(id: KeyId, config: ConfigStatus | null | undefined
     return { ...entry, name: "Gemini", labelKey: "keys.label.geminiTts", purposeKey: "keys.purpose.liveKeyGemini", target: keyEntry("geminiTts").target };
   }
   if (provider === "elevenlabs") {
-    return { ...entry, name: "ElevenLabs", labelKey: "keys.label.elevenlabs", purposeKey: "keys.purpose.liveKeyElevenLabs", target: keyEntry("elevenlabs").target };
+    // Cloud's included voices cannot place Live calls, so this row asks for the person's own key even then.
+    const voices = keyEntry("elevenlabs").target!;
+    const saved = (config: ConfigStatus): SavedState => {
+      const { included: _included, ...own } = voices.saved(config);
+      return own;
+    };
+    return { ...entry, name: "ElevenLabs", labelKey: "keys.label.elevenlabs", purposeKey: "keys.purpose.liveKeyElevenLabs", target: { ...voices, saved } };
   }
   return { ...entry, name: "Azure OpenAI", labelKey: "call.live.azureKeyField", purposeKey: "keys.purpose.liveKeyAzure", target: { ...target, placeholder: "…", href: "https://portal.azure.com" } };
 }

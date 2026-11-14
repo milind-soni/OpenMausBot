@@ -1,4 +1,4 @@
-import { useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Check, CircleAlert, ExternalLink, Eye, EyeOff, Loader2, TriangleAlert } from "lucide-react";
 import { useStore } from "@/state/store";
 import { installCommandFor } from "@/state/engine-install";
@@ -141,8 +141,9 @@ export function KeyRow({
     setVerdict(null);
     setWorks(false);
   }
-  // A check or save still running for the previous service must not show its result on this one.
-  useEffect(() => () => { generation.current += 1; }, [entry.name]);
+  // A check or save still running for the previous service must not show its result on this one. A layout effect's
+  // cleanup runs while the new service commits, before any later answer can land, where a passive effect's may run after.
+  useLayoutEffect(() => () => { generation.current += 1; }, [entry.name]);
   const target = entry.target;
   if (!target) throw new Error(`${id} is not saved by a key row`);
   const pointer = row.id !== entry.id;

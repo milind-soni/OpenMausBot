@@ -8,8 +8,10 @@ import { decodeBase64, encodeBase64, type GeminiSocket } from "./live-call-gemin
 
 /** The agent is set up to answer with 16 kHz PCM; the first message names the format. */
 const DEFAULT_RATE = 16_000;
-/** ElevenLabs sends no end of the agent's turn, so a pause in its audio this long ends it, not a late chunk. */
+/** An agent set up before `agent_response_complete` was sent ends its turn with a pause in its audio this long. */
 const IDLE_GRACE_MS = 300;
+/** Ends the agent's turn when its audio has stopped this long but no `agent_response_complete` came after it. */
+const TURN_END_WAIT_MS = 3_000;
 
 export interface ElevenLabsSessionDeps {
   openSocket(url: string): GeminiSocket;
@@ -61,6 +63,10 @@ class ElevenLabsLiveSession implements FishAgentSession {
   private segment = 0;
   private speaking = false;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Audio came after the last `agent_response_complete`. */
+  private answering = false;
+  /** ElevenLabs sends `agent_response_complete`, so a pause in the audio no longer ends the agent's turn. */
+  private turnEnds = false;
   /** Audio of an interrupted answer still on its way is not played. */
   private interruptedAt = -1;
 
@@ -131,6 +137,8 @@ class ElevenLabsLiveSession implements FishAgentSession {
   }
 
   async setMicMuted(muted: boolean): Promise<void> {
+    // What the microphone held while muted is not sent once it is on again.
+    if (!muted && this.muted) this.audio?.dropMic();
     this.muted = muted;
   }
 
@@ -178,6 +186,7 @@ class ElevenLabsLiveSession implements FishAgentSession {
         const id = message.audio_event?.event_id;
         if (!data || !this.audio || (id !== undefined && id <= this.interruptedAt)) return;
         this.clearIdleTimer();
+        this.answering = true;
         this.audio.play(decodeBase64(data));
         if (!this.speaking) {
           this.speaking = true;
@@ -197,8 +206,14 @@ class ElevenLabsLiveSession implements FishAgentSession {
         if (text) this.options.callbacks.onAgentResponseDelta({ segmentId: `a${this.segment}`, text });
         return;
       }
+      case "agent_response_complete":
+        this.turnEnds = true;
+        this.answering = false;
+        if (this.audio?.idle() !== false) this.playbackPaused();
+        return;
       case "interruption":
         this.interruptedAt = message.interruption_event?.event_id ?? this.interruptedAt;
+        this.answering = false;
         this.clearIdleTimer();
         this.audio?.flush();
         return this.playbackIdle();
@@ -209,10 +224,11 @@ class ElevenLabsLiveSession implements FishAgentSession {
 
   private playbackPaused(): void {
     this.clearIdleTimer();
+    if (this.turnEnds && !this.answering) return this.playbackIdle();
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
       this.playbackIdle();
-    }, IDLE_GRACE_MS);
+    }, this.turnEnds ? TURN_END_WAIT_MS : IDLE_GRACE_MS);
   }
 
   private clearIdleTimer(): void {

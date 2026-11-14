@@ -55,7 +55,8 @@ describe("an ElevenLabs agent for Live calls", () => {
       conversation_config: { agent: { prompt: { tool_ids: ["tool_1"] } }, asr: { user_input_audio_format: "pcm_16000" }, tts: { agent_output_audio_format: "pcm_16000" } },
       platform_settings: { overrides: { conversation_config_override: { agent: { prompt: { prompt: true } } } }, auth: { enable_auth: true } },
     });
-    expect(agent.conversation_config.conversation.client_events).toEqual(expect.arrayContaining(["client_tool_call", "audio", "interruption", "user_transcript", "agent_response", "ping"]));
+    expect(agent.conversation_config.conversation.client_events).toEqual(expect.arrayContaining(["client_tool_call", "audio", "interruption", "user_transcript", "agent_response", "agent_response_complete", "ping"]));
+    expect(agent.conversation_config.conversation.max_duration_seconds).toBe(3600);
   });
 
   it("fails with words for the person, never ElevenLabs' body, when ElevenLabs refuses or answers oddly", async () => {

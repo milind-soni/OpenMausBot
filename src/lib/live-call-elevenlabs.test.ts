@@ -34,6 +34,7 @@ class FakeAudio implements GeminiAudio {
   played: number[] = [];
   playing = 0;
   flushed = 0;
+  micDropped = 0;
   closed = false;
   mic: ((pcm: ArrayBuffer) => void) | null = null;
   /** Set while the microphone permission prompt is still open; calling it answers the prompt. */
@@ -47,6 +48,7 @@ class FakeAudio implements GeminiAudio {
   play(pcm: ArrayBuffer) { this.played.push(pcm.byteLength); this.playing += 1; }
   flush() { this.flushed += 1; this.playing = 0; }
   idle() { return this.playing === 0; }
+  dropMic() { this.micDropped += 1; }
   finish() { this.playing = 0; this.onIdle?.(); }
   close() { this.closed = true; }
 }
@@ -177,6 +179,39 @@ describe("an ElevenLabs Live session", () => {
     expect(t.socket().sent.at(-1)).toEqual({ type: "user_message", text: "[OpenMausBot] You have two new emails." });
   });
 
+  it("ends the agent's turn at agent_response_complete once ElevenLabs sends it, not at a long gap in its audio", async () => {
+    const t = harness();
+    const session = await t.connect();
+    vi.useFakeTimers();
+    try {
+      const audio = (event_id: number) => t.socket().receive({ type: "audio", audio_event: { audio_base_64: AUDIO, event_id } });
+      audio(1);
+      t.socket().receive({ type: "agent_response_complete" });
+      t.audio().finish();
+      expect(t.callbacks.onModeChange).toHaveBeenLastCalledWith("listening");
+      audio(2);
+      session.sendUserMessage("[OpenMausBot] You have two new emails.");
+      t.audio().finish();
+      vi.advanceTimersByTime(2_000);
+      expect(t.callbacks.onModeChange).toHaveBeenLastCalledWith("speaking");
+      expect(t.socket().sent.map((m) => m.type)).not.toContain("user_message");
+      audio(3);
+      t.audio().finish();
+      t.socket().receive({ type: "agent_response_complete" });
+      expect(t.callbacks.onModeChange).toHaveBeenLastCalledWith("listening");
+      expect(t.socket().sent.at(-1)).toEqual({ type: "user_message", text: "[OpenMausBot] You have two new emails." });
+      // A turn whose end never comes still ends once its audio has long stopped.
+      audio(4);
+      t.audio().finish();
+      vi.advanceTimersByTime(2_999);
+      expect(t.callbacks.onModeChange).toHaveBeenLastCalledWith("speaking");
+      vi.advanceTimersByTime(1);
+      expect(t.callbacks.onModeChange).toHaveBeenLastCalledWith("listening");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("answers the delegate tool call with the harness's words", async () => {
     const t = harness();
     await t.connect();
@@ -216,7 +251,9 @@ describe("an ElevenLabs Live session", () => {
     const sent = t.socket().sent.length;
     t.audio().mic!(new Int16Array([1]).buffer);
     expect(t.socket().sent).toHaveLength(sent);
+    expect(t.audio().micDropped).toBe(0);
     await session.setMicMuted(false);
+    expect(t.audio().micDropped).toBe(1);
     t.audio().mic!(new Int16Array([1]).buffer);
     expect(t.socket().sent).toHaveLength(sent + 1);
   });

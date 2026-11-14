@@ -17,7 +17,11 @@ const AUDIO_FORMAT = "pcm_16000";
 const UNEXPECTED = "ElevenLabs returned an unexpected answer. Try the call again.";
 /** What ElevenLabs sends the client. A list replaces ElevenLabs' defaults, so it names every event the client reads, with
  * `client_tool_call` so `delegate` reaches the client. */
-const CLIENT_EVENTS = ["conversation_initiation_metadata", "ping", "audio", "interruption", "user_transcript", "agent_response", "agent_response_correction", "client_tool_call"];
+const CLIENT_EVENTS = [
+  "conversation_initiation_metadata", "ping", "audio", "interruption", "user_transcript", "agent_response", "agent_response_correction", "agent_response_complete", "client_tool_call",
+];
+/** ElevenLabs ends a conversation after 10 minutes unless the agent allows longer; a Live call may last an hour, as with Gemini. */
+const CALL_AT_MOST_SECONDS = 60 * 60;
 
 /** `model` is the agent id, "" while no usable one is saved. The API root is the one ElevenLabs voices use (OMB_ELEVENLABS_API). */
 export function elevenLabsLiveEndpoint(agentId: string | null | undefined, env: NodeJS.ProcessEnv = process.env): LiveEndpoint {
@@ -75,7 +79,7 @@ export async function setUpElevenLabsAgent(key: string, endpoint: LiveEndpoint, 
         agent: { first_message: "", language: "en", prompt: { prompt: `You are ${product} on a live voice call.`, tool_ids: [toolId] } },
         asr: { user_input_audio_format: AUDIO_FORMAT },
         tts: { agent_output_audio_format: AUDIO_FORMAT },
-        conversation: { client_events: CLIENT_EVENTS },
+        conversation: { client_events: CLIENT_EVENTS, max_duration_seconds: CALL_AT_MOST_SECONDS },
       },
       // Without the override ElevenLabs refuses the prompt each conversation sends. With auth on, a conversation needs a
       // signed URL, which only the harness can get with the key: knowing the agent id is not enough to spend the person's credits.
