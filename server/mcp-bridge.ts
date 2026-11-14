@@ -128,22 +128,29 @@ export function createLineSplitter(onLine: (line: string) => void): {
   push: (chunk: Buffer | string) => void;
   flush: () => void;
 } {
-  let pending = "";
+  let pending: string[] = [];
+  let scanned = 0;
   const decoder = new StringDecoder("utf8");
   return {
     push(chunk) {
-      pending += typeof chunk === "string" ? chunk : decoder.write(chunk);
-      let newline: number;
-      while ((newline = pending.indexOf("\n")) !== -1) {
-        const line = pending.slice(0, newline);
-        pending = pending.slice(newline + 1);
+      const text = typeof chunk === "string" ? chunk : decoder.write(chunk);
+      if (text) pending.push(text);
+      while (scanned < pending.length) {
+        const part = pending[scanned]!;
+        const newline = part.indexOf("\n");
+        if (newline === -1) { scanned++; continue; }
+        const line = pending.slice(0, scanned).join("") + part.slice(0, newline);
+        pending = [part.slice(newline + 1), ...pending.slice(scanned + 1)];
+        scanned = 0;
         onLine(line);
       }
     },
     flush() {
-      pending += decoder.end();
-      if (pending) onLine(pending);
-      pending = "";
+      pending.push(decoder.end());
+      const line = pending.join("");
+      if (line) onLine(line);
+      pending = [];
+      scanned = 0;
     },
   };
 }
