@@ -9,7 +9,7 @@ import {
   saveFile,
   saveImage,
 } from "./attachments.ts";
-import { mimeFor, openFileSavedSince, openMessageFile, type OpenedMessageFile } from "./message-file.ts";
+import { mimeFor, openFileSavedSince, openMessageFile, referencedPathIdentity, type OpenedMessageFile } from "./message-file.ts";
 import type { Message } from "./store.ts";
 
 export type BotAttachment = NonNullable<Message["attachments"]>[number];
