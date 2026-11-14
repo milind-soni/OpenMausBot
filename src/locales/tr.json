@@ -3622,7 +3622,7 @@
   "routines.editor.goalWhere": "Nerede çalışır",
   "routines.editor.goalOneOnOne": "Yalnızca bot, kendi sohbetinde",
   "routines.editor.goalOneOnOneHelp": "Bot, hedef tamamlanana kadar kendi sohbetinde hedef üzerinde çalışır.",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Telefon",
   "computer.browserSwitch.title": "{name} botunun tarayıcı kullanmasına izin ver",
   "computer.tab.browser": "Tarayıcı",
   "computer.tab.data": "Veri",

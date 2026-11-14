@@ -5356,7 +5356,7 @@
   "routines.botCountOne": "{count} bot",
   "routines.botCountMany": "{count} bots",
   "routines.group": "Grupo",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Celular",
   "computer.browserSwitch.title": "Deixar {name} usar um navegador",
   "computer.tab.browser": "Navegador",
   "computer.tab.data": "Dados",

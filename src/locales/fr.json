@@ -1791,7 +1791,7 @@
   "routines.editor.goalWhere": "Où il s'exécute",
   "routines.editor.goalOneOnOne": "Seulement le bot, dans sa propre discussion",
   "routines.editor.goalOneOnOneHelp": "Le bot travaille sur l'objectif dans sa propre discussion jusqu'à ce qu'il soit atteint.",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Téléphone",
   "computer.tab.browser": "Navigateur",
   "computer.tabsAria": "Vue du panneau du bot",
   "computer.simple.needsSetup": "Le bureau de {name} a d'abord besoin d'une étape de configuration.",

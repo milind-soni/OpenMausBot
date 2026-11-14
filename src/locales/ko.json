@@ -4951,7 +4951,7 @@
   "routines.botCountOne": "봇 {count}개",
   "routines.botCountMany": "봇 {count}개",
   "routines.group": "그룹",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "휴대폰",
   "computer.browserSwitch.title": "{name}이(가) 브라우저를 쓰게 하기",
   "computer.tab.browser": "브라우저",
   "computer.tab.data": "데이터",

@@ -208,22 +208,22 @@ describe("Computer panel tab", () => {
   it("moves over an Android tab that appeared", async () => {
     fixture.android = true;
     await open(makeBot());
-    expect(tabLabels()).toEqual(["Screen", "Routines", "Android", "Browser", "Data"]);
+    expect(tabLabels()).toEqual(["Screen", "Routines", "Phone", "Browser", "Data"]);
     press("Routines", "ArrowRight");
     await settle();
-    expect(selected()).toBe("Android");
+    expect(selected()).toBe("Phone");
   });
 
   it("keeps one selected tab when Android disconnects", async () => {
     fixture.android = true;
     await open(makeBot());
-    flushSync(() => tab("Android").click());
+    flushSync(() => tab("Phone").click());
     await settle();
-    expect(selected()).toBe("Android");
+    expect(selected()).toBe("Phone");
 
     fixture.android = false;
     await open(makeBot());
-    expect(tabLabels()).not.toContain("Android");
+    expect(tabLabels()).not.toContain("Phone");
     expect(selected()).toBe("Screen");
   });
 
