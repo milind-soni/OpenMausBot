@@ -1,15 +1,25 @@
 :80 {
-	map {host} {upstream_scheme} {
-		{$OMB_HTTPS_HOST:https-disabled.invalid} {$OMB_UPSTREAM_SCHEME:http}
-		default http
-	}
 	encode zstd gzip
 	handle /hooks/* {
 		reverse_proxy unix//run/openmausbot/hooks.sock
 	}
+	# HTTPS is claimed by the peer that terminates TLS: the ranges named in
+	# OMB_TRUSTED_PROXY_CIDRS may present the HTTPS hostname, anyone else is
+	# plain HTTP.
+	@trusted_https {
+		host {$OMB_HTTPS_HOST:https-disabled.invalid}
+		remote_ip {$OMB_TRUSTED_PROXY_CIDRS}
+	}
+	handle @trusted_https {
+		reverse_proxy unix//run/openmausbot/http.sock {
+			header_up X-Forwarded-Proto https
+			header_up -Accept-Encoding
+			flush_interval -1
+		}
+	}
 	handle {
 		reverse_proxy unix//run/openmausbot/http.sock {
-			header_up X-Forwarded-Proto {upstream_scheme}
+			header_up X-Forwarded-Proto http
 			header_up -Accept-Encoding
 			flush_interval -1
 		}
