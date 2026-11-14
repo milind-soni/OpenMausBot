@@ -297,6 +297,7 @@ describe("deliveredCopy", () => {
   const bot = (id: string, parentId: string | null, extra: Partial<Message> = {}): Message =>
     ({ id, at: 1, parentId, role: "bot", kind: "text", text: "", ...extra }) as Message;
   const photo = { kind: "image" as const, path: "/store/copy.png", mime: "image/png", name: "sideboard.png" };
+  const renamed = { kind: "file" as const, path: "/store/copy.md", mime: "text/markdown; charset=utf-8", name: "团队技能包-README.md", source: "D:\\AI\\openmausbot-skills\\README.md" };
   const ask = { id: "ask", at: 1, parentId: null, role: "user", kind: "text", text: "find a sideboard" } as Message;
 
   it("finds the picture the reply's turn delivered under the name its inline image uses", () => {
