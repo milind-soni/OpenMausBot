@@ -32,7 +32,7 @@ const SERVER_ONLY_OMB: ReadonlySet<string> = new Set([
   "OMB_COMPANION_TAILNET_NAME", "OMB_COMPOSIO_API", "OMB_COMPOSIO_BROKER", "OMB_COMPOSIO_BROKER_TOKEN",
   "OMB_COMPOSIO_BROKER_URL", "OMB_COMPOSIO_TOOLKITS_API", "OMB_COMPUTER_CALL_ACT_WITHIN_MS",
   "OMB_COMPUTER_CALL_WAIT_MS", "OMB_COMPUTER_WAIT_MAX_MS", "OMB_CONTROL_PLANE_URL", "OMB_CONTROL_PORT",
-  "OMB_CREDENTIAL_STORE", "OMB_CUSTOM_IMAGE_KEY", "OMB_DATA_DIR", "OMB_DECISION_RETENTION_DAYS",
+  "OMB_CREDENTIAL_STORE", "OMB_CUSTOM_DECIDER_KEY", "OMB_CUSTOM_IMAGE_KEY", "OMB_DATA_DIR", "OMB_DECISION_RETENTION_DAYS",
   "OMB_DEEPSEEK_API_KEY", "OMB_DESKTOP_LAUNCH_ID", "OMB_DESKTOP_PARENT", "OMB_DEVS_STATUS_MS",
   "OMB_DEV_TRUST_LOCAL_BROWSER", "OMB_DISABLE_ANNOUNCEMENTS", "OMB_DISABLE_MODEL_CATALOG_FETCH", "OMB_DISABLE_MODEL_MANIFEST_FETCH", "OMB_DUCKDB_DIR", "OMB_DUCKDB_MAX_TEMP_SIZE",
   "OMB_DUCKDB_MEMORY_LIMIT", "OMB_ELEVENLABS_API", "OMB_ENTERPRISE_DIR", "OMB_ENVIRONMENT_LABEL", "OMB_EOF",
@@ -62,7 +62,7 @@ const ROOT = new URL("../../", import.meta.url);
 
 /** The `OMB_` names in the code the server runs, and in what starts it (the desktop app). */
 function knownOmbNames(): string[] {
-  const files = execFileSync("git", ["ls-files", "server", "shared", "enterprise/server", "electron"], { cwd: ROOT, encoding: "utf8" })
+  const files = execFileSync("git", ["ls-files", "server", "shared", "packages", "enterprise/server", "electron"], { cwd: ROOT, encoding: "utf8" })
     .split("\n").filter((file) => /\.(?:ts|mts|mjs|cjs|js)$/.test(file) && !/\.test\.|\/testing\/|node-test/.test(file));
   const names = new Set<string>();
   for (const file of files) for (const match of readFileSync(new URL(file, ROOT), "utf8").matchAll(/\bOMB_[A-Z0-9_]+\b/g)) names.add(match[0]);

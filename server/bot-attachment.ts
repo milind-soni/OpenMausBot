@@ -16,7 +16,8 @@ export type BotAttachment = NonNullable<Message["attachments"]>[number];
 
 export const ATTACH_SUPPORTED_TYPES =
   "images (png, jpg, gif, webp), video (mp4, webm, mov), audio (mp3, m4a, aac, wav, ogg, opus, flac), " +
-  "pdf, Word/Excel/PowerPoint and OpenDocument files, and csv, tsv, txt, md, json, rtf";
+  "pdf, Word/Excel/PowerPoint and OpenDocument files, csv, tsv, txt, md, json, rtf, " +
+  "and archives (zip, rar, 7z, tar, gz, tgz, bz2, xz)";
 
 function statusError(status: number, message: string): Error & { status: number } {
   return Object.assign(new Error(message), { status });
@@ -116,6 +117,10 @@ export function deliveredCopy(messages: readonly Message[], reply: Message, name
     }
   }
   return found;
+}
+
+export function attachedFileLine(attachment: BotAttachment, sentInTurn: string | undefined, from?: Message["from"]): Omit<Message, "id" | "at"> {
+  return { role: "bot", kind: "text", text: "", attachments: [attachment], ...(sentInTurn ? { sentInTurn } : {}), ...(from ? { from } : {}) };
 }
 
 export type AttachForTurnOutcome<S> =

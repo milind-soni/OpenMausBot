@@ -3,7 +3,7 @@ import type { HandoffView } from "../coordinator.ts";
 
 export interface QueuedReasonDeps {
   botName(botId: string): string | undefined;
-  /** The handoff already ran and is parked until a computer another turn uses is free. */
+  /** The handoff already ran and is parked until the computer it needs is free of other turns and of a person's hold. */
   waitsForComputer(node: HandoffView): boolean;
   threadBusy(botId: string, threadId: string): boolean;
   /** The bot's threads that hold a slot now, and how many it may run at once when a bot starts the work. */
@@ -20,7 +20,7 @@ export function createQueuedReason(deps: QueuedReasonDeps) {
     // A room's handoff waits on the room, not on these.
     if (node.groupId) return "waiting for that teammate to be free";
     const name = deps.botName(node.botId) ?? "that teammate";
-    if (deps.waitsForComputer(node)) return "waiting for the computer it needs, which another turn is using";
+    if (deps.waitsForComputer(node)) return "waiting for the computer it needs, which another turn or a person is using";
     if (deps.threadBusy(node.botId, node.threadId)) return "waiting for an earlier turn in that thread to finish";
     const { busy, limit } = deps.slots(node.botId);
     if (busy.length >= limit) {
