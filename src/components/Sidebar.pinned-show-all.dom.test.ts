@@ -76,6 +76,18 @@ describe("a bot's Show all threads", () => {
     expect(saved()).toEqual([]);
     await unmount();
   });
+
+  it("reads a change another window saved while no list was showing", async () => {
+    await mount();
+    await click("Show all 11 threads");
+    await unmount();
+
+    localStorage.setItem(SIDEBAR_SHOW_ALL_KEY, "[]"); // another window picked Show fewer meanwhile
+    await mount();
+    expect(host.textContent).not.toContain("Loose chat 0");
+    expect(button("Show all 11 threads")).toBeTruthy();
+    await unmount();
+  });
 });
 
 describe("a collapsed folder", () => {

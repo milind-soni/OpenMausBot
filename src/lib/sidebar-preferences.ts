@@ -465,6 +465,8 @@ let showAllBots: ReadonlySet<string> | null = null;
 const showAllListeners = new Set<() => void>();
 
 function currentShowAllBots(): ReadonlySet<string> {
+  // With no list mounted, no storage listener kept the cache current: another window may have changed it.
+  if (showAllListeners.size === 0) showAllBots = null;
   showAllBots ??= new Set(loadStringList(SIDEBAR_SHOW_ALL_KEY));
   return showAllBots;
 }
