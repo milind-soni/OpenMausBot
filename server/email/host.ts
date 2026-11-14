@@ -107,7 +107,10 @@ export function createEmailHost(deps: EmailHostDeps) {
         let threading = {};
         if (args.reply_to_uid) {
           const original = await run.readMessage(mailbox, guard, { mailbox: box, uid: args.reply_to_uid });
-          if (original.messageId) threading = { inReplyTo: original.messageId };
+          // RFC 5322 section 3.6.4: keep the parent's ancestors, then append its own ID.
+          const ancestors = original.references ?? (original.inReplyTo && /^<[^<>\s]+>$/u.test(original.inReplyTo) ? [original.inReplyTo] : []);
+          const references = [...ancestors, ...(original.messageId ? [original.messageId] : [])];
+          threading = { ...(original.messageId ? { inReplyTo: original.messageId } : {}), ...(references.length ? { references: references.join(" ") } : {}) };
         }
         return emailText({ account: from, ...await run.sendMessage(mailbox, guard, { to: args.to, subject: args.subject, text: args.text, ...pick(args, ["cc", "bcc", "html", "inline_images"]), ...threading }) });
       }

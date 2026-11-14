@@ -288,6 +288,7 @@ export interface ReadMessage extends MessageSummary {
   replyTo: string[];
   messageId?: string;
   inReplyTo?: string;
+  references?: string[];
   text: string;
   truncated: boolean;
   attachments: Array<{ filename: string; contentType: string; size: number; savedTo?: string }>;
@@ -339,6 +340,7 @@ export async function readMessage(account: EmailAccount, guard: EmailGuard, inpu
         subject: parsed.subject ?? summary(head).subject,
         ...(parsed.messageId ? { messageId: parsed.messageId } : {}),
         ...(typeof parsed.inReplyTo === "string" ? { inReplyTo: parsed.inReplyTo } : {}),
+        ...(parsed.references ? { references: Array.isArray(parsed.references) ? parsed.references : [parsed.references] } : {}),
         text: text.slice(0, MAX_TEXT_CHARS),
         truncated: text.length > MAX_TEXT_CHARS,
         attachments: parsed.attachments.map((attachment, index) => ({
@@ -400,7 +402,9 @@ export async function sendMessage(account: EmailAccount, guard: EmailGuard, inpu
   const { default: MailComposer } = await import("nodemailer/lib/mail-composer");
   const composed = new MailComposer({
     from: account.address, to: input.to, ...(input.cc?.length ? { cc: input.cc } : {}), ...(input.bcc?.length ? { bcc: input.bcc } : {}),
-    subject: input.subject, text: input.text, html: input.html, attachments, disableFileAccess: true, disableUrlAccess: true, ...(input.inReplyTo ? { inReplyTo: input.inReplyTo, references: input.references ?? input.inReplyTo } : {}),
+    subject: input.subject, text: input.text, html: input.html, attachments, disableFileAccess: true, disableUrlAccess: true,
+    ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
+    ...(input.references || input.inReplyTo ? { references: input.references ?? input.inReplyTo } : {}),
   }).compile();
   const envelope = composed.getEnvelope();
   const raw = await composed.build();
