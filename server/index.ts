@@ -319,6 +319,7 @@ import {
 import * as tts from "./tts/index.ts";
 import { voiceNoteFailure } from "./tts/errors.ts";
 import { createDecider, deciderReady, describeDecider } from "./decider/index.ts"; import { createExtractor, describeHelpers } from "./extractor/index.ts";
+import { resolveTurnEffort, roomTurnSelection, stampTurnEffort, turnEffortLevels } from "./decider/turn-effort.ts";
 import { createStopLineRoutes } from "./routes/stop-line.ts"; import { decideRoomResponder } from "./decider/room-routing.ts"; import { roomRoutingInput } from "./host/room-routing-input.ts";
 import { liveHistoryFrom, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
 import { LiveCallController, LiveCallSignedOutError } from "./live-call-controller.ts"; import { liveSessionWiring } from "./live-session-wiring.ts";
@@ -481,7 +482,7 @@ import { connectorAccessDecision, describeConnectorScopes } from "../shared/conn
 import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
 import { listenWebhookIngress, type WebhookIngress } from "./webhook-ingress.ts"; import { createBotApiHost } from "./bot-api-host.ts"; import { BOT_API_PARTS, BOT_API_REFUSAL, BOT_API_TOOLS, botApiRouteRefused } from "./bot-api-fence.ts";
 import { addressFor } from "./webhook-address.ts";
-import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.ts";
+import { assertTurnSelectionSupported } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
 import { tieAutomationsToBots } from "./bot-automations.ts"; import { WaitManager } from "./waits.ts"; import { cancelWaitFromCard, createWaitHost, waitRunChat } from "./wait-host.ts"; import { continuedConversation } from "./routine-same-conversation.ts"; import { createWaitRoutes, findWaitPeer, handedAssignment, hostWaitRefusal, waitSourceRefusal, type WaitRouteContext } from "./routes/waits.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
@@ -7649,15 +7650,9 @@ async function beginTurn(
   const instanceId = instance.instanceId;
   const automated = commsDepth > 0 || opts?.automationSource !== undefined
     || Boolean(opts?.unattended || opts?.cardContinuation || opts?.peerAsk || opts?.coordination || opts?.compactOnly || opts?.computerSelectionContinuation);
-  const route = routeDirectTurn(bot, task, store.activePath(threadId), resolvedImages, instance, automated, quickFallback.refused(instance.instanceId));
-  const { model, effort, variant } = route;
-  assertModelVariantSupported({ variant, effort }, instance.adapter.capabilities);
-  if (effort && !instance.adapter.capabilities.effortLevels?.includes(effort)) {
-    throw Object.assign(
-      new Error(`effort "${effort}" is not offered by this bot's engine — choose another level in settings`),
-      { status: 409 },
-    );
-  }
+  const route = routeDirectTurn(bot, task, store.activePath(threadId), resolvedImages, instance, automated, quickFallback.refused(instance.instanceId), turnEffortLevels(cfg, bot, instance, automated) !== undefined);
+  let { model, effort, variant } = route;
+  assertTurnSelectionSupported({ variant, effort }, instance.adapter.capabilities);
 
   let userMessage = opts?.userMessage;
   if (opts?.editedMessageId) {
@@ -7769,6 +7764,10 @@ async function beginTurn(
 
   void (async () => {
     try {
+      const chosenEffort = opts?.compactOnly ? undefined : await resolveTurnEffort(cfg, decider, bot, instance, store.activePath(threadId), userMessage, automated);
+      if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped during effort selection");
+      effort = chosenEffort ?? effort;
+      if (!opts?.cardContinuation) store.patchMessage(threadId, userMessage.id, { turnEffort: chosenEffort, quickModel: route.quickModel });
       const engineRead = registry.engineRead(instance.instanceId);
       if (engineRead) {
         await engineRead;
@@ -9720,7 +9719,7 @@ async function runClaimedGroupMemberTurn(
   const reportDispatchError = (message: string) => { roomFailure = message; onDispatchError?.(message); };
   try {
   assertWithinBudget(cfg, DATA_DIR);
-  assertModelVariantSupported(preparedSelection, instance.adapter.capabilities);
+  assertTurnSelectionSupported(preparedSelection, instance.adapter.capabilities);
   const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
   const skillAuthoring =
     skillAuthoringEnabled(cfg) &&
@@ -10199,6 +10198,8 @@ async function runClaimedGroupMemberTurn(
     return false;
   }
   const turnTexts: string[] = [];
+  const { selection: roomSelection, base: roomBaseSelection, effort: roomEffort } = await roomTurnSelection(cfg, decider, readyBot, instance, store.activePath(threadId), latestUser, hop > 0 || Boolean(cardContinuation || orchestration || operation?.goalRun || operation?.handedFor));
+  if (!roomSetupIsCurrent()) return false;
   let turnCompletedOk = false;
   let providerTurnId: string | undefined;
   let abandoned = false;
@@ -10250,6 +10251,7 @@ async function runClaimedGroupMemberTurn(
       deadline.observe(e);
       if (e.type === "item.completed" && e.itemType === "assistant_text") turnTexts.push(e.text);
       else if (e.type === "turn.completed") {
+        stampTurnEffort(store, threadId, e.turnId, readyBot.id, roomEffort);
         turnCompletedOk = e.ok;
         const end = roomTurnEnd(e, Boolean(orchestration), roomClaimFailure);
         if (orchestration && end.stopReason !== undefined) {
@@ -10294,7 +10296,7 @@ async function runClaimedGroupMemberTurn(
     const roomSession = roomSessions.dispatch({
       threadId, botId: readyBot.id, claimId: internalGeneration, instance, guestConfined: roomGuestConfined, reset: Boolean(roomReset), hooks: Boolean(integrations.hooks),
       context: () => ({ ...roomMemberContexts.forThread(threadId)?.[readyBot.id], compactAt: nativeCompactTokens(instance) }),
-      config: [roomSystem.stable, cwd, readyBot.modelSelection, turnApprovalMode, roomToolScope, roomUserMcp, integrations],
+      config: [roomSystem.stable, cwd, roomBaseSelection, turnApprovalMode, roomToolScope, roomUserMcp, integrations],
       window: roomWindow, tail: roomTail, wrap: (body) => withTurnClock(clock, withRecalled(roomRecalled, roomPick + attachmentsForBox(body, cwd) + roomShareNote.text + devsReports.note(threadId, Boolean(integrations.agents)))),
     });
     guardTurnDispatch(roomShareNote.after(instance.adapter.sendTurn({
@@ -10315,9 +10317,7 @@ async function runClaimedGroupMemberTurn(
         ...(integrations.browser && browserIsThePlace(roomPlan) ? { preloadBrowserTools: true } : {}),
         ...settingsTurnFields(cfg, DATA_DIR, managedPolicy.restrictsMcp()),
         botSettingsFile: botSettingsFile(readyBot),
-        ...(instance.instanceId === readyBot.modelSelection.instanceId
-          ? memberTurnSelection(readyBot.modelSelection)
-          : { model: instance.models.default }),
+        ...roomSelection,
       })), () => abandoned || Boolean(isCancelled?.()), async () => {
         // Stop may have landed before the adapter had a process to interrupt: interrupt again now.
         await instance.adapter.interruptTurn(threadId).catch(() => {});

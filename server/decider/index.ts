@@ -73,8 +73,8 @@ export function deciderEnabled(cfg: AppConfig): boolean {
   return helpersOn(cfg, deciderAccount(cfg));
 }
 
-/** Absent means on. */
 export function deciderJobOn(cfg: AppConfig, job: DeciderJob): boolean {
+  if (job === "turnEffort") return cfg.decider?.jobs?.turnEffort === true;
   return cfg.decider?.jobs?.[job] !== false;
 }
 
@@ -106,7 +106,8 @@ export function describeDecider(cfg: AppConfig) {
     ...(provider === "openrouter" && deciderSharedKeyUsable(cfg) ? { sharedKey: true as const } : {}),
     ...(account?.included ? { included: true as const } : {}),
     enabled: deciderEnabled(cfg),
-    jobs: { roomRouting: deciderJobOn(cfg, "roomRouting") },
+    jobs: { roomRouting: deciderJobOn(cfg, "roomRouting"), turnEffort: deciderJobOn(cfg, "turnEffort") },
+    turnEffortConfigured: Boolean(deciderAccount(cfg, "turnEffort")),
   };
 }
 

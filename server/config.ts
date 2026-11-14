@@ -27,7 +27,7 @@ import { migrateLegacyFeatureFlags } from "./legacy-feature-flags.ts";
 import { settledFileCache, settledFileStamp } from "./settled-file.ts";
 import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer } from "./mcp-registry.ts"; import { postizKeyHeaders } from "./postiz/connection.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
-import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
+import { deciderConfigSchema, storedDeciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
 import { fishKeyFromLiveKey, liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts";
 import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
 import { roomContextSettings } from "./room-context-settings.ts";
@@ -416,7 +416,7 @@ const appConfigSchema = z.object({
   /** Loose on purpose: one bad server entry is skipped later, never fails the whole file. */
   mcpServers: z.record(z.string(), z.unknown()).optional(),
 });
-const storedAppConfigSchema = appConfigSchema.extend(helperStoredShape).extend({
+const storedAppConfigSchema = appConfigSchema.extend({ ...helperStoredShape, decider: storedDeciderConfigSchema.optional() }).extend({
   browserProfiles: storedBrowserProfilesSchema.optional(),
   /** Loose like mcpServers: a bad provider key is dropped later, never the whole file. */
   opencodeGo: z.object({

@@ -587,6 +587,7 @@ process.stdin.on("data", (chunk) => {
                   ? [{ id: "gpt-6-astra", displayName: "GPT-6 Astra", hidden: false, isDefault: true }]
                   : []),
                 { id: "gpt-fake-default", displayName: "GPT Fake Default", hidden: false, isDefault: !hasAstra,
+                  ...(process.env.FAKE_CODEX_EFFORTS ? { supportedReasoningEfforts: JSON.parse(process.env.FAKE_CODEX_EFFORTS) } : {}),
                   ...(tiers ? { serviceTiers: FAST_TIERS, defaultServiceTier: null } : {}) },
                 ...(process.env.FAKE_CODEX_LUNA === "1"
                   ? [{ id: "gpt-6-luna", displayName: "GPT-6 Luna", hidden: false, isDefault: false }]

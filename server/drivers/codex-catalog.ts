@@ -10,6 +10,7 @@ import { killCliTree, spawnCli } from "../procs.ts";
 import { codexHome } from "./codex-identity.ts";
 import { MODEL_ID, SEP, TIERED_ID, codexTierOf } from "./codex-tier.ts";
 import { unconfirmedModelCatalog } from "../startup-model-catalog.ts";
+import { isEffortLevel } from "../../shared/wire.ts";
 import { codexLocalProviderArgs, mergeLocalInject } from "./local-inject.ts";
 
 export const STATIC_CODEX_MODELS: ModelCatalog = {
@@ -69,6 +70,7 @@ interface CodexAppServerModel {
   isDefault?: unknown;
   serviceTiers?: unknown;
   defaultServiceTier?: unknown;
+  supportedReasoningEfforts?: unknown;
 }
 
 const FAST_TIER = /fast/i;
@@ -173,9 +175,12 @@ export function readCodexAppServerModelCatalog(
           if (row.hidden === true || typeof row.id !== "string" || !MODEL_ID.test(row.id) || seen.has(row.id)) continue;
           seen.add(row.id);
           const label = typeof row.displayName === "string" && row.displayName.trim() ? row.displayName : row.id;
-          options.push({ id: row.id, label });
+          const effortLevels = Array.isArray(row.supportedReasoningEfforts)
+            ? row.supportedReasoningEfforts.map((entry) => entry?.reasoningEffort).filter(isEffortLevel) : undefined;
+          const effort = effortLevels === undefined ? {} : { effortLevels };
+          options.push({ id: row.id, label, ...effort });
           const fast = fastTier(row);
-          if (fast && !TIERED_ID.test(row.id)) options.push({ id: `${row.id}+${fast.id}`, label: `${label} · ${fast.name}` });
+          if (fast && !TIERED_ID.test(row.id)) options.push({ id: `${row.id}+${fast.id}`, label: `${label} · ${fast.name}`, ...effort });
           if (row.isDefault === true) defaultModel = row.id;
         }
         if (!options.length) {

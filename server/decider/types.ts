@@ -7,8 +7,8 @@ export type OpenRouterApi = "chat" | "decisions";
 /** A custom gateway's protocol: systemone is `POST {base}/systemone` (Jev's shape), decisions is `POST {base}/decisions`. */
 export type CustomApi = "systemone" | "decisions";
 
-export type DeciderJob = "roomRouting" | "inboxTriage";
-export const DECIDER_JOBS: readonly DeciderJob[] = ["roomRouting", "inboxTriage"];
+export type DeciderJob = "roomRouting" | "inboxTriage" | "turnEffort";
+export const DECIDER_JOBS: readonly DeciderJob[] = ["roomRouting", "inboxTriage", "turnEffort"];
 
 /** botDecide: a bot's own `decide` tool call. */
 export type DeciderSeam = DeciderJob | "keyCheck" | "botDecide";

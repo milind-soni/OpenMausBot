@@ -97,10 +97,11 @@ export function routeDirectTurn(
   instance: { models?: ModelCatalog; quickModelsUsable?: () => boolean; adapter: { capabilities: { effortLevels?: readonly EffortLevel[] } } },
   automated: boolean,
   refused?: ReadonlySet<string>,
+  autoEffort = false,
 ): RouteResult {
   const lastAsk = path.findLastIndex((m) => m.role === "user" && m.kind === "text");
   return routeTurn({
-    conversational: isConversational(bot.replyStyle),
+    conversational: !autoEffort && isConversational(bot.replyStyle),
     followsBotModel: task.modelSelection === undefined,
     automated,
     signals: {

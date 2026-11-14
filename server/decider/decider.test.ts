@@ -288,7 +288,7 @@ describe("settings rules", () => {
   });
 
   it("status is booleans only and the switch reads off while no key is saved", () => {
-    expect(describeDecider(ON)).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
+    expect(describeDecider(ON)).toEqual({ turnEffortConfigured: true, provider: "jev", configured: true, enabled: true, jobs: { turnEffort: false, roomRouting: true } });
     expect(JSON.stringify(describeDecider({ decider: { ...ON.decider, baseUrl: "https://internal.example" } }))).not.toMatch(/tsk_|internal/);
     expect(describeDecider({ decider: { enabled: true } })).toMatchObject({ configured: false, enabled: false });
     expect(deciderReady(ON, "roomRouting")).toBe(true);
@@ -348,7 +348,7 @@ describe("Cloud Pro's included decisions", () => {
     await route(decider({ decider: { ...ON.decider, baseUrl: "http://127.0.0.1:9" } }, fetchImpl));
     expect(sent(fetchImpl, 1)).toEqual({ url: "http://127.0.0.1:9/v1/systemone", auth: `Bearer ${KEY}` });
     expect(JSON.stringify(fetchImpl.mock.calls)).not.toContain(INCLUDED);
-    expect(describeDecider(ON)).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
+    expect(describeDecider(ON)).toEqual({ turnEffortConfigured: true, provider: "jev", configured: true, enabled: true, jobs: { turnEffort: false, roomRouting: true } });
   });
 
   it("an own key is on only once switched on, as without Cloud Pro", async () => {
@@ -364,7 +364,7 @@ describe("Cloud Pro's included decisions", () => {
     cloudPro();
     const fetchImpl = theo();
     const off: AppConfig = { decider: { enabled: false } };
-    expect(describeDecider(off)).toEqual({ provider: "jev", configured: true, included: true, enabled: false, jobs: { roomRouting: true } });
+    expect(describeDecider(off)).toEqual({ turnEffortConfigured: false, provider: "jev", configured: true, included: true, enabled: false, jobs: { turnEffort: false, roomRouting: true } });
     expect(deciderReady(off, "roomRouting")).toBe(false);
     await expect(route(decider(off, fetchImpl))).resolves.toEqual({ ok: false, reason: "disabled" });
     const jobOff: AppConfig = { decider: { jobs: { roomRouting: false } } };
@@ -379,7 +379,7 @@ describe("Cloud Pro's included decisions", () => {
     for (const env of [{}, { OMB_CLOUD_DECIDER_TOKEN: INCLUDED }, { OMB_CLOUD_DECIDER_URL: RELAY }]) {
       vi.unstubAllEnvs();
       for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
-      expect(describeDecider({})).toEqual({ provider: "jev", configured: false, enabled: false, jobs: { roomRouting: true } });
+      expect(describeDecider({})).toEqual({ turnEffortConfigured: false, provider: "jev", configured: false, enabled: false, jobs: { turnEffort: false, roomRouting: true } });
       expect(deciderReady({}, "roomRouting")).toBe(false);
       await expect(route(decider({}, fetchImpl))).resolves.toEqual({ ok: false, reason: "disabled" });
       await expect(decider({}, fetchImpl).testKey()).resolves.toEqual({ ok: false, reason: "no_key" });
@@ -390,7 +390,7 @@ describe("Cloud Pro's included decisions", () => {
   it("Settings sees it as included and never sees the token", () => {
     cloudPro();
     const status = describeDecider({});
-    expect(status).toEqual({ provider: "jev", configured: true, included: true, enabled: true, jobs: { roomRouting: true } });
+    expect(status).toEqual({ turnEffortConfigured: false, provider: "jev", configured: true, included: true, enabled: true, jobs: { turnEffort: false, roomRouting: true } });
     expect(JSON.stringify(status)).not.toContain(INCLUDED);
   });
 
@@ -570,7 +570,7 @@ describe("OpenRouter as the provider", () => {
     vi.stubEnv("OMB_CLOUD_DECIDER_TOKEN", "omb_decide_unit_included_token_0123456789");
     const fetchImpl = yes();
     const chose: AppConfig = { decider: { ...OR.decider } };
-    expect(describeDecider(chose)).toEqual({ provider: "jev", configured: true, included: true, enabled: true, jobs: { roomRouting: true } });
+    expect(describeDecider(chose)).toEqual({ turnEffortConfigured: true, provider: "jev", configured: true, included: true, enabled: true, jobs: { turnEffort: false, roomRouting: true } });
     await decider(chose, fetchImpl).testKey();
     expect(String(fetchImpl.mock.calls[0]![0])).toBe(`${relay}/v1/systemone`);
     // A job the relay does not take falls through to OpenRouter, with the person's own OpenRouter key only.
@@ -581,10 +581,10 @@ describe("OpenRouter as the provider", () => {
 
   it("Settings status names the provider and the model in use, and never a key", () => {
     const status = describeDecider(OR);
-    expect(status).toEqual({ provider: "openrouter", model: "openai/gpt-4o-mini", api: "chat", configured: true, keySource: "own", enabled: true, jobs: { roomRouting: true } });
+    expect(status).toEqual({ turnEffortConfigured: true, provider: "openrouter", model: "openai/gpt-4o-mini", api: "chat", configured: true, keySource: "own", enabled: true, jobs: { turnEffort: false, roomRouting: true } });
     expect(JSON.stringify(status)).not.toContain(OR_KEY);
     expect(describeDecider({ decider: { enabled: true, provider: "openrouter", key: KEY } })).toMatchObject({ provider: "jev", configured: true, enabled: true });
-    expect(describeDecider({ decider: { enabled: true, key: KEY } })).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
+    expect(describeDecider({ decider: { enabled: true, key: KEY } })).toEqual({ turnEffortConfigured: true, provider: "jev", configured: true, enabled: true, jobs: { turnEffort: false, roomRouting: true } });
   });
 
   describe("the OpenRouter key from Settings → API keys", () => {
@@ -641,15 +641,15 @@ describe("OpenRouter as the provider", () => {
       await decider(jev, fetchImpl).testKey();
       expect(String(fetchImpl.mock.calls[0]![0])).toBe("https://api.typesafe.ai/v1/systemone");
       expect(JSON.stringify(fetchImpl.mock.calls)).not.toContain(SHARED_KEY);
-      expect(describeDecider(jev)).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
+      expect(describeDecider(jev)).toEqual({ turnEffortConfigured: true, provider: "jev", configured: true, enabled: true, jobs: { turnEffort: false, roomRouting: true } });
       // With no key of the decider's own, the engine's OpenRouter key is the fallback.
       expect(describeDecider({ openrouter: { key: SHARED_KEY }, decider: { enabled: true } })).toMatchObject({ provider: "openrouter", configured: true, keySource: "shared" });
     });
 
     it("status says which key is in use and whether a shared one is on file, never the key", () => {
       const status = (config: AppConfig) => describeDecider(config);
-      expect(status(shared())).toEqual({
-        provider: "openrouter", model: "openai/gpt-4o-mini", api: "chat", configured: true, keySource: "shared", sharedKey: true, enabled: true, jobs: { roomRouting: true },
+      expect(status(shared())).toEqual({ turnEffortConfigured: true,
+        provider: "openrouter", model: "openai/gpt-4o-mini", api: "chat", configured: true, keySource: "shared", sharedKey: true, enabled: true, jobs: { turnEffort: false, roomRouting: true },
       });
       expect(status(shared({ openrouterKey: OR_KEY }))).toMatchObject({ configured: true, keySource: "own", sharedKey: true });
       expect(status({ decider: { enabled: true, provider: "openrouter", openrouterKey: OR_KEY } })).toMatchObject({ configured: true, keySource: "own" });

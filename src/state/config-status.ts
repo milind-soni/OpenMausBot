@@ -113,7 +113,8 @@ export interface ConfigStatus {
     sharedKey?: boolean;
     included?: boolean;
     enabled: boolean;
-    jobs: { roomRouting: boolean };
+    jobs: { roomRouting: boolean; turnEffort?: boolean };
+    turnEffortConfigured?: boolean;
   };
   /** The decision and extraction models' keys: which of the person's own are on file, never a key. */
   helpers?: {

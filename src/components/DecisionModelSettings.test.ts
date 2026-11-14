@@ -45,6 +45,7 @@ function render() {
     switches: all.filter((node) => node.type === Switch),
     master: byTestId("decider-master")[0]!,
     job: byTestId("decider-job-roomRouting")[0]!,
+    effortJob: byTestId("decider-job-turnEffort")[0]!,
     provider: byTestId("decider-provider")[0],
     model: byTestId("decider-model")[0],
     save: byTestId("decider-save")[0]!,
@@ -133,7 +134,7 @@ describe("DecisionModelSettings", () => {
   it("lists only the jobs that work: no coming-soon rows", () => {
     const view = render();
     for (const label of ["Browser clicks", "Tool selection", "Where work runs", "Coming soon"]) expect(view.html).not.toContain(label);
-    expect(view.switches).toHaveLength(2);
+    expect(view.switches).toHaveLength(3);
   });
 
   it("every button shows a pointer cursor", () => {
@@ -164,6 +165,34 @@ describe("DecisionModelSettings", () => {
     click(render().job);
     await flush();
     expect(fixture.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { jobs: { roomRouting: false } } }) });
+  });
+
+  it("keeps automatic effort off by default, requires an own helper key, and saves its toggle", async () => {
+    fixture.config = status({ provider: "jev", configured: true, included: true, enabled: true, jobs: { roomRouting: true }, turnEffortConfigured: false });
+    expect(render().effortJob.props.disabled).toBe(true);
+    expect(render().effortJob.props.checked).toBe(false);
+    fixture.config = status({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true }, turnEffortConfigured: true });
+    fixture.api.mockResolvedValue(fixture.config);
+    expect(render().effortJob.props.disabled).toBe(false);
+    click(render().effortJob);
+    await flush();
+    expect(fixture.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { jobs: { turnEffort: true } } }) });
+  });
+
+  it("never turns Helpers on, or picks their provider, from the effort toggle", () => {
+    fixture.config = status({ provider: "jev", configured: true, enabled: false, jobs: { roomRouting: true, turnEffort: false }, turnEffortConfigured: true });
+    expect(render().effortJob.props.disabled).toBe(true);
+    expect(render().effortJob.props.checked).toBe(false);
+  });
+
+  it("can clear the saved effort job after its helper key is removed", async () => {
+    fixture.config = status({ provider: "jev", configured: false, enabled: false, jobs: { roomRouting: true, turnEffort: true }, turnEffortConfigured: false });
+    fixture.api.mockResolvedValue(fixture.config);
+    expect(render().effortJob.props.checked).toBe(true);
+    expect(render().effortJob.props.disabled).toBe(false);
+    click(render().effortJob);
+    await flush();
+    expect(fixture.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { jobs: { turnEffort: false } } }) });
   });
 
   it("Test shows the result: how fast on success, a fixed sentence on failure", async () => {

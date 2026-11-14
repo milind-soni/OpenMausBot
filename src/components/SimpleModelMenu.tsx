@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronRight, ChevronUp, Download, Lightbulb, Loader2, LogIn, RefreshCw, Search, Settings, Star, X } from "lucide-react";
-import type { Bot, InstanceInfo } from "@/state/store";
+import { useStore, type Bot, type InstanceInfo } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
 import type { MenuGroup, MenuModelRow, SimpleMenu } from "@/lib/simple-model-menu";
 import { favoriteKey, toggleFavoriteModel, useFavoriteModels } from "@/lib/favorite-models";
@@ -182,6 +182,8 @@ function GroupBody({ group, props }: { group: MenuGroup; props: SimpleModelMenuP
 
 /** Thinking folds to one row that names the level; the steps open under it, so most people only ever read "Auto". */
 function Thinking({ thinking, labelId }: { thinking: SimpleThinking; labelId: string }) {
+  const { state } = useStore();
+  const autoEffort = state.config?.decider?.enabled && state.config.decider.jobs.turnEffort && state.config.decider.turnEffortConfigured;
   const [open, setOpen] = useState(false);
   if ("variants" in thinking) return <div data-simple-thinking>{thinking.variants}</div>;
   const levels = thinking;
@@ -224,7 +226,7 @@ function Thinking({ thinking, labelId }: { thinking: SimpleThinking; labelId: st
           ))}
         </div>
         <p data-simple-effort-auto={auto || undefined} className="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">
-          {auto ? t("model.simple.thinkingAuto") : t(`model.simple.effortHint.${levels.current!}`)}
+          {auto ? t(autoEffort ? "model.simple.thinkingAuto" : "model.simple.thinkingEngineDefault") : t(`model.simple.effortHint.${levels.current!}`)}
         </p>
       </div>
     </div>

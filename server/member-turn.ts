@@ -14,6 +14,13 @@ export function assertModelVariantSupported(
   }
 }
 
+export function assertTurnSelectionSupported(selection: Pick<ModelSelection, "variant" | "effort">, capabilities: { modelVariants?: boolean; effortLevels?: readonly EffortLevel[] }): void {
+  assertModelVariantSupported(selection, capabilities);
+  if (selection.effort && !capabilities.effortLevels?.includes(selection.effort)) {
+    throw Object.assign(new Error(`effort "${selection.effort}" is not offered by this bot's engine — choose another level in settings`), { status: 409 });
+  }
+}
+
 export function memberTurnSelection(selection: ModelSelection): {
   model: string;
   effort?: EffortLevel;

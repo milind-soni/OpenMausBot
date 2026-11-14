@@ -1,6 +1,11 @@
 import { t } from "@/lib/i18n";
 import { roomQueueLabel, roomThreadQueue } from "@/lib/room-threads";
 import type { Bot, Group, Message } from "@/state/store";
+import { TurnEffortNote } from "./ConversationalReply";
+
+export function RoomDecisionNotes({ message }: { message: Message }) {
+  return <>{message.routedBy && <RoutedByLine routedBy={message.routedBy} />}<TurnEffortNote effort={message.turnEffort} /></>;
+}
 
 const nameIn = (members: Bot[]) => (botId: string) => members.find((member) => member.id === botId)?.name;
 

@@ -65,6 +65,12 @@ describe("decodeCodexSelection", () => {
 });
 
 describe("readCodexModelCatalog", () => {
+  it("preserves model-specific effort levels on normal and Fast rows", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const catalog = await readCodexModelCatalog({ HOME: join(tmpdir(), "omb-codex-efforts"), PATH: process.env.PATH, FAKE_CODEX_TIERS: "1",
+      FAKE_CODEX_EFFORTS: JSON.stringify([{ reasoningEffort: "low" }, { reasoningEffort: "high" }, { reasoningEffort: "future" }]) }, fetch, FAKE_CLI);
+    expect(catalog.options.filter((option) => option.id.startsWith("gpt-fake-default")).map((option) => option.effortLevels)).toEqual([["low", "high"], ["low", "high"]]);
+  });
   it("returns the static cloud fallback when there is no config or CLI probe", async () => {
     expect(await readCodexModelCatalog({ HOME: join(tmpdir(), "omb-codex-missing-home") })).toEqual(
       STATIC_CODEX_MODELS,

@@ -4,6 +4,7 @@
 //
 // To add a model: edit model-manifest.json, bump `updatedAt`, open a PR. `scripts/check-model-manifest.mjs` runs in CI.
 import { z } from "zod";
+import { EFFORT_LEVELS } from "../../shared/wire.ts";
 
 // Claude Code's `[1m]` suffix selects a model's 1M-token context.
 export const CLAUDE_MODEL_ID = /^[a-z0-9][a-z0-9._:/-]*(?:\[1m\])?$/i;
@@ -52,6 +53,7 @@ function engineSchema(engine: ManifestEngine, objectOf: ObjectOf) {
     aliases: z.array(modelId(engine)).max(20).optional(),
     status: z.enum(["current", "legacy"]),
     contextWindow: z.number().int().positive().max(100_000_000).optional(),
+    effortLevels: z.array(z.enum(EFFORT_LEVELS)).max(EFFORT_LEVELS.length).optional(),
     minCliVersion: z.string().regex(CLI_VERSION).optional(),
     variants: z.array(objectOf({ id: z.string().min(1).max(40).regex(VARIANT_ID), label: label(40) })).max(20).optional(),
   });

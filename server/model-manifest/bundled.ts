@@ -17,6 +17,7 @@ export function engineCatalogFrom(manifest: ModelManifestData, engine: ManifestE
       id: model.id,
       label: model.name,
       ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
+      ...(model.effortLevels ? { effortLevels: model.effortLevels } : {}),
       ...(model.variants?.length ? { variants: model.variants } : {}),
     })),
   };

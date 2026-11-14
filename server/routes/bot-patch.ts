@@ -8,6 +8,7 @@ import { parseToolScope, toolScopeWidens } from "../../shared/tool-scope.ts";
 import { isMausColor, MAUS_COLOR_NAMES, type WireBot, type WireGroup } from "../../shared/wire.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
+import { autoEffortSchema } from "../auto-effort.ts";
 import { accessFromVisibility } from "../../shared/bot-access.ts";
 import { parseVisibility } from "../bot-visibility.ts";
 import type { BrowserLive } from "../browser-live.ts";
@@ -187,6 +188,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       const patch: Record<string, unknown> = {};
       Object.assign(patch, profile.patch);
+      if (body.autoEffort !== undefined) {
+        const parsed = autoEffortSchema.safeParse(body.autoEffort);
+        if (!parsed.success) return json(res, 400, { error: "autoEffort must contain valid minimum and maximum effort levels in ascending order and an optional automated boolean" });
+        patch.autoEffort = parsed.data;
+      }
       let section: string | undefined | null;
       if (body.section !== undefined) {
         if (body.section === null) section = null;

@@ -6,6 +6,7 @@ import { DATA_DIR } from "./config.ts";
 import type { ModelCatalog } from "./contracts.ts";
 import { buildStamp } from "./environment.ts";
 import { afterFirstEngineRead } from "./first-engine-read.ts";
+import { isEffortLevel } from "../shared/wire.ts";
 
 const SAFE_INSTANCE_ID = /^[\w.-]+$/;
 /** A list this server's build read this recently is used as it is at start; an older one, or one an earlier build read,
@@ -55,6 +56,7 @@ function catalogFrom(value: unknown): ModelCatalog | null {
       provider?: unknown;
       contextWindow?: unknown;
       variants?: unknown;
+      effortLevels?: unknown;
       orgBlocked?: unknown;
       needsCliUpdate?: unknown;
     };
@@ -70,6 +72,7 @@ function catalogFrom(value: unknown): ModelCatalog | null {
         ? { contextWindow: option.contextWindow }
         : {}),
       ...(variants ? { variants } : {}),
+      ...(Array.isArray(option.effortLevels) ? { effortLevels: option.effortLevels.filter(isEffortLevel) } : {}),
       ...(option.orgBlocked === true ? { orgBlocked: true as const } : {}),
       ...(typeof option.needsCliUpdate === "string" ? { needsCliUpdate: option.needsCliUpdate } : {}),
     });

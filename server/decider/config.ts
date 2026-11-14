@@ -22,7 +22,7 @@ export const CUSTOM_MODEL_ID_MAX = 128;
  * `openrouterModel` is an OpenRouter model id and `openrouterApi` says
  * whether it is a chat model or one of OpenRouter's decisions models
  * (`chat` when absent); `jobs` switches each
- * decision on or off. Not `decisions`: that section is the authorization
+ * decision on or off; `turnEffort` is off unless explicitly enabled. Not `decisions`: that section is the authorization
  * log's retention. */
 export const deciderConfigSchema = z.object({
   enabled: z.boolean().optional(),
@@ -65,8 +65,10 @@ export const deciderConfigSchema = z.object({
     .max(2048)
     .refine((value) => !value || /^https?:\/\//i.test(value), "the OpenRouter address must start with http:// or https://")
     .optional(),
-  jobs: z.object({ roomRouting: z.boolean().optional(), inboxTriage: z.boolean().optional() }).optional(),
+  jobs: z.object({ roomRouting: z.boolean().optional(), inboxTriage: z.boolean().optional(), turnEffort: z.boolean().optional() }).optional(),
 });
+
+export const storedDeciderConfigSchema = deciderConfigSchema.extend({ provider: deciderConfigSchema.shape.provider.catch("off") });
 
 /** The decision model; see `deciderConfigSchema`. */
 export interface DeciderConfig {
@@ -89,5 +91,5 @@ export interface DeciderConfig {
   workersAiAccountId?: string;
   /** An operator setting with no UI, like `baseUrl`: Workers AI's REST root, `/client/v4` included. */
   workersAiBaseUrl?: string;
-  jobs?: { roomRouting?: boolean; inboxTriage?: boolean };
+  jobs?: { roomRouting?: boolean; inboxTriage?: boolean; turnEffort?: boolean };
 }
