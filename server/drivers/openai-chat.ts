@@ -803,8 +803,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             let fatal: Error | undefined, title = call.function.name, skipRepeatCount = false;
             try {
               let args: unknown;
-              const rawArguments = call.function.arguments.trim() ? call.function.arguments : "{}";
-              try { args = JSON.parse(rawArguments); }
+              try { args = JSON.parse(call.function.arguments.trim() || "{}"); } // An empty argument string is a tool with no arguments.
               catch { throw new ChatProtocolError("tool arguments are not complete JSON"); }
               if (!object(args)) throw new ChatProtocolError("tool arguments must be a JSON object");
               const inputPreview = preview(args);
