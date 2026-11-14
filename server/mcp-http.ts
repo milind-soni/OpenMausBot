@@ -200,6 +200,7 @@ export class RemoteMcpClient {
   private closed = false;
   private readonly pending = new Map<number, Pending>();
   private sseEndpoint: Promise<string> | null = null;
+  private sseFailure: Error | undefined;
   private readonly sseAbort = new AbortController();
 
   constructor(target: RemoteMcpSpec, options: { fetch?: typeof fetch; maxBytes?: number; onNotification?: (message: JsonRpcMessage) => void } = {}) {
@@ -338,6 +339,7 @@ export class RemoteMcpClient {
     this.sseEndpoint = new Promise<string>((resolveEndpoint, rejectEndpoint) => {
       let settled = false;
       const fail = (error: Error) => {
+        this.sseFailure = error;
         if (!settled) {
           settled = true;
           rejectEndpoint(error);
@@ -400,6 +402,7 @@ export class RemoteMcpClient {
 
   private async ssePost(frame: unknown, signal: AbortSignal): Promise<void> {
     const endpoint = await this.openSseStream(signal);
+    if (this.sseFailure) throw this.sseFailure;
     const response = await this.post(endpoint, frame, signal);
     drain(response);
   }
