@@ -151,6 +151,30 @@ describe("BoardStore", () => {
     expect(() => board.putTask({ threadId: "parent", botId: "b1", subprojectId: undefined, projectId: project.id })).not.toThrow();
   });
 
+  it("links a batch in one commit and records a failed batch without touching tasks", () => {
+    const { board } = store();
+    const project = board.createProject({ name: "创意板" });
+    const version = board.version();
+    const result = board.batchAssign({
+      projectId: project.id, version,
+      links: [{ threadId: "t1", botId: "b1" }, { threadId: "t2", botId: "b1" }],
+    }, { label: "Lin", email: "lin@example.com" });
+    expect(result.count).toBe(2);
+    expect(board.version()).toBe(version + 1);
+    expect(board.state().tasks.map((task) => task.threadId)).toEqual(["t1", "t2"]);
+    expect(board.audit(1)[0]).toMatchObject({ action: "task.batch", count: 2, actor: { label: "Lin", email: "lin@example.com" }, target: { kind: "project", id: project.id } });
+
+    const before = board.version();
+    expect(() => board.batchAssign({
+      projectId: project.id, version: before,
+      links: [{ threadId: "t3", botId: "b1" }, { threadId: "bad id", botId: "b1" }],
+    }, { label: "Lin", email: "lin@example.com" })).toThrowError(/cannot be linked/);
+    expect(board.version()).toBe(before);
+    expect(board.state().tasks.some((task) => task.threadId === "t3")).toBe(false);
+    expect(board.audit(1)[0]).toMatchObject({ action: "task.batch", count: 2, actor: { label: "Lin", email: "lin@example.com" } });
+    expect(board.audit(1)[0]!.reason).toContain("not a valid id");
+  });
+
   it("requires phase evidence on every subproject transition and names the actor", () => {
     const { board } = store();
     const project = board.createProject({ name: "创意板" });

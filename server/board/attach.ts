@@ -13,7 +13,7 @@ export const BOARD_TASK_WRITE_FIELDS: ReadonlySet<string> = new Set([
 
 export type BoardAttachResult =
   | { ok: true; task: BoardTask; state: BoardState }
-  | { ok: false; status: number; code: "BOARD_INVALID" | "BOARD_FORBIDDEN" | "BOARD_NEEDS_EVIDENCE" | "BOARD_VERSION_CONFLICT" | "BOARD_UNAVAILABLE"; message: string };
+  | { ok: false; status: number; code: "BOARD_INVALID" | "BOARD_FORBIDDEN" | "BOARD_NEEDS_EVIDENCE" | "BOARD_VERSION_CONFLICT" | "BOARD_UNAVAILABLE" | "BOARD_BATCH_CONFLICT"; message: string };
 
 export interface BoardAttachDeps {
   board: BoardStore;

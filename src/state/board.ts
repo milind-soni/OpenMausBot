@@ -98,7 +98,7 @@ export function refreshBoardWhenShown(): () => void {
 }
 
 export type BoardErrorCode =
-  | "BOARD_INVALID" | "BOARD_FORBIDDEN" | "BOARD_VERSION_CONFLICT" | "BOARD_NEEDS_EVIDENCE" | "BOARD_UNAVAILABLE";
+  | "BOARD_INVALID" | "BOARD_FORBIDDEN" | "BOARD_VERSION_CONFLICT" | "BOARD_NEEDS_EVIDENCE" | "BOARD_UNAVAILABLE" | "BOARD_BATCH_CONFLICT";
 
 export class BoardWriteError extends Error {
   readonly code: BoardErrorCode;
@@ -115,6 +115,7 @@ const ERROR_TEXT: Readonly<Record<BoardErrorCode, LocaleKey>> = {
   BOARD_VERSION_CONFLICT: "board.error.conflict",
   BOARD_NEEDS_EVIDENCE: "board.error.needsEvidence",
   BOARD_UNAVAILABLE: "board.error.unavailable",
+  BOARD_BATCH_CONFLICT: "board.error.batchConflict",
 };
 
 export function boardErrorText(error: unknown): LocaleKey {
@@ -128,7 +129,7 @@ export function boardErrorKey(code: BoardErrorCode | undefined): LocaleKey {
 function codeOf(error: unknown): BoardErrorCode {
   if (!(error instanceof ApiError)) return "BOARD_UNAVAILABLE";
   const code = error.body?.error;
-  if (code === "BOARD_INVALID" || code === "BOARD_FORBIDDEN" || code === "BOARD_VERSION_CONFLICT" || code === "BOARD_NEEDS_EVIDENCE") return code;
+  if (code === "BOARD_INVALID" || code === "BOARD_FORBIDDEN" || code === "BOARD_VERSION_CONFLICT" || code === "BOARD_NEEDS_EVIDENCE" || code === "BOARD_BATCH_CONFLICT") return code;
   return error.status === 403 ? "BOARD_FORBIDDEN" : "BOARD_UNAVAILABLE";
 }
 

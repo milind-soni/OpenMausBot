@@ -6,13 +6,15 @@ import {
   actorFor, boardViewer, conversationVisible, filterBoard, projectEditable, projectVisible, taskEditable,
   type BoardViewer,
 } from "../board/access.ts";
-import { BoardError, boardErrorStatus, type BoardStore } from "../board/store.ts";
+import { BoardBatchError, BoardError, boardErrorStatus, type BoardBatchLink, type BoardStore } from "../board/store.ts";
 import type { BoardSnapshot } from "../../shared/board.ts";
 
 export interface BoardRouteDeps extends BoardAttachDeps {
   board: BoardStore;
   /** The conversation exists for this bot; a board row never invents one. */
   threadExists(botId: string, threadId: string): boolean;
+  /** The conversation's routine provenance, for excluding scheduler runs from work batches. */
+  threadInfo(botId: string, threadId: string): { routineRunId?: string } | null;
   /** The caller's existing conversation/bot visibility; absence means the admin-only surface. */
   visibleFor(auth: Parameters<RouteHandler>[0]["auth"]): Parameters<typeof boardViewer>[1];
 }
@@ -29,6 +31,21 @@ const MILESTONE_PATCH_FIELDS = new Set([
   "title", "status", "verdict", "evidence", "dueAt", "acceptance", "owner", "ownerEmail", "version",
 ]);
 const VERDICT_FIELDS = new Set(["decision", "evidence", "version"]);
+const BATCH_PATH = "/api/board/tasks/batch";
+const BATCH_PREVIEW_PATH = `${BATCH_PATH}/preview`;
+const BATCH_FIELDS = new Set(["projectId", "subprojectId", "threads", "version"]);
+const BATCH_THREAD_FIELDS = new Set(["threadId", "botId"]);
+const BATCH_LIMIT = 100;
+const BATCH_ID = /^[A-Za-z0-9_-]{1,80}$/;
+
+type BatchStatus = "ready" | "already_assigned" | "missing" | "hidden" | "routine" | "conflict";
+interface BatchItem {
+  threadId: string;
+  botId: string;
+  status: BatchStatus;
+  reason?: string;
+  existing?: { projectId?: string; subprojectId?: string; parentThreadId?: string };
+}
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -100,12 +117,188 @@ export function createBoardRoutes(deps: BoardRouteDeps): RouteHandler {
     return true;
   };
 
+  const handleBatch = async (ctx: Parameters<RouteHandler>[0], who: BoardViewer, preview: boolean): Promise<void> => {
+    const input = await body(ctx);
+    if (!input) return;
+    const extra = unsupported(input, BATCH_FIELDS);
+    if (extra) return invalid(ctx, `unsupported field: ${extra}`);
+
+    const projectId = typeof input.projectId === "string" ? input.projectId : "";
+    if (!projectId || !BATCH_ID.test(projectId)) return invalid(ctx, "projectId is required");
+    if (preview ? !projectGuard(ctx, who, projectId) : !editProjectGuard(ctx, who, projectId)) return;
+    const project = findProject(projectId)!;
+
+    let subprojectId: string | undefined;
+    if (input.subprojectId !== undefined && input.subprojectId !== null) {
+      if (typeof input.subprojectId !== "string" || !BATCH_ID.test(input.subprojectId)) return invalid(ctx, "subprojectId is not a valid id");
+      const subproject = deps.board.state().subprojects.find((candidate) => candidate.id === input.subprojectId);
+      if (!subproject || subproject.projectId !== projectId) return invalid(ctx, "subproject must belong to this project");
+      subprojectId = subproject.id;
+    }
+
+    const rawThreads = input.threads;
+    if (!Array.isArray(rawThreads) || rawThreads.length < 1 || rawThreads.length > BATCH_LIMIT) {
+      return invalid(ctx, `threads must contain 1 to ${BATCH_LIMIT} conversations`);
+    }
+    const threads: Array<{ threadId: string; botId: string }> = [];
+    const seen = new Set<string>();
+    for (const raw of rawThreads) {
+      const item = record(raw);
+      if (!item) return invalid(ctx, "each thread must be an object");
+      const extraThread = unsupported(item, BATCH_THREAD_FIELDS);
+      if (extraThread) return invalid(ctx, `unsupported thread field: ${extraThread}`);
+      const threadId = item.threadId;
+      const botId = item.botId;
+      if (typeof threadId !== "string" || !BATCH_ID.test(threadId) || typeof botId !== "string" || !BATCH_ID.test(botId)) {
+        return invalid(ctx, "threadId and botId must be valid ids");
+      }
+      if (seen.has(threadId)) return invalid(ctx, `thread ${threadId} appears twice`);
+      seen.add(threadId);
+      threads.push({ threadId, botId });
+    }
+
+    let version: number | undefined;
+    if (!preview) {
+      if (!Number.isSafeInteger(input.version) || (input.version as number) < 0) return invalid(ctx, "version is required");
+      version = input.version as number;
+      if (deps.board.version() !== version) {
+        const reason = `BOARD_VERSION_CONFLICT: expected ${version}, board is at ${deps.board.version()}`;
+        deps.board.recordBatchAudit({ actor: actorFor(ctx.auth), projectId, count: threads.length, reason });
+        return ctx.json(ctx.res, 409, { error: "BOARD_VERSION_CONFLICT", message: reason });
+      }
+    }
+
+    const actor = actorFor(ctx.auth);
+    const ownerEmail = who.admin ? undefined : actor.email;
+    const state = deps.board.state();
+    const items: BatchItem[] = [];
+    const links: BoardBatchLink[] = [];
+    const existingView = (task: { projectId?: string; subprojectId?: string; parentThreadId?: string }) => ({
+      ...(task.projectId ? { projectId: task.projectId } : {}),
+      ...(task.subprojectId ? { subprojectId: task.subprojectId } : {}),
+      ...(task.parentThreadId ? { parentThreadId: task.parentThreadId } : {}),
+    });
+
+    for (const thread of threads) {
+      const info = deps.threadInfo(thread.botId, thread.threadId);
+      if (!info) {
+        items.push({ ...thread, status: "missing", reason: "no such conversation" });
+        continue;
+      }
+      if (!who.visible.thread(thread.threadId) || !who.visible.bot(thread.botId)) {
+        items.push({ ...thread, status: "hidden", reason: "no such conversation" });
+        continue;
+      }
+      if (info.routineRunId) {
+        items.push({ ...thread, status: "routine", reason: "routine runs are not work conversations" });
+        continue;
+      }
+      const existing = state.tasks.find((task) => task.threadId === thread.threadId);
+      if (existing) {
+        if (existing.projectId) {
+          const existingProject = findProject(existing.projectId);
+          if (!existingProject || !projectVisible(existingProject, who)) {
+            items.push({ ...thread, status: "hidden", reason: "no such project" });
+            continue;
+          }
+        }
+        if (existing.botId !== thread.botId) {
+          items.push({ ...thread, status: "conflict", reason: "the board row belongs to another bot", existing: existingView(existing) });
+          continue;
+        }
+        if (existing.projectId !== undefined && existing.projectId !== projectId) {
+          items.push({ ...thread, status: "conflict", reason: "already assigned to another project", existing: existingView(existing) });
+          continue;
+        }
+        if (existing.projectId === projectId) {
+          const currentSub = existing.subprojectId ?? null;
+          const targetSub = subprojectId ?? null;
+          if (currentSub === targetSub) {
+            items.push({ ...thread, status: "already_assigned", existing: existingView(existing) });
+            continue;
+          }
+          if (existing.subprojectId === undefined && subprojectId !== undefined) {
+            // Upgrading a project-level row to the target subproject is a normal link.
+          } else {
+            items.push({ ...thread, status: "conflict", reason: "already assigned to another subproject", existing: existingView(existing) });
+            continue;
+          }
+        }
+      }
+      links.push({ ...thread, ...(ownerEmail ? { ownerEmail } : {}) });
+      items.push({ ...thread, status: "ready", ...(existing ? { existing: existingView(existing) } : {}) });
+    }
+
+    const previewFailures = deps.board.previewBatch({ projectId, subprojectId, links });
+    const failureById = new Map(previewFailures.map((failure) => [failure.threadId, failure]));
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index]!;
+      const failure = failureById.get(item.threadId);
+      if (failure && item.status === "ready") items[index] = { ...item, status: "conflict", reason: failure.message };
+    }
+    const summary = {
+      total: items.length,
+      ready: items.filter((item) => item.status === "ready").length,
+      alreadyAssigned: items.filter((item) => item.status === "already_assigned").length,
+      missing: items.filter((item) => item.status === "missing").length,
+      hidden: items.filter((item) => item.status === "hidden").length,
+      routine: items.filter((item) => item.status === "routine").length,
+      conflict: items.filter((item) => item.status === "conflict").length,
+    };
+    const target = {
+      projectId, projectName: project.name,
+      ...(subprojectId ? { subprojectId, subprojectName: state.subprojects.find((candidate) => candidate.id === subprojectId)!.name } : {}),
+    };
+    if (preview) return ctx.json(ctx.res, 200, { version: deps.board.version(), target, items, summary });
+
+    const blocked = items.filter((item) => item.status !== "ready" && item.status !== "already_assigned");
+    if (blocked.length) {
+      const reason = `batch refused: ${Object.entries(summary).filter(([key]) => key !== "total" && key !== "ready" && key !== "alreadyAssigned" && summary[key as keyof typeof summary] > 0).map(([key, value]) => `${key}=${value}`).join(", ")}`;
+      deps.board.recordBatchAudit({ actor, projectId, count: items.length, reason });
+      return ctx.json(ctx.res, 409, {
+        error: "BOARD_BATCH_CONFLICT",
+        message: reason,
+        failures: blocked.map((item) => ({ threadId: item.threadId, code: "BOARD_BATCH_CONFLICT", message: item.reason ?? item.status })),
+        items,
+        summary,
+      });
+    }
+    const readyLinks = links.filter((link) => items.find((item) => item.threadId === link.threadId)?.status === "ready");
+    if (!readyLinks.length) {
+      return ctx.json(ctx.res, 200, {
+        board: snapshot(who),
+        batch: { assigned: 0, alreadyAssigned: summary.alreadyAssigned, total: items.length, version: deps.board.version() },
+      });
+    }
+    try {
+      const result = deps.board.batchAssign({ projectId, subprojectId, links: readyLinks, version }, actor);
+      return ctx.json(ctx.res, 200, {
+        board: snapshot(who),
+        batch: { assigned: result.count, alreadyAssigned: summary.alreadyAssigned, total: items.length, version: deps.board.version() },
+      });
+    } catch (error) {
+      if (error instanceof BoardBatchError) {
+        return ctx.json(ctx.res, 409, { error: error.code, message: error.message, failures: error.failures, items, summary });
+      }
+      throw error;
+    }
+  };
+
   return async (ctx) => {
-    const match = ROUTE.exec(ctx.path);
-    if (!match) return PASS;
     const { res, method, auth } = ctx;
     res.setHeader("cache-control", "no-store");
     const who = viewer(auth);
+    if (method === "POST" && (ctx.path === BATCH_PATH || ctx.path === BATCH_PREVIEW_PATH)) {
+      try {
+        return await handleBatch(ctx, who, ctx.path === BATCH_PREVIEW_PATH);
+      } catch (error) {
+        if (error instanceof BoardBatchError) return ctx.json(res, 409, { error: error.code, message: error.message, failures: error.failures });
+        if (error instanceof BoardError) return fail(ctx, error);
+        throw error;
+      }
+    }
+    const match = ROUTE.exec(ctx.path);
+    if (!match) return PASS;
     const collection = match[1] as "projects" | "subprojects" | "milestones" | "tasks" | undefined;
     const id = match[2];
     const action = match[3];
@@ -240,6 +433,9 @@ export function createBoardRoutes(deps: BoardRouteDeps): RouteHandler {
 
       return invalid(ctx, "unsupported request");
     } catch (error) {
+      if (error instanceof BoardBatchError) {
+        return ctx.json(res, 409, { error: error.code, message: error.message, failures: error.failures });
+      }
       if (error instanceof BoardError) return fail(ctx, error);
       throw error;
     }

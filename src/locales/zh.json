@@ -10143,6 +10143,7 @@
   "board.empty.body": "先建一个项目，再给它添加子项目和对话。",
   "board.empty.action": "新建项目",
   "board.error.unavailable": "看板暂时加载不了。检查网络后再试一次。",
+  "board.error.batchConflict": "有对话无法归入目标项目，请检查批量预览。",
   "board.error.invalid": "这次修改没有被接受。",
   "board.error.forbidden": "只有所有者或管理员可以修改看板。",
   "board.error.conflict": "看板在别处已经更新，这里已是最新，请再试一次。",

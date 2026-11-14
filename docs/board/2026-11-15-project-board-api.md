@@ -69,6 +69,8 @@ interface BoardTask {
 | PUT | `/api/board/tasks/:threadId` | `botId` 必填；可带 `projectId/subprojectId/parentThreadId/phase/phaseEvidence/status/owner/ownerEmail/acceptance/blocked/blockedReason/paused/pausedReason/version`。 |
 | POST | `/api/board/tasks/:threadId/verdict` | `{ decision, evidence, version? }`；任务 ownerEmail 或项目 ownerEmail 或 owner/admin。 |
 | DELETE | `/api/board/tasks/:threadId?version=N` | 只取消归类，不删除对话。 |
+| POST | `/api/board/tasks/batch/preview` | 只读批量预览：`{ projectId, subprojectId?, threads: [{ threadId, botId }] }`；逐条返回 ready/already_assigned/missing/hidden/routine/conflict。 |
+| POST | `/api/board/tasks/batch` | 原子批量归属：同上加 `version`；任一冲突则整批 409，不写任何任务。 |
 
 写响应统一 `{ board }`（verdict 另带 `task`）。`version` 可选；带上则做乐观并发，过期返回
 `409 BOARD_VERSION_CONFLICT`。所有写操作递增 `version` 并广播整板 SSE；当前 SSE 只发 admin 会话，
@@ -83,6 +85,21 @@ interface BoardTask {
   可改项目/子项目/里程碑/任务，其他成员只读。
 - 看不到的项目/对话统一 `403 BOARD_FORBIDDEN`，不返回对象内容。
 - `counts` 由服务端在过滤后计算：`topLevel` 只算没有可见父任务的节点，子任务单列，避免主子任务重复计数。
+
+### 批量历史归集
+
+- 调用者显式给出 `threads: [{ threadId, botId }]`。预览不写盘，不按 Bot 名/标题猜项目；逐条返回：
+  - `missing`：该 bot 下没有这条对话；
+  - `hidden`：调用者看不到对话/所属机器人；
+  - `routine`：`routineRunId` 非空，例程运行不是工作对话，拒绝归集；
+  - `conflict`：已属其他项目/子项目、父子链不成立，或目标阶段证据不满足；
+  - `already_assigned`：已在目标项目/子项目，确认时算成功但不重复写；
+  - `ready`：可归集。
+- 确认请求必须带预览读到的 `version` 和同一 `threads`。服务端在单个 commit 中重新校验并写入全部
+  ready 项；任一失败则所有任务保持原样，返回 `409 BOARD_BATCH_CONFLICT`，并记录一条
+  `task.batch` 审计（actor、count、失败原因）。成功也记录 `task.batch` 审计（actor、count）。
+- 目标项目必须对调用者可见；确认要求项目编辑权（项目 owner/admin）。成员写入时任务 `ownerEmail`
+  固定为本人。批量不移动已属其他项目的任务，避免静默重分类。
 
 ### 新对话归属
 
@@ -102,16 +119,18 @@ interface BoardTask {
 { "error": "BOARD_INVALID", "message": "..." }
 ```
 
-`400 BOARD_INVALID`、`403 BOARD_FORBIDDEN`、`409 BOARD_VERSION_CONFLICT`、`422 BOARD_NEEDS_EVIDENCE`、
-`503 BOARD_UNAVAILABLE`（文件更新版本或损坏，文件保持原样）。
+`400 BOARD_INVALID`、`403 BOARD_FORBIDDEN`、`409 BOARD_VERSION_CONFLICT` / `BOARD_BATCH_CONFLICT`、
+`422 BOARD_NEEDS_EVIDENCE`、`503 BOARD_UNAVAILABLE`（文件更新版本或损坏，文件保持原样）。批量冲突响应带
+`failures: [{ threadId, code, message }]`。
 
 ## 迁移、备份与回滚
 
 - 文件仍是 `board.json`，原子写、`0600`。格式 `version: 2`；旧 `version: 1` 在内存中补默认值：
   项目 `visibility = "admins"`、`status = "active"`，子项目 `phase = "discovery"`，其余新字段留空。
 - 第一次写回时，先把原文件复制为 `board.json.v1.bak`（不覆盖已有备份），再写 v2。只读不会改文件。
-- 旧项目默认 `admins`，避免升级时把原 admin-only 数据暴露给成员；新建项目默认 `everyone`
-  （工作区成员可见），可用 `visibility` 收紧到 `admins` 或 `people`。
+- 旧项目默认 `admins`，避免升级时把原 admin-only 数据暴露给成员；新建项目也默认 `admins`。
+  有权限者可在 create/patch 显式传 `visibility: "everyone"` 或 `{ "people": [...] }`，再按现有
+  `filterBoard` 过滤；不会自动把旧记录或新元数据扩大到全员。
 - 回滚：停服，恢复 `board.json.v1.bak`（或删除 `board.json` 得到空板），回退提交；对话、bot、
   messages 和数据库均未迁移，无需数据回滚。
 - 更新版本/损坏文件返回 `503`，绝不写回或降级为空板。
@@ -125,14 +144,14 @@ pnpm exec vitest run server/direct-coordination.e2e.test.ts -t "sends cross-bot 
 
 覆盖：项目/子项目/任务/里程碑可追责字段、必填字段服务端强制、blockedReason、verdict by、task verdict
 不改 phase、phase done 证据、子项目阶段证据/线上回执、审计；双账号项目可见性与
-原对话双重过滤、counts 不重复、项目 owner/任务 owner 的有限写入、隐藏对象拒绝；v1→v2 备份/迁移/
-回滚、未来版本 503 且文件不变；真实 `coordinate_bots` 两层分派的 `parentThreadId`；创建对话时
-`board` 归属失败回滚；SSE 整板帧。
+原对话双重过滤、counts 不重复、项目 owner/任务 owner 的有限写入、隐藏对象拒绝；批量预览不写盘、
+例程排除、冲突零部分提交、批量成功/失败审计、payload version 冲突；新项目默认 admins、显式
+everyone 才共享；v1→v2 备份/迁移/回滚、未来版本 503 且文件不变；真实 `coordinate_bots` 两层分派的
+`parentThreadId`；创建对话时 `board` 归属失败回滚；SSE 整板帧。
 
 ## 边界
 
-- 不做批量历史归集、不自动猜阶段/完成事实。
-- 前端目前只按 `capabilities.manage` 展示按钮，成员即使有 `permissions` 也先看到只读；后续 UI
-  再接 per-object 权限。
+- 批量不做自动分类、不按标题/机器人名猜项目；一次最多 100 条，超出请分批。
+- 前端 v2 已按 `permissions` 做成员有限编辑；批量归集 API 已备，批量 UI 尚未接。
 - SSE 仍只发 admin；成员靠重取。
 - 未做生产发布/迁移；未在安装包内验证。

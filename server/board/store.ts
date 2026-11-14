@@ -5,8 +5,8 @@ import { dirname } from "node:path";
 
 import {
   BOARD_MILESTONE_STATUSES, BOARD_PHASES, BOARD_PROJECT_STATUSES, BOARD_TASK_STATUSES, BOARD_VERDICTS,
-  type BoardAuditEntry, type BoardBroadcast, type BoardMilestone, type BoardProject, type BoardProjectStatus,
-  type BoardSnapshot, type BoardState, type BoardSubproject, type BoardTask, type BoardTaskVerdictRecord,
+  type BoardAuditEntry, type BoardBroadcast, type BoardMilestone, type BoardPhase, type BoardProject, type BoardProjectStatus,
+  type BoardSnapshot, type BoardState, type BoardSubproject, type BoardTask, type BoardTaskStatus, type BoardTaskVerdictRecord,
   type BoardVisibility,
 } from "../../shared/board.ts";
 import { writeFileAtomic } from "../atomic.ts";
@@ -16,7 +16,7 @@ export const BOARD_FILE = "board.json";
 export const BOARD_FILE_VERSION = 2;
 
 export type BoardErrorCode =
-  | "BOARD_INVALID" | "BOARD_FORBIDDEN" | "BOARD_VERSION_CONFLICT" | "BOARD_NEEDS_EVIDENCE" | "BOARD_UNAVAILABLE";
+  | "BOARD_INVALID" | "BOARD_FORBIDDEN" | "BOARD_VERSION_CONFLICT" | "BOARD_NEEDS_EVIDENCE" | "BOARD_UNAVAILABLE" | "BOARD_BATCH_CONFLICT";
 
 export class BoardError extends Error {
   readonly code: BoardErrorCode;
@@ -33,7 +33,24 @@ export const boardErrorStatus: Readonly<Record<BoardErrorCode, number>> = {
   BOARD_VERSION_CONFLICT: 409,
   BOARD_NEEDS_EVIDENCE: 422,
   BOARD_UNAVAILABLE: 503,
+  BOARD_BATCH_CONFLICT: 409,
 };
+
+export interface BoardBatchFailure {
+  threadId: string;
+  code: BoardErrorCode;
+  message: string;
+}
+
+export class BoardBatchError extends BoardError {
+  readonly failures: BoardBatchFailure[];
+  constructor(failures: BoardBatchFailure[]) {
+    const detail = failures.slice(0, 3).map((failure) => `${failure.threadId}: ${failure.message}`).join("; ");
+    super("BOARD_BATCH_CONFLICT", `${failures.length === 1 ? "one conversation cannot be linked" : `${failures.length} conversations cannot be linked`}: ${detail}`.slice(0, 1_000));
+    this.name = "BoardBatchError";
+    this.failures = failures;
+  }
+}
 
 export interface BoardActor {
   label: string;
@@ -56,7 +73,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ENTRY = /^(?:[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+|@[^\s@,;<>"]+\.[^\s@,;<>"]+)$/;
 const AUDIT_ACTIONS = [
   "project.create", "project.update", "subproject.create", "subproject.update",
-  "milestone.create", "milestone.update", "task.link", "task.update", "task.verdict", "task.remove",
+  "milestone.create", "milestone.update", "task.link", "task.update", "task.verdict", "task.remove", "task.batch",
 ] as const;
 const PHASE_REFERENCE = /^(?:https?:\/\/|receipt:|回执[:：]|验收[:：])/i;
 
@@ -294,6 +311,8 @@ function normalizeAudit(value: unknown): BoardAuditEntry | null {
     action: value.action,
     target: { kind, id: value.target.id },
     fields: value.fields.filter((field): field is string => typeof field === "string").slice(0, 40).map((field) => field.slice(0, 80)),
+    ...(typeof value.count === "number" && Number.isSafeInteger(value.count) && value.count >= 0 ? { count: value.count } : {}),
+    ...(typeof value.reason === "string" && value.reason.trim() ? { reason: value.reason.trim().slice(0, 1_000) } : {}),
   };
 }
 
@@ -337,7 +356,183 @@ interface AuditDraft {
   target: BoardAuditEntry["target"];
   fields: string[];
   actor?: BoardActor;
+  count?: number;
+  reason?: string;
 }
+
+interface TaskWriteInput {
+  threadId?: unknown; botId?: unknown; projectId?: unknown; subprojectId?: unknown; parentThreadId?: unknown;
+  phase?: unknown; phaseEvidence?: unknown; status?: unknown; owner?: unknown; ownerEmail?: unknown; acceptance?: unknown;
+  blocked?: unknown; blockedReason?: unknown; paused?: unknown; pausedReason?: unknown; version?: unknown;
+}
+
+interface ParsedTaskWrite {
+  threadId: string;
+  botId: string;
+  projectId?: string | null;
+  subprojectId?: string | null;
+  parentThreadId?: string | null;
+  phase?: BoardPhase;
+  phaseEvidence?: string | null;
+  status?: BoardTaskStatus;
+  owner?: string | null;
+  ownerEmail?: string | null;
+  acceptance?: string | null;
+  blocked?: boolean;
+  blockedReason?: string | null;
+  paused?: boolean;
+  pausedReason?: string | null;
+  version?: number;
+  fields: string[];
+}
+
+function parseTaskWrite(input: TaskWriteInput): ParsedTaskWrite {
+  const threadId = cleanId(input.threadId, "threadId");
+  const botId = cleanId(input.botId, "botId");
+  const version = cleanVersion(input.version);
+  const projectId = input.projectId === null ? null : input.projectId === undefined ? undefined : cleanId(input.projectId, "projectId");
+  const subprojectId = input.subprojectId === null ? null : input.subprojectId === undefined ? undefined : cleanId(input.subprojectId, "subprojectId");
+  const parentThreadId = input.parentThreadId === null ? null : input.parentThreadId === undefined ? undefined : cleanId(input.parentThreadId, "parentThreadId");
+  const phase = input.phase === undefined ? undefined : oneOf(input.phase, BOARD_PHASES) ? input.phase : (() => {
+    throw new BoardError("BOARD_INVALID", `phase must be one of ${BOARD_PHASES.join(", ")}`);
+  })();
+  const status = input.status === undefined ? undefined : oneOf(input.status, BOARD_TASK_STATUSES) ? input.status : (() => {
+    throw new BoardError("BOARD_INVALID", `status must be one of ${BOARD_TASK_STATUSES.join(", ")}`);
+  })();
+  const phaseEvidence = input.phaseEvidence === null ? null : input.phaseEvidence === undefined ? undefined : cleanText(input.phaseEvidence, "phaseEvidence", ACCEPTANCE_MAX);
+  const owner = input.owner === null ? null : input.owner === undefined ? undefined : cleanText(input.owner, "owner", OWNER_MAX);
+  const ownerEmail = input.ownerEmail === null ? null : input.ownerEmail === undefined ? undefined : cleanEmail(input.ownerEmail);
+  const acceptance = input.acceptance === null ? null : input.acceptance === undefined ? undefined : cleanText(input.acceptance, "acceptance", ACCEPTANCE_MAX);
+  const blocked = cleanBoolean(input.blocked, "blocked");
+  const paused = cleanBoolean(input.paused, "paused");
+  const blockedReason = input.blockedReason === null ? null : input.blockedReason === undefined ? undefined : cleanText(input.blockedReason, "blockedReason", REASON_MAX);
+  const pausedReason = input.pausedReason === null ? null : input.pausedReason === undefined ? undefined : cleanText(input.pausedReason, "pausedReason", REASON_MAX);
+  if (blocked === false && blockedReason) throw new BoardError("BOARD_INVALID", "a task that is not blocked cannot carry a blockedReason");
+  if (paused === false && pausedReason) throw new BoardError("BOARD_INVALID", "a task that is not paused cannot carry a pausedReason");
+  return {
+    threadId, botId, projectId, subprojectId, parentThreadId, phase, phaseEvidence, status, owner, ownerEmail, acceptance,
+    blocked, blockedReason, paused, pausedReason, version,
+    fields: [
+      "projectId", "subprojectId", "parentThreadId", "phase", "phaseEvidence", "status", "owner", "ownerEmail", "acceptance",
+      "blocked", "blockedReason", "paused", "pausedReason",
+    ].filter((field) => input[field as keyof TaskWriteInput] !== undefined),
+  };
+}
+
+function applyTaskWrite(board: BoardState, write: ParsedTaskWrite, at: string): BoardTask {
+  const { threadId, botId, projectId, subprojectId, parentThreadId, phase, phaseEvidence, status, owner, ownerEmail, acceptance, blocked, blockedReason, paused, pausedReason } = write;
+  const existing = board.tasks.find((task) => task.threadId === threadId);
+  if (existing && existing.botId !== botId) throw new BoardError("BOARD_INVALID", "a conversation cannot move to another bot");
+  const phaseChanged = phase !== undefined && phase !== existing?.phase;
+  let nextProject = projectId === null ? undefined : projectId ?? existing?.projectId;
+  let nextSubproject = projectId === null ? undefined : subprojectId === null ? undefined : subprojectId ?? existing?.subprojectId;
+  const nextParent = parentThreadId === null ? undefined : parentThreadId ?? existing?.parentThreadId;
+  const parent = nextParent ? board.tasks.find((task) => task.threadId === nextParent) : undefined;
+  if (nextParent && !parent) throw new BoardError("BOARD_INVALID", "parentThreadId must be a board task");
+  if (projectId === null && nextParent) throw new BoardError("BOARD_INVALID", "an unclassified task cannot have a parent");
+  if (parent) {
+    if (projectId !== undefined && projectId !== null && parent.projectId !== projectId) {
+      throw new BoardError("BOARD_INVALID", "the parent task belongs to another project");
+    }
+    if (subprojectId !== undefined && subprojectId !== null && parent.subprojectId !== subprojectId) {
+      throw new BoardError("BOARD_INVALID", "the parent task belongs to another subproject");
+    }
+    if (projectId === undefined && parent.projectId !== undefined) nextProject = parent.projectId;
+    if (subprojectId === undefined && parent.subprojectId !== undefined) nextSubproject = parent.subprojectId;
+    if (parent.projectId === undefined && nextProject !== undefined) throw new BoardError("BOARD_INVALID", "the parent task has no project");
+    if (parent.subprojectId === undefined && nextSubproject !== undefined) throw new BoardError("BOARD_INVALID", "the parent task has no subproject");
+  }
+  if (parent && parent.threadId === threadId) throw new BoardError("BOARD_INVALID", "a task cannot be its own parent");
+  if (nextProject && !board.projects.some((project) => project.id === nextProject)) throw new BoardError("BOARD_INVALID", "no such project");
+  if (nextSubproject) {
+    const subproject = board.subprojects.find((candidate) => candidate.id === nextSubproject);
+    if (!subproject) throw new BoardError("BOARD_INVALID", "no such subproject");
+    if (nextProject && subproject.projectId !== nextProject) throw new BoardError("BOARD_INVALID", "subproject must belong to this project");
+  }
+  if (!nextProject && nextSubproject) throw new BoardError("BOARD_INVALID", "a subproject needs a project");
+  if (nextParent && !nextProject) throw new BoardError("BOARD_INVALID", "a parent task needs a project");
+  if (existing && (existing.projectId !== nextProject || existing.subprojectId !== nextSubproject) &&
+    board.tasks.some((task) => task.parentThreadId === threadId)) {
+    throw new BoardError("BOARD_INVALID", "move or unlink this task's subtasks before changing its project or subproject");
+  }
+  if (nextParent) {
+    let cursor = parent;
+    for (let depth = 0; cursor && depth < 1_000; depth += 1) {
+      if (cursor.threadId === threadId) throw new BoardError("BOARD_INVALID", "that parent chain loops back to this task");
+      cursor = cursor.parentThreadId ? board.tasks.find((task) => task.threadId === cursor!.parentThreadId) : undefined;
+    }
+  }
+  const next: BoardTask = existing ?? {
+    threadId, botId, phase: "discovery", status: "todo", createdAt: at, updatedAt: at,
+  };
+  if (projectId === null) {
+    delete next.projectId;
+    delete next.subprojectId;
+    delete next.parentThreadId;
+  } else {
+    if (nextProject === undefined) delete next.projectId;
+    else next.projectId = nextProject;
+    if (nextSubproject === undefined) delete next.subprojectId;
+    else next.subprojectId = nextSubproject;
+    if (nextParent === undefined) delete next.parentThreadId;
+    else next.parentThreadId = nextParent;
+  }
+  if (phase !== undefined) next.phase = phase;
+  if (status !== undefined) next.status = status;
+  if (owner === null) delete next.owner;
+  else if (owner !== undefined) next.owner = owner;
+  if (ownerEmail === null) delete next.ownerEmail;
+  else if (ownerEmail !== undefined) next.ownerEmail = ownerEmail;
+  if (acceptance === null) delete next.acceptance;
+  else if (acceptance !== undefined) next.acceptance = acceptance;
+  if (blocked === false) {
+    delete next.blocked;
+    delete next.blockedReason;
+  } else if (blocked === true) {
+    next.blocked = true;
+  }
+  if (blockedReason === null) {
+    delete next.blockedReason;
+    if (blocked === undefined) delete next.blocked;
+  } else if (blockedReason !== undefined) {
+    next.blockedReason = blockedReason;
+    next.blocked = true;
+  }
+  if (paused === false) {
+    delete next.paused;
+    delete next.pausedReason;
+  } else if (paused === true) {
+    next.paused = true;
+  }
+  if (pausedReason === null) {
+    delete next.pausedReason;
+    if (paused === undefined) delete next.paused;
+  } else if (pausedReason !== undefined) {
+    next.pausedReason = pausedReason;
+    next.paused = true;
+  }
+  if (phaseChanged && next.phase === "done" && !phaseEvidence) {
+    throw new BoardError("BOARD_NEEDS_EVIDENCE", "moving a task phase to done needs phaseEvidence");
+  }
+  if (phaseEvidence === null && next.phase === "done") {
+    throw new BoardError("BOARD_NEEDS_EVIDENCE", "a done task cannot drop its phaseEvidence");
+  }
+  if (phaseEvidence !== null && phaseEvidence !== undefined) next.phaseEvidence = phaseEvidence;
+  else if (phaseEvidence === null) delete next.phaseEvidence;
+  if (next.status === "done" && next.verdict?.decision !== "accepted") {
+    throw new BoardError("BOARD_NEEDS_EVIDENCE", "a done task needs an accepted verdict with evidence");
+  }
+  next.updatedAt = at;
+  if (!existing) board.tasks.push(next);
+  return structuredClone(next);
+}
+
+export interface BoardBatchLink {
+  threadId: string;
+  botId: string;
+  ownerEmail?: string;
+}
+
 
 /** One board per workspace, persisted whole. Every write bumps `version`; a caller that sends the version it read
  * gets a conflict instead of overwriting a newer board. */
@@ -467,6 +662,8 @@ export class BoardStore {
       action: audit.action,
       target: audit.target,
       fields: [...new Set(audit.fields)].slice(0, 40),
+      ...(audit.count !== undefined ? { count: audit.count } : {}),
+      ...(audit.reason ? { reason: audit.reason.slice(0, 1_000) } : {}),
     };
     const previous = this.data;
     const previousAudit = this.auditEntries;
@@ -492,7 +689,7 @@ export class BoardStore {
     const goal = cleanText(input.goal, "goal", ACCEPTANCE_MAX);
     const acceptance = cleanText(input.acceptance, "acceptance", ACCEPTANCE_MAX);
     const status = cleanStatus(input.status) ?? "active";
-    const visibility = input.visibility === undefined ? "everyone" : cleanVisibility(input.visibility);
+    const visibility = input.visibility === undefined ? "admins" : cleanVisibility(input.visibility);
     const version = cleanVersion(input.version);
     const at = this.now();
     const id = `p_${newId()}`;
@@ -719,146 +916,81 @@ export class BoardStore {
   }
 
   /** Attribute one existing conversation; omitted fields keep their current value. */
-  putTask(input: {
-    threadId?: unknown; botId?: unknown; projectId?: unknown; subprojectId?: unknown; parentThreadId?: unknown;
-    phase?: unknown; phaseEvidence?: unknown; status?: unknown; owner?: unknown; ownerEmail?: unknown; acceptance?: unknown;
-    blocked?: unknown; blockedReason?: unknown; paused?: unknown; pausedReason?: unknown; version?: unknown;
-  }, actor: BoardActor = SYSTEM_ACTOR): BoardTask {
-    const threadId = cleanId(input.threadId, "threadId");
-    const botId = cleanId(input.botId, "botId");
-    const version = cleanVersion(input.version);
-    const projectId = input.projectId === null ? null : input.projectId === undefined ? undefined : cleanId(input.projectId, "projectId");
-    const subprojectId = input.subprojectId === null ? null : input.subprojectId === undefined ? undefined : cleanId(input.subprojectId, "subprojectId");
-    const parentThreadId = input.parentThreadId === null ? null : input.parentThreadId === undefined ? undefined : cleanId(input.parentThreadId, "parentThreadId");
-    const phase = input.phase === undefined ? undefined : oneOf(input.phase, BOARD_PHASES) ? input.phase : (() => {
-      throw new BoardError("BOARD_INVALID", `phase must be one of ${BOARD_PHASES.join(", ")}`);
-    })();
-    const status = input.status === undefined ? undefined : oneOf(input.status, BOARD_TASK_STATUSES) ? input.status : (() => {
-      throw new BoardError("BOARD_INVALID", `status must be one of ${BOARD_TASK_STATUSES.join(", ")}`);
-    })();
-    const phaseEvidence = input.phaseEvidence === null ? null : input.phaseEvidence === undefined ? undefined : cleanText(input.phaseEvidence, "phaseEvidence", ACCEPTANCE_MAX);
-    const owner = input.owner === null ? null : input.owner === undefined ? undefined : cleanText(input.owner, "owner", OWNER_MAX);
-    const ownerEmail = input.ownerEmail === null ? null : input.ownerEmail === undefined ? undefined : cleanEmail(input.ownerEmail);
-    const acceptance = input.acceptance === null ? null : input.acceptance === undefined ? undefined : cleanText(input.acceptance, "acceptance", ACCEPTANCE_MAX);
-    const blocked = cleanBoolean(input.blocked, "blocked");
-    const paused = cleanBoolean(input.paused, "paused");
-    const blockedReason = input.blockedReason === null ? null : input.blockedReason === undefined ? undefined : cleanText(input.blockedReason, "blockedReason", REASON_MAX);
-    const pausedReason = input.pausedReason === null ? null : input.pausedReason === undefined ? undefined : cleanText(input.pausedReason, "pausedReason", REASON_MAX);
-    if (blocked === false && blockedReason) throw new BoardError("BOARD_INVALID", "a task that is not blocked cannot carry a blockedReason");
-    if (paused === false && pausedReason) throw new BoardError("BOARD_INVALID", "a task that is not paused cannot carry a pausedReason");
+  putTask(input: TaskWriteInput, actor: BoardActor = SYSTEM_ACTOR): BoardTask {
+    const write = parseTaskWrite(input);
     const at = this.now();
-    return this.commit(version, {
-      action: "task.update", target: { kind: "task", id: threadId }, actor,
-      fields: [
-        "projectId", "subprojectId", "parentThreadId", "phase", "phaseEvidence", "status", "owner", "ownerEmail", "acceptance",
-        "blocked", "blockedReason", "paused", "pausedReason",
-      ].filter((field) => input[field as keyof typeof input] !== undefined),
-    }, (board) => {
-      const existing = board.tasks.find((task) => task.threadId === threadId);
-      if (existing && existing.botId !== botId) throw new BoardError("BOARD_INVALID", "a conversation cannot move to another bot");
-      const phaseChanged = phase !== undefined && phase !== existing?.phase;
-      let nextProject = projectId === null ? undefined : projectId ?? existing?.projectId;
-      let nextSubproject = projectId === null ? undefined : subprojectId === null ? undefined : subprojectId ?? existing?.subprojectId;
-      const nextParent = parentThreadId === null ? undefined : parentThreadId ?? existing?.parentThreadId;
-      const parent = nextParent ? board.tasks.find((task) => task.threadId === nextParent) : undefined;
-      if (nextParent && !parent) throw new BoardError("BOARD_INVALID", "parentThreadId must be a board task");
-      if (projectId === null && nextParent) throw new BoardError("BOARD_INVALID", "an unclassified task cannot have a parent");
-      if (parent) {
-        if (projectId !== undefined && projectId !== null && parent.projectId !== projectId) {
-          throw new BoardError("BOARD_INVALID", "the parent task belongs to another project");
-        }
-        if (subprojectId !== undefined && subprojectId !== null && parent.subprojectId !== subprojectId) {
-          throw new BoardError("BOARD_INVALID", "the parent task belongs to another subproject");
-        }
-        if (projectId === undefined && parent.projectId !== undefined) nextProject = parent.projectId;
-        if (subprojectId === undefined && parent.subprojectId !== undefined) nextSubproject = parent.subprojectId;
-        if (parent.projectId === undefined && nextProject !== undefined) throw new BoardError("BOARD_INVALID", "the parent task has no project");
-        if (parent.subprojectId === undefined && nextSubproject !== undefined) throw new BoardError("BOARD_INVALID", "the parent task has no subproject");
+    return this.commit(write.version, { action: "task.update", target: { kind: "task", id: write.threadId }, actor, fields: write.fields },
+      (board) => applyTaskWrite(board, write, at));
+  }
+
+  /** Dry-run every link on one draft; the caller gets per-thread failures and no board mutation. */
+  previewBatch(input: { projectId: string; subprojectId?: string; links: BoardBatchLink[] }): BoardBatchFailure[] {
+    const projectId = cleanId(input.projectId, "projectId");
+    const subprojectId = input.subprojectId === undefined ? undefined : cleanId(input.subprojectId, "subprojectId");
+    if (input.links.length > 100) throw new BoardError("BOARD_INVALID", "a batch can link at most 100 conversations");
+    const draft = structuredClone(this.load());
+    const at = this.now();
+    const failures: BoardBatchFailure[] = [];
+    for (const link of input.links) {
+      try {
+        const write = parseTaskWrite({
+          threadId: link.threadId, botId: link.botId, projectId, subprojectId,
+          ...(link.ownerEmail ? { ownerEmail: link.ownerEmail } : {}),
+        });
+        applyTaskWrite(draft, write, at);
+      } catch (error) {
+        if (!(error instanceof BoardError)) throw error;
+        failures.push({ threadId: link.threadId, code: error.code, message: error.message });
       }
-      if (parent && parent.threadId === threadId) throw new BoardError("BOARD_INVALID", "a task cannot be its own parent");
-      if (nextProject && !board.projects.some((project) => project.id === nextProject)) throw new BoardError("BOARD_INVALID", "no such project");
-      if (nextSubproject) {
-        const subproject = board.subprojects.find((candidate) => candidate.id === nextSubproject);
-        if (!subproject) throw new BoardError("BOARD_INVALID", "no such subproject");
-        if (nextProject && subproject.projectId !== nextProject) throw new BoardError("BOARD_INVALID", "subproject must belong to this project");
-      }
-      if (!nextProject && nextSubproject) throw new BoardError("BOARD_INVALID", "a subproject needs a project");
-      if (nextParent && !nextProject) throw new BoardError("BOARD_INVALID", "a parent task needs a project");
-      if (existing && (existing.projectId !== nextProject || existing.subprojectId !== nextSubproject) &&
-        board.tasks.some((task) => task.parentThreadId === threadId)) {
-        throw new BoardError("BOARD_INVALID", "move or unlink this task's subtasks before changing its project or subproject");
-      }
-      if (nextParent) {
-        let cursor = parent;
-        for (let depth = 0; cursor && depth < 1_000; depth += 1) {
-          if (cursor.threadId === threadId) throw new BoardError("BOARD_INVALID", "that parent chain loops back to this task");
-          cursor = cursor.parentThreadId ? board.tasks.find((task) => task.threadId === cursor!.parentThreadId) : undefined;
-        }
-      }
-      const next: BoardTask = existing ?? {
-        threadId, botId, phase: "discovery", status: "todo", createdAt: at, updatedAt: at,
+    }
+    return failures;
+  }
+
+  /** Link all conversations in one commit; a single bad link leaves every task untouched. */
+  batchAssign(input: { projectId: string; subprojectId?: string; links: BoardBatchLink[]; version?: unknown }, actor: BoardActor = SYSTEM_ACTOR): { tasks: BoardTask[]; count: number } {
+    const projectId = cleanId(input.projectId, "projectId");
+    const subprojectId = input.subprojectId === undefined ? undefined : cleanId(input.subprojectId, "subprojectId");
+    const version = cleanVersion(input.version);
+    if (version === undefined) throw new BoardError("BOARD_INVALID", "version is required");
+    try {
+      const failures = this.previewBatch({ projectId, subprojectId, links: input.links });
+      if (failures.length) throw new BoardBatchError(failures);
+      const at = this.now();
+      return this.commit(version, {
+        action: "task.batch", target: { kind: "project", id: projectId }, actor,
+        fields: ["threadIds", "projectId", "subprojectId"], count: input.links.length,
+      }, (board) => {
+        const tasks = input.links.map((link) => applyTaskWrite(board, parseTaskWrite({
+          threadId: link.threadId, botId: link.botId, projectId, subprojectId,
+          ...(link.ownerEmail ? { ownerEmail: link.ownerEmail } : {}),
+        }), at));
+        return { tasks, count: tasks.length };
+      });
+    } catch (error) {
+      this.recordBatchAudit({ actor, projectId, count: input.links.length, reason: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  }
+
+  /** A failed batch has no task change to commit, but its actor, size and reason still land in the audit. */
+  recordBatchAudit(input: { actor: BoardActor; projectId: string; count: number; reason: string }): void {
+    try {
+      this.load();
+      const entry: BoardAuditEntry = {
+        id: `a_${newId()}`,
+        at: this.now(),
+        actor: input.actor,
+        action: "task.batch",
+        target: { kind: "project", id: input.projectId },
+        fields: ["threadIds"],
+        count: Math.max(0, Math.trunc(input.count)),
+        reason: input.reason.slice(0, 1_000),
       };
-      if (projectId === null) {
-        delete next.projectId;
-        delete next.subprojectId;
-        delete next.parentThreadId;
-      } else {
-        if (nextProject === undefined) delete next.projectId;
-        else next.projectId = nextProject;
-        if (nextSubproject === undefined) delete next.subprojectId;
-        else next.subprojectId = nextSubproject;
-        if (nextParent === undefined) delete next.parentThreadId;
-        else next.parentThreadId = nextParent;
-      }
-      if (phase !== undefined) next.phase = phase;
-      if (status !== undefined) next.status = status;
-      if (owner === null) delete next.owner;
-      else if (owner !== undefined) next.owner = owner;
-      if (ownerEmail === null) delete next.ownerEmail;
-      else if (ownerEmail !== undefined) next.ownerEmail = ownerEmail;
-      if (acceptance === null) delete next.acceptance;
-      else if (acceptance !== undefined) next.acceptance = acceptance;
-      if (blocked === false) {
-        delete next.blocked;
-        delete next.blockedReason;
-      } else if (blocked === true) {
-        next.blocked = true;
-      }
-      if (blockedReason === null) {
-        delete next.blockedReason;
-        if (blocked === undefined) delete next.blocked;
-      } else if (blockedReason !== undefined) {
-        next.blockedReason = blockedReason;
-        next.blocked = true;
-      }
-      if (paused === false) {
-        delete next.paused;
-        delete next.pausedReason;
-      } else if (paused === true) {
-        next.paused = true;
-      }
-      if (pausedReason === null) {
-        delete next.pausedReason;
-        if (paused === undefined) delete next.paused;
-      } else if (pausedReason !== undefined) {
-        next.pausedReason = pausedReason;
-        next.paused = true;
-      }
-      if (phaseChanged && next.phase === "done" && !phaseEvidence) {
-        throw new BoardError("BOARD_NEEDS_EVIDENCE", "moving a task phase to done needs phaseEvidence");
-      }
-      if (phaseEvidence === null && next.phase === "done") {
-        throw new BoardError("BOARD_NEEDS_EVIDENCE", "a done task cannot drop its phaseEvidence");
-      }
-      if (phaseEvidence !== null && phaseEvidence !== undefined) next.phaseEvidence = phaseEvidence;
-      else if (phaseEvidence === null) delete next.phaseEvidence;
-      if (next.status === "done" && next.verdict?.decision !== "accepted") {
-        throw new BoardError("BOARD_NEEDS_EVIDENCE", "a done task needs an accepted verdict with evidence");
-      }
-      next.updatedAt = at;
-      if (!existing) board.tasks.push(next);
-      return structuredClone(next);
-    });
+      this.auditEntries = [...this.auditEntries, entry].slice(-MAX_AUDIT);
+      this.persist();
+    } catch (error) {
+      console.warn(`board: could not record a failed batch audit: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /** A person's completion verdict; accepted moves the task to done in the same write. */

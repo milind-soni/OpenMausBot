@@ -50,6 +50,10 @@ async function serve(input: {
     board,
     canManage: (auth) => auth.scopes.includes("admin"),
     threadExists: (botId, threadId) => botId === "b2" ? threadId === "t2" : threadId !== "t2" && threads.has(threadId),
+    threadInfo: (botId, threadId) => {
+      if (!(botId === "b2" ? threadId === "t2" : threadId !== "t2" && threads.has(threadId))) return null;
+      return threadId === "routine" ? { routineRunId: "run-1" } : {};
+    },
     visibleFor: () => visible({ threads, bots: input.bots, all: input.all ?? input.auth?.scopes.includes("admin") ?? true }),
   })];
   const server = createServer(async (req, res) => {
@@ -237,6 +241,69 @@ describe("/api/board", () => {
     expect(frames.at(-1)?.board.tasks[0]!.phase).toBe("build");
 
     expect(await call(base, "DELETE", "/api/board/tasks/t1")).toMatchObject({ status: 200, body: { board: { tasks: [] } } });
+  });
+
+  it("previews a batch without writing, then links only unclassified work atomically", async () => {
+    const { base, board } = await serve({ threads: new Set(["ready", "already", "other", "routine", "ready2"]) });
+    const projectA = await project(base, { name: "批量目标", owner: "朱明跃", goal: "交付", acceptance: "上线" });
+    const createdB = await call(base, "POST", "/api/board/projects", { name: "别的项目", owner: "朱明跃", goal: "交付", acceptance: "上线" });
+    const projectB = (createdB.body.board as { projects: Array<{ id: string; name: string }> }).projects.find((value) => value.name === "别的项目")!.id;
+    await call(base, "PUT", "/api/board/tasks/already", { botId: "b1", projectId: projectA });
+    await call(base, "PUT", "/api/board/tasks/other", { botId: "b1", projectId: projectB });
+
+    const threads = [
+      { threadId: "ready", botId: "b1" },
+      { threadId: "already", botId: "b1" },
+      { threadId: "other", botId: "b1" },
+      { threadId: "routine", botId: "b1" },
+      { threadId: "missing", botId: "b1" },
+    ];
+    const preview = await call(base, "POST", "/api/board/tasks/batch/preview", { projectId: projectA, threads });
+    expect(preview.status).toBe(200);
+    const previewBody = preview.body as {
+      version: number; items: Array<{ threadId: string; status: string }>;
+      summary: { total: number; ready: number; alreadyAssigned: number; conflict: number; routine: number; missing: number };
+    };
+    expect(previewBody.summary).toEqual({ total: 5, ready: 1, alreadyAssigned: 1, missing: 1, hidden: 0, routine: 1, conflict: 1 });
+    expect(previewBody.items.find((item) => item.threadId === "ready")?.status).toBe("ready");
+    expect(previewBody.items.find((item) => item.threadId === "routine")?.status).toBe("routine");
+    expect(board.state().tasks.some((task) => task.threadId === "ready")).toBe(false);
+    expect(board.version()).toBe(previewBody.version);
+
+    const refused = await call(base, "POST", "/api/board/tasks/batch", { projectId: projectA, version: previewBody.version, threads });
+    expect(refused).toMatchObject({ status: 409, body: { error: "BOARD_BATCH_CONFLICT" } });
+    expect(board.state().tasks.some((task) => task.threadId === "ready")).toBe(false);
+    expect(board.version()).toBe(previewBody.version);
+    const audit = await call(base, "GET", "/api/board/audit?limit=5");
+    expect((audit.body.audit as Array<{ action: string; count: number; reason: string }>).at(-1)).toMatchObject({ action: "task.batch", count: 5 });
+    expect((audit.body.audit as Array<{ action: string; count: number; reason: string }>).at(-1)!.reason).toContain("conflict=1");
+
+    const confirmed = await call(base, "POST", "/api/board/tasks/batch", {
+      projectId: projectA, version: board.version(), threads: [{ threadId: "ready", botId: "b1" }],
+    });
+    expect(confirmed.status).toBe(200);
+    expect((confirmed.body.batch as { assigned: number }).assigned).toBe(1);
+    expect(board.state().tasks.find((task) => task.threadId === "ready")).toMatchObject({ projectId: projectA });
+    expect(board.version()).toBe(previewBody.version + 1);
+
+    const stale = await call(base, "POST", "/api/board/tasks/batch", {
+      projectId: projectA, version: previewBody.version, threads: [{ threadId: "ready2", botId: "b1" }],
+    });
+    expect(stale).toMatchObject({ status: 409, body: { error: "BOARD_VERSION_CONFLICT" } });
+    expect(board.state().tasks.some((task) => task.threadId === "ready2")).toBe(false);
+  });
+
+  it("defaults new projects to admins and only shares on an explicit everyone", async () => {
+    const setup = await serve();
+    const created = await call(setup.base, "POST", "/api/board/projects", { name: "默认安全", owner: "朱明跃", goal: "交付", acceptance: "上线" });
+    const projectId = (created.body.board as { projects: Array<{ id: string; visibility: string }> }).projects[0]!;
+    expect(projectId.visibility).toBe("admins");
+
+    const memberServer = await serve({ auth: member(), folder: setup.folder, bots: new Set(["b1"]), threads: new Set(["t1"]) });
+    expect(((await call(memberServer.base, "GET", "/api/board")).body as { projects: unknown[] }).projects).toEqual([]);
+    await call(setup.base, "PATCH", `/api/board/projects/${projectId.id}`, { visibility: "everyone" });
+    const after = await serve({ auth: member(), folder: setup.folder, bots: new Set(["b1"]), threads: new Set(["t1"]) });
+    expect(((await call(after.base, "GET", "/api/board")).body as { projects: Array<{ id: string }> }).projects.map((project) => project.id)).toEqual([projectId.id]);
   });
 
   it("serves 503 and leaves a newer board file untouched", async () => {

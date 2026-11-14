@@ -10716,6 +10716,7 @@
   "board.empty.body": "Add a project, then give it subprojects and conversations.",
   "board.empty.action": "New project",
   "board.error.unavailable": "The board couldn't be loaded. Check your connection and try again.",
+  "board.error.batchConflict": "One or more conversations could not be linked. Check the batch preview.",
   "board.error.invalid": "That change wasn't accepted.",
   "board.error.forbidden": "Only an owner or admin can change the board.",
   "board.error.conflict": "The board changed somewhere else. It's up to date now, so try again.",

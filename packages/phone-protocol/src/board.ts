@@ -114,10 +114,14 @@ export interface BoardAuditEntry {
   id: string;
   at: string;
   actor: { label: string; email?: string };
-  action: "project.create" | "project.update" | "subproject.create" | "subproject.update" | "milestone.create" | "milestone.update" | "task.link" | "task.update" | "task.verdict" | "task.remove";
+  action: "project.create" | "project.update" | "subproject.create" | "subproject.update" | "milestone.create" | "milestone.update" | "task.link" | "task.update" | "task.verdict" | "task.remove" | "task.batch";
   target: { kind: "project" | "subproject" | "milestone" | "task"; id: string };
   /** Changed field names only; transcript text and evidence bodies never land in the audit. */
   fields: string[];
+  /** Batch size, when one action covers many tasks. */
+  count?: number;
+  /** A failed batch's reason; a successful entry omits it. */
+  reason?: string;
 }
 
 /** Everything the board stores, without a caller's capability. Broadcast as a whole on every write. */

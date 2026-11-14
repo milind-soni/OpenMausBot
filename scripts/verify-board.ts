@@ -42,6 +42,11 @@ async function main() {
     });
     assert(milestoneResponse.status === 201, `create milestone: ${milestoneResponse.status}`);
     const milestone = (milestoneResponse.json.board as { milestones: Array<{ id: string }> }).milestones[0]!;
+    const privateProject = await call("POST", "/api/board/projects", {
+      name: "默认安全项目", owner: "朱明跃", goal: "交付", acceptance: "上线",
+    });
+    assert(privateProject.status === 201 && (privateProject.json.board as { projects: Array<{ name: string; visibility: string }> }).projects.find((value) => value.name === "默认安全项目")?.visibility === "admins", "new projects default to admins");
+
     const acceptedMilestone = await call("PATCH", `/api/board/milestones/${milestone.id}`, { status: "accepted", verdict: "通过", evidence: "回执" });
     assert(acceptedMilestone.status === 200, `accept milestone: ${acceptedMilestone.status}`);
     assert((acceptedMilestone.json.board as { milestones: Array<{ acceptedBy: string }> }).milestones[0]!.acceptedBy, "milestone acceptance is named");
@@ -99,6 +104,22 @@ async function main() {
     });
     assert(phased.status === 200, `phase evidence: ${phased.status}`);
 
+    const unclassified = await call("POST", `/api/bots/${bot.id}/tasks`, { title: "批量待归类" });
+    const unclassifiedThread = (unclassified.json.task as { threadId?: string }).threadId;
+    assert(unclassified.status === 201 && unclassifiedThread, `create unclassified conversation: ${unclassified.status}`);
+    const batchPreview = await call("POST", "/api/board/tasks/batch/preview", {
+      projectId: project.id, threads: [{ threadId: unclassifiedThread, botId: bot.id }],
+    });
+    assert(batchPreview.status === 200, `batch preview: ${batchPreview.status}`);
+    assert((batchPreview.json.items as Array<{ status: string }>)[0]!.status === "ready", "batch preview marks ready");
+    const batchVersion = batchPreview.json.version as number;
+    const beforeBatchBoard = await call("GET", "/api/board");
+    assert(!(beforeBatchBoard.json.tasks as Array<{ threadId: string }>).some((task) => task.threadId === unclassifiedThread), "preview does not write");
+    const batch = await call("POST", "/api/board/tasks/batch", {
+      projectId: project.id, version: batchVersion, threads: [{ threadId: unclassifiedThread, botId: bot.id }],
+    });
+    assert(batch.status === 200 && (batch.json.batch as { assigned: number }).assigned === 1, `batch assign: ${batch.status}`);
+
     const frame = await Promise.race([boardFrame, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("no board SSE frame in 5s")), 5_000))]);
     controller.abort();
     assert(frame.includes('"version"') && frame.includes('"tasks"'), "the board frame carries the whole board");
@@ -107,7 +128,7 @@ async function main() {
     assert(final.status === 200 && (final.json.tasks as Array<{ phase: string; status: string }>)[0]!.status === "done", "the board kept the verdict");
     assert((final.json.tasks as Array<{ phase: string }>)[0]!.phase === "done", "the explicit product phase persisted");
     const counts = final.json.counts as { tasks: number; topLevel: number; subtasks: number };
-    assert(counts.tasks === 2 && counts.topLevel === 2 && counts.subtasks === 0, "counts do not double count");
+    assert(counts.tasks === 3 && counts.topLevel === 3 && counts.subtasks === 0, "counts do not double count");
     const audit = await call("GET", "/api/board/audit?limit=20");
     assert(audit.status === 200 && (audit.json.audit as unknown[]).length >= 5, "audit records the writes");
 
@@ -119,7 +140,7 @@ async function main() {
       boardVersion: (final.json as { version: number }).version,
       taskPhase: (final.json.tasks as Array<{ phase: string }>)[0]!.phase,
       taskStatus: (final.json.tasks as Array<{ status: string }>)[0]!.status,
-      checks: ["empty board", "create project with owner/goal/acceptance", "subproject phase/owner/deliverable", "named milestone acceptance", "attribute with blocked reason", "create with board", "failed attribution rolls back", "stale version 409", "unknown thread 400", "accepted verdict leaves phase", "phase done needs evidence", "explicit phase evidence", "SSE board frame", "counts", "audit", "persisted snapshot"],
+      checks: ["empty board", "create project with owner/goal/acceptance", "new project defaults admins", "subproject phase/owner/deliverable", "named milestone acceptance", "attribute with blocked reason", "create with board", "failed attribution rolls back", "stale version 409", "unknown thread 400", "accepted verdict leaves phase", "phase done needs evidence", "explicit phase evidence", "batch preview no write", "batch atomic assign", "SSE board frame", "counts", "audit", "persisted snapshot"],
     }, null, 2));
   } finally {
     await fixture.close();
