@@ -68,6 +68,8 @@ it("sends cross-bot work onward without resuming either sender", () => fixture(a
   } }], reply: "QA sent onward" };
   f.plan[f.specialist.id] = { gateFile: gate, reply: "Release QA complete" };
 
+  const project = (await f.api("/api/board/projects", { name: "协作", owner: "朱明跃", goal: "交付", acceptance: "上线", visibility: "everyone" }, "POST")).board.projects[0];
+  await f.api(`/api/board/tasks/${f.chief.activeTaskId}`, { botId: f.chief.id, projectId: project.id, phase: "build" }, "PUT");
   await f.start();
   expect((await f.wait()).status).toBe("settled");
   const sendOf = (botId: string) => f.evidence().find((turn: any) => turn.botId === botId)?.evidence
@@ -86,6 +88,10 @@ it("sends cross-bot work onward without resuming either sender", () => fixture(a
   const qaThread = bots.find((bot: any) => bot.id === f.specialist.id).tasks.find((task: any) => task.threadId === sentThread(f.lead.id));
   expect(leadThread.title).toBe("Own the release and send final QA to Reviewer.");
   expect(qaThread.title).toBe("Own final release QA.");
+  const board = await f.api("/api/board", undefined, "GET");
+  const boardTask = (threadId: string) => (board.tasks as any[]).find((task) => task.threadId === threadId);
+  expect(boardTask(leadThread.threadId)).toMatchObject({ parentThreadId: f.chief.activeTaskId, projectId: project.id, status: "todo" });
+  expect(boardTask(qaThread.threadId)).toMatchObject({ parentThreadId: leadThread.threadId, projectId: project.id, status: "todo" });
   const qaMessages = await f.messages(qaThread.threadId);
   expect(qaMessages.some((message: any) => message.text === "Release QA complete")).toBe(true);
   expect(qaMessages.some((message: any) => message.tool?.name?.includes("Send failed"))).toBe(false);

@@ -50,10 +50,11 @@ describe("sidebar footer places", () => {
   it("leads Advanced mode's places with Automations, then Team map, with Apps beside the profile instead", () => {
     fixture.advanced = true;
     const { html } = render("comfortable");
-    const order = ["automations", "team-map"].map((id) => html.indexOf(`data-sidebar-nav="${id}"`));
+    const order = ["automations", "project-board", "team-map"].map((id) => html.indexOf(`data-sidebar-nav="${id}"`));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(html).toContain(">Automations</span>");
+    expect(html).toContain(">Project board</span>");
     expect(html).not.toContain('data-sidebar-nav="routines"');
     expect(html).not.toContain('data-sidebar-nav="triggers"');
     expect(html).not.toContain('data-sidebar-nav="apps"');
@@ -281,9 +282,9 @@ describe("toolbar tools layout", () => {
     expect(render("comfortable", { toolsLayout: "toolbar" }).html).not.toContain('data-testid="routines-attention"');
   });
 
-  it("toolbar applies to Advanced mode's three places; Simple mode keeps them in the bottom bar instead", () => {
+  it("toolbar applies to Advanced mode's four places; Simple mode keeps them in the bottom bar instead", () => {
     fixture.advanced = true;
-    expect(render("comfortable", { toolsLayout: "toolbar" }).html.match(/data-sidebar-nav="/g)).toHaveLength(3);
+    expect(render("comfortable", { toolsLayout: "toolbar" }).html.match(/data-sidebar-nav="/g)).toHaveLength(4);
     fixture.advanced = false;
     expect(render("comfortable", { toolsLayout: "toolbar" }).html).toBe("");
   });

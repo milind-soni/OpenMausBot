@@ -336,6 +336,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // a link into the organisation's Admin: identifiers only, and Admin authorizes its own visitor
   { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/slack-management$/ },
   { methods: ["GET"], path: /^\/api\/search$/ },
+  // The board filters by project audience and then by the conversation/bot the caller already sees.
+  { methods: ["GET", "POST", "PUT", "PATCH", "DELETE"], path: /^\/api\/board(?:\/.*)?$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/tool$/ },
