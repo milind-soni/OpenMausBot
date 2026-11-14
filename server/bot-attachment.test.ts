@@ -297,6 +297,7 @@ describe("deliveredCopy", () => {
   const bot = (id: string, parentId: string | null, extra: Partial<Message> = {}): Message =>
     ({ id, at: 1, parentId, role: "bot", kind: "text", text: "", ...extra }) as Message;
   const photo = { kind: "image" as const, path: "/store/copy.png", mime: "image/png", name: "sideboard.png" };
+  const renamed = { kind: "file" as const, path: "/store/copy.md", mime: "text/markdown; charset=utf-8", name: "团队技能包-README.md", source: "D:\\AI\\openmausbot-skills\\README.md" };
   const ask = { id: "ask", at: 1, parentId: null, role: "user", kind: "text", text: "find a sideboard" } as Message;
 
   it("finds the picture the reply's turn delivered under the name its inline image uses", () => {
@@ -324,5 +325,39 @@ describe("deliveredCopy", () => {
     const twice = bot("twice", "second", by("me"));
     expect(deliveredCopy([ask, first, second, twice], twice, "sideboard.png")).toBeNull();
     expect(deliveredCopy([ask, first, twice], { ...twice, parentId: "first" }, "sideboard.png")).toEqual(photo);
+  });
+
+  it("finds a renamed delivery by its source path", () => {
+    const attached = bot("attached", "ask", { attachments: [renamed] });
+    const reply = bot("reply", "attached", { text: "[README](D:/AI/openmausbot-skills/README.md)" });
+    expect(deliveredCopy([ask, attached, reply], reply, "README.md", "D:\\AI\\openmausbot-skills\\README.md")).toEqual(renamed);
+  });
+
+  it("finds the same source spelled as a file:// URL or with an encoded space", () => {
+    const spaced = { ...renamed, source: "D:\\AI\\openmausbot-skills\\my file.pdf", name: "团队技能包.pdf" };
+    const attached = bot("attached", "ask", { attachments: [spaced] });
+    const reply = bot("reply", "attached", { text: "[pdf](file:///D:/AI/openmausbot-skills/my%20file.pdf)" });
+    expect(deliveredCopy([ask, attached, reply], reply, "my file.pdf", "file:///D:/AI/openmausbot-skills/my%20file.pdf")).toEqual(spaced);
+  });
+
+  it("still finds a delivery by display name when the record has no source", () => {
+    const attached = bot("attached", "ask", { attachments: [photo] });
+    const reply = bot("reply", "attached", { text: "![Sideboard](/tmp/sideboard.png)" });
+    expect(deliveredCopy([ask, attached, reply], reply, "sideboard.png", "/tmp/sideboard.png")).toEqual(photo);
+  });
+
+  it("refuses when two deliveries share the clicked source", () => {
+    const by = (botId: string) => ({ from: { botId, name: botId, color: "blue" } }) as Partial<Message>;
+    const first = bot("first", "ask", { ...by("me"), attachments: [renamed] });
+    const second = bot("second", "first", { ...by("me"), attachments: [{ ...renamed, path: "/store/copy-2.md" }] });
+    const reply = bot("reply", "second", by("me"));
+    expect(deliveredCopy([ask, first, second, reply], reply, "README.md", "D:\\AI\\openmausbot-skills\\README.md")).toBeNull();
+  });
+
+  it("ignores a different bot's delivery even when its source matches", () => {
+    const by = (botId: string) => ({ from: { botId, name: botId, color: "blue" } }) as Partial<Message>;
+    const peer = bot("peer", "ask", { ...by("other"), attachments: [renamed] });
+    const reply = bot("reply", "peer", by("me"));
+    expect(deliveredCopy([ask, peer, reply], reply, "README.md", "D:\\AI\\openmausbot-skills\\README.md")).toBeNull();
   });
 });
