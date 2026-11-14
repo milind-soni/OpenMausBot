@@ -19,7 +19,7 @@ const providers: Record<string, string> = {
   claudeAgent: "Anthropic", codex: "OpenAI", grok: "xAI", grokAgent: "xAI",
   kimiAgent: "Moonshot AI", droidAgent: "Factory", cursorAgent: "Cursor",
   antigravityAgent: "Google", opencodeGo: "OpenCode", qwenAgent: "Qwen",
-  hermesAgent: "Nous Research", clineAgent: "Cline", copilotAgent: "GitHub", commandCodeAgent: "Command Code", kiroAgent: "Amazon Web Services", piAgent: "pi.dev", mistral: "Mistral AI", cerebras: "Cerebras", groq: "Groq", greenference: "Greenference", modelgo: "ModelGo", meta: "Meta", museCode: "Meta", deepseekAgent: "DeepSeek",
+  hermesAgent: "Nous Research", clineAgent: "Cline", copilotAgent: "GitHub", commandCodeAgent: "Command Code", kiroAgent: "Amazon Web Services", piAgent: "pi.dev", mistral: "Mistral AI", cerebras: "Cerebras", groq: "Groq", greenference: "Greenference", llmtr: "LLMTR", modelgo: "ModelGo", meta: "Meta", museCode: "Meta", deepseekAgent: "DeepSeek",
 };
 
 export function providerName(instance: InstanceInfo): string {

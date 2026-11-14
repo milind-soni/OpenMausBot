@@ -153,6 +153,14 @@ export function GreenferenceMark({ size = 16, className }: IconProps) {
   </svg>;
 }
 
+export function LlmtrMark({ size = 16, className }: IconProps) {
+  // LLMTR's site icon (llmtr.com/favicon.svg): the crescent in the text color, which reads on light and dark, and its red star.
+  return <svg width={size} height={size} viewBox="14 -1 38 38" className={className} aria-hidden="true">
+    <path fill="currentColor" fillRule="evenodd" d="M38 18A11 11 0 1 0 16 18A11 11 0 1 0 38 18ZM38 18A8 8 0 1 0 22 18A8 8 0 1 0 38 18Z" />
+    <polygon fill="#E5484D" points="46,13 47.12,16.45 50.76,16.45 47.82,18.59 48.94,22.05 46,19.91 43.06,22.05 44.18,18.59 41.24,16.45 44.88,16.45" />
+  </svg>;
+}
+
 export function ModelgoMark({ size = 16, className }: IconProps) {
   const id = useId().replace(/\W/gu, "");
   // The icon from ModelGo's supplied logo, without its wordmark, whose dark text is unreadable in the dark themes.
@@ -210,6 +218,8 @@ export function ProviderMark({ driverKind, size, className }: IconProps & { driv
       return <KiroMark size={size} className={className} />;
     case "greenference":
       return <GreenferenceMark size={size} className={className} />;
+    case "llmtr":
+      return <LlmtrMark size={size} className={className} />;
     case "modelgo":
       return <ModelgoMark size={size} className={className} />;
     default:
