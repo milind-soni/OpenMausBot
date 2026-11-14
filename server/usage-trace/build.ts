@@ -153,11 +153,17 @@ export function linkTurns(rows: readonly UsageRow[], live: readonly LiveTurnView
     if (!nodes.has(key)) nodes.set(key, nodeFromLive(turn, liveBot(turn.threadId)));
   }
   const parentOf = (node: TurnNode) => node.parent ? nodes.get(turnKey(node.parent.threadId, node.parent.turnId)) : undefined;
+  const cyclic = new Map<TurnNode, boolean>();
   const loops = (node: TurnNode) => {
-    for (let ancestor = parentOf(node), hops = 0; ancestor; ancestor = parentOf(ancestor), hops += 1) {
-      if (ancestor === node || hops > nodes.size) return true;
+    const path = new Set<TurnNode>();
+    let ancestor: TurnNode | undefined = node;
+    while (ancestor && !cyclic.has(ancestor) && !path.has(ancestor)) {
+      path.add(ancestor);
+      ancestor = parentOf(ancestor);
     }
-    return false;
+    const result = ancestor !== undefined && (cyclic.get(ancestor) ?? true);
+    for (const visited of path) cyclic.set(visited, result);
+    return result;
   };
   const roots: TurnNode[] = [];
   for (const node of nodes.values()) {
