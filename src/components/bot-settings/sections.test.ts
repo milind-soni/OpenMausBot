@@ -41,10 +41,11 @@ describe("bot settings search", () => {
   });
 
   it("keeps looking until the Email lookup has answered too", () => {
-    expect(appSearchPhase({ phase: "ready", cardsSettled: true, emailSettled: false })).toBe("loading");
-    expect(appSearchPhase({ phase: "unknown", cardsSettled: true, emailSettled: false })).toBe("loading");
-    expect(appSearchPhase({ phase: "ready", cardsSettled: false, emailSettled: true })).toBe("loading");
-    expect(appSearchPhase({ phase: "ready", cardsSettled: true, emailSettled: true })).toBe("ready");
-    expect(appSearchPhase({ phase: "loading", cardsSettled: true, emailSettled: true })).toBe("loading");
+    expect(appSearchPhase({ inventorySettled: true, phase: "ready", cardsSettled: true, emailSettled: false })).toBe("loading");
+    expect(appSearchPhase({ inventorySettled: true, phase: "unknown", cardsSettled: true, emailSettled: false })).toBe("loading");
+    expect(appSearchPhase({ inventorySettled: true, phase: "ready", cardsSettled: false, emailSettled: true })).toBe("loading");
+    expect(appSearchPhase({ inventorySettled: true, phase: "ready", cardsSettled: true, emailSettled: true })).toBe("ready");
+    expect(appSearchPhase({ inventorySettled: true, phase: "loading", cardsSettled: true, emailSettled: true })).toBe("loading");
+    expect(appSearchPhase({ inventorySettled: false, phase: "ready", cardsSettled: true, emailSettled: true })).toBe("loading");
   });
 });

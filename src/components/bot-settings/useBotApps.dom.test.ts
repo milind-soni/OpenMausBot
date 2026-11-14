@@ -9,12 +9,20 @@ import type { Bot } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
   holdCatalog: false,
+  holdInventory: false,
+  answerInventory: null as null | (() => void),
   answerCatalog: null as null | ((ok: boolean) => void),
   answerEmail: null as null | ((ok: boolean) => void),
 }));
 vi.mock("@/lib/connected-apps", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/connected-apps")>()),
-  preloadConnectedApps: () => Promise.resolve({ authoritative: true, services: { github: { connected: true } } }),
+  preloadConnectedApps: () => {
+    const inventory = { authoritative: true, services: { github: { connected: true } } };
+    if (!fixture.holdInventory) return Promise.resolve(inventory);
+    return new Promise((resolve) => {
+      fixture.answerInventory = () => resolve(inventory);
+    });
+  },
 }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
@@ -66,6 +74,8 @@ afterEach(() => {
   host = null;
   root = null;
   fixture.holdCatalog = false;
+  fixture.holdInventory = false;
+  fixture.answerInventory = null;
   fixture.answerCatalog = null;
   fixture.answerEmail = null;
 });
@@ -114,5 +124,23 @@ describe("app names for the settings search", () => {
     fixture.answerEmail?.(true);
     await settle();
     expect(view.textContent).toBe("ready:email,github");
+  });
+
+  it("is loading while a new lookup's inventory is pending, even with an earlier inventory in hand", async () => {
+    const view = render();
+    await settle();
+    fixture.answerEmail?.(false);
+    await settle();
+    expect(view.textContent).toBe("ready:github");
+    fixture.holdInventory = true;
+    render(false);
+    render(true);
+    await settle();
+    fixture.answerEmail?.(false);
+    await settle();
+    expect(view.textContent).toBe("loading:github");
+    fixture.answerInventory?.();
+    await settle();
+    expect(view.textContent).toBe("ready:github");
   });
 });
