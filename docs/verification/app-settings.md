@@ -33,6 +33,14 @@ would. Nothing touches live app data.
 - **A bot's own settings and a config value.** One turn renames the bot through
   `bots.name` and sets `profile.name`. Both apply at once through the real
   `PATCH /api/bots/:id` and `PUT /api/config`, and Undo puts each back.
+- **Pictures.** One turn gives the bot a picture (`bots.picture`) and the person a
+  photo (`profile.photo`) from a PNG in the bot's workspace. Each is copied into
+  the attachment store and served at `/api/attachments/…`; the bot's crop turns
+  from mascot to circle. A file named `.png` that is really an SVG is refused by
+  its bytes, and a PNG in a folder outside the bot's own is refused by its real
+  path. Undo brings back the mascot face and clears the photo. The containment,
+  link, attachment-store, size and type checks are in
+  `server/app-settings/picture-file.test.ts`.
 - **Approval mode.** The Full-access bot puts itself on Ask; the bot and every
   thread move to Ask at once, and Undo puts it back on Full access.
 - **Window preferences.** A skin change is refused while no app window's live
