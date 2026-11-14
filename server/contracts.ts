@@ -363,7 +363,8 @@ export interface ProviderSnapshot {
   update?: {
     title: string;
     message: string;
-    command: string;
+    /** Absent when there is nothing to run here, e.g. My Cloud's engines update with the Cloud. */
+    command?: string;
   };
   /** On a subscription a reported cost is notional. */
   billing?: "metered" | "subscription";
