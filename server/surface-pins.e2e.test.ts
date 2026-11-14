@@ -275,7 +275,7 @@ describe("surface pin provenance against the real server", () => {
     await stop();
   });
 
-  it("mounts the built-in browser beside the computer in a thread a teammate opened, and not in a person's thread", async () => {
+  it("mounts the built-in browser beside the computer in a person's thread and in a thread a teammate opened", async () => {
     await start(true);
     const { bot } = await apiOk("POST", "/api/bots", { name: "Delegated Browser Bot" });
     const [own, delegated] = (await Promise.all([
@@ -310,7 +310,7 @@ describe("surface pin provenance against the real server", () => {
       await start(true);
       const person = await turnIn(own.threadId);
       expect(person.computer?.args.some((arg: string) => arg.includes("container-mcp")), `${computer} person`).toBe(true);
-      expect(person.browser, `${computer} person`).toBeUndefined();
+      expect(person.browser, `${computer} person`).toBeDefined();
       const teammate = await turnIn(delegated.threadId);
       expect(teammate.computer?.args.some((arg: string) => arg.includes("container-mcp")), `${computer} teammate`).toBe(true);
       expect(teammate.browser, `${computer} teammate`).toBeDefined();
@@ -474,7 +474,9 @@ describe("surface pin provenance against the real server", () => {
     const tester = (await apiOk("POST", "/api/bots", { name: "Tester" })).bot;
     await apiOk("PATCH", `/api/bots/${tester.id}`, { modelSelection: { ...tester.modelSelection, instanceId: "teammate" } });
     await stop();
-    editSavedBot(tester.id, saved => { saved.browserProfile = "guest"; });
+    // Both bots use the guest browser: the asker's own turn mounts it beside its computer too, and the fixture's inert
+    // browser binary cannot prepare a saved profile in time.
+    for (const id of [asker.id, tester.id]) editSavedBot(id, saved => { saved.browserProfile = "guest"; });
     await start(true);
     const { task: own } = await apiOk("POST", `/api/bots/${asker.id}/tasks`, {});
     resetTurn();
