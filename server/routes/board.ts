@@ -2,21 +2,32 @@
 // the transcript itself stays behind the conversation routes.
 import { PASS, type RouteHandler } from "./table.ts";
 import { attachBoardTask, type BoardAttachDeps } from "../board/attach.ts";
+import {
+  actorFor, boardViewer, conversationVisible, filterBoard, projectEditable, projectVisible, taskEditable,
+  type BoardViewer,
+} from "../board/access.ts";
 import { BoardError, boardErrorStatus, type BoardStore } from "../board/store.ts";
+import type { BoardSnapshot } from "../../shared/board.ts";
 
 export interface BoardRouteDeps extends BoardAttachDeps {
   board: BoardStore;
   /** The conversation exists for this bot; a board row never invents one. */
   threadExists(botId: string, threadId: string): boolean;
+  /** The caller's existing conversation/bot visibility; absence means the admin-only surface. */
+  visibleFor(auth: Parameters<RouteHandler>[0]["auth"]): Parameters<typeof boardViewer>[1];
 }
 
-const ROUTE = /^\/api\/board(?:\/(projects|subprojects|milestones|tasks)(?:\/([\w-]+))?(?:\/(verdict))?)?$/;
+const ROUTE = /^\/api\/board(?:\/audit|\/(projects|subprojects|milestones|tasks)(?:\/([\w-]+))?(?:\/(verdict))?)?$/;
 const LIMIT = 64_000;
 
-const PROJECT_FIELDS = new Set(["name", "description", "version"]);
-const SUBPROJECT_FIELDS = new Set(["projectId", "name", "version"]);
-const MILESTONE_FIELDS = new Set(["projectId", "subprojectId", "title", "dueAt", "version"]);
-const MILESTONE_PATCH_FIELDS = new Set(["title", "status", "verdict", "evidence", "dueAt", "version"]);
+const PROJECT_FIELDS = new Set(["name", "description", "owner", "ownerEmail", "goal", "acceptance", "status", "visibility", "version"]);
+const SUBPROJECT_FIELDS = new Set([
+  "projectId", "name", "phase", "phaseEvidence", "owner", "ownerEmail", "deliverable", "acceptance", "status", "version",
+]);
+const MILESTONE_FIELDS = new Set(["projectId", "subprojectId", "title", "dueAt", "acceptance", "owner", "ownerEmail", "version"]);
+const MILESTONE_PATCH_FIELDS = new Set([
+  "title", "status", "verdict", "evidence", "dueAt", "acceptance", "owner", "ownerEmail", "version",
+]);
 const VERDICT_FIELDS = new Set(["decision", "evidence", "version"]);
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -25,6 +36,14 @@ function record(value: unknown): Record<string, unknown> | null {
 
 function unsupported(body: Record<string, unknown>, allowed: ReadonlySet<string>): string | null {
   return Object.keys(body).find((key) => !allowed.has(key)) ?? null;
+}
+
+function missingText(body: Record<string, unknown>, fields: readonly string[]): string | null {
+  return fields.find((field) => typeof body[field] !== "string" || !(body[field] as string).trim()) ?? null;
+}
+
+function emptiedText(body: Record<string, unknown>, fields: readonly string[]): string | null {
+  return fields.find((field) => field in body && (typeof body[field] !== "string" || !(body[field] as string).trim())) ?? null;
 }
 
 export function createBoardRoutes(deps: BoardRouteDeps): RouteHandler {
@@ -49,39 +68,84 @@ export function createBoardRoutes(deps: BoardRouteDeps): RouteHandler {
     return parsed;
   };
 
+  const viewer = (auth: Parameters<RouteHandler>[0]["auth"]): BoardViewer => boardViewer(auth, deps.visibleFor(auth));
+  const snapshot = (who: BoardViewer): BoardSnapshot => {
+    const filtered = filterBoard(deps.board.state(), who);
+    return {
+      ...filtered.state,
+      capabilities: { manage: who.admin },
+      permissions: filtered.permissions,
+      counts: filtered.counts,
+    };
+  };
+  const findProject = (id: string) => deps.board.state().projects.find((project) => project.id === id);
+  const projectGuard = (ctx: Parameters<RouteHandler>[0], who: BoardViewer, projectId: string | undefined): boolean => {
+    const project = projectId ? findProject(projectId) : undefined;
+    if (!project || !projectVisible(project, who)) {
+      if (projectId) invalid(ctx, "no such project", "BOARD_FORBIDDEN");
+      return false;
+    }
+    return true;
+  };
+  const editProjectGuard = (ctx: Parameters<RouteHandler>[0], who: BoardViewer, projectId: string | undefined): boolean => {
+    const project = projectId ? findProject(projectId) : undefined;
+    if (!project || !projectVisible(project, who)) {
+      if (projectId) invalid(ctx, "no such project", "BOARD_FORBIDDEN");
+      return false;
+    }
+    if (!projectEditable(project, who)) {
+      invalid(ctx, "Only this project's owner can change it.", "BOARD_FORBIDDEN");
+      return false;
+    }
+    return true;
+  };
+
   return async (ctx) => {
     const match = ROUTE.exec(ctx.path);
     if (!match) return PASS;
     const { res, method, auth } = ctx;
     res.setHeader("cache-control", "no-store");
-    if (!deps.canManage(auth)) return invalid(ctx, "Only an owner or admin may open or change the project board", "BOARD_FORBIDDEN");
+    const who = viewer(auth);
     const collection = match[1] as "projects" | "subprojects" | "milestones" | "tasks" | undefined;
     const id = match[2];
     const action = match[3];
 
     try {
-      if (!collection && method === "GET") return ctx.json(res, 200, deps.board.snapshot(true));
+      if (ctx.path === "/api/board/audit" && method === "GET") {
+        if (!who.admin) return invalid(ctx, "Only an owner or admin may read the board audit.", "BOARD_FORBIDDEN");
+        const raw = Number(ctx.url.searchParams.get("limit") ?? 100);
+        if (!Number.isSafeInteger(raw) || raw < 1 || raw > 500) return invalid(ctx, "limit must be between 1 and 500");
+        return ctx.json(res, 200, { audit: deps.board.audit(raw), version: deps.board.version() });
+      }
+      if (!collection && method === "GET") return ctx.json(res, 200, snapshot(who));
       if (!collection) return invalid(ctx, "unsupported request");
 
       if (method === "POST" && !id) {
         const input = await body(ctx);
         if (!input) return;
         if (collection === "projects") {
+          if (!who.admin) return invalid(ctx, "Only an owner or admin may create a project.", "BOARD_FORBIDDEN");
           const extra = unsupported(input, PROJECT_FIELDS);
           if (extra) return invalid(ctx, `unsupported field: ${extra}`);
-          deps.board.createProject(input);
+          const missing = missingText(input, ["owner", "goal", "acceptance"]);
+          if (missing) return invalid(ctx, `${missing} is required`);
+          deps.board.createProject(input, actorFor(auth));
         } else if (collection === "subprojects") {
           const extra = unsupported(input, SUBPROJECT_FIELDS);
           if (extra) return invalid(ctx, `unsupported field: ${extra}`);
-          deps.board.createSubproject(input);
+          const missing = missingText(input, ["owner", "deliverable", "acceptance"]);
+          if (missing) return invalid(ctx, `${missing} is required`);
+          if (!editProjectGuard(ctx, who, typeof input.projectId === "string" ? input.projectId : undefined)) return;
+          deps.board.createSubproject(input, actorFor(auth));
         } else if (collection === "milestones") {
           const extra = unsupported(input, MILESTONE_FIELDS);
           if (extra) return invalid(ctx, `unsupported field: ${extra}`);
-          deps.board.createMilestone(input);
+          if (!editProjectGuard(ctx, who, typeof input.projectId === "string" ? input.projectId : undefined)) return;
+          deps.board.createMilestone(input, actorFor(auth));
         } else {
           return invalid(ctx, "create a task with PUT /api/board/tasks/:threadId");
         }
-        return ctx.json(res, 201, { board: deps.board.snapshot(true) });
+        return ctx.json(res, 201, { board: snapshot(who) });
       }
 
       if (method === "PATCH" && id && !action) {
@@ -90,19 +154,30 @@ export function createBoardRoutes(deps: BoardRouteDeps): RouteHandler {
         if (collection === "projects") {
           const extra = unsupported(input, PROJECT_FIELDS);
           if (extra) return invalid(ctx, `unsupported field: ${extra}`);
-          deps.board.patchProject(id, input);
+          const emptied = emptiedText(input, ["owner", "goal", "acceptance"]);
+          if (emptied) return invalid(ctx, `${emptied} cannot be emptied`);
+          if (!editProjectGuard(ctx, who, id)) return;
+          deps.board.patchProject(id, input, actorFor(auth));
         } else if (collection === "subprojects") {
-          const extra = unsupported(input, new Set(["name", "version"]));
+          const extra = unsupported(input, SUBPROJECT_FIELDS);
           if (extra) return invalid(ctx, `unsupported field: ${extra}`);
-          deps.board.patchSubproject(id, input);
+          const emptied = emptiedText(input, ["owner", "deliverable", "acceptance"]);
+          if (emptied) return invalid(ctx, `${emptied} cannot be emptied`);
+          const subproject = deps.board.state().subprojects.find((candidate) => candidate.id === id);
+          if (!subproject) return invalid(ctx, "no such subproject", "BOARD_FORBIDDEN");
+          if (!editProjectGuard(ctx, who, subproject.projectId)) return;
+          deps.board.patchSubproject(id, input, actorFor(auth));
         } else if (collection === "milestones") {
           const extra = unsupported(input, MILESTONE_PATCH_FIELDS);
           if (extra) return invalid(ctx, `unsupported field: ${extra}`);
-          deps.board.patchMilestone(id, input);
+          const milestone = deps.board.state().milestones.find((candidate) => candidate.id === id);
+          if (!milestone) return invalid(ctx, "no such milestone", "BOARD_FORBIDDEN");
+          if (!editProjectGuard(ctx, who, milestone.projectId)) return;
+          deps.board.patchMilestone(id, input, actorFor(auth));
         } else {
           return invalid(ctx, "change a task with PUT /api/board/tasks/:threadId");
         }
-        return ctx.json(res, 200, { board: deps.board.snapshot(true) });
+        return ctx.json(res, 200, { board: snapshot(who) });
       }
 
       if (collection === "tasks" && id && method === "PUT" && !action) {
@@ -110,12 +185,29 @@ export function createBoardRoutes(deps: BoardRouteDeps): RouteHandler {
         if (!input) return;
         const botId = input.botId;
         if (typeof botId !== "string") return invalid(ctx, "botId is required");
+        const existing = deps.board.state().tasks.find((task) => task.threadId === id);
+        if (existing) {
+          if (!conversationVisible(existing, who)) return invalid(ctx, "no such conversation", "BOARD_FORBIDDEN");
+          const project = existing.projectId ? findProject(existing.projectId) : undefined;
+          if (project && !projectVisible(project, who)) return invalid(ctx, "no such project", "BOARD_FORBIDDEN");
+          if (!taskEditable(existing, project, who)) return invalid(ctx, "Only this task's owner or project owner can change it.", "BOARD_FORBIDDEN");
+          if (!project || !projectEditable(project, who)) {
+            for (const key of ["projectId", "subprojectId", "parentThreadId"] as const) {
+              if (input[key] === undefined) continue;
+              const current = existing[key] ?? null;
+              if (input[key] !== current) return invalid(ctx, "Only this project's owner can move a task between projects.", "BOARD_FORBIDDEN");
+            }
+          }
+        } else {
+          if (!who.visible.thread(id) || !who.visible.bot(botId)) return invalid(ctx, "no such conversation", "BOARD_FORBIDDEN");
+          if (typeof input.projectId === "string" && !projectGuard(ctx, who, input.projectId)) return;
+        }
         const attached = attachBoardTask(deps, auth, {
           botId, threadId: id, value: input,
           knownThread: deps.threadExists(botId, id),
         });
         if (!attached.ok) return ctx.json(res, attached.status, { error: attached.code, message: attached.message });
-        return ctx.json(res, 200, { board: deps.board.snapshot(true) });
+        return ctx.json(res, 200, { board: snapshot(who) });
       }
 
       if (collection === "tasks" && id && method === "POST" && action === "verdict") {
@@ -123,15 +215,27 @@ export function createBoardRoutes(deps: BoardRouteDeps): RouteHandler {
         if (!input) return;
         const extra = unsupported(input, VERDICT_FIELDS);
         if (extra) return invalid(ctx, `unsupported field: ${extra}`);
-        const task = deps.board.verdict(id, input);
-        return ctx.json(res, 200, { board: deps.board.snapshot(true), task });
+        const existing = deps.board.state().tasks.find((task) => task.threadId === id);
+        if (!existing) return invalid(ctx, "no such board task");
+        if (!conversationVisible(existing, who)) return invalid(ctx, "no such conversation", "BOARD_FORBIDDEN");
+        const project = existing.projectId ? findProject(existing.projectId) : undefined;
+        if (project && !projectVisible(project, who)) return invalid(ctx, "no such project", "BOARD_FORBIDDEN");
+        if (!taskEditable(existing, project, who)) return invalid(ctx, "Only this task's owner or project owner can decide it.", "BOARD_FORBIDDEN");
+        const task = deps.board.verdict(id, input, actorFor(auth));
+        return ctx.json(res, 200, { board: snapshot(who), task });
       }
 
       if (collection === "tasks" && id && method === "DELETE" && !action) {
+        const existing = deps.board.state().tasks.find((task) => task.threadId === id);
+        if (!existing) return invalid(ctx, "no such board task");
+        if (!conversationVisible(existing, who)) return invalid(ctx, "no such conversation", "BOARD_FORBIDDEN");
+        const project = existing.projectId ? findProject(existing.projectId) : undefined;
+        if (project && !projectVisible(project, who)) return invalid(ctx, "no such project", "BOARD_FORBIDDEN");
+        if (!taskEditable(existing, project, who)) return invalid(ctx, "Only this task's owner or project owner can unclassify it.", "BOARD_FORBIDDEN");
         const raw = ctx.url.searchParams.get("version");
-        const removed = deps.board.removeTask(id, { version: raw === null ? undefined : Number(raw) });
+        const removed = deps.board.removeTask(id, { version: raw === null ? undefined : Number(raw) }, actorFor(auth));
         if (!removed) return invalid(ctx, "no such board task");
-        return ctx.json(res, 200, { board: deps.board.snapshot(true) });
+        return ctx.json(res, 200, { board: snapshot(who) });
       }
 
       return invalid(ctx, "unsupported request");

@@ -87,8 +87,11 @@ export function FormError({ error }: { error: string | null }) {
 
 export function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
+  const [owner, setOwner] = useState("");
+  const [goal, setGoal] = useState("");
+  const [acceptance, setAcceptance] = useState("");
   const [description, setDescription] = useState("");
-  const form = useBoardForm(() => createProject(name, description), onClose);
+  const form = useBoardForm(() => createProject(name, owner, goal, acceptance, description), onClose);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { input.current?.focus(); }, []);
   return (
@@ -97,11 +100,20 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
         <Field label={t("board.dialog.projectName")}>
           <input ref={input} value={name} maxLength={120} onChange={(event) => { setName(event.target.value); form.clearError(); }} placeholder={t("board.dialog.projectNamePlaceholder")} className={FIELD_CLASS} />
         </Field>
+        <Field label={t("board.task.owner")}>
+          <input value={owner} maxLength={80} onChange={(event) => { setOwner(event.target.value); form.clearError(); }} placeholder={t("board.task.ownerPlaceholder")} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.dialog.projectGoal")}>
+          <textarea value={goal} maxLength={4000} rows={2} onChange={(event) => { setGoal(event.target.value); form.clearError(); }} placeholder={t("board.dialog.projectGoalPlaceholder")} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.task.acceptance")}>
+          <textarea value={acceptance} maxLength={4000} rows={2} onChange={(event) => { setAcceptance(event.target.value); form.clearError(); }} placeholder={t("board.task.acceptancePlaceholder")} className={FIELD_CLASS} />
+        </Field>
         <Field label={t("board.dialog.description")}>
           <textarea value={description} maxLength={2000} rows={2} onChange={(event) => setDescription(event.target.value)} placeholder={t("board.dialog.descriptionPlaceholder")} className={FIELD_CLASS} />
         </Field>
         <FormError error={form.error} />
-        <DialogButtons busy={form.busy} disabled={!name.trim()} submitLabel={t("board.dialog.create")} busyLabel={t("board.dialog.creating")} onCancel={onClose} />
+        <DialogButtons busy={form.busy} disabled={!name.trim() || !owner.trim() || !goal.trim() || !acceptance.trim()} submitLabel={t("board.dialog.create")} busyLabel={t("board.dialog.creating")} onCancel={onClose} />
       </form>
     </BoardDialog>
   );
@@ -109,7 +121,10 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
 
 export function NewSubprojectDialog({ projectName, projectId, onClose }: { projectName: string; projectId: string; onClose: () => void }) {
   const [name, setName] = useState("");
-  const form = useBoardForm(() => createSubproject(projectId, name), onClose);
+  const [owner, setOwner] = useState("");
+  const [deliverable, setDeliverable] = useState("");
+  const [acceptance, setAcceptance] = useState("");
+  const form = useBoardForm(() => createSubproject(projectId, name, owner, deliverable, acceptance), onClose);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { input.current?.focus(); }, []);
   return (
@@ -118,8 +133,17 @@ export function NewSubprojectDialog({ projectName, projectId, onClose }: { proje
         <Field label={t("board.dialog.subprojectName")}>
           <input ref={input} value={name} maxLength={120} onChange={(event) => { setName(event.target.value); form.clearError(); }} placeholder={t("board.dialog.subprojectNamePlaceholder")} className={FIELD_CLASS} />
         </Field>
+        <Field label={t("board.task.owner")}>
+          <input value={owner} maxLength={80} onChange={(event) => { setOwner(event.target.value); form.clearError(); }} placeholder={t("board.task.ownerPlaceholder")} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.dialog.deliverable")}>
+          <textarea value={deliverable} maxLength={4000} rows={2} onChange={(event) => { setDeliverable(event.target.value); form.clearError(); }} placeholder={t("board.dialog.deliverablePlaceholder")} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.task.acceptance")}>
+          <textarea value={acceptance} maxLength={4000} rows={2} onChange={(event) => { setAcceptance(event.target.value); form.clearError(); }} placeholder={t("board.task.acceptancePlaceholder")} className={FIELD_CLASS} />
+        </Field>
         <FormError error={form.error} />
-        <DialogButtons busy={form.busy} disabled={!name.trim()} submitLabel={t("board.dialog.create")} busyLabel={t("board.dialog.creating")} onCancel={onClose} />
+        <DialogButtons busy={form.busy} disabled={!name.trim() || !owner.trim() || !deliverable.trim() || !acceptance.trim()} submitLabel={t("board.dialog.create")} busyLabel={t("board.dialog.creating")} onCancel={onClose} />
       </form>
     </BoardDialog>
   );

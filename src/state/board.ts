@@ -158,17 +158,23 @@ export async function removeTask(threadId: string): Promise<void> {
   await writeBoard(`/api/board/tasks/${encodeURIComponent(threadId)}${version === undefined ? "" : `?version=${version}`}`, { method: "DELETE" });
 }
 
-export async function createProject(name: string, description?: string): Promise<void> {
+export async function createProject(name: string, owner: string, goal: string, acceptance: string, description?: string): Promise<void> {
   await writeBoard("/api/board/projects", {
     method: "POST",
-    body: JSON.stringify({ name, ...(description?.trim() ? { description: description.trim() } : {}), version: view.board?.version }),
+    body: JSON.stringify({
+      name, owner: owner.trim(), goal: goal.trim(), acceptance: acceptance.trim(),
+      ...(description?.trim() ? { description: description.trim() } : {}), version: view.board?.version,
+    }),
   });
 }
 
-export async function createSubproject(projectId: string, name: string): Promise<void> {
+export async function createSubproject(projectId: string, name: string, owner: string, deliverable: string, acceptance: string): Promise<void> {
   await writeBoard("/api/board/subprojects", {
     method: "POST",
-    body: JSON.stringify({ projectId, name, version: view.board?.version }),
+    body: JSON.stringify({
+      projectId, name, owner: owner.trim(), deliverable: deliverable.trim(), acceptance: acceptance.trim(),
+      version: view.board?.version,
+    }),
   });
 }
 

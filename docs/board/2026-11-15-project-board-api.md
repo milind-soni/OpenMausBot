@@ -1,7 +1,11 @@
-# 项目看板 v1 后端契约（2026-11-15）
+# 项目看板 v1 后端契约（2026-11-15 集成版）
 
-基线：OpenMausBot `a6cd67c7`（`0.1.158`）。分支：`feat/project-board-backend-20261115`。
-看板项目与 `bot.projects`（左栏文件夹）是两套实体；看板任务只按 `botId + threadId` 关联已有对话，不复制标题、消息或权限。
+集成基线：Pixel 的 `807e5eb3`（其上是 `2ae37364` 后端 + 前端）。本分支
+`feat/project-board-integration-20261115` 保留 `/api/board` 契约，在同一模块补入项目/子项目/任务/里程碑的
+可追责字段、成员只读过滤、有限授权写入、审计、迁移和真实分派关联。
+
+看板项目与 `bot.projects`（左栏文件夹）是两套实体；看板任务只按 `botId + threadId` 关联已有对话，
+不复制标题、消息或权限。
 
 ## 数据
 
@@ -9,134 +13,126 @@
 type BoardPhase = "discovery" | "design" | "build" | "test" | "release_ready" | "live_unverified" | "done";
 type BoardTaskStatus = "todo" | "in_progress" | "review" | "done";
 type BoardMilestoneStatus = "planned" | "in_progress" | "accepted" | "rejected";
+type BoardProjectStatus = "active" | "paused" | "completed" | "archived";
+type BoardVisibility = "everyone" | "admins" | { people: string[] };
+
+interface BoardProject {
+  id; name; description?;
+  owner?; ownerEmail?; goal?; acceptance?; status?; visibility?;
+  createdAt; updatedAt;
+}
+
+interface BoardSubproject {
+  id; projectId; name;
+  phase?; phaseEvidence?; owner?; ownerEmail?; deliverable?; acceptance?; status?;
+  createdAt; updatedAt;
+}
+
+interface BoardMilestone {
+  id; projectId; subprojectId?; title; status;
+  verdict?; evidence?; acceptedBy?; acceptance?; owner?; ownerEmail?; dueAt?;
+  createdAt; updatedAt;
+}
 
 interface BoardTask {
-  threadId: string;            // 唯一键
-  botId: string;               // 首次写入后不可改
-  projectId?: string;
-  subprojectId?: string;
-  parentThreadId?: string;     // 另一个看板任务的 threadId
-  phase: BoardPhase;
-  status: BoardTaskStatus;
-  owner?: string;
-  acceptance?: string;
-  blocked?: boolean;
-  paused?: boolean;
-  verdict?: { decision: "accepted" | "rejected"; evidence: string; at: string };
-  createdAt: string;
-  updatedAt: string;
+  threadId; botId;
+  projectId?; subprojectId?; parentThreadId?;
+  phase; phaseEvidence?; status;
+  owner?; ownerEmail?; acceptance?;
+  blocked?; blockedReason?; paused?; pausedReason?;
+  verdict?: { decision: "accepted" | "rejected"; evidence; at; by? };
+  createdAt; updatedAt;
 }
 ```
 
-`BoardProject { id, name, description?, createdAt, updatedAt }`，`BoardSubproject { id, projectId, name, ... }`，
-`BoardMilestone { id, projectId, subprojectId?, title, status, verdict?, evidence?, dueAt?, ... }`，`dueAt` 是 epoch ms。
-`accepted` 里程碑必须同时有非空 `verdict` 与非空 `evidence`，否则 `422 BOARD_NEEDS_EVIDENCE`。
+- `ownerEmail` 是服务端判定“谁能改”的身份；`owner` 是展示名。二者不互相替代。
+- `blocked`/`paused` 保留原布尔字段，新增原因字段；旧前端仍能显示状态。
+- 任务 `status=done` 必须已有 `accepted` verdict；verdict 只改 `status`，**不改 `phase`**。
+  产品阶段 `phase=done` 必须由服务端显式编辑并带 `phaseEvidence`，不能由验收自动生成。
+- 子项目每次 `phase` 变更都必须带非空 `phaseEvidence`；`live_unverified`/`done` 还必须是线上回执
+  或业务验收引用（`https://`、`receipt:`、`回执:` 或 `验收:` 开头）。变更 actor/time 入审计。
+- verdict 的 `by`、里程碑 `acceptedBy` 由服务端写入，请求体不能指定。
+- `accepted` 里程碑必须同时有非空 `verdict` 与 `evidence`；`acceptedBy` 由服务端写入。
 
 ## 端点
 
-所有端点都是 owner/admin 面（v1）：`GET` 也需要 admin，`403 BOARD_FORBIDDEN` 给其他会话。
-`capabilities.manage` 因此当前恒为 `true`；字段保留给后续只读成员面。
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/board` | 顶层快照，按调用者过滤；含 `capabilities`、`permissions`、`counts`。 |
+| GET | `/api/board/audit?limit=100` | 仅 owner/admin；返回最近审计。 |
+| POST | `/api/board/projects` | 仅 owner/admin；`name/owner/goal/acceptance` 必填，可带 `description/ownerEmail/status/visibility/version`。 |
+| PATCH | `/api/board/projects/:id` | 项目 ownerEmail 或 owner/admin。 |
+| POST | `/api/board/subprojects` | `projectId/name/owner/deliverable/acceptance` 必填；可带 `phase/phaseEvidence/ownerEmail/status/version`。项目 ownerEmail 或 owner/admin。 |
+| PATCH | `/api/board/subprojects/:id` | 同上字段；项目 ownerEmail 或 owner/admin。 |
+| POST | `/api/board/milestones` | `projectId`、`title`；可带 `subprojectId/dueAt/acceptance/owner/ownerEmail/version`。 |
+| PATCH | `/api/board/milestones/:id` | `title/status/verdict/evidence/dueAt/acceptance/owner/ownerEmail/version`；项目 ownerEmail 或 owner/admin。 |
+| PUT | `/api/board/tasks/:threadId` | `botId` 必填；可带 `projectId/subprojectId/parentThreadId/phase/phaseEvidence/status/owner/ownerEmail/acceptance/blocked/blockedReason/paused/pausedReason/version`。 |
+| POST | `/api/board/tasks/:threadId/verdict` | `{ decision, evidence, version? }`；任务 ownerEmail 或项目 ownerEmail 或 owner/admin。 |
+| DELETE | `/api/board/tasks/:threadId?version=N` | 只取消归类，不删除对话。 |
 
-- `GET /api/board` → 顶层快照：
-  `{ version, projects[], subprojects[], milestones[], tasks[], capabilities: { manage }, updatedAt }`
-- `POST /api/board/projects` `{ name, description?, version? }` → `201 { board }`
-- `PATCH /api/board/projects/:id` `{ name?, description?, version? }` → `200 { board }`
-- `POST /api/board/subprojects` `{ projectId, name, version? }` → `201 { board }`
-- `PATCH /api/board/subprojects/:id` `{ name?, version? }` → `200 { board }`
-- `POST /api/board/milestones` `{ projectId, subprojectId?, title, dueAt?, version? }` → `201 { board }`
-- `PATCH /api/board/milestones/:id` `{ title?, status?, verdict?, evidence?, dueAt?, version? }` → `200 { board }`
-- `PUT /api/board/tasks/:threadId` `{ botId, projectId?, subprojectId?, parentThreadId?, phase?, status?, owner?, acceptance?, blocked?, paused?, version? }` → `200 { board }`
-- `POST /api/board/tasks/:threadId/verdict` `{ decision: "accepted" | "rejected", evidence, version? }` → `200 { board, task }`
-- `DELETE /api/board/tasks/:threadId?version=N` → `200 { board }`（仅取消归类，不删除对话）
+写响应统一 `{ board }`（verdict 另带 `task`）。`version` 可选；带上则做乐观并发，过期返回
+`409 BOARD_VERSION_CONFLICT`。所有写操作递增 `version` 并广播整板 SSE；当前 SSE 只发 admin 会话，
+成员页面在聚焦/写入后重取。
 
-写响应用 `{ board }` 整体替换前端副本；`GET` 是顶层快照。`version` 可选；带上则做乐观并发，
-过期返回 `409 BOARD_VERSION_CONFLICT`。所有写操作都会递增 `version` 并广播一条 SSE。
-`PUT` 省略字段 = 保留旧值，`null` = 清空。`phase: "done"` 需要已有 `accepted` verdict（同一次写入无法既设 done 又给 verdict）。
+### 成员只读与有限写入
+
+- GET 不需要 admin：先按项目 `visibility`（缺失按 `admins` 失败关闭），再按调用者已有的
+  `VisibleSet.thread` / `VisibleSet.bot` 过滤任务。看板行不会扩大对原对话的访问。
+- `capabilities.manage` 仅表示“可建项目、可改任意对象”。`permissions.projects/tasks/milestones`
+  给出当前账号对每个对象的写权限；任务 owner 可改自己的任务并提交 verdict，项目 ownerEmail
+  可改项目/子项目/里程碑/任务，其他成员只读。
+- 看不到的项目/对话统一 `403 BOARD_FORBIDDEN`，不返回对象内容。
+- `counts` 由服务端在过滤后计算：`topLevel` 只算没有可见父任务的节点，子任务单列，避免主子任务重复计数。
 
 ### 新对话归属
 
-`POST /api/bots/:id/tasks` 增加可选 `board` 字段，与创建对话同一次请求完成归属：
+`POST /api/bots/:id/tasks` 仍支持可选 `board` 对象，和创建对话同一请求完成归属；失败会删除刚创建的
+对话。字段与 `PUT /api/board/tasks/:threadId` 相同。成员可用，但服务端会把 `ownerEmail` 固定为本人，
+不能把任务写给其他地址。
 
-```json
-{ "title": "看板前端", "board": { "projectId": "p_...", "subprojectId": "sp_...", "phase": "build", "status": "in_progress", "owner": "Pixel" } }
-```
+### 真实分派关联
 
-`board` 内部字段与 `PUT /api/board/tasks/:threadId` 相同，但 `threadId`/`botId` 由服务端取。
-归属失败会删除刚创建的对话并返回 `400/403/422`。不传 `board` 的旧客户端行为不变。
+`coordinate_bots` 或 `start_thread` 新建工作对话后，若源对话已经是看板任务，服务端自动写入
+`parentThreadId = 源 threadId`，并继承项目/子项目/阶段（源阶段为 done 时子任务落到 release_ready）。
+看板持久化失败只记日志，不把已经成功的工作交接改成失败。手动看板新建不是唯一入口。
 
-### 未归类
-
-`GET /api/board` 只返回已归类任务。前端用已有的 `/api/bots` 快照里的对话列表减去 `board.tasks`
-即得“待归类”；v1 不做批量写，只支持逐条 `PUT`（避免误归类）。
-
-### 实时帧
-
-SSE `GET /api/events` 新增：
-
-```json
-{ "kind": "board", "board": { "version": 7, "projects": [], "subprojects": [], "milestones": [], "tasks": [], "updatedAt": "..." } }
-```
-
-整板替换，不带 `capabilities`（每个调用者的权限不同）。页面打开/聚焦仍建议重取 `GET /api/board`。
-当前广播只发给 admin 会话；成员面接入时再按可见对话过滤任务。
-
-## 错误
+### 错误
 
 ```json
 { "error": "BOARD_INVALID", "message": "..." }
 ```
 
-`400 BOARD_INVALID`、`403 BOARD_FORBIDDEN`、`409 BOARD_VERSION_CONFLICT`、`422 BOARD_NEEDS_EVIDENCE`。
+`400 BOARD_INVALID`、`403 BOARD_FORBIDDEN`、`409 BOARD_VERSION_CONFLICT`、`422 BOARD_NEEDS_EVIDENCE`、
+`503 BOARD_UNAVAILABLE`（文件更新版本或损坏，文件保持原样）。
 
-## 本地验收
+## 迁移、备份与回滚
 
-依赖安装后（`pnpm install --frozen-lockfile`），用隔离数据目录启动，不碰真实应用数据：
+- 文件仍是 `board.json`，原子写、`0600`。格式 `version: 2`；旧 `version: 1` 在内存中补默认值：
+  项目 `visibility = "admins"`、`status = "active"`，子项目 `phase = "discovery"`，其余新字段留空。
+- 第一次写回时，先把原文件复制为 `board.json.v1.bak`（不覆盖已有备份），再写 v2。只读不会改文件。
+- 旧项目默认 `admins`，避免升级时把原 admin-only 数据暴露给成员；新建项目默认 `everyone`
+  （工作区成员可见），可用 `visibility` 收紧到 `admins` 或 `people`。
+- 回滚：停服，恢复 `board.json.v1.bak`（或删除 `board.json` 得到空板），回退提交；对话、bot、
+  messages 和数据库均未迁移，无需数据回滚。
+- 更新版本/损坏文件返回 `503`，绝不写回或降级为空板。
 
-```sh
-env -u OMB_DESKTOP_PARENT -u OMB_DESKTOP_LAUNCH_ID \
-  OMB_DEV_TRUST_LOCAL_BROWSER=1 OMB_DATA_DIR=/tmp/omb-board-dev OMB_PORT=8899 \
-  pnpm dev:server
-```
-
-如果从 OpenMausBot 自己的终端里启动，父进程会带 `OMB_DESKTOP_PARENT=1`；服务端会按桌面应用处理，
-浏览器 `Origin` 的写请求被 403 拒绝（`this change must come from the desktop app or a paired device`）。
-上面先清掉它，再显式允许本机浏览器；普通用户终端不需要这一步。
-
-首次启动会生成一个 starter bot；`GET http://127.0.0.1:8899/api/bots` 取 `id` 与 `threadId`，
-然后：
-
-```sh
-curl -s http://127.0.0.1:8899/api/board
-curl -s -X POST http://127.0.0.1:8899/api/board/projects \
-  -H 'content-type: application/json' -d '{"name":"创意板"}'
-curl -s -X PUT http://127.0.0.1:8899/api/board/tasks/<threadId> \
-  -H 'content-type: application/json' -d '{"botId":"<botId>","projectId":"<projectId>","phase":"build"}'
-```
-
-也可以用仓库的隔离 fixture（临时 home、假引擎、随机端口）：
-
-```sh
-node --experimental-strip-types scripts/control-omb.ts launch
-```
-
-它打印 URL/PID/data 目录；Ctrl-C 停止并清理，只动临时目录。
-
-一键真实 HTTP/SSE 验收（自动启动并关闭隔离服务器）：
-
-```sh
-node --experimental-strip-types scripts/verify-board.ts
-```
-
-它验证空板、建项目、单条归属、创建时带 `board`、归属失败回滚、过期版本 409、未知对话 400、
-accepted verdict、SSE 整板帧和重取后的持久快照。自动化测试：
+## 测试与验收
 
 ```sh
 pnpm exec vitest run server/board server/routes/board.test.ts
+pnpm exec vitest run server/direct-coordination.e2e.test.ts -t "sends cross-bot work onward"
 ```
 
-## v1 边界
+覆盖：项目/子项目/任务/里程碑可追责字段、必填字段服务端强制、blockedReason、verdict by、task verdict
+不改 phase、phase done 证据、子项目阶段证据/线上回执、审计；双账号项目可见性与
+原对话双重过滤、counts 不重复、项目 owner/任务 owner 的有限写入、隐藏对象拒绝；v1→v2 备份/迁移/
+回滚、未来版本 503 且文件不变；真实 `coordinate_bots` 两层分派的 `parentThreadId`；创建对话时
+`board` 归属失败回滚；SSE 整板帧。
 
-- 不做批量归集、不做看板内新建对话、不做跨 bot 移动对话。
-- 看板不返回对话标题/消息；前端按 `botId + threadId` join `/api/bots` 快照。
-- 不接 Builder；不写库迁移（JSON 文件 `board.json`，原子写，损坏时降级为空板）。
-- 未完成：真实 Electron 渲染、成员只读面、生产发布。
+## 边界
+
+- 不做批量历史归集、不自动猜阶段/完成事实。
+- 前端目前只按 `capabilities.manage` 展示按钮，成员即使有 `permissions` 也先看到只读；后续 UI
+  再接 per-object 权限。
+- SSE 仍只发 admin；成员靠重取。
+- 未做生产发布/迁移；未在安装包内验证。

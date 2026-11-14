@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -44,7 +44,10 @@ describe("BoardStore", () => {
     const task = board.putTask({ threadId: "t1", botId: "b1", projectId: project.id, phase: "build", status: "in_progress", owner: "Pixel" });
     expect(task).toMatchObject({ threadId: "t1", botId: "b1", projectId: project.id, phase: "build", status: "in_progress" });
     expect(() => board.putTask({ threadId: "t1", botId: "b2" })).toThrowError(/another bot/);
-    expect(() => board.putTask({ threadId: "t1", botId: "b1", phase: "done" })).toThrowError(/accepted verdict/);
+    expect(() => board.putTask({ threadId: "t1", botId: "b1", phase: "done" })).toThrowError(/phaseEvidence/);
+    const phased = board.putTask({ threadId: "t1", botId: "b1", phase: "done", phaseEvidence: "https://example.test/release" });
+    expect(phased.phase).toBe("done");
+    expect(phased.status).toBe("in_progress");
 
     const accepted = board.verdict("t1", { decision: "accepted", evidence: "真实 API 通过" });
     expect(accepted.phase).toBe("done");
@@ -52,8 +55,14 @@ describe("BoardStore", () => {
     expect(accepted.verdict).toMatchObject({ decision: "accepted", evidence: "真实 API 通过" });
 
     const rejected = board.verdict("t1", { decision: "rejected", evidence: "回归失败" });
-    expect(rejected.phase).toBe("release_ready");
+    expect(rejected.phase).toBe("done");
     expect(rejected.status).toBe("review");
+
+    const stillBuilding = board.putTask({ threadId: "t2", botId: "b1", projectId: project.id, phase: "build" });
+    const acceptedWhileBuilding = board.verdict("t2", { decision: "accepted", evidence: "验收通过" });
+    expect(stillBuilding.phase).toBe("build");
+    expect(acceptedWhileBuilding.phase).toBe("build");
+    expect(acceptedWhileBuilding.status).toBe("done");
   });
 
   it("rejects a stale version instead of overwriting someone else's board", () => {
@@ -92,6 +101,103 @@ describe("BoardStore", () => {
     expect(reopened.removeTask("t1", {})).toBe(true);
     expect(reopened.state().tasks.map((task) => task.threadId)).toEqual(["t2"]);
     expect(reopened.state().tasks[0]!.parentThreadId).toBeUndefined();
+  });
+
+  it("keeps project, subproject, task and milestone accountability fields", () => {
+    const { board } = store();
+    const actor = { label: "m@example.com", email: "m@example.com" };
+    const project = board.createProject({
+      name: "创意板", owner: "朱明跃", ownerEmail: "owner@example.com", goal: "交付", acceptance: "上线", status: "active",
+      visibility: { people: ["m@example.com"] },
+    }, actor);
+    expect(project).toMatchObject({ owner: "朱明跃", ownerEmail: "owner@example.com", goal: "交付", acceptance: "上线", status: "active" });
+    expect(board.audit(1)[0]).toMatchObject({ action: "project.create", target: { kind: "project", id: project.id }, actor: { email: "m@example.com" } });
+
+    const subproject = board.createSubproject({
+      projectId: project.id, name: "财税", phase: "test", phaseEvidence: "前后端已联调", owner: "唐僧",
+      ownerEmail: "tang@example.com", deliverable: "办理卡", acceptance: "双账号验收", status: "active",
+    }, actor);
+    expect(subproject).toMatchObject({ phase: "test", phaseEvidence: "前后端已联调", owner: "唐僧", deliverable: "办理卡", acceptance: "双账号验收" });
+
+    const task = board.putTask({
+      threadId: "t1", botId: "b1", projectId: project.id, subprojectId: subproject.id, ownerEmail: "m@example.com",
+      blocked: true, blockedReason: "等待账号",
+    }, actor);
+    expect(task).toMatchObject({ blocked: true, blockedReason: "等待账号", ownerEmail: "m@example.com" });
+    const accepted = board.verdict("t1", { decision: "accepted", evidence: "真实 API 通过" }, actor);
+    expect(accepted.verdict).toMatchObject({ decision: "accepted", by: "m@example.com" });
+
+    const milestone = board.createMilestone({
+      projectId: project.id, subprojectId: subproject.id, title: "上线", acceptance: "生产验收", owner: "唐僧",
+    }, actor);
+    const achieved = board.patchMilestone(milestone.id, { status: "accepted", verdict: "通过", evidence: "回执" }, actor);
+    expect(achieved).toMatchObject({ acceptedBy: "m@example.com", acceptance: "生产验收", owner: "唐僧" });
+    const edited = board.patchMilestone(milestone.id, { title: "上线 v2" }, { label: "other@example.com", email: "other@example.com" });
+    expect(edited.acceptedBy).toBe("m@example.com");
+    expect(board.audit(10).map((entry) => entry.action)).toEqual([
+      "project.create", "subproject.create", "task.update", "task.verdict", "milestone.create", "milestone.update", "milestone.update",
+    ]);
+  });
+
+  it("records task status done only with an accepted verdict and anchors a dispatched child to its parent", () => {
+    const { board } = store();
+    const project = board.createProject({ name: "创意板" });
+    const subproject = board.createSubproject({ projectId: project.id, name: "财税", phase: "build", phaseEvidence: "https://example.test/build" });
+    board.putTask({ threadId: "parent", botId: "b1", projectId: project.id, subprojectId: subproject.id, phase: "build" });
+    expect(() => board.putTask({ threadId: "parent", botId: "b1", status: "done" })).toThrowError(/accepted verdict/);
+    const child = board.attachDispatch({ parentThreadId: "parent", botId: "b1", threadId: "child", actor: { label: "Lin" } });
+    expect(child).toMatchObject({ threadId: "child", parentThreadId: "parent", projectId: project.id, subprojectId: subproject.id, phase: "build", status: "todo" });
+    expect(board.state().tasks.map((task) => task.threadId)).toEqual(["parent", "child"]);
+    expect(() => board.putTask({ threadId: "parent", botId: "b1", subprojectId: undefined, projectId: project.id })).not.toThrow();
+  });
+
+  it("requires phase evidence on every subproject transition and names the actor", () => {
+    const { board } = store();
+    const project = board.createProject({ name: "创意板" });
+    const subproject = board.createSubproject({
+      projectId: project.id, name: "财税", owner: "唐僧", deliverable: "办理卡", acceptance: "双账号验收",
+    });
+    expect(() => board.patchSubproject(subproject.id, { phase: "build" })).toThrowError(/phaseEvidence/);
+    const built = board.patchSubproject(subproject.id, { phase: "build", phaseEvidence: "前后端联调通过" }, { label: "Lin", email: "lin@example.com" });
+    expect(built).toMatchObject({ phase: "build", phaseEvidence: "前后端联调通过" });
+    expect(() => board.patchSubproject(subproject.id, { phase: "done" })).toThrowError(/phaseEvidence/);
+    expect(() => board.patchSubproject(subproject.id, { phase: "done", phaseEvidence: "上线了" })).toThrowError(/online receipt|business acceptance/);
+    const done = board.patchSubproject(subproject.id, { phase: "done", phaseEvidence: "https://example.test/receipt/42" }, { label: "唐僧", email: "tang@example.com" });
+    expect(done).toMatchObject({ phase: "done", phaseEvidence: "https://example.test/receipt/42" });
+    expect(board.audit(1)[0]).toMatchObject({ action: "subproject.update", actor: { label: "唐僧", email: "tang@example.com" } });
+    expect(() => board.patchSubproject(subproject.id, { phaseEvidence: null })).toThrowError(/cannot drop/);
+  });
+
+  it("migrates a version-1 board with a backup, then refuses a newer file without touching it", () => {
+    const folder = mkdtempSync(join(tmpdir(), "omb-board-v1-"));
+    folders.push(folder);
+    const legacy = {
+      version: 1, boardVersion: 4,
+      projects: [{ id: "p_1", name: "创意板", createdAt: "2026-11-15T00:00:00.000Z", updatedAt: "2026-11-15T00:00:00.000Z" }],
+      subprojects: [{ id: "sp_1", projectId: "p_1", name: "财税", phase: "done", createdAt: "2026-11-15T00:00:00.000Z", updatedAt: "2026-11-15T00:00:00.000Z" }],
+      milestones: [], tasks: [], updatedAt: "2026-11-15T00:00:00.000Z",
+    };
+    writeFileSync(join(folder, "board.json"), JSON.stringify(legacy));
+    const board = new BoardStore({ file: join(folder, "board.json") });
+    expect(board.state().projects[0]).toMatchObject({ visibility: "admins", status: "active" });
+    expect(board.state().subprojects[0]).toMatchObject({ phase: "discovery", status: "active" });
+    expect(board.state().subprojects[0]!.phaseEvidence).toBeUndefined();
+    board.createProject({ name: "新项目" });
+    const migrated = JSON.parse(readFileSync(join(folder, "board.json"), "utf8"));
+    expect(migrated.version).toBe(2);
+    expect(migrated.audit.at(-1)).toMatchObject({ action: "project.create" });
+    expect(existsSync(join(folder, "board.json.v1.bak"))).toBe(true);
+    const backup = readFileSync(join(folder, "board.json.v1.bak"), "utf8");
+    expect(JSON.parse(backup).version).toBe(1);
+    // Rollback: putting the version-1 bytes back is enough; the store again migrates them in memory.
+    writeFileSync(join(folder, "board.json"), backup);
+    expect(new BoardStore({ file: join(folder, "board.json") }).state().projects.map((project) => project.id)).toEqual(["p_1"]);
+
+    const newer = JSON.stringify({ version: 3, boardVersion: 9, projects: [], subprojects: [], milestones: [], tasks: [], updatedAt: "x" });
+    writeFileSync(join(folder, "board.json"), newer);
+    const future = new BoardStore({ file: join(folder, "board.json") });
+    expect(() => future.state()).toThrowError(/not supported/);
+    expect(readFileSync(join(folder, "board.json"), "utf8")).toBe(newer);
   });
 
   it("repairs a hand-edited file instead of throwing", () => {
