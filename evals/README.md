@@ -69,6 +69,12 @@ On Claude with tool search on, a turn sends a few agents tools whole and the res
 
 `--context` runs no model and prints the bytes a Claude turn sends of the agents tools up front, whole against deferred.
 
+## Dream — what a nightly dream keeps
+
+`evals/dream` grades a dream's answer as `runDream` keeps it: `parseDream`, then the fact checks, before anything is written. Each case in `cases.json` holds a few chats, the notebook as it stands, the lines a dream should save (any of a few words, ignoring case) and words no saved line may contain. A case passes when the answer is JSON, every expected line is saved and nothing forbidden is. Saved lines no expectation covers are listed as `unexpected`, for a person or a judge to read. Only the scoring runs offline, in the evals suite; nothing calls a model yet.
+
+    npx vitest run --config evals/vitest.config.ts evals/dream
+
 ## Tier 3 — opt-in live-model smoke
 
 Live-model runs never execute by default: `pnpm eval --live` prints one skip line and exits 0 unless the gate is open.
