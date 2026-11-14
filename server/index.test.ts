@@ -2844,6 +2844,160 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("turns a picture file in the Chief's working folder into the avatar of a bot it creates, sets up or updates", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    const created: string[] = [];
+    try {
+      const folder = mkdtempSync(join(tmpdir(), "omb-avatar-file-"));
+      writeFileSync(join(folder, "face.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]));
+      writeFileSync(join(folder, "face.svg"), "<svg/>");
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask", cwd: folder })).status).toBe(200);
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const post = async (path: string, body: Record<string, unknown>) => {
+        const response = await fetch(`${BASE}${path}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ fromBotId: chief.id, fromThreadId: chief.threadId, ...body }),
+        });
+        return { status: response.status, body: await response.json() as { id?: string; state?: string; error?: string; result?: { bots?: Array<{ id: string }> } } };
+      };
+      const bots = async () => (await api("GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; avatarUrl?: string; avatarCrop?: string }>;
+      const stored = /^\/api\/attachments\/[A-Za-z0-9-]+\.png$/;
+
+      const made = await post("/api/internal/create-bot", { name: `Painted ${chief.id}`, role: "Ops", instructions: "Work.", avatarUrl: "face.png" });
+      expect(made.status, JSON.stringify(made.body)).toBe(201);
+      created.push(made.body.id!);
+      expect((await bots()).find((bot) => bot.id === made.body.id)).toMatchObject({ avatarUrl: expect.stringMatching(stored), avatarCrop: "circle" });
+
+      const vector = await post("/api/internal/create-bot", { name: `Vector ${chief.id}`, role: "Ops", instructions: "Work.", avatarUrl: "face.svg" });
+      expect(vector.status).toBe(415);
+      const escaped = await post("/api/internal/create-bot", { name: `Escaped ${chief.id}`, role: "Ops", instructions: "Work.", avatarUrl: "../face.png" });
+      expect([403, 404]).toContain(escaped.status);
+      const modelSelection = ((await api("GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; modelSelection: unknown }>)
+        .find((bot) => bot.id === made.body.id)!.modelSelection;
+      const setup = await post("/api/internal/team-setup-requests", { plan: { reason: "you asked", operations: [
+        { action: "create", key: "framed", fields: { name: `Framed ${chief.id}`, title: "Ops", soul: "Work.", avatarUrl: join(folder, "face.png"), avatarCrop: "rounded", modelSelection } },
+      ] } });
+      expect(setup.status, JSON.stringify(setup.body)).toBe(201);
+      const framedId = setup.body.result?.bots?.[0]?.id;
+      expect(framedId).toEqual(expect.any(String));
+      created.push(framedId!);
+      expect((await bots()).find((bot) => bot.id === framedId)).toMatchObject({ avatarUrl: expect.stringMatching(stored), avatarCrop: "rounded" });
+
+      const own = await post("/api/internal/profile-requests", { changes: { avatarUrl: "face.png" }, reason: "you asked" });
+      expect(own.status, JSON.stringify(own.body)).toBe(201);
+      expect((await bots()).find((bot) => bot.id === chief.id)).toMatchObject({ avatarUrl: expect.stringMatching(stored), avatarCrop: "circle" });
+    } finally {
+      for (const id of created) await api("DELETE", `/api/bots/${id}`);
+      await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
+  it("copies no picture file for a proposal it refuses, and removes the copy when the request is refused after it", async () => {
+    const sender = (await api("POST", "/api/bots")).body.bot;
+    const other = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const folder = mkdtempSync(join(tmpdir(), "omb-avatar-refused-"));
+      writeFileSync(join(folder, "face.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]));
+      expect((await api("PATCH", `/api/bots/${sender.id}`, { approvalMode: "ask", cwd: folder })).status).toBe(200);
+      const token = await mintTestCapability(BASE, sender.id, sender.threadId);
+      const propose = async (body: Record<string, unknown>) => (await fetch(`${BASE}/api/internal/profile-requests`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: sender.id, fromThreadId: sender.threadId, reason: "you asked", ...body }),
+      })).status;
+      const store = join(home, ".openmausbot", "attachments");
+      const files = () => existsSync(store) ? readdirSync(store).sort() : [];
+      const before = files();
+
+      expect(await propose({ forBotId: other.id, changes: { avatarUrl: "face.png" } })).toBe(403);
+      expect(files()).toEqual(before);
+      expect(await propose({ changes: { avatarUrl: "face.png", color: "not-a-colour" } })).toBe(400);
+      expect(files()).toEqual(before);
+      expect(((await api("GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; avatarUrl?: string }>).find((bot) => bot.id === sender.id)?.avatarUrl ?? null).toBeNull();
+    } finally {
+      await api("DELETE", `/api/bots/${other.id}`);
+      await api("DELETE", `/api/bots/${sender.id}`);
+    }
+  });
+
+  it("keeps the picture an open profile card shows when Settings clears old attachments", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const folder = mkdtempSync(join(tmpdir(), "omb-avatar-clear-"));
+      writeFileSync(join(folder, "face.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]));
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", cwd: folder })).status).toBe(200);
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const propose = async () => (await (await fetch(`${BASE}/api/internal/profile-requests`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, changes: { avatarUrl: "face.png" }, reason: "you asked" }),
+      })).json()) as { requestId: string; state: string };
+      const first = await propose();
+      const avatarOf = async () => ((await api("GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; avatarUrl?: string }>).find((candidate) => candidate.id === bot.id)?.avatarUrl;
+      const shown = (await avatarOf())!;
+      expect(shown).toMatch(/^\/api\/attachments\//);
+      // A second picture replaces it, so only the first card still names the first file. Reopening that card stands in
+      // for one still waiting for the person, which a local conversation never leaves since its changes apply at once.
+      expect((await propose()).state).toBe("applied");
+      expect(await avatarOf()).not.toBe(shown);
+      const db = new DatabaseSync(join(home, ".openmausbot", "messages.db"), { timeout: 5_000 });
+      try {
+        const reopened = db.prepare("UPDATE messages SET json = json_remove(json, '$.card.answered', '$.card.dismissed') WHERE thread_id = ? AND json_extract(json, '$.card.requestId') = ?")
+          .run(bot.threadId, first.requestId);
+        expect(reopened.changes).toBe(1);
+      } finally {
+        db.close();
+      }
+      const store = join(home, ".openmausbot", "attachments");
+      const waiting = join(store, shown.slice("/api/attachments/".length));
+      const stray = join(store, `${randomUUID()}.png`);
+      writeFileSync(stray, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      const hourAgo = new Date(Date.now() - 60 * 60_000);
+      for (const file of [waiting, stray]) utimesSync(file, hourAgo, hourAgo);
+
+      await expect.poll(async () => (await api("POST", "/api/attachment-storage")).status, { timeout: 10_000 }).toBe(200);
+      expect(existsSync(stray)).toBe(false);
+      expect(existsSync(waiting)).toBe(true);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  // Copying an .svg is refused with 415, so a 403 here shows each route refused on authority before it tried to copy.
+  it("refuses an unauthorized avatar proposal on every route before it reads the picture file", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    const plain = (await api("POST", "/api/bots")).body.bot;
+    const outsider = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const folder = mkdtempSync(join(tmpdir(), "omb-avatar-order-"));
+      writeFileSync(join(folder, "face.svg"), "<svg/>");
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask", cwd: folder, section: "Avatar order ops" })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${plain.id}`, { approvalMode: "ask", cwd: folder })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${outsider.id}`, { section: "Avatar order research" })).status).toBe(200);
+      const post = async (bot: { id: string; threadId: string }, path: string, body: Record<string, unknown>) => {
+        const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+        const response = await fetch(`${BASE}${path}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, ...body }),
+        });
+        return { status: response.status, error: ((await response.json()) as { error?: string }).error };
+      };
+      const svg = join(folder, "face.svg");
+      // The same picture is refused as a file type when the sender is allowed, so it is read only after authority.
+      expect((await post(chief, "/api/internal/profile-requests", { changes: { avatarUrl: svg }, reason: "you asked" })).status).toBe(415);
+
+      expect(await post(plain, "/api/internal/profile-requests", { forBotId: outsider.id, changes: { avatarUrl: svg }, reason: "you asked" })).toMatchObject({ status: 403 });
+      expect(await post(chief, "/api/internal/team-setup-requests", { plan: { reason: "you asked", operations: [
+        { action: "update", botId: outsider.id, fields: { avatarUrl: svg } },
+      ] } })).toMatchObject({ status: 403 });
+      expect(await post(plain, "/api/internal/create-bot", { name: `Unpainted ${plain.id}`, role: "Ops", instructions: "Work.", avatarUrl: svg })).toMatchObject({ status: 403 });
+    } finally {
+      for (const bot of [outsider, plain, chief]) await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("takes a created operator's role description up to 4000 characters, and says what to do with a longer one", async () => {
     const chief = (await api("POST", "/api/bots")).body.bot;
     let createdId: string | undefined;
@@ -11918,6 +12072,40 @@ describe("harness HTTP API", () => {
         const decisions = (await api("GET", "/api/decisions")).body.decisions;
         return decisions.filter((d: any) => d.requestId === again.requestId).map((d: any) => `${d.decision}:${d.source}`).sort();
       }).toEqual(["auto-approved:level", "user-undone:user"]);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("applies a proposed color and stored avatar at once and undoes both back to the mascot", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Painter" })).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const propose = (changes: Record<string, unknown>) => fetch(`${BASE}/api/internal/profile-requests`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, changes, reason: "you asked" }),
+      });
+      const current = async () => (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      const colorBefore = (await current()).color;
+
+      const missing = await propose({ avatarUrl: "/api/attachments/00000000-0000-0000-0000-000000000000.png" });
+      expect(missing.status).toBe(400);
+
+      const avatarUrl = await uploadAvatar();
+      const color = colorBefore === "blue" ? "pink" : "blue";
+      const response = await propose({ color, avatarUrl });
+      expect(response.status).toBe(201);
+      const applied = z.object({ requestId: z.string(), state: z.literal("applied") }).passthrough().parse(await response.json());
+      expect(await current()).toMatchObject({ color, avatarUrl, avatarCrop: "circle" });
+
+      expect((await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: applied.requestId })).body).toEqual({ ok: true, undone: true });
+      const undone = await current();
+      expect(undone.color).toBe(colorBefore);
+      expect(undone.avatarUrl ?? null).toBeNull();
+      expect(undone.avatarCrop ?? "mascot").toBe("mascot");
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
       await api("DELETE", `/api/bots/${bot.id}`);

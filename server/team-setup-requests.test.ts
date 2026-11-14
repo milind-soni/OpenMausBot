@@ -7,6 +7,7 @@ import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.t
 import { botFolder } from "./bot-folder.ts";
 import { flushProfileHistory, readHistory } from "./profile-versions.ts";
 import { hasTeamAuthority } from "./peer-roster.ts";
+import { ProposedAvatars } from "./proposed-avatars.ts";
 import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { DirectApply } from "./direct-apply.ts";
@@ -54,6 +55,7 @@ function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean 
   const canPersist = vi.fn((): { ok: true } | { ok: false; status: number; error: string } => ({ ok: true }));
   const service = new TeamSetupRequestService({ store, teams: () => teams, maxBots: 100, hasTeamAuthority,
     canPersist, ownsThread: () => sourceExists, targetBusy, deleteBot, deletionRefusal, autoApply, validateChange,
+    attachmentExists: (avatarUrl: string) => !avatarUrl.includes("0000"),
     validateModel: (selection, current) => {
       if (!({ claude: ["sonnet", "opus"], codex: ["gpt-fixture"] }[selection.instanceId]?.includes(selection.model))) return "Model is not in the current catalog";
       return current?.approvalMode === "full" && selection.instanceId !== current.modelSelection.instanceId ? "Existing permissions are incompatible" : null;
@@ -368,6 +370,71 @@ describe("reviewed Chief team setup", () => {
     expect(await h.service.undo({ botId: h.chief.id, threadId: h.chief.threadId, requestId: response.requestId })).toMatchObject({ state: "undone" });
     expect(h.peer.soul).toBe("Verify sources.\n");
     expect(blank.soul).toBe("");
+  });
+
+  it("gives a new bot a stored avatar under a real crop, and refuses a picture that is not stored", async () => {
+    const h = harness();
+    const mira = specialist("Mira", "Work");
+    const avatarUrl = "/api/attachments/a1b2c3.png";
+    const card = h.propose([{ ...mira, fields: { ...mira.fields, avatarUrl } }]);
+    expect(card.detail).toContain(`Avatar: "${avatarUrl}"`);
+    expect(card.detail).not.toContain("avatar untouched");
+    expect((await h.resolve(card.requestId))?.result.state).toBe("applied");
+    expect(h.store.bots.find((bot) => bot.name === "Mira")).toMatchObject({ avatarUrl, avatarCrop: "circle" });
+
+    const rounded = specialist("Rua", "Work");
+    const kept = h.propose([{ ...rounded, fields: { ...rounded.fields, avatarUrl, avatarCrop: "rounded" } }]);
+    expect((await h.resolve(kept.requestId))?.result.state).toBe("applied");
+    expect(h.store.bots.find((bot) => bot.name === "Rua")).toMatchObject({ avatarUrl, avatarCrop: "rounded" });
+
+    expect(() => h.propose([{ ...mira, key: "Gone", fields: { ...mira.fields, name: "Gone", avatarUrl: "/api/attachments/0000.png" } }])).toThrow(/existing stored image/);
+    expect(() => h.propose([{ ...mira, key: "Remote", fields: { ...mira.fields, name: "Remote", avatarUrl: "https://example.com/a.png" } }])).toThrow();
+    expect(() => h.propose([{ ...mira, key: "Vector", fields: { ...mira.fields, name: "Vector", avatarUrl: "/api/attachments/a1b2c3.svg" } }])).toThrow();
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { avatarCrop: "square" } }])).toThrow(/needs a picture/);
+  });
+
+  it("re-checks a proposed avatar when the card is confirmed", async () => {
+    const h = harness();
+    const card = h.propose([{ action: "update", botId: h.peer.id, fields: { avatarUrl: "/api/attachments/a1b2c3.webp" } }]);
+    const pending = h.messages.find((message) => message.card?.requestId === card.requestId)!.card!.teamSetupRequest!;
+    pending.operations[0]!.fields.avatarUrl = "/api/attachments/0000.webp";
+    expect((await h.resolve(card.requestId))?.result).toMatchObject({ state: "cancelled", error: expect.stringMatching(/existing stored image/) });
+    expect(h.peer.avatarUrl).toBeUndefined();
+  });
+
+  it("changes a teammate's avatar at once and undoes it back to the picture and crop it had", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("level");
+    h.peer.avatarUrl = "/api/attachments/old.png"; h.peer.avatarCrop = "square";
+    const changed = await h.submit([{ action: "update", botId: h.peer.id, fields: { avatarUrl: "/api/attachments/new.gif" } }]);
+    expect(changed).toMatchObject({ state: "applied" });
+    expect(h.peer).toMatchObject({ avatarUrl: "/api/attachments/new.gif", avatarCrop: "square" });
+    expect(await h.service.undo({ botId: h.chief.id, threadId: h.chief.threadId, requestId: changed.requestId })).toMatchObject({ state: "undone" });
+    expect(h.peer).toMatchObject({ avatarUrl: "/api/attachments/old.png", avatarCrop: "square" });
+
+    const cleared = await h.submit([{ action: "update", botId: h.peer.id, fields: { avatarUrl: "" } }]);
+    expect(h.peer).toMatchObject({ avatarUrl: "", avatarCrop: "mascot" });
+    expect(await h.service.undo({ botId: h.chief.id, threadId: h.chief.threadId, requestId: cleared.requestId })).toMatchObject({ state: "undone" });
+    expect(h.peer).toMatchObject({ avatarUrl: "/api/attachments/old.png", avatarCrop: "square" });
+  });
+
+  it("keeps avatar changes inside the Chief's own team", () => {
+    const h = harness(); h.peer.section = "Private";
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { avatarUrl: "/api/attachments/a1b2c3.png" } }])).toThrow(/not in charge of/);
+  });
+
+  it("refuses a plan outside the Chief's team before any picture file it names is copied", async () => {
+    const h = harness(); h.peer.section = "Private";
+    const save = vi.fn(async () => "/api/attachments/copied.png"), remove = vi.fn();
+    const plan = { reason: "asked", operations: [{ action: "update", botId: h.peer.id, fields: { avatarUrl: "face.png" } }] };
+    expect(() => h.service.checkAuthority(h.chief.id, plan)).toThrow(/not in charge of/);
+    expect(() => h.service.checkAuthority(h.chief.id, { reason: "asked", operations: [{ action: "update", botId: "nobody", fields: { avatarUrl: "face.png" } }] })).toThrow(/outside/);
+    expect(() => h.service.checkAuthority(h.chief.id, { reason: "asked", operations: [specialist("Ghost", "Private")] })).toThrow(/not in charge of/);
+    expect(() => h.service.checkAuthority(h.chief.id, { reason: "asked", operations: [specialist("Newcomer", "Engineering")] })).not.toThrow();
+    expect(() => h.service.checkAuthority(h.chief.id, { reason: "asked", newTeams: ["Lab"], operations: [specialist("Founder", "Lab")] })).not.toThrow();
+    // The route runs checkAuthority first, so a refused plan never reaches the copy.
+    const avatars = new ProposedAvatars(save, remove);
+    await expect((async () => { h.service.checkAuthority(h.chief.id, plan); await avatars.inPlan(plan); })()).rejects.toThrow(/not in charge of/);
+    expect(save).not.toHaveBeenCalled();
   });
 
   it("refuses an added rule on a new bot, beside replacement instructions, or where re-saving would redact existing text", () => {

@@ -1392,8 +1392,7 @@ export class Store {
             unread: false, activity: "idle", busy: false }],
         };
         Object.assign(next, appsFromCreator(chief, next));
-        if (!next.cwd) delete next.cwd;
-        nextBots.unshift(next);
+        if (!next.cwd) delete next.cwd; nextBots.unshift(next);
       } else {
         if (at < 0) throw new Error("A setup target no longer exists");
         const previous = nextBots[at];
@@ -1402,6 +1401,7 @@ export class Store {
         nextBots[at] = next;
       }
       if (operation.fields.chiefOfStaff === false) delete next.managedSections;
+      if (next.avatarUrl === "") delete next.avatarUrl; // a cleared picture keeps no empty URL
       next.section = sectionKey(next.section) || undefined;
       if (operation.fields.soul !== undefined) { next.soulHash = soulHash(operation.fields.soul); next.soulDrift = false; }
       changed.push(next);
@@ -1556,7 +1556,7 @@ export class Store {
     return changed;
   }
 
-  patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "lastProfileRequestId">>): BotRecord | null {
+  patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "color" | "lastProfileRequestId">>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
     const next = { ...bot, ...reshowWhenMoved(bot, patch) };

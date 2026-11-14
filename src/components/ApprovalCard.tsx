@@ -74,6 +74,8 @@ const PROFILE_FIELD_LABEL: Record<ProfileRequestField, LocaleKey> = {
   cwd: "approval.applied.field.cwd",
   notifications: "approval.applied.field.notifications",
   speakReplies: "approval.applied.field.speakReplies",
+  color: "approval.applied.field.color",
+  avatarUrl: "approval.applied.field.avatarUrl",
 };
 
 /** A routine card no one answered is from before Triggers v2 applied changes on their own: nothing can confirm it now. */
@@ -560,6 +562,14 @@ export function ApprovalCard({
       >
         {approvalDetailText(card)}
       </pre>
+
+      {card.profileRequest?.changes.avatarUrl && (
+        <img
+          src={card.profileRequest.changes.avatarUrl}
+          alt={t("approval.card.proposedAvatar")}
+          className="mt-2 flex size-16 rounded-xl border border-hairline/40 object-cover"
+        />
+      )}
 
       {card.skillRequest && <SkillRequestPreview request={card.skillRequest} />}
 

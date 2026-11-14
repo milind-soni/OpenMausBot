@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { botOwner, chiefScope } from "../shared/bot-owner.ts";
 import { z } from "zod";
 import { soulDiffLines } from "../shared/line-diff.ts";
+import { botAvatarCropSchema, botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
 import { profileSnapshot } from "./profile-revision.ts";
@@ -15,7 +16,7 @@ import type { TeamSetupFields, TeamSetupOperation, TeamSetupRequest, TeamSetupRe
 
 const section = (value?: string) => value?.trim() || "";
 const teamName = z.string().trim().min(1).max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials");
-const FIELD_LABELS: Record<string, string> = { name: "Name", title: "Title", description: "Description", section: "Department", cwd: "Working folder" };
+const FIELD_LABELS: Record<string, string> = { name: "Name", title: "Title", description: "Description", section: "Department", cwd: "Working folder", avatarUrl: "Avatar", avatarCrop: "Avatar crop" };
 const modelSelectionText = (selection: ModelSelection) =>
   `${selection.instanceId}/${selection.model}${selection.variant ? ` (variant ${selection.variant})` : " (no variant)"}${selection.effort ? ` (effort ${selection.effort})` : ""}`;
 /** One setup may edit a whole department at once (a model switch, an added rule), but each new bot still needs a close review. */
@@ -26,6 +27,8 @@ const fieldsSchema = z.object({
   name: z.string().optional(), title: z.string().optional(), description: z.string().optional(), soul: z.string().optional(),
   soulAppend: z.string().trim().min(1).optional(),
   cwd: z.string().optional(),
+  avatarUrl: z.union([botAvatarUrlSchema, z.literal("")]).optional(),
+  avatarCrop: botAvatarCropSchema.optional(),
   section: z.string().trim().max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials").optional(),
   modelSelection: z.object({ instanceId: z.string().trim().min(1), model: z.string().trim().min(1), effort: z.string().optional(), variant: z.string().optional() }).strict().optional(),
 }).strict();
@@ -64,6 +67,7 @@ export function teamSetupRevision(bot: BotRecord, fields?: TeamSetupFields): str
   if (fields.section !== undefined) scope.section = section(bot.section);
   if (fields.modelSelection !== undefined) scope.modelSelection = bot.modelSelection;
   if (fields.chiefOfStaff !== undefined) scope.chiefOfStaff = Boolean(bot.chiefOfStaff);
+  if (fields.avatarUrl !== undefined || fields.avatarCrop !== undefined) scope.avatar = [bot.avatarUrl ?? "", bot.avatarCrop ?? "mascot"];
   return createHash("sha256").update(JSON.stringify(scope)).digest("hex");
 }
 
@@ -88,6 +92,8 @@ interface Options {
   autoApply?(botId: string, threadId: string): DirectApply | null;
   driverCapabilities?(instanceId: string): DriverCapabilities | undefined;
   validateChange?(before: BotRecord, fields: TeamSetupFields): void;
+  /** Whether a stored avatar picture is still on disk; checked when proposed and again when applied. */
+  attachmentExists?(avatarUrl: string): boolean;
   maxBots: number;
   ownsThread(botId: string, threadId: string): boolean;
   /** `request` only for a reviewed deletion; Undo of a creation deletes without one. */
@@ -121,7 +127,7 @@ export class TeamSetupRequestService {
   }
 
   private fields(input: z.infer<typeof fieldsSchema>, current?: BotRecord): TeamSetupFields {
-    const { section: targetSection, modelSelection, chiefOfStaff, cwd: rawCwd, ...profile } = input;
+    const { section: targetSection, modelSelection, chiefOfStaff, cwd: rawCwd, avatarUrl, avatarCrop, ...profile } = input;
     const safe = Object.fromEntries(Object.entries(profile).map(([key, value]) => [key, redactSecretsInText(value!)]));
     const parsed = parseBotProfilePatch(safe, true);
     if (!parsed.ok) throw new TeamSetupError(parsed.error);
@@ -133,6 +139,18 @@ export class TeamSetupRequestService {
       const checked = validateBotCwd(rawCwd);
       if (!checked.ok) throw new TeamSetupError(checked.error);
       result.cwd = checked.cwd ?? "";
+    }
+    if (avatarUrl !== undefined) {
+      if (avatarUrl && this.options.attachmentExists && !this.options.attachmentExists(avatarUrl)) {
+        throw new TeamSetupError("avatarUrl must reference an existing stored image");
+      }
+      // A picture shows only under a real crop; with none it stays the mascot, as the profile panel's upload does.
+      result.avatarUrl = avatarUrl;
+      result.avatarCrop = !avatarUrl ? "mascot" : avatarCrop && avatarCrop !== "mascot" ? avatarCrop
+        : current?.avatarCrop && current.avatarCrop !== "mascot" ? current.avatarCrop : "circle";
+    } else if (avatarCrop !== undefined) {
+      if (!current?.avatarUrl && avatarCrop !== "mascot") throw new TeamSetupError("avatarCrop needs a picture; give avatarUrl too");
+      result.avatarCrop = avatarCrop;
     }
     if (modelSelection) {
       const selection = modelSelection as ModelSelection;
@@ -256,6 +274,23 @@ export class TeamSetupRequestService {
     return request;
   }
 
+  /** Before anything (a picture file) is copied for a plan: an active Chief, every bot it updates inside its
+   * authority, and every destination team one it may place bots in. The full checks still run on the prepared plan. */
+  checkAuthority(botId: string, plan: unknown): void {
+    const chief = this.chief(botId);
+    const parsed = z.object({ newTeams: z.array(z.unknown()).optional(), operations: z.array(z.unknown()) }).passthrough().safeParse(plan);
+    if (!parsed.success) return;
+    const newTeams = new Set((parsed.data.newTeams ?? []).filter((name) => typeof name === "string").map((name) => section(name as string)));
+    for (const operation of parsed.data.operations) {
+      const op = operation && typeof operation === "object" ? operation as { action?: unknown; botId?: unknown; fields?: { section?: unknown } } : {};
+      const target = op.action === "update" ? this.options.store.bot(String(op.botId ?? "")) : undefined;
+      if (op.action === "update" && (!target || target.hidden)) throw new TeamSetupError("A target bot is outside this Chief's authorized team", 403);
+      if (target && !this.options.hasTeamAuthority(chief, target.section)) throw new TeamSetupError(outsideDepartmentReason(chief, target), 403);
+      const destination = typeof op.fields?.section === "string" ? op.fields.section : target?.section ?? chief.section;
+      if (!newTeams.has(section(destination)) && !this.options.hasTeamAuthority(chief, destination)) throw new TeamSetupError(outsideDepartmentReason(chief, { section: destination }), 403);
+    }
+  }
+
   propose(args: SetupArgs) { return this.card(this.prepare(args), args.from); }
   proposeDeletion(args: DeletionArgs) { return this.card(this.prepareDeletion(args), args.from); }
 
@@ -312,7 +347,8 @@ export class TeamSetupRequestService {
     if (!request.deletion) {
       lines.push("\nDefault models apply to groups and new threads. Every existing thread keeps its current model and permissions.");
       if (request.operations.some((operation) => operation.action === "create")) {
-        lines.push(`New bots stay owner-owned after creation: the same connected apps as @${chief.name}, the workspace's default access level, a private workspace by default, avatar untouched.`);
+        const avatarWords = request.operations.some((operation) => operation.action === "create" && operation.fields.avatarUrl) ? "" : ", avatar untouched";
+        lines.push(`New bots stay owner-owned after creation: the same connected apps as @${chief.name}, the workspace's default access level, a private workspace by default${avatarWords}.`);
       }
       lines.push("Existing execution permissions are unchanged.");
     }
@@ -394,7 +430,8 @@ export class TeamSetupRequestService {
       if (!bot) continue;
       const fields: Record<string, unknown> = {};
       for (const key of Object.keys(operation.fields) as Array<keyof TeamSetupFields>) {
-        if (key !== "cwd") fields[key] = key === "section" ? section(bot.section) : key === "chiefOfStaff" ? Boolean(bot.chiefOfStaff) : structuredClone(bot[key]) ?? "";
+        if (key !== "cwd") fields[key] = key === "section" ? section(bot.section) : key === "chiefOfStaff" ? Boolean(bot.chiefOfStaff)
+          : key === "avatarCrop" ? bot.avatarCrop ?? "mascot" : structuredClone(bot[key]) ?? "";
       }
       const teams = operation.fields.chiefOfStaff !== undefined || (bot.id === request.botId && request.newTeams.length > 0);
       before.push({ botId: bot.id, fields, ...(teams ? { managedSections: bot.managedSections ? [...bot.managedSections] : null } : {}) });

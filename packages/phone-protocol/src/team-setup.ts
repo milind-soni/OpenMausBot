@@ -1,3 +1,4 @@
+import type { BotAvatarCrop } from "./bot-avatar.ts";
 import type { ModelSelection } from "./wire.ts";
 
 export interface TeamSetupFields {
@@ -10,6 +11,10 @@ export interface TeamSetupFields {
   section?: string;
   modelSelection?: ModelSelection;
   chiefOfStaff?: boolean;
+  /** A stored /api/attachments picture; "" returns to the mascot. */
+  avatarUrl?: string;
+  /** Set with avatarUrl: how the picture is cropped ("mascot" with no picture). */
+  avatarCrop?: BotAvatarCrop;
 }
 
 export interface TeamSetupOperation {
