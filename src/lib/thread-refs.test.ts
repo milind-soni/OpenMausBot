@@ -9,10 +9,24 @@ import {
   splitThreadRefsForDisplay,
   takeThreadLinkFromLocation,
   threadRefUrl,
+  threadWebRefUrl,
   threadTokenFromPaste,
   threadTokenSpacing,
   type ThreadRefCandidate,
 } from "./thread-refs";
+
+describe("web conversation links", () => {
+  it("uses the public web address and encodes both identifiers without retaining unrelated query values", () => {
+    const result = threadWebRefUrl({ botId: "bot & one", threadId: "thread/#?" }, "https://chat.example/team/?old=secret#fragment");
+    const url = new URL(result!);
+    expect(url.origin + url.pathname).toBe("https://chat.example/team/");
+    expect([...url.searchParams]).toEqual([["thread", "thread/#?"], ["bot", "bot & one"]]);
+    expect(url.hash).toBe("");
+  });
+  it.each(["not a URL", "javascript:alert(1)", "file:///tmp/chat", "https://user:secret@chat.example/"])("refuses a non-web or credential-bearing base: %s", (base) => {
+    expect(threadWebRefUrl({ botId: "bot", threadId: "thread" }, base)).toBeNull();
+  });
+});
 
 const scout = (threadId: string, title: string, activeAt?: number): ThreadRefCandidate =>
   ({ botId: "scout", botName: "Scout", threadId, title, activeAt });
