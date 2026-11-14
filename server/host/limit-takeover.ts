@@ -83,14 +83,11 @@ interface SavedHolds { models?: Record<string, ModelHold>; signedOut?: Record<st
 export function signedOutStop(stopReason: string | null | undefined, said: string | undefined): boolean {
   return stopReason === "auth_required" && !(said && (engineFailureKind(said) === "credits" || classifyError({ text: said }).reason === "quota"));
 }
-/** What refused a turn another AI may carry on: its AI's usage limit (`limit`, when the engine said which one) or its
- * sign-out; undefined for any other failure. A tool call's failure names the tool, never the engine's own limit,
- * whatever its words. */
 export function takeoverRefusal(stopReason: string | null | undefined, said: string | undefined, limit: LimitScope | undefined): TakeoverScope | undefined {
   if (signedOutStop(stopReason, said)) return "signed-out";
+  // A tool call's failure names the tool, never the engine's own limit, whatever its words.
   return limit ?? (stopReason !== "tool_error" && classifyError({ text: said ?? "" }).reason === "quota" ? "engine" : undefined);
 }
-/** That refusal as a job's outcome carries it: which one, and when the limit said it resets. */
 export function turnRefusal(stopReason: string | null | undefined, said: string | undefined,
   flags: { limit?: LimitScope; limitResetsAt?: number } | undefined): { scope: TakeoverScope; resetsAt?: number } | undefined {
   const scope = takeoverRefusal(stopReason, said, flags?.limit);
