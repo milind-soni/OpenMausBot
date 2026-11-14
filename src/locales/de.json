@@ -1884,7 +1884,7 @@
   "routines.editor.goalWhere": "Wo es läuft",
   "routines.editor.goalOneOnOne": "Nur der Bot, in seinem eigenen Chat",
   "routines.editor.goalOneOnOneHelp": "Der Bot arbeitet in seinem eigenen Chat am Ziel, bis es erreicht ist.",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Telefon",
   "computer.tab.browser": "Browser",
   "computer.tabsAria": "Bot-Panel-Ansicht",
   "computer.simple.needsSetup": "Der Desktop von {name} braucht zuerst einen Einrichtungsschritt.",

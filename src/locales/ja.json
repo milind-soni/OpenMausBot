@@ -5157,7 +5157,7 @@
   "routines.botCountOne": "{count}体のボット",
   "routines.botCountMany": "{count}体のボット",
   "routines.group": "グループ",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "スマホ",
   "computer.browserSwitch.title": "{name} にブラウザーの使用を許可",
   "computer.tab.browser": "ブラウザー",
   "computer.tab.data": "データ",

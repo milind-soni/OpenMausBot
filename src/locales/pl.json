@@ -4548,7 +4548,7 @@
   "routines.botCountOne": "{count} bot",
   "routines.botCountMany": "Boty: {count}",
   "routines.group": "Grupa",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Telefon",
   "computer.browserSwitch.title": "Pozwól botowi {name} używać przeglądarki",
   "computer.tab.browser": "Przeglądarka",
   "computer.tab.data": "Dane",
