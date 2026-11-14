@@ -200,7 +200,7 @@ export class RemoteMcpClient {
   private closed = false;
   private readonly pending = new Map<number, Pending>();
   private sseEndpoint: Promise<string> | null = null;
-  private readonly sseAbort = new AbortController();
+  private readonly closeAbort = new AbortController();
 
   constructor(target: RemoteMcpSpec, options: { fetch?: typeof fetch; maxBytes?: number; onNotification?: (message: JsonRpcMessage) => void } = {}) {
     this.target = target;
@@ -261,7 +261,7 @@ export class RemoteMcpClient {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.sseAbort.abort();
+    this.closeAbort.abort();
     for (const entry of this.pending.values()) entry.reject(new McpHttpError("network", "client closed"));
     this.pending.clear();
     // Streamable HTTP: end the session. Many servers answer 405 here.
@@ -288,11 +288,12 @@ export class RemoteMcpClient {
   private async post(url: string, frame: unknown, signal: AbortSignal): Promise<Response> {
     const headers = this.headers();
     headers.set("content-type", "application/json");
+    const requestSignal = AbortSignal.any([signal, this.closeAbort.signal]);
     let response: Response;
     try {
-      response = await this.fetchImpl(url, { method: "POST", headers, body: JSON.stringify(frame), signal });
+      response = await this.fetchImpl(url, { method: "POST", headers, body: JSON.stringify(frame), signal: requestSignal });
     } catch (error) {
-      if (signal.aborted) throw error;
+      if (requestSignal.aborted) throw error;
       throw new McpHttpError("network", "request failed");
     }
     if (!response.ok) {
@@ -352,14 +353,14 @@ export class RemoteMcpClient {
       const abortOpening = () => opening.abort(signal.reason);
       signal.addEventListener("abort", abortOpening, { once: true });
       if (signal.aborted) abortOpening();
-      const streamSignal = AbortSignal.any([opening.signal, this.sseAbort.signal]);
+      const streamSignal = AbortSignal.any([opening.signal, this.closeAbort.signal]);
       this.fetchImpl(this.target.url, { method: "GET", headers, signal: streamSignal })
         .then(async (response) => {
           if (!response.ok) {
             drain(response);
             throw new McpHttpError("status", `HTTP ${response.status}`, response.status, response.headers.get("www-authenticate") ?? undefined);
           }
-          await readSse(response, this.sseAbort.signal, (event) => {
+          await readSse(response, this.closeAbort.signal, (event) => {
             if (event.event === "endpoint") {
               if (!settled) {
                 settled = true;
