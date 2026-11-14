@@ -9,6 +9,7 @@ import {
   useNotificationSounds,
 } from "@/lib/notification-preferences";
 import { requestNotificationPermission } from "@/lib/notify";
+import { api, useStore, type ConfigStatus } from "@/state/store";
 import { SettingRow, Switch } from "./SettingsPrimitives";
 
 export function NotificationRows({ simple = false }: { simple?: boolean }) {
@@ -17,6 +18,7 @@ export function NotificationRows({ simple = false }: { simple?: boolean }) {
       <DeviceNotificationsRow simple={simple} />
       <NotificationSoundsRow simple={simple} />
       <NotificationFeedRow simple={simple} />
+      <InboxDelegatedResultsRow simple={simple} />
     </>
   );
 }
@@ -86,6 +88,25 @@ export function NotificationFeedRow({ simple = false }: { simple?: boolean }) {
         aria-label={t("settings.notificationFeed.show")}
         onClick={() => setNotificationFeed(!enabled)}
       />
+    </SettingRow>
+  );
+}
+
+/** A teammate's finished work for another bot is that bot's news, not the person's; this switch keeps it out of the Inbox. */
+export function InboxDelegatedResultsRow({ simple = false }: { simple?: boolean }) {
+  const { state, dispatch } = useStore();
+  const [saving, setSaving] = useState(false);
+  const on = state.config?.features?.inboxHideDelegatedLines === true;
+  const toggle = () => {
+    setSaving(true);
+    api("/api/config", { method: "PATCH", body: JSON.stringify({ features: { inboxHideDelegatedLines: !on } }) })
+      .then((config: ConfigStatus) => dispatch({ type: "configStatus", config }))
+      .catch(() => undefined)
+      .finally(() => setSaving(false));
+  };
+  return (
+    <SettingRow title={t("settings.inboxDelegated.title")} subtitle={t(simple ? "settings.inboxDelegated.short" : "settings.inboxDelegated.subtitle")}>
+      <Switch checked={on} disabled={saving} aria-label={t("settings.inboxDelegated.title")} onClick={toggle} />
     </SettingRow>
   );
 }

@@ -73,6 +73,8 @@ export interface PlaceInboxDeps {
   guestName(threadId: string): string | undefined;
   /** The bot that handed this conversation's work on. */
   handedBy(threadId: string): string | null;
+  /** Bot-to-bot hand-off results kept out of the Inbox: the person asked not to be told what one bot did for another. */
+  delegatedLineHidden?(): boolean;
   /** Sends a notification as it is. */
   send(notification: Notification): void;
   /** Conversations resting on the person for a card a running turn does not hold open: a password, a sign-in, an app to
@@ -109,6 +111,9 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     const bot = botId ? store.bot(botId) : undefined;
     return bot ? { botId: bot.id, name: bot.name } : undefined;
   };
+
+  /** News about work another bot handed on: with the switch on it is filed nowhere but the conversation it happened in. */
+  const handOffHidden = (threadId: string): boolean => deps.delegatedLineHidden?.() === true && deps.handedBy(threadId) !== null;
 
   const titleOf = (botId: string, threadId: string): string => store.groupByThread(threadId)?.name ?? store.taskByThread(botId, threadId)?.title ?? store.bot(botId)?.name ?? "";
 
@@ -180,7 +185,10 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
   });
 
   function view(auth: RequestAuth): InboxView {
-    const rows = [...askRows(auth), ...lines.filter((line) => lineFor(auth, line)).map(lineRow)].sort((a, b) => b.at - a.at).slice(0, VIEW_ROWS);
+    // The switch also drops the hand-off lines filed before it was turned on, so the list says what the person asked for.
+    // A bot's own message to the person is not a hand-off report, so it always stays.
+    const hidden = deps.delegatedLineHidden?.() === true;
+    const rows = [...askRows(auth), ...lines.filter((line) => lineFor(auth, line) && !(hidden && line.workingFor && line.kind !== "message")).map(lineRow)].sort((a, b) => b.at - a.at).slice(0, VIEW_ROWS);
     return { botId: null, threadId: null, rows, anchor: null };
   }
 
@@ -225,7 +233,7 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     const { kind, botId, threadId } = notification;
     const result = (kind === "done" && (how.routine === true || how.summary === true)) || (kind === "delegation-settled" && how.summary === true);
     const notice = ASK_NOTIFICATIONS.has(kind) && kind !== "approval" && kind !== "question" && (how.routine === true || deps.handedBy(threadId) !== null);
-    const bot = result || notice ? store.bot(botId) : undefined;
+    const bot = (result || notice) && !handOffHidden(threadId) ? store.bot(botId) : undefined;
     if (bot) {
       const handed = workingFor(threadId);
       const guest = deps.guestOf(threadId);
@@ -238,6 +246,8 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
   /** Work handed on finished: one line, so the result is here even if the conversation that asked never reports back. It
    * sends nothing, and that conversation's next result or its summary replaces it. */
   function handedResult(work: { botId: string; threadId: string; groupId?: string; text: string }, requester: { botId: string; threadId: string }): void {
+    // This path only ever carries work one bot handed to another, so the switch alone decides.
+    if (deps.delegatedLineHidden?.() === true) return;
     const bot = store.bot(work.botId);
     const text = work.text.trim();
     if (!bot || bot.notifications === false || !text) return;

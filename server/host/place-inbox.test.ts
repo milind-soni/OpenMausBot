@@ -417,3 +417,58 @@ describe("the inbox of a place that is no team's", () => {
     });
   });
 });
+
+
+describe("the hand-off switch", () => {
+  const work = (text = "Pricing page updated.") => ({ botId: "mira", threadId: "mira-pricing", text });
+  const asked = { botId: "eli", threadId: "eli-main" };
+  const routine = { kind: "done", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Done", body: "Weekly report." } as Notification;
+  const failure = (threadId: string) => ({ kind: "turn-failed", botId: "eli", botName: "Eli", threadId, title: "Failed", body: "It stopped." }) as Notification;
+
+  it("keeps a handed-off result out of the list and the count when it is on", () => {
+    const f = setup({ delegatedLineHidden: () => true });
+    f.inbox.handedResult(work(), asked);
+    expect(f.inbox.view(OWNER).rows).toEqual([]);
+    expect(f.inbox.count(OWNER)).toBe(0);
+  });
+
+  it("files the result as it always did when it is off", () => {
+    const f = setup();
+    f.inbox.handedResult(work(), asked);
+    expect(f.inbox.view(OWNER).rows.map((row) => row.text)).toEqual(["Pricing page updated."]);
+    expect(f.inbox.count(OWNER)).toBe(1);
+  });
+
+  it("still files the person's own routine report", () => {
+    const f = setup({ delegatedLineHidden: () => true });
+    f.inbox.route(routine, { routine: true });
+    expect(f.inbox.view(OWNER).rows.map((row) => row.text)).toEqual(["Weekly report."]);
+    expect(f.inbox.count(OWNER)).toBe(1);
+  });
+
+  it("drops a failure in a conversation another bot handed on, and keeps one in the person's own", () => {
+    const f = setup({ delegatedLineHidden: () => true });
+    f.handed.set("eli-child", "eli");
+    f.inbox.route(failure("eli-child"), { routine: true });
+    f.inbox.route(failure("eli-main"), { routine: true });
+    expect(f.inbox.view(OWNER).rows.map((row) => row.text)).toEqual(["It stopped."]);
+  });
+
+  it("keeps a bot's own message to the person, and still says whose work it is", () => {
+    const f = setup({ delegatedLineHidden: () => true });
+    f.handed.set("mira-main", "eli");
+    f.inbox.message("mira", "mira-main", "Hello from Mira.");
+    expect(f.inbox.view(OWNER).rows.map((row) => row.text)).toEqual(["Hello from Mira."]);
+    expect(f.inbox.view(OWNER).rows[0]!.workingFor).toEqual({ botId: "eli", name: "Eli" });
+  });
+
+  it("also leaves out a hand-off line filed before the switch was turned on", () => {
+    let hidden = false;
+    const f = setup({ delegatedLineHidden: () => hidden });
+    f.inbox.handedResult(work(), asked);
+    expect(f.inbox.view(OWNER).rows).toHaveLength(1);
+    hidden = true;
+    expect(f.inbox.view(OWNER).rows).toEqual([]);
+    expect(f.inbox.count(OWNER)).toBe(0);
+  });
+});
