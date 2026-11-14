@@ -5,8 +5,10 @@ import {
   CITATION_MAX_COMMENT_LENGTH,
   CITATION_MAX_QUOTE_LENGTH,
   citationAttachment,
+  createCitationTextSelector,
   withCitationComment,
   type CitationAttachment,
+  type CitationSource,
 } from "@/lib/citations";
 import { captureCitationSelection, citationShortcutHint, citationTabShortcut, isCitationShortcut } from "@/lib/citations-dom";
 import { isMacPlatform } from "@/lib/keyboard-shortcuts";
@@ -194,29 +196,76 @@ export function CitationSelectionToolbar({
       }}
     />;
   }
-  const tooLong = captured.citation.quote.length > CITATION_MAX_QUOTE_LENGTH;
-  const shortcut = citationShortcutHint(isMac);
+  return <CiteButton
+    buttonRef={buttonRef}
+    point={captured.point}
+    tooLong={captured.citation.quote.length > CITATION_MAX_QUOTE_LENGTH}
+    shortcut={{ hint: citationShortcutHint(isMac), keys: isMac ? "Meta+L" : "Control+L" }}
+    onCite={() => setEditing(true)}
+    onDismiss={() => setCaptured(null)}
+  />;
+}
+
+function CiteButton({ buttonRef, point, tooLong, shortcut, onCite, onDismiss }: {
+  buttonRef: RefObject<HTMLButtonElement | null>;
+  point: Point;
+  tooLong: boolean;
+  shortcut?: { hint: string; keys: string };
+  onCite: () => void;
+  onDismiss: () => void;
+}) {
+  const hint = !tooLong && shortcut;
   return createPortal(
     <button
       ref={buttonRef}
       type="button"
       disabled={tooLong}
       aria-label={t(tooLong ? "chat.citation.tooLongLabel" : "chat.citation.citeLabel")}
-      aria-keyshortcuts={tooLong ? undefined : isMac ? "Meta+L" : "Control+L"}
-      title={tooLong ? undefined : `${t("chat.citation.citeLabel")} (${shortcut})`}
+      aria-keyshortcuts={hint ? hint.keys : undefined}
+      title={tooLong ? undefined : hint ? `${t("chat.citation.citeLabel")} (${hint.hint})` : t("chat.citation.citeLabel")}
       onPointerDown={(event) => event.preventDefault()}
-      onClick={() => setEditing(true)}
+      onClick={onCite}
       onKeyDown={(event) => {
-        if (event.key === "Escape") { event.preventDefault(); setCaptured(null); }
+        if (event.key === "Escape") { event.preventDefault(); onDismiss(); }
       }}
       className="fixed z-50 flex items-center gap-1.5 rounded-full border border-hairline/50 bg-panel px-3 py-1.5 text-[12px] font-medium text-ink shadow-lg disabled:text-danger"
-      style={captured.point}
+      style={point}
     >
       <Quote size={13} aria-hidden="true" /> {t(tooLong ? "chat.citation.shorten" : "chat.citation.cite")}
-      {!tooLong && <kbd aria-hidden="true" className="font-sans text-[11px] font-normal text-ink-secondary">{shortcut}</kbd>}
+      {hint && <kbd aria-hidden="true" className="font-sans text-[11px] font-normal text-ink-secondary">{hint.hint}</kbd>}
     </button>,
     document.body,
   );
+}
+
+/** Cite for text the person selected inside a page in chat. The page reports the selection, so its keys stay
+ * the page's own: no shortcut here. Once the card is open it stays, as chat's does, whatever the page selects. */
+export function PageCitationButton({ selection, source, onAdd, onDismiss }: {
+  selection: { text: string; point: Point } | null;
+  source: Omit<CitationSource, "start" | "end" | "prefix" | "suffix">;
+  onAdd: (citation: CitationAttachment) => void;
+  onDismiss: () => void;
+}) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [editing, setEditing] = useState<{ citation: CitationAttachment; point: Point } | null>(null);
+  const point = editing ? null : selection?.point;
+  useLayoutEffect(() => {
+    if (!point) return;
+    const update = () => { if (buttonRef.current) place(buttonRef.current, point); };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [point]);
+  if (editing) {
+    const done = () => { setEditing(null); onDismiss(); focusComposer(); };
+    return <CitationEditor citation={editing.citation} point={editing.point} onCancel={done} onSave={(saved) => { onAdd(saved); done(); }} />;
+  }
+  if (!selection) return null;
+  const cite = () => {
+    const selector = createCitationTextSelector(selection.text, 0, selection.text.length);
+    if (selector) setEditing({ citation: citationAttachment(source, selector), point: selection.point });
+  };
+  return <CiteButton buttonRef={buttonRef} point={selection.point} tooLong={selection.text.length > CITATION_MAX_QUOTE_LENGTH} onCite={cite} onDismiss={onDismiss} />;
 }
 
 export function CitationBadge({

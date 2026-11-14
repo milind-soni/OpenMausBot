@@ -9,6 +9,9 @@
 //     room: boolean,                    // shown in a room: send and setContext resolve and do nothing
 //   }
 //
+// Outside a room it also reports the person's text selection (mausbot/notifications/selection), so the host can
+// offer to cite it in the chat's composer.
+//
 // A page pasted from an SDK build runs its own App beside this one: the helper's request ids are strings
 // ("mausbot:1"), never the SDK's numeric ones, and it answers no host request but teardown, so it never
 // races the SDK's answer.
@@ -24,6 +27,11 @@ export const APP_THEME_STYLE = [
   "--font-sans:system-ui,-apple-system,\"Segoe UI\",Roboto,\"Helvetica Neue\",Arial,sans-serif;",
   "--font-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}",
 ].join("");
+
+/** The page's text selection, read by the desktop host beside the bridge: { text, left, bottom }, or { text: "" } once gone. */
+export const APP_SELECTION_METHOD = "mausbot/notifications/selection";
+/** One past the longest quote a chat citation holds, so the host can say a longer selection is too long. */
+export const APP_SELECTION_CHARS = 12_001;
 
 /** Plain ES2017 with no imports: it runs as written in every browser engine the apps ship in. */
 const helperSource = (room: boolean) => `(function () {
@@ -148,6 +156,30 @@ const helperSource = (room: boolean) => `(function () {
     window.addEventListener("load", report);
     report();
   };
+  // What the person selects, and where it ends, so the host can offer to cite it as chat does. Not in a room.
+  var watchSelection = function () {
+    if (room || typeof document.getSelection !== "function") return;
+    var shown = false;
+    var timer = null;
+    var report = function () {
+      timer = null;
+      var selection = document.getSelection();
+      var text = selection && selection.rangeCount && !selection.isCollapsed ? String(selection) : "";
+      if (!text.trim()) {
+        if (shown) notify("${APP_SELECTION_METHOD}", { text: "" });
+        shown = false;
+        return;
+      }
+      var range = selection.getRangeAt(selection.rangeCount - 1);
+      var rects = range.getClientRects();
+      var end = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect();
+      shown = true;
+      notify("${APP_SELECTION_METHOD}", { text: text.slice(0, ${APP_SELECTION_CHARS}), left: end.left, bottom: end.bottom });
+    };
+    document.addEventListener("selectionchange", function () {
+      if (timer === null) timer = setTimeout(report, 100);
+    });
+  };
   var ready = request("ui/initialize", {
     appInfo: { name: "mausbot-page", version: "1.0.0" },
     appCapabilities: {},
@@ -156,6 +188,7 @@ const helperSource = (room: boolean) => `(function () {
     apply(result && result.hostContext);
     notify("ui/notifications/initialized");
     watchSize();
+    watchSelection();
   });
   var checked = function (result) {
     if (result && result.isError) throw new Error("The host could not do that.");
