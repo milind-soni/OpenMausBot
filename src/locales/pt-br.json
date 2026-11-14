@@ -1955,7 +1955,7 @@
   "teamShare.skip.skill_changed": "foi alterada depois da revisão",
   "teamShare.skip.skill_conflict": "dois bots têm habilidades diferentes com este nome",
   "teamShare.skip.bot_skill_limit": "um bot pode compartilhar no máximo 30 habilidades (as ligadas vêm primeiro)",
-  "teamShare.skip.team_skill_limit": "uma equipe pode compartilhar no máximo 60 habilidades",
+  "teamShare.skip.team_skill_limit": "uma equipe pode compartilhar no máximo 120 habilidades",
   "teamShare.field.soul": "instruções permanentes",
   "teamShare.field.notes": "notas iniciais",
   "teamShare.field.brief": "instruções compartilhadas",

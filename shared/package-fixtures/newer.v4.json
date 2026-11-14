@@ -1,6 +1,6 @@
 {
   "format": "openmaus.package",
-  "version": 3,
+  "version": 4,
   "package": {
     "id": "from-the-future",
     "release": "9.0.0",

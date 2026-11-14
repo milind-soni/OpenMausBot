@@ -165,12 +165,19 @@ Create the team.`);
     });
   });
 
+  it("previews a version 3 file (a team sharing more than 60 skills) like a version 2 one", () => {
+    const { manifest: _v2File, ...v2 } = teamImportPreview(fixture("full-team.v2.json"));
+    const { manifest: v3File, ...v3 } = teamImportPreview({ ...fixture("full-team.v2.json"), version: 3 });
+    expect(v3).toEqual(v2);
+    expect(v3File).toMatchObject({ version: 3 });
+  });
+
   it("shows the newer-file message from the catalog, word for word", () => {
     expect(en["teamImport.newer"]).toBe(NEWER_PACKAGE_MESSAGE);
   });
 
   it("names the problem in a shared team before anything is added", () => {
-    expect(() => teamImportPreview(fixture("newer.v3.json"))).toThrow(NEWER_PACKAGE_MESSAGE);
+    expect(() => teamImportPreview(fixture("newer.v4.json"))).toThrow(NEWER_PACKAGE_MESSAGE);
     const skillsOnly = fixture("library-only.v2.json");
     delete skillsOnly.package.presets;
     expect(() => teamImportPreview(skillsOnly)).toThrow("This file has no bots or preset bots to add.");

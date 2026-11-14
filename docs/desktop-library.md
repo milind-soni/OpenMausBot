@@ -34,7 +34,7 @@ update controls: the catalog always names the newest release.
    the last good catalog stays. A malformed entry is dropped on its own;
    unknown fields are ignored.
 2. For every entry that is not **Off**, has a release, and whose format this
-   app reads (version 2 or lower), and whose file is missing:
+   app reads (version 3 or lower), and whose file is missing:
    `GET /api/desktop/library/blobs/<sha256>` (at most 4 MiB, 60 s, and never
    more than the catalog's `sizeBytes`). The bytes must hash to the catalog's
    `sha256`, or they are never written. A failure leaves that package
