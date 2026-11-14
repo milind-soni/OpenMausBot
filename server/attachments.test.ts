@@ -557,7 +557,24 @@ describe("shared files", () => {
     expect(() => sanitizeSharedFileName("..\\..\\secret.txt", "text/plain")).toThrow(/filename, not a path/);
     expect(() => sanitizeSharedFileName("..%2F..%2Fsecret.txt", "text/plain")).toThrow(/filename, not a path/);
     expect(sanitizeSharedFileName("logs.tar.gz", "application/gzip")).toBe("logs.tar.gz");
-    expect(() => sanitizeSharedFileName("notes.txt", "application/x-msdownload")).toThrow(/supported document/);
+    expect(sanitizeSharedFileName("Setup Tool.EXE", "application/x-msdownload")).toBe("Setup Tool.exe");
+    expect(sanitizeSharedFileName("Makefile", "")).toBe("Makefile");
+    expect(sanitizeSharedFileName("odd.name~", "application/octet-stream")).toBe("odd.name~");
+  });
+
+  it.each([
+    ["script.py", "text/x-python", "script.py"],
+    ["Setup.exe", "application/x-msdownload", "Setup.exe"],
+    ["page.html", "text/html", "page.html"],
+    ["logo.svg", "image/svg+xml", "logo.svg"],
+    ["Makefile", "", "Makefile"],
+    ["photo.png", "application/octet-stream", "photo.png"],
+  ])("keeps %s (%s) as an inert download", async (original, mime, name) => {
+    const saved = await saveFile((async function* () { yield Buffer.from("<b>x</b>"); })(), original, mime, { uploadId: UPLOAD_A });
+    expect(saved).toMatchObject({ name, mime: "application/octet-stream", bytes: 8 });
+    expect(saved.path).toBe(join(ATTACHMENTS_DIR, `${UPLOAD_A}.bin`));
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([`${UPLOAD_A}.bin`]);
+    await expect(saveFile((async function* () { yield Buffer.from("x"); })(), "../evil.sh", mime)).rejects.toThrow(/filename, not a path/);
   });
 
   it("streams a file under a generated name with private permissions", async () => {

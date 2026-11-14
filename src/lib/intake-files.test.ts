@@ -181,6 +181,23 @@ describe("intakeFiles", () => {
     expect(out.notice).toBe("Unable to attach run.exe. Choose a supported image, document, or audio file.");
   });
 
+  it("uploads a browser file of any other type as a plain download", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      path: "/private/attachments/id.bin", name: "Setup.exe", bytes: 2,
+    }), { status: 201, headers: { "content-type": "application/json" } }));
+    try {
+      const out = await intakeFiles([new File(["MZ"], "Setup.exe", { type: "application/x-msdownload" })], {
+        allowImages: true, getPath: () => "", uploadImage: async () => null,
+      });
+      expect(fetch.mock.calls[0]![1]).toMatchObject({ headers: { "content-type": "application/x-msdownload" } });
+      expect(out.attachments).toEqual([expect.objectContaining({ kind: "file", name: "Setup.exe", path: "/private/attachments/id.bin" })]);
+      expect(out.problems).toEqual([]);
+      expect(out.notice).toBeNull();
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
   it("counts the images already in the draft, and names pasted images past the slots left", () => {
     const draft = [{ kind: "image" }, { kind: "file" }, { kind: "image" }] as unknown as Attachment[];
     expect(imageSlotsLeft(draft)).toBe(TURN_IMAGE_MAX_COUNT - 2);
