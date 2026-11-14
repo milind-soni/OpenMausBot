@@ -24,7 +24,7 @@ export function Switch({
       type="button"
       role="switch"
       aria-checked={checked}
-      data-switch=""
+      data-switch="" data-look="switch"
       className={cn(
         "relative cursor-pointer h-6 w-11 shrink-0 rounded-full transition-colors enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none",
         checked ? "bg-accent" : "bg-control",

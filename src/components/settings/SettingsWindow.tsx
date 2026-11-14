@@ -154,7 +154,7 @@ export function SettingsWindow() {
       <SettingsShellContext.Provider value={shell}>
         <div className="glass-popup-frame" data-settings-sheet data-settings-look="simple" style={{ ...glassPopupFrameStyle(), ["--settings-narrow-top" as string]: `${glassPopupTopInset() === GLASS_POPUP_GUTTER ? 12 : glassPopupTopInset()}px` }} onMouseDown={(event) => event.target === event.currentTarget && close()}>
           <div aria-hidden="true" className="glass-scrim pointer-events-none absolute inset-0" />
-          <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="app-settings-title" tabIndex={-1} style={{ outline: "none" }}
+          <div ref={dialogRef} role="dialog" data-look="settings" aria-modal="true" aria-labelledby="app-settings-title" tabIndex={-1} style={{ outline: "none" }}
             data-settings-page-open={target.page} data-settings-advanced={ctx.advanced ? "" : undefined}
             className="glass-surface glass-popup animate-pop-in relative flex flex-col overflow-hidden text-ink">
             <span id="app-settings-title" className="sr-only">{t("settings.title")}</span>

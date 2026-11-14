@@ -459,7 +459,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     const nav = navRef.current;
     setMenu({ place, top: nav ? Math.max(8, Math.min(topWithin(from, nav) - 6, nav.clientHeight - 200)) : 8 });
   };
-  return <nav ref={navRef} aria-label={t("rail.label")} data-places-rail style={drag}
+  return <nav ref={navRef} aria-label={t("rail.label")} data-places-rail data-look="rail" style={drag}
     className={cn("relative w-9 shrink-0 flex-col items-center", chrome ? "flex h-full" : "hidden md:flex",
       framed ? "bg-frame [--rail-surface:var(--color-frame)]" : cn("border-r bg-panel [--rail-surface:var(--color-panel)]", calm ? "border-r-[0.5px] border-edge" : "border-hairline/50"))}>
     <div aria-hidden="true" className={cn(above, "shrink-0")} />

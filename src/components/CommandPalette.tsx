@@ -156,7 +156,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
       onKeyDown={onKeyDown}
     >
       <div
-        role="dialog"
+        role="dialog" data-look="dialog"
         aria-modal="true"
         aria-label={t("palette.label")}
         className="popover-surface flex max-h-[min(480px,70vh)] w-full max-w-[560px] flex-col overflow-hidden rounded-[var(--radius-menu)] border border-hairline/50 bg-menu shadow-2xl shadow-black/60"

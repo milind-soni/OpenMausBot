@@ -184,7 +184,7 @@ function GradientAvatarComponent(
 
   return (
     <span
-      className="inline-flex shrink-0"
+      data-look="avatar" className="inline-flex shrink-0"
       onPointerMove={trackPointer && animated ? onPointerMove : undefined}
       onPointerLeave={trackPointer && animated ? onPointerLeave : undefined}
     >
@@ -279,7 +279,7 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
   const origin = `${focusX * 100}% ${focusY * 100}%`;
   return (
     <span
-      className="relative block shrink-0 overflow-hidden bg-raised"
+      data-look="avatar" className="relative block shrink-0 overflow-hidden bg-raised"
       style={{ width: size, height: size, borderRadius: radius }}
     >
       <img
