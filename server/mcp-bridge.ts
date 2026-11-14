@@ -148,9 +148,9 @@ export function createLineSplitter(onLine: (line: string) => void): {
     flush() {
       pending.push(decoder.end());
       const line = pending.join("");
-      if (line) onLine(line);
       pending = [];
       scanned = 0;
+      if (line) onLine(line);
     },
   };
 }

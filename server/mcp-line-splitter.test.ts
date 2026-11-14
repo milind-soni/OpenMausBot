@@ -73,4 +73,31 @@ describe("MCP line framing", () => {
     splitter.flush();
     expect(lines).toEqual(["prefix �", "next"]);
   });
+
+  it("preserves data pushed while delivering a flushed tail", () => {
+    const lines: string[] = [];
+    const splitter = createLineSplitter((line) => {
+      lines.push(line);
+      if (line === "tail") splitter.push("next\nrest");
+    });
+    splitter.push("tail");
+    splitter.flush();
+    expect(lines).toEqual(["tail", "next"]);
+    splitter.flush();
+    expect(lines).toEqual(["tail", "next", "rest"]);
+  });
+
+  it("does not retain a flushed tail when its receiver throws", () => {
+    const lines: string[] = [];
+    const failure = new Error("receiver stopped");
+    const splitter = createLineSplitter((line) => {
+      lines.push(line);
+      if (line === "tail") throw failure;
+    });
+    splitter.push("tail");
+    expect(() => splitter.flush()).toThrow(failure);
+    splitter.push("next\n");
+    splitter.flush();
+    expect(lines).toEqual(["tail", "next"]);
+  });
 });
