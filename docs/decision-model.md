@@ -2,19 +2,20 @@
 
 OpenMausBot can use a fast decision model to pick things for your bots. It
 answers in a few hundred milliseconds for a fraction of a cent. It never does
-the work: the chosen bot still runs its own turn on its own engine. Four
+the work: the chosen bot still runs its own turn on its own engine. Five
 providers are supported: Cloudflare's Clef on
 [Workers AI](https://developers.cloudflare.com/workers-ai/) (free tier),
 TypeSafe's [Jev](https://typesafe.ai) (the default), a model of your choice
-on [OpenRouter](https://openrouter.ai), and a custom endpoint of your own that
+on [OpenRouter](https://openrouter.ai), Google's
+[Gemini Decision 1](https://aistudio.google.com/docs/decisions-api), and a custom endpoint of your own that
 speaks System One or OpenAI Decisions.
 
 Everything is in **Settings › AI › Routing and extraction** (Advanced mode): the
-Cloudflare Workers AI card, the Jev/OpenRouter/Custom endpoint picker under
+Cloudflare Workers AI card, the Jev/Gemini/OpenRouter/Custom endpoint picker under
 **Another key**, for OpenRouter the model, for a custom endpoint its base URL,
 model ID and protocol, one master switch, each key with **Save** and
 **Test**, and a switch for room routing (**Who answers in rooms**). Each
-provider keeps its own key. Picking **Custom endpoint** makes it the only one
+provider keeps its own key. Picking **Gemini** or **Custom endpoint** makes it the only one
 that decides; picking Jev or OpenRouter does not choose whose key decides: the
 fixed order below does. To use Workers AI or OpenRouter while a
 Jev key is saved, clear the Jev key (an `OMB_JEV_API_KEY` in the environment
@@ -28,6 +29,37 @@ until another provider is picked. Otherwise, with several keys saved, one fixed
 order picks whose key decides: your own Jev key, then your own Workers AI key,
 then Cloud's included decisions, then OpenRouter. A custom endpoint's key is
 not part of that order.
+
+Gemini is an explicit choice: selecting **Gemini Decision 1** uses Gemini
+instead of that fixed order. If its key is missing or a request fails, the
+caller uses its normal fallback; another provider's key is not tried.
+
+## Gemini Decision 1
+
+Select **Gemini Decision 1** under **Another key**. In **Key to use**, choose
+**Enter a separate key**, or reuse an existing **Gemini speech key** or
+**Gemini image key**. Saved sources appear only when a key is available.
+Changing the source tests that key with Google's Decisions API before saving.
+A failed test leaves the previous source selected.
+
+A separate key comes from [Google AI Studio](https://aistudio.google.com/apikey).
+Paste it and choose **Save**; **Test** checks the saved key, and **Clear**
+removes only the separate decision key. Reusing a key does not copy it:
+replacing the speech or image key updates decisions too. Removing it leaves
+the source selected but unavailable until a key is restored or another source
+is chosen. **Manage this key** opens its settings.
+
+Gemini handles choice, score and yes/no decisions with `gemini-decision-1`.
+It does not provide the extraction helper. Existing extraction providers keep
+their own configuration.
+
+For server configuration, use `decider.provider: "gemini"` and
+`decider.geminiKeySource: "own"` (the default), `"speech"`, or `"images"`.
+The separate key is `decider.geminiKey`, or `OMB_GEMINI_DECIDER_KEY` in the
+environment. Speech references `tts.geminiKey` / `OMB_GEMINI_API_KEY`; images
+reference `imageGen.geminiKey` / `OMB_GEMINI_IMAGE_KEY`. Keys remain write-only
+and are stored encrypted by the desktop app. Requests go only to Google's
+Decisions API, with redirects refused.
 
 ## Cloudflare Workers AI (free tier)
 

@@ -337,6 +337,10 @@ desktop routing, cancellation, and computer authority cleanup.
 
 ## Evidence
 
+The [Gemini decisions fixture](gemini-decisions.md) checks separate and reused
+keys, typed decisions, unavailable sources and encrypted-storage handling
+through isolated HTTP routes with a synthetic Google transport.
+
 The [Gemini speech fixture](gemini-speech.md) checks write-only credentials,
 voice selection and WAV synthesis against an offline provider in an isolated
 server, with manual steps for real Google access and playback.

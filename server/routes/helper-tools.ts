@@ -51,7 +51,7 @@ const FAILURE: Partial<Record<DeciderFailure, string>> = {
   misconfigured: "That request is outside what the helper model takes.",
   too_large: "That is too large for the helper model. Send less text or a smaller image; trying the same again will not work.",
 };
-const BY: Record<DeciderProvider, string> = { jev: "Jev", workersai: "Cloudflare Workers AI", openrouter: "OpenRouter", custom: "your decision endpoint" };
+const BY: Record<DeciderProvider, string> = { gemini: "Gemini Decision 1", jev: "Jev", workersai: "Cloudflare Workers AI", openrouter: "OpenRouter", custom: "your decision endpoint" };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const text = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value : null);

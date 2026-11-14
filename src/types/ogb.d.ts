@@ -455,7 +455,7 @@ const __APP_VERSION__: string;
       credentialStore?: { unreadable(): Promise<boolean>; reset(): Promise<"reset" | "cancelled" | "quitting" | "failed" | "readable"> };
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "openaiApiKey" | "anthropicApiKey" | "openrouterApiKey" | "mistralApiKey" | "cerebrasApiKey" | "groqApiKey" | "greenferenceApiKey" | "modelgoApiKey" | "metaApiKey" | "deepseekApiKey" | "openaiCompatApiKey" | "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "customDeciderKey" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
+        name: "openaiApiKey" | "anthropicApiKey" | "openrouterApiKey" | "mistralApiKey" | "cerebrasApiKey" | "groqApiKey" | "greenferenceApiKey" | "modelgoApiKey" | "metaApiKey" | "deepseekApiKey" | "openaiCompatApiKey" | "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "geminiDeciderKey" | "openrouterDeciderKey" | "workersAiToken" | "customDeciderKey" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
         value: string,
         options?: { everyClaudeBot?: false },
       ): Promise<ConfigStatus>;

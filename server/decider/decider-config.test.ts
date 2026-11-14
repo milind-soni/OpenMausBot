@@ -7,18 +7,34 @@ import {
   changedInstanceIds, DATA_DIR, instanceConfigs, loadConfig, parseConfigPatch, parseStoredConfig, saveConfig, stripWorkspaceCredentialEnv, syncCredentialEnv,
 } from "../config.ts";
 import { createDecider, deciderSavePatch, describeDecider } from "./index.ts";
+import { deciderConfigWithEnv, deciderCredentialEnv } from "./config.ts";
 
 const KEY = "tsk_config_secret_0123456789";
 const OR_KEY = "sk-or-v1-config-secret-0123456789";
 
 describe("decider config", () => {
+  it("overlays only defined environment credentials and keeps explicit empty values", () => {
+    const saved = { key: "jev-saved", geminiKey: "gemini-saved", customKey: "custom-saved", openrouterKey: "router-saved", workersAiToken: "workers-saved", enabled: true };
+    const next = deciderConfigWithEnv(saved, { OMB_JEV_API_KEY: "jev-env", OMB_GEMINI_DECIDER_KEY: "", OMB_CUSTOM_DECIDER_KEY: "custom-env", OMB_WORKERS_AI_TOKEN: "workers-env" });
+    expect(next).toEqual({ ...saved, key: "jev-env", geminiKey: "", customKey: "custom-env", workersAiToken: "workers-env" });
+    expect(saved.geminiKey).toBe("gemini-saved");
+    expect(deciderConfigWithEnv(undefined, {})).toEqual({});
+    expect(deciderCredentialEnv(next)).toEqual([
+      ["jev-env", "OMB_JEV_API_KEY"], ["", "OMB_GEMINI_DECIDER_KEY"],
+      ["custom-env", "OMB_CUSTOM_DECIDER_KEY"],
+      ["router-saved", "OMB_OPENROUTER_DECIDER_KEY"], ["workers-env", "OMB_WORKERS_AI_TOKEN"],
+    ]);
+    expect(deciderCredentialEnv(undefined).every(([value]) => value === undefined)).toBe(true);
+  });
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
     mkdirSync(DATA_DIR, { recursive: true });
     delete process.env.OMB_JEV_API_KEY;
+    delete process.env.OMB_GEMINI_DECIDER_KEY;
     delete process.env.OMB_OPENROUTER_DECIDER_KEY;
   });
   afterEach(() => {
+    delete process.env.OMB_GEMINI_DECIDER_KEY;
     delete process.env.OMB_JEV_API_KEY;
     delete process.env.OMB_OPENROUTER_DECIDER_KEY;
   });
@@ -26,6 +42,23 @@ describe("decider config", () => {
   it("saving decision-model settings never reloads the engine fleet", () => {
     const decider = { enabled: true, key: KEY, jobs: { roomRouting: false } };
     expect(changedInstanceIds(instanceConfigs({}), instanceConfigs({ decider }))).toEqual([]);
+  });
+
+  it("loads, persists, strips and clears the Gemini decision credential separately", () => {
+    const key = "gemini-decision-private-1234";
+    expect(parseConfigPatch({ decider: { provider: "gemini", geminiKeySource: "speech" } }).decider).toEqual({ provider: "gemini", geminiKeySource: "speech" });
+    expect(() => parseConfigPatch({ decider: { geminiKeySource: "automatic" } })).toThrow();
+    saveConfig({ decider: { provider: "gemini", geminiKey: key, enabled: true } });
+    expect(loadConfig().decider?.geminiKey).toBe(key);
+    syncCredentialEnv({ decider: { geminiKey: "replacement" } });
+    expect(loadConfig().decider?.geminiKey).toBe("replacement");
+    const childEnv = { OMB_GEMINI_DECIDER_KEY: key, PATH: "path" };
+    stripWorkspaceCredentialEnv(childEnv);
+    expect(childEnv).toEqual({ PATH: "path" });
+    syncCredentialEnv({ decider: { geminiKey: "" } });
+    expect(process.env.OMB_GEMINI_DECIDER_KEY).toBeUndefined();
+    saveConfig({ decider: { geminiKey: "" } });
+    expect(describeDecider(loadConfig())).toMatchObject({ provider: "gemini", configured: false });
   });
 
   it("engines never inherit the key, nor Cloud Pro's included token", () => {

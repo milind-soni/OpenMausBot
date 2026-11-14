@@ -30,6 +30,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import { parseConfigPatchForPerson } from "../decider/config-errors.ts";
 import { TEAM_PERSONAL_HINTS } from "../../shared/cloud-hints.ts";
 import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKeyUsable, type Decider } from "../decider/index.ts";
+import { geminiAccount } from "../decider/accounts.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import { forgetKey } from "../key-rejections.ts";
@@ -186,7 +187,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       }
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
       if (patch.decider) {
-        const planned = deciderSavePatch(patch.decider, cfg.decider, { included: deciderIncludedHere(), shared: deciderSharedKeyUsable(cfg) });
+        const gemini = geminiAccount({ ...cfg, decider: { ...cfg.decider, ...patch.decider }, tts: { ...cfg.tts, ...patch.tts }, imageGen: { ...cfg.imageGen, geminiKey: patch.imageGen?.geminiKey ?? cfg.imageGen?.geminiKey } });
+        const planned = deciderSavePatch(patch.decider, cfg.decider, { included: deciderIncludedHere(), shared: deciderSharedKeyUsable(cfg), gemini: Boolean(gemini) });
         if (!planned.ok) return json(res, 400, refusalBody(planned));
         patch.decider = planned.patch;
       }
@@ -488,6 +490,14 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           return json(res, 400, { ...userError(DECIDER_KEY_ERROR[deciderKey.provider]), code: "decider_rejected" });
         }
       }
+      if (patch.decider?.geminiKeySource !== undefined) {
+        const account = geminiAccount({ ...cfg, decider: { ...cfg.decider, ...patch.decider }, tts: { ...cfg.tts, ...patch.tts }, imageGen: { ...cfg.imageGen, geminiKey: patch.imageGen?.geminiKey ?? cfg.imageGen?.geminiKey } });
+        if (!account && patch.decider.geminiKeySource !== "own") return json(res, 400, userError("serverError.decider.geminiSourceMissing"));
+        if (account) {
+          const check = await decider.testKey({ provider: "gemini", key: account.token });
+          if (!check.ok) return json(res, 400, userError(check.reason === "rejected" ? "serverError.decider.geminiRejected" : "serverError.decider.geminiSourceFailed"));
+        }
+      }
       if (patch.browserProfiles !== undefined) {
         // Revalidated: the awaits above let a turn claim a profile. No awaits from here through the save.
         const retained = new Set(patch.browserProfiles.map((profile) => profile.id));
@@ -571,6 +581,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.tts?.fishKey !== undefined) persisted.tts.fishKey = "";
           if (persisted.tts?.geminiKey !== undefined) persisted.tts.geminiKey = "";
           if (persisted.decider?.key !== undefined) persisted.decider.key = "";
+          if (persisted.decider?.geminiKey !== undefined) persisted.decider.geminiKey = "";
           if (persisted.decider?.openrouterKey !== undefined) persisted.decider.openrouterKey = "";
           if (persisted.decider?.workersAiToken !== undefined) persisted.decider.workersAiToken = "";
           if (persisted.decider?.customKey !== undefined) persisted.decider.customKey = "";

@@ -176,6 +176,7 @@ const closesOnEscape = (event: ReactKeyboardEvent) =>
 
 export function SidebarPopoverMenu({
   items,
+  disabled = false,
   ariaLabel,
   openOnHover = false,
   placement = "above",
@@ -193,6 +194,7 @@ export function SidebarPopoverMenu({
   placement?: "above" | "below";
   align?: "start" | "end";
   items: SidebarMenuItem[];
+  disabled?: boolean;
   ariaLabel: string;
   openOnHover?: boolean;
   triggerClassName?: string;
@@ -450,6 +452,7 @@ export function SidebarPopoverMenu({
         ref={triggerRef}
         type="button"
         aria-haspopup="menu"
+        disabled={disabled}
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         aria-label={triggerLabel ?? ariaLabel}

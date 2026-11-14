@@ -26,8 +26,10 @@ export const CUSTOM_MODEL_ID_MAX = 128;
  * log's retention. */
 export const deciderConfigSchema = z.object({
   enabled: z.boolean().optional(),
-  provider: z.enum(["jev", "openrouter", "custom", "off"]).optional(),
+  provider: z.enum(["jev", "gemini", "openrouter", "custom", "off"]).optional(),
   key: optionalText,
+  geminiKey: optionalText,
+  geminiKeySource: z.enum(["own", "speech", "images"]).optional(),
   openrouterKey: optionalText,
   customKey: optionalText,
   customBaseUrl: z
@@ -71,8 +73,12 @@ export const deciderConfigSchema = z.object({
 /** The decision model; see `deciderConfigSchema`. */
 export interface DeciderConfig {
   enabled?: boolean;
-  provider?: "jev" | "openrouter" | "custom" | "off";
+  provider?: "jev" | "gemini" | "openrouter" | "custom" | "off";
   key?: string;
+  /** Write-only Google AI Studio key for Gemini Decision 1. */
+  geminiKey?: string;
+  /** Defaults to `own`; speech and image sources reference their saved key without copying it. */
+  geminiKeySource?: "own" | "speech" | "images";
   customKey?: string;
   /** The gateway's root, e.g. `https://gateway.example.com/v1`: requests go to `{customBaseUrl}/systemone` or `/decisions`. */
   customBaseUrl?: string;
@@ -90,4 +96,22 @@ export interface DeciderConfig {
   /** An operator setting with no UI, like `baseUrl`: Workers AI's REST root, `/client/v4` included. */
   workersAiBaseUrl?: string;
   jobs?: { roomRouting?: boolean; inboxTriage?: boolean };
+}
+
+const CREDENTIAL_ENV = [
+  ["key", "OMB_JEV_API_KEY"],
+  ["geminiKey", "OMB_GEMINI_DECIDER_KEY"],
+  ["customKey", "OMB_CUSTOM_DECIDER_KEY"],
+  ["openrouterKey", "OMB_OPENROUTER_DECIDER_KEY"],
+  ["workersAiToken", "OMB_WORKERS_AI_TOKEN"],
+] as const;
+
+export function deciderConfigWithEnv(config: DeciderConfig | undefined, env: NodeJS.ProcessEnv = process.env): DeciderConfig {
+  const next = { ...config };
+  for (const [field, name] of CREDENTIAL_ENV) if (env[name] !== undefined) next[field] = env[name];
+  return next;
+}
+
+export function deciderCredentialEnv(config: DeciderConfig | undefined): Array<[string | undefined, string]> {
+  return CREDENTIAL_ENV.map(([field, name]) => [config?.[field], name]);
 }

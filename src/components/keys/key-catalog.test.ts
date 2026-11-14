@@ -108,7 +108,7 @@ describe("searching the keys", () => {
     expect(found("voice")).toEqual(expect.arrayContaining(["liveCalls", "liveKey", "elevenlabs", "fishAudio"]));
     expect(found("openai")).toEqual(expect.arrayContaining(["openai", "liveCalls", "liveKey", "imageOpenai"]));
     expect(found("gmail")).toEqual(["composio"]);
-    expect(found("gemini")).toEqual(["openaiCompat", "geminiTts", "imageGemini"]);
+    expect(found("gemini")).toEqual(["openaiCompat", "geminiTts", "geminiDecider", "imageGemini"]);
     expect(found("no such key anywhere")).toEqual([]);
   });
 

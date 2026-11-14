@@ -1,5 +1,5 @@
 /** workersai: Cloudflare's Clef on Workers AI, Jev-compatible. custom: a gateway the person points at. */
-export type DeciderProvider = "jev" | "workersai" | "openrouter" | "custom";
+export type DeciderProvider = "jev" | "gemini" | "workersai" | "openrouter" | "custom";
 
 /** chat: a chat model asked for strict JSON; decisions: OpenRouter's Decisions API (output modality `decisions`). */
 export type OpenRouterApi = "chat" | "decisions";

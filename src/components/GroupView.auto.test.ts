@@ -60,6 +60,9 @@ describe("room responder selector", () => {
 });
 
 describe("routed-by line", () => {
+  it("names Gemini when it picked the speaker", () => {
+    expect(renderToStaticMarkup(createElement(RoutedByLine, { routedBy: { provider: "gemini", probability: 0.87 } }))).toContain("Picked by Gemini · 87%");
+  });
   it("says Jev picked the speaker, with how sure it was", () => {
     expect(renderToStaticMarkup(createElement(RoutedByLine, { routedBy: { provider: "jev", probability: 0.94 } }))).toContain("Picked by Jev · 94%");
   });

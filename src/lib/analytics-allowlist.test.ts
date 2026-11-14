@@ -78,7 +78,7 @@ describe("app, role and key lists", () => {
       openai: "openai", anthropic: "anthropic", xai: "xai", openrouter: "openrouter", mistral: "mistral", cerebras: "cerebras", groq: "groq",
       greenference: "greenference", modelgo: "modelgo", meta: "meta", deepseek: "deepseek", opencodeGo: "opencode_go", openaiCompat: "openai_compat", liveKey: "openai_live",
       elevenlabs: "elevenlabs", fishAudio: "fish_audio", geminiTts: "gemini_tts", box: "boat", composio: "composio", treg: "treg", jev: "jev",
-      openrouterHelper: "openrouter_decider", imageOpenai: "openai_image", postiz: "postiz",
+      geminiDecider: "gemini_decider", openrouterHelper: "openrouter_decider", imageOpenai: "openai_image", postiz: "postiz",
     });
     for (const provider of Object.values(rows)) expect(KEY_PROVIDER).toContain(provider);
   });
