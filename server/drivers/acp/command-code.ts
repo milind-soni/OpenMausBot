@@ -97,6 +97,9 @@ const SUPPORT: AcpSupport = {
   resolveModels: (env, config) => resolveCommandCodeModels(env, config),
   // Every fleet has this instance: the catalog comes from the startup cache and refreshes when the engine is picked.
   resolveModelsOnCreate: false,
+  // command-code 1.89 acknowledges session/load in a live process but keeps the MCP connections it opened first,
+  // so a rotated app bearer is answered "unauthorized" on every agents tool until the process is replaced.
+  restartOnMcpChange: true,
   selectModel: { configId: "model", agentDefault: AGENT_DEFAULT.id },
   modelVariants: true,
   // The OS keeps no login the CLI could be walked through over ACP; `cmd login` opens a browser.
