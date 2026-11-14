@@ -50,6 +50,9 @@ describe("routineRunNeedsReview", () => {
       expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(reply, 2_000) })).toBe(routineRunNeedsReview({ status: "completed" }, reply));
       expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(reply, 2_000) })).toBe(true);
     }
+    const bare = `${"Long report. ".repeat(300)}\nNEEDS INPUT:\ndefault: ${"wait ".repeat(500)}`;
+    expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(bare, 2_000) })).toBe(routineRunNeedsReview({ status: "completed" }, bare));
+    expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(bare, 2_000) })).toBe(true);
     expect(routineRunNeedsReview({ status: "cancelled" })).toBe(false);
   });
 });

@@ -80,4 +80,10 @@ describe("clipRunOutput", () => {
     expect(cut.startsWith("NEEDS INPUT: why")).toBe(true);
     expect(cut.endsWith("…")).toBe(true);
   });
+
+  it("keeps the default line of a bare NEEDS INPUT line too long to fit", () => {
+    const cut = clipRunOutput(`${long}\nNEEDS INPUT:\ndefault: ${"wait ".repeat(500)}`, 2_000);
+    expect(cut.length).toBe(2_000);
+    expect(cut.startsWith("NEEDS INPUT:\ndefault: wait")).toBe(true);
+  });
 });

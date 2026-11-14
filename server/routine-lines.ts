@@ -103,6 +103,8 @@ export function clipRunOutput(text: string, max: number): string {
   const tail = lines.slice(at).join("\n").trim();
   if (tail.length > max) {
     const question = lines[at]!.trim();
+    // A bare NEEDS INPUT: line asks through its default: line, so that line is kept (cut) with it.
+    if (!question.replace(CLOSING_QUESTION, "").trim()) return `${tail.slice(0, max - 1)}…`;
     return question.length <= max ? question : `${question.slice(0, max - 1)}…`;
   }
   const room = max - tail.length - 3;
