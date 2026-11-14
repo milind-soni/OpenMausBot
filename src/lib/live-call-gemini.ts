@@ -48,6 +48,7 @@ type ServerMessage = {
     turnComplete?: boolean;
   };
   toolCall?: { functionCalls?: ToolCall[] };
+  toolCallCancellation?: { ids?: string[] };
   goAway?: unknown;
   sessionResumptionUpdate?: { newHandle?: string; resumable?: boolean };
 };
@@ -104,6 +105,8 @@ class GeminiLiveSession implements FishAgentSession {
   private heldCalls: ToolCall[] = [];
   private heldQuiet: ReturnType<typeof setTimeout> | null = null;
   private heldLimit: ReturnType<typeof setTimeout> | null = null;
+  /** Calls Gemini cancelled, e.g. when the person talked over the agent: they do not run, or their answer is not sent. */
+  private cancelledCalls = new Set<string>();
 
   constructor(options: FishSessionOptions<LiveGeminiSession>, deps: GeminiSessionDeps) {
     this.options = options;
@@ -231,7 +234,7 @@ class GeminiLiveSession implements FishAgentSession {
       }
       for (const part of content.modelTurn?.parts ?? []) {
         if (!part.inlineData?.data || !part.inlineData.mimeType?.startsWith("audio/")) continue;
-        this.finishHeard();
+        this.finishHeardUnlessHeld();
         this.turnDone = false;
         this.audio?.play(decodeBase64(part.inlineData.data));
         if (!this.speaking) {
@@ -241,7 +244,7 @@ class GeminiLiveSession implements FishAgentSession {
       }
       const said = content.outputTranscription?.text;
       if (said) {
-        this.finishHeard();
+        this.finishHeardUnlessHeld();
         this.said += said;
         this.options.callbacks.onAgentResponseDelta({ segmentId: `a${this.segment}`, text: this.said });
       }
@@ -253,12 +256,14 @@ class GeminiLiveSession implements FishAgentSession {
         this.playbackIdle();
       }
       if (content.turnComplete) {
-        this.finishHeard();
+        this.finishHeardUnlessHeld();
         this.heardThisTurn = false;
         this.turnDone = true;
         if (this.audio?.idle() !== false) this.playbackIdle();
       }
     }
+    const cancelled = message.toolCallCancellation?.ids ?? [];
+    if (cancelled.length) this.cancelCalls(cancelled);
     const calls = message.toolCall?.functionCalls ?? [];
     if (calls.length) this.onToolCalls(calls);
     if (message.goAway !== undefined) this.wentAway = true;
@@ -276,7 +281,12 @@ class GeminiLiveSession implements FishAgentSession {
     this.options.callbacks.onUserTranscript({ segmentId: `s${this.segment}`, text, final: true });
     this.segment += 1;
     this.heardThisTurn = true;
-    this.releaseCalls();
+  }
+
+  /** The agent answering ends what the person said, but not while a tool call waits for it: the person's words can still
+   * come after the agent's (Gemini sends the two in no fixed order), and the call goes with all of them. */
+  private finishHeardUnlessHeld(): void {
+    if (!this.heldCalls.length) this.finishHeard();
   }
 
   private playbackIdle(): void {
@@ -291,9 +301,17 @@ class GeminiLiveSession implements FishAgentSession {
     // while they are still coming.
     for (const call of calls) this.callsAfterHandle.add(call.id ?? "");
     this.heldCalls.push(...calls);
-    if (this.heard) this.releaseWhenQuiet();
-    else if (this.heardThisTurn) return this.releaseCalls();
+    if (this.heard || this.heardThisTurn) this.releaseWhenQuiet();
     this.heldLimit ??= setTimeout(() => this.releaseCalls(), HEARD_WAIT_MS);
+  }
+
+  private cancelCalls(ids: string[]): void {
+    for (const id of ids) {
+      this.cancelledCalls.add(id);
+      this.callsAfterHandle.delete(id);
+    }
+    this.heldCalls = this.heldCalls.filter((call) => !this.cancelledCalls.has(call.id ?? ""));
+    if (!this.heldCalls.length) this.clearHeldTimers();
   }
 
   private releaseWhenQuiet(): void {
@@ -326,6 +344,7 @@ class GeminiLiveSession implements FishAgentSession {
     const tool = this.options.clientTools[name];
     const answer = tool ? tool(call.args ?? {}, { callId: id }) : Promise.resolve(`There is no tool named ${name}.`);
     void answer.then((result) => {
+      if (this.cancelledCalls.has(id)) return;
       const text = String(result);
       this.post({ toolResponse: { functionResponses: [{ id, name, response: { result: text, scheduling: "WHEN_IDLE" } }] }, callId: id, text });
     }, () => undefined);

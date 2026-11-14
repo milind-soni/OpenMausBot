@@ -250,6 +250,60 @@ describe("a Gemini Live session", () => {
     }
   });
 
+  it("keeps a held call waiting for the rest of the words when the agent's audio comes between them", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = harness();
+      await t.connect();
+      const order: string[] = [];
+      t.callbacks.onUserTranscript.mockImplementation(({ final, text }: { final: boolean; text: string }) => { if (final) order.push(text); });
+      t.delegate.mockImplementation(async () => { order.push("delegate"); return "On it."; });
+      t.socket().receive({ toolCall: { functionCalls: [{ id: "fc_1", name: FISH_DELEGATE_TOOL, args: {} }] } });
+      t.socket().receive({ serverContent: { inputTranscription: { text: "book " } } });
+      t.socket().receive({ serverContent: { modelTurn: { parts: [{ inlineData: { mimeType: "audio/pcm", data: AUDIO } }] } } });
+      t.socket().receive({ serverContent: { outputTranscription: { text: "Sure." } } });
+      t.socket().receive({ serverContent: { inputTranscription: { text: "a table" } } });
+      expect(t.delegate).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(400);
+      expect(order).toEqual(["book a table", "delegate"]);
+      // Words made final by the agent's audio before a call came still wait a moment for more.
+      t.socket().receive({ serverContent: { turnComplete: true } });
+      t.socket().receive({ serverContent: { inputTranscription: { text: "and a " } } });
+      t.socket().receive({ serverContent: { modelTurn: { parts: [{ inlineData: { mimeType: "audio/pcm", data: AUDIO } }] } } });
+      t.socket().receive({ toolCall: { functionCalls: [{ id: "fc_2", name: FISH_DELEGATE_TOOL, args: {} }] } });
+      t.socket().receive({ serverContent: { inputTranscription: { text: "taxi" } } });
+      expect(t.delegate).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(400);
+      expect(order).toEqual(["book a table", "delegate", "and a ", "taxi", "delegate"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops a call Gemini cancels: a held one never runs, a running one's answer is not sent", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = harness();
+      await t.connect();
+      t.socket().receive({ toolCall: { functionCalls: [{ id: "fc_1", name: FISH_DELEGATE_TOOL, args: {} }] } });
+      t.socket().receive({ toolCallCancellation: { ids: ["fc_1"] } });
+      vi.advanceTimersByTime(2_000);
+      expect(t.delegate).not.toHaveBeenCalled();
+      let finish: (value: string) => void = () => undefined;
+      t.delegate.mockImplementation(() => new Promise<string>((resolve) => { finish = resolve; }));
+      t.socket().receive({ serverContent: { inputTranscription: { text: "book a table" } } });
+      t.socket().receive({ toolCall: { functionCalls: [{ id: "fc_2", name: FISH_DELEGATE_TOOL, args: {} }] } });
+      vi.advanceTimersByTime(400);
+      expect(t.delegate).toHaveBeenCalledTimes(1);
+      t.socket().receive({ toolCallCancellation: { ids: ["fc_2"] } });
+      finish("On it.");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.socket().sent.some((message) => "toolResponse" in message)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("goes on over a new connection with the resumption handle when Gemini ends one", async () => {
     const t = harness();
     await t.connect();
