@@ -178,6 +178,7 @@ export function ProviderMark({ driverKind, size, className }: IconProps & { driv
     case "claudeAgent":
       return <ClaudeMark size={size} className={className} />;
     case "mistral":
+    case "mistralVibeAgent":
       return <PresetProviderMark preset="mistral" size={size} className={className} />;
     case "meta":
     case "museCode":

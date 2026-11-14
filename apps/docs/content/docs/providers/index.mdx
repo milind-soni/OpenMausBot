@@ -27,6 +27,7 @@ MausBot does not proxy every message through its own model account. It starts su
 | Hermes | Hermes CLI login | ACP integration |
 | Pi | Pi CLI login | Native driver |
 | OMP | `omp login` or OMP's own provider configuration | ACP driver with live models, thinking choices, approvals, and session resume |
+| Mistral Vibe | Mistral AI Studio browser sign-in, or `MISTRAL_API_KEY` | ACP driver with the account's live models, thinking levels, tries, approvals, and session resume |
 
 Additional driver instances can be declared in local configuration. An agent CLI with its own ACP entry point runs this way too, from one entry in `config.json`: see [Custom engines](./custom-acp.mdx). Unavailable engines remain visible with a reason instead of crashing the provider fleet.
 
@@ -37,6 +38,8 @@ Command Code runs the official Command Code CLI (`npm install -g command-code`, 
 Kiro runs the official Kiro CLI (`curl -fsSL https://cli.kiro.dev/install | bash` on macOS and Linux) in its ACP mode with its V3 engine (`kiro-cli acp --agent-engine=v3`) and bills the Kiro account `kiro-cli login` signed in, or the Kiro Pro key in `KIRO_API_KEY`. Its picker lists every model the account offers, plus **Kiro default**, which keeps the model picked in Kiro itself. Ask turns Kiro's Autopilot off, so each write or command waits for approval in the app; Full access turns Autopilot on.
 
 OMP runs the official Oh My Pi CLI (`npm install -g @oh-my-pi/pi-coding-agent`) through `omp acp`. Run `omp login` or configure providers in `~/.omp/agent/models.yml`; OMP keeps its own credentials. The picker lists OMP's advertised models and their thinking choices, plus **OMP default (configured)**, which leaves the model selected in OMP itself. Threads resume their native OMP sessions, and permission prompts use MausBot's approval cards.
+
+Mistral Vibe runs the official Vibe Code CLI in its ACP mode (`vibe-acp`, from [github.com/mistralai/mistral-vibe/releases](https://github.com/mistralai/mistral-vibe/releases)) and bills the Mistral account it is signed in to. Start a first chat to open the browser sign-in to Mistral AI Studio, or paste a Mistral API key under **Settings → Connections → Model providers** — the workspace key is passed to the CLI as `MISTRAL_API_KEY` when the instance has none of its own. The picker lists the models Mistral publishes for Vibe, refreshed from a live session, including **Z.ai GLM 5.3**, GLM 5.3 Flash, and the Codestral coding model. Threads resume their native Vibe sessions, and permission prompts use MausBot's approval cards. To run it against an account whose sign-in you keep outside MausBot, declare a custom ACP instance instead: see [Custom engines](./custom-acp.mdx).
 
 To use OpenRouter, Fireworks AI, DeepSeek, Cline, or your own OpenAI- or Anthropic-compatible service, see [Other model providers](./model-providers.mdx).
 

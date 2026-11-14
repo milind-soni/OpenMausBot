@@ -16,7 +16,7 @@ import {
   closeSync, createReadStream, existsSync, lstatSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, realpathSync, renameSync, rmSync, unlinkSync,
 } from "node:fs";
 import { chmod, copyFile, link, lstat, mkdir, open, readdir, rename, rm, stat, symlink, unlink, writeFile, type FileHandle } from "node:fs/promises";
-import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import { writeFileAtomic } from "./atomic.ts";
@@ -278,15 +278,18 @@ function verifiedCurrent(engineDir: string, release: StandaloneRelease): Standal
   if (!realDirectory(binDir)) return null;
   // Nothing but the program goes on PATH; a rename Windows could not finish (.old-) is never a command anyone types.
   if (readdirSync(binDir).some((entry) => entry !== name && !entry.startsWith(OLD_PREFIX))) return null;
-  const executablePath = join(binDir, name);
-  const program = release.launcher ? launcherTarget(executablePath, pointer.version, asset.executable) : executablePath;
+  // A Windows launcher has no bin/ entry at all (see activate): the version folder itself is the PATH folder.
+  const isWinLauncher = release.launcher && process.platform === "win32";
+  const versionPath = isWinLauncher ? join(engineDir, pointer.version) : binDir;
+  const executablePath = isWinLauncher ? executableIn(versionPath, asset.executable) : join(binDir, name);
+  const program = release.launcher && !isWinLauncher ? launcherTarget(executablePath, pointer.version, asset.executable) : executablePath;
   if (!program || !realFile(program)) return null;
   try {
     if (hashFileSync(program) !== expected) return null;
   } catch {
     return null;
   }
-  return { version: pointer.version, executablePath, binDir };
+  return { version: pointer.version, executablePath, binDir: versionPath };
 }
 
 /** bin/'s entry for a launcher is a link to exactly this version's program, written relative to bin/: anything else is
@@ -473,6 +476,15 @@ async function extractTarGz(archivePath: string, staging: string): Promise<boole
       const type = "type" in entry ? entry.type : undefined;
       const name = path.replace(/^(?:\.\/)+/u, "").replace(/\/$/u, "");
       if (name === "" && type === "Directory") return false;
+      if (type === "SymbolicLink") {
+        // A bundled runtime may link inside itself (PyInstaller's Python.framework does); a link out of the folder is
+        // what an unsafe archive hides behind.
+        if (!safeArchivePath(name) || !safeInboundLink(name, "linkpath" in entry ? String(entry.linkpath) : "")) {
+          unsafe = true;
+          return false;
+        }
+        return true;
+      }
       if ((type !== "File" && type !== "Directory") || !safeArchivePath(name)) {
         unsafe = true;
         return false;
@@ -480,7 +492,76 @@ async function extractTarGz(archivePath: string, staging: string): Promise<boole
       return true;
     },
   });
+  if (!unsafe && linkChainsEscape(staging)) unsafe = true;
   return !unsafe;
+}
+
+/** True when a link entry resolving to `link` from the entry's own `name` stays inside the unpacked folder: relative,
+ * safe characters, never reaching past the folder root, and never a link to the containing folder itself. */
+function safeInboundLink(name: string, link: string): boolean {
+  if (!link || link.startsWith("/") || link.includes("\\") || link.includes(":")) return false;
+  let depth = name.split("/").slice(0, -1).filter((segment) => segment !== ".").length;
+  let steps = 0;
+  for (const segment of link.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      depth -= 1;
+      if (depth < 0) return false;
+      continue;
+    }
+    if (!safeArchivePath(segment)) return false;
+    depth += 1;
+    steps += 1;
+  }
+  return steps > 0;
+}
+
+/** The most splices one chain can make before cyclical links are given up on as dangling: nothing escapes behind them. */
+const MAX_LINK_HOPS = 64;
+
+/** True when a kept link, followed exactly as the kernel would (each component resolved, every link it crosses
+ * spliced), leaves the extracted folder. Each entry was vetted alone (see safeInboundLink), but a chain —
+ * folders `b`, `a -> b/..`, `c -> a/../out` — composes an way out no single entry shows. A link chain that
+ * ends before a real file (an in-root cycle, a missing hand-off name) stays dangling, and dangles are kept. */
+function linkChainsEscape(root: string): boolean {
+  const notInside = (path: string): boolean => path !== root && !path.startsWith(root + sep);
+  const follow = (path: string): string | null => {
+    try { return lstatSync(path).isSymbolicLink() ? readlinkSync(path) : null; }
+    catch { return null; }
+  };
+  // Components left to place, and where they hang from; a splice continues from the link's own directory.
+  const chain = (from: string, target: string): boolean => {
+    let queue: string[] = target.split("/");
+    let path = from;
+    let hops = 0;
+    while (queue.length) {
+      const segment = queue.shift()!;
+      if (segment === "" || segment === ".") continue;
+      if (segment === "..") {
+        path = dirname(path);
+        if (notInside(path)) return true;
+        continue;
+      }
+      path = join(path, segment);
+      if (notInside(path)) return true;
+      const next = follow(path);
+      if (next !== null) {
+        if (++hops > MAX_LINK_HOPS) return false;
+        queue = next.split("/").concat(queue);
+        path = dirname(path);
+      }
+    }
+    return false;
+  };
+  const walk = (dir: string): boolean => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) { if (walk(path)) return true; }
+      else if (entry.isSymbolicLink() && chain(dirname(path), readlinkSync(path))) return true;
+    }
+    return false;
+  };
+  return walk(root);
 }
 
 /** Folders 0755, files 0755 when the archive marked them executable and 0644 otherwise: no setuid, nothing writable by others. */
@@ -492,9 +573,8 @@ async function normaliseModes(directory: string): Promise<void> {
       await normaliseModes(path);
     } else if (entry.isFile()) {
       await chmod(path, ((await stat(path)).mode & 0o111) !== 0 ? 0o755 : 0o644);
-    } else {
-      throw Object.assign(new StandaloneInstallError("The archive contains an unexpected or unsafe file. Nothing was installed."), userErrorFields(userError("serverError.install.unsafeArchive")));
     }
+    // A link the archive kept (see extractTarGz) was already vetted as one that stays inside; its mode is its target's.
   }
 }
 
@@ -635,20 +715,29 @@ async function activate(engineDir: string, release: StandaloneRelease, asset: St
   await realFolder(binDir, release);
   const name = programName(asset.executable);
   const source = executableIn(versionDir, asset.executable);
-  const target = join(binDir, name);
+  // A launcher keeps finding its folder beside itself. POSIX can point bin/ at it with a link; Windows refuses a file
+  // symlink without Developer Mode, so there the version folder (the exe beside its bundle) takes bin/'s PATH slot.
+  const winLauncher = release.launcher && process.platform === "win32";
+  const target = winLauncher ? source : join(binDir, name);
   const fresh = join(binDir, `${NEW_PREFIX}${randomUUID()}${extname(name)}`);
   try {
-    if (release.launcher) {
+    if (winLauncher) {
+      // No bin entry to write; a folder check below keeps bin/ clean all the same, and the program already
+      // sits in the version folder from the extraction.
+    } else if (release.launcher) {
       // A launcher finds the rest of its folder from where it really is, so bin/ links to it rather than holding a copy.
       await symlink(launcherLink(release.version, asset.executable), fresh);
-    } else try {
-      await link(source, fresh);
-    } catch {
-      // A file system without hard links gets a copy.
-      await copyFile(source, fresh);
-      if (process.platform !== "win32") await chmod(fresh, 0o755);
+      await replaceFile(fresh, target);
+    } else {
+      try {
+        await link(source, fresh);
+      } catch {
+        // A file system without hard links gets a copy.
+        await copyFile(source, fresh);
+        if (process.platform !== "win32") await chmod(fresh, 0o755);
+      }
+      await replaceFile(fresh, target);
     }
-    await replaceFile(fresh, target);
   } finally {
     // Renaming one hard link onto another of the same file leaves both names in place.
     await rm(fresh, { force: true }).catch(() => {});
@@ -661,7 +750,7 @@ async function activate(engineDir: string, release: StandaloneRelease, asset: St
   const pointer: CurrentPointer = { version: release.version, executable: asset.executable, sha256: asset.sha256, executableSha256: programSha256 };
   writeFileAtomic(join(engineDir, CURRENT), `${JSON.stringify(pointer)}\n`, { mode: 0o600 });
   activeVersions.add(versionDir);
-  registerFallbackPathDir(binDir);
+  registerFallbackPathDir(winLauncher ? versionDir : binDir);
   resetPathCache();
   return { version: release.version, executablePath: target, binDir };
 }
