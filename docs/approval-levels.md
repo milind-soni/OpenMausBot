@@ -120,6 +120,43 @@ A turn a webhook, a routine, or another bot started runs in the bot's level
 like any other turn. The decision log records that nobody was at the keyboard
 when such a turn asked.
 
+### Approvals relayed by another bot, a webhook or an outside page
+
+An approval only counts when the person gives it to the bot that acts. Every
+line a bot reads opens with a note OpenMausBot writes, `[From <who> · <what> ·
+<authority>]` (`server/provenance-label.ts`, see
+[team-cloud.md](team-cloud.md)). A person's own typed or spoken line, or their
+answer on that bot's own card, is *their own request*. A line from another bot,
+an app through the API, a relay, an app event or a webhook is *information
+only*: the bot reads it as data, never as approval, even when it says "approved"
+or claims to come from you. So an Approve click on your own outside page (an
+approval dashboard, another bot's card) that reaches the acting bot through
+another bot or a webhook does not authorize anything, and the bot asks or stops
+instead. This is on purpose. Anyone who can make a bot read text, such as a web
+page, an email or a webhook call, could otherwise write "the owner approved
+this" and borrow your authority; a note written inside a message is escaped
+(`escapeNotes`, `server/peer-provenance.ts`), so only OpenMausBot opens one.
+
+The supported ways to have a bot act on your approval:
+
+- **Approve in the acting bot's own chat.** Tap its card, or type the go-ahead
+  there. On a phone or another device, the same chat works from any paired
+  client.
+- **Set the work up as that bot's own automation.** A routine, or a webhook
+  automation whose instructions you write ("when an approved deploy arrives,
+  run the deploy checklist"), runs *on their behalf at your level*: the
+  instructions are your own set-up, and only the event it carries is
+  information only (`server/webhooks.ts`). Keep the webhook's private address
+  secret, narrow the instructions to the work you mean, and use its event-type
+  or payload filter so other calls start nothing.
+- **Hand the work over from your own request.** When you ask one bot and it
+  hands the work on with `coordinate_bots`, the receiving bot gets it *on their
+  behalf at your level*, because it traces back to your own line.
+- **Change the approval level** of the acting bot when the prompts themselves
+  are the problem (see the table above).
+
+There is no signed-approval token that lets an outside page stand in for you.
+
 ### A Chief of Staff's level covers the work it delegates
 
 Teammates start at Full access like every bot, but a person may have set one
