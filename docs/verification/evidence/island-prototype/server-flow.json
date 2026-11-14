@@ -1,0 +1,28 @@
+{
+  "verifiedAt": "2026-11-14T01:28:57.943Z",
+  "origin": "http://127.0.0.1:22052",
+  "fixtureOnly": true,
+  "screenshot": "PNG sintético 1×1; nenhum dado pessoal",
+  "attachmentBytes": 68,
+  "attachmentUnderFixture": true,
+  "uploadBytesMatch": true,
+  "omiContext": "fictício",
+  "chat": {
+    "botId": "10ee4e94-8d1e-45ce-bf39-4693da6aa2d6",
+    "threadId": "980aa678-c84f-4665-ba36-40f5c6d37c7e"
+  },
+  "sendId": "2893ee18-1db4-4949-9a87-aa5d345b3e7c",
+  "outcome": "done",
+  "finalUpdate": {
+    "kind": "done",
+    "ok": true,
+    "text": "hello from fake claude"
+  },
+  "transcriptContainsPrompt": true,
+  "transcriptContainsOmiContext": true,
+  "transcriptContainsAttachment": true,
+  "engineReceivedPromptAndOmi": true,
+  "limitations": [
+    "Não testa captura real de tela, microfone ou conta Omi real."
+  ]
+}

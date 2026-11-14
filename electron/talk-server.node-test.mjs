@@ -16,7 +16,7 @@ const CHAT = { botId: "m", threadId: "t1" };
 
 const MOVED = { error: "This bot lives on My Cloud now.", code: "moved" };
 
-function fakeServer({ bots, saved = null, sendStatus = 202, sendBody = { ok: true }, made = null, starting }) {
+function fakeServer({ bots, saved = null, sendStatus = 202, sendBody = { ok: true }, made = null, starting, sendResponse }) {
   const encoder = new TextEncoder();
   const server = { calls: [], saves: [], events: null, listing: { down: false, status: 200 } };
   const request = async (route, init = {}) => {
@@ -33,7 +33,7 @@ function fakeServer({ bots, saved = null, sendStatus = 202, sendBody = { ok: tru
       server.events = { cancelled: false, push: frame => stream.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`)), end: () => stream.close() };
       return new Response(body, { headers: { "content-type": "text/event-stream" } });
     }
-    if (method === "POST" && /^\/api\/bots\/[\w-]+\/messages$/.test(route)) return Response.json(sendBody, { status: sendStatus });
+    if (method === "POST" && /^\/api\/bots\/[\w-]+\/messages$/.test(route)) return sendResponse ? sendResponse() : Response.json(sendBody, { status: sendStatus });
     return new Response(null, { status: 404 });
   };
   server.talk = createTalkServer({ request, serverKey: () => "server-a", starting, prefs: { quickAsksChat: () => saved, setQuickAsksChat: (key, chat) => server.saves.push([key, chat]) } });
@@ -42,6 +42,43 @@ function fakeServer({ bots, saved = null, sendStatus = 202, sendBody = { ok: tru
 
 const asking = (server, { signal = new AbortController().signal, onUpdate = () => {} } = {}) =>
   server.talk.ask({ chat: CHAT, text: "hi", sendId: "s1", signal, onUpdate });
+
+test("an aborted stream preserves the pending POST receipt for Stop to await", async () => {
+  let delivered;
+  const response = new Promise(resolve => { delivered = resolve; });
+  const server = fakeServer({ bots: [], sendResponse: () => response });
+  const controller = new AbortController();
+  const ask = asking(server, { signal: controller.signal });
+  await flush(); server.events.push(HELLO); await flush();
+  controller.abort(); await assert.rejects(ask, { name: "AbortError" });
+  let drained = false;
+  const drain = server.talk.settleSend().then(() => { drained = true; });
+  await flush(); assert.equal(drained, false);
+  delivered(Response.json({ ok: true }, { status: 202 }));
+  await drain; assert.equal(drained, true);
+  assert.equal(server.calls.filter(([method]) => method === "POST").length, 1);
+});
+
+test("abort before the hello is processed never posts, even when hello was queued", async () => {
+  const server = fakeServer({ bots: [] });
+  const controller = new AbortController();
+  const ask = asking(server, { signal: controller.signal });
+  await flush(); server.events.push(HELLO); controller.abort();
+  await assert.rejects(ask, { name: "AbortError" }); await flush(); await server.talk.settleSend();
+  assert.equal(server.calls.filter(([method]) => method === "POST").length, 0);
+});
+
+test("a lost POST receipt remains uncertain after stream cancellation", async () => {
+  let failed;
+  const response = new Promise((_, reject) => { failed = reject; });
+  const server = fakeServer({ bots: [], sendResponse: () => response });
+  const controller = new AbortController();
+  const ask = asking(server, { signal: controller.signal });
+  await flush(); server.events.push(HELLO); await flush();
+  controller.abort(); await assert.rejects(ask, { name: "AbortError" });
+  const drain = assert.rejects(server.talk.settleSend(), /lost receipt/);
+  failed(new Error("lost receipt")); await drain;
+});
 
 test("findMausBot picks this computer's MausBot, else the Chief of Staff", () => {
   const mine = { id: "m", defaultBot: {} }, member = { id: "p", defaultBot: { person: "a@b.test" } }, chief = { id: "c", chiefOfStaff: true };
