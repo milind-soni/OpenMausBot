@@ -3,6 +3,7 @@ import type { WorkOrigin } from "./peer-provenance.ts";
 import type { LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import type { Answerer, Assignment, EnvelopeNames, Level, Limits, Mode, Origin, Outcome, Owner, Reply, Requester, StatusView, TurnEvidence } from "./runtime/types.ts";
 import type { ModelSelection } from "../shared/wire.ts";
+import type { TakeoverScope } from "./host/limit-takeover.ts";
 
 /** One coordinate_bots call, as the internal route hands it to the server. */
 export type CoordinateBotsCall = {
@@ -98,6 +99,9 @@ export interface HostTurnResult {
   /** The host's stall watchdog stopped the turn, including a room turn a stall ended during setup, before it had an
    * outcome: it failed as `stalled`, not as a provider error. */
   stalled?: boolean;
+  /** Its AI's usage limit or sign-out refused the turn, so another AI the person set up may carry its job on: which one,
+   * and when the limit said it resets. */
+  refusedBy?: { scope: TakeoverScope; resetsAt?: number };
 }
 
 export interface HandoffOpener {

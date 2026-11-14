@@ -83,6 +83,17 @@ interface SavedHolds { models?: Record<string, ModelHold>; signedOut?: Record<st
 export function signedOutStop(stopReason: string | null | undefined, said: string | undefined): boolean {
   return stopReason === "auth_required" && !(said && (engineFailureKind(said) === "credits" || classifyError({ text: said }).reason === "quota"));
 }
+export function takeoverRefusal(stopReason: string | null | undefined, said: string | undefined, limit: LimitScope | undefined): TakeoverScope | undefined {
+  if (signedOutStop(stopReason, said)) return "signed-out";
+  // A tool call's failure names the tool, never the engine's own limit, whatever its words.
+  return limit ?? (stopReason !== "tool_error" && classifyError({ text: said ?? "" }).reason === "quota" ? "engine" : undefined);
+}
+export function turnRefusal(stopReason: string | null | undefined, said: string | undefined,
+  flags: { limit?: LimitScope; limitResetsAt?: number } | undefined): { scope: TakeoverScope; resetsAt?: number } | undefined {
+  const scope = takeoverRefusal(stopReason, said, flags?.limit);
+  const resetsAt = scope === "signed-out" ? undefined : flags?.limitResetsAt;
+  return scope ? { scope, ...(resetsAt ? { resetsAt } : {}) } : undefined;
+}
 /** A row a conversation shows when its turn carried on elsewhere: `setup` marks the one signing in fixes. */
 export interface CarriedOnRow extends ServerToolText { name: string; ok: boolean; setup?: boolean }
 

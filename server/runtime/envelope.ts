@@ -165,6 +165,8 @@ function evidenceLine(evidence: TurnEvidence | undefined): string {
     const more = evidence.outward.length > FILES_SHOWN ? `, +${evidence.outward.length - FILES_SHOWN} more` : "";
     if (shown.length) parts.push(`outward actions done (${shown.join(", ")}${more})`);
   }
+  const served = quote(evidence.servedBy, NAME_MAX);
+  if (served) parts.push(`done by ${served}, not the assignee's own AI`);
   const summary = quote(evidence.summary, QUOTE_MAX);
   if (!parts.length && !summary) return "The harness observed nothing of this turn.";
   return `Observed by the harness: ${parts.join(", ")}${summary ? `${parts.length ? "; " : ""}${summary}` : ""}.`;

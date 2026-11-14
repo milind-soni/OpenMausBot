@@ -15,6 +15,7 @@ const evidenceSchema = z.object({
   okToolCalls: z.number().int().nonnegative().optional(),
   errors: z.array(z.string()).optional(),
   outward: z.array(z.string()).optional(),
+  servedBy: z.string().optional(),
 });
 
 const assignmentSchema = z.object({
