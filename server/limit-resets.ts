@@ -113,6 +113,8 @@ export class LimitResetClock {
   /** When each hold began: a usage read from before it (a cached one) says nothing about whether it is over. */
   private readonly heldAt = new Map<string, number>();
   private readonly turnEngines = new Map<string, string>();
+  /** Turns already running when their engine refused cannot prove that its new hold is over. */
+  private readonly turnsBeforeRefusal = new Set<string>();
   private checkedAt = 0;
   private loading: Promise<void> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -169,7 +171,10 @@ export class LimitResetClock {
   /** Every runtime event, with the engine its turn runs on when known: a refusal holds the engine, and a turn that
    * works on it afterwards ends the hold, since the account plainly has room again (another model, plan or account). */
   noteRuntimeEvent(engine: string | undefined, event: RuntimeEvent): void {
-    if (event.type === "turn.started" && engine) this.turnEngines.set(event.threadId, engine);
+    if (event.type === "turn.started" && engine) {
+      this.turnEngines.set(event.threadId, engine);
+      this.turnsBeforeRefusal.delete(event.threadId);
+    }
     else if (event.type === "runtime.error") {
       const refused = engine ?? this.turnEngines.get(event.threadId);
       // One model's own limit leaves the engine's other models working: only that model is held (host/limit-takeover).
@@ -179,7 +184,8 @@ export class LimitResetClock {
     else if (event.type === "turn.completed" || event.type === "session.exited") {
       const ran = this.turnEngines.get(event.threadId) ?? engine;
       this.turnEngines.delete(event.threadId);
-      if (event.type === "turn.completed" && event.ok && ran && this.refusals.delete(ran)) { this.guessed.delete(ran); this.saveHolds(); this.options.onChange?.(); }
+      const beforeRefusal = this.turnsBeforeRefusal.delete(event.threadId);
+      if (event.type === "turn.completed" && event.ok && !beforeRefusal && ran && this.refusals.delete(ran)) { this.guessed.delete(ran); this.saveHolds(); this.options.onChange?.(); }
     }
   }
 
@@ -188,17 +194,26 @@ export class LimitResetClock {
    * none: the refusal still holds the engine, so the next turn does not go there again at once. */
   noteLimit(engine: string | undefined, resetsAt: number | undefined): void {
     if (resetsAt !== undefined && resetsAt > this.now()) return this.noteRefusal(engine, resetsAt);
+    if (!engine) return;
+    this.markEarlierTurns(engine);
     // A reset the engine named still stands: a refusal that names none never shortens it.
-    if (!engine || ((this.refusal(engine) ?? 0) > this.now() && !this.guessed.has(engine))) return;
+    if ((this.refusal(engine) ?? 0) > this.now() && !this.guessed.has(engine)) return;
     this.hold(engine, this.now() + UNNAMED_LIMIT_MS, true);
   }
 
   /** A turn on this engine was refused by its usage limit; `resetsAt` is when the engine said it resets. */
   noteRefusal(engine: string | undefined, resetsAt: number | undefined): void {
     if (!engine || resetsAt === undefined || !Number.isFinite(resetsAt) || resetsAt <= this.now()) return;
+    this.markEarlierTurns(engine);
     // Without this refresh, a usage read between two refusals would end the hold.
     if (this.refusals.get(engine) === resetsAt && !this.guessed.has(engine)) { this.heldAt.set(engine, this.now()); this.saveHolds(); return; }
     this.hold(engine, resetsAt, false);
+  }
+
+  private markEarlierTurns(engine: string): void {
+    for (const [thread, runningEngine] of this.turnEngines) {
+      if (runningEngine === engine) this.turnsBeforeRefusal.add(thread);
+    }
   }
 
   private hold(engine: string, until: number, guessed: boolean): void {
