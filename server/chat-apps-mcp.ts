@@ -24,6 +24,7 @@ const STARTUP_PROBE_DELAY_MS = 20_000;
 const RPC_CALL_MS = 120_000;
 const RPC_OTHER_MS = 30_000;
 const REMOTE_ERROR_CHARS = 1_000;
+const RESOURCE_PAGES = 100;
 /** A command server started through `npx` may first have to fetch its package. */
 const BACKGROUND_PROBE_MS = 45_000;
 const AUTOMATIC_PROBE_EVERY_MS = 10 * 60_000;
@@ -165,9 +166,19 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
         let ui = uiMeta(item);
         if (!ui) {
           // The MCP Apps draft also allows `_meta.ui` on the resources/list entry.
-          const listed = await connections.request(name, server, "resources/list", {}, AbortSignal.timeout(RPC_OTHER_MS), extension).catch(() => undefined);
-          const entry = isRecord(listed) && Array.isArray(listed.resources) ? listed.resources.find((resource) => isRecord(resource) && resource.uri === uri) : undefined;
-          ui = uiMeta(entry);
+          const signal = AbortSignal.timeout(RPC_OTHER_MS);
+          const cursors = new Set<string>();
+          let cursor: string | undefined;
+          for (let page = 0; page < RESOURCE_PAGES; page += 1) {
+            const listed = await connections.request(name, server, "resources/list", cursor === undefined ? {} : { cursor }, signal, extension).catch(() => undefined);
+            if (!isRecord(listed) || !Array.isArray(listed.resources)) break;
+            const entry = listed.resources.find((resource) => isRecord(resource) && resource.uri === uri);
+            if (entry) { ui = uiMeta(entry); break; }
+            const next = listed.nextCursor;
+            if (typeof next !== "string" || cursors.has(next)) break;
+            cursors.add(next);
+            cursor = next;
+          }
         }
         return { ok: true, html, ui };
       } catch (error) {
