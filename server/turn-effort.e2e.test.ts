@@ -8,6 +8,8 @@ import { launchVerificationServer, type VerificationServer } from "../scripts/co
 let fixture: VerificationServer;
 let choice = "high";
 let probability = 0.96;
+let failureStatus = 200;
+let delayMs = 0;
 let hold: Promise<void> | undefined;
 const requests: Array<Record<string, any>> = [];
 const helper = createServer((req, res) => {
@@ -21,9 +23,11 @@ const helper = createServer((req, res) => {
       return;
     }
     requests.push(body);
+    if (failureStatus !== 200) { res.writeHead(failureStatus); res.end(); return; }
     const selected = choice;
     const p = probability;
     if (hold) await hold;
+    if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
     const other = Object.keys(question.criteria).find((key) => key !== selected)!;
     res.end(JSON.stringify({ answers: { answer: { type: "choice", choice: selected, probabilities: { [selected]: p, [other]: 1 - p } } } }));
   });
@@ -83,6 +87,7 @@ it("uses Auto for default and conversational bots without changing model or save
     await api("PATCH", `/api/bots/${botId}`, { replyStyle });
     const message = await send(replyStyle === "default" ? "arruma o login" : "исправь вход");
     expect(message.turnEffort).toBe("high");
+    expect(message.quickModel).toBeUndefined();
     expect(effortArg()).toBe("high");
     const args: string[] = dump().argv;
     expect(args[args.indexOf("--model") + 1]).toBe(selection.model);
@@ -107,6 +112,25 @@ it("omits effort after an uncertain choice even after a previous explicit effort
   expect((await send("arruma o login outra vez")).turnEffort).toBeUndefined();
   expect(dump().argv).not.toContain("--effort");
   probability = 0.96;
+}, 30_000);
+
+it.each([
+  { name: "low confidence", probability: 0.5, status: 200, delay: 0 },
+  { name: "provider error", probability: 0.96, status: 503, delay: 0 },
+  { name: "timeout", probability: 0.96, status: 200, delay: 2_000 },
+])("keeps the quick-model route after $name", async (scenario) => {
+  await api("PATCH", `/api/bots/${botId}`, { replyStyle: "conversational", modelSelection: selection });
+  probability = scenario.probability;
+  failureStatus = scenario.status;
+  delayMs = scenario.delay;
+  try {
+    const message = await send("thanks!");
+    expect(message.turnEffort).toBeUndefined();
+    expect(message.quickModel).toMatch(/Haiku/);
+    const args: string[] = dump().argv;
+    expect(args[args.indexOf("--model") + 1]).toMatch(/^claude-haiku-/);
+    expect(args).not.toContain("--effort");
+  } finally { probability = 0.96; failureStatus = 200; delayMs = 0; }
 }, 30_000);
 
 it("preserves fixed effort with the new job both on and off", async () => {

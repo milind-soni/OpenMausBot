@@ -319,7 +319,7 @@ import {
 import * as tts from "./tts/index.ts";
 import { voiceNoteFailure } from "./tts/errors.ts";
 import { createDecider, deciderReady, describeDecider } from "./decider/index.ts"; import { createExtractor, describeHelpers } from "./extractor/index.ts";
-import { resolveTurnEffort, roomTurnSelection, stampTurnEffort, turnEffortLevels } from "./decider/turn-effort.ts";
+import { resolveTurnEffort, roomTurnSelection, stampTurnEffort } from "./decider/turn-effort.ts";
 import { createStopLineRoutes } from "./routes/stop-line.ts"; import { decideRoomResponder } from "./decider/room-routing.ts"; import { roomRoutingInput } from "./host/room-routing-input.ts";
 import { liveHistoryFrom, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
 import { LiveCallController, LiveCallSignedOutError } from "./live-call-controller.ts"; import { liveSessionWiring } from "./live-session-wiring.ts";
@@ -7650,8 +7650,7 @@ async function beginTurn(
   const instanceId = instance.instanceId;
   const automated = commsDepth > 0 || opts?.automationSource !== undefined
     || Boolean(opts?.unattended || opts?.cardContinuation || opts?.peerAsk || opts?.coordination || opts?.compactOnly || opts?.computerSelectionContinuation);
-  const route = routeDirectTurn(bot, task, store.activePath(threadId), resolvedImages, instance, automated, quickFallback.refused(instance.instanceId), turnEffortLevels(cfg, bot, instance, automated) !== undefined);
-  let { model, effort, variant } = route;
+  let { model, effort, variant } = bot.modelSelection;
   assertTurnSelectionSupported({ variant, effort }, instance.adapter.capabilities);
 
   let userMessage = opts?.userMessage;
@@ -7687,7 +7686,7 @@ async function beginTurn(
     queueMicrotask(drainQueuedSends);
     return userMessage;
   }
-  const setupLine = takeSetupRequest(store, { botId: bot.id, threadId, line: userMessage, person: personLine, editedFrom: opts?.editedMessageId, mounted: instance.adapter.capabilities.agentsMcp === true }); if (setupLine) { userMessage = setupLine; providerText = setupTurnText(setupLine, usesNativeImageInput); } if (route.quickModel && !opts?.cardContinuation && userMessage.quickModel !== route.quickModel) userMessage = store.patchMessage(threadId, userMessage.id, { quickModel: route.quickModel }) ?? userMessage;
+  const setupLine = takeSetupRequest(store, { botId: bot.id, threadId, line: userMessage, person: personLine, editedFrom: opts?.editedMessageId, mounted: instance.adapter.capabilities.agentsMcp === true }); if (setupLine) { userMessage = setupLine; providerText = setupTurnText(setupLine, usesNativeImageInput); }
   const recoveryUserMessageId = opts?.coordination
     ? store.activePath(threadId).findLast(m => m.role === "user" && m.kind === "text")?.id
     : userMessage.id;
@@ -7766,7 +7765,8 @@ async function beginTurn(
     try {
       const chosenEffort = opts?.compactOnly ? undefined : await resolveTurnEffort(cfg, decider, bot, instance, store.activePath(threadId), userMessage, automated);
       if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped during effort selection");
-      effort = chosenEffort ?? effort;
+      const route = routeDirectTurn(bot, task, store.activePath(threadId).filter((message) => message.id !== userMessage.id), resolvedImages, instance, automated, quickFallback.refused(instance.instanceId), chosenEffort !== undefined);
+      ({ model, effort, variant } = { ...route, effort: chosenEffort ?? route.effort });
       if (!opts?.cardContinuation) store.patchMessage(threadId, userMessage.id, { turnEffort: chosenEffort, quickModel: route.quickModel });
       const engineRead = registry.engineRead(instance.instanceId);
       if (engineRead) {

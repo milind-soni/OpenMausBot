@@ -18,10 +18,10 @@ note. Check Midnight and Daylight, a narrow window and keyboard focus. The
 switch starts off; an own helper key is required. Included Cloud relay
 credentials do not support this job. The bot's automation switch starts off.
 
-Limits restrict successful automatic choices. On unavailable, timed-out or
-uncertain decisions the chosen model runs with its own default effort, which
-is not constrained by these limits. A fixed effort always wins. Auto with the
-new job enabled bypasses conversational quick-model routing even on fallback.
+Limits restrict successful automatic choices. An accepted Auto effort choice
+keeps the selected model. On unavailable, timed-out or uncertain decisions,
+conversational quick-model routing applies as usual; these limits do not
+constrain the fallback engine's default effort.
 
 Automatic choices intersect the engine's levels with model-specific levels
 when the catalog reports them. Codex supplies these through `model/list`;
