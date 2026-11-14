@@ -155,7 +155,7 @@ import {
   engineLaunches,
   localVmIdleTimeoutMinutes,
   localVmMaxInstances,
-  localVmMode,
+  localVmMode, localVmPersistentAddons,
   localVmPreservesInstalledApps, localVmResources,
   roomTurnTimeoutMinutes,
   mcpCallTimeoutMinutes,
@@ -4666,7 +4666,7 @@ const desktopViewer = createDesktopViewer({
       ...Array.from({ length: localVmMaxInstances(cfg) }, (_, seat) => poolLocalVmTarget(seat))];
     const target = targets.find(target => viewerTargetId(target) === id);
     return target && localDesktopTarget(target, {
-      status: target => containerComputerStatus(undefined, undefined, target, { probeDesktop: false }),
+      status: target => containerComputerStatus(undefined, undefined, target, { probeDesktop: false, persistentAddons: localVmPersistentAddons(cfg) }),
       touch: target => localVmIdleFor(target).touch(),
     });
   },
@@ -5620,8 +5620,8 @@ let localVmImageBusy = false;
 let localVmProvisionBusy = false;
 let localVmModeChangeBusy = false;
 const localVmUpdates = createLocalVmUpdater({
-  status: (target) => containerComputerStatus(undefined, undefined, target),
-  act: (action, target) => containerComputerAction(action, undefined, undefined, target, localVmResources(cfg)),
+  status: (target) => containerComputerStatus(undefined, undefined, target, { persistentAddons: localVmPersistentAddons(cfg) }),
+  act: (action, target) => containerComputerAction(action, undefined, undefined, target, localVmResources(cfg), localVmPersistentAddons(cfg)),
   imageBusy: { get: () => localVmImageBusy, set: (busy) => { localVmImageBusy = busy; } },
   provisionBusy: { get: () => localVmProvisionBusy, set: (busy) => { localVmProvisionBusy = busy; } },
   lifecycleBusy: localVmLifecycleBusy,
@@ -6019,7 +6019,7 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
   }
   const target = localVmTargetForStatus(bot.id, threadId);
   if (!CLOUD_HOME && instance?.adapter.capabilities.computerMcp && localVmSeen.has(target.key)) {
-    const vm = await containerComputerStatus(undefined, undefined, target).catch(() => null);
+    const vm = await containerComputerStatus(undefined, undefined, target, { persistentAddons: localVmPersistentAddons(cfg) }).catch(() => null);
     if (vm && (autoLocalVmAttachable(vm) || localVmUpdates.observe(target, vm))) return "vm";
   }
   if (!CLOUD_HOME && shouldMountLocalComputer({ requested: undefined, hostPlatform: process.platform,
@@ -6067,7 +6067,7 @@ async function selectableComputers(bot: BotRecord) {
         }
       } else if (surface === "vm" && caps?.computerMcp) {
         const target = localVmTargetForStatus(bot.id);
-        const status = await containerComputerStatus(undefined, undefined, target);
+        const status = await containerComputerStatus(undefined, undefined, target, { persistentAddons: localVmPersistentAddons(cfg) });
         ready = status.ready;
         canCreate = !ready && autoLocalVmAttachable(status);
         if (ready || canCreate) noteLocalVmSeen(target, status);
@@ -6237,9 +6237,9 @@ function localVmIdleFor(target: LocalVmTarget): ComputerIdleTimer {
     async () => {
       localVmLifecycleBusy.add(target.key);
       try {
-        const status = await containerComputerStatus(undefined, undefined, target);
+        const status = await containerComputerStatus(undefined, undefined, target, { persistentAddons: localVmPersistentAddons(cfg) });
         if (status.container === "running" && status.managed) {
-          const stopped = await containerComputerAction("stop", undefined, undefined, target);
+          const stopped = await containerComputerAction("stop", undefined, undefined, target, localVmResources(cfg), localVmPersistentAddons(cfg));
           recordLocalVmIdleStop(target.key, stopped.stopped_at);
         }
       } finally {
@@ -6268,7 +6268,7 @@ function releaseLocalVmThread(threadId: string): void {
 
 void recoverLocalVms({
   mode: localVmMode(cfg), seats: localVmMaxInstances(cfg), bots: store.bots, seen: localVmSeen,
-  status: (target) => containerComputerStatus(undefined, undefined, target).catch(() => null),
+  status: (target) => containerComputerStatus(undefined, undefined, target, { persistentAddons: localVmPersistentAddons(cfg) }).catch(() => null),
   note: noteLocalVmSeen, armIdle: (target) => localVmIdleFor(target).touch(),
 }).then(() => localVmUpdates.sweep()).catch(() => {});
 
@@ -6284,7 +6284,7 @@ async function localVmInventoryPayload() {
   }
   const existing = await discoverExistingPerBotLocalVms(store.bots, runtime.runtime);
   const statuses = await Promise.all(existing.map(({ target }) =>
-    containerComputerStatus(undefined, undefined, target),
+    containerComputerStatus(undefined, undefined, target, { persistentAddons: localVmPersistentAddons(cfg) }),
   ));
   const instances = existing.flatMap(({ bot, target }, index) => {
     const status = statuses[index];
@@ -8092,17 +8092,17 @@ async function beginTurn(
         const localVmTarget = { ...localVmTargetForThread(bot.id, threadId) };
         let lazyReadyVm: { runtime: Runtime } | null = null;
         if (strict) {
-          const seen = await containerComputerStatus(undefined, undefined, localVmTarget).catch(() => null);
+          const seen = await containerComputerStatus(undefined, undefined, localVmTarget, { persistentAddons: localVmPersistentAddons(cfg) }).catch(() => null);
           if (seen?.ready && seen.runtime && !localVmUpdates.observe(localVmTarget, seen) && !localVmImageBusy && !localVmModeChangeBusy && !localVmLifecycleBusy.has(localVmTarget.key)) lazyReadyVm = { runtime: seen.runtime };
         } else {
           if (!localVmSeen.has(localVmTarget.key) && !opts?.automationSource) return false;
-          let seen = await containerComputerStatus(undefined, undefined, localVmTarget).catch(() => null);
+          let seen = await containerComputerStatus(undefined, undefined, localVmTarget, { persistentAddons: localVmPersistentAddons(cfg) }).catch(() => null);
           // An old desktop is updated, never swapped for this computer: an unattended run waits for it, a chat is told.
           if (localVmUpdates.observe(localVmTarget, seen)) {
             if (!opts?.automationSource) { vmUpdateNote = localVmUpdates.kick(localVmTarget); return false; }
             try { await waitForLocalVmUpdate(localVmTarget, threadId, () => directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)); }
             catch (error) { if (error instanceof DirectTurnSetupCancelled) throw error; skipComputer(error); return false; }
-            seen = await containerComputerStatus(undefined, undefined, localVmTarget).catch(() => null);
+            seen = await containerComputerStatus(undefined, undefined, localVmTarget, { persistentAddons: localVmPersistentAddons(cfg) }).catch(() => null);
           }
           if (!seen || !autoLocalVmAttachable(seen)) return false;
           if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) return false;
@@ -9063,7 +9063,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           // Hold the target from preflight through deletion, so nothing recreates the container in between.
           localVmLifecycleBusy.add(target.key);
           claimedLocalVmTarget = target;
-          const vm = await containerComputerStatus(undefined, undefined, target);
+          const vm = await containerComputerStatus(undefined, undefined, target, { persistentAddons: localVmPersistentAddons(cfg) });
           if (!vm.daemonUp && existsSync(target.workspaceDir)) {
             return deletionResponse( 409, {
               error: "start the container runtime so OpenMausBot can remove this bot's Local VM while deleting it",
@@ -9116,7 +9116,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           }
           if (localVmCleanup) {
             if (localVmCleanup.removeContainer) {
-              await containerComputerAction("remove", undefined, undefined, localVmCleanup.target);
+              await containerComputerAction("remove", undefined, undefined, localVmCleanup.target, localVmResources(cfg), localVmPersistentAddons(cfg));
             }
             await removeDirectory(localVmCleanup.target.workspaceDir, { recursive: true, force: true });
             localVmSeen.delete(localVmCleanup.target.key);
@@ -11613,11 +11613,11 @@ const { fillLoginForTurn } = createFillLoginTurn({
 });
 
 async function localVmPayload(target: LocalVmTarget, auth: RequestAuth) {
-  const status = localVmUpdates.describe(target, await containerComputerStatus(undefined, undefined, target));
+  const status = localVmUpdates.describe(target, await containerComputerStatus(undefined, undefined, target, { persistentAddons: localVmPersistentAddons(cfg) }));
   return {
     ...localVmViewerStatus(status, auth),
     stop_reason: localVmStopReason(target.key, status),
-    commands: setupCommands(status.runtime, process.platform, target),
+    commands: setupCommands(status.runtime, process.platform, target, localVmPersistentAddons(cfg)),
     idle_timeout_ms: localVmIdleMs(),
     mode: localVmMode(cfg),
     max_instances: localVmMaxInstances(cfg),
@@ -11632,8 +11632,8 @@ async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurre
   if (ownsProvision) localVmProvisionBusy = true;
   let status: ContainerComputerStatus;
   try {
-    status = await containerComputerStatus(undefined, undefined, target);
-    status = await startStoppedPodmanMachine(status, () => containerComputerStatus(undefined, undefined, target), () => broadcast({ kind: "computer", botId, state: "provisioning" }));
+    status = await containerComputerStatus(undefined, undefined, target, { persistentAddons: localVmPersistentAddons(cfg) });
+    status = await startStoppedPodmanMachine(status, () => containerComputerStatus(undefined, undefined, target, { persistentAddons: localVmPersistentAddons(cfg) }), () => broadcast({ kind: "computer", botId, state: "provisioning" }));
     noteLocalVmSeen(target, status);
     if (!isCurrent()) return status;
     const action = localVmWakeAction(status);
@@ -11647,7 +11647,7 @@ async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurre
 
     broadcast({ kind: "computer", botId, state: "provisioning" });
     try {
-      status = await containerComputerAction(action, undefined, undefined, target, localVmResources(cfg));
+      status = await containerComputerAction(action, undefined, undefined, target, localVmResources(cfg), localVmPersistentAddons(cfg));
     } catch {
       // `run` can throw after the container exists, so arm the idle backstop anyway.
       localVmIdleFor(target).touch();
@@ -11664,7 +11664,7 @@ async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurre
   while (isCurrent() && !status.ready && status.container === "running" && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     if (!isCurrent()) break;
-    status = await containerComputerStatus(undefined, undefined, target);
+    status = await containerComputerStatus(undefined, undefined, target, { persistentAddons: localVmPersistentAddons(cfg) });
   }
   return status;
 }

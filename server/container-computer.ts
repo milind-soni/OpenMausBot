@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
@@ -33,6 +33,7 @@ import {
   type DockerHardeningConfig,
   type HostUser,
 } from "./container-isolation.ts";
+import { appleWorkspaceMountIsSafe, assertPersistentAddonSources, dockerWorkspaceMountIsSafe, persistentAddonMounts, type PersistentLocalVmAddon } from "./local-vm-addons.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
 const run = promisify(execFile);
@@ -63,6 +64,7 @@ export const WORKSPACE_LABEL = "com.openmausbot.workspace";
 export const TARGET_LABEL = "com.openmausbot.local-vm-target";
 export const VM_WORKSPACE_DIR = join(DATA_DIR, "vm-home");
 export const VM_WORKSPACE_GUEST = "/home/cua/workspace";
+const VM_ADDONS_DIR = join(DATA_DIR, "vm-addons");
 export const DISPLAY = ":1";
 export const CUA_SOCKET = "/run/user/1000/openmausbot-cua.sock";
 export const CUA_EXECUTABLE = "/usr/local/libexec/openmausbot/cua-driver";
@@ -87,6 +89,8 @@ export interface LocalVmTarget {
   viewerPort: number | null;
   label: string;
 }
+
+export { assertPersistentAddonSources, type PersistentLocalVmAddon } from "./local-vm-addons.ts";
 
 export const SHARED_LOCAL_VM_TARGET: LocalVmTarget = {
   key: "shared",
@@ -495,7 +499,7 @@ export async function containerComputerStatus(
   runner: CommandRunner = sh,
   platform: NodeJS.Platform = process.platform,
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
-  options: { probeDesktop?: boolean } = {},
+  options: { probeDesktop?: boolean; persistentAddons?: ReadonlyArray<PersistentLocalVmAddon> } = {},
 ): Promise<ContainerComputerStatus> {
   const status = emptyStatus(platform, target);
   const host = currentHostUser(platform);
@@ -546,7 +550,7 @@ export async function containerComputerStatus(
       status.imageMatches =
         appleImage === IMAGE && status.image_id !== null && appleImageId === status.image_id;
       status.managed = containerOwnershipLabelsMatch(detail?.configuration?.labels, target);
-      status.persistence = appleWorkspaceMountIsSafe(detail?.configuration?.mounts, platform, target.workspaceDir)
+      status.persistence = appleWorkspaceMountIsSafe(detail?.configuration?.mounts, platform, target.workspaceDir, VM_WORKSPACE_GUEST, VM_ADDONS_DIR, options.persistentAddons)
         ? "durable"
         : "unsafe";
       status.security = appleResourcesAreLimited(detail?.configuration?.resources) ? "hardened" : "unsafe";
@@ -589,7 +593,10 @@ export async function containerComputerStatus(
         detail?.Mounts,
         platform,
         target.workspaceDir,
+        VM_WORKSPACE_GUEST,
+        VM_ADDONS_DIR,
         status.runtime,
+        options.persistentAddons,
       ) ? "durable" : "unsafe";
       status.security = (
         status.runtime === "podman"
@@ -715,67 +722,12 @@ function appleViewerPort(
   return Number.isInteger(raw) && Number(raw) > 0 && Number(raw) <= 65_535 ? Number(raw) : fallback;
 }
 
-function sameWorkspaceSource(
-  source: string | undefined,
-  platform: NodeJS.Platform,
-  expectedWorkspace: string,
-): boolean {
-  if (!source) return false;
-  const actual = resolve(source);
-  const expected = resolve(expectedWorkspace);
-  return platform === "win32" ? actual.toLowerCase() === expected.toLowerCase() : actual === expected;
-}
-
-/** Podman Machine exposes a Windows bind source through its WSL mount path; accept only the exact translation. */
-function samePodmanWindowsWorkspaceSource(source: string | undefined, expectedWorkspace: string): boolean {
-  if (!source) return false;
-  const match = expectedWorkspace.match(/^([A-Za-z]):[\\/](.+)$/);
-  if (!match) return false;
-  const expected = `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll("\\", "/")}`;
-  const actual = source.replaceAll("\\", "/");
-  return actual.toLowerCase() === expected.toLowerCase();
-}
-
-function dockerWorkspaceMountIsSafe(
-  mounts:
-    | Array<{ Type?: string; Source?: string; Destination?: string; RW?: boolean }>
-    | undefined,
-  platform: NodeJS.Platform,
-  expectedWorkspace: string,
-  runtime: Runtime = "docker",
-): boolean {
-  const sourceMatches = sameWorkspaceSource(mounts?.[0]?.Source, platform, expectedWorkspace) ||
-    (runtime === "podman" &&
-      platform === "win32" &&
-      samePodmanWindowsWorkspaceSource(mounts?.[0]?.Source, expectedWorkspace));
-  return Boolean(
-    mounts?.length === 1 &&
-      mounts[0]?.Type === "bind" &&
-      sourceMatches &&
-      mounts[0]?.Destination === VM_WORKSPACE_GUEST &&
-      mounts[0]?.RW !== false,
-  );
-}
-
-function appleWorkspaceMountIsSafe(
-  mounts: Array<{ source?: string; destination?: string; options?: string[] }> | undefined,
-  platform: NodeJS.Platform,
-  expectedWorkspace: string,
-): boolean {
-  const options = mounts?.[0]?.options ?? [];
-  return Boolean(
-    mounts?.length === 1 &&
-      sameWorkspaceSource(mounts[0]?.source, platform, expectedWorkspace) &&
-      mounts[0]?.destination === VM_WORKSPACE_GUEST &&
-      !options.some((option) => option === "ro" || option === "readonly"),
-  );
-}
-
 export function containerRunArgs(
   runtime: Runtime,
   password = "CHANGE_ME",
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
   desktop: DesktopRunOptions = { platform: process.platform, resources: DEFAULT_DESKTOP_RESOURCES, hostUser: null },
+  persistentAddons: ReadonlyArray<PersistentLocalVmAddon> = [],
 ): string[] {
   if (runtime === "container" && target.key !== SHARED_LOCAL_VM_TARGET.key) {
     throw new Error("Per-bot Local VMs require Docker or Podman because Apple container requires a fixed host port");
@@ -818,6 +770,14 @@ export function containerRunArgs(
       ...desktopCapArgs(runtime),
       "--shm-size",
       "512m",
+    );
+  }
+  for (const mount of persistentAddonMounts(persistentAddons, VM_ADDONS_DIR)) {
+    common.push(
+      "--mount",
+      runtime === "podman"
+        ? `type=bind,source=${mount.source},target=${mount.guestPath},readonly,relabel=private`
+        : `type=bind,source=${mount.source},target=${mount.guestPath},readonly`,
     );
   }
   if (desktopRootIsHostRoot(runtime, desktop.platform, desktop.hostUser)) common.push("--security-opt", "no-new-privileges");
@@ -873,9 +833,10 @@ export async function containerComputerAction(
   platform: NodeJS.Platform = process.platform,
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
   resources: DesktopResources = DEFAULT_DESKTOP_RESOURCES,
+  persistentAddons: ReadonlyArray<PersistentLocalVmAddon> = [],
 ): Promise<ContainerComputerStatus> {
   if (runner === sh && platform === process.platform) screenshotStatusCache.delete(target.key);
-  const before = await containerComputerStatus(runner, platform, target);
+  const before = await containerComputerStatus(runner, platform, target, { persistentAddons });
   const runtime = before.runtime;
   if (!runtime) throw Object.assign(new Error(before.problem ?? "No container runtime is installed"), { status: 409 });
   if (!before.daemonUp) throw Object.assign(new Error(before.problem ?? `${runtime} is not running`), { status: 409 });
@@ -908,7 +869,7 @@ export async function containerComputerAction(
   if (action === "pull") {
     await prepareManagedImage(runtime, runner);
   } else {
-    if (action === "run") await ensureVmWorkspace(platform, target, runtime);
+    if (action === "run") { assertPersistentAddonSources(persistentAddons, VM_ADDONS_DIR); await ensureVmWorkspace(platform, target, runtime); }
     if (action === "start" && runtime !== "container") {
       await applyResourcesBeforeStart(target.containerName, resources, (args, timeoutMs) => runner(runtime, args, timeoutMs));
     }
@@ -918,13 +879,13 @@ export async function containerComputerAction(
           platform,
           resources,
           hostUser: currentHostUser(platform),
-        })
+        }, persistentAddons)
         : action === "remove"
           ? ["rm", runtime === "container" ? "--force" : "-f", target.containerName]
           : [action, target.containerName];
     await runner(runtime, args, 2 * 60_000);
   }
-  return containerComputerStatus(runner, platform, target);
+  return containerComputerStatus(runner, platform, target, { persistentAddons });
 }
 
 export async function containerComputerExists(
@@ -963,19 +924,21 @@ export async function containerComputerFrame(
   runner: CommandRunner = sh,
   platform: NodeJS.Platform = process.platform,
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
+  persistentAddons: ReadonlyArray<PersistentLocalVmAddon> = [],
 ): Promise<{ png: string; format: "png" | "jpeg" }> {
   const cacheable = runner === sh && platform === process.platform;
+  const cacheKey = `${target.key}:${JSON.stringify(persistentAddons)}`;
   const now = Date.now();
-  const cached = screenshotStatusCache.get(target.key);
+  const cached = screenshotStatusCache.get(cacheKey);
   const status =
     cacheable && cached && cached.expiresAt > now
       ? cached.status
-      : await containerComputerStatus(runner, platform, target);
+      : await containerComputerStatus(runner, platform, target, { persistentAddons });
   if (!status.ready || !status.runtime) {
-    if (cacheable) screenshotStatusCache.delete(target.key);
+    if (cacheable) screenshotStatusCache.delete(cacheKey);
     throw Object.assign(new Error(status.problem ?? "The Local VM is not ready"), { status: 409 });
   }
-  if (cacheable) screenshotStatusCache.set(target.key, { status, expiresAt: now + SCREENSHOT_STATUS_TTL_MS });
+  if (cacheable) screenshotStatusCache.set(cacheKey, { status, expiresAt: now + SCREENSHOT_STATUS_TTL_MS });
   try {
     const screenshot = "/tmp/openmausbot-preview.png";
     await runner(
@@ -1003,7 +966,7 @@ export async function containerComputerFrame(
     }
     return { png: data, format: checked.mime === "image/jpeg" ? "jpeg" : "png" };
   } catch (error) {
-    if (cacheable) screenshotStatusCache.delete(target.key);
+    if (cacheable) screenshotStatusCache.delete(cacheKey);
     throw error;
   }
 }
@@ -1012,8 +975,9 @@ export async function containerComputerScreenshot(
   runner: CommandRunner = sh,
   platform: NodeJS.Platform = process.platform,
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
+  persistentAddons: ReadonlyArray<PersistentLocalVmAddon> = [],
 ): Promise<string> {
-  const { png, format } = await containerComputerFrame(runner, platform, target);
+  const { png, format } = await containerComputerFrame(runner, platform, target, persistentAddons);
   return `data:image/${format};base64,${png}`;
 }
 
@@ -1124,6 +1088,7 @@ export function setupCommands(
   runtime: Runtime | null,
   platform: NodeJS.Platform = process.platform,
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
+  persistentAddons: ReadonlyArray<PersistentLocalVmAddon> = [],
 ) {
   const install =
     platform === "darwin"
@@ -1166,7 +1131,7 @@ export function setupCommands(
           platform,
           resources: DEFAULT_DESKTOP_RESOURCES,
           hostUser: null,
-        })),
+        }, persistentAddons)),
     start: command(["start", target.containerName]),
     stop: command(["stop", target.containerName]),
     remove: command(["rm", runtime === "container" ? "--force" : "-f", target.containerName]),

@@ -22,6 +22,7 @@ import { cacheUntilConfigChanges,
   localVmIdleTimeoutMinutes,
   localVmMaxInstances,
   localVmMode,
+  localVmPersistentAddons,
   parseConfigPatch,
   parseStoredConfig,
   persistableInstanceConfigs,
@@ -617,6 +618,25 @@ describe("configuration boundaries", () => {
     });
     expect(localVmMode({ localVm: { mode: "pool" } })).toBe("pool");
     expect(localVmMode({})).toBe("shared");
+  });
+
+  it("accepts only named, relative-path persistent Local VM add-ons", () => {
+    const addons = [{
+      name: "browseros-neo",
+      mounts: [
+        { source: "browserclaw", guestPath: "/usr/lib/browserclaw" },
+        { source: "runtime", guestPath: "/opt/browseros-neo-runtime" },
+      ],
+    }];
+    expect(parseConfigPatch({ localVm: { persistentAddons: addons } })).toEqual({ localVm: { persistentAddons: addons } });
+    expect(localVmPersistentAddons({ localVm: { persistentAddons: addons } })).toEqual(addons);
+    expect(() => parseConfigPatch({ localVm: { persistentAddons: [{ name: "neo", mounts: [{ source: "../host", guestPath: "/opt/neo" }] }] } })).toThrow("localVm.persistentAddons");
+    expect(() => parseConfigPatch({ localVm: { persistentAddons: [{ name: "neo", mounts: [{ source: "..\\host", guestPath: "/opt/neo" }] }] } })).toThrow("localVm.persistentAddons");
+    expect(() => parseConfigPatch({ localVm: { persistentAddons: [{ name: "neo", mounts: [{ source: "runtime,readonly", guestPath: "/opt/neo" }] }] } })).toThrow("localVm.persistentAddons");
+    expect(() => parseConfigPatch({ localVm: { persistentAddons: [{ name: "neo", mounts: [{ source: "runtime", guestPath: "/opt/neo,readonly" }] }] } })).toThrow("localVm.persistentAddons");
+    expect(() => parseConfigPatch({ localVm: { persistentAddons: [{ name: "neo", mounts: [{ source: "runtime\nreadonly", guestPath: "/opt/neo" }] }] } })).toThrow("localVm.persistentAddons");
+    expect(() => parseConfigPatch({ localVm: { persistentAddons: [{ name: "neo", mounts: [{ source: "runtime", guestPath: "/opt/neo\rreadonly" }] }] } })).toThrow("localVm.persistentAddons");
+    expect(() => parseConfigPatch({ localVm: { persistentAddons: [{ name: "neo", mounts: [{ source: "runtime", guestPath: "../opt/neo" }] }] } })).toThrow("localVm.persistentAddons");
   });
 
   it("keeps skill authoring on by default with an explicit opt-out, and the browser off by default", () => {

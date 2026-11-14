@@ -2,6 +2,7 @@
 import { z } from "zod";
 
 import type { AppConfig } from "./config.ts";
+import { persistentLocalVmAddonSchema, type PersistentLocalVmAddon } from "./local-vm-addons.ts";
 import {
   DEFAULT_DESKTOP_RESOURCES,
   MAX_DESKTOP_CPUS,
@@ -35,6 +36,7 @@ export const localVmConfigSchema = z.object({
     .max(MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES)
     .optional(),
   preserveInstalledApps: z.boolean().optional(),
+  persistentAddons: z.array(persistentLocalVmAddonSchema).max(8).optional(),
   /** Each desktop's memory limit in GiB, with no swap beyond it; 4 when unset. New desktops take a change; on Docker and Podman a stopped one takes it when it next starts. */
   memoryGb: z.number().int().min(MIN_DESKTOP_MEMORY_GB).max(MAX_DESKTOP_MEMORY_GB).optional(),
   /** Each desktop's CPU limit; 2 when unset. Docker refuses more CPUs than its engine has. */
@@ -56,6 +58,11 @@ export function localVmIdleTimeoutMinutes(cfg: AppConfig): number {
 /** App preservation is deliberately opt-in: a normal image replacement keeps its existing small, predictable footprint. */
 export function localVmPreservesInstalledApps(cfg: AppConfig): boolean {
   return cfg.localVm?.preserveInstalledApps === true;
+}
+
+/** Administrator-provided add-ons live below the app data directory and are mounted read-only into each new Local VM. */
+export function localVmPersistentAddons(cfg: AppConfig): ReadonlyArray<PersistentLocalVmAddon> {
+  return cfg.localVm?.persistentAddons ?? [];
 }
 
 export function localVmResources(cfg: AppConfig): DesktopResources {
