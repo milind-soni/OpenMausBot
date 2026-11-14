@@ -35,6 +35,7 @@ describe("loopback shared-computer request provenance", () => {
     computers.register({ id, name: "Granted computer", environmentId: "c036782a-7b14-4241-a22f-0141d6efda47", folders: [], terminal: false, computer: true },
       { session: "registered-lender", person: OWN_SERVER_LENDER }, "a".repeat(64));
     expect(computers.list(principal).map((computer) => computer.id)).toEqual([id]);
+    expect(computers.list("p_someone-else")).toEqual([]);
     computers.close();
   });
 
@@ -65,6 +66,14 @@ describe("loopback shared-computer request provenance", () => {
     expect(requestSharedComputerPrincipal(proof, own, [session], (id) => id === session.id)).toBe(OWN_SERVER_LENDER);
     expect(requestSharedComputerPrincipal(proof, own, [session], () => false)).toBeNull();
     expect(requestSharedComputerPrincipal(proof, own, [session], () => true)).toBe(OWN_SERVER_LENDER);
+  });
+
+  it("does not map a limited guest session to the owner's shared computers", () => {
+    const guest = { id: "guest-session", label: "Guest", scopes: ["client"] as ("admin" | "client")[], createdAt: Date.now(), lastSeenAt: Date.now(), expiresAt: Date.now() + 60_000 };
+    const proof = { kind: "session" as const, sessionId: guest.id, person: personKey(guest) };
+    expect(requestSharedComputerPrincipal(proof, own, [guest], (id) => id === guest.id)).toBe(personKey(guest));
+    expect(requestSharedComputerPrincipal(proof, own, [guest], (id) => id === guest.id)).not.toBe(OWN_SERVER_LENDER);
+    expect(requestSharedComputerPrincipal(undefined, own, [], () => false)).toBeNull();
   });
 
   it("carries a real authenticated session identity separately from its display label", () => {
@@ -106,6 +115,14 @@ describe("loopback shared-computer request provenance", () => {
     authz.afterSteer("message-2", proof, () => ({ id: "queue-2" }));
     expect(authz.take("message-2", "queue-2")).toEqual(proof);
     expect(authz.take("message-2", "queue-2")).toBeUndefined();
+  });
+
+  it("separates same-person sessions and authenticated companion credentials when coalescing requests", () => {
+    const authz = new SharedComputerTurnAuthorization();
+    expect(authz.coalescingKey({ kind: "session", sessionId: "session-a", person: "p_owner" }))
+      .not.toBe(authz.coalescingKey({ kind: "session", sessionId: "session-b", person: "p_owner" }));
+    expect(authz.coalescingKey({ kind: "companion", deviceId: "phone-a", credentialId: "cred-a" }))
+      .not.toBe(authz.coalescingKey({ kind: "companion", deviceId: "phone-a", credentialId: "cred-b" }));
   });
 
   it("rechecks the same active principal after waiting and before inventory access", async () => {

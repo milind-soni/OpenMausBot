@@ -217,7 +217,7 @@ export function createLentMcp(deps: LentMcpDeps) {
     const state = lentState(deps.computers, principal, server);
     if (state.kind !== "ready") return refuse(lentLine(name, state, words));
     const definition = lentDefinition(name, server);
-    const active = () => deps.active(turn);
+    const active = () => deps.active(turn) && deps.principal(turn) === principal;
     try {
       if (method === "tools/list") return reply(id, { tools: await tools(state.computerId, definition, principal, active) });
       const params = (message.params ?? {}) as { name?: unknown; arguments?: unknown };
@@ -249,7 +249,7 @@ export function createLentMcp(deps: LentMcpDeps) {
         if (state.kind !== "ready") continue;
         token ??= deps.mint(turn);
         mounted[name] = { type: "http", url: `${deps.origin}${LENT_MCP_PATH}${name}`, headers: { authorization: `Bearer ${token}` } };
-        void tools(state.computerId, lentDefinition(name, server), principal, () => deps.active(turn)).catch(() => {});
+        void tools(state.computerId, lentDefinition(name, server), principal, () => deps.active(turn) && deps.principal(turn) === principal).catch(() => {});
       }
       return mounted;
     },

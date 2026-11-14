@@ -223,6 +223,13 @@ describe("live routes", () => {
       expect((await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone("phone-7"), { kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-7" })).status).toBe(200);
       expect(companionRevoked).toHaveBeenCalledWith("phone-7");
     });
+    it("keeps standalone unpair notices able to end calls without granting revocation provenance", async () => {
+      const companionRevoked = vi.fn();
+      const d = deps({ companionRevoked });
+      expect(await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone())).toMatchObject({ status: 200, body: { call: { status: "ending" } } });
+      expect(d.calls.deviceRevoked).toHaveBeenCalledWith("phone-1");
+      expect(companionRevoked).not.toHaveBeenCalled();
+    });
     it("takes the unpairing only from the companion, for a well-formed phone", async () => {
       const d = deps();
       expect((await request(d, "POST", "/api/live/device-revoked", undefined, { "x-openmausbot-companion-device": "phone-1" })).status).toBe(403);

@@ -7176,7 +7176,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
       trigger,
       via,
       callId,
-      reaction: replyTo?.reactedWith,
+      reaction: replyTo?.reactedWith, authorizationGroup: sharedComputerAuthorization.coalescingKey(requestProvenance),
     });
     if (requestProvenance) sharedComputerAuthorization.queue(queued.id, requestProvenance);
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason, why: waitWords.queued(threadId, decision.reason) };
@@ -7266,7 +7266,7 @@ async function acceptDirectSend(
       if (typedStop) return typedStop;
       if (currentAtStart.busy) {
         const personsOwn = personPresent && !app && (trigger.kind === "user" || trigger.kind === "owner"), queuedPrompt = (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId)));
-        if (runOwners.arrival(threadId, sender, personPresent && Boolean(sender?.id)) === "queue") return { ok: true as const, queued: true as const, threadId, queueId: sharedComputerAuthorization.queueWith(requestProvenance, () => queueSteeredMessage(currentAtStart.id, threadId, text, { replyToId: replyTo?.id, sendId, dataContext, fromApp: app?.fromApp, mentions, prompt: queuedPrompt, sender, trigger, via, callId, first: personPresent && Boolean(sender?.id) })).id };
+        if (runOwners.arrival(threadId, sender, personPresent && Boolean(sender?.id)) === "queue") return { ok: true as const, queued: true as const, threadId, queueId: sharedComputerAuthorization.queueWith(requestProvenance, () => queueSteeredMessage(currentAtStart.id, threadId, text, { replyToId: replyTo?.id, sendId, dataContext, fromApp: app?.fromApp, mentions, prompt: queuedPrompt, sender, trigger, via, callId, first: personPresent && Boolean(sender?.id), authorizationGroup: sharedComputerAuthorization.coalescingKey(requestProvenance) })).id };
         const instance = runningTurnInstance(currentAtStart, threadId);
         let steered: SteerOutcome = "refused";
         const steerInput = extractTurnImages(text);
@@ -7318,7 +7318,7 @@ async function acceptDirectSend(
           store.setTaskAskedAt(botId, threadId, message.at);
           handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
           signInSettle.answerInChat(botId, threadId);
-          if (personsOwn) personFirst.wait(threadId, { requeue: (note) => sharedComputerAuthorization.afterSteer(message.id, requestProvenance, () => queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, via, callId, mentions, aheadOfOthers: runOwners.askerFirst(threadId) })) });
+          if (personsOwn) personFirst.wait(threadId, { requeue: (note) => sharedComputerAuthorization.afterSteer(message.id, requestProvenance, () => queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, via, callId, mentions, aheadOfOthers: runOwners.askerFirst(threadId), authorizationGroup: sharedComputerAuthorization.coalescingKey(requestProvenance) })) });
           return { ok: true as const, steered: true as const, threadId, message };
         }
         if (!current.busy) {
@@ -7333,7 +7333,7 @@ async function acceptDirectSend(
           trigger,
           via,
           callId,
-          first: personsOwn || chose === "restart", aheadOfOthers: runOwners.askerFirst(threadId),
+          first: personsOwn || chose === "restart", aheadOfOthers: runOwners.askerFirst(threadId), authorizationGroup: sharedComputerAuthorization.coalescingKey(requestProvenance),
         });
         if (requestProvenance) sharedComputerAuthorization.queue(queued.id, requestProvenance);
         if (personsOwn && !chose) personFirst.wait(threadId, {});

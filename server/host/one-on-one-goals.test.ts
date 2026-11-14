@@ -5,11 +5,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HostTurnResult } from "../coordinator.ts";
+import type { LoopbackTurnProvenance } from "../direct-send.ts";
 import { GROUP_GOAL_CONTROL_CLOSE, GROUP_GOAL_CONTROL_OPEN, GROUP_GOAL_MAX_TURNS, GROUP_GOAL_WAIT_MAX_MS, type GoalRunEnd } from "../group-goal-run.ts";
 import type { BotRecord, Message, TaskRecord } from "../store.ts";
 import type { LiveGoalRun } from "./goal-cards.ts";
 import { createGoalTurns, type GoalLeadTurn } from "./goal-turns.ts";
-import { createOneOnOneGoals } from "./one-on-one-goals.ts";
+import { createOneOnOneGoals, type OneOnOneGoalStart } from "./one-on-one-goals.ts";
 
 // A one-second cap: the real half hour is thousands of retries, each a timer round of its own.
 vi.mock("../group-goal-run.ts", async (importOriginal) => ({
@@ -21,7 +22,7 @@ const DONE = `${GROUP_GOAL_CONTROL_OPEN}{"status":"completed","detail":"Done."}$
 const refused = (code: string) => Object.assign(new Error("this thread is already working"), { code });
 
 /** A goal in a chat whose startTurn is scripted; the real goal-turns hold the lead, so a reply can be filled in. */
-function goalChat(startTurn: (call: number, lead: GoalLeadTurn, settle: (outcome: HostTurnResult) => void) => Promise<unknown>, canStart: () => boolean = () => true) {
+function goalChat(startTurn: (call: number, lead: GoalLeadTurn, settle: (outcome: HostTurnResult) => void) => Promise<unknown>, canStart: () => boolean = () => true, options: OneOnOneGoalStart = {}) {
   const run: LiveGoalRun = {
     runId: "r",
     cardMessageId: "card",
@@ -38,6 +39,7 @@ function goalChat(startTurn: (call: number, lead: GoalLeadTurn, settle: (outcome
   const turns = createGoalTurns({ retireProviderTurn() {} });
   let lead!: GoalLeadTurn;
   let starts = 0;
+  const turnOptions: Array<{ requestProvenance?: LoopbackTurnProvenance }> = [];
   let botChanged: ((change: { type: "bot"; botId: string }) => void) | undefined;
   createOneOnOneGoals({
     store: {
@@ -67,10 +69,10 @@ function goalChat(startTurn: (call: number, lead: GoalLeadTurn, settle: (outcome
     },
     canStart,
     isUnattended: () => false,
-    startTurn: (_botId, _text, opts) => startTurn(++starts, lead, opts.onSettled),
-  }).start("b", "t", "Fix the build");
+    startTurn: (_botId, _text, opts) => { turnOptions.push(opts); return startTurn(++starts, lead, opts.onSettled); },
+  }).start("b", "t", "Fix the build", options);
   // The store's change event for the bot, as the real store fires it when the bot's turn ends.
-  return { run, finished, ends, starts: () => starts, botChanged: () => botChanged?.({ type: "bot", botId: "b" }) };
+  return { run, finished, ends, turnOptions, starts: () => starts, botChanged: () => botChanged?.({ type: "bot", botId: "b" }) };
 }
 
 describe("a one-on-one goal whose turn keeps losing its slot", () => {
@@ -132,5 +134,15 @@ describe("a one-on-one goal whose turn keeps losing its slot", () => {
     expect(chat.starts()).toBe(2);
     expect(chat.run.turnCount).toBe(1);
     expect(chat.finished).toEqual([{ status: "completed", detail: "Done." }]);
+  });
+
+  it("keeps verified request provenance on each goal step", async () => {
+    const proof = { kind: "desktop-owner" as const, credentialId: "verified" };
+    const chat = goalChat(async (_call, lead, settle) => {
+      lead.assistantItems.push(DONE);
+      settle({ ok: true, text: "" });
+    }, () => true, { requestProvenance: proof });
+    await vi.waitFor(() => expect(chat.finished).toEqual([{ status: "completed", detail: "Done." }]));
+    expect(chat.turnOptions[0]).toMatchObject({ requestProvenance: proof });
   });
 });

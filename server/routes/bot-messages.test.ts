@@ -198,6 +198,14 @@ describe("running a request again where several people write", () => {
     }
   });
 
+  it("preserves verified request provenance when editing a message to rerun it", async () => {
+    const proof = { kind: "desktop-owner" as const, credentialId: "verified" };
+    const { store, threadId, state, edit } = await fixture({ ...team({ person: PRIYA, admin: false }), requestProvenance: () => proof });
+    const request = asked(store, threadId);
+    expect((await edit(request.id, { threadId, text: request.text })).status).toBe(202);
+    expect(state.started[0]?.opts).toMatchObject({ requestProvenance: proof });
+  });
+
   it("refuses another member who calls the route directly, with the same words or new ones", async () => {
     const { store, threadId, state, edit } = await fixture(team({ person: TOM, admin: false }));
     const request = asked(store, threadId);
@@ -258,6 +266,14 @@ describe("POST /api/bots/:id/messages and who typed it", () => {
     const response = await post({ threadId, sendId: SEND, text: "List shared computers" });
     expect(response.status).toBe(202);
     expect(state.accepted[0]?.requestProvenance).toEqual(proof);
+  });
+
+  it("passes verified request provenance into a goal turn", async () => {
+    const proof = { kind: "desktop-owner" as const, credentialId: "verified" };
+    const goals = { start: vi.fn(() => ({ id: "goal-message" } as Message)) };
+    const { bot, threadId, post } = await fixture({ goals, requestProvenance: () => proof });
+    expect((await post({ threadId, mode: "goal", text: "Use my computer" })).status).toBe(202);
+    expect(goals.start).toHaveBeenCalledWith(bot.id, threadId, "Use my computer", { sendId: undefined, sender: undefined, requestProvenance: proof });
   });
 
   it("takes neither a press, whose words the widget wrote, nor a relay as a person's", async () => {

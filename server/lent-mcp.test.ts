@@ -14,13 +14,16 @@ const notes = { command: "/Users/ada/bin/notes-mcp", args: [], env: { NOTES_TOKE
 const here = (over: Partial<HereChecks> = {}): HereChecks => ({ exists: () => false, program: () => true, answers: async () => false, ...over });
 
 type Online = NonNullable<ReturnType<SharedComputers["runsOn"]>["online"]>;
-function fixture(options: { keys?: LentMcpDeps["keys"]; online?: Partial<Online> | null; known?: { lent: boolean } | null; principal?: string | null; servers?: Record<string, unknown>; mcpServers?: string[]; toolScope?: unknown; answer?: (operation: Record<string, unknown>) => unknown; lenders?: ReturnType<SharedComputers["mcpLenders"]>; here?: HereChecks; personal?: boolean; place?: string } = {}) {
+function fixture(options: { keys?: LentMcpDeps["keys"]; online?: Partial<Online> | null; known?: { lent: boolean } | null; principal?: string | null | (() => string | null); active?: () => boolean; servers?: Record<string, unknown>; mcpServers?: string[]; toolScope?: unknown; answer?: (operation: Record<string, unknown>) => unknown; lenders?: ReturnType<SharedComputers["mcpLenders"]>; here?: HereChecks; personal?: boolean; place?: string } = {}) {
   const requests: Array<{ operation: Record<string, unknown>; principal: string | null }> = [];
+  const activeChecks: Array<() => boolean> = [];
   const online = options.online === null ? null : { id: "mac-1", name: "Ada's Mac", platform: "darwin" as const, terminal: false, mcpServers: true, ...options.online };
   const computers: LentMcpDeps["computers"] = {
     runsOn: (principal) => (principal === "cloud-home" ? { online, known: options.known === null ? null : { name: "Ada's Mac", platform: "darwin", lent: options.known?.lent ?? true } } : { online: null, known: null }),
     mcpLenders: (principal) => (principal === "cloud-home" ? options.lenders ?? [] : []),
-    request: async (operation, principal) => {
+    request: async (operation, principal, active) => {
+      activeChecks.push(active);
+      if (!active()) throw new Error("turn is no longer authorized");
       requests.push({ operation: operation as Record<string, unknown>, principal });
       const answer = options.answer?.(operation as Record<string, unknown>);
       if (answer instanceof Error) throw answer;
@@ -34,17 +37,17 @@ function fixture(options: { keys?: LentMcpDeps["keys"]; online?: Partial<Online>
     computers,
     policy: (servers) => servers,
     bot: (id) => (id === "kiwi" ? { id, ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}), toolScope: options.toolScope } : undefined),
-    principal: () => (options.principal === undefined ? "cloud-home" : options.principal),
+    principal: () => (typeof options.principal === "function" ? options.principal() : options.principal === undefined ? "cloud-home" : options.principal),
     notice: () => "Someone else wrote in this conversation, so it can't use your Mac. Start a new conversation to use it.",
     refusal: () => "Someone else wrote in this conversation, so it can't use your Mac. Start a new conversation to use it. Only the person can change this.",
     mint: () => { minted.push("token"); return "turn-bearer"; },
-    active: () => true,
+    active: options.active ?? (() => true),
     origin: "http://127.0.0.1:4242",
     personal: options.personal ?? true,
     place: options.place ?? "My Cloud",
     here: options.here ?? here(),
   });
-  return { lent, requests, minted };
+  return { lent, requests, minted, activeChecks };
 }
 
 const rpc = (method: string, params: unknown = {}, id = 1) => ({ jsonrpc: "2.0", id, method, params });
@@ -173,6 +176,22 @@ describe("the MCP endpoint a turn's engine reaches", () => {
     ]);
     expect((await route(lent, `${LENT_MCP_PATH}local`, rpc("tools/list"))).json, "listed again within ten minutes: kept").toHaveBeenCalled();
     expect(requests.filter((request) => request.operation.action === "mcp_tools")).toHaveLength(1);
+  });
+
+  it("cancels mount-time discovery and MCP calls when the verified principal changes", async () => {
+    let principal: string | null = "cloud-home";
+    const { lent, activeChecks } = fixture({ principal: () => principal });
+    lent.mounts({ id: "kiwi" }, TURN);
+    expect(activeChecks[0]?.()).toBe(true);
+    principal = null;
+    expect(activeChecks[0]?.()).toBe(false);
+
+    principal = "cloud-home";
+    await route(lent, `${LENT_MCP_PATH}local`, rpc("tools/call", { name: "search" }));
+    const callIsActive = activeChecks.at(-1)!;
+    expect(callIsActive()).toBe(true);
+    principal = null;
+    expect(callIsActive()).toBe(false);
   });
 
   it("refuses a server that isn't this bot's now, a turn that can't use the computer, and an offline computer, with no job sent", async () => {

@@ -32,6 +32,8 @@ export class SharedComputerTurnAuthorization {
 
   queue(id: string, proof: LoopbackTurnProvenance | undefined): void { if (proof) this.queued.set(id, proof); }
 
+  coalescingKey(proof: LoopbackTurnProvenance | undefined): string | undefined { return proof ? JSON.stringify(proof) : undefined; }
+
   queueWith<T extends { id: string }>(proof: LoopbackTurnProvenance | undefined, create: () => T): T {
     const item = create();
     this.queue(item.id, proof);
