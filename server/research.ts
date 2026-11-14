@@ -173,15 +173,16 @@ export function createResearchAvailability(deps: {
   const now = deps.now ?? Date.now;
   const recheckOffMs = deps.recheckOffMs ?? 60 * 60_000;
   let known: { key: string; on: boolean; at: number } | null = null;
-  let asking: string | null = null;
+  let asking: { key: string } | null = null;
   const keyOf = (credential: ServiceCredential) => createHash("sha256").update(`${credential.api}\0${credential.token}`).digest("hex");
   const ask = (credential: ServiceCredential, key: string) => {
-    if (asking === key) return;
-    asking = key;
+    if (asking?.key === key) return;
+    const probe = { key };
+    asking = probe;
     void (deps.offered ?? researchOffered)(credential).then((on) => {
-      if (on !== null) known = { key, on, at: now() };
+      if (asking === probe && on !== null) known = { key, on, at: now() };
     }, () => {}).finally(() => {
-      if (asking === key) asking = null;
+      if (asking === probe) asking = null;
     });
   };
   return {
@@ -195,7 +196,10 @@ export function createResearchAvailability(deps: {
     },
     refused(): void {
       const credential = deps.credential();
-      if (credential?.included) known = { key: keyOf(credential), on: false, at: now() };
+      if (credential?.included) {
+        known = { key: keyOf(credential), on: false, at: now() };
+        asking = null;
+      }
     },
   };
 }
