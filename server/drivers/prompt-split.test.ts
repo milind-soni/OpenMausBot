@@ -6,6 +6,7 @@ import {
   promptSplitFingerprints,
   readPromptSplitReceipt,
   splitSessionPrompt,
+  STABLE_PROMPT_REPLACEMENT_NOTE,
   volatileContextNote,
   withContextNote,
   writePromptSplitReceipt,
@@ -130,7 +131,7 @@ describe("splitSessionPrompt", () => {
   it("re-delivers the full prompt when the stable half changes", () => {
     const first = splitSessionPrompt("old rules.", "memory", null, fullSystem, "first");
     const second = splitSessionPrompt("new rules.", "memory", first.receipt, "new rules.\n\nmemory", "second");
-    expect(second.text).toBe("new rules.\n\nmemory\n\nsecond");
+    expect(second.text).toBe(STABLE_PROMPT_REPLACEMENT_NOTE + "\n\nnew rules.\n\nmemory\n\nsecond");
   });
 
   it("re-anchors the full prompt after the requested run of bare turns", () => {

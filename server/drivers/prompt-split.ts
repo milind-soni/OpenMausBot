@@ -25,6 +25,10 @@ export function promptHalves(
 export const VOLATILE_CONTEXT_NOTE_PREFIX =
   "Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:";
 
+/** A changed stable half is re-sent in the same session. The earlier copy stays in the transcript. */
+export const STABLE_PROMPT_REPLACEMENT_NOTE =
+  "The standing instructions below replace the earlier copy in this conversation. Follow this copy, not the earlier one.";
+
 export const VOLATILE_CONTEXT_CLEARED_NOTE =
   "The OpenMausBot context notes from earlier in this conversation have been cleared; the standing instructions still apply.";
 
@@ -102,7 +106,11 @@ export function splitSessionPrompt(
   const turnsSinceFull = typeof previous?.turnsSinceFull === "number" ? previous.turnsSinceFull : 0;
   const reAnchor = reAnchorAfterTurns > 0 && previous !== null && turnsSinceFull >= reAnchorAfterTurns;
   if (previous === null || previous.stable !== fingerprints.stable || reAnchor) {
-    return { text: fullSystem ? fullSystem + "\n\n" + text : text, receipt: { ...fingerprints, turnsSinceFull: 0 } };
+    const body = fullSystem ? fullSystem + "\n\n" + text : text;
+    // First delivery and a scheduled re-anchor repeat the same instructions. Only a changed stable half
+    // needs to say that this copy replaces the one already in the transcript.
+    const replacing = previous !== null && previous.stable !== fingerprints.stable;
+    return { text: replacing ? withContextNote(STABLE_PROMPT_REPLACEMENT_NOTE, body) : body, receipt: { ...fingerprints, turnsSinceFull: 0 } };
   }
   const note = previous.volatile === fingerprints.volatile && !perTurnVolatile
     ? ""
