@@ -297,7 +297,7 @@ export class AppConnections {
         if (!isRecord(result) || !Array.isArray(result.tools)) throw new McpHttpError("protocol", "invalid tool list");
         for (const tool of result.tools) if (isRecord(tool) && typeof tool.name === "string" && tool.name) tools.push(tool);
         const next = result.nextCursor;
-        if (typeof next !== "string" || !next || cursors.has(next)) break;
+        if (typeof next !== "string" || cursors.has(next)) break;
         cursors.add(next);
         cursor = next;
       }
