@@ -31,6 +31,16 @@ describe("ACP model and reasoning options", () => {
     ] });
   });
 
+  it("recognises the thinking category Vibe's ACP agent emits", () => {
+    expect(acpVariantOption({ configOptions: [{ type: "select", id: "thinking", category: "thinking", currentValue: "max", options: [
+      { value: "off", name: "Off" }, { value: "low", name: "Low" }, { value: "high", name: "High" },
+      { value: "xhigh", name: "Extra high" }, { value: "max", name: "Maximum" },
+    ] }] })).toEqual({ configId: "thinking", currentValue: "max", options: [
+      { id: "off", label: "Off" }, { id: "low", label: "Low" }, { id: "high", label: "High" },
+      { id: "xhigh", label: "Extra high" }, { id: "max", label: "Maximum" },
+    ] });
+  });
+
   it("does not invent reasoning options for a model without them", () => {
     expect(acpVariantOption({ configOptions: [{ type: "select", id: "model", options: [{ value: "fast" }] }] })).toBeUndefined();
     expect(acpVariantOption({ configOptions: [{ type: "boolean", id: "effort", currentValue: true }] })).toBeUndefined();
