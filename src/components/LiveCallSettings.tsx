@@ -27,8 +27,9 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
   }, []);
   const azure = live.provider === "azure";
   const fish = live.provider === "fish";
+  const gemini = live.provider === "gemini";
   const copy = liveKeyCopy(live.provider);
-  const hasKey = live.keySource === (fish ? "fishAudio" : "live");
+  const hasKey = live.keySource === (fish ? "fishAudio" : gemini ? "gemini" : "live");
   const voice = live.voice || "marin";
   const known = LIVE_VOICE_OPTIONS.some((option) => option.id === voice);
 
@@ -74,7 +75,8 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
       }}
     >
       <LiveProviderSettings locked={keySaving} onSaving={setProviderSaving} />
-      {!fish && <>
+      {/* Relayed calls speak in the provider's own voice. */}
+      {!fish && !gemini && <>
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.voice")}</span>
         <Select
@@ -126,13 +128,13 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
           )}
         </span>
       </div>
-      {!hasKey && (azure || fish) && <div className="-mt-2 text-[12px] text-ink-tertiary">{t(copy.missing)}</div>}
-      {live.keySource !== "live" && !azure && !fish && (
+      {!hasKey && (azure || fish || gemini) && <div className="-mt-2 text-[12px] text-ink-tertiary">{t(copy.missing)}</div>}
+      {live.keySource !== "live" && !azure && !fish && !gemini && (
         <div className="-mt-2 text-[12px] text-ink-tertiary">{t(live.keySource === "openai" ? "call.live.keyFromApiKeys" : "call.live.needsKey")} <KeysLink id="openai" purpose="liveCalls" /></div>
       )}
       {/* Keyed by provider: a key typed for one provider is never saved for another. */}
       {changingKey && <LiveKeySetup key={state.config?.live?.provider ?? "openai"} compact locked={providerSaving} onSaving={setKeySaving} onSaved={() => setChangingKey(false)} />}
-      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, fish })} {t(copy.cost)}</div>
+      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, fish, gemini })} {t(copy.cost)}</div>
       {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
   );

@@ -6,7 +6,7 @@ import {
 } from "../shared/live-approval.ts";
 import { clampAppend, commentaryChunks, LiveTranscript } from "../shared/live-call.ts";
 import { signInWaits } from "../shared/sign-in-request.ts";
-import type { LiveCallRecord, LiveCallState, LiveClient, LiveEndReason, LiveFishTransport, LiveProvider } from "../shared/wire.ts";
+import type { LiveCallRecord, LiveCallState, LiveClient, LiveEndReason, LiveFishTransport, LiveGeminiTransport, LiveProvider } from "../shared/wire.ts";
 import { FISH_AGENT_VOICE } from "./live-fish.ts";
 import { LIVE_NEEDS_KEY, liveAuthHeaders, liveCallSummaryLine, liveProviderName, LiveSessionError, liveVoice, spokenHangUp, type LiveEndpoint } from "./live-call.ts";
 import type { RequestAuth } from "./request-auth.ts";
@@ -40,9 +40,13 @@ export interface LiveSocket {
 }
 
 export type LiveActivity = "idle" | "working" | "waiting";
-export type LiveSessionAnswer = { sessionId: string; sdp: string } | { sessionId: string; fish: LiveFishTransport };
-export type LiveCallStarted = { call: LiveCallState; sdp: string; fish?: undefined } | { call: LiveCallState; sdp?: undefined; fish: LiveFishTransport };
+export type LiveSessionAnswer = { sessionId: string; sdp: string } | { sessionId: string; fish: LiveFishTransport } | { sessionId: string; gemini: LiveGeminiTransport };
+export type LiveCallStarted =
+  | { call: LiveCallState; sdp: string; fish?: undefined; gemini?: undefined }
+  | { call: LiveCallState; sdp?: undefined; fish: LiveFishTransport; gemini?: undefined }
+  | { call: LiveCallState; sdp?: undefined; fish?: undefined; gemini: LiveGeminiTransport };
 export const LIVE_FISH_NEEDS_APP = "Live calls through Fish Audio work in the desktop app or a web browser, not in the phone app yet.";
+export const LIVE_GEMINI_NEEDS_APP = "Live calls through Gemini work in the desktop app or a web browser, not in the phone app yet.";
 export type LiveSendResult = { kind: "started" | "steered"; messageId: string } | { kind: "queued"; queueId: string };
 export type LiveRespondResult = { ok: true } | { ok: false; error: string };
 
@@ -59,9 +63,10 @@ export interface LiveCallDeps {
   settings(): { key: string; endpoint: LiveEndpoint | null; setupProblem?: string | null; provider?: LiveProvider; voice: string; readTypedReplies: boolean; idleMinutes: number };
   /** Why this caller may not hold a call through Azure OpenAI; null when they may. Required, so no wiring can leave it out. */
   azureRefusal(auth: RequestAuth): string | null;
-  /** The same for Fish Audio, where the harness hears the call only through its client's reports. Required too. */
+  /** The same for Fish Audio and Gemini, where the harness hears the call only through its client's reports. Required too. */
   fishRefusal(auth: RequestAuth): string | null;
-  /** `sdp` is "" on Fish Audio, which answers with `fish` instead of an SDP answer. */
+  geminiRefusal(auth: RequestAuth): string | null;
+  /** `sdp` is "" on Fish Audio and Gemini, which answer with `fish` or `gemini` instead of an SDP answer. */
   createSession(input: { key: string; endpoint: LiveEndpoint; sdp: string; botId: string; threadId: string; voice: string }): Promise<LiveSessionAnswer>;
   openSocket(url: string, key: string, endpoint: LiveEndpoint): LiveSocket;
   attachUrl(sessionId: string, endpoint: LiveEndpoint): string;
@@ -167,32 +172,35 @@ export class LiveCallController {
 
   async start(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient; sdp?: string }): Promise<LiveCallStarted> {
     const settings = this.deps.settings();
-    // First: someone refused here is not told about a running call, or sent to set Azure or Fish Audio up.
+    // First: someone refused here is not told about a running call, or sent to set Azure, Fish Audio or Gemini up.
+    // The chosen relayed service comes before a key's endpoint, so its refusal and its mismatch check apply.
+    const relayedChoice = settings.provider === "fish" || settings.provider === "gemini" ? settings.provider : null;
     const limited = settings.provider === "azure" || settings.endpoint?.provider === "azure" ? "azure"
-      : settings.provider === "fish" || settings.endpoint?.provider === "fish" ? "fish" : null;
+      : relayedChoice ?? (settings.endpoint?.provider === "fish" || settings.endpoint?.provider === "gemini" ? settings.endpoint.provider : null);
     if (limited) {
-      const refusal = limited === "azure" ? this.deps.azureRefusal(input.auth) : this.deps.fishRefusal(input.auth);
+      const refusal = limited === "azure" ? this.deps.azureRefusal(input.auth) : limited === "fish" ? this.deps.fishRefusal(input.auth) : this.deps.geminiRefusal(input.auth);
       if (refusal) {
         this.deps.log(`[live] call refused bot=${input.botId} client=${input.client} provider=${limited}`);
         throw new LiveSessionError(refusal, 403);
       }
     }
-    const fish = limited === "fish";
-    if (fish && (input.client === "ios" || input.client === "android")) throw new LiveSessionError(LIVE_FISH_NEEDS_APP, 400);
-    if (!fish && !input.sdp) throw new LiveSessionError("The call request was not valid.", 400);
+    // Fish Audio and Gemini calls are relayed: the client holds the provider's session and reports what it heard.
+    const relayed = limited === "fish" || limited === "gemini" ? limited : null;
+    if (relayed && (input.client === "ios" || input.client === "android")) throw new LiveSessionError(relayed === "fish" ? LIVE_FISH_NEEDS_APP : LIVE_GEMINI_NEEDS_APP, 400);
+    if (!relayed && !input.sdp) throw new LiveSessionError("The call request was not valid.", 400);
     if (this.call && this.call.state.status !== "ended") throw new LiveCallBusyError({ ...this.call.state });
     if (input.device && this.revokedDevices.has(input.device)) throw new LiveCallSignedOutError();
     const key = settings.key.trim();
     const endpoint = settings.endpoint;
     if (settings.setupProblem || !key || !endpoint) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409);
-    if (fish !== (endpoint.provider === "fish")) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409);
-    const voice = fish ? FISH_AGENT_VOICE : liveVoice(settings.voice);
+    if (relayed !== (endpoint.provider === "fish" || endpoint.provider === "gemini" ? endpoint.provider : null)) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409);
+    const voice = relayed ? FISH_AGENT_VOICE : liveVoice(settings.voice);
     const call = this.newCall(input, key, endpoint, voice);
     // Taken before the first await: a second start in the same tick is refused.
     this.call = call;
     let session: LiveSessionAnswer;
     try {
-      session = await this.deps.createSession({ key, endpoint, sdp: fish ? "" : input.sdp ?? "", botId: input.botId, threadId: input.threadId, voice });
+      session = await this.deps.createSession({ key, endpoint, sdp: relayed ? "" : input.sdp ?? "", botId: input.botId, threadId: input.threadId, voice });
     } catch (error) {
       if (this.call === call) this.call = null;
       this.deps.log(`[live] call failed bot=${input.botId} client=${input.client} status=${error instanceof LiveSessionError ? error.status : "error"}`);
@@ -221,7 +229,10 @@ export class LiveCallController {
       if (!sidebandOpened) this.closeOrphan(session.sessionId, key, endpoint);
       throw error;
     }
-    return "fish" in session ? { call: { ...call.state }, fish: session.fish } : { call: { ...call.state }, sdp: session.sdp };
+    const state = { ...call.state };
+    if ("fish" in session) return { call: state, fish: session.fish };
+    if ("gemini" in session) return { call: state, gemini: session.gemini };
+    return { call: state, sdp: session.sdp };
   }
 
   async end(callId: string): Promise<LiveCallState | null> {
@@ -311,7 +322,7 @@ export class LiveCallController {
     call.socket = socket;
     const attachTimer = this.later(call, () => {
       if (!call.attached) this.finish(call, "sideband-lost", `The call could not connect to ${liveProviderName(call.endpoint.provider)}.`);
-    }, call.endpoint.provider === "fish" ? FISH_ATTACH_TIMEOUT_MS : ATTACH_TIMEOUT_MS);
+    }, call.endpoint.provider === "fish" || call.endpoint.provider === "gemini" ? FISH_ATTACH_TIMEOUT_MS : ATTACH_TIMEOUT_MS);
     socket.onopen = () => {
       call.attached = true;
       this.clear(call, attachTimer);

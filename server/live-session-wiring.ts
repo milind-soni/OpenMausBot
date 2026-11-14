@@ -2,9 +2,10 @@ import { productName } from "./brand.ts";
 import type { LiveCallDeps } from "./live-call-controller.ts";
 import { openLiveSocket } from "./live-call-controller.ts";
 import { createLiveSession, liveAttachUrl, type LiveBot, type LiveEndpoint, type LiveHistoryMessage } from "./live-call.ts";
-import { fishLiveCallRefusal } from "./live-access.ts";
+import { fishLiveCallRefusal, geminiLiveCallRefusal } from "./live-access.ts";
 import type { LiveConfig } from "./live-config.ts";
 import { createFishLiveSession, endFishLiveSession, fishKeyPrint, FishRelays, setUpFishAgent } from "./live-fish.ts";
+import { createGeminiLiveSession } from "./live-gemini.ts";
 import type { LiveRouteDeps } from "./routes/live.ts";
 
 export interface LiveSessionWiringInput {
@@ -21,12 +22,13 @@ export interface LiveSessionWiringInput {
 }
 
 /** How a Live call's session starts and is followed, per provider: GPT-Live's WebRTC session and sideband on OpenAI or
- * Azure, or a Fish Audio agent session followed through its client's relay. */
+ * Azure, or a Fish Audio agent or Gemini Live session followed through its client's relay. */
 export function liveSessionWiring(input: LiveSessionWiringInput): {
-  calls: Pick<LiveCallDeps, "fishRefusal" | "createSession" | "openSocket" | "attachUrl">;
+  calls: Pick<LiveCallDeps, "fishRefusal" | "geminiRefusal" | "createSession" | "openSocket" | "attachUrl">;
   fishRelay: LiveRouteDeps["fishRelay"];
 } {
   const relays = new FishRelays();
+  const relayed = (endpoint: LiveEndpoint) => endpoint.provider === "fish" || endpoint.provider === "gemini";
   const env = input.env ?? process.env;
   const fetchImpl = input.fetchImpl ?? fetch;
 
@@ -54,7 +56,14 @@ export function liveSessionWiring(input: LiveSessionWiringInput): {
     fishRelay: (sessionId, token) => relays.find(sessionId, token),
     calls: {
       fishRefusal: (auth) => fishLiveCallRefusal(auth, { othersOnLoopback: input.othersOnLoopback() }),
+      geminiRefusal: (auth) => geminiLiveCallRefusal(auth, { othersOnLoopback: input.othersOnLoopback() }),
       createSession: async ({ key, endpoint, sdp, botId, threadId, voice }) => {
+        if (endpoint.provider === "gemini") {
+          const session = await createGeminiLiveSession({ key, endpoint, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome, fetchImpl });
+          // Gemini has nothing to end: the session ends when the client closes it, and the token is single use.
+          const { token } = relays.open(session.session_id, async () => undefined);
+          return { sessionId: session.session_id, gemini: { type: "gemini", session, relayToken: token } };
+        }
         if (endpoint.provider !== "fish") {
           return createLiveSession({ key, endpoint, sdp, voice, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome });
         }
@@ -62,8 +71,8 @@ export function liveSessionWiring(input: LiveSessionWiringInput): {
         const { token } = relays.open(session.session_id, () => endFishLiveSession(session.session_id, key, agent, fetchImpl));
         return { sessionId: session.session_id, fish: { type: "fish", session, relayToken: token } };
       },
-      openSocket: (url, key, endpoint) => endpoint.provider === "fish" ? relays.socket(url) : openLiveSocket(url, key, endpoint),
-      attachUrl: (sessionId, endpoint) => endpoint.provider === "fish" ? sessionId : liveAttachUrl(sessionId, endpoint),
+      openSocket: (url, key, endpoint) => relayed(endpoint) ? relays.socket(url) : openLiveSocket(url, key, endpoint),
+      attachUrl: (sessionId, endpoint) => relayed(endpoint) ? sessionId : liveAttachUrl(sessionId, endpoint),
     },
   };
 }

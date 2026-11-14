@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AppConfig } from "./config.ts";
 import { nestedKeyStatus } from "./key-hint.ts";
-import { LIVE_NEEDS_AZURE, LIVE_NEEDS_FISH, LIVE_NEEDS_KEY } from "./live-call.ts";
+import { LIVE_NEEDS_AZURE, LIVE_NEEDS_FISH, LIVE_NEEDS_GEMINI, LIVE_NEEDS_KEY } from "./live-call.ts";
 import { fishKeyFromLiveKey, LIVE_KEY_NEEDS_ENDPOINT, liveConfigWithEnv, liveKeyTarget, liveSavePatch, usableLiveKey, type LiveConfig } from "./live-config.ts";
 import { fishKeyPrint } from "./live-fish.ts";
 import { LIVE_IDLE_MINUTES_DEFAULT, liveCallEndpoint, liveCallKey, liveCallSettings, liveSettingsFor, liveSettingsForClient, liveSetupProblem } from "./live-settings.ts";
@@ -289,5 +289,31 @@ describe("a saved Live key", () => {
       expect(usable(undefined, { OMB_OPENAI_LIVE_KEY: "sk-env" })).toBe("sk-env");
       expect(usable({ voice: "cedar" }, { OMB_OPENAI_LIVE_KEY: "sk-env", OMB_LIVE_PROVIDER: "openai" })).toBe("sk-env");
     });
+  });
+});
+
+describe("Live calls through Gemini", () => {
+  const gemini = { provider: "gemini" as const };
+
+  it("use only the Gemini key, never the OpenAI API key or a key saved for another provider", () => {
+    for (const live of [gemini, { ...gemini, key: "k", keyFor: "openai" }, { ...gemini, key: "k", keyFor: "fish" }]) {
+      const cfg = { live, openai: { key: "sk-openai" }, tts: { fishKey: "fish" } } as AppConfig;
+      expect(liveCallKey(cfg), JSON.stringify(live)).toBeNull();
+      expect(liveSetupProblem(cfg)).toBe(LIVE_NEEDS_GEMINI);
+    }
+  });
+
+  it("are ready with the Gemini key that Gemini voices use, and report none of it", () => {
+    const cfg = { live: gemini, tts: { geminiKey: " gemini-secret " } } as AppConfig;
+    expect(liveCallKey(cfg)).toEqual({ key: "gemini-secret", source: "gemini" });
+    expect(liveCallEndpoint(cfg, {})).toEqual({ provider: "gemini", apiBase: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-3.8-live" });
+    expect(liveSetupProblem(cfg)).toBeNull();
+    const settings = liveSettingsFor(cfg);
+    expect(settings).toMatchObject({ configured: true, keySource: "gemini", provider: "gemini" });
+    expect(JSON.stringify(settings)).not.toContain("gemini-secret");
+  });
+
+  it("name the provider in what a call start reads, so the Gemini limit sees it before setup is done", () => {
+    expect(liveCallSettings({ live: gemini } as AppConfig)).toMatchObject({ provider: "gemini", key: "", setupProblem: LIVE_NEEDS_GEMINI });
   });
 });
