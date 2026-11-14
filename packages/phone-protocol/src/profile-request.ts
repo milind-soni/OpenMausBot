@@ -10,7 +10,12 @@
 export const PROFILE_REQUEST_FIELDS = ["name", "title", "description", "soul", "cwd", "notifications", "speakReplies"] as const;
 export type ProfileRequestField = (typeof PROFILE_REQUEST_FIELDS)[number];
 export type ProfileRequestChanges = Partial<Record<Exclude<ProfileRequestField, "notifications" | "speakReplies">, string>> &
-  Partial<Record<"notifications" | "speakReplies", boolean>>;
+  Partial<Record<"notifications" | "speakReplies", boolean>> & {
+    /** A Chief's change of another bot's browser profile: a profile id, "guest"
+     * (temporary browser) or "" (the bot's own browser). Kept out of
+     * PROFILE_REQUEST_FIELDS, so profile versions and rollback never write it. */
+    browserProfile?: string;
+  };
 
 export interface ProfileRequestCardData {
   version: 1;
