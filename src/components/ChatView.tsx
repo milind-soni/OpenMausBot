@@ -1085,7 +1085,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
               <span className="@max-4xl/chathead:hidden">{t("chat.stop")}</span>
             </button>
           )}
-          <ThreadContextWarning bot={bot} messages={messages} />
+          <ThreadContextWarning bot={bot} />
           {phone && <UsageAlert engine={bot.modelSelection?.instanceId} />}
           {/* The model and the bot's computer stay in view in both modes; Simple mode moves only ⋯ into the bot panel. */}
           {!phone && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} />}

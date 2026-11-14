@@ -2,11 +2,13 @@ import { useState } from "react";
 import { Gauge } from "lucide-react";
 
 import { cn } from "@/lib/cn";
-import { roomContextWarnings, threadContextWarning } from "@/lib/context-warning";
+import { CONTEXT_WARNING_PERCENT, roomContextWarnings, threadContextWarning } from "@/lib/context-warning";
 import { t } from "@/lib/i18n";
-import { api, useStore, type Bot, type Group, type Message } from "@/state/store";
+import { formatTokens } from "@/lib/usage";
+import { api, useStore, type Bot, type Group } from "@/state/store";
 
 const pill = "flex items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-2.5 py-1 text-[13px] text-ink";
+const calmPill = "flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/50 px-2.5 py-1 text-[13px] text-ink-secondary";
 const action = "rounded-full px-1.5 font-medium text-accent hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline";
 
 export function useContextAction() {
@@ -22,14 +24,18 @@ export function useContextAction() {
   return { pending, run };
 }
 
-export function ThreadContextWarningView({ name, percent, busy, pending, onCompact }: {
-  name: string; percent: number; busy: boolean; pending: boolean; onCompact: () => void;
+export function ThreadContextWarningView({ name, tokens, window, percent, busy, pending, onCompact }: {
+  name: string; tokens: number; window?: number; percent?: number; busy: boolean; pending: boolean; onCompact: () => void;
 }) {
+  const danger = percent !== undefined && percent >= CONTEXT_WARNING_PERCENT;
+  const reading = window !== undefined && percent !== undefined
+    ? t("chat.usage.contextOfWindow", { tokens: formatTokens(tokens), percent: String(percent), window: formatTokens(window) })
+    : t("chat.usage.context", { tokens: formatTokens(tokens) });
   return (
-    <span role="status" data-testid="context-warning" className={pill}
-      title={t("contextWarning.threadHint", { name, percent })}>
-      <Gauge size={13} className="shrink-0 text-warning" aria-hidden="true" />
-      <span className="tabular-nums">{t("contextWarning.short", { percent })}</span>
+    <span role="status" data-testid="context-warning" className={danger ? pill : calmPill}
+      title={percent === undefined ? undefined : t("contextWarning.threadHint", { name, percent })}>
+      <Gauge size={13} className={cn("shrink-0", danger ? "text-warning" : "text-ink-tertiary")} aria-hidden="true" />
+      <span className="tabular-nums">{reading}</span>
       <button type="button" className={action} disabled={busy || pending} onClick={onCompact}
         title={busy ? t("contextWarning.busy") : undefined}>
         {pending ? t("contextWarning.compacting") : t("contextWarning.compactNow")}
@@ -38,13 +44,14 @@ export function ThreadContextWarningView({ name, percent, busy, pending, onCompa
   );
 }
 
-export function ThreadContextWarning({ bot, messages }: { bot: Bot; messages: readonly Message[] }) {
+export function ThreadContextWarning({ bot }: { bot: Bot }) {
   const usage = bot.tasks?.find((task) => task.threadId === bot.threadId)?.usage;
-  const warning = threadContextWarning(usage, messages);
+  const reading = threadContextWarning(usage);
   const { pending, run } = useContextAction();
-  if (!warning) return null;
+  if (!reading) return null;
   return (
-    <ThreadContextWarningView name={bot.name} percent={warning.percent} busy={Boolean(bot.busy)} pending={pending}
+    <ThreadContextWarningView name={bot.name} tokens={reading.tokens} window={reading.window} percent={reading.percent}
+      busy={Boolean(bot.busy)} pending={pending}
       onCompact={() => run(`/api/bots/${bot.id}/compact`, { threadId: bot.threadId })} />
   );
 }
