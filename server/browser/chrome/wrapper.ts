@@ -1,6 +1,8 @@
-// agent-browser runs AGENT_BROWSER_EXECUTABLE_PATH with its own arguments. It splits AGENT_BROWSER_ARGS at commas (0.37),
-// which cut the user agent at "(KHTML,", so the identity flags ride a generated launcher instead: a shell script that execs
-// Chrome (same process, same pid), or on Windows a batch file, which Rust's Command runs through cmd.exe.
+// agent-browser runs AGENT_BROWSER_EXECUTABLE_PATH with its own arguments. It splits AGENT_BROWSER_ARGS at commas and
+// newlines, which cut the user agent at "(KHTML,", so the identity flags ride a generated launcher instead: a shell script
+// that execs Chrome (same process, same pid) or, only where a Windows browser must be downloaded, a batch file that Rust's
+// Command runs through cmd.exe. A Windows Chrome found on the machine is started directly (launcher.ts), with the
+// comma-free flags in AGENT_BROWSER_ARGS, so no batch file runs.
 import { execFile } from "node:child_process";
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -114,13 +116,19 @@ const MAC_SCREEN = `ObjC.import("AppKit"); const size = $.NSScreen.screens.objec
 /** WPF reports the primary screen in device-independent pixels, the unit of a page's `screen.width`. */
 const WINDOWS_SCREEN = "Add-Type -AssemblyName PresentationFramework; '{0}x{1}' -f [System.Windows.SystemParameters]::PrimaryScreenWidth, [System.Windows.SystemParameters]::PrimaryScreenHeight";
 
+/** The `OMB_BROWSER_SCREEN` override, when it names a size. */
+export function screenOverride(env: NodeJS.ProcessEnv): Screen | null {
+  const match = SIZE.exec(env.OMB_BROWSER_SCREEN?.trim() ?? "");
+  return match ? { width: Number(match[1]), height: Number(match[2]) } : null;
+}
+
 /** The primary display, as headed Chrome reports `screen` on it; a server has none and declares 1920×1080. */
 export async function primaryScreen(platform: NodeJS.Platform, env: NodeJS.ProcessEnv, runCommand: Run = run): Promise<Screen> {
   const parse = (output: string): Screen | null => {
     const match = SIZE.exec(output);
     return match ? { width: Number(match[1]), height: Number(match[2]) } : null;
   };
-  const named = parse(env.OMB_BROWSER_SCREEN?.trim() ?? "");
+  const named = screenOverride(env);
   if (named) return named;
   try {
     if (platform === "darwin") return parse(await runCommand("osascript", ["-l", "JavaScript", "-e", MAC_SCREEN], 5_000)) ?? SERVER_SCREEN;

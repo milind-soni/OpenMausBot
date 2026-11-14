@@ -59,11 +59,14 @@ unless a Chrome is named too.
 **Identity.** The chosen Chrome reports exactly what it reports headed, read
 from the binary itself once per version: its own user agent without
 "HeadlessChrome", and its own client hints (brands, full version list,
-platform version, architecture). agent-browser runs a generated launcher
-(`browser/chrome-launcher.sh`, `.cmd` on Windows) that adds
+platform version, architecture). On macOS and Linux agent-browser runs a
+generated launcher (`browser/chrome-launcher.sh`) that adds
 `--disable-blink-features=AutomationControlled`, that user agent, the primary
 display's size and, when OMB knows it, the language; on a server it also
-passes the server's `TZ`. A bot's Chrome never touches the person's keychain
+passes the server's `TZ`. On Windows OpenMausBot starts the resolved Chrome
+directly and hands the engine the comma-free flags (`--disable-blink-features`
+and `--lang`), so no batch file or `cmd.exe` runs for the browsing session; the
+binary's own user agent and the client-hint connection supply the rest. A bot's Chrome never touches the person's keychain
 or keyring (`--use-mock-keychain` on macOS, `--password-store=basic` on
 Linux), and on macOS it always runs with the person's own home, so no
 "keychain cannot be found" dialog can appear. A second DevTools connection gives every page,
