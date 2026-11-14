@@ -1077,6 +1077,12 @@ export function claudeInstanceOwnsRouting(environment: Record<string, string> | 
 }
 
 const sameUrl = (a: string, b: string) => a.trim().replace(/\/+$/u, "") === b.trim().replace(/\/+$/u, "");
+const KEYED_DRIVERS = {
+  mistral: ["MISTRAL_API_KEY", "https://api.mistral.ai/v1"], cerebras: ["CEREBRAS_API_KEY", "https://api.cerebras.ai/v1"],
+  greenference: ["GREENFERENCE_API_KEY", "https://llm.eu.greenference.com/v1"], llmtr: ["LLMTR_API_KEY", "https://llmtr.com/v1"],
+  modelgo: ["MODELGO_API_KEY", "https://api.modelgo.ai/v1"],
+} as const;
+const keyedDriver = (driver: string) => Object.hasOwn(KEYED_DRIVERS, driver) ? driver as keyof typeof KEYED_DRIVERS : undefined;
 
 /** An instance with its own endpoint or credential never gets the workspace key, which would go to its host. */
 export function instanceOwnsRouting(
@@ -1091,6 +1097,8 @@ export function instanceOwnsRouting(
   const ownUrl = (...workspace: Array<string | undefined>) => own(config.url)
     && !workspace.some((url) => url !== undefined && sameUrl(config.url as string, url));
   const compatKeyEnv = routingDefaults?.apiKeyEnv ?? "OPENAI_COMPAT_API_KEY";
+  const keyed = keyedDriver(entry.driver);
+  if (keyed) return own(entry.environment?.[KEYED_DRIVERS[keyed][0]]) || ownUrl(KEYED_DRIVERS[keyed][1]);
   switch (entry.driver) {
     case "claudeAgent":
       return claudeInstanceOwnsRouting(entry.environment);
@@ -1099,17 +1107,8 @@ export function instanceOwnsRouting(
         || own(entry.environment?.[compatKeyEnv])
         || (own(config.apiKeyEnv) && config.apiKeyEnv !== compatKeyEnv)
         || ownUrl(routingDefaults?.url || cfg.openaiCompat?.url || process.env.OPENAI_COMPAT_URL || "https://openrouter.ai/api/v1");
-    case "mistral":
-      return own(entry.environment?.MISTRAL_API_KEY) || ownUrl("https://api.mistral.ai/v1");
-    case "cerebras":
-      return own(entry.environment?.CEREBRAS_API_KEY) || ownUrl("https://api.cerebras.ai/v1");
     case "groq":
       return own(entry.environment?.GROQ_API_KEY) || ownUrl("https://api.groq.com/openai/v1", cfg.groq?.url);
-    case "greenference":
-      return own(entry.environment?.GREENFERENCE_API_KEY) || ownUrl("https://llm.eu.greenference.com/v1");
-    case "llmtr":
-      return own(entry.environment?.LLMTR_API_KEY) || ownUrl("https://llmtr.com/v1");
-    case "modelgo": return own(entry.environment?.MODELGO_API_KEY) || ownUrl("https://api.modelgo.ai/v1");
     case "meta":
       return own(entry.environment?.META_API_KEY) || ownUrl("https://api.meta.ai/v1", cfg.meta?.url);
     case "deepseekAgent":
@@ -1126,12 +1125,9 @@ export function instanceOwnsRouting(
 /** Each secret goes only to the driver that reads it; the Boat token reaches no engine. */
 function injectedEnvironment(cfg: AppConfig, instanceId: string, driver: string): Map<string, string> {
   const environment = new Map<string, string>();
-  if (driver === "mistral" && cfg.mistral?.key) environment.set("MISTRAL_API_KEY", cfg.mistral.key);
-  if (driver === "cerebras" && cfg.cerebras?.key) environment.set("CEREBRAS_API_KEY", cfg.cerebras.key);
+  const keyed = keyedDriver(driver), keyedKey = keyed && cfg[keyed]?.key;
+  if (keyed && keyedKey) environment.set(KEYED_DRIVERS[keyed][0], keyedKey);
   if (driver === "groq" && cfg.groq?.key) environment.set("GROQ_API_KEY", cfg.groq.key);
-  if (driver === "greenference" && cfg.greenference?.key) environment.set("GREENFERENCE_API_KEY", cfg.greenference.key);
-  if (driver === "llmtr" && cfg.llmtr?.key) environment.set("LLMTR_API_KEY", cfg.llmtr.key);
-  if (driver === "modelgo" && cfg.modelgo?.key) environment.set("MODELGO_API_KEY", cfg.modelgo.key);
   if (driver === "meta" && cfg.meta?.key) environment.set("META_API_KEY", cfg.meta.key);
   if (driver === "deepseekAgent" && cfg.deepseek?.key) environment.set("DEEPSEEK_API_KEY", cfg.deepseek.key);
   if (driver === "grok" && cfg.xai?.key) environment.set("XAI_API_KEY", cfg.xai.key);
