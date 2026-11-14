@@ -114,6 +114,19 @@ call through this driver against the real API have not been run; use a real key
 before relying on them. `/models` has no field for tool support, so the picker
 keeps every model whose `output_modalities` includes text.
 
+
+## LLMTR API setup
+
+```sh
+pnpm exec vitest run server/drivers/llmtr.test.ts server/provider-key-check.test.ts server/credential-request.test.ts src/components/keys/key-catalog.test.ts
+```
+
+These use a local stand-in for `https://llmtr.com/v1`. They check the preset
+endpoint, that the server's key never goes to another host, the model list
+(OpenAI-style ids, short names, image input from `input_modalities`), streaming
+with reasoning and usage, and that a refused key never shows in events. They
+never call LLMTR. A real chat turn needs a real key.
+
 ## Greenference API setup
 
 ```sh

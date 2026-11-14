@@ -2464,6 +2464,8 @@ describe("a key the desktop app hands the server as an environment variable", ()
     ["CEREBRAS_API_KEY", "cerebras", "CEREBRAS_API_KEY"],
     ["OMB_GROQ_API_KEY", "groq", "GROQ_API_KEY"],
     ["OMB_GREENFERENCE_API_KEY", "greenference", "GREENFERENCE_API_KEY"],
+    ["OMB_LLMTR_API_KEY", "llmtr", "LLMTR_API_KEY"],
+    ["LLMTR_API_KEY", "llmtr", "LLMTR_API_KEY"],
     ["OMB_META_API_KEY", "meta", "META_API_KEY"],
     ["OMB_DEEPSEEK_API_KEY", "deepseek", "DEEPSEEK_API_KEY"],
     ["OPENAI_COMPAT_API_KEY", "openaiCompat", "OPENAI_COMPAT_API_KEY"],

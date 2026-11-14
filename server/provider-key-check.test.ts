@@ -205,6 +205,19 @@ describe("provider key check", () => {
     expect(await checkProviderKey({ provider: "greenference", key: "bad-key" }, refused)).toEqual({ ok: false, reason: "rejected", status: 401 });
   });
 
+  it("checks LLMTR at its preset endpoint", async () => {
+    const llmtr: typeof fetch = async (input, init) => {
+      expect(String(input)).toBe("https://llmtr.com/v1/models");
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture-llmtr");
+      expect(init?.redirect).toBe("manual");
+      return Response.json({ object: "list", data: [{ id: "minimax/minimax-m3.1-flash-free" }] });
+    };
+    expect(await checkProviderKey({ provider: "llmtr", key: "fixture-llmtr" }, llmtr))
+      .toEqual({ ok: true, check: "models", models: ["minimax/minimax-m3.1-flash-free"] });
+    const refused: typeof fetch = async () => Response.json({ error: { code: "authentication", message: "invalid or expired token" } }, { status: 401 });
+    expect(await checkProviderKey({ provider: "llmtr", key: "bad-key" }, refused)).toEqual({ ok: false, reason: "rejected", status: 401 });
+  });
+
   it("checks Meta at its preset endpoint without claiming chat authentication", async () => {
     const meta: typeof fetch = async (input, init) => {
       expect(String(input)).toBe("https://api.meta.ai/v1/models");

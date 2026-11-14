@@ -710,7 +710,7 @@ export interface SecretRequestCardData {
   description: string;
   /** Optional named-key copy for client localization; `description` remains the complete fallback for English and older cards. */
   descriptionParts?: {
-    baseCode: "secretCard.greenference.description" | "secretCard.modelgo.description" | "secretCard.geminiTts.description";
+    baseCode: "secretCard.greenference.description" | "secretCard.modelgo.description" | "secretCard.llmtr.description" | "secretCard.geminiTts.description";
     reason: string;
     bot: string;
   };

@@ -54,6 +54,7 @@ function keyProviders(config: ConfigStatus): KeyProvider[] {
     [config.cerebras?.configured, "cerebras"],
     [config.groq?.configured, "groq"],
     [config.greenference?.configured, "greenference"],
+    [config.llmtr?.configured, "llmtr"],
     [config.modelgo?.configured, "modelgo"],
     [config.meta?.configured, "meta"],
     [config.box?.configured && config.box.included !== true, "boat"],

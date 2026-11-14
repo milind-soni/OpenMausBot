@@ -39,6 +39,7 @@ const FAMILIES: readonly FamilyRule[] = [
   { id: "cursor", label: "Cursor", color: "#74818C", pattern: /cursor|composer/i },
   { id: "factory", label: "Factory", color: "#7B8794", pattern: /droid/i },
   { id: "greenference", label: "Greenference", color: "#3F8F5F", pattern: /greenference/i },
+  { id: "llmtr", label: "LLMTR", color: "#2563EB", pattern: /llmtr/i },
   { id: "unknown", label: "Other", color: "#76828F", pattern: /(?!)/ },
 ];
 
@@ -61,6 +62,7 @@ const DRIVER_FAMILIES: ReadonlyArray<readonly [RegExp, string]> = [
   [/droid/i, "factory"],
   [/hermes/i, "nous"],
   [/greenference/i, "greenference"],
+  [/llmtr/i, "llmtr"],
 ];
 
 const GATEWAY = /^(?:opencode-go|opencode|zen|openrouter|vercel|groq|fireworks(?:-ai)?|together(?:_ai)?|deepinfra|cerebras|togetherai|ollama|lmstudio|local)\//;
