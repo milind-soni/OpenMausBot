@@ -9,7 +9,7 @@ import type { ProviderInstance } from "../../contracts.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import { BUILT_IN_DRIVERS } from "../builtIn.ts";
-import { MistralVibeAgentDriver, removeMistralVibeSignIn, resolveMistralVibeModels, vibeSignedIn } from "./mistral-vibe.ts";
+import { keychain, MistralVibeAgentDriver, removeMistralVibeSignIn, resolveMistralVibeModels, vibeSignedIn } from "./mistral-vibe.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
 const MODELS = "mistral-medium-3.5,zai-glm-5-3-flash,Mistral Large,Codestral";
@@ -134,6 +134,16 @@ describe("Mistral (Vibe) ACP driver", () => {
   });
 
   describe("sign-out cleanup of Vibe's fallback .env", () => {
+    const originalDelete = keychain.delete;
+    let deletedServices: string[];
+
+    beforeEach(() => {
+      // a developer's real `vibe` / `vibe-acp` login items stay put while the filesystem cleanup stays real
+      deletedServices = [];
+      keychain.delete = (service: string) => { deletedServices.push(service); return Promise.resolve(); };
+    });
+
+    afterEach(() => { keychain.delete = originalDelete; });
     it("strips bare and exported MISTRAL_API_KEY lines and keeps unrelated ones", async () => {
       const home = join(scratch, "vibe-home");
       mkdirSync(home, { recursive: true });
@@ -141,6 +151,9 @@ describe("Mistral (Vibe) ACP driver", () => {
       writeFileSync(envFile, ["ONE=1", "MISTRAL_API_KEY='fixture'", 'export MISTRAL_API_KEY="second"', "TWO=2"].join("\n"));
       await removeMistralVibeSignIn({ VIBE_HOME: home });
       expect(readFileSync(envFile, "utf8")).toBe(["ONE=1", "TWO=2"].join("\n"));
+      expect(deletedServices.sort()).toEqual(
+        process.platform === "darwin" ? ["ai.mistral.vibe", "vibe"] : [],
+      );
     });
 
     it("resolves without a .env and rejects when one cannot be rewritten", async () => {

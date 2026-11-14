@@ -91,6 +91,19 @@ function offeredModels(sessionConfig: unknown): { values: string[]; current?: st
  * see vibe's utils/keyring.py). A keyring entry the CLI stored through its own backends on Linux or
  * Windows has no portable command-line delete, so the marker files here are what this app can honestly
  * clear there. A pasted plan key in Connections is not touched. */
+/** One level of indirection over `security delete-generic-password` so tests keep a developer's real
+ * login items out of the way while the filesystem cleanup stays real. */
+export const keychain = {
+  delete: (service: string): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      execFile("security", ["delete-generic-password", "-s", service], { timeout: 5_000, windowsHide: true }, (error) => {
+        // "The specified item could not be found" is exit 44: already gone, which is the goal met.
+        if (!error || (error as { code?: string | number }).code === 44) return resolve();
+        reject(Object.assign(new Error(`The macOS keychain refused to remove the ${service} entry: ${error.message}`), { cause: error }));
+      });
+    }),
+};
+
 export async function removeMistralVibeSignIn(env: Record<string, string | undefined>): Promise<void> {
   const home = vibeHome(env);
   try { rmSync(join(home, "whoami_cache.json"), { force: true }); } catch {}
@@ -102,13 +115,7 @@ export async function removeMistralVibeSignIn(env: Record<string, string | undef
   }
   if (process.platform !== "darwin") return;
   const service = env.VIBE_KEYCHAIN_SERVICE || MISTRAL_VIBE_KEYCHAIN_SERVICE;
-  await Promise.all([service, "vibe"].map((name) => new Promise<void>((resolve, reject) => {
-    execFile("security", ["delete-generic-password", "-s", name], { timeout: 5_000, windowsHide: true }, (error) => {
-      // "The specified item could not be found" is exit 44: already gone, which is the goal met.
-      if (!error || (error as { code?: string | number }).code === 44) return resolve();
-      reject(Object.assign(new Error(`The macOS keychain refused to remove the ${name} entry: ${error.message}`), { cause: error }));
-    });
-  })));
+  await Promise.all([service, "vibe"].map((name) => keychain.delete(name)));
 }
 
 
