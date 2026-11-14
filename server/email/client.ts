@@ -3,7 +3,7 @@
 // call, closed after it, so nothing stays signed in between turns.
 // Security: only over TLS with a certificate valid for the host, so a wrong guess at a host never gets the password; on
 // a Cloud home only to public addresses, and to the address the check saw, the same rule as the box's way out.
-import { constants, mkdirSync, openSync, closeSync, writeSync } from "node:fs";
+import { constants, mkdirSync, openSync, closeSync, unlinkSync, writeSync } from "node:fs";
 import { basename, join } from "node:path";
 import { isIP } from "node:net";
 
@@ -311,7 +311,21 @@ export function saveAttachment(folder: string, name: string, content: Buffer): s
       if ((error as NodeJS.ErrnoException).code === "EEXIST" && n < 99) continue;
       throw error;
     }
-    try { writeSync(fd, content); } finally { closeSync(fd); }
+    let saved = false;
+    try {
+      try {
+        for (let offset = 0; offset < content.length;) {
+          const written = writeSync(fd, content, offset, content.length - offset);
+          if (written <= 0) throw new Error("The attachment could not be completely written.");
+          offset += written;
+        }
+      } finally {
+        closeSync(fd);
+      }
+      saved = true;
+    } finally {
+      if (!saved) { try { unlinkSync(path); } catch {} }
+    }
     return path;
   }
 }
