@@ -441,6 +441,25 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       expect(existsSync(join(scratch, "reply.json.calls"))).toBe(false);
     });
 
+    it("bounds wide query metadata on the wire and keeps the held result queryable", async () => {
+      const key = `items_${"x".repeat(10_000)}`;
+      const rows = Array.from({ length: 20 }, (_, id) => ({ id, text: "y".repeat(100) }));
+      start({ text: JSON.stringify({ [key]: rows }) }, { OMB_GATE_BUDGET: "512" }, SCOPED_UPSTREAM);
+      const shaped = (await call("read")).result.content[0].text;
+      expect(shaped.length).toBeLessThanOrEqual(512);
+      expect(shaped).toContain('"r1"');
+
+      const whole = (await query({ result: "r1", query: "@" }, 2)).result;
+      expect(whole.content[0].text.length).toBeLessThanOrEqual(512);
+      expect(whole.content[0].text).toContain("Narrow the query");
+      const invalid = (await query({ result: "r1", query: "[?" }, 3)).result;
+      expect(invalid.isError).toBe(true);
+      expect(invalid.content[0].text.length).toBeLessThanOrEqual(512);
+      const selected = (await query({ result: "r1", query: `${JSON.stringify(key)}[-1].id` }, 4)).result;
+      expect(selected.content[0].text).toBe("19");
+      expect(readFileSync(join(scratch, "reply.json.calls"), "utf8")).toBe("read\n");
+    });
+
     it("keeps query_result listed and callable under a tool selection that never names it", async () => {
       start({ text: full }, { OMB_GATE_TOOL_SCOPE: JSON.stringify({ allow: ["mcp:shop:read"] }) }, SCOPED_UPSTREAM);
       send({ jsonrpc: "2.0", id: 1, method: "tools/list", params: { cursor: "second" } });

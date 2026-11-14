@@ -126,12 +126,13 @@ const text = (body: string, isError?: true): QueryToolResult => ({ content: [{ t
 
 /** Answer one query_result call locally; the upstream server never sees it. */
 export function answerQuery(store: ResultStore, args: unknown, budget: number): QueryToolResult {
+  const fail = (body: string) => text(trimResultText({ text: body, budget }).text, true);
   if (!isRecord(args) || typeof args.result !== "string" || typeof args.query !== "string" || !args.query.trim()) {
-    return text(`${QUERY_TOOL_NAME} needs {"result": "<handle from the shaped result>", "query": "<JMESPath>"}.`, true);
+    return fail(`${QUERY_TOOL_NAME} needs {"result": "<handle from the shaped result>", "query": "<JMESPath>"}.`);
   }
   const held = store.get(args.result);
   if (!held) {
-    return text(`Result "${args.result}" is no longer held; call the original tool again and query the new handle it gives you.`, true);
+    return fail(`Result "${args.result}" is no longer held; call the original tool again and query the new handle it gives you.`);
   }
   const shape = describeShape(held.value);
   const example = exampleQuery(held.value);
@@ -140,7 +141,7 @@ export function answerQuery(store: ResultStore, args: unknown, budget: number): 
     selected = jmespath.search(held.value, args.query);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    return text(`Invalid JMESPath query (${reason}). The held result "${args.result}" is ${shape}. Examples: ${example}; length(@).`, true);
+    return fail(`Invalid JMESPath query (${reason}). The held result "${args.result}" is ${shape}. Examples: ${example}; length(@).`);
   }
   const body = JSON.stringify(selected) ?? "null";
   if (body.length <= budget) return text(body);
