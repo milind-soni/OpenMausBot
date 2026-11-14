@@ -346,6 +346,7 @@ export class ProfileRequestService {
       reason,
       changes: finalChanges,
       before,
+      ...(finalChanges.avatarUrl !== undefined ? { beforeAvatarCrop: target.avatarCrop ?? "mascot" } : {}),
       expectedRevision: profileRevision(target),
     };
 
@@ -426,6 +427,12 @@ export class ProfileRequestService {
       const checked = validateBotCwd(cwd || null);
       if (!checked.ok) return cannot(checked.error);
       patch.cwd = checked.cwd ?? undefined;
+    }
+    if (payload.changes.avatarUrl !== undefined) {
+      // The snapshot reads a missing avatar as "": store none, not an empty
+      // URL, and put back the crop the bot had before the change.
+      patch.avatarUrl = rest.avatarUrl || undefined;
+      patch.avatarCrop = rest.avatarUrl ? payload.beforeAvatarCrop ?? target.avatarCrop : "mascot";
     }
     if (!this.store.patchBotProfile(target.id, patch)) return cannot(NO_SUCH_BOT, 404);
     recordProfileChange(target.id, "user", `undo:${message.id}`, payload.changes, payload.before);

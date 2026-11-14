@@ -1,3 +1,4 @@
+import type { BotAvatarCrop } from "./bot-avatar.ts";
 import type { MausColor } from "./wire.ts";
 
 /**
@@ -28,6 +29,9 @@ export interface ProfileRequestCardData {
   reason: string;
   changes: ProfileRequestChanges;
   before: ProfileRequestChanges;
+  /** With an avatarUrl change: the crop before it, so Undo puts back the
+   * picture exactly as it was shown (mascot when there was none). */
+  beforeAvatarCrop?: BotAvatarCrop;
   expectedRevision: string;
   appliedAt?: number;
   /** Written when the change applied without a person: the profile's

@@ -11924,6 +11924,40 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("applies a proposed color and stored avatar at once and undoes both back to the mascot", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Painter" })).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const propose = (changes: Record<string, unknown>) => fetch(`${BASE}/api/internal/profile-requests`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, changes, reason: "you asked" }),
+      });
+      const current = async () => (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      const colorBefore = (await current()).color;
+
+      const missing = await propose({ avatarUrl: "/api/attachments/00000000-0000-0000-0000-000000000000.png" });
+      expect(missing.status).toBe(400);
+
+      const avatarUrl = await uploadAvatar();
+      const color = colorBefore === "blue" ? "pink" : "blue";
+      const response = await propose({ color, avatarUrl });
+      expect(response.status).toBe(201);
+      const applied = z.object({ requestId: z.string(), state: z.literal("applied") }).passthrough().parse(await response.json());
+      expect(await current()).toMatchObject({ color, avatarUrl, avatarCrop: "circle" });
+
+      expect((await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: applied.requestId })).body).toEqual({ ok: true, undone: true });
+      const undone = await current();
+      expect(undone.color).toBe(colorBefore);
+      expect(undone.avatarUrl ?? null).toBeNull();
+      expect(undone.avatarCrop ?? "mascot").toBe("mascot");
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("only lets a section's Chief of Staff change another bot's profile, which applies at Ask with an Undo", async () => {
     const a = (await api("POST", "/api/bots", { name: "Ari" })).body.bot;
     const b = (await api("POST", "/api/bots", { name: "Bo" })).body.bot;
