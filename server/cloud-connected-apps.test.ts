@@ -95,7 +95,7 @@ describe("a Cloud home's connected-apps installation", () => {
     if (process.platform !== "win32") expect(statSync(file()).mode & 0o777).toBe(0o600);
     expect(applied.at(-1)).toEqual({ url: BROKER, token: NEW });
     expect(connectionMode({})).toBe("managed");
-    expect(connectorSetup({}, true)).toBe("ready");
+    expect(connectorSetup({}, "cloud-home")).toBe("ready");
     expect(timers).toEqual([]);
     expect(lines.join("\n")).not.toContain(NEW);
   });
@@ -153,7 +153,7 @@ describe("a Cloud home's connected-apps installation", () => {
     await apps.settled();
     expect(applied).toEqual([null]);
     expect(connectionMode({})).toBe("unavailable");
-    expect(connectorSetup({}, true)).toBe("service-unavailable");
+    expect(connectorSetup({}, "cloud-home")).toBe("service-unavailable");
     expect(existsSync(file())).toBe(false);
 
     // 30 s, 1 min, 2 min, each with the jitter random() = 0.5 adds (a tenth).
@@ -382,9 +382,9 @@ describe("a Cloud kept off the managed service", () => {
     setManagedBrokerAccess({ url: BROKER, token: OLD });
     expect(brokerAccess()).toBeNull();
     expect(connectionMode({})).toBe("unavailable");
-    expect(connectorSetup({}, true)).toBe("needs-setup");
+    expect(connectorSetup({}, "cloud-home")).toBe("needs-setup");
     expect(connectionMode({ composio: { apiKey: "ak_owner_project" } })).toBe("self-hosted");
-    expect(connectorSetup({ composio: { apiKey: "ak_owner_project" } }, true)).toBe("ready");
+    expect(connectorSetup({ composio: { apiKey: "ak_owner_project" } }, "cloud-home")).toBe("ready");
   });
 
   it("the switch also wins over a token named in the server's environment", async () => {
