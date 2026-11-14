@@ -83,6 +83,18 @@ jobs:
             fi
           fi
           echo "should_release=$should_release" >> "$GITHUB_OUTPUT"
+      - name: Windows signing preflight
+        # docs/windows-signing.md. Only whether each secret is set reaches this step, never its
+        # value. Fails here, in a minute, a release whose Windows build would refuse to sign.
+        if: steps.pin.outputs.should_release == 'true'
+        env:
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME != '' && 'set' || '' }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD != '' && 'set' || '' }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID != '' && 'set' || '' }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET != '' && 'set' || '' }}
+          WINDOWS_PUBLISHER_NAME: ${{ vars.WINDOWS_PUBLISHER_NAME }}
+          WINDOWS_SIGNING_REQUIRED: ${{ vars.WINDOWS_SIGNING_REQUIRED }}
+        run: node scripts/windows-signing.mjs preflight
       - name: Refuse to overwrite a published canonical release
         if: steps.pin.outputs.should_release == 'true'
         env:
@@ -349,11 +361,13 @@ jobs:
           retention-days: 7
 
   windows:
+    # Unsigned unless the Windows signing secrets are set (docs/windows-signing.md).
     name: Windows x64
     needs: prepare
     if: needs.prepare.outputs.should_release == 'true'
     runs-on: windows-latest
-    timeout-minutes: 30
+    # signing adds a cloud round trip per binary
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -368,7 +382,17 @@ jobs:
       - name: Clean generated output
         shell: bash
         run: rm -rf dist dist-server release
-      - run: pnpm package:win
+      - id: package
+        # Signs only with a complete set of signing secrets; refuses to build unsigned
+        # once WINDOWS_SIGNING_REQUIRED is true. Reports signing=signed|unsigned.
+        env:
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          WINDOWS_PUBLISHER_NAME: ${{ vars.WINDOWS_PUBLISHER_NAME }}
+          WINDOWS_SIGNING_REQUIRED: ${{ vars.WINDOWS_SIGNING_REQUIRED }}
+        run: pnpm package:win
       - name: "Gate: bundled browser works with an empty home"
         run: node scripts/smoke-browser-bundle.mjs --resources "${{ github.workspace }}/release/win-unpacked/resources"
       - name: "Gate: packaged Windows server discovers its browser"
@@ -377,6 +401,9 @@ jobs:
         run: node scripts/smoke-packaged-server.mjs --browser-bundle "${{ github.workspace }}/release/win-unpacked/resources/browser-engine"
       - name: Verify the packaged tree and start the packaged server
         shell: bash
+        env:
+          WINDOWS_PUBLISHER_NAME: ${{ vars.WINDOWS_PUBLISHER_NAME }}
+          WINDOWS_SIGNING_REQUIRED: ${{ vars.WINDOWS_SIGNING_REQUIRED }}
         run: |
           res=release/win-unpacked/resources
           [ -f "$res/server/index.js" ] || { echo "::error::missing server/index.js"; exit 1; }
@@ -394,7 +421,10 @@ jobs:
           [ -f "$res/app-update.yml" ] || { echo "::error::missing app-update.yml"; exit 1; }
           grep -Eq '^owner: milind-soni$' "$res/app-update.yml" || { echo "::error::wrong update owner"; exit 1; }
           grep -Eq '^repo: OpenMausBot$' "$res/app-update.yml" || { echo "::error::wrong update repo"; exit 1; }
-          if grep -q "publisherName" "$res/app-update.yml"; then
+          if [ "$WINDOWS_SIGNING_REQUIRED" = "true" ]; then
+            # every release from here on is signed: installs must refuse anything else
+            node scripts/windows-signing.mjs check-update-config "$res/app-update.yml" || exit 1
+          elif grep -q "publisherName" "$res/app-update.yml"; then
             echo "::error::publisherName on an unsigned build breaks every update"; exit 1
           fi
           HOME="$RUNNER_TEMP/smoke" USERPROFILE="$RUNNER_TEMP/smoke" OMB_PORT=21987 \
@@ -408,6 +438,19 @@ jobs:
           echo "::error::the packaged server never served /api/health"
           cat "$RUNNER_TEMP/server.log" || true
           exit 1
+      - name: "Gate: every Windows binary is signed and timestamped"
+        # The macOS codesign gate's counterpart. Skipped for an unsigned build, unless
+        # signing is required: then an unsigned build fails here.
+        if: steps.package.outputs.signing == 'signed' || vars.WINDOWS_SIGNING_REQUIRED == 'true'
+        shell: bash
+        env:
+          SIGNING: ${{ steps.package.outputs.signing }}
+          WINDOWS_PUBLISHER_NAME: ${{ vars.WINDOWS_PUBLISHER_NAME }}
+        run: |
+          test "$SIGNING" = signed || { echo "::error::WINDOWS_SIGNING_REQUIRED is true but this Windows build is not signed"; exit 1; }
+          v=$(node -p "require('./package.json').version")
+          node scripts/verify-windows-signatures.mjs --unpacked release/win-unpacked \
+            --installer "release/OpenMausBot-$v-setup.exe" --log release/windows-signing-log.jsonl
       - name: Stable-named copy
         shell: bash
         run: |

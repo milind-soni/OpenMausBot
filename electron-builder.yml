@@ -184,15 +184,14 @@ win:
       to: cua-driver-background.exe
     - from: dist-native/cua-win32-x64/cua-sdk
       to: cua-sdk
-  # No signing config yet (would go under win.signtoolOptions or
-  # win.azureSignOptions — eb 26 nests it, there is no top-level
-  # win.certificateFile). The installer is unsigned, so SmartScreen shows
-  # "unknown publisher" on first run (README says so). verifyUpdateCodeSignature
-  # defaults true, but electron-updater skips the check when app-update.yml
-  # carries no publisherName — so auto-update still works today. Do NOT set
-  # publisherName without actually signing, or every update is rejected as
-  # untrusted; and once signed, keep the cert subject stable (or list both old
-  # and new in publisherName) or you strand already-installed users.
+  # No signing config HERE, deliberately: this file is the unsigned build.
+  # scripts/package-win.mjs merges signing (win.signtoolOptions with our hook,
+  # signExts, afterSign, verifyUpdateCodeSignature, publisherName) over this
+  # file only when the release passes complete signing secrets — see
+  # docs/windows-signing.md. electron-updater skips the update signature check
+  # when app-update.yml carries no publisherName, so auto-update works on
+  # unsigned builds. Never set publisherName here: a build that carries it
+  # rejects every update not signed by that exact subject, forever.
 
 nsis:
   oneClick: true
