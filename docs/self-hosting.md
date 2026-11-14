@@ -1140,7 +1140,10 @@ no AI to carry on, it says the bot waits instead. Nobody is asked.
   around the provider's limit; a pay-per-use API key on the same AI is fine.
 - **What moves.** The person's message that met the limit is sent again on that
   AI, in that conversation alone; the bot's own model and its other
-  conversations stay where they are. While the limit lasts, every new turn and
+  conversations stay where they are. A teammate's job that met it (work handed
+  on with `coordinate_bots`) runs again on that AI in the job's conversation,
+  so the bot that asked gets its result, not a failure; the report says which
+  AI did the work when it was not the teammate's own. While the limit lasts, every new turn and
   conversation of every bot that uses the limited AI (a person's, a routine's,
   a webhook's) goes straight to that AI without asking the limited one first,
   and a routine run the limit stopped starts again on it.

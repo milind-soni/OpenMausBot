@@ -18,13 +18,15 @@ const jsonLines = (path: string): any[] => existsSync(path)
   ? readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 
 async function withQuotaFixture(
-  options: { env?: Record<string, string>; otherSignInOnly?: boolean },
+  options: { env?: Record<string, string>; otherSignInOnly?: boolean; roomPlan?: boolean },
   check: (fixture: {
     api: (method: string, path: string, body?: unknown) => Promise<any>;
     control: (...args: string[]) => Promise<any>;
     respond: (threadId: string, body: unknown) => Promise<{ status: number; body: any }>;
     backupPrompts: () => any[];
     dataDir: string;
+    plan: Record<string, any>;
+    evidence: () => any[];
   }) => Promise<void>,
 ) {
   const port = await freePortBlock([0, 1]);
@@ -35,6 +37,8 @@ async function withQuotaFixture(
   mkdirSync(evidenceDir, { recursive: true });
   const logPath = join(evidenceDir, `quota-switch-${Date.now()}-${process.pid}.log`);
   const backupFile = join(dataDir, "backup-prompts.jsonl");
+  const planPath = join(dataDir, "room-plan.json");
+  const plan: Record<string, any> = {};
   const engine = (displayName: string, environment: Record<string, string>) =>
     ({ driver: "claudeAgent", displayName, config: { cli: FAKE_CLI }, environment });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
@@ -42,7 +46,7 @@ async function withQuotaFixture(
       claude: engine(LIMITED, { FAKE_CLAUDE_MODE: "usage-limit" }),
       ...(options.otherSignInOnly
         ? { backup: engine(OTHER_SIGN_IN, { FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_PROMPTS: backupFile, FAKE_CLAUDE_TOOL_CALLS: "[]" }) }
-        : { codex: { driver: "codex", config: { cli: FAKE_CODEX }, environment: { FAKE_CODEX_DUMP: backupFile } } }),
+        : { codex: { driver: "codex", config: { cli: FAKE_CODEX }, environment: { FAKE_CODEX_DUMP: backupFile, ...(options.roomPlan ? { FAKE_CODEX_ROOM_PLAN: planPath } : {}) } } }),
     },
   }));
   const evidence: unknown[] = [{ url, options }];
@@ -91,7 +95,9 @@ async function withQuotaFixture(
       if (options.otherSignInOnly) return jsonLines(backupFile);
       try { return (JSON.parse(readFileSync(backupFile, "utf8")).calls as any[]).filter((call) => call.method === "turn/start"); } catch { return []; }
     };
-    await check({ api, control, respond, backupPrompts: sent, dataDir });
+    writeFileSync(planPath, "{}");
+    const planned = new Proxy(plan, { set: (target, key, value) => { target[key as string] = value; writeFileSync(planPath, JSON.stringify(target)); return true; } });
+    await check({ api, control, respond, backupPrompts: sent, dataDir, plan: planned, evidence: () => jsonLines(`${planPath}.evidence.jsonl`) });
   } finally {
     evidence.push({ backupPrompts: existsSync(backupFile) ? readFileSync(backupFile, "utf8").slice(0, 20_000) : null, roots: readHandoffs(dataDir) });
     const evidencePath = `${logPath}.quota-switch.json`;
@@ -143,6 +149,41 @@ it("carries the request on with another AI by itself: the exact message once mor
     expect(readHandoffs(dataDir).filter((node) => node.threadId === threadId).map((node) => [node.status, node.executions])).toEqual([["failed", 1], ["completed", 1]]);
     // One notice for this bot; the Chief, told of the incident, hears its own if its own turn meets the limit too.
     const notices = (await api("GET", "/api/notifications")).notifications.filter((entry: any) => entry.kind === "notice" && entry.botId === bot.id);
+    expect(notices.map((entry: any) => entry.body)).toEqual([expect.stringMatching(/^Limited Claude reached its limit.*, so Out of quota is using Codex meanwhile\.$/)]);
+  });
+}, 240_000);
+
+it("carries a teammate's job on with another AI by itself: the job runs once more there and its result reaches the Chief, never a failure", async () => {
+  await withQuotaFixture({ roomPlan: true }, async ({ api, control, dataDir, plan, evidence }) => {
+    const chief = (await control("new-bot", "--name", "Clive", "--section", "Leadership")).bot;
+    const lead = (await control("new-bot", "--name", "Out of quota", "--section", "Engineering")).bot;
+    await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, managedSections: ["Engineering"], acknowledgePeerScope: true });
+    const codex = (await api("GET", "/api/instances")).instances.find((instance: any) => instance.instanceId === "codex").models.default;
+    await api("PATCH", `/api/bots/${chief.id}/tasks/${chief.activeTaskId}`, { modelSelection: { instanceId: "codex", model: codex }, updateBotDefault: true });
+    const limited = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === lead.id).modelSelection;
+    await api("PATCH", `/api/bots/${lead.id}/tasks/${lead.activeTaskId}`, { modelSelection: { ...limited, instanceId: "claude" }, updateBotDefault: true });
+    plan[lead.id] = { reply: "EXPORT_BUILT_7Q" };
+    plan[chief.id] = { steps: [{ arguments: { bot_ids: [lead.id], message: "Build the CSV export BRIEF_4M" } }], reply: "Assigned", resumeReply: "Reviewed the export" };
+
+    await control("send", "--bot", chief.id, "--task", chief.activeTaskId, "--text", "Have Engineering build the CSV export.");
+    await expect.poll(() => readHandoffs(dataDir).find((node) => node.botId === lead.id)?.status, { timeout: 60_000 }).toBe("completed");
+    expect((await control("wait", "--bot", chief.id, "--task", chief.activeTaskId, "--timeout", "60")).status).toBe("settled");
+
+    const job = readHandoffs(dataDir).find((node) => node.botId === lead.id)!;
+    expect(job.executions).toBe(2);
+    const done = evidence().filter((turn) => turn.botId === lead.id);
+    expect(done).toHaveLength(1);
+    expect(JSON.stringify(done[0].prompt)).toContain("BRIEF_4M");
+    const leadState = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === lead.id);
+    expect(leadState.tasks.find((task: any) => task.threadId === job.threadId).modelSelection.instanceId).toBe("codex");
+    expect(leadState.modelSelection.instanceId).toBe("claude");
+
+    const chiefLines = (await api("GET", `/api/threads/${chief.activeTaskId}/messages?limit=100`)).messages as any[];
+    expect(chiefLines.filter((line) => line.tool?.name?.includes("failed"))).toEqual([]);
+    const reviewed = evidence().filter((turn) => turn.botId === chief.id).map((turn) => JSON.stringify(turn.prompt)).join("\n");
+    expect(reviewed).toContain("EXPORT_BUILT_7Q");
+    expect(reviewed).toContain(`done by Codex ${codex}, not the assignee's own AI`);
+    const notices = (await api("GET", "/api/notifications")).notifications.filter((entry: any) => entry.kind === "notice" && entry.botId === lead.id);
     expect(notices.map((entry: any) => entry.body)).toEqual([expect.stringMatching(/^Limited Claude reached its limit.*, so Out of quota is using Codex meanwhile\.$/)]);
   });
 }, 240_000);
