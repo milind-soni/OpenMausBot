@@ -27,13 +27,16 @@ const REFUSED = /\b403\b|forbidden|insufficient[_ ](?:scope|permission)s?|permis
 const MAX_READ = 262_144;
 
 function frameOf(text: string, contentType: string): unknown {
-  if (!contentType.includes("text/event-stream")) {
+  if (!contentType.toLowerCase().includes("text/event-stream")) {
     try { return JSON.parse(text); } catch { return null; }
   }
-  for (const line of text.split("\n").reverse()) {
-    if (!line.startsWith("data:")) continue;
+  for (const block of text.replace(/\r\n?/g, "\n").split("\n\n").reverse()) {
+    const data = block.split("\n")
+      .filter((line) => line === "data" || line.startsWith("data:"))
+      .map((line) => line.slice(5).replace(/^ /, ""))
+      .join("\n");
     try {
-      const frame = JSON.parse(line.slice(5)) as { id?: unknown };
+      const frame = JSON.parse(data) as { id?: unknown };
       if (frame && typeof frame === "object" && frame.id !== undefined) return frame;
     } catch {}
   }
