@@ -46,8 +46,9 @@ vi.mock("@/state/store", async (importOriginal) => {
 const { useBotApps } = await import("./useBotApps");
 const { appSearchPhase } = await import("./sections");
 
+let hook = useBotApps;
 function Probe({ bot, load }: { bot: Bot; load: boolean }) {
-  const apps = useBotApps(bot, load);
+  const apps = hook(bot, load);
   return createElement("p", null, `${appSearchPhase(apps)}:${apps.apps.map((app) => app.slug).join(",")}`);
 }
 
@@ -69,6 +70,7 @@ function render(load = true) {
 }
 
 afterEach(() => {
+  hook = useBotApps;
   root?.unmount();
   host?.remove();
   host = null;
@@ -81,8 +83,10 @@ afterEach(() => {
 });
 
 describe("app names for the settings search", () => {
-  // Runs first: the app catalog is cached once it loads, and only a failed load is asked again.
   it("stays loading while the app catalog has not answered, and stops when it fails", async () => {
+    // The app catalog is cached once it loads, so this test uses a fresh copy of the hook.
+    vi.resetModules();
+    hook = (await import("./useBotApps")).useBotApps;
     fixture.holdCatalog = true;
     const view = render();
     await settle();
