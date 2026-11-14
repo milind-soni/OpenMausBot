@@ -45,10 +45,20 @@ describe("fill_login outside the bot's own browser", () => {
     expect(moveToBrowser).toHaveBeenCalledWith(turn);
     expect(target).not.toHaveBeenCalled();
     expect(answer.ok).toBe(false);
-    expect(answer.text).toContain("never types one on the screen of");
+    expect(answer.text).toContain("it never types one there");
     expect(answer.text).toContain("moving this conversation to your own browser");
     expect(answer.text).toContain("End this turn now");
     expect(answer.text).not.toContain("request_sign_in");
+  });
+
+  it.each([
+    ["can move", {}],
+    ["cannot move", { moveToBrowser: () => false }],
+    ["has no browser here", { browserSelectable: () => false }],
+  ] as const)("says plainly why a saved login is not filled on a screen when the run %s", async (_case, over) => {
+    const { fill } = harness(over);
+    const answer = await fill(bot, turn, undefined, undefined);
+    expect(answer.text).toMatch(/^Saved logins are filled only in your own browser, the one your browser tools drive, where OpenMausBot checks the page's site before it types a password\. On the screen of this computer it cannot prove which site a box belongs to, so it never types one there[,.]/);
   });
 
   it("names the person's own Chrome when the bot's profile is My Chrome", async () => {
