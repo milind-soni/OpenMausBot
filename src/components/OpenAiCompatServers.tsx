@@ -12,6 +12,14 @@ export function modelIds(text: string): string[] {
   return [...new Set(text.split(/[,，、\s]+/).map((id) => id.trim()).filter(Boolean))];
 }
 
+/** The same limits the settings route applies, so a bad entry never leaves the panel. */
+function modelIdFrom(text: string): string | null {
+  const id = text.trim();
+  return id.length > 0 && id.length <= 200 && !/\p{Cc}/u.test(id) ? id : null;
+}
+
+const CUSTOM_MODEL = "__custom__";
+
 const INPUT = cn(KEY_FIELD, "font-sans");
 /** A slow computer can take minutes before a local model's first words, so the wait is the person's call. */
 export const REPLY_WAIT_CHOICES = [5, 10, 20, 30, 60] as const;
@@ -23,7 +31,7 @@ export const GEMINI_PRESET = { name: "Google Gemini", url: "https://generativela
 const MODEL_ID_LIMITS = { count: 64, length: 200 } as const;
 const withinModelIdLimits = (ids: string[]) => ids.length <= MODEL_ID_LIMITS.count && ids.every((id) => id.length <= MODEL_ID_LIMITS.length);
 
-const saveSettings = (instanceId: string, settings: { replyWaitMinutes?: number | null; models?: string[] }): Promise<{ instances?: unknown }> =>
+const saveSettings = (instanceId: string, settings: { replyWaitMinutes?: number | null; models?: string[]; model?: string }): Promise<{ instances?: unknown }> =>
   api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "PATCH", body: JSON.stringify(settings) });
 
 function ReplyWaitSelect({ server, disabled, onPick }: { server: InstanceInfo; disabled: boolean; onPick: (minutes: number | null) => void }) {
@@ -84,6 +92,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
   const [url, setUrl] = useState("");
   const [key, setKey] = useState("");
   const [models, setModels] = useState("");
+  const [modelDrafts, setModelDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<"add" | "other" | null>(null);
   /** The last failure, and the server whose model-ID editor it belongs to (shown there instead of below the add form). */
   const [error, setError] = useState<{ text: string; at?: string } | null>(null);
@@ -104,6 +113,27 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
       })
       .catch((e: Error) => setError({ text: e.message || t("apiInstances.failed"), at }))
       .finally(() => setBusy(null));
+  };
+
+  const setModelDraft = (instanceId: string, value: string | null) => {
+    const next = { ...modelDrafts };
+    if (value === null) delete next[instanceId];
+    else next[instanceId] = value;
+    setModelDrafts(next);
+    if (error?.at === instanceId) setError(null);
+  };
+
+  const saveModel = (server: InstanceInfo & { url?: string }, text: string) => {
+    if (!text.trim()) return setModelDraft(server.instanceId, null);
+    const id = modelIdFrom(text);
+    if (!id) return setError({ text: t("apiInstances.modelInvalid"), at: server.instanceId });
+    if (id === server.models.default) return setModelDraft(server.instanceId, null);
+    run(
+      "other",
+      () => saveSettings(server.instanceId, { model: id }),
+      () => { if (server.models.options.length > 0) setModelDraft(server.instanceId, null); },
+      server.instanceId,
+    );
   };
 
   const add = () => ready && run(
@@ -130,6 +160,40 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
               <div className="truncate text-[13px] leading-5 text-ink">{server.displayName}</div>
               {server.url && <div className="truncate text-[12px] leading-4 text-ink-secondary">{server.url}</div>}
             </div>
+            {modelDrafts[server.instanceId] !== undefined || server.models.options.length === 0 ? (
+              <input
+                value={modelDrafts[server.instanceId] ?? server.models.default}
+                onChange={(event) => setModelDraft(server.instanceId, event.target.value)}
+                onBlur={(event) => saveModel(server, event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") { event.preventDefault(); saveModel(server, event.currentTarget.value); }
+                  if (event.key === "Escape") setModelDraft(server.instanceId, null);
+                }}
+                placeholder={t("apiInstances.modelId")}
+                aria-label={t("apiInstances.modelFor", { name: server.displayName })}
+                aria-invalid={error?.at === server.instanceId || undefined}
+                aria-describedby={error?.at === server.instanceId ? `model-error-${server.instanceId}` : undefined}
+                title={t("apiInstances.modelHint")}
+                spellCheck={false}
+                disabled={busy !== null}
+                className={cn(INPUT, "max-w-[12rem] shrink-0 font-mono")}
+              />
+            ) : (
+              <Select
+                size="sm"
+                className="max-w-[12rem]"
+                value={server.models.default}
+                onChange={(event) => event.target.value === CUSTOM_MODEL
+                  ? setModelDraft(server.instanceId, server.models.default)
+                  : run("other", () => saveSettings(server.instanceId, { model: event.target.value }), undefined, server.instanceId)}
+                disabled={busy !== null}
+                aria-label={t("apiInstances.modelFor", { name: server.displayName })}
+                title={t("apiInstances.modelHint")}
+              >
+                {server.models.options.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+                {!server.managedModels && <option value={CUSTOM_MODEL}>{t("apiInstances.modelCustom")}</option>}
+              </Select>
+            )}
             <ReplyWaitSelect
               server={server}
               disabled={busy !== null}
@@ -171,6 +235,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
               <Trash2 size={13} aria-hidden="true" />
             </button>
           </div>
+          {error?.at === server.instanceId && editing !== server.instanceId && <div id={`model-error-${server.instanceId}`} role="alert" className="mt-1 text-[12px] leading-4 text-danger">{error.text}</div>}
           {editing === server.instanceId && (
             <div className="mt-1.5 flex flex-col gap-1.5">
               <input value={editText} onChange={(e) => setEditText(e.target.value)} placeholder={t("apiInstances.models")}

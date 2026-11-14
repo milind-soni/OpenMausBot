@@ -179,6 +179,8 @@ export const USER_ERROR = {
   "serverError.instance.replyWaitUnsupported": "The reply wait is available for OpenAI-compatible servers only.",
   "serverError.instance.modelsUnsupported": "Model IDs can be changed for added OpenAI-compatible servers only.",
   "serverError.instance.defaultModelRemoved": "{model} is the default model. Choose another default model before removing it from this server.",
+  "serverError.instance.modelUnsupported": "The default model is available for OpenAI-compatible servers only.",
+  "serverError.instance.modelNotListed": "Choose one of this server's model IDs.",
   "serverError.mcp.personalHeadersShared": "Personal MCP header values cannot be saved in shared configuration. Save your key in your personal connection.",
   "serverError.mcp.testSignInFirst": "Sign in to the team to test your own connection.",
   "serverError.postiz.adminOnly": "Only the owner or an admin can manage the Postiz connection.",
