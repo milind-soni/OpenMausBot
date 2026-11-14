@@ -613,10 +613,7 @@ import { createInternalChiefTeamRoutes } from "./routes/internal-chief-team.ts";
 import { createRoomHoldRoutes } from "./routes/room-holds.ts";
 import { checkedGroupResponder, createGroupRoutes } from "./routes/groups.ts";
 import { createChannelRoutes } from "./routes/channels.ts";
-import { createTaskRoutes } from "./routes/tasks.ts";
-import { BoardStore, BOARD_FILE } from "./board/store.ts";
-import { createBoardRoutes } from "./routes/board.ts";
-import { attachBoardTask } from "./board/attach.ts";
+import { createTaskRoutes } from "./routes/tasks.ts"; import { BoardStore, BOARD_FILE } from "./board/store.ts"; import { createBoardRoutes } from "./routes/board.ts"; import { attachBoardTask } from "./board/attach.ts";
 import { createTeamRoutes } from "./routes/teams.ts";
 import { createThreadModelRoutes } from "./routes/thread-models.ts";
 import { createUndoRoutes } from "./routes/undo.ts";
@@ -12232,13 +12229,7 @@ ROUTES.push(createChannelRoutes({
   revokeInternalCapabilitiesForThread,
   stagedSkillCleanupsForThread,
   rejectDeletedThreadSkillStages,
-}));
-const board = new BoardStore({ file: join(DATA_DIR, BOARD_FILE), broadcast: (frame) => broadcast({ ...frame }, { adminOnly: true }) });
-const boardRoutes = createBoardRoutes({
-  board,
-  canManage: ownerOrAdmin,
-  threadExists: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)),
-});
+})); const board = new BoardStore({ file: join(DATA_DIR, BOARD_FILE), broadcast: (frame) => broadcast({ ...frame }, { adminOnly: true }) }); const boardRoutes = createBoardRoutes({ board, canManage: ownerOrAdmin, threadExists: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)) });
 const taskRoutes = createTaskRoutes({
   store, threadRead: teamMessages.seen,
   cloudHome: Boolean(CLOUD_HOME),
@@ -12273,8 +12264,7 @@ const taskRoutes = createTaskRoutes({
   clearTurnDigestState,
   revokeInternalCapabilitiesForThread,
   stagedSkillCleanupsForThread,
-  rejectDeletedThreadSkillStages,
-  attachBoard: (auth, input) => attachBoardTask({ board, canManage: ownerOrAdmin }, auth, { ...input, knownThread: true }),
+  rejectDeletedThreadSkillStages, attachBoard: (auth, input) => attachBoardTask({ board, canManage: ownerOrAdmin }, auth, { ...input, knownThread: true }),
 }); ROUTES.push(taskRoutes, boardRoutes); const leaveTeam = CLOUD_TEAM ? createTeamMemberLeft({ dataDir: DATA_DIR, store, openedBy: (person) => threadStarters.threadsOf(person, 50_000), privateTo: teamHost.privateTo, sharesLeft: conversationSharing.personLeft, revokeSessions: (email) => sessions.revokeMember(email), busy: threadBusy, stop: (botId, threadId) => interruptDirectThread(botId, threadId, "The person left the team"), deleteTasks: taskRoutes.deleteTasks, stopBot: (botId) => memberOwnBot.stopWork(botId, "The person left the team"), deleteBot: memberOwnBot.remove, threadsReferencing, deleteAttachment: (name) => deleteAttachment(join(ATTACHMENTS_DIR, name)), eraseBrowsers: eraseAudienceBrowsers, forgetConnections: (person) => { connectionHealth.forgetPerson(person); personRooms.reads?.forgetPerson(person); return teamConnections.forgetPerson(person); }, forgetSecrets: (person) => { logins.forgetPerson(person); }, ...teamRoutines.leaving, forgetOnBots: (email) => forgetMember(store, email, (bot, access) => writeAccess({ store, publicGroupState, broadcast, audienceChanged }, bot, access)).length, ownerOf: (botId) => { const bot = store.bot(botId); return bot ? botOwner(bot) : null; }, record: (row) => appendAdminAction(DATA_DIR, { ...row, actor: { kind: "session", sessionId: "", label: "MausBot Cloud" } }) }) : null;
 ROUTES.push(createTeamRoutes({
   store,
