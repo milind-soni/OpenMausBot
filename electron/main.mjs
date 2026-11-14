@@ -2251,9 +2251,9 @@ ipcMain.handle("desktop:export-diagnostics", localOrHome("desktop:export-diagnos
   return result.filePath;
 }));
 
-// The path is renderer-controlled: it must resolve inside ~/.openmausbot to a regular file, never a symlink escape.
+// The path is renderer-controlled: it must resolve inside the active local data directory to a regular file, never a symlink escape.
 ipcMain.handle("desktop:save-file", localOnly("desktop:save-file", async (event, rawPath) => {
-  return withSavableFile(rawPath, { home: os.homedir() }, async ({ defaultName, copyTo }) => {
+  return withSavableFile(rawPath, { dataDir: runningDataDir ?? desktopDataDir() }, async ({ defaultName, copyTo }) => {
     const parent = BrowserWindow.fromWebContents(event.sender);
     const defaultPath = await defaultSaveName(app.getPath("downloads"), defaultName);
     const choice = await dialog.showSaveDialog(parent ?? undefined, {

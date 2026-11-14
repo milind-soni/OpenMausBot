@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
+import vm from "node:vm";
 
 import { collisionFreeDownloadPath, defaultSaveName, htmlCopyName, openFolder, openHtmlCopy, openLogsFolder, resolveSavablePath, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
 
@@ -80,6 +81,70 @@ describe("save-file path validation", () => {
     await assert.rejects(resolveSavablePath("workspaces/bot/report.docx", { home }), { message: "That file path is invalid" });
     await assert.rejects(resolveSavablePath(path.join(botHome, "nope.docx"), { home }), { message: "That file no longer exists" });
     await assert.rejects(resolveSavablePath(path.join(botHome, "workspaces"), { home }), { message: "That path is not a file" });
+  });
+});
+
+function configuredWorkspace(name) {
+  const root = path.join(home, name);
+  const userHome = path.join(root, "home");
+  const dataDir = path.join(root, "active-data");
+  const downloads = path.join(root, "downloads");
+  for (const dir of [userHome, dataDir, downloads]) fs.mkdirSync(dir, { recursive: true });
+  const source = path.join(dataDir, "report.docx");
+  fs.writeFileSync(source, "active directory report");
+  return { userHome, dataDir, downloads, source };
+}
+
+describe("save-file configured data directory", () => {
+  it("validates the configured directory when the default bot home does not exist", async () => {
+    const { userHome, dataDir, source } = configuredWorkspace("configured-validation");
+    assert.equal(fs.existsSync(path.join(userHome, ".openmausbot")), false);
+    const expected = await fs.promises.realpath(source);
+    assert.equal(await resolveSavablePath(source, { home: userHome, dataDir }), expected);
+    assert.equal(await resolveSavablePath(pathToFileURL(source).href, { home: userHome, dataDir }), expected);
+  });
+
+  it("copies from a validated handle in the configured directory", async () => {
+    const { userHome, dataDir, source, downloads } = configuredWorkspace("configured-copy");
+    const destination = path.join(downloads, "report.docx");
+    await withSavableFile(source, { home: userHome, dataDir }, ({ copyTo }) => copyTo(destination));
+    assert.equal(fs.readFileSync(destination, "utf8"), "active directory report");
+  });
+
+  it("does not also grant access to the inactive default directory", async () => {
+    const { userHome, dataDir } = configuredWorkspace("configured-boundary");
+    const inactive = path.join(userHome, ".openmausbot");
+    fs.mkdirSync(inactive);
+    const source = path.join(inactive, "report.docx");
+    fs.writeFileSync(source, "inactive directory report");
+    await assert.rejects(resolveSavablePath(source, { home: userHome, dataDir }), {
+      message: "Only files created by your bots can be saved",
+    });
+  });
+
+  it("the desktop save handler uses the running local environment", async () => {
+    const { userHome, dataDir, source, downloads } = configuredWorkspace("configured-desktop");
+    const main = fs.readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+    const start = main.indexOf('ipcMain.handle("desktop:save-file",');
+    const end = main.indexOf('ipcMain.handle("desktop:reveal-file",', start);
+    assert.ok(start >= 0 && end > start);
+    let handler;
+    vm.runInNewContext(main.slice(start, end), {
+      ipcMain: { handle: (_channel, callback) => { handler = callback; } },
+      localOnly: (_channel, callback) => callback,
+      withSavableFile,
+      defaultSaveName,
+      os: { homedir: () => userHome },
+      runningDataDir: dataDir,
+      desktopDataDir: () => botHome,
+      BrowserWindow: { fromWebContents: () => null },
+      app: { getPath: () => downloads },
+      dialog: { showSaveDialog: async (_owner, options) => ({ canceled: false, filePath: options.defaultPath }) },
+      shell: { showItemInFolder: () => {} },
+    });
+    const destination = await handler({ sender: null }, source);
+    assert.equal(destination, path.join(downloads, "report.docx"));
+    assert.equal(fs.readFileSync(destination, "utf8"), "active directory report");
   });
 });
 
