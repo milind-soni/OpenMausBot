@@ -1,7 +1,7 @@
 // The project board's reading layer: a board snapshot is flat (projects, subprojects, milestones,
 // tasks by id), while the page shows one tree. Everything here is pure so the counts, the filters
 // and the "waiting to be classified" list can be tested without a server or a browser.
-import type { BoardMilestone, BoardPhase, BoardSnapshot, BoardSubproject, BoardTask, BoardTaskStatus } from "../../shared/board";
+import type { BoardMilestone, BoardPhase, BoardSnapshot, BoardSubproject, BoardTask, BoardTaskStatus, BoardVisibility } from "../../shared/board";
 import type { LocaleKey } from "@/locales";
 
 export const BOARD_PHASE_ORDER: readonly BoardPhase[] = [
@@ -65,6 +65,16 @@ export function phaseLabel(phase: string, locale: LocaleSource): string {
 export function statusLabel(status: string, locale: LocaleSource): string {
   const key = TASK_STATUS_LABEL[status as BoardTaskStatus];
   return key && locale[key] ? locale[key]! : status;
+}
+
+export function visibilityKind(value: BoardVisibility | undefined): "admins" | "everyone" | "people" {
+  if (value === "everyone") return "everyone";
+  if (value && typeof value === "object") return "people";
+  return "admins";
+}
+
+export function visibilityPeople(value: BoardVisibility | undefined): string[] {
+  return value && typeof value === "object" ? value.people : [];
 }
 
 export function projectStatusLabel(status: string, locale: LocaleSource): string {

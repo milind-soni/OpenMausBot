@@ -12229,7 +12229,7 @@ ROUTES.push(createChannelRoutes({
   revokeInternalCapabilitiesForThread,
   stagedSkillCleanupsForThread,
   rejectDeletedThreadSkillStages,
-})); const board = new BoardStore({ file: join(DATA_DIR, BOARD_FILE), broadcast: (frame) => broadcast({ ...frame }, { adminOnly: true }) }); const boardRoutes = createBoardRoutes({ board, canManage: ownerOrAdmin, threadExists: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)), threadInfo: (botId, threadId) => { const task = store.taskByThread(botId, threadId); return task ? { ...(task.routineRunId ? { routineRunId: task.routineRunId } : {}) } : null; }, visibleFor: (auth) => visibleTo(viewerFor(auth)) });
+})); const board = new BoardStore({ file: join(DATA_DIR, BOARD_FILE), broadcast: (frame) => broadcast({ ...frame }, { adminOnly: true }) }); const boardRoutes = createBoardRoutes({ board, canManage: ownerOrAdmin, threadExists: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)), threadInfo: (botId, threadId) => { const task = store.taskByThread(botId, threadId); return task ? (task.routineRunId ? { routineRunId: task.routineRunId } : {}) : null; }, visibleFor: (auth) => visibleTo(viewerFor(auth)) });
 const taskRoutes = createTaskRoutes({
   store, threadRead: teamMessages.seen,
   cloudHome: Boolean(CLOUD_HOME),

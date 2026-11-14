@@ -12,12 +12,13 @@ import {
   BOARD_PHASE_CLASS, EMPTY_FILTER, MILESTONE_CLASS, MILESTONE_LABEL, PHASE_LABEL, PROJECT_STATUS_CLASS,
   PROJECT_STATUS_LABEL, TASK_STATUS_LABEL, boardTaskTitle, boardTree, botNameOf,
   canEditMilestone, canEditProject, canEditTask, filterBoard, filterIsEmpty, milestoneCounts,
-  phaseDistribution, taskCounts, unclassifiedConversations,
+  phaseDistribution, taskCounts, unclassifiedConversations, visibilityKind, visibilityPeople,
   type BoardFilter, type BoardProjectNode, type BoardSubprojectNode,
 } from "@/lib/project-board";
 import type { BoardMilestone, BoardProject, BoardSnapshot, BoardSubproject, BoardTask } from "../../shared/board";
 import { ProjectAssignment } from "./board/ProjectAssignment";
 import { TaskRow } from "./board/TaskRow";
+import { UnclassifiedPanel } from "./board/UnclassifiedPanel";
 import {
   EditProjectDialog, EditSubprojectDialog, MilestoneDecisionDialog, NewConversationDialog, NewMilestoneDialog,
   NewProjectDialog, NewSubprojectDialog,
@@ -39,7 +40,6 @@ export function ProjectBoardPage() {
   const [filter, setFilter] = useState<BoardFilter>(EMPTY_FILTER);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<Dialog | null>(null);
-  const [showAllUnclassified, setShowAllUnclassified] = useState(false);
   const [slow, setSlow] = useState(false);
   const back = useRef<HTMLButtonElement>(null);
 
@@ -223,40 +223,11 @@ export function ProjectBoardPage() {
                 </>
               )}
 
-              <section aria-labelledby="board-unclassified" className="mt-5 rounded-xl border border-hairline/40 bg-card/30 p-3" data-board-unclassified={unclassified.length}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 id="board-unclassified" className="text-[13px] font-semibold text-ink">{t("board.unclassified.title")}</h2>
-                  <span className="text-[11px] text-ink-tertiary tabular-nums">{unclassified.length}</span>
-                  {unclassified.length > 6 && (
-                    <button type="button" className="ms-auto text-[12px] font-medium text-accent-text hover:underline" onClick={() => setShowAllUnclassified((current) => !current)}>
-                      {showAllUnclassified ? t("board.unclassified.showLess") : t("board.unclassified.showAll")}
-                    </button>
-                  )}
-                </div>
-                {unclassified.length === 0 ? (
-                  <p className="mt-1.5 text-[12px] text-ink-tertiary">{t("board.unclassified.empty")}</p>
-                ) : (
-                  <>
-                    <p className="mt-1 text-[11px] text-ink-tertiary">{t("board.unclassified.note", { count: unclassified.length })}</p>
-                    <ul aria-label={t("board.unclassified.title")} className="mt-1 divide-y divide-hairline/25">
-                      {(showAllUnclassified ? unclassified : unclassified.slice(0, 6)).map((conversation) => (
-                        <li key={conversation.threadId} className="flex min-h-10 flex-wrap items-center gap-2 py-1.5">
-                          <button
-                            type="button"
-                            onClick={() => openThread(dispatch, { botId: conversation.botId, threadId: conversation.threadId }, state, showThreads)}
-                            className="min-h-6 min-w-0 flex-1 truncate rounded py-0.5 text-start text-[13px] text-ink hover:underline focus-visible:outline-none focus-visible:ring-[1.5px] focus-visible:ring-focus"
-                            title={conversation.title}
-                          >
-                            {conversation.title}
-                          </button>
-                          <span className="shrink-0 text-[11px] text-ink-tertiary">{conversation.botName}</span>
-                          <ProjectAssignment botId={conversation.botId} threadId={conversation.threadId} variant="row" emptyLabel={t("board.unclassified.classify")} />
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-              </section>
+              <UnclassifiedPanel
+                conversations={unclassified}
+                board={board}
+                onOpen={(conversation) => openThread(dispatch, { botId: conversation.botId, threadId: conversation.threadId }, state, showThreads)}
+              />
               <p className="mt-3 text-[11px] text-ink-tertiary">{t("board.note.counts")}</p>
             </>
           )}
@@ -284,6 +255,14 @@ export function ProjectBoardPage() {
       {manageBusy && <span className="sr-only" role="status">{t("board.loading")}</span>}
     </ToolPage>
   );
+}
+
+function visibilityText(value: BoardSnapshot["projects"][number]["visibility"]): string {
+  const kind = visibilityKind(value);
+  if (kind === "everyone") return t("board.visibility.everyone");
+  if (kind === "admins") return t("board.visibility.admins");
+  const people = visibilityPeople(value);
+  return people.length <= 2 ? people.join(", ") : `${people.slice(0, 2).join(", ")} +${people.length - 2}`;
 }
 
 function botConversations(bot: Bot) {
@@ -390,6 +369,9 @@ function ProjectCard({ node, board, bots, expanded, onToggle, filter, filtering,
           <p className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11.5px] text-ink-tertiary">
             {node.project.owner && <span>{t("board.task.owner")}: <span className="text-ink-secondary">{node.project.owner}</span></span>}
             {node.project.goal && <span className="min-w-0 truncate" title={node.project.goal}>{t("board.detail.goal")}: <span className="text-ink-secondary">{node.project.goal}</span></span>}
+            <span data-project-visibility={visibilityKind(node.project.visibility)} title={visibilityText(node.project.visibility)}>
+              {t("board.visibility.label")}: <span className="text-ink-secondary">{visibilityText(node.project.visibility)}</span>
+            </span>
           </p>
           {node.project.description && <p className="mt-0.5 line-clamp-2 text-[12px] leading-relaxed text-ink-secondary">{node.project.description}</p>}
           {spread.length > 0 && (
@@ -421,6 +403,9 @@ function ProjectCard({ node, board, bots, expanded, onToggle, filter, filtering,
                 {t("board.detail.acceptance")}: <span className="text-ink-secondary">{node.project.acceptance}</span>
               </p>
             )}
+            <p className="mt-1 text-[11px] leading-relaxed text-ink-tertiary" data-project-visibility-note>
+              {t(`board.visibility.hint.${visibilityKind(node.project.visibility)}`)}
+            </p>
             {node.milestones.length > 0 && (
               <ul aria-label={t("board.project.milestones")} className="mt-2 flex flex-col gap-1">
                 {node.milestones.map((milestone) => <MilestoneRow key={milestone.id} milestone={milestone} editable={canEditMilestone(board, milestone.id)} onDecide={() => onDecideMilestone(milestone)} />)}

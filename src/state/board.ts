@@ -2,7 +2,7 @@
 // write replaces it whole, as the server sends it. The SSE frame and a refetch after a write land here too.
 import { useSyncExternalStore } from "react";
 
-import type { BoardPhase, BoardProjectStatus, BoardState, BoardSnapshot } from "../../shared/board";
+import type { BoardPhase, BoardProjectStatus, BoardState, BoardSnapshot, BoardVisibility } from "../../shared/board";
 import type { LocaleKey } from "@/locales";
 import { api, ApiError } from "@/state/api";
 
@@ -186,6 +186,7 @@ export interface ProjectWrite {
   goal?: string;
   acceptance?: string;
   status?: BoardProjectStatus;
+  visibility?: BoardVisibility;
 }
 
 export async function createProject(input: ProjectWrite & { name: string; owner: string; goal: string; acceptance: string }): Promise<void> {
@@ -199,6 +200,7 @@ export async function createProject(input: ProjectWrite & { name: string; owner:
       ...(trimmed(input.description) ? { description: trimmed(input.description) } : {}),
       ...(trimmed(input.ownerEmail) ? { ownerEmail: trimmed(input.ownerEmail) } : {}),
       ...(input.status ? { status: input.status } : {}),
+      ...(input.visibility ? { visibility: input.visibility } : {}),
       version: view.board?.version,
     }),
   });
@@ -291,6 +293,83 @@ export async function decideTask(threadId: string, decision: "accepted" | "rejec
     method: "POST",
     body: JSON.stringify({ decision, evidence, version: view.board?.version }),
   });
+}
+
+export type BatchStatus = "ready" | "already_assigned" | "missing" | "hidden" | "routine" | "conflict";
+
+export interface BatchThread {
+  threadId: string;
+  botId: string;
+}
+
+export interface BatchItem extends BatchThread {
+  status: BatchStatus;
+  reason?: string;
+  existing?: { projectId?: string; subprojectId?: string; parentThreadId?: string };
+}
+
+export interface BatchSummary {
+  total: number;
+  ready: number;
+  alreadyAssigned: number;
+  missing: number;
+  hidden: number;
+  routine: number;
+  conflict: number;
+}
+
+export interface BatchPreview {
+  version: number;
+  target: { projectId: string; projectName: string; subprojectId?: string; subprojectName?: string };
+  items: BatchItem[];
+  summary: BatchSummary;
+}
+
+export class BoardBatchError extends BoardWriteError {
+  readonly items?: BatchItem[];
+  readonly summary?: BatchSummary;
+  readonly failures?: ReadonlyArray<{ threadId: string; code: string; message: string }>;
+  constructor(code: BoardErrorCode, message: string, body?: Record<string, unknown>) {
+    super(code, message);
+    this.name = "BoardBatchError";
+    this.items = Array.isArray(body?.items) ? body.items as BatchItem[] : undefined;
+    this.summary = body?.summary && typeof body.summary === "object" ? body.summary as BatchSummary : undefined;
+    this.failures = Array.isArray(body?.failures) ? body.failures as { threadId: string; code: string; message: string }[] : undefined;
+  }
+}
+
+function batchBody(input: { projectId: string; subprojectId?: string; threads: readonly BatchThread[]; version?: number }): string {
+  return JSON.stringify({
+    projectId: input.projectId,
+    ...(input.subprojectId ? { subprojectId: input.subprojectId } : {}),
+    threads: input.threads.map(({ threadId, botId }) => ({ threadId, botId })),
+    ...(input.version === undefined ? {} : { version: input.version }),
+  });
+}
+
+/** Read-only: the server checks every thread and returns what it would do, without writing. */
+export async function previewBatch(input: { projectId: string; subprojectId?: string; threads: readonly BatchThread[] }): Promise<BatchPreview> {
+  try {
+    return await api<BatchPreview>("/api/board/tasks/batch/preview", { method: "POST", body: batchBody(input) });
+  } catch (error) {
+    const code = codeOf(error);
+    throw new BoardBatchError(code, error instanceof Error ? error.message : String(error), error instanceof ApiError ? error.body : undefined);
+  }
+}
+
+/** All-or-nothing: one conflict leaves every task where it was. `version` is the preview's version. */
+export async function applyBatch(input: { projectId: string; subprojectId?: string; threads: readonly BatchThread[]; version: number }): Promise<{ assigned: number; alreadyAssigned: number; total: number }> {
+  try {
+    const answer = await api<{ board: BoardSnapshot; batch: { assigned: number; alreadyAssigned: number; total: number; version: number } }>("/api/board/tasks/batch", {
+      method: "POST",
+      body: batchBody(input),
+    });
+    if (answer.board) applyBoard(answer.board);
+    return answer.batch;
+  } catch (error) {
+    const code = codeOf(error);
+    throw new BoardBatchError(code, error instanceof Error ? error.message : String(error), error instanceof ApiError ? error.body : undefined);
+  }
 }
 
 /** A new conversation that already belongs to a subproject, in the same request that creates it. */

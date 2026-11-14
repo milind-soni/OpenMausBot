@@ -44,6 +44,7 @@ const LINES: Record<string, number> = {
   "src/components/ModelPicker.tsx": 1039,
   "src/components/PhoneSetupFlow.tsx": 1089,
   "server/cli.ts": 1053,
+  "server/board/store.ts": 1052,
   "src/components/AttachmentPreview.tsx": 1034,
   "server/meetings/meetbot.ts": 1047,
 };

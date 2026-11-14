@@ -7,8 +7,8 @@ import { Select } from "@/components/Select";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { boardErrorText, createConversationOnBoard, createMilestone, createProject, createSubproject, decideMilestone, patchProject, patchSubproject } from "@/state/board";
 import type { Bot } from "@/state/store";
-import { PHASE_LABEL, PROJECT_STATUS_LABEL } from "@/lib/project-board";
-import { BOARD_PHASES, BOARD_PROJECT_STATUSES, type BoardPhase, type BoardProject, type BoardProjectStatus, type BoardSubproject } from "../../../shared/board";
+import { PHASE_LABEL, PROJECT_STATUS_LABEL, visibilityKind, visibilityPeople } from "@/lib/project-board";
+import { BOARD_PHASES, BOARD_PROJECT_STATUSES, type BoardPhase, type BoardProject, type BoardProjectStatus, type BoardSubproject, type BoardVisibility } from "../../../shared/board";
 
 /** One small board form. Portalled to the body for the same reason the other dialogs are: a translated sidebar is a
  * containing block for a fixed child. */
@@ -87,6 +87,37 @@ export function FormError({ error }: { error: string | null }) {
   return error ? <p role="alert" className="mt-3 text-[12px] text-danger">{error}</p> : null;
 }
 
+type VisibilityMode = "admins" | "everyone" | "people";
+
+export function visibilityValue(mode: VisibilityMode, people: string): BoardVisibility {
+  return mode === "people" ? { people: people.split(/[\s,;]+/).map((value) => value.trim()).filter(Boolean) } : mode;
+}
+
+function missingPeople(mode: VisibilityMode, people: string): boolean {
+  return mode === "people" && !people.split(/[\s,;]+/).some(Boolean);
+}
+
+function VisibilityFields({ mode, onMode, people, onPeople }: {
+  mode: VisibilityMode; onMode: (mode: VisibilityMode) => void; people: string; onPeople: (value: string) => void;
+}) {
+  return (
+    <>
+      <Field label={t("board.visibility.label")} hint={t(`board.visibility.hint.${mode}`)}>
+        <Select value={mode} onChange={(event) => onMode(event.target.value as VisibilityMode)} className="mt-1 w-full" aria-label={t("board.visibility.label")}>
+          <option value="admins">{t("board.visibility.admins")}</option>
+          <option value="everyone">{t("board.visibility.everyone")}</option>
+          <option value="people">{t("board.visibility.people")}</option>
+        </Select>
+      </Field>
+      {mode === "people" && (
+        <Field label={t("board.visibility.peopleLabel")}>
+          <textarea value={people} maxLength={4000} rows={2} onChange={(event) => onPeople(event.target.value)} placeholder={t("board.visibility.peoplePlaceholder")} className={FIELD_CLASS} aria-label={t("board.visibility.peopleLabel")} />
+        </Field>
+      )}
+    </>
+  );
+}
+
 export function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [owner, setOwner] = useState("");
@@ -94,7 +125,9 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const [goal, setGoal] = useState("");
   const [acceptance, setAcceptance] = useState("");
   const [description, setDescription] = useState("");
-  const form = useBoardForm(() => createProject({ name, owner, ownerEmail, goal, acceptance, description }), onClose);
+  const [visibility, setVisibility] = useState<VisibilityMode>("admins");
+  const [people, setPeople] = useState("");
+  const form = useBoardForm(() => createProject({ name, owner, ownerEmail, goal, acceptance, description, visibility: visibilityValue(visibility, people) }), onClose);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { input.current?.focus(); }, []);
   return (
@@ -118,8 +151,9 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
         <Field label={t("board.dialog.description")}>
           <textarea value={description} maxLength={2000} rows={2} onChange={(event) => setDescription(event.target.value)} placeholder={t("board.dialog.descriptionPlaceholder")} className={FIELD_CLASS} />
         </Field>
+        <VisibilityFields mode={visibility} onMode={setVisibility} people={people} onPeople={setPeople} />
         <FormError error={form.error} />
-        <DialogButtons busy={form.busy} disabled={!name.trim() || !owner.trim() || !goal.trim() || !acceptance.trim()} submitLabel={t("board.dialog.create")} busyLabel={t("board.dialog.creating")} onCancel={onClose} />
+        <DialogButtons busy={form.busy} disabled={!name.trim() || !owner.trim() || !goal.trim() || !acceptance.trim() || missingPeople(visibility, people)} submitLabel={t("board.dialog.create")} busyLabel={t("board.dialog.creating")} onCancel={onClose} />
       </form>
     </BoardDialog>
   );
@@ -133,8 +167,10 @@ export function EditProjectDialog({ project, onClose }: { project: BoardProject;
   const [acceptance, setAcceptance] = useState(project.acceptance ?? "");
   const [description, setDescription] = useState(project.description ?? "");
   const [status, setStatus] = useState<BoardProjectStatus>((project.status as BoardProjectStatus | undefined) ?? "active");
+  const [visibility, setVisibility] = useState<VisibilityMode>(visibilityKind(project.visibility));
+  const [people, setPeople] = useState(visibilityPeople(project.visibility).join(", "));
   const form = useBoardForm(() => patchProject(project.id, {
-    name, owner, goal, acceptance, status,
+    name, owner, goal, acceptance, status, visibility: visibilityValue(visibility, people),
     ...(description.trim() ? { description } : {}),
     ...(ownerEmail.trim() ? { ownerEmail } : {}),
   }), onClose);
@@ -166,8 +202,9 @@ export function EditProjectDialog({ project, onClose }: { project: BoardProject;
             {BOARD_PROJECT_STATUSES.map((value) => <option key={value} value={value}>{t(PROJECT_STATUS_LABEL[value]!)}</option>)}
           </Select>
         </Field>
+        <VisibilityFields mode={visibility} onMode={setVisibility} people={people} onPeople={setPeople} />
         <FormError error={form.error} />
-        <DialogButtons busy={form.busy} disabled={!name.trim() || !owner.trim() || !goal.trim() || !acceptance.trim()} submitLabel={t("board.task.save")} busyLabel={t("board.saving")} onCancel={onClose} />
+        <DialogButtons busy={form.busy} disabled={!name.trim() || !owner.trim() || !goal.trim() || !acceptance.trim() || missingPeople(visibility, people)} submitLabel={t("board.task.save")} busyLabel={t("board.saving")} onCancel={onClose} />
       </form>
     </BoardDialog>
   );

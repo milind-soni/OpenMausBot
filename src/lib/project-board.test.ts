@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { BoardSnapshot, BoardTask } from "../../shared/board";
 import {
   boardTree, canEditMilestone, canEditProject, canEditTask, childTasks, filterBoard, milestoneCounts,
-  phaseDistribution, taskCounts, taskFits, taskMatches, unclassifiedConversations, projectOfTask, EMPTY_FILTER,
-  type TaskMatchContext,
+  phaseDistribution, taskCounts, taskFits, taskMatches, unclassifiedConversations, projectOfTask, visibilityKind,
+  visibilityPeople, EMPTY_FILTER, type TaskMatchContext,
 } from "./project-board";
 
 const at = (minute: number) => new Date(Date.UTC(2026, 10, 15, 9, minute)).toISOString();
@@ -179,5 +179,16 @@ describe("unclassified conversations", () => {
       { threadId: "run", title: "Nightly check", updatedAt: 4, routineRunId: "run-1" },
     ] }];
     expect(unclassifiedConversations(bots, board).map((ref) => ref.threadId)).toEqual(["waiting-2"]);
+  });
+});
+
+describe("project visibility", () => {
+  it("reads the three scopes and the people list without inventing one", () => {
+    expect(visibilityKind(undefined)).toBe("admins");
+    expect(visibilityKind("admins")).toBe("admins");
+    expect(visibilityKind("everyone")).toBe("everyone");
+    expect(visibilityKind({ people: ["pixel@example.com", "@example.com"] })).toBe("people");
+    expect(visibilityPeople({ people: ["pixel@example.com", "@example.com"] })).toEqual(["pixel@example.com", "@example.com"]);
+    expect(visibilityPeople("everyone")).toEqual([]);
   });
 });
