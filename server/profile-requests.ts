@@ -435,9 +435,11 @@ export class ProfileRequestService {
     }
     if (payload.changes.avatarUrl !== undefined) {
       // The snapshot reads a missing avatar as "": store none, not an empty
-      // URL, and put back the crop the bot had before the change.
-      patch.avatarUrl = rest.avatarUrl || undefined;
-      patch.avatarCrop = rest.avatarUrl ? payload.beforeAvatarCrop ?? target.avatarCrop : "mascot";
+      // URL, and put back the crop the bot had before the change. A picture
+      // removed since (a Settings clear) leaves the mascot, not a broken link.
+      const previous = rest.avatarUrl && (!this.attachmentExists || this.attachmentExists(rest.avatarUrl)) ? rest.avatarUrl : "";
+      patch.avatarUrl = previous || undefined;
+      patch.avatarCrop = previous ? payload.beforeAvatarCrop ?? target.avatarCrop : "mascot";
     }
     if (!this.store.patchBotProfile(target.id, patch)) return cannot(NO_SUCH_BOT, 404);
     recordProfileChange(target.id, "user", `undo:${message.id}`, payload.changes, payload.before);
