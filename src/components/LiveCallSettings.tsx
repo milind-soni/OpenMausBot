@@ -28,8 +28,9 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
   const azure = live.provider === "azure";
   const fish = live.provider === "fish";
   const gemini = live.provider === "gemini";
+  const elevenlabs = live.provider === "elevenlabs";
   const copy = liveKeyCopy(live.provider);
-  const hasKey = live.keySource === (fish ? "fishAudio" : gemini ? "gemini" : "live");
+  const hasKey = live.keySource === (fish ? "fishAudio" : gemini ? "gemini" : elevenlabs ? "elevenlabs" : "live");
   // Gemini has its own voices, kept apart from the GPT-Live one.
   const voiceOptions = gemini ? GEMINI_LIVE_VOICE_OPTIONS : LIVE_VOICE_OPTIONS;
   const voice = gemini ? geminiLiveVoice(live.geminiVoice) : live.voice || "marin";
@@ -77,8 +78,8 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
       }}
     >
       <LiveProviderSettings locked={keySaving} onSaving={setProviderSaving} />
-      {/* Fish Audio calls speak in the agent's own voice. */}
-      {!fish && <>
+      {/* Fish Audio and ElevenLabs calls speak in their agent's own voice. */}
+      {!fish && !elevenlabs && <>
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.voice")}</span>
         <Select
@@ -130,13 +131,13 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
           )}
         </span>
       </div>
-      {!hasKey && (azure || fish || gemini) && <div className="-mt-2 text-[12px] text-ink-tertiary">{t(copy.missing)}</div>}
-      {live.keySource !== "live" && !azure && !fish && !gemini && (
+      {!hasKey && (azure || fish || gemini || elevenlabs) && <div className="-mt-2 text-[12px] text-ink-tertiary">{t(copy.missing)}</div>}
+      {live.keySource !== "live" && !azure && !fish && !gemini && !elevenlabs && (
         <div className="-mt-2 text-[12px] text-ink-tertiary">{t(live.keySource === "openai" ? "call.live.keyFromApiKeys" : "call.live.needsKey")} <KeysLink id="openai" purpose="liveCalls" /></div>
       )}
       {/* Keyed by provider: a key typed for one provider is never saved for another. */}
       {changingKey && <LiveKeySetup key={state.config?.live?.provider ?? "openai"} compact locked={providerSaving} onSaving={setKeySaving} onSaved={() => setChangingKey(false)} />}
-      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, fish, gemini })} {t(copy.cost)}</div>
+      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, fish, gemini, elevenlabs })} {t(copy.cost)}</div>
       {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
   );

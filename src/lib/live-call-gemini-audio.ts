@@ -1,4 +1,5 @@
-// The microphone and speaker of a Gemini Live call: Gemini takes 16 kHz 16-bit PCM and answers with 24 kHz 16-bit PCM.
+// The microphone and speaker of a Gemini or ElevenLabs Live call: both take 16 kHz 16-bit PCM; Gemini answers with 24 kHz
+// 16-bit PCM, ElevenLabs at the rate its agent is set up for.
 const MIC_RATE = 16_000;
 const SPEAKER_RATE = 24_000;
 /** About 100 ms of microphone audio per message. */
@@ -69,7 +70,7 @@ export function pcm16ToFloat(pcm: ArrayBuffer): Float32Array<ArrayBuffer> {
   return out;
 }
 
-export function browserGeminiAudio(): GeminiAudio {
+export function browserGeminiAudio(speakerRate = SPEAKER_RATE): GeminiAudio {
   let context: AudioContext | null = new AudioContext();
   let stream: MediaStream | null = null;
   let node: AudioWorkletNode | null = null;
@@ -102,7 +103,7 @@ export function browserGeminiAudio(): GeminiAudio {
       if (!context) return;
       const samples = pcm16ToFloat(pcm);
       if (!samples.length) return;
-      const buffer = context.createBuffer(1, samples.length, SPEAKER_RATE);
+      const buffer = context.createBuffer(1, samples.length, speakerRate);
       buffer.copyToChannel(samples, 0);
       const source = context.createBufferSource();
       source.buffer = buffer;

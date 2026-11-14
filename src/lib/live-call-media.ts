@@ -1,11 +1,12 @@
 // Its data channel may only send session.close; everything else about the call runs on the harness.
 import { useSyncExternalStore } from "react";
-import type { LiveCallState, LiveEndReason, LiveFishTransport, LiveGeminiSession, LiveGeminiTransport, LiveProvider } from "../../shared/wire";
+import type { LiveCallState, LiveElevenLabsSession, LiveElevenLabsTransport, LiveEndReason, LiveFishTransport, LiveGeminiSession, LiveGeminiTransport, LiveProvider } from "../../shared/wire";
 import { api, ApiError } from "@/state/store";
 import { openExternalLink } from "./app-links";
 import { endCall, startCall } from "./call";
 import { desktopCapabilitiesNow } from "./desktop";
 import { FishCall, isFishMicDenied, startFishAgentSession, type FishCallHooks, type FishSessionStarter } from "./live-call-fish";
+import { startElevenLabsLiveSession } from "./live-call-elevenlabs";
 import { startGeminiLiveSession } from "./live-call-gemini";
 import { t } from "./i18n";
 
@@ -48,6 +49,7 @@ export interface LiveMediaDeps {
   openInBrowser(url: string): void;
   startFish: FishSessionStarter;
   startGemini: FishSessionStarter<LiveGeminiSession>;
+  startElevenLabs: FishSessionStarter<LiveElevenLabsSession>;
 }
 
 const IDLE: LiveMediaState = {
@@ -94,6 +96,7 @@ const defaults: LiveMediaDeps = {
   openInBrowser: (url) => void openExternalLink(url).catch(() => undefined),
   startFish: startFishAgentSession,
   startGemini: startGeminiLiveSession,
+  startElevenLabs: startElevenLabsLiveSession,
 };
 let deps: LiveMediaDeps = defaults;
 
@@ -196,7 +199,7 @@ export async function startLiveCall(target: { botId: string; threadId: string; p
   set({ ...IDLE, phase: "starting", ...where });
   startCall(target.botId);
   try {
-    if (target.provider === "fish" || target.provider === "gemini") return await startFishCall(target, mine);
+    if (target.provider === "fish" || target.provider === "gemini" || target.provider === "elevenlabs") return await startFishCall(target, mine);
     const stream = await deps.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     if (mine !== generation) return void stream.getTracks().forEach((track) => track.stop());
     microphone = stream;
@@ -272,10 +275,10 @@ export async function startLiveCall(target: { botId: string; threadId: string; p
   }
 }
 
-/** Fish's SDK, or the Gemini session here, opens the microphone and plays the agent; the harness follows the call through
+/** Fish's SDK, or the Gemini or ElevenLabs session here, opens the microphone and plays the agent; the harness follows the call through
  * the relay. */
 async function startFishCall(target: { botId: string; threadId: string }, mine: number): Promise<void> {
-  const result = await deps.request<{ call: LiveCallState; transport: LiveFishTransport | LiveGeminiTransport | { type: "webrtc" } }>("/api/live/session", {
+  const result = await deps.request<{ call: LiveCallState; transport: LiveFishTransport | LiveGeminiTransport | LiveElevenLabsTransport | { type: "webrtc" } }>("/api/live/session", {
     method: "POST",
     body: JSON.stringify({ botId: target.botId, threadId: target.threadId, client: liveClient(deps.capabilities()) }),
     timeoutMs: 35_000,
@@ -313,7 +316,8 @@ async function startFishCall(target: { botId: string; threadId: string }, mine: 
     },
     now: () => Date.now(),
   };
-  const call = transport.type === "gemini" ? new FishCall(transport, hooks, deps.startGemini) : new FishCall(transport, hooks, deps.startFish);
+  const call = transport.type === "gemini" ? new FishCall(transport, hooks, deps.startGemini)
+    : transport.type === "elevenlabs" ? new FishCall(transport, hooks, deps.startElevenLabs) : new FishCall(transport, hooks, deps.startFish);
   fishCall = call;
   // Started only now: the SDK's start includes the microphone prompt, which may take the person a while.
   await call.start();
