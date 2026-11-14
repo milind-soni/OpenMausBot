@@ -22,6 +22,7 @@ import { sawThread } from "../thread-presence.ts";
 import { refusalBody, userError } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
 import { readThreadNotifications, type NotificationListed } from "./notifications.ts";
+import type { BoardAttachResult } from "../board/attach.ts";
 
 type HostedModels = NonNullable<ReturnType<typeof hostedModelPolicy>>;
 
@@ -74,6 +75,8 @@ export interface TaskRouteDeps {
   rejectDeletedThreadSkillStages(cleanups: Array<{ botId: string; stagedId: string }>): void;
   /** A person opened this conversation (a Team Cloud's Needs you lines for them there are done). */
   threadRead?(auth: RequestAuth, threadId: string): void;
+  /** With a `board` object on POST /api/bots/:id/tasks: put the new conversation on the board in the same request. */
+  attachBoard?(auth: RequestAuth, input: { botId: string; threadId: string; value: unknown }): BoardAttachResult;
 }
 
 /** `deleteTasks`: the same deletion for the server's own use (a person leaving a Team Cloud, host/team-member-left.ts). */
@@ -216,7 +219,16 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, body.select !== false, body.projectId, undefined, body.approvalMode, undefined, cwd,
         auth.kind === "session" ? (created) => threadStarters.set(created.threadId, actorKey(auth)) : undefined);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
-      return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task, store.bot(bot.id)!.modelSelection) });
+      let boardAfter: unknown;
+      if (body.board !== undefined) {
+        const attached = deps.attachBoard?.(auth, { botId: bot.id, threadId: task.threadId, value: body.board });
+        if (!attached || !attached.ok) {
+          deleteTasks(bot.id, [task.threadId]);
+          return json(res, attached?.status ?? 400, { error: attached?.code ?? "BOARD_INVALID", message: attached?.message ?? "the board is unavailable" });
+        }
+        boardAfter = attached.state;
+      }
+      return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task, store.bot(bot.id)!.modelSelection), ...(boardAfter ? { board: boardAfter } : {}) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/delete$/);
     if (m && method === "POST") {
