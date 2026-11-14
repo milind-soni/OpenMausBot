@@ -98,7 +98,7 @@ class GeminiLiveSession implements FishAgentSession {
   private said = "";
   private speaking = false;
   private turnDone = false;
-  /** What the person said for the current turn has been captioned as final. */
+  /** What the person said has been captioned as final, and no tool call has gone with it yet. */
   private heardThisTurn = false;
   /** Tool calls waiting for what the person said, so the harness gets the request before the delegation. */
   private heldCalls: ToolCall[] = [];
@@ -227,10 +227,7 @@ class GeminiLiveSession implements FishAgentSession {
       if (heard) {
         this.heard += heard;
         this.options.callbacks.onUserTranscript({ segmentId: `s${this.segment}`, text: this.heard, final: false });
-        if (this.heldCalls.length) {
-          if (this.heldQuiet) clearTimeout(this.heldQuiet);
-          this.heldQuiet = setTimeout(() => this.releaseCalls(), HEARD_QUIET_MS);
-        }
+        if (this.heldCalls.length) this.releaseWhenQuiet();
       }
       for (const part of content.modelTurn?.parts ?? []) {
         if (!part.inlineData?.data || !part.inlineData.mimeType?.startsWith("audio/")) continue;
@@ -262,7 +259,8 @@ class GeminiLiveSession implements FishAgentSession {
         if (this.audio?.idle() !== false) this.playbackIdle();
       }
     }
-    for (const call of message.toolCall?.functionCalls ?? []) this.onToolCall(call);
+    const calls = message.toolCall?.functionCalls ?? [];
+    if (calls.length) this.onToolCalls(calls);
     if (message.goAway !== undefined) this.wentAway = true;
     const update = message.sessionResumptionUpdate;
     if (update?.resumable && typeof update.newHandle === "string" && update.newHandle) {
@@ -288,13 +286,19 @@ class GeminiLiveSession implements FishAgentSession {
     this.flush();
   }
 
-  private onToolCall(call: ToolCall): void {
-    // The harness reads the request from what it heard, so that goes first; Gemini may send it after the call.
-    this.callsAfterHandle.add(call.id ?? "");
-    this.finishHeard();
-    if (this.heardThisTurn && !this.heldCalls.length) return this.runToolCall(call);
-    this.heldCalls.push(call);
+  private onToolCalls(calls: ToolCall[]): void {
+    // The harness reads the request from what it heard, so that goes first: Gemini may send the call before the words, or
+    // while they are still coming.
+    for (const call of calls) this.callsAfterHandle.add(call.id ?? "");
+    this.heldCalls.push(...calls);
+    if (this.heard) this.releaseWhenQuiet();
+    else if (this.heardThisTurn) return this.releaseCalls();
     this.heldLimit ??= setTimeout(() => this.releaseCalls(), HEARD_WAIT_MS);
+  }
+
+  private releaseWhenQuiet(): void {
+    if (this.heldQuiet) clearTimeout(this.heldQuiet);
+    this.heldQuiet = setTimeout(() => this.releaseCalls(), HEARD_QUIET_MS);
   }
 
   private releaseCalls(): void {
@@ -303,6 +307,8 @@ class GeminiLiveSession implements FishAgentSession {
     this.heldCalls = [];
     this.clearHeldTimers();
     this.finishHeard();
+    // The words heard go with these calls; a later call waits for its own.
+    this.heardThisTurn = false;
     calls.forEach((call) => this.runToolCall(call));
   }
 

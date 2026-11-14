@@ -75,6 +75,8 @@ function harness({ denied = false } = {}) {
 
 const AUDIO = btoa(String.fromCharCode(1, 0, 2, 0));
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+/** Longer than a tool call waits for more of what the person said. */
+const quiet = () => new Promise((resolve) => setTimeout(resolve, 450));
 
 describe("a Gemini Live session", () => {
   it("connects with the token, sends only the model and resumption, and joins once Gemini and the microphone are ready", async () => {
@@ -149,6 +151,8 @@ describe("a Gemini Live session", () => {
     await t.connect();
     t.socket().receive({ serverContent: { inputTranscription: { text: "book a table" } } });
     t.socket().receive({ toolCall: { functionCalls: [{ id: "fc_1", name: FISH_DELEGATE_TOOL, args: { request: "book a table" } }] } });
+    expect(t.delegate).not.toHaveBeenCalled();
+    await quiet();
     expect(t.callbacks.onUserTranscript).toHaveBeenLastCalledWith({ segmentId: "s0", text: "book a table", final: true });
     expect(t.delegate).toHaveBeenCalledWith({ request: "book a table" }, { callId: "fc_1" });
     await settle();
@@ -221,6 +225,31 @@ describe("a Gemini Live session", () => {
     }
   });
 
+  it("waits for the rest of the words when Gemini calls while they are still coming, and a later call for its own", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = harness();
+      await t.connect();
+      const order: string[] = [];
+      t.callbacks.onUserTranscript.mockImplementation(({ final, text }: { final: boolean; text: string }) => { if (final) order.push(text); });
+      t.delegate.mockImplementation(async () => { order.push("delegate"); return "On it."; });
+      t.socket().receive({ serverContent: { inputTranscription: { text: "book " } } });
+      t.socket().receive({ toolCall: { functionCalls: [{ id: "fc_1", name: FISH_DELEGATE_TOOL, args: {} }] } });
+      t.socket().receive({ serverContent: { inputTranscription: { text: "a table" } } });
+      expect(t.delegate).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(400);
+      expect(order).toEqual(["book a table", "delegate"]);
+      // Gemini waits for the answer without ending its turn; the next call is for words not yet heard.
+      t.socket().receive({ toolCall: { functionCalls: [{ id: "fc_2", name: FISH_DELEGATE_TOOL, args: {} }] } });
+      expect(t.delegate).toHaveBeenCalledTimes(1);
+      t.socket().receive({ serverContent: { inputTranscription: { text: "and a taxi" } } });
+      vi.advanceTimersByTime(400);
+      expect(order).toEqual(["book a table", "delegate", "and a taxi", "delegate"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("goes on over a new connection with the resumption handle when Gemini ends one", async () => {
     const t = harness();
     await t.connect();
@@ -243,10 +272,14 @@ describe("a Gemini Live session", () => {
   it("keeps tool answers and updates made between connections for the resumed one, in order", async () => {
     const t = harness();
     const session = await t.connect();
+    let answer!: (result: string) => void;
+    t.delegate.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
     t.socket().receive({ serverContent: { inputTranscription: { text: "x" } } });
     t.socket().receive({ toolCall: { functionCalls: [{ id: "fc_1", name: FISH_DELEGATE_TOOL, args: { request: "x" } }] } });
+    await quiet();
     t.socket().receive({ sessionResumptionUpdate: { newHandle: "h-2", resumable: true } });
     t.socket().drop(1000);
+    answer("On it.");
     await settle();
     session.sendUserMessage("[OpenMausBot] done", { audio: true });
     t.socket().open();
@@ -258,14 +291,18 @@ describe("a Gemini Live session", () => {
   it("answers a tool call the resumed session never saw as the bot's words, not as a tool response", async () => {
     const t = harness();
     await t.connect();
+    let answer!: (result: string) => void;
+    t.delegate.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
     t.socket().receive({ sessionResumptionUpdate: { newHandle: "h-2", resumable: true } });
     t.socket().receive({ serverContent: { inputTranscription: { text: "x" } } });
     t.socket().receive({ toolCall: { functionCalls: [{ id: "fc_1", name: FISH_DELEGATE_TOOL, args: {} }] } });
+    await quiet();
     t.socket().receive({ sessionResumptionUpdate: { resumable: false } });
     t.socket().drop(1000);
     t.socket().open();
     expect(t.socket().sent).toEqual([{ setup: { model: SESSION.model, sessionResumption: { handle: "h-2" } } }]);
     t.socket().receive({ setupComplete: {} });
+    answer("On it.");
     await settle();
     expect(t.socket().sent.slice(1)).toEqual([
       { clientContent: { turns: [{ role: "user", parts: [{ text: "[OpenMausBot] On it." }] }], turnComplete: true } },
