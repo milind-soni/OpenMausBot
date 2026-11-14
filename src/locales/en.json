@@ -3021,6 +3021,7 @@
   "composer.queued.steerNextInterruptHint": "Stop the running turn and any work it handed to other bots, then send the next queued message now",
   "composer.queued.steeringAria": "Steering queued messages",
   "composer.queued.steerImagesHeld": "Pictures can't be steered into this bot's running turn. Your message will be sent as the next turn.",
+  "composer.queued.steerHeld": "The running turn couldn't take this message. It stays in the queue and will be sent next.",
   "composer.queued.regionOne": "1 queued message",
   "composer.queued.regionMany": "{count} queued messages",
   "composer.queued.list": "Queued messages",

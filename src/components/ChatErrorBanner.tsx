@@ -13,9 +13,11 @@ export function ChatNotice({ notice }: { notice: AppState["notice"] }) {
           ? notice.text
           : notice.kind === "steer-images"
             ? t("composer.queued.steerImagesHeld")
-            : notice.kind === "bot-gone"
-              ? t("thread.botGone")
-              : notice.botName ? t("thread.goneShowing", { name: notice.botName }) : t("thread.gone")}
+            : notice.kind === "steer-held"
+              ? t("composer.queued.steerHeld")
+              : notice.kind === "bot-gone"
+                ? t("thread.botGone")
+                : notice.botName ? t("thread.goneShowing", { name: notice.botName }) : t("thread.gone")}
       </div>
     </div>
   );
