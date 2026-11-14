@@ -547,7 +547,7 @@ import {
   serializeSessionCookie,
   sessionCookieName, ownerOrAdmin, acceptLegacyOrigins,
 } from "./request-auth.ts";
-import { cookieMaxAgeSeconds, formatPairingCode, pairingRequest, SessionRegistry, type SessionRecord } from "./sessions.ts";
+import { cookieMaxAgeSeconds, formatPairingCode, pairingRequest, SessionRegistry, type SessionRecord } from "./sessions.ts"; import type { PairingErrorCode } from "../shared/pairing-code.ts";
 import { ThreadStarters } from "./thread-starters.ts"; import { createConversationShares } from "./host/conversation-shares.ts"; import { createTeamMemorySaves } from "./host/team-memory-saves.ts"; import { createConversationSharing } from "./routes/conversation-share.ts";
 import { startPhoneRelay } from "./phone-relay.ts";
 import {
@@ -12577,7 +12577,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (method === "POST" && path === "/api/auth/pair") {
       // JSON only: a cross-site HTML form cannot send this content type without a preflight, so no unused code is planted as a session.
       if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {
-        return json(res, 415, { error: "send the pairing code as JSON (content-type: application/json)" });
+        return json(res, 415, { error: "send the pairing code as JSON (content-type: application/json)", code: "pairing_bad_request" satisfies PairingErrorCode });
       }
       const body = await readBody(req);
       const code = typeof body?.code === "string" ? body.code : "";
@@ -12589,13 +12589,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (browser && body?.preview === true) {
         // Shown before the person continues; redeems nothing.
         const preview = sessions.previewBrowserSignIn(code);
-        return preview ? json(res, 200, { ...preview, ...(CLOUD_TEAM ? { team: CLOUD_TEAM.name } : {}) }) : json(res, 401, userError("serverError.pair.linkExpired"));
+        return preview ? json(res, 200, { ...preview, ...(CLOUD_TEAM ? { team: CLOUD_TEAM.name } : {}) }) : json(res, 401, { ...userError("serverError.pair.linkExpired"), code: "pairing_link_expired" satisfies PairingErrorCode });
       }
-      if (browser && !wantsCookie) return json(res, 400, { error: "a browser sign-in sets this browser's cookie; send cookie: true" });
+      if (browser && !wantsCookie) return json(res, 400, { error: "a browser sign-in sets this browser's cookie; send cookie: true", code: "pairing_bad_request" satisfies PairingErrorCode });
       const result = sessions.exchange({ code, label, attemptId, browser, source: requestSource(req), fallbackLabel: labelFromUserAgent(req.headers["user-agent"]) });
       if (!result.ok) {
         console.warn(`pairing refused from ${requestSource(req)}: ${result.error}`);
-        return json(res, result.status, refusalBody(result));
+        return json(res, result.status, { ...refusalBody(result), code: result.code });
       }
       if (CLOUD_TEAM) teamHost.met(result.session);
       const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED, emailSignIn: !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled(), cloudHome: Boolean(CLOUD_HOME), cloudTeam: CLOUD_TEAM !== null, ownHome: ownHome.takesMove() });
@@ -12611,17 +12611,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // The companion apps' pairing route: same window, lockout and single-use exchange as /api/auth/pair; redeeming the credential IS the sign-in.
     if (method === "POST" && path === "/api/pair") {
       if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {
-        return json(res, 415, { error: "send the pairing credential as JSON (content-type: application/json)" });
+        return json(res, 415, { error: "send the pairing credential as JSON (content-type: application/json)", code: "pairing_bad_request" satisfies PairingErrorCode });
       }
       const body = await readBody(req);
       const credential = typeof body?.credential === "string" ? body.credential : typeof body?.code === "string" ? body.code : "";
       const label = typeof body?.deviceName === "string" ? body.deviceName : "";
       const attemptId = typeof body?.pairRequestId === "string" ? body.pairRequestId : undefined;
-      const relayRefusal = phoneRelay?.pairingRefusal(req, credential); if (relayRefusal) return json(res, 400, { error: relayRefusal });
+      const relayRefusal = phoneRelay?.pairingRefusal(req, credential); if (relayRefusal) return json(res, 400, { error: relayRefusal, code: "pairing_qr_only" satisfies PairingErrorCode });
       const paired = sessions.exchange({ code: credential, label, attemptId, source: requestSource(req), fallbackLabel: labelFromUserAgent(req.headers["user-agent"]) });
       if (!paired.ok) {
         console.warn(`pairing refused from ${requestSource(req)}: ${paired.error}`);
-        return json(res, paired.status, refusalBody(paired));
+        return json(res, paired.status, { ...refusalBody(paired), code: paired.code });
       }
       // The shape the companion apps decode: token, device and serverName are required.
       return json(res, 200, {

@@ -61,7 +61,7 @@ beforeAll(async () => {
     createProxyHandler({
       harnessPort,
       authenticate: (t) => (t === TOKEN ? { id: "phone-1", cloudDesktopAccess, browserControlAccess: false } : null),
-      redeem: () => ({ error: "not used here" }),
+      redeem: () => ({ error: "not used here", code: "pairing_code_wrong" }),
       serverName: () => "Test computer",
       endpoints: () => endpointCandidates,
     }),

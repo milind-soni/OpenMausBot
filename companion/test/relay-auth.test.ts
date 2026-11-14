@@ -30,7 +30,7 @@ it("adds the private capability only after authenticating and authorizing, never
   const port = await listen(createServer(createProxyHandler({
     harnessPort, mutationToken: () => capability,
     authenticate: (token) => token === "paired" ? { id: "real-phone", cloudDesktopAccess: false, browserControlAccess: false } : null,
-    redeem: () => ({ error: "not pairing" }), serverName: () => "Fixture",
+    redeem: () => ({ error: "not pairing", code: "pairing_code_wrong" }), serverName: () => "Fixture",
   })));
   const call = async (path: string, token = "paired", method = "POST") => {
     const res = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers: {

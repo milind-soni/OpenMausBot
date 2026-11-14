@@ -147,7 +147,7 @@ beforeAll(async () => {
       redeem: (code, deviceName) =>
         code === "424242"
           ? { token: TOKEN, device: { id: "d1", name: String(deviceName) } }
-          : { error: "that code is not right" },
+          : { error: "that code is not right", code: "pairing_code_wrong" },
       serverName: () => "Test computer",
       version: DESKTOP_VERSION,
       connected: connectedDevices.open,
@@ -205,7 +205,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const delayedProxy = createServer(createProxyHandler({
       harnessPort: delayedHarnessPort,
       authenticate: () => valid ? { id: "phone-delayed", cloudDesktopAccess: false, browserControlAccess: false } : null,
-      redeem: () => ({ error: "not pairing" }),
+      redeem: () => ({ error: "not pairing", code: "pairing_code_wrong" }),
       serverName: () => "Test computer",
       connected: connections.open,
     }));
@@ -542,7 +542,7 @@ describe("the sidecar in front of an unmodified harness", () => {
       createProxyHandler({
         harnessPort: 1,
         authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
-        redeem: () => ({ error: "no" }),
+        redeem: () => ({ error: "no", code: "pairing_code_wrong" }),
         serverName: () => "Test computer",
       }),
     );
@@ -568,7 +568,7 @@ describe("the sidecar in front of an unmodified harness", () => {
       createProxyHandler({
         harnessPort: mutePort,
         authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
-        redeem: () => ({ error: "no" }),
+        redeem: () => ({ error: "no", code: "pairing_code_wrong" }),
         serverName: () => "Test computer",
         headersTimeoutMs: 300,
       }),
@@ -609,7 +609,7 @@ describe("the sidecar in front of an unmodified harness", () => {
       createProxyHandler({
         harnessPort: slowPort,
         authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
-        redeem: () => ({ error: "no" }),
+        redeem: () => ({ error: "no", code: "pairing_code_wrong" }),
         serverName: () => "Test computer",
       }),
     );
@@ -659,7 +659,7 @@ describe("the sidecar in front of an unmodified harness", () => {
       createProxyHandler({
         harnessPort: floodPort,
         authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
-        redeem: () => ({ error: "no" }),
+        redeem: () => ({ error: "no", code: "pairing_code_wrong" }),
         serverName: () => "Test computer",
       }),
     );
@@ -695,7 +695,7 @@ describe("live companion endpoint refresh", () => {
         // No harness on port 1: a 200 proves the sidecar answered locally.
         harnessPort: 1,
         authenticate: (token) => token === TOKEN ? { cloudDesktopAccess: false, browserControlAccess: false } : null,
-        redeem: () => ({ error: "not used" }),
+        redeem: () => ({ error: "not used", code: "pairing_code_wrong" }),
         serverName: () => "Test computer",
         endpoints: () => endpoints,
       }),
@@ -809,6 +809,17 @@ describe("pairing, end to end", () => {
         body: JSON.stringify({ code: "000000", deviceName: "Impostor" }),
       });
       expect(wrong.status).toBe(401);
+      expect(await wrong.json()).toEqual({ error: "that pairing credential is not right", code: "pairing_code_wrong" });
+      const malformed = await fetch(`${base}/api/pair`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: { nested: true }, deviceName: "Impostor" }),
+      });
+      expect(malformed.status).toBe(400);
+      expect(await malformed.json()).toEqual({ error: "invalid pairing request", code: "pairing_bad_request" });
+      const notJson = await fetch(`${base}/api/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: "{" });
+      expect(notJson.status).toBe(400);
+      expect(((await notJson.json()) as { code?: string }).code).toBe("pairing_bad_request");
 
       const pairRequestId = "4c825d5b-cf40-4db7-aac5-2455f805a8ec";
       const pairBody = JSON.stringify({
@@ -1057,7 +1068,7 @@ describe("the desktop version the sidecar reports", () => {
         // No harness on port 1: the endpoint list is the sidecar's own answer.
         harnessPort: 1,
         authenticate: (token) => token === TOKEN ? { cloudDesktopAccess: false, browserControlAccess: false } : null,
-        redeem: () => ({ error: "not used" }),
+        redeem: () => ({ error: "not used", code: "pairing_code_wrong" }),
         serverName: () => "Test computer",
         version,
       }));

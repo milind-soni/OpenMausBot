@@ -127,13 +127,13 @@ describe("DeviceRegistry", () => {
     const wrong = code === "000000" ? "111111" : "000000";
 
     for (let i = 1; i < MAX_PAIRING_ATTEMPTS; i++) {
-      expect(registry.redeem(wrong, "iPhone")).toEqual({ error: "that pairing credential is not right" });
+      expect(registry.redeem(wrong, "iPhone")).toEqual({ error: "that pairing credential is not right", code: "pairing_code_wrong" });
       expect(registry.pairing()).not.toBeNull();
     }
-    expect(registry.redeem(wrong, "iPhone")).toMatchObject({ error: expect.stringContaining("start pairing again") });
+    expect(registry.redeem(wrong, "iPhone")).toMatchObject({ error: expect.stringContaining("start pairing again"), code: "pairing_too_many" });
     expect(registry.pairing()).toBeNull();
 
-    expect(registry.redeem(code, "iPhone")).toMatchObject({ error: expect.stringContaining("no pairing") });
+    expect(registry.redeem(code, "iPhone")).toMatchObject({ error: expect.stringContaining("no pairing"), code: "pairing_not_open" });
     expect(registry.count()).toBe(0);
   });
 
@@ -148,6 +148,7 @@ describe("DeviceRegistry", () => {
   it("points an out-of-window pairing attempt to Phone settings", () => {
     expect(new DeviceRegistry().redeem("000000", "iPhone")).toEqual({
       error: "no pairing is in progress — open Phone settings on your computer",
+      code: "pairing_not_open",
     });
   });
 

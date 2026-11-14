@@ -91,7 +91,7 @@ beforeAll(async () => {
   const options = (extra: Partial<ProxyOptions> = {}): ProxyOptions => ({
     harnessPort: 0,
     authenticate: (t) => (t === TOKEN ? { id: "phone-1", cloudDesktopAccess: true, browserControlAccess: true } : null),
-    redeem: () => ({ error: "not used here" }),
+    redeem: () => ({ error: "not used here", code: "pairing_code_wrong" }),
     serverName: () => "Test computer",
     ...extra,
   });
