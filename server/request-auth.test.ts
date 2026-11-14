@@ -308,6 +308,10 @@ describe("resolveRequestAuth", () => {
       ["GET", "/api/bots/b/browser/live"], ["POST", "/api/bots/b/browser/action"],
     ]) expect(check(method, path).auth?.kind, path).toBe("loopback");
     expect(check("GET", "/api/phones/self/jobs").auth).toEqual({ kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" });
+    expect(check("GET", "/api/bots/b/skills").auth?.kind).toBe("loopback");
+    expect(check("POST", "/api/bots/b/skills").auth).toBeNull();
+    expect(check("DELETE", "/api/attachments/abc-1.jpg").auth).toEqual({ kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" });
+    expect(check("DELETE", "/api/attachments/..%2Fconfig.json").auth).toBeNull();
     const plain = resolveRequestAuth(request({ host: "127.0.0.1:8799", "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1" }, "GET"), {
       sessions, cookieName, streamPath: "/api/events", url: new URL("/api/phones/self/jobs", "http://localhost"),
       loopbackMutationToken: "desktop-secret", companionMutationToken: "relay-secret",
