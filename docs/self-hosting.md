@@ -461,6 +461,12 @@ because npm may prune its npx cache. The unit points at that copy. Not being
 a terminal, the service writes no pairing code into its log: run
 `npx openmausbot pair` when you need one.
 
+`openmausbot serve` waits up to 5 minutes for the server to answer, and says so
+after the first minute. If the limit runs out, it stops the server and exits
+with an error. A server with a lot of saved work can need longer: set
+`OMB_SERVE_READY_TIMEOUT_MS` in whole milliseconds, in the service's
+environment. A value that is not a positive finite number leaves the default.
+
 Engine CLIs read their logins from the service user's home: sign them in
 from Settings → Engines (below), or as that user in a terminal, before you
 rely on routines running unattended.

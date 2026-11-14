@@ -31,6 +31,7 @@ import { restartPolicy } from "./restart.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
 import { runServiceCommand } from "./service-cli.ts";
+import { serveReadyLimitMs, serverNotReadyMessage, waitForServer } from "./serve-ready.ts";
 import { runSentinelCli } from "./sentinel/cli.ts";
 import { runFleetCommand, type FleetInput } from "./fleet-cli.ts";
 import { startFleetAgent } from "./fleet-agent.ts";
@@ -806,18 +807,15 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   process.on("SIGTERM", onSignal);
 
   try {
-    const deadline = Date.now() + 60_000;
-    while (Date.now() < deadline && exited === null && !stopping) {
-      if (await serverUp(options.port, child.pid)) break;
-      await new Promise((r) => setTimeout(r, 250));
-    }
+    const readyLimitMs = serveReadyLimitMs(env);
+    await waitForServer({ limitMs: readyLimitMs, up: () => serverUp(options.port, child.pid), stopped: () => exited !== null || stopping !== null, stillStarting: () => log("Still starting. A server with a lot of saved work can take a few minutes.") });
     if (exited !== null) {
       if (exited !== 0) log(`OpenMausBot could not start.${logPath ? ` Details: ${logPath}` : " See the output above."}`);
       return exited;
     }
     if (stopping) return await childExit;
     if (!(await serverUp(options.port, child.pid))) {
-      console.error(`OpenMausBot did not become ready within a minute.${logPath ? ` Details: ${logPath}` : " See its output above."}`);
+      console.error(serverNotReadyMessage(readyLimitMs, logPath));
       await stop();
       return 1;
     }
