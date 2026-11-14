@@ -5414,12 +5414,17 @@ describe("harness HTTP API", () => {
     expect(zipResult).toMatchObject({ name: "payload.zip", mime: "application/zip", bytes: archive.byteLength });
     expect(zipResult.path).toMatch(/\.zip$/);
 
-    const unsupported = await fetch(`${BASE}/api/files?name=payload.exe`, {
+    const binary = await fetch(`${BASE}/api/files?name=payload.exe`, {
       method: "POST",
       headers: { "content-type": "application/x-msdownload" },
       body: Buffer.from("binary"),
     });
-    expect(unsupported.status).toBe(400);
+    expect(binary.status).toBe(201);
+    const binaryResult = await binary.json() as { path: string; name: string; mime: string };
+    expect(binaryResult).toMatchObject({ name: "payload.exe", mime: "application/octet-stream" });
+    expect(binaryResult.path).toMatch(/[\\/]attachments[\\/][0-9a-f-]+\.bin$/);
+    const served = await fetch(`${BASE}/api/attachments/${binaryResult.path.split(/[\\/]/).at(-1)}`);
+    expect(served.status).toBe(404);
 
     const missingName = await fetch(`${BASE}/api/files`, {
       method: "POST",
