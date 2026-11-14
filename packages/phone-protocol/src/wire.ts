@@ -41,7 +41,7 @@ export const SHARED_CHAT_TITLE = "Shared chat";
 
 export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken, LiveFishTransport, LiveKeySource, LiveProvider, LiveSettings } from "./live-call-wire.ts";
 export type { ForkOrigin, TaskClosedBy, TaskOpenedBy } from "./task-provenance.ts";
-export type { AuthPairResponse, BotsResponse, CompanionE2EDescriptor, CompanionEndpointsSnapshot, PairedDevice, PairedSession, PairResponse, WireComputerControl, WireMessagePage } from "./responses.ts";
+export type { AuthPairResponse, AuthSessionResponse, BotCreateResponse, BotsResponse, BotUpdateResponse, CompanionE2EDescriptor, CompanionEndpointsSnapshot, InstancesResponse, LoopbackSessionResponse, PairedDevice, PairedSession, PairResponse, RoomCreateResponse, RoomTaskCreateResponse, RoomTaskUpdateResponse, RoomUpdateResponse, SearchHit, SearchResponse, SignedInSessionResponse, TaskResponse, WireComputerControl, WireInstance, WireMessagePage, WireModelOption } from "./responses.ts";
 
 /** Reasoning-effort levels, ascending: a union of what any engine accepts;
  * each driver declares the subset its CLI will take. */

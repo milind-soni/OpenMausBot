@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { routeRunOwners, type Actor, type RouteRunOwners } from "../host/run-owner.ts";
-import type { ResolvedSender, WireGroup } from "../../shared/wire.ts";
+import type { ResolvedSender, RoomTaskCreateResponse, RoomTaskUpdateResponse, RoomUpdateResponse, WireGroup } from "../../shared/wire.ts";
 import { admit } from "../admission.ts";
 import {
   cancelChannelMessage,
@@ -158,7 +158,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const task = store.forkGroupTask(group.id, m[2], messageId);
       if (!task) return json(res, 404, { error: "no such completed message in this conversation" });
       if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
-      return json(res, 201, { group: own(groupWithThread(store.group(group.id)!)), task });
+      return json(res, 201, { group: own(groupWithThread(store.group(group.id)!)), task } satisfies RoomTaskCreateResponse);
     }
 
     m = path.match(/^\/api\/groups\/([\w-]+)\/tasks$/);
@@ -179,7 +179,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       // Who opened it decides who may answer its cards on a shared workspace.
       if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
-      return json(res, 201, { group: own(groupWithThread(store.group(group.id)!)), task });
+      return json(res, 201, { group: own(groupWithThread(store.group(group.id)!)), task } satisfies RoomTaskCreateResponse);
     }
 
     m = path.match(/^\/api\/groups\/([\w-]+)\/tasks\/delete$/);
@@ -266,7 +266,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       };
       const task = Object.keys(patch).length ? store.patchGroupTask(group.id, m[2], patch) : existing;
       if (!task) return json(res, 404, { error: "no such channel task" });
-      return json(res, 200, { task });
+      return json(res, 200, { task } satisfies RoomTaskUpdateResponse);
     }
     if (m && method === "DELETE") {
       const group = store.group(m[1]);
@@ -295,10 +295,10 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (deps.personMarkRoom && auth.kind === "session" && renamed && typeof body?.unread === "boolean") {
         const { unread, ...shared } = body;
         const group = Object.keys(shared).length ? updateChannel(m[1], shared) : renamed;
-        return json(res, 200, { group: deps.personMarkRoom(auth, group, unread) ?? own(publicGroupState(group)) });
+        return json(res, 200, { group: deps.personMarkRoom(auth, group, unread) ?? own(publicGroupState(group)) } satisfies RoomUpdateResponse);
       }
       const group = updateChannel(m[1], body);
-      return json(res, 200, { group: own(publicGroupState(group)) });
+      return json(res, 200, { group: own(publicGroupState(group)) } satisfies RoomUpdateResponse);
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/read$/);
     if (m && method === "POST") {

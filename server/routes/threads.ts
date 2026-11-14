@@ -1,7 +1,7 @@
 import { userError } from "../user-errors.ts";
 import { basename, join } from "node:path";
 
-import type { BotsResponse, WireBot, WireGroup } from "../../shared/wire.ts";
+import type { BotsResponse, SearchResponse, WireBot, WireGroup } from "../../shared/wire.ts";
 import { NO_SUCH_BOT } from "../../shared/bot-read.ts";
 import {
   ATTACHMENTS_DIR, attachmentStorageUsage, clearAttachments, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES,
@@ -535,7 +535,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
           return null;
         })
         .filter((hit): hit is NonNullable<typeof hit> => hit !== null);
-      return json(res, 200, { hits });
+      return json(res, 200, { hits } satisfies SearchResponse);
     }
 
     m = path.match(/^\/api\/threads\/([\w-]+)\/export$/);
