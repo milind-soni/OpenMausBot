@@ -367,8 +367,12 @@ export class SharedComputers {
       entry.wake = wake;
     });
     this.authorize(id, session, secret);
-    entry.seen = Date.now();
-    this.lent?.seen(entry.owner.person, id);
+    // A poll whose client already left, or that a newer poll replaced, must not mark this registration
+    // just seen. After a re-pair that would make the old session look like the live one.
+    if (entry.polls === mine && !gone?.aborted) {
+      entry.seen = Date.now();
+      this.lent?.seen(entry.owner.person, id);
+    }
     return next();
   }
   private send(entry: Computer, job: Job) {
