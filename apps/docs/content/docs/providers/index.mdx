@@ -19,6 +19,7 @@ MausBot does not proxy every message through its own model account. It starts su
 | GitHub Copilot | `copilot login`, or `COPILOT_GITHUB_TOKEN` | ACP driver with the plan's live models, each labelled with its premium request multiplier |
 | Command Code | `cmd login`, or `COMMAND_CODE_API_KEY` | ACP driver with the account's live models and their effort levels |
 | Kiro | `kiro-cli login`, or `KIRO_API_KEY` | ACP driver with the account's live models and their effort levels |
+| Devin | `devin auth login`, or `WINDSURF_API_KEY` | ACP driver with the account's live models |
 | Kimi | Kimi CLI login | ACP integration |
 | Droid | Factory Droid CLI login | ACP integration |
 | Antigravity | Google account through the official ACP server | Managed install, isolated accounts, live models, and approval cards |
@@ -35,6 +36,8 @@ GitHub Copilot runs the official Copilot CLI (`npm install -g @github/copilot`) 
 Command Code runs the official Command Code CLI (`npm install -g command-code`, Node.js 22 or newer) in its ACP mode (`command-code acp`) and bills the Command Code account `cmd login` signed in, or the key in `COMMAND_CODE_API_KEY`. Its picker lists every model the account offers, plus **Command Code default**, which keeps the model picked in Command Code itself. Ask runs Command Code's Standard mode, so each change it makes waits for approval in the app; Full access runs its Bypass Permissions mode.
 
 Kiro runs the official Kiro CLI (`curl -fsSL https://cli.kiro.dev/install | bash` on macOS and Linux) in its ACP mode with its V3 engine (`kiro-cli acp --agent-engine=v3`) and bills the Kiro account `kiro-cli login` signed in, or the Kiro Pro key in `KIRO_API_KEY`. Its picker lists every model the account offers, plus **Kiro default**, which keeps the model picked in Kiro itself. Ask turns Kiro's Autopilot off, so each write or command waits for approval in the app; Full access turns Autopilot on.
+
+Devin runs the official Devin CLI (`curl -fsSL https://cli.devin.ai/install.sh | bash` on macOS and Linux, `irm https://static.devin.ai/cli/setup.ps1 | iex` in Windows PowerShell) in its ACP mode (`devin acp`) and bills the Devin account `devin auth login` signed in, or the key in `WINDSURF_API_KEY`. Its picker lists every model the account offers, plus **Devin default**, which keeps the model set in Devin itself. Full access runs Devin's Bypass Permissions mode. Every other level runs its Code mode, the strictest one Devin offers over ACP that can still edit: Devin applies workspace edits on its own there, including a command it reads as one, and other commands wait for approval in the app. Approving for the session is the longest grant MausBot gives: Devin's project-wide, all-projects and switch-to-bypass choices are never offered.
 
 OMP runs the official Oh My Pi CLI (`npm install -g @oh-my-pi/pi-coding-agent`) through `omp acp`. Run `omp login` or configure providers in `~/.omp/agent/models.yml`; OMP keeps its own credentials. The picker lists OMP's advertised models and their thinking choices, plus **OMP default (configured)**, which leaves the model selected in OMP itself. Threads resume their native OMP sessions, and permission prompts use MausBot's approval cards.
 

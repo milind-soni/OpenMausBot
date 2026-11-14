@@ -17,6 +17,7 @@ import { ClineAgentDriver } from "./acp/cline.ts";
 import { CopilotAgentDriver } from "./acp/copilot.ts";
 import { CommandCodeAgentDriver } from "./acp/command-code.ts";
 import { KiroAgentDriver } from "./acp/kiro.ts";
+import { DevinAgentDriver } from "./acp/devin.ts";
 import { OmpAgentDriver } from "./acp/omp.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { PiDriver } from "./pi.ts";
@@ -43,6 +44,7 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   CopilotAgentDriver,
   CommandCodeAgentDriver,
   KiroAgentDriver,
+  DevinAgentDriver,
   OmpAgentDriver,
   CustomAcpDriver,
   PiDriver,
