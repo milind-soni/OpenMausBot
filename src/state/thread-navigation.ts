@@ -10,7 +10,17 @@ interface NotificationThreadOwner {
   tasks?: Array<RowThread>;
 }
 
-type RowThread = { threadId: string; activity?: string; unread?: boolean; busy?: boolean; routineRunId?: unknown; archivedAt?: unknown; updatedAt?: number; createdAt?: number };
+type RowThread = {
+  threadId: string;
+  activity?: string;
+  unread?: boolean;
+  busy?: boolean;
+  routineRunId?: unknown;
+  archivedAt?: unknown;
+  updatedAt?: number;
+  createdAt?: number;
+  openedBy?: { botId?: string };
+};
 
 interface NotificationRoutingState {
   bots: NotificationThreadOwner[];
@@ -72,8 +82,22 @@ export function markedThread(bot: Pick<NotificationThreadOwner, "threadId" | "ma
   return marked[0]?.task.threadId ?? null;
 }
 
+const stampOf = (task: RowThread) => task.updatedAt ?? task.createdAt ?? 0;
+
+/** The newest teammate hand-off newer than the chat the row would otherwise open. A thread the bot opened on itself is not one. */
+export function newestTeammateHandoff(bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks">, threadsShown: boolean): string | null {
+  const home = botOpensTo(bot, threadsShown);
+  const homeTask = bot.tasks?.find((task) => task.threadId === home);
+  const homeStamp = homeTask ? stampOf(homeTask) : 0;
+  const newer = (bot.tasks ?? [])
+    .filter((task) => task.openedBy?.botId && task.openedBy.botId !== bot.id && !task.routineRunId && task.archivedAt === undefined && stampOf(task) > homeStamp)
+    .sort((a, b) => stampOf(b) - stampOf(a));
+  return newer[0]?.threadId ?? null;
+}
+
 /** A click on a bot's row or tile opens the thread its mark is about; with no mark, or with that thread already on screen,
- * the bot as ever. Every other way into a bot is `openBot`. On a team a bot's row is the person's own chat. */
+ * the bot as ever. A finished teammate hand-off is the exception, and only the newest one: already reading it on screen
+ * returns to the main chat. Every other way into a bot is `openBot`. On a team a bot's row is the person's own chat. */
 export function openBotRow(
   dispatch: (action: Action) => void,
   bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks"> & { yourAccess?: string },
@@ -81,8 +105,10 @@ export function openBotRow(
   onScreen: boolean,
 ) {
   const marked = teamChats() ? null : markedThread(bot, threadsShown);
-  if (!marked || marked === botOpensTo(bot, threadsShown) || (onScreen && marked === bot.threadId)) openBot(dispatch, bot, threadsShown);
-  else openBotThread(dispatch, bot, marked, threadsShown);
+  const handoff = marked || teamChats() ? null : newestTeammateHandoff(bot, threadsShown);
+  const target = marked && marked !== botOpensTo(bot, threadsShown) ? marked : handoff;
+  if (!target || (onScreen && target === bot.threadId)) openBot(dispatch, bot, threadsShown);
+  else openBotThread(dispatch, bot, target, threadsShown);
 }
 
 /** With threads hidden the switch alone selects the bot, so the thread left behind keeps its unread mark. */

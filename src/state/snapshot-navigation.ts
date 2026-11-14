@@ -38,17 +38,35 @@ function keepNewTasks<T extends { threadId: string }>(previous: T[] | undefined,
   return created.length ? [...(incoming ?? []), ...created] : incoming;
 }
 
+function viewingHandoff(previous: Bot, incoming: Bot): boolean {
+  const task = previous.tasks?.find((candidate) => candidate.threadId === previous.threadId);
+  return Boolean(task?.openedBy?.botId) && (incoming.tasks ?? []).some((candidate) => candidate.threadId === previous.threadId);
+}
+
+function reconcileTranscript(previous: Message[], incoming: Message[]): Message[] {
+  const incomingById = new Map(incoming.map((message) => [message.id, message]));
+  const seen = new Set<string>();
+  const merged = previous.map((message) => {
+    seen.add(message.id);
+    return incomingById.get(message.id) ?? message;
+  });
+  for (const message of incoming) if (!seen.has(message.id)) merged.push(message);
+  return merged;
+}
+
 export function keepBotNavigation(previous: Bot | undefined, incoming: Bot, preserve: boolean, taskIdsAtStart?: ReadonlySet<string>): Bot {
-  if (!preserve || !previous) return incoming;
+  const keepHandoff = previous !== undefined && !preserve && viewingHandoff(previous, incoming);
+  if ((!preserve && !keepHandoff) || !previous) return incoming;
+  const sameOpenHandoff = keepHandoff && incoming.threadId === previous.threadId;
   return {
     ...incoming,
     threadId: previous.threadId,
     tasks: keepNewTasks(previous.tasks, incoming.tasks, taskIdsAtStart),
     switchingTo: previous.switchingTo,
     awaitingThreadSnapshot: previous.awaitingThreadSnapshot,
-    messages: previous.messages,
-    hasMore: previous.hasMore,
-    activeLeafId: previous.activeLeafId,
+    messages: sameOpenHandoff ? reconcileTranscript(previous.messages, incoming.messages) : previous.messages,
+    hasMore: sameOpenHandoff ? Boolean(previous.hasMore || incoming.hasMore) : previous.hasMore,
+    activeLeafId: sameOpenHandoff ? incoming.activeLeafId ?? previous.activeLeafId : previous.activeLeafId,
     pinnedMessageId: previous.pinnedMessageId,
   };
 }
