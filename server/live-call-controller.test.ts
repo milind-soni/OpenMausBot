@@ -505,6 +505,17 @@ describe("LiveCallController lifecycle", () => {
       expect(started).not.toHaveProperty("sessionId");
     });
 
+    it("starts in the Gemini voice chosen for Gemini calls, never the GPT-Live one", async () => {
+      const t = gemini();
+      Object.assign(t.settings, { voice: "cedar", geminiVoice: "Charon" });
+      await t.controller.start({ auth: owner, ...BOT, client: "web" });
+      expect(t.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ voice: "Charon" }));
+      const plain = gemini();
+      Object.assign(plain.settings, { voice: "cedar" });
+      await plain.controller.start({ auth: owner, ...BOT, client: "web" });
+      expect(plain.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ voice: "Puck" }));
+    });
+
     it("refuses with the reason as a 403 before any session is taken", async () => {
       const t = gemini({ geminiRefusal: () => "not you" });
       await expect(t.controller.start({ auth: owner, ...BOT, client: "web" })).rejects.toMatchObject({ status: 403, message: "not you" });

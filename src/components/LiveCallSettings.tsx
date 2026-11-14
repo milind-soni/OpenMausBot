@@ -1,6 +1,6 @@
 import { useCallback, useId, useState } from "react";
 
-import { LIVE_VOICE_OPTIONS } from "../../shared/live-call";
+import { GEMINI_LIVE_VOICE_OPTIONS, geminiLiveVoice, LIVE_VOICE_OPTIONS } from "../../shared/live-call";
 import { t } from "@/lib/i18n";
 import { liveDisclosure, liveKeyCopy } from "@/lib/call-mode";
 import { api, useStore, type ConfigStatus } from "@/state/store";
@@ -30,10 +30,12 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
   const gemini = live.provider === "gemini";
   const copy = liveKeyCopy(live.provider);
   const hasKey = live.keySource === (fish ? "fishAudio" : gemini ? "gemini" : "live");
-  const voice = live.voice || "marin";
-  const known = LIVE_VOICE_OPTIONS.some((option) => option.id === voice);
+  // Gemini has its own voices, kept apart from the GPT-Live one.
+  const voiceOptions = gemini ? GEMINI_LIVE_VOICE_OPTIONS : LIVE_VOICE_OPTIONS;
+  const voice = gemini ? geminiLiveVoice(live.geminiVoice) : live.voice || "marin";
+  const known = voiceOptions.some((option) => option.id === voice);
 
-  const save = async (patch: Partial<Pick<LiveSettings, "voice" | "readTypedReplies" | "idleMinutes">>) => {
+  const save = async (patch: Partial<Pick<LiveSettings, "voice" | "geminiVoice" | "readTypedReplies" | "idleMinutes">>) => {
     setSaving(true);
     setError(null);
     try {
@@ -75,18 +77,18 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
       }}
     >
       <LiveProviderSettings locked={keySaving} onSaving={setProviderSaving} />
-      {/* Relayed calls speak in the provider's own voice. */}
-      {!fish && !gemini && <>
+      {/* Fish Audio calls speak in the agent's own voice. */}
+      {!fish && <>
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.voice")}</span>
         <Select
           size="sm"
           value={voice}
           disabled={saving}
-          onChange={(event) => void save({ voice: event.target.value })}
+          onChange={(event) => void save(gemini ? { geminiVoice: event.target.value } : { voice: event.target.value })}
         >
           {!known && <option value={voice}>{voice}</option>}
-          {LIVE_VOICE_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+          {voiceOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
         </Select>
       </label>
       <div className="-mt-2 text-[12px] text-ink-tertiary">{t("call.live.voiceNext")}</div>

@@ -68,6 +68,8 @@ export interface LiveSettings {
   /** The Azure deployment of gpt-live-1; empty means "gpt-live-1". */
   azureDeployment?: string;
   voice: string;
+  /** The Gemini Live voice for "gemini" calls; absent means Gemini's default. */
+  geminiVoice?: string;
   readTypedReplies: boolean;
   idleMinutes: number;
 }

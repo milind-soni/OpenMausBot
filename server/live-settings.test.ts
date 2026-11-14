@@ -17,6 +17,11 @@ describe("live settings", () => {
     expect(settings).toEqual({ configured: true, keySource: "live", voice: "sol", readTypedReplies: false, idleMinutes: 12 });
     expect(JSON.stringify(settings)).not.toContain("sk-test");
   });
+
+  it("reports a saved Gemini voice beside the GPT-Live one, and nothing when it is cleared", () => {
+    expect(liveSettingsFor({ live: { voice: "cedar", geminiVoice: "Kore" } } as AppConfig)).toMatchObject({ voice: "cedar", geminiVoice: "Kore" });
+    expect(liveSettingsFor({ live: { geminiVoice: "" } } as AppConfig)).not.toHaveProperty("geminiVoice");
+  });
 });
 
 describe("the key a Live call uses", () => {

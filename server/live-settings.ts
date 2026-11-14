@@ -71,6 +71,7 @@ export function liveSettingsFor(cfg: AppConfig): LiveSettings {
     ...(cfg.live?.azureEndpoint ? { azureEndpoint: cfg.live.azureEndpoint } : {}),
     ...(cfg.live?.azureDeployment ? { azureDeployment: cfg.live.azureDeployment } : {}),
     voice: cfg.live?.voice ?? "",
+    ...(cfg.live?.geminiVoice ? { geminiVoice: cfg.live.geminiVoice } : {}),
     readTypedReplies: cfg.live?.readTypedReplies ?? true,
     idleMinutes: Number.isInteger(minutes) && minutes! >= 1 && minutes! <= 60 ? minutes! : LIVE_IDLE_MINUTES_DEFAULT,
   };

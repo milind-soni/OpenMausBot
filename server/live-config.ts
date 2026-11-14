@@ -4,7 +4,7 @@ import { z } from "zod";
 export const LIVE_KEY_NEEDS_ENDPOINT = "Save the Azure endpoint first: a Live key works only with the endpoint it was saved for.";
 const NOWHERE = "nowhere";
 
-/** Live calls: `key` is a key for Live calls only; with `provider` "openai" (the default) a call without one uses `openai.key`, with "azure" it is the Azure resource's key and is required, with "fish" or "gemini" it is not used: Fish Audio calls use the Fish Audio key (`tts.fishKey`) and Gemini calls the Gemini key (`tts.geminiKey`). `keyFor` says where `key` may go (`liveKeyTarget`): the server sets it when the key is saved and never takes it from a request; absent, the key is from before Azure was offered, so OpenAI's. `azureEndpoint` is the resource URL and `azureDeployment` the gpt-live-1 deployment name. `fishAgentId` is the Fish Audio agent a "fish" call starts, which the harness sets up on the account of the key whose `fishKeyPrint` is `fishAgentFor`; without `fishAgentFor` (an operator's OMB_FISH_LIVE_AGENT_ID) it is used with any key. `voice` is a GPT-Live voice. */
+/** Live calls: `key` is a key for Live calls only; with `provider` "openai" (the default) a call without one uses `openai.key`, with "azure" it is the Azure resource's key and is required, with "fish" or "gemini" it is not used: Fish Audio calls use the Fish Audio key (`tts.fishKey`) and Gemini calls the Gemini key (`tts.geminiKey`). `keyFor` says where `key` may go (`liveKeyTarget`): the server sets it when the key is saved and never takes it from a request; absent, the key is from before Azure was offered, so OpenAI's. `azureEndpoint` is the resource URL and `azureDeployment` the gpt-live-1 deployment name. `fishAgentId` is the Fish Audio agent a "fish" call starts, which the harness sets up on the account of the key whose `fishKeyPrint` is `fishAgentFor`; without `fishAgentFor` (an operator's OMB_FISH_LIVE_AGENT_ID) it is used with any key. `voice` is a GPT-Live voice, `geminiVoice` a Gemini Live voice. */
 export const liveConfigSchema = z.object({
   key: z.string().optional(),
   keyFor: z.string().max(300).optional(),
@@ -14,6 +14,7 @@ export const liveConfigSchema = z.object({
   fishAgentId: z.string().trim().max(128).optional(),
   fishAgentFor: z.string().max(64).optional(),
   voice: z.string().trim().max(40).regex(/^[a-z]*$/, "a Live voice is a lowercase built-in voice name").optional(),
+  geminiVoice: z.string().trim().max(40).regex(/^[A-Za-z]*$/, "a Gemini Live voice is a built-in voice name").optional(),
   readTypedReplies: z.boolean().optional(),
   idleMinutes: z.number().int().min(1).max(60).optional(),
 });
@@ -27,6 +28,7 @@ export interface LiveConfig {
   fishAgentId?: string;
   fishAgentFor?: string;
   voice?: string;
+  geminiVoice?: string;
   readTypedReplies?: boolean;
   idleMinutes?: number;
 }

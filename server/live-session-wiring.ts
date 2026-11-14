@@ -59,7 +59,7 @@ export function liveSessionWiring(input: LiveSessionWiringInput): {
       geminiRefusal: (auth) => geminiLiveCallRefusal(auth, { othersOnLoopback: input.othersOnLoopback() }),
       createSession: async ({ key, endpoint, sdp, botId, threadId, voice }) => {
         if (endpoint.provider === "gemini") {
-          const session = await createGeminiLiveSession({ key, endpoint, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome, fetchImpl });
+          const session = await createGeminiLiveSession({ key, endpoint, voice, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome, fetchImpl });
           // Gemini has nothing to end: the session ends when the client closes it, and the token is single use.
           const { token } = relays.open(session.session_id, async () => undefined);
           return { sessionId: session.session_id, gemini: { type: "gemini", session, relayToken: token } };

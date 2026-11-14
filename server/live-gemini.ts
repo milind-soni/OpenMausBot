@@ -1,6 +1,7 @@
 // Gemini Live calls. The Gemini key never leaves the harness: the client gets only a single-use ephemeral token whose setup
 // (model, instructions, the `delegate` tool) the harness locks here, and it relays what was said as a Fish Audio call does.
 import { randomBytes } from "node:crypto";
+import { geminiLiveVoice } from "../shared/live-call.ts";
 import type { LiveGeminiSession } from "../shared/wire.ts";
 import { LiveSessionError, type LiveBot, type LiveEndpoint, type LiveHistoryMessage } from "./live-call.ts";
 import { FISH_DELEGATE_TOOL, fishInstructions } from "./live-fish.ts";
@@ -28,10 +29,10 @@ export function geminiLiveEndpoint(env: NodeJS.ProcessEnv = process.env): LiveEn
 }
 
 /** The setup every connection of the call gets, whatever the client sends: Gemini Live API `BidiGenerateContentSetup`. */
-export function geminiLiveSetup(model: string, instructions: string): Record<string, unknown> {
+export function geminiLiveSetup(model: string, instructions: string, voice: string): Record<string, unknown> {
   return {
     model: `models/${model}`,
-    generationConfig: { responseModalities: ["AUDIO"] },
+    generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: geminiLiveVoice(voice) } } } },
     systemInstruction: { parts: [{ text: instructions }] },
     tools: [{ functionDeclarations: [{
       name: FISH_DELEGATE_TOOL,
@@ -57,6 +58,8 @@ export function geminiFieldMask(setup: Record<string, unknown>): string {
 export interface CreateGeminiSessionInput {
   key: string;
   endpoint: LiveEndpoint;
+  /** A Gemini prebuilt voice name; anything else gets the default voice. */
+  voice: string;
   bot: LiveBot;
   history: LiveHistoryMessage[];
   cloudHome: boolean;
@@ -70,7 +73,7 @@ export async function createGeminiLiveSession(input: CreateGeminiSessionInput): 
   const key = input.key.trim();
   if (!key) throw new LiveSessionError("Add a Gemini API key in Settings → API keys to use Live calls.", 409);
   const now = (input.now ?? Date.now)();
-  const setup = geminiLiveSetup(input.endpoint.model, fishInstructions(input.bot, input.history, { cloudHome: input.cloudHome }));
+  const setup = geminiLiveSetup(input.endpoint.model, fishInstructions(input.bot, input.history, { cloudHome: input.cloudHome }), input.voice);
   const expiresAt = new Date(now + CONNECT_WITHIN_MS).toISOString();
   let response: Response;
   try {

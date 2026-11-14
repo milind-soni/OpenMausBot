@@ -9,8 +9,8 @@ function fakeGemini(answer: () => Response = () => new Response(JSON.stringify({
   return vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => answer());
 }
 
-const create = (fetchImpl: typeof fetch, key = " gemini-secret ") =>
-  createGeminiLiveSession({ key, endpoint: ENDPOINT, bot: { name: "Rigel" }, history: [], cloudHome: false, fetchImpl, now: () => NOW });
+const create = (fetchImpl: typeof fetch, key = " gemini-secret ", voice = "Kore") =>
+  createGeminiLiveSession({ key, endpoint: ENDPOINT, voice, bot: { name: "Rigel" }, history: [], cloudHome: false, fetchImpl, now: () => NOW });
 
 describe("Gemini Live endpoint", () => {
   it("talks to Google's v1beta API with the default Live model", () => {
@@ -37,10 +37,10 @@ describe("a Gemini Live call's token", () => {
     expect(init!.headers).toMatchObject({ "x-goog-api-key": "gemini-secret" });
     const body = JSON.parse(String(init!.body));
     expect(body).toMatchObject({ uses: 1, newSessionExpireTime: "2026-11-14T10:01:00.000Z", expireTime: "2026-11-14T11:00:00.000Z" });
-    expect(body.bidiGenerateContentSetup).toMatchObject({ model: `models/${GEMINI_LIVE_MODEL}`, generationConfig: { responseModalities: ["AUDIO"] } });
+    expect(body.bidiGenerateContentSetup).toMatchObject({ model: `models/${GEMINI_LIVE_MODEL}`, generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } } } } });
     expect(body.bidiGenerateContentSetup.systemInstruction.parts[0].text).toContain("Rigel");
     expect(body.bidiGenerateContentSetup.tools[0].functionDeclarations[0]).toMatchObject({ name: FISH_DELEGATE_TOOL, behavior: "NON_BLOCKING" });
-    expect(body.fieldMask.split(",")).toEqual(expect.arrayContaining(["model", "generationConfig.responseModalities", "systemInstruction.parts", "tools", "contextWindowCompression.slidingWindow"]));
+    expect(body.fieldMask.split(",")).toEqual(expect.arrayContaining(["model", "generationConfig.responseModalities", "generationConfig.speechConfig", "systemInstruction.parts", "tools", "contextWindowCompression.slidingWindow"]));
     expect(body.fieldMask).not.toContain("sessionResumption");
     expect(JSON.stringify(session)).not.toContain("gemini-secret");
     expect(session).toEqual({
@@ -53,13 +53,24 @@ describe("a Gemini Live call's token", () => {
   });
 
   it("locks every field it sets, nested ones by their inner keys", () => {
-    expect(geminiFieldMask(geminiLiveSetup("m", "hi"))).toBe(
-      "model,generationConfig.responseModalities,systemInstruction.parts,tools,inputAudioTranscription,outputAudioTranscription,contextWindowCompression.slidingWindow");
+    expect(geminiFieldMask(geminiLiveSetup("m", "hi", "Puck"))).toBe(
+      "model,generationConfig.responseModalities,generationConfig.speechConfig,systemInstruction.parts,tools,inputAudioTranscription,outputAudioTranscription,contextWindowCompression.slidingWindow");
+  });
+
+  it("speaks in the chosen Gemini voice, and in Gemini's default for a name Gemini does not have", async () => {
+    const voiceOf = async (voice: string) => {
+      const fetchImpl = fakeGemini();
+      await create(fetchImpl, "k", voice);
+      return JSON.parse(String(fetchImpl.mock.calls[0]![1]!.body)).bidiGenerateContentSetup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName;
+    };
+    expect(await voiceOf("Charon")).toBe("Charon");
+    expect(await voiceOf("")).toBe("Puck");
+    expect(await voiceOf("marin")).toBe("Puck");
   });
 
   it("connects a loopback override over ws", async () => {
     const endpoint = geminiLiveEndpoint({ OMB_GEMINI_LIVE_URL: "http://127.0.0.1:9123" });
-    const session = await createGeminiLiveSession({ key: "k", endpoint, bot: { name: "R" }, history: [], cloudHome: false, fetchImpl: fakeGemini(), now: () => NOW });
+    const session = await createGeminiLiveSession({ key: "k", endpoint, voice: "Puck", bot: { name: "R" }, history: [], cloudHome: false, fetchImpl: fakeGemini(), now: () => NOW });
     expect(session.ws_url).toBe("ws://127.0.0.1:9123/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained");
   });
 
