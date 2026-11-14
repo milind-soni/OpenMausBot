@@ -95,4 +95,31 @@ describe("loopback shared-computer request provenance", () => {
     expect(request).toHaveProperty("stopped", true);
     expect(authz.principal(request, "new-generation", own, [], () => false, [], credentialIsCurrent)).toBeNull();
   });
+
+  it("consumes queued and steered provenance once for the matching turn", () => {
+    const authz = new SharedComputerTurnAuthorization();
+    const proof = { kind: "desktop-owner" as const, credentialId: "verified" };
+    const queued = authz.queueWith(proof, () => ({ id: "queue-1" }));
+    expect(authz.takeOption("message-1", queued.id)).toEqual({ requestProvenance: proof });
+    expect(authz.takeOption("message-1", queued.id)).toEqual({});
+
+    authz.afterSteer("message-2", proof, () => ({ id: "queue-2" }));
+    expect(authz.take("message-2", "queue-2")).toEqual(proof);
+    expect(authz.take("message-2", "queue-2")).toBeUndefined();
+  });
+
+  it("rechecks the same active principal after waiting and before inventory access", async () => {
+    const authz = new SharedComputerTurnAuthorization();
+    let active = true;
+    let current: string | null = OWN_SERVER_LENDER;
+    const wait = async (_principal: string | null, check: () => boolean) => {
+      expect(check()).toBe(true);
+      current = null;
+    };
+    await expect(authz.afterWake(OWN_SERVER_LENDER, () => active, () => current, wait)).resolves.toBeNull();
+
+    current = OWN_SERVER_LENDER;
+    active = false;
+    await expect(authz.afterWake(OWN_SERVER_LENDER, () => active, () => current, async () => {})).resolves.toBeNull();
+  });
 });
