@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, FolderPlus, Loader2, Plus, RefreshCw, TriangleAlert } from "lucide-react";
+import { ChevronRight, FolderPlus, Loader2, Pencil, Plus, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { t, intlLocale } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
@@ -9,19 +9,25 @@ import { openThread, useStore, type Bot } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { boardErrorKey, loadBoard, refreshBoardWhenShown, startMilestone, useBoard } from "@/state/board";
 import {
-  EMPTY_FILTER, PHASE_LABEL, TASK_STATUS_LABEL, MILESTONE_CLASS,
-  BOARD_PHASE_CLASS, MILESTONE_LABEL, boardTaskTitle, boardTree, botNameOf, filterBoard, filterIsEmpty,
-  milestoneCounts, phaseDistribution, taskCounts, unclassifiedConversations,
+  BOARD_PHASE_CLASS, EMPTY_FILTER, MILESTONE_CLASS, MILESTONE_LABEL, PHASE_LABEL, PROJECT_STATUS_CLASS,
+  PROJECT_STATUS_LABEL, TASK_STATUS_LABEL, boardTaskTitle, boardTree, botNameOf,
+  canEditMilestone, canEditProject, canEditTask, filterBoard, filterIsEmpty, milestoneCounts,
+  phaseDistribution, taskCounts, unclassifiedConversations,
   type BoardFilter, type BoardProjectNode, type BoardSubprojectNode,
 } from "@/lib/project-board";
-import type { BoardMilestone, BoardSnapshot, BoardTask } from "../../shared/board";
+import type { BoardMilestone, BoardProject, BoardSnapshot, BoardSubproject, BoardTask } from "../../shared/board";
 import { ProjectAssignment } from "./board/ProjectAssignment";
 import { TaskRow } from "./board/TaskRow";
-import { MilestoneDecisionDialog, NewConversationDialog, NewMilestoneDialog, NewProjectDialog, NewSubprojectDialog } from "./board/BoardDialogs";
+import {
+  EditProjectDialog, EditSubprojectDialog, MilestoneDecisionDialog, NewConversationDialog, NewMilestoneDialog,
+  NewProjectDialog, NewSubprojectDialog,
+} from "./board/BoardDialogs";
 
 type Dialog =
   | { kind: "project" }
+  | { kind: "editProject"; project: BoardProject }
   | { kind: "subproject"; projectId: string; projectName: string }
+  | { kind: "editSubproject"; subproject: BoardSubproject }
   | { kind: "milestone"; projectId: string; subprojectId: string; subprojectName: string }
   | { kind: "milestoneDecision"; id: string; title: string }
   | { kind: "conversation"; projectId: string; subprojectId: string; subprojectName: string; parentThreadId?: string; parentTitle?: string };
@@ -62,6 +68,7 @@ export function ProjectBoardPage() {
 
   const board = view.board;
   const manage = board?.capabilities.manage === true;
+  const anyEdit = Boolean(board && (manage || Object.values(board.permissions?.projects ?? {}).some(Boolean)));
   const tree = useMemo(() => (board ? boardTree(board) : null), [board]);
   const filtered = useMemo(
     () => (tree ? filterBoard(tree, filter, (task) => ({
@@ -93,12 +100,12 @@ export function ProjectBoardPage() {
   };
   const summary = useMemo(() => {
     if (!board) return null;
-    const counts = taskCounts(board.tasks);
+    const local = taskCounts(board.tasks);
     return {
       projects: board.projects.length,
       subprojects: board.subprojects.length,
-      done: counts.mainDone,
-      main: counts.main,
+      done: board.counts?.done ?? local.mainDone,
+      main: board.counts?.topLevel ?? local.main,
       accepted: board.milestones.filter((milestone) => milestone.status === "accepted").length,
       milestones: board.milestones.length,
     };
@@ -128,7 +135,7 @@ export function ProjectBoardPage() {
         </ToolPageActions>
       </ToolPageHeader>
 
-      <div className="min-h-0 flex-1 overflow-y-auto" data-project-board={view.status}>
+      <div className="min-h-0 flex-1 overflow-y-auto" data-project-board={view.status} data-board-manage={manage ? "true" : "false"}>
         <div className="mx-auto w-full max-w-5xl p-4 sm:p-6">
           {view.status === "error" && !board ? (
             <section role="alert" className="px-6 py-16 text-center">
@@ -147,7 +154,9 @@ export function ProjectBoardPage() {
                   {t(boardErrorKey(view.code))}
                 </p>
               )}
-              {!manage && <p className="mb-3 text-[12px] text-ink-tertiary">{t("board.readOnly")}</p>}
+              {!manage && (
+                <p className="mb-3 text-[12px] text-ink-tertiary">{anyEdit ? t("board.readOnly.partial") : t("board.readOnly")}</p>
+              )}
 
               {summary && (
                 <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4" data-board-summary>
@@ -162,7 +171,7 @@ export function ProjectBoardPage() {
                 <section aria-label={t("board.empty.title")} className="rounded-xl border border-hairline/40 bg-card/40 px-6 py-14 text-center">
                   <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-2xl bg-accent/10 text-accent"><FolderPlus size={20} /></div>
                   <h2 className="text-[15px] font-semibold text-ink">{t("board.empty.title")}</h2>
-                  <p className="mx-auto mt-1.5 max-w-sm text-[13px] leading-relaxed text-ink-secondary">{t("board.empty.body")}</p>
+                  <p className="mx-auto mt-1.5 max-w-sm text-[13px] leading-relaxed text-ink-secondary">{manage ? t("board.empty.body") : t("board.empty.member")}</p>
                   {manage && <button type="button" className="ui-button ui-button-primary mt-4" onClick={() => setDialog({ kind: "project" })}>{t("board.empty.action")}</button>}
                 </section>
               ) : (
@@ -181,14 +190,15 @@ export function ProjectBoardPage() {
                           node={node}
                           board={board}
                           bots={state.bots}
-                          manage={manage}
                           expanded={expanded}
                           onToggle={toggle}
                           filter={filter}
                           filtering={!filterIsEmpty(filter)}
                           visible={!filterIsEmpty(filter) ? filtered?.visible : undefined}
                           onOpen={openTask}
+                          onEditProject={() => setDialog({ kind: "editProject", project: node.project })}
                           onAddSubproject={() => setDialog({ kind: "subproject", projectId: node.project.id, projectName: node.project.name })}
+                          onEditSubproject={(subproject) => setDialog({ kind: "editSubproject", subproject })}
                           onAddMilestone={(subproject) => setDialog({ kind: "milestone", projectId: node.project.id, subprojectId: subproject.id, subprojectName: subproject.name })}
                           onDecideMilestone={(milestone) => setDialog({ kind: "milestoneDecision", id: milestone.id, title: milestone.title })}
                           onNewConversation={(subproject) => setDialog({ kind: "conversation", projectId: node.project.id, subprojectId: subproject.id, subprojectName: subproject.name })}
@@ -234,13 +244,13 @@ export function ProjectBoardPage() {
                           <button
                             type="button"
                             onClick={() => openThread(dispatch, { botId: conversation.botId, threadId: conversation.threadId }, state, showThreads)}
-                            className="min-w-0 flex-1 truncate rounded text-start text-[13px] text-ink hover:underline focus-visible:outline-none focus-visible:ring-[1.5px] focus-visible:ring-focus"
+                            className="min-h-6 min-w-0 flex-1 truncate rounded py-0.5 text-start text-[13px] text-ink hover:underline focus-visible:outline-none focus-visible:ring-[1.5px] focus-visible:ring-focus"
                             title={conversation.title}
                           >
                             {conversation.title}
                           </button>
                           <span className="shrink-0 text-[11px] text-ink-tertiary">{conversation.botName}</span>
-                          {manage && <ProjectAssignment botId={conversation.botId} threadId={conversation.threadId} variant="row" emptyLabel={t("board.unclassified.classify")} />}
+                          <ProjectAssignment botId={conversation.botId} threadId={conversation.threadId} variant="row" emptyLabel={t("board.unclassified.classify")} />
                         </li>
                       ))}
                     </ul>
@@ -254,7 +264,9 @@ export function ProjectBoardPage() {
       </div>
 
       {dialog?.kind === "project" && <NewProjectDialog onClose={() => setDialog(null)} />}
+      {dialog?.kind === "editProject" && <EditProjectDialog project={dialog.project} onClose={() => setDialog(null)} />}
       {dialog?.kind === "subproject" && <NewSubprojectDialog projectId={dialog.projectId} projectName={dialog.projectName} onClose={() => setDialog(null)} />}
+      {dialog?.kind === "editSubproject" && <EditSubprojectDialog subproject={dialog.subproject} onClose={() => setDialog(null)} />}
       {dialog?.kind === "milestone" && <NewMilestoneDialog projectId={dialog.projectId} subprojectId={dialog.subprojectId} subprojectName={dialog.subprojectName} onClose={() => setDialog(null)} />}
       {dialog?.kind === "milestoneDecision" && <MilestoneDecisionDialog id={dialog.id} title={dialog.title} onClose={() => setDialog(null)} />}
       {dialog?.kind === "conversation" && (
@@ -327,18 +339,19 @@ function BoardFilters({ filter, onChange, bots, board }: {
   );
 }
 
-function ProjectCard({ node, board, bots, manage, expanded, onToggle, filter, filtering, visible, onOpen, onAddSubproject, onAddMilestone, onDecideMilestone, onNewConversation, onNewSubtask }: {
+function ProjectCard({ node, board, bots, expanded, onToggle, filter, filtering, visible, onOpen, onEditProject, onAddSubproject, onEditSubproject, onAddMilestone, onDecideMilestone, onNewConversation, onNewSubtask }: {
   node: BoardProjectNode;
   board: BoardSnapshot;
   bots: readonly Bot[];
-  manage: boolean;
   expanded: Set<string>;
   onToggle: (id: string) => void;
   filter: BoardFilter;
   filtering: boolean;
   visible?: ReadonlySet<string>;
   onOpen: (task: BoardTask) => void;
+  onEditProject: () => void;
   onAddSubproject: () => void;
+  onEditSubproject: (subproject: BoardSubproject) => void;
   onAddMilestone: (subproject: BoardSnapshot["subprojects"][number]) => void;
   onDecideMilestone: (milestone: BoardMilestone) => void;
   onNewConversation: (subproject: BoardSnapshot["subprojects"][number]) => void;
@@ -350,8 +363,11 @@ function ProjectCard({ node, board, bots, manage, expanded, onToggle, filter, fi
   const milestones = milestoneCounts([...node.milestones, ...node.subprojects.flatMap((subproject) => subproject.milestones)]);
   const spread = phaseDistribution(allTasks);
   const empty = !node.subprojects.length && !node.tasks.length;
+  const canEdit = canEditProject(board, node.project.id);
+  const status = node.project.status ?? "active";
   return (
-    <section aria-labelledby={`project-${node.project.id}`} data-board-project={node.project.id} className="overflow-hidden rounded-xl border border-hairline/40 bg-card/40">
+    <section aria-labelledby={`project-${node.project.id}`} data-board-project={node.project.id} data-board-editable={canEdit ? "true" : "false"}
+      className="overflow-hidden rounded-xl border border-hairline/40 bg-card/40">
       <div className="flex items-start gap-2 p-3">
         <button
           type="button"
@@ -365,9 +381,16 @@ function ProjectCard({ node, board, bots, manage, expanded, onToggle, filter, fi
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <h2 id={`project-${node.project.id}`} className="min-w-0 truncate text-[14px] font-semibold text-ink" title={node.project.name}>{node.project.name}</h2>
+            <span className={cn("inline-flex h-5 shrink-0 items-center rounded-full px-1.5 text-[10.5px] font-medium", PROJECT_STATUS_CLASS[status] ?? PROJECT_STATUS_CLASS.active)}>
+              {t(PROJECT_STATUS_LABEL[status] ?? PROJECT_STATUS_LABEL.active!)}
+            </span>
             <span className="text-[11px] text-ink-tertiary tabular-nums">{counts.mainDone}/{counts.main}</span>
             {milestones.total > 0 && <span className="text-[11px] text-ink-tertiary tabular-nums">{t("board.milestone.accepted")} {milestones.accepted}/{milestones.total}</span>}
           </div>
+          <p className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11.5px] text-ink-tertiary">
+            {node.project.owner && <span>{t("board.task.owner")}: <span className="text-ink-secondary">{node.project.owner}</span></span>}
+            {node.project.goal && <span className="min-w-0 truncate" title={node.project.goal}>{t("board.detail.goal")}: <span className="text-ink-secondary">{node.project.goal}</span></span>}
+          </p>
           {node.project.description && <p className="mt-0.5 line-clamp-2 text-[12px] leading-relaxed text-ink-secondary">{node.project.description}</p>}
           {spread.length > 0 && (
             <div className="mt-1 flex flex-wrap items-center gap-1" aria-label={t("board.project.stageSpread")}>
@@ -377,32 +400,43 @@ function ProjectCard({ node, board, bots, manage, expanded, onToggle, filter, fi
             </div>
           )}
         </div>
-        {manage && (
-          <button type="button" onClick={onAddSubproject} title={t("board.project.addSubproject")} aria-label={`${t("board.project.addSubproject")}: ${node.project.name}`}
-            className="flex size-7 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-[1.5px] focus-visible:ring-focus">
-            <Plus size={14} aria-hidden />
-          </button>
+        {canEdit && (
+          <div className="flex shrink-0 items-center gap-1">
+            <button type="button" onClick={onEditProject} title={t("board.dialog.editProject")} aria-label={`${t("board.dialog.editProject")}: ${node.project.name}`}
+              className="flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-[1.5px] focus-visible:ring-focus">
+              <Pencil size={13} aria-hidden />
+            </button>
+            <button type="button" onClick={onAddSubproject} title={t("board.project.addSubproject")} aria-label={`${t("board.project.addSubproject")}: ${node.project.name}`}
+              className="flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-[1.5px] focus-visible:ring-focus">
+              <Plus size={14} aria-hidden />
+            </button>
+          </div>
         )}
       </div>
       <div id={`project-body-${node.project.id}`} hidden={!open}>
         {open && (
           <div className="border-t border-hairline/30 px-3 pb-3">
+            {node.project.acceptance && (
+              <p className="mt-2 text-[11.5px] leading-relaxed text-ink-tertiary" data-project-acceptance>
+                {t("board.detail.acceptance")}: <span className="text-ink-secondary">{node.project.acceptance}</span>
+              </p>
+            )}
             {node.milestones.length > 0 && (
               <ul aria-label={t("board.project.milestones")} className="mt-2 flex flex-col gap-1">
-                {node.milestones.map((milestone) => <MilestoneRow key={milestone.id} milestone={milestone} manage={manage} onDecide={() => onDecideMilestone(milestone)} />)}
+                {node.milestones.map((milestone) => <MilestoneRow key={milestone.id} milestone={milestone} editable={canEditMilestone(board, milestone.id)} onDecide={() => onDecideMilestone(milestone)} />)}
               </ul>
             )}
             {node.tasks.length > 0 && (
               <ul aria-label={node.project.name} className="mt-1">
                 {node.tasks.map((task) => (
                   <TaskRow key={task.threadId} task={task} board={board} bots={bots} title={boardTaskTitle(task, bots, task.threadId)}
-                    botName={botNameOf(task, bots)} projectName={node.project.name} subprojectName="" manage={manage} depth={0} onOpen={onOpen} visible={visible} />
+                    botName={botNameOf(task, bots)} projectName={node.project.name} subprojectName="" editable={canEditTask(board, task.threadId)} depth={0} onOpen={onOpen} visible={visible} />
                 ))}
               </ul>
             )}
             {node.subprojects.map((subproject) => (
-              <SubprojectBlock key={subproject.subproject.id} node={subproject} projectName={node.project.name} board={board} bots={bots} manage={manage}
-                expanded={expanded} onToggle={onToggle} onOpen={onOpen} onAddMilestone={() => onAddMilestone(subproject.subproject)}
+              <SubprojectBlock key={subproject.subproject.id} node={subproject} projectName={node.project.name} board={board} bots={bots}
+                expanded={expanded} onToggle={onToggle} onOpen={onOpen} onEdit={() => onEditSubproject(subproject.subproject)} onAddMilestone={() => onAddMilestone(subproject.subproject)}
                 onDecideMilestone={onDecideMilestone} onNewConversation={() => onNewConversation(subproject.subproject)} onNewSubtask={(task) => onNewSubtask(task, subproject.subproject)} filtering={!filterIsEmpty(filter)} visible={visible} />
             ))}
             {empty && <p className="px-1 py-3 text-[12px] text-ink-tertiary">{t("board.project.emptySubprojects")}</p>}
@@ -413,27 +447,38 @@ function ProjectCard({ node, board, bots, manage, expanded, onToggle, filter, fi
   );
 }
 
-function SubprojectBlock({ node, projectName, board, bots, manage, expanded, onToggle, onOpen, onAddMilestone, onDecideMilestone, onNewConversation, onNewSubtask, filtering, visible }: {
-  node: BoardSubprojectNode; projectName: string; board: BoardSnapshot; bots: readonly Bot[]; manage: boolean; expanded: Set<string>;
-  onToggle: (id: string) => void; onOpen: (task: BoardTask) => void; onAddMilestone: () => void; onDecideMilestone: (milestone: BoardMilestone) => void;
-  onNewConversation: () => void; onNewSubtask: (task: BoardTask) => void; filtering: boolean; visible?: ReadonlySet<string>;
+function SubprojectBlock({ node, projectName, board, bots, expanded, onToggle, onOpen, onEdit, onAddMilestone, onDecideMilestone, onNewConversation, onNewSubtask, filtering, visible }: {
+  node: BoardSubprojectNode; projectName: string; board: BoardSnapshot; bots: readonly Bot[]; expanded: Set<string>;
+  onToggle: (id: string) => void; onOpen: (task: BoardTask) => void; onEdit: () => void; onAddMilestone: () => void;
+  onDecideMilestone: (milestone: BoardMilestone) => void; onNewConversation: () => void; onNewSubtask: (task: BoardTask) => void;
+  filtering: boolean; visible?: ReadonlySet<string>;
 }) {
   const id = node.subproject.id;
   const open = expanded.has(id) || filtering;
   const counts = taskCounts(node.tasks);
   const milestones = milestoneCounts(node.milestones);
+  const canEdit = canEditProject(board, node.subproject.projectId);
+  const phase = node.subproject.phase ?? "discovery";
   return (
-    <div className="mt-2 rounded-lg border border-hairline/30 bg-app/40" data-board-subproject={id}>
+    <div className="mt-2 rounded-lg border border-hairline/30 bg-app/40" data-board-subproject={id} data-board-editable={canEdit ? "true" : "false"}>
       <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5">
         <button type="button" onClick={() => onToggle(id)} aria-expanded={open} aria-controls={`subproject-body-${id}`}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-1 text-start hover:bg-raised/50 focus-visible:outline-none focus-visible:ring-[1.5px] focus-visible:ring-focus">
           <ChevronRight size={13} aria-hidden className={cn("shrink-0 text-ink-tertiary transition-transform motion-reduce:transition-none", open && "rotate-90")} />
           <span className="min-w-0 truncate text-[13px] font-medium text-ink" title={node.subproject.name}>{node.subproject.name}</span>
         </button>
+        <span className={cn("inline-flex h-5 shrink-0 items-center rounded-full px-1.5 text-[10.5px] font-medium", BOARD_PHASE_CLASS[phase])} title={node.subproject.phaseEvidence ? `${t("board.subproject.phaseEvidence")}: ${node.subproject.phaseEvidence}` : undefined}>
+          {t(PHASE_LABEL[phase])}
+        </span>
+        {node.subproject.owner && <span className="text-[11px] text-ink-tertiary">{node.subproject.owner}</span>}
         <span className="text-[11px] text-ink-tertiary tabular-nums">{counts.mainDone}/{counts.main}</span>
         {milestones.total > 0 && <span className="text-[11px] text-ink-tertiary tabular-nums">{milestones.accepted}/{milestones.total}</span>}
-        {manage && (
+        {canEdit && (
           <div className="ms-auto flex items-center gap-1">
+            <button type="button" onClick={onEdit} title={t("board.dialog.editSubproject")} aria-label={`${t("board.dialog.editSubproject")}: ${node.subproject.name}`}
+              className="flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-[1.5px] focus-visible:ring-focus">
+              <Pencil size={12} aria-hidden />
+            </button>
             <button type="button" onClick={onNewConversation} title={t("board.subproject.newConversation")} aria-label={`${t("board.subproject.newConversation")}: ${node.subproject.name}`}
               className="flex h-7 items-center gap-1 rounded-full px-2 text-[11.5px] text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-[1.5px] focus-visible:ring-focus">
               <Plus size={12} aria-hidden />{t("board.subproject.newConversation")}
@@ -445,19 +490,30 @@ function SubprojectBlock({ node, projectName, board, bots, manage, expanded, onT
           </div>
         )}
       </div>
+      {node.subproject.deliverable && <p className="px-4 text-[11.5px] leading-relaxed text-ink-tertiary" data-subproject-deliverable>{t("board.dialog.deliverable")}: <span className="text-ink-secondary">{node.subproject.deliverable}</span></p>}
       <div id={`subproject-body-${id}`} hidden={!open}>
         {open && (
           <div className="border-t border-hairline/25 px-2 pb-2">
+            {node.subproject.acceptance && (
+              <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-tertiary" data-subproject-acceptance>
+                {t("board.detail.acceptance")}: <span className="text-ink-secondary">{node.subproject.acceptance}</span>
+              </p>
+            )}
+            {node.subproject.phaseEvidence && (
+              <p className="mt-1 px-1 text-[11.5px] leading-relaxed text-ink-tertiary" data-subproject-phase-evidence>
+                {t("board.subproject.phaseEvidence")}: <span className="text-ink-secondary">{node.subproject.phaseEvidence}</span>
+              </p>
+            )}
             {node.milestones.length > 0 ? (
               <ul aria-label={t("board.project.milestones")} className="mt-1.5 flex flex-col gap-1">
-                {node.milestones.map((milestone) => <MilestoneRow key={milestone.id} milestone={milestone} manage={manage} onDecide={() => onDecideMilestone(milestone)} />)}
+                {node.milestones.map((milestone) => <MilestoneRow key={milestone.id} milestone={milestone} editable={canEditMilestone(board, milestone.id)} onDecide={() => onDecideMilestone(milestone)} />)}
               </ul>
             ) : <p className="mt-1.5 px-1 text-[11px] text-ink-tertiary">{t("board.subproject.noMilestones")}</p>}
             {node.tasks.length > 0 ? (
               <ul aria-label={node.subproject.name} className="mt-1">
                 {node.tasks.map((task) => (
                   <TaskRow key={task.threadId} task={task} board={board} bots={bots} title={boardTaskTitle(task, bots, task.threadId)} botName={botNameOf(task, bots)}
-                    projectName={projectName} subprojectName={node.subproject.name} manage={manage} depth={0} onOpen={onOpen} onNewSubtask={onNewSubtask} visible={visible} />
+                    projectName={projectName} subprojectName={node.subproject.name} editable={canEditTask(board, task.threadId)} depth={0} onOpen={onOpen} onNewSubtask={canEdit ? onNewSubtask : undefined} visible={visible} />
                 ))}
               </ul>
             ) : <p className="mt-1.5 px-1 text-[11px] text-ink-tertiary">{t("board.subproject.noTasks")}</p>}
@@ -468,7 +524,7 @@ function SubprojectBlock({ node, projectName, board, bots, manage, expanded, onT
   );
 }
 
-function MilestoneRow({ milestone, manage, onDecide }: { milestone: BoardMilestone; manage: boolean; onDecide: () => void }) {
+function MilestoneRow({ milestone, editable, onDecide }: { milestone: BoardMilestone; editable: boolean; onDecide: () => void }) {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const start = async () => {
@@ -486,8 +542,10 @@ function MilestoneRow({ milestone, manage, onDecide }: { milestone: BoardMilesto
     <li data-board-milestone={milestone.id} className="flex min-h-8 flex-wrap items-center gap-2 rounded-md px-1 py-0.5">
       <span className={cn("inline-flex h-5 shrink-0 items-center rounded-full px-1.5 text-[10.5px] font-medium", MILESTONE_CLASS[milestone.status])}>{t(MILESTONE_LABEL[milestone.status])}</span>
       <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink" title={milestone.verdict ? `${milestone.title} · ${milestone.verdict}` : milestone.title}>{milestone.title}</span>
+      {milestone.owner && <span className="shrink-0 text-[11px] text-ink-tertiary">{milestone.owner}</span>}
+      {milestone.acceptedBy && <span className="shrink-0 text-[11px] text-ink-tertiary" data-milestone-accepted-by>{t("board.milestone.acceptedBy")}: {milestone.acceptedBy}</span>}
       {milestone.dueAt && <span className="shrink-0 text-[11px] text-ink-tertiary tabular-nums">{new Date(milestone.dueAt).toLocaleDateString(intlLocale(), { month: "short", day: "numeric" })}</span>}
-      {manage && milestone.status !== "accepted" && milestone.status !== "rejected" && (
+      {editable && milestone.status !== "accepted" && milestone.status !== "rejected" && (
         milestone.status === "planned"
           ? <button type="button" onClick={() => void start()} disabled={starting} className="ui-button ui-button-sm">{starting ? <Loader2 size={12} className="animate-spin" /> : null}{t("board.milestone.start")}</button>
           : <button type="button" onClick={onDecide} className="ui-button ui-button-sm">{t("board.milestone.decide")}</button>

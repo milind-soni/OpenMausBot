@@ -5,8 +5,10 @@ import { Loader2 } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { Select } from "@/components/Select";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
-import { boardErrorText, createConversationOnBoard, createMilestone, createProject, createSubproject, decideMilestone } from "@/state/board";
+import { boardErrorText, createConversationOnBoard, createMilestone, createProject, createSubproject, decideMilestone, patchProject, patchSubproject } from "@/state/board";
 import type { Bot } from "@/state/store";
+import { PHASE_LABEL, PROJECT_STATUS_LABEL } from "@/lib/project-board";
+import { BOARD_PHASES, BOARD_PROJECT_STATUSES, type BoardPhase, type BoardProject, type BoardProjectStatus, type BoardSubproject } from "../../../shared/board";
 
 /** One small board form. Portalled to the body for the same reason the other dialogs are: a translated sidebar is a
  * containing block for a fixed child. */
@@ -88,10 +90,11 @@ export function FormError({ error }: { error: string | null }) {
 export function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [owner, setOwner] = useState("");
+  const [ownerEmail, setOwnerEmail] = useState("");
   const [goal, setGoal] = useState("");
   const [acceptance, setAcceptance] = useState("");
   const [description, setDescription] = useState("");
-  const form = useBoardForm(() => createProject(name, owner, goal, acceptance, description), onClose);
+  const form = useBoardForm(() => createProject({ name, owner, ownerEmail, goal, acceptance, description }), onClose);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { input.current?.focus(); }, []);
   return (
@@ -109,6 +112,9 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
         <Field label={t("board.task.acceptance")}>
           <textarea value={acceptance} maxLength={4000} rows={2} onChange={(event) => { setAcceptance(event.target.value); form.clearError(); }} placeholder={t("board.task.acceptancePlaceholder")} className={FIELD_CLASS} />
         </Field>
+        <Field label={t("board.task.ownerEmail")} hint={t("board.task.ownerEmailHint")}>
+          <input value={ownerEmail} maxLength={320} inputMode="email" onChange={(event) => { setOwnerEmail(event.target.value); form.clearError(); }} placeholder="name@example.com" className={FIELD_CLASS} />
+        </Field>
         <Field label={t("board.dialog.description")}>
           <textarea value={description} maxLength={2000} rows={2} onChange={(event) => setDescription(event.target.value)} placeholder={t("board.dialog.descriptionPlaceholder")} className={FIELD_CLASS} />
         </Field>
@@ -119,12 +125,61 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+export function EditProjectDialog({ project, onClose }: { project: BoardProject; onClose: () => void }) {
+  const [name, setName] = useState(project.name);
+  const [owner, setOwner] = useState(project.owner ?? "");
+  const [ownerEmail, setOwnerEmail] = useState(project.ownerEmail ?? "");
+  const [goal, setGoal] = useState(project.goal ?? "");
+  const [acceptance, setAcceptance] = useState(project.acceptance ?? "");
+  const [description, setDescription] = useState(project.description ?? "");
+  const [status, setStatus] = useState<BoardProjectStatus>((project.status as BoardProjectStatus | undefined) ?? "active");
+  const form = useBoardForm(() => patchProject(project.id, {
+    name, owner, goal, acceptance, status,
+    ...(description.trim() ? { description } : {}),
+    ...(ownerEmail.trim() ? { ownerEmail } : {}),
+  }), onClose);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => { input.current?.focus(); }, []);
+  return (
+    <BoardDialog title={t("board.dialog.editProject")} description={project.name} onClose={onClose}>
+      <form onSubmit={form.run}>
+        <Field label={t("board.dialog.projectName")}>
+          <input ref={input} value={name} maxLength={120} onChange={(event) => { setName(event.target.value); form.clearError(); }} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.task.owner")}>
+          <input value={owner} maxLength={80} onChange={(event) => { setOwner(event.target.value); form.clearError(); }} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.task.ownerEmail")} hint={t("board.task.ownerEmailHint")}>
+          <input value={ownerEmail} maxLength={320} inputMode="email" onChange={(event) => { setOwnerEmail(event.target.value); form.clearError(); }} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.dialog.projectGoal")}>
+          <textarea value={goal} maxLength={4000} rows={2} onChange={(event) => { setGoal(event.target.value); form.clearError(); }} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.task.acceptance")}>
+          <textarea value={acceptance} maxLength={4000} rows={2} onChange={(event) => { setAcceptance(event.target.value); form.clearError(); }} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.dialog.description")}>
+          <textarea value={description} maxLength={2000} rows={2} onChange={(event) => setDescription(event.target.value)} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.task.status")}>
+          <Select value={status} onChange={(event) => setStatus(event.target.value as BoardProjectStatus)} className="mt-1 w-full" aria-label={t("board.task.status")}>
+            {BOARD_PROJECT_STATUSES.map((value) => <option key={value} value={value}>{t(PROJECT_STATUS_LABEL[value]!)}</option>)}
+          </Select>
+        </Field>
+        <FormError error={form.error} />
+        <DialogButtons busy={form.busy} disabled={!name.trim() || !owner.trim() || !goal.trim() || !acceptance.trim()} submitLabel={t("board.task.save")} busyLabel={t("board.saving")} onCancel={onClose} />
+      </form>
+    </BoardDialog>
+  );
+}
+
 export function NewSubprojectDialog({ projectName, projectId, onClose }: { projectName: string; projectId: string; onClose: () => void }) {
   const [name, setName] = useState("");
   const [owner, setOwner] = useState("");
+  const [ownerEmail, setOwnerEmail] = useState("");
   const [deliverable, setDeliverable] = useState("");
   const [acceptance, setAcceptance] = useState("");
-  const form = useBoardForm(() => createSubproject(projectId, name, owner, deliverable, acceptance), onClose);
+  const form = useBoardForm(() => createSubproject({ projectId, name, owner, ownerEmail, deliverable, acceptance }), onClose);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { input.current?.focus(); }, []);
   return (
@@ -142,8 +197,73 @@ export function NewSubprojectDialog({ projectName, projectId, onClose }: { proje
         <Field label={t("board.task.acceptance")}>
           <textarea value={acceptance} maxLength={4000} rows={2} onChange={(event) => { setAcceptance(event.target.value); form.clearError(); }} placeholder={t("board.task.acceptancePlaceholder")} className={FIELD_CLASS} />
         </Field>
+        <Field label={t("board.task.ownerEmail")} hint={t("board.task.ownerEmailHint")}>
+          <input value={ownerEmail} maxLength={320} inputMode="email" onChange={(event) => { setOwnerEmail(event.target.value); form.clearError(); }} placeholder="name@example.com" className={FIELD_CLASS} />
+        </Field>
         <FormError error={form.error} />
         <DialogButtons busy={form.busy} disabled={!name.trim() || !owner.trim() || !deliverable.trim() || !acceptance.trim()} submitLabel={t("board.dialog.create")} busyLabel={t("board.dialog.creating")} onCancel={onClose} />
+      </form>
+    </BoardDialog>
+  );
+}
+
+export function EditSubprojectDialog({ subproject, onClose }: { subproject: BoardSubproject; onClose: () => void }) {
+  const currentPhase = (subproject.phase as BoardPhase | undefined) ?? "discovery";
+  const [name, setName] = useState(subproject.name);
+  const [owner, setOwner] = useState(subproject.owner ?? "");
+  const [ownerEmail, setOwnerEmail] = useState(subproject.ownerEmail ?? "");
+  const [deliverable, setDeliverable] = useState(subproject.deliverable ?? "");
+  const [acceptance, setAcceptance] = useState(subproject.acceptance ?? "");
+  const [status, setStatus] = useState<BoardProjectStatus>((subproject.status as BoardProjectStatus | undefined) ?? "active");
+  const [phase, setPhase] = useState<BoardPhase>(currentPhase);
+  const [evidence, setEvidence] = useState(subproject.phaseEvidence ?? "");
+  const phaseChanged = phase !== currentPhase;
+  const needsReference = phase === "live_unverified" || phase === "done";
+  const reference = /^(?:https?:\/\/|receipt:|回执[:：]|验收[:：])/i.test(evidence.trim());
+  const evidenceOk = !phaseChanged || (Boolean(evidence.trim()) && (!needsReference || reference));
+  const form = useBoardForm(() => patchSubproject(subproject.id, {
+    name, owner, deliverable, acceptance, status,
+    ...(ownerEmail.trim() ? { ownerEmail } : {}),
+    ...(phaseChanged || evidence.trim() !== (subproject.phaseEvidence ?? "")
+      ? { ...(phaseChanged ? { phase } : {}), phaseEvidence: evidence.trim() }
+      : {}),
+  }), onClose);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => { input.current?.focus(); }, []);
+  return (
+    <BoardDialog title={t("board.dialog.editSubproject")} description={subproject.name} onClose={onClose}>
+      <form onSubmit={form.run}>
+        <Field label={t("board.dialog.subprojectName")}>
+          <input ref={input} value={name} maxLength={120} onChange={(event) => { setName(event.target.value); form.clearError(); }} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.task.owner")}>
+          <input value={owner} maxLength={80} onChange={(event) => { setOwner(event.target.value); form.clearError(); }} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.task.ownerEmail")} hint={t("board.task.ownerEmailHint")}>
+          <input value={ownerEmail} maxLength={320} inputMode="email" onChange={(event) => { setOwnerEmail(event.target.value); form.clearError(); }} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.dialog.deliverable")}>
+          <textarea value={deliverable} maxLength={4000} rows={2} onChange={(event) => { setDeliverable(event.target.value); form.clearError(); }} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.task.acceptance")}>
+          <textarea value={acceptance} maxLength={4000} rows={2} onChange={(event) => { setAcceptance(event.target.value); form.clearError(); }} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.task.status")}>
+          <Select value={status} onChange={(event) => setStatus(event.target.value as BoardProjectStatus)} className="mt-1 w-full" aria-label={t("board.task.status")}>
+            {BOARD_PROJECT_STATUSES.map((value) => <option key={value} value={value}>{t(PROJECT_STATUS_LABEL[value]!)}</option>)}
+          </Select>
+        </Field>
+        <Field label={t("board.task.phase")} hint={t("board.dialog.phaseHint")}>
+          <Select value={phase} onChange={(event) => { setPhase(event.target.value as BoardPhase); form.clearError(); }} className="mt-1 w-full" aria-label={t("board.task.phase")}>
+            {BOARD_PHASES.map((value) => <option key={value} value={value}>{t(PHASE_LABEL[value])}</option>)}
+          </Select>
+        </Field>
+        <Field label={t("board.subproject.phaseEvidence")} hint={t("board.dialog.phaseEvidenceHint")}>
+          <textarea value={evidence} maxLength={4000} rows={2} aria-label={t("board.subproject.phaseEvidence")} onChange={(event) => { setEvidence(event.target.value); form.clearError(); }} className={FIELD_CLASS} />
+        </Field>
+        {phaseChanged && needsReference && !reference && <p className="mt-2 text-[11px] text-warning-ink">{t("board.dialog.phaseReference")}</p>}
+        <FormError error={form.error} />
+        <DialogButtons busy={form.busy} disabled={!name.trim() || !owner.trim() || !deliverable.trim() || !acceptance.trim() || !evidenceOk} submitLabel={t("board.task.save")} busyLabel={t("board.saving")} onCancel={onClose} />
       </form>
     </BoardDialog>
   );
@@ -152,7 +272,12 @@ export function NewSubprojectDialog({ projectName, projectId, onClose }: { proje
 export function NewMilestoneDialog({ projectId, subprojectId, subprojectName, onClose }: { projectId: string; subprojectId: string; subprojectName: string; onClose: () => void }) {
   const [title, setTitle] = useState("");
   const [due, setDue] = useState("");
-  const form = useBoardForm(() => createMilestone({ projectId, subprojectId, title, ...(due ? { dueAt: new Date(`${due}T12:00:00`).getTime() } : {}) }), onClose);
+  const [owner, setOwner] = useState("");
+  const [acceptance, setAcceptance] = useState("");
+  const form = useBoardForm(() => createMilestone({
+    projectId, subprojectId, title, owner, acceptance,
+    ...(due ? { dueAt: new Date(`${due}T12:00:00`).getTime() } : {}),
+  }), onClose);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { input.current?.focus(); }, []);
   return (
@@ -163,6 +288,12 @@ export function NewMilestoneDialog({ projectId, subprojectId, subprojectName, on
         </Field>
         <Field label={t("board.milestone.dueLabel")}>
           <input type="date" value={due} onChange={(event) => setDue(event.target.value)} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.milestone.owner")}>
+          <input value={owner} maxLength={80} onChange={(event) => setOwner(event.target.value)} className={FIELD_CLASS} />
+        </Field>
+        <Field label={t("board.milestone.acceptance")}>
+          <textarea value={acceptance} maxLength={4000} rows={2} onChange={(event) => setAcceptance(event.target.value)} className={FIELD_CLASS} />
         </Field>
         <FormError error={form.error} />
         <DialogButtons busy={form.busy} disabled={!title.trim()} submitLabel={t("board.dialog.add")} busyLabel={t("board.dialog.adding")} onCancel={onClose} />

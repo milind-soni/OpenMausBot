@@ -18,7 +18,8 @@ export interface TaskRowProps {
   botName: string | undefined;
   projectName: string;
   subprojectName: string;
-  manage: boolean;
+  /** Whether this caller may change this task (server `permissions.tasks`). */
+  editable: boolean;
   depth: number;
   onOpen: (task: BoardTask) => void;
   onNewSubtask?: (task: BoardTask) => void;
@@ -31,12 +32,12 @@ const SMALL_PILL = "inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-
 /** One conversation on the board: its status and stage at a glance, the full task metadata on demand, and its
  * children indented under it so a parent and its parts are one row of reading. */
 export function TaskRow(props: TaskRowProps) {
-  const { task, board, bots, title, botName, projectName, subprojectName, manage, depth, onOpen, onNewSubtask } = props;
+  const { task, board, bots, title, botName, projectName, subprojectName, editable, depth, onOpen, onNewSubtask } = props;
   const [open, setOpen] = useState(false);
   const children = useMemo(() => childTasks(task, board.tasks).filter((child) => !props.visible || props.visible.has(child.threadId)), [task, board.tasks, props.visible]);
   const progress = subtaskProgress(task, board.tasks);
   return (
-    <li data-board-task={task.threadId} data-task-status={task.status} data-task-phase={task.phase}>
+    <li data-board-task={task.threadId} data-task-status={task.status} data-task-phase={task.phase} data-task-editable={editable ? "true" : "false"}>
       <div className={cn("group flex min-h-12 items-start gap-2 rounded-lg py-1.5 pe-1 hover:bg-raised/40", depth > 0 && "ms-3")}>
         <button
           type="button"
@@ -53,16 +54,16 @@ export function TaskRow(props: TaskRowProps) {
             <button
               type="button"
               onClick={() => setOpen((current) => !current)}
-              className="min-w-0 max-w-full truncate rounded text-start text-[13px] font-medium text-ink hover:underline focus-visible:outline-none focus-visible:ring-[1.5px] focus-visible:ring-focus"
+              className="min-h-6 min-w-0 max-w-full truncate rounded py-0.5 text-start text-[13px] font-medium text-ink hover:underline focus-visible:outline-none focus-visible:ring-[1.5px] focus-visible:ring-focus"
               title={title}
             >
               {title}
             </button>
             <span className={cn(SMALL_PILL, TASK_STATUS_CLASS[task.status] ?? "bg-raised text-ink-secondary")}>{taskStatusText(task.status)}</span>
             <span className={cn(SMALL_PILL, "bg-raised text-ink-secondary")} title={t("board.task.phase")}>{taskPhaseText(task.phase)}</span>
-            {task.blocked && <span className={cn(SMALL_PILL, "bg-danger/12 text-danger")}><AlertTriangle size={11} aria-hidden />{t("board.task.blocked")}</span>}
-            {task.paused && <span className={cn(SMALL_PILL, "bg-raised text-ink-secondary")}><PauseCircle size={11} aria-hidden />{t("board.task.paused")}</span>}
-            {task.verdict?.decision === "accepted" && <span className={cn(SMALL_PILL, "bg-success/15 text-success-ink")}><Check size={11} aria-hidden />{t("board.task.done")}</span>}
+            {task.blocked && <span className={cn(SMALL_PILL, "bg-danger/12 text-danger")} title={task.blockedReason}><AlertTriangle size={11} aria-hidden />{t("board.task.blocked")}</span>}
+            {task.paused && <span className={cn(SMALL_PILL, "bg-raised text-ink-secondary")} title={task.pausedReason}><PauseCircle size={11} aria-hidden />{t("board.task.paused")}</span>}
+            {task.verdict?.decision === "accepted" && <span className={cn(SMALL_PILL, "bg-success/15 text-success-ink")}><Check size={11} aria-hidden />{t("board.task.accepted")}</span>}
           </div>
           <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-tertiary">
             {botName && <span className="truncate">{botName}</span>}
@@ -82,7 +83,7 @@ export function TaskRow(props: TaskRowProps) {
         </button>
       </div>
       <div id={`task-body-${task.threadId}`} hidden={!open} className="ms-8 mb-2 rounded-xl border border-hairline/35 bg-card/50 p-3">
-        {open && <TaskDetail task={task} bots={bots} projectName={projectName} subprojectName={subprojectName} manage={manage} onNewSubtask={onNewSubtask} />}
+        {open && <TaskDetail task={task} bots={bots} projectName={projectName} subprojectName={subprojectName} editable={editable} onNewSubtask={onNewSubtask} />}
       </div>
       {children.length > 0 && (
         <ul aria-label={t("board.task.subtasks", progress)} className="border-s border-hairline/35 ps-1">
@@ -124,15 +125,18 @@ function botNameOf(botId: string, bots: readonly Bot[]): string | undefined {
   return bots.find((bot) => bot.id === botId)?.name;
 }
 
-function TaskDetail({ task, bots, projectName, subprojectName, manage, onNewSubtask }: {
-  task: BoardTask; bots: readonly Bot[]; projectName: string; subprojectName: string; manage: boolean; onNewSubtask?: (task: BoardTask) => void;
+function TaskDetail({ task, bots, projectName, subprojectName, editable, onNewSubtask }: {
+  task: BoardTask; bots: readonly Bot[]; projectName: string; subprojectName: string; editable: boolean; onNewSubtask?: (task: BoardTask) => void;
 }) {
   const [phase, setPhase] = useState(task.phase);
+  const [phaseEvidence, setPhaseEvidence] = useState(task.phaseEvidence ?? "");
   const [status, setStatus] = useState(task.status);
   const [owner, setOwner] = useState(task.owner ?? "");
   const [acceptance, setAcceptance] = useState(task.acceptance ?? "");
   const [blocked, setBlocked] = useState(Boolean(task.blocked));
+  const [blockedReason, setBlockedReason] = useState(task.blockedReason ?? "");
   const [paused, setPaused] = useState(Boolean(task.paused));
+  const [pausedReason, setPausedReason] = useState(task.pausedReason ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -144,15 +148,17 @@ function TaskDetail({ task, bots, projectName, subprojectName, manage, onNewSubt
     return () => { live.current = false; };
   }, []);
   useEffect(() => {
-    setPhase(task.phase); setStatus(task.status); setOwner(task.owner ?? ""); setAcceptance(task.acceptance ?? "");
-    setBlocked(Boolean(task.blocked)); setPaused(Boolean(task.paused));
-  }, [task.threadId]);
+    setPhase(task.phase); setPhaseEvidence(task.phaseEvidence ?? ""); setStatus(task.status); setOwner(task.owner ?? ""); setAcceptance(task.acceptance ?? "");
+    setBlocked(Boolean(task.blocked)); setBlockedReason(task.blockedReason ?? ""); setPaused(Boolean(task.paused)); setPausedReason(task.pausedReason ?? "");
+  }, [task.threadId, task.updatedAt]);
 
-  const dirty = phase !== task.phase || status !== task.status || owner.trim() !== (task.owner ?? "") ||
-    acceptance.trim() !== (task.acceptance ?? "") || blocked !== Boolean(task.blocked) || paused !== Boolean(task.paused);
+  const dirty = phase !== task.phase || phaseEvidence.trim() !== (task.phaseEvidence ?? "") || status !== task.status || owner.trim() !== (task.owner ?? "") ||
+    acceptance.trim() !== (task.acceptance ?? "") || blocked !== Boolean(task.blocked) || blockedReason.trim() !== (task.blockedReason ?? "") ||
+    paused !== Boolean(task.paused) || pausedReason.trim() !== (task.pausedReason ?? "");
+  const needsPhaseEvidence = phase === "done" && !phaseEvidence.trim();
 
   const save = async () => {
-    if (!manage || saving) return;
+    if (!editable || saving || needsPhaseEvidence) return;
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -160,11 +166,14 @@ function TaskDetail({ task, bots, projectName, subprojectName, manage, onNewSubt
       await putTask(task.threadId, {
         botId: task.botId,
         phase,
+        phaseEvidence: phaseEvidence.trim() || null,
         status,
         owner: owner.trim() || null,
         acceptance: acceptance.trim() || null,
         blocked,
+        blockedReason: blocked && blockedReason.trim() ? blockedReason : null,
         paused,
+        pausedReason: paused && pausedReason.trim() ? pausedReason : null,
       });
       if (live.current) setSaved(true);
     } catch (cause) {
@@ -175,7 +184,7 @@ function TaskDetail({ task, bots, projectName, subprojectName, manage, onNewSubt
   };
 
   const verdict = async (decision: "accepted" | "rejected") => {
-    if (!manage || deciding || !evidence.trim()) return;
+    if (!editable || deciding || !evidence.trim()) return;
     setDeciding(decision);
     setError(null);
     try {
@@ -189,11 +198,11 @@ function TaskDetail({ task, bots, projectName, subprojectName, manage, onNewSubt
   };
 
   return (
-    <div data-board-task-detail={task.threadId}>
+    <div data-board-task-detail={task.threadId} data-task-detail-editable={editable ? "true" : "false"}>
       <div className="flex flex-wrap items-center gap-2">
-        <ProjectAssignment botId={task.botId} threadId={task.threadId} variant="row" className="max-w-full" />
+        <ProjectAssignment botId={task.botId} threadId={task.threadId} variant="row" className="max-w-full" readOnly={!editable} />
         <span className="sr-only">{projectName}{subprojectName ? ` · ${subprojectName}` : ""}</span>
-        {manage && onNewSubtask && (
+        {editable && onNewSubtask && (
           <button type="button" onClick={() => onNewSubtask(task)} className="ui-button ui-button-sm ms-auto">
             <Plus size={13} aria-hidden />{t("board.task.newSubtask")}
           </button>
@@ -202,15 +211,15 @@ function TaskDetail({ task, bots, projectName, subprojectName, manage, onNewSubt
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="block text-[11px] font-medium text-ink-secondary">
           {t("board.task.phase")}
-          <Select value={phase} disabled={!manage || saving} onChange={(event) => setPhase(event.target.value as BoardTask["phase"])} className="mt-1 w-full" aria-label={t("board.task.phase")}>
-            {(Object.keys(PHASE_LABEL) as BoardTask["phase"][]).filter((value) => value !== "done" || phase === "done").map((value) => (
+          <Select value={phase} disabled={!editable || saving} onChange={(event) => setPhase(event.target.value as BoardTask["phase"])} className="mt-1 w-full" aria-label={t("board.task.phase")}>
+            {(Object.keys(PHASE_LABEL) as BoardTask["phase"][]).map((value) => (
               <option key={value} value={value}>{t(PHASE_LABEL[value])}</option>
             ))}
           </Select>
         </label>
         <label className="block text-[11px] font-medium text-ink-secondary">
           {t("board.task.status")}
-          <Select value={status} disabled={!manage || saving} onChange={(event) => setStatus(event.target.value as BoardTask["status"])} className="mt-1 w-full" aria-label={t("board.task.status")}>
+          <Select value={status} disabled={!editable || saving} onChange={(event) => setStatus(event.target.value as BoardTask["status"])} className="mt-1 w-full" aria-label={t("board.task.status")}>
             {(Object.keys(TASK_STATUS_LABEL) as BoardTask["status"][]).filter((value) => value !== "done" || status === "done").map((value) => (
               <option key={value} value={value}>{t(TASK_STATUS_LABEL[value])}</option>
             ))}
@@ -218,25 +227,47 @@ function TaskDetail({ task, bots, projectName, subprojectName, manage, onNewSubt
         </label>
         <label className="block text-[11px] font-medium text-ink-secondary">
           {t("board.task.owner")}
-          <input list={`board-owners-${task.threadId}`} value={owner} disabled={!manage || saving} maxLength={80} onChange={(event) => setOwner(event.target.value)} placeholder={t("board.task.ownerPlaceholder")} className={SELECT} />
+          <input list={`board-owners-${task.threadId}`} value={owner} disabled={!editable || saving} maxLength={80} onChange={(event) => setOwner(event.target.value)} placeholder={t("board.task.ownerPlaceholder")} className={SELECT} />
           <datalist id={`board-owners-${task.threadId}`}>{bots.map((bot) => <option key={bot.id} value={bot.name} />)}</datalist>
         </label>
         <div className="flex items-end gap-2">
-          <button type="button" aria-pressed={blocked} disabled={!manage || saving} onClick={() => setBlocked((current) => !current)} className={cn("ui-button", blocked && "bg-danger/12 text-danger")}>
+          <button type="button" aria-pressed={blocked} disabled={!editable || saving} onClick={() => setBlocked((current) => !current)} className={cn("ui-button", blocked && "bg-danger/12 text-danger")}>
             <AlertTriangle size={13} aria-hidden />{t("board.task.blocked")}
           </button>
-          <button type="button" aria-pressed={paused} disabled={!manage || saving} onClick={() => setPaused((current) => !current)} className={cn("ui-button", paused && "bg-raised")}>
+          <button type="button" aria-pressed={paused} disabled={!editable || saving} onClick={() => setPaused((current) => !current)} className={cn("ui-button", paused && "bg-raised")}>
             <PauseCircle size={13} aria-hidden />{t("board.task.paused")}
           </button>
         </div>
       </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <label className="block text-[11px] font-medium text-ink-secondary">
+          {t("board.task.phaseEvidence")}
+          <textarea value={phaseEvidence} disabled={!editable || saving} maxLength={4000} rows={2} onChange={(event) => setPhaseEvidence(event.target.value)} className={cn(SELECT, "resize-y")} aria-label={t("board.task.phaseEvidence")} />
+        </label>
+        <div className="flex flex-col gap-2">
+          {blocked && (
+            <label className="block text-[11px] font-medium text-ink-secondary">
+              {t("board.task.blockedReason")}
+              <input value={blockedReason} disabled={!editable || saving} maxLength={4000} onChange={(event) => setBlockedReason(event.target.value)} className={SELECT} />
+            </label>
+          )}
+          {paused && (
+            <label className="block text-[11px] font-medium text-ink-secondary">
+              {t("board.task.pausedReason")}
+              <input value={pausedReason} disabled={!editable || saving} maxLength={4000} onChange={(event) => setPausedReason(event.target.value)} className={SELECT} />
+            </label>
+          )}
+        </div>
+      </div>
+      <p className="mt-1 text-[11px] text-ink-tertiary">{t("board.task.phaseKept")}</p>
+      {needsPhaseEvidence && <p role="alert" className="mt-1 text-[11px] text-warning-ink">{t("board.task.phaseEvidenceNeeded")}</p>}
       <label className="mt-3 block text-[11px] font-medium text-ink-secondary">
         {t("board.task.acceptance")}
-        <textarea value={acceptance} disabled={!manage || saving} maxLength={4000} rows={2} onChange={(event) => setAcceptance(event.target.value)} placeholder={t("board.task.acceptancePlaceholder")} className={cn(SELECT, "resize-y")} />
+        <textarea value={acceptance} disabled={!editable || saving} maxLength={4000} rows={2} onChange={(event) => setAcceptance(event.target.value)} placeholder={t("board.task.acceptancePlaceholder")} className={cn(SELECT, "resize-y")} />
       </label>
-      {manage && (
+      {editable && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <button type="button" onClick={() => void save()} disabled={!dirty || saving} className="ui-button ui-button-primary">
+          <button type="button" onClick={() => void save()} disabled={!dirty || saving || needsPhaseEvidence} className="ui-button ui-button-primary">
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} aria-hidden />}
             {saving ? t("board.saving") : t("board.task.save")}
           </button>
@@ -247,10 +278,11 @@ function TaskDetail({ task, bots, projectName, subprojectName, manage, onNewSubt
       <div className="mt-3 rounded-lg border border-hairline/35 p-2.5">
         <p className="text-[11px] font-medium text-ink-secondary">{t("board.task.acceptanceTitle")}</p>
         {task.verdict ? (
-          <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
-            {task.verdict.decision === "accepted" ? t("board.task.verdict", { evidence: task.verdict.evidence }) : `${t("board.task.reject")} · ${task.verdict.evidence}`}
-          </p>
-        ) : manage ? (
+          <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
+            <p>{task.verdict.decision === "accepted" ? t("board.task.verdict", { evidence: task.verdict.evidence }) : `${t("board.task.reject")} · ${task.verdict.evidence}`}</p>
+            {task.verdict.by && <p className="mt-0.5 text-[11px] text-ink-tertiary" data-task-verdict-by>{t("board.task.verdictBy")}: {task.verdict.by}</p>}
+          </div>
+        ) : editable ? (
           <>
             <p className="mt-1 text-[11px] text-ink-tertiary">{t("board.task.doneViaVerdict")}</p>
             <textarea value={evidence} maxLength={4000} rows={2} onChange={(event) => setEvidence(event.target.value)} placeholder={t("board.task.evidencePlaceholder")} className={cn(SELECT, "mt-1.5 resize-y")} aria-label={t("board.task.evidence")} />

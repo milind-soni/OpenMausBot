@@ -13710,8 +13710,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 : store.createTask(target.botId, `@${internalSender.name} · work`, false, undefined, { ...opened, kind: "work" }, undefined, undefined, folder.cwd, startedFor));
               if (!task) throw new Error("The recipient no longer exists");
               target.threadId = task.threadId;
-              if (!continued) createdThread = task.threadId;
-              if (!continued) attachDispatchedTask({ board }, { parentThreadId: address.threadId, botId: target.botId, threadId: task.threadId, actor: { label: internalSender.name } });
+              if (!continued) createdThread = task.threadId; if (!continued) attachDispatchedTask({ board }, { parentThreadId: address.threadId, botId: target.botId, threadId: task.threadId, actor: { label: internalSender.name } });
               delegatedLevel.apply(internalSender, internalCapability.threadId, internalCapability.roomHandoffId ?? generation, recipient, target.threadId); if (lends && !levelWithin(approvalModeForTurn(store.projectBotForTask(recipient.id, target.threadId) ?? recipient, true, target.threadId), approvalModeForTurn(store.projectBotForTask(internalSender.id, address.threadId) ?? internalSender, internalCapability.depth > 0, address.threadId))) { lends = false; handedInUnproven(target.threadId); }
             }
             const routed = lane ? { botId: target.botId, threadId: lane.threadId } : target;
@@ -14037,8 +14036,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             return json(res, result.status === 200 ? 201 : result.status, { ...result.body, self: true, reportBack: true, title, botId: from.id, botName: from.name, threadId: receipt?.threadId, requestId: receipt?.requestId }); }
           const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() }, inherited.approvalMode, inherited.modelSelection, undefined,
             (created) => threadStarters.set(created.threadId, (CLOUD_TEAM ? teamConnections.handOnFor(internalCapability.threadId, internalCapability.generation) : null) ?? openerFrom(fromThreadId)));
-          if (!task) return json(res, 500, { error: "couldn't create that thread" });
-          attachDispatchedTask({ board }, { parentThreadId: fromThreadId, botId: from.id, threadId: task.threadId, actor: { label: from.name } });
+          if (!task) return json(res, 500, { error: "couldn't create that thread" }); attachDispatchedTask({ board }, { parentThreadId: fromThreadId, botId: from.id, threadId: task.threadId, actor: { label: from.name } });
           internalCapability.openedThreads += 1;
           const chip: Omit<Message, "id" | "at"> = {
             role: "bot",

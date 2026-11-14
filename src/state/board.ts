@@ -2,7 +2,7 @@
 // write replaces it whole, as the server sends it. The SSE frame and a refetch after a write land here too.
 import { useSyncExternalStore } from "react";
 
-import type { BoardState, BoardSnapshot } from "../../shared/board";
+import type { BoardPhase, BoardProjectStatus, BoardState, BoardSnapshot } from "../../shared/board";
 import type { LocaleKey } from "@/locales";
 import { api, ApiError } from "@/state/api";
 
@@ -39,10 +39,23 @@ export function useBoard(): BoardView {
   return useSyncExternalStore(subscribe, boardView, boardView);
 }
 
-/** A write replaced the board: the server's copy is the truth, capabilities come with GET only. */
+/** A write or read replaced the board. A frame carries no caller fields: keep permission maps from the session only
+ * for a caller who is not an admin, and drop counts so the page recomputes them from the tasks it can see. */
 export function applyBoard(board: BoardState | BoardSnapshot): void {
-  const capabilities = "capabilities" in board ? board.capabilities : view.board?.capabilities ?? { manage: false };
-  publish({ status: "ready", board: { ...board, capabilities }, revision: view.revision + 1 });
+  const previous = view.board;
+  const capabilities = "capabilities" in board ? board.capabilities : previous?.capabilities ?? { manage: false };
+  const permissions = "permissions" in board ? board.permissions : capabilities.manage ? undefined : previous?.permissions;
+  const counts = "counts" in board ? board.counts : undefined;
+  publish({
+    status: "ready",
+    board: {
+      ...board,
+      capabilities,
+      ...(permissions ? { permissions } : {}),
+      ...(counts ? { counts } : {}),
+    },
+    revision: view.revision + 1,
+  });
 }
 
 export function applyBoardFrame(board: BoardState): void {
@@ -119,7 +132,7 @@ function codeOf(error: unknown): BoardErrorCode {
   return error.status === 403 ? "BOARD_FORBIDDEN" : "BOARD_UNAVAILABLE";
 }
 
-/** One board write; the response's whole board replaces ours. `refresh` re-reads after a 409 so the next try is current. */
+/** One board write; the response's whole board replaces ours. A 409 re-reads so the next try is current. */
 export async function writeBoard<T extends { board?: BoardState }>(path: string, init: RequestInit): Promise<T> {
   try {
     const answer = await api<T & { board: BoardState }>(path, init);
@@ -133,17 +146,23 @@ export async function writeBoard<T extends { board?: BoardState }>(path: string,
   }
 }
 
+const trimmed = (value: string | undefined): string | undefined => value?.trim() ? value.trim() : undefined;
+
 export interface TaskWrite {
   botId: string;
   projectId?: string | null;
   subprojectId?: string | null;
   parentThreadId?: string | null;
-  phase?: string;
+  phase?: BoardPhase;
+  phaseEvidence?: string | null;
   status?: string;
   owner?: string | null;
+  ownerEmail?: string | null;
   acceptance?: string | null;
   blocked?: boolean;
+  blockedReason?: string | null;
   paused?: boolean;
+  pausedReason?: string | null;
 }
 
 export async function putTask(threadId: string, task: TaskWrite): Promise<void> {
@@ -158,45 +177,112 @@ export async function removeTask(threadId: string): Promise<void> {
   await writeBoard(`/api/board/tasks/${encodeURIComponent(threadId)}${version === undefined ? "" : `?version=${version}`}`, { method: "DELETE" });
 }
 
-export async function createProject(name: string, owner: string, goal: string, acceptance: string, description?: string): Promise<void> {
+export interface ProjectWrite {
+  name?: string;
+  description?: string;
+  owner?: string;
+  ownerEmail?: string;
+  goal?: string;
+  acceptance?: string;
+  status?: BoardProjectStatus;
+}
+
+export async function createProject(input: ProjectWrite & { name: string; owner: string; goal: string; acceptance: string }): Promise<void> {
   await writeBoard("/api/board/projects", {
     method: "POST",
     body: JSON.stringify({
-      name, owner: owner.trim(), goal: goal.trim(), acceptance: acceptance.trim(),
-      ...(description?.trim() ? { description: description.trim() } : {}), version: view.board?.version,
-    }),
-  });
-}
-
-export async function createSubproject(projectId: string, name: string, owner: string, deliverable: string, acceptance: string): Promise<void> {
-  await writeBoard("/api/board/subprojects", {
-    method: "POST",
-    body: JSON.stringify({
-      projectId, name, owner: owner.trim(), deliverable: deliverable.trim(), acceptance: acceptance.trim(),
+      name: input.name.trim(),
+      owner: input.owner.trim(),
+      goal: input.goal.trim(),
+      acceptance: input.acceptance.trim(),
+      ...(trimmed(input.description) ? { description: trimmed(input.description) } : {}),
+      ...(trimmed(input.ownerEmail) ? { ownerEmail: trimmed(input.ownerEmail) } : {}),
+      ...(input.status ? { status: input.status } : {}),
       version: view.board?.version,
     }),
   });
 }
 
-export async function createMilestone(input: { projectId: string; subprojectId?: string; title: string; dueAt?: number }): Promise<void> {
+export async function patchProject(id: string, patch: ProjectWrite): Promise<void> {
+  await writeBoard(`/api/board/projects/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ ...patch, version: view.board?.version }),
+  });
+}
+
+export interface SubprojectWrite {
+  name?: string;
+  owner?: string;
+  ownerEmail?: string;
+  deliverable?: string;
+  acceptance?: string;
+  status?: BoardProjectStatus;
+  phase?: BoardPhase;
+  phaseEvidence?: string;
+}
+
+export async function createSubproject(input: SubprojectWrite & {
+  projectId: string; name: string; owner: string; deliverable: string; acceptance: string;
+}): Promise<void> {
+  await writeBoard("/api/board/subprojects", {
+    method: "POST",
+    body: JSON.stringify({
+      projectId: input.projectId,
+      name: input.name.trim(),
+      owner: input.owner.trim(),
+      deliverable: input.deliverable.trim(),
+      acceptance: input.acceptance.trim(),
+      ...(trimmed(input.ownerEmail) ? { ownerEmail: trimmed(input.ownerEmail) } : {}),
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.phase ? { phase: input.phase } : {}),
+      ...(trimmed(input.phaseEvidence) ? { phaseEvidence: trimmed(input.phaseEvidence) } : {}),
+      version: view.board?.version,
+    }),
+  });
+}
+
+export async function patchSubproject(id: string, patch: SubprojectWrite): Promise<void> {
+  await writeBoard(`/api/board/subprojects/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ ...patch, version: view.board?.version }),
+  });
+}
+
+export async function createMilestone(input: {
+  projectId: string; subprojectId?: string; title: string; dueAt?: number;
+  acceptance?: string; owner?: string; ownerEmail?: string;
+}): Promise<void> {
   await writeBoard("/api/board/milestones", {
     method: "POST",
-    body: JSON.stringify({ ...input, version: view.board?.version }),
+    body: JSON.stringify({
+      projectId: input.projectId,
+      title: input.title,
+      ...(input.subprojectId ? { subprojectId: input.subprojectId } : {}),
+      ...(input.dueAt ? { dueAt: input.dueAt } : {}),
+      ...(trimmed(input.acceptance) ? { acceptance: trimmed(input.acceptance) } : {}),
+      ...(trimmed(input.owner) ? { owner: trimmed(input.owner) } : {}),
+      ...(trimmed(input.ownerEmail) ? { ownerEmail: trimmed(input.ownerEmail) } : {}),
+      version: view.board?.version,
+    }),
+  });
+}
+
+export async function patchMilestone(id: string, patch: {
+  title?: string; status?: "planned" | "in_progress" | "accepted" | "rejected"; verdict?: string; evidence?: string;
+  acceptance?: string; owner?: string; ownerEmail?: string; dueAt?: number;
+}): Promise<void> {
+  await writeBoard(`/api/board/milestones/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ ...patch, version: view.board?.version }),
   });
 }
 
 export async function decideMilestone(id: string, decision: "accepted" | "rejected", verdict: string, evidence: string): Promise<void> {
-  await writeBoard(`/api/board/milestones/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ status: decision, verdict, evidence, version: view.board?.version }),
-  });
+  await patchMilestone(id, { status: decision, verdict, evidence });
 }
 
 export async function startMilestone(id: string): Promise<void> {
-  await writeBoard(`/api/board/milestones/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ status: "in_progress", version: view.board?.version }),
-  });
+  await patchMilestone(id, { status: "in_progress" });
 }
 
 export async function decideTask(threadId: string, decision: "accepted" | "rejected", evidence: string): Promise<void> {

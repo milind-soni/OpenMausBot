@@ -27,6 +27,13 @@ export const TASK_STATUS_LABEL: Readonly<Record<BoardTaskStatus, LocaleKey>> = {
   done: "board.task.done",
 };
 
+export const PROJECT_STATUS_LABEL: Readonly<Record<string, LocaleKey>> = {
+  active: "board.projectStatus.active",
+  paused: "board.projectStatus.paused",
+  completed: "board.projectStatus.completed",
+  archived: "board.projectStatus.archived",
+};
+
 export const MILESTONE_LABEL: Readonly<Record<BoardMilestone["status"], LocaleKey>> = {
   planned: "board.milestone.planned",
   in_progress: "board.milestone.inProgress",
@@ -37,6 +44,19 @@ export const MILESTONE_LABEL: Readonly<Record<BoardMilestone["status"], LocaleKe
 type LocaleSource = Readonly<Record<string, string>>;
 
 /** The label a phase or status shows; a board that speaks a newer phase than this page reads as is shown as it is, not hid. */
+/** Admin means every object; a member only sees `true` for the objects the server lets them change. */
+export function canEditProject(board: Pick<BoardSnapshot, "capabilities" | "permissions">, id: string): boolean {
+  return board.capabilities.manage || board.permissions?.projects[id] === true;
+}
+
+export function canEditTask(board: Pick<BoardSnapshot, "capabilities" | "permissions">, threadId: string): boolean {
+  return board.capabilities.manage || board.permissions?.tasks[threadId] === true;
+}
+
+export function canEditMilestone(board: Pick<BoardSnapshot, "capabilities" | "permissions">, id: string): boolean {
+  return board.capabilities.manage || board.permissions?.milestones[id] === true;
+}
+
 export function phaseLabel(phase: string, locale: LocaleSource): string {
   const key = PHASE_LABEL[phase as BoardPhase];
   return key && locale[key] ? locale[key]! : phase;
@@ -44,6 +64,11 @@ export function phaseLabel(phase: string, locale: LocaleSource): string {
 
 export function statusLabel(status: string, locale: LocaleSource): string {
   const key = TASK_STATUS_LABEL[status as BoardTaskStatus];
+  return key && locale[key] ? locale[key]! : status;
+}
+
+export function projectStatusLabel(status: string, locale: LocaleSource): string {
+  const key = PROJECT_STATUS_LABEL[status];
   return key && locale[key] ? locale[key]! : status;
 }
 
@@ -328,7 +353,7 @@ export interface BotConversations {
   name: string;
   hidden?: boolean;
   threadId?: string;
-  tasks?: ReadonlyArray<{ threadId: string; title?: string; updatedAt?: number }>;
+  tasks?: ReadonlyArray<{ threadId: string; title?: string; updatedAt?: number; routineRunId?: string }>;
 }
 
 /** Classified conversation ids, to subtract from the bot snapshot. */
@@ -343,6 +368,7 @@ export function unclassifiedConversations(bots: readonly BotConversations[], boa
   for (const bot of bots) {
     if (bot.hidden) continue;
     for (const task of bot.tasks ?? []) {
+      if (task.routineRunId) continue;
       if (classified.has(task.threadId)) continue;
       found.push({
         botId: bot.id,
@@ -396,6 +422,13 @@ export const BOARD_PHASE_CLASS: Readonly<Record<BoardPhase, string>> = {
   release_ready: "bg-warning/15 text-warning-ink",
   live_unverified: "bg-success/15 text-success-ink",
   done: "bg-success/15 text-success-ink",
+};
+
+export const PROJECT_STATUS_CLASS: Readonly<Record<string, string>> = {
+  active: "bg-raised text-ink-secondary",
+  paused: "bg-warning/15 text-warning-ink",
+  completed: "bg-success/15 text-success-ink",
+  archived: "bg-raised text-ink-tertiary",
 };
 
 export const TASK_STATUS_CLASS: Readonly<Record<BoardTaskStatus, string>> = {

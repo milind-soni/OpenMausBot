@@ -15,6 +15,8 @@ interface Props {
   className?: string;
   /** A row in the board's "waiting to be classified" list rather than the conversation's chip. */
   variant?: "chip" | "row";
+  /** The caller can see the board but not change this row: show its place, do not offer a picker. */
+  readOnly?: boolean;
   onAssigned?: (assigned: { projectId?: string; subprojectId?: string; removed?: boolean }) => void;
 }
 
@@ -23,7 +25,7 @@ const PANEL_MAX_HEIGHT = 320;
 
 /** The conversation's place on the board: a chip that opens project, then subproject. One control writes the
  * same row the board page edits, so both places show one answer. */
-export function ProjectAssignment({ botId, threadId, emptyLabel, className, variant = "chip", onAssigned }: Props) {
+export function ProjectAssignment({ botId, threadId, emptyLabel, className, variant = "chip", readOnly = false, onAssigned }: Props) {
   const board = useBoard();
   const [open, setOpen] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -109,6 +111,24 @@ export function ProjectAssignment({ botId, threadId, emptyLabel, className, vari
   const label = task
     ? [currentProject?.name, currentSubproject?.name].filter(Boolean).join(" · ")
     : emptyLabel ?? t("board.assign.empty");
+
+  if (readOnly && task) {
+    return (
+      <div ref={root} data-project-assignment data-project-assignment-readonly className={cn("relative", className)}>
+        <span
+          aria-label={`${t("board.assign.title")}: ${label}`}
+          title={label}
+          className={cn(
+            "flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-hairline/40 text-ink-tertiary",
+            variant === "chip" ? "h-7 bg-raised/40 px-2.5 text-[12px]" : "h-8 bg-transparent px-2 text-[12.5px]",
+          )}
+        >
+          <FolderTree size={13} aria-hidden className="shrink-0" />
+          <span className="truncate">{label}</span>
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div ref={root} data-project-assignment className={cn("relative", className)}>

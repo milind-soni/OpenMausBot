@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { BoardSnapshot, BoardTask } from "../../shared/board";
 import {
-  boardTree, childTasks, filterBoard, milestoneCounts, phaseDistribution, taskCounts, taskFits, taskMatches,
-  unclassifiedConversations, projectOfTask, EMPTY_FILTER, type TaskMatchContext,
+  boardTree, canEditMilestone, canEditProject, canEditTask, childTasks, filterBoard, milestoneCounts,
+  phaseDistribution, taskCounts, taskFits, taskMatches, unclassifiedConversations, projectOfTask, EMPTY_FILTER,
+  type TaskMatchContext,
 } from "./project-board";
 
 const at = (minute: number) => new Date(Date.UTC(2026, 10, 15, 9, minute)).toISOString();
@@ -146,5 +147,37 @@ describe("waiting to be classified", () => {
   it("names the project and subproject of a task", () => {
     expect(projectOfTask(board, board.tasks[0]!)).toEqual({ projectName: "Creative board", subprojectName: "Tax" });
     expect(projectOfTask(board, board.tasks[5]!)).toBeNull();
+  });
+});
+
+describe("what a member may change", () => {
+  const member: BoardSnapshot = {
+    ...board,
+    capabilities: { manage: false },
+    permissions: { projects: { p1: true, p2: false }, tasks: { main: false, second: true }, milestones: { m1: true, m2: false, m3: false } },
+  };
+
+  it("trusts the server's per-object permissions, not only the admin flag", () => {
+    expect(canEditProject(member, "p1")).toBe(true);
+    expect(canEditProject(member, "p2")).toBe(false);
+    expect(canEditTask(member, "second")).toBe(true);
+    expect(canEditTask(member, "main")).toBe(false);
+    expect(canEditMilestone(member, "m1")).toBe(true);
+    expect(canEditMilestone(member, "m3")).toBe(false);
+  });
+
+  it("gives an admin every object even when no permission map is sent", () => {
+    expect(canEditProject(board, "p2")).toBe(true);
+    expect(canEditTask(board, "anything")).toBe(true);
+  });
+});
+
+describe("unclassified conversations", () => {
+  it("leaves routine runs out: a schedule is not work waiting for a project", () => {
+    const bots = [{ id: "bot-1", name: "MausBot", tasks: [
+      { threadId: "waiting-2", title: "Waiting", updatedAt: 3 },
+      { threadId: "run", title: "Nightly check", updatedAt: 4, routineRunId: "run-1" },
+    ] }];
+    expect(unclassifiedConversations(bots, board).map((ref) => ref.threadId)).toEqual(["waiting-2"]);
   });
 });

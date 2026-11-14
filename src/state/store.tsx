@@ -6,7 +6,7 @@ import { addForkOptimistic, reduceForkPanel, removeForkOptimistic, runForkEffect
 import { use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createAppStore } from "./app-store"; import { readOneBot } from "./bot-read"; import { StoreContext, StoreSourceContext } from "./store-context";
 import { flushSync } from "react-dom";
-import type { BotMovedTo, BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, ResolvedSender, SteerQueueReason, WireBot, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire"; import type { InstanceEndpointInfo } from "../../shared/claude-endpoint";
+import type { BotMovedTo, BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, ResolvedSender, SteerQueueReason, WireBot, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire"; import type { InstanceEndpointInfo } from "../../shared/claude-endpoint"; import { applyBoardFrame } from "./board";
 import { movesThreadToTop } from "../../shared/wire"; import type { DefaultBotFields } from "../../shared/default-bot";
 import { reorderIfMoved } from "../../shared/bot-order";
 import { withOneChief } from "../../shared/bot-owner";
@@ -3058,6 +3058,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ) {
         bumpPeripheralVersion("webhooks");
       }
+      if (frame.kind === "board") applyBoardFrame(frame.board);
       switch (frame.kind) {
         case "sections":
           rawDispatch({ type: "sections", sections: frame.sections });
@@ -3171,9 +3172,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             help: parseComputerHelp(frame.help),
           });
           break;
-        case "data":
-          rawDispatch({ type: "dataSheet", sheet: frame.sheet });
-          break;
+        case "data": rawDispatch({ type: "dataSheet", sheet: frame.sheet }); break;
         case "bot.deleted":
           botPatchQueue.cancel(frame.botId);
           rawDispatch({ type: "deleteBot", botId: frame.botId });
