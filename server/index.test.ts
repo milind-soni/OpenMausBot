@@ -13269,6 +13269,46 @@ describe("bot memory API", () => {
     }
   });
 
+  it("lets a bot send an archive, served only as a download", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      const workspace = workspaceOf(bot.id);
+      mkdirSync(workspace, { recursive: true });
+      const tarball = Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0x3c, 0x68, 0x74, 0x6d, 0x6c, 0x3e]);
+      writeFileSync(join(workspace, "Site.TAR.GZ"), tarball);
+      writeFileSync(join(workspace, "bundle.cab"), "MSCF");
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const attach = (body: unknown) => fetch(`${BASE}/api/internal/attach-file`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const attached = await attach({ path: "Site.TAR.GZ" });
+      expect(attached.status).toBe(200);
+      expect(await attached.json()).toMatchObject({ ok: true, name: "Site.TAR.gz", bytes: tarball.byteLength });
+      expect((await attach({ path: "bundle.cab" })).status).toBe(415);
+
+      const dump = await api("GET", `/api/threads/${bot.threadId}/export?format=json`);
+      const [message] = (dump.body.messages as Array<{ id: string; attachments?: Array<{ kind: string; path: string; mime: string; name?: string }> }>)
+        .filter((entry) => entry.attachments?.length);
+      expect(message!.attachments).toEqual([expect.objectContaining({ kind: "file", name: "Site.TAR.gz", mime: "application/gzip" })]);
+
+      const served = await fetch(`${BASE}/api/threads/${bot.threadId}/messages/${message!.id}/file`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: message!.attachments![0]!.path }),
+      });
+      expect(served.status).toBe(200);
+      expect(served.headers.get("content-type")).toBe("application/gzip");
+      expect(served.headers.get("content-disposition")).toMatch(/^attachment; filename="Site\.TAR\.gz"/);
+      expect(served.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(Buffer.from(await served.arrayBuffer())).toEqual(tarball);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("delivers a file a host engine's turn saved outside its folders by copy, and nothing else from there", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
