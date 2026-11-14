@@ -21,6 +21,7 @@ import {
   antigravityProfileDirectory,
   authorizationUrlFromLine,
   catalogFromAntigravityConfigOptions,
+  forwardAntigravityCallback,
   isValidAntigravityInitializeResult,
   parseAntigravityAuthorizationUrl,
   prepareAntigravityProfile,
@@ -302,6 +303,26 @@ createInterface({ input: process.stdin }).on('line', line => {
       controller.cancel();
       inBox.close();
       relay.close();
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("stops forwarding a pasted callback when its undialed box relay closes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "omb-antigravity-relay-close-"));
+    scratch.push(directory);
+    const relay = await openBoxRelay(join(directory, "relay.sock"));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let failure: Error | undefined;
+    try {
+      void forwardAntigravityCallback(new URL("http://127.0.0.1:54321/?state=fixture&code=pasted"), relay)
+        .catch((error: Error) => { failure = error; });
+      relay.close();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(failure?.message).toBe("The sign-in's box relay is closed.");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      relay.close();
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
     }
   });
 

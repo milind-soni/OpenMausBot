@@ -3,7 +3,7 @@ import { createServer, request, type Server } from "node:http";
 import { connect, createServer as createNetServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { dialRelay, openBoxRelay, type BoxRelay } from "./relay.ts";
 
@@ -62,6 +62,43 @@ linuxBox("the relay into a box's own loopback", () => {
 
     const silent = await relayAt();
     await expect(silent.connect(port, 50)).rejects.toThrow(/did not answer/);
+  });
+
+  it("closing settles every pending connection and clears its deadline", async () => {
+    const relay = await relayAt();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const errors: Error[] = [];
+    try {
+      for (const port of [1234, 5678]) void relay.connect(port).catch((error: Error) => { errors.push(error); });
+      expect(vi.getTimerCount()).toBe(2);
+      relay.close();
+      relay.close();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(errors.map((error) => error.message)).toEqual([
+        "The sign-in's box relay is closed.",
+        "The sign-in's box relay is closed.",
+      ]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
+    }
+  });
+
+  it("refuses a connection after close without starting another deadline", async () => {
+    const relay = await relayAt();
+    relay.close();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const errors: Error[] = [];
+    try {
+      void relay.connect(1234).catch((error: Error) => { errors.push(error); });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(errors.map((error) => error.message)).toEqual(["The sign-in's box relay is closed."]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
+    }
   });
 
   it("the box side drops a connection whose first line is not a port", async () => {
