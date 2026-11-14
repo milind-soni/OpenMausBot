@@ -557,9 +557,10 @@ describe("optional built-in question compatibility", () => {
     });
     await f.start({ integrations: undefined });
     expect(await f.completed()).toMatchObject({ ok: false });
+    // A transient 429/500 is retried twice now; every attempt still carries the tools.
     expect(f.requests).toHaveLength(status === 429 || status === 500 ? 3 : 1);
     for (const request of f.requests) expect(request.tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
-  });
+  }, 20_000);
 
   it("retries a network failure as the same request, and never strips tools mounted by the person", async () => {
     for (const network of [false, true]) {
@@ -570,11 +571,13 @@ describe("optional built-in question compatibility", () => {
       });
       await f.start(network ? { integrations: undefined } : {});
       expect(await f.completed()).toMatchObject({ ok: false });
+      // A dropped connection is transient, so it goes again twice; the 400 stays a single attempt.
       expect(f.requests).toHaveLength(network ? 3 : 1);
-      for (const request of f.requests) expect(request.tools?.some(tool => tool.function.name === (network ? "ask_user" : "audit_write"))).toBe(true);
+      if (!network) expect(f.requests[0].tools?.some(tool => tool.function.name === "audit_write")).toBe(true);
+      else for (const request of f.requests) expect(request.tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
       expect(f.effects()).toEqual([]);
     }
-  });
+  }, 20_000);
 
   it("does not repeat an unsupported-tools rejection after its one plain retry", async () => {
     const f = await fixture((_body, response) => {

@@ -10,6 +10,7 @@ import { discardNativeLog, flushNativeLog } from "./native.ts";
 import type { RuntimeEvent, SendTurnInput } from "../contracts.ts";
 import { GrokDriver } from "./grok.ts";
 import { MinimaxDriver } from "./minimax.ts";
+import { createOpenAIChatRuntime } from "./openai-chat.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { MistralDriver } from "./mistral.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
@@ -924,7 +925,7 @@ describe("createOpenAIChatRuntime rejected keys", () => {
     await instance.adapter.sendTurn({ threadId: "thread", text: "hi" });
     await vi.waitFor(() => {
       if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
-    });
+    }, { timeout: 10_000 });
     stop();
     return events;
   };
@@ -961,5 +962,150 @@ describe("createOpenAIChatRuntime rejected keys", () => {
     await turn(instance);
     expect(await instance.snapshot()).toMatchObject({ state: "available", authenticated: true });
     await instance.dispose();
+  }, 20_000);
+});
+
+describe("createOpenAIChatRuntime transient retries", () => {
+  // Like runTurn, but the turn waits out the retry backoff before it completes.
+  const runRetryTurn = async (respond: () => Response, apiUrl = "https://api.example.com/v1") => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL) =>
+      String(url).endsWith("/chat/completions") ? respond() : new Response("", { status: 404 })));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "compat", displayName: "Compat", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: apiUrl, apiKeyEnv: "K", model: "m" }),
+      environment: { K: "secret" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    await instance.adapter.sendTurn({ threadId: "thread", text: "hi" });
+    await vi.waitFor(() => {
+      if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+    }, { timeout: 10_000 });
+    await instance.dispose();
+    return events;
+  };
+  const rateLimited = () => new Response(JSON.stringify({ error: { message: "Rate limit reached", code: "rate_limit_exceeded" } }), { status: 429 });
+  const answer = () => sse('data: {"choices":[{"index":0,"finish_reason":"stop","delta":{"content":"Hello!"}}]}\n\ndata: [DONE]\n\n');
+
+  it("does not retry a turn the liveness notice stopped", async () => {
+    // A local server on port 503: the notice names its host, and the bare "503" in it must not
+    // read as a 5xx status. The completions POST hangs until the notice aborts it, like a frozen
+    // server; the /models probe fails so the watcher fires.
+    vi.stubEnv("OPENMAUS_OPENAI_COMPAT_PROBE_MS", "200");
+    let requests = 0;
+    try {
+      vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: { signal?: AbortSignal }) => {
+        // The probe and the Ollama check fail at once, so neither waits out its timeout.
+        if (String(url).endsWith("/v1/models") || String(url).endsWith("/api/version")) throw new Error("fetch failed");
+        requests++;
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal!.reason ?? new DOMException("aborted", "AbortError")), { once: true });
+        });
+      }));
+      const instance = await OpenAICompatDriver.create({
+        instanceId: "compat-liveness", displayName: "Compat", enabled: true,
+        config: OpenAICompatDriver.decodeConfig({ url: "http://127.0.0.1:503/v1", apiKeyEnv: "K", model: "m" }),
+        environment: { K: "secret" },
+      });
+      const events: RuntimeEvent[] = [];
+      instance.adapter.onEvent((event) => events.push(event));
+      await instance.adapter.sendTurn({ threadId: "thread", text: "hi" });
+      await vi.waitFor(() => {
+        if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+      }, { timeout: 10_000 });
+      await instance.dispose();
+      expect(requests).toBe(1);
+      expect(events.filter((event) => event.type === "turn.retrying")).toHaveLength(0);
+      expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("stopped answering") });
+      expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }, 20_000);
+
+  it("does not retry a 409 whose body only looks like a server failure", async () => {
+    let requests = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => {
+      // Creation fetches /models for the catalog; only the completions POST counts.
+      if (String(url).endsWith("/v1/models")) return new Response("", { status: 404 });
+      requests++;
+      return new Response(JSON.stringify({ error: { message: "max 500 tokens" } }), { status: 409, headers: { "content-type": "application/json" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "compat-409", displayName: "Compat", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.com/v1", apiKeyEnv: "K", model: "m" }),
+      environment: { K: "secret" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    await instance.adapter.sendTurn({ threadId: "thread", text: "hi" });
+    await vi.waitFor(() => {
+      if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+    }, { timeout: 5_000 });
+    expect(requests).toBe(1);
+    expect(events.filter((event) => event.type === "turn.retrying")).toHaveLength(0);
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("HTTP 409") });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+    await instance.dispose();
   });
+
+  it("retries a 409 from api.openai.com, then answers", async () => {
+    let requests = 0;
+    const conflict = () => new Response(JSON.stringify({ error: { message: "conflict with the current resource state" } }), { status: 409 });
+    const events = await runRetryTurn(() => ++requests === 1 ? conflict() : answer(), "https://api.openai.com/v1");
+    expect(requests).toBe(2);
+    expect(events.find((event) => event.type === "turn.retrying")).toMatchObject({ attempt: 1, reason: "server_error" });
+    expect(events.find((event) => event.type === "item.completed")).toMatchObject({ text: "Hello!" });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  }, 20_000);
+
+  it("does not retry a 429 when the caller opts out", async () => {
+    let requests = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL) =>
+      String(url).endsWith("/chat/completions")
+        ? (requests++, rateLimited())
+        : new Response("", { status: 404 })));
+    const runtime = createOpenAIChatRuntime({
+      input: { instanceId: "runtime", displayName: "Runtime", environment: {}, enabled: true, config: {} },
+      driverKind: "test",
+      apiKey: "secret",
+      apiUrl: "https://api.example.com/v1",
+      models: () => ({ default: "m", options: [{ id: "m", label: "m" }] }),
+      requestBody: (model, messages, stream) => ({ model, messages, stream }),
+      httpErrorLabel: "Test",
+      missingKeyError: "missing key",
+      unavailableReason: "missing key",
+      timeoutMs: 10_000,
+      noRetry: true,
+      nativeLog: { source: "test", outgoing: () => ({}), incoming: () => ({}) },
+    });
+    const events: RuntimeEvent[] = [];
+    runtime.adapter.onEvent((event) => events.push(event));
+    await runtime.adapter.sendTurn({ threadId: "thread", text: "hi" });
+    await vi.waitFor(() => {
+      if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+    }, { timeout: 10_000 });
+    await runtime.dispose();
+    expect(requests).toBe(1);
+    expect(events.filter((event) => event.type === "turn.retrying")).toHaveLength(0);
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  }, 20_000);
+
+  it("retries a 429 from an endpoint that omits retryScale, then answers", async () => {
+    let requests = 0;
+    const events = await runRetryTurn(() => ++requests === 1 ? rateLimited() : answer());
+    expect(requests).toBe(2);
+    expect(events.find((event) => event.type === "turn.retrying")).toMatchObject({ attempt: 1, reason: "rate_limited" });
+    expect(events.find((event) => event.type === "item.completed")).toMatchObject({ text: "Hello!" });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  }, 20_000);
+
+  it("gives up after three 429s and reports the last one", async () => {
+    let requests = 0;
+    const events = await runRetryTurn(() => (requests++, rateLimited()));
+    expect(requests).toBe(3);
+    expect(events.filter((event) => event.type === "turn.retrying")).toHaveLength(2);
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("HTTP 429") });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  }, 20_000);
 });
