@@ -663,7 +663,7 @@ async function startDesktopCompanion({ waitForHosted = true, remember = true, ro
   }
   if (remember) for (const route of routes.filter((name) => ["wifi", "relay"].includes(name))) await rememberCompanionRoute(route, true);
   phoneLinkRoutes.touched();
-  await startCheckedManagedConnection({ check: () => (companionRouteOn("https") && managedCompanionTunnelAccess(secureCredentials) ? companionAccountService?.checkStoredAddress() : null), start: startManagedCompanionConnection, wait: waitForHosted && !companionRouteOn("relay"), desired: () => companionDesiredThisLaunch });
+  await startCheckedManagedConnection({ check: () => (companionRouteOn("https") && managedCompanionTunnelAccess(secureCredentials) ? companionAccountService?.checkStoredAddress() : null), start: startManagedCompanionConnection, wait: waitForHosted && routes.length > 0 && !companionRouteOn("relay"), desired: () => companionDesiredThisLaunch });
   return desktopCompanionState();
 }
 
@@ -748,7 +748,7 @@ function ensureCompanionAccountService() {
     onDemand: true,
     managedEndpointNeeded: async () =>
       companionRunning() ? managedEndpointNeed(await companionState().catch(() => null)) : null,
-    relay: { capable: () => companionE2E?.enabled === true, legacyDevices: async () => (companionRunning() ? deviceCounts(await companionState().catch(() => null)).legacy : null) }, installationChanged: () => companionE2E?.tokenRejected(),
+    relay: { capable: () => companionE2E?.enabled === true, legacyDevices: async () => (companionRunning() ? deviceCounts(await companionState().catch(() => null)).legacy : null) }, installationChanged: () => void companionE2E?.prime(),
     log: (line) => slog(line),
   });
   return companionAccountService;
@@ -2470,8 +2470,8 @@ ipcMain.handle("companion-account:verify-code", localOnly("companion-account:ver
 ));
 ipcMain.handle("companion-account:retry", localOnly("companion-account:retry", () => ensureCompanionAccountService().retry()));
 ipcMain.handle("companion-account:prepare", localOnly("companion-account:prepare", () => {
-  const refusal = managedRemoteAccessRefusal();
-  if (refusal) throw new Error(refusal);
+  const refusal = managedRemoteAccessRefusal(); if (refusal) throw new Error(refusal);
+  void companionE2E?.prime(); // a person is pairing: with Anywhere on, the encrypted connection starts before a code opens
   return rememberCompanionRoute("https", true).then(() => ensureCompanionAccountService().prepare());
 }));
 ipcMain.handle("companion-account:sign-out", localOnly("companion-account:sign-out", () => ensureCompanionAccountService().signOut()));

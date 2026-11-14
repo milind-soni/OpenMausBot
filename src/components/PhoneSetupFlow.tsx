@@ -49,7 +49,7 @@ import {
   preparePhonePairingRoute,
   queuePhonePairingAttempt,
   releasePhonePairingAttempt,
-  pairThroughRelayWithoutAddress,
+  pairThroughRelayWithoutAddress, relayServesPairing,
   secureAddressRequestLapsed,
   shouldArmPhoneSetupProvisioningTimeout,
   shouldPrepareSecureAddress,
@@ -322,7 +322,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
       }
       setError(null);
       try {
-        const started = await preparePhonePairingRoute(
+        let started = await preparePhonePairingRoute(
           routeMode,
           Boolean(state?.enabled),
           {
@@ -355,8 +355,9 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
           : null;
         let mode = routeMode;
         if (gate !== "open") {
-          const ask = prepare && (() => mutateCompanionBridgeState(companionMutationEpoch, () => prepare()));
-          if (!(await pairThroughRelayWithoutAddress(gate, accountOverride ?? account, started, { prepare: ask, isCurrent, setAccount, setProvisioning }))) return;
+          const relayed = await pairThroughRelayWithoutAddress(gate, accountOverride ?? account, started, { prepare: prepare && (() => mutateCompanionBridgeState(companionMutationEpoch, () => prepare())), latest: () => companion.state(), isCurrent, setAccount, setProvisioning });
+          if (!relayed) return;
+          setState((started = relayed));
           mode = "local";
           dispatchFlow({ type: "use-local" });
         } else if (prepare) void Promise.resolve().then(() => prepare()).catch(() => {});
@@ -702,7 +703,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
       return;
     }
     if (
-      phonePairingGate(account, state, false) === "open"
+      phonePairingGate(account, state, false) === "open" || relayServesPairing(account, state)
       || (!provisioning && secureAddressRequestLapsed(account, state))
     ) {
       void openPairing("automatic");

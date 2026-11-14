@@ -53,7 +53,7 @@ export interface CompanionAccountService {
   prepare(): Promise<CompanionAccountState>;
   /** Before the connector dials a stored address: asks whether it still exists (null when nothing changed). */
   checkStoredAddress(): Promise<CompanionAccountState | null>;
-  /** The managed connector's status as it changes: verify failures check, then provision the address again. */
+  /** The managed connector's status as it changes: verify failures check the address with the control plane. */
   connectorChanged(status: { status: string } | null | undefined): void;
   signOut(): Promise<CompanionAccountState>;
   restore(): Promise<CompanionAccountState>;
@@ -92,8 +92,8 @@ export declare function createCompanionAccountService(options: {
   relay?: { capable: () => boolean; legacyDevices: () => Promise<number | null> };
   releaseGraceMs?: number;
   releaseJitterMs?: number;
-  /** The least time between two forced re-provisions of an address that does not answer. */
-  reprovisionIntervalMs?: number;
+  /** The first wait between two out-of-turn checks of an address that does not answer (then 3x, then 12x). */
+  forcedCheckIntervalMs?: number;
   /** A new installation credential was stored. */
   installationChanged?: () => void;
   /** One line per failed setup step: code, HTTP status, request id, retry delay. */

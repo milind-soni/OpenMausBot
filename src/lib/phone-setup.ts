@@ -1,6 +1,6 @@
 import type { CompanionAccountState } from "../types/ogb";
 import { t } from "./i18n";
-import type { CompanionEndpoint, CompanionPairingRouteMode } from "./companion-pairing";
+import { companionPairingRoute, type CompanionEndpoint, type CompanionPairingRouteMode, type CompanionPairingRouteSource } from "./companion-pairing";
 
 export type PhoneSetupPhase = "intro" | "sign-in" | "verifying" | "qr" | "success";
 
@@ -192,45 +192,52 @@ export function shouldPrepareSecureAddress(
     && (account.status === "ready" || account.status === "connecting");
 }
 
-/** Automatic pairing goes through MausBot Relay instead of waiting on an HTTPS address whenever the relay can carry
- * the phone: the phone link runs with Anywhere on and the account is signed in (the relay token comes with the
- * sign-in, and is asked for as soon as a code is open). A stored HTTPS address that has not answered yet never holds
- * the code: it opens on the direct route at once, and its QR carries the relay. */
-export function relayServesPairing(
-  account: CompanionAccountState | null,
-  companion: (PhoneSetupCompanionSnapshot & { routes?: { relay?: { on: boolean } } }) | null,
-): boolean {
+export type RelayPairingSnapshot = PhoneSetupCompanionSnapshot & CompanionPairingRouteSource & {
+  routes?: CompanionPairingRouteSource["routes"] & { relay?: { on: boolean } };
+  e2e?: { enabled: boolean };
+};
+
+/** Automatic pairing goes through MausBot Relay instead of waiting on an HTTPS address only when the relay can carry
+ * the phone and the code has a direct route to open on: the account is signed in, the phone link runs with Anywhere
+ * on and the encrypted connection on (so the QR pins this computer's key and carries the relay), and Same Wi-Fi has
+ * an address. Otherwise the pairing waits for the HTTPS address, as before: a plain Wi-Fi code is never opened
+ * without the person choosing Wi-Fi. */
+export function relayServesPairing(account: CompanionAccountState | null, companion: RelayPairingSnapshot | null): boolean {
   return account?.available === true
     && account.status === "ready"
     && companion?.enabled === true
-    && companion.routes?.relay?.on === true;
+    && companion.routes?.relay?.on === true
+    && companion.e2e?.enabled === true
+    && companionPairingRoute(companion, "local") !== null;
 }
 
-/** An automatic pairing whose gate is not open. When the relay can carry the phone the code opens on the direct route
- * at once (true) and any address repair (`prepare`) runs behind it. Otherwise the pairing waits on `prepare`, and
- * opens through the relay only if the account it returns lets the relay carry it (signed in only now, or the address
- * request settled). False: the pairing keeps waiting. A failing `prepare` rejects, as before. */
-export async function pairThroughRelayWithoutAddress(
+/** An automatic pairing whose gate is not open. When the relay can carry the phone, the snapshot to open the code on
+ * comes back at once and any address repair (`prepare`) runs behind it. Otherwise the pairing waits on `prepare`, then
+ * reads the phone link again (`latest`: the request can switch the encrypted connection on), and opens through the
+ * relay if that now serves. Null: the pairing keeps waiting. A failing `prepare` rejects, as before. */
+export async function pairThroughRelayWithoutAddress<State extends RelayPairingSnapshot>(
   gate: PhonePairingGate,
   account: CompanionAccountState | null,
-  companion: Parameters<typeof relayServesPairing>[1],
+  companion: State,
   actions: {
     prepare: (() => Promise<CompanionAccountState>) | null;
+    latest: () => Promise<State>;
     isCurrent: () => boolean;
     setAccount: (next: CompanionAccountState) => void;
     setProvisioning: (on: boolean) => void;
   },
-): Promise<boolean> {
+): Promise<State | null> {
   if (relayServesPairing(account, companion)) {
     if (actions.prepare) void actions.prepare().then((next) => { if (actions.isCurrent()) actions.setAccount(next); }, () => {});
-    return true;
+    return companion;
   }
   actions.setProvisioning(gate === "wait" || gate === "start");
-  if (!actions.prepare) return false;
+  if (!actions.prepare) return null;
   const next = await actions.prepare();
-  if (!actions.isCurrent()) return false;
+  if (!actions.isCurrent()) return null;
   actions.setAccount(next);
-  return relayServesPairing(next, companion);
+  const fresh = await actions.latest().catch(() => companion);
+  return actions.isCurrent() && relayServesPairing(next, fresh) ? fresh : null;
 }
 
 export function secureAddressRequestLapsed(

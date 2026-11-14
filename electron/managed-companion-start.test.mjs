@@ -30,6 +30,26 @@ describe("starting the managed connection with the phone link", () => {
     expect(stopped).not.toHaveBeenCalled();
   });
 
+  it("dials anyway when the check is slow, and lets the check correct it afterwards", async () => {
+    const check = vi.fn(() => new Promise(() => {}));
+    const start = vi.fn(async () => {});
+    const begun = Date.now();
+    await startCheckedManagedConnection({ check, start, wait: true, desired: () => true, checkWaitMs: 50 });
+    expect(start).toHaveBeenCalledWith({ waitForVerification: true });
+    expect(Date.now() - begun).toBeLessThan(2_000);
+
+    const background = vi.fn(async () => {});
+    await startCheckedManagedConnection({ check, start: background, wait: false, desired: () => true, checkWaitMs: 50 });
+    expect(background).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(background).toHaveBeenCalledWith({ waitForVerification: false }));
+  });
+
+  it("does not dial once the phone link stopped during the check", async () => {
+    const start = vi.fn(async () => {});
+    await startCheckedManagedConnection({ check: async () => null, start, wait: true, desired: () => false });
+    expect(start).not.toHaveBeenCalled();
+  });
+
   it("still starts when the check fails or there is nothing to check", async () => {
     for (const check of [vi.fn(async () => Promise.reject(new Error("offline"))), vi.fn(() => { throw new Error("no account"); }), vi.fn(() => undefined)]) {
       const start = vi.fn(async () => {});

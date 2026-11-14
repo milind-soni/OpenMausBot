@@ -81,9 +81,11 @@ const WATCHDOG_CHECK_STATES = new Set(["starting", "ready", "retrying", "error"]
 
 const CONNECTOR_FAILING_STATES = new Set(["retrying", "error"]);
 
-/** Verify failures in a row after which a stored address is asked for again, whatever its status reads. */
-const REPROVISION_AFTER_FAILURES = 2;
-const DEFAULT_REPROVISION_INTERVAL_MS = 10 * 60_000;
+/** Verify failures in a row after which a stored address is checked with the control plane. */
+const FORCED_CHECK_AFTER_FAILURES = 2;
+const DEFAULT_FORCED_CHECK_INTERVAL_MS = 10 * 60_000;
+/** Each such check waits longer (10 min, 30 min, then 2 h with the default), until a connection verifies. */
+const FORCED_CHECK_STEPS = [1, 3, 12];
 
 const defaultSetTimer = (callback, milliseconds) => {
   const timer = setTimeout(callback, milliseconds);
@@ -129,7 +131,7 @@ export function createCompanionAccountService({
   relay = { capable: () => false, legacyDevices: async () => null },
   releaseGraceMs = DEFAULT_RELEASE_GRACE_MS,
   releaseJitterMs = DEFAULT_RELEASE_JITTER_MS,
-  reprovisionIntervalMs = DEFAULT_REPROVISION_INTERVAL_MS,
+  forcedCheckIntervalMs = DEFAULT_FORCED_CHECK_INTERVAL_MS,
   /** A new installation credential was stored: the relay token can be asked for now. */
   installationChanged = () => {},
   // Only the code, HTTP status, request id and retry delay: never an email, token, credential or address.
@@ -148,7 +150,8 @@ export function createCompanionAccountService({
   let requestedAt = null;
   let disposed = false;
   let connectorFailures = 0;
-  let lastForcedReprovision = null;
+  let forcedChecks = 0;
+  let nextForcedCheckAt = null;
 
   const serialize = (work) => {
     const next = transition.then(work, work);
@@ -398,7 +401,7 @@ export function createCompanionAccountService({
     });
   };
 
-  /** `addressGone`: the stored address is known gone or unanswered, so it is forgotten even when no tunnel is asked for. */
+  /** `addressGone`: the control plane said the stored address is gone, so it is forgotten even when no tunnel is asked for. */
   const provision = async ({ accountToken, user, addressGone = false }) => {
     const clientInstanceId = await ensureClientIdentity();
     await finishPendingRelease();
@@ -642,28 +645,33 @@ export function createCompanionAccountService({
     return retryWork();
   });
 
-  /** Re-provisions only on a definitive "no endpoint" answer; a network or service failure keeps everything as is. */
-  const reconcileIfEndpointGone = async ({ onGone = () => retryWork({ addressGone: true }) } = {}) => {
+  /** Re-provisions only on a definitive "no endpoint" answer; a network or service failure keeps everything as is.
+   * `gone`: the control plane no longer holds this address (none, deleted, another one, or this credential refused). */
+  const reconcileIfEndpointGone = async ({ onGone = ({ gone } = {}) => retryWork({ addressGone: gone === true }) } = {}) => {
     const document = credentials();
     const account = storedAccount(document);
     const access = managedCompanionTunnelAccess(document);
     if (!account || !access || companionAccountCleanupPending(document)) return null;
     // A stored address without a usable installation credential can never be checked, released or given a relay
     // token: provisioning again (with the account) is the only way it is ever asked about.
-    if (!account.installationCredential) return onGone();
+    if (!account.installationCredential) {
+      // Counted as a check, so a provisioning that keeps failing is tried once per check interval, not per event.
+      lastEndpointCheck = now();
+      return onGone({ gone: false });
+    }
     if (typeof client.getEndpoint !== "function") return null;
     lastEndpointCheck = now();
     let endpoint;
     try {
       endpoint = await client.getEndpoint(account.installationCredential);
     } catch (error) {
-      if (error instanceof ControlPlaneError && error.status === 401) return onGone();
+      if (error instanceof ControlPlaneError && error.status === 401) return onGone({ gone: true });
       return null;
     }
     if (endpoint && endpoint.url === access.endpoint && !ENDPOINT_NEEDS_RECONCILE.has(endpoint.status)) {
       return null;
     }
-    return onGone();
+    return onGone({ gone: !endpoint || endpoint.url !== access.endpoint || endpoint.status !== "error" });
   };
 
   const endpointCheckDue = () =>
@@ -837,6 +845,7 @@ export function createCompanionAccountService({
     if (
       !configured ||
       disposed ||
+      phase?.status === "signed-out" ||
       !companionIsOn() ||
       !managedCompanionTunnelAccess(document) ||
       !endpointCheckDue()
@@ -846,11 +855,19 @@ export function createCompanionAccountService({
     return reconcileIfEndpointGone();
   });
 
-  /** The connector's status, as it changes. A verify failure checks the address; failures in a row provision it
-   * again even when the control plane still lists it, at most once per `reprovisionIntervalMs`. */
+  /** The connector's status, as it changes. Verify failures in a row check the address with the control plane, on a
+   * growing, jittered interval that a verified connection resets (the start and prepare() check it when due). A
+   * server-listed address is never dropped because this computer cannot reach it: only the control plane's "gone"
+   * forgets it. */
   const connectorChanged = (status) => {
     if (disposed || !configured) return;
-    if (status?.status === "ready" || status?.status === "stopped" || status?.status === "unconfigured") {
+    if (status?.status === "ready") {
+      connectorFailures = 0;
+      forcedChecks = 0;
+      nextForcedCheckAt = null;
+      return;
+    }
+    if (status?.status === "stopped" || status?.status === "unconfigured") {
       connectorFailures = 0;
       return;
     }
@@ -859,6 +876,7 @@ export function createCompanionAccountService({
     void serialize(async () => {
       const document = credentials();
       if (
+        phase?.status === "signed-out" ||
         !companionIsOn() ||
         !storedAccount(document) ||
         !managedCompanionTunnelAccess(document) ||
@@ -868,15 +886,14 @@ export function createCompanionAccountService({
       ) {
         return null;
       }
-      const forcedDue = lastForcedReprovision === null || now() - lastForcedReprovision >= reprovisionIntervalMs;
-      if (connectorFailures >= REPROVISION_AFTER_FAILURES && forcedDue) {
-        if (!(await probeControlPlane({ force: true }))) return null;
-        lastForcedReprovision = now();
-        connectorFailures = 0;
-        writeLog("companion account: the secure address did not answer; asking for it again");
-        return retryWork({ addressGone: true });
-      }
-      return endpointCheckDue() ? reconcileIfEndpointGone() : null;
+      if (connectorFailures < FORCED_CHECK_AFTER_FAILURES || (nextForcedCheckAt !== null && now() < nextForcedCheckAt)) return null;
+      const step = forcedCheckIntervalMs * FORCED_CHECK_STEPS[Math.min(forcedChecks, FORCED_CHECK_STEPS.length - 1)];
+      nextForcedCheckAt = now() + Math.round(step * (0.8 + 0.4 * random()));
+      forcedChecks += 1;
+      connectorFailures = 0;
+      if (!(await probeControlPlane())) return null;
+      writeLog("companion account: the secure address did not answer; checking it with the control plane");
+      return reconcileIfEndpointGone();
     }).catch(() => {});
   };
 
