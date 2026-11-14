@@ -22,6 +22,15 @@ describe("EngineUpdateNotice", () => {
     expect(markup).toContain('aria-label="Copy command"');
   });
 
+  it("shows only the note when there is nothing to run, as on My Cloud", () => {
+    const cloud = { title: "Codex 0.160.1 is out", message: "On My Cloud, Codex updates with the Cloud." };
+    const markup = renderToStaticMarkup(createElement(EngineUpdateNotice, { update: cloud }));
+
+    expect(markup).toContain("On My Cloud, Codex updates with the Cloud.");
+    expect(markup).not.toContain('aria-label="Copy command"');
+    expect(markup).not.toContain("<button");
+  });
+
   it("offers the native Terminal action when the desktop bridge supports it", () => {
     vi.stubGlobal("window", { ogb: { openInstallTerminal: vi.fn() } });
 
