@@ -1877,6 +1877,11 @@
             "type": "boolean",
             "description": "Speak this bot's replies aloud as they settle, without being asked."
           },
+          "browserProfile": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "With for_bot_id, only when the person asked: an idle teammate's browser profile, an existing one's name or id; \"\" = its own browser."
+          },
           "reason": {
             "type": "string",
             "description": "One sentence the user will see explaining why."
