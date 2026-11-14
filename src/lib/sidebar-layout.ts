@@ -133,7 +133,7 @@ export function partitionSidebarBots<T extends SidebarBot>(
 
 export function withPrimaryTile<T extends SidebarBot>(parts: ReturnType<typeof partitionSidebarBots<T>>, defaultBotId: string | undefined) {
   const primary = parts.unsectionedChief
-    ?? parts.pinnedBots.find((bot) => bot.chiefOfStaff && !bot.section)
+    ?? parts.pinnedBots.find((bot) => bot.chiefOfStaff)
     ?? [...parts.pinnedBots, ...parts.unsectionedBots].find((bot) => bot.id === defaultBotId)
     ?? null;
   if (!primary) return { ...parts, primary };

@@ -318,6 +318,14 @@ describe("the primary tile", () => {
     expect(tiled.sectionChiefs.map((candidate) => candidate.id)).toEqual(["lead"]);
     expect(withPrimaryTile(parts, undefined).primary).toBeNull();
   });
+
+  it("prefers a pinned Chief over the MausBot fallback, even one pinned inside a department", () => {
+    const parts = partitionSidebarBots([bot("lead", { chiefOfStaff: true, pinned: true, section: "Work" }), bot("mausbot"), bot("bea")]);
+    const tiled = withPrimaryTile(parts, "mausbot");
+    expect(tiled.primary?.id).toBe("lead");
+    expect(tiled.pinnedBots.map((candidate) => candidate.id)).toEqual([]);
+    expect(tiled.unsectionedBots.map((candidate) => candidate.id)).toEqual(["mausbot", "bea"]);
+  });
 });
 
 describe("active bots first", () => {
