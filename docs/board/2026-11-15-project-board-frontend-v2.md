@@ -1,7 +1,7 @@
 # 项目看板 v2：可追责字段、权限与跨窗口（2026-11-15）
 
 - 基线：Lin 集成提交 `29984bd0f695a2081cc176b748c946f65f5ca339`（其下是 Pixel `807e5eb3`、后端 `2ae37364`、上游 `a6cd67c7`）。
-- 前端分支：`feat/project-board-frontend-v2-20261115`，本次提交见文末。
+- 前端分支：`feat/project-board-frontend-v2-20261115`，实现提交 `451ae9fb`（基于 `29984bd`）。
 - 目标：把项目/子项目的负责人、目标、交付物、完成标准、状态做成真实可编辑字段；子项目独立阶段与依据；任务阻塞原因/阶段依据/具名验收；按服务端 `permissions` 做成员有限编辑；例程运行不入待归类；验收不改产品阶段；两个入口读同一份数据并跨窗口刷新。
 - 契约真源：`packages/phone-protocol/src/board.ts` 与 `docs/board/2026-11-15-project-board-api.md`。
 
