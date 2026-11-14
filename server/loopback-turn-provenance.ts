@@ -34,8 +34,8 @@ export class SharedComputerTurnAuthorization {
 
   queuedProof(id: string): LoopbackTurnProvenance | undefined { return this.queued.get(id); }
 
-  canSteer(principal: string, proof: LoopbackTurnProvenance | undefined, own: OwnServer, sessions: readonly LenderSession[], sessionLive: (id: string) => boolean, credentialIsCurrent: (proof: Extract<LoopbackTurnProvenance, { kind: "desktop-owner" | "companion" }>) => boolean): boolean {
-    return requestSharedComputerPrincipal(proof, own, sessions, sessionLive, (id) => this.revokedCompanions.has(id), credentialIsCurrent) === principal;
+  canSteer(principal: string, active: LoopbackTurnProvenance | undefined, proof: LoopbackTurnProvenance | undefined, own: OwnServer, sessions: readonly LenderSession[], sessionLive: (id: string) => boolean, credentialIsCurrent: (proof: Extract<LoopbackTurnProvenance, { kind: "desktop-owner" | "companion" }>) => boolean): boolean {
+    return this.coalescingKey(active) !== undefined && this.coalescingKey(active) === this.coalescingKey(proof) && requestSharedComputerPrincipal(proof, own, sessions, sessionLive, (id) => this.revokedCompanions.has(id), credentialIsCurrent) === principal;
   }
 
   coalescingKey(proof: LoopbackTurnProvenance | undefined): string | undefined { return proof ? JSON.stringify(proof) : undefined; }

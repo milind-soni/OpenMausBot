@@ -108,12 +108,14 @@ describe("loopback shared-computer request provenance", () => {
   it("allows steering only from the active verified requester principal", () => {
     const authorization = new SharedComputerTurnAuthorization();
     const owner = { kind: "desktop-owner" as const, credentialId: "current-desktop" };
+    const otherOwner = { kind: "companion" as const, deviceId: "paired-device", credentialId: "current-phone" };
     const guest = { kind: "session" as const, sessionId: "guest", person: "p_guest" };
-    const currentCredential = (proof: Extract<LoopbackTurnProvenance, { kind: "desktop-owner" | "companion" }>) => proof.credentialId === "current-desktop";
-    expect(authorization.canSteer(OWN_SERVER_LENDER, owner, own, [], () => true, currentCredential)).toBe(true);
-    expect(authorization.canSteer(OWN_SERVER_LENDER, guest, own, [], () => true, currentCredential)).toBe(false);
-    expect(authorization.canSteer(OWN_SERVER_LENDER, undefined, own, [], () => true, currentCredential)).toBe(false);
-    expect(authorization.canSteer(OWN_SERVER_LENDER, { ...owner, credentialId: "rotated" }, own, [], () => true, currentCredential)).toBe(false);
+    const currentCredential = (proof: Extract<LoopbackTurnProvenance, { kind: "desktop-owner" | "companion" }>) => proof.credentialId === "current-desktop" || proof.credentialId === "current-phone";
+    expect(authorization.canSteer(OWN_SERVER_LENDER, owner, owner, own, [], () => true, currentCredential)).toBe(true);
+    expect(authorization.canSteer(OWN_SERVER_LENDER, owner, otherOwner, own, [], () => true, currentCredential)).toBe(false);
+    expect(authorization.canSteer(OWN_SERVER_LENDER, owner, guest, own, [], () => true, currentCredential)).toBe(false);
+    expect(authorization.canSteer(OWN_SERVER_LENDER, owner, undefined, own, [], () => true, currentCredential)).toBe(false);
+    expect(authorization.canSteer(OWN_SERVER_LENDER, owner, { ...owner, credentialId: "rotated" }, own, [], () => true, currentCredential)).toBe(false);
   });
 
   it("consumes queued and steered provenance once for the matching turn", () => {
