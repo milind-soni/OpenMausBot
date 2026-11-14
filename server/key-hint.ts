@@ -23,6 +23,7 @@ export function nestedKeyStatus(cfg: AppConfig) {
     geminiDeciderKey: keyStatus(cfg.decider?.geminiKey),
     openrouterDeciderKey: keyStatus(cfg.decider?.openrouterKey),
     workersAiToken: keyStatus(cfg.decider?.workersAiToken),
+    customDeciderKey: keyStatus(cfg.decider?.customKey),
     openaiImageApiKey: keyStatus(cfg.imageGen?.key),
     customImageApiKey: keyStatus(cfg.imageGen?.customApiKey),
     geminiImageApiKey: keyStatus(cfg.imageGen?.geminiKey),

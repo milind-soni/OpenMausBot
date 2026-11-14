@@ -24,11 +24,15 @@ export function roomMemberQueueTitle(group: Group, members: Bot[], bot: Bot): st
   return entry ? t("room.queue.member", { name: bot.name, status: roomQueueLabel(entry, nameIn(members)) }) : undefined;
 }
 
+const ROUTED_BY = {
+  jev: "room.routedBy", gemini: "room.routedBy.gemini", openrouter: "room.routedBy.openrouter", workersai: "room.routedBy.workersai", custom: "room.routedBy.custom",
+} as const;
+
 export function RoutedByLine({ routedBy }: { routedBy: NonNullable<Message["routedBy"]> }) {
   const percent = Math.round(Math.min(1, Math.max(0, routedBy.probability)) * 100);
   return (
     <div data-testid="routed-by" className="mt-1 px-1 text-[11px] text-ink-secondary">
-      {t(routedBy.provider === "gemini" ? "room.routedBy.gemini" : routedBy.provider === "openrouter" ? "room.routedBy.openrouter" : routedBy.provider === "workersai" ? "room.routedBy.workersai" : "room.routedBy", { percent: String(percent) })}
+      {t(ROUTED_BY[routedBy.provider] ?? "room.routedBy", { percent: String(percent) })}
     </div>
   );
 }

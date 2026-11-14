@@ -28,6 +28,26 @@ describe("isFormattedReply", () => {
 describe("splitReplyBlocks", () => {
   const table = "| Sender | Emails |\n|---|---:|\n| Acme | 4 |\n| Priya | 2 |";
 
+  it.each(["`", "~"])("keeps tables inside longer %s fences as code", (character) => {
+    const outer = character.repeat(4);
+    const opposite = character === "`" ? "~~~~" : "````";
+    const fenced = [
+      `${outer}md`, character.repeat(3), opposite, table, `${outer} still code`, table, character.repeat(5),
+    ].join("\n");
+    expect(splitReplyBlocks(`${fenced}\n\n${table}`)).toEqual([
+      { kind: "prose", text: fenced },
+      { kind: "table", text: table },
+    ]);
+  });
+
+  it("keeps tables outside an invalid backtick fence visible", () => {
+    const invalidFence = "```md`example";
+    expect(splitReplyBlocks(`${invalidFence}\n\n${table}`)).toEqual([
+      { kind: "prose", text: invalidFence },
+      { kind: "table", text: table },
+    ]);
+  });
+
   it("keeps a reply with no table as one prose block", () => {
     expect(splitReplyBlocks("Hello\n\n- one\n- two")).toEqual([{ kind: "prose", text: "Hello\n\n- one\n- two" }]);
   });

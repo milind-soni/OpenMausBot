@@ -76,6 +76,8 @@ export interface ConfigRouteDeps {
   sharedComputerControl: Pick<SharedComputerControl, "close">;
   hostedModels: boolean;
   cloudHome: boolean;
+  /** A Team Cloud shares one browser egress policy across every member. */
+  cloudTeam?: boolean;
   /** Security: a Team Cloud never takes over another installation's Composio user, since every member's bots would then get that person's apps. */
   sharedMembership: () => boolean;
   lendingEnabled(): boolean;
@@ -132,6 +134,9 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       const body = await readBody(req);
       if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatchForPerson(body);
+      if (deps.cloudTeam && patch.browserEngine?.egress?.proxy !== undefined && !(auth.kind === "session" && auth.session.teamRole === "owner")) {
+        return json(res, 403, { error: "Only the Team Cloud owner can configure the browser proxy." });
+      }
       if (patch.profile && ownProfile) {
         // The address is the verified claim's; a profile names no other.
         const { email: _email, ...own } = patch.profile;
@@ -579,6 +584,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.decider?.geminiKey !== undefined) persisted.decider.geminiKey = "";
           if (persisted.decider?.openrouterKey !== undefined) persisted.decider.openrouterKey = "";
           if (persisted.decider?.workersAiToken !== undefined) persisted.decider.workersAiToken = "";
+          if (persisted.decider?.customKey !== undefined) persisted.decider.customKey = "";
           if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
           if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
           if (persisted.imageGen?.geminiKey !== undefined) persisted.imageGen.geminiKey = "";

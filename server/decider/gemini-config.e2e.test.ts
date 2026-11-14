@@ -20,9 +20,10 @@ let configRoute: ReturnType<typeof createConfigRoutes>;
 let testRoute: ReturnType<typeof createDeciderRoutes>;
 let helperRoute: ReturnType<typeof createHelperToolRoutes>;
 let status = 200;
-const calls: Array<{ url: string; key: string | null; body: any }> = [];
+const calls: Array<{ url: string; key: string | null; authorization: string | null; body: any }> = [];
 const fetchGoogle: typeof fetch = async (url, init) => {
-  calls.push({ url: String(url), key: new Headers(init?.headers).get("x-goog-api-key"), body: JSON.parse(String(init?.body)) });
+  const headers = new Headers(init?.headers);
+  calls.push({ url: String(url), key: headers.get("x-goog-api-key"), authorization: headers.get("authorization"), body: JSON.parse(String(init?.body)) });
   return new Response(JSON.stringify(status === 200 ? { answers: { answer: { type: "noul", noul: 0.9 } }, usage: { total_input_tokens: 10 } } : { error: KEY }), { status });
 };
 
@@ -77,6 +78,24 @@ const api = async (method: string, path: string, body?: unknown) => {
 };
 
 describe("Gemini decisions through isolated HTTP routes", () => {
+  it("switches between Gemini and a custom endpoint without mixing their settings or credentials", async () => {
+    const customKey = "custom-fixture-secret";
+    const customBaseUrl = "https://gateway.example.com/v1";
+    expect((await api("PUT", "/api/config", { decider: { geminiKey: KEY } })).status).toBe(200);
+    const custom = await api("PUT", "/api/config", { decider: { provider: "custom", customKey, customBaseUrl, customModel: "decision-model-1", customApi: "systemone" } });
+    expect(custom.status).toBe(200);
+    expect(custom.body.decider).toMatchObject({ provider: "custom", configured: true, baseUrl: customBaseUrl, model: "decision-model-1", api: "systemone" });
+    expect(JSON.stringify(custom.body)).not.toContain(customKey);
+    expect((await api("POST", "/api/decider/test", {})).body.ok).toBe(true);
+    expect(calls.at(-1)).toMatchObject({ url: `${customBaseUrl}/systemone`, key: null, authorization: `Bearer ${customKey}`, body: { model: "decision-model-1" } });
+    expect((await api("PUT", "/api/config", { decider: { provider: "gemini" } })).body.decider).toMatchObject({ provider: "gemini", configured: true, geminiKeySource: "own" });
+    expect((await api("POST", "/api/decider/test", {})).body.ok).toBe(true);
+    expect(calls.at(-1)).toMatchObject({ url: GEMINI_DECIDER_URL, key: KEY, authorization: null });
+    expect((await api("PUT", "/api/config", { decider: { provider: "custom" } })).body.decider).toMatchObject({ provider: "custom", configured: true, baseUrl: customBaseUrl, model: "decision-model-1" });
+    expect((await api("POST", "/api/decider/test", {})).body.ok).toBe(true);
+    expect(calls.at(-1)).toMatchObject({ url: `${customBaseUrl}/systemone`, key: null, authorization: `Bearer ${customKey}` });
+  });
+
   it("saves and tests a separate key, answers a bot, then clears it", async () => {
     expect((await api("PUT", "/api/config", { decider: { geminiKey: KEY } })).status).toBe(200);
     expect((await api("POST", "/api/decider/test", {})).body.ok).toBe(true);

@@ -4,6 +4,7 @@ import type { AppConfig } from "../config.ts";
 import { deciderCredential, type ServiceCredential } from "../included-services.ts";
 import { WORKERS_AI_ACCOUNT_ID } from "./config.ts";
 import { GEMINI_DECIDER_URL } from "./gemini.ts";
+import { customEndpoint } from "./custom.ts";
 import { OPENROUTER_DEFAULT_BASE_URL } from "./openrouter.ts";
 import type { DeciderProvider } from "./types.ts";
 import { WORKERS_AI_DEFAULT_BASE_URL } from "./workers-ai.ts";
@@ -51,6 +52,14 @@ export function geminiAccount(cfg: AppConfig, draft?: string): HelperAccount | n
   const saved = source === "speech" ? cfg.tts?.geminiKey : source === "images" ? cfg.imageGen?.geminiKey : cfg.decider?.geminiKey;
   const token = draft?.trim() || saved?.trim();
   return token ? { provider: "gemini", token, api: GEMINI_DECIDER_URL, included: false } : null;
+}
+
+/** The person's own gateway: a key with nowhere safe to send it is nothing. */
+export function customAccount(cfg: AppConfig, draft?: string): HelperAccount | null {
+  const token = draft?.trim() || cfg.decider?.customKey?.trim();
+  const base = cfg.decider?.customBaseUrl?.trim();
+  if (!token || !base || !customEndpoint(base, "systemone")) return null;
+  return { provider: "custom", token, api: base, included: false };
 }
 
 /** Cloud's included relay, a Jev base URL whose `/v1/extract` also extracts. */

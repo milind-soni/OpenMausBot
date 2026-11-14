@@ -15,7 +15,7 @@ function storage(): Storage | undefined {
   }
 }
 
-function showThreads(): boolean {
+export function showThreads(): boolean {
   if (sessionChoice !== undefined) return sessionChoice;
   try {
     return storage()?.getItem(SHOW_THREADS_KEY) !== "0";

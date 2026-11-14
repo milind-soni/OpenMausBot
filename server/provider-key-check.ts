@@ -32,6 +32,19 @@ export function isLoopback(hostname: string): boolean {
   return host === "localhost" || host === "::1" || (isIP(host) === 4 && host.startsWith("127."));
 }
 
+/** `{root}/{path}`, or null when a key must not be sent there: https anywhere, plain http only to this machine. */
+export function keySafeUrl(root: string, path: string): URL | null {
+  let url: URL;
+  try {
+    url = new URL(`${root.trim().replace(/\/+$/, "")}/${path}`);
+  } catch {
+    return null;
+  }
+  if (url.username || url.password) return null;
+  if (url.protocol === "https:") return url;
+  return url.protocol === "http:" && isLoopback(url.hostname) ? url : null;
+}
+
 export function providerBaseUrl(provider: ProviderKeyKind, base?: string | null): string {
   return (base?.trim() || DEFAULT_URLS[provider]).replace(/\/+$/, "");
 }

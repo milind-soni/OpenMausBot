@@ -48,6 +48,7 @@ function render() {
     job: byTestId("decider-job-roomRouting")[0]!,
     provider: byTestId("decider-provider")[0],
     source: byTestId("decider-gemini-source")[0],
+    customApi: byTestId("decider-custom-api")[0],
     geminiManage: byTestId("decider-gemini-manage")[0],
     model: byTestId("decider-model")[0],
     save: byTestId("decider-save")[0]!,
@@ -172,14 +173,49 @@ describe("DecisionModelSettings", () => {
     expect(helpersStatusLine(null)).toBe("Decisões: sem configuração · Extração: sem configuração");
   });
 
-  it("offers the providers, with Jev selected for an existing install and no model picker", () => {
+  it("offers every provider, with Jev selected for an existing install and no model picker", () => {
     const view = render();
     expect(view.provider!.props.value).toBe("jev");
-    expect(optionsOf(view.provider!)).toEqual(["jev", "gemini", "openrouter"]);
+    expect(optionsOf(view.provider!)).toEqual(["jev", "gemini", "openrouter", "custom"]);
     expect(view.html).toContain("TypeSafe Jev");
     expect(view.model).toBeUndefined();
     runEffects();
     expect(fixture.api).not.toHaveBeenCalled();
+  });
+
+  it("asks a custom endpoint for its base URL, model and protocol, and saves its key in its own slot", async () => {
+    fixture.config = status({ provider: "custom", model: "m-1", api: "decisions", baseUrl: "https://gw.example.com/v1", configured: false, enabled: false, jobs: { roomRouting: true } });
+    let view = render();
+    expect(view.html).toContain('value="https://gw.example.com/v1"');
+    expect(view.html).toContain('value="m-1"');
+    expect(view.html).toContain("Endpoint API key");
+    expect(view.html).not.toContain("typesafe.ai");
+    fixture.api.mockResolvedValue(fixture.config);
+    type(view.input, "gw-key");
+    view = render();
+    click(view.save);
+    await flush();
+    expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { customKey: "gw-key" } }) });
+    expect(deciderFailureText({ reason: "malformed" }, false, "custom")).toContain("Check the protocol and model ID.");
+    expect(deciderFailureText({ reason: "http_error", status: 500 }, false, "custom")).toBe("Your endpoint sent back an error (500).");
+  });
+
+  it("switches between custom and Gemini controls and saves the custom protocol", async () => {
+    fixture.api.mockResolvedValueOnce(status({ provider: "custom", configured: false, enabled: false, jobs: { roomRouting: true } }));
+    change(render().provider!, "custom");
+    await flush();
+    expect(render().source).toBeUndefined();
+    expect(optionsOf(render().customApi!)).toEqual(["systemone", "decisions"]);
+    fixture.api.mockResolvedValueOnce(fixture.config);
+    change(render().customApi!, "decisions");
+    await flush();
+    expect(fixture.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { customApi: "decisions" } }) });
+    fixture.api.mockResolvedValueOnce(gemini());
+    change(render().provider!, "gemini");
+    await flush();
+    expect(render().provider!.props.value).toBe("gemini");
+    expect(render().customApi).toBeUndefined();
+    expect(optionsOf(render().source!)).toEqual(["own", "speech", "images"]);
   });
 
   it("lists only the jobs that work: no coming-soon rows", () => {

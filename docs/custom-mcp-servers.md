@@ -107,6 +107,24 @@ sending a message. Choose which bots get each card under **Bot access**. To
 have a bot answer new mail, texts or calls, add a webhook for that bot in
 **Automations** and paste its address into the service.
 
+### BubblaV
+
+In Plugins, find **BubblaV** and click **Connect**. The card uses BubblaV's
+official hosted MCP endpoint, `https://www.bubblav.com/mcp`, and opens BubblaV's
+browser sign-in. Sign in (or create a free account), choose the one chatbot
+(website) the connection may reach, and choose **Full access** or **Read
+only**. No API key is needed. After sign-in and tool discovery it enables the
+connection, and **Disconnect** and **Bot access** work as they do for Whop.
+
+A bot that can use BubblaV reads that chatbot's reports, unanswered questions,
+conversations and leads. With **Full access** it can also add and delete
+knowledge and change the chatbot's instructions, widget, forms and webhook
+tools, so choose which bots get it under **Bot access**; **Read only** lists
+and runs only BubblaV's read-only tools. BubblaV saves the sign-in as an API
+key named **MCP Client** under **Settings → API Keys**, where revoking it ends
+the connection. The key lasts one year, then the card asks you to sign in
+again. See [BubblaV's OpenMausBot guide](https://docs.bubblav.com/user-guide/integrations/openmausbot).
+
 ### Servers that ask you to sign in
 
 Some URL servers take no token; they want you to sign in with your browser
@@ -429,6 +447,20 @@ tool selection keeps working. In `config.json` it is
 removed when the switch goes off; a skill brought in from `~/.claude/skills`
 is left out of a Claude turn while the switch is on, since Claude already has
 the original.
+
+A project can ship skills for any AI agent in `agents/skills`, `.agents/skills`
+or `.claude/skills`. When a bot works in such a folder (or one below it, up to
+the git root; outside a repository, only the working folder itself counts), its
+**Skills** page lists them under **In this project**, and the bot uses them by
+itself, the way Claude Code loads `.claude/skills`. There is no switch. Claude
+Code loads `.claude/skills` and Codex loads `.agents/skills` themselves, and
+those show as the engine's own skills, each with the bot's own switch. A bot's
+prompt lists each project skill with its SKILL.md path and `/name` runs it,
+except one marked `user-invocable: false`, which only the model uses. A
+SKILL.md must be a plain file of a skill's size, and a skill folder linked to a
+place outside the project is skipped. The bot's own, library and brought-in skills keep
+their names, an engine without file tools gets none, and they never travel in a
+bot or team package.
 
 The switch drops the CLI flag `--strict-mcp-config` (Claude Code 1.0.60+)
 while keeping `--setting-sources project` (1.0.122+). The environment variable

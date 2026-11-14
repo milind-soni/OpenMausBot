@@ -1,5 +1,5 @@
 /**
- * Bakes every festival pack into `shared/carved-bodies.ts`. Run with `pnpm gen:carved`.
+ * Bakes every festival pack into `packages/phone-protocol/src/carved-bodies.ts`. Run with `pnpm gen:carved`.
  *
  * Each pack's drawings live in `scripts/mascot-bodies/<pack>.ts`, in a 240-unit square
  * centred on x = 120.
@@ -294,9 +294,9 @@ ${entries.join("\n")}
 `
 }
 
-const out = fileURLToPath(new URL("../shared/carved-bodies.ts", import.meta.url))
+const out = fileURLToPath(new URL("../packages/phone-protocol/src/carved-bodies.ts", import.meta.url))
 writeFileSync(out, emitTs())
-console.log(`wrote ${BAKED.length} carved bodies to shared/carved-bodies.ts`)
+console.log(`wrote ${BAKED.length} carved bodies to packages/phone-protocol/src/carved-bodies.ts`)
 
 for (const [flag, emitNative] of [["--swift", emitSwift], ["--kotlin", emitKotlin]] as const) {
   const at = process.argv.indexOf(flag)

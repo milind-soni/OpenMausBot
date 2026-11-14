@@ -159,3 +159,49 @@ describe("SidebarNewChatPanel", () => {
     expect(props.onClose).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("SidebarNewChatPanel with an input method", () => {
+  const composing = [
+    { name: "composition", init: { isComposing: true } },
+    { name: "IME key code", init: { keyCode: 229 } },
+  ];
+  let root: Root | undefined;
+  let container: HTMLElement | undefined;
+
+  afterEach(() => {
+    flushSync(() => root?.unmount());
+    container?.remove();
+    root = undefined;
+    fixture.dispatch.mockReset();
+  });
+
+  function open() {
+    const props = { anchor: null, onClose: vi.fn(), onNewBot: vi.fn(), onNewGroup: vi.fn() };
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    flushSync(() => root!.render(createElement(SidebarNewChatPanel, props)));
+    return { props, input: container.querySelector("input")! };
+  }
+  const press = (target: Element, key: string, init: KeyboardEventInit) =>
+    flushSync(() => { target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init })); });
+
+  it.each(composing)("does not start a chat or close on keys that belong to the $name", ({ init }) => {
+    const { props, input } = open();
+    const outside = vi.fn();
+    window.addEventListener("keydown", outside);
+    try {
+      flushSync(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "qu");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      press(input, "Enter", init);
+      press(input, "Escape", init);
+      expect(fixture.dispatch).not.toHaveBeenCalled();
+      expect(props.onClose).not.toHaveBeenCalled();
+      expect(outside).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", outside);
+    }
+  });
+});

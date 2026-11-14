@@ -247,6 +247,15 @@ export function clipboardImageFiles(
   return [];
 }
 
+/** A file copied in Finder or Explorer reaches a paste in clipboardData.files (Chromium), with only its name as text.
+ * Anything there but pictures is attached the way a picked file is; pictures alone keep the image paste. */
+export function clipboardFilesToAttach<T extends { type: string }>(
+  clipboardData: { files?: Iterable<T> | null } | null | undefined,
+): T[] {
+  const files = Array.from(clipboardData?.files ?? []);
+  return files.some((file) => !isImageFile(file)) ? files : [];
+}
+
 export function clipboardHasImages(
   clipboardData: {
     files?: Iterable<{ type: string; size?: number }> | null;
