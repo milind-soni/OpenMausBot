@@ -639,6 +639,21 @@ describe("a bot's profile changes below Full access", () => {
     }
   });
 
+  it("undo puts back a hidden picture with its mascot crop, not the crop the new picture got", () => {
+    const { store, bot } = harness({ name: "Scout" });
+    // A stored picture the person hid behind the mascot.
+    bot.avatarUrl = "/api/attachments/hidden-a.png";
+    bot.avatarCrop = "mascot";
+    const service = new ProfileRequestService({ store, autoApply: rule, attachmentExists: () => true });
+    const applied = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { avatarUrl: "/api/attachments/new-b.png" }, reason: "asked" });
+    expect(applied).toMatchObject({ state: "applied" });
+    expect(store.bot(bot.id)!.avatarUrl).toBe("/api/attachments/new-b.png");
+    expect(store.bot(bot.id)!.avatarCrop).toBe("circle");
+    expect(service.undo({ botId: bot.id, threadId: bot.threadId, requestId: applied.requestId })).toMatchObject({ state: "undone" });
+    expect(store.bot(bot.id)!.avatarUrl).toBe("/api/attachments/hidden-a.png");
+    expect(store.bot(bot.id)!.avatarCrop).toBe("mascot");
+  });
+
   it("is not held back by the open-card budget, which still holds the owner's card", () => {
     const { store, bot } = harness({ name: "Scout" });
     const canPersist = vi.fn((_botId: string, _threadId: string, opensCard: boolean) =>
