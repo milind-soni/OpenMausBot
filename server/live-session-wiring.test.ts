@@ -71,3 +71,26 @@ describe("a Fish Audio call's session", () => {
     expect(() => w.calls.openSocket("sess_9", "k", endpoint)).toThrow("no relay for that session");
   });
 });
+
+describe("a Gemini Live call's session", () => {
+  const gemini = { provider: "gemini" as const, apiBase: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-3.8-live" };
+
+  it("takes a token from Gemini and answers with it and a relay, never the key", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ name: "auth_tokens/t1" }), { status: 200 }));
+    const w = wiring(fetchImpl as unknown as typeof fetch);
+    const answer = await w.calls.createSession({ ...start, key: "gemini-secret", endpoint: gemini });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(answer).toMatchObject({ gemini: { type: "gemini", session: { token: "auth_tokens/t1" } } });
+    expect(JSON.stringify(answer)).not.toContain("gemini-secret");
+    const { session, relayToken } = (answer as { gemini: { session: { session_id: string }; relayToken: string } }).gemini;
+    expect(answer.sessionId).toBe(session.session_id);
+    expect(w.fishRelay(session.session_id, relayToken)).not.toBeNull();
+    expect(w.calls.attachUrl(session.session_id, gemini)).toBe(session.session_id);
+    expect(w.calls.openSocket(session.session_id, "k", gemini)).toBeTruthy();
+  });
+
+  it("asks who is calling as for Fish Audio", () => {
+    const w = wiring(fakeFish());
+    expect(w.calls.geminiRefusal({ kind: "loopback", scopes: ["admin", "client"] })).toBeNull();
+  });
+});

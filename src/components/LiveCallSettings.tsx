@@ -1,6 +1,6 @@
 import { useCallback, useId, useState } from "react";
 
-import { LIVE_VOICE_OPTIONS } from "../../shared/live-call";
+import { GEMINI_LIVE_VOICE_OPTIONS, geminiLiveVoice, LIVE_VOICE_OPTIONS } from "../../shared/live-call";
 import { t } from "@/lib/i18n";
 import { liveDisclosure, liveKeyCopy } from "@/lib/call-mode";
 import { api, useStore, type ConfigStatus } from "@/state/store";
@@ -27,12 +27,15 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
   }, []);
   const azure = live.provider === "azure";
   const fish = live.provider === "fish";
+  const gemini = live.provider === "gemini";
   const copy = liveKeyCopy(live.provider);
-  const hasKey = live.keySource === (fish ? "fishAudio" : "live");
-  const voice = live.voice || "marin";
-  const known = LIVE_VOICE_OPTIONS.some((option) => option.id === voice);
+  const hasKey = live.keySource === (fish ? "fishAudio" : gemini ? "gemini" : "live");
+  // Gemini has its own voices, kept apart from the GPT-Live one.
+  const voiceOptions = gemini ? GEMINI_LIVE_VOICE_OPTIONS : LIVE_VOICE_OPTIONS;
+  const voice = gemini ? geminiLiveVoice(live.geminiVoice) : live.voice || "marin";
+  const known = voiceOptions.some((option) => option.id === voice);
 
-  const save = async (patch: Partial<Pick<LiveSettings, "voice" | "readTypedReplies" | "idleMinutes">>) => {
+  const save = async (patch: Partial<Pick<LiveSettings, "voice" | "geminiVoice" | "readTypedReplies" | "idleMinutes">>) => {
     setSaving(true);
     setError(null);
     try {
@@ -74,6 +77,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
       }}
     >
       <LiveProviderSettings locked={keySaving} onSaving={setProviderSaving} />
+      {/* Fish Audio calls speak in the agent's own voice. */}
       {!fish && <>
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.voice")}</span>
@@ -81,10 +85,10 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
           size="sm"
           value={voice}
           disabled={saving}
-          onChange={(event) => void save({ voice: event.target.value })}
+          onChange={(event) => void save(gemini ? { geminiVoice: event.target.value } : { voice: event.target.value })}
         >
           {!known && <option value={voice}>{voice}</option>}
-          {LIVE_VOICE_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+          {voiceOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
         </Select>
       </label>
       <div className="-mt-2 text-[12px] text-ink-tertiary">{t("call.live.voiceNext")}</div>
@@ -126,13 +130,13 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
           )}
         </span>
       </div>
-      {!hasKey && (azure || fish) && <div className="-mt-2 text-[12px] text-ink-tertiary">{t(copy.missing)}</div>}
-      {live.keySource !== "live" && !azure && !fish && (
+      {!hasKey && (azure || fish || gemini) && <div className="-mt-2 text-[12px] text-ink-tertiary">{t(copy.missing)}</div>}
+      {live.keySource !== "live" && !azure && !fish && !gemini && (
         <div className="-mt-2 text-[12px] text-ink-tertiary">{t(live.keySource === "openai" ? "call.live.keyFromApiKeys" : "call.live.needsKey")} <KeysLink id="openai" purpose="liveCalls" /></div>
       )}
       {/* Keyed by provider: a key typed for one provider is never saved for another. */}
       {changingKey && <LiveKeySetup key={state.config?.live?.provider ?? "openai"} compact locked={providerSaving} onSaving={setKeySaving} onSaved={() => setChangingKey(false)} />}
-      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, fish })} {t(copy.cost)}</div>
+      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, fish, gemini })} {t(copy.cost)}</div>
       {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
   );
