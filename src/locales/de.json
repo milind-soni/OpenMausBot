@@ -2776,6 +2776,7 @@
   "homeLine.profile": "{name} startet frisch, getrennt von My Cloud. Deine bisherigen Bots sind in My Cloud; eine ältere Kopie holst du zurück, indem du ihr Backup unter Einstellungen → Backups importierst.",
   "homeLine.local": "{name} startet frisch: ein eigener Bereich auf diesem Computer, mit eigenen Bots, Chats und Dateien.",
   "native.places.profileFailed": "Der eigene Bereich dieses Computers wurde nicht geöffnet. Versuch es gleich noch einmal.",
+  "chat.notice.devinAccountRefused": "Devin hat diese Anfrage für das angemeldete Konto abgelehnt. Prüfe den Devin-Tarif und das Guthaben und versuche es dann erneut.",
   "rail.settingUp": "{name}: wird eingerichtet",
   "rail.waiting": "{name}: wartet auf Zahlung",
   "rail.attention": "{name}: braucht dich",

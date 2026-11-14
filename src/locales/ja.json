@@ -575,6 +575,7 @@
   "homeLine.profile": "{name} は My Cloud とは別の、まっさらな場所です。以前ここにあったボットは My Cloud にあります。古いコピーを取り込むには、設定 → バックアップでそのバックアップをインポートしてください。",
   "homeLine.local": "{name} はまっさらな状態から始まります。このコンピューター上の別の場所で、専用のボット、チャット、ファイルがあります。",
   "native.places.profileFailed": "このコンピューター専用の場所を開けませんでした。少し待ってからもう一度お試しください。",
+  "chat.notice.devinAccountRefused": "Devin はサインイン中のアカウントでのこのリクエストを拒否しました。Devin のプランとクレジットを確認してから、もう一度お試しください。",
   "rail.settingUp": "{name}: 準備中",
   "rail.waiting": "{name}: 支払い待ち",
   "rail.attention": "{name}: 対応が必要です",

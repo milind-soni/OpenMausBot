@@ -518,6 +518,7 @@
   "homeLine.profile": "{name} riparte da zero, separato da My Cloud. I bot che avevi qui sono su My Cloud; per riportare una copia precedente, importa il suo backup in Impostazioni → Backup.",
   "homeLine.local": "{name} riparte da zero: uno spazio a parte su questo computer, con i suoi bot, chat e file.",
   "native.places.profileFailed": "Lo spazio di questo computer non si è aperto. Riprova tra un momento.",
+  "chat.notice.devinAccountRefused": "Devin ha rifiutato questa richiesta per l'account connesso. Controlla il piano e i crediti di Devin, poi riprova.",
   "rail.settingUp": "{name}: in configurazione",
   "rail.waiting": "{name}: in attesa del pagamento",
   "rail.attention": "{name}: ha bisogno di te",
