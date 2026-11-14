@@ -39,6 +39,7 @@ export const DEFAULT_FLEET: InstanceConfigMap = {
   opencodeGo: { driver: "opencodeGo" },
   openaiCompat: { driver: "openai-compat" },
   mistral: { driver: "mistral" },
+  mistralVibe: { driver: "mistralVibeAgent" },
   cerebras: { driver: "cerebras" },
   groq: { driver: "groq" },
   greenference: { driver: "greenference" },
@@ -60,6 +61,7 @@ const CUSTOM_ONLY = {
   cline: { driver: "clineAgent" },
   pi: { driver: "piAgent" },
   omp: { driver: "ompAgent" },
+  mistralVibe: { driver: "mistralVibeAgent" },
 } as const;
 
 /** Added to a saved fleet that holds a product engine (claude, grok or codex), when it lacks them. */

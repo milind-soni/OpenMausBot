@@ -22,6 +22,7 @@ const ENGINES: Readonly<Record<string, EngineRow>> = {
   codex: { resume: true },
   piAgent: { resume: true },
   ompAgent: { resume: true },
+  mistralVibeAgent: { resume: true },
   antigravityAgent: { resume: true },
   grokAgent: { resume: true },
   geminiAgent: { resume: true },
