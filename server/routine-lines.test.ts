@@ -70,8 +70,14 @@ describe("clipRunOutput", () => {
     expect(clipRunOutput(`${long}\nNEEDS INPUT: Go?\nMore text after it.`, 2_000)).toBe(`${long}\nNEEDS INPUT: Go?\nMore text after it.`.slice(0, 2_000));
   });
 
-  it("cuts plainly when the question alone is too long to keep", () => {
-    const text = `${long}\nNEEDS INPUT: ${"why ".repeat(400)}?`;
-    expect(clipRunOutput(text, 2_000)).toBe(text.slice(0, 2_000));
+  it("keeps a long closing question that fits, and cuts one too long on its own line", () => {
+    const question = `NEEDS INPUT: ${"why ".repeat(300)}?`;
+    const kept = clipRunOutput(`${long}\n${question}`, 2_000);
+    expect(kept.length).toBeLessThanOrEqual(2_000);
+    expect(kept.endsWith(`\n…\n${question}`)).toBe(true);
+    const cut = clipRunOutput(`${long}\nNEEDS INPUT: ${"why ".repeat(600)}?\ndefault: wait`, 2_000);
+    expect(cut.length).toBe(2_000);
+    expect(cut.startsWith("NEEDS INPUT: why")).toBe(true);
+    expect(cut.endsWith("…")).toBe(true);
   });
 });

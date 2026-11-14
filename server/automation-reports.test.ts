@@ -44,6 +44,12 @@ describe("routineRunNeedsReview", () => {
     expect(routineRunNeedsReview({ status: "waiting", attention: ROUTINE_HANDOFF_WAIT })).toBe(false);
     expect(routineRunNeedsReview({ status: "running" })).toBe(false);
     expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(`${"Long report. ".repeat(300)}\nNEEDS INPUT: Send it?`, 2_000) })).toBe(true);
+    // The source chat is synced from the stored output alone: a closing question over half of it, or over all of it, still counts.
+    for (const words of [150, 300]) {
+      const reply = `${"Long report. ".repeat(300)}\nNEEDS INPUT: ${"Which one? ".repeat(words)}\ndefault: wait`;
+      expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(reply, 2_000) })).toBe(routineRunNeedsReview({ status: "completed" }, reply));
+      expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(reply, 2_000) })).toBe(true);
+    }
     expect(routineRunNeedsReview({ status: "cancelled" })).toBe(false);
   });
 });
