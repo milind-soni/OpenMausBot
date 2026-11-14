@@ -6807,7 +6807,7 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "local" })).status).toBe(200);
       const onScreen = await fill();
       expect(onScreen.ok).toBe(false);
-      expect(onScreen.text).toContain("it never types one on the screen of this computer");
+      expect(onScreen.text).toContain("On the screen of this computer it cannot prove which site a box belongs to, so it never types one there");
       expect(onScreen.text).toContain("Call request_sign_in so the person signs in on this computer.");
       expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "browser" })).status).toBe(200);
       const inBrowser = await fill();

@@ -39,14 +39,14 @@ export interface FillLoginTurnDeps {
   turnActive?(turn: Turn): boolean;
 }
 
-const ONLY_IN_BROWSER = "fill_login types a password only into a page of your own browser, where OpenMausBot checks the page's site first";
+const ONLY_IN_BROWSER = "Saved logins are filled only in your own browser, the one your browser tools drive, where OpenMausBot checks the page's site before it types a password";
 
 export function createFillLoginTurn(deps: FillLoginTurnDeps) {
   // Security: on a screen the server cannot prove which site a focused box belongs to, so a secret is never typed there.
   function elsewhere(bot: BotRecord, turn: Turn, place: Surface | null, signsInByEmail: boolean): Answer {
     const current = deps.current(bot, turn.threadId);
     const where = place ? surfaceLabel(place) : null;
-    const notHere = where ? `; it never types one on the screen of ${where}` : "";
+    const notHere = where ? `. On the screen of ${where} it cannot prove which site a box belongs to, so it never types one there` : "";
     const signIn = where ? `Call request_sign_in so the person signs in on ${where}.` : "Call request_sign_in instead.";
     if (!deps.browserSelectable(current)) {
       const why = current.browser === false || current.computer === "off" || !deps.builtInBrowserOn()
