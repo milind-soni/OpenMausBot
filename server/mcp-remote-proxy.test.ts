@@ -524,7 +524,7 @@ describe("remote MCP tool directory", () => {
   it("reads its settings from a private record when mounts share one environment", async () => {
     fake = await startFakeHttpMcp({ tools: catalog });
     const record = `OMB_REMOTE_MCP_CONFIG_${"a".repeat(64)}`;
-    const descriptor = mcpStdioServer(spec(fake.url), { directory: { name: "whop" }, configEnvName: record })!;
+    const descriptor = mcpStdioServer(spec(fake.url), { sourceEnv: {}, directory: { name: "whop" }, configEnvName: record })!;
     expect(descriptor.args!.slice(1)).toEqual(["--config-env", record]);
     expect(Object.keys(descriptor.env!)).toEqual([record]);
     expect(descriptor.args!.join(" ")).not.toContain("directory-fixture-token");

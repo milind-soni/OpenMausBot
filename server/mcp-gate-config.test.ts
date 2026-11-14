@@ -55,7 +55,7 @@ describe("tool directory configuration", () => {
 
   it("keeps a shared environment's settings in one private record", () => {
     const record = `OMB_REMOTE_MCP_CONFIG_${"0".repeat(64)}`;
-    const proxy = mcpStdioServer(remote, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, directory: { name: "whop" }, configEnvName: record })!;
+    const proxy = mcpStdioServer(remote, { sourceEnv: {}, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, directory: { name: "whop" }, configEnvName: record })!;
     expect(proxy.args!.slice(1)).toEqual(["--config-env", record]);
     expect(Object.keys(proxy.env!).sort()).toEqual(["ELECTRON_RUN_AS_NODE", record]);
     const settings = JSON.parse(proxy.env![record]);
