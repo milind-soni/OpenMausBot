@@ -15,6 +15,9 @@ const AGENT_ID = /^[\w-]{1,128}$/;
 /** The agent's audio both ways: 16 kHz 16-bit PCM, as the client sends and plays it. */
 const AUDIO_FORMAT = "pcm_16000";
 const UNEXPECTED = "ElevenLabs returned an unexpected answer. Try the call again.";
+/** What ElevenLabs sends the client. A list replaces ElevenLabs' defaults, so it names every event the client reads, with
+ * `client_tool_call` so `delegate` reaches the client. */
+const CLIENT_EVENTS = ["conversation_initiation_metadata", "ping", "audio", "interruption", "user_transcript", "agent_response", "agent_response_correction", "client_tool_call"];
 
 /** `model` is the agent id, "" while no usable one is saved. The API root is the one ElevenLabs voices use (OMB_ELEVENLABS_API). */
 export function elevenLabsLiveEndpoint(agentId: string | null | undefined, env: NodeJS.ProcessEnv = process.env): LiveEndpoint {
@@ -72,9 +75,11 @@ export async function setUpElevenLabsAgent(key: string, endpoint: LiveEndpoint, 
         agent: { first_message: "", language: "en", prompt: { prompt: `You are ${product} on a live voice call.`, tool_ids: [toolId] } },
         asr: { user_input_audio_format: AUDIO_FORMAT },
         tts: { agent_output_audio_format: AUDIO_FORMAT },
+        conversation: { client_events: CLIENT_EVENTS },
       },
-      // Without this ElevenLabs refuses the prompt each conversation sends.
-      platform_settings: { overrides: { conversation_config_override: { agent: { prompt: { prompt: true } } } } },
+      // Without the override ElevenLabs refuses the prompt each conversation sends. With auth on, a conversation needs a
+      // signed URL, which only the harness can get with the key: knowing the agent id is not enough to spend the person's credits.
+      platform_settings: { overrides: { conversation_config_override: { agent: { prompt: { prompt: true } } } }, auth: { enable_auth: true } },
     });
     const agentId = typeof agent.agent_id === "string" && AGENT_ID.test(agent.agent_id) ? agent.agent_id : "";
     if (!agentId) throw new LiveSessionError(UNEXPECTED, 502);

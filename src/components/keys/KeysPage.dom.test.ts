@@ -146,6 +146,19 @@ describe("the keys page", () => {
     expect(row("liveCalls")).toBeNull();
   });
 
+  it("drops a key typed on the Live key row when the Live calls service changes, so it is never saved for the other service", () => {
+    const live = { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live: { ...live, provider: "fish" } });
+    page();
+    const field = () => row("liveKey")!.querySelector<HTMLInputElement>('input[type="password"]')!;
+    type(field(), "typed-for-fish-audio");
+    expect(field().value).toBe("typed-for-fish-audio");
+
+    flushSync(() => setConfig({ ...fx.config, live: { ...live, provider: "elevenlabs" } }));
+    expect(row("liveKey")!.textContent).toContain("ElevenLabs");
+    expect(field().value).toBe("");
+  });
+
   it("opens a section that holds a saved key, and counts what is connected", () => {
     setConfig({ ...fx.config, box: { configured: true, last4: "c3d4" } });
     page();

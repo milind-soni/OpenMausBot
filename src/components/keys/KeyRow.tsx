@@ -130,6 +130,17 @@ export function KeyRow({
 
   const entry = shownKeyEntry(id, state.config);
   const row = rowId ? shownKeyEntry(rowId, state.config) : entry;
+  // The Live key row changes service with the Live calls choice: a key typed for one service is never saved for another.
+  const [draftFor, setDraftFor] = useState(entry.name);
+  if (draftFor !== entry.name) {
+    setDraftFor(entry.name);
+    setDraft("");
+    setShown(false);
+    setReplacing(false);
+    setProblem(null);
+    setVerdict(null);
+    setWorks(false);
+  }
   const target = entry.target;
   if (!target) throw new Error(`${id} is not saved by a key row`);
   const pointer = row.id !== entry.id;

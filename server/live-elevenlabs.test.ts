@@ -53,8 +53,9 @@ describe("an ElevenLabs agent for Live calls", () => {
     expect(agent).toMatchObject({
       name: "OpenMausBot Live calls",
       conversation_config: { agent: { prompt: { tool_ids: ["tool_1"] } }, asr: { user_input_audio_format: "pcm_16000" }, tts: { agent_output_audio_format: "pcm_16000" } },
-      platform_settings: { overrides: { conversation_config_override: { agent: { prompt: { prompt: true } } } } },
+      platform_settings: { overrides: { conversation_config_override: { agent: { prompt: { prompt: true } } } }, auth: { enable_auth: true } },
     });
+    expect(agent.conversation_config.conversation.client_events).toEqual(expect.arrayContaining(["client_tool_call", "audio", "interruption", "user_transcript", "agent_response", "ping"]));
   });
 
   it("fails with words for the person, never ElevenLabs' body, when ElevenLabs refuses or answers oddly", async () => {
