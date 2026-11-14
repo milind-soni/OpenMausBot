@@ -29,7 +29,8 @@ export function botUsage(bot: Pick<Bot, "tasks">): TaskUsage {
 export function formatTokens(n: number): string {
   if (!hasFiniteCost(n)) return "0";
   if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${trim(n / 1000)}k`;
+  // Round first: 999,500 and up would otherwise print as "1000k" instead of "1M".
+  if (Math.round(n / 1000) < 1000) return `${trim(n / 1000)}k`;
   return `${trim(n / 1_000_000)}M`;
 }
 const trim = (x: number) => (x >= 100 ? Math.round(x).toString() : x.toFixed(1).replace(/\.0$/, ""));
