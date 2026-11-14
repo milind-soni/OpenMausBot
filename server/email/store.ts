@@ -133,10 +133,14 @@ export class EmailStore {
     this.put({ ...rest, ...(problem ? { problem } : {}) });
   }
 
-  /** Says sending stopped working, only while the outgoing server and its password are still the ones that failed. */
-  markSendingProblem(failed: Pick<EmailAccount, "address" | "password" | "smtp" | "smtpPassword">, problem: string): void {
+  /** Says sending stopped working, only while the outgoing server and its sign-in are still the ones that failed. */
+  markSendingProblem(failed: Pick<EmailAccount, "address" | "username" | "password" | "smtp" | "smtpUsername" | "smtpPassword">, problem: string): void {
     const current = this.get(failed.address);
-    if (!current || current.password !== failed.password || current.smtpPassword !== failed.smtpPassword || current.smtp?.host !== failed.smtp?.host || current.smtp?.port !== failed.smtp?.port || current.sendingProblem === problem) return;
+    if (!current
+      || (current.smtpUsername ?? current.username) !== (failed.smtpUsername ?? failed.username)
+      || (current.smtpPassword ?? current.password) !== (failed.smtpPassword ?? failed.password)
+      || current.smtp?.host !== failed.smtp?.host || current.smtp?.port !== failed.smtp?.port
+      || current.smtp?.secure !== failed.smtp?.secure || current.sendingProblem === problem) return;
     this.put({ ...current, sendingProblem: problem });
   }
 

@@ -10,6 +10,7 @@ import { EmailError, openGuard, SendingError } from "./client.ts";
 import { outsideRouteRefused } from "../host/outside-fence.ts";
 import { createEmailHost, EMAIL_INTERNAL_MCP_PATH, emailAccess, emailAllowedFor, type EmailBot, type EmailHostDeps } from "./host.ts";
 import { createEmailService } from "./service.ts";
+import type { EmailAccount } from "./store.ts";
 import type { EmailToolResult } from "./tools.ts";
 import { EMAIL_READ_TOOL_NAMES, EMAIL_TOOL_NAMES } from "../../shared/email.ts";
 
@@ -103,6 +104,44 @@ describe("a turn's Email tools", () => {
     expect((await send()).isError).toBe(true);
     expect(calls, "the third send never reached the server").toBe(2);
     expect(host.prompt({ id: "b1", name: "Ada" })).toContain("Sending from me@shop.example doesn't work until the person fixes its outgoing server");
+  });
+
+  it.each([
+    ["outgoing username", (account: EmailAccount) => ({ ...account, smtpUsername: "fixed-login" })],
+    ["fallback username", (account: EmailAccount) => ({ ...account, username: "fixed-login" })],
+    ["TLS mode", (account: EmailAccount) => ({ ...account, smtp: { ...account.smtp!, secure: !account.smtp!.secure } })],
+  ] as const)("a stale send failure cannot block a mailbox after its %s changes", async (_name, change) => {
+    let started!: () => void;
+    let fail!: () => void;
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    const failed = new Promise<void>((resolve) => { fail = resolve; });
+    let calls = 0;
+    const { call, service } = await fixture({ sendMessage: async (account) => {
+      calls++;
+      if (calls === 1) {
+        started();
+        await failed;
+        throw new SendingError("password", account.smtp!);
+      }
+      return { messageId: "<2@x>", accepted: ["a@b.example"], rejected: [], filed: false };
+    } });
+    const send = () => call("EMAIL_SEND_MESSAGE", { to: ["a@b.example"], subject: "Hi", text: "Body" });
+    const pending = send();
+    await entered;
+    service.store.put(change(service.store.get("me@shop.example")!));
+    fail();
+    expect((await pending).isError).toBe(true);
+    expect(service.sendingProblem("me@shop.example")).toBeUndefined();
+    expect((await send()).isError).toBeUndefined();
+    expect(calls).toBe(2);
+  });
+
+  it("still records a sending failure when only the incoming password changed", async () => {
+    const { service } = await fixture();
+    const failed = { ...service.store.get("me@shop.example")!, smtpUsername: "outgoing-login", smtpPassword: "outgoing-password" };
+    service.store.put({ ...failed, password: "new-incoming-password" });
+    service.store.markSendingProblem(failed, "Outgoing sign-in failed.");
+    expect(service.sendingProblem(failed.address)).toBe("Outgoing sign-in failed.");
   });
 
   it("a header can't be smuggled into a send", async () => {
