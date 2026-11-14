@@ -21,6 +21,7 @@ import { appLabel } from "./app-event-catalog.ts";
 import { eventBlock, eventPreview, eventPrompt, matchesFilter, mergeEventBlock } from "./app-events.ts";
 import { BrokerError, type AppTriggerBroker, type BrokerEvent, type BrokerInventory, type BrokerTriggerType } from "./app-trigger-broker.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { instructionsUpdateRefusal } from "./automation-instructions.ts";
 import { DATA_DIR } from "./config.ts";
 import type { RoutineRunOn } from "./routines.ts";
 
@@ -315,7 +316,7 @@ export class AppTriggerManager {
       ...(record.sameConversation ? { sameConversation: true } : {}) });
   }
 
-  async update(id: string, patch: AppTriggerPatch): Promise<AppTrigger | null> {
+  async update(id: string, patch: AppTriggerPatch, options: { protectInstructions?: boolean } = {}): Promise<AppTrigger | null> {
     this.assertWritable();
     const trigger = this.triggers.find((candidate) => candidate.id === id);
     if (!trigger) return null;
@@ -333,6 +334,10 @@ export class AppTriggerManager {
       config = triggerConfig(type, Object.fromEntries(Object.entries(base).filter(([, value]) => value !== undefined)), filter);
     }
     await this.exclusive(async () => {
+      if (options.protectInstructions) {
+        const refusal = instructionsUpdateRefusal(trigger.prompt, patch.prompt);
+        if (refusal) throw new AppTriggerError(refusal, 409);
+      }
       const previous = trigger.remote.triggerId;
       const previousConfig = JSON.stringify(trigger.config);
       Object.assign(trigger, {

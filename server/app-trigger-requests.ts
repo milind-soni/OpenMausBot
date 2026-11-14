@@ -139,7 +139,7 @@ export class AppTriggerRequestService {
       }
       case "update": {
         const { instructions, ...changes } = operation.changes;
-        after = await triggers.update(operation.triggerId, { ...changes, ...(instructions !== undefined ? { prompt: instructions } : {}) });
+        after = await triggers.update(operation.triggerId, { ...changes, ...(instructions !== undefined ? { prompt: instructions } : {}) }, { protectInstructions: true });
         break;
       }
       case "pause":

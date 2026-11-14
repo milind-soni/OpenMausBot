@@ -73,6 +73,63 @@ async function gmailTrigger(triggers: AppTriggerManager, filter = { from: "acme.
 }
 
 describe("AppTriggerManager", () => {
+  it("refuses a bot replacement when a direct edit adds protected instructions during its network wait", async () => {
+    const client = brokerClient(() => ({ url: broker.url, token: owner.token }));
+    const triggers = manager({ broker: client });
+    const saved = await gmailTrigger(triggers);
+    const store = { messagesFor: () => [], appendMessage: vi.fn(() => ({ id: "message-1" })), patchMessage: vi.fn() };
+    const service = new AppTriggerRequestService({ triggers, store, botName: () => "Fixture" });
+    const type = await client.triggerType(saved.event);
+    let entered!: () => void;
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { entered = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(client, "triggerType").mockImplementationOnce(async () => { entered(); await resume; return type; });
+    const outcome = service.submit({ botId: saved.botId, threadId: "thread-a", operation: {
+      action: "update", triggerId: saved.id, changes: { name: "Must not apply", instructions: "Bot replacement", filter: { from: "changed.example" } },
+    } }).then(value => ({ value, error: null }), error => ({ value: null, error }));
+    await blocked;
+    const protectedPrompt = "Use token=fixture-private-value.";
+    let before!: ReturnType<AppTriggerManager["list"]>;
+    let remote!: Array<unknown>;
+    try {
+      await triggers.update(saved.id, { prompt: protectedPrompt });
+      before = structuredClone(triggers.list());
+      remote = structuredClone([...broker.harness.composio.instances.entries()]);
+    } finally { release(); }
+    expect((await outcome).error).toMatchObject({ status: 409 });
+    expect(triggers.list()).toEqual(before);
+    expect([...broker.harness.composio.instances.entries()]).toEqual(remote);
+    expect(store.appendMessage).not.toHaveBeenCalled();
+  });
+
+  it("refuses a bot replacement queued behind a direct edit that stores protected instructions", async () => {
+    const client = brokerClient(() => ({ url: broker.url, token: owner.token }));
+    const triggers = manager({ broker: client });
+    const saved = await gmailTrigger(triggers);
+    const store = { messagesFor: () => [], appendMessage: vi.fn(() => ({ id: "message-1" })), patchMessage: vi.fn() };
+    const service = new AppTriggerRequestService({ triggers, store, botName: () => "Fixture" });
+    let entered!: () => void;
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { entered = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    const setEnabled = client.setEnabled.bind(client);
+    vi.spyOn(client, "setEnabled").mockImplementationOnce(async (...args) => { entered(); await resume; await setEnabled(...args); });
+    const holding = triggers.update(saved.id, { name: "Holding update" });
+    await blocked;
+    const protectedPrompt = "Use token=fixture-private-value.";
+    const manual = triggers.update(saved.id, { prompt: protectedPrompt });
+    const outcome = service.submit({ botId: saved.botId, threadId: "thread-a", operation: {
+      action: "update", triggerId: saved.id, changes: { name: "Must not apply", instructions: "Bot replacement" },
+    } }).then(value => ({ value, error: null }), error => ({ value: null, error }));
+    release();
+    await holding;
+    const expected = await manual;
+    expect((await outcome).error).toMatchObject({ status: 409 });
+    expect(triggers.get(saved.id)).toEqual(expected);
+    expect(store.appendMessage).not.toHaveBeenCalled();
+  });
+
   it("refuses replacing redacted app instructions before changing local or remote state", async () => {
     const triggers = manager();
     const prompt = "Review the queue.\n".repeat(180) + "Use token=fixture-secret-value.";
@@ -89,6 +146,9 @@ describe("AppTriggerManager", () => {
     expect(store.appendMessage).not.toHaveBeenCalled();
     await submit({ name: "Safe rename" });
     expect(triggers.get(saved.id)).toMatchObject({ name: "Safe rename", prompt });
+    const edited = prompt + " Changed by the person.";
+    await triggers.update(saved.id, { prompt: edited });
+    expect(triggers.get(saved.id)?.prompt).toBe(edited);
   });
 
   it("creates the service copy with a Gmail filter folded into Gmail's own search", async () => {

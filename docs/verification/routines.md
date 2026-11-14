@@ -37,7 +37,9 @@ Secrets remain redacted, and `instructionsRedacted` reports whether the saved
 text contains hidden content, including beyond a listing's preview. When true,
 a bot instruction replacement fails with HTTP 409 before any field or receipt
 changes. Ask the person to edit those instructions on the Automations page;
-other updates work when instructions are omitted.
+other updates work when instructions are omitted. App-event bot replacements
+recheck inside the serialized write after any network or queue wait, so a
+concurrent direct edit that adds protected instructions is preserved.
 
 The disposable fake-engine fixture reads a long schedule and webhook through
 the real MCP tools, changes one sentence, and checks the full saved text and
