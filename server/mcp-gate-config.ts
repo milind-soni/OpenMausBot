@@ -75,7 +75,13 @@ export function limitUngatedOutput(
   let untrimmed = false;
   for (const name of owned) {
     const server = Object.hasOwn(mounted, name) ? mounted[name] as { env?: Record<string, string> } | undefined : undefined;
-    if (!server || server.env?.OMB_GATE_BUDGET) continue;
+    if (!server) continue;
+    // A gate trims on its own budget; one set to 0 passes whole payloads through, so it needs the limit unset too.
+    const gateBudget = server.env?.OMB_GATE_BUDGET;
+    if (gateBudget !== undefined) {
+      if (Number(gateBudget) <= 0) return;
+      continue;
+    }
     if (serverResultBudget(name, perServer, env) <= 0) return;
     untrimmed = true;
   }

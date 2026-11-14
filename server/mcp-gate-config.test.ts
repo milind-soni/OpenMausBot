@@ -198,4 +198,10 @@ describe("untrimmed bot servers", () => {
     expect(limit({}, { docs: remote, whole: remote }, { whole: 0 })).toBeUndefined();
     expect(limit({}, { whole: gated, docs: remote }, { whole: 0 })).toBe(String(UNGATED_MCP_OUTPUT_TOKENS));
   });
+
+  it("leaves it unset when a gate passes whole payloads through (a budget of 0)", () => {
+    const whole = { ...gated, env: { OMB_GATE_BUDGET: "0" } };
+    expect(limit({}, { whole, docs: remote })).toBeUndefined();
+    expect(limit({}, { docs: remote, whole })).toBeUndefined();
+  });
 });
