@@ -20,7 +20,7 @@ export async function openStartPlace({ home, places, profiles, server, log = () 
   const { kind } = await home.refresh();
   const last = places.remembered();
   // Signed out, nothing of the account's opens: home shows as ever, and the place waits for the person to be back.
-  if (!last || home.opensNow("cloud") === null) { await home.show(); return "home"; }
+  if (!last || (typeof last.server !== "string" && home.opensNow("cloud") === null)) { await home.show(); return "home"; }
   if (await reopens(last)) return "remembered";
   log(`start: the place open last time can't open now (${Object.keys(last)[0]}); My Cloud instead`);
   places.remember(null);
@@ -30,7 +30,7 @@ export async function openStartPlace({ home, places, profiles, server, log = () 
 
   async function reopens(place) {
     if (typeof place.profile === "string") return Boolean(profiles) && (await profiles.open(place.profile)) === true;
-    if (typeof place.server === "string") return kind === "cloud" && (await server(place.server).catch(() => false)) === true;
+    if (typeof place.server === "string") return (await server(place.server).catch(() => false)) === true;
     if (!home.opensNow(place)) return false;
     await home.show();
     return true;

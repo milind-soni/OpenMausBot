@@ -1660,7 +1660,7 @@ async function switchEnvironment(id, stale = () => false) {
     }
   }
   if ((entry && handSaved(entry) && !(await serverOpens(entry, { t: nativeT, fetch: (...args) => session.defaultSession.fetch(...args), dialog, forget: (gone) => forgetEnvironment(gone, false, true) }))) || stale()) return;
-  persistEnvironments(withActive(environmentsState, id)); await navigateMainWindow(activeOrigin()); if (entry && handSaved(entry) && homeWindow.cloudOrigin()) homePlaces.remember({ server: id });
+  persistEnvironments(withActive(environmentsState, id)); await navigateMainWindow(activeOrigin()); if (entry && handSaved(entry) && !stale()) homePlaces.remember({ server: id });
 }
 
 function createLocalEnvironment(name, dataDir) {
