@@ -481,7 +481,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // spawnCli can throw synchronously, before settle() could remove the credential file.
       const child = (() => {
         try {
-          return spawnCli(config.cli, childArgs, {
+          return spawnCli(config.cli, childArgs, { box: { rw: [mcpTempDir] },
             stdio: ["pipe", "pipe", "pipe"],
             cwd: turn.cwd,
             env: piEnvironment({
