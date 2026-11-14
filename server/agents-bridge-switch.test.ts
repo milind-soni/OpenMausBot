@@ -500,6 +500,34 @@ describe("which engines a turn is bridged on", () => {
   });
 });
 
+describe("a bot on a local model gets the bridge without the switch", () => {
+  const onOllama = { modelSelection: { model: "ollama::qwen3.5:4b" } };
+  const onServer = (url: string) => ({ driverKind: "openai-compat", config: { url } });
+
+  it.each(["http://127.0.0.1:1234/v1", "http://192.168.1.20:8080/v1", "http://mac-studio.local:11434/v1"])("on a server at %s", (url) => {
+    expect(agentsToolBridgeRefusal({}, {}, onServer(url), {})).toBeNull();
+  });
+
+  it("picked from a local server, on the chat engine", () => {
+    expect(agentsToolBridgeRefusal({}, onOllama, onServer("https://openrouter.ai/api/v1"), {})).toBeNull();
+  });
+
+  it("not on a hosted model", () => {
+    expect(agentsToolBridgeRefusal({}, { modelSelection: { model: "gpt-5" } }, onServer("https://openrouter.ai/api/v1"), {})).toBe("the switch is off");
+    expect(agentsToolBridgeRefusal({}, {}, { driverKind: "grok", config: { url: "http://127.0.0.1:1/v1" } }, {})).toBe("the switch is off");
+  });
+
+  it("not when the operator's variable says no", () => {
+    expect(agentsToolBridgeRefusal({}, onOllama, onServer("http://127.0.0.1:1234/v1"), { OMB_AGENTS_TOOL_BRIDGE: "0" })).toBe("the switch is off");
+  });
+
+  it("not past the rules everyone else keeps: a tool selection, or an engine that judges tools by name", () => {
+    expect(agentsToolBridgeRefusal({}, { ...onOllama, toolScope: { allow: ["native:read"] } }, onServer("http://127.0.0.1:1234/v1"), {})).toBe("the bot has a tool selection");
+    expect(agentsToolBridgeRefusal({}, onOllama, { driverKind: "codex" }, {})).toContain("Codex");
+    expect(agentsToolBridgeRefusal({}, onOllama, { driverKind: "piAgent" }, {})).toContain("Pi");
+  });
+});
+
 describe("which bots a turn is bridged for", () => {
   it("writes the switch on every turn, so a value inherited from the server's own environment cannot stand in", () => {
     expect(agentsToolBridgeEnv({}, bot, CLAUDE, {})).toEqual(off);

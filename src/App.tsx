@@ -16,10 +16,10 @@ import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
 import { SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
-import { PluginsPanel, preloadConnectedApps } from "@/components/PluginsPanel";
+import { preloadConnectedApps } from "@/lib/connected-apps";
 import {
-  ActivityPanel, BotSettingsDialog, ComputerPanel, FilesView, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace,
-  preloadScreens, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, SettingsModal, TeamMapPage, TriggersPage,
+  ActivityPanel, BotSettingsDialog, CloudAddDialog, ComputerPanel, FilesView, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace,
+  PluginsPanel, preloadScreens, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, SettingsModal, TeamMapPage, TriggersPage,
 } from "@/components/lazy-screens";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useRoomPanelShown } from "@/lib/room-panel";
@@ -36,7 +36,6 @@ import { useTeamChats } from "@/state/team-chats";
 import { needsYouVersion, useTeamPeopleLoader } from "@/state/team-people";
 import { inboxVersion, useInboxLoader, useInboxPanel } from "@/state/inbox";
 import { InboxPanel } from "@/components/inbox/InboxPanel";
-import { CloudAddDialog } from "@/components/CloudAddDialog";
 import { PlacesRail } from "@/components/PlacesRail";
 import { CloudHowTo } from "@/components/CloudHowTo";
 import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip, windowFramed } from "@/components/DesktopCapabilities";
@@ -54,9 +53,9 @@ import { EmptyChatShell } from "@/components/onboarding/EmptyChatShell";
 import { cloudFirstRun, cloudWelcomeVisible, useCloudWelcome } from "@/lib/cloud-welcome";
 import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
-import { setLocale, t } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
 import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
-import { effectiveLanguage, useLanguageChoice } from "@/lib/language-preference";
+import { effectiveLanguage, useLanguageChoice, usePageLanguage } from "@/lib/language-preference";
 import { botUnreadCount, showBrowserUnread } from "@/lib/bot-unread";
 import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing"; import { takeConnectRequest } from "@/lib/connect-link";
 import { useExternalChatLinks } from "@/hooks/use-external-chat-links";
@@ -130,13 +129,11 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   useExternalChatLinks(state, dispatch);
   usePresence(state, dispatch);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const language = effectiveLanguage(useLanguageChoice(), state.config?.language);
-  const [, setLocaleEpoch] = useState(0);
-  useEffect(() => {
-    setLocale(language || globalThis.navigator?.language);
-    setLocaleEpoch((epoch) => epoch + 1);
-  }, [language]);
+  usePageLanguage(effectiveLanguage(useLanguageChoice(), state.config?.language));
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Stays mounted once opened: a Cloud bought in it can arrive after the sheet is closed.
+  const cloudAddOpened = useRef(false);
+  cloudAddOpened.current ||= Boolean(state.cloudAdd);
   const [localVmWorkspaceBotId, setLocalVmWorkspaceBotId] = useState<string | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const previousViewRef = useRef(state.activeView);
@@ -337,11 +334,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         />
       )}
       {!calendarFocus && <PlacesRail />}
-      {/* A framed window shows the app, its sidebar and the chat or page, in a rounded card on the frame beside the
-          window's rail: its top corners and its bottom-left corner are round, and it runs to the window's right and
-          bottom edges. */}
+      {/* A framed window shows the app, its sidebar and the chat or page, as one square pane under the top bar and beside
+          the window's rail, running to the window's right and bottom edges. */}
       <div data-window-card={framed ? "" : undefined}
-        className={framed ? "relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-t-[12px] rounded-bl-[12px] bg-app ring-1 ring-ink/[0.06]" : "contents"}>
+        className={framed ? "relative flex min-w-0 flex-1 flex-col overflow-hidden bg-app" : "contents"}>
       {framed && strips}
       <div className={framed ? "relative flex min-h-0 flex-1" : "contents"}>
       {!calendarFocus && <Sidebar
@@ -422,7 +418,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       </div>
       </div>
       {state.appSettingsOpen && <SettingsModal />}
-      <CloudAddDialog />
+      {cloudAddOpened.current && <CloudAddDialog />}
       <CloudHowTo />
       <CloudSetup viewer={viewer} welcomeShown={welcomeOnScreen} />
       <WelcomeKeeper viewer={viewer} />

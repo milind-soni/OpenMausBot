@@ -68,6 +68,7 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
   if (move.phase === "home-again" || move.phase === "back") {
     if (page !== "local") return null;
     if (move.phase === "back" && move.kept) return { kind: "done", text: t("cloudSend.move.kept"), extra: [] };
+    if (move.phase === "back" && move.gone) return { kind: "done", text: t("cloudSend.move.backGone"), extra: [] };
     const elsewhere = move.phase === "back" ? move.elsewhere : undefined;
     if (elsewhere) {
       return { kind: "done", extra: [], text: elsewhere.since

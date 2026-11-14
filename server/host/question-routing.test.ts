@@ -10,11 +10,15 @@ const FUCHS = bot("fuchs", "Fuchs", { chiefOfStaff: true });
 const DACHS = bot("dachs", "Dachs");
 const OTTER = bot("otter", "Otter");
 
-function world(options: { live?: string[]; privateTo?: string; steers?: boolean } = {}) {
+function world(options: { live?: string[]; privateTo?: string; steers?: boolean; takesAnswers?: boolean; unattended?: string[] } = {}) {
   const threads = new Map<string, Message[]>();
   let ids = 0;
   const rows = (threadId: string) => threads.get(threadId) ?? [];
-  const tasks: Record<string, Array<{ threadId: string; title: string }>> = { dachs: [{ threadId: "work", title: "Fix" }, { threadId: "other-work", title: "Other" }] };
+  const tasks: Record<string, Array<{ threadId: string; title: string; activity?: string; archivedAt?: number; openedBy?: { botId: string } }>> = { dachs: [
+    { threadId: "work", title: "Fix" }, { threadId: "other-work", title: "Other" },
+    // The person's own chats with Dachs, one archived, and a thread Fuchs opened on Dachs.
+    { threadId: "chat", title: "Dachs", activity: "waiting-on-you" }, { threadId: "old-chat", title: "Old", activity: "waiting-on-you", archivedAt: 1 },
+    { threadId: "chief-work", title: "Chief", activity: "waiting-on-you", openedBy: { botId: "fuchs" } }] };
   const store = {
     bot: (id: string) => [FUCHS, DACHS, OTTER].find((one) => one.id === id),
     tasks: (botId: string) => tasks[botId] ?? [],
@@ -57,7 +61,8 @@ function world(options: { live?: string[]; privateTo?: string; steers?: boolean 
       return true;
     },
     live: (_threadId, requestId) => (options.live ?? []).includes(requestId),
-    answerLive: async (threadId, requestId, text) => { answeredLive.push({ threadId, requestId, text }); return true; },
+    unattended: (_botId, threadId) => (options.unattended ?? []).includes(threadId),
+    answerLive: async (threadId, requestId, text) => { if (options.takesAnswers === false) return false; answeredLive.push({ threadId, requestId, text }); return true; },
     settleSignIns: (parked) => { settled.push(parked.id); },
     keptPrivate: (child, requester) => child.threadId === options.privateTo && requester.threadId !== options.privateTo,
     steer: async (threadId, text) => { if (options.steers === false) return false; steered.push({ threadId, text }); return true; },
@@ -187,6 +192,64 @@ describe("an answer passed on by another bot", () => {
     const node = connect.node({ question: "Waiting on the person: connect Notion", cards: ["m1"] });
     expect(await connect.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "verbunden", answers: node.id })).toMatchObject({ outcome: "failed" });
     expect(connect.answeredNodes).toEqual([]);
+  });
+});
+
+describe("a Chief's answer, for the person, to a question a teammate asks them", () => {
+  const QUESTION = "Soll ich die alte Version behalten?";
+  const asks = (w: ReturnType<typeof world>, threadId: string, question = QUESTION, requestId = "req-p") =>
+    w.store.appendMessage(threadId, { role: "bot", kind: "options", text: question, card: { title: "Dachs has a question", subtitle: question, options: ["Ja", "Nein"], requestId, requestType: "question" } });
+  const answer = (w: ReturnType<typeof world>, threadId: string) =>
+    w.routing.answerForPerson({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, threadId, message: "Ja, behalten" });
+
+  it("answers the card in the person's own chat with the teammate, and the card and the Chief's chat say who answered", async () => {
+    const w = world({ live: ["req-p"] });
+    asks(w, "chat");
+    const receipt = await answer(w, "chat");
+    expect(receipt).toMatchObject({ botId: "dachs", outcome: "injected", threadId: "chat" });
+    expect(receipt?.detail).toBe(`answered its question "${QUESTION}" for the person; it carries on with your answer, and the person can still give their own in that thread`);
+    expect(w.answeredLive).toEqual([{ threadId: "chat", requestId: "req-p", text: "@Fuchs answered for the person: Ja, behalten" }]);
+    expect(w.rows("chat")[0]!.card).toMatchObject({ answered: "answer", answeredText: "Ja, behalten", answeredBy: { kind: "bot", name: "Fuchs" } });
+    expect(w.rows("inbox")).toEqual([expect.objectContaining({ kind: "activity", tool: expect.objectContaining({ name: "Answered Dachs's question for the person" }),
+      threadRef: { botId: "dachs", threadId: "chat", title: "Dachs" } })]);
+  });
+
+  it("leaves to the usual thread rules a thread with no live question, one only the person can answer, an archived one and one the Chief opened", async () => {
+    const idle = world();
+    asks(idle, "chat");
+    expect(await answer(idle, "chat"), "the card's turn no longer waits on it").toBeUndefined();
+    const theirs = world({ live: ["req-p"] });
+    asks(theirs, "chat", "Please sign in to the bank portal");
+    expect(await answer(theirs, "chat")).toBeUndefined();
+    const w = world({ live: ["req-p"] });
+    for (const threadId of ["old-chat", "chief-work", "nowhere"]) {
+      asks(w, threadId);
+      expect(await answer(w, threadId), threadId).toBeUndefined();
+    }
+    expect([...idle.answeredLive, ...theirs.answeredLive, ...w.answeredLive]).toEqual([]);
+  });
+
+  it("leaves with the person, and does not list, a question in work an outside event started", async () => {
+    const w = world({ live: ["req-p"], unattended: ["chat"] });
+    asks(w, "chat");
+    expect(await answer(w, "chat")).toBeUndefined();
+    expect(w.routing.waitingForPerson(FUCHS, [DACHS])).toEqual([]);
+    expect(w.answeredLive).toEqual([]);
+  });
+
+  it("says nothing was sent when the question was answered meanwhile", async () => {
+    const w = world({ live: ["req-p"], takesAnswers: false });
+    asks(w, "chat");
+    expect(await answer(w, "chat")).toMatchObject({ outcome: "failed", detail: `Dachs's question "${QUESTION}" was answered or closed meanwhile; nothing was sent` });
+    expect(w.rows("chat")[0]!.card!.answered).toBeUndefined();
+    expect(w.rows("inbox")).toEqual([]);
+  });
+
+  it("lists the questions teammates wait on the person for, leaving out threads the Chief opened, archived ones and ones it may not read", () => {
+    const w = world({ live: ["req-p"] });
+    for (const threadId of ["chat", "old-chat", "chief-work"]) asks(w, threadId);
+    expect(w.routing.waitingForPerson(FUCHS, [DACHS, OTTER])).toEqual([{ bot: "Dachs", threadId: "chat", thread: "Dachs", question: QUESTION }]);
+    expect(w.routing.waitingForPerson(FUCHS, [DACHS], (threadId) => threadId !== "chat")).toEqual([]);
   });
 });
 

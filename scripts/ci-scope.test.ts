@@ -129,7 +129,7 @@ describe("CI path scope", () => {
       expect(selectCiScope([file]).checks).toContain("windows-cua");
     });
 
-  it.each([["electron/main.mjs"], ["build/icon.icns"], ["electron-builder.yml"], ["index.html"]])("runs the server's checks for the desktop's %j", (file) => {
+  it.each([["electron/main.mjs"], ["build/icon.icns"], ["electron-builder.yml"], ["index.html"], ["rail.html"]])("runs the server's checks for the desktop's %j", (file) => {
     expect(selectCiScope([file])).toEqual({ areas: ["desktop"], checks: checks("server") });
   });
 

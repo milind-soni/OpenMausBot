@@ -37,6 +37,13 @@ export function threadsWhenTreeHidden(bot: Bot, queued: Record<string, unknown[]
   return orderedThreadList([...attention, ...pinned]);
 }
 
+/** Simple mode has no thread list, so a thread gets a row under its bot only while it waits on the person:
+ * it asks them something, or has a reply they have not read. A teammate's thread that ended on a card for them
+ * reaches the app only as unread, so unread is the signal. */
+export function threadsWaitingOnPerson(bot: Bot, queued: Record<string, unknown[]>) {
+  return orderedThreadList(sidebarBotActivityTasks(bot, queued).filter((task) => task.activity === "waiting-on-you" || task.unread));
+}
+
 /** Must derive each thread's state exactly as GroupThreadList's sidebar rows do. */
 export function sidebarGroupActivityTasks(group: Group, bots: Bot[], queued: Record<string, unknown[]>): Array<Task & { queued: boolean }> {
   if (group.dm) return [];
@@ -189,8 +196,8 @@ export function PinnedThreadRows({ entries, now, onJump, onUnpin }: { entries: A
   </>;
 }
 
-export function SidebarBotActivity({ bot, rowThreadId, density, pendingQueued, dispatch }: { bot: Bot; rowThreadId: string; density: SidebarDensity; pendingQueued: AppState["pendingQueued"]; dispatch: Dispatch<Action> }) {
-  const tasks = threadsWhenTreeHidden(bot, pendingQueued).filter((task) => task.threadId !== rowThreadId);
+export function SidebarBotActivity({ bot, rowThreadId, density, pendingQueued, dispatch, waitingOnly = false }: { bot: Bot; rowThreadId: string; density: SidebarDensity; pendingQueued: AppState["pendingQueued"]; dispatch: Dispatch<Action>; waitingOnly?: boolean }) {
+  const tasks = (waitingOnly ? threadsWaitingOnPerson : threadsWhenTreeHidden)(bot, pendingQueued).filter((task) => task.threadId !== rowThreadId);
   if (!tasks.length) return null;
   const iconOnly = density === "icons";
   return <div data-sidebar-bot-activity={bot.id} className={cn("mb-1 space-y-0.5", !iconOnly && "ml-6")}>

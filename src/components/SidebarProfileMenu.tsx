@@ -27,7 +27,7 @@ import { AccountMoveStatus, useAccountMove, type AccountMoveKind } from "./Accou
 import { InitialsAvatar } from "./Avatar";
 import { DiscordIcon } from "./DiscordIcon";
 import { AboutDialog } from "./AboutDialog";
-import { PhoneAppDialog } from "./PhoneAppDialog";
+import { PhoneAppDialog } from "./lazy-screens";
 import { CloudTile } from "./cloud-buy/parts";
 import { usageBridge } from "./CloudUsageMeter";
 import { useCloudPlanSnapshot } from "./CloudTrialNotice";
@@ -400,7 +400,7 @@ export function simplePhoneItems({ connected, onGetApp }: { connected: boolean; 
 }
 
 type PlanWindowUse = { available: boolean; usedPercent: number | null; resetsAt: string | null };
-export type PlanUsageWindows = { providers: Array<{ ok: boolean; plan: string | null; weekly: PlanWindowUse; fiveHour: PlanWindowUse }> };
+export type PlanUsageWindows = { providers: Array<{ ok: boolean; plan: string | null; weekly: PlanWindowUse; fiveHour: PlanWindowUse; extra?: Array<{ label: string; usedPercent: number }> }> };
 
 export interface UsageSummary {
   value: string;
@@ -424,7 +424,8 @@ export function planUsageSummary(report: PlanUsageWindows | null, now = Date.now
     const resets = resetsIn(tightest.resetsAt ? Date.parse(tightest.resetsAt) : null, now);
     return { value: t("sidebar.menu.usageUsed", { percent: Math.round(tightest.usedPercent!) }), weekly: window === "weekly", ...(resets ? { resets } : {}) };
   }
-  return null;
+  const budgets = signedIn.flatMap((provider) => provider.extra?.filter((extra) => extra.label === "Monthly spend") ?? []);
+  return budgets.length ? { value: t("sidebar.menu.usageUsed", { percent: Math.round(Math.max(...budgets.map((budget) => budget.usedPercent))) }) } : null;
 }
 
 export function cloudUsageSummary(plan: CloudPlanSnapshot | null): UsageSummary | null {
@@ -692,15 +693,15 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         )}
       />
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
-      <PhoneAppDialog
-        open={phoneAppOpen}
+      {phoneAppOpen && <PhoneAppDialog
+        open
         onClose={() => setPhoneAppOpen(false)}
         connect={destinations.map((destination) => ({
           key: destination.id,
           subtitle: destination.team ? t("sidebar.menu.connectPhone.team", { team: destination.team }) : t(destination.subtitleKey),
           onSelect: () => connectTo(destination),
         }))}
-      />
+      />}
     </>
   );
 }

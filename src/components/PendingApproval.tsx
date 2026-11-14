@@ -5,7 +5,7 @@ import { cn } from "@/lib/cn";
 import { t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
-import { toolLabel } from "./ApprovalCard";
+import { titledCard, toolLabel } from "./ApprovalCard";
 import { ASK_QUIET_ANSWER, ASK_QUIET_BUTTON, ASK_SECONDARY_BUTTON, AskDetail, AskHeader, askPrimary, type Asker } from "./AskCard";
 import { outboundSummary } from "@/lib/approval-summary";
 import { reviewedSkillSha256 } from "../../shared/skill-request";
@@ -66,7 +66,8 @@ export function spokenApprovalPrompt(pending: Pending, requester: string): strin
   if (turnOn) return `${turnOn.line}. ${turnOn.reason}`;
   const ask = yourComputerAsk(pending.message.card, requester);
   if (ask) return `${requester}: ${ask.line}`;
-  if (pending.message.card?.teamSetupRequest) return `${requester}: ${pending.message.card.title} Review the details and choose ${pending.message.card.options[0]} or ${pending.message.card.options[1] ?? "Cancel"}.`;
+  const card = pending.message.card;
+  if (card && titledCard(card)) return `${requester}: ${card.title} Review the details and choose ${card.options[0]} or ${card.options[1] ?? "Cancel"}.`;
   const isSkillRequest = isSkillApproval(pending);
   const isProfileRequest = isProfileApproval(pending);
   if (isSkillRequest) {
@@ -88,7 +89,8 @@ export function spokenApprovalPrompt(pending: Pending, requester: string): strin
 }
 
 function label(pending: Pending): string {
-  if (pending.message.card?.teamSetupRequest) return pending.message.card.title;
+  const card = pending.message.card;
+  if (card && titledCard(card)) return card.title;
   if (isSkillApproval(pending)) {
     return pending.message.card?.skillRequest?.action === "update"
       ? t("approval.label.updateSkill")
@@ -114,7 +116,7 @@ const COMMAND_TOOLS = new Set(["Bash", "shell"]);
 function isDurable(pending: Pending): boolean {
   const card = pending.message.card;
   return isSkillApproval(pending) || isProfileApproval(pending) ||
-    Boolean(card?.teamSetupRequest) || Boolean(card?.modelRequest);
+    titledCard(card) || Boolean(card?.modelRequest);
 }
 
 /** What will happen, in plain words; the command shown whole when it is what will run, and everything the card holds
@@ -128,6 +130,7 @@ function approvalWords(pending: Pending, botName?: string): { line: string; summ
   const detail = (pending.commandAllowlist?.command ?? ask?.detail ?? pending.detail).trim();
   if (outbound) return { line: outbound.headline, ...(outbound.summary ? { summary: outbound.summary } : {}), detail };
   if (ask) return { line: ask.line, detail };
+  if (card?.mcpRequest) return { line: card.title, inline: detail, detail };
   if (isDurable(pending)) return { line: label(pending), detail };
   const action = COMMAND_TOOLS.has(pending.tool) ? t("approval.tool.runCommand") : toolLabel(pending.tool);
   return { line: botName ? t("approval.card.namedWantsTo", { name: botName, action }) : label(pending), inline: detail, detail };
@@ -258,8 +261,8 @@ export function PendingApprovalActions({
   const isRoutineRequest = isRoutineApproval(pending);
   const isSkillRequest = isSkillApproval(pending);
   const isProfileRequest = isProfileApproval(pending);
-  const isTeamSetup = Boolean(pending.message.card?.teamSetupRequest);
-  const durableRequest = isRoutineRequest || isSkillRequest || isProfileRequest || isTeamSetup;
+  const titled = titledCard(pending.message.card);
+  const durableRequest = isRoutineRequest || isSkillRequest || isProfileRequest || titled;
   const canRememberCommand = ownerOrAdmin === true && !durableRequest && !pending.allowKey && Boolean(pending.commandAllowlist);
   const reviewedSha256 = pending.message.card?.skillRequest
     ? reviewedSkillSha256(pending.message.card.skillRequest)
@@ -329,10 +332,10 @@ export function PendingApprovalActions({
       {...marked("deny")}
       type="button"
       onClick={() => decide("deny")}
-      autoFocus={isTeamSetup}
+      autoFocus={titled}
       className={ASK_SECONDARY_BUTTON}
     >
-      {isRoutineRequest || isProfileRequest || isTeamSetup ? t("approval.action.cancel") : t("approval.action.deny")}
+      {isRoutineRequest || isProfileRequest || titled ? t("approval.action.cancel") : t("approval.action.deny")}
     </button>,
     <button
       key="allow"
@@ -343,7 +346,7 @@ export function PendingApprovalActions({
       className={allow.className}
       style={allow.style}
     >
-      {isTeamSetup ? pending.message.card?.options[0] : isSkillRequest
+      {titled ? pending.message.card?.options[0] : isSkillRequest
         ? pending.message.card?.skillRequest?.action === "update"
           ? t("approval.action.update")
           : t("approval.action.enable")

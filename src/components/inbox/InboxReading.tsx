@@ -85,7 +85,7 @@ export function InboxReading({ view, row, now }: { view: InboxView; row: InboxRo
         )}
         {ask === "question" && view.threadId && <QuestionCard threadId={view.threadId} asker={asker} message={asMessage(row)} />}
         {approval && view.threadId && (
-          <div className={cn("rounded-[20px]", ELEVATED_CARD)}>
+          <div className={cn("rounded-[24px]", ELEVATED_CARD)}>
             <PendingApprovalPanel pending={approval} count={1} index={0} botName={asker?.name ?? row.from.name} asker={asker}
               actions={<PendingApprovalActions part="primary" tag="inbox" pending={approval} threadId={view.threadId} bot={asker} onCancelTurn={() => {}} />} />
           </div>

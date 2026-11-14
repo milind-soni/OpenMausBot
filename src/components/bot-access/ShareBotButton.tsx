@@ -16,8 +16,8 @@ export function useTeamName(): string | null {
   return typeof team?.name === "string" && team.name ? team.name : null;
 }
 
-/** A bot's Share button on a team: opens who has access. `footer` holds what else the button offers there. */
-export function ShareBotButton({ bot, className, footer, iconSize = 16 }: { bot: Bot; className: string; footer?: ReactNode; iconSize?: number }) {
+/** A bot's Share button on a team: opens who has access. `headerMenu` holds what else the button offers there. */
+export function ShareBotButton({ bot, className, headerMenu, iconSize = 16 }: { bot: Bot; className: string; headerMenu?: ReactNode; iconSize?: number }) {
   const teamName = useTeamName();
   const [open, setOpen] = useState(false);
   const [change, setChange] = useState<AccessChange | null>(null);
@@ -29,7 +29,7 @@ export function ShareBotButton({ bot, className, footer, iconSize = 16 }: { bot:
         aria-haspopup="dialog" onClick={() => setOpen(true)} className={className}>
         <Share size={iconSize} aria-hidden="true" className="pointer-events-none" />
       </button>
-      {open && <ShareBotDialog bot={bot} teamName={teamName} onClose={() => setOpen(false)} onChanged={setChange} footer={footer} />}
+      {open && <ShareBotDialog bot={bot} teamName={teamName} onClose={() => setOpen(false)} onChanged={setChange} headerMenu={headerMenu} />}
       {change && <UndoToast key={`${change.text}:${JSON.stringify(change.after)}`} text={change.text}
         onUndo={() => saveAccess(bot.id, change.before)} onDone={settled} />}
     </>

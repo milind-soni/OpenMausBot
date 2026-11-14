@@ -12,7 +12,7 @@ import { speakerOf, type PersonName } from "../replies.ts";
 import type { Coordinator } from "../coordinator.ts";
 import type { WorkspaceAccess } from "../enterprise.ts";
 import type { GroupUsageReader } from "../group-thread-usage.ts";
-import { searchMessagesAsync } from "../message-db.ts";
+import { readMessage, searchMessagesAsync } from "../message-db.ts";
 import {
   listMessageFolder, messageAttachmentName, messageFileDisposition, messageFileDownloadName, messageFolderEntryName,
   messageImageTargetAt, messageReferencesFile, openMessageFile, openMessageFolderEntry, referencedFileName,
@@ -152,6 +152,14 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         "cache-control": "private, no-store",
       });
       return res.end(bytes);
+    }
+
+    m = path.match(/^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/tool$/);
+    if (m && method === "GET") {
+      if (!store.botByThread(m[1]) && !store.groupByThread(m[1])) return json(res, 404, { error: "no such conversation" });
+      const message = readMessage(m[1], m[2]);
+      if (message?.tool?.output === undefined) return json(res, 404, { error: "no tool output on that message" });
+      return json(res, 200, { output: message.tool.output });
     }
 
     // Only a file this exact stored message grants; deliberately not a general path reader.

@@ -1,5 +1,5 @@
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
-import type { ConnectorCardData } from "../../shared/wire";
+import type { ConnectorCardData } from "../../shared/connector-card";
 import type { DefaultBotFields } from "../../shared/default-bot";
 import { hiddenFromSidebar } from "./default-bot";
 

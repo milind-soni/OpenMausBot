@@ -108,3 +108,11 @@ it("never makes a server the own of a deleted bot whose folder was left behind",
 it("says it in one plain line per bot", () => {
   expect(claimedNotice("Iris", ["blender"])).toBe("The Blender tool only works for Iris, so it's off for your other bots.");
 });
+
+it("tests a command server as its bot's turns start it, from that bot's own folder, and any other as any bot's", () => {
+  const { host, data } = setup();
+  expect(host.probeAs({})).toEqual({});
+  expect(host.probeAs({ bot: "paul" })).toEqual({ id: "paul", cwd: data });
+  mkdirSync(join(data, "workspaces", "iris"), { recursive: true });
+  expect(host.probeAs({ bot: "iris" })).toEqual({ id: "iris", cwd: join(data, "workspaces", "iris") });
+});

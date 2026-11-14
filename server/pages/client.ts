@@ -28,6 +28,8 @@ interface Minted {
 export const SIGN_IN_MESSAGE = "Publishing a page needs a MausBot account. Sign in to MausBot in the app's Settings, then ask again.";
 const UNAVAILABLE = "Publishing isn't available right now. Try again in a few minutes.";
 const NOT_TURNED_ON = "Publishing pages isn't turned on for this account yet.";
+/** A server with no desktop app to sign in through and no Cloud home (`openmausbot serve`): no Settings sign-in can help. */
+export const SELF_HOSTED_MESSAGE = "Publishing pages isn't available on self-hosted servers yet.";
 const TOKEN_TIMEOUT_MS = 15_000, UPLOAD_TIMEOUT_MS = 60_000;
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
@@ -57,12 +59,15 @@ const readJson = async (response: Response): Promise<Record<string, unknown>> =>
 const callSignal = (call: PagesCall, ms: number) => call.signal ? AbortSignal.any([call.signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms);
 const said = (body: Record<string, unknown>, fallback: string) => typeof body.message === "string" && body.message.trim() ? body.message.trim().slice(0, 500) : fallback;
 
-export function createPagesClient(options: { access: () => PagesAccess | null; notOffered?: () => boolean; fetch?: typeof fetch; now?: () => number }) {
+export function createPagesClient(options: { access: () => PagesAccess | null; notOffered?: () => boolean; selfHosted?: boolean; fetch?: typeof fetch; now?: () => number }) {
   const http = options.fetch ?? fetch, now = options.now ?? Date.now;
 
   const mint = async (action: "create" | "update" | "delete", call: PagesCall, pageId?: string): Promise<Minted | PagesFailure> => {
     const access = options.access();
-    if (!access) return options.notOffered?.() ? fail("unavailable", NOT_TURNED_ON) : fail("sign_in", SIGN_IN_MESSAGE);
+    if (!access) {
+      if (options.notOffered?.()) return fail("unavailable", NOT_TURNED_ON);
+      return options.selfHosted ? fail("unavailable", SELF_HOSTED_MESSAGE) : fail("sign_in", SIGN_IN_MESSAGE);
+    }
     const body = JSON.stringify(pageId ? { action, pageId } : { action });
     let response: Response;
     call.assertActive?.();

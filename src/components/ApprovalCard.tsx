@@ -71,8 +71,11 @@ const PROFILE_FIELD_LABEL: Record<ProfileRequestField, LocaleKey> = {
 /** A routine card no one answered is from before Triggers v2 applied changes on their own: nothing can confirm it now. */
 const staleRoutineCard = (card: OptionCardData) => Boolean(card.routineRequest && !card.answered);
 
+/** The card brings its own question and answer words (its title and first option): team setup and MCP server changes. */
+export const titledCard = (card: OptionCardData | undefined) => Boolean(card?.teamSetupRequest || card?.mcpRequest);
+
 export function approvalCardOutcome(card: OptionCardData): string | undefined {
-  const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest);
+  const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || titledCard(card));
   if (card.expired === true || staleRoutineCard(card)) return t(isProposal || !card.tool ? "approval.status.expired" : "approval.status.timedOut");
   if (!card.answered) return undefined;
   if (card.undone === true) return t("approval.status.undone");
@@ -435,7 +438,7 @@ export function ApprovalCard({
   const isRoutineRequest = Boolean(card.routineRequest);
   const isSkillRequest = Boolean(card.skillRequest);
   const isProfileRequest = Boolean(card.profileRequest);
-  const isTeamSetup = Boolean(card.teamSetupRequest);
+  const titled = titledCard(card);
   const routineAction = card.routineRequest?.operation.action;
   const skillAction = card.skillRequest?.action;
   const heldNote = tFromServer(card.heldCode, card.held);
@@ -468,7 +471,7 @@ export function ApprovalCard({
       </div>
     );
   }
-  if (!isRoutineRequest && !isSkillRequest && !isProfileRequest && !isTeamSetup && !card.modelRequest) {
+  if (!isRoutineRequest && !isSkillRequest && !isProfileRequest && !titled && !card.modelRequest) {
     const waiting = !settled && !expired;
     const ask = yourComputerAsk(card, bot?.name ?? t("approval.someone"));
     const header = ask ? ask.line : outbound
@@ -503,7 +506,7 @@ export function ApprovalCard({
     >
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-[15px] font-semibold text-ink">
-          {isTeamSetup ? card.title : outbound ? outbound.headline : profileHeader ?? (
+          {titled ? card.title : outbound ? outbound.headline : profileHeader ?? (
             <>
               {bot
                 ? t("approval.card.namedWantsTo", { name: bot.name, action: toolLabel(displayTool) })
@@ -511,7 +514,7 @@ export function ApprovalCard({
             </>
           )}
         </div>
-        {displayTool && !isTeamSetup && !outbound && <span className="shrink-0 font-mono text-[11px] text-ink-secondary">{displayTool}</span>}
+        {displayTool && !titled && !outbound && <span className="shrink-0 font-mono text-[11px] text-ink-secondary">{displayTool}</span>}
       </div>
       {outbound?.summary && <div className="mt-0.5 text-[13px] text-ink-secondary">{outbound.summary}</div>}
 
@@ -548,7 +551,7 @@ export function ApprovalCard({
         ) : (
           <>
             <ShieldCheck size={14} className="text-accent" />
-            {isRoutineRequest || isSkillRequest || isProfileRequest || isTeamSetup
+            {isRoutineRequest || isSkillRequest || isProfileRequest || titled
               ? t("approval.status.waitingConfirmation")
               : t("approval.status.waitingAnswer")}
           </>

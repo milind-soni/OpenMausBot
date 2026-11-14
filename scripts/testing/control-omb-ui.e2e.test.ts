@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
@@ -387,7 +387,12 @@ describe("control-omb ui drives the real renderer", () => {
 
     await ui("click", info.ui, "--name", "More");
     await ui("click", info.ui, "--name", "Inspector");
-    const inspected = await ui("snapshot", info.ui);
+    // A local page fetches a screen when it opens, so the panel arrives just after the click.
+    const inspected = await vi.waitFor(async () => {
+      const snapshot = await ui("snapshot", info.ui);
+      expect(snapshot.snapshot).toContain('complementary "Inspector"');
+      return snapshot;
+    }, { timeout: 5_000, interval: 100 });
     const runLog = (inspected.snapshot as string).slice((inspected.snapshot as string).indexOf('complementary "Inspector"'));
     expect(runLog).toContain('tab "Run Log" [selected');
     expect(runLog).toContain("pnpm control:omb doctor");

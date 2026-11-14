@@ -349,6 +349,7 @@ test("the window's IPC: the screen reads and retries, My Cloud's page renews its
   w.url = `${LOCAL}${HOME_SCREEN_PATH}`;
   assert.deepEqual(handlers.get("home:state")(page), { screen: "opening" });
   assert.throws(() => handlers.get("home:repair")(page), /only available/);
+  w.state = { status: "signed-out" };
   await handlers.get("home:sign-in")(page);
   w.url = "https://other.example.test/";
   assert.throws(() => handlers.get("home:sign-in")(page), /only available/);

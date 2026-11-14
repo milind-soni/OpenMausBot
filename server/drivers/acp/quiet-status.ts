@@ -318,6 +318,10 @@ export const LIMIT_WORDS = /\b429\b|rate.?limit|too many requests|usage limit|qu
 export const DEFAULT_LIMIT_QUIET_MS = 2 * 60_000;
 export const limitQuietMs = (): number => knob("OMB_ACP_LIMIT_QUIET_MS", DEFAULT_LIMIT_QUIET_MS);
 
+/** A 429 whose wait is longer than any engine retries on its own is a usage limit, not a short rate limit. */
+export const usageLimitWait = (status: number | null | undefined, waitMs: number | null | undefined): boolean =>
+  status === 429 && (waitMs ?? 0) > limitQuietMs();
+
 /** No open request, no CPU and nothing logged, this long: the engine is stuck, and the turn is stopped
  * (OMB_ACP_NO_SIGNS_STOP_MS overrides). */
 export const DEFAULT_NO_SIGNS_STOP_MS = 5 * 60_000;
@@ -327,7 +331,7 @@ export const noSignsStopMs = (): number => knob("OMB_ACP_NO_SIGNS_STOP_MS", DEFA
 export function waitingOutLimit(signal: LogSignal | null): boolean {
   if (!signal) return false;
   if (signal.kind === "provider-error") return LIMIT_WORDS.test(signal.message);
-  return signal.kind === "retry" && signal.status === 429 && (signal.delayMs ?? 0) > limitQuietMs();
+  return signal.kind === "retry" && usageLimitWait(signal.status, signal.delayMs);
 }
 
 /** A quiet turn after it is classified: no sign of life reads as "between requests" until `stuckAfterMs`, and the turn

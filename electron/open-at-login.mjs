@@ -1,6 +1,6 @@
 // While this computer is lent, the app starts with the person's session, out of sight, so My Cloud's bots can use it
-// again after a restart without anyone opening it. Only a login item this app added for lending is ever removed, and
-// only such a launch starts hidden: one the person set up themselves, here or in the system's settings, opens the window.
+// again after a restart without anyone opening it. Lending only ever removes a login item it added, and only such a
+// launch starts hidden: one the person set up themselves, here or in the system's settings, opens the window.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -18,14 +18,22 @@ export function autostartEntry(exec, { lending = true } = {}) {
 }
 
 /**
- * `file`: where this app records that it added the login item (macOS, where a login item carries no arguments).
+ * `file`: where this app records that it added the login item (macOS, where a login item carries no arguments), and
+ * that the person turned Open at login off (Windows, where lending then adds no entry of its own).
  * `follow(on)` keeps the login item in step with lending; `startedHidden()` says this launch came from it.
- * `chosen()` and `choose(on)`: the person's own login item, which opens the window and which lending never removes.
+ * `chosen()` and `choose(on)`: the person's own login item, which opens the window and which lending never removes; on
+ * Windows, whether Windows starts the app at sign-in at all, as its Startup apps list shows.
  */
 export function createOpenAtLogin({ app, file, platform = process.platform, env = process.env, home, argv = process.argv, execPath = process.execPath }) {
   const autostart = path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), "autostart", "openmausbot.desktop");
-  const added = () => { try { return JSON.parse(fs.readFileSync(file, "utf8")).added === true; } catch { return false; } };
-  const remember = (value) => { try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify({ added: value })); } catch {} };
+  const saved = () => { try { return JSON.parse(fs.readFileSync(file, "utf8")) ?? {}; } catch { return {}; } };
+  const store = (fields) => { try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify({ ...saved(), ...fields })); } catch {} };
+  const added = () => saved().added === true;
+  const remember = (value) => store({ added: value });
+  /** Electron 43.7 on Windows: `openAtLogin` compares the Run entry's arguments with the `args` asked about (none by
+   * default), so lending's `--omb-hidden` entry reads as off; `launchItems` lists the entries that start this executable,
+   * each with its name, arguments and whether Task Manager has it enabled. */
+  const windowsStartsApp = () => (app.getLoginItemSettings().launchItems ?? []).filter(item => item.enabled !== false);
   const ours = () => { try { return fs.readFileSync(autostart, "utf8").includes(MARK); } catch { return false; } };
   return {
     follow(on) {
@@ -40,6 +48,7 @@ export function createOpenAtLogin({ app, file, platform = process.platform, env 
         }
         if (platform === "win32") {
           const settings = { args: [HIDDEN_ARG] };
+          if (on && saved().declined === true) return;
           if (app.getLoginItemSettings(settings).openAtLogin !== on) app.setLoginItemSettings({ openAtLogin: on, ...settings });
           return;
         }
@@ -53,7 +62,7 @@ export function createOpenAtLogin({ app, file, platform = process.platform, env 
     chosen() {
       try {
         if (platform === "linux") return fs.existsSync(autostart) && !ours();
-        if (platform === "win32") return (app.getLoginItemSettings().launchItems ?? []).some(item => item.name === CHOSEN_NAME && item.enabled !== false);
+        if (platform === "win32") return windowsStartsApp().length > 0;
         return app.getLoginItemSettings().openAtLogin === true && !added();
       } catch { return false; }
     },
@@ -66,7 +75,12 @@ export function createOpenAtLogin({ app, file, platform = process.platform, env 
         } else if (!ours()) fs.rmSync(autostart, { force: true });
         return;
       }
-      if (platform === "win32") { app.setLoginItemSettings({ openAtLogin: on, args: [], name: CHOSEN_NAME }); return; }
+      if (platform === "win32") {
+        if (on) app.setLoginItemSettings({ openAtLogin: true, args: [], name: CHOSEN_NAME });
+        else for (const item of windowsStartsApp()) app.setLoginItemSettings({ openAtLogin: false, args: item.args ?? [], name: item.name });
+        store({ declined: !on });
+        return;
+      }
       app.setLoginItemSettings({ openAtLogin: on });
       remember(false);
     },

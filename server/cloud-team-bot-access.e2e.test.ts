@@ -370,4 +370,23 @@ describe("asking to chat", () => {
     expect(refused.status, JSON.stringify(refused.body)).toBe(403);
     expect((await botOf("eve", atlas.id))).toMatchObject({ yourAccess: "view" });
   });
+
+  it("shows each sharing change, answered ask and owner hand-over in the admins' Activity", async () => {
+    type Entry = { who: string; action: string; target?: { id: string; name?: string }; after?: Record<string, unknown> };
+    const activity = async (who = "ada") => ((await as(who, "GET", "/api/admin-activity?what=visibility")).body.entries ?? []) as Entry[];
+    const made = await as("ada", "POST", "/api/bots", { name: "Archive", reportsTo: CARA.email });
+    const archive = made.body.bot as Bot;
+    expect((await share("ada", archive.id, { everyone: "none", people: { [EVE.email]: "view" } })).status).toBe(200);
+    expect((await as("eve", "POST", `/api/bots/${archive.id}/access-request`)).status).toBe(201);
+    expect((await answer("cara", (await asks("cara", archive.id))[0]!, "Allow")).status).toBe(200);
+    expect((await as("ada", "PUT", `/api/bots/${archive.id}/reports-to`, { email: DAN.email })).status).toBe(200);
+    await until(async () => (await activity()).filter((entry) => entry.target?.id === archive.id).length >= 2);
+    const rows = (await activity()).filter((entry) => entry.target?.id === archive.id);
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "access.update", target: expect.objectContaining({ name: "Archive" }), after: { access: { everyone: "none", people: { [EVE.email]: "view" } } } }),
+      expect.objectContaining({ action: "access.allow", who: expect.stringContaining(CARA.email) }),
+    ]));
+    await until(async () => ((await as("ada", "GET", "/api/admin-activity?what=bot")).body.entries as Entry[]).some((entry) => entry.action === "owner.update" && entry.target?.id === archive.id));
+    expect((await as("bob", "GET", "/api/admin-activity?what=visibility")).status, "a member never reads it").toBe(403);
+  });
 });

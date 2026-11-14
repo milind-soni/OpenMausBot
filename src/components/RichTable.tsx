@@ -50,7 +50,7 @@ const SMALL_TABLE_ROWS = 8;
 /** Simple mode's table card: the composer surface with a hairline edge and no footer. Its header row starts at the
  * top; the hover plate floats over the header's right end and takes no room. Only touch screens, where the plate is
  * always shown and its buttons keep 40px targets, give it a band of its own. */
-const TABLE_CARD = "group/table relative w-full overflow-hidden rounded-[20px] bg-composer text-ink shadow-[0_0_0_0.5px_var(--color-composer-ring),0_2px_8px_rgb(28_28_28/0.035)] touch:pt-11";
+const TABLE_CARD = "group/table relative w-full overflow-hidden rounded-[24px] bg-composer text-ink shadow-[0_0_0_0.5px_var(--color-composer-ring),0_2px_8px_rgb(28_28_28/0.035)] touch:pt-11";
 
 export function RichTable({ columns, rows, name = t("table.title"), expanded = false, direction = "ltr", headless = false, card: asCard = true }: RichTableProps) {
   const simple = !useAdvancedMode();

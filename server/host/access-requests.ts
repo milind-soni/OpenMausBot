@@ -2,6 +2,7 @@
 // the inbox of the bot's owner (or of each admin, when nobody owns it). Allow gives the asker Can chat at once and tells
 // them in their own inbox. Security: the route is client-scoped and the gate lets anyone who can view the bot reach it;
 // the card's answer takes effect only while the person answering can edit the bot.
+import type { AdminActionRow } from "../admin-activity.ts";
 import { randomUUID } from "node:crypto";
 
 import { ACCESS_REQUEST_OPTIONS, atLeast, type BotAccessLevel } from "../../shared/bot-access.ts";
@@ -34,6 +35,8 @@ export interface AccessRequestDeps {
   visibleTo(viewer: Viewer): VisibleSet;
   levelOf(auth: RequestAuth, botId: string): BotAccessLevel;
   writeAccess(bot: BotRecord, access: ReturnType<typeof accessOf>): BotRecord | null;
+  /** Settings → Activity, as the person who answered from their inbox. */
+  record?(row: Omit<AdminActionRow, "at" | "actor">, by: string): void;
 }
 
 export function createAccessRequests(deps: AccessRequestDeps) {
@@ -99,12 +102,16 @@ export function createAccessRequests(deps: AccessRequestDeps) {
     if (allow) {
       if (!bot || !person || levelFor(person, bot.id) !== "edit") return { status: 403, body: { error: `Only people who can edit ${ask.botName} can let someone chat with it.` } };
       const access = accessOf(bot);
-      if (!atLeast(access.people[ask.email], "chat")) deps.writeAccess(bot, { everyone: access.everyone, people: { ...access.people, [ask.email]: "chat" } });
+      const raised = !atLeast(access.people[ask.email], "chat");
+      const after = raised ? { everyone: access.everyone, people: { ...access.people, [ask.email]: "chat" as const } } : access;
+      if (raised) deps.writeAccess(bot, after);
+      deps.record?.({ category: "visibility", action: "access.allow", target: { kind: "bot", id: bot.id, name: bot.name }, before: { access, asked: ask.email }, after: { access: after, asked: ask.email } }, person.email);
       deps.inbox().deliver(personKeyOf(ask.email), {
         kind: "notice", from: { name: nameOf(person.email), email: person.email },
         text: `${nameOf(person.email)} let you chat with ${bot.name}.`, title: `You can chat with ${bot.name}`, notify: "done",
       });
     }
+    if (!allow && bot && person) deps.record?.({ category: "visibility", action: "access.decline", target: { kind: "bot", id: bot.id, name: bot.name }, after: { asked: ask.email } }, person.email);
     for (const open of [{ threadId, line }, ...(bot ? openAsks(bot, ask.email).filter((other) => other.threadId !== threadId) : [])]) {
       deps.store().patchMessage(open.threadId, open.line.id, { card: { ...open.line.card!, answered: "answer", answeredText: allow ? ACCESS_REQUEST_OPTIONS[0] : ACCESS_REQUEST_OPTIONS[1] } });
     }

@@ -34,6 +34,8 @@ async function chiefJob(test: (f: any) => Promise<void>) {
   const model = createServer(async (req, res) => {
     if (req.url?.endsWith("/models")) { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "loop-model" }] })); return; }
     let body = "";
+    // Only a turn's POST carries a body; the Ollama probe GETs /api/version first (ollama-context.ts).
+    if (req.method !== "POST") { res.writeHead(404); res.end(); return; }
     for await (const chunk of req) body += chunk;
     const sent = JSON.parse(body) as { messages: Array<{ role: string; content?: unknown }>; tools?: Array<{ function: { name: string } }> };
     const text = (message: { content?: unknown }) => typeof message.content === "string" ? message.content
@@ -47,7 +49,9 @@ async function chiefJob(test: (f: any) => Promise<void>) {
       if ("hold" in given) { await given.hold; return reply(out, given.after); }
       out.writeHead(200, { "content-type": "text/event-stream" });
       out.end("say" in given ? frame({ content: given.say }, "stop") + "data: [DONE]\n\n"
-        : frame({ tool_calls: [{ index: 0, id: `call_${++callSerial}`, type: "function", function: { name: tool, arguments: "{}" } }] }, "tool_calls") + "data: [DONE]\n\n");
+        // Each call carries its own round: a local model that repeats one identical call is stopped after ten (chat-repeat-guard.ts),
+        // and this loop is meant to run to the step cap.
+        : frame({ tool_calls: [{ index: 0, id: `call_${++callSerial}`, type: "function", function: { name: tool, arguments: JSON.stringify({ round: callSerial }) } }] }, "tool_calls") + "data: [DONE]\n\n");
     };
     await reply(res, answer(request)).catch(() => {});
   });
@@ -231,10 +235,12 @@ it("carries a consult-and-implement job over several teammate turns, through a s
   expect(chiefRows.filter((name: string) => name.startsWith("Resumed with"))).toEqual(["Resumed with Mira, Eli results, reviewing", "Resumed with Mira, Eli results, reviewing"]);
   for (const node of f.tree(job).filter((candidate: any) => candidate.parentId)) expect(await f.cards(node.threadId)).toEqual([]);
   expect(f.notifications.filter((notification: any) => notification.kind === "approval")).toEqual([]);
+  // No "done" while teammates still work (A0, and A1 handing off again): one at the job's end, with its final answer.
+  await expect.poll(() => f.notifications.some((notification: any) => notification.kind === "done"), { timeout: 10_000 }).toBe(true);
   expect(f.notifications.map((notification: any) => [notification.kind, notification.body])).toEqual([
-    ["done", "A0: Mira is consulting and Eli is implementing."],
     ["delegation-settled", "Results in from Mira, Eli"],
     ["delegation-settled", "Results in from Mira, Eli"],
+    ["done", expect.stringContaining("A-FINAL")],
   ]);
 
   const consult = f.prompt(f.turn("M1"));
@@ -300,11 +306,12 @@ it("tells the Chief what happened to each approval: allowed, denied, or never an
   expect(f.prompt(f.turn("B3"))).toContain("[OpenMausBot report from @Mira on assignment ");
   expect((await f.cards(work)).map((message: any) => [message.card.subtitle, message.card.answered, message.card.dismissed, message.card.answeredBy?.kind]))
     .toEqual([["git log --oneline -5 -- src/export", "allow", false, "loopback"], ["git push origin export", "deny", false, "loopback"], ["pnpm test", "deny", true, undefined]]);
+  await expect.poll(() => f.notifications.some((notification: any) => notification.kind === "done"), { timeout: 10_000 }).toBe(true);
   expect(f.notifications.map((notification: any) => [notification.kind, notification.body])).toEqual([
-    ["done", "B0: Mira is checking."],
     ["approval", "git log --oneline -5 -- src/export"], ["delegation-settled", "Results in from Mira"],
     ["approval", "git push origin export"], ["delegation-settled", "Results in from Mira"],
     ["approval", "pnpm test"], ["delegation-settled", "Results in from Mira"],
+    ["done", expect.stringContaining("APPROVALS-FINAL")],
   ]);
 }), hostTimeout(120_000));
 
@@ -415,8 +422,9 @@ it("tells the Chief a teammate's turn stalled, in the watchdog's words", () => c
   expect(f.child(job, f.mira.id, "LONG-SUITE").result).toBe(stalled.result);
   expect(f.turns(f.clive.id).map((record: any) => record.planKey)).toEqual(["D0", "D1"]);
   expect((await f.tasks(f.clive.id)).map((task: any) => task.title)).not.toContain("Team incidents");
+  await expect.poll(() => f.notifications.some((notification: any) => notification.kind === "done"), { timeout: 10_000 }).toBe(true);
   expect(f.notifications.map((notification: any) => [notification.kind, notification.body])).toEqual([
-    ["done", "D0: Mira is running the suite."], ["delegation-settled", "Results in from Mira"]]);
+    ["delegation-settled", "Results in from Mira"], ["done", expect.stringContaining("STALL-FINAL")]]);
 }), hostTimeout(90_000));
 
 it("lets a card hold only its own job: other jobs run beside it, or say once whose card they wait behind", () => chiefJob(async (f) => {

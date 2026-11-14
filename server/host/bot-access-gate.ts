@@ -86,14 +86,14 @@ export function createBotAccessGate(deps: BotAccessGateDeps) {
   };
 }
 
-type SetupCard = { profileRequest?: unknown; modelRequest?: unknown; skillRequest?: unknown; teamSetupRequest?: unknown; webhookRequest?: unknown; appTriggerRequest?: unknown };
+type SetupCard = { profileRequest?: unknown; modelRequest?: unknown; skillRequest?: unknown; teamSetupRequest?: unknown; webhookRequest?: unknown; appTriggerRequest?: unknown; mcpRequest?: unknown };
 
-/** A card whose answer changes the bot itself (its instructions, model, skills, team, triggers) is answered only by
- * someone who can edit it; any other card by whoever may answer it. */
+/** A card whose answer changes the bot itself (its instructions, model, skills, team, triggers, MCP servers) is answered
+ * only by someone who can edit it; any other card by whoever may answer it. */
 export function setupCardRefusal(card: SetupCard | undefined, bot: { id: string; name: string } | undefined, level: (botId: string) => BotAccessLevel): string | null {
   if (!card || !bot) return null;
   const changesBot = card.profileRequest !== undefined || card.modelRequest !== undefined || card.skillRequest !== undefined ||
-    card.teamSetupRequest !== undefined || card.webhookRequest !== undefined || card.appTriggerRequest !== undefined;
+    card.teamSetupRequest !== undefined || card.webhookRequest !== undefined || card.appTriggerRequest !== undefined || card.mcpRequest !== undefined;
   return changesBot && !atLeast(level(bot.id), "edit") ? refusalFor(bot.name, "edit") : null;
 }
 

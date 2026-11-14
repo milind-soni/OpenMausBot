@@ -291,9 +291,19 @@ Known limits:
   Codex lets a server's read-only tools run without asking, but here every
   tool runs through the one tool that runs them all, which cannot carry each
   tool's own read-only hint. Each Whop call shows a card, naming the tool.
-- **Command servers are not searched yet.** Only URL servers are. A command
-  server with hundreds of tools is still listed whole, and API-model bots
-  refuse more than 128 tools in one turn.
+- **Command servers are searched only on API models.** On other engines a
+  command server with hundreds of tools is still listed whole.
+
+API-model bots take at most 128 tools in one turn, and every server of the
+turn shares them with the built-in tools. When a bot's servers offer more,
+the turn lists as many whole servers as fit, in the order they are set up
+after the built-ins, and reaches the rest through one tool search of three
+tools (`mcp_search_tools`, `mcp_describe_tool`, `mcp_call_tool`) that count
+toward the 128. No server is left out for the limit; the chat says in one
+line which servers were reached through the search. The bot's MCP servers
+card in Access shows the last turn's count against the limit and those
+servers, and a server's **Test** says when it alone has more tools than the
+limit, or half of it or more.
 
 ### Which engines reach which servers
 
@@ -469,7 +479,10 @@ servers gets the enabled tools on its next task.
 - **Testing is bounded.** A command is stopped after the handshake (or eight
   seconds), its output is capped, and its stderr is never sent to the UI. It
   inherits none of OpenMausBot's workspace or provider credentials; only the
-  environment variables configured for that MCP server are added. A test
+  environment variables configured for that MCP server are added. Where bots
+  are boxed, a command server is tested in the box, as a bot's turn starts
+  it, and its configured variables pass the box's allow-list there, in the
+  test and in an API-model bot's turn alike. A test
   reads at most 32 MB (Whop's tool list alone is 1.2 MB), and a URL test
   reports only the HTTP status of a refusal.
 - **Addresses are checked.** A URL server needs a full `http://` or

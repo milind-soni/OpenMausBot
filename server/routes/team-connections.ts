@@ -29,6 +29,8 @@ export interface TeamConnectionRouteDeps {
   composio: Pick<typeof Composio, "configured" | "connectedServices" | "authorizeService" | "removeService">;
   /** This server's own https address, where a member's MCP sign-in comes back. */
   publicOrigin: string | null;
+  /** The team's rules: an app or server they don't allow can't be connected by anyone. */
+  policy?: { appRefusal(slug: string): string | undefined; mcpRefusal(name: string, url?: string): string | undefined };
   /** An admin's change, for the team's admin activity. */
   record?(auth: RequestAuth, row: Omit<AdminActionRow, "at" | "actor">): void;
 }
@@ -106,6 +108,8 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
         return json(res, 409, { error: `${appLabel(slug)} is ${team.name}'s, connected once for everyone by an admin.` });
       }
       if (app[2] && method === "POST") {
+        const refused = deps.policy?.appRefusal(slug);
+        if (refused) return json(res, 403, { error: refused, code: "managed_policy" });
         const access = await deps.host.people.ensureAppsAccess(person, email);
         if (!access) return json(res, 503, { error: "Connected apps aren't available on this Cloud right now. Try again in a minute." });
         try {
@@ -130,6 +134,10 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
         return json(res, 409, { error: `${name} is ${team.name}'s, connected once for everyone by an admin.` });
       }
       deps.host.people.remember(person, email);
+      if ((mcp[2] === "/sign-in" || mcp[2] === "/key") && method !== "DELETE") {
+        const refused = deps.policy?.mcpRefusal(name, stored.url);
+        if (refused) return json(res, 403, { error: refused, code: "managed_policy" });
+      }
       if (mcp[2] === "/sign-in" && method === "POST") {
         const origin = mcpCallbackOrigin(provesSameOrigin(req) ? requestOrigin(req) : null, [deps.publicOrigin]);
         try {

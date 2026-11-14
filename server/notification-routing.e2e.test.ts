@@ -391,8 +391,10 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
       const notified = stream.frames.filter((candidate) => candidate.kind === "notify").map((candidate) => candidate.notification);
       expect(notified.filter((notification) => notification?.botId === peer.id), JSON.stringify(notified)).toEqual([]);
       expect(notified.every((notification) => notification?.botId === asker.id && notification?.threadId === asker.threadId), JSON.stringify(notified)).toBe(true);
-      expect(notified.map((notification) => notification?.kind), JSON.stringify(notified)).toEqual(["done", "delegation-settled"]);
-      expect(notified[1]).toMatchObject({ title: "Pen resumed with results", body: "Results in from Ink" });
+      // The hand-off turn is not the end of the job: no "done" then. Results in, then one "done" with the reviewed answer.
+      expect(notified.map((notification) => notification?.kind), JSON.stringify(notified)).toEqual(["delegation-settled", "done"]);
+      expect(notified[0]).toMatchObject({ title: "Pen resumed with results", body: "Results in from Ink" });
+      expect(notified[1]).toMatchObject({ title: "Pen finished", body: expect.stringContaining("saw the result") });
     } finally {
       stream.close();
       await cleanup([], [asker.id, peer.id]);

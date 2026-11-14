@@ -42,6 +42,61 @@ function account(driver: PlanAccount["driver"], extras: Partial<PlanAccount> = {
 }
 
 describe("plan usage parsers", () => {
+  describe("a Claude budget in money", () => {
+    const enterprise = {
+      five_hour: null,
+      seven_day: null,
+      spend: { enabled: true, used: { amount_minor: 4_631, currency: "USD", exponent: 2 }, limit: { amount_minor: 50_000, currency: "USD", exponent: 2 }, percent: 9 },
+      extra_usage: { is_enabled: true, used_credits: 4_631, monthly_limit: 50_000, utilization: 9.262, currency: "USD", decimal_places: 2 },
+    };
+    const line = (label: string, used: number, spend?: object) => ({ label, usedPercent: expect.closeTo(used, 2), remainingPercent: expect.closeTo(100 - used, 2), resetsAt: null, ...(spend ? { spend } : {}) });
+
+    it("shows an Enterprise seat's monthly spend with its amounts, once", () => {
+      const parsed = parseClaudeUsage(enterprise);
+      expect(parsed.extra).toEqual([line("Monthly spend", 9.262, { usedMinor: 4_631, limitMinor: 50_000, currency: "USD", exponent: 2 })]);
+      expect(parsed.fiveHour.available).toBe(false);
+      expect(parsed.weekly.available).toBe(false);
+    });
+
+    it("reads the budget from extra usage when the spend block is missing, off or its money does not add up", () => {
+      const fallback = line("Monthly spend", 9.262, { usedMinor: 4_631, limitMinor: 50_000, currency: "USD", exponent: 2 });
+      expect(parseClaudeUsage({ extra_usage: enterprise.extra_usage }).extra).toEqual([fallback]);
+      expect(parseClaudeUsage({ ...enterprise, spend: { ...enterprise.spend, enabled: false } }).extra).toEqual([fallback]);
+      const unmatched = { ...enterprise.spend, used: { amount_minor: 9_000, currency: "USD", exponent: 2 } };
+      expect(parseClaudeUsage({ ...enterprise, spend: { ...unmatched, limit: { amount_minor: 50_000, currency: "EUR", exponent: 2 } } }).extra).toEqual([fallback]);
+      expect(parseClaudeUsage({ ...enterprise, spend: { ...unmatched, limit: { amount_minor: 50_000, currency: "USD", exponent: 3 } } }).extra).toEqual([fallback]);
+    });
+
+    it("prefers the spend block over extra usage, and needs nothing else", () => {
+      const spend = { ...enterprise.spend, used: { amount_minor: 25_000, currency: "USD", exponent: 2 } };
+      const line50 = line("Monthly spend", 50, { usedMinor: 25_000, limitMinor: 50_000, currency: "USD", exponent: 2 });
+      expect(parseClaudeUsage({ ...enterprise, spend }).extra).toEqual([line50]);
+      expect(parseClaudeUsage({ spend }).extra).toEqual([line50]);
+    });
+
+    it("takes the digits from the currency when Claude does not say", () => {
+      const { decimal_places: _digits, ...usd } = enterprise.extra_usage;
+      expect(parseClaudeUsage({ extra_usage: usd }).extra[0]?.spend?.exponent).toBe(2);
+      expect(parseClaudeUsage({ extra_usage: { ...usd, currency: "JPY" } }).extra[0]?.spend?.exponent).toBe(0);
+    });
+
+    it("keeps only the percent without usable amounts", () => {
+      expect(parseClaudeUsage({ extra_usage: { is_enabled: true, utilization: 30, monthly_limit: null, used_credits: null } }).extra).toEqual([line("Monthly spend", 30)]);
+      expect(parseClaudeUsage({ extra_usage: { is_enabled: true, utilization: 30, monthly_limit: 500, used_credits: 150, currency: "not money" } }).extra).toEqual([line("Monthly spend", 30)]);
+      expect(parseClaudeUsage({ extra_usage: { is_enabled: true, utilization: 30, monthly_limit: 0, used_credits: 0, currency: "USD" } }).extra).toEqual([line("Monthly spend", 30)]);
+    });
+
+    it("calls it extra usage on a plan with rolling windows", () => {
+      const parsed = parseClaudeUsage({ five_hour: { utilization: 10, resets_at: null }, seven_day: { utilization: 20, resets_at: null }, extra_usage: { is_enabled: true, used_credits: 500, monthly_limit: 1_000, utilization: 50, currency: "USD" } });
+      expect(parsed.extra).toEqual([line("Extra Usage", 50, { usedMinor: 500, limitMinor: 1_000, currency: "USD", exponent: 2 })]);
+    });
+
+    it("shows nothing for a budget that is off", () => {
+      expect(parseClaudeUsage({ extra_usage: { ...enterprise.extra_usage, is_enabled: false } }).extra).toEqual([]);
+      expect(parseClaudeUsage({ spend: { ...enterprise.spend, enabled: false } }).extra).toEqual([]);
+    });
+  });
+
   it("turns Claude utilization into remaining percent and keeps opus as a model window", () => {
     const parsed = parseClaudeUsage({
       five_hour: { utilization: 25, resets_at: "2026-09-26T12:00:00.000Z" },

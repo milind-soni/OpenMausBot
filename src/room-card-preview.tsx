@@ -8,7 +8,7 @@ import { InitialsAvatar } from "@/components/Avatar";
 import { ConfirmDialogCard } from "@/components/ConfirmDialog";
 import { CloudRoomCardView } from "@/components/CloudRoomCard";
 import { cloudPlanLabel } from "@/lib/cloud-plan";
-import { setLocale, t } from "@/lib/i18n";
+import { loadLocale, t } from "@/lib/i18n";
 import { roomCardView } from "@/lib/room-card";
 import { SKIN_IDS, type SkinId } from "@/lib/skins";
 import { upgradeConfirmBody } from "@/lib/usage-meter";
@@ -89,11 +89,11 @@ function Preview() {
   const params = new URLSearchParams(location.search);
   const skin = (SKIN_IDS as readonly string[]).includes(params.get("skin") ?? "") ? params.get("skin") as SkinId : "midnight";
   document.documentElement.dataset.skin = skin;
-  setLocale(params.get("lang") ?? "en");
   const state = params.get("state") ?? "memory", layout = params.get("layout") ?? "desktop";
   return <div className="h-screen overflow-hidden">
     {state === "confirm" ? <Confirm layout={layout} /> : layout === "phone" ? <Phone state={state} /> : <Desktop state={state} />}
   </div>;
 }
 
+await loadLocale(new URLSearchParams(location.search).get("lang") ?? "en");
 createRoot(document.getElementById("root")!).render(<StrictMode><Preview /></StrictMode>);

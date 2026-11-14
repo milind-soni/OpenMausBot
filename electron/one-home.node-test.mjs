@@ -371,7 +371,7 @@ test("a newer app tops up once from the frozen copy, which is deleted 30 days af
 test("one home reads the Admin's word: a ready Cloud the account may move to, and a held one that ended", () => {
   const state = (machine, extra = {}) => ({ status: "connected", account: { id: "acct-1" }, entitlement: { status: "active" }, machine, ...extra });
   assert.equal(oneHomeCloud({ status: "signed-out" }), null);
-  assert.deepEqual(oneHomeCloud(state({ status: "ready", origin: CLOUD, moves: true })), { origin: CLOUD, account: "acct-1", machine: CLOUD, ready: true, moves: true, ended: false, paid: true });
+  assert.deepEqual(oneHomeCloud(state({ status: "ready", origin: CLOUD, moves: true })), { origin: CLOUD, account: "acct-1", machine: CLOUD, ready: true, moves: true, ended: false, paid: true, verified: true });
   assert.equal(oneHomeCloud(state({ status: "ready", origin: CLOUD })).moves, false, "no move unless the Admin lets this account move");
   assert.equal(oneHomeCloud(state({ status: "stopped", hold: { until: 5 } })).ended, true);
   assert.equal(oneHomeCloud(state({ status: "stopped" })).ended, false, "stopped alone is not ended");
@@ -379,7 +379,7 @@ test("one home reads the Admin's word: a ready Cloud the account may move to, an
   assert.equal(oneHomeCloud({ ...state({ status: "ready", origin: CLOUD, moves: true }), status: "unavailable" }).ready, false);
   const team = [{ id: "team-acme", name: "Acme", role: "owner", machine: { status: "ready", origin: "https://omb-t-2.fly.dev", moves: true } }];
   assert.deepEqual(oneHomeCloud(state(undefined, { entitlement: { plan: "pro", tier: "team", status: "active" }, teams: team })),
-    { origin: null, account: "acct-1", machine: null, ready: false, moves: false, ended: false, paid: false }, "a Team plan has no My Cloud: nothing moves, and nothing here counts as paid for");
+    { origin: null, account: "acct-1", machine: null, ready: false, moves: false, ended: false, paid: false, verified: true }, "a Team plan has no My Cloud: nothing moves, and nothing here counts as paid for");
 });
 
 test("automations switch on through their own routes, and the done line counts only what both sides hold", () => {

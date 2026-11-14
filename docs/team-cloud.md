@@ -41,6 +41,8 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   map's "Who reports to whom", a card's "Asking Ada", the @ list, a "Told Bob" chip, a Needs you line from them) it shows
   their picture, or their initial when they have none; the picture is served to the team's signed-in members only
   (below), never off the team.
+- **Rules.** A team's Owner and Admins choose the AI engines and computers its bots may use, whether bots may add MCP servers
+  of their own, and whether it opens on a phone or with a link (below, "Rules"). What they restrict shows as *Managed by Acme*.
 - **Connected apps.** The team's connections (Composio, HighLevel, MCP sign-ins, an AI key an Admin saved) belong to the
   Team Cloud and serve every member's turn through the broker. An Admin can instead make an app or an MCP server *each
   person's own* (below): then every member connects their own, and only their own chats use it. A person's
@@ -61,6 +63,33 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   phone out at once and closes its open streams; the app windows the Admin signs in are not listed there.
 - **Never asleep, kept across restarts.** A Team Cloud refuses the Admin's sleep request (`busy: ["team"]`) and keeps
   every member's session across a restart; a My Cloud revokes every session that is not its owner's at each boot.
+
+## Rules
+
+The team's rules live on the Admin (openmaus-cloud `docs/team-cloud.md` "Rules"): one document, `{ schema: 1, limits }`, that
+only restricts. `server/cloud-team-policy.ts` fetches it at boot, every 5 minutes and when the Admin's signed `POST
+/api/cloud/team/policy-changed` nudges it, signed with the bootstrap secret (`POST /api/cloud/machines/team-policy`), and each
+request reports the fingerprint in force here. A change applies without a restart.
+
+- **One enforcement.** The document is projected into the one policy object (`server/managed-policy.ts`) every refusal site
+  and every "Managed by" screen already reads. Nothing restricted: no object at all, as on a team with no rules. Admins are not exempt.
+- **What passes through it.** Every turn start, direct or in a group chat, whoever or whatever asked: a person, a routine, a
+  webhook, another bot, a retry, a backup engine and every side job meet `policyModelRefusal`. Every computer claim meets
+  `bindTurnComputer`, and a lent computer's request is refused too (nobody's Mac serves a team anyway). A turn's MCP servers
+  all come through `mcpServersHost.mounted`, which drops what isn't allowed, whoever connected it; adding or signing in to one is
+  refused. `allowedMcpServers: "team"` is the plain form: admins add servers as ever, a bot can't add one, a bot's own doesn't
+  start and an engine's own user settings aren't read. Every connected-apps tool crosses `POST /api/internal/connectors/mcp`, which refuses a tool of an app that isn't
+  allowed, and code that could reach any app; connecting one is refused, and HighLevel isn't mounted.
+- **Remote access** on a Team Cloud is what a member's own code opens: "Open on your phone" is refused, codes already made stop
+  working and phones already open sign out. The Admin-signed pairing stays: it is how every member's app and the Admin reach
+  this machine, so a rule never locks the team out.
+- **Kept rules.** The last valid document stays in `team-policy.json` (0600, bound to this team, in no backup) and applies at
+  boot before anything starts. It never lapses: an Admin that can't be reached leaves it in force. With `requireFreshPolicy`,
+  new turns are refused in plain words once the Admin hasn't confirmed it for 15 minutes. A document this version can't read
+  (a newer schema, a key it can't enforce) leaves the last good one in force and is reported; the Rules page says so. Only the
+  Admin's own JSON answer, no rules or a 404 (an older Admin, or its switch off), lifts them.
+- **Constrain only.** A rule never runs anything on a member's computer and never asks anyone to approve anything. It is not a
+  security boundary against the team's own admins: the Admin holds it, and an engine's own managed settings are separate.
 
 ## The role
 
@@ -385,12 +414,13 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
   bot frame, withdraws a bot that stops being shown (`bot.deleted`, and their stream ends to start fresh) and sends one
   that becomes shown whole.
 - **The app.** The bot's Share button (the bot panel in Simple, the settings header in Advanced) opens the Share
-  dialog on a team; the conversation's copy and download sit at its foot. Someone who can only view a bot sees "You
+  dialog on a team; the conversation's copy and download sit under the ⋯ of its header. Someone who can only view a bot sees "You
   can view Payroll, not chat with it." where the composer would be (and in a room with that bot), opens its main chat
   rather than a new one of their own, and is offered no New conversation. Off a team none of this shows.
-- **Bot access** (Settings, for a team's admins): every team bot down the side (each person's own MausBot stays out),
-  each User across, and what everyone in the team gets; each cell is that person's level (the owner's says Owner), and
-  the Everyone column sets it for everyone. The same sharing as the Share dialog, applied at once with Undo.
+- **Bot access** (its own Settings page, for a team's admins): one row per team bot (each person's own MausBot stays
+  out) with its owner, what everyone gets and the faces of those with their own access; a row opens that bot's Share
+  dialog. By person lists each User, and opening one shows their bots with the same level menus and Remove. The same
+  sharing as the Share dialog, applied at once with Undo.
 - **Asking to chat.** Beside "You can view Payroll" sits "Ask Ada to chat" (Ada owns it; "Ask an admin to chat" when
   nobody on the team does). `POST /api/bots/<id>/access-request` (anyone who can view the bot; someone who can chat
   already gets 409) puts an Allow / Not now card in the owner's inbox, or each admin's when the owner is gone

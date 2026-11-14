@@ -148,6 +148,10 @@ export interface ManagedPolicySummary {
   mcp: { allowCustom: boolean; allowlist: string[] };
   computers: { thisComputer: boolean; localVm: boolean; box: boolean; vps: boolean };
   remoteAccess: boolean;
+  /** Connected apps by service slug; absent from an older Team Cloud and from an organisation's policy. */
+  apps?: { allowAll: boolean; allowlist: string[] };
+  /** A Team Cloud's rules rather than an organisation's. */
+  team?: true;
 }
 
 export interface BrowserEngineSummary {

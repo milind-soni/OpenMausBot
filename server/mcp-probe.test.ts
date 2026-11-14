@@ -23,6 +23,12 @@ function whopSizedCatalog() {
   return tools;
 }
 
+const spawned = vi.hoisted(() => [] as Array<{ opts: { cwd?: unknown; box?: unknown } }>);
+vi.mock("./procs.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./procs.ts")>();
+  return { ...actual, spawnCli: (...args: Parameters<typeof actual.spawnCli>) => { spawned.push({ opts: args[2] }); return actual.spawnCli(...args); } };
+});
+
 const fakeServer = fileURLToPath(new URL("./testing/fake-mcp-server.ts", import.meta.url));
 
 /** Bounded by real time, not a count of turns: a loaded CI runner can need far more turns for the same round trips. */
@@ -53,6 +59,25 @@ describe("custom MCP probe", () => {
       ok: true,
       tools: [{ name: "read_notes", description: "Read saved notes" }],
     });
+  });
+
+  it("starts a command as a bot's turn would: in the box, its configured environment vouched for, and from the bot's folder when it is one bot's", async () => {
+    const server = { command: process.execPath, args: ["--experimental-strip-types", fakeServer], env: { OP_SERVICE_ACCOUNT_TOKEN: "ops_synthetic" }, enabled: false };
+    const opts = async (options: Parameters<typeof probeMcpServer>[3]) => {
+      spawned.length = 0;
+      await expect(probeMcpServer(server, 5_000, undefined, options)).resolves.toMatchObject({ ok: true });
+      return spawned[0]!.opts;
+    };
+    const anyBot = await opts({ asBot: {} });
+    expect(anyBot.box).toEqual({ allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"] });
+    expect(anyBot).not.toHaveProperty("cwd");
+    const folder = mkdtempSync(join(tmpdir(), "omb-probe-bot-"));
+    try {
+      expect(await opts({ asBot: { id: "ada", cwd: folder } })).toMatchObject({ cwd: folder, box: { botId: "ada", allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"] } });
+    } finally { await removeTempDir(folder); }
+    const plain = await opts({});
+    expect(plain).not.toHaveProperty("box");
+    expect(plain.cwd).toBe(process.cwd());
   });
 
   it("times out a server that never completes initialization", async () => {

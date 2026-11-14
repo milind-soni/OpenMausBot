@@ -16,18 +16,18 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 15806,
-  "src/state/store.tsx": 3379,
+  "server/index.ts": 15778,
+  "src/state/store.tsx": 3360,
   "electron/main.mjs": 3246,
   "server/store.ts": 2323,
-  "src/components/Sidebar.tsx": 1748,
-  "server/drivers/claude.ts": 2122,
-  "server/drivers/acp/core.ts": 1755,
+  "src/components/Sidebar.tsx": 1744,
+  "server/drivers/claude.ts": 2119,
+  "server/drivers/acp/core.ts": 1744,
   "server/drivers/codex.ts": 1813,
   "server/routines.ts": 1570,
   "src/components/ComputerPanel.tsx": 1821,
   "src/components/RoutineCalendarPage.tsx": 1623,
-  "server/config.ts": 1283,
+  "server/config.ts": 1281,
   "src/components/ChatView.tsx": 1308,
   "server/routine-requests.ts": 1484,
   "src/components/GroupView.tsx": 1225,
@@ -40,13 +40,11 @@ const LINES: Record<string, number> = {
   "server/boat.ts": 1258,
   "server/drivers/pi.ts": 1047,
   "server/container-computer.ts": 1225,
-  "src/components/Composer.tsx": 1013,
   "src/components/ModelPicker.tsx": 1050,
-  "src/components/PhoneSetupFlow.tsx": 1147,
+  "src/components/PhoneSetupFlow.tsx": 1146,
   "server/cli.ts": 1080,
-  "src/components/PluginsPanel.tsx": 1006,
   "server/org-library.ts": 1003,
-  "src/components/AttachmentPreview.tsx": 1044,
+  "src/components/AttachmentPreview.tsx": 1037,
 };
 
 function sourceFiles(): string[] {

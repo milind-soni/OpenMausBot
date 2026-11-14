@@ -1,4 +1,4 @@
-// Structured chat-completions calls. Assistant content is never parsed as a tool.
+// Structured chat-completions calls. Assistant content becomes a tool call only for a local model, in chat-text-tool-calls.ts.
 export interface ChatToolCall {
   id: string;
   type: "function";

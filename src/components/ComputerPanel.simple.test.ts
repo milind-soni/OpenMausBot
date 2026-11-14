@@ -18,6 +18,7 @@ const fixture = vi.hoisted(() => {
     view,
     ogb,
     platform: "darwin" as "darwin" | "win32" | "linux",
+    localComputer: {} as Record<string, unknown>,
     values: [] as unknown[],
     index: 0,
     own: 0,
@@ -68,7 +69,7 @@ vi.mock("./DesktopCapabilities", () => ({
       windowChrome: "native",
       screenPreview: { available: false, interaction: "none" },
       dictation: { available: false, engine: "none", onDevice: false },
-      localComputer: { available: true, support: "supported", enabled: true, status: "ready" },
+      localComputer: fixture.localComputer,
     },
   }),
 }));
@@ -171,6 +172,7 @@ beforeEach(() => {
   fixture.advanced = false;
   fixture.view.current = "computer";
   fixture.platform = "darwin";
+  fixture.localComputer = { available: true, support: "supported", enabled: true, status: "ready" };
   fixture.values = [];
   fixture.index = 0;
   fixture.own = 0;
@@ -371,6 +373,11 @@ describe("Where the bot works", () => {
     const rendered = render(makeBot());
     expect(grid(rendered).map((node) => text(node.props.children))).toContain("This PC");
     expect(placeLine(rendered)).not.toMatch(/Local VM|Boat|cloud box/i);
+  });
+
+  it("leaves This Mac out on another server's page, where this computer can never be a bot's place", () => {
+    fixture.localComputer = { available: false, support: "unsupported", enabled: false, status: "unavailable", reasonCode: "remote-server" };
+    expect(grid(render(makeBot())).map((node) => text(node.props.children))).toEqual(["Auto", "Cloud desktop", "Private desktop", "Browser", "Off"]);
   });
 
   it("says what Auto does on My Cloud, where it starts a cloud computer by itself", () => {

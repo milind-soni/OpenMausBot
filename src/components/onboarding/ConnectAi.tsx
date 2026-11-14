@@ -51,11 +51,11 @@ export function ConnectAi({ hosted = false, tested }: { hosted?: boolean; tested
   const [open, setOpen] = useState<string | null>(null);
   const latestRequest = useRef(0);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (fresh = true) => {
     const request = ++latestRequest.current;
     setChecking(true);
     try {
-      const d = await api("/api/instances", { signal: AbortSignal.timeout(10_000) });
+      const d = await api(fresh ? "/api/instances?fresh=1" : "/api/instances", { signal: AbortSignal.timeout(10_000) });
       if (request !== latestRequest.current) return;
       dispatch({ type: "instances", instances: d.instances ?? [] });
       setFailed(false);
@@ -67,7 +67,7 @@ export function ConnectAi({ hosted = false, tested }: { hosted?: boolean; tested
   }, [dispatch]);
 
   useEffect(() => {
-    void refresh();
+    void refresh(false);
     return () => {
       latestRequest.current++;
     };

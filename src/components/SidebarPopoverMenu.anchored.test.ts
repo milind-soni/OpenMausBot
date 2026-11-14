@@ -23,6 +23,13 @@ describe("anchoredMenuPosition", () => {
     expect(anchoredMenuPosition(avatar, menu, viewport)).toEqual({ left: 14, top: 434 });
   });
 
+  it("opens a choice at a row's end below it on its end edge, and above when it would run off the window", () => {
+    const end = { left: 700, right: 800, top: 200, bottom: 230 };
+    expect(anchoredMenuPosition(end, menu, viewport, false, "end")).toEqual({ left: 800 - 280, top: 236 });
+    expect(anchoredMenuPosition(end, menu, viewport, true, "end")).toEqual({ left: 700, top: 236 });
+    expect(anchoredMenuPosition({ ...end, top: 740, bottom: 770 }, menu, viewport, false, "end")).toEqual({ left: 520, top: 434 });
+  });
+
   it("anchors to the trigger's right edge in RTL, and stays inside the window", () => {
     const rtlRow = { left: 980, right: 1268, top: 740, bottom: 784 };
     expect(anchoredMenuPosition(rtlRow, menu, viewport, true)).toEqual({ left: 1268 - 280, top: 434 });

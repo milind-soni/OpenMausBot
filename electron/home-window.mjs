@@ -9,7 +9,7 @@
 // shown place's verified origin, nothing else. A team is only ever one the Admin's session lists, paired through the
 // Admin's team pairing (its claims are the Admin's), never an address a page supplied.
 import { cloudHomeConnectUrl, cloudSetupOf, cloudUnreachableText, machineSetup, readyCloudOrigin } from "./cloud-home.mjs";
-import { cloudMachine, cloudState, otherOwnClouds } from "./cloud-list.mjs";
+import { cloudMachine, cloudState, otherOwnClouds, ownCloud } from "./cloud-list.mjs";
 import { asleepAnswer, BACKGROUND_HEADERS, openSleepingCloud, SIGNED_IN_MS } from "./cloud-power.mjs";
 import { awayIn, parseJournal } from "./one-home.mjs";
 
@@ -62,7 +62,9 @@ const originOf = (url) => { try { return new URL(url).origin; } catch { return n
 
 /**
  * Who the window opens. `journal`: one-home.json read back; `frozenCloud`: this computer's freeze marker when there is no
- * journal (its Cloud's origin, or true when it names none); `state`: the MausBot Cloud sign-in's state.
+ * journal (its Cloud's origin, or true when it names none); `state`: the MausBot Cloud sign-in's state. An ended My Cloud
+ * sends home only a computer that moved to that Cloud; a freeze that names another Cloud of the signed-in person's own list
+ * is theirs, and opens that Cloud.
  * @returns {{ kind: "computer" } | { kind: "cloud", origin: string } | { kind: "signin", other?: true }}
  */
 export function homeOf({ journal = null, frozenCloud = null, state = null }) {
@@ -70,14 +72,15 @@ export function homeOf({ journal = null, frozenCloud = null, state = null }) {
     : frozenCloud ? { origin: typeof frozenCloud === "string" ? frozenCloud : null, account: null } : null;
   if (!moved) return { kind: "computer" };
   const connected = state?.status === "connected";
-  if (connected && state.machine?.hold) return { kind: "computer" };
+  if (connected && state.machine?.hold && (!moved.origin || !state.machine.origin || state.machine.origin === moved.origin)) return { kind: "computer" };
   const signedIn = state?.account?.id ?? null;
   if (!signedIn || state.status === "signed-out" || state.status === "connecting") return { kind: "signin" };
   if (moved.account && moved.account !== signedIn) return { kind: "signin", other: true };
   const theirs = connected ? state.machine?.origin ?? null : null;
   const origin = moved.origin ?? theirs;
   if (!origin) return { kind: "signin" };
-  if (!moved.account && theirs && theirs !== origin) return { kind: "signin", other: true };
+  const listed = connected && Array.isArray(state.clouds) && state.clouds.some((cloud) => ownCloud(cloud) && cloud.origin === origin);
+  if (!moved.account && theirs && theirs !== origin && !listed) return { kind: "signin", other: true };
   return { kind: "cloud", origin };
 }
 
@@ -166,7 +169,7 @@ export function routeOf(url, origin) {
  *   journal(): unknown,
  *   frozen(): Promise<{ frozen: boolean, cloud?: string } | null>,
  *   account(): { state(): any, power(): any, wakeHome(): Promise<unknown>, setWaking(on: boolean): void, pairHome(cloudId?: string | null): Promise<{ origin: string, code: string, expiresAt: number }>,
- *     pairTeam?(teamId: string): Promise<{ origin: string, code: string, expiresAt: number }>, signInAgain(): Promise<unknown>, begin(): Promise<unknown> } | null,
+ *     pairTeam?(teamId: string): Promise<{ origin: string, code: string, expiresAt: number }>, signInAgain(): Promise<unknown>, begin(): Promise<unknown>, signOut?(): Promise<unknown>, reopen?(): Promise<unknown> } | null,
  *   restored?(): Promise<unknown>,
  *   window(): { isDestroyed(): boolean, webContents: { id: number, getURL(): string, reload(): void } } | null,
  *   ensureWindow(): void,
@@ -611,11 +614,21 @@ export function createHomeWindow(deps) {
     shown: () => shown,
     /** The person asked again (the screen's timer, back online, or the window focused). */
     retry: () => show(),
-    /** The screen's one button: this device's MausBot Cloud sign-in, again. */
+    /** The screen's one button: this device's MausBot Cloud sign-in, again. A sign-in already open in the browser opens
+     * again; one with an account My Cloud isn't (`other`) ends first, so the browser can sign in another; one that is still
+     * good only looks again. */
     async signIn() {
       const client = account();
       if (!client) return;
-      await (client.state().status === "reauth-required" ? client.signInAgain() : client.begin());
+      const status = client.state().status;
+      if (status === "reauth-required") return void await client.signInAgain();
+      if (status === "connecting") return void await client.reopen?.();
+      if (status !== "signed-out") {
+        const current = await refresh();
+        if (!(current.kind === "signin" && current.other)) return void await show();
+        await client.signOut?.();
+      }
+      await client.begin();
     },
     repair,
     /** The MausBot Cloud sign-in changed: a window that waits on it, a home that changed, or a team shown that the

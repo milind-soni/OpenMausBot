@@ -6,7 +6,8 @@ import { highLevelConnected, preloadHighLevelStatus } from "@/lib/highlevel-stat
 import { t } from "@/lib/i18n";
 import { api, type Bot } from "@/state/store";
 import type { ConnectorScope } from "../../../shared/connector-scopes";
-import { preloadConnectedApps, type ConnectorInventory, type ToolkitCard } from "../PluginsPanel";
+import { preloadConnectedApps, type ConnectorInventory } from "@/lib/connected-apps";
+import type { ToolkitCard } from "../ServiceIcon";
 
 export interface BotApp {
   slug: string;

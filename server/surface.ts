@@ -92,6 +92,13 @@ export function chosenPin(task: { surface?: Surface; surfaceSource?: "user" | "a
   return task?.surfaceSource === "auto" ? null : task?.surface;
 }
 
+/** Where a turn's pinned place came from. A pin a turn made on its own to the place Works on already names is Works on:
+ * the person chose that place, so it is never asked for again (only a turn on Auto asks before using this computer). */
+export function pinSource(pinned: Surface, task: { surfaceSource?: "user" | "auto" } | undefined, destination: Destination): PlaceSource {
+  if (task?.surfaceSource !== "auto") return "pin";
+  return pinned === destination ? "works-on" : "auto-pin";
+}
+
 export function cloudPlaceRefusal(engine: CloudEngine & { name: string }, source: PlaceSource, bot: string): PlaceUnavailableError | null {
   if (canWorkOnCloud(engine)) return null;
   return placeUnavailable("cloud", { state: "cc-cannot", params: { bot, model: engine.name }, source });

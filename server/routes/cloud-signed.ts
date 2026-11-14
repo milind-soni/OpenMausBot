@@ -8,6 +8,7 @@ import { boxSummary } from "../cloud-health.ts";
 import { CLOUD_HEALTH_PATH, CLOUD_PAIRING_PATH, createCloudPairing, createCloudRequestVerifier, readSignedBody } from "../cloud-home.ts";
 import { teamMemberEmail, type CloudTeam } from "../cloud-team.ts";
 import { CLOUD_TEAM_ADMIN_PATH, type TeamAdminSummary } from "../cloud-team-admin.ts";
+import { CLOUD_TEAM_POLICY_CHANGED_PATH } from "../cloud-team-policy.ts";
 import type { CloudHealth } from "../cloud-health.ts";
 import { CLOUD_IDLE_ACTIVITY_MS, CLOUD_POWER_PATH, CLOUD_POWER_SLEEP_PATH, type CloudPower } from "../cloud-power.ts";
 import { json } from "../harness/http.ts";
@@ -41,6 +42,8 @@ export function createCloudSignedRoutes(deps: {
   teamAdmin?: { summary(): Promise<TeamAdminSummary> } | null;
   /** A Team Cloud's member left: delete what was theirs alone; absent on a My Cloud. */
   memberLeft?: ((email: string) => Promise<Record<string, unknown>>) | null;
+  /** A Team Cloud's rules changed on the Admin: fetch them now; absent on a My Cloud. */
+  policyChanged?: (() => void) | null;
   /** The plan was cancelled (true) or renews again (false); absent on a server that is not a Cloud home. */
   plan?: ((cancelled: boolean) => void) | null;
   now?: () => number;
@@ -53,13 +56,15 @@ export function createCloudSignedRoutes(deps: {
   const teamAdminReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   const memberLeftRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   const planRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
+  const policyNudges = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   /** True when the request was one of these and has been answered. */
   return async ({ req, res, url, path, method }: CloudSignedRequest): Promise<boolean> => {
     const power = path === CLOUD_POWER_PATH || path === CLOUD_POWER_SLEEP_PATH ? deps.power?.() ?? null : null;
     const teamAdmin = path === CLOUD_TEAM_ADMIN_PATH && deps.team ? deps.teamAdmin ?? null : null;
     const memberLeft = path === CLOUD_TEAM_MEMBER_LEFT_PATH && deps.team ? deps.memberLeft ?? null : null;
     const plan = path === CLOUD_PLAN_PATH ? deps.plan ?? null : null;
-    if (path !== CLOUD_PAIRING_PATH && path !== CLOUD_HEALTH_PATH && path !== CLOUD_BOX_PATH && !power && !teamAdmin && !memberLeft && !plan) return false;
+    const policyChanged = path === CLOUD_TEAM_POLICY_CHANGED_PATH && deps.team ? deps.policyChanged ?? null : null;
+    if (path !== CLOUD_PAIRING_PATH && path !== CLOUD_HEALTH_PATH && path !== CLOUD_BOX_PATH && !power && !teamAdmin && !memberLeft && !plan && !policyChanged) return false;
     res.setHeader("cache-control", "no-store");
     const source = requestSource(req);
     const header = (name: string) => { const value = req.headers[name]; return typeof value === "string" ? value : undefined; };
@@ -105,6 +110,14 @@ export function createCloudSignedRoutes(deps: {
       const email = teamMemberEmail((parsed as { email?: unknown } | null)?.email);
       if (!email) { json(res, 400, { error: "invalid_member" }); return true; }
       json(res, 200, { ok: true, ...(await memberLeft(email)) });
+      return true;
+    }
+    if (policyChanged) {
+      if (method !== "POST") { json(res, 405, { error: "method_not_allowed" }); return true; }
+      const verdict = policyNudges.verify({ ...signed, method, target: `${path}${url.search}`, body: await readSignedBody(req) });
+      if (!verdict.ok) { console.warn(`team rules nudge refused from ${source}: ${verdict.error}`); json(res, verdict.status, { error: verdict.error }); return true; }
+      policyChanged();
+      json(res, 200, { ok: true });
       return true;
     }
     if (plan) {

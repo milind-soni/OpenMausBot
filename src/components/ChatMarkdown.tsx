@@ -1,6 +1,6 @@
 // Security: model output never reaches the DOM as raw HTML (no rehype-raw); Shiki's output is generator-escaped.
 import { createContext, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
-import Markdown, { defaultUrlTransform, type Components, type ExtraProps } from "react-markdown";
+import Markdown, { defaultUrlTransform, type Components, type ExtraProps, type Options as MarkdownOptions } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { fromMarkdown, type Options as MarkdownParseOptions } from "mdast-util-from-markdown";
@@ -10,6 +10,7 @@ import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { remarkMentions, sameMentionPerson, type MentionPeer, type MentionPerson } from "@/lib/mentions";
+import { createMarkdownRenderCache } from "@/lib/markdown-render-cache";
 
 import { parseFenceInfo } from "../lib/code-block";
 import { markdownImageName, markdownImageOpenUrl } from "../lib/markdown-image";
@@ -712,8 +713,44 @@ const MARKDOWN_COMPONENTS: Components = {
   },
 };
 
-const MAY_LINK_THREAD = /#|openmausbot/i;
+// A thread link is "#" directly before a title, or an app link. A heading's "## " never reaches the plugin as text.
+const MAY_LINK_THREAD = /#[^\s#]|openmausbot/i;
 const NO_THREAD_REFS: ThreadRefsValue = { threads: [] };
+
+// One plugin list for everything every message shares; a message adds mentions only when it has an "@" and thread
+// links only when it may name one, so most messages render the same way whatever the bot list holds.
+const BASE_REMARK_PLUGINS: NonNullable<MarkdownOptions["remarkPlugins"]> = [remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, remarkSoftBreaks, remarkGithubRefs];
+const NO_REHYPE_PLUGINS: NonNullable<MarkdownOptions["rehypePlugins"]> = [];
+let katexPlugins: { plugin: KatexPlugin; list: NonNullable<MarkdownOptions["rehypePlugins"]> } | null = null;
+const rehypePluginsFor = (math: KatexPlugin | null) => {
+  if (!math) return NO_REHYPE_PLUGINS;
+  if (katexPlugins?.plugin !== math) katexPlugins = { plugin: math, list: [math] };
+  return katexPlugins.list;
+};
+
+const markdownCache = createMarkdownRenderCache();
+const peerSignatures = new WeakMap<readonly MentionPeer[], string>();
+const peerSignature = (peers: readonly MentionPeer[]) => {
+  let signature = peerSignatures.get(peers);
+  if (signature === undefined) {
+    signature = peers.map((peer) => `${peer.name}\u0001${peer.hidden ? 1 : 0}${peer.person ? 1 : 0}${peer.color ?? ""}`).join("\u0002");
+    peerSignatures.set(peers, signature);
+  }
+  return signature;
+};
+// The thread list keeps its identity while its contents hold (ThreadRefsProvider), so a number per list stands for it.
+const threadListIds = new WeakMap<object, number>();
+let threadListCount = 0;
+const threadListId = (threads: object) => {
+  let id = threadListIds.get(threads);
+  if (id === undefined) threadListIds.set(threads, (id = ++threadListCount));
+  return id;
+};
+
+/** Test seam: drops every cached message. */
+export function clearChatMarkdownCache(): void {
+  markdownCache.clear();
+}
 
 function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS, everyone = false, mentionPerson, delivered }: {
   text: string; message?: MessageAttachmentContext;
@@ -741,18 +778,18 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
     };
   }, [needsMath]);
   const mathPlugin = needsMath && katexReady ? katexPlugin : null;
+  const mentions = source.includes("@"), linksThreads = threads.length > 0;
+  const variant = `${mathPlugin ? "math" : ""}\u0003${mentions ? `${peerSignature(mentionPeers)}\u0001${everyone ? 1 : 0}\u0001${mentionPerson?.profileName ?? ""}` : ""}\u0003${linksThreads ? `${threadListId(threads)}\u0001${currentBotId ?? ""}` : ""}`;
+  // Markdown is a plain function of its options (no hooks), so its elements can be kept and drawn again.
+  const markdown = markdownCache.render(text, variant, () => {
+    const remarkPlugins = [...BASE_REMARK_PLUGINS];
+    if (mentions) remarkPlugins.push([remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }]);
+    if (linksThreads) remarkPlugins.push(remarkThreadRefs(threads, currentBotId));
+    return Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
+  });
   return (
     <MessageScopeContext.Provider value={{ message, imageOffsets, threads, currentBotId, delivered }}>
-      <div className="chat-md min-w-0 [&>*+*]:mt-2">
-        <Markdown
-          remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, remarkSoftBreaks, remarkGithubRefs, [remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }], remarkThreadRefs(threads, currentBotId)]}
-          rehypePlugins={mathPlugin ? [mathPlugin] : []}
-          urlTransform={chatUrlTransform}
-          components={MARKDOWN_COMPONENTS}
-        >
-          {source}
-        </Markdown>
-      </div>
+      <div className="chat-md min-w-0 [&>*+*]:mt-2">{markdown}</div>
     </MessageScopeContext.Provider>
   );
 }

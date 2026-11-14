@@ -231,7 +231,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       }
       const steps = compatAnswer === "steps";
       const delta = steps
-        ? { content: "Still exporting.", tool_calls: [{ index: 0, id: `call_${randomUUID()}`, type: "function", function: { name: "missing_tool", arguments: "{}" } }] }
+        ? { content: "Still exporting.", tool_calls: [{ index: 0, id: `call_${randomUUID()}`, type: "function", function: { name: "missing_tool", arguments: JSON.stringify({ call: randomUUID() }) } }] }
         : { content: "ping from fake" };
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: steps ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);

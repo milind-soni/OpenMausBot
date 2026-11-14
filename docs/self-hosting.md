@@ -927,6 +927,14 @@ no AI to carry on, it says the bot waits instead. Nobody is asked.
   a sleep the Cloud was stopped for keeps them. A conversation that moved goes
   back once its AI's limit has reset, with one line saying so.
 
+An engine that posts the provider's raw error as its whole reply instead of
+failing the turn (omp's ACP mode sends `429 {"type":"error",…} retry-after-ms=…`
+that way) has that turn count as failed, not as a reply, and the person reads
+it in plain words. It is a usage limit when its words say so, or when it is a
+429 whose wait runs past two minutes, and is then held until that wait ends;
+a shorter wait is a rate limit to try again after. A reply that only quotes
+such an error among other words stays a reply.
+
 This is on by default. Start the server with `OMB_QUOTA_SWITCH=0` to switch it
 off: then only the backups Automatic recovery names take over, and the
 notification says the bot waits. Any other value, or none, leaves it on. It

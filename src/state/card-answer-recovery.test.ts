@@ -63,7 +63,7 @@ beforeAll(async () => {
   vi.stubGlobal("fetch", (path: string) => {
     if (path.startsWith("/api/bots?")) return json({ bots: [bot], groups: [room] });
     if (path.endsWith("/respond")) return respond();
-    return json(answers[path] ?? {});
+    return json(answers[path.replace(/\?since=[^&]*$/, "")] ?? {});
   });
   const container = document.createElement("div");
   document.body.append(container);

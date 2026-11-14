@@ -85,7 +85,7 @@ const AREAS = [
   [/^(?:src|public)\/|^[^/]+-preview\.html$/, "web"],
   [/^(?:server|shared|enterprise|companion|evals|skills|deploy|cloudflare\/composio-broker)\/|^(?:Dockerfile|\.dockerignore|compose\.yaml)$/, "server"],
   [/^electron\/(?:cua|cua-failure|cua-connection|capabilities|screen-status|shared-cua-connection|shared-computer-access|lent-screen-tools|lent-screen-failures|paced-typing)\.[cm]js$/, "windows-computer-control"],
-  [/^(?:electron|build)\/|^(?:electron-builder\.yml|index\.html)$/, "desktop"],
+  [/^(?:electron|build)\/|^(?:electron-builder\.yml|index\.html|rail\.html)$/, "desktop"],
   [/^cloudflare\/control-plane\//, "control-plane"],
 ];
 

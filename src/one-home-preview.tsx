@@ -8,7 +8,7 @@ import type { RailState } from "../electron/cloud-rail.mjs";
 import { PlacesRail } from "@/components/PlacesRail";
 import { SidebarFooter } from "@/components/SidebarFooter";
 import { TwoPlacesCard } from "@/components/TwoPlacesCard";
-import { setLocale } from "@/lib/i18n";
+import { loadLocale } from "@/lib/i18n";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
 import { initialState, StoreContext, type AppState } from "@/state/store";
 import "./styles.css";
@@ -17,7 +17,7 @@ const params = new URLSearchParams(location.search);
 const stateName = params.get("state") ?? "menu";
 const skin = params.get("skin") ?? "midnight";
 applySkinChoice(SKIN_IDS.includes(skin as SkinId) ? (skin as SkinId) : "midnight");
-setLocale(params.get("lang") ?? "en");
+await loadLocale(params.get("lang") ?? "en");
 
 const rail: RailState = { places: [
   { id: "local", name: "This computer", color: null, kind: "computer", opens: true, active: true, paint: { swatch: null } },

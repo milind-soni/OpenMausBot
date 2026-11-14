@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { parseJson, type JsonValue } from "./schema.ts";
 import type { WebhookManager } from "./webhooks.ts";
+import { IDLE_HTTP_SERVER } from "./due-timer.ts";
 
 export const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
 const statusErrorSchema = z.object({ status: z.number().int().optional() });
@@ -171,7 +172,7 @@ export async function listenWebhookIngress(
   const host = options.host ?? "127.0.0.1";
   const advertised = options.publicBaseUrl === undefined ? undefined : advertisedWebhookBase(options.publicBaseUrl);
   const handle = createWebhookIngressHandler(manager, options.claimRequest);
-  const server = createServer((req, res) => {
+  const server = createServer(IDLE_HTTP_SERVER, (req, res) => {
     handle(req, res).catch((error: unknown) => {
       console.error("webhooks: receiver failed", error);
       if (res.headersSent) res.destroy();

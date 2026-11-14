@@ -169,7 +169,12 @@ export function installTeamMove({ ipcMain, cloudPage, home, account, file, journ
     if (cloudPage(event) !== "cloud") throw new Error(`${channel} is only available on My Cloud in this app`);
     return handler(...args);
   };
-  ipcMain.handle("cloud-send:teams", myCloudPage("cloud-send:teams", () => ({ teams: teams().map(({ id, name, ready }) => ({ id, name, ready })) })));
+  // The page asks on every server, including a solo app and a custom base URL. Electron reports a throw from this
+  // handler as "Error occurred in handler for 'cloud-send:teams'" and the desktop window dies, so anywhere but My Cloud the answer is no teams.
+  ipcMain.handle("cloud-send:teams", (event) => {
+    if (cloudPage(event) !== "cloud") return { teams: [] };
+    return { teams: teams().map(({ id, name, ready }) => ({ id, name, ready })) };
+  });
   ipcMain.handle("cloud-send:team-move", myCloudPage("cloud-send:team-move", (botId, teamId, name) => {
     const team = teamOf(String(teamId));
     if (!team) throw new Error("You're not in that team.");

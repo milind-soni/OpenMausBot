@@ -338,6 +338,24 @@ describe("RuntimeCoordinator: refusals in the legacy words", () => {
     await w.host.release(node.id, { ok: true, text: "done" });
   });
 
+  it("lets work handed on with reply none answer its requester's conversation with a one-way notice, and nothing more", async () => {
+    const w = world(hold);
+    begun(w, chief, "gen-1");
+    const { node } = w.coordinator.enqueue(chief, "gen-1", undefined, builder, "Ask the person, then tell me", { mode: "notify", reply: "none" });
+    w.coordinator.tick();
+    expect(() => send(w, builder, "gen-1", node.id, chief, "They said yes")).toThrow(/back to an ancestor/);
+    expect(() => w.coordinator.enqueue(builder, "gen-1", node.id, { ...chief, threadId: "chief-other" }, "They said yes", { mode: "notify", reply: "none" })).toThrow(/back to an ancestor/);
+    const answer = w.coordinator.enqueue(builder, "gen-1", node.id, chief, "They said yes", { mode: "notify", reply: "none" });
+    expect(answer).toMatchObject({ duplicate: false, node: { botId: "chief", threadId: "chief-chat", status: "queued" } });
+    expect(w.coordinator.answersTo(node.id)).toEqual({ botId: "chief", threadId: "chief-chat" });
+    await w.host.release(node.id, { ok: true, text: "done" });
+    const awaited = send(w, chief, "gen-2", undefined, builder, "Build it");
+    w.coordinator.tick();
+    expect(() => w.coordinator.enqueue(builder, "gen-2", awaited.node.id, chief, "Done", { mode: "notify", reply: "none" })).toThrow(/back to an ancestor/);
+    expect(w.coordinator.answersTo(awaited.node.id)).toBeUndefined();
+    await w.host.release(awaited.node.id, { ok: true, text: "done" });
+  });
+
   it("refuses a second assignment to a teammate that completed one, unless it is rework", async () => {
     const w = world();
     const { node } = send(w, chief, "gen-1", undefined, builder, "Build it");
@@ -1590,5 +1608,27 @@ describe("RuntimeCoordinator: who answers a teammate's question", () => {
     w.coordinator.tick(); await flush();
     expect(w.coordinator.parkedFor("builder").map(n => n.id)).toEqual([node.id]);
     expect(w.coordinator.parkedFor("tester")).toEqual([]);
+  });
+});
+
+describe("pace: how soon the host must tick", () => {
+  it("is busy while a turn runs, parked while the work only waits on the person, idle once done; every write is announced", async () => {
+    const host = fakeHost();
+    const wrote = vi.fn();
+    const w: World = { host, coordinator: new RuntimeCoordinator({ dataDir: ":memory:", host, wrote }), logs: [] };
+    expect(w.coordinator.pace()).toBe("idle");
+    begun(w, chief, "gen-1");
+    expect(wrote).toHaveBeenCalled();
+    expect(w.coordinator.pace()).toBe("busy");
+    w.coordinator.endTurn("gen-1", { ok: true, text: "", cards: { question: "Approve the key", ids: ["msg-1"] } });
+    expect(w.coordinator.pace()).toBe("parked");
+    wrote.mockClear();
+    expect(w.coordinator.answerRoot("gen-1", "The user approved the key.")).toBe(true);
+    expect(wrote).toHaveBeenCalled();
+    expect(w.coordinator.pace()).toBe("busy");
+    w.coordinator.tick(); await flush();
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node("gen-1")).toMatchObject({ status: "completed" });
+    expect(w.coordinator.pace()).toBe("idle");
   });
 });

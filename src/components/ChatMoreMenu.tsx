@@ -181,30 +181,31 @@ export function ChatMoreMenu({ bot, phoneHeader = false }: { bot: Bot; phoneHead
 
 export const EXPORT_ITEMS = ["copy", "download"];
 
-/** The bot panel's round Share button: on a team who has access, with copying or downloading this conversation below;
- * anywhere else a menu of those two. */
+/** The bot panel's round Share button: on a team who has access, with copying or downloading this conversation under
+ * the ⋯ of its header; anywhere else a menu of those two. */
 export function ChatShareMenu({ bot, className }: { bot: Bot; className: string }): JSX.Element {
-  return useTeamName() ? <ShareBotButton bot={bot} className={className} footer={<ExportButtons key={bot.threadId} bot={bot} />} />
+  return useTeamName() ? <ShareBotButton bot={bot} className={className} headerMenu={<ExportMore key={bot.threadId} bot={bot} />} />
     : <ShareMenu key={bot.threadId} bot={bot} className={className} />;
 }
 
-function ExportButtons({ bot }: { bot: Bot }) {
+const exportItems = (items: SidebarMenuItem[]): SidebarMenuItem[] => items.filter((item) => EXPORT_ITEMS.includes(item.key)).map((item) => ({
+  ...item, heading: undefined, separatorBefore: false, label: t(item.key === "copy" ? "chat.export.copyConversation" : "chat.export.downloadConversation"),
+}));
+
+function ExportMore({ bot }: { bot: Bot }) {
   const { items } = useChatMoreItems(bot);
-  return items.filter((item) => EXPORT_ITEMS.includes(item.key)).map((item) => (
-    <button key={item.key} type="button" disabled={item.disabled} onClick={item.onSelect}
-      className="rounded-lg px-2 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50">
-      {t(item.key === "copy" ? "chat.export.copyConversation" : "chat.export.downloadConversation")}{item.trailing && <> · {item.trailing}</>}
-    </button>
-  ));
+  return (
+    <SidebarPopoverMenu items={exportItems(items)} ariaLabel={t("chat.more")} align="end" triggerTitle={t("chat.more")}
+      triggerClassName="flex shrink-0 rounded-md p-1.5 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.06]"
+      renderTrigger={() => <MoreHorizontal size={16} aria-hidden="true" />} />
+  );
 }
 
 function ShareMenu({ bot, className }: { bot: Bot; className: string }) {
   const { items } = useChatMoreItems(bot);
   return (
     <SidebarPopoverMenu
-      items={items.filter((item) => EXPORT_ITEMS.includes(item.key)).map((item) => ({
-        ...item, heading: undefined, separatorBefore: false, label: t(item.key === "copy" ? "chat.export.copyConversation" : "chat.export.downloadConversation"),
-      }))}
+      items={exportItems(items)}
       ariaLabel={t("chat.export.heading")}
       triggerClassName="rounded-full"
       triggerTitle={t("chat.export.heading")}

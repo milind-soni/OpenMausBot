@@ -68,6 +68,12 @@ Staff, hands Mira work. Expected:
   him; the id of a thread he did not open on her is refused with where thread ids come from.
 - Two assignments Clive hands Mira in one turn stay two jobs, though the first is already running when he sends the
   second.
+- A question Mira's ask tool puts to the person in their own chat with her is listed in Clive's next turn (thread id and
+  question). As her Chief, Clive sends the answer with that thread id: it answers the card for the person (receipt
+  `injected`), her turn carries on with `@Clive answered for the person: …`, the card says Clive answered, and no work is
+  handed out. When Clive is not her Chief, the same thread id is refused as above and the question stays the person's.
+  So it is when a webhook starts Clive's turn: it does not list the question either. The person can still change Clive's
+  answer on the card, and Mira gets a new turn with it.
 
 Unit tests for the relay's rules (which thread, which sender, sign-ins, work handed out this turn, an engine that cannot
 take a message mid-turn) are in `server/host/question-routing.test.ts`.

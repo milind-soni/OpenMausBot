@@ -14,7 +14,7 @@ import { loadAppCards } from "./bot-settings/useBotApps";
 import { engineReady } from "./EngineLibrary";
 import { IntroChips } from "./HelperSetup";
 import { usePrefersReducedMotion } from "./mascot-clock";
-import { preloadConnectedApps } from "./PluginsPanel";
+import { preloadConnectedApps } from "@/lib/connected-apps";
 
 /** How long after the part before each part arrives, when a first run has just landed here: the three lines, the typing
  * row, the follow-up and its chips. With no AI there is no typing row, and the follow-up comes `noAi` after the last line. */

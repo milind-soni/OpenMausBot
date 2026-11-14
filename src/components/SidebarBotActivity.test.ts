@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Bot, Group, GroupTask, Task } from "@/state/store";
 import { botShowsUnread } from "@/lib/bot-unread";
 import { t } from "@/lib/i18n";
-import { attentionHasRunningWork, attentionJumpAction, attentionOwnerName, attentionRowStatus, attentionTriggerLabel, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, sidebarBotActivityTasks, sidebarGroupActivityTasks, threadsWhenTreeHidden } from "./SidebarBotActivity";
+import { attentionHasRunningWork, attentionJumpAction, attentionOwnerName, attentionRowStatus, attentionTriggerLabel, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, sidebarBotActivityTasks, sidebarGroupActivityTasks, threadsWaitingOnPerson, threadsWhenTreeHidden } from "./SidebarBotActivity";
 
 const task = (threadId: string, title: string, extra: Partial<Task>): Task =>
   ({ threadId, title, createdAt: 0, ...extra }) as Task;
@@ -292,5 +292,23 @@ describe("attentionUnpinAction", () => {
     const room = group("g", "Crew", "g0", { tasks: [{ threadId: "g0", title: "Crew", createdAt: 0, pinned: true }] });
     const [entry] = crossBotPinnedThreads([], [room], {});
     expect(attentionUnpinAction(entry)).toEqual({ type: "pinGroupTask", groupId: "g", threadId: "g0", pinned: false, title: "Crew" });
+  });
+});
+
+describe("threadsWaitingOnPerson", () => {
+  it("keeps only threads that ask the person something or hold a reply they have not read", () => {
+    const ivy = bot("ivy", "Ivy", "i0", [
+      task("i0", "Main chat", {}),
+      task("i1", "Opened by the Chief, ended on a card", { unread: true, openedBy: { botId: "chief", name: "Chief", at: 1 } }),
+      task("i2", "Needs approval", { busy: true, activity: "waiting-on-you" }),
+      task("i3", "Still running", { busy: true, activity: "working" }),
+      task("i4", "Waits on a teammate", { waitingForTeammates: true }),
+      task("i5", "Queued", {}),
+      task("i6", "Pinned", { pinned: true }),
+      task("i7", "Put away", { archivedAt: 5, unread: true }),
+      task("i8", "Routine run", { routineRunId: "run-1", unread: true }),
+    ]);
+    expect(threadsWaitingOnPerson(ivy, { i5: [{}] }).map((one) => one.threadId).sort()).toEqual(["i1", "i2"]);
+    expect(threadsWaitingOnPerson(bot("q", "Quiet", "q0", [task("q0", "Read", {}), task("q1", "Read too", {})]), {})).toEqual([]);
   });
 });

@@ -64,7 +64,7 @@ beforeAll(async () => {
     if (path.startsWith("/api/groups/")) {
       return new Promise<Response>((resolve) => { held.set(path, (body) => resolve(new Response(JSON.stringify(body)))); });
     }
-    return json(answers[path] ?? {});
+    return json(answers[path.replace(/\?since=[^&]*$/, "")] ?? {});
   });
   const container = document.createElement("div");
   document.body.append(container);

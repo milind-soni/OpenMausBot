@@ -3,6 +3,7 @@
 import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
 import { isLoopback } from "../provider-key-check.ts";
 import { lmStudioV1Catalog } from "./local-inject.ts";
+import { isContextName, isOllama, serveWithWindow } from "./ollama-context.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 import {
   freeDefault, freeFallbackCatalog, freeLabel, freeToolModels, freeToolsFirst, isOpenRouterOrigin, openRouterFreeTier,
@@ -233,7 +234,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         const options: ModelCatalog["options"] = [];
         for (const row of rows) {
           const id = typeof row.id === "string" ? row.id : "";
-          if (!id || seen.has(id)) continue;
+          if (!id || seen.has(id) || isContextName(id)) continue;
           seen.add(id);
           const label = typeof row.name === "string" && row.name.trim() ? row.name : id;
           const contextWindow = advertisedContextWindow(row);
@@ -275,9 +276,19 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       fetchModels(),
     ]) : null;
 
+    const origin = onThisNetwork(config.url) ? config.url.replace(/\/v1$/, "") : null;
+    const servedModel = origin ? async (model: string) => {
+      if (!await isOllama(origin)) return model;
+      const served = await serveWithWindow(origin, model);
+      const option = served.window ? catalog.options.find((entry) => entry.id === model) : undefined;
+      if (option) option.contextWindow = served.window;
+      return served.model;
+    } : undefined;
+
     const runtime = createOpenAIChatRuntime({
       input,
       driverKind: DRIVER_KIND,
+      ...(servedModel ? { servedModel } : {}),
       apiKey,
       apiUrl: config.url,
       tools: config.tools,
@@ -298,7 +309,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       missingKeyError: missingKey,
       unavailableReason: missingKey,
       timeoutMs: config.replyWaitMinutes ? config.replyWaitMinutes * 60_000 : idleTimeoutMs(),
-      ...(onThisNetwork(config.url) ? { livenessEveryMs: livenessEveryMs() } : {}),
+      ...(onThisNetwork(config.url) ? { livenessEveryMs: livenessEveryMs(), localModel: true } : {}),
       reasoning: true,
       billing: "metered",
       includeUsageInCompleted: true,

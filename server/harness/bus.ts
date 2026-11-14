@@ -3,7 +3,9 @@ import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { EVENTS_DIR } from "../config.ts";
+import { flushNativeLog } from "../drivers/native.ts";
 import { redactSecrets } from "../redact.ts";
+import { batchSaves } from "../save-batch.ts";
 import { capThreadLog, currentThreadLogCap } from "../thread-log-rotation.ts";
 import { newId, type ProviderAdapter, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener } from "../contracts.ts";
 import { LiveSteps } from "./live-steps.ts";
@@ -153,7 +155,9 @@ export class EventBus {
     // Queue first, then deliver: a listener publishing during delivery queues after this, so the log keeps publication order.
     this.enqueue(event);
     this.deliver(event);
-    if (isTerminalEvent(event)) void this.flushDisk();
+    if (!isTerminalEvent(event)) return;
+    flushNativeLog(event.threadId);
+    void this.flushDisk();
   }
 
   private enqueue(event: RuntimeEvent) {
@@ -274,13 +278,15 @@ export class EventBus {
   }
 
   private deliver(event: RuntimeEvent) {
-    for (const listener of Array.from(this.listeners)) {
-      try {
-        listener(event);
-      } catch (e) {
-        console.error("bus: listener threw", e);
+    batchSaves(() => {
+      for (const listener of Array.from(this.listeners)) {
+        try {
+          listener(event);
+        } catch (e) {
+          console.error("bus: listener threw", e);
+        }
       }
-    }
+    });
   }
 
   subscribe(listener: RuntimeEventListener): () => void {

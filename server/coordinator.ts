@@ -153,6 +153,9 @@ export interface CoordinatorHost {
 
 export interface Coordinator {
   node(id: string): HandoffView | undefined;
+  /** The conversation the running assignment `id` may answer with a one-way notice: its requester, when it was handed
+   * with reply none outside rooms. */
+  answersTo(id: string): { botId: string; threadId: string } | undefined;
   has(id: string): boolean;
   all(): HandoffView[];
   active(): HandoffView[];
@@ -190,6 +193,8 @@ export interface Coordinator {
   continuesAfterRestart(threadId: string): boolean;
   note(id: string): string | undefined;
   tick(): void;
+  /** How soon the next tick() matters (Runtime.pace). */
+  pace(): "busy" | "parked" | "idle";
   close(): void;
   progress(threadId: string): void;
   /** True when a parked assignment took the text as its answer: the host must not start an ordinary turn. */
@@ -204,6 +209,8 @@ export interface CoordinatorOptions {
   runtimeLimits?: Partial<Limits>;
   log?: (line: string) => void;
   legacyThreads?: LegacyThreadResolver;
+  /** After every write to the assignment store, so a host that ticks only when work is due can tick again. */
+  wrote?: () => void;
 }
 
 export function createCoordinator(options: CoordinatorOptions): Coordinator {

@@ -48,16 +48,14 @@ it("a bot's server from a conversation folder is kept in its own folder, and a s
     const chatFolder = join(fixture.info.dataDir, "task-workspaces", iris.id, iris.threadId, "sketch");
     mkdirSync(chatFolder, { recursive: true });
     copyFileSync(FAKE_MCP, join(chatFolder, "server.ts"));
-    const added = await api("POST", "/api/internal/mcp-servers", { name: "sketch", command: process.execPath, args: ["--experimental-strip-types", "--no-warnings", join(chatFolder, "server.ts")] }, 201, token);
-    expect(added).toMatchObject({ name: "sketch", keptIn: [join("tools", "sketch")], enabled: false });
-    expect(added.own).toBeUndefined();
+    const added = await api("POST", "/api/internal/mcp-servers", { action: "add", name: "sketch", command: process.execPath, args: ["--experimental-strip-types", "--no-warnings", join(chatFolder, "server.ts")] }, 201, token);
+    expect(added.text).toBe(`Added MCP server sketch and turned it on. Test: it works. Its tools: read_notes. Its files were in this conversation's temporary folder, so they were copied to ${join("tools", "sketch")} in your own folder, and it runs from there: change them there. The new tools arrive on your next turn.`);
     const kept = join(fixture.info.dataDir, "workspaces", iris.id, "tools", "sketch", "server.ts");
     const stored = JSON.parse(readFileSync(join(fixture.info.dataDir, "config.json"), "utf8")).mcpServers.sketch;
     expect(stored).toMatchObject({ args: ["--experimental-strip-types", "--no-warnings", kept] });
     expect(stored.bot).toBeUndefined();
     writeFileSync(gate, "");
     await first.settled();
-    await api("PATCH", "/api/mcp/servers/sketch", { enabled: true });
 
     // The person adds one that can't start anywhere.
     await api("POST", "/api/mcp/servers", { name: "broken", command: process.execPath, args: ["-e", "process.exit(1)"] }, 201);

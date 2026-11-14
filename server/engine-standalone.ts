@@ -16,7 +16,6 @@ import {
 import { chmod, copyFile, link, lstat, mkdir, open, readdir, rename, rm, stat, unlink, writeFile, type FileHandle } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import * as tar from "tar";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { cliProbeEnvironment } from "./cli-probe.ts";
@@ -436,6 +435,7 @@ async function download(release: StandaloneRelease, asset: StandaloneAsset, dest
 /** Plain files and folders only, each inside the staging folder; `./` prefixes are allowed. */
 async function extractTarGz(archivePath: string, staging: string): Promise<boolean> {
   let unsafe = false;
+  const tar = await import("tar");
   await tar.x({
     file: archivePath,
     cwd: staging,

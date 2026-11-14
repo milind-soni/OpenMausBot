@@ -62,7 +62,7 @@ function setup(options: { team?: boolean; requester?: Record<string, string>; se
       const server = raw as { url: string; headers: Record<string, string> };
       return [name, { type: "http", url: server.url, headers: server.headers } as McpServerSpec];
     })),
-    isSessionLive: () => true,
+    isOwnerLive: () => true,
     ...(options.roster ? { roster: () => options.roster! } : {}),
     brokerUrl: () => ADA_ACCESS.url,
     composio: composio as never,
@@ -107,6 +107,25 @@ describe("whose connection a turn may use", () => {
     const routine = setup({ requester: { "ada-chat": "", "ada-work": "" } }).host;
     for (const thread of ["ada-chat", "ada-work"]) expect(routine.turnPerson(thread), `a routine or a webhook acts for nobody (${thread})`).toBeNull();
     expect(setup({ team: false }).host.turnPerson("ada-chat"), "off a team nothing is anyone's").toBeNull();
+  });
+
+  it("tests a personal server with the member's own sign-in, and their key only at the address it was saved for", () => {
+    const { host } = setup();
+    host.people.putKey(ADA, "ada@acme.test", "mail", { url: "https://mail.example/mcp", header: "Authorization", value: "Bearer ada-own-mail-key" });
+    const own = host.people.connection(ADA, "mail", "https://mail.example/mcp");
+    expect(own.oauth).toBe(host.people.oauth(ADA));
+    expect(own.key).toMatchObject({ header: "Authorization", value: "Bearer ada-own-mail-key" });
+    expect(host.people.connection(ADA, "mail", "https://elsewhere.example/mcp").key).toBeUndefined();
+    expect(host.people.connection(CLEO, "mail", "https://mail.example/mcp")).toEqual({ oauth: host.people.oauth(CLEO) });
+  });
+
+  it("lets a turn change the team's MCP servers only when the person it acts for is an owner or admin", () => {
+    const team = setup({ roster: ROSTER, requester: { "main-chat": OLIVE, "work-chat": BEN, "ada-chat": ADA, "room-chat": "" } }).host;
+    expect(team.actsForAdmin("main-chat"), "the owner").toBe(true);
+    expect(team.actsForAdmin("work-chat"), "an admin").toBe(true);
+    expect(team.actsForAdmin("ada-chat"), "a User").toBe(false);
+    expect(team.actsForAdmin("room-chat"), "a turn that acts for nobody").toBe(false);
+    expect(setup({ team: false }).host.actsForAdmin("ada-chat"), "off a Team Cloud").toBe(true);
   });
 
   it("opens work a person's request hands on in the receiving bot's chat with them, when they connected anything of their own", () => {

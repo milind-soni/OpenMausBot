@@ -1,6 +1,6 @@
 // "Since this turn began" is read from event ids (one global order), never timestamps: a clock can step back.
 import type { RuntimeStore } from "./store.ts";
-import { terminal, type Assignment, type Owner, type TurnEvidence } from "./types.ts";
+import { terminal, type Assignment, type Mode, type Owner, type TurnEvidence } from "./types.ts";
 
 export const CUT_TWICE = "Interrupted by another OpenMausBot restart after resuming once; not resumed again. Some of its steps may already have taken effect.";
 
@@ -73,6 +73,13 @@ export const awaited = (children: readonly Assignment[]): Assignment[] => childr
 /** Parked on something its requester hears of at once: a question answered in words, or, at Full access, a card too, so
  * the rest of the work moves on while the person acts on it. Another card park waits on its card. */
 export const asking = (a: Assignment): boolean => a.status === "needs_input" && (!(a.cards && a.cards.length > 0) || a.level === "full");
+
+/** A one-way notice from the turn running `parent` back into the conversation that handed it that work with reply none.
+ * Nothing returns from such work on its own, so this is the only way its answer gets back: the ancestor rule lets it
+ * through, but never as new work and never into another conversation of that bot. */
+export const answersSender = (parent: Assignment | undefined, mode: Mode, target: { botId: string; threadId: string; groupId?: string | undefined }): boolean =>
+  mode === "notify" && parent?.reply === "none" && parent.requester.botId === target.botId && parent.requester.threadId === target.threadId
+  && parent.assignee.destination.groupId === undefined && target.groupId === undefined;
 
 export function path(store: RuntimeStore, n: Assignment): Assignment[] {
   const out: Assignment[] = [];

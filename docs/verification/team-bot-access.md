@@ -33,12 +33,16 @@ pnpm exec vitest run server/cloud-team-bot-access.e2e.test.ts server/bot-access.
 - `server/host/access-requests.test.ts`: the admins decide when the owner is gone, one admin's Allow settles every
   copy, the owner alone decides while on the team, Not now gives nothing.
 - `src/components/bot-access/AccessOverview.dom.test.ts`: Settings → Bot access lists each team bot (no one's own
-  MausBot) by each User, the owner, levels below everyone's disabled, a cell or row applied at once with Undo; "Ask Cara
-  to chat" asks and says so, "Ask an admin to chat" when nobody on the team owns the bot.
-  `src/components/SettingsModal.groups.test.ts` shows the page to a team's admins only.
-- `src/components/bot-access/ShareBotDialog.dom.test.ts` drives the dialog: the owner first, each level, a change sent
-  at once with Undo putting it back, adding a teammate, removing one, opening the bot to everyone, the read-only view
-  of someone who can't edit, and no button off a team.
+  MausBot) with its owner, a plain summary and a stack of faces (+N past four); a row opens the Share dialog; the search
+  takes a bot's name or owner; By person lists each User, and opening one gives their bots at the same level menus, with
+  Remove only for their own access; the empty states; "Ask Cara to chat" asks and says so, "Ask an admin to chat" when
+  nobody on the team owns the bot. `src/components/SettingsModal.groups.test.ts` and
+  `src/components/SettingsModal.simple.test.ts` show the page to a team's admins only, as its own page in both modes.
+- `src/components/bot-access/ShareBotDialog.dom.test.ts` drives the dialog: the owner first, each level on a real menu
+  with its check, nothing below what everyone gets, a change sent at once with Undo putting it back, adding a teammate
+  from the keyboard, removing one, general access and its level, Make owner behind a confirmation and only for whoever
+  may hand the bot on, the read-only view of someone who can't edit, keys staying inside it over Settings, and no button
+  off a team.
 
 ## The pictures
 
@@ -49,25 +53,56 @@ node --experimental-strip-types scripts/verify-team-bot-access.ts --shots <dir>
 It starts the same kind of Team Cloud, sets Payroll up through the routes, and photographs the whole app
 (`scripts/testing/team-access-preview.tsx`) in a headless Chrome with a throwaway profile, at 1280×800 at 2x, each page's
 every request sent as that person through the preview's proxy. It fails if the app is refused anything naming a bot, a
-room or a conversation while it is shown. `--before` takes the same setup through the older visibility route, for a
+room or a conversation while it is shown. The `-dark` pictures use the Midnight skin and the `-390` ones a 390×844
+window; the many-people and many-bots ones add six people to Payroll and bring the team to fifty bots. `--before` takes the same setup through the older visibility route, for a
 checkout of the code before levels.
 
 | | Before | After |
 |---|---|---|
-| An admin's Share button (Simple) | ![](evidence/team-bot-access/before-share-menu.png) | ![](evidence/team-bot-access/share-dialog-admin.png) |
-| Advanced settings | ![](evidence/team-bot-access/before-visibility.png) | ![](evidence/team-bot-access/share-dialog-advanced-dark.png) |
-| A member who may only view | ![](evidence/team-bot-access/before-member-bob.png) | ![](evidence/team-bot-access/member-view-bob.png) |
+| The Share dialog | ![](evidence/team-bot-access/before-look-share-dialog.png) | ![](evidence/team-bot-access/share-dialog-admin.png) |
+| The Share dialog, dark | ![](evidence/team-bot-access/before-look-share-dialog-dark.png) | ![](evidence/team-bot-access/share-dialog-advanced-dark.png) |
+| Someone who can only view | ![](evidence/team-bot-access/before-look-member-view.png) | ![](evidence/team-bot-access/member-view-bob-share.png) |
+| Bot access in Settings | ![](evidence/team-bot-access/before-look-overview.png) | ![](evidence/team-bot-access/overview-admin.png) |
+| Bot access in Settings, dark | ![](evidence/team-bot-access/before-look-overview-dark.png) | ![](evidence/team-bot-access/overview-admin-advanced-dark.png) |
 
-| After | |
+| The Share dialog | |
 |---|---|
+| Dark, Simple | ![](evidence/team-bot-access/share-dialog-admin-dark.png) |
+| A level's menu | ![](evidence/team-bot-access/share-dialog-level-menu.png) |
+| A level's menu, dark | ![](evidence/team-bot-access/share-dialog-level-menu-dark.png) |
+| The ⋯ menu | ![](evidence/team-bot-access/share-dialog-more-menu.png) |
+| Make owner, confirming | ![](evidence/team-bot-access/share-dialog-make-owner.png) |
+| Made owner, the one before still able to edit | ![](evidence/team-bot-access/share-dialog-made-owner.png) |
 | Adding a teammate | ![](evidence/team-bot-access/share-dialog-add-person.png) |
 | A change, with Undo | ![](evidence/team-bot-access/share-dialog-undo-toast.png) |
+| Everyone in the team: the level at the row's end | ![](evidence/team-bot-access/overview-share-everyone.png) |
+| Ten people: the list scrolls inside | ![](evidence/team-bot-access/share-dialog-many-people.png) |
+| 390px | ![](evidence/team-bot-access/share-dialog-390.png) |
+| 390px, a level's menu | ![](evidence/team-bot-access/share-dialog-level-menu-390.png) |
+| 390px, ten people | ![](evidence/team-bot-access/share-dialog-many-people-390.png) |
+
+| Bot access | |
+|---|---|
+| By person | ![](evidence/team-bot-access/overview-by-person.png) |
+| By person, dark | ![](evidence/team-bot-access/overview-by-person-dark.png) |
+| A person's bots, a level open | ![](evidence/team-bot-access/overview-person-bots.png) |
+| A person's bots, dark | ![](evidence/team-bot-access/overview-person-bots-dark.png) |
+| Fifty bots | ![](evidence/team-bot-access/overview-many-bots.png) |
+| Searching, with ten people: +N past four | ![](evidence/team-bot-access/overview-search-many-people.png) |
+| 390px, by bot | ![](evidence/team-bot-access/overview-admin-390.png) |
+| 390px, by person | ![](evidence/team-bot-access/overview-by-person-390.png) |
+| 390px, a person's bots | ![](evidence/team-bot-access/overview-person-bots-390.png) |
+| 390px, fifty bots | ![](evidence/team-bot-access/overview-many-bots-390.png) |
+
+| Each level | |
+|---|---|
 | Can view: the Share dialog | ![](evidence/team-bot-access/member-view-bob-share.png) |
+| Can view: the Share dialog, dark | ![](evidence/team-bot-access/member-view-bob-share-dark.png) |
+| Can view: the Share dialog, 390px | ![](evidence/team-bot-access/member-view-bob-share-390.png) |
+| Can view | ![](evidence/team-bot-access/member-view-bob.png) |
 | Can chat | ![](evidence/team-bot-access/member-chat-cara.png) |
 | Can edit: the Share dialog | ![](evidence/team-bot-access/member-edit-dan-share.png) |
 | No access: not in the list | ![](evidence/team-bot-access/member-none-eve.png) |
-| Bot access in Settings (Simple) | ![](evidence/team-bot-access/overview-admin.png) |
-| Bot access in Settings (Advanced) | ![](evidence/team-bot-access/overview-admin-advanced-dark.png) |
 | Can view: ask the owner | ![](evidence/team-bot-access/ask-bob.png) |
 | Asked | ![](evidence/team-bot-access/ask-bob-asked.png) |
 | The card in the owner's inbox | ![](evidence/team-bot-access/ask-card-ada-inbox.png) |

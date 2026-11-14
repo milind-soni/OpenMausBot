@@ -56,6 +56,17 @@ describe("local computer UI eligibility", () => {
     ).toBe(false);
   });
 
+  it("never offers This computer on another server's page, whatever the platform", () => {
+    for (const platform of ["darwin", "win32", "linux"] as const) {
+      const capabilities = {
+        host: { platform },
+        localComputer: { available: false, reasonCode: "remote-server" },
+      } as DesktopCapabilities;
+      expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(false);
+      expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(en["computer.problem.localRemoteServer"]);
+    }
+  });
+
   it("keeps This computer selectable on Windows before the driver is live", () => {
     const capabilities = {
       host: { platform: "win32" as const, label: "Windows" },

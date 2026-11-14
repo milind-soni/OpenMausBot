@@ -3,6 +3,7 @@ import { createServer, request as httpRequest, type RequestOptions, type Server 
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openCredentialBroker, type CredentialBroker } from "../bot-box/broker.ts";
@@ -13,6 +14,8 @@ import type { TeamConnectionsHost } from "../host/team-connections-host.ts";
 import { McpOAuthManager } from "../mcp-oauth.ts";
 import { listMcpServers } from "../mcp-registry.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
+import { createMcpConfig } from "../host/mcp-config.ts";
+import { forgetToolBudgets, noteToolBudget } from "../tool-budgets.ts";
 import { createMcpServerRoutes } from "./mcp-servers.ts";
 import { dispatchRoutes } from "./table.ts";
 
@@ -23,24 +26,37 @@ afterEach(async () => {
   if (active) await new Promise<void>((resolve, reject) => active.close((error) => error ? reject(error) : resolve()));
 });
 
-async function serve(options: { botsPath?: () => BrokerPath | null } = {}) {
+type Bot = { id: string; mcpServers?: string[] };
+
+async function serve(options: { botsPath?: () => BrokerPath | null; bots?: Bot[]; listed?: Record<string, Record<string, unknown>>; probeAs?: (server: { bot?: string }) => { id?: string; cwd?: string } } = {}) {
   const cfg: Pick<AppConfig, "mcpServers"> = { mcpServers: {} };
   const changes: string[] = [];
   let busy = false;
-  const route = createMcpServerRoutes({
-    cfg,
-    sessions: { isLive: () => true },
-    mcpOAuth: new McpOAuthManager({ file: join(DATA_DIR, "mcp-route-oauth.json") }),
-    teamConnections: { personMcp: () => ["private"], people: {} as TeamConnectionsHost["people"] },
+  const mcpOAuth = new McpOAuthManager({ file: join(DATA_DIR, "mcp-route-oauth.json") });
+  const teamConnections = { personMcp: () => ["private"], people: {} as TeamConnectionsHost["people"] };
+  const mcpServerResponse = () => ({ servers: listMcpServers(cfg.mcpServers).map((server) => ({ ...server, ...options.listed?.[server.name] })) });
+  const sessions = { isLive: () => true };
+  const config = createMcpConfig({
+    cfg, sessions, mcpOAuth, teamConnections,
     cloudHome: null,
     fallbackPublicUrl: null,
     mcpConfigBusy: { get: () => busy, set: (value) => { busy = value; } },
-    mcpServerResponse: () => ({ servers: listMcpServers(cfg.mcpServers) }),
+    mcpServerResponse,
     mcpPolicyRefusal: () => undefined,
     persistMcpServers: (next) => { cfg.mcpServers = next; },
     savedCustomDomain: () => null,
     connectionsChanged: (change) => { changes.push(change); },
+    changed: () => {},
     ...(options.botsPath ? { botsPath: options.botsPath } : {}),
+    ...(options.probeAs ? { probeAs: options.probeAs } : {}),
+  });
+  const route = createMcpServerRoutes({
+    cfg, bot: (id) => options.bots?.find((bot) => bot.id === id) ?? null, sessions, mcpOAuth, teamConnections,
+    cloudHome: null,
+    fallbackPublicUrl: null,
+    mcpServerResponse,
+    savedCustomDomain: () => null,
+    config,
   });
   const active = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -55,7 +71,7 @@ async function serve(options: { botsPath?: () => BrokerPath | null } = {}) {
   const post = (path: string, body: unknown) => fetch(`${base}${path}`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
   });
-  return { cfg, post, changes, get: () => fetch(`${base}/api/mcp/servers`), remove: (name: string) => fetch(`${base}/api/mcp/servers/${name}`, { method: "DELETE" }) };
+  return { cfg, post, changes, base, get: () => fetch(`${base}/api/mcp/servers`), remove: (name: string) => fetch(`${base}/api/mcp/servers/${name}`, { method: "DELETE" }) };
 }
 
 it("says when a server is added, imported or removed on purpose, so a Cloud home's routines can wait while none is left", async () => {
@@ -103,6 +119,77 @@ it.each(["create", "import"])("accepts blank personal headers on %s and retains 
   }
 });
 
+describe("a bot's MCP servers, as a phone reads them", () => {
+  const SERVERS = {
+    warehouse: { command: "npx", args: ["-y", "warehouse-mcp", "--token", "wh-arg-secret"], env: { WAREHOUSE_KEY: "wh-env-secret" }, enabled: true },
+    ada_notes: { command: "node", args: ["notes.js"], env: {}, enabled: true, bot: "ada" },
+    bea_files: { command: "node", args: ["files.js"], env: {}, enabled: true, bot: "bea" },
+    tickets: {
+      type: "http", url: "https://tickets.example.com/mcp?key=url-secret", headers: { Authorization: "Bearer header-secret" }, enabled: true,
+      oauth: { clientId: "tickets-client", clientSecret: "oauth-secret", scopes: ["read"] },
+    },
+    archive: { command: "node", args: ["archive.js"], env: {}, enabled: false },
+  };
+  async function servers(bot: Bot, listed?: Record<string, Record<string, unknown>>) {
+    const { cfg, base } = await serve({ bots: [bot, { id: "bea" }], ...(listed ? { listed } : {}) });
+    cfg.mcpServers = structuredClone(SERVERS);
+    return fetch(`${base}/api/bots/${bot.id}/mcp-servers`);
+  }
+
+  it("lists every bot's servers and the bot's own, in settings order, with every enabled one on when the bot has no list", async () => {
+    const response = await servers({ id: "ada" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ servers: [
+      { name: "warehouse", enabled: true, on: true },
+      { name: "ada_notes", enabled: true, on: true },
+      { name: "tickets", enabled: true, on: true },
+      { name: "archive", enabled: false, on: false },
+    ] });
+  });
+
+  it("turns on only the enabled servers in the bot's list", async () => {
+    expect(await (await servers({ id: "ada", mcpServers: ["tickets", "archive", "bea_files"] })).json()).toEqual({ servers: [
+      { name: "warehouse", enabled: true, on: false },
+      { name: "ada_notes", enabled: true, on: false },
+      { name: "tickets", enabled: true, on: true },
+      { name: "archive", enabled: false, on: false },
+    ] });
+    const none = await (await servers({ id: "ada", mcpServers: [] })).json() as { servers: { on: boolean }[] };
+    expect(none.servers.map((server) => server.on)).toEqual([false, false, false, false]);
+  });
+
+  it("marks a server that doesn't start for this bot, and not for the bots it starts for", async () => {
+    const listed = { warehouse: { offFor: ["ada"] }, tickets: { offFor: ["bea"] } };
+    expect(await (await servers({ id: "ada" }, listed)).json()).toEqual({ servers: [
+      { name: "warehouse", enabled: true, on: true, offFor: true },
+      { name: "ada_notes", enabled: true, on: true },
+      { name: "tickets", enabled: true, on: true },
+      { name: "archive", enabled: false, on: false },
+    ] });
+  });
+
+  it("gives names and switches only: no command, arguments, environment, address, headers, sign-in or policy", async () => {
+    const response = await servers({ id: "ada" }, {
+      tickets: { auth: "signed-in", managedBy: "Acme", scope: "team", redirectUri: "https://cloud.example.com/cb" },
+      warehouse: { offFor: ["ada"], managedBy: "Acme" },
+    });
+    const text = await response.text();
+    for (const server of (JSON.parse(text) as { servers: Record<string, unknown>[] }).servers) {
+      expect(Object.keys(server).filter((key) => !["name", "enabled", "on", "offFor"].includes(key)), server.name as string).toEqual([]);
+    }
+    for (const leaked of ["npx", "wh-arg-secret", "WAREHOUSE_KEY", "wh-env-secret", "tickets.example.com", "url-secret", "header-secret", "Authorization", "tickets-client", "oauth-secret", "Acme", "signed-in", "cloud.example.com"]) {
+      expect(text).not.toContain(leaked);
+    }
+  });
+
+  it("answers a bot that doesn't exist as not found", async () => {
+    const { base } = await serve({ bots: [{ id: "ada" }] });
+    const response = await fetch(`${base}/api/bots/nobody/mcp-servers`);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "no such bot" });
+  });
+});
+
 // The broker listens on a unix socket, which Windows refuses at a file path; the box runs only on a Linux Cloud home.
 describe.skipIf(process.platform === "win32")("Test, where bots reach URL servers through the credential broker", () => {
   const HEADERS = { Authorization: "Bearer team-orders", "CF-Access-Client-Id": "5c1d0e9a.access", "CF-Access-Client-Secret": "0f9e8d7c6b5a4938271605" };
@@ -146,5 +233,31 @@ describe.skipIf(process.platform === "win32")("Test, where bots reach URL server
     await mcp.close();
     mcp = undefined;
     expect(await tested(await brokerPath(), url)).toEqual({ ok: false, error: "Could not reach this address. Check the URL and your network.", reason: "unreachable" });
+  });
+});
+
+describe("a bot's tool budget and a command server's Test", () => {
+  afterEach(() => forgetToolBudgets());
+
+  it("gives a bot's last chat turn's tool budget, nothing before one ran, and not found for no bot", async () => {
+    const { base } = await serve({ bots: [{ id: "ada" }] });
+    expect(await (await fetch(`${base}/api/bots/ada/tool-budget`)).json()).toEqual({ budget: null });
+    const budget = { limit: 128, listed: 127, servers: [{ name: "notes", tools: 124, direct: true }, { name: "sogni", tools: 30, direct: false }] };
+    noteToolBudget("ada", budget);
+    expect(await (await fetch(`${base}/api/bots/ada/tool-budget`)).json()).toEqual({ budget });
+    expect((await fetch(`${base}/api/bots/nobody/tool-budget`)).status).toBe(404);
+  });
+
+  it("starts a command server for Test as its bot's turn would", async () => {
+    const seen: Array<string | undefined> = [];
+    const fake = fileURLToPath(new URL("../testing/fake-mcp-server.ts", import.meta.url));
+    const { cfg, post } = await serve({ probeAs: (server) => { seen.push(server.bot ?? "any bot"); return {}; } });
+    cfg.mcpServers = {
+      notes: { command: process.execPath, args: ["--experimental-strip-types", fake], env: {}, enabled: true },
+      own: { command: process.execPath, args: ["--experimental-strip-types", fake], env: {}, enabled: true, bot: "ada" },
+    };
+    expect(await (await post("/api/mcp/servers/notes/test", {})).json()).toMatchObject({ ok: true, tools: [{ name: "read_notes" }] });
+    expect(await (await post("/api/mcp/servers/own/test", {})).json()).toMatchObject({ ok: true });
+    expect(seen).toEqual(["any bot", "ada"]);
   });
 });

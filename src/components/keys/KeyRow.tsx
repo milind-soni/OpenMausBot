@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Check, CircleAlert, ExternalLink, Eye, EyeOff, Loader2, TriangleAlert } from "lucide-react";
 import { useStore } from "@/state/store";
+import { installCommandFor } from "@/state/engine-install";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { KeyResult, KeyVia } from "@/lib/analytics-allowlist";
@@ -96,7 +97,7 @@ export function KeyRow({
   className?: string;
   children?: ReactNode;
 }) {
-  const { state, dispatch } = useStore();
+  const { state, dispatch, refreshInstances } = useStore();
   const titleId = useId();
   const [draft, setDraft] = useState("");
   const [shown, setShown] = useState(false);
@@ -107,6 +108,8 @@ export function KeyRow({
   const [notice, setNotice] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<string | null>(null);
   const [works, setWorks] = useState(false);
+  const [enginesChecking, setEnginesChecking] = useState(false);
+  const [engineCheckError, setEngineCheckError] = useState<string | null>(null);
   const busyRef = useRef(false);
   const generation = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -129,6 +132,15 @@ export function KeyRow({
   const saved = savedState(entry, state.config);
   const engineRejected = (state.instances ?? []).some((instance) => instance.access === "api" && keyForInstance(instance.instanceId) === entry.id
     && instance.snapshot.state === "available" && instance.snapshot.authenticated === false);
+  // A key engine with its own CLI (DeepSeek Harness) can't use a saved key until that CLI runs here.
+  // The Grok CLI signs in with a grok.com account and drops XAI_API_KEY, so installing it never puts the xAI key to use.
+  const keyEngines = saved.configured
+    ? (state.instances ?? []).filter((instance) => instance.driverKind !== "grokAgent" && keyForInstance(instance.instanceId) === entry.id)
+    : [];
+  const missingEngine = keyEngines.some((instance) => instance.snapshot.state === "available")
+    ? undefined
+    : keyEngines.find((instance) => instance.snapshot.state === "unavailable" && installCommandFor(instance.install) !== null);
+  const installCommand = installCommandFor(missingEngine?.install);
   const rejected = !works && (rejectedHere ?? (saved.configured && engineRejected));
   const failure = problem ?? (rejected && !busy ? t("keys.testRejected") : null);
   const editing = !saved.configured || replacing;
@@ -194,6 +206,18 @@ export function KeyRow({
     } finally {
       busyRef.current = false;
       setBusy(null);
+    }
+  };
+
+  const checkEngines = async () => {
+    setEnginesChecking(true);
+    setEngineCheckError(null);
+    try {
+      await refreshInstances({ reportErrors: true });
+    } catch (cause) {
+      setEngineCheckError(errorText(cause));
+    } finally {
+      setEnginesChecking(false);
     }
   };
 
@@ -330,7 +354,7 @@ export function KeyRow({
             <button type="button" data-key-own className="ui-button" onClick={() => { setOwnKey(true); focusAfter.current = "input"; }}>{t("keys.row.useOwn")}</button>
           </div>
         )}
-        {(notice || failure || other || warning || note || verdict || (fieldShown && target.href) || (!fieldShown && saved.configured && target.test)) && (
+        {(notice || failure || other || warning || installCommand || note || verdict || (fieldShown && target.href) || (!fieldShown && saved.configured && target.test)) && (
           <div className="flex flex-col gap-1.5 text-[12px] leading-4">
             {notice && <p role="alert" className="text-danger">{notice}</p>}
             {failure && (
@@ -350,6 +374,20 @@ export function KeyRow({
                 <TriangleAlert size={13} aria-hidden="true" className="mt-px shrink-0" />
                 <span>{warning}</span>
               </p>
+            )}
+            {installCommand && missingEngine && (
+              <div data-key-engine-missing className="flex flex-col gap-1">
+                <p className="flex gap-1.5 text-warning">
+                  <TriangleAlert size={13} aria-hidden="true" className="mt-px shrink-0" />
+                  <span>{t("keys.row.engineMissing", { engine: missingEngine.displayName })}</span>
+                </p>
+                <code className="select-all break-all rounded-md bg-inset px-2 py-1 font-mono text-[12px] text-ink">{installCommand}</code>
+                <button type="button" data-key-engine-check className="cursor-pointer self-start text-ink-secondary hover:text-ink hover:underline disabled:opacity-50" disabled={enginesChecking}
+                  onClick={() => void checkEngines()}>
+                  {enginesChecking ? t("common.checking") : t("common.checkAgain")}
+                </button>
+                {engineCheckError && <p role="alert" className="text-danger">{t("engineSetup.checkFailed", { reason: engineCheckError })}</p>}
+              </div>
             )}
             {note && <p className="text-ink-secondary">{note}</p>}
             {verdict && <p role="status" className="whitespace-pre-line text-ink-secondary">{verdict}</p>}

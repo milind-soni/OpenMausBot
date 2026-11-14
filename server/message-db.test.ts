@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import { closeMessageDb,
@@ -109,6 +109,22 @@ describe("message-db", () => {
     new Store(selection);
     expect(searchMessages("unopened legacy")).toMatchObject([{ threadId: bot.threadId, messageId: "old" }]);
     expect(existsSync(`${legacy(bot.threadId)}.imported`)).toBe(true);
+  });
+
+  // Windows will not delete a file SQLite holds open.
+  it.skipIf(process.platform === "win32")("opens the database again when its file was deleted under it, looking at most once a second", () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    try {
+      insertMessage("t-gone", msg("m1", "before"));
+      for (const suffix of ["", "-wal", "-shm"]) rmSync(join(DATA_DIR, `messages.db${suffix}`), { force: true });
+      clock.mockReturnValue(now + 1_000);
+      insertMessage("t-gone", msg("m2", "after"));
+      expect(existsSync(join(DATA_DIR, "messages.db"))).toBe(true);
+      expect(readThread("t-gone", legacy("t-gone")).messages.map((m) => m.id)).toEqual(["m2"]);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("stores transcripts with owner-only permissions", () => {

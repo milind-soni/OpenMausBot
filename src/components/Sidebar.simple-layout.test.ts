@@ -161,13 +161,13 @@ describe("Simple-mode sidebar layout", () => {
   it("draws the same faint edge in both modes, with the Simple footer in Simple mode and Advanced's footer in Advanced", () => {
     const footer = (tree: ReactElement<Props>[]) => (tree.find((node) => node.type === SidebarFooter)!.props as Parameters<typeof SidebarFooter>[0]).simple;
     const simple = render();
-    expect(simple.root.props.className).toContain("border-r border-ink/[0.04]");
+    expect(simple.root.props.className).toContain("border-r-[0.5px] border-edge");
     expect(simple.root.props.className).not.toContain("border-hairline");
     expect(footer(simple.tree)).toBe(true);
     fixture.values = [];
     fixture.advanced = true;
     const advanced = render();
-    expect(advanced.root.props.className).toContain("border-r border-ink/[0.04]");
+    expect(advanced.root.props.className).toContain("border-r-[0.5px] border-edge");
     expect(footer(advanced.tree)).toBe(false);
   });
 

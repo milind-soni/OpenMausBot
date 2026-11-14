@@ -15,8 +15,8 @@ import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
 import { TraceView } from "./usage/TraceView";
 import { LiveBadge, modelName, StatStrip, totalsStats } from "./usage/TraceWaterfall";
 
-export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine";
-const OTHER_GROUPINGS: readonly UsageGroupBy[] = ["model", "user", "day", "engine", "routine"];
+export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine" | "department";
+const OTHER_GROUPINGS: readonly UsageGroupBy[] = ["model", "user", "department", "day", "engine", "routine"];
 
 export interface UsageGroup {
   key: string;
@@ -41,6 +41,7 @@ const GROUP_LABEL_KEYS: Record<UsageGroupBy, LocaleKey> = {
   day: "usage.history.byDay",
   engine: "usage.history.byEngine",
   routine: "usage.history.byRoutine",
+  department: "usage.history.byDepartment",
 };
 
 const PERIOD_LABEL_KEYS: Record<UsagePeriod, LocaleKey> = {
@@ -55,6 +56,7 @@ const LIVE_REFRESH_MS = 2_000;
 
 export function usageGroupLabel(groupBy: UsageGroupBy, group: Pick<UsageGroup, "key" | "label">): string {
   if (groupBy === "routine") return group.key === "manual" ? t("usage.history.notRoutine") : group.label;
+  if (groupBy === "department") return group.label || t("usage.history.noDepartment");
   if (groupBy !== "user") return group.label;
   if (group.key === "owner") return t("usage.history.owner");
   if (group.key === "bot") return t("usage.history.botToBot");

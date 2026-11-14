@@ -27,14 +27,18 @@ export function ModelRow({ option, current, defaultId, botModel = false, onPick 
   botModel?: boolean;
   onPick: () => void;
 }) {
-  const meta = [option.provider, option.id === defaultId ? t("model.effort.default") : undefined].filter(Boolean).join(" · ");
+  const blocked = option.orgBlocked === true;
+  const meta = blocked ? t("model.orgBlocked") : [option.provider, option.id === defaultId ? t("model.effort.default") : undefined].filter(Boolean).join(" · ");
   return (
     <button
       type="button"
       data-menu-row
       data-current-model={current || undefined}
+      data-org-blocked={blocked || undefined}
+      disabled={blocked}
       aria-pressed={current}
-      title={option.provider ? t("model.provider", { name: option.provider }) : undefined}
+      aria-label={blocked ? `${option.label} · ${t("model.orgBlocked")}` : undefined}
+      title={blocked ? t("model.orgBlocked") : option.provider ? t("model.provider", { name: option.provider }) : undefined}
       onClick={onPick}
       className={MENU_ROW}
     >

@@ -154,6 +154,25 @@ posixOnly("usage attribution e2e", () => {
     await waitFor(async () => (await getBot(unlisted.id)).busy === false, "the bots to go idle");
   }, 40_000);
 
+  it("books each turn to the department its bot was in then, and moving the bot later keeps what was spent there", async () => {
+    const bot = await newBot("acpHappy", "grok-4.7");
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { section: "Finance" })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "for finance" })).status).toBe(202);
+    await waitFor(() => ledger(bot.id).length === 1, "the Finance turn to be booked");
+    await waitFor(async () => (await getBot(bot.id)).busy === false, "the bot to go idle");
+    expect(ledger(bot.id)[0]).toMatchObject({ section: "Finance" });
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { section: "Operations" })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "for operations" })).status).toBe(202);
+    await waitFor(() => ledger(bot.id).length === 2, "the Operations turn to be booked");
+    await waitFor(async () => (await getBot(bot.id)).busy === false, "the bot to go idle");
+    const byDepartment = (await api("GET", "/api/usage?groupBy=department")).body.groups as Array<{ key: string; turns: number }>;
+    expect(byDepartment.find((group) => group.key === "department:Finance")).toMatchObject({ turns: 1 });
+    expect(byDepartment.find((group) => group.key === "department:Operations")).toMatchObject({ turns: 1 });
+    const csv = await (await fetch(`${BASE}/api/usage.csv`)).text();
+    expect(csv.split("\n")[0]).toMatch(/,thread,department,person$/);
+    expect(csv).toContain(",Finance,");
+  }, 40_000);
+
   it("a queued message leaves the running turn with its starter, and its own turn is booked to its sender", async () => {
     const bot = await newBot("acp", "fake-model");
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "owner's work" })).status).toBe(202);

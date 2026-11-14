@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { AppConfig } from "../config.ts";
 import type { ProviderAuthenticationStart, ProviderAuthenticationStatus } from "../contracts.ts";
-import { ProviderRegistry } from "../harness/registry.ts";
+import { ENGINE_LIST_REUSE_MS, ProviderRegistry } from "../harness/registry.ts";
 import { json, readBody } from "../harness/http.ts";
 import { ProviderAuthSessions } from "../provider-auth-sessions.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
@@ -41,7 +41,7 @@ async function serve(extra: Partial<InstanceRouteDeps> = {}) {
     hostedModels: false,
     providerConfigBusy: { get: () => false, set: () => {} },
     providerInstancesChanging: new Set<string>(),
-    describeInstances: () => registry.describe(),
+    describeInstances: () => registry.describe({ reuse: { ms: ENGINE_LIST_REUSE_MS, changed: () => {} } }),
     threadBusy: () => false,
     botForThread: () => null,
     activeGroupTurnForBot: () => null,
@@ -70,7 +70,7 @@ async function serve(extra: Partial<InstanceRouteDeps> = {}) {
     await call("GET", "/api/instances");
     return fake.probes.length;
   };
-  return { sign, call, probesAfterList, base };
+  return { sign, call, probesAfterList, base, fake };
 }
 
 describe("engine sign-in routes", () => {
@@ -100,6 +100,17 @@ describe("engine sign-in routes", () => {
 
     await call("POST", "/api/instances/a/auth/sign-out", {});
     expect(await probesAfterList()).toBe(5);
+  });
+});
+
+describe("the engine list", () => {
+  it("answers again from the last status read, and reads every engine again when asked for fresh", async () => {
+    const { call, probesAfterList, fake } = await serve();
+    expect(await probesAfterList()).toBe(1);
+    expect(await probesAfterList()).toBe(1);
+    await call("GET", "/api/instances?fresh=1");
+    expect(fake.probes).toHaveLength(2);
+    expect(await probesAfterList()).toBe(2);
   });
 });
 

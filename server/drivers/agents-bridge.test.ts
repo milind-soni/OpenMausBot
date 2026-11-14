@@ -251,7 +251,7 @@ describe("find_tool", () => {
     ["search my earlier conversations", "session_search"],
     ["delete one of my routines for good", "delete_trigger"],
     ["run a shell command in the VM", "vm_exec"],
-    ["add an MCP server", "add_mcp_server"],
+    ["add an MCP server", "mcp_server"],
     ["see how the threads I opened are going", "list_threads"],
     ["write a line to today's log", "memory_log"],
     ["remember a decision for the whole team", "propose_team_memory"],
