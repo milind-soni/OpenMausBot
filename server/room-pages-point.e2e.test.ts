@@ -30,19 +30,19 @@ it("sends a pick on a room page to the bot that made it, and to no other member"
     .map((line) => JSON.parse(line)).filter((entry: any) => entry.botId === botId && entry.prompt !== undefined);
   const plan = (steps: Array<{ tool: string; arguments: unknown }>) =>
     writeFileSync(planPath, JSON.stringify({ [designer.id]: { steps, reply: "Done." }, [helper.id]: { steps: [], reply: "Done." } }));
-  const settled = async (botId: string) => expect((await cli("wait", "--bot", botId, "--timeout", "30")).status).toBe("settled");
   // Helper answers the room by default, so only the pick can send the next line to Designer.
   const created = await api("/api/groups", {
     name: "Design room", memberIds: [designer.id, helper.id], setup: { bulletin: "", defaultResponder: { kind: "member", botId: helper.id } },
   });
   expect(created.status, JSON.stringify(created.body)).toBeLessThan(300);
   const group = created.body.group;
+  const settled = async () => expect((await cli("wait", "--thread", group.threadId, "--timeout", "30")).status).toBe("settled");
   const transcript = async () => (await api(`/api/threads/${group.threadId}/messages?limit=50`)).body.messages as any[];
 
   plan([{ tool: "show_html", arguments: { html: "<main><button>Go</button></main>", title: "Launch" } }]);
   expect((await api(`/api/groups/${group.id}/messages`, { text: "@Designer make a launch page", mentions: [designer.id] })).status).toBe(202);
   await expect.poll(async () => (await transcript()).find((message) => message.kind === "app")?.id, { timeout: 30_000 }).toBeTruthy();
-  await settled(designer.id);
+  await settled();
   const page = (await transcript()).find((message) => message.kind === "app");
   expect(page).toMatchObject({ from: { botId: designer.id }, app: { source: "html", title: "Launch" } });
 
@@ -54,7 +54,7 @@ it("sends a pick on a room page to the bot that made it, and to no other member"
   expect(sent.status, JSON.stringify(sent.body)).toBe(202);
   expect(sent.body.message).toMatchObject({ role: "user", text: "Make this one bigger", pointed: [{ appId: page.id }] });
   await expect.poll(() => evidence(designer.id).length, { timeout: 30_000 }).toBe(designerTurns + 1);
-  await settled(designer.id);
+  await settled();
   const prompt = JSON.stringify(evidence(designer.id).at(-1).prompt);
   expect(prompt).toContain("While writing this message the person pointed at parts of your page.");
   expect(prompt).toContain(`Page app_id \\"${page.id}\\" (now version 1); the person was looking at version 1.`);
@@ -64,7 +64,7 @@ it("sends a pick on a room page to the bot that made it, and to no other member"
   // A plain line still goes to the room's default responder, and carries no pick.
   expect((await api(`/api/groups/${group.id}/messages`, { text: "Thanks" })).status).toBe(202);
   await expect.poll(() => evidence(helper.id).length, { timeout: 30_000 }).toBe(helperTurns + 1);
-  await settled(helper.id);
+  await settled();
   expect(JSON.stringify(evidence(helper.id).at(-1).prompt)).not.toContain("pointed at parts of your page");
   expect(evidence(designer.id).length).toBe(designerTurns + 1);
 
@@ -94,7 +94,7 @@ it("sends a pick on a room page to the bot that made it, and to no other member"
   expect(queued.body.queued).toBe(true);
   expect((await api(`/api/groups/${group.id}/holds`, { botId: designer.id, held: true })).status).toBeLessThan(300);
   writeFileSync(gateFile, "go");
-  await settled(helper.id);
+  await settled();
   await expect.poll(async () => (await transcript()).some((message) => message.kind === "activity" && String(message.tool?.name).includes("what you pointed at in its page wasn't sent")), { timeout: 30_000 }).toBe(true);
   expect(evidence(designer.id).length).toBe(designerTurns + 1);
 
@@ -103,7 +103,7 @@ it("sends a pick on a room page to the bot that made it, and to no other member"
   writeFileSync(planPath, JSON.stringify({ [designer.id]: { steps: [], reply: "Done." }, [helper.id]: { steps: [{ tool: "show_html", arguments: { html: "<main><p>Notes</p></main>", title: "Notes" } }], reply: "Done." } }));
   expect((await api(`/api/groups/${group.id}/messages`, { text: "@Helper make a notes page", mentions: [helper.id] })).status).toBe(202);
   await expect.poll(async () => (await transcript()).find((message) => message.kind === "app" && message.from?.botId === helper.id)?.id, { timeout: 30_000 }).toBeTruthy();
-  await settled(helper.id);
+  await settled();
   const notes = (await transcript()).find((message) => message.kind === "app" && message.from?.botId === helper.id);
   const designerReady = join(fixture.info.dataDir, "designer-ready");
   writeFileSync(planPath, JSON.stringify({ [designer.id]: { steps: [], reply: "Done.", readyFile: designerReady, gateFile: join(fixture.info.dataDir, "designer-gate") }, [helper.id]: { steps: [], reply: "Done." } }));

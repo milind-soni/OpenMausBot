@@ -54,7 +54,7 @@ async function server(env: NodeJS.ProcessEnv = {}) {
   const bot = (await runControlOmb(["new-bot", "--name", "Inbox bot", "--url", url]) as any).bot;
   events = await openSse(`${url}/api/events`, { origin: url });
   const routine = async (name = "Inbox brief") => (await api("POST", "/api/routines", {
-    name, prompt: "Summarise my inbox.", botId: bot.id, schedule: { type: "cron", expression: "0 7 * * *", timeZone: "Europe/London" },
+    name, prompt: "Summarise my inbox.", botId: bot.id, enabled: false, schedule: { type: "cron", expression: "0 7 * * *", timeZone: "Europe/London" },
   })).routine;
   const runs = async () => {
     try { return (await api("GET", "/api/routines")).runs as any[]; } catch { return []; }
@@ -182,7 +182,7 @@ it("keeps an ACP engine's run that a graceful shutdown cut off, and starts it on
   await restart();
   const { bot } = await cli("new-bot", "--name", "Inbox bot");
   await cli("set-model", "--bot", bot.id, "--instance", "cline", "--model", "cline-default");
-  const { routine } = await api("POST", "/api/routines", { name: "Inbox brief", prompt: "Summarise my inbox.", botId: bot.id,
+  const { routine } = await api("POST", "/api/routines", { name: "Inbox brief", prompt: "Summarise my inbox.", botId: bot.id, enabled: false,
     schedule: { type: "cron", expression: "0 7 * * *", timeZone: "Europe/London" } });
   const { run } = await api("POST", `/api/routines/${routine.id}/run`);
   const read = async () => ((await api("GET", "/api/routines").catch(() => ({ runs: [] }))).runs as any[]).find((candidate) => candidate.id === run.id);
