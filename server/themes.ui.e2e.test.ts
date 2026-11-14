@@ -55,11 +55,11 @@ it.skipIf(!ready)("paints a theme live, lists it in Settings, and the reset keys
   expect((await api("PUT", "/api/themes/neon", { theme: { name: "Neon", canvas: "#0b1020", accent: "#ff2bd6", css } })).status).toBe(200);
   expect((await api("PUT", "/api/themes/active", { id: "neon" })).status).toBe(200);
 
-  const look = () => page.evaluate(() => ({
+  const look = () => page.evaluate(`({
     app: getComputedStyle(document.documentElement).getPropertyValue("--color-app").trim(),
     theme: document.documentElement.dataset.theme ?? null,
-    outline: getComputedStyle(document.querySelector('[data-look="composer"]')!).outlineColor,
-  }));
+    outline: getComputedStyle(document.querySelector('[data-look="composer"]')).outlineColor,
+  })`);
   await expect.poll(look, { timeout: 15_000 }).toMatchObject({ app: "#0b1020", theme: "neon", outline: "rgb(255, 43, 214)" });
   if (shots) await page.screenshot({ path: join(shots, "theme-live.png") });
 
@@ -72,7 +72,7 @@ it.skipIf(!ready)("paints a theme live, lists it in Settings, and the reset keys
   const safe = await browser.newPage({ viewport: { width: 1280, height: 820 } });
   await safe.goto(`${url}/?safe-look`);
   await safe.getByText("Scout", { exact: true }).first().waitFor();
-  expect(await safe.evaluate(() => document.documentElement.dataset.theme ?? null)).toBeNull();
+  expect(await safe.evaluate("document.documentElement.dataset.theme ?? null")).toBeNull();
   await safe.close();
 
   expect(remote).toEqual([]);
