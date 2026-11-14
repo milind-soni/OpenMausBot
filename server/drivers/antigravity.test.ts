@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -568,6 +568,19 @@ describe("official Antigravity runtime", () => {
     expect(readdirSync(acpDirectory).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 
+  it("refuses a symlinked staging root before launching a profile process", async () => {
+    const fake = fakeRuntime();
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const profileDirectory = join(fake.directory, "profile");
+    const outside = join(fake.directory, "outside");
+    mkdirSync(profileDirectory);
+    mkdirSync(outside);
+    symlinkSync(outside, join(profileDirectory, "omb-skills"), process.platform === "win32" ? "junction" : "dir");
+    await expect(prepareAntigravityProfile({ instanceId: "linked-staging", runtime, baseEnv: {}, profileDirectory }))
+      .rejects.toThrow("Antigravity staging path must be a real directory.");
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
   it("keeps the existing Google sign-in when the runtime version changes", async () => {
     const fake = fakeRuntime();
     const runtime = await resolveAntigravityRuntime(fake.executable);
@@ -845,6 +858,19 @@ describe("Antigravity driver over shared ACP", () => {
     expect(antigravityPermissionMode(true, "edits")).toBe("yolo");
   });
 
+  it("returns staging failures as rejected promises before dispatch", async () => {
+    const fake = fakeRuntime();
+    instance = await AntigravityDriver.create({
+      instanceId: "antigravity-staging-failure", displayName: "Antigravity",
+      environment: {}, enabled: true, config: { cli: fake.executable, fullAuto: false },
+    });
+    const file = join(fake.directory, "missing-skill", "SKILL.md");
+    const pending = instance.adapter.sendTurn({
+      threadId: "staging-failure", text: "Read " + JSON.stringify(file), skillFiles: [file], cwd: fake.directory,
+    });
+    await expect(pending).rejects.toThrow("Antigravity skill folders must be real directories.");
+  });
+
   it.each(["ask", "edits", "auto", "full"] as const)("runs an authenticated %s turn with explicit mode and session-scoped MCP", async (approvalMode) => {
     ensureDirs();
     const fake = fakeRuntime();
@@ -853,6 +879,34 @@ describe("Antigravity driver over shared ACP", () => {
     const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
     mkdirSync(tokenDirectory, { recursive: true });
     writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+    const replies = new Map<string, any>();
+    let received!: () => void;
+    const fileRequestsFinished = new Promise<void>((resolve) => { received = resolve; });
+    const spawn = procs.spawnCli;
+    vi.spyOn(procs, "spawnCli").mockImplementation((...args) => {
+      const child = spawn(...args);
+      const write = child.stdin.write.bind(child.stdin);
+      vi.spyOn(child.stdin, "write").mockImplementation((...writeArgs) => {
+        const message = JSON.parse(String(writeArgs[0]));
+        if (message.method === "session/prompt") {
+          const path = JSON.parse(message.params.prompt[0].text.slice(5)) as string;
+          const calls = [
+            { id: "skill-read", method: "fs/read_text_file", path },
+            { id: "reference-read", method: "fs/read_text_file", path: join(dirname(path), "references", "guide.md") },
+            { id: "skill-write", method: "fs/write_text_file", path, content: "unreviewed" },
+            { id: "token-read", method: "fs/read_text_file", path: join(tokenDirectory, "acp_token.json") },
+          ];
+          for (const call of calls) child.stdout.emit("data", Buffer.from(JSON.stringify({
+            jsonrpc: "2.0", id: call.id, method: call.method, params: { sessionId: message.params.sessionId, path: call.path, content: call.content },
+          }) + "\n"));
+        } else if (["skill-read", "reference-read", "skill-write", "token-read"].includes(message.id)) {
+          replies.set(message.id, message);
+          if (replies.size === 4) received();
+        }
+        return write(...writeArgs);
+      });
+      return child;
+    });
     instance = await AntigravityDriver.create({
       instanceId,
       displayName: "Antigravity Work",
@@ -874,6 +928,7 @@ describe("Antigravity driver over shared ACP", () => {
         }),
         FAKE_ACP_MODES: "default,yolo,auto_edit",
         FAKE_ACP_DUMP: dump,
+        FAKE_ACP_DUMP_PROMPT: "1",
         // Inherited temp folders: replaced on Windows, passed through elsewhere.
         TEMP: fake.directory,
         TMP: fake.directory,
@@ -882,9 +937,15 @@ describe("Antigravity driver over shared ACP", () => {
       config: { cli: fake.executable, fullAuto: false },
     });
     recorder = recordEvents(instance.adapter);
+    const skillDirectory = join(DATA_DIR, "workspaces", "skill-bot", "skills", ".revisions", "a".repeat(64));
+    mkdirSync(join(skillDirectory, "references"), { recursive: true });
+    const skillFile = join(skillDirectory, "SKILL.md");
+    writeFileSync(skillFile, "Read references/guide.md.");
+    writeFileSync(join(skillDirectory, "references", "guide.md"), "Reviewed instructions");
     const { turnId } = await instance.adapter.sendTurn({
       threadId: "thread-antigravity",
-      text: "hello",
+      text: "Read " + JSON.stringify(skillFile),
+      skillFiles: [skillFile],
       approvalMode,
       resumeCursor: "fake-acp-session",
       // Existing bots can have the pre-variant fallback ID saved. The official
@@ -899,7 +960,19 @@ describe("Antigravity driver over shared ACP", () => {
     const events = recorder.events.filter((event) => event.turnId === turnId);
     expect(events.some((event) => event.type === "item.completed" && event.itemType === "assistant_text")).toBe(true);
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+    const prompt = JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8"));
+    const stagedFile = JSON.parse(prompt[0].text.slice(5)) as string;
+    expect(stagedFile.startsWith(join(realpathSync(antigravityProfileDirectory(instanceId)), "omb-skills") + (process.platform === "win32" ? "\\" : "/"))).toBe(true);
+    expect(readFileSync(stagedFile, "utf8")).toBe("Read references/guide.md.");
+    expect(readFileSync(join(dirname(stagedFile), "references", "guide.md"), "utf8")).toBe("Reviewed instructions");
+    await fileRequestsFinished;
+    expect(replies.get("skill-read").result).toEqual({ content: "Read references/guide.md." });
+    expect(replies.get("reference-read").result).toEqual({ content: "Reviewed instructions" });
+    expect(replies.get("skill-write").error.message).toContain("outside");
+    expect(replies.get("token-read").error.message).toContain("outside");
     const dumpState = JSON.parse(readFileSync(dump, "utf8"));
+    const turnSpawn = vi.mocked(procs.spawnCli).mock.calls.find((call) => call[2].cwd === fake.directory);
+    expect(turnSpawn?.[2].box).toMatchObject({ ro: [join(antigravityProfileDirectory(instanceId), "omb-skills")] });
     expect(dumpState.argv).toEqual(process.platform === "linux" ? ["--uid="] : []);
     expect(dumpState.env.GEMINI_HOME).toBe(antigravityProfileDirectory(instanceId));
     expect(dumpState.env.GEMINI_API_KEY).toBeUndefined();

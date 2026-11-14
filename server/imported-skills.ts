@@ -11,7 +11,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync,
-  statSync, symlinkSync, unlinkSync, writeFileSync,
+  readSync, statSync, symlinkSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -95,12 +95,21 @@ export function listedImportedSkills<T extends { name: string; description: stri
   return available.filter((skill) => picked.has(skill.name));
 }
 
-export function readFileNoFollow(path: string): Buffer | null {
+export function readFileNoFollow(path: string, maxBytes?: number): Buffer | null {
   let fd: number | null = null;
   try {
     fd = openSync(path, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW));
-    if (!fstatSync(fd).isFile()) return null;
-    return readFileSync(fd);
+    const info = fstatSync(fd);
+    if (!info.isFile() || (maxBytes !== undefined && info.size > maxBytes)) return null;
+    if (maxBytes === undefined) return readFileSync(fd);
+    const buffer = Buffer.alloc(maxBytes + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const count = readSync(fd, buffer, length, buffer.length - length, null);
+      if (count === 0) break;
+      length += count;
+    }
+    return length <= maxBytes ? Buffer.from(buffer.subarray(0, length)) : null;
   } catch {
     return null;
   } finally {

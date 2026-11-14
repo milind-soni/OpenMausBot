@@ -432,7 +432,7 @@ import { CLOUD_COMPUTER_DID_NOT_START, CLOUD_COMPUTER_START_BUDGET_MS, CLOUD_COM
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { LocalVmSeatPool, type LocalVmSeatHolder } from "./local-vm-seat-pool.ts";
 import { createLoopGuard, loopGuardSettings } from "./host/loop-guard.ts"; import { createPersonFirst } from "./host/person-first.ts"; import { createRunOwners, runActorOf } from "./host/run-owner.ts";
-import { claudeUserSkillsEnabled, settingsTurnFields } from "./turn-settings.ts";
+import { claudeUserSkillsEnabled } from "./turn-settings.ts";
 import { addHeldSecretScrubber, redactSecretsInText, scrubHeldSecrets } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { vpsConfigForBot, vpsSshAliasForBot } from "./vps-hosts.ts";
@@ -8454,7 +8454,7 @@ async function beginTurn(
         mentionTurn: tagged.length > 0,
         integrations,
         ...(integrations.browser && browserIsThePlace(turnSurfacePlan(bot, undefined, threadId, true)) ? { preloadBrowserTools: true } : {}),
-        ...settingsTurnFields(cfg, DATA_DIR, managedPolicy.restrictsMcp()),
+        ...skillsHost.turnSettings(bot, threadId, instance, managedPolicy.restrictsMcp()),
         cwd, ...(worksInWorkspace || guestConfined || cloudGuestOpened(threadId) ? {} : { toolResultFolder: messageFileRootsForThread(bot.id, threadId).find((root) => root !== ATTACHMENTS_DIR) }),
         botSettingsFile: botSettingsFile(bot),
       }, (input) => quickFallback.sendTurn(instance, input, route.quickModel ? { model, own: bot.modelSelection, onFallback: () => store.patchMessage(threadId, userMessage.id, { quickModel: undefined }) } : undefined))), () => companyShutdown || !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
@@ -10313,7 +10313,7 @@ async function runClaimedGroupMemberTurn(
         cwd, ...(worksInWorkspace || roomGuestConfined || cloudGuestOpened(threadId) ? {} : { toolResultFolder: messageFileRootsForThread(readyBot.id, threadId).find((root) => root !== ATTACHMENTS_DIR) }),
         integrations,
         ...(integrations.browser && browserIsThePlace(roomPlan) ? { preloadBrowserTools: true } : {}),
-        ...settingsTurnFields(cfg, DATA_DIR, managedPolicy.restrictsMcp()),
+        ...skillsHost.turnSettings(readyBot, threadId, instance, managedPolicy.restrictsMcp()),
         botSettingsFile: botSettingsFile(readyBot),
         ...(instance.instanceId === readyBot.modelSelection.instanceId
           ? memberTurnSelection(readyBot.modelSelection)
