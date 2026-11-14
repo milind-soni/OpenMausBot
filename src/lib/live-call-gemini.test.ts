@@ -198,6 +198,8 @@ describe("a Gemini Live session", () => {
     expect(t.sockets).toHaveLength(2);
     t.socket().open();
     expect(t.socket().sent).toEqual([{ setup: { model: SESSION.model, sessionResumption: { handle: "h-2" } } }]);
+    t.audio().mic!(new Int16Array([1]).buffer);
+    expect(t.socket().sent, "nothing but the setup before Gemini takes it").toHaveLength(1);
     t.socket().receive({ setupComplete: {} });
     expect(t.callbacks.onDisconnect).not.toHaveBeenCalled();
     expect(t.callbacks.onConnect).toHaveBeenCalledTimes(1);

@@ -287,7 +287,7 @@ class GeminiLiveSession implements FishAgentSession {
   }
 
   private send(message: unknown): void {
-    if (this.ended || this.socket?.readyState !== 1) return;
+    if (this.ended || !this.linked || this.socket?.readyState !== 1) return;
     this.socket.send(JSON.stringify(message));
   }
 }
