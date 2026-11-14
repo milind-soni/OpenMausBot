@@ -136,7 +136,7 @@ function fail(path: string, message: string): never {
   throw new WidgetInputError(`${path}: ${message}`);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
@@ -328,7 +328,7 @@ const action: Reader = (raw, path) => {
 /** The longest url a widget action or image may carry. */
 export const WEB_URL_MAX = 2_000;
 
-function isWebUrl(value: unknown, protocols: string[]): value is string {
+export function isWebUrl(value: unknown, protocols: string[]): value is string {
   if (typeof value !== "string" || value.length > WEB_URL_MAX) return false;
   try {
     return protocols.includes(new URL(value).protocol);

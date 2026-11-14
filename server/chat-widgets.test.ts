@@ -4,11 +4,14 @@ import { WATCHER_OPTIONS_CARD_BOT_ID } from "../shared/options-card.ts";
 import { redactSecretsInText } from "../shared/redact.ts";
 import { WIDGET_SAMPLES } from "../shared/widget-samples.ts";
 import { WIDGET_LIMITS, widgetActions, widgetToText, type WidgetNode, type WidgetPayload } from "../shared/widget.ts";
-import { createAgentCard, prepareWidgetPress, reopenCancelledPress, type AgentCardStore } from "./chat-widgets.ts";
+import { createAgentCard, prepareDevicePress, prepareWidgetPress, reopenCancelledPress, type AgentCardStore } from "./chat-widgets.ts";
+import { briefCard } from "./host/brief-cards.ts";
 import type { Message } from "./store.ts";
 
 const THREAD = "thread-scout";
 const SCOUT = { id: "bot-scout", name: "Scout", color: "blue" as const };
+const HIDDEN = { id: "bot-hidden", name: "Hidden", color: "blue" as const };
+const HIDDEN_THREAD = "thread-hidden";
 // Shapes shared/redact.ts recognises: an Anthropic key and a GitHub token.
 const API_KEY = "sk-ant-api03-abcdefghijklmnopqrstuvwx";
 const GITHUB_TOKEN = "ghp_abcdefghijklmnopqrstuvwxyz0123";
@@ -31,6 +34,9 @@ function fakeStore(rooms: string[] = []) {
   });
   const store: AgentCardStore = {
     groupByThread: (threadId) => (rooms.includes(threadId) ? { id: "room-1" } : undefined),
+    taskByThread: (botId: string, threadId: string) =>
+      (botId === SCOUT.id && threadId === THREAD) || (botId === HIDDEN.id && threadId === HIDDEN_THREAD) ? { threadId } : undefined,
+    bot: (botId: string) => (botId === SCOUT.id ? SCOUT : botId === HIDDEN.id ? { ...HIDDEN, hidden: true as const } : null),
     messagesFor: rows,
     appendMessage,
     patchMessage,
@@ -551,6 +557,90 @@ describe("prepareWidgetPress", () => {
         ok: false, status: 400, error: "widgetAction must be {messageId, ref, values?, other?, rev?}, with values an object of text and on/off fields and other an object of text.",
       });
     }
+    expect(fake.patchMessage).not.toHaveBeenCalled();
+  });
+
+  it("answers a posted open_thread press with the conversation to open, and sends nothing", () => {
+    const fake = fakeStore();
+    const card = briefCard({ now: 1, intro: false, needs: [], meetings: [], emails: [], routines: [{ text: "Standup", note: "Finished", open: { botId: SCOUT.id, threadId: THREAD } }] });
+    const shownCard = show(fake, card.card);
+    if (!shownCard.ok) throw new Error(shownCard.error);
+    const open = widgetActions(payloadOf(fake, shownCard.messageId).root).find((entry) => entry.action.type === "open_thread")!;
+    expect(open.label).toBe("Open");
+    expect(prepareDevicePress(fake.store, THREAD, { messageId: shownCard.messageId, ref: open.ref }, undefined))
+      .toEqual({ ok: true, messageId: shownCard.messageId, device: { openThread: { botId: SCOUT.id, threadId: THREAD } } });
+    expect(fake.patchMessage).not.toHaveBeenCalled();
+    expect(payloadOf(fake, shownCard.messageId).settled).toBeUndefined();
+  });
+
+  it("answers a posted open_thread press for a room, and refuses one whose conversation is gone", () => {
+    const fake = fakeStore(["thread-room"]);
+    const room = show(fake, { type: "Card", children: [{ type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { groupId: "room-1", threadId: "thread-room" } } }] });
+    if (!room.ok) throw new Error(room.error);
+    const ref = widgetActions(payloadOf(fake, room.messageId).root)[0]!.ref;
+    expect(prepareDevicePress(fake.store, THREAD, { messageId: room.messageId, ref }, undefined))
+      .toEqual({ ok: true, messageId: room.messageId, device: { openThread: { groupId: "room-1", threadId: "thread-room" } } });
+    const gone = show(fake, { type: "Card", children: [{ type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { botId: SCOUT.id, threadId: "thread-gone" } } }] });
+    if (!gone.ok) throw new Error(gone.error);
+    const goneRef = widgetActions(payloadOf(fake, gone.messageId).root)[0]!.ref;
+    expect(prepareDevicePress(fake.store, THREAD, { messageId: gone.messageId, ref: goneRef }, undefined))
+      .toEqual({ ok: false, status: 404, error: "That conversation is no longer here." });
+    const wrongRoom = show(fake, { type: "Card", children: [{ type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { groupId: "room-2", threadId: "thread-room" } } }] });
+    if (!wrongRoom.ok) throw new Error(wrongRoom.error);
+    const wrongRef = widgetActions(payloadOf(fake, wrongRoom.messageId).root)[0]!.ref;
+    expect(prepareDevicePress(fake.store, THREAD, { messageId: wrongRoom.messageId, ref: wrongRef }, undefined))
+      .toEqual({ ok: false, status: 404, error: "That conversation is no longer here." });
+    expect(fake.patchMessage).not.toHaveBeenCalled();
+  });
+
+  it("refuses a posted open_thread press naming a hidden bot's thread, like a missing one", () => {
+    const fake = fakeStore();
+    expect(fake.store.taskByThread(HIDDEN.id, HIDDEN_THREAD)).toBeDefined();
+    const card = show(fake, { type: "Card", children: [{ type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { botId: HIDDEN.id, threadId: HIDDEN_THREAD } } }] });
+    if (!card.ok) throw new Error(card.error);
+    const ref = widgetActions(payloadOf(fake, card.messageId).root)[0]!.ref;
+    expect(prepareDevicePress(fake.store, THREAD, { messageId: card.messageId, ref }, undefined))
+      .toEqual({ ok: false, status: 404, error: "That conversation is no longer here." });
+    expect(fake.patchMessage).not.toHaveBeenCalled();
+  });
+
+  it("refuses a stale device press after the widget was replaced and answered, and takes one on the tree that is there", () => {
+    const fake = fakeStore();
+    const card = {
+      type: "Card",
+      title: "Standup",
+      children: [{ type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { botId: SCOUT.id, threadId: THREAD } } }],
+      confirm: { label: "Merge", action: { type: "pr.merge", payload: { prs: [750] } } },
+    };
+    const shownCard = show(fake, card);
+    if (!shownCard.ok) throw new Error(shownCard.error);
+    const open = widgetActions(payloadOf(fake, shownCard.messageId).root).find((entry) => entry.action.type === "open_thread")!;
+    const device = (rev: number) => prepareDevicePress(fake.store, THREAD, { messageId: shownCard.messageId, ref: open.ref, rev }, undefined);
+    expect(device(0)).toEqual({ ok: true, messageId: shownCard.messageId, device: { openThread: { botId: SCOUT.id, threadId: THREAD } } });
+
+    // The bot replaces the card, and the person answers the new one: the old press is now stale.
+    expect(createAgentCard({ store: fake.store, bot: SCOUT, threadId: THREAD, input: { tool: "update_widget", widget_id: shownCard.messageId, widget: { ...card, title: "Standup (updated)" } } }).ok).toBe(true);
+    expect(payloadOf(fake, shownCard.messageId).rev).toBe(1);
+    const settled = prepareWidgetPress(fake.store, THREAD, { messageId: shownCard.messageId, ref: "confirm", rev: 1 }, SEND);
+    if (!settled.ok) throw new Error(settled.error);
+    settled.settle();
+    expect(payloadOf(fake, shownCard.messageId).settled).toBeDefined();
+    expect(device(0)).toEqual({ ok: false, status: 409, error: "This widget changed. Check it and press again." });
+    expect(device(1)).toEqual({ ok: true, messageId: shownCard.messageId, device: { openThread: { botId: SCOUT.id, threadId: THREAD } } });
+  });
+
+  it("answers a posted open_url press with the link, and still refuses a phone-pairing press", () => {
+    const fake = fakeStore();
+    const sources = shown(fake, "sources");
+    const link = widgetActions(sources.widget!.root)[0]!;
+    expect(prepareDevicePress(fake.store, THREAD, { messageId: sources.id, ref: link.ref }, undefined))
+      .toEqual({ ok: true, messageId: sources.id, device: { openUrl: "https://developers.openai.com/api/docs/guides/chatkit-widgets" } });
+    const pairing = show(fake, { type: "Card", children: [{ type: "Button", label: "Pair phone", onClickAction: { type: "open_phone_pairing" } }] });
+    if (!pairing.ok) throw new Error(pairing.error);
+    const pairRef = widgetActions(payloadOf(fake, pairing.messageId).root)[0]!.ref;
+    expect(prepareDevicePress(fake.store, THREAD, { messageId: pairing.messageId, ref: pairRef }, undefined)).toBeUndefined();
+    expect(prepareWidgetPress(fake.store, THREAD, { messageId: pairing.messageId, ref: pairRef }, undefined))
+      .toEqual({ ok: false, status: 400, error: "That action opens on the device and is not sent." });
     expect(fake.patchMessage).not.toHaveBeenCalled();
   });
 });

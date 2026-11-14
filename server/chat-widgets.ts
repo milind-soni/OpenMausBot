@@ -1,8 +1,9 @@
 // A bot's widget tree is normalised, scrubbed of secrets and given its text fallback here, once; everything after reads the stored message.
 import { tagsDevs } from "../shared/devs-mention.ts";
+import { clientWidgetAction, urlActionTarget } from "../shared/widget-client.ts";
 import {
-  parseWidgetInput, resolveWidgetAction, widgetActions, widgetFieldOptions, widgetFields, widgetToText, WIDGET_LIMITS,
-  type WidgetAction, type WidgetNode, type WidgetPayload, type WidgetRoot, type WidgetSettled,
+  parseWidgetInput, resolveWidgetAction, threadActionTarget, widgetActions, widgetFieldOptions, widgetFields, widgetToText, WIDGET_LIMITS,
+  type WidgetAction, type WidgetActionEntry, type WidgetNode, type WidgetPayload, type WidgetRoot, type WidgetSettled,
 } from "../shared/widget.ts";
 import type { MausColor } from "../shared/wire.ts";
 import type { ChatApps } from "./chat-apps.ts";
@@ -13,6 +14,9 @@ import type { Message } from "./store.ts";
 
 export interface AgentCardStore {
   groupByThread(threadId: string): unknown;
+  taskByThread(botId: string, threadId: string): unknown;
+  /** Null when no such bot. */
+  bot(botId: string): { id: string; hidden?: boolean } | null | undefined;
   messagesFor(threadId: string): Message[];
   appendMessage(threadId: string, message: Omit<Message, "id" | "at">): Message;
   patchMessage(threadId: string, messageId: string, patch: Partial<Message>): Message | null;
@@ -190,6 +194,15 @@ export type WidgetPress =
     }
   | { ok: false; status: 400 | 404 | 409; error: string };
 
+/** A press on a device-handled action: where the device goes, or a refusal when that conversation is gone or the widget changed. */
+export type DevicePress =
+  | {
+      ok: true;
+      messageId: string;
+      device: { openThread: { botId: string; threadId: string } | { groupId: string; threadId: string } } | { openUrl: string };
+    }
+  | { ok: false; status: 404 | 409; error: string };
+
 const BAD_PRESS = "widgetAction must be {messageId, ref, values?, other?, rev?}, with values an object of text and on/off fields and other an object of text.";
 const STALE_PRESS = "This widget changed. Check it and press again.";
 
@@ -205,6 +218,53 @@ function isOther(value: unknown): value is Record<string, string> | undefined | 
 
 function isRevision(value: unknown): value is number | undefined | null {
   return value === undefined || value === null || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
+}
+
+/** A press on a device-handled action: where the device goes, or a refusal when that conversation is gone or hidden. */
+function devicePress(
+  store: Pick<AgentCardStore, "bot" | "groupByThread" | "taskByThread">,
+  messageId: string,
+  entry: WidgetActionEntry,
+): DevicePress | undefined {
+  if (entry.action.type === "open_thread") {
+    const target = threadActionTarget(entry.action);
+    if (!target) return undefined;
+    let open: { botId: string; threadId: string } | { groupId: string; threadId: string } | undefined;
+    if (target.groupId !== undefined) {
+      const group = store.groupByThread(target.threadId) as { id: string } | undefined;
+      if (group?.id === target.groupId) open = { groupId: target.groupId, threadId: target.threadId };
+    } else if (target.botId !== undefined && store.bot(target.botId)?.hidden !== true && store.taskByThread(target.botId, target.threadId)) {
+      open = { botId: target.botId, threadId: target.threadId };
+    }
+    return open
+      ? { ok: true, messageId, device: { openThread: open } }
+      : { ok: false, status: 404, error: "That conversation is no longer here." };
+  }
+  if (entry.action.type === "open_url") {
+    const url = urlActionTarget(entry.action);
+    return url ? { ok: true, messageId, device: { openUrl: url } } : undefined;
+  }
+  return undefined;
+}
+
+/** A press on a device-handled action: where the device goes, or a refusal when that conversation is gone or the widget changed.
+ * Returns undefined when the press is not a device-handled action, so the caller answers it as a press that sends. */
+export function prepareDevicePress(
+  store: Pick<AgentCardStore, "bot" | "groupByThread" | "messagesFor" | "taskByThread">,
+  threadId: string,
+  widgetAction: unknown,
+  sendId: string | undefined,
+): DevicePress | undefined {
+  if (!isRecord(widgetAction)) return undefined;
+  const { messageId, ref, rev } = widgetAction;
+  if (typeof messageId !== "string" || typeof ref !== "string" || !isRevision(rev)) return undefined;
+  const payload = storedWidget(store, threadId, messageId);
+  if (!payload?.root) return undefined;
+  const client = clientWidgetAction(payload, ref);
+  if (!client) return undefined;
+  const retry = sendId !== undefined && payload.settled?.sendId === sendId;
+  if (!retry && (rev ?? 0) !== (payload.rev ?? 0)) return { ok: false, status: 409, error: STALE_PRESS };
+  return devicePress(store, messageId, client);
 }
 
 /** Writes nothing until `settle()`. A press on an older `rev` is refused (its ref may now be another button); a retry with

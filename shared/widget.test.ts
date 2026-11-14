@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { clientWidgetAction } from "./widget-client.ts";
 import { WIDGET_SAMPLES } from "./widget-samples.ts";
 import {
   dayList, parseWidgetInput, resolveWidgetAction, widgetAdvice, widgetActionByLabel, widgetActions, widgetFieldOptions, widgetFields, widgetInitialValues, widgetScope, widgetToText,
@@ -318,6 +319,14 @@ describe("widget actions", () => {
     expect(resolveWidgetAction(payload("pullRequests"), "n999", {})).toEqual({ ok: false, status: 404, error: "That button is no longer on this widget." });
     const sources = payload("sources");
     expect(resolveWidgetAction(sources, widgetActions(sources.root)[0].ref, {})).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it("finds a device-handled action by ref, and nothing for a sent action or an unknown ref", () => {
+    const sources = payload("sources");
+    const link = widgetActions(sources.root)[0]!;
+    expect(clientWidgetAction(sources, link.ref)).toEqual(link);
+    expect(clientWidgetAction(payload("pullRequests"), "confirm")).toBeUndefined();
+    expect(clientWidgetAction(sources, "n999")).toBeUndefined();
   });
 });
 
