@@ -141,7 +141,7 @@ function SavedText({ saved, onSave, disabled, label, placeholder, testId }: {
       aria-label={label}
       autoComplete="off"
       spellCheck={false}
-      className={SETTINGS_INPUT}
+      className={cn(SETTINGS_INPUT, "[width:var(--settings-select-width,200px)] max-w-full")}
     />
   );
 }
