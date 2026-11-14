@@ -1,7 +1,8 @@
 // This client never logs a header value.
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { Readable } from "node:stream";
+import { Duplex, Readable } from "node:stream";
+import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
 
 import type { RemoteMcpSpec } from "./contracts.ts";
 
@@ -476,6 +477,19 @@ export function bypassesProxy(target: URL, noProxy: string): boolean {
   return false;
 }
 
+function decodedProxyBody(response: IncomingMessage, headers: Headers): ReadableStream<Uint8Array> {
+  let body = Readable.toWeb(response) as ReadableStream<Uint8Array>;
+  const codings = (headers.get("content-encoding") ?? "").toLowerCase().split(",").map((coding) => coding.trim());
+  if (codings.every((coding) => ["gzip", "x-gzip", "deflate", "x-deflate", "br"].includes(coding))) {
+    for (const coding of codings.reverse()) {
+      const decoder = coding === "br" ? createBrotliDecompress()
+        : coding === "gzip" || coding === "x-gzip" ? createGunzip() : createInflate();
+      body = body.pipeThrough(Duplex.toWeb(decoder));
+    }
+  }
+  return body;
+}
+
 export function plainHttpProxyFetch(env: Record<string, string | undefined>, fallback: typeof fetch = fetch): typeof fetch | undefined {
   const configured = env.http_proxy || env.HTTP_PROXY;
   if (!configured) return undefined;
@@ -515,10 +529,10 @@ export function plainHttpProxyFetch(env: Record<string, string | undefined>, fal
         for (const [name, value] of Object.entries(response.headers)) {
           for (const entry of Array.isArray(value) ? value : value === undefined ? [] : [value]) received.append(name, entry);
         }
-        const empty = status === 204 || status === 205 || status === 304;
+        const empty = init.method?.toUpperCase() === "HEAD" || status === 204 || status === 205 || status === 304;
         if (empty) response.resume();
         try {
-          resolve(new Response(empty ? null : Readable.toWeb(response) as ReadableStream<Uint8Array>, { status, statusText: response.statusMessage, headers: received }));
+          resolve(new Response(empty ? null : decodedProxyBody(response, received), { status, statusText: response.statusMessage, headers: received }));
         } catch (error) {
           response.destroy();
           reject(error instanceof Error ? error : new Error(String(error)));
