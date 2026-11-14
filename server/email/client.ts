@@ -163,7 +163,9 @@ export function sendingError(error: unknown, server: EmailServer): SendingError 
   const code = `${known.code ?? ""} ${known.originalCode ?? ""}`;
   const message = known.message ?? "";
   const answered = typeof known.responseCode === "number" ? known.responseCode : undefined;
-  if (/ENOTFOUND|EAI_AGAIN|EDNS|ENODATA/u.test(code)) return new SendingError("missing", server);
+  if (known.code === "EAI_AGAIN" || known.originalCode === "EAI_AGAIN" ||
+      (known.code === "EDNS" && /^(?:ETIMEOUT|ETIMEDOUT|ESERVFAIL|ECONNREFUSED|EREFUSED)$/u.test(known.originalCode ?? ""))) return new SendingError("no-answer", server);
+  if (/ENOTFOUND|EDNS|ENODATA/u.test(code)) return new SendingError("missing", server);
   if (/CERT|ALTNAME|SELF_SIGNED|UNABLE_TO_VERIFY|UNABLE_TO_GET_ISSUER|DEPTH_ZERO/u.test(code) || /certificate|altnames/iu.test(message)) return new SendingError("certificate", server);
   // Nodemailer's words for the two mix-ups: STARTTLS on a port that starts in TLS waits for a greeting that never comes,
   // and TLS on a port that starts in the clear reads its plain greeting as a broken TLS record.
