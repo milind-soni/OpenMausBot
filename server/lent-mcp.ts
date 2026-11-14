@@ -182,17 +182,22 @@ export function createLentMcp(deps: LentMcpDeps) {
   function tools(computerId: string, definition: LentMcpServer, principal: string, active: () => boolean, fresh = false): Promise<unknown[]> {
     const key = `${computerId}\n${definitionKey(definition)}`;
     const known = listings.get(key);
-    if (!fresh && known && Date.now() - known.at < LISTING_MS) return known.tools;
-    const listed = deps.computers.request({ computer_id: computerId, action: "mcp_tools", server: definition }, principal, active).then((result) => {
-      const error = failed(result);
-      if (error) throw new Error(error);
-      const list = (result as { tools?: unknown })?.tools;
-      if (!Array.isArray(list)) throw new Error(`${definition.name} listed no tools.`);
-      return list;
+    let listed = !fresh && known && Date.now() - known.at < LISTING_MS ? known.tools : undefined;
+    if (!listed) {
+      listed = deps.computers.request({ computer_id: computerId, action: "mcp_tools", server: definition }, principal, active).then((result) => {
+        const error = failed(result);
+        if (error) throw new Error(error);
+        const list = (result as { tools?: unknown })?.tools;
+        if (!Array.isArray(list)) throw new Error(`${definition.name} listed no tools.`);
+        return list;
+      });
+      listings.set(key, { at: Date.now(), tools: listed });
+      listed.catch(() => { if (listings.get(key)?.tools === listed) listings.delete(key); });
+    }
+    return listed.then((result) => {
+      if (!active()) throw new Error("This turn is no longer authorized.");
+      return result;
     });
-    listings.set(key, { at: Date.now(), tools: listed });
-    listed.catch(() => { if (listings.get(key)?.tools === listed) listings.delete(key); });
-    return listed;
   }
 
   async function rpc(name: string, frame: unknown, turn: Turn): Promise<unknown | undefined> {

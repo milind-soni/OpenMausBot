@@ -79,6 +79,7 @@ export interface BotMessageRouteDeps {
   usageTriggerFor(auth: RequestAuth): UsageTrigger;
   messageSender(auth: RequestAuth): ResolvedSender | undefined;
   requestProvenance(auth: RequestAuth): LoopbackTurnProvenance | undefined;
+  sharedComputerSteerAllowed?(auth: RequestAuth, botId: string, threadId: string, queueIds: readonly string[]): boolean;
   cloudGuestSendRefusal(auth: RequestAuth, threadId: string): string | null;
   cloudThreadRefusal(auth: RequestAuth, threadId: string): string | null;
   cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: string, behavior: string): string | null;
@@ -385,6 +386,10 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       // Hold the whole queue atomically: a racing settle drains it or this request steers it, never both.
       const held = holdSteeredQueue(bot.id, bot.threadId, m[2]);
       if (!held) return json(res, 404, { error: "no such queued message" });
+      if (deps.sharedComputerSteerAllowed && !deps.sharedComputerSteerAllowed(auth, bot.id, bot.threadId, held.items.map((item) => item.messageId))) {
+        restoreHeldSteeredQueue(held);
+        return json(res, 200, { ok: true, queued: true, threadId: bot.threadId });
+      }
       const waitsItsTurn = owners.joinRefusal(auth, bot.threadId, held.items.map((item) => item.sender));
       if (waitsItsTurn) {
         restoreHeldSteeredQueue(held);

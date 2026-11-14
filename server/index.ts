@@ -7281,7 +7281,11 @@ async function acceptDirectSend(
         });
         // A chosen wait (queue, or restart's Stop) is never cut short by person-first.
         const chose = busyAdmission.action === "queue" ? busyAdmission.chose : undefined;
-        if (busyAdmission.action === "steer" && instance?.adapter.steer) {
+        const activeRequest = directRequestOwners.get(threadId);
+        const activePrincipal = activeRequest ? sharedComputerPrincipal({ botId, threadId, generation: activeRequest.generation }) : null;
+        const ownServer = ownHome.ownServer();
+        const maySteer = !ownServer || !activeRequest || Boolean(activePrincipal && sharedComputerAuthorization.canSteer(activePrincipal, requestProvenance, ownServer, sessions.list(), (id) => sessions.isLive(id), (proof) => loopbackCredentialIsCurrent(proof, desktopMutationToken, companionMutationToken)));
+        if (busyAdmission.action === "steer" && maySteer && instance?.adapter.steer) {
           const prompt = (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(steerInput.text, dataContext), replyTo, userNameFor(threadId)));
           steered = await (steerInput.images.length > 0
             ? instance.adapter.steer(threadId, prompt, steerInput.images)
@@ -12065,6 +12069,16 @@ ROUTES.push(createBotMessageRoutes({
   routines: () => routines,
   fromPhone: phones.fromPhone, notePhoneSend: phones.noteSend,
   desktopManaged: DESKTOP_MANAGED, cloudHome: Boolean(CLOUD_HOME), DirectSendRefused,
+  sharedComputerSteerAllowed: (auth, botId, threadId, queueIds) => {
+    const ownServer = ownHome.ownServer();
+    if (!ownServer) return true;
+    const request = directRequestOwners.get(threadId);
+    if (!request) return true;
+    const principal = sharedComputerPrincipal({ botId, threadId, generation: request.generation });
+    if (!principal) return false;
+    const current = (proof: LoopbackTurnProvenance | undefined) => sharedComputerAuthorization.canSteer(principal, proof, ownServer, sessions.list(), (id) => sessions.isLive(id), (item) => loopbackCredentialIsCurrent(item, desktopMutationToken, companionMutationToken));
+    return current(requestTurnProvenance(auth, ownServer, actorKey)) && queueIds.every((id) => current(sharedComputerAuthorization.queuedProof(id)));
+  },
   acceptDirectSend, directSendRefusal, startTurn, usageTriggerFor, messageSender, requestProvenance: (auth) => requestTurnProvenance(auth, ownHome.ownServer(), actorKey), cloudGuestSendRefusal, cloudThreadRefusal, runOwners, runActor, resolveAccessRequest: (threadId, requestId, behavior, message) => lendingLifts?.resolve(threadId, requestId, behavior) ?? accessRequests.resolve(threadId, requestId, behavior, message), relayRefusal: CLOUD_TEAM ? (bot, email) => relayedSendRefusal(bot, email, Boolean(email && teamOwners.people?.list().some((one) => one.email === email && one.role !== "member"))) : undefined,
   noAiRefusal: noAiNotice.refusal, cardAnswerRefusal, commandRememberRefusal, requestBehavior, requestedTaskBot, botForThread, threadBusy,
   botAtThreadCapacity, parksBehindCoordination, activeGroupTurnForBot, runningTurnInstance, engineSteersImages, resolveReplyTarget,

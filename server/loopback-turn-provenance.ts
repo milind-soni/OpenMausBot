@@ -32,6 +32,12 @@ export class SharedComputerTurnAuthorization {
 
   queue(id: string, proof: LoopbackTurnProvenance | undefined): void { if (proof) this.queued.set(id, proof); }
 
+  queuedProof(id: string): LoopbackTurnProvenance | undefined { return this.queued.get(id); }
+
+  canSteer(principal: string, proof: LoopbackTurnProvenance | undefined, own: OwnServer, sessions: readonly LenderSession[], sessionLive: (id: string) => boolean, credentialIsCurrent: (proof: Extract<LoopbackTurnProvenance, { kind: "desktop-owner" | "companion" }>) => boolean): boolean {
+    return requestSharedComputerPrincipal(proof, own, sessions, sessionLive, (id) => this.revokedCompanions.has(id), credentialIsCurrent) === principal;
+  }
+
   coalescingKey(proof: LoopbackTurnProvenance | undefined): string | undefined { return proof ? JSON.stringify(proof) : undefined; }
 
   queueWith<T extends { id: string }>(proof: LoopbackTurnProvenance | undefined, create: () => T): T {

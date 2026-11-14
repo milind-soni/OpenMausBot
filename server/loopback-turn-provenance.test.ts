@@ -105,6 +105,17 @@ describe("loopback shared-computer request provenance", () => {
     expect(authz.principal(request, "new-generation", own, [], () => false, [], credentialIsCurrent)).toBeNull();
   });
 
+  it("allows steering only from the active verified requester principal", () => {
+    const authorization = new SharedComputerTurnAuthorization();
+    const owner = { kind: "desktop-owner" as const, credentialId: "current-desktop" };
+    const guest = { kind: "session" as const, sessionId: "guest", person: "p_guest" };
+    const currentCredential = (proof: Extract<LoopbackTurnProvenance, { kind: "desktop-owner" | "companion" }>) => proof.credentialId === "current-desktop";
+    expect(authorization.canSteer(OWN_SERVER_LENDER, owner, own, [], () => true, currentCredential)).toBe(true);
+    expect(authorization.canSteer(OWN_SERVER_LENDER, guest, own, [], () => true, currentCredential)).toBe(false);
+    expect(authorization.canSteer(OWN_SERVER_LENDER, undefined, own, [], () => true, currentCredential)).toBe(false);
+    expect(authorization.canSteer(OWN_SERVER_LENDER, { ...owner, credentialId: "rotated" }, own, [], () => true, currentCredential)).toBe(false);
+  });
+
   it("consumes queued and steered provenance once for the matching turn", () => {
     const authz = new SharedComputerTurnAuthorization();
     const proof = { kind: "desktop-owner" as const, credentialId: "verified" };
