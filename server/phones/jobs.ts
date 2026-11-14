@@ -96,7 +96,7 @@ export class PhoneJobs {
   }
   /** The newest poll wins: one whose client dropped never takes the next job. */
   async poll(key: string, gone?: AbortSignal): Promise<PhoneJobDelivery | null> {
-    if (this.closed) return null;
+    if (this.closed || gone?.aborted) return null;
     const phone = this.phone(key);
     const mine = ++phone.polls;
     phone.wake?.();
