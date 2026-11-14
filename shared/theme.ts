@@ -199,7 +199,7 @@ export const THEME_HOOKS = [
   { selector: '[data-look="sidebar"]', what: "the sidebar" },
   { selector: '[data-look="sidebar-bot"]', what: "a bot's row in the sidebar" },
   { selector: '[data-look="sidebar-thread"]', what: "a conversation's row in the sidebar" },
-  { selector: '[data-look="avatar"]', what: "a bot's picture" },
+  { selector: "[data-avatar]", what: 'every face: a bot\'s or a person\'s; [data-avatar="picture"|"mascot"|"initials"], [data-avatar-kind="bot"|"person"]' },
   { selector: '[data-look="chat-header"]', what: "the bar at the top of a chat" },
   { selector: '[data-look="chat"]', what: "the chat area, behind the messages" },
   { selector: '[data-look="message-user"]', what: "a row with your own message" },

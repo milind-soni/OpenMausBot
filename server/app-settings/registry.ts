@@ -17,6 +17,7 @@ import type { RouteHandler } from "../routes/table.ts";
 import type { BotRecord, Store } from "../store.ts";
 import { botEntries } from "./registry-bots.ts";
 import { configEntries } from "./registry-config.ts";
+import { pictureEntries } from "./registry-pictures.ts";
 import { windowEntries } from "./registry-window.ts";
 
 /** Where the person changes it by hand, as the bot tells them. */
@@ -39,6 +40,9 @@ interface Writable {
   tier: "safe";
   value: z.ZodType;
   allowed: string;
+  /** The value's `path` names a picture file: `describe` sees the path, then the host stores the file and `current` and
+   * `write` get the stored picture's `avatarUrl` in its place. An empty path stays, for taking the picture off. */
+  fromFile?: true;
   current(value: unknown): unknown;
   write(value: unknown): Promise<string | null>;
   describe?(value: unknown): { change: string } | { refusal: string };
@@ -323,11 +327,9 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
       ["domain", "custom domain", "dns", "public url"], () => cfg().customDomain ?? ""),
     ownerOnly("remote.httpsAddress", "HTTPS address", "This computer's public HTTPS address for paired devices; turning it off can cut off the device the person is using now.", "Settings → Phone & devices",
       ["https", "public address"], () => "managed in Settings"),
-    ownerOnly("profile.photo", "Your photo", "Your profile photo; it is a file the person picks or removes.", "Settings → You and your bots", ["photo", "avatar", "profile picture"],
-      () => (cfg().profile?.avatarUrl ? "set" : "")),
   ];
 
-  return [...safe, ...providers, engines, ...botEntries(deps, writable), ...configEntries(deps, writable), ...windowEntries(windowPref), ...secret, ...owner];
+  return [...safe, ...providers, engines, ...botEntries(deps, writable), ...pictureEntries(deps, writable), ...configEntries(deps, writable), ...windowEntries(windowPref), ...secret, ...owner];
 }
 
 export function findSettings(entries: readonly SettingEntry[], query: string, limit = 8): SettingEntry[] {

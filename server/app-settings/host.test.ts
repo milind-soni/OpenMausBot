@@ -18,7 +18,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 });
 
-function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; window?: boolean } = {}) {
+function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; window?: boolean; pictureRefusal?: string; patchRefusal?: string } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "app-settings-"));
   dirs.push(dataDir);
   const bots: BotRecord[] = [
@@ -49,6 +49,7 @@ function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; w
     },
   };
   const credentialCards: Record<string, unknown>[] = [];
+  const pictureFiles: { taken: string[]; discarded: string[] } = { taken: [], discarded: [] };
   const entries = createSettingsRegistry({
     cfg: () => cfg,
     saveConfig: async (patch) => {
@@ -60,7 +61,7 @@ function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; w
     bots: () => bots,
     sections: () => ["Sales"],
     reorderBots: async (botIds) => { bots.sort((a, b) => botIds.indexOf(a.id) - botIds.indexOf(b.id)); return null; },
-    patchBot: async (botId, body) => { botPatches.push({ botId, body }); Object.assign(bots.find((bot) => bot.id === botId)!, body); return null; },
+    patchBot: async (botId, body) => { if (options.patchRefusal) return options.patchRefusal; botPatches.push({ botId, body }); Object.assign(bots.find((bot) => bot.id === botId)!, body); return null; },
     call: async (route, method, path, body) => { routeCalls.push({ route, method, path, body }); return null; },
     read: async (_route, path) => (path === "/api/skills-library" ? { skills: [{ name: "notes", enabled: false, everyBot: false }] } : null),
     paused: () => [],
@@ -88,13 +89,20 @@ function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; w
     requestCredential: async (_bot, _threadId, body) => { credentialCards.push(body); return { status: 201, body: { messageId: "secret-1", label: "OpenAI API key" } }; },
     connectorThread: () => ({ group: options.group ? { id: "g", name: "Room" } as never : undefined }),
     language: () => undefined,
+    pictures: {
+      take: async (_turn, path) => {
+        pictureFiles.taken.push(path);
+        return options.pictureRefusal ? { refusal: options.pictureRefusal } : { avatarUrl: `/api/attachments/stored-${pictureFiles.taken.length}.png` };
+      },
+      discard: (avatarUrl) => { pictureFiles.discarded.push(avatarUrl); },
+    },
   });
   const turn = { botId: "kiwi", threadId: "t-kiwi", generation: "gen-1" };
   const set = (id: string, value?: unknown, generation = turn.generation) => host.handle({ action: "set", id, ...(value === undefined ? {} : { value }) }, { ...turn, generation });
   const cards = () => messages.filter((message) => message.card?.appSettingRequest);
   /** Undo on the newest applied card. */
   const undo = () => host.undo({ threadId: turn.threadId, requestId: String(cards().at(-1)!.card.requestId) });
-  return { host, cfg, saved, messages, cards, credentialCards, windowValues, bots, turn, set, undo, dataDir, engineCalls, botPatches, routeCalls, engines };
+  return { host, cfg, saved, messages, cards, credentialCards, windowValues, bots, turn, set, undo, dataDir, engineCalls, botPatches, routeCalls, engines, pictureFiles };
 }
 
 describe("reads", () => {
@@ -293,11 +301,11 @@ describe("secret tier", () => {
 });
 
 describe("owner-only tier", () => {
-  it("explains and refuses with where to change it: sign-in, logins, pairing, backups, the domain, a photo", async () => {
+  it("explains and refuses with where to change it: sign-in, logins, pairing, backups, the domain", async () => {
     const { host, set, turn, cards, saved, routeCalls } = fixture();
     const got = await host.handle({ action: "get", id: "vault.logins" }, turn);
     expect(JSON.parse(String(got.body.text))).toMatchObject({ tier: "owner-only", change: "only the person, in Settings → Vault" });
-    for (const id of ["cloud.account", "vault.logins", "phone.pairing", "data.backups", "people.signIn", "remote.domain", "remote.httpsAddress", "profile.photo"]) {
+    for (const id of ["cloud.account", "vault.logins", "phone.pairing", "data.backups", "people.signIn", "remote.domain", "remote.httpsAddress"]) {
       const refused = await set(id, "on");
       expect(refused.status, id).toBe(403);
       expect(refused.body.error, id).toMatch(/ is changed only by the person, in Settings → .+\. Tell them where in one line; do not try another way\.$/);
@@ -316,6 +324,65 @@ describe("owner-only tier", () => {
     expect(fx.windowValues.get("remote.relay")).toBe(true);
     expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
     expect(fx.windowValues.get("remote.relay")).toBe(false);
+  });
+});
+
+describe("pictures from a file the bot names", () => {
+  const MASCOT = { avatarUrl: null, avatarCrop: "mascot", avatarZoom: 1, avatarFocusX: 0.5, avatarFocusY: 0.5 };
+
+  it("gives a bot the stored picture in a circle, with Undo back to its mascot face", async () => {
+    const fx = fixture();
+    const done = await fx.set("bots.picture", JSON.stringify({ botId: "clive", path: "/work/clive.png" }));
+    expect(done.body.text).toBe("Done: Give Clive the picture clive.png. Bot picture now: Kiwi: mascot face; Clive: /api/attachments/stored-1.png. The user can undo it from the card in the conversation.");
+    expect(fx.pictureFiles.taken).toEqual(["/work/clive.png"]);
+    expect(fx.botPatches).toEqual([{ botId: "clive", body: { avatarUrl: "/api/attachments/stored-1.png", avatarCrop: "circle", avatarZoom: 1, avatarFocusX: 0.5, avatarFocusY: 0.5 } }]);
+    expect(fx.cards()[0]!.card).toMatchObject({ subtitle: "Give Clive the picture clive.png", appSettingRequest: { settingId: "bots.picture", after: "Give Clive the picture clive.png" } });
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.botPatches[1]).toEqual({ botId: "clive", body: { ...MASCOT, avatarUrl: null } });
+  });
+
+  it("keeps a bot's own crop, takes a picture off with an empty path, and Undo puts the earlier picture back", async () => {
+    const fx = fixture();
+    Object.assign(fx.bots[0]!, { avatarUrl: "/api/attachments/earlier.webp", avatarCrop: "rounded", avatarZoom: 2 });
+    await fx.set("bots.picture", { botId: "kiwi", path: "new.gif" });
+    expect(fx.botPatches[0]!.body).toMatchObject({ avatarUrl: "/api/attachments/stored-1.png", avatarCrop: "rounded", avatarZoom: 1 });
+    const off = await fx.set("bots.picture", { botId: "kiwi", path: "" });
+    expect(off.body.text).toMatch(/^Done: Take Kiwi's picture off; it shows its mascot face again\./);
+    expect(fx.botPatches[1]!.body).toEqual(MASCOT);
+    expect(fx.pictureFiles.taken).toEqual(["new.gif"]);
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.botPatches[2]!.body).toEqual({ avatarUrl: "/api/attachments/stored-1.png", avatarCrop: "rounded", avatarZoom: 1, avatarFocusX: 0.5, avatarFocusY: 0.5 });
+    expect(await fx.set("bots.picture", { botId: "clive", path: "" })).toMatchObject({ status: 409, body: { error: "Clive has no picture; it already shows its mascot face." } });
+  });
+
+  it("sets and takes off the person's photo through the config route, with Undo", async () => {
+    const fx = fixture();
+    const done = await fx.set("profile.photo", { path: "/work/me.jpg" });
+    expect(done.body.text).toMatch(/^Done: Make me\.jpg your photo\. Your photo now: \/api\/attachments\/stored-1\.png\./);
+    expect(fx.saved).toEqual([{ profile: { avatarUrl: "/api/attachments/stored-1.png" } }]);
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.saved[1]).toEqual({ profile: { avatarUrl: "" } });
+    expect(await fx.set("profile.photo", { path: "" })).toMatchObject({ status: 409, body: { error: "The person has no photo to take off." } });
+  });
+
+  it("stores nothing when the turn may not change settings, the bot is unknown or the file is refused", async () => {
+    const notOwner = fixture({ owner: false });
+    expect((await notOwner.set("bots.picture", { botId: "kiwi", path: "a.png" })).status).toBe(403);
+    expect((await notOwner.set("profile.photo", { path: "a.png" })).status).toBe(403);
+    expect(notOwner.pictureFiles.taken).toEqual([]);
+
+    const fx = fixture({ pictureRefusal: "a.png is not a PNG, JPEG, GIF or WebP picture." });
+    expect(await fx.set("bots.picture", { botId: "nobody", path: "a.png" })).toMatchObject({ status: 409, body: { error: "No bot has the id nobody. Use list_bots for the ids." } });
+    expect(await fx.set("bots.picture", { botId: "kiwi", path: "a.png" })).toEqual({ status: 400, body: { error: "a.png is not a PNG, JPEG, GIF or WebP picture." } });
+    expect(await fx.set("bots.picture", { botId: "kiwi", avatarUrl: "/api/attachments/x.png" })).toMatchObject({ status: 400 });
+    expect([fx.botPatches, fx.saved, fx.cards()]).toEqual([[], [], []]);
+  });
+
+  it("takes back the stored copy when the route refuses the change", async () => {
+    const fx = fixture({ patchRefusal: "avatarUrl must reference an existing stored image" });
+    expect(await fx.set("bots.picture", { botId: "kiwi", path: "a.png" })).toEqual({ status: 409, body: { error: "avatarUrl must reference an existing stored image" } });
+    expect(fx.pictureFiles.discarded).toEqual(["/api/attachments/stored-1.png"]);
+    expect(fx.cards()).toEqual([]);
   });
 });
 
@@ -377,6 +444,14 @@ describe("every other setting applies at once with Undo, Full access or not", ()
     }
     expect(fx.cards()).toEqual([]);
     expect(JSON.stringify(fx.messages)).not.toContain(OPENAI_KEY);
+  });
+
+  it("picks a custom decision endpoint with Undo, but never sets its address", async () => {
+    const { set, saved } = fixture();
+    expect((await set("ai.routing", JSON.stringify({ provider: "custom", customModel: "m-1", customApi: "decisions" }))).status).toBe(200);
+    expect(saved).toEqual([{ decider: { provider: "custom", customModel: "m-1", customApi: "decisions" } }]);
+    expect((await set("ai.routing", JSON.stringify({ customBaseUrl: "https://elsewhere.example.com" }))).status).toBe(400);
+    expect(saved).toHaveLength(1);
   });
 
   it("a window preference is refused while no window is open, and nothing is posted", async () => {

@@ -12,12 +12,14 @@ const source = readdirSync(SRC, { recursive: true, encoding: "utf8" })
   .map((file) => readFileSync(join(SRC, file), "utf8"))
   .join("\n");
 
-/** How a hook is written in the source: `data-look="x"` or a `"x"` beside `data-look=`, or a `role="x"`. */
+/** How a hook is written in the source: `data-look="x"` or a `"x"` beside `data-look=`, a `role="x"`, or a quoted attribute name. */
 function written(selector: string): RegExp | null {
   const look = /^\[data-look="([a-z-]+)"\]$/.exec(selector)?.[1];
   if (look) return new RegExp(`data-look=(?:"${look}"|\\{[^}\\n]*"${look}")`);
   const role = /^\[role="([a-z]+)"\]$/.exec(selector)?.[1];
-  return role ? new RegExp(`role="${role}"`) : null;
+  if (role) return new RegExp(`role="${role}"`);
+  const attribute = /^\[(data-[a-z-]+)\]$/.exec(selector)?.[1];
+  return attribute ? new RegExp(`"${attribute}"`) : null;
 }
 
 it.each(THEME_HOOKS.map((hook) => hook.selector))("%s is still in the app", (selector) => {
