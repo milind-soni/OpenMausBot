@@ -68,6 +68,19 @@ export class SessionModelControls {
     return selected === model || (selected === null && this.input.selection?.unsetIds?.includes(model) === true);
   }
 
+  usageLimit(resolve: (model: string | undefined) => { limit: "engine" | "model"; limitModels?: string[] }) {
+    const model = this.modelOf(this.input.state()) ?? this.input.model();
+    const facts = resolve(model);
+    if (facts.limit !== "model") return facts;
+    const models = facts.limitModels?.length ? facts.limitModels : model ? [model] : [];
+    return {
+      ...facts,
+      ...(models.length ? { limitModels: [...new Set(models.map((id) =>
+        id === this.input.model() ? this.input.reportedModel() ?? id : id,
+      ))] } : {}),
+    };
+  }
+
   variant(value: string | undefined): NonNullable<ReturnType<typeof acpVariantOption>> {
     if (!this.input.variants) throw new Error(`${this.input.displayName} does not support model variants`);
     const option = acpVariantOption(this.input.state());
