@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { writeFileAtomic } from "./atomic.ts";
 import { CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_REFUSAL_PLAIN, CONTROL_WAITED, controlRefusal, createControlClient } from "./control-client.ts";
 import { computerPersonAwayText } from "./computer-wait.ts";
@@ -116,7 +116,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
   // Full access, the default, is the person's grant to use this computer without asking; every other level asks.
   const ASKS = "ask";
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     home = mkdtempSync(join(tmpdir(), "omb-host-lazy-claim-"));
     data = join(home, "data");
     ui = join(home, "static");
@@ -142,7 +142,11 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
     await stop();
     if (home) await removeTempDir(home);
   });
-  afterEach(async () => { await stop(); resetTurn(); });
+  afterEach(async () => {
+    await stop();
+    if (home) await removeTempDir(home);
+    home = "";
+  });
 
   itAutoHost("never offers a computer to a call through the Bot API, on Auto, on this computer or on a private desktop", async () => {
     await start({ FAKE_CLAUDE_VERSION: "2.1.284" });
