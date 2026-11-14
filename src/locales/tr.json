@@ -6004,5 +6004,6 @@
   "computer.recovery.restart": "Bilgisayarı yeniden başlat",
   "computer.recovery.restartTitle": "Bu bulut bilgisayarı durdurup yeniden başlatır. Açık programlar kapanır; dosyaları kalır.",
   "computer.recovery.replace": "Bilgisayarı değiştir",
-  "computer.recovery.replaceTitle": "Bu bulut bilgisayarı siler ve bota yenisini verir. Yalnızca üzerinde olan dosyalar kaybolur."
+  "computer.recovery.replaceTitle": "Bu bulut bilgisayarı siler ve bota yenisini verir. Yalnızca üzerinde olan dosyalar kaybolur.",
+  "composer.command.burstDesc": "Bir işin birçok parçasını aynı anda çalıştırın, sonra sonuçları birleştirin"
 }

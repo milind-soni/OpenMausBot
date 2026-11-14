@@ -6004,5 +6004,6 @@
   "computer.recovery.restart": "Khởi động lại máy tính",
   "computer.recovery.restartTitle": "Dừng rồi khởi động lại máy tính đám mây này. Các chương trình đang mở sẽ bị đóng; tệp vẫn còn.",
   "computer.recovery.replace": "Thay máy tính",
-  "computer.recovery.replaceTitle": "Xóa máy tính đám mây này và cho bot một máy mới. Các tệp chỉ có trên máy này sẽ bị mất."
+  "computer.recovery.replaceTitle": "Xóa máy tính đám mây này và cho bot một máy mới. Các tệp chỉ có trên máy này sẽ bị mất.",
+  "composer.command.burstDesc": "Chạy nhiều phần của một công việc cùng lúc, rồi gộp kết quả"
 }
