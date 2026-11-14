@@ -19,7 +19,9 @@ function objectShape(schema: JsonObject): { properties: JsonObject; required: st
   const required = new Set(Array.isArray(schema.required) ? schema.required.filter((key) => typeof key === "string") : []);
 
   const adopt = (shape: { properties: JsonObject }) => {
-    for (const [key, value] of Object.entries(shape.properties)) if (!(key in properties)) properties[key] = value;
+    for (const [key, value] of Object.entries(shape.properties)) {
+      if (!Object.hasOwn(properties, key)) Object.defineProperty(properties, key, { value, enumerable: true, writable: true, configurable: true });
+    }
   };
 
   for (const branch of branches(schema.allOf)) {
