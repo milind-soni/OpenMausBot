@@ -2110,7 +2110,7 @@
   "teamShare.skip.skill_changed": "审核后又有变更",
   "teamShare.skip.skill_conflict": "有两个机器人拥有同名但内容不同的技能",
   "teamShare.skip.bot_skill_limit": "每个机器人最多可共享 30 个技能（已开启的技能优先）",
-  "teamShare.skip.team_skill_limit": "每个部门最多可共享 60 个技能",
+  "teamShare.skip.team_skill_limit": "每个部门最多可共享 120 个技能",
   "teamShare.field.soul": "常设指示",
   "teamShare.field.notes": "初始笔记",
   "teamShare.field.brief": "共享指示",

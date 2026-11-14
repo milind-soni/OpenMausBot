@@ -1228,7 +1228,7 @@
   "teamShare.skip.skill_changed": "đã thay đổi sau khi được xem xét",
   "teamShare.skip.skill_conflict": "hai bot có hai kỹ năng khác nhau nhưng cùng tên này",
   "teamShare.skip.bot_skill_limit": "một bot chỉ có thể chia sẻ tối đa 30 kỹ năng (kỹ năng đang bật được ưu tiên trước)",
-  "teamShare.skip.team_skill_limit": "một phòng ban chỉ có thể chia sẻ tối đa 60 kỹ năng",
+  "teamShare.skip.team_skill_limit": "một phòng ban chỉ có thể chia sẻ tối đa 120 kỹ năng",
   "teamShare.field.soul": "hướng dẫn thường trực",
   "teamShare.field.notes": "ghi chú ban đầu",
   "teamShare.field.brief": "hướng dẫn dùng chung",

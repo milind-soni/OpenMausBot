@@ -8,11 +8,16 @@ import {
   downgradeToV1,
   NEWER_PACKAGE_MESSAGE,
   PACKAGE_MAX_BYTES,
+  PACKAGE_MAX_SKILLS,
+  PACKAGE_V2_MAX_SKILLS,
+  PACKAGE_V2_VERSION,
+  PACKAGE_VERSION,
   packageBytes,
   packageKeys,
   packageScanFindings,
   packageSecretFindings,
   packageSummary,
+  packageVersionFor,
   PackageFormatError,
   parsePackageDocument,
   parsePackageV1,
@@ -85,10 +90,45 @@ describe("package fixtures", () => {
   });
 
   it("refuses a newer file with a pointer to update, and unknown formats plainly", () => {
-    expect(refusal(fixture("newer.v3.json"))).toMatchObject({ code: "newer_version", message: NEWER_PACKAGE_MESSAGE });
+    expect(refusal(fixture("newer.v4.json"))).toMatchObject({ code: "newer_version", message: NEWER_PACKAGE_MESSAGE });
     expect(refusal({ ...fixture("full-team.v2.json"), version: 0 })).toMatchObject({ code: "unsupported_version" });
     expect(refusal({ format: "openmaus.team", version: 2 })).toMatchObject({ code: "not_a_package" });
     expect(refusal("# not a playbook")).toMatchObject({ code: "not_a_package" });
+  });
+});
+
+describe("package skill cap", () => {
+  const skill = (name: string) => ({ name, description: `${name} steps.`, instructions: `---\nname: ${name}\ndescription: ${name} steps.\n---\n\n# ${name}\n` });
+  /** library-only.v2.json grown to `count` skills, stamped the way a writer would. */
+  function withSkills(count: number) {
+    const document = fixture("library-only.v2.json");
+    const entries = document.package.skills.entries;
+    for (let index = entries.length; index < count; index += 1) entries.push(skill(`extra-${index + 1}`));
+    document.version = packageVersionFor(document.package);
+    return document;
+  }
+
+  it("opens a package with 120 skills and refuses a 121st", () => {
+    expect(PACKAGE_MAX_SKILLS).toBe(120);
+    const full = parsePackageDocument(withSkills(120));
+    expect(full.version).toBe(PACKAGE_VERSION);
+    expect(full.package.skills?.entries).toHaveLength(120);
+    expect(refusal(withSkills(121))).toMatchObject({ code: "invalid" });
+  });
+
+  it("stays v2 up to 60 skills, so apps that read only v2 still open it", () => {
+    const fits = withSkills(PACKAGE_V2_MAX_SKILLS);
+    expect(fits.version).toBe(PACKAGE_V2_VERSION);
+    expect(parsePackageDocument(fits).version).toBe(PACKAGE_V2_VERSION);
+  });
+
+  it("stamps v3 past 60 skills, which a v2-only app refuses with \"update the app\"", () => {
+    const big = withSkills(PACKAGE_V2_MAX_SKILLS + 1);
+    expect(big.version).toBe(3);
+    // A v2-only app's reader: any integer version above 2 is "newer".
+    const v2OnlyRefuses = (version: number) => Number.isInteger(version) && version > PACKAGE_V2_VERSION;
+    expect(v2OnlyRefuses(big.version)).toBe(true);
+    expect(refusal({ ...big, version: PACKAGE_VERSION + 1 })).toMatchObject({ code: "newer_version", message: NEWER_PACKAGE_MESSAGE });
   });
 });
 

@@ -1698,7 +1698,7 @@
   "teamShare.skip.skill_changed": "изменён после проверки",
   "teamShare.skip.skill_conflict": "у двух ботов есть разные навыки с таким названием",
   "teamShare.skip.bot_skill_limit": "бот может передать не более 30 навыков (сначала идут включённые)",
-  "teamShare.skip.team_skill_limit": "отдел может передать не более 60 навыков",
+  "teamShare.skip.team_skill_limit": "отдел может передать не более 120 навыков",
   "teamShare.field.soul": "постоянные инструкции",
   "teamShare.field.notes": "начальные заметки",
   "teamShare.field.brief": "общие инструкции",
