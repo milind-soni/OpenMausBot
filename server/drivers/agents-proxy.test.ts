@@ -470,7 +470,6 @@ beforeAll(async () => {
       OMB_BOT_ID: "bot-asker",
       OMB_THREAD_ID: "thread-asker-routine",
       OMB_COMMS_TOKEN: TOKEN,
-      OMB_TURN_DEPTH: "0",
       OMB_SKILL_AUTHORING_ENABLED: "1",
       OMB_SHARED_COMPUTERS_ENABLED: "1",
       // A Chief's turn, so the Chief-only team tools are mounted too.
@@ -1001,7 +1000,7 @@ describe("agents-proxy MCP surface", () => {
       expect(text).toContain("do not check or wait for it in this turn");
       expect(text).not.toMatch(/Deprecated|alias/);
       expect(lastThreadBody).toEqual({
-        fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", title: "QA: PR #9", message: "Review the login fix.", depth: 0, toBotId: "bot-helper",
+        fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", title: "QA: PR #9", message: "Review the login fix.", toBotId: "bot-helper",
       });
     } finally {
       threadResponse = previous;
@@ -1030,7 +1029,7 @@ describe("agents-proxy MCP surface", () => {
       expect(text).toContain("its result comes back to this conversation and resumes you automatically (assignment id: asg-own-1)");
       expect(text).toContain("finish your turn");
       expect(lastThreadBody).toEqual({ fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", title: "Review: GPT", message: "Review the diff.",
-        depth: 0, modelSelection, reportBack: true });
+        modelSelection, reportBack: true });
     } finally {
       threadResponse = previous;
     }
@@ -1047,7 +1046,6 @@ describe("agents-proxy MCP surface", () => {
       fromThreadId: "thread-asker-routine",
       title: "QA: PR #1",
       message: "Review the login fix.",
-      depth: 0,
     });
     threadResponse = { threadId: "thread-two", title: "QA: PR #2", botId: "bot-asker", botName: "Asker", self: true, state: "queued", position: 2, limit: 3 };
     const queued = await callTool("start_thread", { title: "QA: PR #2", message: "Review the signup fix.", folder: "QA" });
@@ -2217,7 +2215,7 @@ describe("standing external runtime", () => {
   beforeAll(async () => {
     external = spawn(process.execPath, [PROXY], {
       env: { ...childEnv(), OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`, OMB_BOT_ID: "bot-asker",
-        OMB_THREAD_ID: "thread-asker-routine", OMB_COMMS_TOKEN: TOKEN, OMB_TURN_DEPTH: "0",
+        OMB_THREAD_ID: "thread-asker-routine", OMB_COMMS_TOKEN: TOKEN,
         OMB_EXTERNAL_RUNTIME: "1", OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1",
         OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1" },
       stdio: ["pipe", "pipe", "inherit"],
@@ -2315,7 +2313,6 @@ describe("with computer sharing off and no Chief of Staff (the defaults)", () =>
         OMB_BOT_ID: "bot-asker",
         OMB_THREAD_ID: "thread-asker-routine",
         OMB_COMMS_TOKEN: TOKEN,
-        OMB_TURN_DEPTH: "0",
         OMB_SKILL_AUTHORING_ENABLED: "1",
         // deliberately no OMB_SHARED_COMPUTERS_ENABLED or OMB_CHIEF_OF_STAFF
       },
@@ -2467,7 +2464,7 @@ describe("tool bridge", () => {
     const proxy = spawn(process.execPath, [PROXY], {
       env: {
         ...childEnv(), TZ: "Asia/Kolkata", OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`, OMB_BOT_ID: "bot-asker",
-        OMB_THREAD_ID: "thread-asker-routine", OMB_COMMS_TOKEN: TOKEN, OMB_TURN_DEPTH: "0", ...env,
+        OMB_THREAD_ID: "thread-asker-routine", OMB_COMMS_TOKEN: TOKEN, ...env,
       },
       stdio: ["pipe", "pipe", "inherit"],
     });

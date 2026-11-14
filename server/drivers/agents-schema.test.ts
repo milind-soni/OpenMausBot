@@ -75,7 +75,7 @@ function recordingContext(): { context: ToolCallContext; calls: string[] } {
   return {
     calls,
     context: {
-      botId: "bot-schema", threadId: "thread-schema", depth: 0, externalRuntime: false, sharedComputers: true,
+      botId: "bot-schema", threadId: "thread-schema", externalRuntime: false, sharedComputers: true,
       client: {
         api: async (path) => { calls.push(path); return {}; },
         apiResponse: async (path) => { calls.push(path); return { ok: true, status: 200, body: {} }; },

@@ -35,7 +35,6 @@ import { callDevsTool, DEVS_TOOL_NAMES } from "./agents-devs-tools.ts";
 export interface ToolCallContext {
   botId: string;
   threadId: string;
-  depth: number;
   /** A standing external runtime: its capability cannot reach the result cache, so big results are cut. */
   externalRuntime: boolean;
   // Presentation only: the server still authenticates and scopes every call.
@@ -54,7 +53,6 @@ export function toolCallContextFromEnv(env: NodeJS.ProcessEnv): ToolCallContext 
   return {
     botId: profile.botId,
     threadId: env.OMB_THREAD_ID ?? "",
-    depth: Number(env.OMB_TURN_DEPTH ?? "0") || 0,
     externalRuntime: env.OMB_EXTERNAL_RUNTIME === "1",
     sharedComputers: profile.sharedComputers,
     client: harnessClientFromEnv(env),
@@ -219,7 +217,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   const refused = outOfBounds(name, fullInputSchema(name), args);
   if (refused) return { text: refused, isError: true };
   const member = agentsCallMember(name, args);
-  const { botId: BOT_ID, threadId: THREAD_ID, depth: DEPTH } = context;
+  const { botId: BOT_ID, threadId: THREAD_ID } = context;
   const { api, apiResponse } = context.client;
   if (name === "vm_exec") {
     const { ok, body } = await apiResponse("/api/internal/vm-exec", {
@@ -453,7 +451,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!title || !message) return { text: "start_thread needs title (one short line) and message (the complete first message).", isError: true };
     const toBotId = typeof args.bot_id === "string" ? args.bot_id.trim() : "";
     const folder = typeof args.folder === "string" ? args.folder.trim() : "";
-    const body: Record<string, unknown> = { fromBotId: BOT_ID, fromThreadId: THREAD_ID, title, message, depth: DEPTH };
+    const body: Record<string, unknown> = { fromBotId: BOT_ID, fromThreadId: THREAD_ID, title, message };
     if (toBotId) body.toBotId = toBotId;
     if (folder) body.folder = folder;
     if (args.model_selection !== undefined) {

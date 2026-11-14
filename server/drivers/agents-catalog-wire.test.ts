@@ -124,7 +124,7 @@ async function toolsListWire(entry: string, env: Record<string, string>): Promis
   // A developer shell or an OpenMausBot turn can carry OMB_* switches; the profile must be the only source.
   const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("OMB_")));
   const child = spawn(process.execPath, [entry], {
-    env: { ...inherited, OMB_HARNESS_URL: "http://127.0.0.1:9", OMB_BOT_ID: "bot-golden", OMB_THREAD_ID: "thread-golden", OMB_COMMS_TOKEN: "unused", OMB_TURN_DEPTH: "0", ...env },
+    env: { ...inherited, OMB_HARNESS_URL: "http://127.0.0.1:9", OMB_BOT_ID: "bot-golden", OMB_THREAD_ID: "thread-golden", OMB_COMMS_TOKEN: "unused", ...env },
     stdio: ["pipe", "pipe", "inherit"],
   });
   try {

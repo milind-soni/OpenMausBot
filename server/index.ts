@@ -1681,9 +1681,11 @@ function beginInternalCapabilityGeneration(threadId: string, generation = random
 }
 
 // The bearer is part of the engine's launch contract, so it stays stable per bot, thread and grants; the record behind it is per turn and honoured only during one.
+// Security invariant: a turn's depth, the hand-off it runs for and whether it may author skills are read from that record on every call, never
+// from the engine, so a person's message and a teammate's report keep one bearer.
 const sessionCredentials = new Map<string, Map<string, { grants: string; token: string }>>();
 
-function sessionGrants({ generation: _turn, ...grants }: Omit<InternalCapability, "orphanExpiresAt">): string {
+function sessionGrants({ generation: _turn, depth: _depth, roomHandoffId: _handoff, skillAuthoring: _skills, ...grants }: Omit<InternalCapability, "orphanExpiresAt">): string {
   const thread = botForThread(grants.botId, grants.threadId);
   return JSON.stringify({ ...grants, approval: thread ? approvalModeFor(thread) : null });
 }
@@ -13998,12 +14000,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const fromThreadId = internalCapability.threadId;
         const owner = connectorThread(from.id, fromThreadId);
         if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" }); if (outsideWorkStaysHere(fromThreadId)) return json(res, 403, { error: "This work came in from outside, so it can't open a new thread. Finish it here." });
-        if (
-          body.depth !== undefined &&
-          (!Number.isInteger(body.depth) || body.depth < 0 || body.depth !== internalCapability.depth)
-        ) {
-          return json(res, 403, { error: "the recursion depth does not match this turn" });
-        }
         const title = String(body.title ?? "").trim();
         const message = String(body.message ?? "").trim();
         if (!title || !message) return json(res, 400, { error: "title and message are required" });
