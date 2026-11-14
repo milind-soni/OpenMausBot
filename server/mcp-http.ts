@@ -113,7 +113,7 @@ function parseSseBlock(block: string): SseEvent | null {
     if (field === "event") event = value;
     else if (field === "data") data.push(value);
   }
-  return data.length ? { event, data: data.join("\n") } : null;
+  return data.length ? { event: event || "message", data: data.join("\n") } : null;
 }
 
 async function readSse(
