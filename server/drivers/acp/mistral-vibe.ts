@@ -106,7 +106,7 @@ export async function removeMistralVibeSignIn(env: Record<string, string | undef
   await Promise.all([service, "vibe"].map((name) => new Promise<void>((resolve, reject) => {
     execFile("security", ["delete-generic-password", "-s", name], { timeout: 5_000, windowsHide: true }, (error) => {
       // "The specified item could not be found" is exit 44: already gone, which is the goal met.
-      if (!error || (error as NodeJS.ErrnoException & { code?: unknown }).code === 44) return resolve();
+      if (!error || (error as { code?: string | number }).code === 44) return resolve();
       reject(Object.assign(new Error(`The macOS keychain refused to remove the ${name} entry: ${error.message}`), { cause: error }));
     });
   })));
