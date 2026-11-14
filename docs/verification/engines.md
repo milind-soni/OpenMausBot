@@ -131,6 +131,24 @@ Checked against the live public list on 2026-10-30: 10 models, of which 5 call
 tools (GLM 5.3 Flash, Qwen3.6 27B, Gemma 4 31B, GLM 4.7 Flash, Qwen3 14B), and
 chat without a key answers 401. A real chat turn needs a real key.
 
+## LLMTR API setup
+
+```sh
+pnpm exec vitest run server/drivers/llmtr.test.ts server/credential-request.test.ts src/components/keys/key-catalog.test.ts
+```
+
+These use a local stand-in for `https://llmtr.com/v1`. They check the preset
+endpoint, that the server's key never goes to another host, the model list
+(chat models whose `supported_parameters` include `tools`, short names, image
+input from `architecture.input_modalities`), streaming with reasoning and
+usage, and that a refused key never shows in events. They never call LLMTR.
+
+Checked against the live public list on 2026-11-14: 418 entries in
+OpenRouter's shape, including image, video, embedding and speech models; 247
+are chat models that call tools. `/models` answers 200 to any key and LLMTR has
+no key endpoint, so Settings offers no Test for it; chat with a wrong key
+answers 401. A real chat turn needs a real key.
+
 ## Meta Muse: Model API and Muse Code
 
 ```sh

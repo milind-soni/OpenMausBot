@@ -54,6 +54,7 @@ function fixture(language?: string, linked?: (vaultStore: VaultStore) => SecretC
 describe("the card a bot asks for a key or secret with", () => {
   it.each([
     ["greenferenceApiKey", "secretCard.greenference.description"],
+    ["llmtrApiKey", "secretCard.llmtr.description"],
     ["modelgoApiKey", "secretCard.modelgo.description"],
     ["geminiTtsKey", "secretCard.geminiTts.description"],
   ] as const)("keeps the fallback and structured description for %s", async (credentialId, baseCode) => {

@@ -8,6 +8,7 @@ export const WORKSPACE_CREDENTIALS = [
   { section: "cerebras", field: "key", name: "cerebrasApiKey", env: "CEREBRAS_API_KEY" },
   { section: "groq", field: "key", name: "groqApiKey", env: "OMB_GROQ_API_KEY" },
   { section: "greenference", field: "key", name: "greenferenceApiKey", env: "OMB_GREENFERENCE_API_KEY" },
+  { section: "llmtr", field: "key", name: "llmtrApiKey", env: "OMB_LLMTR_API_KEY" },
   { section: "modelgo", field: "key", name: "modelgoApiKey", env: "OMB_MODELGO_API_KEY" },
   { section: "meta", field: "key", name: "metaApiKey", env: "OMB_META_API_KEY" },
   { section: "deepseek", field: "key", name: "deepseekApiKey", env: "OMB_DEEPSEEK_API_KEY" },

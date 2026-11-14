@@ -46,7 +46,7 @@ export interface ConnectionListing {
  * goes for "Claude (API key)" alone: there it never takes over Claude bots that sign in with a Claude account. */
 interface Provider { id: string; label: string; for: string[]; config(cfg: AppConfig): Partial<AppConfig> | null }
 
-const keyed = (name: "openai" | "openrouter" | "mistral" | "cerebras" | "greenference" | "modelgo") => (cfg: AppConfig): Partial<AppConfig> | null => {
+const keyed = (name: "openai" | "openrouter" | "mistral" | "cerebras" | "greenference" | "llmtr" | "modelgo") => (cfg: AppConfig): Partial<AppConfig> | null => {
   const key = cfg[name]?.key;
   return key ? { [name]: { key } } : null;
 };
@@ -65,6 +65,7 @@ export const KEY_PROVIDERS: readonly Provider[] = [
   { id: "cerebras", label: "Cerebras", for: ["cerebras"], config: keyed("cerebras") },
   { id: "groq", label: "Groq", for: ["groq"], config: keyedUrl("groq") },
   { id: "greenference", label: "Greenference", for: ["greenference"], config: keyed("greenference") },
+  { id: "llmtr", label: "LLMTR", for: ["llmtr"], config: keyed("llmtr") },
   { id: "modelgo", label: "ModelGo", for: ["modelgo"], config: keyed("modelgo") },
   { id: "meta", label: "Meta", for: ["meta"], config: keyedUrl("meta") },
   { id: "openaiCompat", label: "OpenAI-compatible", for: ["openaiCompat"], config: (cfg) => cfg.openaiCompat?.key

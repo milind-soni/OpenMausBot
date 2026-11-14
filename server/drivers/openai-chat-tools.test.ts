@@ -21,6 +21,7 @@ import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 import { toolBudgetOf } from "../tool-budgets.ts";
 import { GrokDriver } from "./grok.ts";
 import { GreenferenceDriver } from "./greenference.ts";
+import { LlmtrDriver } from "./llmtr.ts";
 import { GroqDriver } from "./groq.ts";
 import { MetaDriver } from "./meta.ts";
 import { MistralDriver } from "./mistral.ts";
@@ -46,6 +47,7 @@ type Provider = "openai-compat" | "grok" | "minimax" | "cerebras" | keyof typeof
 /** OpenAI-compatible providers configured by a URL and their own key variable. */
 const KEYED_DRIVERS = {
   greenference: [GreenferenceDriver, "GREENFERENCE_API_KEY"],
+  llmtr: [LlmtrDriver, "LLMTR_API_KEY"],
   groq: [GroqDriver, "GROQ_API_KEY"],
   meta: [MetaDriver, "META_API_KEY"],
   mistral: [MistralDriver, "MISTRAL_API_KEY"],
@@ -199,7 +201,7 @@ describe("streamed reply messages from an OpenAI-compatible API", () => {
     return out;
   };
 
-  const PROVIDERS: Provider[] = ["openai-compat", "grok", "minimax", "cerebras", "greenference", "groq", "meta", "mistral", "modelgo"];
+  const PROVIDERS: Provider[] = ["openai-compat", "grok", "minimax", "cerebras", "greenference", "llmtr", "groq", "meta", "mistral", "modelgo"];
   it.each(PROVIDERS.flatMap((provider) => LIVE_REPLY_CASES.filter((entry) => entry.action === undefined).map((entry) => ({ provider, entry, name: entry.name }))))(
     "$provider streams the $name reply with one id per message and nothing doubled, lost or glued", async ({ provider, entry }) => {
       const script = rounds(entry.steps);

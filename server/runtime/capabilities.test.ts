@@ -39,6 +39,7 @@ const EXPECTED: Record<string, EngineCapabilities> = {
   cerebras: chat,
   groq: chat,
   greenference: chat,
+  llmtr: chat,
   modelgo: chat,
   meta: chat,
 };

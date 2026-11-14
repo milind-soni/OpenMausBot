@@ -101,6 +101,12 @@ export const CREDENTIAL_TARGETS = {
     placeholder: "Paste your Greenference API key",
     helpUrl: "https://greenference.com/dashboard/tokens",
   },
+  llmtrApiKey: {
+    label: "LLMTR API key",
+    description: "Runs LLMTR models with your own key.",
+    placeholder: "Paste your LLMTR API key",
+    helpUrl: "https://llmtr.com",
+  },
   modelgoApiKey: {
     label: "ModelGo API key",
     description: "Runs ModelGo models with your own key.",
@@ -127,7 +133,7 @@ export type LoginCredentialTargetId = "onePasswordToken";
 export type ConfigCredentialTargetId = Exclude<CredentialTargetId, LoginCredentialTargetId>;
 /** AI provider keys: refused where Admin manages the models, and typed only in the computer's own app or a desktop paired to it, never on a phone. */
 export const PROVIDER_CREDENTIAL_TARGETS = [
-  "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "greenferenceApiKey", "modelgoApiKey", "metaApiKey", "deepseekApiKey",
+  "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "greenferenceApiKey", "llmtrApiKey", "modelgoApiKey", "metaApiKey", "deepseekApiKey",
 ] as const satisfies readonly ConfigCredentialTargetId[];
 export type DesktopCredentialSlot = ConfigCredentialTargetId;
 export type CredentialConfig = {
@@ -144,6 +150,7 @@ export type CredentialConfig = {
   cerebras?: { key?: string };
   groq?: { key?: string };
   greenference?: { key?: string };
+  llmtr?: { key?: string };
   modelgo?: { key?: string };
   meta?: { key?: string };
   deepseek?: { key?: string };
@@ -215,6 +222,8 @@ export function credentialConfigPatch(id: ConfigCredentialTargetId, value: strin
       return { groq: { key: value } };
     case "greenferenceApiKey":
       return { greenference: { key: value } };
+    case "llmtrApiKey":
+      return { llmtr: { key: value } };
     case "modelgoApiKey":
       return { modelgo: { key: value } };
     case "metaApiKey":
@@ -258,6 +267,8 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
       return Boolean(config.groq?.key);
     case "greenferenceApiKey":
       return Boolean(config.greenference?.key);
+    case "llmtrApiKey":
+      return Boolean(config.llmtr?.key);
     case "modelgoApiKey":
       return Boolean(config.modelgo?.key);
     case "metaApiKey":

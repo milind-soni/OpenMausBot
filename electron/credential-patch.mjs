@@ -8,6 +8,7 @@ export const CREDENTIAL_PATCH = {
   cerebrasApiKey: (value) => ({ cerebras: { key: value } }),
   groqApiKey: (value) => ({ groq: { key: value } }),
   greenferenceApiKey: (value) => ({ greenference: { key: value } }),
+  llmtrApiKey: (value) => ({ llmtr: { key: value } }),
   modelgoApiKey: (value) => ({ modelgo: { key: value } }),
   metaApiKey: (value) => ({ meta: { key: value } }),
   deepseekApiKey: (value) => ({ deepseek: { key: value } }),
