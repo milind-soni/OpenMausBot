@@ -31,8 +31,17 @@ function readBotSettings(file: string, cwd: string): unknown {
     try {
       if (realpathSync(join(cwd, ".claude", "settings.json")) === real) return null;
     } catch {}
+    return readJson(real);
+  } catch {
+    return null;
+  }
+}
+
+/** A regular settings file's JSON, never through a link, or null. */
+function readJson(path: string): unknown {
+  try {
     // O_NONBLOCK: a planted FIFO must not hang the open.
-    const fd = openSync(real, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW | constants.O_NONBLOCK));
+    const fd = openSync(path, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW | constants.O_NONBLOCK));
     try {
       const stat = fstatSync(fd);
       return stat.isFile() && stat.size <= MAX_BYTES ? JSON.parse(readFileSync(fd, "utf8")) : null;
@@ -42,6 +51,17 @@ function readBotSettings(file: string, cwd: string): unknown {
   } catch {
     return null;
   }
+}
+
+/** An env value the turn's own folder sets in the settings Claude Code reads there itself (project, then local), or undefined. */
+export function folderSettingsEnv(cwd: string, name: string): string | undefined {
+  let found: string | undefined;
+  for (const file of ["settings.json", "settings.local.json"]) {
+    const parsed = readJson(join(cwd, ".claude", file));
+    const value = isObject(parsed) && isObject(parsed.env) ? parsed.env[name] : undefined;
+    if (typeof value === "string") found = value;
+  }
+  return found;
 }
 
 /** What a turn takes from the bot's settings file: its hooks, plugins, permission rules and env. They ride in
