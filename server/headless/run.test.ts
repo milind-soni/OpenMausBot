@@ -107,6 +107,15 @@ describe("run", () => {
     }
   });
 
+  it("refuses --export with --wait none before sending anything (exit 2), since nothing would be exported", async () => {
+    const h = harness([]);
+    const { code, result } = await h.run(["run", "Room Lead", "Go", "--wait", "none", "--export", join(tmpdir(), "omb-run-export-none"), "--json"]);
+    expect(code).toBe(2);
+    expect(result).toMatchObject({ ok: false, exitCode: 2, error: "--export needs --wait job or --wait turn" });
+    expect(h.calls).toEqual([]);
+    expect(h.requests).toEqual([]);
+  });
+
   it("stops waiting on Ctrl-C (130), and says how to wait on the same job from the same moment", async () => {
     const controller = new AbortController();
     const h = harness([waited("settled", "completed", job("completed", "v1"))], { delayMs: 10_000 });

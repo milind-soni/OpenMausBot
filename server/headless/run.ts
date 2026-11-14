@@ -1,6 +1,6 @@
 // Exit codes: 0 done, 1 failed or stopped, 3 needs you, 4 timed out, 130 Ctrl-C (the work keeps running).
 import { messageFileTargets } from "../message-file.ts";
-import { EXIT, flag, HeadlessError, oneOf, parseCount } from "./args.ts";
+import { EXIT, flag, HeadlessError, oneOf, parseCount, usageError } from "./args.ts";
 import { readJob, type HeadlessClient } from "./client.ts";
 import { conversationFor, conversationTitle, newSendId, readMessage, resolveTarget, waitPolicy, type Target, type VerbContext,
   type VerbOutcome } from "./context.ts";
@@ -169,6 +169,8 @@ export async function runVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const mode = oneOf(flag(ctx.flags, "wait"), "--wait", ["job", "turn", "none"] as const, "job");
   waitPolicy(ctx);
   const out = flag(ctx.flags, "export")?.trim();
+  // --wait none returns before the job ends, so nothing would ever be exported: refuse it before sending.
+  if (out && mode === "none") throw usageError("--export needs --wait job or --wait turn", "run openmausbot help run");
   if (out) exportFolder(out, ctx.flags.force === true);
   const task = flag(ctx.flags, "task")?.trim() || (flag(ctx.flags, "thread") ? undefined : "new");
   const target = await resolveTarget({ ...ctx, flags: { ...ctx.flags, task: undefined } }, named ? undefined : first);
