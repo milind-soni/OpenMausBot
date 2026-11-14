@@ -15,7 +15,8 @@
 //     `model`, and `thinking` (off | high). `thinking` follows the chosen model's own default;
 //     item-specific thought levels prove nothing here, so variants stay off.
 //   - `vibe-acp --version` prints "vibe-acp 3.1.1".
-import { existsSync, readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -68,8 +69,19 @@ function offeredModels(sessionConfig: unknown): { values: string[]; current?: st
   };
 }
 
-/** Discovers models in a temporary session, so a refresh leaves no record in the person's Vibe history. */
-export async function resolveMistralVibeModels(
+/** Sign-out removes what the engine's own browser sign-in wrote: the whoami cache everywhere, and the
+ * macOS keychain entry it stores the token in. A pasted plan key in Connections is not touched. */
+export async function removeMistralVibeSignIn(env: Record<string, string | undefined>): Promise<void> {
+  const home = vibeHome(env);
+  try { rmSync(join(home, "whoami_cache.json"), { force: true }); } catch {}
+  if (process.platform !== "darwin") return;
+  await new Promise<void>((resolve) => {
+    execFile("security", ["delete-generic-password", "-s", "ai.mistral.vibe"], { timeout: 5_000, windowsHide: true }, () => resolve());
+  });
+}
+
+
+/** Discovers models in a temporary session, so a refresh leaves no record in the person's Vibe history. */export async function resolveMistralVibeModels(
   env: Record<string, string | undefined>,
   config: Pick<AcpConfig, "cli">,
 ): Promise<ModelCatalog> {
@@ -104,6 +116,27 @@ export const mistralVibeSupport: AcpSupport = {
   },
   spawnArgs: () => [],
   credentialEnv: ["MISTRAL_API_KEY"],
+  // The app signs in through the engine's own authenticate step: the child opens the browser itself and
+  // holds the request until the person finishes there (see header).
+  browserSignIn: {
+    product: "Mistral",
+    methodId: (methods) => (methods.some((method) => method.id === "browser-auth") ? "browser-auth" : null),
+    signedIn: (env) => vibeSignedIn(env),
+    serverHint:
+      "OpenMausBot cannot reach a browser on this server. Sign in from a machine that runs OpenMausBot, or paste a Mistral API key under Settings → Connections → Model providers.",
+    failure(stage, detail) {
+      switch (stage) {
+        case "start": return detail === "ENOENT"
+          ? "Mistral Vibe isn't installed where OpenMausBot runs. Install it on this card, then try again."
+          : "Mistral Vibe did not start a sign-in in time. Update the CLI on this card, then try again.";
+        case "initialize": return "Mistral Vibe did not answer its sign-in handshake in time. Update the CLI on this card, then try again.";
+        case "authenticate": return "The Mistral sign-in did not finish. It may have been cancelled in the browser; start it again to retry.";
+        case "processEnded": return "The Mistral sign-in ended before finishing. Update the CLI on this card, then try again.";
+        case "expired": return "The Mistral sign-in window expired. Start it again to retry.";
+      }
+    },
+    removeCredentials: removeMistralVibeSignIn,
+  },
   // Model is a session config option (see header); ids pass through unchanged.
   selectModel: { configId: "model" },
   resolveModels: resolveMistralVibeModels,

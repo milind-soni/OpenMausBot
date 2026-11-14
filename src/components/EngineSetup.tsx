@@ -6,6 +6,7 @@ import { t } from "@/lib/i18n";
 import { engineDisplayName } from "@/lib/engine-name";
 import { copyText } from "@/lib/copy-text";
 import { DEVICE_SIGN_IN_COPY, DeviceSignIn, deviceSignInProvider } from "./DeviceSignIn";
+import { EngineBrowserSignIn } from "./EngineBrowserSignIn";
 import { ClaudeSignIn } from "./ClaudeSignIn";
 import { RefreshEngines } from "./EngineLibrary";
 import { AppCopyNotice, AppCopySetup } from "./EngineAppCopy";
@@ -549,6 +550,7 @@ export function EngineSetup({
   /** A Cloud's "not installed" reason only says to install it in a terminal or use Set CLI; the card says what to do instead. */
   const cloudReasonHidden = cloudCantInstall || (cloudHome && !signInOnly && Boolean(install?.server) && instance.snapshot.notEngineCli !== true);
   const deviceSignIn = signInOnly && instance.authentication?.method === "device-code";
+  const engineBrowserSignIn = signInOnly && instance.authentication?.method === "browser";
   const browserSignIn = signInOnly && instance.authentication?.method === "browser-pkce";
   const pasteSignIn = signInOnly && instance.authentication?.method === "paste-code";
   const provider = deviceSignInProvider(instance.driverKind);
@@ -557,7 +559,9 @@ export function EngineSetup({
     ? t("engineSetup.signInTitle", { name: engineDisplayName(instance) })
     : t("engineSetup.setupTitle", { name: engineDisplayName(instance) });
   const description = descriptionOverride ?? (signInOnly
-    ? browserSignIn
+    ? engineBrowserSignIn
+      ? t("engineSetup.engineBrowser.description")
+      : browserSignIn
       ? t("engineSetup.chatgpt.description")
       : deviceSignIn
       ? t(DEVICE_SIGN_IN_COPY[provider].description)
@@ -608,7 +612,7 @@ export function EngineSetup({
   }
 
   // The app's own copy is out of reach of the person's terminal, so its sign-in is finished here.
-  if (signInOnly && install.appCopy && !deviceSignIn && !browserSignIn && !pasteSignIn) {
+  if (signInOnly && install.appCopy && !deviceSignIn && !engineBrowserSignIn && !pasteSignIn) {
     return <AppCopySetup instance={instance} className={className} unframed={unframed} />;
   }
 
@@ -635,7 +639,9 @@ export function EngineSetup({
         </p>
       ))}
 
-      {deviceSignIn || browserSignIn ? (
+      {engineBrowserSignIn ? (
+        <EngineBrowserSignIn key={instance.instanceId} instanceId={instance.instanceId} />
+      ) : deviceSignIn || browserSignIn ? (
         <>
           <DeviceSignIn key={instance.instanceId} instanceId={instance.instanceId} browserPkce={browserSignIn} provider={provider} />
           {deviceSignIn && provider !== "codex" && signInCommand && serverTerminal(cloudHome) && (
