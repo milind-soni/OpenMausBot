@@ -127,7 +127,7 @@ it("reports each run into the main chat as the bot's own line, writes nothing fo
     expect(each.resultsThreadId).toBe(s.main);
     expect(saved.tasks.find((task: any) => task.threadId === each.threadId)).toMatchObject({ routineRunId: each.id, unread: false });
   }
-  expect(saved.tasks.find((task: any) => task.threadId === s.main).unread).toBe(true);
+  expect(saved.tasks.find((task: any) => task.threadId === s.main).unread, "a report that needs nothing from the person leaves the chat out of To review").toBe(false);
   const done = s.notified().filter((notification) => notification.kind === "done");
   expect(done).toEqual([expect.objectContaining({ threadId: s.main, body: "Inbox watch: Acme replied: they need the invoice by Friday." })]);
   for (const key of ["first", "second", "third"]) expect(s.toldOnlyReplyLeaves(key)).toBe(true);

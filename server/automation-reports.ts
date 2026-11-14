@@ -6,6 +6,7 @@
 // that delivers to the brief posts no line: its answer goes to the brief, which reads it as a small JSON result.
 import { liveCardKind } from "../shared/live-approval.ts";
 import type { AutomationLine } from "../shared/routine-run.ts";
+import { ROUTINE_HANDOFF_WAIT } from "../shared/routines.ts";
 import { signInWaits } from "../shared/sign-in-request.ts";
 import { intlLocale } from "./language.ts";
 import { needsInputQuestion } from "./runtime-coordinator.ts";
@@ -28,6 +29,13 @@ export function readRunReply(text: string, attached = false): RunReply {
   if (question === undefined) return { quiet: false, text: text.trim() };
   const at = lines.findLastIndex((line) => NEEDS_INPUT.test(line));
   return { quiet: false, text: [...lines.slice(0, at), lines[at]!.replace(NEEDS_INPUT, ""), ...lines.slice(at + 1)].join("\n").trim(), question };
+}
+
+/** A run puts its chat under To review only when the person is needed: it failed or was missed, waits on them (not on teammates), or ended on a question. */
+export function routineRunNeedsReview(run: Pick<RoutineRun, "status" | "attention" | "output">, reply?: string): boolean {
+  if (run.status === "failed" || run.status === "missed") return true;
+  if (run.status === "waiting") return run.attention !== ROUTINE_HANDOFF_WAIT;
+  return run.status === "completed" && needsInputQuestion(reply ?? run.output ?? "") !== undefined;
 }
 
 function inHostZone(at: number, locale: string, options: Intl.DateTimeFormatOptions): string {
@@ -204,7 +212,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     });
     deps.routines()?.noteReport(run.id, { state: "posted", threadId: target.threadId, messageId: posted.id });
     deps.wrote(target.bot, target.threadId);
-    store.patchTask(target.bot.id, target.threadId, { unread: true });
+    if (line.kind === "failure" || reply.question !== undefined || routineRunNeedsReview(run)) store.patchTask(target.bot.id, target.threadId, { unread: true });
     if (line.kind === "reply" && !recovered) deps.notify(reply.question ? "question" : "done", target.bot, target.threadId, `${run.routineName}: ${reply.question ?? reply.text}`);
     return true;
   };
