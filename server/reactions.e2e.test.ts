@@ -65,7 +65,7 @@ it("answers a bot's yes-or-no question with a 👍, and the bot goes on by itsel
     const reactionPrompt = prompts()[1]!;
     evidence.push({ reactionPrompt });
     expect(reactionPrompt).toContain("The current message is the person's reaction: they reacted 👍 to your earlier message instead of typing a reply.");
-    expect(reactionPrompt).toContain("👍 means yes, go ahead. If that message asked them something, this is their answer: continue without asking again.");
+    expect(reactionPrompt).toContain("If it asked them something or offered to do something, 👍 means yes, go ahead: this is their answer, continue without asking again.");
     expect(reactionPrompt).toContain("--- quoted excerpt ---\nI drafted the email to Sam. Shall I send it?\n--- end quoted excerpt ---\nCurrent message:\n👍");
 
     expect(await react(asked.id, "👍", true)).toMatchObject({ delivery: "none" });
@@ -91,7 +91,7 @@ it("answers a bot's yes-or-no question with a 👍, and the bot goes on by itsel
     expect(prompts()[3]).toContain("they reacted 👎 to your earlier message instead of typing a reply.\n👎 means no, not that.");
     expect(await react(asked.id, "👍", true)).toMatchObject({ delivery: "started" });
     await settled("Then it stays sent.");
-    expect(prompts()[4]).toContain("they reacted 👍 to your earlier message instead of typing a reply.\n👍 means yes, go ahead.");
+    expect(prompts()[4]).toContain("they reacted 👍 to your earlier message instead of typing a reply.\n👍 answers that message. If it asked them something or offered to do something, 👍 means yes, go ahead");
     const answers = (await transcript()).filter((message) => message.reaction);
     expect(answers.map((message) => [message.reaction, message.sendId.slice(-1)])).toEqual([["👍", "y"], ["👎", "n"], ["👍", "y"]]);
     expect(new Set(answers.map((message) => message.sendId)).size).toBe(3);
@@ -237,7 +237,7 @@ it("in a room, gives the 👍 to the member that asked, by name", async () => {
     expect(answered).toContain(": [reacted 👍 to Otter: “Shall I post the launch note?”]");
     expect(answered).not.toContain("@Otter: 👍");
     expect(JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).systemPrompt)
-      .toContain("A \"[reacted 👍 to …]\" line is that person's whole reply to the message it names: 👍 means yes, go ahead, and 👎 means no.");
+      .toContain("A \"[reacted 👍 to …]\" line is that person's whole reply to the message it names: 👍 means yes, go ahead when that message asked them something or offered to do something, and only got it (start no new work) when it just told them something; 👎 means no.");
 
     const posted = after.find((message) => message.text === "Posted it.");
     expect(await api("POST", `/api/threads/${room.threadId}/messages/${posted.id}/reactions`, { emoji: "🎉", on: true }))
