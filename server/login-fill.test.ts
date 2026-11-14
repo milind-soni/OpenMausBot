@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { loginMatchesHost, loginPlace, type LoginPlace } from "../shared/logins.ts";
 import { fillLogin, SECRET_HOLD_MS, type FillCandidate, type FillLoginDeps } from "./login-fill.ts";
-import { FakeLoginPage, LOGIN_FORM } from "./testing/fake-login-page.ts";
+import { FakeLoginPage, LOGIN_FORM, openShadowRoot } from "./testing/fake-login-page.ts";
 import { parseTotpKey, totpCode, type TotpKey } from "./totp.ts";
 
 // Obvious fakes only.
@@ -366,5 +366,46 @@ describe("one-time codes and fields", () => {
       [{ host: "example.com", username: "alice" }], { submit: false });
     expect(await fill()).toMatchObject({ ok: true, filled: ["username"] });
     expect(page.field("input[name=password]").value).toBe("");
+  });
+});
+
+describe("fill_login reaches fields inside open shadow roots", () => {
+  it("fills a username and password that live inside an open shadow root", async () => {
+    const { page, fill } = setup("https://accounts.example.com/login",
+      `<form action="/session" method="post"><sdf-input id="user"></sdf-input><sdf-input id="pass"></sdf-input><button type="submit">Sign in</button></form>`,
+      [{ host: "accounts.example.com", username: "alice@example.com" }], { submit: false });
+    openShadowRoot(page.window, "#user", `<input id="email" name="email" type="email" autocomplete="username">`);
+    openShadowRoot(page.window, "#pass", `<input id="password" name="password" type="password" autocomplete="current-password">`);
+    const outcome = await fill();
+    expect(outcome).toMatchObject({ ok: true, filled: ["username", "password"] });
+    expect(outcome.text).not.toContain("No login fields found");
+    expect(page.typed).toEqual(["alice@example.com", PASSWORD]);
+    expect(page.deepField("input[name=email]").value).toBe("alice@example.com");
+    expect(page.deepField("input[name=password]").value).toBe(PASSWORD);
+  });
+
+  it("recognises and fills a one-time code box named only by its shadow host", async () => {
+    const { page, fill, remembered } = setup("https://example.com/2fa",
+      `<form><sf-code label="Your Six-Digit Code"></sf-code></form>`,
+      [{ host: "example.com", username: "alice", totp: KEY }], { submit: false });
+    openShadowRoot(page.window, "sf-code", `<input type="text" inputmode="numeric">`);
+    const code = totpCode(KEY, NOW);
+    const outcome = await fill();
+    expect(outcome).toMatchObject({ ok: true, filled: ["code"] });
+    expect(page.typed).toEqual([code]);
+    expect(page.deepField('input[inputmode="numeric"]').value).toBe(code);
+    expect(remembered).toContainEqual(["code", code]);
+  });
+
+  it("does not treat a field inside a hidden shadow host as usable", async () => {
+    const { page, fill } = setup("https://example.com/login",
+      `<form><sdf-input id="hidden" style="display:none"></sdf-input></form>`,
+      [{ host: "example.com", username: "alice" }], { submit: false });
+    openShadowRoot(page.window, "#hidden", `<input name="password" type="password" autocomplete="current-password">`);
+    const outcome = await fill();
+    expect(outcome.ok).toBe(false);
+    expect(outcome.text).toContain("No login fields found");
+    expect(page.typed).toEqual([]);
+    expect(page.deepField("input[name=password]").value).toBe("");
   });
 });
