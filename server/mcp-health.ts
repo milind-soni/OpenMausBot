@@ -62,8 +62,12 @@ export function createMcpHealth(deps: McpHealthDeps) {
   let active = 0;
   const slot = async <T,>(work: () => Promise<T>): Promise<T> => {
     if (active >= CHECKS_AT_ONCE) await new Promise<void>((resolve) => waiting.push(resolve));
-    active += 1;
-    try { return await work(); } finally { active -= 1; waiting.shift()?.(); }
+    else active += 1;
+    try { return await work(); } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active -= 1;
+    }
   };
 
   const standsFor = (server: CommandServer, botId: string) => (server.bot ? botId : EVERY_BOT);
