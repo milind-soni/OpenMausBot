@@ -428,6 +428,13 @@ export function insertMessage(threadId: string, message: Message): void {
   prepared(UPSERT_MESSAGE).run(...messageRow(threadId, message));
 }
 
+export function insertMessageWithUpdates(threadId: string, message: Message, updates: readonly Message[]): void {
+  transaction(() => {
+    insertMessage(threadId, message);
+    for (const update of updates) updateMessage(threadId, update);
+  });
+}
+
 /** `relinked`: adds `messages` to a conversation that has rows; each row it names changes only its parentId, and an id it already has fails the whole import. */
 export function importThread(threadId: string, messages: Message[], activeLeafId: string | null, relinked?: ReadonlyArray<{ id: string; parentId: string | null }>): void {
   transaction((database) => {

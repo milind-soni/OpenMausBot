@@ -1655,6 +1655,106 @@ describe("Store", () => {
     expect(store.activePath(bot.threadId).map((m) => m.id)).toEqual(messages.map((m) => m.id));
   });
 
+  it("keeps a failed edit out of memory and disk, then accepts a retry", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const original = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "v1" });
+    const reply = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "answer" });
+    const before = structuredClone(store.messagesFor(bot.threadId));
+    const events: unknown[] = [];
+    store.onChange((event) => events.push(event));
+    const connection = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    try {
+      connection.exec("CREATE TRIGGER fail_edit BEFORE UPDATE ON thread_state BEGIN SELECT RAISE(ABORT, 'write unavailable'); END");
+      expect(() => store.branchMessage(bot.threadId, original.id, "v2")).toThrow("write unavailable");
+      expect(store.messagesFor(bot.threadId)).toEqual(before);
+      expect(store.activeLeaf(bot.threadId)).toBe(reply.id);
+      expect(events).toEqual([]);
+      mdb.closeMessageDb();
+      const restarted = new Store(selection);
+      expect(restarted.messagesFor(bot.threadId)).toEqual(before);
+      expect(restarted.activeLeaf(bot.threadId)).toBe(reply.id);
+      connection.exec("DROP TRIGGER fail_edit");
+      const edited = store.branchMessage(bot.threadId, original.id, "v2")!;
+      const followup = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "continue" });
+      expect(followup.parentId).toBe(edited.id);
+      const path = store.activePath(bot.threadId).map((message) => message.id);
+      expect(path.slice(-2)).toEqual([edited.id, followup.id]);
+      mdb.closeMessageDb();
+      expect(new Store(selection).activePath(bot.threadId).map((message) => message.id)).toEqual(path);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("keeps the current branch when saving a branch switch fails", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const original = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "v1" });
+    const reply = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "answer" });
+    const edited = store.branchMessage(bot.threadId, original.id, "v2")!;
+    const before = structuredClone(store.messagesFor(bot.threadId));
+    const events: unknown[] = [];
+    store.onChange((event) => events.push(event));
+    const connection = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    try {
+      connection.exec("CREATE TRIGGER fail_leaf BEFORE UPDATE ON thread_state BEGIN SELECT RAISE(ABORT, 'write unavailable'); END");
+      expect(() => store.setActiveLeaf(bot.threadId, original.id)).toThrow("write unavailable");
+      expect(store.messagesFor(bot.threadId)).toEqual(before);
+      expect(store.activeLeaf(bot.threadId)).toBe(edited.id);
+      expect(events).toEqual([]);
+      mdb.closeMessageDb();
+      expect(new Store(selection).activeLeaf(bot.threadId)).toBe(edited.id);
+      connection.exec("DROP TRIGGER fail_leaf");
+      expect(store.setActiveLeaf(bot.threadId, original.id)).toBe(reply.id);
+      const followup = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "continue" });
+      expect(followup.parentId).toBe(reply.id);
+      mdb.closeMessageDb();
+      expect(new Store(selection).activeLeaf(bot.threadId)).toBe(followup.id);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it.each(["insert", "relink", "prune"] as const)("rolls back a late artifact when its %s write fails", (failure) => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const anchor = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "done" });
+    for (let i = 0; i < 4; i++) store.appendMessage(bot.threadId, { role: "bot", kind: "screen", png: `frame-${i}` });
+    const leaf = store.activeLeaf(bot.threadId);
+    const before = structuredClone(store.messagesFor(bot.threadId));
+    const events: unknown[] = [];
+    store.onChange((event) => events.push(event));
+    const connection = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    const condition = failure === "relink"
+      ? "WHEN json_extract(NEW.json, '$.parentId') != json_extract(OLD.json, '$.parentId')"
+      : failure === "prune" ? "WHEN json_extract(OLD.json, '$.png') IS NOT NULL AND json_extract(NEW.json, '$.png') IS NULL" : "";
+    try {
+      connection.exec(`CREATE TRIGGER fail_artifact BEFORE ${failure === "insert" ? "INSERT" : "UPDATE"} ON messages ${condition} BEGIN SELECT RAISE(ABORT, 'write unavailable'); END`);
+      expect(() => store.insertMessageAfter(bot.threadId, anchor.id, { role: "bot", kind: "screen", png: "new-frame" })).toThrow("write unavailable");
+      expect(store.messagesFor(bot.threadId)).toEqual(before);
+      expect(store.activeLeaf(bot.threadId)).toBe(leaf);
+      expect(events).toEqual([]);
+      mdb.closeMessageDb();
+      const restarted = new Store(selection);
+      expect(restarted.messagesFor(bot.threadId)).toEqual(before);
+      expect(restarted.activeLeaf(bot.threadId)).toBe(leaf);
+      connection.exec("DROP TRIGGER fail_artifact");
+      const artifact = store.insertMessageAfter(bot.threadId, anchor.id, { role: "bot", kind: "screen", png: "new-frame" });
+      const path = store.activePath(bot.threadId).map((message) => message.id);
+      const anchorIndex = path.indexOf(anchor.id);
+      expect(path.slice(anchorIndex, anchorIndex + 2)).toEqual([anchor.id, artifact.id]);
+      const followup = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "continue" });
+      expect(followup.parentId).toBe(leaf);
+      mdb.closeMessageDb();
+      const reloaded = new Store(selection);
+      expect(reloaded.activePath(bot.threadId).map((message) => message.id)).toEqual([...path, followup.id]);
+      expect(reloaded.messagesFor(bot.threadId).filter((message) => message.png)).toHaveLength(4);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("branchMessage forks at the edited message and hides the old tail", () => {
     const store = new Store(selection);
     const bot = store.createBot();
