@@ -153,6 +153,13 @@ export function GreenferenceMark({ size = 16, className }: IconProps) {
   </svg>;
 }
 
+export function LlmtrMark({ size = 16, className }: IconProps) {
+  // A compact gateway mark in a blue that reads on light and dark.
+  return <svg width={size} height={size} viewBox="0 0 16 16" className={className} aria-hidden="true">
+    <path fill="#2563EB" d="M3.25 3.5A1.25 1.25 0 0 1 4.5 2.25h7A1.25 1.25 0 0 1 12.75 3.5v9A1.25 1.25 0 0 1 11.5 13.75h-7A1.25 1.25 0 0 1 3.25 12.5v-9Zm2 1.5v1.25H9.5a.75.75 0 0 1 0 1.5H5.25v4H6.5V8.5h3.25a2 2 0 0 0 0-4H5.25Z" />
+  </svg>;
+}
+
 export function ModelgoMark({ size = 16, className }: IconProps) {
   const id = useId().replace(/\W/gu, "");
   // The icon from ModelGo's supplied logo, without its wordmark, whose dark text is unreadable in the dark themes.
@@ -210,6 +217,8 @@ export function ProviderMark({ driverKind, size, className }: IconProps & { driv
       return <KiroMark size={size} className={className} />;
     case "greenference":
       return <GreenferenceMark size={size} className={className} />;
+    case "llmtr":
+      return <LlmtrMark size={size} className={className} />;
     case "modelgo":
       return <ModelgoMark size={size} className={className} />;
     default:

@@ -563,9 +563,9 @@ export function createSecretCards(deps: SecretCardsDeps) {
         target: credentialId,
         label: target.label,
         description: `${reason ? `${target.description} ${reason}` : target.description} ${serverLine(language, "server.connect.secretNeverRead", { bot: from.name })}`,
-        ...(credentialId === "greenferenceApiKey" || credentialId === "modelgoApiKey" || credentialId === "geminiTtsKey" ? {
+        ...(credentialId === "greenferenceApiKey" || credentialId === "modelgoApiKey" || credentialId === "llmtrApiKey" || credentialId === "geminiTtsKey" ? {
           descriptionParts: {
-            baseCode: credentialId === "greenferenceApiKey" ? "secretCard.greenference.description" as const : credentialId === "modelgoApiKey" ? "secretCard.modelgo.description" as const : "secretCard.geminiTts.description" as const,
+            baseCode: credentialId === "greenferenceApiKey" ? "secretCard.greenference.description" as const : credentialId === "modelgoApiKey" ? "secretCard.modelgo.description" as const : credentialId === "llmtrApiKey" ? "secretCard.llmtr.description" as const : "secretCard.geminiTts.description" as const,
             reason,
             bot: from.name,
           },

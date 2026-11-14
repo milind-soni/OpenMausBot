@@ -54,6 +54,7 @@ function fixture(language?: string, linked?: (vaultStore: VaultStore) => SecretC
 describe("the card a bot asks for a key or secret with", () => {
   it.each([
     ["greenferenceApiKey", "secretCard.greenference.description"],
+    ["llmtrApiKey", "secretCard.llmtr.description"],
     ["modelgoApiKey", "secretCard.modelgo.description"],
     ["geminiTtsKey", "secretCard.geminiTts.description"],
   ] as const)("keeps the fallback and structured description for %s", async (credentialId, baseCode) => {
@@ -66,7 +67,7 @@ describe("the card a bot asks for a key or secret with", () => {
     });
   });
 
-  it.each(["greenferenceApiKey", "geminiTtsKey"] as const)("scrubs the structured description data for %s", async (credentialId) => {
+  it.each(["greenferenceApiKey", "llmtrApiKey", "geminiTtsKey"] as const)("scrubs the structured description data for %s", async (credentialId) => {
     const { cards, lines, bot } = fixture();
     const key = `sk-ant-api03-${"abcdefghijklmnopqrstuvwxyz0123456789"}`;
     const reason = `Use ${key} for this report.`;

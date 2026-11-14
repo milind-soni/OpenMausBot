@@ -919,6 +919,7 @@
               "cerebrasApiKey",
               "groqApiKey",
               "greenferenceApiKey",
+              "llmtrApiKey",
               "modelgoApiKey",
               "metaApiKey",
               "deepseekApiKey",
