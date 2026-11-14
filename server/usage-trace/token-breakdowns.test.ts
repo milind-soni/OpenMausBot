@@ -91,7 +91,7 @@ it.each(["claude", "codex"])("keeps %s runtime breakdowns visible before and aft
   expect(before!.turns[0]!.running).toBe(true);
   observe(1_000, { type: "turn.completed", ok: true, usage: { input: 300, cachedInput: 120, output: 100 } });
   const fields = recorder.settle("chat");
-  expect(await appendUsage(dataDir, row(0, { ...expected, ...fields }))).toBe(true);
+  expect(await appendUsage(dataDir, row(0, { input: expected.input, cachedInput: expected.cachedInput, output: expected.output, ...fields }))).toBe(true);
   await flushSpans(dataDir);
   const after = await service.detail("chat~turn", AT, () => true);
   expect(after!.turns[0]!.tokens).toEqual(expected);
