@@ -422,8 +422,13 @@ export type DisabledMcpServerAdd =
 
 const BOT_CANNOT_SWITCH = "A bot cannot change the on/off switch. The server is saved off, and only the user can turn it on in MCP server settings.";
 
-/** Never probes or launches; the caller still applies organisation policy before writing. */
-export function addDisabledMcpServer(current: Record<string, unknown>, body: unknown): DisabledMcpServerAdd {
+/** Never probes or launches; the caller still applies organisation policy before writing. `ownerOf` names the bot the
+ * server will belong to (worked out by the caller, never taken from the body), so the per-bot limit counts it there. */
+export function addDisabledMcpServer(
+  current: Record<string, unknown>,
+  body: unknown,
+  ownerOf?: (server: StoredMcpServer) => string | undefined,
+): DisabledMcpServerAdd {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return { ok: false, status: 400, error: "Expected an MCP server object with a name." };
   }
@@ -435,7 +440,8 @@ export function addDisabledMcpServer(current: Record<string, unknown>, body: unk
   }
   const parsed = parseMcpServerMutation(name, pickMcpServerFields(record));
   if (!parsed.ok) return { ok: false, status: 400, error: parsed.error };
-  const limit = mcpServerLimitError(current, [parsed.server]);
+  const owner = ownerOf?.(parsed.server);
+  const limit = mcpServerLimitError(current, [owner ? { ...parsed.server, bot: owner } : parsed.server]);
   if (limit) return { ok: false, status: 400, error: limit };
   if (parsed.server.enabled !== false) return { ok: false, status: 400, error: BOT_CANNOT_SWITCH };
   return { ok: true, name, server: parsed.server, next: { ...current, [name]: parsed.server } };
