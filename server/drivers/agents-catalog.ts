@@ -659,7 +659,7 @@ const TOOL_DEFINITIONS = [
       additionalProperties: false,
       properties: {
         action: { type: "string", enum: ["list", "events"] },
-        trigger_id: { type: "string", description: "list: one trigger's details and recent fires." },
+        trigger_id: { type: "string", description: "Full instructions and fires; edit redactions in Automations." },
         include_address: { type: "boolean", description: "list, with a webhook's trigger_id: also its private address. For the bot that owns it, or a Chief of Staff." },
         for_bot_id: { type: "string", description: "list: ANOTHER bot's triggers in your section, from list_bots." },
         app: { type: "string", description: "events: optional app slug, e.g. gmail." },

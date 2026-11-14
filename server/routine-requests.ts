@@ -1,3 +1,4 @@
+import { instructionsUpdateRefusal } from "./automation-instructions.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
@@ -15,7 +16,7 @@ import {
   type RoutineToolScheduleInput,
 } from "./routine-request-schemas.ts";
 import { runsOnce } from "../shared/limit-reset.ts";
-import { limitResetOccurrence } from "./routine-schedules.ts";
+import { limitResetOccurrence, noFutureResumeMessage } from "./routine-schedules.ts";
 import {
   intervalHasRestrictions,
   nextOccurrence,
@@ -398,16 +399,6 @@ function ownedRoutine(manager: RoutineManager, id: string, botId: string): Routi
   return manager.listRoutines().find((routine) => routine.id === id && routine.botId === botId) ?? null;
 }
 
-function noFutureResumeMessage(schedule: RoutineSchedule): string {
-  if (schedule.type === "interval") {
-    return "That interval routine has no future runs. Choose a later end time or remove the end restriction before resuming.";
-  }
-  if (schedule.type === "once") {
-    return "That one-time routine's scheduled time has passed. Update it to a new future time before resuming.";
-  }
-  return "That routine has no future runs. Update its schedule before resuming.";
-}
-
 function normalizedOperation(
   manager: RoutineManager,
   botId: string,
@@ -430,11 +421,14 @@ function normalizedOperation(
   const current = ownedRoutine(manager, id, ownerBotId);
   if (!current) throw new RoutineRequestError("That routine does not exist", 404);
   if (validated.action === "update") {
+    const changes = normalizeChanges(validated.changes, now, ownEngine);
+    const refusal = instructionsUpdateRefusal(current.prompt, changes.instructions);
+    if (refusal) throw new RoutineRequestError(refusal, 409);
     return {
       action: "update",
       routineId: id,
       expectedUpdatedAt: current.updatedAt,
-      changes: normalizeChanges(validated.changes, now, ownEngine),
+      changes,
       ...(validated.forBot ? { forBot: validated.forBot } : {}),
     };
   }

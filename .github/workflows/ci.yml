@@ -198,7 +198,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.static.outputs.vitest_matrix) }}
-    runs-on: ${{ matrix.os }}
+    # Linux fixtures depend on Ubuntu 24.04's installed tools and user-namespace behavior.
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     # scripts/testing/duration-sequencer.ts splits each platform's files by
     # their recorded seconds on that platform, about 6 minutes a Linux shard
     # (four files at once); a Windows shard runs two files at once. The cap
@@ -729,7 +730,8 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(needs.static.outputs.vitest_os) }}
-    runs-on: ${{ matrix.os }}
+    # Linux fixtures depend on Ubuntu 24.04's installed tools and user-namespace behavior.
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

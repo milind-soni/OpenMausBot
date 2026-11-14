@@ -3,6 +3,7 @@
 import { z } from "zod";
 
 import type { WebhookRequestCardData, WebhookRequestDefinition, WebhookRequestOperation, WebhookRequestSnapshot } from "../shared/webhook-request.ts";
+import { instructionsUpdateRefusal } from "./automation-instructions.ts";
 import { newId } from "./contracts.ts";
 import { UNDO_STALE } from "./direct-apply.ts";
 import { redactSecretsInText } from "./redact.ts";
@@ -49,7 +50,10 @@ const definitionSchema = z.object({
   payloadFilter: z.record(z.string().trim().min(1).max(200), z.string().trim().max(200)).optional(),
   sameConversation: z.boolean().optional(),
 }).strict();
-const changesSchema = definitionSchema.partial().strict()
+const changesSchema = definitionSchema.partial().extend({
+  instructions: definitionSchema.shape.instructions.removeDefault().optional(),
+  runOn: definitionSchema.shape.runOn.removeDefault().optional(),
+}).strict()
   .refine((changes) => Object.keys(changes).length > 0, "The update action needs at least one field in changes");
 const webhookIdSchema = z.string().trim().min(1).max(200);
 const targetSchema = z.object({ botId: z.string(), name: z.string() }).optional();
@@ -154,6 +158,10 @@ export class WebhookRequestService {
     const owner = operation.forBot?.botId ?? args.botId;
     const webhooks = this.options.webhooks;
     const before = operation.action === "create" ? undefined : this.owned(operation.webhookId, owner);
+    if (operation.action === "update") {
+      const refusal = instructionsUpdateRefusal(before!.prompt, operation.changes.instructions);
+      if (refusal) throw new WebhookRequestError(refusal, 409);
+    }
     if (operation.action === "create") {
       const duplicate = webhooks.list().find((webhook) => webhook.botId === owner && webhook.enabled &&
         webhook.name === operation.webhook.name && webhook.prompt === operation.webhook.instructions);
