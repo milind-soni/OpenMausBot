@@ -458,7 +458,7 @@ import { createScreenFrameSource, rememberTurnFrame, type ScreenCapture } from "
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
 import { asSchedule, RoutineRequestService } from "./routine-requests.ts"; import { ownerSpokeOnly } from "./cloud-routine-level.ts"; import { routineRunCard, routineRunFallbackText } from "./routine-run-card.ts";
 import { activeRoutinesContext } from "./active-routines-context.ts";
-import { createRefusedHandoffs } from "./host/refused-handoffs.ts"; import { automationContextText, createAutomationReports, newestAutomationLines } from "./automation-reports.ts"; import { createAutomationDestinations } from "./automation-destinations.ts"; import { createTeamRoutines } from "./host/team-routines.ts"; import { botOwner } from "../shared/bot-owner.ts"; import { forgetMember } from "./bot-owners.ts"; import { createProactive } from "./host/proactive.ts"; import { createFirstHourHooks, startFirstHour, welcomeDonePatch } from "./host/first-hour-host.ts"; import { greetingMessage } from "./host/first-hour.ts"; import { READ_AND_DRAFT_PARTS, READ_AND_DRAFT_REFUSAL, READ_AND_DRAFT_TOOLS, recordsAnswer } from "./read-and-draft.ts"; import { createPresenceRoutes } from "./routes/presence.ts"; import { needsYouNow } from "./today.ts"; import { createTeamPresenceHost } from "./host/team-presence-host.ts";
+import { createRefusedHandoffs } from "./host/refused-handoffs.ts"; import { automationContextText, createAutomationReports, newestAutomationLines, routineRunNeedsReview } from "./automation-reports.ts"; import { createAutomationDestinations } from "./automation-destinations.ts"; import { createTeamRoutines } from "./host/team-routines.ts"; import { botOwner } from "../shared/bot-owner.ts"; import { forgetMember } from "./bot-owners.ts"; import { createProactive } from "./host/proactive.ts"; import { createFirstHourHooks, startFirstHour, welcomeDonePatch } from "./host/first-hour-host.ts"; import { greetingMessage } from "./host/first-hour.ts"; import { READ_AND_DRAFT_PARTS, READ_AND_DRAFT_REFUSAL, READ_AND_DRAFT_TOOLS, recordsAnswer } from "./read-and-draft.ts"; import { createPresenceRoutes } from "./routes/presence.ts"; import { needsYouNow } from "./today.ts"; import { createTeamPresenceHost } from "./host/team-presence-host.ts";
 import { engineLabel, LimitResetClock, nearLimitNote } from "./limit-resets.ts"; import { loadPlanUsage, planAccountsFromInstances } from "./plan-usage.ts"; import { LimitFailovers, limitBackupAllowed } from "./limit-failover.ts"; import { createLimitResetRoutes } from "./routes/limit-resets.ts";
 import { parseTriggerRequest, triggerTarget } from "./trigger-tools.ts"; import { WebhookRequestError, WebhookRequestService } from "./webhook-requests.ts"; import { createAppTriggerHost } from "./app-trigger-host.ts";
 import { appliesNow, directApply, UNDO_STALE, type DirectApply } from "./direct-apply.ts";
@@ -6809,7 +6809,7 @@ bus.subscribe((event: RuntimeEvent) => {
         settlingTurns.add(event.threadId);
         liveTurnByThread.delete(event.threadId);
         const routineReportThread = routineRun ? routineSourceThread(routineRun) : null;
-        if (!routineReportThread && (!internal || reviewAnswer)) store.patchTask(bot.id, event.threadId, { unread: true });
+        if (!routineReportThread && (!internal || reviewAnswer) && (!routineRun || routineRunNeedsReview(routineRun, reply) || personWaits.open(event.threadId))) store.patchTask(bot.id, event.threadId, { unread: true });
         if (routineRun && routineReportThread !== event.threadId) automationReports.runSettled(routineRun, completedTurnId);
         else if ((!routineRun || routineRun.status === "completed") && (!internal || reviewAnswer) && !computerSelectionTurns.get(event.threadId)?.selected && doneNotice.atTurnEnd({ botId: bot.id, threadId: event.threadId, review: reviewAnswer, ok: event.ok, routine: Boolean(routineRun) }) === "notify" && !personWaits.atTurnEnd(event.threadId, reply) && !unaskedBotThread(settledTask, store.activePath(event.threadId))) {
           notify(buildNotification("done", bot, event.threadId, routineRun ? reply || routineRun.output || routineRun.routineName : reply, { avatarUrl: bot.avatarUrl }), routineRun ? { routine: true } : reviewAnswer ? { summary: true } : undefined);
@@ -8665,7 +8665,7 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
     if (execution?.routineRunId === run.id) {
       store.patchTask(run.botId, execution.threadId, {
         routineRunId: undefined,
-        ...(["waiting", "completed", "failed", "missed"].includes(run.status) ? { unread: true } : {}),
+        ...(routineRunNeedsReview(run) ? { unread: true } : {}),
       });
     }
     return null;
@@ -8696,7 +8696,7 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
     }
   }
 
-  if (statusChanged && ["waiting", "completed", "failed", "missed"].includes(run.status)) {
+  if (statusChanged && (source.group ? ["waiting", "completed", "failed", "missed"].includes(run.status) : routineRunNeedsReview(run))) {
     if (source.group) store.markGroupThreadUnread(source.group.id, sourceThreadId, true);
     else store.patchTask(source.bot.id, sourceThreadId, { unread: true });
   }
