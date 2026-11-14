@@ -140,6 +140,7 @@ export function ComposerAttachments({
                 citation={a}
                 onChange={onChangeCitation}
                 onRemove={() => onRemove(a.id)}
+                solid
               />
             ) : a.kind === "paste" ? (
               <Chip
