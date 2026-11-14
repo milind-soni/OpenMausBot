@@ -66,6 +66,8 @@ export function useComposerDictation({ draftId, text, onText }: {
         // A refused permission comes with a way to the pane that grants it.
         setSpeechError(message ?? (reason === "speech-not-authorized" ? withOpenSettings(t("composer.dictation.permission"), "speech")
           : t(reason === "dictation-disabled" ? "composer.dictation.disabled" : "composer.dictation.failed")));
+      } else if (reason === "interrupted") {
+        setSpeechError(t("composer.dictation.cutOff"));
       }
     });
     void bridge.speechStart().catch(() => {
