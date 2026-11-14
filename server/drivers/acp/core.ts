@@ -189,10 +189,7 @@ export interface AcpSupport {
   /** Sent as `clientCapabilities._meta` on initialize, where agents read vendor capabilities. */
   clientCapabilitiesMeta?: Record<string, unknown>;
   /** Made once per process: rewrites a session/update before the turn reads it, or drops it by returning null. */
-  updateFilter?(): (update: Record<string, any>) => Record<string, any> | null;
-  /** Rewrites a session/request_permission's params before the card is built and an option is picked: the options the
-   * app may answer with, and the tool call it describes. */
-  permissionRequest?(params: Record<string, any>): Record<string, any>;
+  updateFilter?(): (update: Record<string, any>) => Record<string, any> | null; /** Rewrites a session/request_permission's params (its options and tool call) before the card is built. */ permissionRequest?(params: Record<string, any>): Record<string, any>;
   /** The agent reaches MCP servers by URL: OpenMausBot's own servers are this server's endpoints, no process each. */
   ownMcpOverHttp?: boolean;
   /** How many tools the agent lists of its own beside the MCP servers', counted against a provider's tool limit. */
