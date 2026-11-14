@@ -3929,6 +3929,7 @@
   "decider.model.label": "Modelo",
   "decider.model.recommended": "Recomendados",
   "decider.model.more": "Mais modelos",
+  "decider.model.geminiChat": "Modelos de chat Gemini (não calibrados)",
   "decider.model.builtinNote": "Não foi possível carregar o catálogo de modelos do OpenRouter. Por isso, esta é a lista que vem com o app.",
   "decider.openrouter.master": "Usar o OpenRouter para decisões rápidas",
   "decider.openrouter.key.label": "Chave de API do OpenRouter",

@@ -36732,7 +36732,8 @@
       "settings.browser.proxyConfigured": "05565d7de5c36e10f5859900c77b9a3600c48ccf213cfbe5ebb5afd1225f5cd8",
       "settings.browser.proxyInactive": "ab2ef0c1c52fc3ffb24536578e5eb2a8d06a7027291bfd480eb577a4a3d1b9da",
       "settings.browser.proxySave": "1509f561f2416598629b886ad7d3c05a7e221e4e0675c84bbff4ee6d9e03913d",
-      "settings.browser.proxyClear": "c3812fc4acb861d5182fc2b8155f327f736fbe5e5eb86a7bd7afcb6dc5497282"
+      "settings.browser.proxyClear": "c3812fc4acb861d5182fc2b8155f327f736fbe5e5eb86a7bd7afcb6dc5497282",
+      "decider.model.geminiChat": "2fa5b94b52ece98b2ad0a021d1c80d226031b3a885fd78d5f82e630bfa9305a9"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

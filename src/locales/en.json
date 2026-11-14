@@ -4123,6 +4123,7 @@
   "decider.model.label": "Model",
   "decider.model.recommended": "Recommended",
   "decider.model.more": "More models",
+  "decider.model.geminiChat": "Gemini chat models (not calibrated)",
   "decider.model.builtinNote": "OpenRouter's model catalog could not be loaded, so this is the built-in list.",
   "decider.openrouter.master": "Use OpenRouter for fast decisions",
   "decider.openrouter.key.label": "OpenRouter API key",
