@@ -1,9 +1,10 @@
 import { rmSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import type { RoutineRunReport } from "../shared/routines.ts";
+import { ROUTINE_HANDOFF_WAIT, type RoutineRunReport } from "../shared/routines.ts";
 import "./server-line-packs.ts";
-import { automationContextText, createAutomationReports, newestAutomationLines, readRunReply, recoveredText } from "./automation-reports.ts";
+import { clipRunOutput } from "./routine-lines.ts";
+import { automationContextText, createAutomationReports, newestAutomationLines, readRunReply, recoveredText, routineRunNeedsReview } from "./automation-reports.ts";
 import { DATA_DIR } from "./config.ts";
 import type { RoutineRun } from "./routines.ts";
 import { Store, type BotRecord, type Message } from "./store.ts";
@@ -29,6 +30,36 @@ describe("readRunReply", () => {
     expect(readRunReply("I drafted a reply to Acme.\nNEEDS INPUT: Should I send it?")).toEqual({
       quiet: false, text: "I drafted a reply to Acme.\nShould I send it?", question: "Should I send it?",
     });
+  });
+});
+
+describe("routineRunNeedsReview", () => {
+  it("is true only when the person is needed: a failed or missed run, a wait on them, or a closing question", () => {
+    expect(routineRunNeedsReview({ status: "completed", output: "Acme replied about the order." })).toBe(false);
+    expect(routineRunNeedsReview({ status: "completed", output: "I drafted a reply.\nNEEDS INPUT: Send it?" })).toBe(true);
+    expect(routineRunNeedsReview({ status: "completed", output: "Short." }, "A longer reply.\nNEEDS INPUT: Send it?")).toBe(true);
+    expect(routineRunNeedsReview({ status: "failed" })).toBe(true);
+    expect(routineRunNeedsReview({ status: "missed" })).toBe(true);
+    expect(routineRunNeedsReview({ status: "waiting", attention: "Approve: Bash" })).toBe(true);
+    expect(routineRunNeedsReview({ status: "waiting", attention: ROUTINE_HANDOFF_WAIT })).toBe(false);
+    expect(routineRunNeedsReview({ status: "running" })).toBe(false);
+    expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(`${"Long report. ".repeat(300)}\nNEEDS INPUT: Send it?`, 2_000) })).toBe(true);
+    // The source chat is synced from the stored output alone: a closing question over half of it, or over all of it, still counts.
+    for (const words of [150, 300]) {
+      const reply = `${"Long report. ".repeat(300)}\nNEEDS INPUT: ${"Which one? ".repeat(words)}\ndefault: wait`;
+      expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(reply, 2_000) })).toBe(routineRunNeedsReview({ status: "completed" }, reply));
+      expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(reply, 2_000) })).toBe(true);
+    }
+    const bare = `${"Long report. ".repeat(300)}\nNEEDS INPUT:\ndefault: ${"wait ".repeat(500)}`;
+    expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(bare, 2_000) })).toBe(routineRunNeedsReview({ status: "completed" }, bare));
+    expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(bare, 2_000) })).toBe(true);
+    const spaced = `${"Long report. ".repeat(300)}\nNEEDS INPUT:\n${"\n".repeat(2_000)}default: ${"wait ".repeat(500)}`;
+    expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(spaced, 2_000) })).toBe(routineRunNeedsReview({ status: "completed" }, spaced));
+    expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(spaced, 2_000) })).toBe(true);
+    const indented = `${"Long report. ".repeat(300)}\nNEEDS INPUT:\n${" ".repeat(2_000)}default: wait`;
+    expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(indented, 2_000) })).toBe(routineRunNeedsReview({ status: "completed" }, indented));
+    expect(routineRunNeedsReview({ status: "completed", output: clipRunOutput(indented, 2_000) })).toBe(true);
+    expect(routineRunNeedsReview({ status: "cancelled" })).toBe(false);
   });
 });
 
@@ -113,7 +144,7 @@ describe("automation reports", () => {
     const run = f.finished("Acme replied about the order.");
     f.store.patchTask(f.bot.id, f.main, { unread: false });
     f.reports.runSettled(run, `turn-${run.id}`);
-    expect(f.store.taskByThread(f.bot.id, f.main)?.unread, "the chat it reports to shows unread").toBe(true);
+    expect(f.store.taskByThread(f.bot.id, f.main)?.unread, "a report that needs nothing from the person leaves the chat out of To review").toBe(false);
     expect(f.lines()).toEqual([expect.objectContaining({
       role: "bot", kind: "text", text: "Acme replied about the order.",
       automation: { routineId: "routine-Inbox brief", runId: run.id, name: "Inbox brief", trigger: "schedule", executionThreadId: run.threadId, scheduledFor: run.scheduledFor },
@@ -139,7 +170,9 @@ describe("automation reports", () => {
   it("asks the person in the chat, as a normal line they can answer, when the run needs them", () => {
     const f = fixture();
     const run = f.finished("I drafted a reply to Acme.\nNEEDS INPUT: Should I send it?");
+    f.store.patchTask(f.bot.id, f.main, { unread: false });
     f.reports.runSettled(run, `turn-${run.id}`);
+    expect(f.store.taskByThread(f.bot.id, f.main)?.unread, "a question puts the chat under To review").toBe(true);
     expect(f.lines()).toEqual([expect.objectContaining({ kind: "text", text: "I drafted a reply to Acme.\nShould I send it?", automation: expect.objectContaining({ needsYou: true }) })]);
     expect(f.notified).toEqual([{ kind: "question", threadId: f.main, detail: "Inbox brief: Should I send it?" }]);
   });
@@ -210,7 +243,9 @@ describe("automation reports", () => {
   it("says once in the chat that a run failed, and stays out of chats a run does not report to", () => {
     const f = fixture();
     const failed = f.finished(null, "Inbox brief", { status: "failed", error: "Signed out" });
+    f.store.patchTask(f.bot.id, f.main, { unread: false });
     f.reports.runFailed(failed, "This bot's engine is signed out. Sign in again in Settings → Model providers.");
+    expect(f.store.taskByThread(f.bot.id, f.main)?.unread, "a failed run puts the chat under To review").toBe(true);
     expect(f.lines()).toEqual([expect.objectContaining({
       text: "This run didn't finish: This bot's engine is signed out. Sign in again in Settings → Model providers.",
       automation: expect.objectContaining({ failed: true }),
@@ -247,7 +282,9 @@ describe("automation reports", () => {
     f.reports.runFailed(failed, "it ran past its 25-minute limit.");
     const finishedAt = Date.UTC(2026, 9, 26, 2, 40);
     const ok = f.finished("Checked 14 emails.\nNOTHING NEW", "Inbox brief", { finishedAt });
+    f.store.patchTask(f.bot.id, f.main, { unread: false });
     f.reports.runSettled(ok, `turn-${ok.id}`);
+    expect(f.store.taskByThread(f.bot.id, f.main)?.unread, "a recovered line needs nothing from the person").toBe(false);
     for (let i = 0; i < 3; i++) {
       const later = f.finished("NOTHING NEW");
       f.reports.runSettled(later, `turn-${later.id}`);

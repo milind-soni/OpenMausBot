@@ -127,7 +127,7 @@ it("reports each run into the main chat as the bot's own line, writes nothing fo
     expect(each.resultsThreadId).toBe(s.main);
     expect(saved.tasks.find((task: any) => task.threadId === each.threadId)).toMatchObject({ routineRunId: each.id, unread: false });
   }
-  expect(saved.tasks.find((task: any) => task.threadId === s.main).unread).toBe(true);
+  expect(saved.tasks.find((task: any) => task.threadId === s.main).unread, "a report that needs nothing from the person leaves the chat out of To review").toBe(false);
   const done = s.notified().filter((notification) => notification.kind === "done");
   expect(done).toEqual([expect.objectContaining({ threadId: s.main, body: "Inbox watch: Acme replied: they need the invoice by Friday." })]);
   for (const key of ["first", "second", "third"]) expect(s.toldOnlyReplyLeaves(key)).toBe(true);
@@ -237,6 +237,21 @@ it("asks the person in the main chat when a run needs them, and their answer the
   await s.cli("send", "--bot", s.bot.id, "--task", s.main, "--text", "Yes, send it.");
   await s.cli("wait", "--bot", s.bot.id, "--task", s.main, "--timeout", "20");
   expect((await s.messages(s.main)).findLast((message) => message.role === "bot" && message.kind === "text")?.text).toBe("Sent.");
+}, 120_000);
+
+it("puts the main chat under To review when a run ends on a question, even one past the 2,000 characters a run stores", async () => {
+  const s = await server();
+  const long = "Read the Acme thread and the invoice. ".repeat(80).trim();
+  s.script([{ key: "long", match: [s.header("Acme replies")], reply: `${long}\nNEEDS INPUT: Should I send the reply?` }]);
+  const id = await s.runNow(await s.routine("Acme replies"));
+  await s.settled(id);
+  await s.reported(id, "posted");
+  const done = await s.run(id);
+  expect(long.length).toBeGreaterThan(2_000);
+  expect(done.output).toContain("Should I send the reply?");
+  const saved = await s.savedBot();
+  expect(saved.tasks.find((task: any) => task.threadId === s.main).unread, "a run that asks the person puts the chat under To review").toBe(true);
+  expect(saved.tasks.find((task: any) => task.threadId === done.threadId)).toMatchObject({ routineRunId: id, unread: false });
 }, 120_000);
 
 it("takes a 👍 on a run's question in the chat as the answer, with that report in hand", async () => {
