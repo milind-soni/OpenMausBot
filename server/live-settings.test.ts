@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AppConfig } from "./config.ts";
 import { nestedKeyStatus } from "./key-hint.ts";
-import { LIVE_NEEDS_AZURE, LIVE_NEEDS_FISH, LIVE_NEEDS_KEY } from "./live-call.ts";
+import { LIVE_NEEDS_AZURE, LIVE_NEEDS_ELEVENLABS, LIVE_NEEDS_FISH, LIVE_NEEDS_GEMINI, LIVE_NEEDS_KEY } from "./live-call.ts";
 import { fishKeyFromLiveKey, LIVE_KEY_NEEDS_ENDPOINT, liveConfigWithEnv, liveKeyTarget, liveSavePatch, usableLiveKey, type LiveConfig } from "./live-config.ts";
 import { fishKeyPrint } from "./live-fish.ts";
 import { LIVE_IDLE_MINUTES_DEFAULT, liveCallEndpoint, liveCallKey, liveCallSettings, liveSettingsFor, liveSettingsForClient, liveSetupProblem } from "./live-settings.ts";
@@ -16,6 +16,11 @@ describe("live settings", () => {
     const settings = liveSettingsFor({ live: { key: "sk-test", voice: "sol", readTypedReplies: false, idleMinutes: 12 } } as AppConfig);
     expect(settings).toEqual({ configured: true, keySource: "live", voice: "sol", readTypedReplies: false, idleMinutes: 12 });
     expect(JSON.stringify(settings)).not.toContain("sk-test");
+  });
+
+  it("reports a saved Gemini voice beside the GPT-Live one, and nothing when it is cleared", () => {
+    expect(liveSettingsFor({ live: { voice: "cedar", geminiVoice: "Kore" } } as AppConfig)).toMatchObject({ voice: "cedar", geminiVoice: "Kore" });
+    expect(liveSettingsFor({ live: { geminiVoice: "" } } as AppConfig)).not.toHaveProperty("geminiVoice");
   });
 });
 
@@ -289,5 +294,62 @@ describe("a saved Live key", () => {
       expect(usable(undefined, { OMB_OPENAI_LIVE_KEY: "sk-env" })).toBe("sk-env");
       expect(usable({ voice: "cedar" }, { OMB_OPENAI_LIVE_KEY: "sk-env", OMB_LIVE_PROVIDER: "openai" })).toBe("sk-env");
     });
+  });
+});
+
+describe("Live calls through Gemini", () => {
+  const gemini = { provider: "gemini" as const };
+
+  it("use only the Gemini key, never the OpenAI API key or a key saved for another provider", () => {
+    for (const live of [gemini, { ...gemini, key: "k", keyFor: "openai" }, { ...gemini, key: "k", keyFor: "fish" }]) {
+      const cfg = { live, openai: { key: "sk-openai" }, tts: { fishKey: "fish" } } as AppConfig;
+      expect(liveCallKey(cfg), JSON.stringify(live)).toBeNull();
+      expect(liveSetupProblem(cfg)).toBe(LIVE_NEEDS_GEMINI);
+    }
+  });
+
+  it("are ready with the Gemini key that Gemini voices use, and report none of it", () => {
+    const cfg = { live: gemini, tts: { geminiKey: " gemini-secret " } } as AppConfig;
+    expect(liveCallKey(cfg)).toEqual({ key: "gemini-secret", source: "gemini" });
+    expect(liveCallEndpoint(cfg, {})).toEqual({ provider: "gemini", apiBase: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-3.8-live" });
+    expect(liveSetupProblem(cfg)).toBeNull();
+    const settings = liveSettingsFor(cfg);
+    expect(settings).toMatchObject({ configured: true, keySource: "gemini", provider: "gemini" });
+    expect(JSON.stringify(settings)).not.toContain("gemini-secret");
+  });
+
+  it("name the provider in what a call start reads, so the Gemini limit sees it before setup is done", () => {
+    expect(liveCallSettings({ live: gemini } as AppConfig)).toMatchObject({ provider: "gemini", key: "", setupProblem: LIVE_NEEDS_GEMINI });
+  });
+});
+
+describe("Live calls through ElevenLabs", () => {
+  const elevenlabs = { provider: "elevenlabs" as const };
+
+  it("use only the person's ElevenLabs key, never the OpenAI API key or a key saved for another provider", () => {
+    for (const live of [elevenlabs, { ...elevenlabs, key: "k", keyFor: "openai" }]) {
+      const cfg = { live, openai: { key: "sk-openai" }, tts: { fishKey: "fish", geminiKey: "gem" } } as AppConfig;
+      expect(liveCallKey(cfg), JSON.stringify(live)).toBeNull();
+      expect(liveSetupProblem(cfg)).toBe(LIVE_NEEDS_ELEVENLABS);
+    }
+  });
+
+  it("never use Cloud's included voice token, which goes only to its relay", () => {
+    const env = { OMB_CLOUD_VOICE_URL: "https://cloud.example.test/api/cloud/services/voice/v1", OMB_CLOUD_VOICE_TOKEN: "omb_voice_included" };
+    expect(liveCallKey({ live: elevenlabs, tts: {} } as AppConfig, env)).toBeNull();
+    expect(liveCallKey({ live: elevenlabs, tts: { key: "omb_voice_included" } } as AppConfig, env)).toBeNull();
+    expect(liveCallKey({ live: elevenlabs, tts: { key: "own-key" } } as AppConfig, env)).toEqual({ key: "own-key", source: "elevenlabs" });
+  });
+
+  it("are ready with the ElevenLabs key that ElevenLabs voices use, with the agent saved for it, and report none of it", () => {
+    const live = { ...elevenlabs, elevenlabsAgentId: "agent_1", elevenlabsAgentFor: fishKeyPrint("eleven-secret") };
+    const cfg = { live, tts: { key: " eleven-secret " } } as AppConfig;
+    expect(liveCallKey(cfg)).toEqual({ key: "eleven-secret", source: "elevenlabs" });
+    expect(liveCallEndpoint(cfg, {})).toEqual({ provider: "elevenlabs", apiBase: "https://api.elevenlabs.io/v1/convai", model: "agent_1" });
+    expect(liveCallEndpoint({ ...cfg, tts: { key: "another-account" } }, {})).toMatchObject({ model: "" });
+    expect(liveSetupProblem(cfg)).toBeNull();
+    const settings = liveSettingsFor(cfg);
+    expect(settings).toMatchObject({ configured: true, keySource: "elevenlabs", provider: "elevenlabs" });
+    expect(JSON.stringify(settings)).not.toContain("eleven-secret");
   });
 });

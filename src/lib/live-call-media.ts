@@ -1,11 +1,13 @@
 // Its data channel may only send session.close; everything else about the call runs on the harness.
 import { useSyncExternalStore } from "react";
-import type { LiveCallState, LiveEndReason, LiveFishTransport, LiveProvider } from "../../shared/wire";
+import type { LiveCallState, LiveElevenLabsSession, LiveElevenLabsTransport, LiveEndReason, LiveFishTransport, LiveGeminiSession, LiveGeminiTransport, LiveProvider } from "../../shared/wire";
 import { api, ApiError } from "@/state/store";
 import { openExternalLink } from "./app-links";
 import { endCall, startCall } from "./call";
 import { desktopCapabilitiesNow } from "./desktop";
-import { FishCall, isFishMicDenied, startFishAgentSession, type FishSessionStarter } from "./live-call-fish";
+import { FishCall, isFishMicDenied, startFishAgentSession, type FishCallHooks, type FishSessionStarter } from "./live-call-fish";
+import { startElevenLabsLiveSession } from "./live-call-elevenlabs";
+import { startGeminiLiveSession } from "./live-call-gemini";
 import { t } from "./i18n";
 
 export type LiveMediaPhase = "idle" | "starting" | "live" | "ending" | "ended" | "failed";
@@ -46,6 +48,8 @@ export interface LiveMediaDeps {
   pageMicrophone(): Promise<"allowed" | "refused" | undefined>;
   openInBrowser(url: string): void;
   startFish: FishSessionStarter;
+  startGemini: FishSessionStarter<LiveGeminiSession>;
+  startElevenLabs: FishSessionStarter<LiveElevenLabsSession>;
 }
 
 const IDLE: LiveMediaState = {
@@ -91,6 +95,8 @@ const defaults: LiveMediaDeps = {
   },
   openInBrowser: (url) => void openExternalLink(url).catch(() => undefined),
   startFish: startFishAgentSession,
+  startGemini: startGeminiLiveSession,
+  startElevenLabs: startElevenLabsLiveSession,
 };
 let deps: LiveMediaDeps = defaults;
 
@@ -99,7 +105,7 @@ let generation = 0;
 let microphone: MediaStream | null = null;
 let peer: RTCPeerConnection | null = null;
 let channel: RTCDataChannel | null = null;
-let fishCall: FishCall | null = null;
+let fishCall: Pick<FishCall, "setMuted" | "close"> | null = null;
 let fishConnected = false;
 let heardTimer: ReturnType<typeof setTimeout> | null = null;
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -193,7 +199,7 @@ export async function startLiveCall(target: { botId: string; threadId: string; p
   set({ ...IDLE, phase: "starting", ...where });
   startCall(target.botId);
   try {
-    if (target.provider === "fish") return await startFishCall(target, mine);
+    if (target.provider === "fish" || target.provider === "gemini" || target.provider === "elevenlabs") return await startFishCall(target, mine);
     const stream = await deps.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     if (mine !== generation) return void stream.getTracks().forEach((track) => track.stop());
     microphone = stream;
@@ -269,9 +275,10 @@ export async function startLiveCall(target: { botId: string; threadId: string; p
   }
 }
 
-/** Fish's SDK opens the microphone and plays the agent itself; the harness follows the call through the relay. */
+/** Fish's SDK, or the Gemini or ElevenLabs session here, opens the microphone and plays the agent; the harness follows the call through
+ * the relay. */
 async function startFishCall(target: { botId: string; threadId: string }, mine: number): Promise<void> {
-  const result = await deps.request<{ call: LiveCallState; transport: LiveFishTransport | { type: "webrtc" } }>("/api/live/session", {
+  const result = await deps.request<{ call: LiveCallState; transport: LiveFishTransport | LiveGeminiTransport | LiveElevenLabsTransport | { type: "webrtc" } }>("/api/live/session", {
     method: "POST",
     body: JSON.stringify({ botId: target.botId, threadId: target.threadId, client: liveClient(deps.capabilities()) }),
     timeoutMs: 35_000,
@@ -282,11 +289,12 @@ async function startFishCall(target: { botId: string; threadId: string }, mine: 
   }
   const seen = serverCall;
   set({ callId: result.call.callId });
-  if (result.transport.type !== "fish") throw new Error(t("call.live.dropped"));
+  const transport = result.transport;
+  if (transport.type === "webrtc") throw new Error(t("call.live.dropped"));
   applyServerCall(result.call);
   if (seen?.callId === result.call.callId) applyServerCall(seen);
   if (mine !== generation) return;
-  const call = new FishCall(result.transport, {
+  const hooks: FishCallHooks = {
     request: deps.request,
     connected: () => {
       if (mine !== generation) return;
@@ -307,7 +315,9 @@ async function startFishCall(target: { botId: string; threadId: string }, mine: 
       onSessionClosed();
     },
     now: () => Date.now(),
-  }, deps.startFish);
+  };
+  const call = transport.type === "gemini" ? new FishCall(transport, hooks, deps.startGemini)
+    : transport.type === "elevenlabs" ? new FishCall(transport, hooks, deps.startElevenLabs) : new FishCall(transport, hooks, deps.startFish);
   fishCall = call;
   // Started only now: the SDK's start includes the microphone prompt, which may take the person a while.
   await call.start();
