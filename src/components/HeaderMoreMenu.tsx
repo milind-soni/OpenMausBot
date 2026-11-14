@@ -123,6 +123,7 @@ export function HeaderMoreMenu({ items, className }: HeaderMoreMenuProps) {
       <button
         ref={triggerRef}
         type="button"
+        data-invoker="more-actions"
         aria-label="More actions"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -168,6 +169,7 @@ export function HeaderMoreMenu({ items, className }: HeaderMoreMenuProps) {
                 key={item.id}
                 type="button"
                 role="menuitem"
+                data-invoker={item.id}
                 tabIndex={-1}
                 onClick={() => {
                   setOpen(false);

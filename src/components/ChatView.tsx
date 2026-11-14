@@ -833,12 +833,14 @@ export function ChatView({ bot }: { bot: Bot }) {
 
           {!collapse.collapseSecondaryToMenu && (
             <button
+              data-invoker="computer"
               onClick={() => dispatch({ type: "toggleComputer" })}
               className={cn(
                 "rounded-md p-1.5 hover:bg-raised",
                 state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
               )}
               title="Bot's computer"
+              aria-label="Bot's computer"
             >
               <Monitor size={18} />
             </button>

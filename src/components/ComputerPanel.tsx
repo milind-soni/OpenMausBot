@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CalendarClock,
   Loader2,
@@ -26,18 +26,66 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
     docked: true,
   });
 
+  const resolveAndRestoreFocus = useCallback(() => {
+    // When Computer panel closes, header width changes and useHeaderCollapse
+    // reflows the header (mounting or unmounting direct button vs More menu).
+    // Try immediate focus, and retry on next frame so reflowed header is resolved.
+    const tryFocus = () => {
+      // 1. Direct computer button
+      const directBtn = document.querySelector<HTMLElement>('button[data-invoker="computer"]');
+      if (directBtn && directBtn.offsetParent !== null) {
+        directBtn.focus();
+        return true;
+      }
+      // 2. More actions trigger button
+      const moreBtn = document.querySelector<HTMLElement>(
+        'button[data-invoker="more-actions"], button[aria-label="More actions"]',
+      );
+      if (moreBtn && moreBtn.offsetParent !== null) {
+        moreBtn.focus();
+        return true;
+      }
+      // 3. Captured trigger if still in DOM
+      if (triggerRef.current && triggerRef.current.isConnected) {
+        triggerRef.current.focus();
+        return true;
+      }
+      // 4. Header name / fallback
+      const fallback = document.querySelector<HTMLElement>(
+        'main button[title="Bot settings"], main header button, main header',
+      );
+      if (fallback) {
+        fallback.focus();
+        return true;
+      }
+      return false;
+    };
+
+    if (!tryFocus()) {
+      requestAnimationFrame(() => {
+        if (!tryFocus()) {
+          setTimeout(tryFocus, 50);
+        }
+      });
+    }
+  }, []);
+
+  const handleClose = useCallback(() => {
+    dispatch({ type: "toggleComputer", open: false });
+    resolveAndRestoreFocus();
+  }, [dispatch, resolveAndRestoreFocus]);
+
   useEffect(() => {
     triggerRef.current = (document.activeElement as HTMLElement) ?? null;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !e.defaultPrevented) {
         e.preventDefault();
-        dispatch({ type: "toggleComputer", open: false });
-        triggerRef.current?.focus();
+        handleClose();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [dispatch]);
+  }, [handleClose]);
 
   const localShort = "this computer";
   const localLong = "This computer";
@@ -92,10 +140,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         </button>
         <span className="text-[15px] font-semibold text-ink">Computer</span>
         <button
-          onClick={() => {
-            dispatch({ type: "toggleComputer", open: false });
-            triggerRef.current?.focus();
-          }}
+          onClick={handleClose}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
           aria-label="Close computer panel"
         >
