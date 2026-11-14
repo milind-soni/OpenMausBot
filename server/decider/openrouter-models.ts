@@ -30,7 +30,7 @@ export const OPENROUTER_DECIDER_MODELS: ReadonlyArray<{ id: string; name: string
   { id: "google/gemini-decision-1", name: "Google: Gemini Decision 1" },
 ];
 
-/** Gemini chat models (#5712): the fast Flash tier only (a decision must answer within 1.5 s), no `:batch` or other variant. */
+/** Gemini chat models: the fast Flash tier only (a decision must answer within 1.5 s), no `:batch` or other variant. */
 const GEMINI_CHAT_ID = /^google\/gemini-[^:]*flash[^:]*$/;
 /** Every parameter the chat request sends (`openrouterRequestBody`); it asks OpenRouter for hosts that honour them all. */
 const CHAT_PARAMETERS = ["max_tokens", "temperature", "response_format", "structured_outputs"];
@@ -156,7 +156,7 @@ export function createOpenRouterModelCatalog(deps: OpenRouterModelCatalogDeps = 
     async load(baseUrl?: string | null): Promise<OpenRouterModelList> {
       const list = cachedLoad(baseUrl, output, readList, builtin(curated, output));
       if (output !== "decisions") return list;
-      // The Gemini chat models (#5712) come after the live decisions list; none beside the built-in one.
+      // The Gemini chat models come after the live decisions list; none beside the built-in one.
       const [decisions, chat] = await Promise.all([list, cachedLoad(baseUrl, "text", geminiChatModels, [])]);
       if (decisions.source !== "openrouter" || !chat.length) return decisions;
       const ids = new Set(decisions.models.map((model) => model.id));

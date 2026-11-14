@@ -53,7 +53,7 @@ describe("which OpenRouter models the picker offers", () => {
     expect(mergeModels(new Map([["alpha/model", "Alpha"]])).source).toBe("builtin");
   });
 
-  it("offers Gemini Flash chat models that take every chat parameter, as uncalibrated chat models sorted by name (#5712)", () => {
+  it("offers Gemini Flash chat models that take every chat parameter, as uncalibrated chat models sorted by name", () => {
     const found = geminiChatModels({
       data: [
         chat("google/gemini-3.5-flash", { name: "Google: Gemini 3.5 Flash" }),
