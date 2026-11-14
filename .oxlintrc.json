@@ -19,5 +19,19 @@
     "release/**",
     "third_party/**",
     "electron/resources/**"
+  ],
+  "overrides": [
+    {
+      "files": ["packages/phone-protocol/**"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "patterns": [{ "group": ["node:*"], "message": "The phone imports this package: no Node modules." }]
+        }],
+        "no-restricted-globals": ["error",
+          { "name": "window", "message": "The phone imports this package: no DOM." },
+          { "name": "document", "message": "The phone imports this package: no DOM." }
+        ]
+      }
+    }
   ]
 }

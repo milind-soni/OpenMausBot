@@ -11,12 +11,11 @@ an OpenMausBot account of its own.
 With MausBot Cloud, pair the phone with your Cloud instead of your computer, and
 it keeps working while the computer is off.
 
-1. In the desktop app, open the menu under your name and choose **Get the
-   phone app**: the App Store for iPhone, or the APK for Android. Scan its code
-   with the phone's camera.
-2. In the same menu, choose **Connect your phone · to your Cloud (always on)**.
-   (**Settings → MausBot Cloud → Use My Cloud on your phone** does the same.) The
-   app opens your Cloud in its window, at the Cloud's phone pairing.
+1. Install MausBot on your phone from the App Store or Google Play.
+2. In the desktop app, open the menu under your name and choose **Connect
+   your phone · to your Cloud (always on)**. (**Settings → MausBot Cloud → Use
+   My Cloud on your phone** does the same.) The app opens your Cloud in its
+   window, at the Cloud's phone pairing.
 3. Choose **Create pairing code** and scan the QR code with the phone app.
 
 On your computer, **Connect your phone** offers your Cloud first and this
@@ -343,8 +342,9 @@ Allowed in the first release:
   that only for a loopback caller, only for a conversation on the Local VM,
   and only to the lease that holds the computer. The sidecar rewrites the
   loopback noVNC address into its device-scoped relay path, then asks the
-  harness every few seconds whether that lease still holds
-  (`action: "check"`, read-only) and closes the relay when it does not. The
+  harness every few seconds, while a viewer socket is open, whether that
+  lease still holds (`action: "check"`, which also renews it) and closes the
+  relay when it does not. The
   phone speaks RFB over the relay. Hand back closes the viewer and releases
   the lease, and so does backgrounding the app.
 - A phone paired with the server directly (`openmausbot serve` behind
@@ -356,10 +356,13 @@ Allowed in the first release:
   either lapses; hand back closes it at once. Computer access is the pairing's
   scope: Full access (`openmausbot pair`) may, chat-only (`--client`) is
   answered 403 and the app shows computer access as off.
-- Phone control requires per-bot Local VMs. Shared and pool modes are refused
-  on both connection paths until a viewer can reserve its desktop against
-  other bots; a control hold on one bot alone cannot do that. Stills remain
-  available in every mode.
+- Phone control works in shared and per-bot Local VM modes. In shared mode
+  the take holds the one shared desktop, so every bot working on it pauses
+  until the hand-back. A phone's hold on a Local VM is released 60 seconds
+  after its last sign of life: the take, the join, a `check`, or the server
+  proxy's re-check. Pool mode is refused on both connection paths, since a
+  take does not say which seat to hold. Stills remain available in every
+  mode.
 - Send messages, interrupt bots, answer approvals/questions, and mark chats
   read.
 - Create a basic bot.

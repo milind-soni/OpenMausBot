@@ -441,6 +441,26 @@ winOnly("resolveCli (Windows)", () => {
     expect(resolveCli("ombfake", [], { PATH: "", PATHEXT: ".CMD" })).toEqual({ command: "ombfake", args: [] });
   });
 
+  it("preserves the DeepSeek desktop shim's Electron CLI entry point", () => {
+    const exe = join(dir, "DeepSeek Harness.exe");
+    const archive = join(dir, "resources", "app.asar");
+    const shim = join(dir, "dsh.cmd");
+    writeFileSync(exe, "MZ");
+    mkdirSync(join(dir, "resources"));
+    writeFileSync(archive, "");
+    writeFileSync(shim, [
+      "@echo off",
+      'set "ELECTRON_RUN_AS_NODE=1"',
+      '"%~dp0DeepSeek Harness.exe" --expose-internals "%~dp0resources\\app.asar\\dsh\\cli.js" %*',
+      "exit /b %errorlevel%",
+    ].join("\r\n"));
+    expect(resolveCli(shim, ["--profile", "acp"])).toEqual({
+      command: exe,
+      args: ["--expose-internals", join(archive, "dsh", "cli.js"), "--profile", "acp"],
+      env: { ELECTRON_RUN_AS_NODE: "1" },
+    });
+  });
+
   it("parses an npm .cmd shim down to `node <cli.js>`, never the shim's own node.exe", async () => {
     shimWith("ombfake.cmd", JS_SHIM, "ombfake.js", "console.log('js target ' + process.argv.slice(2).join(','));\n");
     onPath();

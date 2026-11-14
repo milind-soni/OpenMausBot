@@ -15,7 +15,7 @@ vi.mock("node:child_process", async () => ({
 
 vi.mock("./vps-ssh.ts", async () => ({
   ...(await vi.importActual<typeof import("./vps-ssh.ts")>("./vps-ssh.ts")),
-  ensureVpsSshMaster: vi.fn().mockResolvedValue(undefined),
+  ensureVpsSshMaster: vi.fn().mockResolvedValue(0),
 }));
 
 import {

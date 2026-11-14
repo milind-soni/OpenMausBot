@@ -75,6 +75,8 @@ export interface ConfigRouteDeps {
   sharedComputerControl: Pick<SharedComputerControl, "close">;
   hostedModels: boolean;
   cloudHome: boolean;
+  /** A Team Cloud shares one browser egress policy across every member. */
+  cloudTeam?: boolean;
   /** Security: a Team Cloud never takes over another installation's Composio user, since every member's bots would then get that person's apps. */
   sharedMembership: () => boolean;
   lendingEnabled(): boolean;
@@ -85,6 +87,8 @@ export interface ConfigRouteDeps {
   localVmLifecycleBusy: { readonly size: number };
   localVmImageBusy: Pick<BusyFlag, "get">;
   localVmModeChangeBusy: Pick<BusyFlag, "set">;
+  /** Called before a Local VM mode change is saved; once it is saved, the returned call ends the holds no path reads any more. */
+  localVmModeChanging(): () => void;
   providerConfigBusy: BusyFlag;
   computerProviderConfigTransitions: Pick<Set<RemoteComputerProvider>, "add" | "delete">;
   managedBoatOwners(): boat.ManagedBoatOwner[];
@@ -115,7 +119,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,
     closeBrowser, browserEngineSwitched, sharedComputers, sharedComputerControl, hostedModels, cloudHome: CLOUD_HOME, sharedMembership, lendingEnabled, providerConfigs,
-    localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy,
+    localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy, localVmModeChanging,
     providerConfigBusy, computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict,
     perBotLocalVmCountForModeChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
     configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, ownHints, postiz,
@@ -129,6 +133,9 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       const body = await readBody(req);
       if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatchForPerson(body);
+      if (deps.cloudTeam && patch.browserEngine?.egress?.proxy !== undefined && !(auth.kind === "session" && auth.session.teamRole === "owner")) {
+        return json(res, 403, { error: "Only the Team Cloud owner can configure the browser proxy." });
+      }
       if (patch.profile && ownProfile) {
         // The address is the verified claim's; a profile names no other.
         const { email: _email, ...own } = patch.profile;
@@ -536,6 +543,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       });
       let configWriteCommitted = false;
       const enginesBefore = engineLaunches(providerConfigs());
+      const localVmModeChanged = changingLocalVmMode ? localVmModeChanging() : null;
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
       try {
         if (patch.live) patch.live = liveSavePatch(cfg.live, patch.live);
@@ -594,6 +602,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         throw error;
       }
       for (const key of resetKeys) if (key) forgetKey(key);
+      localVmModeChanged?.();
       postiz?.configSaved(patch);
       // A saved key reaches an engine through the environment its status read uses, often with no reload.
       registry.forgetSnapshots();

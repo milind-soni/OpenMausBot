@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** Fakes a test copies out of the repo: nothing relative may be imported, not even a sibling. */
-const COPIED_OUT = new Set(["fake-codex-app-server.ts"]);
+const COPIED_OUT = new Set(["fake-codex-app-server.ts", "fake-acp-cli.ts"]);
 
 /** Value imports only: `import type` is erased before the file runs. */
 const importSpecifiers = (source: string): string[] =>

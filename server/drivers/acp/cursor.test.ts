@@ -284,7 +284,7 @@ describe("CursorAgentDriver", () => {
     }
   });
 
-  it("spawns `agent [--force] [--model …] acp` and keeps Cursor credentials", async () => {
+  it("spawns `agent [--force|--auto-review] --approve-mcps [--model …] acp` and keeps Cursor credentials", async () => {
     ensureDirs();
     chmodSync(FAKE_CLI, 0o755);
     const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-"));
@@ -307,7 +307,7 @@ describe("CursorAgentDriver", () => {
       await recorder.until((e) => e.type === "turn.completed");
 
       const seen = JSON.parse(readFileSync(dump, "utf8"));
-      expect(seen.argv).toEqual(["--force", "--model", "gpt-5.3-codex", "acp"]);
+      expect(seen.argv).toEqual(["--force", "--approve-mcps", "--model", "gpt-5.3-codex", "acp"]);
       expect(seen.env.CURSOR_API_KEY).toBe("cursor-should-keep");
       expect(seen.env.XAI_API_KEY).toBeUndefined();
 
@@ -318,8 +318,101 @@ describe("CursorAgentDriver", () => {
       for (const approvalMode of ["auto", "ask"] as const) {
         const { turnId } = await instance.adapter.sendTurn({ threadId: "t-cursor", text: "continue", approvalMode, resumeCursor: "fake-acp-session" });
         await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
-        expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(approvalMode === "auto" ? ["--auto-review", "acp"] : ["acp"]);
+        expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(
+          approvalMode === "auto" ? ["--auto-review", "--approve-mcps", "acp"] : ["--approve-mcps", "acp"],
+        );
       }
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
+  it("mounts OpenMausBot team tools over HTTP and respawns when their bearer changes", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-agents-"));
+    scratchDirs.push(scratch);
+    const dump = join(scratch, "dump.json");
+    const launches = join(scratch, "launches");
+    process.env.FAKE_ACP_DUMP = dump;
+    const harness = "http://127.0.0.1:8799";
+    const agents = (token: string) => ({
+      command: process.execPath,
+      args: ["/app/dist-server/agents-proxy.js"],
+      env: {
+        OMB_HARNESS_URL: harness,
+        OMB_COMMS_TOKEN: token,
+        OMB_BOT_ID: "chief",
+        OMB_THREAD_ID: "t-agents",
+        OMB_CHIEF_OF_STAFF: "1",
+        ELECTRON_RUN_AS_NODE: "1",
+      },
+    });
+
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-agents",
+      displayName: "Cursor",
+      // Catalog/auth probes share this counter; assert turn deltas, not absolute process starts.
+      environment: { FAKE_ACP_LAUNCH_COUNT_FILE: launches },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    expect(instance.adapter.capabilities.agentsMcp).toBe(true);
+    const recorder = recordEvents(instance.adapter);
+    const launchCount = () => Number(readFileSync(launches, "utf8"));
+    const afterCreate = launchCount();
+    try {
+      const first = await instance.adapter.sendTurn({
+        threadId: "t-agents",
+        text: "ping teammates",
+        approvalMode: "ask",
+        integrations: { agents: agents("token-one") },
+      });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(["--approve-mcps", "acp"]);
+      expect(JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"))).toEqual([
+        {
+          type: "http",
+          name: "agents",
+          url: `${harness}/api/internal/mcp-http/agents`,
+          headers: [
+            { name: "authorization", value: "Bearer token-one" },
+            {
+              name: "x-omb-agents-env",
+              value: Buffer.from(JSON.stringify({
+                OMB_BOT_ID: "chief",
+                OMB_THREAD_ID: "t-agents",
+                OMB_CHIEF_OF_STAFF: "1",
+              })).toString("base64url"),
+            },
+          ],
+        },
+      ]);
+      expect(launchCount()).toBe(afterCreate + 1);
+
+      const second = await instance.adapter.sendTurn({
+        threadId: "t-agents",
+        text: "create a bot",
+        approvalMode: "ask",
+        resumeCursor: "fake-acp-session",
+        integrations: { agents: agents("token-two") },
+      });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(["--approve-mcps", "acp"]);
+      expect(JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"))[0].headers)
+        .toContainEqual({ name: "authorization", value: "Bearer token-two" });
+      expect(launchCount()).toBe(afterCreate + 2);
+
+      const reused = await instance.adapter.sendTurn({
+        threadId: "t-agents",
+        text: "same bearer",
+        approvalMode: "ask",
+        resumeCursor: "fake-acp-session",
+        integrations: { agents: agents("token-two") },
+      });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === reused.turnId);
+      expect(launchCount()).toBe(afterCreate + 2);
     } finally {
       recorder.stop();
       await instance.dispose();
@@ -360,7 +453,7 @@ describe("CursorAgentDriver", () => {
     expect(await authenticateCalls({ CURSOR_AUTH_TOKEN: "token-from-env" })).toBe(0);
   });
 
-  it("omits --force when fullAuto is off and still completes a turn", async () => {
+  it("omits --force when fullAuto is off, still approves MCP, and completes a turn", async () => {
     ensureDirs();
     chmodSync(FAKE_CLI, 0o755);
     const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-safe-"));
@@ -379,7 +472,7 @@ describe("CursorAgentDriver", () => {
     try {
       const { turnId } = await instance.adapter.sendTurn({ threadId: "t-cursor-safe", text: "hi" });
       await recorder.until((e) => e.type === "turn.completed");
-      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(["acp"]);
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(["--approve-mcps", "acp"]);
       expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "cursorAgent")).toBe(true);
       expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
     } finally {
@@ -696,7 +789,7 @@ describe("cursor ACP model namespace (NS: set_model wiring)", () => {
       expect(applied).toEqual([
         { method: "session/set_model", params: { sessionId: "fake-acp-session", modelId: "default[]" } },
       ]);
-      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(["--model", "auto", "acp"]);
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(["--approve-mcps", "--model", "auto", "acp"]);
     } finally {
       recorder.stop();
       await instance.dispose();

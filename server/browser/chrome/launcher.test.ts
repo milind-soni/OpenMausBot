@@ -77,6 +77,42 @@ describe("the Chrome launcher", () => {
     expect(calibrate).toHaveBeenCalledOnce();
   });
 
+  it("refreshes the launcher language if the app language changes while its check is pending", async () => {
+    const machine = mac({ env: { LANG: "en_US.UTF-8" } });
+    let appLanguage = "en";
+    let beginCheck!: () => void;
+    let finishCheck!: () => void;
+    const checking = new Promise<void>((resolve) => { beginCheck = resolve; });
+    const check = new Promise<void>((resolve) => { finishCheck = resolve; });
+    const chrome = launcher(machine, {
+      language: () => appLanguage,
+      checkLauncher: async () => { beginCheck(); await check; },
+    });
+
+    const ready = chrome.ready(headless(chrome.path));
+    await checking;
+    expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=en'");
+    appLanguage = "ko";
+    finishCheck();
+    await ready;
+
+    expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=ko-KR'");
+  });
+
+  it("refreshes the launcher language between env and a cached ready call", async () => {
+    const machine = mac({ env: { LANG: "en_US.UTF-8" } });
+    let appLanguage = "en";
+    const chrome = launcher(machine, { language: () => appLanguage });
+    await chrome.ready(headless(chrome.path));
+    expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=en'");
+
+    expect(chrome.env()).toEqual({ AGENT_BROWSER_EXECUTABLE_PATH: chrome.path, AGENT_BROWSER_HIDE_SCROLLBARS: "0" });
+    appLanguage = "ko";
+    await chrome.ready(headless(chrome.path));
+
+    expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=ko-KR'");
+  });
+
   it("reads the identity again after Chrome updated itself in place", async () => {
     const machine = mac();
     const calibrate = vi.fn(async () => identity("155"));
@@ -250,14 +286,16 @@ describe("the Chrome launcher", () => {
   });
 
   it("gives a started browser its identity, with the person's languages as a list, only when it is this launcher's headless Chrome", async () => {
-    const machine = mac({ env: { LANG: "pt_BR.UTF-8" } });
+    const machine = mac({ env: { LANG: "en_US.UTF-8" } });
     const attached = sidecars();
     const chrome = launcher(machine, { sidecars: attached });
+    chrome.setLanguageProvider(() => "ko");
     await chrome.started("bot-1", headless(chrome.path));
     expect(attached.ensure).not.toHaveBeenCalled();
     await chrome.ready(headless(chrome.path));
+    expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=ko-KR'");
     await chrome.started("bot-1", headless(chrome.path));
-    expect(attached.ensure).toHaveBeenCalledExactlyOnceWith("bot-1", headless(chrome.path), { ...identity("155"), acceptLanguage: "pt-BR,pt,en-US,en" });
+    expect(attached.ensure).toHaveBeenCalledExactlyOnceWith("bot-1", headless(chrome.path), { ...identity("155"), acceptLanguage: "ko-KR,ko,en-US,en" });
     await chrome.started("bot-2", { command: "/engine/agent-browser", env: { AGENT_BROWSER_EXECUTABLE_PATH: chrome.path } });
     await chrome.started("bot-3", { command: "/engine/agent-browser", env: { ...headless(chrome.path).env, AGENT_BROWSER_AUTO_CONNECT: "1" } });
     await chrome.started("bot-4", headless("/bundle/chrome-headless-shell"));

@@ -59,7 +59,7 @@ Contract version: `1` (`cloudContractVersion` on the wire).
       Start fresh and says that the desktop app brings bots from a computer. On
       a Cloud that already has bots or chats of its own (a chat from a phone,
       say), it says **Your bots are already here**, and **Continue** moves on.
-      A backup file is imported from Settings → Backups, as on any server.
+      A backup file is imported from Settings → Import & export, as on any server.
    2. **Connect your AI**: the engine sign-in's own tiles and sign-in panel
       (below), with **Connected** on one that can run. While the trial's Claude
       credit lasts and nothing of the person's own can run, a line says so
@@ -139,9 +139,8 @@ sign-in instead of the welcome flow, which describes the person's own computer
 
 ### Use My Cloud on your phone
 
-1. Get the phone app: the menu under your name → **Get the phone app** (App
-   Store for iPhone, APK for Android).
-2. The same menu → **Connect your phone · to your Cloud (always on)**, or
+1. Install MausBot on your phone from the App Store or Google Play.
+2. The menu under your name → **Connect your phone · to your Cloud (always on)**, or
    **Settings → MausBot Cloud → Use My Cloud on your phone**. The Cloud opens in
    the app window at its phone pairing.
 3. **Create pairing code**, and scan the QR code with the phone app.
@@ -1128,7 +1127,8 @@ and Fly restarts the machine. The one exception: after a restore commits
 (`server/restart.ts`) and the launcher starts only the server again.
 
 The machine's secrets (`OMB_CLOUD_BOOTSTRAP_SECRET` and the relay tokens
-`OMB_CLOUD_BOAT_TOKEN`, `OMB_CLOUD_VOICE_TOKEN`, `OMB_CLOUD_DECIDER_TOKEN`, `OMB_CLOUD_X_TOKEN`)
+`OMB_CLOUD_BOAT_TOKEN`, `OMB_CLOUD_VOICE_TOKEN`, `OMB_CLOUD_DECIDER_TOKEN`, `OMB_CLOUD_X_TOKEN`,
+`OMB_CLOUD_HOSTING_TOKEN`)
 arrive as the launcher's environment, from the Fly app secrets the Admin
 sets. The launcher never puts them in a child's environment, because
 `/proc/<pid>/environ` keeps a process's starting environment for anything
@@ -1439,6 +1439,8 @@ For each service the Admin has configured, it also sets:
 | `OMB_CLOUD_DECIDER_TOKEN` | secret | This machine's decision relay token (`omb_decide_…`). It is not a Jev key and works only through the relay. |
 | `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools, and `GET /usage` for the month's calls on the Apps page's X card (`GET /api/x/status`). The home asks `GET /research/search` with no job at start, which spends nothing: a 400 means research is on, an off answer hides the research tools (x_search stays) until an hour later or a restart, and a research call refused as off does the same. A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
 | `OMB_CLOUD_X_TOKEN` | secret | This machine's X research relay token (`omb_x_…`). Not a treg key; it works only through the relay, within the plan's monthly X research calls. A signed-in desktop gets its own (`omb_xd_…`) from `POST /api/cloud/desktop/services/x` and hands it to its server in memory. |
+| `OMB_CLOUD_HOSTING_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/hosting/v1`, the Admin's app hosting relay, set only where the Admin has included app hosting on and the plan is paid. The server lists the Cloud's apps and the plan's count (`GET /apps`), publishes a bot's folder (`PUT /apps/<key>`, then each file the relay asks for) and deletes (`DELETE /apps/<key>`); `server/host/included-hosting.ts`. Absent: bots publish to the person's own Netlify account, as on a computer. |
+| `OMB_CLOUD_HOSTING_TOKEN` | secret | This machine's app hosting relay token (`omb_host_…`). Not a Netlify token; it works only through the relay, within the plan's apps and monthly publishes. Bots never get it: they call `publish_app`, and the server publishes. |
 
 A service is included only when both its URL and its token are set
 (`server/included-services.ts`). The real Boat, ElevenLabs and Jev keys stay
@@ -1491,10 +1493,10 @@ computers belong to this machine on every request.
   Workers AI or OpenRouter) until the relay accepts it too. For decisions the
   relay speaks Jev's API only: included decisions are Jev's. An own Jev or
   Workers AI key comes before them; an OpenRouter key comes after them,
-  whichever provider is selected in **Settings → Decision and extraction**.
+  whichever provider is selected in **Settings › AI › Routing and extraction**.
 - **Included decisions are on until switched off.** While the decision model
   runs on the included token, its master switch counts as on unless the person
-  switched it off in **Settings → Decision and extraction**; an explicit off
+  switched it off in **Settings › AI › Routing and extraction**; an explicit off
   always wins, and switching it back on needs no key. The per-job switches keep
   their defaults, so rooms set to Auto ask who answers, and new rooms start on
   Auto, as with a saved key. An own Jev key is on once saved, as anywhere else,
@@ -2422,7 +2424,7 @@ all arrived, and freezes this computer's copy so nothing runs in two places
 (`server/move-freeze.ts`). An older desktop's Copy this computer here gets
 `410` with "Update OpenMausBot to bring your bots here by itself."
 (`server/cloud-move-http.ts`); a backup file still restores from Settings →
-Backups. [docs/verification/cloud-send.md](verification/cloud-send.md) has the
+Import & export. [docs/verification/cloud-send.md](verification/cloud-send.md) has the
 tests.
 
 The move's journal names the Cloud by its address and, once the session lists

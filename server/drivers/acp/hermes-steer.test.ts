@@ -9,6 +9,7 @@ import { ensureDirs } from "../../config.ts";
 import type { AnyProviderDriver, ProviderInstance } from "../../contracts.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
+import { publishedMessages } from "../../harness/text-items.testkit.ts";
 import { AntigravityDriver } from "../antigravity.ts";
 import { ClineAgentDriver } from "./cline.ts";
 import { CommandCodeAgentDriver } from "./command-code.ts";
@@ -55,13 +56,13 @@ const fixtureEnv = (extra: Record<string, string> = {}) => ({
   ...extra,
 });
 
-const start = async (driver: AnyProviderDriver, extra: Record<string, string> = {}) => {
+const start = async (driver: AnyProviderDriver, extra: Record<string, string> = {}, config: Record<string, unknown> = {}) => {
   instance = await driver.create({
     instanceId: `steer-${driver.driverKind}`,
     displayName: "Steer fixture",
     enabled: true,
     environment: fixtureEnv(extra),
-    config: { cli: FAKE_CLI, fullAuto: true },
+    config: { cli: FAKE_CLI, fullAuto: true, ...config },
   } as never) as ProviderInstance;
   recorder = recordEvents(instance.adapter);
   return instance;
@@ -109,6 +110,10 @@ describe("Hermes steering", () => {
     expect(replyOf(turnId)).toEqual(["working. done; steered: Use pytest, not unittest.\nAnd keep it short."]);
     const shown = recorder!.events.filter((event) => event.turnId === turnId && event.type === "content.delta").map((event) => event.type === "content.delta" ? event.delta : "");
     expect(shown.join("")).not.toContain("Steer queued");
+    expect(publishedMessages(recorder!.events.filter((event) => event.turnId === turnId)).map(({ streamed, completed }) => ({ streamed, completed })),
+      "a steered turn is still one message under one id, with Hermes's own line left out").toEqual([
+      { streamed: "working. done; steered: Use pytest, not unittest.\nAnd keep it short.", completed: "working. done; steered: Use pytest, not unittest.\nAnd keep it short." },
+    ]);
   });
 
   it("refuses a steer once the turn has ended, without sending it", async () => {
@@ -207,5 +212,39 @@ describe("other ACP engines", () => {
     await finished(turnId);
     expect(sentPrompts()).toEqual(["session/prompt"]);
     expect(replyOf(turnId)).toEqual(["working. done"]);
+  });
+});
+
+describe("Custom ACP steering, opted in with \"steer\": true", () => {
+  it("is off unless the config says true", () => {
+    expect(CustomAcpDriver.decodeConfig({ cli: "agent acp" }).steer).toBeUndefined();
+    expect(CustomAcpDriver.decodeConfig({ cli: "agent acp", steer: "yes" }).steer).toBeUndefined();
+    expect(CustomAcpDriver.decodeConfig({ cli: "agent acp", steer: true }).steer).toBe(true);
+  });
+
+  it("steers through the agent's /steer like Hermes, and keeps its line out of the reply", async () => {
+    await start(CustomAcpDriver, { FAKE_ACP_GATE_FILE: gate() }, { steer: true });
+    expect(instance!.adapter.capabilities.queueing).toBe(true);
+    const turnId = await runningTurn();
+    expect(await instance!.adapter.steer!(threadId, "Use pytest.")).toBe("steered");
+    expect(sentPrompts()).toEqual(["session/prompt", "session/prompt", "session/prompt.steer"]);
+    await finished(turnId);
+    expect(replyOf(turnId)).toEqual(["working. done; steered: Use pytest."]);
+  });
+
+  it("refuses what the agent says it could not steer", async () => {
+    await start(CustomAcpDriver, { FAKE_ACP_GATE_FILE: gate(), FAKE_ACP_STEER_FAIL: "1" }, { steer: true });
+    const turnId = await runningTurn();
+    expect(await instance!.adapter.steer!(threadId, "use pytest")).toBe("refused");
+    await finished(turnId);
+    expect(replyOf(turnId)).toEqual(["working. done"]);
+  });
+
+  it("sends nothing to a session that does not offer steer, so the message waits for the next turn", async () => {
+    await start(CustomAcpDriver, { FAKE_ACP_GATE_FILE: gate(), FAKE_ACP_HERMES_COMMANDS: "help" }, { steer: true });
+    const turnId = await runningTurn();
+    expect(await instance!.adapter.steer!(threadId, "use pytest")).toBe("refused");
+    await finished(turnId);
+    expect(sentPrompts()).toEqual(["session/prompt"]);
   });
 });

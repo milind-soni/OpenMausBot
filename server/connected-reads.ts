@@ -15,6 +15,8 @@ export interface CalendarEvent {
   start: number;
   end: number;
   allDay: boolean;
+  /** Google Calendar's Show me as Available: this event does not block time. */
+  transparent?: boolean;
   status: "confirmed" | "tentative" | "cancelled";
   selfDeclined: boolean;
   attendees: Array<{ email: string; name?: string; self: boolean; organizer: boolean; response?: string }>;
@@ -71,6 +73,7 @@ export const GMAIL_THREAD_TOOL = "GMAIL_FETCH_MESSAGE_BY_THREAD_ID";
 export const OUTLOOK_LIST_TOOL = "OUTLOOK_LIST_MESSAGES";
 export const OUTLOOK_MESSAGE_TOOL = "OUTLOOK_GET_MESSAGE";
 const CALENDAR_READS_AT_ONCE = 4;
+const CALENDAR_PAGES = 20;
 const CALENDAR_NAME_MAX = 80;
 const GOOGLE_NOT_FOUND = /\brequested entity was not found\b/i;
 const MESSAGE_WORD = /\b(?:message|email|thread)\b/i;
@@ -210,6 +213,7 @@ function calendarEvent(raw: unknown, calendar: { id: string; owned: boolean }): 
     start: startMs,
     end: Number.isFinite(endMs) ? endMs : startMs,
     allDay,
+    ...(item.transparency === "transparent" ? { transparent: true } : {}),
     status: item.status === "cancelled" || item.status === "tentative" ? item.status : "confirmed",
     selfDeclined: attendees.some((attendee) => attendee.self && attendee.response === "declined"),
     attendees,
@@ -266,9 +270,9 @@ export function emailsFromData(data: unknown): EmailHeader[] {
   return headers;
 }
 
-/** Gmail's page token for more messages, or undefined on the last page. */
+/** Gmail or Calendar's page token for more results, or undefined on the last page. */
 export function nextPageOf(data: unknown): string | undefined {
-  const token = [record(data), record(record(data)?.response_data)].map((body) => body?.nextPageToken).find((value) => typeof value === "string" && value);
+  const token = [record(data), record(record(data)?.response_data)].flatMap((body) => [body?.nextPageToken, body?.next_page_token]).find((value) => typeof value === "string" && value);
   return typeof token === "string" ? token : undefined;
 }
 
@@ -492,9 +496,20 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
       if (times.some((time) => !Number.isFinite(time))) throw new SourceError(app, "the time window was not a finite time");
     }
 
-    async function calendars(signal?: AbortSignal): Promise<ReturnType<typeof calendarsFromData>> {
-      const data = await call(CALENDARS_TOOL, {}, signal ? { signal } : {});
-      return parsed("googlecalendar", () => calendarsFromData(data));
+    async function calendarPages<T>(slug: string, args: Record<string, unknown>, parse: (data: unknown) => T[], signal: AbortSignal): Promise<T[]> {
+      const results: T[] = [];
+      const seen = new Set<string>();
+      let page: string | undefined;
+      for (let index = 0; index < CALENDAR_PAGES; index++) {
+        const pageArgs = page ? { ...args, [slug === CALENDARS_TOOL ? "page_token" : "pageToken"]: page } : args;
+        const data = await call(slug, pageArgs, { signal });
+        results.push(...parsed("googlecalendar", () => parse(data)));
+        page = nextPageOf(data);
+        if (!page) return results;
+        if (seen.has(page)) throw new SourceError("googlecalendar", `${slug}: repeated page token`);
+        seen.add(page);
+      }
+      throw new SourceError("googlecalendar", `${slug}: too many pages to read completely`);
     }
 
     return {
@@ -502,15 +517,14 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
         requireFinite("googlecalendar", fromMs, toMs);
         const failed = new AbortController();
         const signal = AbortSignal.any([AbortSignal.timeout(readTimeoutMs), failed.signal]);
-        const listed = await calendars(signal);
+        const listed = await calendarPages(CALENDARS_TOOL, {}, calendarsFromData, signal);
         const read = [...(listed.some((calendar) => calendar.primary) ? [] : [PRIMARY_CALENDAR]), ...listed.filter((calendar) => calendar.read)];
         const perCalendar = await inParallel(read, CALENDAR_READS_AT_ONCE, async (calendar) => {
           try {
-            const data = await call(CALENDAR_LIST_TOOL, {
+            return await calendarPages(CALENDAR_LIST_TOOL, {
               calendarId: calendar.id, timeMin: new Date(fromMs).toISOString(), timeMax: new Date(toMs).toISOString(),
               singleEvents: true, orderBy: "startTime", maxResults: 100, showDeleted: true,
-            }, { signal });
-            return eventsFromData(data, { id: calendar.id, owned: calendar.owned });
+            }, (data) => eventsFromData(data, { id: calendar.id, owned: calendar.owned }), signal);
           } catch (error) {
             failed.abort();
             throw new SourceError("googlecalendar", `calendar ${calendar.name}: ${errorText(error)}`, error instanceof SourceError && error.severalAccounts);

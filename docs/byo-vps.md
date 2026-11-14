@@ -110,6 +110,22 @@ it goes ahead, and the app says what may be left on that server and the command 
 is back. (Changing the default alias still waits until its server can be listed.) Any alias from your
 `~/.ssh/config`, host key already verified by hand, is all it takes. A new bot starts on the default server.
 
+### A server that pauses when idle
+
+Some cloud boxes pause after a while without traffic and refuse SSH until they are resumed. On macOS and Linux
+you can give the app a wake step: put an executable script named `wake` in the app's SSH folder
+(`~/.openmausbot/ssh/wake`, or `ssh/wake` in your data directory). When a server cannot be reached, the app
+runs it once with the alias as its only argument (`wake my-vps`), then tries the connection once more. Make the
+script resume the box with your provider's command or API and return once the server accepts SSH again; it gets
+up to two minutes. If it exits with an error, the app shows that error next to the SSH one. Without the file
+nothing changes. Only someone who can write to the data directory can add it; nothing in the app sets it.
+
+```sh
+#!/bin/sh
+# ~/.openmausbot/ssh/wake: $1 is the SSH alias the app could not reach.
+my-provider resume "$1" && my-provider wait-ready "$1"
+```
+
 **Host key first, by hand.** Connect once manually before pointing OpenMausBot at the alias:
 
 ```sh
@@ -118,6 +134,33 @@ ssh my-vps true
 
 That puts the host key in `known_hosts` on your terms. The app never auto-accepts a host key — an alias whose
 host is unknown simply fails until you have done this once.
+
+## A machine on your Tailscale network
+
+The server does not have to be a rented VPS. Any x86_64 Linux machine that runs Docker and that you can reach
+over SSH works the same way: a home server, a spare desktop, or a computer on your Tailscale network. The bot
+still gets its own managed desktop container on that machine; it does not take over the machine's own screen.
+
+1. On that machine: install Docker and Tailscale, sign in to Tailscale, and add the SSH user to the `docker`
+   group.
+2. On the computer running OpenMausBot: join the same tailnet and add an alias whose `HostName` is the
+   machine's Tailscale name (its MagicDNS name or `100.x` address):
+
+   ```
+   Host home-box
+     HostName home-box.your-tailnet.ts.net
+     User deploy
+     IdentityFile ~/.ssh/id_ed25519
+   ```
+
+3. Check it by hand as in [Troubleshooting](#troubleshooting): `ssh home-box true`, then
+   `docker -H ssh://home-box info`.
+4. Enter `home-box` as the alias in Settings → API keys (or as one bot's own server), then choose
+   **Self-hosted VPS** for the bot.
+
+The same trust rules apply: the bot gets full control of what Docker can reach on that machine, so prefer one
+that holds nothing you would not hand to the agent. Tailscale does not close ports that are already open to the
+internet, so firewall the machine: its SSH and Docker ports should accept connections only from the tailnet.
 
 ## Security
 

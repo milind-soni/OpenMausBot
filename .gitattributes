@@ -3,7 +3,7 @@
 # compares the result to what is checked in, so if git hands Windows a CRLF
 # checkout every line differs and the drift guard fails for a reason that has
 # nothing to do with drift. Pin them to LF on every platform.
-shared/mascot-bodies.ts text eol=lf
+packages/phone-protocol/src/mascot-bodies.ts text eol=lf
 # git runs hooks through sh; a CRLF shebang line is "/bin/sh^M: bad interpreter" on every platform.
 scripts/git-hooks/* text eol=lf
 deploy/podman/*.sh text eol=lf
@@ -54,3 +54,12 @@ relay/test/vectors/** text eol=lf
 # a CRLF checkout on Windows fails every match for a reason that has nothing to do with the edge.
 deploy/fly/Caddyfile* text eol=lf
 deploy/fly/*.caddy text eol=lf
+
+# Imported by scripts/sync-phone-protocol.test.mjs through vitest, which fails with "Invalid or unexpected token" on a
+# file that starts with a shebang and has CRLF line endings (a Windows checkout), as with tighten-ratchets.mjs above.
+scripts/sync-phone-protocol.mjs text eol=lf
+
+# Bundled skills ship to Linux Clouds as they are, and server/skill-publish-to-netlify.test.ts imports a skill's helper
+# through vitest: Vite's transform (vitest 4.1.11) fails with "Invalid or unexpected token" on a file that starts
+# with a shebang and has CRLF line endings, which is what a Windows checkout made of it.
+skills/** text eol=lf

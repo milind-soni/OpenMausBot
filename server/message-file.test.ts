@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { closeSync, constants, mkdirSync, mkdtempSync, openSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -34,6 +35,27 @@ beforeEach(() => {
 afterAll(() => rmSync(suite, { recursive: true, force: true }));
 
 describe("message-linked files", () => {
+  it.skipIf(process.platform === "win32")("rejects a named pipe without waiting for a writer", async () => {
+    const fifo = join(workspace, "waiting-pipe");
+    execFileSync("mkfifo", [fifo]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const opened = openMessageFile(fifo, [workspace]).then(
+      async (file) => { await file.handle.close(); return null; },
+      (error: unknown) => error,
+    );
+    const result = await Promise.race([
+      opened,
+      new Promise<"blocked">((resolve) => { timer = setTimeout(() => resolve("blocked"), 1_000); }),
+    ]);
+    try {
+      expect(result).toMatchObject({ status: 400, message: "the link does not point to a regular file" });
+    } finally {
+      clearTimeout(timer);
+      if (result === "blocked") closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
+      await opened;
+    }
+  });
+
   it("resolves a Markdown image from an opaque source offset", () => {
     const markdown = [
       "See this:",

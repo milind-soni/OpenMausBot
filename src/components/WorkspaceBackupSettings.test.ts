@@ -19,7 +19,9 @@ type Node = ReactElement<{ children?: ReactNode; type?: string; disabled?: boole
 function nodes(value: ReactNode): Node[] {
   if (!isValidElement(value)) return [];
   const node = value as Node;
-  return [node, ...Children.toArray(node.props.children).flatMap(nodes)];
+  // A row's description and message lines hold controls too (Learn more).
+  const extra = node.props as { subtitle?: ReactNode; message?: ReactNode };
+  return [node, ...Children.toArray(node.props.children).flatMap(nodes), ...Children.toArray(extra.subtitle).flatMap(nodes), ...Children.toArray(extra.message).flatMap(nodes)];
 }
 function render(recovery: boolean | "restart" | "cloud" = false) {
   fixture.index = 0; fixture.effects = [];
@@ -41,10 +43,20 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 async function ready() { fixture.api.mockResolvedValueOnce({ busy: false }); render(); fixture.effects[0](); await flush(); }
+/** Each backup action is a row whose button opens its own small dialog. */
+const open = (which: "export" | "import") => { render().nodes.find((node) => (node.props as Record<string, unknown>)[`data-backup-${which}`] === "")!.props.onClick!(); };
+const formOf = (id: string) => render().nodes.find((node) => node.type === "form" && (node.props as { id?: string }).id === id)!;
 
 describe("Settings full backups", () => {
-  it("shows a native file input, password fields and validated summary with warnings", () => {
-    const html = render().html;
+  it("shows two rows, each opening a dialog with its file input or password fields, the details behind Learn more, and a validated summary with warnings", async () => {
+    await ready();
+    let html = render().html;
+    expect(html).toContain("Password-protected. Saved logins are not included.");
+    expect(html).not.toContain('type="password"');
+    expect(html).not.toContain('type="file"');
+    render().nodes.find((node) => (node.type as { name?: string }).name === "LearnMore")!.props.onClick!();
+    open("export"); open("import");
+    html = render().html;
     expect(html).toContain('type="file" accept=".ombbackup"');
     expect(html.match(/type="password"/g)).toHaveLength(3);
     expect(html).toContain("the disks of remote desktops");
@@ -59,6 +71,7 @@ describe("Settings full backups", () => {
   it("exports encrypted state by POST and downloads without putting the password in a URL or storage", async () => {
     await ready();
     storage.set("omb-drafts", "private draft"); storage.set("auth-token", "not exported"); storage.set("omb-webhook-credentials", "not exported either");
+    open("export");
     let view = render();
     const passwords = view.nodes.filter((node) => node.type === "input" && node.props.type === "password");
     change(passwords[0], "correct horse battery"); change(passwords[1], "correct horse battery");
@@ -66,7 +79,7 @@ describe("Settings full backups", () => {
     const link = { href: "", download: "", click: vi.fn(), remove: vi.fn() };
     vi.stubGlobal("document", { createElement: () => link, body: { append: vi.fn() } });
     fixture.api.mockResolvedValueOnce({ id: "download-id", filename: "fixture.ombbackup" });
-    const form = view.nodes.find((node) => node.type === "form")!;
+    const form = formOf("backup-export");
     submit(form); submit(form); await flush();
     expect(fixture.api).toHaveBeenCalledTimes(2); // one status, one export
     const [path, init] = fixture.api.mock.calls[1];
@@ -76,16 +89,30 @@ describe("Settings full backups", () => {
     expect(link.click).toHaveBeenCalledOnce();
     expect([...storage.values()]).not.toContain("correct horse battery");
     expect(render().html).not.toContain('value="correct horse battery"');
+    expect(render().html).not.toContain('id="backup-export"');
+  });
+
+  it("keeps the export dialog open with its reason when the export fails, so it can be tried again", async () => {
+    await ready();
+    open("export");
+    const passwords = render().nodes.filter((node) => node.type === "input" && node.props.type === "password");
+    change(passwords[0], "correct horse battery"); change(passwords[1], "correct horse battery");
+    fixture.api.mockRejectedValueOnce(new Error("Disk full"));
+    submit(formOf("backup-export")); await flush();
+    const html = render().html;
+    expect(html).toContain('id="backup-export"');
+    expect(html).toMatch(/role="alert"[^>]*>Disk full</);
   });
 
   it("uploads a raw file, validates it, and requires exact REPLACE with the staged ID", async () => {
     await ready();
     const file = new File(["encrypted fixture"], "fixture.ombbackup");
+    open("import");
     render().nodes.find((node) => node.props.type === "file")!.props.onChange!({ target: { files: [file] } });
     let view = render();
-    change(view.nodes.filter((node) => node.props.type === "password")[2], "correct horse battery");
+    change(view.nodes.filter((node) => node.props.type === "password")[0], "correct horse battery");
     fixture.api.mockResolvedValueOnce({ id: "upload-id" }).mockResolvedValueOnce({ id: "stage-id", summary });
-    submit(render().nodes.filter((node) => node.type === "form")[1]); await flush();
+    submit(formOf("backup-import")); await flush();
     expect(fixture.api.mock.calls[1]).toEqual(["/api/workspace-backup/upload", { method: "POST", headers: { "content-type": "application/octet-stream" }, body: file }]);
     expect(JSON.parse(fixture.api.mock.calls[2][1].body)).toEqual({ id: "upload-id", password: "correct horse battery" });
     view = render();
@@ -103,10 +130,11 @@ describe("Settings full backups", () => {
 
   it("does not offer a replacement after failed password validation", async () => {
     await ready();
+    open("import");
     render().nodes.find((node) => node.props.type === "file")!.props.onChange!({ target: { files: [new File(["archive"], "file.ombbackup")] } });
-    change(render().nodes.filter((node) => node.props.type === "password")[2], "wrong password");
+    change(render().nodes.filter((node) => node.props.type === "password")[0], "wrong password");
     fixture.api.mockResolvedValueOnce({ id: "upload" }).mockRejectedValueOnce(new Error("Wrong password"));
-    submit(render().nodes.filter((node) => node.type === "form")[1]); await flush();
+    submit(formOf("backup-import")); await flush();
     const html = render().html;
     expect(html).toContain('role="alert"'); expect(html).toContain("Wrong password"); expect(html).not.toContain("Replace installation");
   });
@@ -114,8 +142,9 @@ describe("Settings full backups", () => {
   it("reuploads the selected file if its upload or validated stage expires", async () => {
     await ready();
     const file = new File(["archive"], "file.ombbackup");
+    open("import");
     render().nodes.find((node) => node.props.type === "file")!.props.onChange!({ target: { files: [file] } });
-    const validate = async () => { change(render().nodes.filter((node) => node.props.type === "password")[2], "correct horse battery"); submit(render().nodes.filter((node) => node.type === "form")[1]); await flush(); };
+    const validate = async () => { change(render().nodes.filter((node) => node.props.type === "password")[0], "correct horse battery"); submit(formOf("backup-import")); await flush(); };
     const expired = Object.assign(new Error("Backup expired; upload again"), { status: 404 });
     fixture.api.mockResolvedValueOnce({ id: "upload-old" }).mockRejectedValueOnce(expired);
     await validate();

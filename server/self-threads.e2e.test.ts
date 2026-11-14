@@ -19,15 +19,18 @@ it("opens threads on a bot only for a person's own request, never from a hand-of
     const books = (await cli("new-bot", "--name", "Books")).bot;
     const planPath = join(session.info.dataDir, "room-plan.json");
     const open = (title: string, message: string, expectError: boolean) => ({ tool: "start_thread", arguments: { title, message }, expectError });
+    // The fixture runs the first unused entry that matches, and a follow-up's text still holds its parent's marker (a
+    // resumed turn quotes the request; an opened thread names its source thread, titled by "J2-JOB: …"). The parent's
+    // evidence is written only when its turn ends, which can be after the follow-up starts, so each follow-up comes first.
     writeFileSync(planPath, JSON.stringify({
       [asker.id]: { script: [
-        { key: "J1", match: ["J1-JOB"], steps: [{ arguments: { bot_ids: [books.id], message: "J1-ASK: check each ledger, one thread per ledger" } }], reply: "J1: asked Books." },
         { key: "J1-DONE", match: [SETTLED, "J1-JOB"], reply: "J1-DONE: Books checked the ledgers." },
+        { key: "J1", match: ["J1-JOB"], steps: [{ arguments: { bot_ids: [books.id], message: "J1-ASK: check each ledger, one thread per ledger" } }], reply: "J1: asked Books." },
       ] },
       [books.id]: { script: [
         { key: "J1-ASK", match: ["J1-ASK"], steps: [open("Ledger 1", "J1-SELF: check ledger 1", true)], reply: "J1-ASK: checked both ledgers here." },
-        { key: "J2", match: ["J2-JOB"], steps: [open("Ledger A", "J2-SELF: check ledger A", false)], reply: "J2: opened Ledger A." },
         { key: "J2-SELF", match: ["J2-SELF"], steps: [open("Sub-ledger", "J2-DEEPER: check the sub-ledger", true)], reply: "J2-SELF: ledger A balances." },
+        { key: "J2", match: ["J2-JOB"], steps: [open("Ledger A", "J2-SELF: check ledger A", false)], reply: "J2: opened Ledger A." },
       ] },
     }));
     const evidence = (): any[] => existsSync(`${planPath}.evidence.jsonl`)
@@ -43,7 +46,7 @@ it("opens threads on a bot only for a person's own request, never from a hand-of
 
     // The person's own request opens a job; that job opens no more.
     await cli("send", "--bot", books.id, "--task", books.activeTaskId, "--text", "J2-JOB: open one thread per ledger");
-    await expect.poll(() => evidence().some((turn) => turn.planKey === "J2-SELF"), { timeout: 20_000 }).toBe(true);
+    await expect.poll(() => ["J2", "J2-SELF"].every((key) => evidence().some((turn) => turn.planKey === key)), { timeout: 20_000 }).toBe(true);
     expect(result("J2").isError).toBeFalsy();
     expect(result("J2-SELF").isError).toBe(true);
     expect(await titles()).toContain("Ledger A");

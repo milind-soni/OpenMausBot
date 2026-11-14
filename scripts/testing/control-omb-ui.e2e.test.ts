@@ -197,10 +197,10 @@ describe("control-omb ui drives the real renderer", () => {
     })()`);
     await click("You");
     await click("Settings");
-    // Settings is a lazy chunk: it paints once the chunk arrives. Keys sit on the AI page, under API keys.
+    // Settings is a lazy chunk: it paints once the chunk arrives. Keys sit on the AI page, under Other services.
     await expect.poll(() => evaluate(`(() => {
       document.querySelector('[data-settings-page="ai"]')?.click();
-      document.querySelector('[data-settings-disclosure="ai-keys"] button[aria-expanded="false"]')?.click();
+      document.querySelector('[data-settings-disclosure="ai-other-services"] button[aria-expanded="false"]')?.click();
       return Boolean(${row}?.checkVisibility());
     })()`), { timeout: 10_000 }).toBe(true);
     // The servers section opens on its own, because a key is saved there.
@@ -366,8 +366,11 @@ describe("control-omb ui drives the real renderer", () => {
     const [eventsTab] = refsNamed(inspected, "Events", "tab");
     expect(eventsTab).toBeDefined();
     await ui("click", info.ui, "--ref", eventsTab);
-    const events = await ui("snapshot", info.ui);
-    expect(events.snapshot).toContain("turn.started");
+    const events = await vi.waitFor(async () => {
+      const snapshot = await ui("snapshot", info.ui);
+      expect(snapshot.snapshot).toContain("turn.started");
+      return snapshot;
+    }, { timeout: 10_000 });
     const [rawTab] = refsNamed(events, "Raw", "tab");
     await ui("click", info.ui, "--ref", rawTab);
     expect((await ui("snapshot", info.ui)).snapshot).toContain('tab "Raw" [selected');

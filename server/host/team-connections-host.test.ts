@@ -290,6 +290,55 @@ describe("apps each person connects", () => {
     expect(host.connectRefusal({ threadId: "ada-chat", generation: "g", connectorsFor: ADA }, ["slack"])).toMatch(/Slack is Acme's, connected once for everyone by its owner or an admin/);
     expect(setup({ team: false }).host.connectRefusal({ threadId: "ada-chat", generation: "g" }, ["gmail"])).toBeNull();
   });
+
+  describe("the connected app an MCP server that wants a sign-in can be swapped for", () => {
+    const SERVERS = { gmail: { type: "http", url: "https://mail.example/mcp", headers: {} }, calendar: { type: "http", url: "https://calendarmcp.googleapis.com/mcp/v1", headers: {} } } as Record<string, McpServerSpec>;
+    const SCOUT = { id: "scout", name: "Scout" };
+    const open = { servers: SERVERS, bridged: true, blocked: () => undefined };
+    /** Calendar connected on the team's installation, read the way a turn reads it: with its connected-apps bridge. */
+    async function calendarConnected(options: { team?: boolean } = {}) {
+      const made = setup(options);
+      made.composio.connectedServices.mockImplementation(async () => ({ googlecalendar: { connected: true, pending: false, status: "ACTIVE", accounts: [] } }) as never);
+      await made.host.appsIntegrations(SCOUT, "main-chat", "gen-1");
+      return made.host;
+    }
+
+    it("offers the card for an app not connected yet, and points to one already connected", async () => {
+      const lookup = (await calendarConnected({ team: false })).mcpServerApps(SCOUT, open)!;
+      expect(lookup("gmail", "https://mail.example/mcp")).toEqual({ slug: "gmail", label: "Gmail", connected: false });
+      expect(lookup("calendar", "https://calendarmcp.googleapis.com/mcp/v1")).toEqual({ slug: "googlecalendar", label: "Google Calendar", connected: true });
+      expect(lookup("mail", "https://mail.example/mcp"), "an unknown server").toBeNull();
+    });
+
+    it("does so on a Team Cloud for a team app on the team's bridge, never for a person's app", async () => {
+      const host = await calendarConnected();
+      expect(host.mcpServerApps(SCOUT, open)!("gmail", "")).toEqual({ slug: "gmail", label: "Gmail", connected: false });
+      host.scopes.set("app", "gmail", "person");
+      expect(host.mcpServerApps(SCOUT, open)!("gmail", "")).toBeNull();
+      expect(host.mcpServerApps(SCOUT, open)!("calendar", "https://calendarmcp.googleapis.com/mcp/v1")?.connected).toBe(true);
+    });
+
+    it("gives no app without the turn's bridge, or where the bot's tool selection, scopes, grants or policy leave it out", async () => {
+      const host = await calendarConnected({ team: false });
+      expect(host.mcpServerApps(SCOUT, { ...open, bridged: false }), "no connected-apps bridge").toBeUndefined();
+      expect(host.mcpServerApps({ ...SCOUT, composio: false }, open), "connected apps off for this bot").toBeUndefined();
+      expect(host.mcpServerApps({ ...SCOUT, toolScope: { deny: ["mcp:composio:*"] } }, open), "its tool selection drops connected apps").toBeUndefined();
+      expect(host.mcpServerApps({ ...SCOUT, toolScope: { allow: ["native:*"] } }, open), "its tool selection names no connected-apps tool").toBeUndefined();
+      expect(host.mcpServerApps(SCOUT, { ...open, servers: { mail: { type: "http", url: "https://mail.example/mcp", headers: {} } } }), "no server stands for an app").toBeUndefined();
+      const noCard = host.mcpServerApps({ ...SCOUT, toolScope: { deny: ["mcp:composio:COMPOSIO_MANAGE_CONNECTIONS"] } }, open)!;
+      expect(noCard("gmail", ""), "no card it may show").toBeNull();
+      expect(noCard("calendar", "https://calendarmcp.googleapis.com/mcp/v1")?.connected, "an app it already has").toBe(true);
+      expect(host.mcpServerApps(SCOUT, { ...open, blocked: (slug) => (slug === "gmail" ? "Gmail is off here." : undefined) })!("gmail", ""), "refused by policy").toBeNull();
+      expect(host.mcpServerApps({ ...SCOUT, connectorScopes: { apps: { slack: "write" } } }, open)!("gmail", ""), "outside its scopes").toBeNull();
+      expect(host.mcpServerApps({ ...SCOUT, connectorTools: { slack: { tools: "*" } } }, open)!("gmail", ""), "outside its grants").toBeNull();
+    });
+
+    it("never waits for the apps connected: before the first read it knows none", () => {
+      const { host, composio } = setup({ team: false });
+      expect(host.mcpServerApps(SCOUT, open)!("calendar", "https://calendarmcp.googleapis.com/mcp/v1")).toEqual({ slug: "googlecalendar", label: "Google Calendar", connected: false });
+      expect(composio.connectedServices).not.toHaveBeenCalled();
+    });
+  });
 });
 
 const BOT = { id: "bot-1", name: "Bot" };

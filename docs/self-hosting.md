@@ -660,7 +660,7 @@ computer?** flow above, and its bots stay where they are. Both sides need this
 release: an older server says to update it first.
 
 To move by hand instead, export a backup from this computer in **Settings →
-Backups → Export backup**, then import it on the server in **Settings → Backups
+Import & export → Export backup**, then import it on the server in **Settings → Import & export
 → Import backup**. API keys, engine sign-ins and paired devices stay where they
 are on both sides; routines arrive paused. An older desktop app's **Copy this
 computer here** is answered with "Update OpenMausBot to bring your bots here by
@@ -1501,6 +1501,13 @@ every release instead.
 
 A server installed with the [installer](deploy-vps.md#quick-start-one-command-on-your-own-domain)
 updates with `sudo /opt/openmausbot/update.sh`, which the installer puts there.
+Its admins can also press **Update server** in **Settings → Updates**, which runs
+that same script on the server; a Docker checkout gets the button with
+`sudo deploy/update-runner.sh --install`. Until the bots' sandbox is on for
+self-hosted servers, a bot can ask for the same update, so the runner allows only
+the standard forward update, once per stable release, and never removes your own
+copy of the data. [How it works and
+what it can and cannot do](deploy-vps.md#from-the-app-update-server).
 
 ```sh
 cd deploy && git pull && ./update.sh                                    # Docker: copy the data, update, roll back on failure

@@ -57,6 +57,7 @@ export function createMcpHealth(deps: McpHealthDeps) {
   try { state = JSON.parse(readFileSync(deps.file, "utf8")) as Record<string, ServerHealth>; } catch {}
   const save = () => { try { writeFileAtomic(deps.file, JSON.stringify(state), { mode: 0o600 }); } catch (error) { console.warn("[mcp] could not save server checks:", error); } };
   const running = new Map<string, Promise<void>>();
+  const generations = new Map<string, number>();
   const waiting: Array<() => void> = [];
   let active = 0;
   const slot = async <T,>(work: () => Promise<T>): Promise<T> => {
@@ -72,8 +73,9 @@ export function createMcpHealth(deps: McpHealthDeps) {
   };
   const due = (check: McpStartCheck | undefined) => !check || now() - check.at >= (check.ok ? RECHECK_STARTED_MS : RECHECK_FAILED_MS);
 
-  const record = (name: string, server: CommandServer, botId: string, result: { ok: true } | { ok: false; error: string }) => {
-    const key = startKey(server);
+  const record = (name: string, server: CommandServer, botId: string, key: string, generation: number, result: { ok: true } | { ok: false; error: string }) => {
+    const current = deps.servers()[name];
+    if (!current || (generations.get(name) ?? 0) !== generation || current.bot !== server.bot || startKey(current) !== key) return;
     const health = state[name]?.key === key && state[name]!.checks ? state[name]! : (state[name] = { key, checks: {} });
     health.checks[standsFor(server, botId)] = result.ok ? { ok: true, at: now() } : { ok: false, at: now(), error: result.error };
     const tell = !result.ok && health.told !== key;
@@ -85,12 +87,14 @@ export function createMcpHealth(deps: McpHealthDeps) {
   };
 
   const check = (name: string, server: CommandServer, botId: string): Promise<void> => {
-    const id = `${name}\u0000${standsFor(server, botId)}`;
+    const key = startKey(server);
+    const generation = generations.get(name) ?? 0;
+    const id = `${name}\u0000${standsFor(server, botId)}\u0000${key}\u0000${generation}`;
     const pending = running.get(id);
     if (pending) return pending;
     const work = slot(() => deps.start(name, server, botId))
       .catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) }))
-      .then((result) => record(name, server, botId, result))
+      .then((result) => record(name, server, botId, key, generation, result))
       .finally(() => running.delete(id));
     running.set(id, work);
     return work;
@@ -144,6 +148,7 @@ export function createMcpHealth(deps: McpHealthDeps) {
     },
     /** A server was added, changed or turned on: checked again now. */
     changed(name: string): void {
+      generations.set(name, (generations.get(name) ?? 0) + 1);
       delete state[name];
       save();
       checkUsers(name, true);

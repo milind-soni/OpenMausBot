@@ -1,3 +1,4 @@
+import { SettingsFoldRow, SettingsRows } from "../SettingsPrimitives";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, Search } from "lucide-react";
 import { useStore, type ConfigStatus } from "@/state/store";
@@ -9,10 +10,10 @@ import { LiveProviderSettings } from "../LiveProviderSettings";
 import { VoiceEveryReplySetting } from "../VoiceEveryReplySetting";
 import { BuiltInReplyWait, LmStudioServer, OtherOpenAiCompatServers } from "../OpenAiCompatServers";
 import { OllamaServer } from "../OllamaServer";
-import { KEY_CATALOG, KEY_SECTIONS, keyMatches, savedState, type KeyEntry, type KeyId, type KeySectionId } from "./key-catalog";
+import { KEY_CATALOG, KEY_SECTIONS, keyHidden, keyMatches, savedState, type KeyEntry, type KeyId, type KeySectionId } from "./key-catalog";
 import { finishKeyFocus, useKeyFocus, type KeyFocusRequest } from "./key-focus";
 import { AnthropicEveryClaudeBot, OpenAiCompatUrl, OpenCodeProviderKeys, VpsConnection } from "./KeyPanels";
-import { KEY_ROW, KeyRow, MaskedKey, RowHeading, type KeyStatus } from "./KeyRow";
+import { KEY_CONTENT, KEY_ROW, KeyRow, MaskedKey, RowHeading, type KeyStatus } from "./KeyRow";
 
 const CARD = "rounded-xl bg-card in-data-[settings-look=simple]:rounded-[12px] in-data-[settings-look=simple]:border-[0.5px] in-data-[settings-look=simple]:border-(--settings-edge) in-data-[settings-look=simple]:bg-menu";
 const HIGHLIGHT_MS = 1600;
@@ -45,7 +46,7 @@ function PanelRow({ entry, visible }: { entry: KeyEntry; visible: boolean }) {
   return (
     <div data-key-row={entry.id} role="group" aria-labelledby={titleId} className={KEY_ROW}>
       <RowHeading entry={entry} status={status} titleId={titleId} />
-      <div className="flex flex-col gap-2 pl-8">{PANELS[entry.id]?.(visible)}</div>
+      <div className={cn("flex flex-col gap-2", KEY_CONTENT)}>{PANELS[entry.id]?.(visible)}</div>
     </div>
   );
 }
@@ -59,7 +60,7 @@ function ElsewhereRow({ entry }: { entry: KeyEntry }) {
   return (
     <div data-key-row={entry.id} role="group" aria-labelledby={titleId} className={KEY_ROW}>
       <RowHeading entry={entry} status={status} titleId={titleId} />
-      <div className="flex flex-col gap-2 pl-8">
+      <div className={cn("flex flex-col gap-2", KEY_CONTENT)}>
         {saved.configured && <div className="flex"><MaskedKey saved={saved} label={t(entry.labelKey)} /></div>}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {entry.whereKey && <span className="min-w-0 flex-1 text-[12px] leading-4 text-ink-secondary">{t(entry.whereKey)}</span>}
@@ -123,7 +124,9 @@ function landOn(page: HTMLElement | null, request: KeyFocusRequest, section: Key
   return true;
 }
 
-export function KeysPage() {
+/** `bare`: inside AI's Other services, every section is a fold row in one card; `exclude`: sections listed elsewhere
+ * (AI providers are AI's own Providers list), unless a search or a link asks for a key in one. */
+export function KeysPage({ bare = false, exclude = [] }: { bare?: boolean; exclude?: KeySectionId[] } = {}) {
   const { state } = useStore();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<ReadonlySet<KeySectionId>>(() => new Set(
@@ -149,14 +152,42 @@ export function KeysPage() {
     return () => window.cancelAnimationFrame(frame);
   }, [focus]);
 
-  // With Azure chosen, Live calls do not use the OpenAI key that row points at.
-  const azureLive = state.config?.live?.provider === "azure";
-  const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q) && !(azureLive && entry.id === "liveCalls"));
-  const sections = KEY_SECTIONS.flatMap((section) => {
+  const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q, state.config) && !keyHidden(entry.id, state.config));
+  const asked = focus ? KEY_CATALOG.find((entry) => entry.id === focus.row)?.section : undefined;
+  const sections = KEY_SECTIONS.filter((section) => !exclude.includes(section.id) || section.id === asked).flatMap((section) => {
     const own = rows.filter((entry) => entry.section === section.id);
     return own.length > 0 ? [{ id: section.id, rows: own }] : [];
   });
 
+  const toggle = (id: KeySectionId) => setOpen((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
+  if (bare) {
+    return (
+      <div ref={pageRef} data-keys-page="">
+        {/* The key rows inside lead with their provider's mark, so every row of this card keeps the 32 px slot column
+            (empty on the fold rows), and the card has one text edge and one divider inset (§6.5). */}
+        <SettingsRows icons>
+          {sections.map(({ id, rows: sectionRows }) => {
+            const section = KEY_SECTIONS.find((candidate) => candidate.id === id)!;
+            const count = sectionRows.filter((entry) => connected(entry, state.config)).length;
+            return (
+              <SettingsFoldRow key={id} id={`keys-${id}`} title={t(section.titleKey)} subtitle={t(section.purposeKey)} leading={<span aria-hidden="true" />}
+                value={count > 0 ? t("keys.section.connected", { count }) : undefined} open={open.has(id)} onToggle={() => toggle(id)}>
+                <div data-keys-section={id} className="flex flex-col gap-0.5 py-1.5">
+                  {sectionRows.map((entry) => <KeyCatalogRow key={entry.id} entry={entry} visible={open.has(id)} />)}
+                  {id === "voice" && <VoiceEveryReplySetting />}
+                </div>
+              </SettingsFoldRow>
+            );
+          })}
+        </SettingsRows>
+      </div>
+    );
+  }
   return (
     <div ref={pageRef} data-keys-page className="flex flex-col gap-4">
       <p className="text-[13px] leading-[18px] text-ink-secondary">{t("settings.connections.subtitle")}</p>

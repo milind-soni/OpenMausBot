@@ -150,7 +150,7 @@ async function firstLiveCall() {
   expect(requests.map(({ path, method }) => `${method} ${path}`)).toEqual(["POST /api/live/session"]);
   expect(text()).not.toContain("Call unavailable");
   expect(container.querySelector("input")).toBeNull();
-  const openApiKeys = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Open API keys");
+  const openApiKeys = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Open AI › Other services");
   press(openApiKeys ?? null);
   expect(text()).not.toContain(KEY_NEEDED);
 
@@ -263,7 +263,7 @@ describe("calling a bot off the Mac", () => {
   it.each(["win32", "linux"] as const)("on This computer in the %s app with no Fish Audio key, the call is Live, Take turns asks for the key, and Live points to API keys", async (platform) => {
     open(desktopApp(platform, "this-computer"));
     chat(THIS_COMPUTER);
-    expectTurnsDisabled("Add a Fish Audio key to take turns on calls. On this computer, Take turns hears you through Fish Audio speech-to-text. Add a Fish Audio key in Settings → API keys.");
+    expectTurnsDisabled("Add a Fish Audio or ElevenLabs key to take turns on calls. On this computer, Take turns hears you through Fish Audio or ElevenLabs speech-to-text. Add either key in Settings → API keys.");
     await firstLiveCall();
   });
 
@@ -274,7 +274,7 @@ describe("calling a bot off the Mac", () => {
     press(container.querySelector('[aria-label="Call mode"]'));
     const [turns] = menuItems();
     expect(turns?.hasAttribute("aria-disabled")).toBe(false);
-    expect(turns?.textContent).toContain("Fish Audio turns what you say into text, so your voice goes to Fish Audio.");
+    expect(turns?.textContent).toContain("Fish Audio (or ElevenLabs, if that's the key you saved) turns what you say into text, so your voice goes there.");
   });
 
   it.each([
@@ -340,7 +340,7 @@ describe("calling a bot off the Mac", () => {
       open(desktopApp(platform, "this-computer"));
       flushSync(() => root.render(null));
       roomHeader(THIS_COMPUTER);
-      expect(callButton()?.getAttribute("aria-label"), `${platform} on This computer`).toBe("Add a Fish Audio key to take turns on calls");
+      expect(callButton()?.getAttribute("aria-label"), `${platform} on This computer`).toBe("Add a Fish Audio or ElevenLabs key to take turns on calls");
       flushSync(() => root.render(null));
       roomHeader({ ...THIS_COMPUTER, savedKeys: { fishAudioKey: { configured: true } } } as AppState["config"]);
       expect(callButton()?.getAttribute("aria-label"), `${platform} with a key`).toBe("Call Standup");

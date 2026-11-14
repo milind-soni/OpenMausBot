@@ -22,6 +22,7 @@ import { REMOTE_MCP_STARTUP_MS, remoteMcpSpec } from "../mcp-http.ts";
 import { compileToolSchema, schemaProblems, serverToolValidator, type ServerToolCheck } from "../mcp-schema-validator.ts";
 import { fitToolList, withoutDanglingReferences } from "../mcp-tool-schema.ts";
 import { listsComputerTool } from "../computer-tool-list.ts";
+import { READ_OPEN_PAGE_ONLY, readsAroundBrowser } from "../browser-tool-shape.ts";
 import { capToolList, learnToolCountLimit, shareToolBudget, toolCountLimitFromError } from "../tool-count-limit.ts";
 import type { ToolSchemaProfile } from "../tool-schema-profile.ts";
 import { allowsTool, canUseMcpServer, parseToolScope, type ToolScope } from "../../shared/tool-scope.ts";
@@ -420,6 +421,18 @@ export function loopbackNavigationHint(tool: string, args: unknown, text: string
   return " That address is the loopback of the machine running this browser, not your own computer: open the site by the LAN address it answers on (for example http://192.168.1.20:8188), which must be reachable from the server, and allow it under Settings → Browser → Open sites on this server.";
 }
 
+/** agent-browser's read hides `url`: a call whose only misfit is a string url gets the way to read an address instead of the bare schema misfit. */
+function readsAddressOnly(tool: RegisteredTool, args: unknown): boolean {
+  if (!tool.builtInBrowser || !readsAroundBrowser({ name: tool.name, arguments: args }) || !object(args) || typeof args.url !== "string") return false;
+  const { url: _url, ...rest } = args;
+  return tool.schema(rest);
+}
+
+/** READ_OPEN_PAGE_ONLY with the tool names this chat registered for the browser server. */
+function readOpenPageOnly(server: string): string {
+  return READ_OPEN_PAGE_ONLY.replace(/agent_browser_(?:open|read)/gu, (tool) => chatToolName(server, tool));
+}
+
 function omitBlankDefaults(builtInBrowser: boolean, tool: string, args: unknown) {
   if (!builtInBrowser) return;
   normalizeBuiltInBrowserArgs(tool, args);
@@ -708,7 +721,9 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     if (!tool) throw new Error("The requested tool was not advertised for this turn");
     if (selectionExcludes(tool, args)) throw new Error("Tool selection excludes this tool");
     omitBlankDefaults(tool.builtInBrowser, tool.name, args);
-    if (!object(args) || (!(tool.searched && isDirectoryTool(tool.name)) && !tool.schema(args))) throw new Error(ARGUMENTS_MISFIT);
+    if (!object(args) || (!(tool.searched && isDirectoryTool(tool.name)) && !tool.schema(args))) {
+      throw new Error(readsAddressOnly(tool, args) ? readOpenPageOnly(tool.server) : ARGUMENTS_MISFIT);
+    }
   };
   const viewOf = (tool: RegisteredTool, args: Record<string, unknown>, title: string): ChatToolCallView => {
     const runs = target(tool, args);

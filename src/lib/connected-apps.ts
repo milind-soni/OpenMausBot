@@ -22,6 +22,11 @@ export interface ConnectorInventory {
 
 const REFUSED_INVENTORY: ConnectorInventory = { services: {}, authoritative: true, refused: true };
 
+function unavailableInventory(fallback: Record<string, ConnectorStatus> = {}): ConnectorInventory {
+  cachedConnectorStatusAuthoritative = false;
+  return { services: cachedConnectorStatus ?? readCachedInventory()?.services ?? fallback, authoritative: false };
+}
+
 export function preloadConnectedApps(force = false, background = false): Promise<ConnectorInventory> { // background: src/state/api.ts
   if (!force && cachedConnectorStatus !== null && Date.now() - cachedConnectorStatusAt < CONNECTOR_STATUS_CACHE_MS) {
     return Promise.resolve({
@@ -36,8 +41,7 @@ export function preloadConnectedApps(force = false, background = false): Promise
       if (!response) return REFUSED_INVENTORY;
       const services: Record<string, ConnectorStatus> = response.services ?? {};
       if (response.credentialStore === "unavailable" || response.inventoryComplete === false) {
-        cachedConnectorStatusAuthoritative = false;
-        return { services: readCachedInventory()?.services ?? services, authoritative: false };
+        return unavailableInventory(services);
       }
       cachedConnectorStatus = services;
       cachedConnectorStatusAt = Date.now();
@@ -45,7 +49,7 @@ export function preloadConnectedApps(force = false, background = false): Promise
       writeCachedInventory(services, Date.now());
       return { services, authoritative: true };
     })
-    .catch(() => ({ services: readCachedInventory()?.services ?? {}, authoritative: false }))
+    .catch(() => unavailableInventory())
     .finally(() => {
       connectorStatusRequest = null;
     });

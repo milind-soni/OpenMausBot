@@ -12,7 +12,7 @@ import {
   withConnectionParameters,
 } from "./connector-advertisement.ts";
 import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolAnswer, appToolCall, appToolEntries, parseAppToolsEnv } from "./connector-app-tools.ts";
-import { ARGUMENT_REFUSAL, argumentRefusalNote, fitArguments, fittedArgumentsNote } from "./connector-arguments.ts";
+import { ARGUMENT_REFUSAL, argumentRefusalNote, fitArguments, fittedArgumentsNote, preservesNumericText } from "./connector-arguments.ts";
 import { annotateFailedCall } from "./connector-scope-hint.ts";
 import { withSignedOutHint } from "./connector-signed-out-hint.ts";
 import { AUTH_CONFIG_ID } from "../shared/connector-availability.ts";
@@ -205,17 +205,18 @@ function connectorAdds(args: unknown): { requests: ConnectorRequest[]; badAuthCo
   return { requests: checked, badAuthConfig };
 }
 
-/** Resolves to the harness's line on which auth config each toolkit connects with, when it names one. */
-async function showConnectorCards(items: ConnectorRequest[]): Promise<string> {
+/** Resolves to the harness's lines on which auth config each toolkit connects with, and on apps already connected, when it has any. */
+async function showConnectorCards(items: ConnectorRequest[]): Promise<{ notes: string; nothingToSignIn: boolean }> {
   const response = await fetch(`${HARNESS}/api/internal/connectors/request`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
     body: JSON.stringify({ botId: BOT_ID, threadId: THREAD_ID, items, resumeKey: randomUUID() }),
     signal: AbortSignal.timeout(30_000),
   });
-  const body = (await response.json().catch(() => ({}))) as { error?: unknown; authConfigNote?: unknown };
+  const body = (await response.json().catch(() => ({}))) as { error?: unknown; authConfigNote?: unknown; connectedNote?: unknown; nothingToSignIn?: unknown };
   if (!response.ok) throw new Error(String(body.error ?? `could not show connection card (HTTP ${response.status})`));
-  return typeof body.authConfigNote === "string" && body.authConfigNote ? ` ${body.authConfigNote}` : "";
+  const notes = [body.authConfigNote, body.connectedNote].map((note) => (typeof note === "string" && note ? ` ${note}` : "")).join("");
+  return { notes, nothingToSignIn: body.nothingToSignIn === true };
 }
 
 /** The harness's answer to a bot's search of the catalog. */
@@ -321,11 +322,13 @@ async function handle(received: Json): Promise<void> {
       return;
     }
     if (requests.length) {
-      const authConfigNote = await showConnectorCards(requests);
+      const { notes, nothingToSignIn } = await showConnectorCards(requests);
       const labels = requests.map((r) => (r.alias ? `${r.slug} (${r.alias})` : r.slug)).join(", ");
       send(textResult(
         id,
-        `OpenMausBot showed the user a secure connection card for ${labels}.${authConfigNote} End this turn now. The app will continue the task automatically after the connection finishes.`,
+        nothingToSignIn
+          ? `OpenMausBot showed the user a card that ${labels} is already connected; no sign-in started.${notes} Do not end this turn: carry on now.`
+          : `OpenMausBot showed the user a secure connection card for ${labels}.${notes} End this turn now. The app will continue the task automatically after the connection finishes.`,
       ));
       return;
     }
@@ -368,9 +371,28 @@ input.on("line", (line) => {
   const trimmed = line.trim();
   if (!trimmed) return;
   let message: Json;
+  const unsafeContainers = new WeakSet<object>();
+  const unsafeArgumentOwners = new WeakSet<object>();
   try {
-    message = JSON.parse(trimmed) as Json;
+    message = JSON.parse(trimmed, function (key: string, value: unknown, context?: { source?: string }) {
+      const unsafe = typeof value === "number"
+        ? context?.source === undefined || !preservesNumericText(context.source, value)
+        : value !== null && typeof value === "object" && unsafeContainers.has(value);
+      if (unsafe) {
+        unsafeContainers.add(this);
+        if (key === "arguments") unsafeArgumentOwners.add(this);
+      }
+      return value;
+    }) as Json;
   } catch {
+    return;
+  }
+  if (message.method === "tools/call" && message.params !== null && typeof message.params === "object"
+    && unsafeArgumentOwners.has(message.params)) {
+    if (message.id !== undefined) send(textResult(message.id,
+      'This connected-app call was not sent: an argument contains a numeric literal that cannot be preserved. '
+      + 'Send precision-sensitive IDs as JSON strings when the tool schema accepts strings, for example '
+      + '{"record_id":"9007199254740993"}; otherwise check the original value before retrying.', true));
     return;
   }
   void handle(message).catch((error) => {

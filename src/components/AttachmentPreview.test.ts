@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AttachedFileChips,
   AttachedImageGallery,
+  AttachmentPreviewDialog,
   MarkdownImagePreview,
   OutsideWorkspaceFile,
   canonicalDownloadFilename,
@@ -299,5 +300,50 @@ describe("local Markdown image lifecycle", () => {
     )).toBe(
       "/api/threads/thread-one/messages/message-two/file?preview=1&ref=42",
     );
+  });
+});
+
+describe("image preview copy button", () => {
+  const image = { src: "/api/files/shot.png", name: "shot.png", downloadUrl: "/api/files/shot.png" };
+
+  async function openPreview() {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(createElement(AttachmentPreviewDialog, { image, onClose: () => {} })); });
+    const button = () => document.querySelector<HTMLButtonElement>('button[title="Copy image"], button[title="Image copied"]');
+    return { button, close: () => act(() => root.unmount()) };
+  }
+
+  it("copies the shown image as a PNG and says so", async () => {
+    const write = vi.fn(async (items: { items: Record<string, Promise<Blob>> }[]) => {
+      await items[0]!.items["image/png"];
+    });
+    vi.stubGlobal("ClipboardItem", class { constructor(readonly items: Record<string, Promise<Blob>>) {} });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Blob(["png"], { type: "image/png" }))));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { write } });
+    const preview = await openPreview();
+    try {
+      expect(preview.button()?.getAttribute("aria-label")).toBe("Copy shot.png as an image");
+      await act(async () => { preview.button()!.click(); });
+      expect(write).toHaveBeenCalledOnce();
+      expect(fetch).toHaveBeenCalledWith("/api/files/shot.png");
+      expect(preview.button()?.title).toBe("Image copied");
+    } finally {
+      await preview.close();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("is hidden where the clipboard cannot take images", async () => {
+    vi.stubGlobal("ClipboardItem", undefined);
+    const preview = await openPreview();
+    try {
+      expect(preview.button()).toBeNull();
+      expect(document.querySelector('a[title="Download"]')).not.toBeNull();
+    } finally {
+      await preview.close();
+      vi.unstubAllGlobals();
+    }
   });
 });

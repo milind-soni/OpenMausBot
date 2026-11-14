@@ -96,13 +96,14 @@ export function ensureSectionMemoryKey(section?: string | null): string {
   }
   return data.memoryKeys[name] ?? name;
 }
-export function ensureSections(names: (string | undefined)[]): boolean {
+/** Registers any of `names` that are not departments yet; the ones it added. */
+export function ensureSections(names: (string | undefined)[]): string[] {
   const data = loadFile(true);
-  const sections = [...new Set([...data.sections, ...names.map(sectionContextKey).filter(Boolean)])];
-  if (sections.length === data.sections.length) return false;
-  for (const name of sections) if (!data.sections.includes(name)) data.memoryKeys[name] = `team:${randomUUID()}`;
-  saveFile({ ...data, sections });
-  return true;
+  const added = [...new Set(names.map(sectionContextKey).filter((name) => name && !data.sections.includes(name)))];
+  if (!added.length) return added;
+  for (const name of added) data.memoryKeys[name] = `team:${randomUUID()}`;
+  saveFile({ ...data, sections: [...data.sections, ...added] });
+  return added;
 }
 
 export function changeEmptySection(name: string, nextName: string | null): void {

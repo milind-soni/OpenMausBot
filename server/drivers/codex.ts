@@ -53,12 +53,12 @@ import { commandSummary, toolDetailPreview } from "../tool-summary.ts";
 import { codexDeveloperInstructions, syncCodexInstructions } from "./codex-instructions.ts";
 import { volatileContextNote, withContextNote } from "./prompt-split.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
-import { CodexDeviceAuthController } from "./codex-device-auth.ts";
+import { CodexDeviceAuthController } from "./codex-device-auth.ts"; import { messageItem } from "../harness/text-items.ts";
 import { codexAccountEmail, codexHome } from "./codex-identity.ts";
-import { linkSharedCodexHome } from "./codex-shared-home.ts";
+import { keepChatsOutOfCodexHistory, linkSharedCodexHome } from "./codex-shared-home.ts";
 import { containsControlCharacter, mcpAppApprovalForm, mcpAppApprovalText, mcpElicitationDeclined, plainRecord } from "./codex-app-approval.ts";
 import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, codexProviderMismatch, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexSignInRefused, codexUserError, codexUserFailure, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
-import { codexLoginCheck, codexLoginKind, codexLoginStatus, storedCodexLogin } from "./codex-login.ts";
+import { codexLoginCheck, codexLoginKind, readCodexLogin, storedCodexLogin } from "./codex-login.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts"; import { codexImageInputs, withoutInlineImages } from "./codex-images.ts";
@@ -577,7 +577,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const hideRefusedModel = (raw: string) => hidePlanRefusedModel(turn.model, raw, route);
       const signedOut = chatgptTurn && await loginCheck.check(childEnv()) === "missing";
       const authBridge = planAuth && await planRenewal.supported() ? await startPlanTokenBridge(() => planAuth.accessToken(), () => { assertPlanCurrent(); if (stopRequested) throw new Error("This task has ended."); }) : null;
-      try { assertPlanCurrent(); if (active.has(threadId)) throw new Error("a turn is already running on this thread"); } catch (error) { authBridge?.close(); throw error; }
+      let turnConfigArgs: string[]; try { assertPlanCurrent(); if (active.has(threadId)) throw new Error("a turn is already running on this thread"); turnConfigArgs = codexTurnConfigArgs(turn, childEnv()); } catch (error) { authBridge?.close(); throw error; }
       const turnId = newId();
       if (signedOut) {
         emit({ ...base(threadId, turnId), type: "turn.started" });
@@ -604,13 +604,13 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       };
       const launchAttempt = async (attempt: number): Promise<void> => {
         const env = childEnv();
-        const launchedLogin = chatgptTurn ? storedCodexLogin(env) : null;
+        const launchedLogin = chatgptTurn ? storedCodexLogin(env) : null; if (ownLogin) keepChatsOutOfCodexHistory(env, instanceId);
         if (authBridge) Object.assign(env, authBridge.env); else if (planToken) env.OPENMAUSBOT_CHATGPT_TOKEN = planToken;
         const appServerArgs = ["app-server", ...(plan && planLane === "maus" ? chatgptPlanCodexArgs(!!authBridge) : config.endpoint ? endpointCodexArgs(config.endpoint) : config.managed ? managedCodexArgs(config.managed) : codexSelectedProviderArgs(env, turn.model)), ...codexToolSurfaceArgs(),
           // Native shell snapshots can restore variables the shell policy removed.
           ...(turn.toolScope === undefined && !authBridge ? [] : ["-c", "features.shell_snapshot=false"]),
           // A guest-driven turn: no shell, no file reads (-c wins over config files).
-          ...codexTurnConfigArgs(turn)];
+          ...turnConfigArgs];
         const codexConfig = codexConfigMcp(env), declaredInCodexConfig = codexConfig.names;
         if (turn.toolScope !== undefined) appServerArgs.push(...codexMcpDisableArgs(declaredInCodexConfig));
         const baseEnv = new Map(Object.entries(env).filter(([, value]) => value !== undefined));
@@ -866,7 +866,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           return settle(false, failedStop);
         }
         await interruptibleDelay(Math.max(1, Math.round(delayMs * retryScale)), stopSignal.signal).promise;
-        if (!stopRequested) void launchAttempt(attempt).catch(() => authBridge?.close());
+        if (!stopRequested) { try { turnConfigArgs = codexTurnConfigArgs(turn, childEnv()); } catch (error) { emit({ ...base(threadId, turnId), type: "runtime.error", message: error instanceof Error ? error.message : String(error) }); return settle(false, "rpc_error"); } void launchAttempt(attempt).catch(() => authBridge?.close()); }
         else await settle(false, "interrupted");
       };
 
@@ -1129,7 +1129,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             const delta = typeof p.delta === "string" ? p.delta : "";
             if (delta) {
               state.sawStreamDelta = true;
-              emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta });
+              emit({ ...base(threadId, turnId), ...messageItem({ id: p.itemId }), type: "content.delta", streamKind: "assistant_text", delta });
             }
             break;
           }
@@ -1173,10 +1173,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               if (item.text?.trim()) {
                 state.lastText = item.text;
                 if (!state.sawStreamDelta) {
-                  emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta: item.text });
+                  emit({ ...base(threadId, turnId), ...messageItem(item), type: "content.delta", streamKind: "assistant_text", delta: item.text });
                 }
                 state.sawStreamDelta = false;
-                emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text: item.text });
+                emit({ ...base(threadId, turnId), ...messageItem(item), type: "item.completed", itemType: "assistant_text", text: item.text });
               }
               openAsyncQuestion(item, asks, steerActiveTurn, (event) => emit({ ...base(threadId, turnId), ...event }));
             } else if (item.type === "imageGeneration" && item.status !== "failed") {
@@ -1438,7 +1438,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // Codex's `never` means "do not ask to escalate", not "grant every requested permission":
         // only Full may synthesize approvals.
         autoAcceptPermissions = approvalMode === "full";
-        const selection = routed
+        const selection: { model?: string | null; modelProvider: string | null; serviceTier?: string } = routed
           ? { model: turn.model, modelProvider: routedProvider }
           : config.authMode === "chatgpt-plan" && planLane === "maus"
             ? { model: turn.model, modelProvider: "openai_chatgpt_plan" }
@@ -1547,7 +1547,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             ...(turn.guestConfined ? { environments: [] } : {}),
             // Spread, not `effort ?? null`: codex-cli 0.146.0 treats null as absent (the thread keeps
             // its effort), rejects "", and thread/start takes no effort, so a thread keeps its last level.
-            ...(turn.effort ? { effort: turn.effort } : {}),
+            ...(turn.effort ? { effort: turn.effort } : {}), ...(selection.serviceTier ? { serviceTierForTurn: selection.serviceTier } : {}),
           });
         };
         const waitNames = supportsMcpStartup(initialized?.userAgent) ? enabledMcpMounts([...selectedMcp.keys(), ...directMounts], effectiveConfig, turn.toolScope !== undefined) : [];
@@ -1631,17 +1631,17 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     const previousCliVersion = modelsCliVersion;
     modelsCliVersion = version;
     if (previousCliVersion !== null && previousCliVersion !== version) await refreshModels();
-    const authenticated = await codexLoginStatus(config.cli, env) === "signed-in";
+    const login = await readCodexLogin(config.cli, env), authenticated = login.status === "signed-in";
     if (authenticated && loginRejected()) {
       return { state: "available", version, authenticated: false, reason: CODEX_SIGN_IN_EXPIRED,
         update: await codexReleaseUpdate(version, config.cli), billing: "subscription" };
     }
-    const email = authenticated ? await codexAccountEmail(config.cli, env) : null;
+    const email = authenticated && !login.apiKey ? await codexAccountEmail(config.cli, env) : null;
     return {
       state: "available",
       version,
       authenticated,
-      ...(email ? { account: { email } } : {}),
+      ...(login.apiKey ? { account: { method: "api-key" as const } } : email ? { account: { email } } : {}), // no ChatGPT sign-out
       update: await codexReleaseUpdate(version, config.cli),
       billing: "subscription",
     };

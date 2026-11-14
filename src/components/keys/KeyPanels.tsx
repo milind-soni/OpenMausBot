@@ -94,7 +94,7 @@ export function OpenCodeProviderKeys() {
           autoComplete="off"
           className={cn(KEY_FIELD, "w-auto min-w-[min(100%,10rem)] flex-1")}
         />
-        <button type="button" onClick={add} disabled={busy || !name.trim() || !key.trim()} className="ui-button ui-button-primary shrink-0">
+        <button type="button" onClick={add} disabled={busy || !name.trim() || !key.trim()} className="ui-button shrink-0">
           {adding ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : t("common.save")}
         </button>
       </div>
@@ -173,6 +173,7 @@ export function VpsConnection() {
         </a>
         {t("keys.vps.descAfter")}
       </p>
+      <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.vps.anyMachine")}</p>
       <div className="flex flex-wrap items-center gap-2">
         <input
           type="text"

@@ -61,7 +61,7 @@ if (!process.versions.electron) {
     await delay(150);
     mkdirSync(output, { recursive: true });
     writeFileSync(join(output, "startup-screen.png"), (await active.webContents.capturePage()).toPNG());
-    assert.equal(await active.webContents.executeJavaScript("document.querySelector('h1').textContent"), "OpenMaus Bot");
+    assert.equal(await active.webContents.executeJavaScript("document.querySelector('h1').textContent"), "OpenMausBot");
     assert.equal(await active.webContents.executeJavaScript("typeof process"), "undefined");
     // Exercise the actual renderer close button.
     await active.webContents.executeJavaScript("document.querySelector('button').click()");

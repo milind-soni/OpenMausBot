@@ -1,7 +1,8 @@
 // The proactive bot's one suggestion to add a helper-model key (server/host/helper-suggestion.ts), in the person's own
-// language. A suggestion, not an approval: Add key opens Settings on this device, Not now is kept and ends it.
+// language. A suggestion, not an approval: Add key opens Settings on this device, Not now is kept and ends it. Labelled as
+// the app's own tip, with what the key and Jev are, so it never reads as an unattributed message from a stranger.
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Lightbulb, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -29,7 +30,12 @@ export function HelperKeySuggestion({ threadId, message }: { threadId?: string; 
 
   return (
     <div data-setup-suggestion="helperKey" className="max-w-[600px] text-[15px] leading-relaxed text-ink">
+      <p data-testid="helper-suggestion-from" dir="auto" className="mb-1 flex items-center gap-1 text-[12px] font-medium text-ink-secondary">
+        <Lightbulb size={13} aria-hidden="true" />
+        {t("chat.helperSuggestion.from")}
+      </p>
       <p dir="auto">{t("chat.helperSuggestion.text")}</p>
+      <p dir="auto" className="mt-1 text-[13px] text-ink-secondary">{t("chat.helperSuggestion.about")}</p>
       {declined ? (
         <p dir="auto" className="mt-1 text-[13px] text-ink-secondary">{t("chat.helperSuggestion.declined")}</p>
       ) : (

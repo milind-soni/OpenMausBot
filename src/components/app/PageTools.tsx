@@ -9,11 +9,11 @@ import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { serverErrorText } from "@/lib/server-error";
-import { addPointedChip } from "@/lib/pointed-chips";
+import { addPointedChip, usePointedChips } from "@/lib/pointed-chips";
 import { latestWebPanels, setWebPanels, useWebPanels } from "@/lib/web-panel-preferences";
 import { findPinnedPage, MAX_WEB_PANELS, togglePinnedPage, type PinnedChatPage } from "@/lib/web-panels";
 import type { AppDocument, AppPayload } from "../../../shared/app";
-import { pointMessage, readPointEvent } from "../../../shared/app-frame/point";
+import { marksMessage, pointMessage, readPointEvent } from "../../../shared/app-frame/point";
 import type { PublishedPageCard } from "../../../shared/published-page";
 import { canonicalDownloadFilename } from "../AttachmentPreview";
 import { appDownloadPath, publishAppPage, unpublishPage } from "./app-api";
@@ -127,11 +127,13 @@ export function usePageSave(threadId: string, messageId: string, title: string) 
 }
 
 /** Point mode on whichever frame shows the page. Security: a pick counts only from that frame's own window and only
- * while the person has Point on, so a page cannot fill the composer by itself. */
-export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefined; threadId: string; appId: string; rev: number; title: string; picked(): void }) {
+ * while the person has Point on, so a page cannot fill the composer by itself. Point stays on after a pick so several
+ * parts can be marked in one pass; once it ends after any pick, `picked` runs and the composer takes focus. */
+export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefined; view?: string; frameKey?: string; threadId: string; appId: string; rev: number; title: string; picked(): void }) {
   const [pointing, setPointing] = useState(false);
   const on = useRef(false);
   on.current = pointing;
+  const pickedAny = useRef(false);
   const latest = useRef(args);
   latest.current = args;
   const say = useCallback((next: boolean) => latest.current.frame()?.contentWindow?.postMessage(pointMessage(next), "*"), []);
@@ -139,24 +141,22 @@ export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefin
     on.current = next;
     setPointing(next);
     say(next);
+    if (next || !pickedAny.current) return;
+    pickedAny.current = false;
+    latest.current.picked();
+    requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-tour=\"composer\"] textarea")?.focus());
   }, [say]);
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const heard = readPointEvent({ source: event.source, data: event.data }, latest.current.frame()?.contentWindow ?? null);
       if (!heard || !on.current) return;
-      on.current = false;
-      setPointing(false);
-      if (heard.kind === "ended") return;
-      const { threadId, appId, rev, title, picked } = latest.current;
-      addPointedChip(threadId, { appId, rev, title, ...heard.part });
-      picked();
-      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-tour=\"composer\"] textarea")?.focus());
+      if (heard.kind === "ended") return set(false);
+      const { threadId, appId, rev, title } = latest.current;
+      if (addPointedChip(threadId, { appId, rev, title, ...heard.part })) pickedAny.current = true;
+      else set(false);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || !on.current) return;
-      on.current = false;
-      setPointing(false);
-      latest.current.frame()?.contentWindow?.postMessage(pointMessage(false), "*");
+      if (event.key === "Escape" && on.current) set(false);
     };
     window.addEventListener("message", onMessage);
     window.addEventListener("keydown", onKey);
@@ -164,7 +164,24 @@ export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefin
       window.removeEventListener("message", onMessage);
       window.removeEventListener("keydown", onKey);
     };
-  }, []);
+  }, [set]);
+  // Numbered outlines on this version's parts waiting in the composer; a chip from another page or version keeps its
+  // number with an empty selector, so the page's numbers match the composer's.
+  const chips = usePointedChips(args.threadId);
+  const marks = JSON.stringify(chips.map((chip) => (chip.appId === args.appId && chip.rev === args.rev ? chip.selector : "")));
+  useEffect(() => {
+    const iframe = latest.current.frame();
+    const send = () => iframe?.contentWindow?.postMessage(marksMessage(JSON.parse(marks) as string[]), "*");
+    send();
+    // A new frame (full screen, a reload) starts with Point off: once its page has loaded it gets the Point state, then
+    // the outlines again; `frameKey` changes with each frame.
+    const loaded = () => {
+      say(on.current);
+      send();
+    };
+    iframe?.addEventListener("load", loaded);
+    return () => iframe?.removeEventListener("load", loaded);
+  }, [marks, pointing, args.view, args.frameKey, say]);
   return { pointing, toggle: () => set(!on.current), stop: () => { if (on.current) set(false); } };
 }
 
@@ -188,7 +205,7 @@ export interface PageToolsProps {
   ready: boolean;
   /** pane: the page opens in the chat's page pane, beside a usable message box, instead of covering the window. */
   fullScreen: { open: boolean; toggle(): void; pane?: boolean };
-  /** Shown in a room: view-only, so no Point and no Share. */
+  /** Shown in a room: the page acts for nobody, so no Share; Point sends the pick to the bot that made the page. */
   room?: boolean;
   pin?: ReturnType<typeof usePagePin>;
 }
@@ -209,11 +226,11 @@ export function PageToolbar({ version, point, share, save, ready, fullScreen, ro
         {version.flash && <span role="status" data-page-updated className="ms-1 rounded-full bg-accent/15 px-2 py-px font-medium text-accent-text">{t("chat.preview.updated")}</span>}
       </div>
       <div className="ms-auto flex flex-wrap items-center gap-1">
+        <button type="button" aria-pressed={point.pointing} onClick={point.toggle} disabled={!ready} title={t("chat.preview.pointHint")}
+          className={cn(ASK_CHIP, point.pointing ? ASK_CHIP_PICKED : ASK_CHIP_IDLE)}>
+          <Crosshair size={14} />{t("chat.preview.point")}
+        </button>
         {!room && <>
-          <button type="button" aria-pressed={point.pointing} onClick={point.toggle} disabled={!ready} title={t("chat.preview.pointHint")}
-            className={cn(ASK_CHIP, point.pointing ? ASK_CHIP_PICKED : ASK_CHIP_IDLE)}>
-            <Crosshair size={14} />{t("chat.preview.point")}
-          </button>
           <button type="button" onClick={() => void share.run(version.rev)} disabled={busy} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Share2 size={14} />}{t("chat.preview.share")}
           </button>

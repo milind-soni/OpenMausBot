@@ -398,7 +398,7 @@ const __APP_VERSION__: string;
        * app Settings. Every server's page in the window receives it, and the
        * bridge is absent in the browser. "cloud" is the
        * openmausbot://cloud link (Settings → OMB Cloud, opened by the link). */
-      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto") => void): () => void;
+      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto" | import("../state/store").SettingsPageId) => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;
       /** Opens a live desktop as a sandboxed window owned by OpenMausBot. */
@@ -472,6 +472,11 @@ const __APP_VERSION__: string;
         seen?(): Promise<void>;
         onState(cb: (s: UpdaterState) => void): () => void;
       };
+      /** On a server's page from the Server menu: asks for this app's own update, from the person's click. The page
+       * learns only what was done; the app asks in its own dialog before it restarts. Absent in older desktop builds. */
+      appUpdate?: {
+        request(): Promise<AppUpdateAnswer>;
+      };
     };
   }
 }
@@ -488,6 +493,9 @@ export interface LinuxLocalControlStatus {
   compositor?: "gnome-mutter" | "hyprland";
   warnings?: Array<{ label: string; status: string; message: string; detail?: string }>;
 }
+
+/** What asking for this app's update from a server's page did (electron/updater.mjs `updateForServerPage`). */
+export type AppUpdateAnswer = "installing" | "later" | "downloading" | "current" | "failed" | "unavailable";
 
 export interface UpdaterState {
   status:

@@ -480,6 +480,10 @@ describe("workspace", () => {
     expect(refused).not.toContain(REMEMBER_AND_FORGET);
     expect(REMEMBER_AND_FORGET).toContain("save it now with memory_update append");
     expect(REMEMBER_AND_FORGET).toContain("call memory_update with action forget");
+    // a new instruction that changes an older note replaces it, so memory never keeps both
+    expect(REMEMBER_AND_FORGET).toContain("use memory_update supersede on that old entry instead of append");
+    expect(REMEMBER_AND_FORGET).toContain("carrying into the new text whatever in the old entry still holds");
+    expect(REMEMBER_AND_FORGET).toContain("pass its until date again");
     // a preference for all their bots is saved once, never passed on to each bot
     expect(REMEMBER_AND_FORGET).toContain("saved once with memory_update action prefer");
     expect(REMEMBER_AND_FORGET).toContain("Never pass it on to each bot.");

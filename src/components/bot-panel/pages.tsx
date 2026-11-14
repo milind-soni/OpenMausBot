@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { FileText, FolderOpen, Plus, Server } from "lucide-react";
+import { createPortal } from "react-dom";
+import { FileText, FolderOpen, Maximize2, Minimize2, Plus, Server } from "lucide-react";
 
 import { appSwitchPatch } from "@/lib/bot-app-access";
 import { cn } from "@/lib/cn";
+import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { mcpServersForBot, mcpServersOfBot, mcpSwitch, useMcpServers } from "@/lib/mcp-servers";
@@ -32,9 +34,10 @@ import { useOpenComputer, WherePage } from "./ComputerTab";
 import { SettingsPage } from "./SettingsPage";
 import { panelMemoryNotes, withMemoryNote, withoutMemoryNote, type PanelMemoryNote } from "./memory-notes";
 import type { SimplePageId } from "./page-registry";
-import { BotSwitch, buttonCls, Card, ColRow, LinkRow, NoteRow, RadioRow, RowIcon, rowCls, RowText, SwitchRow, TextRow, TrashButton } from "./rows";
+import { BotSwitch, buttonCls, Card, ColRow, ItemRow, LinkRow, NoteRow, RadioRow, RowIcon, rowCls, RowText, SwitchRow, TextRow, TrashButton } from "./rows";
 import { MemoryUpkeepCards } from "./MemoryUpkeepCards";
 import { useMemoryDoc } from "./use-memory-doc";
+import { useTeamMemoryEntries } from "../conversation-share/conversation-share";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
@@ -168,6 +171,7 @@ export function RoutinesPage({ bot, derived }: PageContext) {
  * the hash it was read at, so a note the bot added meanwhile is never lost: a conflict re-reads and asks again. */
 export function MemoryPage({ bot }: PageContext) {
   const memory = useMemoryDoc(bot);
+  const teamSaved = useTeamMemoryEntries(bot.id, memory.mine && bot.memoryEnabled !== false && !bot.defaultBot?.person, memory.docs);
   const [draft, setDraft] = useState("");
   const [asText, setAsText] = useState<{ botId: string; doc: MemoryDoc } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -239,12 +243,21 @@ export function MemoryPage({ bot }: PageContext) {
           <NoteRow tone="warn">{t("botPanel.library.memoryError")}</NoteRow>
         ) : notes === null ? (
           <NoteRow>{t("common.checking")}</NoteRow>
-        ) : notes.length === 0 ? (
+        ) : notes.length === 0 && teamSaved.entries.length === 0 ? (
           <NoteRow>{t("botPanel.memory.empty")}</NoteRow>
         ) : notes.map((note) => (
           <div key={`${note.path}:${note.line}:${note.text}`} data-memory-note={note.line ?? note.path} className={rowCls}>
             <div className="min-w-0 flex-1 text-[13px] leading-[1.45] text-ink">{note.text}</div>
             <TrashButton label={t("botPanel.memory.forget")} disabled={saving} onClick={() => forget(note)} />
+          </div>
+        ))}
+        {memoryOn && !memory.error && notes !== null && teamSaved.entries.map((entry) => (
+          <div key={entry.id} data-team-memory-entry={entry.id} className={rowCls}>
+            <div className="min-w-0 flex-1 text-[13px] leading-[1.45] text-ink">
+              {entry.text}
+              {entry.yours && <span className="block text-[12px] text-ink-secondary">{t("teamMemorySave.yours")}</span>}
+            </div>
+            <TrashButton label={t("botPanel.memory.forget")} disabled={saving} onClick={() => void change(async () => { await teamSaved.remove(entry.id); return true; })} />
           </div>
         ))}
         {error && <NoteRow tone="warn">{error}</NoteRow>}
@@ -288,6 +301,14 @@ function MemoryTextEditor({ bot, doc, mine, onDone }: {
   const [savedDraft, setSavedDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Full window shows the same text over the whole app; going in or out keeps what was typed.
+  const [wide, setWide] = useState(false);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) firstRender.current = false;
+    else field.current?.focus();
+  }, [wide]);
   // The file is saved either way; a save that lands after the person moved to another bot must not show in that bot's list.
   const mounted = useRef(true);
   useEffect(() => {
@@ -318,13 +339,13 @@ function MemoryTextEditor({ bot, doc, mine, onDone }: {
     setConflict(null);
   };
 
-  return (
-    <Card>
-      <ColRow data-panel-row="memory-text">
+  const body = (
+    <>
         {conflict && <ConflictNotice botName={bot.name} busy={saving} onReload={reload} onOverwrite={() => void save(conflict.currentHash)} />}
         <textarea
+          ref={field}
           data-memory-text=""
-          className={cn(inputCls, "min-h-[280px] resize-y font-mono text-[13px] leading-relaxed")}
+          className={cn(inputCls, wide ? "min-h-0 flex-1 resize-none" : "min-h-[280px] resize-y", "font-mono text-[13px] leading-relaxed")}
           value={text}
           placeholder={t("memory.indexPlaceholder")}
           aria-label={t("memory.botMemory")}
@@ -342,6 +363,10 @@ function MemoryTextEditor({ bot, doc, mine, onDone }: {
           </div>
         )}
         <div className="flex justify-end gap-2">
+          <button type="button" data-memory-wide="" className={cn(buttonCls, "mr-auto inline-flex items-center gap-1.5")} onClick={() => setWide(!wide)}>
+            {wide ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
+            {t(wide ? "botPanel.memory.exitFullWindow" : "botPanel.memory.fullWindow")}
+          </button>
           <button type="button" className={buttonCls} disabled={saving} onClick={() => onDone(null)}>{t("common.cancel")}</button>
           <button
             type="button"
@@ -353,8 +378,34 @@ function MemoryTextEditor({ bot, doc, mine, onDone }: {
             {saving ? t("memory.saving") : t("memory.save")}
           </button>
         </div>
-      </ColRow>
+    </>
+  );
+
+  if (wide) return <MemoryFullWindow label={t("memory.botMemory")} onClose={() => setWide(false)}>{body}</MemoryFullWindow>;
+  return (
+    <Card>
+      <ColRow data-panel-row="memory-text">{body}</ColRow>
     </Card>
+  );
+}
+
+/** The memory text over the whole app window, so a long MEMORY.md is easy to read and edit; Escape goes back to the panel. */
+function MemoryFullWindow({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalDialog(dialogRef, onClose);
+  return createPortal(
+    <div
+      ref={dialogRef}
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      aria-label={label}
+      data-memory-full-window=""
+      className="fixed inset-0 z-[65] flex flex-col gap-3 bg-app p-4 outline-none"
+    >
+      {children}
+    </div>,
+    document.body,
   );
 }
 
@@ -366,6 +417,8 @@ export function SkillsPage({ bot }: PageContext) {
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState<string[]>([]);
   const libraryOn = skillsLibraryEnabled(state.config);
+  const own = skills.skills.filter((skill) => skill.origin !== "project");
+  const project = skills.skills.filter((skill) => skill.origin === "project");
 
   const remove = async (skill: ManagedSkill) => {
     if (skills.working) return;
@@ -412,9 +465,9 @@ export function SkillsPage({ bot }: PageContext) {
       <Card>
         {skills.loading ? (
           <NoteRow>{t("skills.loading")}</NoteRow>
-        ) : skills.skills.length === 0 ? (
+        ) : own.length === 0 ? (
           <NoteRow>{t("botSettings.simple.noSkills")}</NoteRow>
-        ) : skills.skills.map((skill) => (
+        ) : own.map((skill) => (
           <SwitchRow
             key={skill.name}
             data-panel-row={`skill:${skill.name}`}
@@ -430,6 +483,13 @@ export function SkillsPage({ bot }: PageContext) {
         ))}
         {skills.error && !skills.reviewing && <NoteRow tone="warn">{skills.error}</NoteRow>}
       </Card>
+      {project.length > 0 && (
+        <Card label={t("botPanel.skills.project")} anchor="project-skills">
+          {project.map((skill) => (
+            <ItemRow key={skill.name} data-panel-row={`project-skill:${skill.name}`} title={skill.name} hint={skill.description || skill.source} />
+          ))}
+        </Card>
+      )}
       <OrgSkillsCard bot={bot} onAdded={() => void skills.refresh()} />
       <Card>
         <TextRow

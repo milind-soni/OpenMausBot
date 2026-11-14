@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { freePortBlock } from "./testing/ports.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { fakePhone, usbPhoneLine } from "./testing/fake-phone.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 let child: ChildProcess;
@@ -15,6 +16,7 @@ let dumpFile = "";
 let finishFile = "";
 let stderr = "";
 const PHONE_BUSY_ERROR = "another thread is using the phone";
+const USB_PHONE = "PHONE1";
 const api = async (method: string, path: string, body?: unknown) => {
   const r = await fetch(base + path, { method, headers: { "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -122,12 +124,13 @@ beforeAll(async () => {
   } } }));
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
+  const serverAdb = fakePhone({ devices: usbPhoneLine(USB_PHONE), under: fixtureHome }).adbPath;
   child = spawn(process.execPath, [join(ROOT, "server/index.ts")], {
     cwd: ROOT, env: {
       PATH: process.env.PATH, HOME: fixtureHome, USERPROFILE: fixtureHome, OMB_DATA_DIR: data,
       APPDATA: join(fixtureHome, "appdata"), LOCALAPPDATA: join(fixtureHome, "localappdata"),
       TEMP: fixtureHome, TMP: fixtureHome, TMPDIR: fixtureHome,
-      OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui,
+      OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_ADB_PATH: serverAdb,
     }, stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout!.on("data", () => {});
@@ -164,6 +167,28 @@ const makeRoom = async (name: string, botId: string) => {
   return group;
 };
 const roomIdle = (groupId: string) => until(() => api("GET", "/api/bots?messages=0"), s => s.groups.find((g: any) => g.id === groupId)?.working !== true);
+
+describe("features.usbPhoneTakeover on the real server", () => {
+  it("is off until set, is kept once set, and the USB phone list answers only while it is on", async () => {
+    const reported = async () => (await api("GET", "/api/config")).features.usbPhoneTakeover;
+    const list = () => fetch(base + "/api/usb-phones");
+    expect(await reported()).toBe(false);
+    expect((await list()).status).toBe(404);
+    try {
+      await api("PATCH", "/api/config", { features: { usbPhoneTakeover: true } });
+      expect(await reported()).toBe(true);
+      expect(JSON.parse(readFileSync(join(fixtureHome, "data", "config.json"), "utf8")).features.usbPhoneTakeover).toBe(true);
+      expect(await (await list()).json()).toEqual({
+        available: true,
+        devices: [{ serial: USB_PHONE, state: "device", connection: "usb", model: "Pixel 8 Pro" }],
+      });
+    } finally {
+      await api("PATCH", "/api/config", { features: { usbPhoneTakeover: false } });
+    }
+    expect(await reported()).toBe(false);
+    expect((await list()).status).toBe(404);
+  });
+});
 
 describe("Lazy phone claim on the real server", () => {
   it("rejects a retained proxy after its turn settles, before and after a new owner claims", async () => {

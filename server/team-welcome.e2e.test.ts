@@ -70,7 +70,7 @@ it("tells a signed-in member, never anyone before sign-in, where their team page
 
 it("the welcome's one action, a chat with a bot, is the person's own private chat: the new conversation is marked private on the wire at once", async () => {
   const ada = (await team.pair(ADA)).token!, cleo = (await team.pair(CLEO)).token!;
-  const made = await team.as(ada, "POST", "/api/bots", { name: "Research", description: "Briefs before a call." });
+  const made = await team.as(ada, "POST", "/api/bots", { name: "Research", description: "Briefs before a call.", visibility: "everyone" });
   expect(made.status, JSON.stringify(made.body)).toBe(201);
   const botId = made.body.bot.id as string;
   const opened = await team.as(cleo, "POST", `/api/bots/${botId}/tasks`, {});
@@ -83,7 +83,7 @@ it("the welcome's one action, a chat with a bot, is the person's own private cha
 
 it("a User's copy of a team bot carries what the welcome's one line reads, and a removed person's page is told why", async () => {
   const ada = (await team.pair(ADA)).token!;
-  const made = await team.as(ada, "POST", "/api/bots", { name: "Seedling" });
+  const made = await team.as(ada, "POST", "/api/bots", { name: "Seedling", visibility: "everyone" });
   await team.as(ada, "PATCH", `/api/bots/${made.body.bot.id}`, { soul: "You look after the team's plants." });
   const dee = (await team.pair({ email: "dee@acme.test", role: "member" })).token!;
   const copy = ((await team.as(dee, "GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; soul?: string }>).find((bot) => bot.id === made.body.bot.id);

@@ -17,6 +17,8 @@ import { readCodexModelCatalog } from "./codex-catalog.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
 import { DeviceAuthController } from "./device-auth.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
+import { publishedMessages, replyProblems } from "../harness/text-items.testkit.ts";
+import { caseTokens, LIVE_REPLY_CASES, liveReplyScripts } from "../testing/live-reply-cases.ts";
 import { CodexDriver, codexNativeIncomingLogMessage, codexUpdateCommand } from "./codex.ts";
 import { codexCliOverrides } from "./codex-process.ts";
 import { parseToml } from "../toml-lite.ts";
@@ -267,6 +269,53 @@ describe("CodexDriver turns (fake app-server)", () => {
     await expect(instance.adapter.sendTurn({ threadId: "scope-refused", text: "Must not run", resumeCursor: "old-session", approvalMode: "full", toolScope: { allow: [] } })).rejects.toThrow(/native tool selection.*not supported/i);
     expect(existsSync(dump)).toBe(false);
   });
+
+  it("switches a bot's native skills off by path, and still runs its turn while its switches can't be read", async () => {
+    const dump = join(scratch, "skills-off.json"); process.env.FAKE_CODEX_DUMP = dump;
+    const skill = join(scratch, ".agents", "skills", "pdf", "SKILL.md");
+    mkdirSync(dirname(skill), { recursive: true }); writeFileSync(skill, "---\nname: pdf\ndescription: PDFs.\n---\nSteps.\n");
+    const choices = join(DATA_DIR, "skill-state", "codex-skills-off", "native-skills.json");
+    mkdirSync(dirname(choices), { recursive: true }); writeFileSync(choices, JSON.stringify({ off: ["pdf"] }));
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex") } });
+    await instance.adapter.sendTurn({ threadId: "skills-off", botId: "codex-skills-off", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const skillsConfig = (file: string) => (JSON.parse(readFileSync(file, "utf8")) as { argv: string[] }).argv.find((arg) => arg.startsWith("skills.config=")) ?? "";
+    expect(skillsConfig(dump)).toContain(`{path=${JSON.stringify(skill)},enabled=false}`);
+    expect(skillsConfig(dump)).not.toContain("name=");
+
+    writeFileSync(choices, "{\"off\": [");
+    const damaged = join(scratch, "skills-unreadable.json"); process.env.FAKE_CODEX_DUMP = damaged;
+    recorder.events.length = 0;
+    await instance.adapter.sendTurn({ threadId: "skills-unreadable", botId: "codex-skills-off", text: "hi" });
+    await expect(recorder.until((e) => e.type === "turn.completed")).resolves.toMatchObject({ ok: true });
+    expect(skillsConfig(damaged)).toBe("");
+  });
+
+  it("rebuilds a bot's native skill switches for each relaunch, and keeps going if they turn unreadable", async () => {
+    const skill = join(scratch, ".agents", "skills", "pdf", "SKILL.md");
+    const choices = join(DATA_DIR, "skill-state", "codex-skills-retry", "native-skills.json");
+    mkdirSync(dirname(choices), { recursive: true }); writeFileSync(choices, JSON.stringify({ off: ["pdf"] }));
+    Object.assign(process.env, { FAKE_CODEX_TRANSIENTS: "1", FAKE_CODEX_RETRY_SCALE: "0.001", FAKE_CODEX_STATE: join(scratch, "skills-retry-launches"), FAKE_CODEX_DUMP: join(scratch, "skills-retry.json") });
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex") } });
+    const unsubscribe = instance.adapter.onEvent((event) => {
+      if (event.type !== "turn.retrying") return;
+      mkdirSync(dirname(skill), { recursive: true }); writeFileSync(skill, "---\nname: pdf\ndescription: PDFs.\n---\nSteps.\n");
+    });
+    await instance.adapter.sendTurn({ threadId: "skills-retry", botId: "codex-skills-retry", text: "hi" });
+    await expect(recorder.until((e) => e.type === "turn.completed", 15_000)).resolves.toMatchObject({ ok: true });
+    unsubscribe();
+    expect(readFileSync(join(scratch, "skills-retry-launches"), "utf8")).toBe("2");
+    expect((JSON.parse(readFileSync(join(scratch, "skills-retry.json"), "utf8")) as { argv: string[] }).argv.join(" ")).toContain(JSON.stringify(skill));
+
+    recorder.events.length = 0;
+    process.env.FAKE_CODEX_STATE = join(scratch, "skills-retry-damaged");
+    const damage = instance.adapter.onEvent((event) => { if (event.type === "turn.retrying") writeFileSync(choices, "{"); });
+    await instance.adapter.sendTurn({ threadId: "skills-retry-damaged", botId: "codex-skills-retry", text: "hi" });
+    await expect(recorder.until((e) => e.type === "turn.completed", 15_000)).resolves.toMatchObject({ ok: true });
+    damage();
+    expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(false);
+    expect(readFileSync(join(scratch, "skills-retry-damaged"), "utf8")).toBe("2");
+  }, 30_000);
 
   it("gates raw custom identities before mount renaming and disables ambient MCP servers", async () => {
     const dump = join(scratch, "scope-mcp.json"); process.env.FAKE_CODEX_DUMP = dump;
@@ -1192,6 +1241,9 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
 
   it("uses the instance environment for the Codex process", async () => {
     const codexHome = join(scratch, "custom-codex-home");
+    // Signed in with a login file: MausBot keeps the person's home when it has none (the login may be in the keyring).
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, "auth.json"), "{}");
     await create({ environment: { CODEX_HOME: codexHome } });
     const dump = join(scratch, "environment.json");
     process.env.FAKE_CODEX_DUMP = dump;
@@ -1199,7 +1251,12 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     await instance.adapter.sendTurn({ threadId: "t-environment", text: "hi" });
     await recorder.until((event) => event.type === "turn.completed");
 
-    expect(JSON.parse(readFileSync(dump, "utf8")).env.CODEX_HOME).toBe(codexHome);
+    // The turn runs in MausBot's own Codex home, with the instance's Codex home linked in but its chats kept apart.
+    const { env } = JSON.parse(readFileSync(dump, "utf8"));
+    expect(env.CODEX_HOME.startsWith(join(DATA_DIR, "providers", "codex-own") + sep)).toBe(true);
+    expect(env.CODEX_SQLITE_HOME).toBe(env.CODEX_HOME);
+    expect(realpathSync(join(env.CODEX_HOME, "skills"))).toBe(realpathSync(join(codexHome, "skills")));
+    expect(existsSync(join(codexHome, "sessions"))).toBe(false);
   });
 
   it("mounts connected apps without placing credential values in argv", async () => {
@@ -1963,6 +2020,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(seen.argv).toContain("features.browser_use=false");
     expect(seen.argv).toContain("features.browser_use_external=false");
     expect(seen.argv).toContain("features.computer_use=false");
+    expect(seen.argv).toContain("features.plugins=false");
     expect(seen.argv.some((arg: string) => arg.startsWith("web_search="))).toBe(false);
     expect(seen.argv).toContain('plugins={ "browser@openai-bundled" = { enabled = false }, "computer-use@openai-bundled" = { enabled = false }, "unified-computer-use@openai-bundled" = { enabled = false } }');
     expect(seen.argv).toContain('mcp_servers.browser.default_tools_approval_mode="auto"');
@@ -2044,6 +2102,53 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(settled).toHaveLength(1);
     expect((settled[0] as any).text).toBe("done from fake codex");
   });
+
+  it("keeps each streamed message under Codex's own item id, scoped to its turn", async () => {
+    const scripts = join(scratch, "scripts.json");
+    writeFileSync(scripts, JSON.stringify({ "#ids": [{ say: "First message." }, { tool: "ls" }, { say: "Second, after the command." }, { say: "Third." }] }));
+    process.env.FAKE_STREAM_SCRIPT = scripts;
+    process.env.FAKE_STREAM_CADENCE = "4:0";
+    try {
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-items", text: "hi #ids" });
+      await recorder.until((e) => e.type === "turn.completed");
+    } finally {
+      delete process.env.FAKE_STREAM_SCRIPT;
+      delete process.env.FAKE_STREAM_CADENCE;
+    }
+    const deltas = recorder.events.filter((e: any) => e.type === "content.delta" && e.streamKind === "assistant_text");
+    expect(new Set(deltas.map((e) => e.itemId))).toEqual(new Set(["m1", "m3", "m4"]));
+    const messages = publishedMessages(recorder.events);
+    expect(messages.map(({ streamed, completed }) => ({ streamed, completed }))).toEqual([
+      { streamed: "First message.", completed: "First message." },
+      { streamed: "Second, after the command.", completed: "Second, after the command." },
+      { streamed: "Third.", completed: "Third." },
+    ]);
+    const turnId = recorder.events.find((e) => e.type === "turn.started")?.turnId;
+    expect(messages.map((message) => message.itemId)).toEqual([`${turnId}:m1`, `${turnId}:m3`, `${turnId}:m4`]);
+  });
+
+  it.each(LIVE_REPLY_CASES.filter((entry) => entry.action === undefined || entry.action === "stop").map((entry) => ({ entry, name: entry.name })))(
+    "streams the $name reply with one id per message and nothing doubled, lost or glued", async ({ entry }) => {
+      const scripts = join(scratch, "scripts.json");
+      writeFileSync(scripts, JSON.stringify(liveReplyScripts()));
+      process.env.FAKE_STREAM_SCRIPT = scripts;
+      process.env.FAKE_STREAM_CADENCE = entry.action === "stop" ? "6:5" : "7:0";
+      try {
+        await create();
+        const { turnId } = await instance.adapter.sendTurn({ threadId: `t-${entry.name}`, text: `Please answer ${entry.marker}` });
+        if (entry.action === "stop") {
+          await recorder.until((e) => e.type === "content.delta" && e.turnId === turnId);
+          await instance.adapter.interruptTurn(`t-${entry.name}`);
+        }
+        await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId, 30_000);
+        const events = recorder.events.filter((e) => e.turnId === turnId);
+        expect(replyProblems(events, caseTokens(entry), { stopped: entry.action === "stop" })).toEqual([]);
+      } finally {
+        delete process.env.FAKE_STREAM_SCRIPT;
+        delete process.env.FAKE_STREAM_CADENCE;
+      }
+    }, 60_000);
 
   it("reports an apply_patch as it streams, for the chat's status line", async () => {
     process.env.FAKE_CODEX_PATCH_BYTES = "6144";
@@ -2145,6 +2250,10 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     });
     vi.stubEnv("OPENMAUSBOT_CHATGPT_TOKEN", "inherited-token-must-not-leak");
     vi.stubEnv("OPENAI_API_KEY", "inherited-api-key-must-not-leak");
+    if (!Object.keys(opts).length) {
+      mkdirSync(join(scratch, ".codex"), { recursive: true });
+      writeFileSync(join(scratch, ".codex", "auth.json"), "{}");
+    }
     await create({ ...opts, mode: "resume", environment: { HOME: scratch, USERPROFILE: scratch, CODEX_HOME: join(scratch, ".codex") } });
     const dump = join(scratch, "model-provider-resume.json");
     process.env.FAKE_CODEX_DUMP = dump;
@@ -2176,10 +2285,15 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       if (plan) {
         expect(seen.env.CODEX_HOME.startsWith(join(DATA_DIR, "providers", "chatgpt-plan") + sep)).toBe(true);
         expect(seen.env.CODEX_HOME).not.toBe(join(scratch, ".codex"));
-        // The plan signs in on its own home; the person's Codex skills, settings and sessions are linked in.
+        // The plan signs in on its own home; the person's Codex skills and settings are linked in, never their chats.
         expect(realpathSync(join(seen.env.CODEX_HOME, "skills"))).toBe(realpathSync(join(scratch, ".codex", "skills")));
         expect(seen.argv.some((arg: string) => arg.startsWith("shell_environment_policy.exclude="))).toBe(false);
-      } else expect(seen.env.CODEX_HOME).toBe(join(scratch, ".codex"));
+      } else if (Object.keys(opts).length) expect(seen.env.CODEX_HOME).toBe(join(scratch, ".codex"));
+      else {
+        // A turn on the person's own login keeps its chats in MausBot's own Codex home, with their login linked in.
+        expect(seen.env.CODEX_HOME.startsWith(join(DATA_DIR, "providers", "codex-own") + sep)).toBe(true);
+        expect(realpathSync(join(seen.env.CODEX_HOME, "skills"))).toBe(realpathSync(join(scratch, ".codex", "skills")));
+      }
       const threadCalls = seen.calls.filter((call: { method: string }) => ["thread/start", "thread/resume"].includes(call.method));
       expect(threadCalls).toHaveLength(1);
       if (plan) expect(threadCalls[0].params.config["shell_environment_policy.exclude"]).toEqual(["OPENMAUSBOT_CHATGPT_TOKEN"]);
@@ -3529,12 +3643,18 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     });
   });
 
-  it("counts an API-key login as signed in", async () => {
+  it("counts an API-key login as signed in, marked as an API key so Settings offers no ChatGPT sign-out", async () => {
     await create({ mode: "api-key-configured" });
     await expect(instance.snapshot()).resolves.toMatchObject({
       state: "available",
       authenticated: true,
+      account: { method: "api-key" },
     });
+  });
+
+  it("does not mark a ChatGPT login as an API key", async () => {
+    await create({ mode: "logged-in-stdout" });
+    expect((await instance.snapshot()).account?.method).toBeUndefined();
   });
 
   it("also accepts login status from older Codex versions that used stdout", async () => {
@@ -4196,5 +4316,37 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     const turnStart = seen.calls.find((c: any) => c.method === "turn/start");
     expect(turnStart.params).not.toHaveProperty("effort");
+  });
+
+  it("runs a Fast row on its base model with the Fast tier for that turn only", async () => {
+    await create();
+    const dump = join(scratch, "fast.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-fast", text: "hi", model: "gpt-5.5+priority", effort: "high" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    const threadStart = seen.calls.find((c: any) => c.method === "thread/start");
+    const turnStart = seen.calls.find((c: any) => c.method === "turn/start");
+    expect(threadStart.params).toMatchObject({ model: "gpt-5.5", modelProvider: "openai" });
+    expect(threadStart.params).not.toHaveProperty("serviceTier");
+    expect(turnStart.params).toMatchObject({ serviceTierForTurn: "priority", effort: "high" });
+    expect(turnStart.params).not.toHaveProperty("serviceTier");
+  });
+
+  it("sends no service tier for a plain row", async () => {
+    await create();
+    const dump = join(scratch, "plain.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-plain", text: "hi", model: "gpt-5.5" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    const turnStart = seen.calls.find((c: any) => c.method === "turn/start");
+    expect(seen.calls.find((c: any) => c.method === "thread/start").params.model).toBe("gpt-5.5");
+    expect(turnStart.params).not.toHaveProperty("serviceTierForTurn");
+    expect(turnStart.params).not.toHaveProperty("serviceTier");
   });
 });

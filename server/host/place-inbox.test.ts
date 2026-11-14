@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,7 +7,7 @@ import type { Notification } from "../../shared/notification.ts";
 import type { PersonWait } from "../../shared/person-wait.ts";
 import type { OptionCardData } from "../../shared/wire.ts";
 import type { RequestAuth } from "../request-auth.ts";
-import { createPlaceInbox, PLACE_MESSAGES_HOURLY, placeInboxViewer, type InboxViewer, type OpenCardRow, type PlaceInboxDeps } from "./place-inbox.ts";
+import { createPlaceInbox, PLACE_INBOX_FILE, PLACE_MESSAGES_HOURLY, placeInboxViewer, type InboxViewer, type OpenCardRow, type PlaceInboxDeps } from "./place-inbox.ts";
 
 const OWNER = { kind: "owner-session" } as unknown as RequestAuth;
 const GUEST = { kind: "guest-session" } as unknown as RequestAuth;
@@ -17,7 +17,7 @@ const viewers = new Map<RequestAuth, InboxViewer>([[OWNER, { kind: "owner" }], [
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
-type Said = { id: string; at: number; role: string; peerAsk?: boolean; relayed?: boolean; via?: string; text?: string; inbox?: unknown };
+type Said = { id: string; at: number; role: string; peerAsk?: boolean; relayed?: boolean; via?: string; text?: string; inbox?: unknown; replyToId?: string };
 
 function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tmpdir(), "place-inbox-"))) {
   dirs.push(dataDir);
@@ -32,12 +32,13 @@ function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tm
     eli: { id: "eli", name: "Eli", threadId: "eli-main", color: "blue" }, mira: { id: "mira", name: "Mira", threadId: "mira-main", color: "red" },
   };
   const titles: Record<string, string> = { "eli-main": "Eli", "eli-pricing": "Pricing work", "eli-launch": "Launch work", "guest-chat": "Guest chat" };
+  const rooms: Record<string, { id: string; name: string; memberIds: string[] }> = { "room-main": { id: "room", name: "Team room", memberIds: ["eli", "mira"] } };
   const listeners: Array<(change: { type: string; threadId: string }) => void> = [];
   const store = {
     bot: (id: string) => bots[id],
     botByThread: (threadId: string) => (threadId.startsWith("eli") || threadId === "guest-chat" ? bots.eli : threadId.startsWith("mira") ? bots.mira : undefined),
     taskByThread: (_botId: string, threadId: string) => (titles[threadId] ? { threadId, title: titles[threadId] } : undefined),
-    groupByThread: () => undefined,
+    groupByThread: (threadId: string) => rooms[threadId],
     appendMessage: (threadId: string, line: Omit<Said, "id" | "at">) => {
       const posted = { ...line, id: `m${++serial}`, at: clock };
       said.set(threadId, [...(said.get(threadId) ?? []), posted]);
@@ -247,6 +248,47 @@ describe("the inbox of a place that is no team's", () => {
     expect(f.inbox.count(OWNER)).toBe(0);
   });
 
+  it("keeps a bot's message from a room open until the person replies to that line or taps Done, since the room's other talk isn't their answer", () => {
+    const f = setup();
+    const sent = f.inbox.message("eli", "room-main", "The report is ready.");
+    expect(sent).toMatchObject({ status: 200, text: expect.stringContaining("posted in this room") });
+    const [row] = f.inbox.view(OWNER).rows;
+    expect(row).toMatchObject({ kind: "message", tab: "info", unread: true, origin: { threadId: "room-main", groupId: "room", title: "Team room" } });
+
+    f.tick(10);
+    f.store.appendMessage("room-main", { role: "user", text: "@Mira can you check the build?" });
+    f.store.appendMessage("room-main", { role: "bot", text: "On it." });
+    expect(f.inbox.view(OWNER).rows[0]!.tab, "the person talking to others in the room hasn't answered it").toBe("info");
+    f.store.appendMessage("room-main", { role: "user", text: "Thanks", replyToId: "some-other-line" });
+    expect(f.inbox.view(OWNER).rows[0]!.tab, "nor has a reply to another line").toBe("info");
+    f.store.appendMessage("room-main", { role: "user", text: "Thanks", replyToId: row!.id });
+    expect(f.inbox.view(OWNER).rows[0]!.tab).toBe("done");
+
+    const other = f.inbox.message("mira", "room-main", "Build is green.");
+    expect(other.status).toBe(200);
+    const next = f.inbox.view(OWNER).rows.find((one) => one.tab === "info")!;
+    f.store.appendMessage("room-main", { role: "user", text: "ok everyone" });
+    expect(f.inbox.view(OWNER).rows.find((one) => one.id === next.id)!.tab).toBe("info");
+    expect(f.inbox.markDone(OWNER, next.id)).toBe("done");
+    expect(f.inbox.view(OWNER).rows.find((one) => one.id === next.id)!.tab).toBe("done");
+  });
+
+  it("leaves a room message saved before this rule as it was: the person's next words there still settle it", () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "place-inbox-"));
+    writeFileSync(join(dataDir, PLACE_INBOX_FILE), `${JSON.stringify({ version: 1, seenAsks: [], lines: [
+      { id: "old-line", botId: "eli", threadId: "room-main", groupId: "room", kind: "message", from: "Eli", text: "Earlier news", at: 500 },
+    ] })}\n`);
+    const f = setup({}, dataDir);
+    expect(f.inbox.view(OWNER).rows[0]).toMatchObject({ id: "old-line", tab: "info" });
+    f.store.appendMessage("room-main", { role: "user", text: "ok" });
+    expect(f.inbox.view(OWNER).rows[0]!.tab).toBe("done");
+  });
+
+  it("tells a bot in its own chat that the message is in the Inbox, with no room named", () => {
+    const f = setup();
+    expect(f.inbox.message("eli", "eli-pricing", "The report is ready.").text).not.toContain("room");
+  });
+
   it("stops a loop of messages from one conversation, and refuses a conversation that isn't the bot's", () => {
     const f = setup();
     for (let index = 0; index < PLACE_MESSAGES_HOURLY; index++) expect(f.inbox.message("eli", "eli-main", `m${index}`).status).toBe(200);
@@ -293,6 +335,23 @@ describe("the inbox of a place that is no team's", () => {
     expect(f.inbox.markDone(OWNER, "card-q")).toBe("an ask");
     expect(f.inbox.markRead(OWNER, "not-a-line")).toBe(false);
     expect(f.inbox.markDone(OWNER, "not-a-line")).toBe("unknown");
+  });
+
+  it("reads every line and open ask at once for the viewer who has them, answers nothing, and repeats harmlessly", () => {
+    const f = setup();
+    f.guests.set("guest-chat", "p_guest");
+    f.ask("eli-main", "q");
+    f.inbox.message("eli", "eli-main", "News");
+    f.inbox.message("eli", "guest-chat", "For the guest");
+    expect(f.inbox.markAllRead(OWNER)).toBe(2);
+    expect(f.inbox.view(OWNER).rows.map((row) => [row.kind, row.tab, row.unread])).toEqual(expect.arrayContaining([["ask", "needs-you", false], ["message", "info", false]]));
+    expect(f.inbox.count(OWNER), "the ask still waits on them").toBe(1);
+    expect(f.inbox.markDone(OWNER, "card-q")).toBe("an ask");
+    expect(f.inbox.view(GUEST).rows.map((row) => row.unread), "the guest's line is not the owner's to read").toEqual([true]);
+    expect(f.inbox.markAllRead(OWNER)).toBe(0);
+    expect(f.inbox.markAllRead(SHELL)).toBe(0);
+    const again = setup({ openCards: () => f.cards, store: f.store as unknown as PlaceInboxDeps["store"] }, f.dataDir);
+    expect(again.inbox.view(OWNER).rows.every((row) => !row.unread)).toBe(true);
   });
 
   it("opening a conversation reads what waited there", () => {

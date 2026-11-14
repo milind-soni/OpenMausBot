@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
-import { Card } from "./SettingsPrimitives";
+import { SETTINGS_INLINE_INPUT, SettingRow, SettingsGroup, SettingsRows, Switch } from "./SettingsPrimitives";
+import { cn } from "@/lib/cn";
 
 /** Server bounds from server/config.ts, mirrored to reject out-of-range input before the round trip. */
 const MIN_RETENTION_DAYS = 1;
@@ -68,6 +69,7 @@ export function ThreadCleanupSettings() {
       dispatch({ type: "configStatus", config });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("settings.threadCleanup.error"));
+      setErrorKnob(knob);
     } finally {
       saving.current = false;
       setPending(null);
@@ -140,88 +142,52 @@ export function ThreadCleanupSettings() {
     void save({ eventLogMaxBytes: bytes }, "cap");
   };
 
+  const field = (knob: "retention" | "cap") => {
+    const retention = knob === "retention";
+    return (
+      <span className="mt-1 flex items-center gap-2 text-[13px] leading-5 text-ink-secondary">
+        <input
+          id={retention ? "thread-log-retention-days" : "thread-log-cap-mib"}
+          type="number"
+          min={retention ? MIN_RETENTION_DAYS : MIN_CAP_BYTES / MIB}
+          max={retention ? MAX_RETENTION_DAYS : MAX_CAP_BYTES / MIB}
+          step={retention ? 1 : 0.25}
+          inputMode={retention ? "numeric" : "decimal"}
+          value={retention ? retentionValue : capValue}
+          disabled={(retention ? confirmedRetentionDays : confirmedCapBytes) === null || pending !== null}
+          aria-invalid={errorKnob === knob}
+          aria-label={t(retention ? "settings.threadCleanup.retention.enable" : "settings.threadCleanup.cap.enable")}
+          onChange={(event) => {
+            if (retention) setRetentionDraft(event.target.value); else setCapDraft(event.target.value);
+            setError("");
+            setErrorKnob(null);
+          }}
+          onBlur={retention ? commitRetention : commitCap}
+          onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+          className={cn(SETTINGS_INLINE_INPUT, errorKnob === knob && "border-danger/60")}
+        />
+        {t(retention ? "settings.threadCleanup.retention.unit" : "settings.threadCleanup.cap.unit")}
+      </span>
+    );
+  };
+
+  const message = (knob: Knob) => pending === knob ? <span role="status">{t("settings.threadCleanup.saving")}</span>
+    : error && errorKnob === knob ? <span role="alert" className="text-danger">{error}</span> : undefined;
+
   return (
-    <Card title={t("settings.threadCleanup.title")} subtitle={t("settings.threadCleanup.subtitle")}>
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            id="thread-log-retention-enabled"
-            type="checkbox"
-            checked={confirmedRetentionDays !== null}
-            disabled={pending !== null}
-            onChange={(event) => toggleRetention(event.target.checked)}
-            className="size-4 accent-accent"
-          />
-          <label htmlFor="thread-log-retention-enabled" className="text-[13px] font-medium text-ink">{t("settings.threadCleanup.retention.enable")}</label>
-          <div className={`flex max-w-[160px] items-center rounded-lg border bg-inset ${errorKnob === "retention" ? "border-danger/60" : "border-hairline/40 focus-within:border-focus"}`}>
-            <input
-              id="thread-log-retention-days"
-              type="number"
-              min={MIN_RETENTION_DAYS}
-              max={MAX_RETENTION_DAYS}
-              step={1}
-              inputMode="numeric"
-              value={retentionValue}
-              disabled={confirmedRetentionDays === null || pending !== null}
-              aria-invalid={errorKnob === "retention"}
-              aria-describedby="thread-log-retention-help"
-              onChange={(event) => {
-                setRetentionDraft(event.target.value);
-                setError("");
-                setErrorKnob(null);
-              }}
-              onBlur={commitRetention}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") event.currentTarget.blur();
-              }}
-              className="min-w-0 flex-1 bg-transparent px-3 py-2 text-[14px] tabular-nums text-ink focus:outline-none"
-            />
-            <span className="pr-3 text-[13px] text-ink-secondary">{t("settings.threadCleanup.retention.unit")}</span>
-          </div>
-        </div>
-        <p id="thread-log-retention-help" className="text-[12px] leading-relaxed text-ink-secondary">{t("settings.threadCleanup.retention.help")}</p>
-      </div>
-      <div className="mt-4 flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            id="thread-log-cap-enabled"
-            type="checkbox"
-            checked={confirmedCapBytes !== null}
-            disabled={pending !== null}
-            onChange={(event) => toggleCap(event.target.checked)}
-            className="size-4 accent-accent"
-          />
-          <label htmlFor="thread-log-cap-enabled" className="text-[13px] font-medium text-ink">{t("settings.threadCleanup.cap.enable")}</label>
-          <div className={`flex max-w-[160px] items-center rounded-lg border bg-inset ${errorKnob === "cap" ? "border-danger/60" : "border-hairline/40 focus-within:border-focus"}`}>
-            <input
-              id="thread-log-cap-mib"
-              type="number"
-              min={MIN_CAP_BYTES / MIB}
-              max={MAX_CAP_BYTES / MIB}
-              step={0.25}
-              inputMode="decimal"
-              value={capValue}
-              disabled={confirmedCapBytes === null || pending !== null}
-              aria-invalid={errorKnob === "cap"}
-              aria-describedby="thread-log-cap-help"
-              onChange={(event) => {
-                setCapDraft(event.target.value);
-                setError("");
-                setErrorKnob(null);
-              }}
-              onBlur={commitCap}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") event.currentTarget.blur();
-              }}
-              className="min-w-0 flex-1 bg-transparent px-3 py-2 text-[14px] tabular-nums text-ink focus:outline-none"
-            />
-            <span className="pr-3 text-[13px] text-ink-secondary">{t("settings.threadCleanup.cap.unit")}</span>
-          </div>
-        </div>
-        <p id="thread-log-cap-help" className="text-[12px] leading-relaxed text-ink-secondary">{t("settings.threadCleanup.cap.help")}</p>
-      </div>
-      {pending !== null && <p role="status" className="mt-2 text-[12px] text-ink-secondary">{t("settings.threadCleanup.saving")}</p>}
-      {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
-    </Card>
+    <SettingsGroup label={t("settings.threadCleanup.title")} block="cleanup">
+      <SettingsRows>
+        <SettingRow title={t("settings.threadCleanup.retention.title")} subtitle={confirmedRetentionDays !== null ? <>{t("settings.threadCleanup.retention.short")}{field("retention")}</> : t("settings.threadCleanup.retention.plain")}
+          message={message("retention")}>
+          <Switch id="thread-log-retention-enabled" checked={confirmedRetentionDays !== null} disabled={pending !== null}
+            aria-label={t("settings.threadCleanup.retention.title")} onClick={() => toggleRetention(confirmedRetentionDays === null)} />
+        </SettingRow>
+        <SettingRow title={t("settings.threadCleanup.cap.title")} subtitle={confirmedCapBytes !== null ? <>{t("settings.threadCleanup.cap.short")}{field("cap")}</> : t("settings.threadCleanup.cap.plain")}
+          message={message("cap")}>
+          <Switch id="thread-log-cap-enabled" checked={confirmedCapBytes !== null} disabled={pending !== null}
+            aria-label={t("settings.threadCleanup.cap.title")} onClick={() => toggleCap(confirmedCapBytes === null)} />
+        </SettingRow>
+      </SettingsRows>
+    </SettingsGroup>
   );
 }

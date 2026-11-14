@@ -37,6 +37,14 @@ export interface LoginSummary extends LoginPlace {
   bots: LoginBots;
   createdAt: number;
   lastUsedAt?: number;
+  /** A 1Password login's item, and whether its bots are its own choice rather than its vault's. */
+  onePassword?: OnePasswordItemRef;
+}
+
+/** One 1Password item: `<vault id>:<item id>`, and whether it has bots of its own instead of its vault's. */
+export interface OnePasswordItemRef {
+  item: string;
+  ownBots: boolean;
 }
 
 /** A 1Password vault the service account reads, and the bots that may use its

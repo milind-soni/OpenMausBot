@@ -51,6 +51,7 @@ export const DEFAULT_FLEET: InstanceConfigMap = {
   hermes: { driver: "hermesAgent" },
   cline: { driver: "clineAgent" },
   pi: { driver: "piAgent" },
+  omp: { driver: "ompAgent" },
 };
 
 const CUSTOM_ONLY = {
@@ -58,6 +59,7 @@ const CUSTOM_ONLY = {
   hermes: { driver: "hermesAgent" },
   cline: { driver: "clineAgent" },
   pi: { driver: "piAgent" },
+  omp: { driver: "ompAgent" },
 } as const;
 
 /** Added to a saved fleet that holds a product engine (claude, grok or codex), when it lacks them. */
