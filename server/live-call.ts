@@ -257,9 +257,10 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
     );
   }
   if (!response.ok) {
-    const failure = await response.json().catch(() => null) as { error?: { param?: unknown } } | null;
+    const failure = await response.json().catch(() => null) as { error?: { param?: unknown; code?: unknown } } | null;
     const param = typeof failure?.error?.param === "string" ? failure.error.param : undefined;
-    throw new LiveSessionError(liveErrorMessage(response.status, param, endpoint.provider), response.status === 429 ? 429 : 502);
+    const code = typeof failure?.error?.code === "string" ? failure.error.code : undefined;
+    throw new LiveSessionError(liveErrorMessage(response.status, param, endpoint.provider, code), response.status === 429 ? 429 : 502);
   }
   const payload = await response.json().catch(() => null) as { session?: { id?: unknown }; transport?: { sdp?: unknown } } | null;
   const sessionId = payload?.session?.id;
@@ -270,7 +271,8 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
   return { sessionId, sdp };
 }
 
-export function liveErrorMessage(status: number, param?: string, provider: LiveProvider = "openai"): string {
+/** `code` is the provider's `error.code`: OpenAI answers 429 `insufficient_quota` when the account has no credit left, which waiting never fixes. */
+export function liveErrorMessage(status: number, param?: string, provider: LiveProvider = "openai", code?: string): string {
   const name = liveProviderName(provider);
   if (status === 400) {
     return param && /voice/i.test(param)
@@ -286,6 +288,7 @@ export function liveErrorMessage(status: number, param?: string, provider: LiveP
     if (status === 401) return "OpenAI rejected the API key. Check the key for Live calls.";
     if (status === 403) return "This OpenAI project has no access to GPT-Live. Check the project's model access and billing.";
     if (status === 404) return "GPT-Live is not available for this OpenAI project.";
+    if (status === 429 && code === "insufficient_quota") return "This OpenAI account has no credit left for Live calls. Add credit or raise the spending limit in OpenAI's billing settings, then call again.";
     if (status === 429) return "OpenAI is limiting Live sessions right now (rate limit or quota). Try again in a moment.";
   }
   if (status >= 500) return `${name} had a problem starting the call. Try again in a moment.`;

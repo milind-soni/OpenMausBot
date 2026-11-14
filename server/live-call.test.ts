@@ -107,6 +107,16 @@ describe("createLiveSession", () => {
     }
   });
 
+  it("says an OpenAI account with no credit left needs billing, not another try", async () => {
+    const noCredit = vi.fn(async () => new Response(JSON.stringify({ error: { type: "insufficient_quota", code: "insufficient_quota", message: "You exceeded your current quota" } }), { status: 429 }));
+    const error = await createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl: noCredit }).catch((e) => e);
+    expect(error).toMatchObject({ status: 429, message: expect.stringContaining("no credit left") });
+    expect(error.message).not.toContain("Try again in a moment");
+    const limited = vi.fn(async () => new Response(JSON.stringify({ error: { type: "requests", code: "rate_limit_exceeded" } }), { status: 429 }));
+    await expect(createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl: limited }))
+      .rejects.toMatchObject({ status: 429, message: expect.stringContaining("limiting Live sessions") });
+  });
+
   it("reports network failures and malformed answers", async () => {
     const offline = vi.fn(async () => { throw new TypeError("fetch failed"); });
     await expect(createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl: offline })).rejects.toMatchObject({ status: 502, message: expect.stringContaining("Could not reach OpenAI") });
