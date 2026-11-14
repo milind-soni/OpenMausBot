@@ -5652,6 +5652,8 @@
   "settings.page.importExport": "İçe ve dışa aktar",
   "settings.data.takeOut": "Dışarı aktar",
   "settings.import.grokTitle": "Grok Bot'tan taşın",
+  "settings.import.hermesTitle": "Hermes'ten taşın",
+  "grokMove.error.memoryTooLarge": "Bir botun anıları veya içe aktarma notları 256 KB’ı aşıyor. Hiçbir şey içe aktarılmadı. O botun kayıtlı anılarını veya notlarını kısaltın, ardından yeniden dışa aktarıp tekrar deneyin.",
   "settings.import.appsTitle": "Yapay zekâ uygulamalarından",
   "settings.data.move": "{place} konumuna taşı",
   "settings.data.storage": "Depolama",

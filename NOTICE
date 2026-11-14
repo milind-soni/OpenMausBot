@@ -34,8 +34,9 @@ server/drivers/claude-keepwarm.ts) ports the design of Cache Tax,
 https://github.com/karanb192/claude-code-mods, Copyright (c) 2026 Karan
 Bansal, used under the MIT License (third_party/cache-tax/LICENSE).
 
-Moving a Grok Bot (shared/grok-import.ts and server/grok-local.ts) adapts the
-export message, reader repairs, credential refusal and desktop cache reading of
+Bot import parsing (shared/bot-import.ts) and Grok Bot discovery
+(server/grok-local.ts) adapt the export message, reader repairs, credential
+refusal and desktop cache reading of
 the agent-importers plugin in hermes-official-plugins,
 https://github.com/NousResearch/hermes-official-plugins, Copyright (c) 2026
 Nous Research, used under the MIT License: Permission is hereby granted, free

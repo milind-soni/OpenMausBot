@@ -132,6 +132,10 @@ describe("the Settings window", () => {
       expect(row).not.toContain("data-grok-move=");
     });
 
+    it("renders the Hermes import row at its search anchor", () => {
+      expect(render("transfer")).toMatch(/data-import-section="hermes" data-settings-block="hermes-move"[\s\S]*?Move from Hermes/);
+    });
+
     it("opens from the helper's link and an old backups link", () => {
       expect(render("import")).toMatch(/data-settings-page-open="transfer"/);
       expect(render("backups")).toMatch(/data-settings-page-open="transfer"/);

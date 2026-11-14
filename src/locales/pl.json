@@ -6911,6 +6911,8 @@
   "settings.page.importExport": "Import i eksport",
   "settings.data.takeOut": "Zabierz swoje rzeczy",
   "settings.import.grokTitle": "Przenieś się z Grok Bot",
+  "settings.import.hermesTitle": "Przenieś się z Hermes",
+  "grokMove.error.memoryTooLarge": "Wspomnienia lub notatki importu jednego z botów przekraczają 256 KB. Niczego nie zaimportowano. Zmniejsz zapisane wspomnienia lub notatki tego bota, a następnie wyeksportuj je i spróbuj ponownie.",
   "settings.data.move": "Przenieś do {place}",
   "settings.data.storage": "Miejsce na dane",
   "settings.desktops.automation": "Automatyzacja",

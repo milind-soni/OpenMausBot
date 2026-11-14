@@ -6971,6 +6971,8 @@
   "settings.page.importExport": "Импорт и экспорт",
   "settings.data.takeOut": "Забрать своё",
   "settings.import.grokTitle": "Переезд из Grok Bot",
+  "settings.import.hermesTitle": "Переезд из Hermes",
+  "grokMove.error.memoryTooLarge": "Воспоминания или заметки для импорта одного из ботов превышают 256 КБ. Ничего не импортировано. Сократите сохранённые воспоминания или заметки этого бота, затем экспортируйте их и повторите попытку.",
   "settings.data.move": "Перенести на {place}",
   "settings.data.storage": "Хранилище",
   "settings.desktops.automation": "Автоматизация",

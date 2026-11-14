@@ -3242,6 +3242,8 @@
   "settings.page.importExport": "इंपोर्ट और एक्सपोर्ट",
   "settings.data.takeOut": "चीज़ें बाहर ले जाएँ",
   "settings.import.grokTitle": "Grok Bot से यहाँ आएँ",
+  "settings.import.hermesTitle": "Hermes से यहाँ आएँ",
+  "grokMove.error.memoryTooLarge": "एक बॉट की यादें या आयात के नोट्स 256 KB से बड़े हैं। कुछ भी आयात नहीं हुआ। उस बॉट की सहेजी गई यादें या नोट्स कम करें, फिर दोबारा निर्यात करके कोशिश करें।",
   "settings.import.appsTitle": "आपके AI ऐप से",
   "backup.import": "बैकअप इंपोर्ट करें",
   "settings.data.move": "{place} पर ले जाएँ",

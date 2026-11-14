@@ -3567,6 +3567,8 @@
   "settings.page.importExport": "Import & Export",
   "settings.data.takeOut": "Dinge mitnehmen",
   "settings.import.grokTitle": "Von Grok Bot umziehen",
+  "settings.import.hermesTitle": "Von Hermes umziehen",
+  "grokMove.error.memoryTooLarge": "Die Erinnerungen oder Importnotizen eines Bots überschreiten 256 KB. Es wurde nichts importiert. Kürze die gespeicherten Erinnerungen oder Notizen dieses Bots, exportiere sie erneut und versuche es noch einmal.",
   "settings.import.appsTitle": "Aus deinen KI-Apps",
   "backup.import": "Backup importieren",
   "settings.data.move": "Nach {place} umziehen",

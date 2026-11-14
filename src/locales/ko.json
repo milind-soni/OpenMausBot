@@ -7477,6 +7477,8 @@
   "settings.page.importExport": "가져오기 및 내보내기",
   "settings.data.takeOut": "내보내기",
   "settings.import.grokTitle": "Grok Bot에서 옮겨 오기",
+  "settings.import.hermesTitle": "Hermes에서 옮겨 오기",
+  "grokMove.error.memoryTooLarge": "한 봇의 기억 또는 가져오기 메모가 256 KB를 초과합니다. 아무것도 가져오지 않았습니다. 해당 봇에 저장된 기억이나 메모의 분량을 줄인 다음 다시 내보내고 시도하세요.",
   "settings.data.move": "{place}(으)로 옮기기",
   "settings.data.storage": "저장 공간",
   "settings.desktops.automation": "자동화",
