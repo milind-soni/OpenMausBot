@@ -2921,6 +2921,49 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("keeps the picture an open profile card shows when Settings clears old attachments", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const folder = mkdtempSync(join(tmpdir(), "omb-avatar-clear-"));
+      writeFileSync(join(folder, "face.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]));
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", cwd: folder })).status).toBe(200);
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const propose = async () => (await (await fetch(`${BASE}/api/internal/profile-requests`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, changes: { avatarUrl: "face.png" }, reason: "you asked" }),
+      })).json()) as { requestId: string; state: string };
+      const first = await propose();
+      const avatarOf = async () => ((await api("GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; avatarUrl?: string }>).find((candidate) => candidate.id === bot.id)?.avatarUrl;
+      const shown = (await avatarOf())!;
+      expect(shown).toMatch(/^\/api\/attachments\//);
+      // A second picture replaces it, so only the first card still names the first file. Reopening that card stands in
+      // for one still waiting for the person, which a local conversation never leaves since its changes apply at once.
+      expect((await propose()).state).toBe("applied");
+      expect(await avatarOf()).not.toBe(shown);
+      const db = new DatabaseSync(join(home, ".openmausbot", "messages.db"), { timeout: 5_000 });
+      try {
+        const reopened = db.prepare("UPDATE messages SET json = json_remove(json, '$.card.answered', '$.card.dismissed') WHERE thread_id = ? AND json_extract(json, '$.card.requestId') = ?")
+          .run(bot.threadId, first.requestId);
+        expect(reopened.changes).toBe(1);
+      } finally {
+        db.close();
+      }
+      const store = join(home, ".openmausbot", "attachments");
+      const waiting = join(store, shown.slice("/api/attachments/".length));
+      const stray = join(store, `${randomUUID()}.png`);
+      writeFileSync(stray, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      const hourAgo = new Date(Date.now() - 60 * 60_000);
+      for (const file of [waiting, stray]) utimesSync(file, hourAgo, hourAgo);
+
+      await expect.poll(async () => (await api("POST", "/api/attachment-storage")).status, { timeout: 10_000 }).toBe(200);
+      expect(existsSync(stray)).toBe(false);
+      expect(existsSync(waiting)).toBe(true);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   // Copying an .svg is refused with 415, so a 403 here shows each route refused on authority before it tried to copy.
   it("refuses an unauthorized avatar proposal on every route before it reads the picture file", async () => {
     const chief = (await api("POST", "/api/bots")).body.bot;
