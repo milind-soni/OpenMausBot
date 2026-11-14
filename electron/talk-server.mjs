@@ -104,6 +104,7 @@ async function refusal(response) {
 
 export function createTalkServer({ request, prefs, serverKey, starting = () => false }) {
   let preparing = null;
+  let sendSettled = Promise.resolve();
   const down = () => new TalkServerError(starting() ? "starting" : "server-down");
 
   const quickAsksChat = async () => {
@@ -127,6 +128,7 @@ export function createTalkServer({ request, prefs, serverKey, starting = () => f
   };
 
   const ask = ({ chat, text, sendId, signal, onUpdate }) => new Promise((resolve, reject) => {
+    sendSettled = Promise.resolve();
     const reading = new AbortController();
     const track = createReplyTracker({ threadId: chat.threadId, sendId });
     let sent = false, settled = false;
@@ -141,15 +143,19 @@ export function createTalkServer({ request, prefs, serverKey, starting = () => f
     if (signal.aborted) return aborted();
     signal.addEventListener("abort", aborted, { once: true });
 
-    const send = () => request(`/api/bots/${encodeURIComponent(chat.botId)}/messages`, {
-      method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ text, threadId: chat.threadId, sendId }),
-    }).then(
-      async response => {
-        if (response.ok) void response.body?.cancel().catch(() => {});
-        else settle(reject, await refusal(response));
-      },
-      () => settle(reject, down()),
-    );
+    const send = () => {
+      if (settled || signal.aborted) return;
+      // A cancelled stream must not discard the POST receipt: Stop waits for it before interrupting the thread.
+      sendSettled = Promise.resolve().then(async () => {
+        if (settled || signal.aborted) return;
+        const response = await request(`/api/bots/${encodeURIComponent(chat.botId)}/messages`, {
+          method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ text, threadId: chat.threadId, sendId }),
+        });
+        if (!response.ok) throw await refusal(response);
+        await response.body?.cancel().catch(() => {});
+      });
+      void sendSettled.catch(error => settle(reject, error instanceof TalkServerError ? error : down()));
+    };
     const onFrame = frame => {
       if (settled) return;
       if (!sent) {
@@ -179,5 +185,6 @@ export function createTalkServer({ request, prefs, serverKey, starting = () => f
       return preparing;
     },
     ask,
+    settleSend: () => sendSettled,
   };
 }

@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /Users/philipecruz/.openmausbot/task-workspaces/e4aee001-7e46-4534-b072-47d036190c5c/c4e408c3-c118-47ce-a961-32f2ddf1a691/OpenMausBot
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  22:32:26
+   Duration  16.10s (transform 3.45s, setup 2.83s, import 2.33s, tests 10.45s, environment 0ms)
+

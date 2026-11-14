@@ -78,9 +78,9 @@ function harness({ packaged = true, appleSpeech = true, remote = false, register
   return h;
 }
 
-test("every list of the app's windows leaves the talk box out", () => {
+test("every list of the app's windows leaves the talk box and dynamic island out", () => {
   assert.equal(main.match(/BrowserWindow\.getAllWindows\(\)/g).length, 1);
-  assert.match(main, /function appWindows\(\) \{\s*return BrowserWindow\.getAllWindows\(\)\.filter\(\(win\) => !isTalkPanel\(win\)\);/);
+  assert.match(main, /function appWindows\(\) \{\s*return BrowserWindow\.getAllWindows\(\)\.filter\(\(win\) => !isTalkPanel\(win\) && win !== islandWindow\(\)\);/);
   assert.match(main, /if \(appWindows\(\)\.length === 0\) openWindowForLink\(\);/);
   assert.match(main, /allWindows: \(\) => appWindows\(\)/);
 });
@@ -90,6 +90,7 @@ test("main hands the talk wiring its speech sinks, this computer's own server an
   assert.match(main, /packaged: app\.isPackaged, devUrl: DEV_URL, nativeImage, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog, t: nativeT \}\);/);
   assert.match(main, /talk\.start\(\{ globalShortcut, screen, prefs: desktopPrefs, remote: \(\) => Boolean\(desktopRemoteAccess\), away: \(\) => homeWindow\.current\(\)\.kind !== "computer", starting: \(\) => !serverReady, localRequest: localServerRequest, dataDir: \(\) => runningDataDir \}\);/);
   assert.match(main, /app\.on\("before-quit", \(e\) => \{\s*talk\.close\(\);/);
+  assert.match(main, /talk\.close\(\);\s*disposeIsland\(\);\s*desktopShutdownStarted = true;/);
   assert.doesNotMatch(main, /ipcMain\.handle\("(?:speech|talk-shortcut|call):/);
 });
 

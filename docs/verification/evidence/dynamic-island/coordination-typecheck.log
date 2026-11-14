@@ -1,0 +1,4 @@
+
+> openmausbot@0.1.155 typecheck /Users/philipecruz/.openmausbot/task-workspaces/e4aee001-7e46-4534-b072-47d036190c5c/c4e408c3-c118-47ce-a961-32f2ddf1a691/OpenMausBot
+> tsc -b && tsc -p tsconfig.server.json
+

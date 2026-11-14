@@ -36,6 +36,14 @@ lists them. The rest rely on review.
 
 ## 2. Where things go
 
+The experimental desktop dynamic island (`--dynamic-island`) is an explicit
+prototype exception to the placement and no-new-settings rules below. Its
+capture start/pause and Omi connection controls belong inside the island.
+It starts with capture paused, never takes focus on a background update, and
+uses the product's own mascot and skin colours. This is not enabled on normal
+startup until the desktop acceptance checks in `docs/verification/dynamic-island.md`
+have been completed.
+
 The app has three places: the **sidebar** (bots and conversations), the
 **chat**, and the **bot panel** (everything about one bot). Put new things
 where they belong instead of adding new places.

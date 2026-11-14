@@ -38,4 +38,7 @@ export declare function createTalkServer(options: {
   prepare(): Promise<TalkChat>;
   /** Rejects with TalkServerError "server-down", "starting", "refused", "moved" or "lost", or with `signal.reason`. */
   ask(input: { chat: TalkChat; text: string; sendId: string; signal: AbortSignal; onUpdate: (update: TalkUpdate) => void }): Promise<"done" | "needs-you" | "failed">;
+  /** After aborting an ask, waits for its already-started message POST before the caller interrupts the thread.
+   * Rejects when delivery could not be confirmed; never starts another send. */
+  settleSend(): Promise<void>;
 };

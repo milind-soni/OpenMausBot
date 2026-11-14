@@ -1,0 +1,10 @@
+PASS compact and expanded window through real preload
+PASS continuous capture stays local before send
+PASS Omi configure, secure field clearing and refresh
+PASS text sends Omi and image context and displays streamed reply
+PASS dark and light screenshots contain only fixture data
+PASS voice start, finish and transcript submission
+PASS open chat and cancel target only the fixture thread
+PASS pause and disconnect prevent stale context on the next send
+Evidence: /Users/philipecruz/.openmausbot/task-workspaces/e4aee001-7e46-4534-b072-47d036190c5c/c4e408c3-c118-47ce-a961-32f2ddf1a691/OpenMausBot/docs/verification/evidence/dynamic-island
+PASS 8 integration checks; no real network, account or screen content used.
