@@ -18,7 +18,9 @@ import { ANTIGRAVITY_HARNESS_FAILURE_LOG } from "./acp/harness-failure.ts";
 import { acpVendorMessage } from "./acp/rpc-error.ts";
 import { classifyError } from "./retry.ts";
 import {
+  antigravityCliSessionMode,
   antigravityClientInfo,
+  antigravityLaunchArgs,
   antigravityProfileAuthenticated,
   antigravityProfileDirectory,
   antigravitySessionSetup,
@@ -36,10 +38,12 @@ import { antigravityLimitFacts, watchAntigravityPromptOutcome } from "./antigrav
 import { splitAntigravityThinking } from "./antigravity-models.ts";
 import { AntigravityAuthController } from "./antigravity-auth.ts";
 import {
+  ANTIGRAVITY_NATIVE_ALIAS,
   antigravityManagedInstallAvailable,
   installAntigravityRuntime,
   resolveAntigravityRuntime,
 } from "./antigravity-runtime.ts";
+import { ANTIGRAVITY_NATIVE_CLI } from "./antigravity-cli-install.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 import { AntigravityProcesses } from "./antigravity-processes.ts";
 import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravity-temp.ts";
@@ -112,8 +116,8 @@ const managedAsset = resolveAntigravityReleaseAsset();
 const runtimeProcesses = new AntigravityProcesses();
 /** Every model id an account here has been offered, beside the bundled catalog's. */
 const offeredModels = new Set<string>();
-/** The version of the runtime each instance's turns were last started on, known before it answers initialize. */
-const launchedVersions = new Map<string, string | null>();
+/** The runtime each instance's turns were last started on, known before it answers initialize. */
+const launched = new Map<string, { version: string | null; nativeCli: boolean }>();
 
 const support: AcpSupport = {
   driverKind: "antigravityAgent",
@@ -125,8 +129,8 @@ const support: AcpSupport = {
   loginNote: "Antigravity needs a Google account — choose Sign in with Google in engine setup",
   install: {
     docsUrl: "https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp",
-    ...(managedAsset
-      ? { managed: { label: "Install official Antigravity", downloadBytes: managedAsset.archiveBytes } }
+    ...(antigravityManagedInstallAvailable()
+      ? { managed: { label: "Install official Antigravity", ...(managedAsset && !ANTIGRAVITY_NATIVE_CLI ? { downloadBytes: managedAsset.archiveBytes } : {}) } }
       : {}),
   },
   images: true,
@@ -156,12 +160,12 @@ const support: AcpSupport = {
 
   resolveCommand: async (env, config, instanceId) => {
     const runtime = await resolveAntigravityRuntime(config.cli, env);
-    launchedVersions.set(instanceId, runtime.version);
+    launched.set(instanceId, { version: runtime.version, nativeCli: runtime.harnessPath === null });
     const profile = await prepareAntigravityProfile({ instanceId, runtime, baseEnv: env });
     if (profile.tempDirectory) scheduleAntigravityTempSweep(instanceId);
     return {
       command: runtime.executablePath,
-      args: process.platform === "linux" ? ["--uid="] : [],
+      args: antigravityLaunchArgs(runtime, profile.directory),
       env: profile.environment,
       ro: [join(profile.directory, "omb-skills")],
     };
@@ -195,7 +199,9 @@ const support: AcpSupport = {
   sessionSetupParams: antigravitySessionSetup,
   // One model family's quota is not the account's: Gemini and the models that share another allowance keep running.
   limitFacts: (_text, model) => antigravityLimitFacts(model, [...support.models.options.map((option) => option.id), ...offeredModels]),
-  clientInfo: (instanceId) => antigravityClientInfo(launchedVersions.get(instanceId)),
+  clientInfo: (instanceId) => antigravityClientInfo(launched.get(instanceId)?.version),
+  // In `default` the native CLI asks before every edit; Auto-accept edits answers those, as `auto_edit` did.
+  allowsAlone: (instanceId, turn, toolCall) => launched.get(instanceId)?.nativeCli === true && turn.approvalMode === "edits" && toolCall.kind === "edit",
   promptOutcome: (instanceId, sessionId) => watchAntigravityPromptOutcome(support.displayName, antigravityProfileDirectory(instanceId), sessionId),
   requireAuthenticationBeforeSpawn: true,
   isAuthenticated: async (env, config, instanceId) => {
@@ -222,11 +228,12 @@ const support: AcpSupport = {
     }
   },
 
-  configureSession: async ({ request, sessionId, config, turn, configOptions, applied }) => {
+  configureSession: async ({ request, sessionId, env, config, turn, configOptions, applied }) => {
     if (!Array.isArray(configOptions) || !configOptions.some(option => option?.id === "mode")) {
       return;
     }
-    const wanted = antigravityPermissionMode(config.fullAuto, turn.approvalMode);
+    const level = antigravityPermissionMode(config.fullAuto, turn.approvalMode);
+    const wanted = (await resolveAntigravityRuntime(config.cli, env)).harnessPath === null ? antigravityCliSessionMode(level) : level;
     // A mode this live session confirmed, and still reports, is not sent again.
     if (applied?.holds("mode", wanted, reportedConfigValue(configOptions, "mode"))) return;
     const result = await request("session/set_config_option", {
@@ -294,7 +301,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
             installRuntime: async () => {
               installFailure = undefined;
               try {
-                await installAntigravityRuntime({ validate: validateAntigravityRuntime });
+                await installAntigravityRuntime({ validate: validateAntigravityRuntime, native: input.config.cli?.trim() === ANTIGRAVITY_NATIVE_ALIAS });
               } catch (error) {
                 installFailure = error instanceof Error ? error.message : String(error);
                 throw error;

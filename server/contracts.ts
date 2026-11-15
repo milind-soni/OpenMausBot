@@ -431,10 +431,11 @@ export interface EngineInstall {
   /** The vendor's npm package, for an engine whose `command` is its own installer script: Settings installs it on the
    * server when npm is there, while a terminal keeps the vendor's command. */
   npmPackage?: string;
-  /** The app downloads and verifies a pinned provider runtime itself. */
+  /** The app downloads and verifies a provider runtime itself. `downloadBytes` is set when the size is known before the
+   * download starts. */
   managed?: {
     label: string;
-    downloadBytes: number;
+    downloadBytes?: number;
   };
   /** The engine needs a key saved in the app rather than a terminal step. */
   settings?: "connections";
