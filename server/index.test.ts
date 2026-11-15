@@ -10297,6 +10297,33 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("tells a bot its current browser profile and who can change it when it asks select_computer", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      expect((await api("PATCH", "/api/config", { features: { browser: true }, browserProfiles: [{ id: "work", name: "Work" }] })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        browserProfile: "work",
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "stay active" })).status).toBe(202);
+      const dump = await readJsonFileWhenReady<{ mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } } }>(fakeClaudeDump);
+      const asked = await fetch(`${BASE}/api/internal/computer/select`, {
+        headers: { authorization: `Bearer ${dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN}` },
+      });
+      expect(asked.status).toBe(200);
+      expect(((await asked.json()) as { browserProfile: unknown }).browserProfile).toEqual({
+        id: "work",
+        name: '"Work"',
+        changedBy: expect.stringMatching(/the person, in this bot's Browser tab; a Chief of Staff can set it for an idle teammate/),
+      });
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+      await api("PATCH", "/api/config", { features: { browser: false }, browserProfiles: [] }).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+    }
+  }, 60_000);
+
   it.each(["direct", "room"] as const)("mounts the browser engine's MCP server and the sign-in policy in %s turns and preview", async (target) => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     let room: any;

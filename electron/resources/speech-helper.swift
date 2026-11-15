@@ -242,8 +242,34 @@ SFSpeechRecognizer.requestAuthorization { status in
     }
     endpointer?.start()
   }
-  node.installTap(onBus: 0, bufferSize: 1024, format: node.outputFormat(forBus: 0)) { buffer, _ in
-    request.append(buffer)
+  // Audio interfaces can present many input channels (a UA Apollo shows 16) with the mic on only one
+  // of them. SFSpeechRecognizer fails with a generic error on such buffers, so above two channels the
+  // helper feeds it mono: the channel carrying the most signal, tracked with a slow-decaying peak so
+  // it doesn't hop between channels mid-sentence. Mono and stereo devices take the original path.
+  let inputFormat = node.outputFormat(forBus: 0)
+  let channelCount = Int(inputFormat.channelCount)
+  let monoFormat = AVAudioFormat(
+    commonFormat: .pcmFormatFloat32, sampleRate: inputFormat.sampleRate, channels: 1, interleaved: false)
+  var channelPeaks = [Float](repeating: 0, count: channelCount)
+  node.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
+    guard channelCount > 2, let monoFormat, let source = buffer.floatChannelData,
+      let mono = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: buffer.frameLength),
+      let target = mono.floatChannelData
+    else {
+      request.append(buffer)
+      return
+    }
+    let frames = Int(buffer.frameLength)
+    var loudest = 0
+    for channel in 0..<channelCount {
+      var peak: Float = 0
+      for frame in 0..<frames { peak = max(peak, abs(source[channel][frame])) }
+      channelPeaks[channel] = max(channelPeaks[channel] * 0.999, peak)
+      if channelPeaks[channel] > channelPeaks[loudest] { loudest = channel }
+    }
+    mono.frameLength = buffer.frameLength
+    target[0].update(from: source[loudest], count: frames)
+    request.append(mono)
   }
   do {
     engine.prepare()
