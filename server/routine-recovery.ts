@@ -5,7 +5,7 @@
 // A teammate's failed thread takes the same verdict (host/chief-notices.ts).
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
 import type { ServerText } from "../shared/server-text.ts";
-import type { RoutineRetryCause } from "../shared/routines.ts";
+import { isCountedSkip, type RoutineRetryCause } from "../shared/routines.ts";
 import { engineFailureKind } from "./drivers/engine-errors.ts";
 import { classifyError } from "./drivers/retry.ts";
 import { nextOccurrence } from "./routine-schedules.ts";
@@ -218,7 +218,7 @@ export function loadOwnerNotices(value: unknown): RoutineOwnerNotice[] {
 export function weekRuns(runs: readonly RoutineRun[], routineId: string, now: number): { ok: number; total: number } | undefined {
   let ok = 0, total = 0;
   for (const run of runs) {
-    if (run.routineId !== routineId || !["completed", "failed", "missed"].includes(run.status) || (run.finishedAt ?? run.createdAt) < now - WEEK_MS) continue;
+    if (run.routineId !== routineId || !["completed", "failed", "missed"].includes(run.status) || isCountedSkip(run) || (run.finishedAt ?? run.createdAt) < now - WEEK_MS) continue;
     total += 1;
     if (run.status === "completed") ok += 1;
   }

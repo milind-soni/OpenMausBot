@@ -3,6 +3,8 @@
 // of the audience the message asks for. A Slack channel thread is a conversation its writer opened and shared with the
 // team at once; a Slack direct message is their private chat with the bot. What the run does is read from the
 // conversation's own records as they change, and reported to the Admin.
+// On a personal Cloud (no team) the asker is the owner's session, and a channel's and a direct message's conversation
+// are both the owner's ordinary one: there is no team to share with and no audience to tell apart.
 // Security invariants: the session decides who asks, at their level on the bot; the audience named in the request is
 // checked against the conversation's own, so a channel's message never lands in a private chat and a direct message
 // never in a shared one; a bot the member can't chat with answers as one that doesn't exist; nothing in a report's
@@ -24,7 +26,7 @@ import { cancelSteeredMessage, onSteeredQueueChange, queuedSteeredMessage, queue
 import type { BotRecord, Message, Store } from "../store.ts";
 import {
   TEAM_SLACK_ANSWER_MAX, TEAM_SLACK_FINAL, TEAM_SLACK_RUNNING_EVERY_MS, createTeamSlackMessages, createTeamSlackReporter, teamSlackKey, teamSlackOver,
-  type TeamSlackAccepted, type TeamSlackMessage, type TeamSlackRecord, type TeamSlackReport, type TeamSlackReporter, type TeamSlackState, type TeamSlackWaiting,
+  type TeamSlackAccepted, type TeamSlackMessage, type TeamSlackMessages, type TeamSlackRecord, type TeamSlackReport, type TeamSlackReporter, type TeamSlackState, type TeamSlackWaiting,
 } from "../team-slack.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { sharedBeyondOwner } from "./member-bots.ts";
@@ -41,6 +43,10 @@ interface Timer { unref?(): unknown }
 export interface TeamSlackHostDeps {
   cloudHome: Pick<CloudHomeConfig, "team" | "machineId" | "adminOrigin" | "publicOrigin" | "bootstrapSecret"> | null;
   dataDir: string;
+  /** A personal Cloud's record of the messages taken, made by whoever also reads which conversations came from a channel. */
+  messages?: TeamSlackMessages;
+  /** On a personal Cloud: its owner's person key when the session is the owner's, else null. A Team Cloud never asks. */
+  owner(auth: RequestAuth): string | null;
   store: Pick<Store, "bot" | "bots" | "botByThread" | "taskByThread" | "createTask" | "activePath" | "onChange">;
   visibleFor(auth: RequestAuth): Pick<VisibleSet, "bot" | "level" | "thread">;
   sender(auth: RequestAuth): ResolvedSender | undefined;
@@ -119,17 +125,22 @@ export function teamSlackPhase(path: readonly Message[], sendId: string, live: {
 }
 
 export function createTeamSlackHost(deps: TeamSlackHostDeps) {
-  const home = deps.cloudHome?.team ? deps.cloudHome : null;
+  const home = deps.cloudHome;
   if (!home) return null;
+  const personal = !home.team;
   const { store } = deps;
   const now = deps.now ?? Date.now;
   const setTimer = deps.setTimer ?? ((run, ms) => setTimeout(run, ms));
   const later = (run: () => void, ms: number) => { setTimer(run, ms).unref?.(); };
-  const messages = createTeamSlackMessages({ dataDir: deps.dataDir, now });
+  const messages = deps.messages ?? createTeamSlackMessages({ dataDir: deps.dataDir, now });
   const report = deps.reporter ?? createTeamSlackReporter({ machineId: home.machineId, adminOrigin: home.adminOrigin, secret: home.bootstrapSecret, now, log: (line) => console.log(`team slack: ${line}`) });
 
-  const member = (auth: RequestAuth): { person: string } | null =>
-    auth.kind === "session" && auth.session.membershipAuthority === "team" && auth.session.email ? { person: personKey(auth.session) } : null;
+  const member = (auth: RequestAuth): { person: string } | null => {
+    if (personal) { const person = deps.owner(auth); return person ? { person } : null; }
+    return auth.kind === "session" && auth.session.membershipAuthority === "team" && auth.session.email ? { person: personKey(auth.session) } : null;
+  };
+  /** Whether a channel may use the bot. On a personal Cloud every bot is its owner's, in a channel as in a direct message. */
+  const shared = (bot: BotRecord): boolean => personal || teamSlackShared(bot);
   const chattable = (auth: RequestAuth) => {
     const visible = deps.visibleFor(auth);
     return (bot: BotRecord) => !bot.hidden && visible.bot(bot.id) && atLeast(visible.level(bot.id), "chat");
@@ -231,7 +242,8 @@ export function createTeamSlackHost(deps: TeamSlackHostDeps) {
     const text = oneLine(input.text, 40);
     if (input.audience === "member") return serverLine(deps.language(person), "server.teamSlack.direct", { text });
     const channel = input.slack?.channelName?.replace(/^#/, "");
-    return channel ? serverLine(deps.language(), "server.teamSlack.channel", { channel, text }) : serverLine(deps.language(), "server.teamSlack.channelUnnamed", { text });
+    const language = deps.language(personal ? person : undefined);
+    return channel ? serverLine(language, "server.teamSlack.channel", { channel, text }) : serverLine(language, "server.teamSlack.channelUnnamed", { text });
   }
 
   /** What the app's own send refused, as the Admin reads it: it tries again on 409, 423, 429 and 5xx, and tells the sender on anything else. */
@@ -249,7 +261,7 @@ export function createTeamSlackHost(deps: TeamSlackHostDeps) {
     let bot: BotRecord | null | undefined, threadId = input.conversationId ?? undefined;
     if (threadId) {
       bot = store.botByThread(threadId);
-      if (!bot || !store.taskByThread(bot.id, threadId) || !visible.thread(threadId) || !canChat(bot) || deps.audienceOf(threadId) !== wanted) return NO_SUCH_CONVERSATION;
+      if (!bot || !store.taskByThread(bot.id, threadId) || !visible.thread(threadId) || !canChat(bot) || (!personal && deps.audienceOf(threadId) !== wanted)) return NO_SUCH_CONVERSATION;
     } else if ("id" in input.bot) {
       bot = store.bot(input.bot.id);
     } else if ("name" in input.bot) {
@@ -257,20 +269,20 @@ export function createTeamSlackHost(deps: TeamSlackHostDeps) {
       bot = store.bots.find((one) => canChat(one) && one.name.trim().toLowerCase() === name);
     } else {
       const mine = store.bots.filter(canChat);
-      bot = mine.find((one) => defaultBotPerson(one) !== "") ?? mine[0];
+      bot = mine.find((one) => (personal ? Boolean(one.defaultBot) : defaultBotPerson(one) !== "")) ?? mine[0];
     }
     if (!bot || !canChat(bot)) return NO_SUCH_BOT;
-    if (input.audience === "team" && !teamSlackShared(bot)) return refusal(403, "bot_private", "That bot is private to its owner.");
+    if (input.audience === "team" && !shared(bot)) return refusal(403, "bot_private", "That bot is private to its owner.");
 
     const created = threadId === undefined;
     if (threadId === undefined) {
       const task = store.createTask(bot.id, title(input, person), false, undefined, undefined, undefined, undefined, undefined, (made) => {
         deps.starters.set(made.threadId, person);
-        if (input.audience === "team") deps.shareFromSlack(made.threadId, person);
+        if (input.audience === "team") { if (personal) messages.channel(made.threadId, true); else deps.shareFromSlack(made.threadId, person); }
       });
       if (!task) return refusal(503, "unavailable", "The conversation could not be opened.");
       threadId = task.threadId;
-      if (deps.audienceOf(threadId) !== wanted) {
+      if (!personal && deps.audienceOf(threadId) !== wanted) {
         deps.discard(bot.id, threadId);
         return refusal(503, "unavailable", "The conversation could not be opened.");
       }
@@ -279,7 +291,7 @@ export function createTeamSlackHost(deps: TeamSlackHostDeps) {
     try {
       receipt = await deps.send({ botId: bot.id, threadId, text: input.text, sendId: input.id, sender: deps.sender(auth), trigger: deps.trigger(auth), personPresent: true, admin: deps.actor(auth).admin, followUp: "queue" });
     } catch (error) {
-      if (created) deps.discard(bot.id, threadId);
+      if (created) { deps.discard(bot.id, threadId); messages.channel(threadId, false); }
       return sendRefused(error);
     }
     // A line made of stop words ended the run instead of starting one, as it does in the app.
@@ -297,7 +309,7 @@ export function createTeamSlackHost(deps: TeamSlackHostDeps) {
     /** The bots this member can chat with. */
     bots(auth: RequestAuth): TeamSlackAnswer {
       if (!member(auth)) return refusal(404, "not_a_member", "Not found.");
-      return { status: 200, body: { bots: store.bots.filter(chattable(auth)).map((bot) => ({ id: bot.id, name: bot.name, shared: teamSlackShared(bot) })) } };
+      return { status: 200, body: { bots: store.bots.filter(chattable(auth)).map((bot) => ({ id: bot.id, name: bot.name, shared: shared(bot) })) } };
     },
     /** Starts or continues a conversation with one Slack message, once per id. */
     message(auth: RequestAuth, input: TeamSlackMessage): Promise<TeamSlackAnswer> {

@@ -232,13 +232,20 @@ shape.
   that activity's own token.
 - `activity` `{ "v": 1, "token", "event": "start" | "update" | "end", "alert"?,
   "activity": { "botId", "botName", "kind": "needsYou" | "working", "headline",
-  "since", "link", "color", "gradient", "body" } }` starts, updates or ends a
+  "since", "link", "color", "gradient", "body", "version"?, "ask"?, "status"?,
+  "waiting"? } }` starts, updates or ends a
   bot's Live Activity on iPhone, or sends an FCM token the data message the
   Android app turns into its ongoing "working" notification. The schema is as
   strict as `send`'s: `headline` is one line of at most 120 characters (the
   phone's own words, "Scout needs you", with the name filled in), `link` must
   be the app's chat link, colours are `#rrggbb`, and there is no field for a
-  line of text or an answer. Same limits and answers as `send`.
+  line of text or an answer. `alert` is accepted on a `start` only (`400`
+  elsewhere): an alerting update or end lights the screen and expands the
+  Dynamic Island. `version: 1` with `ask` (`approval` | `question` | `signIn`
+  | `other`), `status` (one line of at most 80, the phone's words without the
+  name) and `waiting` (bots waiting on the person) asks for the phone's
+  content state version 1; all four or none. Same limits and answers as
+  `send`.
 
 `collapseId` is the identifier the phone gives the notification the live
 stream would have posted (`openmaus.<threadId>.<seq>`), so a push and that
@@ -267,15 +274,19 @@ however many isolates send; each isolate caches its token for the window.
 
 **Live Activities.** `POST https://api.push.apple.com/3/device/<token>`
 with `apns-push-type: liveactivity`, `apns-topic: <bundle id>.push-type.liveactivity`,
-priority 10 for a start or a ringing update and 5 otherwise, a 15-minute
-expiration, and `{ "aps": { "timestamp", "event", "content-state": { "name":
-"BotActivity", "props": <the app's BotActivityProps as JSON, with an empty line
-and no answers> }, "stale-date" (now + 15 min) | "dismissal-date" (an end),
-"attributes-type": "LiveActivityAttributes" and "attributes": { "url" } (a
-start), "alert"? } }`. `BotActivity` and `LiveActivityAttributes` are the
+priority 10 for a start and 5 otherwise, a 15-minute expiration, and
+`{ "aps": { "timestamp", "event", "content-state": { "name": "BotActivity",
+"props": <the app's BotActivityProps as JSON: version 1 (`version`, `name`,
+`color`, `body`, `mood`, `kind`, `ask`, `status`, `waiting`, `since`, `link`,
+no answers) when asked for, else the earlier shape with `headline`, an empty
+line and no answers> }, "stale-date" (now + 15 min) | "dismissal-date" (an
+end), and for a start only "attributes-type": "LiveActivityAttributes",
+"attributes": { "url" } and the alert ActivityKit requires to start one
+remotely, "alert": { "title": <headline>, "body": <bot name>, "sound" } } }`.
+An update or an end never carries an alert. `BotActivity` and `LiveActivityAttributes` are the
 names the phone app's Live Activity is registered under (expo-widgets). For an
 FCM token: a data-only message `{ "omb_kind": "activity", "event", "bot_id",
-"bot_name", "kind", "headline", "since", "link", "alert", "sent_at" }`, priority
+"bot_name", "kind", "headline", "since", "link", "sent_at" }`, priority
 `HIGH` when the bot needs the person or the activity ends, else `NORMAL`.
 
 **FCM.** An OAuth access token from `https://oauth2.googleapis.com/token`

@@ -15,6 +15,7 @@ import {
   PUSH_ID,
   PUSH_NAME_MAX,
   PUSH_RELAY_ERRORS,
+  type ActivityAsk,
   type ActivityEvent,
   type ActivityKind,
   type ActivityVisual,
@@ -29,11 +30,14 @@ export const MAX_ACTIVITY_PHONES = 50;
 export const MAX_ACTIVITIES = 10;
 export const MAX_VISUALS = 60;
 const HEADLINE_MAX = 120;
-const NEEDS_YOU_KINDS: ReadonlySet<string> = new Set(["approval", "question", "sign-in"]);
+/** A notification kind that means a bot needs the person, as the ask the phone's content state names. */
+const ASK_OF_KIND: ReadonlyMap<string, ActivityAsk> = new Map([["approval", "approval"], ["question", "question"], ["sign-in", "signIn"]]);
 
 const hex = z.string().regex(/^#[0-9A-Fa-f]{6}$/);
 const visualSchema = z.object({ color: hex, gradient: z.array(hex).min(1).max(4), body: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/) }).strict();
 const headline = z.string().min(1).max(HEADLINE_MAX).refine((value) => value.includes("{name}") && !/[\p{Cc}\u2028\u2029]/u.test(value));
+
+const status = z.string().min(1).max(80).refine((value) => value.trim() === value && !/[\p{Cc}\u2028\u2029]/u.test(value));
 
 export const activityRegistrationSchema = z.object({
   scheme: z.enum(["openmausbot", "openmausbot-dev", "openmausbot-next"]),
@@ -44,6 +48,10 @@ export const activityRegistrationSchema = z.object({
   fallbackVisual: visualSchema.optional(),
   ongoing: z.boolean().optional(),
   kinds: z.array(z.enum(["needsYou", "working"])).max(2).optional(),
+  statuses: z.object({
+    working: status,
+    needsYou: z.object({ approval: status, question: status, signIn: status, other: status }).strict(),
+  }).strict().optional(),
 }).strict();
 
 const storedSchema = z.object({ version: z.literal(1), phones: z.array(z.object({ key: z.string().regex(PUSH_DEVICE_KEY), registration: activityRegistrationSchema, updatedAt: z.number() })).max(MAX_ACTIVITY_PHONES) });
@@ -109,6 +117,7 @@ export class PhoneActivity {
   private readonly pending = new Map<string, unknown>();
   private readonly reach = new Map<string, (key: string) => boolean>();
   private readonly askThread = new Map<string, string>();
+  private readonly askKind = new Map<string, ActivityAsk>();
 
   constructor(options: PhoneActivityOptions) {
     this.options = options;
@@ -221,8 +230,10 @@ export class PhoneActivity {
     if (payload.kind === "notify") {
       const notification = payload.notification as Record<string, unknown> | undefined;
       const botId = notification?.botId, threadId = notification?.threadId, kind = notification?.kind;
-      if (typeof botId !== "string" || typeof kind !== "string" || !PUSH_ID.test(botId) || !NEEDS_YOU_KINDS.has(kind)) return null;
+      const ask = typeof kind === "string" ? ASK_OF_KIND.get(kind) : undefined;
+      if (typeof botId !== "string" || !ask || !PUSH_ID.test(botId)) return null;
       if (typeof threadId === "string") this.askThread.set(botId, threadId);
+      this.askKind.set(botId, ask);
       return botId;
     }
     if (payload.kind === "bot") {
@@ -249,7 +260,10 @@ export class PhoneActivity {
       if (bot) this.remember(botId, bot.name, kind === "needsYou" ? this.askThread.get(botId) ?? bot.threadId : bot.threadId);
       if (kind && bot) this.bots.set(botId, { kind, since: previous?.kind === kind ? previous.since : now, name: bot.name, threadId: this.seen.get(botId)?.threadId ?? bot.threadId });
       else this.bots.delete(botId);
-      if (kind !== "needsYou") this.askThread.delete(botId);
+      if (kind !== "needsYou") {
+        this.askThread.delete(botId);
+        this.askKind.delete(botId);
+      }
       const reaches = this.reach.get(botId) ?? (() => false);
       for (const phone of this.phones) {
         if (this.options.push.isLive(phone.key)) {
@@ -314,6 +328,8 @@ export class PhoneActivity {
     const visual = registration.visuals?.[botId] ?? registration.fallbackVisual ?? FALLBACK_VISUAL;
     const known = state ?? this.seen.get(botId);
     const name = clipName(known?.name ?? fallbackName);
+    const statuses = registration.statuses;
+    const ask: ActivityAsk = kind === "needsYou" ? this.askKind.get(botId) ?? "other" : "other";
     return {
       botId,
       botName: name,
@@ -322,6 +338,13 @@ export class PhoneActivity {
       since: state?.since ?? this.now(),
       link: `${registration.scheme}://chat/${encodeURIComponent(known?.threadId ?? botId)}`,
       ...visual,
+      // Content state version 1 only for a phone that registered its words for it.
+      ...(statuses ? {
+        version: 1 as const,
+        ask,
+        status: kind === "working" ? statuses.working : statuses.needsYou[ask],
+        waiting: [...this.bots.values()].filter((bot) => bot.kind === "needsYou").length,
+      } : {}),
     };
   }
 
@@ -331,21 +354,23 @@ export class PhoneActivity {
     const kind = wanted ?? was;
     if (!kind) return outcomes;
     const activity = this.activityBody(phone, botId, kind, state, botId);
-    const alert = wanted === "needsYou" && was !== "needsYou";
+    const newlyNeedsYou = wanted === "needsYou" && was !== "needsYou";
     const event: ActivityEvent = wanted ? "update" : "end";
 
+    // An update or an end never alerts: that lights the screen and expands the Dynamic Island. The person hears of the
+    // ask from the closed-app notification.
     const running = registration.activities?.find((entry) => entry.botId === botId);
     if (running) {
-      outcomes.push(await this.post(phone.key, botId, { v: PHONE_PUSH_WIRE_VERSION, token: running.token, event, ...(alert ? { alert } : {}), activity }, "apns"));
+      outcomes.push(await this.post(phone.key, botId, { v: PHONE_PUSH_WIRE_VERSION, token: running.token, event, activity }, "apns"));
       if (event === "end") this.dropActivity(phone.key, botId);
-    } else if (wanted === "needsYou" && registration.startToken && alert) {
-      // Only a bot that starts needing the person is started remotely: a working bot is news the app shows when opened.
+    } else if (newlyNeedsYou && registration.startToken) {
+      // Only a bot that starts needing the person is started remotely, with the alert ActivityKit requires for that.
       outcomes.push(await this.post(phone.key, botId, { v: PHONE_PUSH_WIRE_VERSION, token: registration.startToken, event: "start", alert: true, activity }, "apns"));
     }
 
     const device = this.options.push.deviceOf(phone.key);
     if (registration.ongoing && device?.platform === "fcm" && FCM_TOKEN.test(device.token)) {
-      outcomes.push(await this.post(phone.key, botId, { v: PHONE_PUSH_WIRE_VERSION, token: device.token, event, ...(alert ? { alert } : {}), activity }, "fcm"));
+      outcomes.push(await this.post(phone.key, botId, { v: PHONE_PUSH_WIRE_VERSION, token: device.token, event, activity }, "fcm"));
     }
     return outcomes;
   }

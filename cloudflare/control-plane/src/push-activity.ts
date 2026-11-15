@@ -32,9 +32,17 @@ const activitySchema = z.strictObject({
   v: z.literal(1),
   token: z.string().regex(TOKEN),
   event: z.enum(["start", "update", "end"]),
-  /** Ring with the headline: a bot started needing the person. */
+  /** A push-to-start only: ActivityKit starts an activity remotely only with an alert, and an alerting update or end
+   * would light the screen and expand the Dynamic Island. Refused anywhere else. */
   alert: z.boolean().optional(),
   activity: z.strictObject({
+    /** Content state version 1 (the phone app's `BotActivityProps`): with `ask`, `status` and `waiting`. */
+    version: z.literal(1).optional(),
+    ask: z.enum(["approval", "question", "signIn", "other"]).optional(),
+    /** The status line in the phone's words, without the name ("Needs your approval"). */
+    status: oneLine(80).optional(),
+    /** How many bots wait on the person now. */
+    waiting: z.number().int().min(0).max(999).optional(),
     botId: z.string().regex(ID),
     botName: oneLine(80),
     kind: z.enum(["needsYou", "working"]),
@@ -47,11 +55,31 @@ const activitySchema = z.strictObject({
     gradient: z.array(z.string().regex(HEX)).min(1).max(4),
     body: z.string().regex(BODY),
   }),
-});
+}).refine((request) => !request.alert || request.event === "start")
+  .refine(({ activity }) => activity.version === undefined
+    ? activity.ask === undefined && activity.status === undefined && activity.waiting === undefined
+    : activity.ask !== undefined && activity.status !== undefined && activity.waiting !== undefined);
 export type ActivitySendRequest = z.infer<typeof activitySchema>;
 
-/** The phone app's `BotActivityProps` for a pushed state: no line of text, no answers. */
+/** The phone app's `BotActivityProps` for a pushed state, version 1 or the earlier shape: no message text, no answers. */
 export function activityProps(activity: ActivitySendRequest["activity"]) {
+  if (activity.version === 1) {
+    return {
+      version: 1,
+      botId: activity.botId,
+      name: activity.botName,
+      color: activity.color,
+      body: activity.body,
+      mood: activity.kind,
+      kind: activity.kind,
+      ask: activity.ask,
+      status: activity.status,
+      waiting: activity.waiting,
+      since: activity.since,
+      link: activity.link,
+      answers: [],
+    };
+  }
   return {
     botId: activity.botId,
     name: activity.botName,
@@ -78,7 +106,8 @@ export function liveActivityPayload(request: ActivitySendRequest, now: number) {
       "content-state": contentState,
       ...(request.event === "end" ? { "dismissal-date": seconds } : { "stale-date": seconds + ACTIVITY_STALE_SECONDS }),
       ...(request.event === "start" ? { "attributes-type": LIVE_ACTIVITY_ATTRIBUTES, attributes: { url: request.activity.link } } : {}),
-      ...(request.alert && request.event !== "end" ? { alert: { title: request.activity.headline, body: request.activity.botName, sound: "default" } } : {}),
+      // The minimal alert ActivityKit needs to start an activity remotely: names and kind only.
+      ...(request.event === "start" ? { alert: { title: request.activity.headline, body: request.activity.botName, sound: "default" } } : {}),
     },
   };
 }
@@ -98,7 +127,6 @@ export function activityFcmPayload(request: ActivitySendRequest, now: number) {
         headline: activity.headline,
         since: String(activity.since),
         link: activity.link,
-        alert: request.alert ? "1" : "0",
         sent_at: String(now),
       },
       android: { priority: activity.kind === "needsYou" || request.event === "end" ? "HIGH" : "NORMAL", ttl: FCM_TTL },
@@ -116,7 +144,7 @@ export async function sendActivityPush(request: Request, env: Env, pushFetch: ty
     const wanted = body.event === "start" ? "activity-start" : "activity";
     if (row.purpose !== wanted) return errorResponse(404, "push_device_unknown");
     if (!config.apns) return errorResponse(503, "push_unavailable");
-    const priority = body.alert || body.event === "start" ? 10 : 5;
+    const priority = body.event === "start" ? 10 : 5;
     return { kind: "apns", config: config.apns, pushType: "liveactivity", priority, expiresInSeconds: ACTIVITY_EXPIRATION_SECONDS, payload: liveActivityPayload(body, now) };
   });
 }

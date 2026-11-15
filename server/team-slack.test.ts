@@ -105,6 +105,30 @@ describe("the record of Slack messages", () => {
     expect(again.forgetPerson("p_zyxwvutsrqponmlkjihgfe")).toEqual([LATER]);
     expect(JSON.parse(readFileSync(join(dataDir, TEAM_SLACK_FILE), "utf8")).messages.map((one: { id: string }) => one.id)).toEqual([ID]);
   });
+  it("on a personal Cloud keeps which conversations a channel opened, after their messages are dropped and across a restart", () => {
+    const dataDir = dir(), day = 24 * 3_600_000;
+    let now = 0;
+    const first = createTeamSlackMessages({ dataDir, now: () => now });
+    first.channel("t_channel", true);
+    first.channel("t_refused", true);
+    first.channel("t_refused", false);
+    first.put(record({ threadId: "t_channel", state: "completed", told: "completed" }));
+    first.put(record({ id: LATER, threadId: "t_direct", audience: "member" }));
+    expect([first.channelThread("t_channel"), first.channelThread("t_direct"), first.channelThread("t_refused")]).toEqual([true, false, false]);
+    now = 31 * day;
+    first.patch(LATER, {});
+    expect(first.all()).toEqual([]);
+    const again = createTeamSlackMessages({ dataDir, now: () => now });
+    expect([again.channelThread("t_channel"), again.channelThread("t_direct")]).toEqual([true, false]);
+    expect(readFileSync(join(dataDir, TEAM_SLACK_FILE), "utf8")).toBe('{"version":1,"messages":[],"channels":["t_channel"]}\n');
+  });
+  it("a Team Cloud's record names no channel conversations: its sharing does", () => {
+    const dataDir = dir();
+    const kept = createTeamSlackMessages({ dataDir, now: () => 2_000 });
+    kept.put(record());
+    expect(kept.channelThread("t_1")).toBe(false);
+    expect(Object.keys(JSON.parse(readFileSync(join(dataDir, TEAM_SLACK_FILE), "utf8")))).toEqual(["version", "messages"]);
+  });
   it("past its cap drops what is over before a run it still tracks", () => {
     const kept = createTeamSlackMessages({ dataDir: dir(), now: () => 1_000, max: 2 });
     const [first, second, third] = [ID, LATER, "8b2e3c4d-5e6f-4a7b-8c9d-2e3f4a5b6c7d"];
