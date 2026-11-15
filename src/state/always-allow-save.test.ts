@@ -76,8 +76,12 @@ const alwaysAllow = (onError?: (message: string) => void) => flushSync(() => dis
 
 describe("Always allow on an approval card", () => {
   it("saves the grant and then approves the request", async () => {
-    saveGrant = () => json({ bot });
+    let finishSave!: (response: Response) => void;
+    saveGrant = () => new Promise((resolve) => { finishSave = resolve; });
     alwaysAllow();
+    await settle();
+    expect(writes).toEqual(["/api/bots/bot/always-allow"]);
+    finishSave(new Response(JSON.stringify({ bot }), { status: 200 }));
     await settle();
     expect(writes).toEqual(["/api/bots/bot/always-allow", "/api/threads/thread/respond"]);
     expect(seen.error).toBeNull();
