@@ -1,4 +1,4 @@
-// Pausing a bot or a department (#4740): GET what is paused; POST {kind, id, paused} pauses or resumes one, and pausing
+// Pausing a bot or a department: GET what is paused; POST {kind, id, paused} pauses or resumes one, and pausing
 // also stops the work its bots are doing now. Admin-scope routes: on a Team Cloud only an owner or admin pauses.
 import type { IncomingMessage } from "node:http";
 import { z } from "zod";

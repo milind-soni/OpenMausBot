@@ -1,4 +1,4 @@
-// #4740 on a real server, its AI a fixture whose turns never end (FAKE_CLAUDE_MODE=hang), so there is always work to stop.
+// Pausing on a real server, its AI a fixture whose turns never end (FAKE_CLAUDE_MODE=hang), so there is always work to stop.
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, it } from "vitest";
 

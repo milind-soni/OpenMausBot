@@ -1,4 +1,4 @@
-// Pausing a bot or a department (#4740): it takes no new work, and what it is doing now stops, until it is resumed. The
+// Pausing a bot or a department: it takes no new work, and what it is doing now stops, until it is resumed. The
 // server sends the new state to every open app in its config frame.
 import type { ConfigStatus } from "@/state/store";
 import { api } from "@/state/api";

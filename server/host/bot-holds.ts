@@ -1,4 +1,4 @@
-// Bots the person paused (#4740): one bot, or every bot in a department, takes no new work until it is resumed.
+// Bots the person paused: one bot, or every bot in a department, takes no new work until it is resumed.
 // <data>/paused-bots.json keeps which bots and departments are paused; a bot is paused when it is named, or its
 // department is. Every way work starts asks here, beside the Starter plan's own pause (starter-caps.ts): a person's
 // message, the bot API, a routine or webhook run, a hand-off from another bot, and its turn in a room.
