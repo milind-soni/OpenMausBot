@@ -7,9 +7,16 @@
 // delivery or the read, it is never followed), and what was written or opened is resolved afterwards and must be
 // exactly that literal path. A copy that landed anywhere else is removed. The sender chooses only the file's display
 // name, which is reduced to one safe path part.
+//
+// Windows has no open-without-following (O_NOFOLLOW), and a junction needs no special rights there. The guard is the
+// same on every platform and does not rest on that flag: `lstat` reports a junction or a link as a link, never as a
+// folder or a file, so each part is refused before it is used; and the path the operating system itself reports for
+// what was opened or written (`realpath.native`, which also expands 8.3 short names and fixes the drive letter's
+// case) must be the literal path, which a junction or link anywhere on the way makes impossible. On Windows the two
+// are compared without regard to case, as its file names are.
 import { constants, lstatSync, mkdirSync, promises as fsp, realpathSync, rmdirSync, rmSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
 import { randomBytes } from "node:crypto";
 
 export const INBOX_FOLDER = "inbox";
@@ -62,7 +69,27 @@ export function inboxFileNames(names: readonly string[]): string[] {
   });
 }
 
-const within = (child: string, parent: string): boolean => child.startsWith(parent.endsWith(sep) ? parent : parent + sep);
+/** The same file path, as this platform names files: exactly, or on Windows whatever the case and the slashes. */
+export function samePath(a: string, b: string, platform: NodeJS.Platform = process.platform): boolean {
+  return platform === "win32" ? win32.normalize(a).toLowerCase() === win32.normalize(b).toLowerCase() : a === b;
+}
+
+/** `child` is strictly below `parent`, by the same rule. */
+export function withinPath(child: string, parent: string, platform: NodeJS.Platform = process.platform): boolean {
+  const separator = platform === "win32" ? win32.sep : posix.sep;
+  const [low, top] = platform === "win32" ? [win32.normalize(child).toLowerCase(), win32.normalize(parent).toLowerCase()] : [child, parent];
+  return low.startsWith(top.endsWith(separator) ? top : top + separator);
+}
+
+/** A copy's place as the receiver reads it from its conversation's own folder, with this platform's separators. */
+export function inboxDisplayPath(fromPart: string, assignmentPart: string, name: string, platform: NodeJS.Platform = process.platform): string {
+  return (platform === "win32" ? win32 : posix).join(INBOX_FOLDER, fromPart, assignmentPart, name);
+}
+
+/** The path the operating system reports for what is there now: links and junctions resolved, and on Windows short
+ * names expanded and the drive letter's case fixed. Every comparison here uses this one form. */
+export const canonical = (path: string): string => realpathSync.native(path);
+const within = (child: string, parent: string): boolean => withinPath(child, parent);
 const realFolder = (path: string): boolean => lstatSync(path, { throwIfNoEntry: false })?.isDirectory() === true;
 
 export interface InboxPlace {
@@ -81,14 +108,14 @@ export function inboxFolder(place: Pick<InboxPlace, "root" | "fromPart" | "assig
 /** Copies `source` to its inbox place, off the event loop, and answers the path. A file already there under that name
  * is replaced: the caller decides whether a delivery is a repeat, and skips those. */
 export async function placeInInbox(place: InboxPlace, source: string, fileName: string): Promise<string> {
-  const root = realpathSync(place.root);
+  const root = canonical(place.root);
   let folder = root;
   for (const part of [INBOX_FOLDER, place.fromPart, place.assignmentPart]) {
     folder = join(folder, part);
     if (!lstatSync(folder, { throwIfNoEntry: false })) mkdirSync(folder, { mode: place.shared ? 0o755 : 0o700 });
     if (!realFolder(folder)) throw new Error(`${folder} is not a folder`);
   }
-  if (realpathSync(folder) !== folder) throw new Error("the inbox folder leads outside the receiver's folder");
+  if (!samePath(canonical(folder), folder)) throw new Error("the inbox folder leads outside the receiver's folder");
   const target = join(folder, inboxFileName(fileName));
   if (lstatSync(target, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`${target} is a folder`);
   const partial = join(folder, `.${randomBytes(6).toString("hex")}.part`);
@@ -99,7 +126,7 @@ export async function placeInInbox(place: InboxPlace, source: string, fileName: 
     await fsp.rename(partial, target);
     // A folder swapped for a link while the copy ran took the file with it: where it really is decides.
     landed = await fsp.realpath(target);
-    if (landed !== target || !(await fsp.lstat(target)).isFile()) throw new Error("the inbox folder was replaced while the file was copied");
+    if (!samePath(landed, target) || !(await fsp.lstat(target)).isFile()) throw new Error("the inbox folder was replaced while the file was copied");
     return target;
   } catch (error) {
     if (landed !== undefined) await fsp.rm(landed, { force: true }).catch(() => undefined);
@@ -131,7 +158,7 @@ function literalInbox(inbox: InboxRead): { root: string; spelled: string } | nul
   if (![inbox.botId, inbox.threadId].every((id) => /^[A-Za-z0-9_-]{1,128}$/.test(id))) return null;
   let folder: string;
   try {
-    folder = realpathSync(inbox.taskWorkspaces);
+    folder = canonical(inbox.taskWorkspaces);
   } catch {
     return null;
   }
@@ -169,7 +196,7 @@ export async function openInboxFile(requested: string, inbox: InboxRead, maxByte
       if (!opened.isFile()) throw new Error("not a file");
       if (opened.size > maxBytes) throw Object.assign(new Error(`${basename(candidate)} exceeds ${maxBytes} bytes`), { status: 413 });
       const after = await fsp.stat(candidate);
-      if (await fsp.realpath(candidate) !== candidate || after.dev !== opened.dev || after.ino !== opened.ino) throw new Error("the inbox changed while the file was opened");
+      if (!samePath(await fsp.realpath(candidate), candidate) || after.dev !== opened.dev || after.ino !== opened.ino) throw new Error("the inbox changed while the file was opened");
       return { handle, bytes: opened.size, name: basename(candidate), path: candidate };
     } catch (error) {
       await handle?.close().catch(() => undefined);

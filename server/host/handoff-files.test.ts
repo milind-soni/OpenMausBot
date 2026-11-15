@@ -1,10 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, promises as fsp, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, promises as fsp, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // attachments.ts and workspace.ts read DATA_DIR at import time.
-const ROOT = mkdtempSync(join(tmpdir(), "omb-handoff-files-"));
+// The form the code itself compares in: on Windows the temp folder is otherwise an 8.3 short name.
+const ROOT = realpathSync.native(mkdtempSync(join(tmpdir(), "omb-handoff-files-")));
+/** A folder link as a bot without special rights can make one on Windows: a junction; an ordinary link elsewhere. */
+const linkFolder = (target: string, path: string) => symlinkSync(target, path, "junction");
 const DATA = join(ROOT, "data");
 process.env.OMB_DATA_DIR = DATA;
 const { ATTACHMENTS_DIR, deleteAttachment } = await import("../attachments.ts");
@@ -183,7 +186,7 @@ describe("receiving", () => {
     const { to } = await handed(files, [write("report.pdf")]);
     ownFolder = true;
     const text = (await files.forTurn(to, false, "first")).text;
-    expect(text).toContain("- inbox/ana/a1/report.pdf (application/pdf, 1 KB)");
+    expect(text).toContain(`- ${join("inbox", "ana", "a1", "report.pdf")} (application/pdf, 1 KB)`);
     expect(text).not.toContain(DATA);
   });
 
@@ -215,7 +218,7 @@ describe("receiving", () => {
     vi.spyOn(fsp, "copyFile").mockImplementationOnce(async (from, dest, mode) => {
       const folder = join(folderOf("ben", "t-ben"), "inbox", "ana", "a1");
       renameSync(folder, `${folder}-moved`);
-      symlinkSync(elsewhere, folder);
+      linkFolder(elsewhere, folder);
       return real(from, dest, mode);
     });
     const text = (await files.forTurn(to, false, "first")).text;
@@ -287,7 +290,7 @@ describe("receiving", () => {
     const elsewhere = join(ROOT, `elsewhere-${serial}`);
     mkdirSync(elsewhere);
     mkdirSync(folderOf("ben", "t-ben"), { recursive: true });
-    symlinkSync(elsewhere, join(folderOf("ben", "t-ben"), "inbox"));
+    linkFolder(elsewhere, join(folderOf("ben", "t-ben"), "inbox"));
     const text = (await files.forTurn(to, false, "first")).text;
     expect(readdirSync(elsewhere)).toEqual([]);
     expect(text).toMatch(/- report\.pdf \(application\/pdf, 1 KB\) <attached-file path="[^"]+" name="report\.pdf" \/>/);
@@ -303,7 +306,8 @@ describe("receiving", () => {
     expect((await files.forTurn(to, false, "rerun")).text).toContain("Also in your Local VM: /home/cua/workspace/inbox/ana/a1/");
     const copy = join(vmHome, "inbox", "ana", "a1", "report.pdf");
     expect(readFileSync(copy, "utf8")).toBe("for the vm");
-    expect(statSync(copy).mode & 0o777).toBe(0o644);
+    // Windows keeps no such permission bits; there the guest reads through the mount as it is.
+    if (process.platform !== "win32") expect(statSync(copy).mode & 0o777).toBe(0o644);
   });
 
   it("moves a file from one bot's computer to another's, each seeing only its own workspace", async () => {
@@ -344,7 +348,7 @@ describe("receiving", () => {
     expect(targets.some((target) => target === work || target === folderOf("ana", "t-ana") || target === ATTACHMENTS_DIR)).toBe(false);
     expect(text).toContain(join(cwd, "inbox", "ana", "a1", "report.pdf"));
     const boxed = attachmentsForBox(text, cwd, true, DATA, ATTACHMENTS_DIR);
-    const shown = join(boxUploadsDir(DATA, "ben", "t-ben"), staged.files[0]!.path.split("/").at(-1)!);
+    const shown = join(boxUploadsDir(DATA, "ben", "t-ben"), basename(staged.files[0]!.path));
     expect(boxed).toContain(`<attached-image path="${shown}" name="chart.png" />`);
     expect(readFileSync(shown).equals(PNG)).toBe(true);
   });
@@ -515,7 +519,7 @@ describe("clean-up", () => {
     const files = setup();
     const first = await saveBotAttachment({ path: write("shown.pdf", `shown ${serial}`), roots: [work], byContent: true });
     const second = await saveBotAttachment({ path: write("unused.pdf", `unused ${serial}`), roots: [work], byContent: true });
-    referenced.add(first.attachment.path.split("/").at(-1)!);
+    referenced.add(basename(first.attachment.path));
     files.drop([first.attachment.path, second.attachment.path]);
     expect(existsSync(first.attachment.path)).toBe(true);
     expect(existsSync(second.attachment.path)).toBe(false);
@@ -545,13 +549,21 @@ describe("a bot's own inbox as a place to send from", () => {
       for (const path of ["inbox/ana/a1/report.pdf", join(inbox, "ana", "a1", "report.pdf")]) await expect(way(path), path).resolves.toBeTruthy();
     }
     await expect(saveBotAttachment({ path: "inbox/ana/a1/report.pdf", roots: [work], byContent: true, inbox: inboxOf("cy", "t-cy") })).rejects.toMatchObject({ status: 404 });
+    // The data folder itself reached through a link the install set up (or, on Windows, a short name): still the bot's inbox.
+    const alias = join(ROOT, `data-alias-${serial}`);
+    linkFolder(DATA, alias);
+    const through = { taskWorkspaces: join(alias, "task-workspaces"), botId: "ben", threadId: "t-ben" };
+    for (const path of ["inbox/ana/a1/report.pdf", join(alias, "task-workspaces", "ben", "t-ben", "inbox", "ana", "a1", "report.pdf"), join(inbox, "ana", "a1", "report.pdf")]) {
+      await expect(saveBotAttachment({ path, roots: [work], byContent: true, inbox: through }), path).resolves.toBeTruthy();
+    }
+    await expect(saveBotAttachment({ path: join(alias, "secret.json"), roots: [work], byContent: true, inbox: through })).rejects.toBeTruthy();
   });
 
   it("refuses everything once the inbox is replaced by a link to the data folder", async () => {
     const files = setup();
     const inbox = await received(files);
     rmSync(inbox, { recursive: true });
-    symlinkSync(DATA, inbox);
+    linkFolder(DATA, inbox);
     const before = stored();
     for (const way of ways(files)) {
       for (const path of ["inbox/secret.json", join(inbox, "secret.json"), SECRET, "secret.json", "inbox/attachments/../secret.json"]) await expect(way(path), path).rejects.toBeTruthy();
@@ -563,7 +575,7 @@ describe("a bot's own inbox as a place to send from", () => {
     const files = setup();
     const inbox = await received(files);
     symlinkSync(SECRET, join(inbox, "ana", "a1", "leak.json"));
-    symlinkSync(DATA, join(inbox, "ana", "peek"));
+    linkFolder(DATA, join(inbox, "ana", "peek"));
     rmSync(join(inbox, "ana", "a1", "report.pdf"));
     symlinkSync(SECRET, join(inbox, "ana", "a1", "report.pdf"));
     const before = stored();
@@ -612,7 +624,9 @@ describe("one coordinate_bots call", () => {
     const before = stored();
     expect(await files.coordinate({ paths: ["report.pdf"], answers: "a1", senderId: "ana", recipients: 1, saveOne: saver(), send: send([]) }))
       .toMatchObject({ status: 400, body: { error: expect.stringContaining("files do not travel with an answer") } });
-    expect(await files.coordinate({ paths: ["/etc/hosts"], senderId: "ana", recipients: 1, saveOne: saver(), send: send([]) })).toMatchObject({ status: 403 });
+    const outside = join(ROOT, `not-the-bots-${serial}.pdf`);
+    writeFileSync(outside, "outside its folders");
+    expect(await files.coordinate({ paths: [outside], senderId: "ana", recipients: 1, saveOne: saver(), send: send([]) })).toMatchObject({ status: 403 });
     expect(await files.coordinate({ paths: ["report.pdf"], senderId: "ana", recipients: 1, saveOne: saver(), send: send([{ botId: "ben", outcome: "failed" }], 409) }))
       .toEqual({ status: 409, body: { receipts: [{ botId: "ben", outcome: "failed" }] } });
     expect(stored()).toEqual(before);

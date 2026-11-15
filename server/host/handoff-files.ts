@@ -9,7 +9,7 @@
 // the result: where the result is withheld (access changed, or it stayed in one person's private chat) they are too.
 // What a receiver reads about them is a harness note saying they are data from another bot; nothing is opened, run or
 // unpacked here.
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { z } from "zod";
@@ -24,7 +24,7 @@ import { peerName } from "../peer-roster.ts";
 import { AUTHORITY, botWho, fromNoteWith } from "../provenance-label.ts";
 import type { Message } from "../store.ts";
 import { ensureTaskWorkspace, TASK_WORKSPACES_DIR } from "../workspace.ts";
-import { INBOX_FOLDER, inboxAssignmentPart, inboxFileNames, inboxFolder, inboxSenderPart, placeInInbox, removeInbox, removeInboxCopy, type InboxRead } from "./handoff-inbox.ts";
+import { canonical, inboxDisplayPath, inboxAssignmentPart, inboxFileNames, inboxFolder, inboxSenderPart, placeInInbox, removeInbox, removeInboxCopy, type InboxRead } from "./handoff-inbox.ts";
 
 /** Files one coordinate_bots call may carry, and their bytes together. Each file also keeps attach_file's own limit. */
 export const HANDOFF_FILES_PER_MESSAGE = 5;
@@ -272,7 +272,7 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
     let inVm = 0;
     const copy = async (given: string, shared: boolean, passed: PassedFile, name: string): Promise<string | null> => {
       let home = given;
-      try { home = realpathSync(given); } catch { /* placeInInbox says why */ }
+      try { home = canonical(given); } catch { /* placeInInbox says why */ }
       const target = join(inboxFolder({ root: home, ...place }), name);
       if (placed[target] === basename(passed.path) && existsSync(target)) return target;
       try {
@@ -296,7 +296,7 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
       if (picture) { shown!.images += 1; shown!.bytes += passed.bytes; }
       const tag = (kind: "image" | "file") => `<attached-${kind} path="${escapeAttribute(passed.path)}" name="${escapeAttribute(name)}" />`;
       // In its own folder the receiver reads `inbox/...` as it stands; elsewhere only the whole path leads there.
-      const read = landed && deps.worksInOwnFolder?.(to.botId, to.threadId) ? [INBOX_FOLDER, place.fromPart, place.assignmentPart, basename(landed)].join("/") : landed;
+      const read = landed && deps.worksInOwnFolder?.(to.botId, to.threadId) ? inboxDisplayPath(place.fromPart, place.assignmentPart, basename(landed)) : landed;
       lines.push(read ? `- ${read} (${passed.mime}, ${sized(passed.bytes)})` : `- ${name} (${passed.mime}, ${sized(passed.bytes)}) ${tag("file")}`);
       if (picture) pictures.push("", tag("image"));
     }

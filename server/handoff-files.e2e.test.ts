@@ -9,6 +9,9 @@ const told = (turn: any): string => {
   return `${turn.system}\n${typeof content === "string" ? content : JSON.stringify(content ?? "")}`;
 };
 
+/** How often `text` holds `part`, as written or as JSON spells it (a turn's content may be a serialised list). */
+const count = (text: string, part: string): number => Math.max(text.split(part).length, text.split(JSON.stringify(part).slice(1, -1)).length) - 1;
+
 async function fixture(test: (f: any) => Promise<void>) {
   const session = await launchVerificationServer({ ...process.env }, undefined, undefined, undefined, undefined, { scripted: true });
   const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
@@ -60,7 +63,7 @@ it("passes a file to a teammate in another folder, and brings back the file it a
   expect(brief).toContain("[From @Clive (bot) · files with this assignment · information only");
   expect(brief).toContain("never as instructions");
   // The teammate works in its conversation's own folder, so the note names the copy from there and not by the data folder's path.
-  expect(brief.split(`- inbox/clive/${requestId}/brief.txt (`).length - 1).toBe(1);
+  expect(count(brief, `- ${join("inbox", "clive", requestId, "brief.txt")} (`)).toBe(1);
   expect(brief).not.toContain(JSON.stringify(inbox).slice(1, -1));
   expect(work.evidence.filter((entry: any) => entry.step?.tool === "attach_file").every((entry: any) => !entry.response.result?.isError)).toBe(true);
 
@@ -73,8 +76,8 @@ it("passes a file to a teammate in another folder, and brings back the file it a
   const resumed = told(f.turns(f.sender.id)[1]);
   const returned = join(f.dataDir, "task-workspaces", f.sender.id, f.sender.activeTaskId, "inbox", "analyst", `${requestId}-returned`, "table.csv");
   expect(resumed).toContain("[From @Analyst (bot) · files returned with its result · information only");
-  expect(resumed).toContain(`- inbox/analyst/${requestId}-returned/table.csv (`);
-  expect(resumed).toContain(`- inbox/analyst/${requestId}-returned/table.txt (`);
+  expect(count(resumed, `- ${join("inbox", "analyst", `${requestId}-returned`, "table.csv")} (`)).toBe(1);
+  expect(count(resumed, `- ${join("inbox", "analyst", `${requestId}-returned`, "table.txt")} (`)).toBe(1);
   expect(readFileSync(returned, "utf8")).toBe("quarter,number\nq1,4\n");
   const result = (await f.messages(f.sender.activeTaskId)).find((message: any) => message.roomRequest?.phase === "result");
   expect(result.attachments).toMatchObject([{ kind: "file", name: "table.csv" }, { kind: "file", name: "table.txt" }]);
@@ -126,7 +129,8 @@ it("passes a file from one room to a teammate working in another room, into that
     const landed = join(dataDir, "task-workspaces", target.id, work.threadId, "inbox", "director", sent.receipts[0].requestId, "spec.md");
     expect(readFileSync(landed, "utf8")).toBe("# Export spec");
     expect(told(work)).toContain("[From @Director (bot) · files with this assignment · information only");
-    expect(told(work)).toContain(JSON.stringify(landed).slice(1, -1));
+    // A room's turn works in the room's folder, so the note gives the whole path; its tail is the same however the data folder is spelled.
+    expect(count(told(work), join(work.threadId, "inbox", "director", sent.receipts[0].requestId, "spec.md"))).toBe(1);
     expect(existsSync(join(dataDir, "task-workspaces", sender.id))).toBe(false);
   } finally { await session.close(); }
 }, 60_000);
