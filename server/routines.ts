@@ -13,7 +13,7 @@ import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 import { intervalAllowsOccurrence, intervalHasRestrictions, isSameLocalDay, latestIntervalOccurrence } from "./routine-intervals.ts";
 import { cloneSchedule, limitResetOccurrence, mergeScheduleUpdate, nextOccurrence, RoutineScheduleError, type RoutineSchedule, type RoutineScheduleInput } from "./routine-schedules.ts";
-import { runsOnce } from "../shared/limit-reset.ts";
+import { runsOnce } from "../shared/limit-reset.ts"; import { limitResetRunOwed } from "./limit-reset-owed.ts";
 import {
   ROUTINE_HANDOFF_WAIT, isRoutineProblemRun, type RoutineAccess, type RoutineCheck, type RoutineContextAttachment, type RoutineDelivery, type RoutineIntervalWindow, type RoutineRetryCause,
   type RoutineHoldCause, type RoutineRunReport, type RoutineRunStatus, type RoutineRunTrigger,
@@ -880,10 +880,10 @@ export class RoutineManager {
     return moved.length;
   }
 
-  /** The engines' reset times changed: each limit-reset routine that is on takes its engine's new time. */
+  /** The engines' reset times changed: each limit-reset routine that is on takes its engine's new time, once the run it owes a passed reset was made (limit-reset-owed.ts). */
   retimeLimitResets(): number {
     const moved = this.routines.filter((routine) => {
-      if (!routine.enabled || routine.schedule.type !== "limit_reset") return false;
+      if (!routine.enabled || routine.schedule.type !== "limit_reset" || limitResetRunOwed(routine, this.runs, this.now())) return false;
       const schedule = this.timedSchedule(routine.schedule, routine.id);
       if (schedule.type !== "limit_reset" || (schedule.at === routine.schedule.at && schedule.at === routine.nextRunAt)) return false;
       routine.schedule = schedule;
