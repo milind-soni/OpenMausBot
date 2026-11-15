@@ -2,7 +2,7 @@ import { createReadStream } from "node:fs";
 import { z } from "zod";
 
 import { SKIN_IDS } from "../../shared/app-settings.ts";
-import { THEME_ID, THEME_LIMITS, themeExportSchema, themeFileSchema } from "../../shared/theme.ts";
+import { THEME_ID, THEME_LIMITS, themeExportSchema, themeFileSchema, type ThemeHistoryItem } from "../../shared/theme.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "../routes/table.ts";
 import { isRefusal, type ThemeStore } from "./store.ts";
@@ -14,6 +14,7 @@ const IMPORT_LIMIT = Math.ceil(THEME_LIMITS.themeBytes * 1.4) + THEME_LIMITS.css
 const activeBody = z.object({ id: z.string().regex(THEME_ID).nullable(), skin: z.enum([...SKIN_IDS, "system"]).optional() }).strict();
 const saveBody = z.object({ theme: themeFileSchema }).strict();
 const nameBody = z.object({ name: z.string().trim().min(1).max(60) }).strict();
+const historyBody = z.object({ index: z.number().int().positive() }).strict();
 
 export interface ThemeRoutesDeps {
   store: ThemeStore;
@@ -60,9 +61,21 @@ export function createThemeRoutes(deps: ThemeRoutesDeps): RouteHandler {
       if (method !== "PUT") return json(res, 405, { error: "GET or PUT" });
       const parsed = activeBody.safeParse(await readBody(req));
       if (!parsed.success) return json(res, 400, { error: "id must be a saved theme's id or null" });
-      const refusal = store.setActive(person, parsed.data.id);
-      if (refusal) return json(res, 404, { error: refusal.refusal });
-      deps.changed(person, parsed.data.skin);
+      const done = store.change(person, { wear: parsed.data.id, ...(parsed.data.skin ? { skin: parsed.data.skin } : {}) });
+      if (isRefusal(done)) return json(res, 404, { error: done.refusal });
+      deps.changed(person, done.skin);
+      return json(res, 200, { ok: true });
+    }
+    if (path === "/api/themes/history") {
+      const items = store.history(person);
+      if (method === "GET") return json(res, 200, { items: items.map(({ index, at, kind, name, count }) => ({ index, at, kind, name, count })) satisfies ThemeHistoryItem[] });
+      if (method !== "POST") return json(res, 405, { error: "GET or POST" });
+      const parsed = historyBody.safeParse(await readBody(req));
+      const target = parsed.success ? items.find((item) => item.index === parsed.data.index) : undefined;
+      if (!target) return json(res, 400, { error: "index must be one of the changes listed." });
+      const done = store.restore(person, target.seq);
+      if (isRefusal(done)) return json(res, 409, { error: done.refusal });
+      deps.changed(person, done.skin);
       return json(res, 200, { ok: true });
     }
     if (path === "/api/themes/import" && method === "POST") {
@@ -93,8 +106,8 @@ export function createThemeRoutes(deps: ThemeRoutesDeps): RouteHandler {
     if (method === "PUT") {
       const parsed = saveBody.safeParse(await readBody(req, THEME_LIMITS.cssChars * 4 + 50_000));
       if (!parsed.success) return json(res, 400, { error: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ") });
-      const refusal = store.save(person, id, parsed.data.theme);
-      if (refusal) return json(res, 400, { error: refusal.refusal });
+      const done = store.change(person, { saves: [{ id, file: parsed.data.theme }] });
+      if (isRefusal(done)) return json(res, 400, { error: done.refusal });
       if (store.active(person) === id) deps.changed(person);
       return json(res, 200, { ok: true });
     }

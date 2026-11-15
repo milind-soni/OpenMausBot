@@ -14,6 +14,7 @@ import { findSettings, personOnly, type SettingEntry, type WritableEntry } from 
 
 export const TOOL = "app_settings";
 export const WRITE_BUDGET = 10;
+const THEME_ACTIONS: readonly string[] = ["theme", "set_theme", "add_theme_asset", "theme_history", "undo_theme"];
 const FIND_LIMIT = 8;
 const NOT_SET = "not set";
 const text = (value: string) => value || NOT_SET;
@@ -161,7 +162,8 @@ export function createAppSettings(deps: AppSettingsDeps) {
     const person = deps.guestDriven(turn.threadId) ? null : themes.person(turn);
     if (!person) return refuse(403, "A theme changes only for the person who asked, in their own conversation. This turn was not started by them here, so nothing changed.");
     if (body.action === "theme") return themes.overview(person, body.id);
-    const asked = body.action === "set_theme" ? themes.wanted(person, body) : null;
+    if (body.action === "theme_history") return themes.history(person);
+    const asked = body.action === "set_theme" ? themes.wanted(person, body) : body.action === "undo_theme" ? themes.undo(person, body) : null;
     if (asked && "error" in asked) return refuse(400, asked.error);
     const budget = spendWrite(turn);
     if (budget) return refuse(429, budget);
@@ -182,8 +184,8 @@ export function createAppSettings(deps: AppSettingsDeps) {
           change: entry.tier === "owner-only" ? `only the person, in ${entry.where}` : entry.tier === "secret" ? "set with no value opens a secure card" : "set applies at once, with Undo on the card" }) });
       }
       if (body.action === "set") return set(turn, body);
-      if (body.action === "theme" || body.action === "set_theme" || body.action === "add_theme_asset") return theme(turn, body);
-      return refuse(400, "action must be find, get, set, theme, set_theme or add_theme_asset.");
+      if (typeof body.action === "string" && THEME_ACTIONS.includes(body.action)) return theme(turn, body);
+      return refuse(400, `action must be find, get, set, ${THEME_ACTIONS.join(", ")}.`);
     },
 
     /** Undo on an applied card: restores the value read before the change, unless it changed since. */
