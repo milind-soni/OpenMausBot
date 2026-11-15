@@ -5,6 +5,7 @@ import { normalizeConnectorScopes } from "../../shared/connector-scopes.ts";
 import { normalizeOutboundPolicy } from "../../shared/outbound.ts";
 import { normalizePhoneApps } from "../../shared/phone-apps.ts";
 import { parseToolScope, toolScopeWidens } from "../../shared/tool-scope.ts";
+import { parseToolsOff, TOOL_GROUPS } from "../../shared/tool-groups.ts";
 import { isMausColor, MAUS_COLOR_NAMES, type BotUpdateResponse, type WireBot, type WireGroup } from "../../shared/wire.ts";
 import { checkBrowserProfileChange, settleBrowserChange } from "../bot-browser-profile.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
@@ -296,6 +297,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (body.xResearch !== undefined) {
         if (typeof body.xResearch !== "boolean") return json(res, 400, { error: "xResearch must be true or false" });
         patch.xResearch = body.xResearch;
+      }
+      if (body.toolsOff !== undefined) {
+        const toolsOff = body.toolsOff === null ? [] : parseToolsOff(body.toolsOff);
+        if (!toolsOff) return json(res, 400, { error: `toolsOff must be a list of ${TOOL_GROUPS.join(", ")}` });
+        patch.toolsOff = toolsOff.length ? toolsOff : undefined;
       }
       if (body.memoryEnabled !== undefined) {
         if (typeof body.memoryEnabled !== "boolean") return json(res, 400, { error: "memoryEnabled must be true or false" });

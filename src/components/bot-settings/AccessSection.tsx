@@ -18,6 +18,7 @@ import { placeManagedBy, worksOnChoices, WorksOnGrid, worksOnSelected, type Work
 import { Switch } from "../SettingsPrimitives";
 import { PhoneAppsCard } from "./PhoneAppsCard";
 import { ProposalStatus } from "./ProposalStatus";
+import { ToolGroupsCard } from "./ToolGroupsCard";
 import { ToolSelectionCard } from "./ToolSelectionCard";
 import { BotApiCard } from "./BotApiCard";
 import { ToolBudgetLine } from "./ToolBudgetLine";
@@ -785,6 +786,7 @@ export function AccessSection({
 
       {shows("phone") && <PhoneAppsCard bot={bot} patch={patch} />}
       {shows("mcp") && <McpServersCard bot={bot} patch={patch} />}
+      {!draft && shows("tools") && <ToolGroupsCard bot={bot} patch={patch} />}
       {shows("tools") && <ToolSelectionCard key={bot.id} bot={bot} engineKind={derived.engine?.driverKind} />}
 
       {shows("browser") && <div className="rounded-xl bg-card p-4">

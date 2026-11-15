@@ -4,7 +4,7 @@
 import type { PresenceFrame } from "./team-presence.ts";
 import type { DataBroadcast } from "./data-surface.ts";
 import type { ApprovalMode } from "./approval-mode.ts";
-import type { ToolScope } from "./tool-scope.ts";
+import type { ToolScope } from "./tool-scope.ts"; import type { ToolGroup } from "./tool-groups.ts";
 import type { CommandAllowlistCandidate } from "./command-allowlist.ts";
 import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop, MascotFaceColor } from "./bot-avatar.ts";
@@ -334,6 +334,8 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   xResearch?: boolean;
   /** Whether this bot uses native memory. Absent/true = enabled. */
   memoryEnabled?: boolean;
+  /** Built-in tool groups turned off for this bot (shared/tool-groups.ts). Absent or empty: all on. */
+  toolsOff?: ToolGroup[];
   /** Queue direct-chat messages behind outstanding delegated work. */
   parkDirectMessages?: boolean;
   /** true after an edit/branch-switch rewound the visible conversation. */
