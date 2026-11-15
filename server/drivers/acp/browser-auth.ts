@@ -1,4 +1,4 @@
-//Browser sign-in through the engine's own ACP `authenticate`: the app starts a one-shot session much like a turn's
+// Browser sign-in through the engine's own ACP `authenticate`: the app starts a one-shot session much like a turn's
 // spawn, initializes it, and sends `authenticate`; the engine then opens the person's browser itself and holds that
 // request until the person finishes there. `start` resolves as soon as the engine holds the sign-in open (the
 // browser pops behind it); `get` reports the flow until the authenticate response, a readiness probe, expiry or a
@@ -163,7 +163,8 @@ export class AcpBrowserAuth {
       });
       child.stderr!.on("data", () => {});
 
-      const request = (method: string, params: unknown, timeoutMs: number) => new Promise<unknown>((resolve, rejectRequest) => {        const id = requestSeq++;
+      const request = (method: string, params: unknown, timeoutMs: number) => new Promise<unknown>((resolve, rejectRequest) => {
+        const id = requestSeq++;
         const timer = setTimeout(() => {
           pending.delete(id);
           rejectRequest(new Error(`${method} was not answered in time`));

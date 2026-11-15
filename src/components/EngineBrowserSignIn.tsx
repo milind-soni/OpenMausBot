@@ -1,4 +1,4 @@
-//A sign-in whose engine opens the person's browser itself (Mistral Vibe's ACP authenticate): the app starts the
+// A sign-in whose engine opens the person's browser itself (Mistral Vibe's ACP authenticate): the app starts the
 // flow, then only polls until the engine reports it done — there is no link or code to show.
 import { useEffect, useRef, useState } from "react";
 import { Loader2, LogIn } from "lucide-react";

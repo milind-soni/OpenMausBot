@@ -35,6 +35,7 @@ import { removeAntigravityProfile } from "../drivers/antigravity-acp.ts";
 import { BUILT_IN_DRIVERS } from "../drivers/builtIn.ts";
 import { findCliCandidates, resetPathCache } from "../env-path.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
+import { productName } from "../brand.ts";
 import { checkEngine, type EngineCheck } from "../engine-check.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import type { ProviderAuthSessions } from "../provider-auth-sessions.ts";
@@ -360,7 +361,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           if ((instance.authenticationMethod === "browser-pkce" || instance.authenticationMethod === "browser")
             && (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress))) {
             if (instance.authenticationMethod === "browser") {
-              return json(res, 403, { error: "This sign-in happens in a browser on the computer running OpenMausBot. Open OpenMausBot there to sign in." });
+              return json(res, 403, { error: `This sign-in happens in a browser on the computer running ${productName()}. Open ${productName()} there to sign in.` });
             }
             return json(res, 403, { error: "Continue with ChatGPT on the computer running OpenMausBot. Hosted Pro sign-in requires OpenAI's hosted-app approval." });
           }

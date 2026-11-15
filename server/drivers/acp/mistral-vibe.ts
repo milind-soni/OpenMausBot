@@ -20,6 +20,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { productName } from "../../brand.ts";
 import type { ModelCatalog } from "../../contracts.ts";
 import { createAcpDriver, type AcpConfig, type AcpSupport } from "./core.ts";
 import { discoverAcpModels } from "./custom-model-catalog.ts";
@@ -119,7 +120,8 @@ export async function removeMistralVibeSignIn(env: Record<string, string | undef
 }
 
 
-/** Discovers models in a temporary session, so a refresh leaves no record in the person's Vibe history. */export async function resolveMistralVibeModels(
+/** Discovers models in a temporary session, so a refresh leaves no record in the person's Vibe history. */
+export async function resolveMistralVibeModels(
   env: Record<string, string | undefined>,
   config: Pick<AcpConfig, "cli">,
 ): Promise<ModelCatalog> {
@@ -160,12 +162,13 @@ export const mistralVibeSupport: AcpSupport = {
     product: "Mistral",
     methodId: (methods) => (methods.some((method) => method.id === "browser-auth") ? "browser-auth" : null),
     signedIn: (env) => vibeSignedIn(env),
-    serverHint:
-      "OpenMausBot cannot reach a browser on this server. Sign in from a machine that runs OpenMausBot, or paste a Mistral API key under Settings → Connections → Model providers.",
+    get serverHint() {
+      return `${productName()} cannot reach a browser on this server. Sign in from a machine that runs ${productName()}, or paste a Mistral API key under Settings → Connections → Model providers.`;
+    },
     failure(stage, detail) {
       switch (stage) {
         case "start": return detail === "ENOENT"
-          ? "Mistral Vibe isn't installed where OpenMausBot runs. Install it on this card, then try again."
+          ? `Mistral Vibe isn't installed where ${productName()} runs. Install it on this card, then try again.`
           : "Mistral Vibe did not start a sign-in in time. Update the CLI on this card, then try again.";
         case "initialize": return "Mistral Vibe did not answer its sign-in handshake in time. Update the CLI on this card, then try again.";
         case "authenticate": return "The Mistral sign-in did not finish. It may have been cancelled in the browser; start it again to retry.";
@@ -186,9 +189,9 @@ export const mistralVibeSupport: AcpSupport = {
     return current ?? null;
   },
 
-  // initialize advertises exactly one method: a browser sign-in the process opens itself,
-  // which the authenticate request blocks on until the person finishes (see header).
-  pickAuthMethod: (methods) => (methods.some((method) => method.id === "browser-auth") ? "browser-auth" : null),
+  // initialize advertises exactly one method: a browser sign-in the process opens itself, which the authenticate
+  // request blocks on until the person finishes (see header). Already signed in, a turn skips it: no browser per turn.
+  pickAuthMethod: (methods, env) => (!vibeSignedIn(env) && methods.some((method) => method.id === "browser-auth") ? "browser-auth" : null),
   authFailure: "continue",
   isAuthenticated: (env) => vibeSignedIn(env),
 

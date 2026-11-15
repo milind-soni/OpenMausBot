@@ -39,6 +39,7 @@ describe("Mistral (Vibe) ACP driver", () => {
       enabled: true,
       environment: {
         VIBE_HOME: join(scratch, "vibe-home"),
+        VIBE_KEYCHAIN_SERVICE: "omb-test-no-such-entry",
         FAKE_ACP_AUTH_METHOD: "browser-auth",
         FAKE_ACP_IMAGE_CAPABILITY: "1",
         FAKE_ACP_AGENT_NAME: "@mistralai/mistral-vibe",
@@ -111,7 +112,8 @@ describe("Mistral (Vibe) ACP driver", () => {
     await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
 
     expect(recorder.events.every((event) => event.provider === "mistralVibeAgent")).toBe(true);
-    expect(JSON.parse(readFileSync(join(scratch, "rpc.json"), "utf8"))).toContain("authenticate");
+    // Signed in through the key: the browser sign-in is not asked for on a turn.
+    expect(JSON.parse(readFileSync(join(scratch, "rpc.json"), "utf8"))).not.toContain("authenticate");
     const launch = JSON.parse(readFileSync(join(scratch, "launch.json"), "utf8"));
     expect(launch.argv).toEqual([]);
     expect(launch.env.MISTRAL_API_KEY).toBe("engine-fixture-key");
@@ -131,6 +133,8 @@ describe("Mistral (Vibe) ACP driver", () => {
     expect(await instance.adapter.respondToRequest("mistral-vibe-permission", ask.requestId!, { behavior: "deny" })).toBe("rejected");
     await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
     expect(readFileSync(answer, "utf8")).toBe("reject");
+    // Not signed in anywhere: the turn asks for the engine's browser sign-in.
+    expect(JSON.parse(readFileSync(join(scratch, "rpc.json"), "utf8"))).toContain("authenticate");
   });
 
   describe("sign-out cleanup of Vibe's fallback .env", () => {

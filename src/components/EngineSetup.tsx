@@ -612,7 +612,7 @@ export function EngineSetup({
   }
 
   // The app's own copy is out of reach of the person's terminal, so its sign-in is finished here.
-  if (signInOnly && install.appCopy && !deviceSignIn && !engineBrowserSignIn && !pasteSignIn) {
+  if (signInOnly && install.appCopy && !deviceSignIn && !browserSignIn && !engineBrowserSignIn && !pasteSignIn) {
     return <AppCopySetup instance={instance} className={className} unframed={unframed} />;
   }
 
