@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { failedTurnTool } from "../shared/failed-turn.ts";
 import type { PlaceRow } from "../shared/place-view.ts";
 import { TRIAL_CREDIT_REFUSED } from "../shared/trial-credit.ts";
@@ -212,15 +212,21 @@ describe("the ledger", () => {
 
   it("reports each routine's last outcome and failures in a row as the saved run rows give them, so a restart hides none", () => {
     const rows = [{ routineId: "routine-1", status: "missed" as const, at: START, consecutiveFailures: 2 }, { routineId: "not an id!", status: "failed" as const, at: START, consecutiveFailures: 9 }];
-    const caps: number[] = [];
-    const deps = { routines: (cap: number) => { caps.push(cap); return rows; }, schedule: () => ({ unreadable: true, slowStops: 2 }) };
+    const caps: number[] = [], none = { ran: 0, failed: 0, missed: 0, late: 0, retried: 0 };
+    const schedule = { v: 1 as const, seq: 7, unreadable: true, nextDueAt: null, oldestUnconfirmed: null, lastConfirmed: null, due: { boot: none, day: none }, slowStops: 2 };
+    const deps = { routines: (cap: number) => { caps.push(cap); return rows; }, schedule: () => schedule };
     for (const w of [world(deps), world(deps)]) {
       const report = w.health.report(null);
       expect(report.routines).toEqual([rows[0]]);
-      expect(report.schedule).toEqual({ unreadable: true, slowStops: 2 });
+      expect(report.schedule).toEqual(schedule);
     }
     expect(caps).toEqual([100, 100]);
     expect(world().health.report(null)).toMatchObject({ routines: [], schedule: null });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const broken = world({ routines: () => { throw new Error("Quarterly-Secret-Plan"); }, schedule: () => { throw new Error("Quarterly-Secret-Plan"); } }).health.report(null);
+    expect(broken).toMatchObject({ v: 1, routines: [], schedule: null, turns: { started15m: 0 } });
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("Quarterly");
+    vi.restoreAllMocks();
   });
 });
 

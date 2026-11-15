@@ -786,26 +786,31 @@ describe("cron routines use the existing persistent scheduler", () => {
     expect(h.manager.wakeHold()).toEqual({ hold: true, reason: "running" });
   });
 
-  it("catches up once within twelve hours and does not replay missed minute slots", async () => {
+  it.each([8, 20])("catches up once with the newest slot after %i hours and counts the missed minute slots on one row", async (hours) => {
     const h = harness(start);
     const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));
-    h.setNow(start + 8 * 3_600_000);
+    h.setNow(start + hours * 3_600_000);
     await h.manager.tick(); await h.manager.tick();
     expect(h.started).toHaveLength(1);
-    expect(h.manager.listRuns()).toHaveLength(1);
-    expect(h.manager.listRuns()[0]).toMatchObject({ scheduledFor: routine.nextRunAt, status: "running" });
-    expect(h.manager.listRoutines()[0].nextRunAt).toBe(start + 8 * 3_600_000 + 60_000);
+    expect(h.manager.listRuns()).toHaveLength(2);
+    expect(h.manager.listRuns()[0]).toMatchObject({ scheduledFor: start + hours * 3_600_000, status: "running" });
+    const older = (start + hours * 3_600_000 - routine.nextRunAt!) / 60_000;
+    expect(h.manager.listRuns()[1]).toMatchObject({ scheduledFor: routine.nextRunAt, status: "missed", seenAt: start + hours * 3_600_000,
+      skipped: { count: older, firstAt: routine.nextRunAt, lastAt: start + hours * 3_600_000 - 60_000 } });
+    expect(h.failed).toHaveLength(0);
+    expect(h.manager.listRoutines()[0].nextRunAt).toBe(start + hours * 3_600_000 + 60_000);
   });
 
-  it("records one missed receipt after longer downtime and advances straight to the future", async () => {
+  it("records one missed receipt when even the newest occurrence is more than twelve hours old, and advances straight to the future", async () => {
     const h = harness(start);
-    const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));
-    h.setNow(start + 20 * 3_600_000);
+    const routine = h.manager.create(input({ ...monthly, expression: "0 9 * * *" }));
+    h.setNow(routine.nextRunAt! + 13 * 3_600_000);
     await h.manager.tick(); await h.manager.tick();
     expect(h.started).toHaveLength(0);
     expect(h.manager.listRuns()).toHaveLength(1);
     expect(h.manager.listRuns()[0]).toMatchObject({ scheduledFor: routine.nextRunAt, status: "missed" });
-    expect(h.manager.listRoutines()[0].nextRunAt).toBe(start + 20 * 3_600_000 + 60_000);
+    expect(h.failed).toHaveLength(1);
+    expect(h.manager.listRoutines()[0].nextRunAt).toBe(routine.nextRunAt! + 24 * 3_600_000);
   });
 
   it("does not accumulate cron work while a previous run is queued or active", async () => {
@@ -2075,7 +2080,8 @@ describe("RoutineManager", () => {
     expect(h.manager.listRuns()).toMatchObject([{
       status: "running",
       scheduledFor: anchorAt + 10 * 60_000,
-    }]);
+    }, { status: "missed", scheduledFor: anchorAt, skipped: { count: 2, firstAt: anchorAt, lastAt: anchorAt + 5 * 60_000 } }]);
+    expect(h.started).toHaveLength(1);
     expect(h.manager.listRoutines()[0]?.nextRunAt).toBe(anchorAt + 15 * 60_000);
   });
 
@@ -2101,7 +2107,7 @@ describe("RoutineManager", () => {
     expect(h.manager.listRuns()).toMatchObject([{
       status: "running",
       scheduledFor: new Date(2026, 7, 17, 10, 0, 0).getTime(),
-    }]);
+    }, { status: "missed", scheduledFor: new Date(2026, 7, 17, 9, 0, 0).getTime(), skipped: { count: 2, lastAt: new Date(2026, 7, 17, 9, 30, 0).getTime() } }]);
     expect(h.manager.listRoutines()[0]?.nextRunAt).toBe(new Date(2026, 7, 24, 9, 0, 0).getTime());
   });
 
@@ -3665,8 +3671,10 @@ describe("run on startup", () => {
     try {
       await expect.poll(() => booted.isTicking).toBe(false);
       expect(h.started).toHaveLength(0);
-      expect(booted.listRuns()).toHaveLength(1);
-      expect(booted.listRuns()[0]).toMatchObject({ routineId: routine.id, triggerSource: "schedule", status: "missed" });
+      expect(booted.listRuns()).toMatchObject([
+        { routineId: routine.id, triggerSource: "schedule", status: "missed", scheduledFor: endsAt, error: "The routine ended before this scheduled run could start" },
+        { routineId: routine.id, triggerSource: "schedule", status: "missed", skipped: { count: hours - 1, firstAt: start + 60 * 60_000, lastAt: endsAt - 60 * 60_000 } },
+      ]);
       expect(booted.listRoutines()[0]).toMatchObject({ enabled: false, nextRunAt: null });
       expect(new RoutineManager(h.options).listRoutines()[0]).toMatchObject({ enabled: false, nextRunAt: null });
     } finally {
