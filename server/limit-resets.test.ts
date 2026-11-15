@@ -529,6 +529,8 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.blockedUntil("opencodeGo", "opencode/big-pickle")).toBeNull();
     instance.noteRefusal("opencodeGo", NOW + 2 * HOUR);
     expect(instance.blockedUntil("opencodeGo", "opencode/big-pickle"), "a refusal of the whole account still holds every model").not.toBeNull();
+    expect(instance.resetAt("opencodeGo", "opencode/big-pickle"), "a free model resets with the refusal, not the Go meter").toBeLessThan(NOW + 4 * HOUR);
+    expect(instance.resetAt("opencodeGo", "opencode-go/kimi-k2")).toBe(NOW + 4 * HOUR);
   });
 
   it("still holds every model of an engine other than OpenCode at a full window", () => {

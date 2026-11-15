@@ -53,7 +53,7 @@ export interface LimitTakeoverDeps {
   /** Until when this engine refuses work, or null. */
   blockedUntil(instanceId: string, model?: string): number | null;
   /** When this engine's limit resets, when that is known. */
-  resetAt?(instanceId: string): number | null;
+  resetAt?(instanceId: string, model?: string): number | null;
   /** The backups the person chose for this bot, or for every bot. */
   chosen(botId: string): ModelSelection[];
   /** The backups a signed-out AI's turns go to, as for a turn its AI never started: the bot's own list, or the
@@ -259,7 +259,7 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
       if (!scope) return null;
       const carries = (deps.enabled?.() ?? true) && backups(bot.id, selection, scope, approvalModeFor(bot)).length > 0;
       if (!carries && !(recovering && scope !== "signed-out")) return null;
-      const resetsAt = scope === "engine" ? deps.resetAt?.(selection.instanceId) ?? undefined : model?.resetsAt;
+      const resetsAt = scope === "engine" ? deps.resetAt?.(selection.instanceId, selection.model) ?? undefined : model?.resetsAt;
       return { scope, ...(resetsAt && resetsAt > now() ? { resetsAt } : {}) };
     },
     /** Every runtime event of a bot's thread, with the model its turn ran on: a model's own limit holds that model, a

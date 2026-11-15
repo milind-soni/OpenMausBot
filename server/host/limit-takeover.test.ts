@@ -68,11 +68,15 @@ describe("which AI carries on while one is limited", () => {
     const clock = new LimitResetClock({ accounts: () => [{ id: "opencode", name: "OpenCode", driver: "opencode", environment: {} }], now: () => NOW });
     clock.noteUsage({ fetchedAt: new Date(NOW).toISOString(), providers: [{ id: "opencode", name: "OpenCode", driver: "opencode", ok: true, error: null,
       ...parseOpenCodeUsage({ usage: { rolling: { percent: 100, resetsAt: new Date(NOW + HOUR).toISOString() }, weekly: { percent: 50, resetsAt: new Date(NOW + 48 * HOUR).toISOString() } } }) }] });
-    const { instance } = takeover({ engines: () => [openCode, CLAUDE, CODEX], blockedUntil: (id, model) => clock.blockedUntil(id, model), resetAt: (id) => clock.resetAt(id) });
+    const { instance } = takeover({ engines: () => [openCode, CLAUDE, CODEX], blockedUntil: (id, model) => clock.blockedUntil(id, model), resetAt: (id, model) => clock.resetAt(id, model) });
     expect(instance.heldAtStart(KAI, on("opencode", "opencode/big-pickle")), "a free model has its own allowance").toBeNull();
     expect(instance.heldAtStart(KAI, on("opencode", "opencode-go/kimi-k2"))).toEqual({ scope: "engine", resetsAt: NOW + HOUR });
     const chosen = takeover({ engines: () => [openCode, CLAUDE, CODEX], blockedUntil: (id, model) => clock.blockedUntil(id, model), chosen: () => [on("opencode", "opencode/big-pickle")] }).instance;
     expect(chosen.backups("kai", on("claude", "claude-opus-5-5"))[0], "a free model the person chose still carries on for another AI").toEqual(on("opencode", "opencode/big-pickle"));
+    clock.noteRefusal("opencode", NOW + HOUR / 2);
+    const free = instance.heldAtStart(KAI, on("opencode", "opencode/big-pickle"));
+    expect(free?.resetsAt, "a refused free model waits for the refusal's reset, not the Go meter's later one").toBe(clock.blockedUntil("opencode", "opencode/big-pickle"));
+    expect(free?.resetsAt).toBeLessThan(NOW + HOUR);
   });
 
   it("never picks an AI that bills each use by itself, only as a backup the person chose", () => {
