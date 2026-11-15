@@ -320,7 +320,7 @@ describe("bot-first sidebar", () => {
     expect(queuedDot).toContain("bg-ink-secondary");
     expect(queuedDot).not.toContain("size-4");
     expect(queuedDot).not.toContain("size-5");
-    expect(markup).toContain('class="truncate">Queued</span>');
+    expect(markup).toContain('class="min-w-0 overflow-hidden whitespace-nowrap">Queued</span>');
     expect(markup).not.toContain("font-semibold text-warning");
     expect(markup).not.toContain("waiting-dot");
   });
