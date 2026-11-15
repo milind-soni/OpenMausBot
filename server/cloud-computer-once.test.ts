@@ -13,6 +13,8 @@ const cfg = {} as AppConfig;
 const BOX = "bx_23456789";
 const KEY = "0123456789abcdef";
 const dirs: string[] = [];
+// The claim and stop scripts run on the cloud computer, a Linux machine; these tests run them with this machine's own sh, which Windows lacks.
+const posix = process.platform !== "win32";
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 /** A computer: one folder for its disk, and a log each run of the user's command appends to. */
@@ -36,7 +38,7 @@ function computer() {
   };
 }
 
-describe("a call's claim on the computer", () => {
+describe.skipIf(!posix)("a call's claim on the computer", () => {
   it("lets the first copy of a call run and stops every later copy before the command", () => {
     const pc = computer();
     const first = pc.sh(onceCommand(KEY, 1, pc.command, pc.claims));
@@ -83,7 +85,7 @@ describe("a call's claim on the computer", () => {
   });
 });
 
-describe("stopping the command a call started", () => {
+describe.skipIf(!posix)("stopping the command a call started", () => {
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
   const until = async (check: () => boolean, ms = 10_000) => {
     for (const end = Date.now() + ms; Date.now() < end; await new Promise((resolve) => setTimeout(resolve, 25))) if (check()) return true;
@@ -144,7 +146,7 @@ function relay(gateway: (send: number) => { delivered: boolean; answered: boolea
 }
 
 describe("a call the computer did not answer", () => {
-  it("is sent again once the computer answers a probe, and runs once when the first copy never arrived", async () => {
+  it.skipIf(!posix)("is sent again once the computer answers a probe, and runs once when the first copy never arrived", async () => {
     const r = relay((send) => ({ delivered: send > 0, answered: send > 0 }));
     const outcome = await r.call();
     expect(outcome).toMatchObject({ kind: "ran", resent: 1, result: { ok: true, stdout: "done\n" } });
@@ -153,14 +155,14 @@ describe("a call the computer did not answer", () => {
     expect(r.counters.snapshot(BOX)).toMatchObject({ unanswered: 1, resent: 1 });
   });
 
-  it("is not run a second time when the first copy did arrive and only its answer was lost", async () => {
+  it.skipIf(!posix)("is not run a second time when the first copy did arrive and only its answer was lost", async () => {
     const r = relay((send) => ({ delivered: true, answered: send > 0 }));
     await expect(r.call()).resolves.toEqual({ kind: "lost" });
     expect(r.pc.runs()).toBe(1);
     expect(r.counters.snapshot(BOX)).toMatchObject({ lostAnswers: 1 });
   });
 
-  it("is not run a second time when the first copy arrives late, after the resend already ran", async () => {
+  it.skipIf(!posix)("is not run a second time when the first copy arrives late, after the resend already ran", async () => {
     const r = relay((send) => ({ delivered: send > 0, answered: send > 0 }));
     await r.call();
     // The hung first send finally reaches the machine.
@@ -169,7 +171,7 @@ describe("a call the computer did not answer", () => {
     expect(r.pc.runs()).toBe(1);
   });
 
-  it("rides out a burst of gateway errors with a growing, varied pause, within its three resends", async () => {
+  it.skipIf(!posix)("rides out a burst of gateway errors with a growing, varied pause, within its three resends", async () => {
     const r = relay((send) => ({ delivered: send === 3, answered: send === 3 }));
     await expect(r.call()).resolves.toMatchObject({ kind: "ran", resent: 3 });
     expect(r.waits).toEqual(RESEND.backoffMs);
@@ -196,7 +198,7 @@ describe("a call the computer did not answer", () => {
     await expect(stays.call()).resolves.toEqual({ kind: "unanswered", phase: "unreachable" });
   });
 
-  it("returns a command that ran and failed as it is, with no resend", async () => {
+  it.skipIf(!posix)("returns a command that ran and failed as it is, with no resend", async () => {
     const pc = computer();
     let sends = 0;
     const outcome = await runOnce(cfg, BOX, "exit 2", { signal: new AbortController().signal, deadline: Date.now() + 60_000 }, {
