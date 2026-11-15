@@ -4,7 +4,7 @@ import { cn } from "@/lib/cn";
 import { WorkingTimer } from "@/components/WorkingIndicator";
 import { phraseAt, phraseHoldMs } from "@/lib/live-activity";
 import { quietText, silenceText } from "@/lib/now-steps";
-import { lastFrameAt } from "@/state/turn-status";
+import { silentSince } from "@/state/turn-status";
 import { t } from "@/lib/i18n";
 import { formatElapsed } from "@/lib/working-time";
 import type { StepQuiet } from "../../shared/turn-progress";
@@ -72,13 +72,12 @@ function QuietPart({ quiet }: { quiet: StepQuiet }) {
 
 /** "nothing new for 5 min" when the whole turn has gone silent, counted from the last frame this window saw. */
 function SilencePart({ threadId }: { threadId: string }) {
-  const [watchedFrom] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(timer);
   }, []);
-  const text = silenceText(lastFrameAt(threadId) ?? watchedFrom, now);
+  const text = silenceText(silentSince(threadId), now);
   return text ? <><Dot /><span data-turn-silent="" className="text-[12px] text-ink-tertiary">{text}</span></> : null;
 }
 

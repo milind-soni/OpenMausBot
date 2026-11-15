@@ -79,9 +79,14 @@ export function turnLive(threadId: string | null | undefined): TurnLive {
   return (threadId && threads.get(threadId)) || UNKNOWN;
 }
 
-/** When this thread last sent any live frame. Read on a clock rather than subscribed, so streamed text never re-renders. */
-export function lastFrameAt(threadId: string | null | undefined): number | undefined {
-  return threadId ? lastFrames.get(threadId) : undefined;
+/** When this thread last sent any live frame, or, before its first one, when this window first asked. Read on a clock
+ * rather than subscribed, so streamed text never re-renders. */
+export function silentSince(threadId: string): number {
+  const at = lastFrames.get(threadId);
+  if (at !== undefined) return at;
+  const now = Date.now();
+  lastFrames.set(threadId, now);
+  return now;
 }
 
 function subscribe(threadId: string | null | undefined, listener: () => void): () => void {
