@@ -13,7 +13,7 @@ the department name), or from **Templates → Share**.
   64 KB; the dialog stops adding pictures after about 2 MB of them).
 - **Skills.** All skills on the team's bots by default, or the ones you tick.
   Only the `SKILL.md` text travels, never scripts or other files. A file
-  holds at most 30 skills per bot and 60 per team, and one skill per name.
+  holds at most 30 skills per bot and 120 per team, and one skill per name.
   When you have not chosen, the dialog puts in what fits (switched-on skills
   first) and lists the rest under **Left out**, including a name two bots
   hold with different content. The skill boxes then start ticked on what
@@ -172,8 +172,10 @@ popup in `src/components/GrokMovePopup.tsx`.
 module the app, the import preview and Admin all validate with. It still
 reads version 1 files (JSON and the BotMRR Markdown playbook). Older apps
 refuse version 2 files with their existing "not supported" message; Admin can
-produce a version 1 download for them. A file is at most 4 MB. Example files
-and their expected hashes live in `shared/package-fixtures/`.
+produce a version 1 download for them. A file with more than 60 skills is
+written as version 3, so apps that read only version 2 say "Update the app"
+instead of refusing it for its size; every other file stays version 2. A file
+is at most 4 MB. Example files and their expected hashes live in `shared/package-fixtures/`.
 
 The HTTP route is `POST /api/teams/export` with
 `{"format":"package","version":2,"team":"Sales desk"}` (admin scope). Optional
