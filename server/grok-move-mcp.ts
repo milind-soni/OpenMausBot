@@ -6,6 +6,7 @@
 import { z } from "zod";
 
 import { GROK_EXPORT_FORMAT, GrokImportError, grokExportDocument, parseGrokExport, type GrokBot } from "../shared/grok-import.ts";
+import { productName } from "./brand.ts";
 
 export const MOVE_MAX_DOCUMENTS = 100;
 export const MOVE_MAX_BYTES = 16 * 1024 * 1024;
@@ -37,15 +38,15 @@ export function createMoveInbox(seq: () => number): MoveInbox {
 }
 
 // The names and the `document` input are fixed: the published MausBot bot in Grok Bot calls them.
-const TOOLS = [
+const tools = (app = productName()) => [
   {
     name: "move_status",
-    description: "Check the link to MausBot: whether it works, how many Bots have arrived so far, and when it stops working. Call this first.",
+    description: `Check the link to ${app}: whether it works, how many Bots have arrived so far, and when it stops working. Call this first.`,
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "send_export",
-    description: `Send one Bot's setup to MausBot. \`document\` is a ${GROK_EXPORT_FORMAT} document: {"format": "${GROK_EXPORT_FORMAT}", "version": 1, "bots": [{name, title, instructions, memories, user_facts, skills, routines, apps}]}. Send one Bot per call, with every skill and routine in full. Never include passwords, API keys, tokens or cookies: a document that has them is refused. A document over 4 MB is refused: split it into several documents with the same bot name. The person sees what arrived in MausBot and chooses what to import; nothing changes in Grok Bot.`,
+    description: `Send one Bot's setup to ${app}. \`document\` is a ${GROK_EXPORT_FORMAT} document: {"format": "${GROK_EXPORT_FORMAT}", "version": 1, "bots": [{name, title, instructions, memories, user_facts, skills, routines, apps}]}. Send one Bot per call, with every skill and routine in full. Never include passwords, API keys, tokens or cookies: a document that has them is refused. A document over 4 MB is refused: split it into several documents with the same bot name. The person sees what arrived in ${app} and chooses what to import; nothing changes where the Bot came from.`,
     inputSchema: {
       type: "object",
       properties: { document: { type: "object", description: `The ${GROK_EXPORT_FORMAT} document.` } },
@@ -68,7 +69,7 @@ function refusal(error: GrokImportError): string {
     case "cutOff":
       return `Nothing was saved: the document is cut off. Send it again whole. If it is too long, do this: ${SPLIT}`;
     case "newerVersion":
-      return `Nothing was saved: MausBot reads version 1 of ${GROK_EXPORT_FORMAT}. Send the document with "version": 1.`;
+      return `Nothing was saved: ${productName()} reads version 1 of ${GROK_EXPORT_FORMAT}. Send the document with "version": 1.`;
     case "notExport":
     case "unusable":
       return `Nothing was saved: that is not a ${GROK_EXPORT_FORMAT} document. Send {"format": "${GROK_EXPORT_FORMAT}", "version": 1, "bots": [{"name": ..., "instructions": ..., "memories": [...], "skills": [...], "routines": [...]}]} as \`document\`, with a name for each Bot.`;
@@ -100,14 +101,16 @@ function sendExport(args: unknown, inbox: MoveInbox, now: number): ToolResult {
     throw error;
   }
   if (!inbox.add(JSON.stringify(grokExportDocument(bots)), bots.map((bot) => bot.name), now)) {
-    return refused("Nothing was saved: this link has taken all it can hold. Tell the person to import what has arrived in MausBot, then to make a new link there for the rest.");
+    return refused(`Nothing was saved: this link has taken all it can hold. Tell the person to import what has arrived in ${productName()}, then to make a new link there for the rest.`);
   }
-  return said(`Arrived in MausBot. ${bots.map(received).join(" ")} The person can now import ${bots.length === 1 ? "it" : "them"} in MausBot, under Move from Grok Bot.`);
+  const app = productName();
+  return said(`Arrived in ${app}. ${bots.map(received).join(" ")} The person can now import ${bots.length === 1 ? "it" : "them"} in ${app}, under Settings → Import.`);
 }
 
 function moveStatus(link: MoveLink): ToolResult {
   const names = new Set(link.inbox.arrivals.flatMap((arrival) => arrival.botNames).map((name) => name.toLowerCase()));
-  return said(`Connected to MausBot. ${plural(names.size, "Bot")} received so far. This link works until ${new Date(link.expiresAt).toISOString()}, while MausBot stays open. Send each Bot with send_export, one Bot per call.`);
+  const app = productName();
+  return said(`Connected to ${app}. ${plural(names.size, "Bot")} received so far. This link works until ${new Date(link.expiresAt).toISOString()}, while ${app} stays open. Send each Bot with send_export, one Bot per call.`);
 }
 
 const rpcSchema = z.object({
@@ -137,12 +140,12 @@ export function moveMcp(message: unknown, link: MoveLink, now = Date.now()): Mov
     return result({
       protocolVersion: typeof asked === "string" && PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
       capabilities: { tools: {} },
-      serverInfo: { name: "MausBot", version: "1.0.0" },
-      instructions: "Moves Bots from Grok Bot to MausBot. Call move_status, then send_export once per Bot.",
+      serverInfo: { name: productName(), version: "1.0.0" },
+      instructions: `Moves Bots to ${productName()}. Call move_status, then send_export once per Bot.`,
     });
   }
   if (method === "ping") return result({});
-  if (method === "tools/list") return result({ tools: TOOLS });
+  if (method === "tools/list") return result({ tools: tools() });
   if (method === "tools/call") {
     if (params?.name === "move_status") return result(moveStatus(link));
     if (params?.name === "send_export") return result(sendExport(params.arguments, link.inbox, now));
