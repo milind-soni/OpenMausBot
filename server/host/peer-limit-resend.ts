@@ -69,7 +69,7 @@ export interface PeerLimitResendDeps<Opts, Outcome> {
   guest(threadId: string): boolean;
   /** The thread's running turn generation. */
   generation(threadId: string): string | undefined;
-  /** A busy thread, queued steering or the person's Stop: a resend never runs over them. */
+  /** A busy thread, queued steering, the person's Stop or a bot they paused: a resend never runs over them. */
   blocked(botId: string, threadId: string): boolean;
   /** The status row, in the thread's language, saying the resend could not run and why. */
   failedLine(threadId: string, detail: string): string;
