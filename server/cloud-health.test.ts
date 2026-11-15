@@ -322,6 +322,18 @@ describe("GET /api/cloud/health", () => {
     expect((await send("GET", again, sign(again))).body.incidents).toEqual([]);
   });
 
+  it("still answers 200, with perf null and one warning a minute, when the performance recorder throws", async () => {
+    const warned: string[] = [];
+    const w = world({ perf: () => { throw new TypeError("boom at /Users/ada/secret"); }, log: (line) => warned.push(line) });
+    const { sign, send } = routes(w);
+    const target = `${CLOUD_HEALTH_PATH}?after=0`;
+    const answer = await send("GET", target, sign(target));
+    expect(answer.status).toBe(200);
+    expect(answer.body).toMatchObject({ v: 1, perf: null });
+    w.health.report(undefined);
+    expect(warned).toEqual(["cloud health: perf left out: TypeError"]);
+  });
+
   it("refuses a wrong key, another path or query, a stale or replayed request, and anything but GET", async () => {
     const w = world();
     const { sign, send } = routes(w);
