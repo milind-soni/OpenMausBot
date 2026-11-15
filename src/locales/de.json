@@ -1608,7 +1608,6 @@
   "remote.client.idle": "Mit einem anderen Computer verbinden",
   "remote.client.subtitle": "Nutz diese Desktop-App als sicheren Client für ein {app} auf einem anderen Rechner.",
   "phone.intro.title": "{app} von einem anderen Gerät nutzen",
-  "phone.intro.detail": "Chats ansehen, Freigaben beantworten und neue Arbeit senden — vom Telefon oder einem anderen Rechner.",
   "phone.value.chats": "Deine Unterhaltungen",
   "phone.value.chatsDetail": "Von einem anderen Gerät lesen und antworten.",
   "phone.value.approvals": "Schnelle Freigaben",
@@ -3353,7 +3352,6 @@
   "native.connect.empty": "Gib die Adresse des Servers ein oder füge seinen Link ein.",
   "native.connect.codeOnly": "Das ist ein Kopplungscode. Gib auch die Adresse des Servers ein, z. B. {example}.",
   "native.connect.emailCode": "Das ist ein Anmeldecode aus einer E-Mail. Zum Koppeln brauchst du einen 12-stelligen Code wie 7KQ2-M9XD-H4TP.",
-  "native.connect.oldCode": "Dieser 6-stellige Code koppelt ein Telefon mit einer Desktop-App, und eine Desktop-App kann sich nicht mit einer anderen verbinden: Teile den Computer mit My Cloud oder nutze My Cloud. Ein Server-Code hat 12 Zeichen wie 7KQ2-M9XD-H4TP: Führe auf dem Server openmausbot pair aus.",
   "native.connect.scriptKey": "Das ist ein Skriptschlüssel. Zum Koppeln brauchst du einen Kopplungscode.",
   "native.connect.notACode": "Das ist kein Kopplungscode. Zum Koppeln brauchst du einen 12-stelligen Code wie 7KQ2-M9XD-H4TP.",
   "native.connect.publicHttp": "http://{host} liegt im offenen Internet und ist nicht verschlüsselt, andere könnten deine Chats mitlesen. Nutze seine https-Adresse oder setze HTTPS davor (cloudflared, Caddy oder Tailscale).",
@@ -3363,12 +3361,10 @@
   "native.connect.dns": "{host} gibt es noch nicht. Prüfe die Schreibweise oder warte auf den DNS-Eintrag.",
   "native.connect.certificate": "Das Zertifikat von {host} ist noch nicht gültig. Ein neuer Server braucht dafür manchmal eine Minute.",
   "native.connect.notMausBot": "Diese Adresse antwortet, ist aber kein MausBot-Server.",
-  "native.connect.desktopApp": "{host} ist eine MausBot-Desktop-App, und eine Desktop-App kann sich nicht mit einer anderen verbinden. Um diesen Computer von hier zu nutzen, teile ihn in seiner eigenen App mit My Cloud oder nutze My Cloud.",
   "native.connect.loopback": "Das zeigt auf diesen Computer ({host}), nicht auf den Server. Nutze die eigene Adresse des Servers.",
   "native.connect.localNetwork": "{host} ist nicht erreichbar. Aktiviere auf dem Mac OpenMausBot unter Systemeinstellungen → Datenschutz & Sicherheit → Lokales Netzwerk und versuche es erneut. Prüfe auch, ob der Server in diesem Netzwerk läuft.",
   "serverError.pair.tooMany": "Zu viele falsche Codes. Versuche es um {time} erneut.",
   "serverError.pair.emailCode": "Das ist ein Anmeldecode aus einer E-Mail. Zum Koppeln brauchst du einen 12-stelligen Code wie 7KQ2-M9XD-H4TP.",
-  "serverError.pair.oldCode": "Das ist ein Code aus einer älteren MausBot-Version. Erstelle auf dem anderen Computer einen neuen: Telefon & Geräte → Gerät koppeln.",
   "serverError.pair.scriptKey": "Das ist ein Skriptschlüssel. Zum Koppeln brauchst du einen Kopplungscode.",
   "serverError.pair.notACode": "Das ist kein Kopplungscode. Zum Koppeln brauchst du einen 12-stelligen Code wie 7KQ2-M9XD-H4TP.",
   "pair.emailCode": "Anmeldecode aus deiner E-Mail",
@@ -3992,6 +3988,7 @@
   "computer.recovery.replaceTitle": "Diesen Cloud-Computer löschen und dem Bot einen neuen geben. Dateien, die nur darauf liegen, gehen verloren.",
   "composer.command.burstDesc": "Viele Teile einer Aufgabe gleichzeitig ausführen und die Ergebnisse zusammenführen",
   "devices.computers.pairButton": "Computer koppeln",
+  "devices.computers.title": "Deine anderen Computer",
   "devices.computers.pairTitle": "Anderen Computer koppeln",
-  "devices.computers.typeCode": "Öffne auf deinem anderen Computer in {app} „Mit einem Server verbinden“ und gib diesen Code ein."
+  "remote.tailscale.needsApproval": "Dieser Computer wartet auf die Genehmigung in Ihrem Tailscale-Netzwerk. Genehmigen Sie ihn in der Tailscale-Admin-Konsole und versuchen Sie es dann erneut."
 }

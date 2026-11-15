@@ -45,7 +45,8 @@ const runStatus = (cli) =>
   });
 
 /** What one `tailscale status --json` says, in the row's words: ready (with this computer's MagicDNS name, its tailnet
- * addresses and whether the tailnet hands out HTTPS certificates), signed out, not running, or not allowed to ask. */
+ * addresses and whether the tailnet hands out HTTPS certificates), signed out, not running, waiting for the tailnet's
+ * admin to approve this computer, or not allowed to ask. */
 export function readTailscaleStatus(stdout, stderr = "") {
   const read = readTailscaleStatusJson(stdout);
   if (!read) {
@@ -53,7 +54,7 @@ export function readTailscaleStatus(stdout, stderr = "") {
     if (/access denied|permission denied|operator|not permitted/.test(text)) return { state: "needs-permission" };
     return { state: "not-running" };
   }
-  if (read.state === "not-running") return { state: "not-running" };
+  if (read.state === "not-running" || read.state === "needs-approval") return { state: read.state };
   if (read.state !== "ready" || !read.name) return { state: "signed-out" };
   return { state: "ready", name: read.name, addresses: read.addresses, https: read.https };
 }

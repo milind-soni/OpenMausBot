@@ -1509,7 +1509,6 @@
   "remote.client.idle": "दूसरे कंप्यूटर से जुड़ें",
   "remote.client.subtitle": "इस डेस्कटॉप ऐप को दूसरे कंप्यूटर पर चल रहे {app} के सुरक्षित क्लाइंट के रूप में इस्तेमाल करें।",
   "phone.intro.title": "किसी दूसरे डिवाइस से {app} इस्तेमाल करें",
-  "phone.intro.detail": "फ़ोन या दूसरे कंप्यूटर से चैट देखें, मंज़ूरी दें और नया काम भेजें।",
   "phone.value.chats": "आपकी बातचीत",
   "phone.value.chatsDetail": "दूसरे डिवाइस से पढ़ें और जवाब दें।",
   "phone.value.approvals": "झटपट मंज़ूरी",
@@ -3020,7 +3019,6 @@
   "native.connect.empty": "सर्वर का पता दर्ज करें या उसका लिंक पेस्ट करें।",
   "native.connect.codeOnly": "यह एक पेयरिंग कोड है। सर्वर का पता भी दर्ज करें, जैसे {example}।",
   "native.connect.emailCode": "यह ईमेल से आया साइन-इन कोड है। पेयरिंग के लिए 7KQ2-M9XD-H4TP जैसा 12 अक्षरों का कोड चाहिए।",
-  "native.connect.oldCode": "यह 6 अंकों का कोड फ़ोन को डेस्कटॉप ऐप से पेयर करता है, और एक डेस्कटॉप ऐप दूसरे से कनेक्ट नहीं हो सकता: उस कंप्यूटर को My Cloud के साथ शेयर करें, या My Cloud इस्तेमाल करें। सर्वर के कोड में 7KQ2-M9XD-H4TP जैसे 12 अक्षर होते हैं: सर्वर पर openmausbot pair चलाएँ।",
   "native.connect.scriptKey": "यह एक स्क्रिप्ट कुंजी है। पेयरिंग के लिए पेयरिंग कोड चाहिए।",
   "native.connect.notACode": "यह पेयरिंग कोड नहीं है। पेयरिंग के लिए 7KQ2-M9XD-H4TP जैसा 12 अक्षरों का कोड चाहिए।",
   "native.connect.publicHttp": "http://{host} खुले इंटरनेट पर है और एन्क्रिप्टेड नहीं है, इसलिए दूसरे आपकी चैट पढ़ सकते हैं। इसका https पता इस्तेमाल करें, या आगे HTTPS लगाएँ (cloudflared, Caddy या Tailscale)।",
@@ -3030,12 +3028,10 @@
   "native.connect.dns": "{host} अभी मौजूद नहीं है। वर्तनी जाँचें, या DNS रिकॉर्ड का इंतज़ार करें।",
   "native.connect.certificate": "{host} का सर्टिफ़िकेट अभी मान्य नहीं है। नए सर्वर को इसे पाने में एक मिनट लग सकता है।",
   "native.connect.notMausBot": "यह पता जवाब देता है, लेकिन यह MausBot सर्वर नहीं है।",
-  "native.connect.desktopApp": "{host} एक MausBot डेस्कटॉप ऐप है, और एक डेस्कटॉप ऐप दूसरे से कनेक्ट नहीं हो सकता। उस कंप्यूटर को यहाँ से इस्तेमाल करने के लिए, उसके अपने ऐप से उसे My Cloud के साथ शेयर करें, या My Cloud इस्तेमाल करें।",
   "native.connect.loopback": "यह इस कंप्यूटर ({host}) की ओर इशारा करता है, सर्वर की ओर नहीं। सर्वर का अपना पता इस्तेमाल करें।",
   "native.connect.localNetwork": "{host} तक नहीं पहुँच पा रहे। Mac पर System Settings → Privacy & Security → Local Network में OpenMausBot चालू करें, फिर दोबारा कोशिश करें। यह भी देखें कि सर्वर इसी नेटवर्क पर चल रहा है।",
   "serverError.pair.tooMany": "बहुत सारे गलत कोड। {time} पर फिर से कोशिश करें।",
   "serverError.pair.emailCode": "यह ईमेल से आया साइन-इन कोड है। पेयर करने के लिए 7KQ2-M9XD-H4TP जैसा 12 अक्षरों का कोड चाहिए।",
-  "serverError.pair.oldCode": "यह MausBot के पुराने संस्करण का कोड है। दूसरे कंप्यूटर पर नया कोड बनाएँ: फ़ोन और डिवाइस → डिवाइस पेयर करें।",
   "serverError.pair.scriptKey": "यह स्क्रिप्ट कुंजी है। पेयर करने के लिए पेयरिंग कोड चाहिए।",
   "serverError.pair.notACode": "यह पेयरिंग कोड नहीं है। पेयर करने के लिए 7KQ2-M9XD-H4TP जैसा 12 अक्षरों का कोड चाहिए।",
   "pair.emailCode": "आपके ईमेल से आया साइन-इन कोड",
@@ -3662,6 +3658,7 @@
   "computer.recovery.replaceTitle": "यह क्लाउड कंप्यूटर हटाकर बॉट को नया दें। जो फ़ाइलें सिर्फ़ इस पर हैं, वे खो जाती हैं।",
   "composer.command.burstDesc": "किसी काम के कई हिस्से एक साथ चलाएं, फिर नतीजे मिलाएं",
   "devices.computers.pairButton": "कंप्यूटर जोड़ें",
+  "devices.computers.title": "आपके दूसरे कंप्यूटर",
   "devices.computers.pairTitle": "दूसरा कंप्यूटर जोड़ें",
-  "devices.computers.typeCode": "अपने दूसरे कंप्यूटर पर {app} में सर्वर से कनेक्ट करें खोलें और यह कोड लिखें।"
+  "remote.tailscale.needsApproval": "यह कंप्यूटर आपके Tailscale नेटवर्क पर मंज़ूरी का इंतज़ार कर रहा है। Tailscale एडमिन कंसोल में इसे मंज़ूर करें, फिर दोबारा कोशिश करें।"
 }

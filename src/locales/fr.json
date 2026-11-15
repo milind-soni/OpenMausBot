@@ -1509,7 +1509,6 @@
   "remote.client.idle": "Se connecter à un autre ordinateur",
   "remote.client.subtitle": "Utilisez cette application de bureau comme client sécurisé d'un {app} tournant sur un autre ordinateur.",
   "phone.intro.title": "Utiliser {app} depuis un autre appareil",
-  "phone.intro.detail": "Consultez les discussions, répondez aux autorisations et envoyez du travail depuis un téléphone ou un autre ordinateur.",
   "phone.value.chats": "Vos conversations",
   "phone.value.chatsDetail": "Lisez et répondez depuis un autre appareil.",
   "phone.value.approvals": "Autorisations rapides",
@@ -3167,7 +3166,6 @@
   "native.connect.empty": "Saisissez l'adresse du serveur ou collez son lien.",
   "native.connect.codeOnly": "C'est un code d'appairage. Saisissez aussi l'adresse du serveur, par exemple {example}.",
   "native.connect.emailCode": "C'est un code de connexion reçu par e-mail. L'appairage demande un code de 12 caractères comme 7KQ2-M9XD-H4TP.",
-  "native.connect.oldCode": "Ce code à 6 chiffres associe un téléphone à une application de bureau, et une application de bureau ne peut pas se connecter à une autre : partagez cet ordinateur avec My Cloud, ou utilisez My Cloud. Le code d'un serveur a 12 caractères comme 7KQ2-M9XD-H4TP : sur le serveur, lancez openmausbot pair.",
   "native.connect.scriptKey": "C'est une clé de script. L'appairage demande un code d'appairage.",
   "native.connect.notACode": "Ce n'est pas un code d'appairage. L'appairage demande un code de 12 caractères comme 7KQ2-M9XD-H4TP.",
   "native.connect.publicHttp": "http://{host} est sur l'internet ouvert et n'est pas chiffré : d'autres pourraient lire vos discussions. Utilisez son adresse https, ou placez HTTPS devant (cloudflared, Caddy ou Tailscale).",
@@ -3177,12 +3175,10 @@
   "native.connect.dns": "{host} n'existe pas encore. Vérifiez l'orthographe, ou attendez l'enregistrement DNS.",
   "native.connect.certificate": "Le certificat de {host} n'est pas encore valide. Un nouveau serveur peut mettre une minute à l'obtenir.",
   "native.connect.notMausBot": "Cette adresse répond, mais ce n'est pas un serveur MausBot.",
-  "native.connect.desktopApp": "{host} est une application de bureau MausBot, et une application de bureau ne peut pas se connecter à une autre. Pour utiliser cet ordinateur d'ici, partagez-le avec My Cloud depuis sa propre application, ou utilisez My Cloud.",
   "native.connect.loopback": "Ceci pointe vers cet ordinateur ({host}), pas vers le serveur. Utilisez l'adresse du serveur lui-même.",
   "native.connect.localNetwork": "Impossible de joindre {host}. Sur un Mac, activez OpenMausBot dans Réglages Système → Confidentialité et sécurité → Réseau local, puis réessayez. Vérifiez aussi que le serveur tourne sur ce réseau.",
   "serverError.pair.tooMany": "Trop de codes erronés. Réessayez à {time}.",
   "serverError.pair.emailCode": "C'est un code de connexion reçu par e-mail. L'association demande un code de 12 caractères comme 7KQ2-M9XD-H4TP.",
-  "serverError.pair.oldCode": "C'est un code d'une ancienne version de MausBot. Créez-en un nouveau sur l'autre ordinateur : Téléphone et appareils → Associer un appareil.",
   "serverError.pair.scriptKey": "C'est une clé de script. L'association demande un code d'association.",
   "serverError.pair.notACode": "Ce n'est pas un code d'association. L'association demande un code de 12 caractères comme 7KQ2-M9XD-H4TP.",
   "pair.emailCode": "Code de connexion reçu par e-mail",
@@ -3808,6 +3804,7 @@
   "computer.recovery.replaceTitle": "Supprime cet ordinateur cloud et en donne un nouveau au bot. Les fichiers qui ne sont que dessus sont perdus.",
   "composer.command.burstDesc": "Lancer plusieurs parties d'un travail en même temps, puis fusionner les résultats",
   "devices.computers.pairButton": "Associer un ordinateur",
+  "devices.computers.title": "Vos autres ordinateurs",
   "devices.computers.pairTitle": "Associer un autre ordinateur",
-  "devices.computers.typeCode": "Sur votre autre ordinateur, ouvrez Se connecter à un serveur dans {app} et saisissez ce code."
+  "remote.tailscale.needsApproval": "Cet ordinateur attend d'être approuvé sur votre réseau Tailscale. Approuvez-le dans la console d'administration Tailscale, puis réessayez."
 }

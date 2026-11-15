@@ -3162,7 +3162,6 @@
   "remote.client.idle": "Başka bir bilgisayara bağlan",
   "remote.client.subtitle": "Bu masaüstü uygulamasını başka bir bilgisayarda çalışan {app} için güvenli bir istemci olarak kullanın.",
   "phone.intro.title": "{app} uygulamasını başka bir cihazdan kullanın",
-  "phone.intro.detail": "Bir telefondan veya başka bir bilgisayardan sohbetleri kontrol edin, onayları yanıtlayın ve yeni işler gönderin.",
   "phone.value.chats": "Konuşmalarınız",
   "phone.value.chatsDetail": "Başka bir cihazdan okuyun ve yanıtlayın.",
   "phone.value.approvals": "Hızlı onaylar",
@@ -5432,7 +5431,6 @@
   "native.connect.empty": "Sunucunun adresini girin veya bağlantısını yapıştırın.",
   "native.connect.codeOnly": "Bu bir eşleştirme kodu. Sunucunun adresini de girin, örneğin {example}.",
   "native.connect.emailCode": "Bu, bir e-postadan gelen oturum açma kodu. Eşleştirme için 7KQ2-M9XD-H4TP gibi 12 karakterlik bir kod gerekir.",
-  "native.connect.oldCode": "Bu 6 haneli kod bir telefonu masaüstü uygulamasıyla eşler ve bir masaüstü uygulaması başka birine bağlanamaz: o bilgisayarı My Cloud ile paylaşın veya My Cloud kullanın. Bir sunucunun kodu 7KQ2-M9XD-H4TP gibi 12 karakterdir: sunucuda openmausbot pair çalıştırın.",
   "native.connect.scriptKey": "Bu bir betik anahtarı. Eşleştirme için bir eşleştirme kodu gerekir.",
   "native.connect.notACode": "Bu bir eşleştirme kodu değil. Eşleştirme için 7KQ2-M9XD-H4TP gibi 12 karakterlik bir kod gerekir.",
   "native.connect.publicHttp": "http://{host} açık internette ve şifrelenmemiş; başkaları sohbetlerinizi okuyabilir. Onun https adresini kullanın ya da önüne HTTPS koyun (cloudflared, Caddy veya Tailscale).",
@@ -5442,12 +5440,10 @@
   "native.connect.dns": "{host} henüz yok. Yazımı kontrol edin ya da DNS kaydını bekleyin.",
   "native.connect.certificate": "{host} sertifikası henüz geçerli değil. Yeni bir sunucunun sertifika alması bir dakika sürebilir.",
   "native.connect.notMausBot": "Bu adres yanıt veriyor ama bir MausBot sunucusu değil.",
-  "native.connect.desktopApp": "{host} bir MausBot masaüstü uygulaması ve bir masaüstü uygulaması başka birine bağlanamaz. O bilgisayarı buradan kullanmak için kendi uygulamasından My Cloud ile paylaşın veya My Cloud kullanın.",
   "native.connect.loopback": "Bu, sunucuyu değil bu bilgisayarı ({host}) gösteriyor. Sunucunun kendi adresini kullanın.",
   "native.connect.localNetwork": "{host} adresine ulaşılamıyor. Mac'te Sistem Ayarları → Gizlilik ve Güvenlik → Yerel Ağ bölümünden OpenMausBot'u açın ve tekrar deneyin. Sunucunun bu ağda çalıştığını da kontrol edin.",
   "serverError.pair.tooMany": "Çok fazla yanlış kod. {time} saatinde yeniden deneyin.",
   "serverError.pair.emailCode": "Bu bir e-postadan gelen giriş kodu. Eşleştirme için 7KQ2-M9XD-H4TP gibi 12 karakterli bir kod gerekir.",
-  "serverError.pair.oldCode": "Bu, eski bir MausBot sürümünün kodu. Diğer bilgisayarda yeni bir kod oluşturun: Telefon ve cihazlar → Cihaz eşleştir.",
   "serverError.pair.scriptKey": "Bu bir betik anahtarı. Eşleştirme için eşleştirme kodu gerekir.",
   "serverError.pair.notACode": "Bu bir eşleştirme kodu değil. Eşleştirme için 7KQ2-M9XD-H4TP gibi 12 karakterli bir kod gerekir.",
   "pair.emailCode": "E-postanızdaki giriş kodu",
@@ -6010,6 +6006,7 @@
   "computer.recovery.replaceTitle": "Bu bulut bilgisayarı siler ve bota yenisini verir. Yalnızca üzerinde olan dosyalar kaybolur.",
   "composer.command.burstDesc": "Bir işin birçok parçasını aynı anda çalıştırın, sonra sonuçları birleştirin",
   "devices.computers.pairButton": "Bilgisayar eşle",
+  "devices.computers.title": "Diğer bilgisayarlarınız",
   "devices.computers.pairTitle": "Başka bir bilgisayar eşle",
-  "devices.computers.typeCode": "Diğer bilgisayarınızda {app} içinde Sunucuya bağlan'ı açın ve bu kodu yazın."
+  "remote.tailscale.needsApproval": "Bu bilgisayar Tailscale ağınızda onay bekliyor. Tailscale yönetici konsolunda onaylayın, ardından tekrar deneyin."
 }

@@ -4501,7 +4501,6 @@
   "remote.client.idle": "連線到另一台電腦",
   "remote.client.subtitle": "將此桌面版 App 當作安全的用戶端，連線到在另一台電腦上執行的 {app}。",
   "phone.intro.title": "從其他裝置使用 {app}",
-  "phone.intro.detail": "透過手機或另一台電腦查看對話、回覆核准要求，並指派新的工作。",
   "phone.value.chats": "你的對話",
   "phone.value.chatsDetail": "從其他裝置閱讀並回覆。",
   "phone.value.approvals": "快速核准",
@@ -8841,7 +8840,6 @@
   "serverError.pair.tooMany": "錯誤的代碼太多。請在 {time} 再試一次。",
   "serverError.pair.linkExpired": "這個登入連結已過期或已被使用",
   "serverError.pair.emailCode": "這是電子郵件中的登入代碼。配對需要像 7KQ2-M9XD-H4TP 這樣的 12 字元代碼。",
-  "serverError.pair.oldCode": "這是舊版 MausBot 的代碼。請在另一台電腦上建立新代碼：手機與裝置 → 配對裝置。",
   "serverError.pair.scriptKey": "這是腳本金鑰。配對需要配對代碼。",
   "serverError.pair.notACode": "這不是配對代碼。配對需要像 7KQ2-M9XD-H4TP 這樣的 12 字元代碼。",
   "serverError.email.invalid": "請輸入有效的電子郵件地址",
@@ -9039,7 +9037,6 @@
   "native.connect.empty": "輸入伺服器的位址，或貼上它的連結。",
   "native.connect.codeOnly": "這是配對碼。也請輸入伺服器的位址，例如 {example}。",
   "native.connect.emailCode": "這是電子郵件裡的登入碼。配對需要像 7KQ2-M9XD-H4TP 這樣的 12 字元配對碼。",
-  "native.connect.oldCode": "這組 6 位數代碼是用來將手機與桌面應用程式配對的，而桌面應用程式之間無法互相連線：請將那台電腦分享給 My Cloud，或使用 My Cloud。伺服器的代碼有 12 個字元，例如 7KQ2-M9XD-H4TP：請在伺服器上執行 openmausbot pair。",
   "native.connect.scriptKey": "這是指令碼金鑰。配對需要配對碼。",
   "native.connect.notACode": "這不是配對碼。配對需要像 7KQ2-M9XD-H4TP 這樣的 12 字元配對碼。",
   "native.connect.publicHttp": "http://{host} 位於公開網際網路且未加密，別人可能讀到你的對話。請使用它的 https 位址，或在前面加上 HTTPS（cloudflared、Caddy 或 Tailscale）。",
@@ -9049,7 +9046,6 @@
   "native.connect.dns": "{host} 還不存在。請檢查拼字，或等待 DNS 記錄生效。",
   "native.connect.certificate": "{host} 的憑證還無效。新伺服器可能需要一分鐘取得憑證。",
   "native.connect.notMausBot": "這個位址有回應，但它不是 MausBot 伺服器。",
-  "native.connect.desktopApp": "{host} 是 MausBot 桌面應用程式，而桌面應用程式之間無法互相連線。若要從這裡使用那台電腦，請在它自己的應用程式中將它分享給 My Cloud，或使用 My Cloud。",
   "native.connect.loopback": "這指向這台電腦（{host}），而不是伺服器。請使用伺服器自己的位址。",
   "native.connect.localNetwork": "無法連到 {host}。在 Mac 上，請到「系統設定」→「隱私權與安全性」→「區域網路」開啟 OpenMausBot，然後再試一次。也請確認伺服器正在這個網路上執行。",
   "native.dialog.mic.allow": "允許",
@@ -10353,6 +10349,7 @@
   "burst.error.action": "操作沒有成功，請稍後再試。",
   "activity.tool.team.burst": "平行處理",
   "devices.computers.pairButton": "配對電腦",
+  "devices.computers.title": "你的其他電腦",
   "devices.computers.pairTitle": "配對另一台電腦",
-  "devices.computers.typeCode": "在另一台電腦上，於 {app} 開啟「連線到伺服器」並輸入這組代碼。"
+  "remote.tailscale.needsApproval": "這台電腦正在等待你的 Tailscale 網路核准。請在 Tailscale 管理主控台中核准它，然後再試一次。"
 }

@@ -45,7 +45,7 @@ export interface CompanionState {
   /** Routes the update kept on that the person has not been told about yet. */
   notices?: CompanionRoute[];
   /** Why Tailscale could not be turned on or checked just now. */
-  tailscaleProblem?: "not-installed" | "no-cli" | "not-running" | "needs-permission" | "signed-out";
+  tailscaleProblem?: "not-installed" | "no-cli" | "not-running" | "needs-permission" | "needs-approval" | "signed-out";
   /** This computer's own server on the tailnet, for the person's other computers. Absent on older builds. */
   tailnetShare?: TailnetShareState;
   lan?: string | null;

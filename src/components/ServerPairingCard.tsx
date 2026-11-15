@@ -8,7 +8,7 @@ import { isOwnerOrAdmin, readSessionState, type SessionState } from "../lib/sess
 import { readMembership } from "../lib/membership";
 import { codeUntil, lastSeen } from "../lib/pairing-time";
 import { revealPhonePairing, takePairOnOpen } from "../lib/phone-pairing";
-import { SettingsGroup, SettingsRows } from "./SettingsPrimitives";
+import { SettingRow, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
 import { Layer } from "./Layer";
 import { DialogTitle, PairRow } from "./PhoneDevicesSection";
 import { Smartphone } from "lucide-react";
@@ -69,12 +69,23 @@ export function sameWifiOnlyLink(url: string | null): boolean {
   }
 }
 
+/** The link another computer pastes into Connect to a server, and the address it names: the server's own link, else one made from the shared address. */
+export function computerLink(offer: Pick<PairingOffer, "url" | "code">, address: string | null): { link: string; address: string } | null {
+  const link = offer.url ?? (address ? `${address}/pair#code=${offer.code}` : null);
+  if (!link) return null;
+  try {
+    return { link, address: new URL(link).origin };
+  } catch {
+    return null;
+  }
+}
+
 export function shownDevices(devices: PairedDevice[], cloudHome: boolean): PairedDevice[] {
   return cloudHome ? devices.filter((device) => device.scopes.includes("admin")) : devices;
 }
 
 
-export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0, team, teamPhoneBlocked = null, simple = false, reveal = true, placeName = "", forComputer = false }: { placeName?: string; /** True under "Your other computers": the code is for another computer, not a phone. */ forComputer?: boolean; initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number; team?: string; teamPhoneBlocked?: string | null; simple?: boolean; /** False where another pairing flow owns the page's focus. */ reveal?: boolean }) {
+export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0, team, teamPhoneBlocked = null, simple = false, reveal = true, placeName = "", forComputer = false, address = null }: { placeName?: string; /** True under "Your other computers": the code is for another computer, not a phone. */ forComputer?: boolean; /** Where another computer reaches this one, shown beside its code. */ address?: string | null; initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number; team?: string; teamPhoneBlocked?: string | null; simple?: boolean; /** False where another pairing flow owns the page's focus. */ reveal?: boolean }) {
   const [session, setSession] = useState<SessionState | null>(initialSession);
   const [pairingCodes, setPairingCodes] = useState(initialPairingCodes);
   const [computerName, setComputerName] = useState<string | null>(null);
@@ -179,9 +190,11 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     }
   }
 
+  const forOtherComputer = forComputer && offer ? computerLink(offer, address) : null;
+  const link = forOtherComputer?.link ?? offer?.url ?? null;
   async function copyLink() {
-    if (!offer?.url) return;
-    const result = await copyText(offer.url);
+    if (!link) return;
+    const result = await copyText(link);
     if (result !== "empty") setCopied(result);
   }
 
@@ -211,7 +224,14 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
                   <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.code.notCamera", { app: productName() })}</p>
                 </> : <p className="text-[14px] leading-5 text-ink">{t("phone.code.typeThis", { app: productName() })}</p>}
               </div>
+              {forOtherComputer && (
+                <div className="flex flex-col gap-1">
+                  <div className="text-[12px] leading-4 text-ink-secondary">{t("devices.computers.address")}</div>
+                  <div className="select-text break-all text-[14px] leading-5 text-ink" data-pairing-address="">{forOtherComputer.address}</div>
+                </div>
+              )}
               <div className="flex flex-col gap-1">
+                {forOtherComputer && <div className="text-[12px] leading-4 text-ink-secondary">{t("connect.code")}</div>}
                 <div className="text-[20px] font-medium leading-7 tracking-[0.08em] text-ink tabular-nums" data-pairing-code="">{offer.code}</div>
                 <div className="text-[12px] leading-4 text-ink-secondary">{codeUntil(offer.expiresAt)}</div>
               </div>
@@ -221,13 +241,18 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
             </div>
           )}
           <div className="flex items-center justify-end gap-2">
-            {!expired && offer.url && (
+            {!expired && link && !forOtherComputer && (
               <button type="button" onClick={() => void copyLink()} className="ui-button mr-auto">
                 {t(copied === "copied" ? "remote.serverPairing.copied" : copied === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
               </button>
             )}
             {expired && <button type="button" className="ui-button" onClick={() => void create()}>{t("remote.serverPairing.create")}</button>}
-            <button type="button" className="ui-button ui-button-primary" onClick={() => setOffer(null)}>{t("devices.pair.done")}</button>
+            <button type="button" className={cn("ui-button", (expired || !forOtherComputer) && "ui-button-primary")} onClick={() => setOffer(null)}>{t("devices.pair.done")}</button>
+            {!expired && forOtherComputer && (
+              <button type="button" onClick={() => void copyLink()} className="ui-button ui-button-primary" data-copy-link="">
+                {t(copied === "copied" ? "remote.serverPairing.copied" : copied === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -248,7 +273,11 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   ) : null;
   const nameRow = !simple && pairingCodes && !cloudHome && computerName !== null
     ? <SettingsRows><ComputerNameRow saved={computerName} onSaved={setComputerName} className="px-4 py-3" /></SettingsRows> : null;
-  const pairRow = (
+  const pairRow = forComputer ? (
+    <SettingRow title={t("devices.computers.pairTitle")} subtitle={t("devices.computers.pairLine")} message={pairingCodes ? undefined : t("remote.serverPairing.portalShort")}>
+      {choices}{pairButton}
+    </SettingRow>
+  ) : (
     <PairRow reason={pairingCodes ? null : t("remote.serverPairing.portalShort")}>
       {choices}{pairButton}
     </PairRow>
