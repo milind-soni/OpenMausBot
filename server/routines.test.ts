@@ -4086,6 +4086,25 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
     h.manager.create(once(start + 120_000));
     expect(h.manager.nextDueAt()).toBe(start + 120_000);
   });
+
+  it("lets a bot the person paused skip its scheduled and webhook runs quietly, and fails only a run they started by hand", async () => {
+    const h = harness(start);
+    const paused = "Ada is paused, so it takes no new work.";
+    h.options.pausedText = (botId) => (botId === "maus-1" ? paused : null);
+    h.options.held = (botId) => botId === "maus-1";
+    const routine = h.manager.create(once(start + 60_000));
+    h.setNow(start + 60_000);
+    await h.manager.tick();
+    h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "maus-1", runOn: "maus", deliveryId: "d1", receivedAt: start });
+    await h.manager.tick();
+    expect(h.manager.listRuns().map((run) => [run.status, run.error])).toEqual([["cancelled", paused], ["cancelled", paused]]);
+    expect([h.taskTitles, h.started, h.failed]).toEqual([[], [], []]);
+
+    h.manager.runNow(routine.id);
+    await h.manager.tick();
+    expect(h.manager.listRuns().find((run) => run.manual)).toMatchObject({ status: "failed", error: paused });
+    expect(h.failed).toHaveLength(1);
+  });
 });
 
 describe("runs that report into a chat", () => {
