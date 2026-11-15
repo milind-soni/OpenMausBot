@@ -1430,6 +1430,8 @@
   "engineSetup.sending": "Надсилаємо…",
   "engineSetup.sendRedirect": "Надіслати редирект",
   "engineSetup.googleNoLink": "Вхід Google не повернув посилання.",
+  "engineSetup.googleExpired": "Термін входу через Google минув. Почніть знову.",
+  "engineSetup.googleFailed": "Вхід через Google не завершено. Почніть знову.",
   "engineSetup.signInTitle": "Увійти в {name}",
   "engineSetup.installTitle": "Встановити {name}",
   "engineSetup.managedSignIn": "Кожне налаштування Antigravity має власний акаунт Google. Ваш браузер виконує безпечний вхід.",

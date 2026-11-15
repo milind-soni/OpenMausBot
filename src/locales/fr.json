@@ -1256,6 +1256,8 @@
   "engineSetup.sending": "Envoi…",
   "engineSetup.sendRedirect": "Envoyer la redirection",
   "engineSetup.googleNoLink": "La connexion Google n'a pas renvoyé de lien.",
+  "engineSetup.googleExpired": "La connexion Google a expiré. Recommencez.",
+  "engineSetup.googleFailed": "La connexion Google n'a pas abouti. Recommencez.",
   "engineSetup.signInTitle": "Se connecter à {name}",
   "engineSetup.installTitle": "Installer {name}",
   "engineSetup.managedSignIn": "Chaque configuration Antigravity a son propre compte Google. Votre navigateur termine la connexion sécurisée.",

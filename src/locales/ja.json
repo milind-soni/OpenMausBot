@@ -3237,6 +3237,8 @@
   "engineSetup.sending": "送信中…",
   "engineSetup.sendRedirect": "リダイレクトを送る",
   "engineSetup.googleNoLink": "Google サインインからリンクが返りませんでした。",
+  "engineSetup.googleExpired": "Google のサインインの有効期限が切れました。もう一度始めてください。",
+  "engineSetup.googleFailed": "Google のサインインが完了しませんでした。もう一度始めてください。",
   "engineSetup.signInTitle": "{name} にサインイン",
   "engineSetup.installTitle": "{name} をインストール",
   "engineSetup.managedSignIn": "Antigravity のセットアップごとに Google アカウントがあります。安全なサインインはブラウザーで完了します。",

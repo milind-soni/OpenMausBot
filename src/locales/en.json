@@ -3673,6 +3673,8 @@
   "engineSetup.sending": "Sending…",
   "engineSetup.sendRedirect": "Send redirect",
   "engineSetup.googleNoLink": "Google sign-in did not return a link.",
+  "engineSetup.googleExpired": "Google sign-in expired. Start again.",
+  "engineSetup.googleFailed": "Google sign-in did not finish. Start again.",
   "engineSetup.signInTitle": "Sign in to {name}",
   "engineSetup.installTitle": "Install {name}",
   "engineSetup.managedSignIn": "Each Antigravity setup has its own Google account. Your browser completes the secure sign-in.",

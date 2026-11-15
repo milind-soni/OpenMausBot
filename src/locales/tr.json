@@ -2357,6 +2357,8 @@
   "engineSetup.sending": "Gönderiliyor…",
   "engineSetup.sendRedirect": "Yönlendirmeyi gönder",
   "engineSetup.googleNoLink": "Google girişi bir bağlantı döndürmedi.",
+  "engineSetup.googleExpired": "Google girişinin süresi doldu. Yeniden başlatın.",
+  "engineSetup.googleFailed": "Google girişi tamamlanamadı. Yeniden başlatın.",
   "engineSetup.signInTitle": "{name} servisine giriş yap",
   "engineSetup.installTitle": "{name} Kur",
   "engineSetup.managedSignIn": "Her Antigravity kurulumunun kendi Google hesabı vardır. Güvenli girişi tarayıcınız tamamlar.",
