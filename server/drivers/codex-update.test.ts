@@ -25,7 +25,7 @@ it("keeps the app updater when the advertised release is the pinned version", as
 
 it("keeps the configured executable's update command when a terminal update is needed", async () => {
   const update = await codexReleaseUpdate("codex-cli 0.167.0", "'/Applications/My Codex/codex'", false);
-  expect(update?.command).toBe("'/Applications/My Codex/codex' update");
+  expect(update?.command).toBe(`${process.platform === "win32" ? "& " : ""}'/Applications/My Codex/codex' update`);
 });
 
 it("does not show an update on My Cloud or for an already current copy", async () => {
