@@ -1103,15 +1103,15 @@ function receivePhoneSecretSave(proc, rawMessage) {
 }
 
 async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmentDir(environmentsState, desktopDataDir())) {
-  if (desktopShutdownStarted) return { proc: null, abort: true };
+  const systemProxy = await systemProxyEnvironment(); // A Mac app opened from Finder never gets the shell's proxy.
+  if (desktopShutdownStarted) return { proc: null, abort: true }; // After the lookup: a quit during it forks nothing.
   const { entry, compileCacheDir } = serverChildLaunch({
     resourcesPath: process.resourcesPath,
     userData: app.getPath("userData"),
   });
   const childEnv = managedComposioChildEnvironment(composioBrokerUrl(), secureCredentials, {
-    ...process.env, ...(await systemProxyEnvironment()), // A Mac app opened from Finder never gets the shell's proxy.
     // The parent owns the data-dir lease; a child only validates it, so fallback-port children never replace it.
-    ...desktopDataDirLease.utilityServerLeaseEnvironment(),
+    ...process.env, ...systemProxy, ...desktopDataDirLease.utilityServerLeaseEnvironment(),
     OMB_DATA_DIR: dataDir,
     // Fail-closed until this process sends the private connection; never a descriptor inherited from the shell.
     OMB_DESKTOP_PARENT: "1",

@@ -36,6 +36,21 @@ export function macProxyFromScutil(output) {
   return { https: `http://${host.includes(":") ? `[${host}]` : host}:${port}`, exceptions };
 }
 
+/** Node's proxy matcher skips CIDR ("169.254/16", macOS's default exception) but honours an IPv4 range, so convert. */
+export function cidrAsRange(entry) {
+  const match = /^(\d{1,3}(?:\.\d{1,3}){0,3})\/(\d{1,2})$/.exec(entry);
+  if (!match) return entry;
+  const octets = match[1].split(".").map(Number);
+  const bits = Number(match[2]);
+  if (octets.some((octet) => octet > 255) || bits > 32) return entry;
+  while (octets.length < 4) octets.push(0);
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  const start = (((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) & mask) >>> 0;
+  const end = (start | (~mask >>> 0)) >>> 0;
+  const dotted = (n) => [24, 16, 8, 0].map((shift) => (n >>> shift) & 255).join(".");
+  return `${dotted(start)}-${dotted(end)}`;
+}
+
 function scutilProxy() {
   return new Promise((resolve) => {
     execFile("/usr/sbin/scutil", ["--proxy"], { timeout: 2_000, encoding: "utf8" }, (error, stdout) => resolve(error ? "" : String(stdout)));
@@ -49,6 +64,7 @@ export async function systemProxyEnvironment({ platform = process.platform, env 
   const proxy = macProxyFromScutil(await read());
   if (!proxy) return {};
   const own = [env.NO_PROXY, env.no_proxy].flatMap((list) => (list ?? "").split(",")).map((entry) => entry.trim()).filter(Boolean);
-  const bypass = [...new Set([...own, ...proxy.exceptions, ...LOOPBACK])].join(",");
+  if (own.includes("*")) return {}; // The person bypasses the proxy for every host; fetch honours "*" only as the whole value.
+  const bypass = [...new Set([...own, ...proxy.exceptions.map(cidrAsRange), ...LOOPBACK])].join(",");
   return { HTTPS_PROXY: proxy.https, https_proxy: proxy.https, NO_PROXY: bypass, no_proxy: bypass, NODE_USE_ENV_PROXY: "1" };
 }

@@ -1,6 +1,8 @@
 // A Mac whose internet goes through a proxy set in System Settings: the server reaches HTTPS sites through it too.
+import { execFile } from "node:child_process";
+import { createServer } from "node:net";
 import { describe, expect, it } from "vitest";
-import { macProxyFromScutil, systemProxyEnvironment } from "./system-proxy.mjs";
+import { cidrAsRange, macProxyFromScutil, systemProxyEnvironment } from "./system-proxy.mjs";
 
 const SCUTIL = `<dictionary> {
   ExceptionsList : <array> {
@@ -45,15 +47,15 @@ describe("the Mac's system proxy", () => {
     expect(await systemProxyEnvironment({ platform: "darwin", env: {}, read: read(SCUTIL) })).toEqual({
       HTTPS_PROXY: "http://127.0.0.1:1082",
       https_proxy: "http://127.0.0.1:1082",
-      NO_PROXY: "*.local,169.254/16,localhost,127.0.0.1,::1,[::1]",
-      no_proxy: "*.local,169.254/16,localhost,127.0.0.1,::1,[::1]",
+      NO_PROXY: "*.local,169.254.0.0-169.254.255.255,localhost,127.0.0.1,::1,[::1]",
+      no_proxy: "*.local,169.254.0.0-169.254.255.255,localhost,127.0.0.1,::1,[::1]",
       NODE_USE_ENV_PROXY: "1",
     });
   });
 
   it("keeps the hosts a NO_PROXY in the environment already skips", async () => {
     const env = await systemProxyEnvironment({ platform: "darwin", env: { no_proxy: "intranet.example, localhost" }, read: read(SCUTIL) });
-    expect(env.NO_PROXY).toBe("intranet.example,localhost,*.local,169.254/16,127.0.0.1,::1,[::1]");
+    expect(env.NO_PROXY).toBe("intranet.example,localhost,*.local,169.254.0.0-169.254.255.255,127.0.0.1,::1,[::1]");
     expect(env.no_proxy).toBe(env.NO_PROXY);
   });
 
@@ -69,4 +71,50 @@ describe("the Mac's system proxy", () => {
     expect(await systemProxyEnvironment({ platform: "darwin", env: {}, read: read("<dictionary> {\n  HTTPSEnable : 0\n}\n") })).toEqual({});
     expect(await systemProxyEnvironment({ platform: "darwin", env: {}, read: read("") })).toEqual({});
   });
+
+  it("leaves everything alone when the environment's NO_PROXY already skips every host", async () => {
+    expect(await systemProxyEnvironment({ platform: "darwin", env: { NO_PROXY: "*" }, read: read(SCUTIL) })).toEqual({});
+    expect(await systemProxyEnvironment({ platform: "darwin", env: { no_proxy: "intranet.example, *" }, read: read(SCUTIL) })).toEqual({});
+  });
+
+  it("turns an IPv4 CIDR exception into the range Node's proxy matcher understands, and nothing else", () => {
+    expect(cidrAsRange("169.254/16")).toBe("169.254.0.0-169.254.255.255");
+    expect(cidrAsRange("10.0.0.0/8")).toBe("10.0.0.0-10.255.255.255");
+    expect(cidrAsRange("192.168.1.7/32")).toBe("192.168.1.7-192.168.1.7");
+    expect(cidrAsRange("172.16.5.9/12")).toBe("172.16.0.0-172.31.255.255");
+    for (const entry of ["*.local", "example.com", "127.0.0.1", "300.1/16", "10.0.0.0/33", "::1/128"]) expect(cidrAsRange(entry)).toBe(entry);
+  });
+});
+
+const [major, minor] = process.versions.node.split(".").map(Number);
+/** Node reads NODE_USE_ENV_PROXY for https.request from 24.5 on. */
+const envProxyWorks = major > 24 || (major === 24 && minor >= 5);
+
+/** Starts a real child Node with the env this module gives it and asks whether an HTTPS request to host goes to the proxy. */
+async function requestGoesThroughProxy(host) {
+  let connections = 0;
+  const proxy = createServer((socket) => {
+    connections += 1;
+    socket.destroy();
+  });
+  await new Promise((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+  try {
+    const scutil = `<dictionary> {\n  ExceptionsList : <array> {\n    0 : 169.254/16\n  }\n  HTTPSEnable : 1\n  HTTPSPort : ${proxy.address().port}\n  HTTPSProxy : 127.0.0.1\n}\n`;
+    const added = await systemProxyEnvironment({ platform: "darwin", env: {}, read: read(scutil) });
+    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(https?|no|all)_proxy$/i.test(name)));
+    const child = `setTimeout(() => process.exit(0), 3000);
+      const req = require("node:https").request({ host: process.argv[1], port: 443, timeout: 400 });
+      req.on("timeout", () => req.destroy()); req.on("error", () => {}); req.on("close", () => process.exit(0)); req.end();`;
+    await new Promise((resolve) => execFile(process.execPath, ["-e", child, host], { env: { ...env, ...added } }, () => resolve()));
+    return connections > 0;
+  } finally {
+    proxy.close();
+  }
+}
+
+describe.runIf(envProxyWorks)("a server started with that env", () => {
+  it("sends HTTPS through the proxy, but not to an address the CIDR exception covers", async () => {
+    expect(await requestGoesThroughProxy("203.0.113.5")).toBe(true);
+    expect(await requestGoesThroughProxy("169.254.1.2")).toBe(false);
+  }, 15_000);
 });
