@@ -368,6 +368,9 @@ describe("createOpenAIChatRuntime tool approvals", () => {
       + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
     const answer = 'data: {"choices":[{"index":0,"delta":{"content":"Done."}}]}\n\n'
       + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n';
+    const emptyArgumentsToolCall = (id: string, name: string, argumentsText: string) =>
+      `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: argumentsText } }] } }] })}\n\n`
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
     const run = async (replies: string[], rounds?: number, integrations?: SendTurnInput["integrations"]) => {
       const bodies: any[] = [];
       vi.stubGlobal("fetch", vi.fn(async (input: unknown, init?: RequestInit) => {
@@ -397,6 +400,13 @@ describe("createOpenAIChatRuntime tool approvals", () => {
     it("sends a failed call back once per round, then ends the turn as failed", async () => {
       expect(await run([toolCall("c1", "nope"), answer, toolCall("c2", "nope"), answer], 1))
         .toEqual({ requests: 4, corrective: 1, ok: false, stopReason: "tool_error" });
+    }, 20_000);
+
+    it.each(["", " \t\n "])("treats whitespace-only tool arguments as an empty object (%j)", async (argumentsText) => {
+      expect(await run([
+        emptyArgumentsToolCall("c1", "fx_write", argumentsText),
+        answer,
+      ], undefined, { custom: { fx: toolServer() } })).toMatchObject({ requests: 2, ok: true });
     }, 20_000);
 
     it("keeps the failure when the bot answers the round without running a tool", async () => {

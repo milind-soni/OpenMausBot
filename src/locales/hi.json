@@ -1791,7 +1791,7 @@
   "routines.editor.goalWhere": "यह कहाँ चलता है",
   "routines.editor.goalOneOnOne": "सिर्फ़ बॉट, उसकी अपनी चैट में",
   "routines.editor.goalOneOnOneHelp": "बॉट लक्ष्य पूरा होने तक अपनी चैट में उस पर काम करता है।",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "फ़ोन",
   "computer.tab.browser": "ब्राउज़र",
   "computer.tabsAria": "बॉट पैनल का दृश्य",
   "computer.simple.needsSetup": "{name} के डेस्कटॉप को पहले एक सेटअप चरण चाहिए।",

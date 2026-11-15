@@ -238,6 +238,8 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     return owner !== undefined && ID.test(owner) && !rest.includes("..") && (botId ? owner === botId : true);
   });
   const named = new Set((request.ro ?? []).map((path) => resolve(path)));
+  // Only a caller's own `ro` grant may put a read-only copy over a writable folder, never the implicit SOUL.md line.
+  const asked = new Set(named);
   if (botId && ID.test(botId)) named.add(join(dataDir, "bots", botId, "SOUL.md"));
   for (const path of [...(request.ro ?? []), ...argvPaths(request.args), ...(botId && ID.test(botId) ? [join(dataDir, "bots", botId, "SOUL.md")] : [])]) {
     const full = resolve(path);
@@ -247,7 +249,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     // gave no bot (a configured server's program lives in the folder of the bot that added it).
     if (!named.has(full) && (under(full, dataDir) || under(dataDir, full)) && !covered(full) && !inBotFolder(full)) continue;
     // Code and the system are already there; a file under HOME or /tmp the command line names is put back read-only.
-    if (covered(full) || readOnly.has(full)) continue;
+    if ((!asked.has(full) && covered(full)) || readOnly.has(full)) continue;
     if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;
     readOnly.add(full);
     mounts.push({ kind: "ro", source: full, target: full, optional: true });
