@@ -198,6 +198,28 @@ describe("independent bot threads", () => {
     expect(open.bots[0]?.onlyPeopleAdded).toBeUndefined();
   });
 
+  it("a frame without liveVoice clears the bot's own call voice", () => {
+    const voiced = reducer(start(), { type: "botPatched", bot: { ...bot, liveVoice: "marin" } });
+    expect(voiced.bots[0]?.liveVoice).toBe("marin");
+    const cleared = reducer(voiced, { type: "botPatched", bot: { ...bot } });
+    expect(cleared.bots[0]?.liveVoice).toBeUndefined();
+  });
+
+  it("a thread-switch snapshot without liveVoice clears the bot's own call voice", () => {
+    const voiced = reducer(start(), { type: "botPatched", bot: { ...bot, liveVoice: "marin" } });
+    const full = { ...bot, threadId: "second", activeLeafId: null, tasks: bot.tasks!.slice(1), messages: [] };
+    const switched = reducer(voiced, { type: "botPatched", bot: full });
+    expect(switched.bots[0]).toMatchObject({ threadId: "second" });
+    expect(switched.bots[0]?.liveVoice).toBeUndefined();
+  });
+
+  it("a direct thread snapshot without liveVoice clears the bot's own call voice", () => {
+    const voiced = reducer(start(), { type: "botPatched", bot: { ...bot, liveVoice: "marin" } });
+    const switched = reducer(voiced, { type: "taskSwitched", bot: { ...bot, threadId: "second", messages: [] } });
+    expect(switched.bots[0]).toMatchObject({ threadId: "second" });
+    expect(switched.bots[0]?.liveVoice).toBeUndefined();
+  });
+
   it("keeps background bot frames from switching the visible transcript or clearing unread", () => {
     const patched = reducer(start(), { type: "botPatched", bot: { ...bot, threadId: "second", messages: [], activeLeafId: "other" } });
     expect(patched.bots[0]?.threadId).toBe("first");

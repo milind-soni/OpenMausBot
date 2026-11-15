@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { approvalModeFor, isApprovalMode, type ApprovalMode } from "../../shared/approval-mode.ts";
 import { normalizeConnectorScopes } from "../../shared/connector-scopes.ts";
+import { isBotLiveVoice } from "../../shared/live-call.ts";
 import { normalizeOutboundPolicy } from "../../shared/outbound.ts";
 import { normalizePhoneApps } from "../../shared/phone-apps.ts";
 import { parseToolScope, toolScopeWidens } from "../../shared/tool-scope.ts";
@@ -292,6 +293,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (body.voiceNoteEveryReply !== undefined) {
         if (body.voiceNoteEveryReply !== null && typeof body.voiceNoteEveryReply !== "boolean") return json(res, 400, { error: "voiceNoteEveryReply must be true, false or null" });
         patch.voiceNoteEveryReply = body.voiceNoteEveryReply ?? undefined;
+      }
+      // The bot's own Live call voice; "" or null: the app's voice again.
+      if (body.liveVoice !== undefined) {
+        if (body.liveVoice !== null && body.liveVoice !== "" && !isBotLiveVoice(body.liveVoice)) return json(res, 400, { error: "liveVoice must be a GPT-Live or Gemini Live voice, or empty" });
+        patch.liveVoice = body.liveVoice || undefined;
       }
       // Spends the Cloud plan's monthly X research calls: an admin decision too.
       if (body.xResearch !== undefined) {
