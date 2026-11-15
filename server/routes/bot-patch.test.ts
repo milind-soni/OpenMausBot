@@ -245,6 +245,24 @@ describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
   });
 });
 
+describe("PATCH /api/bots/:id toolsOff", () => {
+  it("stores known groups once each in one order, clears them with null or an empty list, and refuses anything else", async () => {
+    const { store, bot, patch } = fixture();
+    expect((await patch(bot.id, { toolsOff: ["pages", "meetings", "pages"] })).status).toBe(200);
+    expect(store.bot(bot.id)?.toolsOff).toEqual(["meetings", "pages"]);
+    const refused = await patch(bot.id, { toolsOff: ["browser"] });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toBe("toolsOff must be a list of meetings, data, pages, images, email");
+    expect((await patch(bot.id, { toolsOff: "meetings" })).status).toBe(400);
+    expect(store.bot(bot.id)?.toolsOff).toEqual(["meetings", "pages"]);
+    expect((await patch(bot.id, { toolsOff: [] })).status).toBe(200);
+    expect(store.bot(bot.id)?.toolsOff).toBeUndefined();
+    await patch(bot.id, { toolsOff: ["data"] });
+    expect((await patch(bot.id, { toolsOff: null })).status).toBe(200);
+    expect(store.bot(bot.id)?.toolsOff).toBeUndefined();
+  });
+});
+
 describe("PATCH /api/bots/:id phoneApps", () => {
   it("stores phoneApps and clears it with null", async () => {
     const { store, bot, patch } = fixture();

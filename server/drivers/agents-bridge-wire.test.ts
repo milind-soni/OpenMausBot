@@ -26,6 +26,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { waitForExit } from "../testing/cleanup.ts";
 import { FIND_TOOL, USE_TOOL, createToolBridge, type BridgeTool } from "./agents-bridge.ts";
 import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
+import { toolsOffNames } from "./agents-tool-groups.ts";
+import { toolsOffFromEnv } from "../../shared/tool-groups.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PROXY_SOURCE = join(HERE, "agents-proxy.ts");
@@ -70,6 +72,7 @@ function profiles(): Record<string, Record<string, string>> {
   all["default+images"] = { ...all.default!, OMB_IMAGE_GENERATION: "1" };
   all["skills+shared+voice+x+team+images+hosting"] = { ...all["skills+shared+voice+x+team+images"]!, OMB_APP_HOSTING: "1" };
   all["default+hosting"] = { ...all.default!, OMB_APP_HOSTING: "1" };
+  all["default+tools-off"] = { ...all.default!, OMB_TOOLS_OFF: "pages,meetings" };
   return all;
 }
 
@@ -114,6 +117,7 @@ const BUDGET_BASELINE: Record<string, number> = {
   "default+images": 18395,
   "skills+shared+voice+x+team+images+hosting": 20668,
   "default+hosting": 19743,
+  "default+tools-off": 17766,
 };
 
 type RpcAnswer = { id: number; result?: { tools?: unknown[]; content?: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };
@@ -285,8 +289,9 @@ describe("agents proxy tools/list golden with the tool bridge on", () => {
     expect(base).toEqual(["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "post_to_thread", "request_credential", "request_sign_in", "fill_login", "message_person", "memory_update"]);
     for (const name of Object.keys(PROFILES)) {
       const selects = PROFILES[name]!.OMB_COMPUTER_SELECTION === "1";
+      const off = toolsOffNames(toolsOffFromEnv(PROFILES[name]!.OMB_TOOLS_OFF));
       // publish_app puts an app on the public web, so the host counts it as outbound and it is never behind use_tool.
-      expect(hotOf(name).filter((tool) => tool !== "send_voice_note" && tool !== "publish_app"), name).toEqual(selects ? base : base.filter((tool) => tool !== "select_computer"));
+      expect(hotOf(name).filter((tool) => tool !== "send_voice_note" && tool !== "publish_app"), name).toEqual(base.filter((tool) => (selects || tool !== "select_computer") && !off.has(tool)));
       expect(hotOf(name).includes("publish_app"), name).toBe(PROFILES[name]!.OMB_APP_HOSTING === "1");
       expect(hotOf(name).includes("send_voice_note"), name).toBe(PROFILES[name]!.OMB_VOICE_NOTES === "1");
     }

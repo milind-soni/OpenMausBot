@@ -19,7 +19,7 @@ import { MAUSBOT_TOOL_DEFINITIONS } from "./agents-mausbot-tools.ts";
 import { PERSON_TOOL_DEFINITIONS } from "./agents-person-tools.ts";
 import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES, X_TOOL_NAMES } from "./agents-research-tools.ts";
 import type { CatalogProfile } from "./agents-catalog-profile.ts";
-import { advertisedSchema } from "./agents-schema.ts";
+import { advertisedSchema } from "./agents-schema.ts"; import { toolsOffNames } from "./agents-tool-groups.ts";
 export { catalogProfileFromEnv, type CatalogProfile } from "./agents-catalog-profile.ts";
 
 export const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
@@ -966,7 +966,8 @@ export function fullInputSchema(name: string): unknown {
 }
 
 function catalogTools(profile: CatalogProfile) {
-  const BOT_SCOPED_TOOLS = TOOL_DEFINITIONS.filter((tool) =>
+  const off = toolsOffNames(profile.toolsOff ?? []);
+  const BOT_SCOPED_TOOLS = TOOL_DEFINITIONS.filter((tool) => !off.has(tool.name) &&
     (profile.botId === WATCHER_OPTIONS_CARD_BOT_ID || !WATCHER_TOOL_NAMES.has(tool.name)) &&
     (profile.memoryEnabled !== false || (tool.name !== "memory_update" && tool.name !== "memory_log")) &&
     (profile.computerSelection === true || tool.name !== "select_computer") &&
