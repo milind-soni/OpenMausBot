@@ -10171,6 +10171,7 @@
   "computer.answering.awake": "已唤醒。上次响应时间：{time}。",
   "computer.answering.waking": "正在唤醒：已开机，但暂时没有响应。",
   "computer.disk.cleared": "已于 {time} 清理缓存。",
+  "computer.disk.clearedSpace": "已于 {time} 释放空间。",
   "computer.disk.full": "磁盘已用 {percent}%。",
   "computer.answering.restoring": "唤醒后正在恢复磁盘，可能需要几分钟。",
   "computer.answering.notResponding": "自 {time} 起没有响应。",

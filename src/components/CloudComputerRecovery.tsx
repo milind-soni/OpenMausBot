@@ -41,7 +41,8 @@ export function diskLine(disk: CloudComputerDisk | null): string | null {
   if (!disk) return null;
   const parts = [
     disk.percent >= DISK_WARN_PERCENT ? t("computer.disk.full", { percent: disk.percent }) : null,
-    disk.clearedAt !== undefined ? t("computer.disk.cleared", { time: clock(disk.clearedAt) }) : null,
+    disk.spaceClearedAt !== undefined ? t("computer.disk.clearedSpace", { time: clock(disk.spaceClearedAt) })
+      : disk.clearedAt !== undefined ? t("computer.disk.cleared", { time: clock(disk.clearedAt) }) : null,
   ].filter((part): part is string => part !== null);
   return parts.length ? parts.join(" ") : null;
 }

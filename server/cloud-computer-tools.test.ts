@@ -185,13 +185,16 @@ describe("cloud computer tools", () => {
         cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: () => {}, disk,
       }) as Promise<{ isError?: boolean; content: Array<{ type: string; text?: string }> }>;
 
-    it("tells the disk of the use before the call is sent, and ends the result with its note", async () => {
+    it("tells the disk when the call begins and ends, around the command, and ends the result with its note", async () => {
       const seen: string[] = [];
       const result = await withDisk({
-        used: (_cfg, boxId) => { seen.push(`used ${boxId} after ${calls.length} calls`); },
-        after: async (_cfg, boxId, texts) => { seen.push(`after ${boxId}: ${texts.join("|")}`); return "Disk note: this cloud computer's disk is 91% full."; },
+        began: (_cfg, boxId) => { seen.push(`began ${boxId} after ${calls.length} calls`); },
+        ended: (_cfg, boxId) => { seen.push(`ended ${boxId} after ${calls.length} calls`); },
+        after: async (_cfg, boxId, texts, failed) => { seen.push(`after ${boxId} failed=${failed}: ${texts.join("|")}`); return "Disk note: this cloud computer's disk is 91% full."; },
       });
-      expect(seen).toEqual(["used bx_23456789 after 0 calls", `after bx_23456789: ${JSON.stringify({ ok: true, exitCode: 0, stdout: "captured", stderr: "" })}`]);
+      expect(seen).toEqual([
+        "began bx_23456789 after 0 calls", `after bx_23456789 failed=false: ${JSON.stringify({ ok: true, exitCode: 0, stdout: "captured", stderr: "" })}`, "ended bx_23456789 after 1 calls",
+      ]);
       expect(result.isError).toBeFalsy();
       expect(result.content).toEqual([
         { type: "text", text: JSON.stringify({ ok: true, exitCode: 0, stdout: "captured", stderr: "" }) },
@@ -200,22 +203,37 @@ describe("cloud computer tools", () => {
     });
 
     it("leaves the result as it is when there is nothing to say, and a failed command stays failed with the note after it", async () => {
-      expect((await withDisk({ used: () => {}, after: async () => null })).content).toHaveLength(1);
+      expect((await withDisk({ began: () => {}, ended: () => {}, after: async () => null })).content).toHaveLength(1);
       commandExit = 1;
-      const failed = await withDisk({ used: () => {}, after: async () => "Disk note: this cloud computer's disk is 99% full. Writes may fail until space is freed." });
+      const flags: boolean[] = [];
+      const failed = await withDisk({ began: () => {}, ended: () => {}, after: async (_cfg, _boxId, _texts, flag) => { flags.push(flag); return "Disk note: this cloud computer's disk is 99% full. Writes may fail until space is freed."; } });
+      expect(flags).toEqual([true]);
       expect(failed.isError).toBe(true);
       expect(failed.content.map((part) => part.text)).toEqual([JSON.stringify({ ok: false, exitCode: 1, stdout: "captured", stderr: "" }), "Disk note: this cloud computer's disk is 99% full. Writes may fail until space is freed."]);
     });
 
-    it("asks for no note after a call the computer did not answer", async () => {
+    it("asks for no note after a call the computer did not answer, and still counts the call as ended", async () => {
       commandStatus = 502;
       let asked = 0;
+      let open = 0;
       const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "click", arguments: { x: 1, y: 2 } } }, {
         cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: () => {}, budgetMs: 6_000,
-        disk: { used: () => {}, after: async () => { asked++; return "never shown"; } },
+        disk: { began: () => { open++; }, ended: () => { open--; }, after: async () => { asked++; return "never shown"; } },
       }) as { content: unknown[] };
       expect(asked).toBe(0);
+      expect(open).toBe(0);
       expect(result.content).toHaveLength(1);
+    });
+
+    it("counts a call that was stopped before it was sent as ended", async () => {
+      const stop = new AbortController();
+      stop.abort();
+      let open = 0;
+      await expect(tools.cloudComputerRpc({ method: "tools/call", params: { name: "click", arguments: { x: 1, y: 2 } } }, {
+        cfg, boxId: () => "bx_23456789", signal: stop.signal, gate: async () => ({ held: false }), assertActive: () => {},
+        disk: { began: () => { open++; }, ended: () => { open--; }, after: async () => null },
+      })).rejects.toThrow();
+      expect(open).toBe(0);
     });
   });
 

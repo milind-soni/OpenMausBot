@@ -8395,6 +8395,7 @@
   "computer.answering.notResponding": "Not responding since {time}.",
   "computer.disk.full": "Disk {percent}% full.",
   "computer.disk.cleared": "Cleared caches at {time}.",
+  "computer.disk.clearedSpace": "Cleared space at {time}.",
   "computer.recovery.replacing": "This cloud computer isn't responding. MausBot is replacing it.",
   "computer.recovery.replacedManual": "Replaced. {name} gets a new cloud computer the next time it needs one.",
   "computer.recovery.restartedManual": "Restarted. The cloud computer answers again.",

@@ -87,6 +87,14 @@ describe("the computer's own state line", () => {
     expect(host.querySelectorAll("[data-testid=cloud-computer-answering]")).toHaveLength(1);
   });
 
+  it("says space was cleared, in place of caches, after more than caches was removed", async () => {
+    const at = new Date(2026, 10, 14, 14, 5).getTime();
+    disk = { percent: 96, spaceClearedAt: at, clearedAt: at - 60_000 };
+    await render(false);
+    expect(line()).toBe(`Disk 96% full. Cleared space at ${new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}.`);
+    expect(host.querySelector("[role=dialog], [role=alert], [role=alertdialog]")).toBeNull();
+  });
+
   it("shows only the cleanup once the disk has room again", async () => {
     const clearedAt = new Date(2026, 10, 14, 14, 5).getTime();
     disk = { percent: 62, clearedAt };
