@@ -2,11 +2,13 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { configStatusFromFrame, type ConfigStatusFrame } from "@/lib/config-status-frame";
+import type { ConfigStatus } from "@/state/config-status";
 
 const fixture = vi.hoisted(() => ({
   calls: [] as Array<{ path: string; body: unknown }>,
   admin: true as boolean | null,
-  config: { pausedByPerson: { bots: [] as string[], departments: [] as string[] }, heldBots: [] as string[] },
+  config: { pausedByPerson: { bots: [] as string[], departments: [] as string[] }, heldBots: [] as string[] } as Pick<ConfigStatus, "pausedByPerson" | "heldBots">,
 }));
 vi.mock("@/state/api", () => ({ api: async (path: string, init: { body: string }) => { fixture.calls.push({ path, body: JSON.parse(init.body) }); return { stopped: 2 }; } }));
 vi.mock("@/state/store", () => ({ api: vi.fn(), useStore: () => ({ state: { config: fixture.config, bots: [], groups: [] }, dispatch: vi.fn() }) }));
@@ -25,6 +27,10 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
 
 const menu = (onRead = vi.fn()) => createElement(TeamMenuItems, { department: "Sales", onRead, onAddBots: vi.fn(), onRename: vi.fn(), onShare: vi.fn(), onDelete: vi.fn() });
+const baseFrame: ConfigStatusFrame = {
+  composio: { configured: false }, box: { configured: false }, vps: { configured: false, sshAlias: "" },
+  rooms: { turnTimeoutMinutes: 10 }, localVm: { mode: "shared", maxInstances: 1 },
+};
 
 it("lets an admin pause a department, and resume it once paused", async () => {
   const onRead = vi.fn();
@@ -35,9 +41,18 @@ it("lets an admin pause a department, and resume it once paused", async () => {
   expect(fixture.calls).toEqual([{ path: "/api/paused", body: { kind: "department", id: "Sales", paused: true } }]);
   expect(onRead).toHaveBeenCalled();
 
-  fixture.config = { pausedByPerson: { bots: [], departments: ["Sales"] }, heldBots: [] };
+  const pausedFrame = { ...baseFrame, pausedByPerson: { bots: [], departments: ["Sales"] }, heldBots: ["ada"] };
+  fixture.config = configStatusFromFrame(pausedFrame);
   await act(async () => root.render(menu()));
-  expect(container.querySelector('[data-team-pause="resume"]')!.textContent).toBe("Resume department");
+  const resume = container.querySelector<HTMLButtonElement>('[data-team-pause="resume"]');
+  expect(resume?.textContent).toBe("Resume department");
+  await act(async () => resume!.click());
+  expect(fixture.calls.at(-1)).toEqual({ path: "/api/paused", body: { kind: "department", id: "Sales", paused: false } });
+
+  const resumedFrame = { ...baseFrame, pausedByPerson: { bots: [], departments: [] }, heldBots: [] };
+  fixture.config = configStatusFromFrame(resumedFrame);
+  await act(async () => root.render(menu()));
+  expect(container.querySelector('[data-team-pause="pause"]')?.textContent).toBe("Pause department");
 });
 
 it("offers nothing to someone who is not an owner or admin", async () => {

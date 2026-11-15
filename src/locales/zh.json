@@ -7835,6 +7835,7 @@
   "server.routines.held.noConnections": "你的例行任务已暂停：所有已连接的应用和 MCP 服务都被移除了。连接一个之后它们会恢复，你也可以在“例行任务”中重新打开一个。",
   "server.routines.card.conversationKept": "每次执行都会接着上次执行的对话继续",
   "server.routines.card.sessionContinues": "每次执行都会接着上次执行的对话继续",
+  "server.routines.card.onceContinues": "将执行一次；每次执行都会接着上次执行的对话继续。",
   "mcp.request.change": "更改",
   "mcp.request.remove": "移除",
   "secretCard.greenference.description": "用你自己的密钥运行 Greenference 模型。",

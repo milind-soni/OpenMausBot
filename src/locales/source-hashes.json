@@ -3427,6 +3427,9 @@
       "server.share.wrote": "7672ad3a723e9f3a97a7570db7c388644185cfd1c78a5582743d1900fd50ccf1",
       "server.share.answeredTitle": "475334e117f72b6000a657501681debdd73d31128177856fda6a5c48999c94ef",
       "server.share.answered": "b9baf8feb4ac3ea7b8277d116c8c5ea89fe86cbb997143892121ca28259581ec",
+      "server.teamSlack.direct": "373ba43ec0c11e5d29530d434a32d074462c54e2674c2112b88ead9db5f39ccb",
+      "server.teamSlack.channel": "278ba4330c539df0ef4c273e6585467ecc3981d17ca5289dc105567041674de6",
+      "server.teamSlack.channelUnnamed": "bec8ce235c21024fd80e2e4cdb41eaff6b45fbe13b44ff0660047d131ce3d624",
       "settings.learnMore": "1445799c033a2d17e2bad5d8610879e71ff0d73a8a3c2b932b43ad0449dac3a1",
       "phone.pair.installLine": "c38bd5e91a296019b3909f24bed64290e6adbef39480d48eb1af18e5f8fa90ea",
       "phone.code.notCamera": "94977df418d83e1fd94e4d9ed0b8452bcf97bfc9a6a88a42576855f3c32e7481",
@@ -3991,7 +3994,8 @@
       "devices.computers.pairTitle": "b7cda6a11ab410daa4b8977624ca72261c0168e7c3d83ae0eed93ac4e3540bc8",
       "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174",
       "server.routines.card.conversationKept": "ea038ec2124d474aa977c0faeb838dae7c8c2436cc44fc5382c231a7539c0fb9",
-      "server.routines.card.sessionContinues": "af4dedfee873451f6b9f28c12ef5b4f683c98ae795a706fe7fd58da470374c47"
+      "server.routines.card.sessionContinues": "af4dedfee873451f6b9f28c12ef5b4f683c98ae795a706fe7fd58da470374c47",
+      "server.routines.card.onceContinues": "47f36e2af395ab1cc4c1fa758a4e169404e1e0164fb07d2ad82914228cf99297"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -36278,6 +36282,9 @@
       "server.share.wrote": "7672ad3a723e9f3a97a7570db7c388644185cfd1c78a5582743d1900fd50ccf1",
       "server.share.answeredTitle": "475334e117f72b6000a657501681debdd73d31128177856fda6a5c48999c94ef",
       "server.share.answered": "b9baf8feb4ac3ea7b8277d116c8c5ea89fe86cbb997143892121ca28259581ec",
+      "server.teamSlack.direct": "373ba43ec0c11e5d29530d434a32d074462c54e2674c2112b88ead9db5f39ccb",
+      "server.teamSlack.channel": "278ba4330c539df0ef4c273e6585467ecc3981d17ca5289dc105567041674de6",
+      "server.teamSlack.channelUnnamed": "bec8ce235c21024fd80e2e4cdb41eaff6b45fbe13b44ff0660047d131ce3d624",
       "teamMemorySave.saved": "16dcefaa40a168bc07ccea0eb693f0d461e06c3f4204c36418aca8f06b4eb04e",
       "settings.learnMore": "1445799c033a2d17e2bad5d8610879e71ff0d73a8a3c2b932b43ad0449dac3a1",
       "phone.pair.installLine": "c38bd5e91a296019b3909f24bed64290e6adbef39480d48eb1af18e5f8fa90ea",
@@ -36964,7 +36971,8 @@
       "devices.computers.pairTitle": "b7cda6a11ab410daa4b8977624ca72261c0168e7c3d83ae0eed93ac4e3540bc8",
       "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174",
       "server.routines.card.conversationKept": "ea038ec2124d474aa977c0faeb838dae7c8c2436cc44fc5382c231a7539c0fb9",
-      "server.routines.card.sessionContinues": "af4dedfee873451f6b9f28c12ef5b4f683c98ae795a706fe7fd58da470374c47"
+      "server.routines.card.sessionContinues": "af4dedfee873451f6b9f28c12ef5b4f683c98ae795a706fe7fd58da470374c47",
+      "server.routines.card.onceContinues": "47f36e2af395ab1cc4c1fa758a4e169404e1e0164fb07d2ad82914228cf99297"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -47167,7 +47175,8 @@
       "devices.computers.pairTitle": "b7cda6a11ab410daa4b8977624ca72261c0168e7c3d83ae0eed93ac4e3540bc8",
       "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174",
       "server.routines.card.conversationKept": "ea038ec2124d474aa977c0faeb838dae7c8c2436cc44fc5382c231a7539c0fb9",
-      "server.routines.card.sessionContinues": "af4dedfee873451f6b9f28c12ef5b4f683c98ae795a706fe7fd58da470374c47"
+      "server.routines.card.sessionContinues": "af4dedfee873451f6b9f28c12ef5b4f683c98ae795a706fe7fd58da470374c47",
+      "server.routines.card.onceContinues": "47f36e2af395ab1cc4c1fa758a4e169404e1e0164fb07d2ad82914228cf99297"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -57527,7 +57536,8 @@
       "devices.computers.pairTitle": "b7cda6a11ab410daa4b8977624ca72261c0168e7c3d83ae0eed93ac4e3540bc8",
       "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174",
       "server.routines.card.conversationKept": "ea038ec2124d474aa977c0faeb838dae7c8c2436cc44fc5382c231a7539c0fb9",
-      "server.routines.card.sessionContinues": "af4dedfee873451f6b9f28c12ef5b4f683c98ae795a706fe7fd58da470374c47"
+      "server.routines.card.sessionContinues": "af4dedfee873451f6b9f28c12ef5b4f683c98ae795a706fe7fd58da470374c47",
+      "server.routines.card.onceContinues": "47f36e2af395ab1cc4c1fa758a4e169404e1e0164fb07d2ad82914228cf99297"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

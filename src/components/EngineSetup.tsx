@@ -247,7 +247,7 @@ export function EngineUpdateNotice({
           <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{update.message}</p>
         </div>
       </div>
-      {update.command && (instance?.install?.server
+      {update.command && (instance?.install?.server && update.serverInstall !== false
         ? <ServerEngineInstall instance={instance} mode="update" command={update.command} quiet={quiet} />
         : <CommandRow command={update.command} actionLabel={t("engineSetup.openUpdate")} compact />)}
     </div>

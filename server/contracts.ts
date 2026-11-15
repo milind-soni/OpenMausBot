@@ -367,6 +367,8 @@ export interface ProviderSnapshot {
     message: string;
     /** Absent when there is nothing to run here, e.g. My Cloud's engines update with the Cloud. */
     command?: string;
+    /** False when the app installer cannot supply this version; offer the terminal command instead. */
+    serverInstall?: false;
   };
   /** On a subscription a reported cost is notional. */
   billing?: "metered" | "subscription";

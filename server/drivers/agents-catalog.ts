@@ -166,7 +166,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: "coordinate_bots",
-    description: "The one way to hand work on: ask existing OpenMausBot teammates a question or assign them concrete work. Give 1-4 bot_ids from list_bots; they see only what you send, so include exact file paths, constraints and done_when. In a room it goes to this room; elsewhere to your standing work thread with each teammate. Results return here and resume you, so end your turn after sending; on return, verify the outcome and send fixes with rework true. Never target whoever assigned you this work or anyone above it: end your turn and your reply reaches them. Never thank a finished teammate or repeat a refused call unchanged.",
+    description: "The one way to hand work on: ask existing OpenMausBot teammates a question or assign them concrete work. Give 1-4 bot_ids from list_bots; they see only what you send, so include constraints and done_when, and pass files they need in files. In a room it goes to this room; elsewhere to your standing work thread with each teammate. Results return here and resume you, so end your turn after sending; on return, verify the outcome and send fixes with rework true. Never target whoever assigned you this work or anyone above it: end your turn and your reply reaches them. Never thank a finished teammate or repeat a refused call unchanged.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       group_id: { type: "string", description: "Another room, from list_room_targets." },
       bot_ids: { type: "array", items: { type: "string", description: "A teammate's id as list_bots prints it, or its unique name." }, minItems: 1, maxItems: 4, uniqueItems: true },
@@ -179,6 +179,7 @@ const TOOL_DEFINITIONS = [
       consult: { type: "boolean", description: "True for a question answered from what they know, acting on nothing." },
       done_when: { type: "string", maxLength: 1000, description: "What must be true to count as done; the teammate is held to it." },
       answers: { type: "string", description: "Only to answer a teammate's question: the assignment id its note names; message is the answer." },
+      files: { type: "array", items: { type: "string" }, maxItems: 5, description: "Paths as for attach_file, 100 MB together: copied into each teammate's inbox. Files a teammate attaches with attach_file come back with its result." },
     }, required: ["bot_ids", "message"] },
   },
   {
