@@ -7,7 +7,7 @@ import { instructionsUpdateRefusal } from "./automation-instructions.ts";
 import { newId } from "./contracts.ts";
 import { UNDO_STALE } from "./direct-apply.ts";
 import { redactSecretsInText } from "./redact.ts";
-import type { WebhookManager, WebhookTrigger } from "./webhooks.ts";
+import { SYSTEM_ACTOR, type WebhookManager, type WebhookTrigger } from "./webhooks.ts";
 
 export interface WebhookRequestCard {
   title: string;
@@ -174,23 +174,23 @@ export class WebhookRequestService {
     let runId: string | undefined;
     switch (operation.action) {
       case "create":
-        after = webhooks.create({ ...managerInput(operation.webhook), name: operation.webhook.name, prompt: operation.webhook.instructions, botId: owner, enabled: true }).webhook;
+        after = webhooks.create(SYSTEM_ACTOR, { ...managerInput(operation.webhook), name: operation.webhook.name, prompt: operation.webhook.instructions, botId: owner, enabled: true }).webhook;
         break;
       case "update":
-        after = webhooks.update(operation.webhookId, managerInput(operation.changes));
+        after = webhooks.update(SYSTEM_ACTOR, operation.webhookId, managerInput(operation.changes));
         break;
       case "pause":
       case "resume":
-        after = webhooks.update(operation.webhookId, { enabled: operation.action === "resume", verificationPending: false });
+        after = webhooks.update(SYSTEM_ACTOR, operation.webhookId, { enabled: operation.action === "resume", verificationPending: false });
         break;
       case "run_now": {
-        const result = webhooks.test(operation.webhookId);
+        const result = webhooks.test(SYSTEM_ACTOR, operation.webhookId);
         runId = result?.runId;
         after = before ?? null;
         break;
       }
       case "delete":
-        if (!webhooks.remove(operation.webhookId)) throw new WebhookRequestError("That webhook trigger no longer exists.", 404);
+        if (!webhooks.remove(SYSTEM_ACTOR, operation.webhookId)) throw new WebhookRequestError("That webhook trigger no longer exists.", 404);
         break;
     }
     const subject = after ?? before!;
@@ -251,7 +251,7 @@ export class WebhookRequestService {
         case "run_now":
           return cannot("A test call can't be undone.");
         case "create":
-          if (!current || !webhooks.remove(webhookId)) return stale;
+          if (!current || !webhooks.remove(SYSTEM_ACTOR, webhookId)) return stale;
           break;
         case "update":
         case "pause":
@@ -261,7 +261,7 @@ export class WebhookRequestService {
           const patch = operation.action === "update"
             ? before ? { ...managerInput(before), eventTypes: before.eventTypes ?? [], payloadFilter: before.payloadFilter ?? null, sameConversation: before.sameConversation === true, enabled: before.enabled } : undefined
             : { enabled: operation.action === "pause" };
-          if (!patch || !webhooks.update(webhookId, patch)) return stale;
+          if (!patch || !webhooks.update(SYSTEM_ACTOR, webhookId, patch)) return stale;
           break;
         }
         case "delete":

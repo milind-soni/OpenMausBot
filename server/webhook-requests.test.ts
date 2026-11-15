@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { WebhookRequestService, type WebhookRequestCard, type WebhookRequestStore } from "./webhook-requests.ts";
-import { WebhookManager } from "./webhooks.ts";
+import { SYSTEM_ACTOR, WebhookManager } from "./webhooks.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -53,7 +53,7 @@ describe("WebhookRequestService", () => {
   it("refuses replacing redacted instructions atomically but allows a rename", () => {
     const { service, webhooks, store } = harness();
     const prompt = "Review the queue.\n".repeat(180) + "Use token=fixture-secret-value.";
-    const saved = webhooks.create({ name: "Private instructions", prompt, botId: "bot-a", runOn: "cloud", enabled: false }).webhook;
+    const saved = webhooks.create(SYSTEM_ACTOR, { name: "Private instructions", prompt, botId: "bot-a", runOn: "cloud", enabled: false }).webhook;
     const submit = (changes: unknown) => service.submit({ botId: "bot-a", threadId: "thread-a", operation: { action: "update", webhookId: saved.id, changes } });
     const before = structuredClone(webhooks.list());
     expect(() => submit({ name: "Must not apply", instructions: "Only the visible text." })).toThrow(expect.objectContaining({ status: 409 }));
@@ -106,7 +106,7 @@ describe("WebhookRequestService", () => {
   it("undoes an update, a pause and a delete, bringing a deleted webhook back with its URL and secret", () => {
     const { service, webhooks, store, tick } = harness();
     const created = service.submit({ botId: "bot-a", threadId: "thread-a", operation: create });
-    const { secret } = webhooks.rotateSecret(created.resultId)!;
+    const { secret } = webhooks.rotateSecret(SYSTEM_ACTOR, created.resultId)!;
     const endpointId = webhooks.list()[0]!.endpointId;
     tick();
     const updated = service.submit({ botId: "bot-a", threadId: "thread-a", operation: { action: "update", webhookId: created.resultId, changes: { name: "Renamed", eventTypes: ["reply.labelled"] } } });
@@ -142,7 +142,7 @@ describe("WebhookRequestService", () => {
     tick();
     const paused = service.submit({ botId: "bot-a", threadId: "thread-a", operation: { action: "pause", webhookId: again.resultId } });
     tick();
-    webhooks.update(again.resultId, { name: "Changed by hand" });
+    webhooks.update(SYSTEM_ACTOR, again.resultId, { name: "Changed by hand" });
     expect(service.undo({ botId: "bot-a", threadId: "thread-a", requestId: paused.requestId })).toMatchObject({ state: "invalid", stale: true });
     expect(webhooks.list()[0]!.enabled).toBe(false);
   });

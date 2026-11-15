@@ -7,7 +7,7 @@ import { CalendarCallManager } from "./calendar-calls.ts";
 import { createMoveFreeze, ENDED_REFUSAL, switchAutomationsOff, type MoveAutomations } from "./move-freeze.ts";
 import { RoutineManager } from "./routines.ts";
 import { createMoveFreezeRoutes } from "./routes/move-freeze.ts";
-import { WebhookManager } from "./webhooks.ts";
+import { SYSTEM_ACTOR, WebhookManager } from "./webhooks.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -32,7 +32,7 @@ function frozenCopy({ exportOnly = false } = {}) {
   const morning = routines.create({ name: "Morning", prompt: "Report.", botId: "b1", schedule: { type: "interval", everyMinutes: 1_440, anchorAt: clock + 30 * 60_000 } });
   const paused = routines.create({ name: "Paused", prompt: "Wait.", botId: "b1", enabled: false, schedule: { type: "daily", time: "10:00", weekdays: [1] } });
   const call = calls.create({ name: "Sync", botIds: ["b1"], schedule: { type: "once", at: clock + 30 * 60_000 }, durationMinutes: 120 });
-  const webhook = webhooks.create({ name: "Orders", prompt: "File it.", botId: "b1" }).webhook;
+  const webhook = webhooks.create(SYSTEM_ACTOR, { name: "Orders", prompt: "File it.", botId: "b1" }).webhook;
   const appEvents = { switched: [] as Array<[string, unknown]>, list: () => [{ id: "e1", enabled: true }], update: async (id: string, patch: unknown) => { appEvents.switched.push([id, patch]); return null; } };
   const freeze = createMoveFreeze({ dataDir: dir, exportOnly });
   freeze.freeze("https://omb-t-1.fly.dev");

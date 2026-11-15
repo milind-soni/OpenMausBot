@@ -9,7 +9,7 @@ import type { AppTriggerManager } from "./app-triggers.ts";
 import type { RoutineManager } from "./routines.ts";
 import type { BotRecord, GroupRecord } from "./store.ts";
 import type { WaitManager } from "./waits.ts";
-import type { WebhookManager } from "./webhooks.ts";
+import { SYSTEM_ACTOR, type WebhookManager } from "./webhooks.ts";
 
 /** The "team" a bot moving from this computer to My Cloud goes to. */
 export const MY_CLOUD_TEAM = "my-cloud";
@@ -53,7 +53,7 @@ export function createBotMoves(deps: BotMovesDeps) {
   async function switchTo(key: string, on: boolean): Promise<void> {
     const [kind, id] = key.split(":") as [string, string];
     if (kind === "routine") deps.routines()?.update(id, { enabled: on });
-    else if (kind === "webhook") deps.webhooks()?.update(id, { enabled: on });
+    else if (kind === "webhook") deps.webhooks()?.update(SYSTEM_ACTOR, id, { enabled: on });
     else if (kind === "app-event") await deps.appEvents()?.update(id, { enabled: on });
   }
   const movedOf = (bot: BotRecord | null | undefined): Held | undefined => (bot as (BotRecord & { movedTo?: Held }) | null | undefined)?.movedTo;

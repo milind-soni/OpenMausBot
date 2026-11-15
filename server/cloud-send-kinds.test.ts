@@ -8,7 +8,7 @@ import { importedSkillHash, kindRecord, moveItems, moveKindsRoute, type MoveKind
 import { readImportedSkills } from "./imported-skills.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import { installLibrarySkill, readSkillLibraryIndex } from "./skill-library.ts";
-import { WebhookManager } from "./webhooks.ts";
+import { SYSTEM_ACTOR, WebhookManager } from "./webhooks.ts";
 
 const HERE = "/Users/amit/.openmausbot";
 const OWNER = { person: "p_owner0000000000000000", name: "Amit" };
@@ -137,7 +137,7 @@ describe("My Cloud takes a webhook and a call", () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-kinds-"));
     const here = new WebhookManager({ file: join(dir, "here.json"), botState: () => "ready", enqueue: () => ({ runId: "x" }) } as never);
     const there = new WebhookManager({ file: join(dir, "there.json"), botState: () => "ready", enqueue: () => ({ runId: "x" }) } as never);
-    const made = here.create({ name: "Orders", prompt: "File it.", botId: "b1" });
+    const made = here.create(SYSTEM_ACTOR, { name: "Orders", prompt: "File it.", botId: "b1" });
     const d = deps(dir, { webhooks: () => there });
     expect((await take(d, itemKey.moved("webhook", made.webhook.id), made.webhook)).status).toBe(200);
     const arrived = there.list()[0]!;
@@ -146,7 +146,7 @@ describe("My Cloud takes a webhook and a call", () => {
     const secret = there.currentSecret(arrived.id, false)!.secret!;
     expect(secret).toMatch(/^whsec_/u);
     expect(secret).not.toBe(made.secret);
-    there.update(arrived.id, { enabled: true });
+    there.update(SYSTEM_ACTOR, arrived.id, { enabled: true });
     expect((await take(d, itemKey.moved("webhook", made.webhook.id), { ...made.webhook, prompt: "File it twice." })).status).toBe(200);
     expect(there.list()[0]).toMatchObject({ endpointId: arrived.endpointId, enabled: true, prompt: "File it twice." });
     expect(there.currentSecret(arrived.id, false)!.secret).toBe(secret);

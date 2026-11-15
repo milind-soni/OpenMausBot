@@ -11,7 +11,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import type { CalendarCallManager } from "./calendar-calls.ts";
 import type { RoutineManager } from "./routines.ts";
 import type { WaitManager } from "./waits.ts";
-import type { WebhookManager } from "./webhooks.ts";
+import { SYSTEM_ACTOR, type WebhookManager } from "./webhooks.ts";
 
 export const MOVED_REFUSAL = "This bot lives on My Cloud now.";
 /** Why a frozen copy refuses, naming the server of the person's own its bots moved to (`place`), else My Cloud. */
@@ -65,7 +65,7 @@ export async function switchAutomationsOff(automations: MoveAutomations, only?: 
   const routines = automations.routines(), calls = automations.calls(), webhooks = automations.webhooks(), appEvents = automations.appEvents(), waits = automations.waits();
   for (const routine of routines?.listRoutines() ?? []) if (routine.enabled) await off("routine", routine.id, () => routines!.update(routine.id, { enabled: false }));
   for (const call of calls?.list() ?? []) if (call.nextRunAt !== null) await off("call", call.id, () => calls!.switchOff(call.id));
-  for (const webhook of webhooks?.list() ?? []) if (webhook.enabled) await off("webhook", webhook.id, () => webhooks!.update(webhook.id, { enabled: false }));
+  for (const webhook of webhooks?.list() ?? []) if (webhook.enabled) await off("webhook", webhook.id, () => webhooks!.update(SYSTEM_ACTOR, webhook.id, { enabled: false }));
   for (const trigger of appEvents?.list() ?? []) if (trigger.enabled) await off("app-event", trigger.id, () => appEvents!.update(trigger.id, { enabled: false }));
   for (const wait of waits?.all() ?? []) await off("wait", wait.id, () => { if (!waits!.cancel(wait.id, wait.botId)) throw new Error("it already ended"); });
   return done;

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { callTool, type ToolCallContext } from "./drivers/agents-call.ts";
 import { fullInputSchema } from "./drivers/agents-catalog.ts";
 import { parseTriggerRequest } from "./trigger-tools.ts";
-import { unmatchedPayloadField, WebhookManager, type WebhookManagerOptions } from "./webhooks.ts";
+import { SYSTEM_ACTOR, unmatchedPayloadField, WebhookManager, type WebhookManagerOptions } from "./webhooks.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -45,7 +45,7 @@ describe("webhook payload filter", () => {
 
   it("records a call that does not match as ignored and starts no run; a matching call runs", () => {
     const h = harness();
-    const { webhook, secret } = h.manager.create({ name: "Doorbell", prompt: "Answer it", botId: "maus-1", payloadFilter: { " status ": " ring ", "visitor.known": "" } });
+    const { webhook, secret } = h.manager.create(SYSTEM_ACTOR, { name: "Doorbell", prompt: "Answer it", botId: "maus-1", payloadFilter: { " status ": " ring ", "visitor.known": "" } });
     expect(webhook.payloadFilter).toEqual({ status: "ring" });
 
     expect(h.manager.receive(webhook.endpointId, secret, { payload: { status: "idle" }, deliveryId: "d-1" })).toMatchObject({ ignored: true });
@@ -58,24 +58,24 @@ describe("webhook payload filter", () => {
 
   it("keeps the filter across a restart and an unrelated edit, removes it with null or {}, and lets Run now through", () => {
     const h = harness();
-    const { webhook, secret } = h.manager.create({ name: "Doorbell", prompt: "Answer it", botId: "maus-1", payloadFilter: { status: "ring" } });
+    const { webhook, secret } = h.manager.create(SYSTEM_ACTOR, { name: "Doorbell", prompt: "Answer it", botId: "maus-1", payloadFilter: { status: "ring" } });
     const reloaded = new WebhookManager(h.options);
     expect(reloaded.list()[0]!.payloadFilter).toEqual({ status: "ring" });
-    expect(reloaded.update(webhook.id, { name: "Front door" })!.payloadFilter).toEqual({ status: "ring" });
+    expect(reloaded.update(SYSTEM_ACTOR, webhook.id, { name: "Front door" })!.payloadFilter).toEqual({ status: "ring" });
 
-    expect(reloaded.test(webhook.id)).toMatchObject({ duplicate: false });
+    expect(reloaded.test(SYSTEM_ACTOR, webhook.id)).toMatchObject({ duplicate: false });
     expect(h.queued).toHaveLength(1);
 
-    expect(reloaded.update(webhook.id, { payloadFilter: {} })!.payloadFilter).toBeUndefined();
+    expect(reloaded.update(SYSTEM_ACTOR, webhook.id, { payloadFilter: {} })!.payloadFilter).toBeUndefined();
     expect(reloaded.receive(webhook.endpointId, secret, { payload: { status: "idle" }, deliveryId: "d-3" })).not.toMatchObject({ ignored: true });
-    expect(reloaded.update(webhook.id, { payloadFilter: { status: "ring" } })!.payloadFilter).toEqual({ status: "ring" });
-    expect(reloaded.update(webhook.id, { payloadFilter: null })!.payloadFilter).toBeUndefined();
+    expect(reloaded.update(SYSTEM_ACTOR, webhook.id, { payloadFilter: { status: "ring" } })!.payloadFilter).toEqual({ status: "ring" });
+    expect(reloaded.update(SYSTEM_ACTOR, webhook.id, { payloadFilter: null })!.payloadFilter).toBeUndefined();
   });
 
   it("refuses more than 10 fields", () => {
     const h = harness();
     const payloadFilter = Object.fromEntries(Array.from({ length: 11 }, (_, index) => [`f${index}`, "x"]));
-    expect(() => h.manager.create({ name: "Too many", prompt: "x", botId: "maus-1", payloadFilter })).toThrow();
+    expect(() => h.manager.create(SYSTEM_ACTOR, { name: "Too many", prompt: "x", botId: "maus-1", payloadFilter })).toThrow();
   });
 });
 

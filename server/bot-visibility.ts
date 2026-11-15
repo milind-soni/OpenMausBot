@@ -650,6 +650,20 @@ export function webhookVisible(value: { botId?: unknown; groupId?: unknown }, vi
   return typeof value.groupId !== "string" || !value.groupId || visible.group(value.groupId);
 }
 
+/** Whether a caller with this visibility set may create, update, rotate, test, or remove the webhook. */
+export function canManageWebhook(
+  value: { botId?: unknown; groupId?: unknown },
+  visible: Pick<VisibleSet, "everything" | "bot" | "group"> & { level?(id: string): string; member?: boolean },
+): boolean {
+  if (!webhookVisible(value, visible)) return false;
+  if (visible.everything) return true;
+  if (visible.member === false) return true;
+  if (typeof visible.level === "function" && typeof value.botId === "string") {
+    return visible.level(value.botId) === "edit";
+  }
+  return true;
+}
+
 export function routineVisible(value: RoutineRef, visible: VisibleSet): boolean {
   if (visible.everything) return true;
   if (!visible.routineShown(value)) return false;

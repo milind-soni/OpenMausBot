@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { RoutineManager } from "./routines.ts";
-import { WebhookManager } from "./webhooks.ts";
+import { SYSTEM_ACTOR, WebhookManager } from "./webhooks.ts";
 
 const dirs: string[] = [];
 const week = 7 * 24 * 60 * 60_000;
@@ -33,7 +33,7 @@ it("recovers the canonical job when saving the ingress receipt failed, even with
     },
   };
   const webhook = new WebhookManager(options);
-  const { webhook: hook, secret } = webhook.create({ name: "Incoming", prompt: "Handle once", botId: "bot" });
+  const { webhook: hook, secret } = webhook.create(SYSTEM_ACTOR, { name: "Incoming", prompt: "Handle once", botId: "bot" });
   const event = { deliveryId: "retry", payload: { item: 1 } };
   expect(() => webhook.receive(hook.endpointId, secret, event)).toThrow("lost response");
   const first = h.manager.listRuns()[0]!;

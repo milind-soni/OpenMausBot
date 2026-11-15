@@ -11,6 +11,14 @@ import type { RoutineRunOn } from "./routines.ts";
 import { parseJson, schemaIssue, type JsonValue } from "./schema.ts";
 import { AUTHORITY, fromNote, fromNoteWith, webhookWho } from "./provenance-label.ts";
 
+export interface WebhookActor {
+  readonly kind?: "system" | "user";
+  canSee?(target: { botId: string; groupId?: string }): boolean;
+  canManage?(target: { botId: string; groupId?: string }): boolean;
+}
+
+export const SYSTEM_ACTOR: WebhookActor = Object.freeze({ kind: "system" });
+
 export type WebhookTriggerInput = z.input<typeof triggerInputSchema>;
 export type WebhookVerificationSample = z.output<typeof verificationSampleSchema>;
 export type WebhookAttempt = z.output<typeof webhookAttemptSchema>;
@@ -456,11 +464,24 @@ export class WebhookManager {
     return this.attempts.map((attempt) => ({ ...attempt }));
   }
 
-  create(input: JsonValue): CreatedWebhook {
+  get(id: string): WebhookTrigger | null {
+    const trigger = this.webhooks.find((candidate) => candidate.id === id);
+    return trigger ? publicTrigger(trigger) : null;
+  }
+
+  create(actor: WebhookActor, input: JsonValue): CreatedWebhook {
     this.assertWritable();
     const clean = cleanInput(parseTriggerInput(input));
     if (this.options.botState(clean.botId) === "missing") fail(400, "That MAUS no longer exists");
     if (clean.groupId) this.assertRoomMember(clean.botId, clean.groupId);
+    if (actor !== SYSTEM_ACTOR) {
+      if (actor.canSee && !actor.canSee({ botId: clean.botId, groupId: clean.groupId })) {
+        fail(404, "That MAUS no longer exists");
+      }
+      if (actor.canManage && !actor.canManage({ botId: clean.botId, groupId: clean.groupId })) {
+        fail(403, "cannot manage webhooks for this bot");
+      }
+    }
     const now = this.now();
     const secret = newSecret();
     const trigger: StoredWebhookTrigger = {
@@ -505,10 +526,14 @@ export class WebhookManager {
     return publicTrigger(trigger);
   }
 
-  update(id: string, value: JsonValue): WebhookTrigger | null {
+  update(actor: WebhookActor, id: string, value: JsonValue): WebhookTrigger | null {
     this.assertWritable();
     const trigger = this.webhooks.find((candidate) => candidate.id === id);
     if (!trigger) return null;
+    if (actor !== SYSTEM_ACTOR) {
+      if (actor.canSee && !actor.canSee(trigger)) return null;
+      if (actor.canManage && !actor.canManage(trigger)) fail(403, "cannot manage this webhook");
+    }
     const patch = parseTriggerPatch(value);
     const clean = cleanInput({
       name: patch.name ?? trigger.name,
@@ -527,6 +552,14 @@ export class WebhookManager {
     });
     if (this.options.botState(clean.botId) === "missing") fail(400, "That MAUS no longer exists");
     if (clean.groupId) this.assertRoomMember(clean.botId, clean.groupId);
+    if (actor !== SYSTEM_ACTOR && (patch.botId !== undefined || patch.groupId !== undefined)) {
+      if (actor.canSee && !actor.canSee({ botId: clean.botId, groupId: clean.groupId })) {
+        fail(404, "That MAUS no longer exists");
+      }
+      if (actor.canManage && !actor.canManage({ botId: clean.botId, groupId: clean.groupId })) {
+        fail(403, "cannot manage webhooks for this bot");
+      }
+    }
     Object.assign(trigger, clean, { updatedAt: this.now() });
     if (!clean.eventTypes?.length) delete trigger.eventTypes;
     if (!clean.payloadFilter) delete trigger.payloadFilter;
@@ -541,17 +574,22 @@ export class WebhookManager {
     return publicTrigger(trigger);
   }
 
-  remove(id: string): boolean {
+  remove(actor: WebhookActor, id: string): boolean {
     this.assertWritable();
     const at = this.webhooks.findIndex((candidate) => candidate.id === id);
     if (at === -1) return false;
-    const [trigger] = this.webhooks.splice(at, 1);
-    this.deleted = [...this.deleted.filter((entry) => entry.at >= this.now() - RESTORE_WINDOW_MS && entry.webhook.id !== trigger.id),
-      { at: this.now(), webhook: trigger }].slice(-MAX_DELETED);
-    this.deliveries = this.deliveries.filter((delivery) => !delivery.key.startsWith(`${trigger.endpointId}:`));
-    this.attempts = this.attempts.filter((attempt) => attempt.webhookId !== trigger.id);
-    this.rate.delete(trigger.endpointId);
-    this.options.cancelQueued?.(trigger.id, "The webhook was deleted before this delivery started");
+    const trigger = this.webhooks[at]!;
+    if (actor !== SYSTEM_ACTOR) {
+      if (actor.canSee && !actor.canSee(trigger)) return false;
+      if (actor.canManage && !actor.canManage(trigger)) fail(403, "cannot manage this webhook");
+    }
+    const [removed] = this.webhooks.splice(at, 1);
+    this.deleted = [...this.deleted.filter((entry) => entry.at >= this.now() - RESTORE_WINDOW_MS && entry.webhook.id !== removed.id),
+      { at: this.now(), webhook: removed }].slice(-MAX_DELETED);
+    this.deliveries = this.deliveries.filter((delivery) => !delivery.key.startsWith(`${removed.endpointId}:`));
+    this.attempts = this.attempts.filter((attempt) => attempt.webhookId !== removed.id);
+    this.rate.delete(removed.endpointId);
+    this.options.cancelQueued?.(removed.id, "The webhook was deleted before this delivery started");
     this.save();
     this.options.emit?.({ kind: "webhook.deleted", webhookId: id });
     return true;
@@ -571,10 +609,14 @@ export class WebhookManager {
     return publicTrigger(trigger);
   }
 
-  rotateSecret(id: string): { webhook: WebhookTrigger; secret: string } | null {
+  rotateSecret(actor: WebhookActor, id: string): { webhook: WebhookTrigger; secret: string } | null {
     this.assertWritable();
     const trigger = this.webhooks.find((candidate) => candidate.id === id);
     if (!trigger) return null;
+    if (actor !== SYSTEM_ACTOR) {
+      if (actor.canSee && !actor.canSee(trigger)) return null;
+      if (actor.canManage && !actor.canManage(trigger)) fail(403, "cannot manage this webhook");
+    }
     const secret = newSecret();
     trigger.secretHash = hashSecret(secret);
     Object.assign(trigger, this.seal(secret));
@@ -593,7 +635,7 @@ export class WebhookManager {
     if (kept) return { webhook: publicTrigger(trigger), secret: kept };
     const reached = trigger.deliveryCount > 0 || trigger.lastReceivedAt !== undefined || trigger.verifiedAt !== undefined
       || this.attempts.some((attempt) => attempt.webhookId === id);
-    return mintIfUnreached && !reached ? this.rotateSecret(id) : { webhook: publicTrigger(trigger), secret: null };
+    return mintIfUnreached && !reached ? this.rotateSecret(SYSTEM_ACTOR, id) : { webhook: publicTrigger(trigger), secret: null };
   }
 
   /** A deleted bot's webhooks go with it, for good: the bot cannot come back, so no Undo keeps them. */
@@ -648,9 +690,13 @@ export class WebhookManager {
     this.recordRejectedForTrigger(trigger, status, error instanceof Error ? error.message : String(error), event);
   }
 
-  test(id: string, payload: JsonValue = { event: "openmaus.test", message: "Test webhook delivery" }): WebhookReceiveResult | null {
+  test(actor: WebhookActor, id: string, payload: JsonValue = { event: "openmaus.test", message: "Test webhook delivery" }): WebhookReceiveResult | null {
     const trigger = this.webhooks.find((candidate) => candidate.id === id);
     if (!trigger) return null;
+    if (actor !== SYSTEM_ACTOR) {
+      if (actor.canSee && !actor.canSee(trigger)) return null;
+      if (actor.canManage && !actor.canManage(trigger)) fail(403, "cannot manage this webhook");
+    }
     // A room delivery synthesizes voice and stores images asynchronously; the test route stays synchronous.
     if (trigger.delivery === "post" && trigger.groupId) fail(400, "a room webhook posts through its webhook URL, not the test button");
     const eventName = trigger.eventTypes?.[0] ?? "openmaus.test";
