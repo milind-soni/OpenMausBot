@@ -492,6 +492,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // what the viewer's own bots put online, from conversations they can read; the handler deletes only what is theirs
   { methods: ["GET"], path: /^\/api\/published-apps(?:\/framing)?$/ },
   { methods: ["POST"], path: /^\/api\/published-apps\/delete$/ },
+  // Slack for Team Clouds: the Admin calls these with the member's own session, and the handler answers each as that
+  // member alone (routes/team-slack.ts); off a Team Cloud they answer 404
+  { methods: ["GET"], path: /^\/api\/slack\/team\/bots$/ },
+  { methods: ["POST"], path: /^\/api\/slack\/team\/messages(?:\/[0-9a-f-]{36}\/stop)?$/ },
 ];
 
 export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {
