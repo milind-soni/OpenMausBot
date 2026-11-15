@@ -1243,7 +1243,7 @@ export async function screenshotBoat(cfg: AppConfig, botId: string, knownBoatId?
   }
   const framePath = options?.nativeSize ? PANEL_PATH + ".model.jpg" : PANEL_PATH;
   const out = await runCommand(cfg, boxId, options?.nativeSize ? panelShotCommand({ framePath, nativeSize: true }) : SHOT_CMD,
-    { timeoutMs: 60_000, signal: options?.signal });
+    { timeoutMs: 25_000, signal: options?.signal });
   if (!/captured/.test(out.stdout)) {
     throw new Error(out.unanswered ? CLOUD_COMPUTER_NO_ANSWER : out.stderr.slice(0, 200) || "screen capture failed on the cloud computer");
   }

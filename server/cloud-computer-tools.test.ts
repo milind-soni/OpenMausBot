@@ -11,8 +11,10 @@ let commandStatus = 200;
 let commandExit = 0;
 /** This many commands in a row get the gateway's 502 before the machine answers again. */
 let unansweredFirst = 0;
-/** The Boat starts a detached command and reports it running for ever. */
+/** The Boat starts a detached command whose text says `forever` and reports it running until it is stopped; any other one has ended by the first read. */
 let neverEnds = false;
+const forever = new Set<number>();
+let nextProcess = 100;
 let commandStarted: (() => void) | undefined;
 const calls: Array<{ path: string; body: any; authorization?: string }> = [];
 const cfg: AppConfig = { box: { token: "synthetic-box-key" } } as AppConfig;
@@ -26,8 +28,17 @@ beforeAll(async () => {
     for await (const part of req) body += part;
     const path = req.url ?? "";
     calls.push({ path, body: body ? JSON.parse(body) : null, authorization: req.headers.authorization });
-    if (neverEnds && /\/commands\/7\?/.test(path)) { res.end(JSON.stringify({ running: true, status: "running", stdout: "compiling", stderr: "" })); return; }
-    if (neverEnds && path.endsWith("/commands") && JSON.parse(body).detached === true) { res.end(JSON.stringify({ processId: 7 })); return; }
+    const read = /\/commands\/(\d+)\?/.exec(path);
+    if (neverEnds && read) {
+      res.end(JSON.stringify(forever.has(Number(read[1])) ? { running: true, status: "running", stdout: "compiling", stderr: "" } : { running: false, status: "exited", exitCode: 0, stdout: "captured", stderr: "" }));
+      return;
+    }
+    if (neverEnds && path.endsWith("/commands") && JSON.parse(body).detached === true) {
+      const id = nextProcess++;
+      if (String(JSON.parse(body).command).includes("forever")) forever.add(id);
+      res.end(JSON.stringify({ processId: id }));
+      return;
+    }
     if (path.endsWith("/commands")) {
       commandStarted?.();
       if (unansweredFirst > 0) { unansweredFirst--; res.writeHead(502); res.end(JSON.stringify({ ok: false, code: "upstream_unavailable" })); return; }
@@ -45,7 +56,7 @@ beforeAll(async () => {
   vi.stubEnv("OMB_CLOUD_BOAT_TOKEN", undefined);
   tools = await import("./cloud-computer-tools.ts");
 });
-beforeEach(() => { calls.length = 0; holdCommand = false; commandStarted = undefined; commandStatus = 200; commandExit = 0; unansweredFirst = 0; neverEnds = false; });
+beforeEach(() => { calls.length = 0; holdCommand = false; commandStarted = undefined; commandStatus = 200; commandExit = 0; unansweredFirst = 0; neverEnds = false; forever.clear(); });
 afterAll(async () => { vi.unstubAllEnvs(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
 
 type Recovery = NonNullable<Parameters<typeof import("./cloud-computer-tools.ts").cloudComputerRpc>[1]["recovery"]>;
@@ -206,7 +217,9 @@ describe("cloud computer tools", () => {
     await started;
     abort.abort();
     await rejected;
-    expect(calls.filter(entry => entry.path.endsWith("/commands"))).toHaveLength(1);
+    expect(calls.filter(entry => entry.path.endsWith("/commands") && String(entry.body.command).includes("printf fixture"))).toHaveLength(1);
+    // The person stopped the turn, so the command it was waiting on is stopped too, by the call's own key.
+    await vi.waitFor(() => expect(calls.some(entry => entry.path.endsWith("/commands") && String(entry.body.command).includes("kill -TERM"))).toBe(true));
     server.closeAllConnections();
   });
 
@@ -220,13 +233,14 @@ describe("cloud computer tools", () => {
     expect(result).toEqual({ isError: true, content: [{ type: "text", text: (await import("./cloud-computer-background.ts")).EXEC_LATE }] });
     expect(Date.now() - started).toBeGreaterThanOrEqual(550);
     expect(Date.now() - started).toBeLessThan(1_500);
-    expect(calls.filter(entry => entry.path.endsWith("/commands"))).toHaveLength(1);
+    expect(calls.filter(entry => entry.path.endsWith("/commands") && String(entry.body.command).includes("sleep 600"))).toHaveLength(1);
+    expect(calls.some(entry => String(entry.body?.command).includes("kill -TERM"))).toBe(false);
     server.closeAllConnections();
   });
 
   it("hands a command that outlasts its call back still running, with a process id exec_status follows, instead of an error", async () => {
     neverEnds = true;
-    const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "make all" } } }, {
+    const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "make forever" } } }, {
       cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, budgetMs: 37_000, assertActive: () => {}, gate: async () => ({ held: false }),
     }) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
     expect(result.isError).toBeFalsy();
@@ -239,10 +253,58 @@ describe("cloud computer tools", () => {
     expect(JSON.parse(status.content[0]!.text!)).toMatchObject({ status: "running", processId: handed.processId });
   }, 60_000);
 
-  it("sends pointer and key calls the direct way, in one round trip, and exec the way that survives a long run", async () => {
+  it("sends pointer calls, key calls and screenshots the direct way, in one round trip, and exec the way that survives a long run", async () => {
     await rpc({ method: "tools/call", params: { name: "click", arguments: { x: 1, y: 2 } } }).done;
+    await rpc({ method: "tools/call", params: { name: "screenshot", arguments: {} } }).done;
     await rpc({ method: "tools/call", params: { name: "exec", arguments: { command: "pwd" } } }).done;
-    expect(calls.filter(entry => entry.path.endsWith("/commands")).map(entry => entry.body.detached === true)).toEqual([false, true]);
+    expect(calls.filter(entry => entry.path.endsWith("/commands")).map(entry => entry.body.detached === true)).toEqual([false, false, true]);
+  });
+
+  it("answers that the command ran out of time, as a result and before the call's own limit, when its start gets no reply", async () => {
+    holdCommand = true;
+    const before = Date.now();
+    const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "make" } } }, {
+      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, budgetMs: 8_000, assertActive: () => {}, gate: async () => ({ held: false }),
+    });
+    expect(result).toEqual({ isError: true, content: [{ type: "text", text: (await import("./cloud-computer-background.ts")).EXEC_LATE }] });
+    expect(Date.now() - before).toBeLessThan(7_000);
+    server.closeAllConnections();
+  }, 20_000);
+
+  describe("with five long-running commands already left on the computer by earlier exec calls", () => {
+    const exec = (command: string, budgetMs?: number) => tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command } } }, {
+      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, assertActive: () => {}, gate: async () => ({ held: false }), ...(budgetMs ? { budgetMs } : {}),
+    }) as Promise<{ isError?: boolean; content: Array<{ type: string; text?: string }> }>;
+    const fiveDevServers = async () => {
+      neverEnds = true;
+      const { noteLeftRunning } = await import("./boat-command.ts");
+      for (const id of [1, 2, 3, 4, 5]) { forever.add(id); noteLeftRunning("bx_23456789", id); }
+    };
+
+    it("still runs the command that stops them, and any other short command", async () => {
+      await fiveDevServers();
+      const stopped = await exec("pkill -f devserver");
+      expect(stopped.isError).toBeFalsy();
+      expect(JSON.parse(stopped.content[0]!.text!)).toMatchObject({ ok: true, exitCode: 0 });
+      expect((await exec("ls")).isError).toBeFalsy();
+      const click = await rpc({ method: "tools/call", params: { name: "click", arguments: { x: 1, y: 2 } } }).done as { isError?: boolean };
+      expect(click.isError).toBeFalsy();
+    });
+
+    it("stops a sixth one when its call's time runs out, instead of leaving it, and says how to see and stop the others", async () => {
+      await fiveDevServers();
+      const sixth = await exec("devserver forever", 37_000);
+      expect(sixth).toEqual({ isError: true, content: [{ type: "text", text: tools.TOO_MANY_LEFT_RUNNING }] });
+      expect(tools.TOO_MANY_LEFT_RUNNING).toMatch(/background: true.*ps -eo.*kill <pid>/s);
+      const sent = calls.filter(entry => entry.path.endsWith("/commands")).map(entry => String(entry.body.command));
+      const key = /^k=([0-9a-f]{16});/.exec(sent.find(command => command.includes("devserver forever"))!)![1]!;
+      expect(sent.some(command => command.startsWith(`k=${key}; p=;`) && command.includes("kill -TERM"))).toBe(true);
+      // With one of the five gone, the next long command is handed back as usual.
+      forever.delete(5);
+      const next = await exec("watcher forever", 37_000);
+      expect(next.isError).toBeFalsy();
+      expect(JSON.parse(next.content[0]!.text!)).toMatchObject({ status: "running" });
+    }, 120_000);
   });
 
   describe("a computer that stopped answering", () => {

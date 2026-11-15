@@ -87,17 +87,21 @@ async function world(watched = false) {
   const now = () => at;
   const health = createBoatHealth(now);
   const counters = createCloudComputerCounters(now);
-  const readiness = createBoatReadiness({ health, counters, now, sleep: async (ms) => { at += ms; await new Promise((resolve) => setImmediate(resolve)); } });
+  const readiness = createBoatReadiness({ health, counters, now, 
+    // A little real time passes with each wait, so the test's clock cannot run through the run's twenty minutes while
+    // the recovery's own steps (real requests, a real pause between two reads of a waking computer) are still under way.
+    sleep: async (ms) => { at += ms; await new Promise((resolve) => setTimeout(resolve, 25)); },
+  });
   const told: string[] = [];
   const logged: string[] = [];
   const recovery = createBoatRecovery({
     cfg: () => cfg, tell: (_owner, line) => told.push(line), log: (line) => logged.push(line), file: join(dir, "boat-replacements.json"),
-    now, health, pollMs: 5, readiness, autoReplace: () => false, personActive: () => watched,
+    now, health, pollMs: 5, recheckMs: 20, readiness, autoReplace: () => false, personActive: () => watched,
   });
   let manager: InstanceType<typeof RoutineManager>;
   const gate = createRunComputerGate({
     computerOf: () => BOT, find: (owner) => boat.findBoat(cfg, owner), wake: (owner, budgetMs) => boat.readyBoat(cfg, owner, budgetMs),
-    awaitAnswer: (boxId, opts) => readiness.awaitAnswer(cfg, boxId, opts), verdict: (owner) => recovery.verdict(owner),
+    awaitAnswer: (boxId, opts) => readiness.awaitAnswer(cfg, boxId, opts), verdict: (owner, since) => recovery.verdict(owner, since),
     recoveryState: (owner) => recovery.status(owner)?.state ?? null, used: () => {},
     routineOf: (botId, threadId) => { const run = manager.activeRunForBot(botId); return run?.threadId === threadId ? run.routineId : null; },
     log: (line) => logged.push(line), now,
@@ -108,7 +112,7 @@ async function world(watched = false) {
     file: join(dir, "routines.json"), now, botState: () => "ready",
     createTask: () => ({ threadId: `thread-${++tasks}` }),
     startTurn: async (_botId, threadId) => { started.push(threadId); },
-    prepareRun: (run) => gate.prepare(run), preparing: RUN_COMPUTER_LINES.waking,
+    prepareRun: (run, signal) => gate.prepare(run, signal), preparing: RUN_COMPUTER_LINES.waking,
   });
   close = () => { recovery.close(); manager.close?.(); };
   const event = (threadId: string, body: Record<string, unknown>) =>
@@ -127,15 +131,16 @@ async function world(watched = false) {
   };
   const run = (id: string) => manager.listRuns().find((candidate) => candidate.id === id)!;
   /** As the turn's computer calls and its end reach the server. */
+  const notes: string[] = [];
   const finishTurn = (threadId: string, lastCallAnswered = true) => {
     gate.callSettled(BOT, threadId, lastCallAnswered);
-    const silent = gate.turnEnded(threadId, true);
-    if (silent) manager.failThread(threadId, silent);
+    const note = gate.turnEnded(threadId, true);
+    if (note) notes.push(note);
     event(threadId, { type: "item.completed", itemType: "assistant_text", text: "Fixed." });
     event(threadId, { type: "turn.completed", ok: true });
   };
   const routineNow = () => manager.listRoutines().find((candidate) => candidate.id === routine.id)!;
-  return { boat, manager, gate, recovery, health, counters, restarts: () => cloudComputerCounters.snapshot(BOX_ID)?.restarts ?? 0, started, told, logged, occurrence, run, finishTurn, until, routineNow, advance: (ms: number) => { at += ms; }, now };
+  return { notes, boat, manager, gate, recovery, health, counters, restarts: () => cloudComputerCounters.snapshot(BOX_ID)?.restarts ?? 0, started, told, logged, occurrence, run, finishTurn, until, routineNow, advance: (ms: number) => { at += ms; }, now };
 }
 
 /** Each scenario makes a few hundred loopback requests; this leaves room on a busy machine. */
@@ -222,7 +227,7 @@ describe("a scheduled run whose cloud computer says ready but does not answer", 
     expect(w.routineNow().enabled).toBe(true);
   }, SCENARIO_MS);
 
-  it("starts the run once more when the computer went silent part-way, and fails it with the reason if that happens again", async () => {
+  it("leaves a run that finished as finished, with a note, when its last computer call got no answer: nothing is done twice", async () => {
     const w = await world();
     const first = await w.occurrence();
     w.finishTurn(first.threadId!);
@@ -230,17 +235,21 @@ describe("a scheduled run whose cloud computer says ready but does not answer", 
     const second = await w.occurrence();
     await w.until(() => w.run(second.id).status === "running", "the run to start");
     w.finishTurn(w.run(second.id).threadId!, false);
-    expect(w.run(second.id)).toMatchObject({ status: "queued", retried: "failed" });
-    w.advance(20_000);
-    await w.manager.tick();
-    await w.until(() => w.run(second.id).status === "running", "the run's second start");
-    expect(w.started).toHaveLength(3);
-    w.finishTurn(w.run(second.id).threadId!, false);
-    expect(w.run(second.id).status).toBe("failed");
-    expect(w.run(second.id).error).toContain(RUN_COMPUTER_LINES.duringRun);
+    expect(w.run(second.id).status).toBe("completed");
+    expect(w.run(second.id).retried).toBeUndefined();
+    expect(w.notes).toEqual([RUN_COMPUTER_LINES.lastCallUnanswered]);
+    expect(w.started).toHaveLength(2);
+  }, SCENARIO_MS);
 
-    const third = await w.occurrence();
-    await w.until(() => w.run(third.id).status === "running", "the next occurrence to start");
-    expect(w.routineNow().enabled).toBe(true);
+  it("starts a run a person asked for at once, without waiting on a silent computer", async () => {
+    const w = await world();
+    const first = await w.occurrence();
+    w.finishTurn(first.threadId!);
+
+    answers = false;
+    const manual = w.manager.runNow(w.routineNow().id)!;
+    await w.manager.tick();
+    expect(w.run(manual.id)).toMatchObject({ status: "running", threadId: expect.any(String) });
+    expect(w.started).toHaveLength(2);
   }, SCENARIO_MS);
 });

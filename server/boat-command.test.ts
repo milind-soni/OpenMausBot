@@ -13,7 +13,7 @@ const cfg = { box: { token: "synthetic-box-key" } } as AppConfig;
 type Process = { id: number; command: string; startedAt: number; endsAt: number; exitCode: number; stdout: string };
 let server: Server;
 let processes: Process[] = [];
-let requests: Array<{ method: string; path: string; detached: boolean; command?: string }> = [];
+let requests: Array<{ method: string; path: string; detached: boolean; command?: string; tail?: number }> = [];
 /** Status reads the gateway fails before it answers again; `forgetsDetached`: a relay that drops the flag; `gone`: the computer restarted. */
 let failReads = 0;
 let forgetsDetached = false;
@@ -31,7 +31,7 @@ beforeAll(async () => {
     for await (const part of req) raw += part;
     const url = new URL(req.url ?? "/", "http://boat.test");
     const body = raw ? JSON.parse(raw) : {};
-    requests.push({ method: req.method ?? "GET", path: url.pathname, detached: body.detached === true, ...(typeof body.command === "string" ? { command: body.command } : {}) });
+    requests.push({ method: req.method ?? "GET", path: url.pathname, detached: body.detached === true, ...(typeof body.command === "string" ? { command: body.command } : {}), ...(url.searchParams.has("tailBytes") ? { tail: Number(url.searchParams.get("tailBytes")) } : {}) });
     const read = /\/commands\/(\d+)$/.exec(url.pathname);
     if (read && req.method === "GET") {
       if (failReads > 0) { failReads--; return send(res, 502, { ok: false }); }
@@ -88,10 +88,45 @@ describe("the provider's limit on a synchronous command", () => {
   });
 });
 
+describe("the commands a bot's exec calls left running", () => {
+  const start = async (ms: number) => {
+    const response = await fetch(`${process.env.OMB_BOAT_API}/sandboxes/${BOX}/commands`, { method: "POST", body: JSON.stringify({ command: `serve ms:${ms}`, detached: true }) });
+    return (await response.json() as { processId: number }).processId;
+  };
+
+  it("are counted while they run, and forgotten once they end", async () => {
+    const server1 = await start(60_000), server2 = await start(60_000);
+    command.noteLeftRunning(BOX, server1);
+    command.noteLeftRunning(BOX, server2);
+    expect(await command.commandsLeftRunning(cfg, BOX)).toBe(2);
+    processes[0]!.endsAt = Date.now() - 1;
+    expect(await command.commandsLeftRunning(cfg, BOX)).toBe(1);
+    processes[0]!.endsAt = Date.now() + 60_000;
+    expect(await command.commandsLeftRunning(cfg, BOX)).toBe(1);
+  });
+
+  it("are not counted when their status cannot be read, so a failing gateway never holds a bot at the limit", async () => {
+    command.noteLeftRunning(BOX, await start(60_000));
+    failReads = 1;
+    expect(await command.commandsLeftRunning(cfg, BOX)).toBe(0);
+    expect(await command.commandsLeftRunning(cfg, BOX)).toBe(1);
+  });
+
+  it("stop counting after two hours, the same time they may keep the computer awake", async () => {
+    command.noteLeftRunning(BOX, await start(10 * 60 * 60_000));
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + command.COMMAND_WALL.leftRunningMs);
+    expect(await command.commandsLeftRunning(cfg, BOX)).toBe(0);
+    clock.mockRestore();
+    expect(await command.commandsLeftRunning(cfg, BOX)).toBe(0);
+  });
+});
+
 describe("a command that may run long", () => {
   it("runs to its end however far past the wall, once, with its own exit code and output", async () => {
     const out = await boat.runCommand(cfg, BOX, `build ms:${WALL_MS * 3} exit:2`);
     expect(out).toEqual({ ok: false, exitCode: 2, stdout: `ran ${WALL_MS * 3}`, stderr: "" });
+    expect(requests.filter((request) => request.method === "GET" && request.tail === command.COMMAND_WALL.tailBytes)).toHaveLength(1);
     expect(posts()).toEqual([expect.objectContaining({ detached: true })]);
     expect(processes).toHaveLength(1);
     expect(command.trackedProcesses(BOX).size).toBe(0);
@@ -114,12 +149,19 @@ describe("a command that may run long", () => {
     expect(out).toMatchObject({ ok: false, exitCode: null, timedOut: true, processId: 1, stdout: "partial" });
     expect(running(processes[0]!)).toBe(true);
     expect(posts()).toHaveLength(1);
-    expect(await command.commandsLeftRunning(cfg, BOX)).toBe(1);
     expect(command.trackedProcesses(BOX).has(1)).toBe(true);
-    processes[0]!.endsAt = Date.now() - 1;
+    // Whoever only runs a helper command (the console, a meeting) adds nothing to a bot's count.
     expect(await command.commandsLeftRunning(cfg, BOX)).toBe(0);
-    expect(command.trackedProcesses(BOX).size).toBe(0);
   }, 45_000);
+
+  it("reads a small tail while the command runs and the whole tail once, when it has ended", async () => {
+    await boat.runCommand(cfg, BOX, "build ms:700");
+    const tails = requests.filter((request) => request.method === "GET").map((request) => request.tail);
+    expect(tails.length).toBeGreaterThanOrEqual(3);
+    expect(tails.at(-1)).toBe(command.COMMAND_WALL.tailBytes);
+    expect(tails.slice(0, -1).every((tail) => tail === command.COMMAND_WALL.runningTailBytes)).toBe(true);
+    expect(command.COMMAND_WALL.runningTailBytes).toBeLessThanOrEqual(12_000);
+  });
 
   it("reads the status again when the gateway fails a read, without starting the command again", async () => {
     failReads = 3;
@@ -151,8 +193,11 @@ describe("a command that may run long", () => {
     const pending = boat.runCommand(cfg, BOX, "build ms:5000", { signal: abort.signal });
     const rejected = expect(pending).rejects.toThrow();
     await sleep(100);
+    expect(command.trackedProcesses(BOX).size).toBe(1);
     abort.abort();
     await rejected;
+    // Nobody follows it any more, so it no longer keeps the computer awake.
+    expect(command.trackedProcesses(BOX).size).toBe(0);
   });
 
   it("is sent the direct way when its caller gives it less time than the wall, and the probe always is", async () => {

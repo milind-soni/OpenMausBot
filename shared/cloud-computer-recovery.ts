@@ -71,7 +71,7 @@ export const CLOUD_COMPUTER_EXEC_ANSWER_LOST =
   "The cloud computer started this command, but its answer was lost on the way back, so it may still be running or may have finished. It was not "
   + "started a second time. Do not run it again blindly: check first, for example with exec `pgrep -af '<part of the command>'` or by looking at the files it writes.";
 
-/** Why an unattended run did not start, or was started once more, because of its cloud computer. */
+/** Why an unattended run did not start because of its cloud computer, and the note on one that finished unsure of it. */
 export const RUN_COMPUTER_LINES = {
   waking: "Waiting for its cloud computer to wake and answer",
   noWake: "The cloud computer did not wake, so this run did not start. The next scheduled run tries again.",
@@ -80,7 +80,7 @@ export const RUN_COMPUTER_LINES = {
   personBusy: "The cloud computer is not answering, and it was not restarted because someone is using it, so this run did not start. The next scheduled run tries again.",
   restartLimited: "The cloud computer is not answering, and it was already restarted within the last hour, so this run did not start. The next scheduled run tries again.",
   shared: "The team's shared cloud computer is not answering, so this run did not start. A team admin can look at it in the Team map.",
-  duringRun: "The cloud computer stopped answering during this run",
+  lastCallUnanswered: "This run finished, but its last cloud computer call got no answer, so check that what it did on the computer is complete. It was not run again.",
 } as const;
 
 /** The person's one line in the chat and the Inbox, by its language pack key; each takes the bot's `{name}`. */

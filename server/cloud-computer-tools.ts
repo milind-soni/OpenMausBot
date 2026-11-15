@@ -5,7 +5,7 @@ import { isRedditAddress, REDDIT_REFUSAL } from "./browser/egress/reddit.ts";
 import {
   backgroundStatus, commandLateText, EXEC_LATE, PROCESS_ID_PATTERN, processIdOn, startInBackground, STATUS_WAIT_MAX_SECONDS, STDERR_TAIL_CHARS, STDOUT_TAIL_CHARS,
 } from "./cloud-computer-background.ts";
-import { COMMAND_WALL, commandsLeftRunning } from "./boat-command.ts";
+import { COMMAND_WALL, commandsLeftRunning, noteLeftRunning, untrackProcess } from "./boat-command.ts";
 import { copyFromComputer, copyToComputer } from "./cloud-computer-files.ts";
 import { retryRead, runOnce } from "./cloud-computer-once.ts";
 import type { AppConfig } from "./config.ts";
@@ -54,8 +54,9 @@ export const CLOUD_COMPUTER_COPY_LATE = "The copy did not finish within 9 minute
 /** A command that outlasted its call: it is left running, since stopping a build half-way is worse, and handed back to follow. */
 export const EXEC_STILL_RUNNING = "The command is still running on the cloud computer; it was not stopped and was not started twice. Follow it with exec_status and this "
   + "processId (wait_seconds up to 60) until it finishes, then check its exit code and output. Do not run it again. Start a command that may run long with background: true.";
-export const TOO_MANY_LEFT_RUNNING = `This cloud computer already has ${COMMAND_WALL.leftRunningMax} commands still running from earlier exec calls that ran out of time. This command was not `
-  + "started. Follow those with exec_status, or stop the ones no longer needed (for example with exec `pkill -f '<part of the command>'`), then try again.";
+export const TOO_MANY_LEFT_RUNNING = `This command ran past this call's time limit, and this cloud computer already has ${COMMAND_WALL.leftRunningMax} commands left running from earlier exec calls, `
+  + "so this one was stopped. Start a command that keeps running (a server, a watcher, a long build) with background: true. To see what is running, exec "
+  + "`ps -eo pid,etime,args --sort=start_time | tail -n 30`; to stop one, exec `kill <pid>`. Short commands like these always run.";
 /** Pointer moves, clicks, keys and the like take well under a second; this is far below the provider's 40 s limit on a direct command. */
 const QUICK_CALL_MS = 25_000;
 const COPY_TOOLS = new Set(["copy_from_computer", "copy_to_computer"]);
@@ -94,7 +95,8 @@ export const cloudComputerUnanswered = (result: CloudComputerResult): boolean =>
   result.isError === true && result.content.some((part) => part.type === "text" && UNANSWERED_TEXTS.has(part.text));
 
 /** The caller has already checked the arguments and the person's control. `folder` is the bot's working folder for this
- * turn. `deadline`: when the whole call must have answered; a call the computer did not answer is sent again inside it. */
+ * turn. `deadline`: when the whole call must have answered; a call the computer did not answer is sent again inside it.
+ * `stopped`: aborts when the person stops the turn, which also stops a command this call is still following. */
 export async function runCloudComputerTool(
   cfg: AppConfig,
   boxId: string,
@@ -103,6 +105,7 @@ export async function runCloudComputerTool(
   signal: AbortSignal,
   folder?: string | null,
   deadline = Date.now() + HARNESS_CALL_BUDGET_MS,
+  stopped?: AbortSignal,
 ): Promise<CloudComputerResult> {
   const problem = cloudComputerCallProblem(name, args);
   if (problem) return { isError: true, content: [{ type: "text", text: problem }] };
@@ -137,17 +140,23 @@ export async function runCloudComputerTool(
     case "exec_status": return backgroundStatus(cfg, boxId, a as { process_id: string; wait_seconds?: number }, signal);
     default: return { isError: true, content: [{ type: "text", text: "Unknown cloud computer tool." }] };
   }
-  if (name === "exec" && await commandsLeftRunning(cfg, boxId) >= COMMAND_WALL.leftRunningMax) {
-    return { isError: true, content: [{ type: "text", text: TOO_MANY_LEFT_RUNNING }] };
-  }
   // Only exec may run long. Every other call is a quick one, sent the direct way so it answers in one round trip.
-  const sent = await runOnce(cfg, boxId, isolatedRemoteCommand(command), { signal, deadline, ...(name === "exec" ? {} : { timeoutMs: QUICK_CALL_MS }) });
+  const sent = await runOnce(cfg, boxId, isolatedRemoteCommand(command), { signal, deadline, ...(stopped ? { stopped } : {}), ...(name === "exec" ? {} : { timeoutMs: QUICK_CALL_MS }) });
   signal.throwIfAborted();
   if (sent.kind === "unanswered") return unansweredResult(sent.phase);
+  if (sent.kind === "late") return { isError: true, content: [{ type: "text", text: commandLateText(name, a) ?? CLOUD_COMPUTER_LATE }] };
   if (sent.kind === "lost") return { isError: true, content: [{ type: "text", text: name === "exec" ? CLOUD_COMPUTER_EXEC_ANSWER_LOST : CLOUD_COMPUTER_ANSWER_LOST }] };
   const result = sent.result;
   if (name === "open_url" && result.ok) return { content: [{ type: "text", text: "Browser launch requested. Page loading is not confirmed; inspect the screen before continuing." }] };
   if (name === "exec" && result.timedOut && result.processId !== undefined) {
+    // The limit applies here, to the command that would be one too many, and never to a command before it is sent: a
+    // short command, such as the one that stops the others, always goes through.
+    if (await commandsLeftRunning(cfg, boxId) >= COMMAND_WALL.leftRunningMax) {
+      await sent.stop();
+      untrackProcess(boxId, result.processId);
+      return { isError: true, content: [{ type: "text", text: TOO_MANY_LEFT_RUNNING }] };
+    }
+    noteLeftRunning(boxId, result.processId);
     return { content: [{ type: "text", text: JSON.stringify({
       status: "running", processId: processIdOn(boxId, result.processId), stdout: result.stdout.slice(-STDOUT_TAIL_CHARS), stderr: result.stderr.slice(-STDERR_TAIL_CHARS), next: EXEC_STILL_RUNNING,
     }) }] };
@@ -204,7 +213,7 @@ export async function cloudComputerRpc(
   const late = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
   let result: CloudComputerResult;
   try {
-    result = await runCloudComputerTool(deps.cfg, boxId, params.name as string, args as Record<string, unknown>, AbortSignal.any([deps.signal, late]), deps.folder?.(), deadline);
+    result = await runCloudComputerTool(deps.cfg, boxId, params.name as string, args as Record<string, unknown>, AbortSignal.any([deps.signal, late]), deps.folder?.(), deadline, deps.signal);
   } catch (error) {
     if (deps.signal.aborted) throw error;
     const after = refused("after");

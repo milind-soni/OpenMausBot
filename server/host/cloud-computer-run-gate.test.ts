@@ -9,22 +9,23 @@ const RUN = { routineId: "routine-1", botId: "bot-1", target: "bot", runOn: "clo
 
 function harness(over: { state?: string; answers?: (wait: number) => boolean; wakes?: boolean } = {}) {
   let at = 0;
-  const seen = { finds: 0, wakes: 0, waits: [] as boolean[], used: 0 };
-  const world = { verdict: null as RecoveryVerdict | null, recovery: null as CloudComputerRecoveryState | null, machine: { id: "bx_23456789", state: over.state ?? "idle" } as { id: string; state: string } | null };
+  const seen = { finds: 0, wakes: 0, waits: [] as boolean[], signals: [] as Array<AbortSignal | undefined>, used: 0 };
+  const world = { verdict: null as RecoveryVerdict | null, verdictAt: 0, routine: "routine-1" as string | null, recovery: null as CloudComputerRecoveryState | null, machine: { id: "bx_23456789", state: over.state ?? "idle" } as { id: string; state: string } | null };
   const gate = createRunComputerGate({
     computerOf: () => "bot-1",
     find: async () => { seen.finds++; return world.machine; },
     wake: async () => { seen.wakes++; return over.wakes === false ? null : { id: "bx_23456789", state: "idle" }; },
     awaitAnswer: async (_boxId, opts): Promise<BoatAnswer> => {
       seen.waits.push(opts.woke);
+      seen.signals.push(opts.signal);
       if (over.answers?.(seen.waits.length) ?? true) return { ok: true, waitedMs: 0 };
       at += 90_000;
       return { ok: false, phase: "waking", waitedMs: 90_000 };
     },
-    verdict: () => world.verdict, recoveryState: () => world.recovery,
-    used: () => { seen.used++; }, routineOf: () => "routine-1", log: () => {}, now: () => at,
+    verdict: (_owner, since) => (world.verdict && world.verdictAt >= since ? world.verdict : null), recoveryState: () => world.recovery,
+    used: () => { seen.used++; }, routineOf: () => world.routine, log: () => {}, now: () => at,
   });
-  return { gate, seen, world, used: () => gate.callSettled("bot-1", "thread-1", true), now: () => at };
+  return { gate, seen, world, used: () => gate.callSettled("bot-1", "thread-1", true), now: () => at, advance: (ms: number) => { at += ms; } };
 }
 
 describe("an unattended run and its cloud computer", () => {
@@ -79,7 +80,46 @@ describe("an unattended run and its cloud computer", () => {
     const h = harness({ answers: () => false });
     h.used();
     h.world.verdict = verdict;
+    h.world.verdictAt = 1;
     await expect(h.gate.prepare(RUN)).resolves.toBe(line);
+  });
+
+  it("does not take a verdict from an earlier silence for this wait's", async () => {
+    const h = harness({ answers: (wait) => wait >= 2 });
+    h.used();
+    h.world.verdict = "restart-failed";
+    h.world.verdictAt = 500;
+    h.advance(60_000);
+    await expect(h.gate.prepare(RUN)).resolves.toBeNull();
+    expect(h.seen.waits).toHaveLength(2);
+  });
+
+  it("reads the verdict once more when the recovery has ended, so a reason written a moment later is not missed", async () => {
+    let reads = 0;
+    const gate = createRunComputerGate({
+      computerOf: () => "bot-1", find: async () => ({ id: "bx_23456789", state: "idle" }), wake: async () => null,
+      awaitAnswer: async () => ({ ok: false, phase: "waking", waitedMs: 90_000 }),
+      // Nothing at the first read; written by the time the state reads as ended.
+      verdict: () => (++reads >= 2 ? "restart-failed" : null), recoveryState: () => "needs-person",
+      used: () => {}, routineOf: () => "routine-1", log: () => {}, now: () => 0,
+    });
+    gate.callSettled("bot-1", "thread-1", true);
+    await expect(gate.prepare(RUN)).resolves.toBe(RUN_COMPUTER_LINES.afterRestart);
+  });
+
+  it("stops waiting, and wakes nothing more, once the run it waits for is gone", async () => {
+    const stop = new AbortController();
+    const h = harness({ answers: () => { stop.abort(); return false; } });
+    h.used();
+    await expect(h.gate.prepare(RUN, stop.signal)).resolves.toBeNull();
+    expect(h.seen.waits).toHaveLength(1);
+    expect(h.seen.signals[0]).toBe(stop.signal);
+    const gone = new AbortController();
+    gone.abort();
+    const asleep = harness({ state: "archived" });
+    asleep.used();
+    await asleep.gate.prepare(RUN, gone.signal);
+    expect(asleep.seen.wakes).toBe(0);
   });
 
   it("gives up after twenty minutes whatever the recovery is doing", async () => {
@@ -90,15 +130,22 @@ describe("an unattended run and its cloud computer", () => {
     expect(h.now()).toBeLessThanOrEqual(RUN_COMPUTER_WAIT_MS + 90_000);
   });
 
-  it("starts a run once more when its turn ended well but its last computer call got no answer", () => {
+  it("leaves a run that ended well as done, with a note, when its last computer call got no answer: it is not run again", () => {
     const h = harness();
     h.gate.callSettled("bot-1", "thread-1", false);
-    expect(h.gate.turnEnded("thread-1", true)).toBe(RUN_COMPUTER_LINES.duringRun);
+    expect(h.gate.turnEnded("thread-1", true)).toBe(RUN_COMPUTER_LINES.lastCallUnanswered);
     expect(h.gate.turnEnded("thread-1", true)).toBeNull();
     h.gate.callSettled("bot-1", "thread-1", false);
     h.gate.callSettled("bot-1", "thread-1", true);
     expect(h.gate.turnEnded("thread-1", true)).toBeNull();
+  });
+
+  it("says nothing for a turn that failed, which the scheduler starts once more as it does any failed run, or for a person's own turn", () => {
+    const h = harness();
     h.gate.callSettled("bot-1", "thread-1", false);
     expect(h.gate.turnEnded("thread-1", false)).toBeNull();
+    h.world.routine = null;
+    h.gate.callSettled("bot-1", "thread-2", false);
+    expect(h.gate.turnEnded("thread-2", true)).toBeNull();
   });
 });

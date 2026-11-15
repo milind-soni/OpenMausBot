@@ -274,7 +274,7 @@ export interface RoutineManagerOptions {
   handedOffWorkLive?: (threadId: string) => boolean;
   launchId?: string;
   /** A Cloud home woken from a sleep it was stopped for (server/cloud-power.ts): not a startup, so no "run on startup". */
-  skipStartupRuns?: boolean; /** What a run needs before it starts (its cloud computer awake and answering): null when nothing, else resolves null when ready or with why the run cannot start. `preparing` is the run's line meanwhile. */ prepareRun?: RunPreparation<RoutineRun>; preparing?: string;
+  skipStartupRuns?: boolean; /** What a run needs before it starts (its cloud computer awake and answering): null when nothing, else resolves null when ready or with why the run cannot start. `preparing` is the run's line meanwhile. Only a run nobody started by hand is held; the signal aborts once the run no longer waits to start. */ prepareRun?: RunPreparation<RoutineRun>; preparing?: string;
   checks?: RoutineChecks;
 }
 
@@ -322,7 +322,7 @@ export class RoutineManager {
   private unreadable = false; private malformedAttachments = false;
   private frozenPending = false;
   private readonly bootedAt: number;
-  private readonly checking = new Set<string>(); private readonly progress = new RunProgressSave(() => this.file, () => this.save()); private readonly gate = createRunGate<RoutineRun>((run) => this.options.prepareRun?.(cloneRun(run)) ?? null, () => this.tickInBackground());
+  private readonly checking = new Set<string>(); private readonly progress = new RunProgressSave(() => this.file, () => this.save()); private readonly gate = createRunGate<RoutineRun>((run, signal) => this.options.prepareRun?.(cloneRun(run), signal) ?? null, () => this.tickInBackground());
 
   constructor(options: RoutineManagerOptions) {
     this.options = options;
@@ -987,7 +987,7 @@ export class RoutineManager {
     if (this.closing || this.ticking) return;
     this.ticking = true;
     try {
-      const now = this.now();
+      const now = this.now(); this.gate.sweep((id) => this.runs.some((run) => run.id === id && run.status === "queued"));
       for (const run of this.runs) {
         if (!["running", "waiting"].includes(run.status) || run.startedAt == null || run.timeoutMinutes == null ||
           activeMs(run, now) < run.timeoutMinutes * 60_000) continue;
@@ -1113,7 +1113,7 @@ export class RoutineManager {
         }
         if (state === "missing") { this.failRun(run, this.missingTargetMessage(run.target)); continue; }
         const paused = run.target === "room-goal" ? null : this.options.pausedText?.(run.botId);
-        if (paused) { if (triggerSource !== "manual" && this.options.held?.(run.botId)) void this.cancelRun(run.id, paused); else this.failRun(run, paused); continue; } const gated = this.gate.hold(run); if (gated === true) { if (this.options.preparing && run.attention !== this.options.preparing) { run.attention = this.options.preparing; this.emitRun(run); } continue; } if (gated) { this.failRun(run, gated); continue; }
+        if (paused) { if (triggerSource !== "manual" && this.options.held?.(run.botId)) void this.cancelRun(run.id, paused); else this.failRun(run, paused); continue; } const gated = triggerSource === "manual" ? false : this.gate.hold(run); if (gated === true) { if (this.options.preparing && run.attention !== this.options.preparing) { run.attention = this.options.preparing; this.emitRun(run); } continue; } if (gated) { this.failRun(run, gated); continue; }
         const startedAt = this.now();
         const suffix = ` · ${new Date(startedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
         const title = `${run.routineName.slice(0, 80 - suffix.length).trimEnd()}${suffix}`;

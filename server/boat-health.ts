@@ -105,6 +105,12 @@ export function createBoatHealth(now: () => number = Date.now) {
     /** Some other computer answered recently, so the provider and the path to it work. */
     otherAnsweredWithin: (boxId: string, ms: number): boolean =>
       [...boxes].some(([id, health]) => id !== boxId && health.lastAnsweredAt !== null && now() - health.lastAnsweredAt <= ms),
+    /** Some other computer was probed recently and none of them answered: the trouble is on the provider's side. */
+    othersSilentWithin: (boxId: string, ms: number): boolean => {
+      const others = [...boxes].filter(([id]) => id !== boxId).map(([, health]) => health);
+      return others.some((health) => health.lastFailureAt !== null && now() - health.lastFailureAt <= ms)
+        && !others.some((health) => health.lastAnsweredAt !== null && now() - health.lastAnsweredAt <= ms);
+    },
     /** A person opened this computer's desktop. */
     personUsed: (boxId: string) => { entry(boxId).personAt = now(); },
     personUsedWithin: (boxId: string, ms: number): boolean => {

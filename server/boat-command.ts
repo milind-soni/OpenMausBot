@@ -15,13 +15,17 @@ export const COMMAND_WALL = {
   /** A command given no more time than this by its caller is sent the synchronous way: it cannot reach the 40 s wall,
    * and it answers in one round trip. */
   syncSafeMs: 30_000,
-  /** The end of each output stream that is read back: 256 KiB. */
+  /** The end of each output stream that is read back once the command has ended: 256 KiB. */
   tailBytes: 262_144,
+  /** While it runs only this much is read, since each read is thrown away but the last. */
+  runningTailBytes: 12_000,
   /** Before each status read: short at first, so a command that takes a fifth of a second gains about a tenth. */
   pollMs: [40, 80, 150, 300, 600, 1_200, 2_000],
   readTimeoutMs: 15_000,
-  /** Commands a computer may have still running after their calls' time ran out, before another long one is refused. */
+  /** Commands a bot's exec calls may leave running on one computer after their time ran out; one more is stopped instead. */
   leftRunningMax: 5,
+  /** A command left running counts toward that for this long, the same two hours it may keep the computer awake. */
+  leftRunningMs: 2 * 60 * 60_000,
 } as const;
 
 export interface CommandOutcome {
@@ -47,8 +51,8 @@ export const COMMAND_LOST = "The cloud computer restarted or lost track of this 
 /** Process ids started on each computer, with when: its idle sleep waits for them, up to a limit the reader sets. */
 const started = new Map<string, Map<number, number>>();
 const MAX_TRACKED_PER_COMPUTER = 20;
-/** The ones whose foreground call gave up waiting. */
-const leftRunning = new Map<string, Set<number>>();
+/** The ones a bot's exec call handed back still running, with when. */
+const leftRunning = new Map<string, Map<number, number>>();
 
 export function trackProcess(boxId: string, processId: number): void {
   const mine = started.get(boxId) ?? new Map<number, number>();
@@ -61,9 +65,20 @@ export function untrackProcess(boxId: string, processId: number): void {
   const mine = started.get(boxId);
   mine?.delete(processId);
   if (mine?.size === 0) started.delete(boxId);
+  forgetLeftRunning(boxId, processId);
+}
+
+function forgetLeftRunning(boxId: string, processId: number): void {
   const left = leftRunning.get(boxId);
   left?.delete(processId);
   if (left?.size === 0) leftRunning.delete(boxId);
+}
+
+/** A bot's exec call ran out of time and this command was handed back to it still running. */
+export function noteLeftRunning(boxId: string, processId: number): void {
+  const left = leftRunning.get(boxId) ?? new Map<number, number>();
+  left.set(processId, Date.now());
+  leftRunning.set(boxId, left);
 }
 
 export const trackedProcesses = (boxId: string): ReadonlyMap<number, number> => started.get(boxId) ?? new Map();
@@ -79,14 +94,22 @@ export async function processMayStillRun(cfg: AppConfig, boxId: string, processI
   }
 }
 
-/** How many commands, left running when their call's time ran out, still run; the finished ones are forgotten here. */
+/** How many commands a bot's exec calls left running still run. One that ended, or was left longer ago than
+ * COMMAND_WALL.leftRunningMs, is forgotten; one whose status could not be read is not counted, so a failing gateway
+ * never holds a bot at the limit. */
 export async function commandsLeftRunning(cfg: AppConfig, boxId: string): Promise<number> {
-  const running = await Promise.all([...(leftRunning.get(boxId) ?? [])].map(async (processId) => {
-    if (await processMayStillRun(cfg, boxId, processId, 5_000)) return true;
-    untrackProcess(boxId, processId);
-    return false;
+  const seen = await Promise.all([...(leftRunning.get(boxId) ?? [])].map(async ([processId, at]) => {
+    if (Date.now() - at >= COMMAND_WALL.leftRunningMs) { forgetLeftRunning(boxId, processId); return false; }
+    try {
+      const response = await boatFetch(cfg, `/sandboxes/${boxId}/commands/${processId}?tailBytes=1`, { signal: AbortSignal.timeout(5_000) });
+      const body: any = await response.json().catch(() => null);
+      if (response.status === 404 || (response.ok && body?.running === false)) { forgetLeftRunning(boxId, processId); return false; }
+      return response.ok && body?.running === true;
+    } catch {
+      return false;
+    }
   }));
-  return running.filter(Boolean).length;
+  return seen.filter(Boolean).length;
 }
 
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
@@ -121,20 +144,21 @@ export async function runToEnd(
   for (let read = 0; ; read++) {
     const pause = COMMAND_WALL.pollMs[Math.min(read, COMMAND_WALL.pollMs.length - 1)]!;
     await delay(Math.min(pause, Math.max(0, deadline - Date.now())), undefined, { signal }).catch(() => undefined);
+    // The caller gave up (the turn was stopped): nobody follows this process any more, so it must not keep the
+    // computer awake. Stopping it is the caller's, which knows how it was started.
+    if (signal?.aborted) untrackProcess(boxId, processId);
     signal?.throwIfAborted();
     if (Date.now() >= deadline) {
-      const left = leftRunning.get(boxId) ?? new Set<number>();
-      left.add(processId);
-      leftRunning.set(boxId, left);
       return { ok: false, exitCode: null, stdout: text(last?.stdout), stderr: text(last?.stderr), timedOut: true, processId };
     }
     let status: Response;
     let seen: any;
     try {
-      status = await boatFetch(cfg, `/sandboxes/${boxId}/commands/${processId}?tailBytes=${COMMAND_WALL.tailBytes}`,
+      status = await boatFetch(cfg, `/sandboxes/${boxId}/commands/${processId}?tailBytes=${COMMAND_WALL.runningTailBytes}`,
         { signal: within(Math.min(COMMAND_WALL.readTimeoutMs, deadline - Date.now())) });
       seen = await status.json().catch(() => null);
     } catch {
+      if (signal?.aborted) untrackProcess(boxId, processId);
       signal?.throwIfAborted();
       continue;
     }
@@ -147,13 +171,23 @@ export async function runToEnd(
     last = seen;
     if (seen.running) continue;
     untrackProcess(boxId, processId);
+    // It has ended: one more read for the whole tail. If that read fails, the short tail stands and is marked cut.
+    let whole = false;
+    try {
+      const full = await boatFetch(cfg, `/sandboxes/${boxId}/commands/${processId}?tailBytes=${COMMAND_WALL.tailBytes}`, { signal: within(COMMAND_WALL.readTimeoutMs) });
+      const body: any = await full.json().catch(() => null);
+      if (full.ok && body?.running === false) { seen = body; whole = true; }
+    } catch {
+      signal?.throwIfAborted();
+    }
     const exitCode = Number.isInteger(seen.exitCode) ? seen.exitCode as number : null;
     const lost = seen.status === "lost";
     // Only the machine's own answer counts toward its health: an exit code it reported.
     if (exitCode !== null && !lost) boatHealth.answered(boxId);
     return {
       ok: exitCode === 0, exitCode, stdout: text(seen.stdout), stderr: lost && !text(seen.stderr) ? COMMAND_LOST : text(seen.stderr),
-      ...(seen.stdoutTruncated === true || seen.stderrTruncated === true ? { outputCut: true as const } : {}), ...(lost ? { lost: true as const } : {}),
+      ...(seen.stdoutTruncated === true || seen.stderrTruncated === true || (!whole && (text(seen.stdout).length >= COMMAND_WALL.runningTailBytes || text(seen.stderr).length >= COMMAND_WALL.runningTailBytes)) ? { outputCut: true as const } : {}),
+      ...(lost ? { lost: true as const } : {}),
     };
   }
 }

@@ -1,11 +1,11 @@
 // The claim script is run for real, by this machine's own sh in a throwaway folder, standing in for the computer's shell.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { onceCommand, RESEND, retryRead, runOnce, type OnceDeps } from "./cloud-computer-once.ts";
+import { onceCommand, RESEND, retryRead, runOnce, stopCommand, type OnceDeps } from "./cloud-computer-once.ts";
 import { createCloudComputerCounters } from "./cloud-computer-counters.ts";
 import type { AppConfig } from "./config.ts";
 
@@ -80,6 +80,36 @@ describe("a call's claim on the computer", () => {
 
   it("refuses a key that is not its own kind, since the key is written into the shell", () => {
     expect(() => onceCommand("$(reboot)", 1, "true")).toThrow(RangeError);
+  });
+});
+
+describe("stopping the command a call started", () => {
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const until = async (check: () => boolean, ms = 10_000) => {
+    for (const end = Date.now() + ms; Date.now() < end; await new Promise((resolve) => setTimeout(resolve, 25))) if (check()) return true;
+    return false;
+  };
+
+  it("ends the command and what it started, by the process id the call recorded, and nothing else", async () => {
+    const pc = computer();
+    const bystander = spawn("/bin/sh", ["-c", "sleep 30"], { stdio: "ignore" });
+    const shell = spawn("/bin/sh", ["-c", onceCommand(KEY, 1, "sleep 30 & sleep 30; wait", pc.claims)], { stdio: "ignore" });
+    const pidFile = join(pc.claims.disk, KEY, "pid");
+    expect(await until(() => existsSync(pidFile) && readFileSync(pidFile, "utf8").trim() !== "")).toBe(true);
+    expect(Number(readFileSync(pidFile, "utf8"))).toBe(shell.pid);
+    const children = () => execFileSync("/bin/sh", ["-c", `pgrep -P ${shell.pid} || true`], { encoding: "utf8" }).split("\n").filter(Boolean).map(Number);
+    expect(await until(() => children().length >= 1)).toBe(true);
+    const started = children();
+    expect(pc.sh(stopCommand(KEY, pc.claims)).exitCode).toBe(0);
+    expect(await until(() => !alive(shell.pid!) && started.every((pid) => !alive(pid)))).toBe(true);
+    expect(alive(bystander.pid!)).toBe(true);
+    bystander.kill();
+  });
+
+  it("does nothing, quietly, for a call that recorded no process", () => {
+    const pc = computer();
+    expect(pc.sh(stopCommand(KEY, pc.claims))).toEqual({ exitCode: 0, stdout: "" });
+    expect(() => stopCommand("$(reboot)")).toThrow(RangeError);
   });
 });
 
@@ -175,6 +205,39 @@ describe("a call the computer did not answer", () => {
     });
     expect(outcome).toMatchObject({ kind: "ran", resent: 0, result: { exitCode: 2 } });
     expect(sends).toBe(1);
+  });
+
+  it("answers that the call ran out of time, not a raw error, when a send hangs with no reply until the call's time is up", async () => {
+    let at = 0;
+    const outcome = await runOnce(cfg, BOX, "make", { signal: new AbortController().signal, deadline: 120_000 }, {
+      key: () => KEY, now: () => at,
+      run: async (_cfg, _box, _script, opts) => { at += opts.timeoutMs!; throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" }); },
+    });
+    expect(outcome).toEqual({ kind: "late" });
+  });
+
+  it("stops the command it was following when the person stops the turn, and not when only the call's time runs out", async () => {
+    const sentFor = async (stoppedByPerson: boolean) => {
+      const turn = new AbortController(), call = new AbortController();
+      const sent: string[] = [];
+      const pending = runOnce(cfg, BOX, "make", { signal: AbortSignal.any([turn.signal, call.signal]), deadline: Date.now() + 120_000, stopped: turn.signal }, {
+        key: () => KEY,
+        run: async (_cfg, _box, script, opts) => {
+          sent.push(script);
+          if (script === stopCommand(KEY)) return { ok: true, exitCode: 0, stdout: "", stderr: "" };
+          await new Promise<void>((_resolve, reject) => opts.signal!.addEventListener("abort", () => reject(opts.signal!.reason)));
+          throw new Error("unreachable");
+        },
+      });
+      const rejected = expect(pending).rejects.toBeDefined();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      (stoppedByPerson ? turn : call).abort();
+      await rejected;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return sent.includes(stopCommand(KEY));
+    };
+    expect(await sentFor(true)).toBe(true);
+    expect(await sentFor(false)).toBe(false);
   });
 
   it("does not treat a refusal thrown before the send as the computer's silence", async () => {

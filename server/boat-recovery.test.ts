@@ -132,7 +132,7 @@ async function load() {
 function start() {
   told = [];
   health = healthModule.createBoatHealth(now);
-  recovery = recoveryModule.createBoatRecovery({ cfg: () => cfg, tell: (owner, line) => told.push([owner, line]), log: () => {}, file, now, health, pollMs: 5,
+  recovery = recoveryModule.createBoatRecovery({ cfg: () => cfg, tell: (owner, line) => told.push([owner, line]), log: () => {}, file, now, health, pollMs: 5, recheckMs: 20,
     autoReplace: () => autoOn, eligible: (owner) => !teamOwners.has(owner), personActive: (owner) => watched.has(owner),
     // One probe stands for the wait, so a restart that does not help is judged at once.
     readiness: { awaitAnswer: async (_cfg, boxId) => ((await boat.probeBoat(cfg, boxId)) === true ? { ok: true, waitedMs: 0 } : { ok: false, phase: "waking", waitedMs: 0 }) } });
@@ -480,16 +480,100 @@ describe("a cloud computer that is ready, silent, and still restoring its disk",
 
   it("is restarted without that wait when the provider does not say it is restoring", async () => {
     const { botId, box } = await botWith("ready", { hydrated: true });
+    const witness = await botWith("ready");
     commandStatus.set(box.id, 502);
     resumeAnswers.add(box.id);
     await boat.findBoat(cfg, botId);
     justStoppedAnswering(box.id);
+    health.answered(witness.box.id);
     await until(() => recovery.status(botId)?.state === "restarted");
     expect(stops()).toHaveLength(1);
   });
 });
 
+describe("before a silent computer is restarted by itself", () => {
+  const silentForAMinute = (boxId: string) => {
+    health.unanswered(boxId);
+    at += 35_000;
+    health.unanswered(boxId);
+    at += 35_000;
+    health.unanswered(boxId);
+  };
+
+  it("nothing is restarted when the installation's other computers were probed and none answered: the trouble is the provider's", async () => {
+    const { botId, box } = await botWith("ready");
+    const other = await botWith("ready");
+    commandStatus.set(box.id, 502);
+    commandStatus.set(other.box.id, 502);
+    await boat.findBoat(cfg, botId);
+    stopsAnswering(box.id);
+    health.unanswered(other.box.id);
+    await until(() => recovery.status(botId)?.state === "unreachable");
+    expect(stops()).toHaveLength(0);
+    expect(told).toEqual([[botId, "unreachable"]]);
+    expect(recovery.verdict(botId)).toBeNull();
+  });
+
+  it("with no other computer to compare against, it waits for five minutes of silence, looking again meanwhile", async () => {
+    const { botId, box } = await botWith("ready");
+    commandStatus.set(box.id, 502);
+    resumeAnswers.add(box.id);
+    await boat.findBoat(cfg, botId);
+    silentForAMinute(box.id);
+    await until(() => requests.filter((request) => request.path === `/boxes/${box.id}/commands`).length >= 3);
+    expect(recovery.status(botId)?.state).toBe("not-responding");
+    expect(stops()).toHaveLength(0);
+    at += 5 * 60_000;
+    await until(() => recovery.status(botId)?.state === "restarted");
+    expect(stops()).toHaveLength(1);
+  });
+
+  it("with another computer answering, it is restarted after the first minute", async () => {
+    const { botId, box } = await botWith("ready");
+    const witness = await botWith("ready");
+    commandStatus.set(box.id, 502);
+    resumeAnswers.add(box.id);
+    await boat.findBoat(cfg, botId);
+    silentForAMinute(box.id);
+    health.answered(witness.box.id);
+    await until(() => recovery.status(botId)?.state === "restarted");
+    expect(stops()).toHaveLength(1);
+  });
+
+  it("a state that cannot be read is unknown, never a reason to restart", async () => {
+    const { botId, box } = await botWith("ready");
+    const witness = await botWith("ready");
+    commandStatus.set(box.id, 502);
+    await boat.findBoat(cfg, botId);
+    recovery.close();
+    told = [];
+    recovery = recoveryModule.createBoatRecovery({ cfg: () => cfg, tell: (owner, line) => told.push([owner, line]), log: () => {}, file, now, health, pollMs: 5, recheckMs: 20,
+      autoReplace: () => false, read: async () => null,
+      readiness: { awaitAnswer: async () => ({ ok: false, phase: "waking", waitedMs: 0 }) } });
+    silentForAMinute(box.id);
+    health.answered(witness.box.id);
+    await until(() => requests.filter((request) => request.path === `/boxes/${box.id}/commands`).length >= 3);
+    expect(recovery.status(botId)?.state).toBe("not-responding");
+    expect(stops()).toHaveLength(0);
+    at += 11 * 60_000;
+    health.answered(witness.box.id);
+    await until(() => recovery.status(botId)?.state === "needs-person");
+    expect(stops()).toHaveLength(0);
+    expect(deletes()).toHaveLength(0);
+  });
+});
+
 describe("why a silent computer was left as it is", () => {
+  it("dates its answer, so a wait that began later does not take it for its own", async () => {
+    const { botId, box } = await botWith("ready");
+    commandStatus.set(box.id, 502);
+    await boat.findBoat(cfg, botId);
+    stopsAnswering(box.id);
+    await until(() => recovery.verdict(botId) === "restart-failed");
+    expect(recovery.verdict(botId, at)).toBe("restart-failed");
+    expect(recovery.verdict(botId, at + 1)).toBeNull();
+  });
+
   it("says a person was using it", async () => {
     const { botId, box } = await botWith("ready");
     commandStatus.set(box.id, 502);

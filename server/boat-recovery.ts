@@ -27,8 +27,10 @@ const WAKE_BUDGET_MS = 120_000;
 const POLL_MS = 2_500;
 /** A restart or replacement no longer running after this long has ended where the next start picks it up. */
 const STALE_MS = 15 * 60_000;
-/** How often a computer whose disk is being restored is looked at again. */
-const RESTORE_RECHECK_MS = 30_000;
+/** How often a computer that is waited on before a restart (a disk restore, too short a silence, an unread state) is looked at again. */
+const RECHECK_MS = 30_000;
+/** With no other computer to compare against, a silent one is restarted only after this long without one answer. */
+const SOLO_SILENCE_MS = 5 * 60_000;
 /** A restart the person asked for answers the panel within this, however long the disk takes. */
 const MANUAL_ANSWER_WAIT_MS = 3 * 60_000;
 const READY = new Set(["idle", "ready", "running"]);
@@ -70,8 +72,9 @@ export interface BoatRecoveryDeps {
   pollMs?: number;
   autoReplace?: () => boolean;
   readiness?: Pick<BoatReadiness, "awaitAnswer">;
-  /** The provider's sandbox object, for what it says about a disk restore; null when it could not be read. */
+  /** The provider's sandbox object, for its state and what it says about a disk restore; null when it could not be read. */
   read?(cfg: AppConfig, boxId: string): Promise<unknown>;
+  recheckMs?: number;
 }
 
 /** Why a computer that is not answering was left as it is, for a run that waited on it. */
@@ -91,7 +94,9 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
   const read = deps.read ?? readBoat;
   /** When each computer was first seen not answering with its disk still being restored. */
   const restoringSince = new Map<string, number>();
-  const verdicts = new Map<string, { boxId: string; why: RecoveryVerdict }>();
+  const recheckMs = deps.recheckMs ?? RECHECK_MS;
+  const verdicts = new Map<string, { boxId: string; why: RecoveryVerdict; at: number }>();
+  const judge = (owner: string, boxId: string, why: RecoveryVerdict) => verdicts.set(owner, { boxId, why, at: now() });
   const states = new Map<string, CloudComputerRecovery & { boxId: string }>();
   const lanes = new Map<string, Promise<unknown>>();
   const restarts = new Map<string, number>();
@@ -144,7 +149,7 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
     deps.tell(owner, line);
   };
   const needsPerson = (owner: string, boxId: string) => {
-    if (!eligible(owner)) verdicts.set(owner, { boxId, why: "shared" });
+    if (!eligible(owner)) judge(owner, boxId, "shared");
     tellOnce(owner, boxId, "needs-person", eligible(owner) ? "needsPerson" : "teamNotResponding");
   };
   const personBusy = (owner: string, boxId: string) =>
@@ -320,23 +325,36 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
     // Every guard before a stop: it closes the person's programs, and three failed probes can be this home's own outage.
     if (!(await stillDown(owner, boxId, cfg, false))) return;
     const since = Math.min(health.notRespondingSince(boxId) ?? now(), restoringSince.get(boxId) ?? now());
-    if (boatSignals(await read(cfg, boxId)).restoring === true && now() - since < READY_WAIT.restorePatienceMs) {
-      restoringSince.set(boxId, since);
-      set(owner, boxId, "restoring");
+    restoringSince.set(boxId, since);
+    /** Looks again shortly instead of restarting now. */
+    const later = (state: "restoring" | "not-responding") => {
+      set(owner, boxId, state);
       const timer = setTimeout(() => {
         timers.delete(owner);
         if (!closed) void lane(owner, () => notResponding(owner, boxId)).catch((error) => deps.log(`cloud computer ${owner}: ${String(error)}`));
-      }, RESTORE_RECHECK_MS);
+      }, recheckMs);
       timer.unref?.();
       timers.set(owner, timer);
-      return;
+    };
+    // The provider's command gateway can fail for every computer while its API still calls each one ready. Then a
+    // restart helps nobody and stops work that is still running, so one is made only when this computer alone is silent.
+    const witnessed = health.otherAnsweredWithin(boxId, DEAD_COMPUTER.witnessMs);
+    if (!witnessed && health.othersSilentWithin(boxId, DEAD_COMPUTER.witnessMs)) {
+      deps.log(`cloud computer ${owner}: ${boxId} is not responding, and neither are this installation's other computers; nothing was restarted`);
+      return unreachable(owner, boxId);
     }
+    const box = await read(cfg, boxId);
+    const state = box && typeof box === "object" ? (box as { state?: unknown }).state : undefined;
+    // A state that could not be read is unknown, never a reason to restart.
+    if (typeof state !== "string" || !READY.has(state)) return now() - since < DEAD_COMPUTER.replaceAfterMs ? later("not-responding") : decide(owner, boxId);
+    if (boatSignals(box).restoring === true && now() - since < READY_WAIT.restorePatienceMs) return later("restoring");
+    if (!witnessed && now() - since < SOLO_SILENCE_MS) return later("not-responding");
     const lastRestart = restarts.get(boxId);
     const limited = (lastRestart !== undefined && now() - lastRestart < HOUR_MS) || now() - lastAutoRestartAt < DEAD_COMPUTER.restartGapMs;
     if (limited || personBusy(owner, boxId)) {
       // A restart that just failed stays the reason: it says more than the limit that restart itself set off.
       const failed = verdicts.get(owner);
-      if (!(limited && failed?.boxId === boxId && failed.why === "restart-failed")) verdicts.set(owner, { boxId, why: limited ? "restart-limited" : "person-busy" });
+      if (!(limited && failed?.boxId === boxId && failed.why === "restart-failed")) judge(owner, boxId, limited ? "restart-limited" : "person-busy");
       deps.log(`cloud computer ${owner}: ${boxId} is not responding and was not restarted: ${limited ? "a restart was made too recently" : "a person is using it"}`);
     } else {
       lastAutoRestartAt = now();
@@ -352,7 +370,7 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
         restartedOwners.add(owner);
         return;
       }
-      verdicts.set(owner, { boxId, why: "restart-failed" });
+      judge(owner, boxId, "restart-failed");
       deps.log(`cloud computer ${owner}: ${boxId} still does not answer after a restart`);
     }
     return decide(owner, boxId);
@@ -437,8 +455,12 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
       return (state !== undefined && state !== "restarted" && state !== "replaced") || boat.deadBoatOf(owner) !== null
         || (box !== null && health.notRespondingSince(box) !== null);
     },
-    /** Why this owner's computer, not answering, was left as it is; null while that is not decided or it answers. */
-    verdict: (owner: string): RecoveryVerdict | null => verdicts.get(owner)?.why ?? null,
+    /** Why this owner's computer, not answering, was left as it is; null while that is not decided, once it answers, or
+     * when it was decided before `since`. Written before the state moves to one that has ended. */
+    verdict: (owner: string, since = -Infinity): RecoveryVerdict | null => {
+      const found = verdicts.get(owner);
+      return found && found.at >= since ? found.why : null;
+    },
     /** The panel's Restart computer: the same restart the automatic path tries first. */
     async restart(owner: string): Promise<{ answers: boolean }> {
       const found = await boat.findBoat(deps.cfg(), owner);

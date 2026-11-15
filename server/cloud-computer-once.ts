@@ -25,6 +25,7 @@ export const RESEND = {
   reserveMs: 5_000,
 } as const;
 
+const STOP_MS = 10_000;
 const TAKEN_EXIT = 75;
 const UNCLAIMED_EXIT = 76;
 const KEY = /^[0-9a-f]{16}$/;
@@ -54,16 +55,33 @@ export function onceCommand(key: string, attempt: number, command: string, dirs:
     attempt > 1 ? `    echo ${unclaimedMark(key)}; exit ${UNCLAIMED_EXIT}` : "    :",
     "  fi",
     "fi",
+    // The shell's own process id, kept beside the claim: `exec` below keeps it, so it names the command.
+    'echo $$ > "$a/$k/pid" 2>/dev/null || echo $$ > "$b/$k/pid" 2>/dev/null',
     ...(key.endsWith("0") ? ['find "$a" "$b" -mindepth 1 -maxdepth 1 -type d -mmin +1440 -exec rmdir {} + 2>/dev/null'] : []),
     command,
+  ].join("\n");
+}
+
+/** Ends the command a call started and everything it started, by the process id the call recorded: Boat has no call
+ * this app knows of that stops a command by its processId (unverified). Only that process and its descendants are
+ * signalled, never a process group, which could hold the computer's own agent. */
+export function stopCommand(key: string, dirs: { disk: string; memory: string } = CLAIM_DIRS): string {
+  if (!KEY.test(key)) throw new RangeError("a call key is 16 hex characters");
+  return [
+    `k=${key}; p=; for d in "${dirs.disk}" "${dirs.memory}"; do if [ -f "$d/$k/pid" ]; then p=$(cat "$d/$k/pid"); break; fi; done`,
+    '[ -n "$p" ] || exit 0',
+    'stop() { for c in $(pgrep -P "$1" 2>/dev/null); do stop "$c"; done; kill -TERM "$1" 2>/dev/null; }',
+    'stop "$p"; exit 0',
   ].join("\n");
 }
 
 type CommandResult = CommandOutcome;
 
 export type OnceOutcome =
-  /** The command ran in this call and this is its own result. */
-  | { kind: "ran"; result: CommandResult; resent: number }
+  /** The command ran in this call and this is its own result. `stop()` ends it, for a result that says it still runs. */
+  | { kind: "ran"; result: CommandResult; resent: number; stop(): Promise<void> }
+  /** A send got no reply at all and the call's time is up: the command may have started. */
+  | { kind: "late" }
   /** An earlier copy of this call ran (or is still running); its answer never came back. */
   | { kind: "lost" }
   /** No copy of this call is known to have run, and the computer did not answer in time to send it again. */
@@ -90,6 +108,8 @@ export interface OnceOptions {
   deadline: number;
   /** The most one send may take, when that is less than what is left of the call. */
   timeoutMs?: number;
+  /** Aborts when the person stops the turn, as opposed to the call's own time running out. */
+  stopped?: AbortSignal;
 }
 
 const backoff = (resend: number, random: () => number): number => {
@@ -103,6 +123,8 @@ export async function runOnce(cfg: AppConfig, boxId: string, command: string, op
   const deps = { ...defaults, ...overrides };
   const key = deps.key();
   const lastSend = () => opts.deadline - RESEND.reserveMs;
+  /** Best effort, on its own short clock: the caller that asks has usually given up already. */
+  const stop = async () => { await deps.run(cfg, boxId, stopCommand(key), { timeoutMs: STOP_MS }).catch(() => undefined); };
   for (let resent = 0; ; resent++) {
     let result: CommandResult | null = null;
     try {
@@ -111,7 +133,10 @@ export async function runOnce(cfg: AppConfig, boxId: string, command: string, op
         signal: opts.signal, timeoutMs: Math.max(1_000, Math.min(opts.timeoutMs ?? Infinity, lastSend() - deps.now())),
       });
     } catch (error) {
-      if (opts.signal.aborted || !transientClaimFailure(error) || deps.now() >= lastSend()) throw error;
+      // The person stopped the turn: its foreground command is stopped with it, as Ctrl-C would, since nobody is left to follow it.
+      if (opts.stopped?.aborted) void stop();
+      if (opts.signal.aborted || !transientClaimFailure(error)) throw error;
+      if (deps.now() >= lastSend()) return { kind: "late" };
     }
     if (result && !result.unanswered && !result.busy) {
       if (result.exitCode === TAKEN_EXIT && result.stdout.includes(takenMark(key))) {
@@ -119,7 +144,7 @@ export async function runOnce(cfg: AppConfig, boxId: string, command: string, op
         return { kind: "lost" };
       }
       if (result.exitCode === UNCLAIMED_EXIT && result.stdout.includes(unclaimedMark(key))) return { kind: "unanswered", phase: "waking" };
-      return { kind: "ran", result, resent };
+      return { kind: "ran", result, resent, stop };
     }
     deps.counters.count(boxId, "unanswered");
     if (resent >= RESEND.max) return { kind: "unanswered", phase: result?.busy ? "unreachable" : "waking" };
