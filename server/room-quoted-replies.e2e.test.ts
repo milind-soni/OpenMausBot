@@ -1,10 +1,10 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
+import type { Message } from "./store.ts";
 
 type Bot = { id: string; name: string };
 type Room = { id: string; threadId: string };
-type Message = { id: string; kind: string; role: string; text?: string; from?: { botId: string }; routedBy?: unknown };
 let fixture: VerificationServer;
 let upstream: Server;
 const bots: Bot[] = [];
@@ -12,6 +12,8 @@ let routingCalls = 0;
 let routingOptions: string[] = [];
 let keyChecks = 0;
 let replyGate: { started: boolean; release: Promise<void> } | undefined;
+let replyContent = "I received your message.";
+let routingFailure = false;
 
 const api = async (method: string, path: string, body?: unknown) => {
   const response = await fetch(fixture.info.url + path, {
@@ -40,6 +42,7 @@ beforeAll(async () => {
       }
       routingCalls++;
       routingOptions = Object.keys(body.questions.answer.criteria);
+      if (routingFailure) { res.writeHead(503, { "content-type": "application/json" }); res.end(JSON.stringify({ error: "fixture router unavailable" })); return; }
       const choice = bots[1]!.id;
       return json({ answers: { answer: { type: "choice", choice, confidence: 0.99, probabilities: { [choice]: 0.99 } } } });
     }
@@ -51,7 +54,7 @@ beforeAll(async () => {
       gate.started = true;
       await gate.release;
     }
-    res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "I received your message." }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: replyContent }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
   const address = upstream.address();
@@ -196,4 +199,107 @@ it("leaves a fixed-lead room's policy unchanged", async () => {
   const before = routingCalls;
   expect((await round(room, "Please review this.", quote.id)).replies.map((message) => message.from?.botId)).toEqual([bots[2]!.id]);
   expect(routingCalls).toBe(before);
+}, 120_000);
+
+it.each(["held", "paused", "department-paused"])("uses the remaining Auto member when the configured fallback is %s", async (unavailable) => {
+  const { room, quote } = await quotedRoom();
+  await api("PATCH", `/api/groups/${room.id}`, {
+    memberIds: bots.slice(0, 2).map((bot) => bot.id), defaultResponder: { kind: "auto", fallbackBotId: bots[0]!.id },
+  });
+  if (unavailable === "held") await api("POST", `/api/groups/${room.id}/holds`, { botId: bots[0]!.id, held: true });
+  if (unavailable === "paused") await api("POST", "/api/paused", { kind: "bot", id: bots[0]!.id, paused: true });
+  if (unavailable === "department-paused") {
+    await api("POST", "/api/sidebar-sections", { name: "Auto fallback fixture", botIds: [bots[0]!.id] });
+    await api("POST", "/api/paused", { kind: "department", id: "Auto fallback fixture", paused: true });
+  }
+  try {
+    const before = routingCalls;
+    expect((await round(room, "Please review this.", quote.id)).replies.map((message) => message.from?.botId)).toEqual([bots[1]!.id]);
+    expect(routingCalls).toBe(before);
+  } finally {
+    if (unavailable === "paused") await api("POST", "/api/paused", { kind: "bot", id: bots[0]!.id, paused: false });
+    if (unavailable === "department-paused") await api("POST", "/api/paused", { kind: "department", id: "Auto fallback fixture", paused: false });
+  }
+}, 120_000);
+
+it("retains an available configured Auto fallback when the decision model is disabled", async () => {
+  const room = await newRoom();
+  await api("PATCH", `/api/groups/${room.id}`, { defaultResponder: { kind: "auto", fallbackBotId: bots[2]!.id } });
+  await api("PATCH", "/api/config", { decider: { jobs: { roomRouting: false } } });
+  try {
+    const before = routingCalls;
+    expect((await round(room, "Please review this.")).replies.map((message) => message.from?.botId)).toEqual([bots[2]!.id]);
+    expect(routingCalls).toBe(before);
+  } finally {
+    await api("PATCH", "/api/config", { decider: { jobs: { roomRouting: true } } });
+  }
+}, 120_000);
+
+it.each(["disabled", "unavailable"])("uses an unpaused Auto fallback when the decision model is %s", async (state) => {
+  const room = await newRoom();
+  await api("PATCH", `/api/groups/${room.id}`, { defaultResponder: { kind: "auto", fallbackBotId: bots[0]!.id } });
+  await api("POST", "/api/paused", { kind: "bot", id: bots[0]!.id, paused: true });
+  if (state === "disabled") await api("PATCH", "/api/config", { decider: { jobs: { roomRouting: false } } });
+  routingFailure = state === "unavailable";
+  try {
+    const before = routingCalls;
+    expect((await round(room, "Please review this.")).replies.map((message) => message.from?.botId)).toEqual([bots[1]!.id]);
+    expect(routingCalls - before).toBe(state === "disabled" ? 0 : 1);
+  } finally {
+    routingFailure = false;
+    await api("POST", "/api/paused", { kind: "bot", id: bots[0]!.id, paused: false });
+    if (state === "disabled") await api("PATCH", "/api/config", { decider: { jobs: { roomRouting: true } } });
+  }
+}, 120_000);
+
+it("keeps the held notice when every Auto member is held", async () => {
+  const room = await newRoom();
+  for (const bot of bots) await api("POST", `/api/groups/${room.id}/holds`, { botId: bot.id, held: true });
+  const before = routingCalls;
+  expect((await round(room, "Please review this.")).replies).toEqual([]);
+  expect(routingCalls).toBe(before);
+  expect((await messages(room)).find((message) => message.kind === "activity" && message.from?.botId === bots[0]!.id)?.tool?.name).toContain("Atlas");
+}, 120_000);
+
+it.each(["explicit mention", "configured lead", "Auto fallback"])("preserves a paused goal coordinator chosen by %s", async (choice) => {
+  const room = await newRoom();
+  await api("PATCH", `/api/groups/${room.id}`, {
+    defaultResponder: choice === "Auto fallback" ? { kind: "auto", fallbackBotId: bots[0]!.id }
+      : { kind: "member", botId: bots[choice === "explicit mention" ? 1 : 0]!.id },
+  });
+  await api("POST", "/api/paused", { kind: "bot", id: bots[0]!.id, paused: true });
+  replyContent = 'Goal done.\n<openmaus-goal>{"status":"completed","detail":"Fixture goal done."}</openmaus-goal>';
+  try {
+    const before = routingCalls;
+    await api("POST", `/api/groups/${room.id}/messages`, {
+      text: `${choice === "explicit mention" ? "@Atlas " : ""}Please finish this goal.`, threadId: room.threadId, mode: "goal",
+    });
+    await expect.poll(async () => {
+      const status = (await messages(room)).find((message) => message.kind === "goal.run")?.goalRun?.status;
+      return status !== undefined && status !== "working";
+    }, { timeout: 30_000 }).toBe(true);
+    expect((await messages(room)).find((message) => message.kind === "goal.run")?.goalRun).toMatchObject({
+      coordinatorBotId: bots[0]!.id, status: "blocked", turnCount: 0, detail: expect.stringContaining("Atlas"),
+    });
+    expect(routingCalls).toBe(before);
+  } finally {
+    replyContent = "I received your message.";
+    await api("POST", "/api/paused", { kind: "bot", id: bots[0]!.id, paused: false });
+  }
+}, 120_000);
+
+it("still excludes a room-held member from goal coordination", async () => {
+  const room = await newRoom();
+  await api("PATCH", `/api/groups/${room.id}`, { defaultResponder: { kind: "member", botId: bots[0]!.id } });
+  await api("POST", `/api/groups/${room.id}/holds`, { botId: bots[0]!.id, held: true });
+  replyContent = 'Goal done.\n<openmaus-goal>{"status":"completed","detail":"Fixture goal done."}</openmaus-goal>';
+  try {
+    await api("POST", `/api/groups/${room.id}/messages`, { text: "@Atlas please finish this goal.", threadId: room.threadId, mode: "goal" });
+    await expect.poll(async () => (await messages(room)).find((message) => message.kind === "goal.run")?.goalRun?.status, { timeout: 30_000 }).toBe("completed");
+    expect((await messages(room)).find((message) => message.kind === "goal.run")?.goalRun).toMatchObject({
+      coordinatorBotId: bots[1]!.id, turnCount: 1,
+    });
+  } finally {
+    replyContent = "I received your message.";
+  }
 }, 120_000);
