@@ -129,7 +129,7 @@ interface Job {
   attempts: number;
 }
 
-interface RelayAnswer {
+export interface RelayAnswer {
   status: number;
   code?: string;
   retryAfterMs?: number;
@@ -215,6 +215,21 @@ export class PhonePush {
     const device = this.devices.find((candidate) => candidate.key === key);
     if (!device) return null;
     return { platform: device.platform, environment: device.environment, ...(device.pairing ? { pairing: device.pairing } : {}), kinds: [...device.kinds], updatedAt: device.updatedAt };
+  }
+
+  /** The device token a phone registered, for the Live Activity and ongoing-notification pushes that share its relay. */
+  deviceOf(key: string): { platform: "apns" | "fcm"; token: string; environment: "production" | "sandbox" } | undefined {
+    const device = this.devices.find((candidate) => candidate.key === key);
+    return device ? { platform: device.platform, token: device.token, environment: device.environment } : undefined;
+  }
+
+  isLive(key: string): boolean {
+    return this.options.live(key);
+  }
+
+  /** One relay call, as this server's installation; null when the relay could not be reached or there is no account. */
+  call(path: string, body: unknown): Promise<RelayAnswer | null> {
+    return this.relay(path, body);
   }
 
   answer(key: string): PhonePushAnswer {

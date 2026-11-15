@@ -102,7 +102,7 @@ import { removeRetiredAppFiles } from "./retired-apps.ts"; import { createEmailR
 import { createPhones } from "./host/phones.ts";
 import { NOT_THE_OWNER } from "./phones/owner.ts";
 import { PHONE_INTERNAL_MCP_PATH } from "./phones/rpc.ts";
-import { isLongPollPath, phoneKey } from "./routes/phones.ts"; import { createPhonePushRoutes } from "./routes/phone-push.ts"; import { PhonePush, PhonePushAccessSource, phonePushEnabled } from "./phone-push.ts"; import { DEFAULT_COMPANION_CONTROL_PLANE_URL } from "../electron/companion-account-service.mjs"; import { TUNNEL_CREDENTIALS_FILE } from "./tunnel.ts";
+import { isLongPollPath, phoneKey } from "./routes/phones.ts"; import { createPhoneActivityRoutes, createPhonePushRoutes } from "./routes/phone-push.ts"; import { PhoneActivity } from "./phone-activity.ts"; import { PhonePush, PhonePushAccessSource, phonePushEnabled } from "./phone-push.ts"; import { DEFAULT_COMPANION_CONTROL_PLANE_URL } from "../electron/companion-account-service.mjs"; import { TUNNEL_CREDENTIALS_FILE } from "./tunnel.ts";
 import { createDataRoutes } from "./data/routes.ts";
 import { DataSheetRegistry } from "./data/sheet.ts";
 import { DataFailure } from "./data/types.ts";
@@ -4639,7 +4639,7 @@ interface SseClient {
   /** Stops the heartbeat and leaves `sseClients` before ending the response; every way a stream ends goes through it. */
   close: () => void;
 }
-const { streams: sseClients, ...teamPresence } = createTeamPresenceHost<SseClient>({ people: teamOwners.people, broadcast, audienceOf: (threadId) => teamHost.audienceOf(threadId), sharedWithOne: (threadId) => conversationShares.readers(threadId) !== null, store: () => store, visibleTo }); type StreamView = Pick<SseClient, "admin" | "person" | "viewer" | "seen" | "ask">; const phonePush = new PhonePush({ dataDir: DATA_DIR, access: () => phonePushAccess.current(), enabled: () => phonePushEnabled(cfg), live: (key) => [...sseClients].some((client) => client.pushKey === key), room: (notification) => { const group = (notification.groupId ? store.group(notification.groupId) : undefined) ?? store.groupByThread(notification.threadId); return group && !group.dm ? { id: group.id, name: group.name } : undefined; } });
+const { streams: sseClients, ...teamPresence } = createTeamPresenceHost<SseClient>({ people: teamOwners.people, broadcast, audienceOf: (threadId) => teamHost.audienceOf(threadId), sharedWithOne: (threadId) => conversationShares.readers(threadId) !== null, store: () => store, visibleTo }); type StreamView = Pick<SseClient, "admin" | "person" | "viewer" | "seen" | "ask">; const phonePush = new PhonePush({ dataDir: DATA_DIR, access: () => phonePushAccess.current(), enabled: () => phonePushEnabled(cfg), live: (key) => [...sseClients].some((client) => client.pushKey === key), room: (notification) => { const group = (notification.groupId ? store.group(notification.groupId) : undefined) ?? store.groupByThread(notification.threadId); return group && !group.dm ? { id: group.id, name: group.name } : undefined; } }); const phoneActivity = new PhoneActivity({ dataDir: DATA_DIR, push: phonePush, hasOpenAsk: (botId) => openCardRows().some((row) => row.fromBotId === botId || store.botByThread(row.threadId)?.id === botId), bot: (botId) => { const bot = store.bot(botId); const working = bot ? store.tasks(botId).find((task) => threadBusy(botId, task.threadId)) : undefined; return bot ? { name: bot.name, busy: Boolean(working), threadId: working?.threadId ?? bot.threadId } : undefined; }, botOfThread: (threadId) => store.botByThread(threadId)?.id });
 
 let audienceChangedAt = 0;
 function audienceChanged(): void {
@@ -4744,7 +4744,7 @@ function broadcast(payload: Record<string, unknown>, options: { adminOnly?: bool
   // Members get config as configured-or-not and every bot without its server alias.
   const clientPayload = options.adminOnly ? null : kind === "config" ? configForAccess(payload as ReturnType<typeof configStatus>, false) : memberFramePayload(payload);
   const clientFrame = clientPayload === null ? null : clientPayload === payload ? frame : `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...clientPayload, seq })}\n\n`;
-  replayBuffer.push({ seq, kind, frame, clientFrame, payload, ...(options.person ? { person: options.person } : {}) }); if (kind === "notify") phonePush.offer({ notification: payload.notification, seq }, (key) => pushReaches(key, payload, seq, options));
+  replayBuffer.push({ seq, kind, frame, clientFrame, payload, ...(options.person ? { person: options.person } : {}) }); if (kind === "notify") phonePush.offer({ notification: payload.notification, seq }, (key) => pushReaches(key, payload, seq, options)); if (kind === "notify" || kind === "bot" || kind === "runtime") phoneActivity.offer(payload, (key) => pushReaches(key, payload, seq, options));
   const ownGroups: OwnGroupFrames = new Map();
   for (const client of Array.from(sseClients)) {
     if (!wants(client, kind) || !teamOwners.reaches(client.ask, payload) || !streamFor(client, options.person)) continue;
@@ -12493,7 +12493,7 @@ const liveCalls = new LiveCallController({
   },
   log: (line) => console.log(line),
 });
-sessions.onSessionRevoked((sessionId) => liveCalls.sessionRevoked(sessionId)); sessions.onSessionRevoked((sessionId) => phonePush.forget(`session:${sessionId}`)); ROUTES.push(createPhonePushRoutes({ push: phonePush, live: (auth) => auth.kind === "loopback" || sessions.isLive(auth.session.id) }));
+sessions.onSessionRevoked((sessionId) => liveCalls.sessionRevoked(sessionId)); sessions.onSessionRevoked((sessionId) => { phonePush.forget(`session:${sessionId}`); phoneActivity.forget(`session:${sessionId}`); }); ROUTES.push(createPhonePushRoutes({ push: phonePush, live: (auth) => auth.kind === "loopback" || sessions.isLive(auth.session.id) }), createPhoneActivityRoutes({ push: phonePush, activity: phoneActivity, live: (auth) => auth.kind === "loopback" || sessions.isLive(auth.session.id) }));
 ROUTES.push(createDataRoutes({
   bot: (id) => store.bot(id),
   engine: dataEngine,
@@ -12502,7 +12502,7 @@ ROUTES.push(createDataRoutes({
   exportRoots: dataExportRoots,
 }));
 ROUTES.push(createLiveRoutes({
-  calls: liveCalls, deviceRevoked: (device) => phonePush.forget(`companion:${device}`),
+  calls: liveCalls, deviceRevoked: (device) => { phonePush.forget(`companion:${device}`); phoneActivity.forget(`companion:${device}`); },
   resolveTarget: (botId, threadId) => {
     const bot = store.bot(botId);
     if (!bot) return null;

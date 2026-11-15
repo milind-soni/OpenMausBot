@@ -221,6 +221,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "PUT", path: /^\/api\/push\/device$/ },
   { method: "GET", path: /^\/api\/push\/device$/ },
   { method: "DELETE", path: /^\/api\/push\/device$/ },
+  { method: "PUT", path: /^\/api\/push\/activity$/ },
+  { method: "GET", path: /^\/api\/push\/activity$/ },
+  { method: "DELETE", path: /^\/api\/push\/activity$/ },
 
   // The harness records only the owner's activation; a guest's is answered and
   // dropped.
