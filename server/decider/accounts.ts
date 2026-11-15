@@ -4,6 +4,7 @@ import type { AppConfig } from "../config.ts";
 import { deciderCredential, type ServiceCredential } from "../included-services.ts";
 import { WORKERS_AI_ACCOUNT_ID } from "./config.ts";
 import { customEndpoint } from "./custom.ts";
+import { GEMINI_DECIDER_URL } from "./gemini.ts";
 import { OPENROUTER_DEFAULT_BASE_URL } from "./openrouter.ts";
 import type { DeciderProvider } from "./types.ts";
 import { WORKERS_AI_DEFAULT_BASE_URL } from "./workers-ai.ts";
@@ -58,6 +59,12 @@ export function customAccount(cfg: AppConfig, draft?: string): HelperAccount | n
 export function includedAccount(): HelperAccount | null {
   const credential = deciderCredential(undefined, undefined);
   return credential?.included ? { ...credential, provider: "jev" } : null;
+}
+
+/** The Gemini key saved for speech, else the one saved for images: Google's Decisions API takes either. */
+export function geminiAccount(cfg: AppConfig): HelperAccount | null {
+  const token = cfg.tts?.geminiKey?.trim() || cfg.imageGen?.geminiKey?.trim();
+  return token ? { provider: "gemini", token, api: GEMINI_DECIDER_URL, included: false } : null;
 }
 
 export function openrouterAccount(cfg: AppConfig, draft?: string): HelperAccount | null {

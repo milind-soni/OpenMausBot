@@ -4,9 +4,10 @@ import { userError, type UserError } from "../user-errors.ts";
 import type { AppConfig } from "../config.ts";
 import { deciderCredential } from "../included-services.ts";
 import {
-  customAccount, helpersOn, includedAccount, jevAccount, openrouterAccount, sharedOpenRouterKey, workersAiAccount, type HelperAccount,
+  customAccount, geminiAccount, helpersOn, includedAccount, jevAccount, openrouterAccount, sharedOpenRouterKey, workersAiAccount, type HelperAccount,
 } from "./accounts.ts";
 import { CUSTOM_DEFAULT_API, customBackend, customEndpoint } from "./custom.ts";
+import { geminiBackend } from "./gemini.ts";
 import { jevBackend } from "./jev.ts";
 import { appendDeciderLog, stateHash } from "./log.ts";
 import { OPENROUTER_DEFAULT_API, OPENROUTER_DEFAULT_MODEL, openrouterBackend } from "./openrouter.ts";
@@ -27,7 +28,7 @@ const MIN_TIMEOUT_MS = 50;
 const MAX_TIMEOUT_MS = 30_000;
 
 const BACKENDS: Record<DeciderProvider, DeciderBackend> = {
-  jev: jevBackend, workersai: workersAiBackend, openrouter: openrouterBackend, custom: customBackend,
+  jev: jevBackend, workersai: workersAiBackend, openrouter: openrouterBackend, custom: customBackend, gemini: geminiBackend,
 };
 
 type DeciderConfig = NonNullable<AppConfig["decider"]>;
@@ -53,11 +54,11 @@ export function deciderApi(cfg: AppConfig): OpenRouterApi {
 
 /** A chosen custom gateway decides alone, or nothing does until it is set up. Otherwise, in order: the person's own Jev
  * key, their own Workers AI key (Clef), Cloud's included relay (only for seams it accepts), the OpenRouter LLM fallback,
- * nothing. */
+ * a Gemini key saved for speech or images, nothing. */
 export function deciderAccount(cfg: AppConfig, seam?: DeciderSeam): HelperAccount | null {
   if (cfg.decider?.provider === "custom") return customAccount(cfg);
   const jev = jevAccount(cfg);
-  const candidates = [jev, workersAiAccount(cfg), jev?.included ? null : includedAccount(), openrouterAccount(cfg)];
+  const candidates = [jev, workersAiAccount(cfg), jev?.included ? null : includedAccount(), openrouterAccount(cfg), geminiAccount(cfg)];
   return candidates.find((account): account is HelperAccount => Boolean(account) && !(account!.included && seam && !relaySeam(seam))) ?? null;
 }
 
@@ -85,6 +86,11 @@ export function deciderReady(cfg: AppConfig, job: DeciderJob): boolean {
 /** Whether Settings → API keys holds an OpenRouter key the decision model may use. */
 export function deciderSharedKeyUsable(cfg: AppConfig): boolean {
   return Boolean(sharedOpenRouterKey(cfg));
+}
+
+/** A key from elsewhere in Settings the decision model falls back on: OpenRouter's, or a Gemini one. */
+export function deciderBorrowedKey(cfg: AppConfig): boolean {
+  return deciderSharedKeyUsable(cfg) || Boolean(geminiAccount(cfg));
 }
 
 /** Never a key, nor an operator base URL with no UI; a custom gateway's `baseUrl` is the person's own setting. `provider` is the one in use, else the one chosen
@@ -169,13 +175,14 @@ export const DECIDER_KEY_REJECTED: Record<DeciderProvider, string> = {
   workersai: "Cloudflare rejected this token. Check that it has Workers AI permission and belongs to this account ID.",
   openrouter: "OpenRouter rejected this key. Check it at openrouter.ai/keys and paste it again.",
   custom: "Your endpoint rejected this key. Check it with the endpoint's owner and paste it again.",
+  gemini: "Google rejected the saved Gemini key. Check it at aistudio.google.com/apikey and paste it again under API keys.",
 };
 
 /** The key a save brings, to be tested before it is kept: a custom gateway's, Jev's, Workers AI's, then OpenRouter's. */
 export function deciderPatchKey(
   patch: Partial<DeciderConfig>,
   current: DeciderConfig | undefined,
-): { provider: DeciderProvider; check: DeciderKeyCheck } | null {
+): { provider: keyof typeof DECIDER_KEY_ERROR; check: DeciderKeyCheck } | null {
   const jevKey = patch.key?.trim();
   const workersAiKey = patch.workersAiToken?.trim();
   const openrouterKey = patch.openrouterKey?.trim();
@@ -212,6 +219,7 @@ function checkAccount(cfg: AppConfig, input: { key?: string; provider?: DeciderP
   if (provider === "workersai") return workersAiAccount(cfg, { token: draft, accountId: input.accountId });
   if (provider === "openrouter") return openrouterAccount(cfg, draft);
   if (provider === "custom") return customAccount(cfg, draft);
+  if (provider === "gemini") return geminiAccount(cfg);
   return jevAccount(cfg, draft) ?? includedAccount();
 }
 

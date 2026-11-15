@@ -79,8 +79,9 @@ const WORKERS_AI_FAILURES: Record<string, LocaleKey> = {
   malformed: "decider.workersAi.error.malformed",
 };
 
-const BY: Record<"jev" | "workersai" | "openrouter" | "custom", LocaleKey> = {
+const BY: Record<"jev" | "workersai" | "openrouter" | "custom" | "gemini", LocaleKey> = {
   jev: "decider.status.byJev", workersai: "decider.status.byWorkersAi", openrouter: "decider.status.byOpenRouter", custom: "decider.status.byCustom",
+  gemini: "decider.status.byGemini",
 };
 
 /** Who decides and who reads, in a word each: the person's own key, the Cloud plan's, or nothing yet. */
