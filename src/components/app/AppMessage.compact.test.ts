@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// A bot's page in its own chat: a compact card that opens the chat's page pane from anywhere on it.
+// A bot's page: a compact card that opens from anywhere on it, in the chat's page pane or, in a room, over the window.
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,11 +24,11 @@ let pane: HTMLDivElement;
 let root: Root;
 
 const settle = () => act(async () => { for (let i = 0; i < 8; i += 1) await new Promise((resolve) => setTimeout(resolve, 0)); });
-const render = async (message: Message) => {
+const render = async (message: Message, room = false) => {
   await act(async () => {
     root.render(createElement(BotEditorStore, { value: store, children:
-      createElement(PagePaneContext, { value: pane },
-        createElement(AppMessage, { botId: "pepper", botName: "Pepper", threadId: "t1", message, pool: createAppPool({ limit: 3 }) })) }));
+      createElement(PagePaneContext, { value: room ? null : pane },
+        createElement(AppMessage, { botId: "pepper", botName: "Pepper", threadId: "t1", message, room, pool: createAppPool({ limit: 3 }) })) }));
   });
   await settle();
 };
@@ -86,5 +86,20 @@ describe("a bot's page as a compact card", () => {
     await press(card().querySelector<HTMLButtonElement>("[aria-label='About this app']")!);
     expect(card().querySelector("[data-app-info]")).not.toBeNull();
     expect(pane.querySelector("[data-page-pane]")).toBeNull();
+  });
+
+  it("is the same card in a room, where it opens over the window", async () => {
+    await render(row(payload()), true);
+    expect(card().querySelector<HTMLElement>("[data-app-box]")!.style.height).toBe(`${PAGE_PREVIEW_HEIGHT}px`);
+    expect(card().querySelector("[data-page-footer]")!.textContent).toBe("PricingPage");
+    expect(card().querySelector("[data-app-header]")).toBeNull();
+    expect(card().querySelector("[data-page-tools]")).toBeNull();
+    await press(opener());
+    const opened = document.body.querySelector<HTMLElement>("[role=dialog][data-page-fullscreen=a1]")!;
+    expect(opened.querySelector("[data-page-tools]")).not.toBeNull();
+    expect(pane.querySelector("[data-page-pane]")).toBeNull();
+    await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+    expect(document.body.querySelector("[data-page-fullscreen]")).toBeNull();
+    expect(opener().getAttribute("aria-pressed")).toBe("false");
   });
 });

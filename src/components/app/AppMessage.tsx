@@ -104,9 +104,10 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   const frame = useRef<AppFrameHandle | null>(null);
   const wide = useRef<AppFrameHandle | null>(null);
   const [fullScreen, setFullScreen] = useState(false);
-  // In a bot chat a page is a compact card that opens in the chat's page pane; elsewhere it stays a full card.
+  // A page is a compact card where it has somewhere to open: the chat's page pane, or over the window in a room.
   const paneSlot = useContext(PagePaneContext);
   const pane = page && !room ? paneSlot : null;
+  const compact = Boolean(pane) || (page && Boolean(room));
   const paneOpen = Boolean(pane && fullScreen);
   const row = useRef<HTMLDivElement | null>(null);
   const mounted = useRef(true);
@@ -223,17 +224,17 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   const infoId = `${uid}-info`;
 
   // The compact card clips the page at its natural size, so it reads as a preview of the real thing.
-  const boxHeight = pane ? Math.min(height, PAGE_PREVIEW_HEIGHT) : height;
+  const boxHeight = compact ? Math.min(height, PAGE_PREVIEW_HEIGHT) : height;
   const body = collapsed ? null : fullScreen && current ? (
-    <div data-app-box className={cn("relative w-full", bordered && !pane && "border-t border-ink/[0.08]")} style={{ height: boxHeight }}>
-      {pane
+    <div data-app-box className={cn("relative w-full", bordered && !compact && "border-t border-ink/[0.08]")} style={{ height: boxHeight }}>
+      {compact
         ? <AppPlaceholder height={boxHeight}><span className="ui-pill">{t("chat.preview.closePage")}</span></AppPlaceholder>
         : <AppPlaceholder height={boxHeight} open={() => setFullScreen(false)} label={t("chat.preview.exitFullScreen")} />}
     </div>
   ) : noPage ? (
-    message.text ? <div dir="auto" className={cn("line-clamp-6 whitespace-pre-wrap text-[13px] leading-[18px] text-ink-secondary", pane ? "px-4 pt-3" : bordered ? "px-4 pb-3" : "pb-2")}>{message.text}</div> : null
+    message.text ? <div dir="auto" className={cn("line-clamp-6 whitespace-pre-wrap text-[13px] leading-[18px] text-ink-secondary", compact ? "px-4 pt-3" : bordered ? "px-4 pb-3" : "pb-2")}>{message.text}</div> : null
   ) : (
-    <div data-app-box className={cn("relative w-full", pane && "overflow-hidden", bordered && !pane && "border-t border-ink/[0.08]", point.pointing && "ring-2 ring-inset ring-accent/60")}
+    <div data-app-box className={cn("relative w-full", compact && "overflow-hidden", bordered && !compact && "border-t border-ink/[0.08]", point.pointing && "ring-2 ring-inset ring-accent/60")}
       style={{ height: boxHeight }}>
       {current ? (
         <AppFrame
@@ -255,9 +256,9 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
       )}
     </div>
   );
-  const info = infoOpen && <AppInfo id={infoId} network={payload.network ?? { connect: [], resources: [] }} bytes={payload.bytes ?? 0} bordered={bordered || Boolean(pane)} />;
+  const info = infoOpen && <AppInfo id={infoId} network={payload.network ?? { connect: [], resources: [] }} bytes={payload.bytes ?? 0} bordered={bordered || compact} />;
   const reopen = collapsed && (
-    <div className={cn("flex", bordered || pane ? "px-4 pb-3.5" : "pb-2", pane && "pt-3.5")}>
+    <div className={cn("flex", bordered || compact ? "px-4 pb-3.5" : "pb-2", compact && "pt-3.5")}>
       <AppOpenButton label={t("app.openAgain")} onClick={reloadNow} />
     </div>
   );
@@ -275,7 +276,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
       {...(room ? { "data-app-room": "" } : {})}
       className={cn("w-full text-start", WIDTH)}
     >
-      {pane ? (
+      {compact ? (
         <div className={APP_SURFACE}>
           <div className="group/page relative">
             {reopen}
@@ -291,8 +292,8 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
               reloading={fetching && Boolean(current)}
             />
             {current && !point.pointing && (
-              <button type="button" data-page-open onClick={tools.fullScreen.toggle} aria-pressed={paneOpen}
-                aria-label={t(paneOpen ? "chat.preview.closePage" : "chat.preview.openPage")}
+              <button type="button" data-page-open onClick={tools.fullScreen.toggle} aria-pressed={fullScreen}
+                aria-label={t(fullScreen ? "chat.preview.closePage" : "chat.preview.openPage")}
                 className="absolute inset-0 cursor-pointer rounded-2xl transition-colors duration-[120ms] hover:bg-ink/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus motion-reduce:transition-none" />
             )}
           </div>
