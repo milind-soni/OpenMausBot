@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Gauge, RotateCcw, Shrink } from "lucide-react";
 
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
@@ -6,9 +6,10 @@ import { cn } from "@/lib/cn";
 import { compactedSinceReading } from "@/lib/context-warning";
 import { contextReading, contextRowLabel, contextRows, roomContextReadings, type ContextReading, type ContextRow } from "@/lib/context-usage";
 import { t } from "@/lib/i18n";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { formatTokens, type ContextTone } from "@/lib/usage";
+import { api } from "@/state/api";
 import { visibleMessages, type Bot, type Group, type Message } from "@/state/store";
+import type { ContextBreakdown } from "../../shared/context-breakdown";
 import { useContextAction } from "./ContextWarning";
 import { MENU_ICON, MENU_LABEL, MENU_NOTE, MENU_ROW, MENU_SEPARATOR, MENU_SHEET } from "./menu-recipe";
 
@@ -60,7 +61,7 @@ function Breakdown({ rows }: { rows: ContextRow[] }) {
         <div key={row.id} className="flex items-baseline gap-3">
           <dt className={cn("min-w-0 truncate", row.id === "free" ? "text-ink-tertiary" : "text-ink-secondary")}>{contextRowLabel(row.id)}</dt>
           <dd className="ms-auto shrink-0 tabular-nums text-ink-tertiary">
-            {row.percent === undefined ? formatTokens(row.tokens) : t("contextMenu.rowShare", { tokens: formatTokens(row.tokens), percent: row.percent })}
+            {t("contextMenu.rowShare", { tokens: formatTokens(row.tokens), percent: row.percent })}
           </dd>
         </div>
       ))}
@@ -73,14 +74,39 @@ function currentContext(bot: Bot, messages: readonly Message[]) {
   return compactedSinceReading(messages) ? undefined : bot.tasks?.find((task) => task.threadId === bot.threadId)?.usage?.context;
 }
 
+const lastBreakdown = new Map<string, ContextBreakdown>();
+
+/** The engine's own count, asked for when the panel opens and again whenever a turn starts or ends or the conversation
+ * is summarized. The last answer shows until the new one lands, so the panel is not redrawn; no answer leaves the total alone. */
+function useContextBreakdown(bot: Bot, summarized: boolean): ContextBreakdown | null {
+  const { id, threadId } = bot;
+  const busy = Boolean(bot.busy);
+  const slot = `${id}:${threadId ?? ""}`;
+  const moment = `${slot}:${summarized}`;
+  const [answer, setAnswer] = useState<{ moment: string; breakdown: ContextBreakdown | null } | null>(null);
+  useEffect(() => {
+    if (!threadId) return;
+    let current = true;
+    void api<{ breakdown: ContextBreakdown | null }>(`/api/bots/${id}/context`, { method: "POST", body: JSON.stringify({ threadId }) })
+      .then((reply) => reply?.breakdown ?? null, () => null)
+      .then((breakdown) => {
+        if (breakdown) lastBreakdown.set(slot, breakdown); else lastBreakdown.delete(slot);
+        if (current) setAnswer({ moment, breakdown });
+      });
+    return () => { current = false; };
+  }, [id, threadId, slot, moment, busy]);
+  if (answer?.moment === moment) return answer.breakdown;
+  return summarized ? null : lastBreakdown.get(slot) ?? null;
+}
+
 function ChatContext({ bot, onDone }: { bot: Bot; onDone: () => void }) {
-  const advanced = useAdvancedMode();
   const compact = useContextAction();
   const fresh = useContextAction();
   const messages = visibleMessages(bot);
   const context = currentContext(bot, messages);
-  const reading = contextReading(context?.tokens, context?.window);
-  const rows = advanced ? contextRows(context) : null;
+  const breakdown = useContextBreakdown(bot, compactedSinceReading(messages));
+  const reading = contextReading(context?.tokens, context?.window) ?? contextReading(breakdown?.tokens, breakdown?.window);
+  const rows = contextRows(breakdown);
   const atFreshStart = messages.at(-1)?.compaction?.fresh === true;
   const idle = !bot.busy && !compact.pending && !fresh.pending && messages.length > 0 && !atFreshStart;
   return (
@@ -88,7 +114,7 @@ function ChatContext({ bot, onDone }: { bot: Bot; onDone: () => void }) {
       <div className={MENU_LABEL}>{t("contextMenu.title")}</div>
       {reading ? <Meter reading={reading} /> : <p className={MENU_NOTE}>{t("contextMenu.empty")}</p>}
       {rows && <Breakdown rows={rows} />}
-      {context?.breakdown?.providerCompacts && <p className={MENU_NOTE}>{t("contextMenu.providerCompacts")}</p>}
+      {breakdown?.autoCompact === true && <p className={MENU_NOTE}>{t("contextMenu.providerCompacts")}</p>}
       <div className={MENU_SEPARATOR} />
       <button type="button" data-context-compact className={MENU_ROW} disabled={!idle || compactedSinceReading(messages)}
         title={t(bot.busy ? "contextWarning.busy" : "contextMenu.compactHint")}
@@ -153,7 +179,7 @@ export function ComposerContextMenu({ bot, group, members, className }: { bot?: 
       </button>
       {open && (
         <div role="dialog" aria-label={t("contextMenu.title")} data-context-panel
-          className={cn("animate-pop-in absolute bottom-full end-0 z-50 mb-2 max-h-[min(24rem,calc(100dvh-8rem))] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain", MENU_SHEET)}>
+          className={cn("animate-pop-in absolute bottom-full end-0 z-50 mb-2 max-h-[min(28rem,calc(100dvh-8rem))] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain", MENU_SHEET)}>
           {group ? <RoomContext group={group} members={members ?? []} /> : bot && <ChatContext bot={bot} onDone={close} />}
         </div>
       )}

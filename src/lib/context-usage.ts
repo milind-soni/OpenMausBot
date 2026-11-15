@@ -1,16 +1,7 @@
-import type { Bot, Group, TaskUsage } from "@/state/store";
+import type { ContextBreakdown } from "../../shared/context-breakdown";
+import type { Bot, Group } from "@/state/store";
 import { t } from "./i18n";
 import type { ContextTone } from "./usage";
-
-export const CONTEXT_CATEGORIES = ["systemPrompt", "memoryFiles", "tools", "skills", "toolCalls", "messages", "other"] as const;
-export type ContextCategory = (typeof CONTEXT_CATEGORIES)[number];
-
-/** What fills the context, by kind, when the engine can tell. `providerCompacts`: the provider folds the conversation
- * on its own as it nears the window. */
-export interface ContextBreakdown {
-  categories: ReadonlyArray<{ id: string; tokens: number }>;
-  providerCompacts?: boolean;
-}
 
 export interface ContextReading {
   tokens: number;
@@ -37,27 +28,32 @@ export function roomContextReadings(group: Pick<Group, "memberContext">, members
   });
 }
 
-export type ContextRow = { id: ContextCategory | "free"; tokens: number; percent?: number };
+const ROWS = ["systemPrompt", "memoryFiles", "tools", "skills", "toolCalls", "messages", "other", "reserved", "free"] as const;
+export type ContextRow = { id: (typeof ROWS)[number]; tokens: number; percent: number };
 
-/** A kind this app has no name for counts as Other; free space closes the list when the window is known. */
-export function contextRows(context: TaskUsage["context"]): ContextRow[] | null {
-  const listed = context?.breakdown?.categories;
-  if (!context || !Array.isArray(listed)) return null;
-  const totals = new Map<ContextCategory, number>();
-  for (const entry of listed) {
-    if (!positive(entry?.tokens)) continue;
-    const id = (CONTEXT_CATEGORIES as readonly string[]).includes(entry.id) ? entry.id as ContextCategory : "other";
-    totals.set(id, (totals.get(id) ?? 0) + entry.tokens);
+const ROW_OF: Record<string, ContextRow["id"]> = {
+  system_prompt: "systemPrompt", memory_files: "memoryFiles",
+  system_tools: "tools", mcp_tools: "tools", mcp_instructions: "tools",
+  skills: "skills", custom_agents: "skills", messages: "messages",
+};
+
+/** The engine's categories as the rows people read: tool calls and their results come out of the messages, a kind
+ * this app has no name for counts as Other, and what the engine holds back for compacting is not free space. */
+export function contextRows(breakdown: ContextBreakdown | null | undefined): ContextRow[] | null {
+  if (!breakdown || !positive(breakdown.window) || !Array.isArray(breakdown.categories)) return null;
+  const totals = new Map<ContextRow["id"], number>();
+  const add = (id: ContextRow["id"], tokens: number) => { if (positive(tokens)) totals.set(id, (totals.get(id) ?? 0) + tokens); };
+  for (const entry of breakdown.categories) {
+    add(entry.kind === "free" ? "free" : entry.kind === "buffer" ? "reserved" : ROW_OF[entry.id] ?? "other", entry.tokens);
   }
-  if (!totals.size) return null;
-  const window = positive(context.window) ? context.window : undefined;
-  const share = (tokens: number) => window ? Math.round((tokens / window) * 1000) / 10 : undefined;
-  const rows: ContextRow[] = CONTEXT_CATEGORIES.filter((id) => totals.has(id)).map((id) => ({ id, tokens: totals.get(id)!, percent: share(totals.get(id)!) }));
-  if (window) {
-    const free = Math.max(0, window - Math.max(context.tokens, rows.reduce((sum, row) => sum + row.tokens, 0)));
-    rows.push({ id: "free", tokens: free, percent: share(free) });
+  const tools = Math.min(totals.get("messages") ?? 0, (breakdown.messages?.toolCalls ?? 0) + (breakdown.messages?.toolResults ?? 0));
+  if (tools > 0) {
+    add("toolCalls", tools);
+    if (totals.get("messages") === tools) totals.delete("messages");
+    else totals.set("messages", totals.get("messages")! - tools);
   }
-  return rows;
+  if (![...totals.keys()].some((id) => id !== "free" && id !== "reserved")) return null;
+  return ROWS.filter((id) => totals.has(id)).map((id) => ({ id, tokens: totals.get(id)!, percent: Math.round((totals.get(id)! / breakdown.window) * 1000) / 10 }));
 }
 
 export function contextRowLabel(id: ContextRow["id"]): string {
@@ -69,6 +65,7 @@ export function contextRowLabel(id: ContextRow["id"]): string {
     case "toolCalls": return t("contextMenu.category.toolCalls");
     case "messages": return t("contextMenu.category.messages");
     case "other": return t("contextMenu.category.other");
+    case "reserved": return t("contextMenu.category.reserved");
     case "free": return t("contextMenu.category.free");
   }
 }

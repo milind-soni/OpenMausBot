@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { contextReading, contextRows, roomContextReadings } from "@/lib/context-usage";
 import { BotEditorStore, type Bot, type Group, type Message, type TaskUsage, type useStore } from "@/state/store";
+import type { ContextBreakdown } from "../../shared/context-breakdown";
 import { ComposerContextMenu } from "./ComposerContextMenu";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -22,6 +23,7 @@ const chat = (context: NonNullable<TaskUsage["context"]>, more: Partial<Bot> = {
 let host: HTMLDivElement;
 let root: Root;
 let fetched: ReturnType<typeof vi.fn>;
+let breakdown: ContextBreakdown | null;
 
 const render = (props: Parameters<typeof ComposerContextMenu>[0]) => act(async () => {
   root.render(createElement(BotEditorStore, { value: store, children: createElement(ComposerContextMenu, props) }));
@@ -30,10 +32,24 @@ const trigger = () => host.querySelector<HTMLButtonElement>("[data-composer-cont
 const panel = () => host.querySelector<HTMLElement>("[data-context-panel]");
 const press = (element: HTMLElement) => act(async () => { element.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 const words = () => panel()!.textContent!.replace(/\s+/g, " ");
-const posted = () => fetched.mock.calls.map(([url, init]) => [String(url).replace(/^.*(?=\/api\/)/, ""), JSON.parse(String((init as RequestInit).body))]);
+const requests = () => fetched.mock.calls.map(([url, init]) => [String(url).replace(/^.*(?=\/api\/)/, ""), JSON.parse(String((init as RequestInit).body))]);
+const posted = () => requests().filter(([path]) => !path.endsWith("/context"));
+const counted: ContextBreakdown = {
+  tokens: 136_000, window: 200_000,
+  categories: [
+    { id: "system_prompt", kind: "used", tokens: 8_000 }, { id: "system_tools", kind: "used", tokens: 10_000 },
+    { id: "mcp_tools", kind: "used", tokens: 6_000 }, { id: "memory_files", kind: "used", tokens: 2_000 },
+    { id: "skills", kind: "used", tokens: 3_000 }, { id: "custom_agents", kind: "used", tokens: 1_000 },
+    { id: "something_new", kind: "used", tokens: 6_000 }, { id: "messages", kind: "used", tokens: 100_000 },
+    { id: "autocompact_buffer", kind: "buffer", tokens: 24_000 }, { id: "free_space", kind: "free", tokens: 40_000 },
+  ],
+  messages: { toolCalls: 12_000, toolResults: 24_000, attachments: 4_000, assistant: 40_000, user: 20_000 },
+  autoCompact: true, autoCompactAt: 176_000,
+};
 
 beforeEach(() => {
-  fetched = vi.fn(async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }));
+  breakdown = null;
+  fetched = vi.fn(async (url: unknown) => new Response(String(url).endsWith("/context") ? JSON.stringify({ threadId: "t1", breakdown }) : "{}", { status: 200, headers: { "content-type": "application/json" } }));
   vi.stubGlobal("fetch", fetched);
   localStorage.setItem("omb-advanced-mode", "0");
   host = document.createElement("div");
@@ -86,21 +102,43 @@ describe("the composer's context button", () => {
     expect(panel()!.querySelector<HTMLButtonElement>("[data-context-fresh]")!.disabled).toBe(false);
   });
 
-  it("lists what fills the context only when the reading carries it, and only in Advanced", async () => {
-    const breakdown = { providerCompacts: true, categories: [
-      { id: "systemPrompt", tokens: 8_000 }, { id: "messages", tokens: 100_000 }, { id: "toolCalls", tokens: 20_000 }, { id: "somethingNew", tokens: 8_000 },
-    ] };
-    await render({ bot: chat({ tokens: 136_000, window: 200_000, breakdown }) });
+  it("asks the engine what fills the context when the panel opens, and lists it in Simple mode too", async () => {
+    breakdown = counted;
+    await render({ bot: chat({ tokens: 136_000, window: 200_000 }) });
+    expect(requests()).toEqual([]);
+    await press(trigger());
+    expect(requests()).toEqual([["/api/bots/b1/context", { threadId: "t1" }]]);
+    expect([...panel()!.querySelectorAll("[data-context-breakdown] > div")].map((row) => [row.querySelector("dt")!.textContent, row.querySelector("dd")!.textContent]))
+      .toEqual([
+        ["System prompt", "8k · 4%"], ["Memory files", "2k · 1%"], ["Tools", "16k · 8%"], ["Skills and subagents", "4k · 2%"],
+        ["Tool calls and results", "36k · 18%"], ["Messages", "64k · 32%"], ["Other", "6k · 3%"],
+        ["Reserved for compacting", "24k · 12%"], ["Free space", "40k · 20%"],
+      ]);
+    expect(words()).toContain("The provider compacts this conversation automatically.");
+  });
+
+  it("keeps the total alone when the engine has no count, and the last count on screen while a new one loads", async () => {
+    await render({ bot: chat({ tokens: 136_000, window: 200_000 }, { id: "b2" }) });
+    await press(trigger());
+    expect(words()).toContain("68% used");
+    expect(panel()!.querySelector("[data-context-breakdown]")).toBeNull();
+    expect(words()).not.toContain("The provider compacts");
+    await press(trigger());
+
+    breakdown = counted;
+    await press(trigger());
+    expect(panel()!.querySelector("[data-context-breakdown]")).not.toBeNull();
+    await press(trigger());
+    fetched.mockImplementation(() => new Promise<Response>(() => {}));
+    await press(trigger());
+    expect(panel()!.querySelectorAll("[data-context-breakdown] > div")).toHaveLength(9);
+
+    await press(trigger());
+    fetched.mockImplementation(async () => { throw new Error("offline"); });
     await press(trigger());
     expect(panel()!.querySelector("[data-context-breakdown]")).toBeNull();
-    expect(words()).toContain("The provider compacts this conversation automatically.");
-    localStorage.setItem("omb-advanced-mode", "1");
-    await act(async () => { window.dispatchEvent(new StorageEvent("storage", { key: "omb-advanced-mode", newValue: "1" })); });
-    expect([...panel()!.querySelectorAll("[data-context-breakdown] dt")].map((term) => term.textContent))
-      .toEqual(["System prompt", "Tool calls and results", "Messages", "Other", "Free space"]);
-    expect(panel()!.querySelector("[data-context-breakdown]")!.textContent).toContain("64k · 32%");
-    await render({ bot: chat({ tokens: 136_000, window: 200_000 }) });
-    expect(panel()!.querySelector("[data-context-breakdown]")).toBeNull();
+    expect(words()).toContain("68% used");
+    expect(store.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "error" }));
   });
 
   it("shows each measured bot of a room with its own compact, and no start fresh", async () => {
@@ -130,11 +168,12 @@ describe("context readings", () => {
     expect(roomContextReadings({ memberContext: { a: { tokens: 0, window: 200_000 } } }, [{ id: "a" } as Bot])).toEqual([]);
   });
 
-  it("folds unknown kinds into Other and closes with the free space", () => {
-    expect(contextRows({ tokens: 100 })).toBeNull();
-    expect(contextRows({ tokens: 100, window: 1_000, breakdown: { categories: [] } })).toBeNull();
-    expect(contextRows({ tokens: 100, window: 1_000, breakdown: { categories: [{ id: "x", tokens: 30 }, { id: "other", tokens: 20 }, { id: "tools", tokens: 50 }] } }))
-      .toEqual([{ id: "tools", tokens: 50, percent: 5 }, { id: "other", tokens: 50, percent: 5 }, { id: "free", tokens: 900, percent: 90 }]);
-    expect(contextRows({ tokens: 100, breakdown: { categories: [{ id: "messages", tokens: 100 }] } })).toEqual([{ id: "messages", tokens: 100, percent: undefined }]);
+  it("needs a window and something counted as used; the rest of the messages is what tools did not take", () => {
+    expect(contextRows(null)).toBeNull();
+    expect(contextRows({ tokens: 0, window: 1_000, categories: [{ id: "free_space", kind: "free", tokens: 1_000 }] })).toBeNull();
+    expect(contextRows({ tokens: 100, window: 1_000, categories: [{ id: "messages", kind: "used", tokens: 100 }], messages: { toolCalls: 60, toolResults: 40, attachments: 0, assistant: 0, user: 0 } }))
+      .toEqual([{ id: "toolCalls", tokens: 100, percent: 10 }]);
+    expect(contextRows({ tokens: 100, window: 1_000, categories: [{ id: "messages", kind: "used", tokens: 100 }, { id: "compact_buffer", kind: "buffer", tokens: 50 }] }))
+      .toEqual([{ id: "messages", tokens: 100, percent: 10 }, { id: "reserved", tokens: 50, percent: 5 }]);
   });
 });

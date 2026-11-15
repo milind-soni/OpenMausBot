@@ -2756,6 +2756,7 @@
   "contextMenu.category.toolCalls": "Tool calls and results",
   "contextMenu.category.messages": "Messages",
   "contextMenu.category.other": "Other",
+  "contextMenu.category.reserved": "Reserved for compacting",
   "contextMenu.category.free": "Free space",
   "chat.emptyPrompt": "Send a message to start the conversation.",
   "chat.chiefOfStaff": "Chief of Staff",
