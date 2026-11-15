@@ -320,6 +320,7 @@ import * as tts from "./tts/index.ts";
 import { voiceNoteFailure } from "./tts/errors.ts";
 import { createDecider, deciderReady, describeDecider } from "./decider/index.ts"; import { createExtractor, describeHelpers } from "./extractor/index.ts";
 import { createStopLineRoutes } from "./routes/stop-line.ts"; import { decideRoomResponder } from "./decider/room-routing.ts"; import { roomRoutingInput } from "./host/room-routing-input.ts";
+import { autoRoomDefault, roomTurnMembers } from "./room-routing-members.ts";
 import { liveHistoryFrom, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
 import { LiveCallController, LiveCallSignedOutError } from "./live-call-controller.ts"; import { liveSessionWiring } from "./live-session-wiring.ts";
 import { liveCallSettings, liveSettingsFor, liveSettingsForClient, saveLiveSettings } from "./live-settings.ts"; import { azureLiveCallRefusal, liveScopeRefusal } from "./live-access.ts";
@@ -10734,9 +10735,8 @@ function startGroupTurn(
   const members = group.memberIds
     .map((id) => store.bot(id))
     .filter((bot): bot is NonNullable<typeof bot> => Boolean(bot));
-  const availableMembers = members.filter((member) => !member.hidden);
   const isHeld = (member: { id: string }) => roomHeld(group, member.id);
-  const routableMembers = availableMembers.filter((member) => !isHeld(member));
+  const { availableMembers, goalMembers, routableMembers } = roomTurnMembers(members, isHeld, (member) => botHolds.held(member.id));
   const requestedGoalCoordinator = options.goalCoordinatorBotId
     ? availableMembers.find((member) => member.id === options.goalCoordinatorBotId)
     : undefined;
@@ -10813,15 +10813,15 @@ function startGroupTurn(
     });
   }
   const pageBots = channelMode === "chat" ? pointedResponders(options.pointed, availableMembers, () => roomResponders(text, availableMembers, { kind: "mentions" }, options.mentions)) : [];
-  let responders = pageBots.length ? pageBots : roomResponders(text, members, replyBot ? { kind: "member", botId: replyBot.id } : group.defaultResponder, options.mentions);
+  let responders = pageBots.length ? pageBots : roomResponders(text, members, !group.dm && channelMode === "chat" ? autoRoomDefault(group.defaultResponder, routableMembers, replyBot) : group.defaultResponder, options.mentions);
   if (!group.dm) {
     const addressed = stopWordPlacement(text) === "adjacent" ? undefined : message.id;
     for (const held of responders.filter(isHeld)) noteHeldSkip(group.id, threadId, held, addressed);
     responders = responders.filter((responder) => !isHeld(responder));
   } const unsentPick = undeliveredPickBots(options.pointed, responders), notePickNotSent = (id: string) => store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(threadId), "server.rooms.pickNotSent", { bot: store.bot(id)?.name ?? id }), ok: false } }); for (const id of unsentPick) notePickNotSent(id);
-  const explicitlyMentionedLead = roomResponders(text, routableMembers, { kind: "mentions" }, options.mentions)[0];
+  const explicitlyMentionedLead = roomResponders(text, goalMembers, { kind: "mentions" }, options.mentions)[0];
   const goalCoordinator = channelMode === "goal"
-    ? requestedGoalCoordinator ?? explicitlyMentionedLead ?? selectGroupGoalCoordinator(routableMembers, group.defaultResponder)
+    ? requestedGoalCoordinator ?? explicitlyMentionedLead ?? selectGroupGoalCoordinator(goalMembers, group.defaultResponder)
     : null;
   if (!responders.length && group.dm) {
     const lastSpeakerId = [...store.messagesFor(threadId)]
