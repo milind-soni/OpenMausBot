@@ -64,6 +64,15 @@ describe("a bot's page as a compact card", () => {
     expect(Array.from(card().querySelectorAll("button"), (button) => button.getAttribute("aria-label"))).toEqual(["About this app", "Reload app", "Open page"]);
   });
 
+  it("glazes the foot of the preview into the footer, and only while there is a preview", async () => {
+    await render(row(payload()));
+    expect(card().querySelector("[data-app-box] [data-page-glaze]")).not.toBeNull();
+    expect(card().querySelector("[data-page-footer]")!.className).not.toContain("border-t");
+    await press(opener());
+    expect(card().querySelector("[data-page-glaze]")).toBeNull();
+    expect(card().querySelector("[data-page-footer]")!.className).toContain("border-t");
+  });
+
   it("names the version once the page has been updated", async () => {
     await render(row(payload({ rev: 1, doc: "d1", history: ["d0"] })));
     expect(card().querySelector("[data-page-footer]")!.textContent).toBe("PricingPage · v2");
