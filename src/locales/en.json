@@ -6890,7 +6890,7 @@
   "call.live.provider.custom": "Custom endpoint",
   "call.live.customEndpoint": "Endpoint address",
   "call.live.customModel": "Model",
-  "call.live.customHint": "Any server that speaks OpenAI's GPT-Live API (POST /v1/live/sessions), such as your own gateway. Paste its address, like https://gateway.example.com/v1, and the model name. An empty name means gpt-live-1. Plain http works only on this computer (127.0.0.1 or localhost). A key works only with the endpoint it was saved for: changing the Service or the endpoint's host asks for the key again.",
+  "call.live.customHint": "Any service that speaks OpenAI's GPT-Live API (POST /v1/live/sessions), such as your own gateway. Paste its address, like https://gateway.example.com/v1, and the model name. An empty name means gpt-live-1. Plain http works only on this computer (127.0.0.1 or localhost). A key works only with the endpoint it was saved for: changing the Service or the endpoint's host asks for the key again.",
   "call.live.customKey": "Endpoint key",
   "call.live.customNeedsKey": "Add the key of your custom endpoint with Change key.",
   "call.live.customKeyTitle": "Live calls through a custom endpoint",

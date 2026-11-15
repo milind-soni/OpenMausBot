@@ -6568,7 +6568,7 @@
   "call.live.provider.custom": "Endereço personalizado",
   "call.live.customEndpoint": "Endereço do serviço",
   "call.live.customModel": "Modelo",
-  "call.live.customHint": "Qualquer servidor compatível com a API GPT-Live da OpenAI (POST /v1/live/sessions), como o seu próprio gateway. Cole o endereço, por exemplo https://gateway.example.com/v1, e o nome do modelo. Deixe o nome em branco para usar gpt-live-1. http simples só funciona neste computador (127.0.0.1 ou localhost). Uma chave só funciona com o endereço para o qual foi salva: ao mudar a opção “Serviço” ou o domínio do endereço, você precisa informar a chave novamente.",
+  "call.live.customHint": "Qualquer serviço compatível com a API GPT-Live da OpenAI (POST /v1/live/sessions), como o seu próprio gateway. Cole o endereço, por exemplo https://gateway.example.com/v1, e o nome do modelo. Deixe o nome em branco para usar gpt-live-1. http simples só funciona neste computador (127.0.0.1 ou localhost). Uma chave só funciona com o endereço para o qual foi salva: ao mudar a opção “Serviço” ou o domínio do endereço, você precisa informar a chave novamente.",
   "call.live.customKey": "Chave do serviço",
   "call.live.customNeedsKey": "Adicione a chave do seu endereço personalizado pela opção “Trocar chave”.",
   "call.live.customKeyTitle": "Chamadas ao vivo por um endereço personalizado",
