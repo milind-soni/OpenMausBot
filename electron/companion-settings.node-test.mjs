@@ -114,3 +114,13 @@ test("the switch for other computers lives on the Tailscale route and goes with 
   const read = readCompanionSettings({ version: COMPANION_SETTINGS_VERSION, routes: { tailscale: { on: true, since: 5, name: "mac.tail1.ts.net", computers: "yes" } } });
   assert.equal(read.routes.tailscale.computers, undefined, "anything but true is off: this opens a listener");
 });
+
+test("a Tailscale route the share turned on is marked, keeps the mark through a name refresh, and loses it when the person turns the route on or off", () => {
+  const shared = setRoute(defaultCompanionSettings(), "tailscale", true, { now: 5, name: "mac.tail1.ts.net", computers: true, forShare: true });
+  assert.deepEqual(shared.routes.tailscale, { on: true, since: 5, name: "mac.tail1.ts.net", computers: true, forShare: true });
+  assert.equal(setRoute(shared, "tailscale", true, { now: 6, name: "mac.tail1.ts.net" }).routes.tailscale.forShare, true);
+  assert.equal(setRoute(shared, "tailscale", true, { now: 6, forShare: false }).routes.tailscale.forShare, undefined);
+  assert.deepEqual(setRoute(shared, "tailscale", false).routes.tailscale, { on: false, since: null });
+  assert.equal(readCompanionSettings({ version: COMPANION_SETTINGS_VERSION, routes: shared.routes }).routes.tailscale.forShare, true);
+  assert.equal(readCompanionSettings({ version: COMPANION_SETTINGS_VERSION, routes: { tailscale: { on: true, since: 5, forShare: "yes" } } }).routes.tailscale.forShare, undefined);
+});

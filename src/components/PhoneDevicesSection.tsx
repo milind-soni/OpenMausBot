@@ -60,6 +60,7 @@ export function deriveTailscalePairingStatus(
   if (state.tailscaleProblem === "no-cli") return { kind: "signed-out", title: t("remote.tailscale.noCli"), detail: "" };
   if (state.tailscaleProblem === "not-running") return { kind: "signed-out", title: t("remote.tailscale.notRunning"), detail: "" };
   if (state.tailscaleProblem === "needs-permission") return { kind: "signed-out", title: t("remote.tailscale.needsPermission", { app: productName() }), detail: "" };
+  if (state.tailscaleProblem === "needs-approval") return { kind: "signed-out", title: t("remote.tailscale.needsApproval"), detail: "" };
   if (state.tailscaleProblem === "signed-out") return { kind: "signed-out", title: t("remote.tailscale.signIn"), detail: "" };
   if (state.error) return { kind: "error", title: t("remote.status.attention"), detail: state.error };
   const route = state.routes?.tailscale;
@@ -71,9 +72,10 @@ export function deriveTailscalePairingStatus(
     : { kind: "waiting", title, detail: t("remote.tailscale.linkOff") };
 }
 
-/** The control plane gives an app that serves the encrypted connection no free web address (`relay_capable`): the row shows only where one is held or on. */
-export function showHttpsAddressRow(state: Pick<CompanionState, "routes" | "endpoints" | "e2e">): boolean {
-  return state.routes?.https?.on === true || state.endpoints?.some((endpoint) => endpoint.kind === "hosted") === true || state.e2e === undefined;
+/** The control plane gives a build with the encrypted connection no free web address (`relay_capable`): there the row
+ * shows only while the route is on or the account still holds an address. `renewPairing` is what such a build's bridge adds. */
+export function showHttpsAddressRow(state: Pick<CompanionState, "routes">, account: Pick<CompanionAccountState, "endpoint"> | null, bridge: Pick<CompanionBridge, "renewPairing"> | null): boolean {
+  return state.routes?.https?.on === true || Boolean(account?.endpoint) || typeof bridge?.renewPairing !== "function";
 }
 
 /** Older app builds have no switch: on falls back to the check that turns it on, and off cannot be asked of them. */
@@ -500,7 +502,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
                       onClick={() => void c.act((companion) => setCompanionTailscale(companion, !tailscaleOn))} />
                   </span>
                 </SettingRow>
-                {showHttpsAddressRow(state) && <SettingRow title={t("devices.route.https")} subtitle={t("devices.route.httpsDetail", { app: productName() })}
+                {showHttpsAddressRow(state, c.account, companionBridge()) && <SettingRow title={t("devices.route.https")} subtitle={t("devices.route.httpsDetail", { app: productName() })}
                   message={(httpsOn && hosted) || c.account?.status === "ready" || accountActionError ? <>
                     {httpsOn && hosted ? t("devices.route.httpsOn", { address: endpointHost(hosted.url) }) : null}
                     {c.account?.status === "ready" && <span className="block">{t("devices.route.httpsAccount", { app: productName() })}</span>}

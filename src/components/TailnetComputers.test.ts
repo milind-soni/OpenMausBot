@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -14,7 +15,7 @@ vi.mock("./ServerPairingCard", async () => {
 vi.mock("../lib/session", async (original) => ({ ...await original<typeof import("../lib/session")>(), readSessionState: async () => ({ kind: "loopback" }) }));
 
 const { deriveTailscalePairingStatus } = await import("./PhoneDevicesSection");
-const { TailnetComputers, setComputerShare, tailnetShareLine } = await import("./TailnetComputers");
+const { TailnetComputers, tailnetShareLine } = await import("./TailnetComputers");
 
 const controller = { busy: false, accountBusy: false, act: async () => {} } as unknown as PhoneSetupController;
 const tailscale = (on: boolean, computers = false) => (on ? { on: true, since: 1, name: "macmini.tail1234.ts.net", computers } : { on: false, since: null });
@@ -76,35 +77,43 @@ describe("the Your other computers row", () => {
   });
 });
 
-describe("turning Your other computers on", () => {
-  const bridge = (tailscaleAnswer: Partial<CompanionState>) => {
+describe("what the row says when nothing answers", () => {
+  const sharing = { on: true, origin: null, https: false, problem: "signed-out" };
+
+  it("with the share on and no MagicDNS name, says what to fix, not that Tailscale isn't connected", () => {
+    const html = row({ routes: { tailscale: { on: true, since: 1, name: null, computers: true } } as CompanionState["routes"], tailnetShare: sharing });
+    expect(html).toContain('data-tailnet-trouble="magicdns"');
+    expect(html).toContain("Turn on MagicDNS in Tailscale");
+    expect(html).not.toContain("isn't connected on this computer yet");
+    expect(html).not.toContain("data-pairing-card");
+  });
+
+  it("says Tailscale isn't connected only when Tailscale itself gives no reason", () => {
+    const html = row({ routes: { tailscale: tailscale(true, true) } as CompanionState["routes"], tailnetShare: sharing });
+    expect(html).toContain("isn't connected on this computer yet");
+    expect(html).not.toContain("data-tailnet-trouble");
+  });
+
+  it("says the computer is waiting for approval on the Tailscale network when that is why the switch stayed off", () => {
+    const html = row({ routes: { tailscale: tailscale(false) } as CompanionState["routes"], tailscaleProblem: "needs-approval" });
+    expect(html).toContain("This computer is waiting for approval on your Tailscale network. Approve it in the Tailscale admin console, then try again.");
+    expect(html).toMatch(/<button[^>]*role="switch"[^>]*aria-checked="false"/);
+  });
+});
+
+describe("the switch", () => {
+  it("asks the app for the share only: the app turns Tailscale on and off with it", async () => {
     const calls: string[] = [];
-    const companion = {
-      state: async () => ({}) as CompanionState,
-      setTailscale: async (on: boolean) => { calls.push(`tailscale:${on}`); return tailscaleAnswer as CompanionState; },
-      setTailscaleComputers: async (on: boolean) => { calls.push(`computers:${on}`); return { routes: { tailscale: tailscale(true, on) } } as CompanionState; },
-    } as unknown as CompanionBridge;
-    return { calls, companion };
-  };
-
-  it("turns Tailscale on first, then the share", async () => {
-    const { calls, companion } = bridge({ routes: { tailscale: tailscale(true) } as CompanionState["routes"] });
-    const next = await setComputerShare(companion, { routes: { tailscale: tailscale(false) } as CompanionState["routes"] }, true);
-    expect(calls).toEqual(["tailscale:true", "computers:true"]);
-    expect(next.routes?.tailscale?.computers).toBe(true);
-  });
-
-  it("stops with Tailscale's reason when Tailscale can't be turned on", async () => {
-    const { calls, companion } = bridge({ routes: { tailscale: tailscale(false) } as CompanionState["routes"], tailscaleProblem: "not-installed" });
-    const next = await setComputerShare(companion, { routes: { tailscale: tailscale(false) } as CompanionState["routes"] }, true);
-    expect(calls).toEqual(["tailscale:true"]);
-    expect(next.tailscaleProblem).toBe("not-installed");
-  });
-
-  it("with Tailscale already on, changes only the share; turning it off leaves Tailscale on", async () => {
-    const { calls, companion } = bridge({});
-    await setComputerShare(companion, { routes: { tailscale: tailscale(true) } as CompanionState["routes"] }, true);
-    await setComputerShare(companion, { routes: { tailscale: tailscale(true, true) } as CompanionState["routes"] }, false);
-    expect(calls).toEqual(["computers:true", "computers:false"]);
+    const companion = { state: async () => ({}) as CompanionState, setTailscale: async () => { calls.push("tailscale"); return {} as CompanionState; }, setTailscaleComputers: async (on: boolean) => { calls.push(`computers:${on}`); return {} as CompanionState; } } as unknown as CompanionBridge;
+    const act = vi.fn(async (call: (bridge: CompanionBridge) => Promise<CompanionState>) => call(companion));
+    const { createRoot } = await import("react-dom/client");
+    const { flushSync } = await import("react-dom");
+    const host = document.createElement("div");
+    const root = createRoot(host);
+    const state = { routes: { tailscale: tailscale(false) } } as unknown as CompanionState;
+    flushSync(() => root.render(createElement(TailnetComputers, { c: { busy: false, accountBusy: false, act } as unknown as PhoneSetupController, blocked: null, simple: true, state, status: deriveTailscalePairingStatus(state) })));
+    host.querySelector<HTMLButtonElement>('[role="switch"]')!.click();
+    await vi.waitFor(() => expect(calls).toEqual(["computers:true"]));
+    flushSync(() => root.unmount());
   });
 });

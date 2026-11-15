@@ -6501,5 +6501,6 @@
   "composer.command.burstDesc": "Ejecutar muchas partes de un trabajo a la vez y luego unir los resultados",
   "devices.computers.pairButton": "Vincular un ordenador",
   "devices.computers.title": "Tus otros ordenadores",
-  "devices.computers.pairTitle": "Vincular otro ordenador"
+  "devices.computers.pairTitle": "Vincular otro ordenador",
+  "remote.tailscale.needsApproval": "Este ordenador espera la aprobación en tu red de Tailscale. Apruébalo en la consola de administración de Tailscale y vuelve a intentarlo."
 }

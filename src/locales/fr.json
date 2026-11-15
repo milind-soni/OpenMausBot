@@ -3803,5 +3803,6 @@
   "composer.command.burstDesc": "Lancer plusieurs parties d'un travail en même temps, puis fusionner les résultats",
   "devices.computers.pairButton": "Associer un ordinateur",
   "devices.computers.title": "Vos autres ordinateurs",
-  "devices.computers.pairTitle": "Associer un autre ordinateur"
+  "devices.computers.pairTitle": "Associer un autre ordinateur",
+  "remote.tailscale.needsApproval": "Cet ordinateur attend d'être approuvé sur votre réseau Tailscale. Approuvez-le dans la console d'administration Tailscale, puis réessayez."
 }

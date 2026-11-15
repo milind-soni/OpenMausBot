@@ -4078,5 +4078,6 @@
   "composer.command.burstDesc": "Запустити багато частин роботи одночасно, а потім об'єднати результати",
   "devices.computers.pairButton": "Підключити комп’ютер",
   "devices.computers.title": "Ваші інші комп’ютери",
-  "devices.computers.pairTitle": "Підключити інший комп’ютер"
+  "devices.computers.pairTitle": "Підключити інший комп’ютер",
+  "remote.tailscale.needsApproval": "Цей комп’ютер чекає на схвалення у вашій мережі Tailscale. Схваліть його в консолі адміністратора Tailscale, потім спробуйте ще раз."
 }

@@ -7786,5 +7786,6 @@
   "composer.command.burstDesc": "작업의 여러 부분을 한 번에 실행한 뒤 결과 합치기",
   "devices.computers.pairButton": "컴퓨터 페어링",
   "devices.computers.title": "내 다른 컴퓨터",
-  "devices.computers.pairTitle": "다른 컴퓨터 페어링"
+  "devices.computers.pairTitle": "다른 컴퓨터 페어링",
+  "remote.tailscale.needsApproval": "이 컴퓨터는 Tailscale 네트워크에서 승인을 기다리고 있습니다. Tailscale 관리 콘솔에서 승인한 다음 다시 시도하세요."
 }

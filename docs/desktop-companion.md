@@ -14,8 +14,10 @@ the phone app can use it. A computer needs the link below.
 
 1. On the host, open **Settings → Phone & devices**. Settings search finds the row too: type "other computers" or
    "tailscale".
-2. Turn on **Your other computers**. This turns Tailscale on in the app first, if it is off. The app never installs,
-   starts or signs in Tailscale itself: if Tailscale is not installed, not running or signed out, the row says so.
+2. Turn on **Your other computers**. This turns Tailscale on in the app first, if it is off, and turning the share off
+   turns it off again unless you turned Tailscale on yourself or a phone is paired. The app never installs, starts or
+   signs in Tailscale itself: if Tailscale is not installed, not running, signed out or waiting for approval on your
+   Tailscale network, the row says so.
 3. Wait for the line under the row: `Ready at https://<name>.ts.net` when Tailscale's HTTPS Certificates are on, or
    `Ready at http://<name>.ts.net:8799` when they are off. Both are private to your Tailscale network.
 4. Choose **Pair a computer**. The dialog shows the address and a 12-character code, with **Copy link**. The code works
@@ -43,7 +45,7 @@ holds it awake while a way in is on, and that includes **Your other computers**.
 | It says | Do this |
 |---|---|
 | "…is a MausBot desktop app. To open it from here, turn on Tailscale and Your other computers…" | The address reached the host's phone link or an app that is not shared. Share the host as above and use its link. |
-| "That code is for the phone app." | A six-digit code was typed. Use **Pair a computer** on the host. |
+| "That code is for the phone app…" | A six-digit code was typed. Use **Pair a computer** on the host. |
 | "Tailscale isn't connected on this computer." | Open Tailscale on the client and sign in. |
 | "…isn't on this computer's tailnet." | The two computers are signed in to different Tailscale accounts. |
 | "…is on your tailnet but didn't answer." | The host is asleep, offline, or **Your other computers** is off. |

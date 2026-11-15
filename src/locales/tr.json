@@ -6005,5 +6005,6 @@
   "composer.command.burstDesc": "Bir işin birçok parçasını aynı anda çalıştırın, sonra sonuçları birleştirin",
   "devices.computers.pairButton": "Bilgisayar eşle",
   "devices.computers.title": "Diğer bilgisayarlarınız",
-  "devices.computers.pairTitle": "Başka bir bilgisayar eşle"
+  "devices.computers.pairTitle": "Başka bir bilgisayar eşle",
+  "remote.tailscale.needsApproval": "Bu bilgisayar Tailscale ağınızda onay bekliyor. Tailscale yönetici konsolunda onaylayın, ardından tekrar deneyin."
 }

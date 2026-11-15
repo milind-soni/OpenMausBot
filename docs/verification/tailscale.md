@@ -50,7 +50,9 @@ Use a disposable workspace on the host.
 
 1. Leave HTTPS Certificates off at https://login.tailscale.com/admin/dns.
 2. On the host, open Settings → Phone & devices and turn on **Your other computers**. With Tailscale off in the app,
-   that one switch turns it on first. Expect `Ready at http://$NAME:8799`. Do this once in Simple mode: the row is
+   that one switch turns it on first. Turn it off again with nothing paired: expect Tailscale under More ways in to go
+   off with it. Then turn Tailscale on yourself, turn the share on and off: expect Tailscale to stay on. Leave the
+   share on. Expect `Ready at http://$NAME:8799`. Do this once in Simple mode: the row is
    there without Advanced mode.
 3. On the host, run `lsof -nP -iTCP:8799 -sTCP:LISTEN`. Expect `127.0.0.1:8799` and the tailnet addresses, and never
    `*:8799`.
@@ -99,10 +101,11 @@ says it listens on `http://$NAME:8799`, and connect a client with the printed li
 
 1. Pair the phone with the Tailscale route, then move it from Wi-Fi to cellular with Tailscale on. Chats keep working.
 2. Turn off **Your other computers** on the host. The client's page stops answering, and the phone keeps working:
-   Tailscale stays on in the app.
+   with a phone paired, Tailscale stays on in the app.
 3. With nothing else on, turn **Your other computers** on and then **Keep this computer awake**. Expect the switch to
    be usable, and the host to stay reachable from the client after its usual sleep time.
 4. On a computer without Tailscale installed, turn **Your other computers** on. Expect the switch to stay off and the
-   row to say Tailscale isn't installed, with **Get Tailscale**.
+   row to say Tailscale isn't installed, with **Get Tailscale**. On a tailnet with device approval, do the same on a
+   computer not yet approved: expect the row to say it is waiting for approval.
 5. A MausBot Cloud is not on your tailnet. Lend the host to the Cloud with Tailscale on and confirm it still works over
    the host's own outbound connection.

@@ -4,13 +4,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CompanionState, PhoneSetupController } from "./PhoneSetupFlow";
 
-const f = vi.hoisted(() => ({ state: null as object | null }));
+const f = vi.hoisted(() => ({ state: null as object | null, bridge: {} as object, account: null as object | null }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: {} } }) }));
 vi.mock("./PhonesList", () => ({ PhonesList: () => null }));
 vi.mock("./PhoneSetupFlow", () => ({
-  companionBridge: () => ({}),
+  companionBridge: () => f.bridge,
   companionAccountBridge: () => null,
-  usePhoneSetupController: () => ({ state: f.state, busy: false, accountBusy: false, account: null, accountAct: () => undefined, act: vi.fn(), accountError: null, error: null, useLocal: vi.fn(), start: vi.fn(), cancel: vi.fn(), refreshTailscale: vi.fn() }),
+  usePhoneSetupController: () => ({ state: f.state, busy: false, accountBusy: false, account: f.account, accountAct: () => undefined, act: vi.fn(), accountError: null, error: null, useLocal: vi.fn(), start: vi.fn(), cancel: vi.fn(), refreshTailscale: vi.fn() }),
   PhoneSetupFlowView: () => "PAIRING_CODE_VIEW",
   companionAccountActionError: () => null,
   loadCompanionBridgeState: () => null,
@@ -32,6 +32,8 @@ const c = () => ({ busy: false, act: vi.fn(), useLocal: vi.fn(), start: vi.fn(),
 const page = (simple = false) => renderToStaticMarkup(createElement(PhoneDevicesSection, { simple })).replaceAll("&#x27;", "'");
 
 beforeEach(() => {
+  f.bridge = {};
+  f.account = null;
   f.state = state();
 });
 
@@ -114,24 +116,37 @@ describe("Keep this computer awake", () => {
 });
 
 describe("the HTTPS address row", () => {
-  const hosted = { url: "https://c-0123456789abcdef0123456789abcdef.mausbot.si", kind: "hosted" as const, priority: 0 };
-  const relayCapable = { enabled: true, relay: "off" as const, node: null, descriptor: null };
+  const current = { renewPairing: async () => state() };
+  const held = { available: true, status: "ready", endpoint: "https://c-0123456789abcdef0123456789abcdef.mausbot.si" };
 
-  it("is hidden on an app that serves the encrypted connection and holds no web address", () => {
-    const base = { routes: routes({ wifi: true }), e2e: relayCapable };
-    expect(showHttpsAddressRow(base)).toBe(false);
-    f.state = state(base);
-    const html = page(false);
-    expect(html).toContain("More ways in");
-    expect(html).not.toContain('data-route-row="https"');
-    expect(html).not.toContain("HTTPS address");
+  it("is hidden on a build with the encrypted connection that holds no web address, whether or not the phone link is running", () => {
+    expect(showHttpsAddressRow({ routes: routes({ wifi: true }) }, null, current)).toBe(false);
+    expect(showHttpsAddressRow({ routes: routes() }, { }, current)).toBe(false);
+    f.bridge = current;
+    f.account = { available: true, status: "ready" };
+    for (const enabled of [false, true]) {
+      f.state = state({ enabled, routes: routes({ wifi: true, tailscale: true }) });
+      const html = page(false);
+      expect(html).toMatch(/data-settings-disclosure="more-ways"[\s\S]*?aria-expanded="true"[\s\S]*?data-route-row="tailscale"/);
+      expect(html).not.toContain('data-route-row="https"');
+      expect(html).not.toContain("HTTPS address");
+    }
   });
 
-  it("stays for a computer that still has its address, has the route on, or runs a build before the encrypted connection", () => {
-    expect(showHttpsAddressRow({ routes: routes(), e2e: relayCapable, endpoints: [hosted] })).toBe(true);
-    expect(showHttpsAddressRow({ routes: routes({ https: true }), e2e: relayCapable })).toBe(true);
-    expect(showHttpsAddressRow({ routes: routes() })).toBe(true);
-    f.state = state({ routes: routes({ https: true }), e2e: relayCapable, endpoints: [hosted] });
+  it("stays while the account still holds an address, with Set up when the route is off", () => {
+    expect(showHttpsAddressRow({ routes: routes() }, held, current)).toBe(true);
+    f.bridge = current;
+    f.account = held;
+    f.state = state({ routes: routes({ wifi: true, tailscale: true }) });
+    expect(page(false)).toMatch(/HTTPS address[\s\S]*?data-route-row="https"[\s\S]*?>Set up</);
+  });
+
+  it("stays while the route is on, and on a build before the encrypted connection", () => {
+    expect(showHttpsAddressRow({ routes: routes({ https: true }) }, null, current)).toBe(true);
+    expect(showHttpsAddressRow({ routes: routes() }, null, {})).toBe(true);
+    expect(showHttpsAddressRow({ routes: routes() }, null, null)).toBe(true);
+    f.bridge = current;
+    f.state = state({ routes: routes({ https: true }), endpoints: [{ url: held.endpoint, kind: "hosted", priority: 0 }] });
     const html = page(true);
     expect(html).toMatch(/HTTPS address[\s\S]*?data-route-row="https"[\s\S]*?>Turn off</);
     expect(html).toContain("On · c-0123456789abcdef0123456789abcdef.mausbot.si");

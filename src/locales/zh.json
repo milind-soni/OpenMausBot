@@ -10220,5 +10220,6 @@
   "activity.tool.team.burst": "并行处理",
   "devices.computers.pairButton": "配对电脑",
   "devices.computers.title": "你的其他电脑",
-  "devices.computers.pairTitle": "配对另一台电脑"
+  "devices.computers.pairTitle": "配对另一台电脑",
+  "remote.tailscale.needsApproval": "这台电脑正在等待你的 Tailscale 网络批准。请在 Tailscale 管理控制台中批准它，然后重试。"
 }

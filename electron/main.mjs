@@ -452,7 +452,7 @@ import { companionAdvertisedHostedUrl, companionEnabledAtRest, companionOriginTa
   companionBrowserControlAccess, companionRevoke, companionRunning, companionSettings, companionState, rememberCompanionKeepAwake, setCompanionHostedUrl, setCompanionLifecycleListener, startCompanion, stopCompanion } from "./companion.mjs";
 import { createDesktopCompanionE2E, deviceCounts } from "./companion-e2e-desktop.mjs"; import { startCheckedManagedConnection } from "./managed-companion-start.mjs";
 import { autoStartCompanion } from "./companion-autostart.mjs";
-import { createPhoneLinkRoutes } from "./phone-link-routes.mjs";
+import { createPhoneLinkRoutes } from "./phone-link-routes.mjs"; import { reachableForKeepAwake } from "./keep-awake.mjs";
 import { createRoutineWakeHold, rememberRoutineWake, routineWakeSettings } from "./routine-wake.mjs";
 import { CREDENTIAL_PATCH, credentialSaveError } from "./credential-patch.mjs";
 
@@ -568,7 +568,7 @@ function publicManagedCompanionState() {
 }
 
 function decorateDesktopCompanionState(state) {
-  syncCompanionKeepAwake((state.enabled && !state.error) || tailnetShare.state().on === true, state.keepAwake === true);
+  syncCompanionKeepAwake(reachableForKeepAwake(state, tailnetShare.state()), state.keepAwake === true);
   return { ...state, managedConnection: publicManagedCompanionState(), tailnetShare: tailnetShare.state(), relayToken: companionE2E?.relayToken ?? null };
 }
 
@@ -677,7 +677,7 @@ async function stopDesktopCompanion({ remember = true } = {}) {
   return desktopCompanionState();
 }
 
-const tailnetShare = createTailnetShare({ check: checkTailscale, allowed: () => remotePolicyAllows({ managed: app.isPackaged && !desktopRemoteAccess, client: managedDesktop }), markerFile: () => path.join(app.getPath("userData"), "tailnet-serve.marker"), log: slog }); const phoneLinkRoutes = createPhoneLinkRoutes({ shareChanged: () => tailnetShare.apply(companionSettings().routes.tailscale), rememberRoute: rememberCompanionRoute, routeOn: companionRouteOn, dismissNotice: dismissCompanionNotice, state: () => desktopCompanionState(), running: companionRunning, log: slog, changed: (route, on) => (route !== "https" ? companionE2E?.reconcile() : on ? startManagedCompanionConnection({ waitForVerification: false }) : stopManagedCompanionEndpointLocally()),
+const tailnetShare = createTailnetShare({ check: checkTailscale, allowed: () => remotePolicyAllows({ managed: app.isPackaged && !desktopRemoteAccess, client: managedDesktop }), markerFile: () => path.join(app.getPath("userData"), "tailnet-serve.marker"), log: slog }); const phoneLinkRoutes = createPhoneLinkRoutes({ shareChanged: () => tailnetShare.apply(companionSettings().routes.tailscale), rememberRoute: rememberCompanionRoute, routeOn: companionRouteOn, tailscaleRoute: () => companionSettings().routes.tailscale, dismissNotice: dismissCompanionNotice, state: () => desktopCompanionState(), running: companionRunning, log: slog, changed: (route, on) => (route !== "https" ? companionE2E?.reconcile() : on ? startManagedCompanionConnection({ waitForVerification: false }) : stopManagedCompanionEndpointLocally()),
   wake: () => (!companionRunning() && companionStartsAtLaunch({ remoteClient: Boolean(desktopRemoteAccess), serverReady }) ? startDesktopCompanion({ waitForHosted: false, remember: false }) : null), sleep: () => stopDesktopCompanion({ remember: false }) });
 setCompanionMigrationFacts(() => ({ managedAddress: Boolean(managedCompanionTunnelAccess(secureCredentials)) }));
 

@@ -3657,5 +3657,6 @@
   "composer.command.burstDesc": "किसी काम के कई हिस्से एक साथ चलाएं, फिर नतीजे मिलाएं",
   "devices.computers.pairButton": "कंप्यूटर जोड़ें",
   "devices.computers.title": "आपके दूसरे कंप्यूटर",
-  "devices.computers.pairTitle": "दूसरा कंप्यूटर जोड़ें"
+  "devices.computers.pairTitle": "दूसरा कंप्यूटर जोड़ें",
+  "remote.tailscale.needsApproval": "यह कंप्यूटर आपके Tailscale नेटवर्क पर मंज़ूरी का इंतज़ार कर रहा है। Tailscale एडमिन कंसोल में इसे मंज़ूर करें, फिर दोबारा कोशिश करें।"
 }

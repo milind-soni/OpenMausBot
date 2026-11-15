@@ -7266,5 +7266,6 @@
   "composer.command.burstDesc": "Uruchom wiele części zadania naraz, a potem połącz wyniki",
   "devices.computers.pairButton": "Sparuj komputer",
   "devices.computers.title": "Twoje inne komputery",
-  "devices.computers.pairTitle": "Sparuj inny komputer"
+  "devices.computers.pairTitle": "Sparuj inny komputer",
+  "remote.tailscale.needsApproval": "Ten komputer czeka na zatwierdzenie w Twojej sieci Tailscale. Zatwierdź go w konsoli administracyjnej Tailscale, a potem spróbuj ponownie."
 }

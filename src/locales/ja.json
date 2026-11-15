@@ -8096,5 +8096,6 @@
   "composer.command.burstDesc": "作業の多くの部分を同時に実行し、結果をまとめます",
   "devices.computers.pairButton": "コンピュータをペアリング",
   "devices.computers.title": "お使いの他のコンピューター",
-  "devices.computers.pairTitle": "別のコンピュータをペアリング"
+  "devices.computers.pairTitle": "別のコンピュータをペアリング",
+  "remote.tailscale.needsApproval": "このコンピューターは Tailscale ネットワークでの承認を待っています。Tailscale の管理コンソールで承認してから、もう一度お試しください。"
 }

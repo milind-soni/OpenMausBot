@@ -7125,5 +7125,6 @@
   "composer.command.burstDesc": "Esegui molte parti di un lavoro insieme, poi unisci i risultati",
   "devices.computers.pairButton": "Associa un computer",
   "devices.computers.title": "I tuoi altri computer",
-  "devices.computers.pairTitle": "Associa un altro computer"
+  "devices.computers.pairTitle": "Associa un altro computer",
+  "remote.tailscale.needsApproval": "Questo computer è in attesa di approvazione sulla tua rete Tailscale. Approvalo nella console di amministrazione di Tailscale, poi riprova."
 }

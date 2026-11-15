@@ -10913,5 +10913,15 @@
   "settings.browser.proxyConfigured": "As novas conexões do navegador integrado usam este proxy SOCKS5. O Meu Chrome mantém as próprias configurações; destinos privados e locais continuam protegidos.",
   "settings.browser.proxyInactive": "Salvo, mas só funciona com o navegador integrado em hosts compatíveis.",
   "settings.browser.proxySave": "Salvar",
-  "settings.browser.proxyClear": "Remover"
+  "settings.browser.proxyClear": "Remover",
+  "remote.tailscale.needsApproval": "Este computador está aguardando aprovação na sua rede Tailscale. Aprove-o no console de administração do Tailscale, depois tente novamente.",
+  "connect.otherComputer": "Para outro computador com o app {app}: nesse computador, abra Configurações → Celular e dispositivos → Seus outros computadores.",
+  "phone.intro.detail": "Veja conversas, responda às solicitações de aprovação e envie novas tarefas pelo celular.",
+  "serverError.pair.oldCode": "Esse código é para o app do celular. O pareamento aqui precisa de um código de 12 caracteres como 7KQ2-M9XD-H4TP, criado em Configurações → Celular e dispositivos no computador ou servidor ao qual você está se conectando.",
+  "native.connect.oldCode": "Esse código é para o app do celular. Para abrir esse computador daqui, ligue o Tailscale e Seus outros computadores em Configurações → Celular e dispositivos dele, depois use o link mostrado lá. Você também pode compartilhar esse computador com o My Cloud. O código de um servidor tem 12 caracteres como 7KQ2-M9XD-H4TP.",
+  "native.connect.desktopApp": "{host} é um app de desktop do MausBot. Para abri-lo daqui, ligue o Tailscale e Seus outros computadores em Configurações → Celular e dispositivos dele, depois use o link mostrado lá. Você também pode compartilhar esse computador com o My Cloud pelo próprio app dele.",
+  "devices.computers.detail": "Abra os bots deste computador em outro computador conectado à mesma conta do Tailscale. Precisa do Tailscale nos dois.",
+  "devices.computers.typeCode": "No outro computador, abra Conectar a um servidor no {app} e cole o link que você copiar aqui. Ou digite lá este endereço e este código.",
+  "devices.computers.address": "Endereço",
+  "devices.computers.pairLine": "Cria um link que seu outro computador abre. Funciona uma vez."
 }
