@@ -2341,8 +2341,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 for (const queueId of body.queueIds ?? []) {
                   rawDispatch({ type: "consumePendingQueued", threadId: body.threadId, queueId });
                 }
-              } else if (body?.queued === true && body.blockedBy === "images") {
-                wrapped({ type: "notice", notice: { kind: "steer-images", botName: null } });
+              } else if (body?.queued === true) {
+                wrapped({ type: "notice", notice: body.blockedBy === "images" ? { kind: "steer-images", botName: null } : { kind: "note", botName: null, text: t("composer.queued.roomSteerHeld") } });
               }
               action.onSettled?.();
             })

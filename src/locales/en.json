@@ -3076,6 +3076,8 @@
   "composer.queued.regionMany": "{count} queued messages",
   "composer.queued.list": "Queued messages",
   "composer.queued.capacity": "Queued. Starts when this bot has a free thread slot.",
+  "composer.queued.roomHeld": "Queued. Sends when the room's current turn finishes.",
+  "composer.queued.roomSteerHeld": "Your message stayed queued. Nothing was stopped.",
   "composer.queued.groupTurn": "Queued. This bot's room turn runs one at a time; it starts when that finishes.",
   "settings.threads.title": "Parallel threads",
   "settings.threads.subtitle": "Choose how much each bot can work on at once.",
