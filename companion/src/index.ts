@@ -130,8 +130,9 @@ const relayBaseUrl = relayBaseUrlOverride(process.env.OMB_COMPANION_RELAY_URL);
 const watcher = createAddressWatcher({
   addresses: advertisableAddresses,
   name: machineName,
-  advertise: () => mdns.advertise(service()),
-  withdraw: () => mdns.stop(),
+  // Called when the address set (or the name) changes: a relay socket that crossed networks may be dead without knowing it.
+  advertise: () => (relay?.checkAlive(), mdns.advertise(service())),
+  withdraw: () => (relay?.checkAlive(), mdns.stop()),
   log: (line) => console.log(`bonjour: ${line}`),
   // On a Mac a failed join is not papered over by the default-route
   // membership, so a join that fails while an interface settles is retried.
@@ -263,7 +264,7 @@ const control = createControlServer({
     void watcher.check();
     return true;
   },
-  e2e: () => ({ enabled: e2e.enabled, relay: relay?.status ?? "off", node: relay?.node ?? null, descriptor: e2e.descriptor(null) }),
+  e2e: () => ({ enabled: e2e.enabled, relay: relay?.status ?? "off", node: relay?.node ?? null, relayProblem: relay?.problem ?? null, descriptor: e2e.descriptor(null) }),
   liveRoutes: () => e2e.routes(),
   // The phone hears where it may connect from inside its session first. Narrowed, the relay keeps it a moment so that
   // lands, then refuses it (4404) and its relay sessions close; direct ones stay. Widened, it is admitted before it hears.

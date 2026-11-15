@@ -101,6 +101,57 @@ describe("relay tokens", () => {
     await service.refreshNow();
     expect(grants).toEqual([grant(), null]);
     expect([...timers.pending.values()][0].milliseconds).toBe(30 * 60_000);
+    expect(service.status).toEqual({ state: "failed", code: "unavailable" });
+    service.stop();
+    expect(service.status).toEqual({ state: "off", code: null });
+  });
+
+  it("after a sign-in failure, wait for a wake-up instead of asking again on a timer", async () => {
+    const timers = manualTimers();
+    const answers = [
+      () => Promise.reject(Object.assign(new Error("signed out"), { code: "signed_out" })),
+      () => Promise.reject(Object.assign(new Error("expired"), { status: 401 })),
+      () => grant(),
+    ];
+    const fetchGrant = vi.fn(async () => answers.shift()());
+    const service = createRelayTokenService({ fetchGrant, onGrant: () => {}, ...timers, now: () => 0, random: () => 0.5, wakeAfterSignInFailure: true });
+    service.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(timers.pending.size).toBe(0);
+    expect(service.status).toEqual({ state: "waiting", code: "sign_in" });
+    await service.refreshNow();
+    expect(timers.pending.size).toBe(0);
+    expect(service.status).toEqual({ state: "waiting", code: "sign_in" });
+    await service.refreshNow();
+    expect(service.status).toEqual({ state: "ready", code: null });
+    expect(fetchGrant).toHaveBeenCalledTimes(3);
+    service.stop();
+  });
+
+  it("without the wake-up option, a sign-in failure still asks again after half an hour", async () => {
+    const timers = manualTimers();
+    const service = createRelayTokenService({
+      fetchGrant: async () => Promise.reject(Object.assign(new Error("signed out"), { code: "signed_out" })),
+      onGrant: () => {}, ...timers, now: () => 0, random: () => 0.5,
+    });
+    service.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect([...timers.pending.values()][0].milliseconds).toBe(30 * 60_000);
+    service.stop();
+  });
+
+  it("reports only a fixed word: never a token, a server message or its code", async () => {
+    const timers = manualTimers();
+    const answers = [
+      () => Promise.reject(Object.assign(new Error("eyJ2IjoxfQ.c2lnbmF0dXJl leaked"), { code: "Bearer omb_install_secret" })),
+      () => Promise.reject(Object.assign(new Error("busy"), { code: "rate_limited", status: 429 })),
+    ];
+    const service = createRelayTokenService({ fetchGrant: async () => answers.shift()(), onGrant: () => {}, ...timers, now: () => 0, random: () => 0.5 });
+    service.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(service.status).toEqual({ state: "failed", code: "failed" });
+    await service.refreshNow();
+    expect(service.status).toEqual({ state: "failed", code: "busy" });
     service.stop();
   });
 });

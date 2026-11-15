@@ -63,6 +63,7 @@ export function createCompanionE2E({
       void ensureIdentity().then(sync, (error) => log(`e2e: connection key unavailable: ${error?.message ?? error}`));
     },
     log,
+    wakeAfterSignInFailure: true,
   });
 
   async function reconcile() {
@@ -79,6 +80,10 @@ export function createCompanionE2E({
     },
     get publicKey() {
       return identity?.publicKey ?? null;
+    },
+    /** The relay token's state and last failure code, for the renderer's diagnosis: never the token. */
+    get relayToken() {
+      return tokens.status;
     },
     /** For a new sidecar: null while the encrypted connection is off. */
     message: () => (identity ? companionE2EMessage(identity, tokens.grant) : null),

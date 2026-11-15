@@ -9,6 +9,16 @@ const RELAY_HOST = /^relay[1-9][0-9]?\.openmausbot\.com$/;
 const HOST_ID = /^[A-Za-z0-9_-]{22}$/;
 const TOKEN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 
+/** A failure as one of a few fixed words for the desktop's diagnosis: never a message, a server's text or its code. */
+function failureWord(error) {
+  const code = error?.code;
+  if (code === "relay_unavailable") return "unavailable";
+  if (code === "signed_out" || error?.status === 401) return "sign_in";
+  if (code === "rate_limited" || error?.status === 429) return "busy";
+  if (code === "network_unavailable" || code === "control_plane_unavailable") return "unreachable";
+  return "failed";
+}
+
 const defaultSetTimer = (callback, milliseconds) => {
   const timer = setTimeout(callback, milliseconds);
   timer.unref?.();
@@ -34,17 +44,20 @@ export function createRelayTokenService({
   now = Date.now,
   random = Math.random,
   log = () => {},
+  wakeAfterSignInFailure = false,
 }) {
   let running = false;
   let grant = null;
   let timer = null;
   let failures = 0;
   let inFlight = null;
+  let lastCode = null;
+  let waiting = false;
 
   const jitter = (milliseconds) => Math.round(milliseconds * (0.8 + 0.4 * random()));
   const schedule = (milliseconds) => {
     if (timer) clearTimer(timer);
-    timer = running ? setTimer(() => void refresh(), Math.max(0, milliseconds)) : null;
+    timer = running && milliseconds !== null ? setTimer(() => void refresh(), Math.max(0, milliseconds)) : null;
   };
   const publish = (next) => {
     if (next === grant) return;
@@ -57,16 +70,22 @@ export function createRelayTokenService({
       const next = validRelayGrant(await fetchGrant());
       if (!next) throw Object.assign(new Error("invalid relay grant"), { code: "invalid_response" });
       failures = 0;
+      lastCode = null;
+      waiting = false;
       if (!running) return;
       publish(next);
       schedule(Math.max(MIN_REFRESH_MS, next.refreshAfter - now()));
     } catch (error) {
       if (!running) return;
       const code = error?.code ?? "";
-      if (code === "relay_unavailable" || code === "signed_out" || error?.status === 401) {
+      lastCode = failureWord(error);
+      const signIn = code === "signed_out" || error?.status === 401;
+      if (code === "relay_unavailable" || signIn) {
         log(`relay token ${code || "refused"}`);
         publish(null);
-        return schedule(jitter(UNAVAILABLE_RETRY_MS));
+        // Only a new sign-in or credential can fix these; asking again on a timer cannot.
+        waiting = signIn && wakeAfterSignInFailure;
+        return waiting ? schedule(null) : schedule(jitter(UNAVAILABLE_RETRY_MS));
       }
       if (grant && grant.expiresAt <= now()) publish(null);
       const retryAfter = Number.isSafeInteger(error?.retryAfterMs) ? error.retryAfterMs : 0;
@@ -90,6 +109,12 @@ export function createRelayTokenService({
     get running() {
       return running;
     },
+    /** For the desktop's diagnosis: "waiting" means a sign-in failure that waits for a sign-in, a new credential or a
+     * wake from sleep (`refreshNow`). `code` is one fixed word, never the token or a server's message. */
+    get status() {
+      const state = !running ? "off" : grant ? "ready" : waiting ? "waiting" : lastCode ? "failed" : "fetching";
+      return { state, code: running ? lastCode : null };
+    },
     start() {
       if (running) return;
       running = true;
@@ -99,9 +124,11 @@ export function createRelayTokenService({
       running = false;
       if (timer) clearTimer(timer);
       timer = null;
+      lastCode = null;
+      waiting = false;
       publish(null);
     },
-    /** The relay said 4401, or the computer woke up. */
+    /** The relay said 4401, the computer woke up, or a sign-in or credential changed. */
     refreshNow() {
       if (!running) return Promise.resolve();
       if (timer) clearTimer(timer);
