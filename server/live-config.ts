@@ -4,7 +4,7 @@ import { z } from "zod";
 export const LIVE_KEY_NEEDS_ENDPOINT = "Save the Azure endpoint first: a Live key works only with the endpoint it was saved for.";
 const NOWHERE = "nowhere";
 
-/** Live calls: `key` is a key for Live calls only; with `provider` "openai" (the default) a call without one uses `openai.key`, with "azure" it is the Azure resource's key and is required, with "fish", "gemini" or "elevenlabs" it is not used: Fish Audio calls use the Fish Audio key (`tts.fishKey`), Gemini calls the Gemini key (`tts.geminiKey`) and ElevenLabs calls the ElevenLabs key (`tts.key`). `keyFor` says where `key` may go (`liveKeyTarget`): the server sets it when the key is saved and never takes it from a request; absent, the key is from before Azure was offered, so OpenAI's. `azureEndpoint` is the resource URL and `azureDeployment` the gpt-live-1 deployment name. `fishAgentId` is the Fish Audio agent a "fish" call starts, which the harness sets up on the account of the key whose `fishKeyPrint` is `fishAgentFor`; without `fishAgentFor` (an operator's OMB_FISH_LIVE_AGENT_ID) it is used with any key. `elevenlabsAgentId` and `elevenlabsAgentFor` are the same for an "elevenlabs" call's ElevenLabs agent. `voice` is a GPT-Live voice, `geminiVoice` a Gemini Live voice. */
+/** Live calls: `key` is a key for Live calls only; with `provider` "openai" (the default) a call without one uses `openai.key`, with "azure" it is the Azure resource's key and is required, with "fish", "gemini" or "elevenlabs" it is not used: Fish Audio calls use the Fish Audio key (`tts.fishKey`), Gemini calls the Gemini key (`tts.geminiKey`) and ElevenLabs calls the ElevenLabs key (`tts.key`). `keyFor` says where `key` may go (`liveKeyTarget`): the server sets it when the key is saved and never takes it from a request; absent, the key is from before Azure was offered, so OpenAI's. `azureEndpoint` is the resource URL and `azureDeployment` the gpt-live-1 deployment name. `fishAgentId` is the Fish Audio agent a "fish" call starts, which the harness sets up on the account of the key whose `fishKeyPrint` is `fishAgentFor`; without `fishAgentFor` (an operator's OMB_FISH_LIVE_AGENT_ID) it is used with any key, and `fishAgentLanguage` is the language the harness last set it to speak (absent: English, as agents were first set up). `elevenlabsAgentId` and `elevenlabsAgentFor` are the same for an "elevenlabs" call's ElevenLabs agent. `voice` is a GPT-Live voice, `geminiVoice` a Gemini Live voice. */
 export const liveConfigSchema = z.object({
   key: z.string().optional(),
   keyFor: z.string().max(300).optional(),
@@ -13,6 +13,7 @@ export const liveConfigSchema = z.object({
   azureDeployment: z.string().trim().max(64).optional(),
   fishAgentId: z.string().trim().max(128).optional(),
   fishAgentFor: z.string().max(64).optional(),
+  fishAgentLanguage: z.string().max(8).optional(),
   elevenlabsAgentId: z.string().trim().max(128).optional(),
   elevenlabsAgentFor: z.string().max(64).optional(),
   voice: z.string().trim().max(40).regex(/^[a-z]*$/, "a Live voice is a lowercase built-in voice name").optional(),
@@ -29,6 +30,7 @@ export interface LiveConfig {
   azureDeployment?: string;
   fishAgentId?: string;
   fishAgentFor?: string;
+  fishAgentLanguage?: string;
   elevenlabsAgentId?: string;
   elevenlabsAgentFor?: string;
   voice?: string;
@@ -84,6 +86,7 @@ export function liveConfigWithEnv(live: LiveConfig | undefined, env: NodeJS.Proc
   if (env.OMB_FISH_LIVE_AGENT_ID?.trim()) {
     next.fishAgentId = env.OMB_FISH_LIVE_AGENT_ID.trim();
     delete next.fishAgentFor;
+    delete next.fishAgentLanguage;
   }
   // Set together in the environment, the key and the Azure endpoint are the operator's own pairing. A `keyFor` from the
   // file stands: saves mirror settings into the environment, so they must not be able to pair a forgotten key.
