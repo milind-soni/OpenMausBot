@@ -377,13 +377,15 @@ export async function imageAttachmentFromFile(
   };
 }
 
-/** Copied into the private store so the companion route never sees an arbitrary Finder path. */
-export async function fileAttachmentFromFile(file: File): Promise<FileAttachment | null> {
+/** Copied into the private store so the companion route never sees an arbitrary Finder path.
+ * `anyType` sends a file of any other type, which the server keeps as a plain download. */
+export async function fileAttachmentFromFile(file: File, anyType = false): Promise<FileAttachment | null> {
   const declared = file.type.split(";", 1)[0]!.trim().toLowerCase();
   const extension = file.name.split(".").at(-1)?.toLowerCase() ?? "";
   const mime = documentMime(file) ??
     (ACCEPTED_AUDIO_MIMES.has(declared) ? declared : AUDIO_MIMES_BY_EXTENSION[extension]) ??
-    ARCHIVE_MIMES_BY_EXTENSION[extension];
+    ARCHIVE_MIMES_BY_EXTENSION[extension] ??
+    (anyType ? declared || "application/octet-stream" : undefined);
   if (!mime) return null;
   if (file.size > FILE_MAX_BYTES) throw new AttachError(file.name, FILE_MAX_BYTES);
   const uploadId = newUploadId();
@@ -776,7 +778,8 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
     allowImages: boolean;
     getPath: (file: T) => string;
     uploadImage: (file: T) => Promise<Attachment | null>;
-    uploadFile?: (file: T) => Promise<FileAttachment | null>;
+    /** `anyType` is set for a file nothing else takes, to upload it as a plain download. */
+    uploadFile?: (file: T, anyType?: boolean) => Promise<FileAttachment | null>;
     /** Images the message can still take; the rest are left out and named in the notice. */
     imageSlots?: number;
     /** Image bytes the message can still take; images past it are left out the same way. */
@@ -788,9 +791,9 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
   const overflow = new Set(fitImagesToSlots(images, _opts.imageSlots ?? Infinity, _opts.imageBytes).leftOut);
   const leftOut = [...overflow].map((file) => file.name);
   const files = _files.filter((file) => !overflow.has(file));
-  const uploadFile = _opts.uploadFile ?? (async (file: T) => {
+  const uploadFile = _opts.uploadFile ?? (async (file: T, anyType?: boolean) => {
     if (!file.arrayBuffer) return null;
-    return fileAttachmentFromFile(file as unknown as File);
+    return fileAttachmentFromFile(file as unknown as File, anyType);
   });
   const failed = (file: T, err: unknown): { uploadError: AttachProblem; uploadErrorText: string } => ({
     uploadError: err instanceof AttachError ? err.problem
@@ -820,7 +823,13 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
       return { attachments: [], rejectedNames: [], ...failed(file, err) };
     }
     const result = await attachmentsFromDroppedFiles([file], getPath);
-    return result;
+    if (!result.rejectedNames.length) return result;
+    try {
+      const attachment = await uploadFile(file, true);
+      return attachment ? { attachments: [attachment], rejectedNames: [] } : result;
+    } catch (err) {
+      return { attachments: [], rejectedNames: [], ...failed(file, err) };
+    }
   }));
   const attachments = results.flatMap((result) => result.attachments);
   const rejectedNames = results.flatMap((result) => result.rejectedNames);

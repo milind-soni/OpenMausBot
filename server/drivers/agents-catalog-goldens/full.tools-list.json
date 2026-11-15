@@ -312,6 +312,23 @@
       }
     },
     {
+      "name": "rename_thread",
+      "description": "Rename the thread you are in so the sidebar says what it is about (\"Acme: carousel design\"): when the person asks, or when the title is only the cut start of the first message. Never rename a thread the person named unless asked. Rooms and automation chats keep their names.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "One short, specific line, at most 80 characters."
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    },
+    {
       "name": "start_thread",
       "description": "Open a separate job on yourself: one conversation with its own history and its own run, shown to the person as a row under you, without switching the person's selected conversation. Use it only when the user requests independent jobs (for example one review per pull request, \"review each pull request\" — one thread per pull request) instead of doing them inside this conversation, or a second opinion from another model (model_selection from list_models, report_back true). The title becomes the row's name, so make it short and specific, and write it as #Title when you mention it to the person; give complete instructions, since the run will not see this conversation. You can open at most five per turn; a self-opened job cannot open more jobs. This is not a teammate handoff: use coordinate_bots for teammates (thread \"new\" opens a fresh thread on them) and their automatic replies. If a call is refused, do not retry it: say what you still wanted opened.",
       "inputSchema": {
