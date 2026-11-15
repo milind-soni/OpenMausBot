@@ -38,6 +38,7 @@ export interface ProxyOptions {
     code: string,
     deviceName: unknown,
     pairRequestId?: unknown,
+    replacesToken?: unknown,
   ) => { token: string; device: unknown } | PairingRefusal;
   serverName: () => string;
   /** The desktop app's version: told only to a paired device. */
@@ -461,6 +462,7 @@ export function createProxyHandler(options: ProxyOptions) {
             String(credential ?? ""),
             body.deviceName,
             body.pairRequestId,
+            body.replacesToken,
           );
           if ("error" in result) return sendJson(res, 401, { error: result.error, code: result.code } satisfies PairingRefusal);
           const pairedId = (result.device as { id?: unknown } | null)?.id;
