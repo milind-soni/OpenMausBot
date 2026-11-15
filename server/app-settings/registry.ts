@@ -10,7 +10,7 @@ import { MAX_MCP_CALL_TIMEOUT_MINUTES, MAX_ROOM_TURN_TIMEOUT_MINUTES, mcpCallTim
 import type { InstanceConfig } from "../contracts.ts";
 import { BUILT_IN_DRIVERS } from "../drivers/builtIn.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
-import { endpointBaseUrl, endpointDisplayUrl, isAddedEndpoint } from "../openai-compat-endpoints.ts";
+import { endpointDisplayUrl, isAddedEndpoint, localServerAlreadyAdded } from "../openai-compat-endpoints.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { callRoute, type RouteReply } from "../routes/call-route.ts";
 import type { RouteHandler } from "../routes/table.ts";
@@ -279,10 +279,8 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
     describe: (change: EngineChange) => {
       if (change.kind === "remove") return { refusal: personOnly("Removing an AI engine", "Settings → AI") };
       if (change.kind === "ollama" || change.kind === "lmstudio") {
-        // Settings adds a local server once per address; a second one only shows the same engine twice.
-        const url = endpointBaseUrl(change.url);
-        const existing = url ? Object.entries(instances()).find(([instanceId, entry]) => isAddedEndpoint(instanceId, entry) && endpointDisplayUrl(entry.config) === url) : undefined;
-        if (existing) return { refusal: `"${existing[1].displayName ?? existing[0]}" at ${url} is already an engine (${existing[0]}). Use that one; do not add it again.` };
+        const duplicate = localServerAlreadyAdded(instances(), change.url);
+        if (duplicate) return { refusal: duplicate };
       }
       if (change.kind === "openai-compat") {
         if (!savedKey(change.keyFrom)) return { refusal: keyMissing(change.keyFrom) };
