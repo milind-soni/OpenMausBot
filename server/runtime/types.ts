@@ -325,6 +325,9 @@ export interface TurnRunner {
   /** What the cut turn of this node already did outward, as short labels. Read at open() only: a
    * turn that acted outward is not run again. Absent or empty: the turn reruns once. */
   outward?(a: Assignment): string[];
+  /** The assignee lives in a place that cannot be reached now (a computer that is off or asleep). Queued work for it is
+   * held by no window: neither the queue bound nor the tree's stall window runs while this is true. */
+  away?(a: Assignment): boolean;
 }
 
 export interface Clock {
