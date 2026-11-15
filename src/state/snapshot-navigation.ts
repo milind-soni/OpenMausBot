@@ -69,3 +69,15 @@ export function keepGroupNavigation(previous: Group | undefined, incoming: Group
     turnStartedAt: previous.turnStartedAt,
   };
 }
+
+/** Where to land when nothing is selected: never a bot this device sees only as a room member. */
+export function firstChat(bots: readonly Pick<Bot, "id" | "roomOnly">[], groups: readonly Pick<Group, "id">[]): string {
+  return bots.find((bot) => !bot.roomOnly)?.id ?? groups[0]?.id ?? "";
+}
+
+/** What a hydrate leaves selected: the current chat if it is still there, else the resumed one, else the first. */
+export function hydratedSelection(current: string, resume: string | undefined, bots: readonly Pick<Bot, "id" | "roomOnly" | "hidden">[], groups: readonly Pick<Group, "id">[]): string {
+  const chat = (id: string, open: (bot: Pick<Bot, "roomOnly" | "hidden">) => boolean) => bots.some((b) => b.id === id && open(b)) || groups.some((g) => g.id === id);
+  if (current && chat(current, (b) => !b.roomOnly)) return current;
+  return resume && chat(resume, (b) => !b.hidden && !b.roomOnly) ? resume : firstChat(bots, groups);
+}

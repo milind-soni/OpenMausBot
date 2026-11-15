@@ -8,7 +8,7 @@ import { isOwnerOrAdmin, readSessionState, type SessionState } from "../lib/sess
 import { readMembership } from "../lib/membership";
 import { codeUntil, lastSeen } from "../lib/pairing-time";
 import { revealPhonePairing, takePairOnOpen } from "../lib/phone-pairing";
-import { SettingsGroup, SettingsRows } from "./SettingsPrimitives";
+import { SettingsGroup, SettingsRows, Switch } from "./SettingsPrimitives";
 import { Layer } from "./Layer";
 import { DialogTitle, PairRow } from "./PhoneDevicesSection";
 import { Smartphone } from "lucide-react";
@@ -16,6 +16,8 @@ import { productName } from "@/lib/brand";
 import { Select } from "./Select";
 import { cn } from "@/lib/cn";
 import { TeamPhoneCard } from "./TeamPhoneCard";
+import type { DeviceView } from "../../shared/device-view";
+import { EMPTY_VIEW, flipTarget, knownTargets, NO_TARGETS, pairingBody, pickedCount, switchTargets, togglePicked, viewNames, viewTargetsFrom, type DeviceAccess, type DeviceViewTargets } from "../lib/device-view-choice";
 import { ComputerNameRow } from "./ComputerNameRow";
 import { isPrivateHost, serverTransport } from "../../electron/server-address.mjs";
 
@@ -36,6 +38,7 @@ export interface PairedDevice {
   lastSeenAt: number;
   expiresAt: number;
   email?: string;
+  view?: DeviceView;
 }
 
 /**
@@ -74,11 +77,55 @@ export function shownDevices(devices: PairedDevice[], cloudHome: boolean): Paire
 }
 
 
+const quiet = "ui-button";
+
+export function ViewTargetPicker({ targets, picked, onToggle, saving = false }: { targets: DeviceViewTargets; picked: DeviceView; onToggle: (kind: keyof DeviceView, id: string) => void; saving?: boolean }) {
+  const kinds: Array<{ kind: keyof DeviceView; label: string; items: Array<{ id: string; name: string }> }> = [
+    { kind: "sections", label: t("remote.serverPairing.view.department"), items: targets.sections.map((section) => ({ id: section, name: section.trim() || t("remote.serverPairing.view.general") })) },
+    { kind: "bots", label: t("remote.serverPairing.view.bot"), items: switchTargets(targets, picked, "bots") },
+    { kind: "groups", label: t("remote.serverPairing.view.group"), items: switchTargets(targets, picked, "groups") },
+  ];
+  return (
+    <div data-device-view-picker className="flex flex-wrap gap-x-8 gap-y-3 text-[13px]">
+      {kinds.filter(({ items }) => items.length).map(({ kind, label, items }) => (
+        <fieldset key={kind} className="min-w-[12rem]">
+          <legend className="mb-1 font-medium text-ink">{label}</legend>
+          {items.map((item) => (
+            <div key={item.id} className="flex items-center justify-between gap-3 py-1 text-ink">
+              <span className="truncate">{item.name}</span>
+              <Switch checked={picked[kind].includes(item.id)} aria-label={item.name} disabled={saving} onClick={() => onToggle(kind, item.id)} />
+            </div>
+          ))}
+        </fieldset>
+      ))}
+      {targets.groups.length ? <p className="basis-full text-[12px] text-ink-secondary">{t("remote.serverPairing.view.roomNote")}</p> : null}
+    </div>
+  );
+}
+
+export function deviceAccessName(device: Pick<PairedDevice, "scopes" | "view">, targets: DeviceViewTargets): string {
+  if (!device.view) return t(device.scopes.includes("admin") ? "remote.serverPairing.scope.admin" : "remote.serverPairing.scope.client");
+  const names = viewNames(device.view, targets, t("remote.serverPairing.view.general"));
+  if (!pickedCount(device.view)) return t("remote.serverPairing.view.nothing");
+  if (!names.length) return t("remote.serverPairing.view.gone");
+  const shown = names.slice(0, 2).join(", ");
+  return t("remote.serverPairing.view.only", { names: names.length > 2 ? t("remote.serverPairing.view.more", { names: shown, count: names.length - 2 }) : shown });
+}
+
+/** Limiting a full-access device takes its admin away, and lifting the limit never gives it back. */
+export function limitWarning(device: Pick<PairedDevice, "scopes" | "view">): string | null {
+  return device.scopes.includes("admin") && !device.view ? t("remote.serverPairing.view.dropsAdmin") : null;
+}
+
 export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0, team, teamPhoneBlocked = null, simple = false, reveal = true, placeName = "" }: { placeName?: string; initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number; team?: string; teamPhoneBlocked?: string | null; simple?: boolean; /** False where another pairing flow owns the page's focus. */ reveal?: boolean }) {
   const [session, setSession] = useState<SessionState | null>(initialSession);
   const [pairingCodes, setPairingCodes] = useState(initialPairingCodes);
+  const [access, setAccess] = useState<DeviceAccess>("admin");
+  const [picked, setPicked] = useState<DeviceView>(EMPTY_VIEW);
+  const [editing, setEditing] = useState<{ id: string; picked: DeviceView; saving?: boolean } | null>(null);
+  const savingView = useRef(false);
+  const [targets, setTargets] = useState<DeviceViewTargets>(NO_TARGETS);
   const [computerName, setComputerName] = useState<string | null>(null);
-  const [scope, setScope] = useState<"admin" | "client">("admin");
   const [offer, setOffer] = useState<PairingOffer | null>(null);
   const [devices, setDevices] = useState<PairedDevice[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
@@ -94,6 +141,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       const body = await api("/api/auth/sessions");
       setDevices(Array.isArray(body?.sessions) ? body.sessions : []);
       setCurrent(typeof body?.current === "string" ? body.current : null);
+      setTargets(viewTargetsFrom(await api("/api/bots?messages=0")));
     } catch (e) {
       setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) }));
     }
@@ -157,7 +205,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     setError(null);
     setCopied("idle");
     try {
-      const body: PairingOffer = await api("/api/auth/pairing", { method: "POST", body: JSON.stringify({ scopes: scope === "admin" || cloudHome ? ["admin", "client"] : ["client"] }) });
+      const body: PairingOffer = await api("/api/auth/pairing", { method: "POST", body: JSON.stringify(pairingBody(cloudHome ? "admin" : access, knownTargets(picked, targets))) });
       setOffer(body);
       setNow(Date.now());
     } catch (e) {
@@ -175,6 +223,41 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     } catch (e) {
       setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) }));
     }
+  }
+
+  /** The device's stored view after the change (undefined once its limit is lifted), or false when it failed. */
+  async function changeView(id: string, view: DeviceView | null): Promise<DeviceView | undefined | false> {
+    setError(null);
+    try {
+      const changed: { session?: Pick<PairedDevice, "view"> } = await api(`/api/auth/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ view }) });
+      await loadDevices();
+      return changed.session?.view;
+    } catch (e) {
+      setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) }));
+      // A target deleted meanwhile is refused; reloading drops it, so the next change can be saved.
+      await loadDevices();
+      return false;
+    }
+  }
+
+  async function unlimit(device: PairedDevice) {
+    if (savingView.current) return;
+    savingView.current = true;
+    setEditing((open) => open?.id === device.id ? { ...open, saving: true } : open);
+    const stored = await changeView(device.id, null);
+    savingView.current = false;
+    setEditing((open) => open?.id !== device.id ? open : stored === false ? { ...open, saving: false } : null);
+  }
+
+  async function flip(device: PairedDevice, before: DeviceView, kind: keyof DeviceView, id: string) {
+    // A ref, not state: a second click in the same frame still sees the first one's `before`.
+    if (savingView.current) return;
+    savingView.current = true;
+    const next = flipTarget(before, kind, id, targets);
+    setEditing({ id: device.id, picked: next, saving: true });
+    const stored = await changeView(device.id, next);
+    savingView.current = false;
+    setEditing((open) => open?.id === device.id ? { id: device.id, picked: stored === false ? before : stored ?? next } : open);
   }
 
   async function copyLink() {
@@ -230,19 +313,44 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       </div>
     </Layer>
   ) : null;
-  const scopeName = (device: PairedDevice) => t(device.scopes.includes("admin") ? "remote.serverPairing.scope.admin" : "remote.serverPairing.scope.client");
+  const scopeName = (device: PairedDevice) => deviceAccessName(device, targets);
+  const limitedEmpty = access === "limited" && pickedCount(knownTargets(picked, targets)) === 0;
   const pairButton = (
-    <button type="button" data-phone-pairing-action={reveal ? "" : undefined} data-settings-drop="" onClick={() => void create()} disabled={busy || !pairingCodes}
+    <button type="button" data-phone-pairing-action={reveal ? "" : undefined} data-settings-drop="" onClick={() => void create()} disabled={busy || !pairingCodes || limitedEmpty}
       className={cn("ui-button ui-button-primary", !pairingCodes && "opacity-40")}>
       {busy ? t("remote.serverPairing.creating") : t("phone.pair.button")}
     </button>
   );
   const choices = !simple && pairingCodes && !cloudHome ? (
-    <Select variant="ghost" value={scope} aria-label={t("remote.serverPairing.title")} onChange={(event) => setScope(event.target.value === "client" ? "client" : "admin")}>
+    <Select variant="ghost" name="server-pairing-scope" value={access} aria-label={t("remote.serverPairing.view.label")} onChange={(event) => setAccess(event.target.value as DeviceAccess)}>
       <option value="admin">{t("remote.serverPairing.scope.admin")}</option>
       <option value="client">{t("remote.serverPairing.scope.client")}</option>
+      <option value="limited">{t("remote.serverPairing.view.limited")}</option>
     </Select>
   ) : null;
+  const newDevicePicker = choices && access === "limited" ? (
+    <div className="px-4">
+      <ViewTargetPicker targets={targets} picked={picked} onToggle={(kind, id) => setPicked((view) => togglePicked(view, kind, id))} />
+      {limitedEmpty ? <p className="mt-2 text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.view.pickOne")}</p> : null}
+    </div>
+  ) : null;
+  const viewButton = (device: PairedDevice) => cloudHome || device.id === current ? null : (
+    <button type="button" className="settings-quiet shrink-0 cursor-pointer" data-device-view={device.id} aria-label={t("remote.serverPairing.view.change", { device: device.label })}
+      disabled={targets === NO_TARGETS}
+      onClick={() => setEditing(editing?.id === device.id ? null : { id: device.id, picked: knownTargets(device.view ?? EMPTY_VIEW, targets) })}>
+      {t(device.view ? "remote.serverPairing.view.edit" : "remote.serverPairing.view.limit")}
+    </button>
+  );
+  const viewEditor = (device: PairedDevice) => editing?.id !== device.id ? null : (
+    <div data-device-view-editor={device.id} className="basis-full rounded-lg border border-hairline/40 bg-inset p-3">
+      {limitWarning(device) ? <p className="mb-2 text-[12px] leading-4 text-ink-secondary">{limitWarning(device)}</p> : null}
+      <ViewTargetPicker targets={targets} picked={editing.picked} saving={editing.saving} onToggle={(kind, id) => void flip(device, editing.picked, kind, id)} />
+      <div className="mt-3 flex flex-wrap gap-2">
+        {device.view ? <button type="button" className={quiet} disabled={editing.saving} onClick={() => void unlimit(device)}>{t("remote.serverPairing.view.unlimit")}</button> : null}
+        <button type="button" className={quiet} onClick={() => setEditing(null)}>{t("common.done")}</button>
+      </div>
+    </div>
+  );
   const nameRow = !simple && pairingCodes && !cloudHome && computerName !== null
     ? <SettingsRows><ComputerNameRow saved={computerName} onSaved={setComputerName} className="px-4 py-3" /></SettingsRows> : null;
   const pairRow = (
@@ -257,14 +365,16 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       {listed.length === 0 ? (
         <SettingsGroup block="pair">
           <SettingsRows>{pairRow}</SettingsRows>
+          {newDevicePicker}
           {nameRow}
           {!pairingCodes && <p data-server-pairing-portal className="px-4 text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
         </SettingsGroup>
       ) : (
         <SettingsGroup label={t(pairingCodes ? "devices.paired" : "remote.serverPairing.portalDevices")} block="paired" actions={pairingCodes ? <span className="flex items-center gap-2">{choices}{pairButton}</span> : undefined}>
+            {newDevicePicker}
             <SettingsRows icons>
               {listed.map((device) => (
-                <div key={device.id} className="flex min-h-16 items-center gap-3 px-4 py-3" data-paired-device={device.id}>
+                <div key={device.id} className="flex min-h-16 flex-wrap items-center gap-3 px-4 py-3" data-paired-device={device.id}>
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Smartphone size={18} strokeWidth={1.75} aria-hidden="true" /></span>
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="truncate text-[14px] leading-5 text-ink">{device.label}</span>
@@ -272,9 +382,11 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
                       {[device.email, cloudHome ? null : scopeName(device), t("remote.serverPairing.seen", { when: lastSeen(device.lastSeenAt, now) }), device.id === current ? t("remote.serverPairing.thisBrowser") : null].filter(Boolean).join(" · ")}
                     </span>
                   </span>
+                  {viewButton(device)}
                   {device.id === current ? null : (
                     <button type="button" onClick={() => void signOut(device.id)} data-danger="" className="settings-quiet shrink-0 cursor-pointer">{t("phone.devices.remove")}</button>
                   )}
+                  {viewEditor(device)}
                 </div>
               ))}
             </SettingsRows>

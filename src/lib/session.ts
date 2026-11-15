@@ -1,3 +1,4 @@
+import { storedDeviceView, type DeviceView } from "../../shared/device-view";
 import { t } from "./i18n";
 import { serverErrorText } from "./server-error";
 
@@ -14,7 +15,7 @@ export interface TeamSession { id: string; name: string; role: string }
 
 export type SessionState =
   | { kind: "loopback"; trust?: "service" }
-  | { kind: "session"; id: string; label: string; email?: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[]; reactor?: string; team?: TeamSession; teamSignIn?: string }
+  | { kind: "session"; id: string; label: string; email?: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[]; reactor?: string; team?: TeamSession; teamSignIn?: string; view?: DeviceView }
   | { kind: "unauthenticated"; error: string }
   | { kind: "unreachable"; error: string };
 
@@ -64,6 +65,7 @@ export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise
       expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : 0,
       ...(typeof record.reactor === "string" ? { reactor: record.reactor } : {}),
       ...(typeof record.teamSignIn === "string" ? { teamSignIn: record.teamSignIn } : {}),
+      ...(record.view !== undefined ? { view: storedDeviceView(record.view)! } : {}),
       ...(teamSessionOf(record.team) ? { team: teamSessionOf(record.team)!, openedThreads: Array.isArray(record.openedThreads) ? record.openedThreads.filter((id): id is string => typeof id === "string") : [] } : {}),
       ...(record.cloudGuest === true ? {
         cloudGuest: true as const,

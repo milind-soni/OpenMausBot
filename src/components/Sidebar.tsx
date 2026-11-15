@@ -1089,7 +1089,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
     onError: (text) => setTeamFeedback({ error: true, text }), onCancelled: () => sidebarRef.current?.focus() }), roomDrag = useSidebarRoomDrag({ dispatch, announce: sections.announce, enabled: (sections.interactive || density === "icons") && !phone && !q, groups: state.groups });
 
   const sideLists = useTeamSideLists(state), matchingBots = sideLists.bots
-    .filter((b) => !b.hidden)
+    .filter((b) => !b.hidden && !b.roomOnly)
     .filter(
       (b) =>
         !q ||
