@@ -18,7 +18,7 @@ describe("host setup", () => {
   });
 
   it("names the sandbox when Chrome says it has none, and never turns it off by itself", async () => {
-    const diagnosis = await diagnoseLaunchFailure({ executable: "/opt/chrome", output: "[0101/000000.000:FATAL:zygote_host_impl_linux.cc] No usable sandbox! ...", platform: "darwin" });
+    const diagnosis = await diagnoseLaunchFailure({ executable: "/opt/chrome", output: "[0101/000000.000:FATAL:zygote_host_impl_linux.cc] No usable sandbox! ...", platform: "darwin", exists: () => false });
     expect(diagnosis).toBeInstanceOf(BrowserHostError);
     expect(diagnosis?.kind).toBe("sandbox");
     expect(diagnosis?.message).toContain(SANDBOX_STEPS_URL);
