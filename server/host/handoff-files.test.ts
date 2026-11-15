@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, promises as fsp, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // attachments.ts and workspace.ts read DATA_DIR at import time.
 const ROOT = mkdtempSync(join(tmpdir(), "omb-handoff-files-"));
@@ -26,6 +26,11 @@ let nodes: Map<string, Node>;
 let withheld: (child: Node, parent: Node) => boolean;
 let vmHome: string | null;
 let clock: number;
+let referenced: Set<string>;
+let ownFolder: boolean;
+let changed: ((change: { type: string; threadId?: string; botId?: string }) => void) | undefined;
+const WORKSPACES = join(DATA, "task-workspaces");
+const inboxOf = (botId: string, threadId: string) => ({ taskWorkspaces: WORKSPACES, botId, threadId });
 
 function setup(over: Partial<Deps> = {}) {
   return createHandoffFiles({
@@ -37,6 +42,10 @@ function setup(over: Partial<Deps> = {}) {
     children: (id) => [...nodes.values()].filter((node) => node.parentId === id),
     withheld: (child, parent) => withheld(child, parent),
     discard: deleteAttachment,
+    threadsReferencing: (name) => referenced.has(name) ? ["some-thread"] : [],
+    worksInOwnFolder: () => ownFolder,
+    changes: (listener) => { changed = listener; },
+    taskWorkspaces: WORKSPACES,
     ...over,
   });
 }
@@ -60,7 +69,10 @@ beforeEach(() => {
   withheld = () => false;
   vmHome = null;
   clock = Date.UTC(2026, 10, 15, 12);
+  referenced = new Set();
+  ownFolder = false;
 });
+afterEach(() => vi.restoreAllMocks());
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }));
 
 describe("sending", () => {
@@ -101,17 +113,36 @@ describe("sending", () => {
     const big = (name: string) => ({ attachment: { kind: "file" as const, path: join(ATTACHMENTS_DIR, name), mime: "application/zip", name }, bytes: 60 * 1024 * 1024, fresh: false });
     await expect(files.stage(["a.zip", "b.zip"], async (path) => big(path))).rejects.toMatchObject({ status: 413, message: expect.stringContaining("at most 100 MB") });
 
-    const one = [{ kind: "file" as const, path: join(ATTACHMENTS_DIR, "a.zip"), name: "a.zip", mime: "application/zip", bytes: HANDOFF_BYTES_PER_DAY / 2 }];
-    expect(files.dayRefusal("ana", one, 2)).toBeNull();
-    files.sent("a1", ANA, one);
-    files.sent("a2", ANA, one);
-    expect(files.dayRefusal("ana", one, 1)).toContain("daily limit");
-    expect(files.dayRefusal("ben", one, 1)).toBeNull();
-    const small = [{ ...one[0]!, bytes: 1 }];
-    for (let i = 0; i < HANDOFF_FILES_PER_DAY; i += 1) files.sent(`c${i}`, { botId: "cy", name: "Cy" }, small);
-    expect(files.dayRefusal("cy", small, 1)).toContain(`${HANDOFF_FILES_PER_DAY} files`);
+    const half = HANDOFF_BYTES_PER_DAY / 2;
+    expect(files.reserveDay("ana", 2, 2 * half)).toBeNull();
+    expect(files.reserveDay("ana", 1, 1)).toContain("daily limit");
+    expect(files.reserveDay("ben", 1, half)).toBeNull();
+    files.releaseDay("ana", 1, half);
+    expect(files.reserveDay("ana", 1, half)).toBeNull();
+    expect(files.reserveDay("cy", HANDOFF_FILES_PER_DAY, 1)).toBeNull();
+    expect(files.reserveDay("cy", 1, 1)).toContain(`${HANDOFF_FILES_PER_DAY} files`);
     clock += 24 * 60 * 60 * 1000;
-    expect(files.dayRefusal("ana", one, 1)).toBeNull();
+    expect(files.reserveDay("ana", 1, half)).toBeNull();
+  });
+
+  it("holds the day's limit under calls that run side by side, and charges only for teammates that got the files", async () => {
+    const files = setup();
+    const big = (name: string) => ({ attachment: { kind: "file" as const, path: join(ATTACHMENTS_DIR, name), mime: "application/zip", name }, bytes: HANDOFF_BYTES_PER_DAY / 5, fresh: false });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const call = (name: string, id: string) => files.coordinate({
+      paths: [name], senderId: "ana", recipients: 2, saveOne: async (path) => { await gate; return big(path); },
+      send: async (passed) => { files.sent(id, ANA, passed!); return { status: 200, body: { receipts: [{ botId: "ben", botName: "Ben", outcome: "queued", requestId: id }, { botId: "cy", outcome: "failed" }] } }; },
+    });
+    const calls = [call("a.zip", "p1"), call("b.zip", "p2"), call("c.zip", "p3"), call("d.zip", "p4"), call("e.zip", "p5"), call("f.zip", "p6")];
+    release();
+    const results = await Promise.all(calls);
+    // Each call holds two teammates' worth (two fifths of the day) until it knows one of them failed: two fit at once.
+    expect(results.map((result) => result.status)).toEqual([200, 200, 429, 429, 429, 429]);
+    expect(results[2]!.body.error).toContain("daily limit");
+    // Two calls, one teammate each, cost two fifths in all: three more single sends fit, a fourth does not.
+    expect(files.reserveDay("ana", 3, 3 * (HANDOFF_BYTES_PER_DAY / 5))).toBeNull();
+    expect(files.reserveDay("ana", 1, 1)).toContain("daily limit");
   });
 });
 
@@ -126,7 +157,7 @@ describe("receiving", () => {
   it("copies the files into the receiving conversation's own inbox and says whose they are, as data", async () => {
     const files = setup();
     const { to } = await handed(files, [write("report.pdf", "the report"), write("data.csv", "a,b")]);
-    const { text } = files.forTurn(to, false, "first");
+    const { text } = await files.forTurn(to, false, "first");
     const inbox = join(folderOf("ben", "t-ben"), "inbox", "ana", "a1");
     expect(readFileSync(join(inbox, "report.pdf"), "utf8")).toBe("the report");
     expect(readFileSync(join(inbox, "data.csv"), "utf8")).toBe("a,b");
@@ -141,42 +172,88 @@ describe("receiving", () => {
     const files = setup();
     const { to } = await handed(files, [write("report.pdf")]);
     const other = node("a2", "cy", "t-cy", { parentId: "root" });
-    expect(files.forTurn(other, false, "first").text).toBe("");
-    files.forTurn(to, false, "first");
+    expect((await files.forTurn(other, false, "first")).text).toBe("");
+    await files.forTurn(to, false, "first");
     expect(existsSync(folderOf("cy", "t-cy"))).toBe(false);
     expect(existsSync(join(folderOf("ben", "t-ben"), "inbox"))).toBe(true);
+  });
+
+  it("lists the copies as inbox/... where the receiver works in its own folder, without the data folder's path", async () => {
+    const files = setup();
+    const { to } = await handed(files, [write("report.pdf")]);
+    ownFolder = true;
+    const text = (await files.forTurn(to, false, "first")).text;
+    expect(text).toContain("- inbox/ana/a1/report.pdf (application/pdf, 1 KB)");
+    expect(text).not.toContain(DATA);
+  });
+
+  it("copies off the event loop, with a copy-on-write clone where the disk has one", async () => {
+    const files = setup();
+    const { to } = await handed(files, [write("report.pdf", "slow copy")]);
+    const real = fsp.copyFile.bind(fsp);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const copy = vi.spyOn(fsp, "copyFile").mockImplementation(async (from, dest, mode) => { await gate; return real(from, dest, mode); });
+    let done = false;
+    const delivery = files.forTurn(to, false, "first").then((turn) => { done = true; return turn; });
+    let ticks = 0;
+    for (; ticks < 5; ticks += 1) await new Promise((resolve) => setTimeout(resolve, 2));
+    expect(done).toBe(false);
+    expect(ticks).toBe(5);
+    release();
+    expect((await delivery).text).toContain("report.pdf");
+    expect(copy).toHaveBeenCalledTimes(1);
+    expect(Number(copy.mock.calls[0]![2]) & fsp.constants.COPYFILE_FICLONE).toBe(fsp.constants.COPYFILE_FICLONE);
+  });
+
+  it("removes a copy that a folder swapped during delivery carried elsewhere", async () => {
+    const files = setup();
+    const { to } = await handed(files, [write("report.pdf", "not for elsewhere")]);
+    const elsewhere = join(ROOT, `swapped-${serial}`);
+    mkdirSync(elsewhere);
+    const real = fsp.copyFile.bind(fsp);
+    vi.spyOn(fsp, "copyFile").mockImplementationOnce(async (from, dest, mode) => {
+      const folder = join(folderOf("ben", "t-ben"), "inbox", "ana", "a1");
+      renameSync(folder, `${folder}-moved`);
+      symlinkSync(elsewhere, folder);
+      return real(from, dest, mode);
+    });
+    const text = (await files.forTurn(to, false, "first")).text;
+    expect(readdirSync(elsewhere)).toEqual([]);
+    expect(text).not.toContain(join("inbox", "ana", "a1", "report.pdf"));
+    expect(text).toMatch(/- report\.pdf \(application\/pdf, 1 KB\) <attached-file /);
   });
 
   it("makes each copy once: a rerun lists the same paths and leaves the receiver's own edits alone", async () => {
     const files = setup();
     const { to } = await handed(files, [write("report.pdf", "original")]);
-    const first = files.forTurn(to, false, "first").text;
+    const first = (await files.forTurn(to, false, "first")).text;
     const landed = join(folderOf("ben", "t-ben"), "inbox", "ana", "a1", "report.pdf");
     writeFileSync(landed, "edited by ben");
-    const again = setup().forTurn(to, false, "rerun").text;
+    const again = (await setup().forTurn(to, false, "rerun")).text;
     expect(again).toBe(first);
     expect(again.split(landed).length - 1).toBe(1);
     expect(readFileSync(landed, "utf8")).toBe("edited by ben");
     expect(readdirSync(join(folderOf("ben", "t-ben"), "inbox", "ana", "a1"))).toEqual(["report.pdf"]);
     rmSync(landed);
-    files.forTurn(to, false, "continued");
+    await files.forTurn(to, false, "continued");
     expect(readFileSync(landed, "utf8")).toBe("original");
   });
 
   it("gives a picture to a direct turn as a person's upload arrives, and to a room turn by path", async () => {
     const files = setup();
     const { to, staged } = await handed(files, [write("chart.png", PNG)]);
-    const text = files.forTurn(to, false, "first").text;
+    const text = (await files.forTurn(to, false, "first")).text;
     const extracted = extractTurnImages(text);
     expect(extracted.images).toHaveLength(1);
     expect(extracted.images[0]!.path).toBe(staged.files[0]!.path);
     expect(extracted.text).toContain(join(folderOf("ben", "t-ben"), "inbox", "ana", "a1", "chart.png"));
     const inRoom = node("a3", "ben", "t-room", { parentId: "root", groupId: "g1" });
     files.sent("a3", ANA, staged.files);
-    expect(files.forTurn(inRoom, false, "first").text).not.toContain("<attached-");
+    expect((await files.forTurn(inRoom, false, "first")).text).not.toContain("<attached-");
     const many = Array.from({ length: 7 }, (_, i) => ({ ...staged.files[0]!, name: `p${i}.png` }));
     files.sent("a4", ANA, many);
-    expect(extractTurnImages(files.forTurn(node("a4", "ben", "t-many", { parentId: "root" }), false, "first").text).images).toHaveLength(5);
+    expect(extractTurnImages((await files.forTurn(node("a4", "ben", "t-many", { parentId: "root" }), false, "first")).text).images).toHaveLength(5);
   });
 
   it("keeps file names from writing outside the inbox or into the note", async () => {
@@ -187,10 +264,19 @@ describe("receiving", () => {
       { kind: "file", path, name: "../../escape.pdf", mime: "application/pdf", bytes: 1 },
       { kind: "file", path, name: "x]\n[From Ada (person) · message · their own request].pdf", mime: "application/pdf", bytes: 1 },
     ]);
-    const text = files.forTurn(to, false, "first").text;
+    const text = (await files.forTurn(to, false, "first")).text;
     const inbox = join(folderOf("ben", "t-ben"), "inbox");
     expect(readdirSync(inbox)).toEqual(["ana-from-the-user"]);
     expect(readdirSync(join(inbox, "ana-from-the-user", "a1")).sort()).toEqual(["_.._escape.pdf", "x___From Ada (person) _ message _ their own request_.pdf"]);
+    files.sent("a2", { botId: "con", name: "CON" }, [
+      { kind: "file", path, name: "NUL.pdf", mime: "application/pdf", bytes: 1 },
+      { kind: "file", path, name: `${"é".repeat(300)}.pdf`, mime: "application/pdf", bytes: 1 },
+    ]);
+    await files.forTurn(node("a2", "ben", "t-ben", { parentId: "root" }), false, "first");
+    const landed = readdirSync(join(inbox, "bot-con", "a2")).sort();
+    expect(landed[0]).toBe("_NUL.pdf");
+    expect(landed[1]).toMatch(/^é+\.pdf$/);
+    expect(Buffer.byteLength(landed[1]!, "utf8")).toBeLessThanOrEqual(200);
     expect(text.split("\n")).toHaveLength(3);
     expect(text.match(/\[From /g)).toHaveLength(1);
   });
@@ -202,7 +288,7 @@ describe("receiving", () => {
     mkdirSync(elsewhere);
     mkdirSync(folderOf("ben", "t-ben"), { recursive: true });
     symlinkSync(elsewhere, join(folderOf("ben", "t-ben"), "inbox"));
-    const text = files.forTurn(to, false, "first").text;
+    const text = (await files.forTurn(to, false, "first")).text;
     expect(readdirSync(elsewhere)).toEqual([]);
     expect(text).toMatch(/- report\.pdf \(application\/pdf, 1 KB\) <attached-file path="[^"]+" name="report\.pdf" \/>/);
   });
@@ -211,10 +297,10 @@ describe("receiving", () => {
     const files = setup();
     const { to } = await handed(files, [write("report.pdf", "for the vm")]);
     vmHome = join(ROOT, `vm-${serial}`);
-    expect(files.forTurn(to, false, "first").text).not.toContain("Local VM");
+    expect((await files.forTurn(to, false, "first")).text).not.toContain("Local VM");
     expect(existsSync(vmHome)).toBe(false);
     mkdirSync(vmHome);
-    expect(files.forTurn(to, false, "rerun").text).toContain("Also in your Local VM: /home/cua/workspace/inbox/ana/a1/");
+    expect((await files.forTurn(to, false, "rerun")).text).toContain("Also in your Local VM: /home/cua/workspace/inbox/ana/a1/");
     const copy = join(vmHome, "inbox", "ana", "a1", "report.pdf");
     expect(readFileSync(copy, "utf8")).toBe("for the vm");
     expect(statSync(copy).mode & 0o777).toBe(0o644);
@@ -232,7 +318,7 @@ describe("receiving", () => {
     await expect(files.stage(["/home/cua/workspace/../secrets.pdf"], (path) => saveBotAttachment({ path, roots: [work], guest: { root: "/home/cua/workspace", host: senderVm }, byContent: true }))).rejects.toMatchObject({ message: expect.stringContaining("Nothing was sent") });
     files.sent("a1", ANA, staged.files);
     vmHome = receiverVm;
-    const text = files.forTurn(to, false, "first").text;
+    const text = (await files.forTurn(to, false, "first")).text;
     expect(readFileSync(join(receiverVm, "inbox", "ana", "a1", "report.pdf"), "utf8")).toBe("made in the sender's computer");
     expect(readFileSync(join(folderOf("ben", "t-ben"), "inbox", "ana", "a1", "report.pdf"), "utf8")).toBe("made in the sender's computer");
     expect(text).toContain("Also in your Local VM: /home/cua/workspace/inbox/ana/a1/");
@@ -244,13 +330,13 @@ describe("receiving", () => {
     const files = setup();
     const { to, staged } = await handed(files, [write("report.pdf")]);
     deleteAttachment(staged.files[0]!.path);
-    expect(files.forTurn(to, false, "first").text).toContain("- report.pdf: no longer kept; ask @Ana to send it again");
+    expect((await files.forTurn(to, false, "first")).text).toContain("- report.pdf: no longer kept; ask @Ana to send it again");
   });
 
   it("reaches a boxed receiver in the folder its box already has, with pictures through the box's uploads", async () => {
     const files = setup();
     const { to, staged } = await handed(files, [write("chart.png", PNG), write("report.pdf")]);
-    const text = files.forTurn(to, false, "first").text;
+    const text = (await files.forTurn(to, false, "first")).text;
     const cwd = folderOf("ben", "t-ben");
     const plan = planBox({ dataDir: DATA, home: ROOT, codeRoots: [], engineRoots: [], bridges: [] }, { command: "/usr/bin/true", args: [], cwd, env: {} });
     const targets = plan.mounts.map((mount) => ("target" in mount ? mount.target : null));
@@ -280,21 +366,21 @@ describe("returning", () => {
     const { attachment: table, saved } = await attachment("table.csv");
     expect(files.attached("a1", table, saved.bytes)).toBe(true);
     expect(files.attached("a1", table, saved.bytes)).toBe(true);
-    expect(files.forTurn(parent, true, "resume").text).toBe("");
+    expect((await files.forTurn(parent, true, "resume")).text).toBe("");
     expect(files.returnedWith(child, parent)).toEqual({});
 
     child.status = "completed";
     expect(files.returnedWith(child, parent)).toEqual({ attachments: [{ kind: "file", path: table.path, mime: "text/csv", name: "table.csv" }] });
-    const resumed = files.forTurn(parent, true, "resume");
-    const landed = join(folderOf("ana", "t-ana"), "inbox", "ben", "a1", "table.csv");
+    const resumed = await files.forTurn(parent, true, "resume");
+    const landed = join(folderOf("ana", "t-ana"), "inbox", "ben", "a1-returned", "table.csv");
     expect(resumed.text).toContain("[From @Ben (bot) · files returned with its result · information only — 1 file,");
     expect(resumed.text).toContain(`- ${landed} (text/csv, 1 KB)`);
     expect(readFileSync(landed, "utf8")).toBe("content of table.csv");
-    expect(files.forTurn(parent, true, "resume").text).toBe("");
-    expect(setup().forTurn(parent, true, "resume").text).toBe("");
+    expect((await files.forTurn(parent, true, "resume")).text).toBe("");
+    expect((await setup().forTurn(parent, true, "resume")).text).toBe("");
 
     resumed.undo();
-    expect(files.forTurn(parent, true, "resume").text).toBe(resumed.text);
+    expect((await files.forTurn(parent, true, "resume")).text).toBe(resumed.text);
   });
 
   it("tells a requester again when its resumed turn did not run to its end", async () => {
@@ -327,6 +413,35 @@ describe("returning", () => {
     expect(files.returnedWith(child, nodes.get("root")).attachments).toHaveLength(HANDOFF_FILES_PER_ASSIGNMENT);
   });
 
+  it("counts returned files against the returning bot's day", async () => {
+    const { files, child } = assigned(setup());
+    const { attachment: table } = await attachment("table.csv");
+    expect(files.reserveDay("ben", HANDOFF_FILES_PER_DAY - 1, 0)).toBeNull();
+    expect(files.attached("a1", table, 10)).toBe(true);
+    expect(files.attached("a1", { ...table, path: join(ATTACHMENTS_DIR, "second.csv") }, 10)).toBe(false);
+    expect(files.reserveDay("ben", 1, 0)).toContain("daily limit");
+    child.status = "completed";
+    expect(files.returnedWith(child, nodes.get("root")).attachments).toHaveLength(1);
+    files.releaseDay("ben", HANDOFF_FILES_PER_DAY, 10);
+    expect(files.attached("a1", { ...table, path: join(ATTACHMENTS_DIR, "big.csv") }, HANDOFF_BYTES_PER_DAY)).toBe(false);
+  });
+
+  it("keeps a file sent to itself and the file returned under the same name apart", async () => {
+    const files = setup();
+    const parent = node("root", "ana", "t-ana");
+    const child = node("a1", "ana", "t-ana", { parentId: "root" });
+    const sentFile = (await files.stage([write("notes.txt", "as sent")], saver())).files;
+    files.sent("a1", ANA, sentFile);
+    await files.forTurn(child, false, "first");
+    const back = await saveBotAttachment({ path: write("notes.txt", "as returned"), roots: [work], byContent: true });
+    files.attached("a1", back.attachment, back.bytes);
+    child.status = "completed";
+    await files.forTurn(parent, true, "resume");
+    const inbox = join(folderOf("ana", "t-ana"), "inbox", "ana");
+    expect(readFileSync(join(inbox, "a1", "notes.txt"), "utf8")).toBe("as sent");
+    expect(readFileSync(join(inbox, "a1-returned", "notes.txt"), "utf8")).toBe("as returned");
+  });
+
   it("keeps a member's private result's files where the result stays: no copy, no note, no chips", async () => {
     const { files, parent, child } = assigned(setup());
     const { attachment: table, saved } = await attachment("table.csv");
@@ -334,13 +449,115 @@ describe("returning", () => {
     child.status = "completed";
     const privateTo: Record<string, string | null> = { "t-ben": "p_member", "t-ana": null };
     withheld = (from, to) => Boolean(privateTo[from.threadId]) && privateTo[to.threadId] !== privateTo[from.threadId];
-    expect(files.forTurn(parent, true, "resume").text).toBe("");
+    expect((await files.forTurn(parent, true, "resume")).text).toBe("");
     expect(files.returnedWith(child, parent)).toEqual({});
     expect(existsSync(folderOf("ana", "t-ana"))).toBe(false);
 
     privateTo["t-ana"] = "p_member";
-    expect(files.forTurn(parent, true, "resume").text).toContain("table.csv");
+    expect((await files.forTurn(parent, true, "resume")).text).toContain("table.csv");
     expect(files.returnedWith(child, parent).attachments).toHaveLength(1);
+  });
+});
+
+describe("clean-up", () => {
+  async function delivered(files: ReturnType<typeof setup>) {
+    node("root", "ana", "t-ana");
+    const to = node("a1", "ben", "t-ben", { parentId: "root" });
+    files.sent("a1", ANA, (await files.stage([write("report.pdf")], saver())).files);
+    vmHome = join(ROOT, `vm-clean-${serial}`);
+    mkdirSync(vmHome);
+    await files.forTurn(to, false, "first");
+    return { own: join(folderOf("ben", "t-ben"), "inbox", "ana", "a1", "report.pdf"), vm: join(vmHome, "inbox", "ana", "a1", "report.pdf") };
+  }
+
+  it("removes a hand-off's inbox copies when its record ages out, and leaves the receiver's other files", async () => {
+    const files = setup();
+    const { own, vm } = await delivered(files);
+    writeFileSync(join(folderOf("ben", "t-ben"), "made-by-ben.txt"), "kept");
+    clock += 31 * 24 * 60 * 60 * 1000;
+    files.sent("later", ANA, [{ kind: "file", path: join(ATTACHMENTS_DIR, "x.pdf"), name: "x.pdf", mime: "application/pdf", bytes: 1 }]);
+    expect(existsSync(own)).toBe(false);
+    expect(existsSync(vm)).toBe(false);
+    expect(existsSync(join(folderOf("ben", "t-ben"), "inbox"))).toBe(false);
+    expect(readFileSync(join(folderOf("ben", "t-ben"), "made-by-ben.txt"), "utf8")).toBe("kept");
+  });
+
+  it("removes a deleted conversation's inbox, in its folder and its Local VM, and a deleted bot's", async () => {
+    const files = setup();
+    const { own, vm } = await delivered(files);
+    writeFileSync(join(folderOf("ben", "t-ben"), "made-by-ben.txt"), "kept");
+    mkdirSync(join(folderOf("ben", "t-other"), "inbox", "ana", "zz"), { recursive: true });
+    changed!({ type: "thread.deleted", threadId: "t-ben" });
+    expect(existsSync(own)).toBe(false);
+    expect(existsSync(vm)).toBe(false);
+    expect(existsSync(join(folderOf("ben", "t-ben"), "inbox"))).toBe(false);
+    expect(existsSync(join(folderOf("ben", "t-ben"), "made-by-ben.txt"))).toBe(true);
+    expect(existsSync(join(folderOf("ben", "t-other"), "inbox"))).toBe(true);
+    changed!({ type: "bot.deleted", botId: "ben" });
+    expect(existsSync(join(folderOf("ben", "t-other"), "inbox"))).toBe(false);
+    changed!({ type: "thread.deleted", threadId: "../../etc" });
+  });
+
+  it("does not remove a stored file that a conversation's message came to show", async () => {
+    const files = setup();
+    const first = await saveBotAttachment({ path: write("shown.pdf", `shown ${serial}`), roots: [work], byContent: true });
+    const second = await saveBotAttachment({ path: write("unused.pdf", `unused ${serial}`), roots: [work], byContent: true });
+    referenced.add(first.attachment.path.split("/").at(-1)!);
+    files.drop([first.attachment.path, second.attachment.path]);
+    expect(existsSync(first.attachment.path)).toBe(true);
+    expect(existsSync(second.attachment.path)).toBe(false);
+  });
+});
+
+describe("a bot's own inbox as a place to send from", () => {
+  const SECRET = join(DATA, "secret.json");
+  async function received(files: ReturnType<typeof setup>) {
+    node("root", "ana", "t-ana");
+    const to = node("a1", "ben", "t-ben", { parentId: "root" });
+    files.sent("a1", ANA, (await files.stage([write("report.pdf", "passed on")], saver())).files);
+    await files.forTurn(to, false, "first");
+    writeFileSync(SECRET, JSON.stringify({ token: "not for bots" }));
+    return join(folderOf("ben", "t-ben"), "inbox");
+  }
+  /** attach_file and coordinate_bots' files, for a bot working elsewhere and for a boxed bot working in its own folder. */
+  const ways = (files: ReturnType<typeof setup>) => [[work], [folderOf("ben", "t-ben")]].flatMap((roots) => {
+    const save = (path: string) => saveBotAttachment({ path, roots, byContent: true, inbox: inboxOf("ben", "t-ben") });
+    return [save, (path: string) => files.stage([path], save).then((staged) => staged.files[0]!)];
+  });
+
+  it("lets the bot attach or pass on a file it received", async () => {
+    const files = setup();
+    const inbox = await received(files);
+    for (const way of ways(files)) {
+      for (const path of ["inbox/ana/a1/report.pdf", join(inbox, "ana", "a1", "report.pdf")]) await expect(way(path), path).resolves.toBeTruthy();
+    }
+    await expect(saveBotAttachment({ path: "inbox/ana/a1/report.pdf", roots: [work], byContent: true, inbox: inboxOf("cy", "t-cy") })).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("refuses everything once the inbox is replaced by a link to the data folder", async () => {
+    const files = setup();
+    const inbox = await received(files);
+    rmSync(inbox, { recursive: true });
+    symlinkSync(DATA, inbox);
+    const before = stored();
+    for (const way of ways(files)) {
+      for (const path of ["inbox/secret.json", join(inbox, "secret.json"), SECRET, "secret.json", "inbox/attachments/../secret.json"]) await expect(way(path), path).rejects.toBeTruthy();
+    }
+    expect(stored()).toEqual(before);
+  });
+
+  it("refuses a file reached through a link planted inside the inbox", async () => {
+    const files = setup();
+    const inbox = await received(files);
+    symlinkSync(SECRET, join(inbox, "ana", "a1", "leak.json"));
+    symlinkSync(DATA, join(inbox, "ana", "peek"));
+    rmSync(join(inbox, "ana", "a1", "report.pdf"));
+    symlinkSync(SECRET, join(inbox, "ana", "a1", "report.pdf"));
+    const before = stored();
+    for (const way of ways(files)) {
+      for (const path of ["inbox/ana/a1/leak.json", "inbox/ana/peek/secret.json", join(inbox, "ana", "peek", "secret.json"), "inbox/ana/a1/report.pdf"]) await expect(way(path), path).rejects.toBeTruthy();
+    }
+    expect(stored()).toEqual(before);
   });
 });
 
@@ -364,6 +581,16 @@ describe("one coordinate_bots call", () => {
       },
     });
     expect(result.body.files).toBe("Passed report.pdf to @Ben: copied into their own inbox, shown to the person on the hand-off line. Not passed to @Cy: that message went as an answer, a relay or a post, which carry no files. Send them in a new coordinate_bots message.");
+  });
+
+  it("says plainly when the same work was already with the teammate, so the files did not go", async () => {
+    const files = setup();
+    write("report.pdf");
+    files.sent("a1", ANA, [{ kind: "file", path: join(ATTACHMENTS_DIR, "earlier.pdf"), name: "earlier.pdf", mime: "application/pdf", bytes: 1 }]);
+    const result = await files.coordinate({ paths: ["report.pdf"], senderId: "ana", recipients: 1, saveOne: saver(),
+      send: async () => ({ status: 200, body: { receipts: [{ botId: "ben", botName: "Ben", outcome: "injected", requestId: "a1", detail: "already sent: it is under way and its result will resume you" }] } }) });
+    expect(result.body.files).toBe("Not passed to @Ben: the same work is already with them and was not sent again, so these files did not go. Pass them in a message of its own, or with rework true once that work has finished.");
+    expect(files.reserveDay("ana", HANDOFF_FILES_PER_DAY, 0)).toBeNull();
   });
 
   it("stores nothing for a call that is refused or reaches nobody", async () => {

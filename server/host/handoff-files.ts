@@ -9,12 +9,13 @@
 // the result: where the result is withheld (access changed, or it stayed in one person's private chat) they are too.
 // What a receiver reads about them is a harness note saying they are data from another bot; nothing is opened, run or
 // unpacked here.
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { z } from "zod";
 
 import { escapeAttribute } from "../../src/lib/composer-attachments.ts";
+import { isOwnThreadFolder } from "../../shared/thread-folder.ts";
 import { FILE_MAX_BYTES } from "../../shared/upload-limits.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import type { SavedBotAttachment } from "../bot-attachment.ts";
@@ -23,7 +24,7 @@ import { peerName } from "../peer-roster.ts";
 import { AUTHORITY, botWho, fromNoteWith } from "../provenance-label.ts";
 import type { Message } from "../store.ts";
 import { ensureTaskWorkspace, TASK_WORKSPACES_DIR } from "../workspace.ts";
-import { INBOX_FOLDER, inboxAssignmentPart, inboxFileNames, inboxFolder, inboxSenderPart, placeInInbox } from "./handoff-inbox.ts";
+import { INBOX_FOLDER, inboxAssignmentPart, inboxFileNames, inboxFolder, inboxSenderPart, placeInInbox, removeInbox, removeInboxCopy, type InboxRead } from "./handoff-inbox.ts";
 
 /** Files one coordinate_bots call may carry, and their bytes together. Each file also keeps attach_file's own limit. */
 export const HANDOFF_FILES_PER_MESSAGE = 5;
@@ -53,6 +54,8 @@ interface Batch {
   listed?: number;
   /** Where each copy landed, by the stored file it was copied from: a delivery already made is not made again. */
   placed?: Record<string, string>;
+  /** The conversation the copies were made for, so they go when it does. */
+  to?: { botId: string; threadId: string };
 }
 interface Ledger {
   batches: Batch[];
@@ -76,6 +79,14 @@ export interface HandoffFilesDeps {
   withheld(child: Node, parent: Node): boolean;
   /** Removes a stored file this module put there and nothing came to use. */
   discard?(path: string): void;
+  /** Conversations whose messages name this stored file (message-db.ts threadsReferencing): such a file is never removed here. */
+  threadsReferencing?(name: string): readonly string[];
+  /** The conversation's turns run in its own folder, so `inbox/...` paths read from there; otherwise paths are absolute. */
+  worksInOwnFolder?(botId: string, threadId: string): boolean;
+  /** The store's change feed: a deleted conversation or bot takes its inbox copies with it. */
+  changes?(listener: (change: { type: string; threadId?: string; botId?: string }) => void): unknown;
+  /** `<data>/task-workspaces`, where conversations' own folders are. Absent: this install's. */
+  taskWorkspaces?: string;
   log?(line: string): void;
 }
 
@@ -86,8 +97,14 @@ const total = (files: readonly PassedFile[]) => files.reduce((sum, file) => sum 
 const asAttachment = (file: PassedFile): NonNullable<Message["attachments"]>[number] =>
   file.kind === "image" ? { kind: "image", path: file.path, mime: file.mime, name: file.name } : { kind: "file", path: file.path, mime: file.mime, name: file.name };
 
-/** Where a conversation's received files are: a folder the bot may attach from and pass on from, wherever it works. */
-export const ownInboxFolder = (botId: string, threadId: string): string => join(TASK_WORKSPACES_DIR, botId, threadId, INBOX_FOLDER);
+/** Whether a conversation's turns run in its own folder (`task-workspaces/<bot>/<thread>`): its pinned folder is that
+ * one, or none is pinned yet and nothing else would be (no room, no working folder on the bot). */
+export function turnsRunInOwnFolder(botId: string, threadId: string, pinned: string | null | undefined, botFolder: string | undefined, room: boolean): boolean {
+  return pinned === undefined ? !room && !botFolder : isOwnThreadFolder(pinned, botId, threadId);
+}
+
+/** A conversation's inbox of received files, which its bot may attach from and pass on from wherever it works. */
+export const inboxRead = (botId: string, threadId: string): InboxRead => ({ taskWorkspaces: TASK_WORKSPACES_DIR, botId, threadId });
 
 /** coordinate_bots' `files` as the internal route takes it. */
 export const handoffFilesSchema = z.array(z.string().trim().min(1).max(2_000)).max(HANDOFF_FILES_PER_MESSAGE).optional();
@@ -115,9 +132,16 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
     return ledger;
   }
 
+  /** A batch that leaves the record takes the inbox copies made from it. */
+  function removeCopies(batches: readonly Batch[]): void {
+    for (const batch of batches) for (const path of Object.keys(batch.placed ?? {})) removeInboxCopy(path);
+  }
+
   function save(): void {
     const state = load(), oldest = now() - KEPT_MS, today = new Date(now()).toISOString().slice(0, 10);
-    state.batches = state.batches.filter((batch) => batch.at >= oldest).slice(-KEPT_BATCHES);
+    const kept = state.batches.filter((batch) => batch.at >= oldest).slice(-KEPT_BATCHES);
+    if (kept.length !== state.batches.length) removeCopies(state.batches.filter((batch) => !kept.includes(batch)));
+    state.batches = kept;
     for (const [botId, day] of Object.entries(state.days)) if (day.day !== today) delete state.days[botId];
     try {
       writeFileAtomic(file, JSON.stringify(state), { mode: 0o600 });
@@ -168,25 +192,39 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
     return { files, fresh };
   }
 
-  /** Stored files a refused call left behind; one a hand-off or a message came to name stays. */
+  /** Stored files a refused call left behind. One a hand-off still carries, or a message in any conversation names,
+   * stays: another turn may have come to use the same bytes meanwhile. */
   function drop(paths: readonly string[]): void {
     const named = new Set(load().batches.flatMap((batch) => batch.files.map((passed) => passed.path)));
-    for (const path of paths) if (!named.has(path)) deps.discard?.(path);
+    for (const path of paths) {
+      if (named.has(path)) continue;
+      let shown = true;
+      try { shown = (deps.threadsReferencing?.(basename(path)) ?? []).length > 0; } catch { /* unknown: keep it */ }
+      if (!shown) deps.discard?.(path);
+    }
   }
 
-  /** Why this bot may not pass these files to this many teammates today, in words for the model; null when it may. */
-  function dayRefusal(botId: string, files: readonly PassedFile[], recipients: number): string | null {
+  /** Takes `files` files and `bytes` bytes of this bot's day in one step, so parallel calls cannot each see room for
+   * themselves. Answers why not, in words for the model, when the day has no room; then nothing is taken. */
+  function reserveDay(botId: string, files: number, bytes: number): string | null {
     const used = today(botId);
-    if (used.files + files.length * recipients <= HANDOFF_FILES_PER_DAY && used.bytes + total(files) * recipients <= HANDOFF_BYTES_PER_DAY) return null;
-    return `files: you have passed ${used.files} files (${sized(used.bytes)}) to teammates today; the daily limit is ${HANDOFF_FILES_PER_DAY} files or ${megabytes(HANDOFF_BYTES_PER_DAY)}. Nothing was sent: send the message without files and give paths the teammate can already read, or tell the person.`;
+    if (used.files + files > HANDOFF_FILES_PER_DAY || used.bytes + bytes > HANDOFF_BYTES_PER_DAY) {
+      return `files: you have passed ${used.files} files (${sized(used.bytes)}) between teammates today; the daily limit is ${HANDOFF_FILES_PER_DAY} files or ${megabytes(HANDOFF_BYTES_PER_DAY)}. Nothing was sent: send the message without files and give paths the teammate can already read, or tell the person.`;
+    }
+    load().days[botId] = { day: used.day, files: used.files + files, bytes: used.bytes + bytes };
+    return null;
   }
 
-  /** The files this assignment was handed out with. One record for each assignment: a repeat is not recorded again. */
+  function releaseDay(botId: string, files: number, bytes: number): void {
+    const used = today(botId);
+    load().days[botId] = { day: used.day, files: Math.max(0, used.files - files), bytes: Math.max(0, used.bytes - bytes) };
+  }
+
+  /** The files this assignment was handed out with. One record for each assignment: a repeat is not recorded again.
+   * The sender's day was charged when the call reserved it. */
   function sent(assignmentId: string, from: { botId: string; name: string }, files: readonly PassedFile[]): void {
     if (!files.length || batchOf(assignmentId, "sent")) return;
-    const state = load(), used = today(from.botId);
-    state.batches.push({ assignmentId, way: "sent", from, files: [...files], at: now() });
-    state.days[from.botId] = { day: used.day, files: used.files + files.length, bytes: used.bytes + total(files) };
+    load().batches.push({ assignmentId, way: "sent", from, files: [...files], at: now() });
     save();
   }
 
@@ -198,6 +236,7 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
     const all = carried(node.id);
     if (all.some((passed) => passed.path === attachment.path)) return true;
     if (all.length >= HANDOFF_FILES_PER_ASSIGNMENT || total(all) + bytes > HANDOFF_BYTES_PER_ASSIGNMENT) return false;
+    if (reserveDay(node.botId, 1, bytes)) return false;
     const passed: PassedFile = { kind: attachment.kind, path: attachment.path, name: attachment.name || basename(attachment.path), mime: attachment.mime, bytes };
     const batch = batchOf(node.id, "returned");
     if (batch) batch.files.push(passed);
@@ -223,18 +262,21 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
 
   /** Copies a batch's files into the receiver's inbox (and its own Local VM's), once each, and answers their lines.
    * A picture's tag stands on a line of its own, after a blank one: only such a tag becomes an image the engine sees. */
-  function deliver(batch: Batch, files: readonly PassedFile[], to: { botId: string; threadId: string }, shown: { images: number; bytes: number } | null): string[] {
-    const place = { fromPart: inboxSenderPart(batch.from.name, batch.from.botId), assignmentPart: inboxAssignmentPart(batch.assignmentId) };
+  async function deliver(batch: Batch, files: readonly PassedFile[], to: { botId: string; threadId: string }, shown: { images: number; bytes: number } | null): Promise<string[]> {
+    const place = { fromPart: inboxSenderPart(batch.from.name, batch.from.botId), assignmentPart: inboxAssignmentPart(batch.assignmentId, batch.way === "returned") };
+    batch.to = to;
     const names = inboxFileNames(batch.files.map((passed) => passed.name));
     const root = (deps.inboxRoot ?? ownFolder)(to.botId, to.threadId), home = deps.vmHome?.(to.botId) ?? null, vm = home && isFolder(home) ? home : null;
     const placed = batch.placed ??= {};
     const lines: string[] = [], pictures: string[] = [];
     let inVm = 0;
-    const copy = (home: string, shared: boolean, passed: PassedFile, name: string): string | null => {
+    const copy = async (given: string, shared: boolean, passed: PassedFile, name: string): Promise<string | null> => {
+      let home = given;
+      try { home = realpathSync(given); } catch { /* placeInInbox says why */ }
       const target = join(inboxFolder({ root: home, ...place }), name);
       if (placed[target] === basename(passed.path) && existsSync(target)) return target;
       try {
-        const landed = placeInInbox({ root: home, ...place, shared }, passed.path, name);
+        const landed = await placeInInbox({ root: home, ...place, shared }, passed.path, name);
         placed[landed] = basename(passed.path);
         return landed;
       } catch (error) {
@@ -248,12 +290,14 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
         lines.push(`- ${name}: no longer kept; ask @${peerName(batch.from.name)} to send it again if you need it`);
         continue;
       }
-      const landed = root ? copy(root, false, passed, name) : null;
-      if (vm && copy(vm, true, passed, name)) inVm += 1;
+      const landed = root ? await copy(root, false, passed, name) : null;
+      if (vm && await copy(vm, true, passed, name)) inVm += 1;
       const picture = passed.kind === "image" && shown !== null && shown.images < IMAGES_SHOWN && shown.bytes + passed.bytes <= IMAGE_BYTES_SHOWN;
       if (picture) { shown!.images += 1; shown!.bytes += passed.bytes; }
       const tag = (kind: "image" | "file") => `<attached-${kind} path="${escapeAttribute(passed.path)}" name="${escapeAttribute(name)}" />`;
-      lines.push(landed ? `- ${landed} (${passed.mime}, ${sized(passed.bytes)})` : `- ${name} (${passed.mime}, ${sized(passed.bytes)}) ${tag("file")}`);
+      // In its own folder the receiver reads `inbox/...` as it stands; elsewhere only the whole path leads there.
+      const read = landed && deps.worksInOwnFolder?.(to.botId, to.threadId) ? [INBOX_FOLDER, place.fromPart, place.assignmentPart, basename(landed)].join("/") : landed;
+      lines.push(read ? `- ${read} (${passed.mime}, ${sized(passed.bytes)})` : `- ${name} (${passed.mime}, ${sized(passed.bytes)}) ${tag("file")}`);
       if (picture) pictures.push("", tag("image"));
     }
     if (inVm) lines.push(`Also in your Local VM: ${VM_WORKSPACE}/inbox/${place.fromPart}/${place.assignmentPart}/`);
@@ -269,25 +313,24 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
   /** What the turn about to start for `node` is told about files, with the copies made. The brief's files ride every
    * turn that carries the brief; returned files are told once, to the turn their results resume. `undo` takes back
    * that "once" for a turn that did not run to its end. */
-  function forTurn(node: Node, resumed: boolean, turn: ComposedTurn["turn"]): { text: string; undo(): void } {
+  async function forTurn(node: Node, resumed: boolean, turn: ComposedTurn["turn"]): Promise<{ text: string; undo(): void }> {
     const to = { botId: node.botId, threadId: node.threadId }, shown = node.groupId ? null : { images: 0, bytes: 0 };
     const notes: string[] = [], told: Array<{ batch: Batch; before: number | undefined }> = [];
-    const before = JSON.stringify(load().batches.map((batch) => batch.placed));
     if (!resumed) {
       const batch = node.parentId ? batchOf(node.id, "sent") : undefined;
-      if (batch) notes.push(note(batch, deliver(batch, batch.files, to, shown), batch.files.length));
+      if (batch) notes.push(note(batch, await deliver(batch, batch.files, to, shown), batch.files.length));
     } else {
       for (const child of deps.children(node.id)) {
         const batch = returnedBatch(child, node);
         if (!batch) continue;
         const fresh = batch.files.slice(turn === "rerun" ? 0 : batch.listed ?? 0);
         if (!fresh.length) continue;
-        notes.push(note(batch, deliver(batch, fresh, to, shown), fresh.length));
         told.push({ batch, before: batch.listed });
         batch.listed = batch.files.length;
+        notes.push(note(batch, await deliver(batch, fresh, to, shown), fresh.length));
       }
     }
-    if (told.length || before !== JSON.stringify(load().batches.map((batch) => batch.placed))) save();
+    if (notes.length) save();
     return {
       text: notes.join("\n\n"),
       undo: () => {
@@ -304,9 +347,9 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
   /** Wraps the coordinator host's `run`: the turn's text gains the files note, after the copies are in place. */
   function around<Run extends (node: HandoffView, resumed: boolean, signal: AbortSignal, composed: ComposedTurn) => Promise<HostTurnResult>>(run: Run) {
     return async (node: HandoffView, resumed: boolean, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult> => {
-      let files: ReturnType<typeof forTurn> | undefined;
+      let files: Awaited<ReturnType<typeof forTurn>> | undefined;
       try {
-        files = forTurn(node, resumed, composed.turn);
+        files = await forTurn(node, resumed, composed.turn);
       } catch (error) {
         deps.log?.(`handoff files: ${node.id}: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -330,32 +373,73 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
   }): Promise<{ status: number; body: Record<string, unknown> }> {
     if (!call.paths?.length) return call.send();
     if (call.answers) return { status: 400, body: { error: "files do not travel with an answer. Send the answer without files, then pass the files in a new coordinate_bots message to that teammate." } };
+    // The day's file count is taken before anything is stored, the bytes as soon as they are known; a refusal gives both back.
+    const asked = new Set(call.paths.map((path) => path.trim()).filter(Boolean)).size * call.recipients;
+    const full = reserveDay(call.senderId, asked, 0);
+    if (full) return { status: 429, body: { error: full } };
     let staged: Awaited<ReturnType<typeof stage>>;
     try {
       staged = await stage(call.paths, call.saveOne);
     } catch (error) {
+      releaseDay(call.senderId, asked, 0);
       return { status: typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500, body: { error: error instanceof Error ? error.message : "files could not be read" } };
     }
-    const over = dayRefusal(call.senderId, staged.files, call.recipients);
+    const count = staged.files.length, bytes = total(staged.files);
+    const over = reserveDay(call.senderId, 0, bytes * call.recipients);
     if (over) {
+      releaseDay(call.senderId, asked, 0);
       drop(staged.fresh);
       return { status: 429, body: { error: over } };
     }
-    const result = await call.send(staged.files);
-    const receipts = Array.isArray(result.body.receipts) ? result.body.receipts as Array<{ botId?: string; botName?: string; outcome?: string; requestId?: string }> : [];
+    let result: { status: number; body: Record<string, unknown> };
+    try {
+      result = await call.send(staged.files);
+    } catch (error) {
+      releaseDay(call.senderId, count * call.recipients, bytes * call.recipients);
+      drop(staged.fresh);
+      throw error;
+    }
+    const receipts = Array.isArray(result.body.receipts) ? result.body.receipts as Array<{ botId?: string; botName?: string; outcome?: string; requestId?: string; detail?: string }> : [];
     const carries = (id: string | undefined) => Boolean(id) && batchOf(id!, "sent")?.files.map((passed) => passed.path).join("\n") === staged.files.map((passed) => passed.path).join("\n");
     const who = (receipt: { botId?: string; botName?: string }) => `@${peerName(receipt.botName ?? "") || receipt.botId || "teammate"}`;
     const got = receipts.filter((receipt) => receipt.outcome !== "failed" && carries(receipt.requestId)), missed = receipts.filter((receipt) => receipt.outcome !== "failed" && !carries(receipt.requestId));
+    // Only a teammate that got the files costs the sender's day.
+    const unused = Math.max(0, call.recipients - got.length);
+    if (unused) releaseDay(call.senderId, count * unused, bytes * unused);
+    save();
     if (!got.length) drop(staged.fresh);
     const names = staged.files.map((passed) => passed.name).join(", ");
+    const open = missed.filter((receipt) => /^already sent\b/.test(receipt.detail ?? "")), elsewhere = missed.filter((receipt) => !open.includes(receipt));
     const said = [
       ...(got.length ? [`Passed ${names} to ${got.map(who).join(", ")}: copied into their own inbox, shown to the person on the hand-off line.`] : []),
-      ...(missed.length ? [`Not passed to ${missed.map(who).join(", ")}: that message went as an answer, a relay or a post, which carry no files. Send them in a new coordinate_bots message.`] : []),
+      ...(open.length ? [`Not passed to ${open.map(who).join(", ")}: the same work is already with them and was not sent again, so these files did not go. Pass them in a message of its own, or with rework true once that work has finished.`] : []),
+      ...(elsewhere.length ? [`Not passed to ${elsewhere.map(who).join(", ")}: that message went as an answer, a relay or a post, which carry no files. Send them in a new coordinate_bots message.`] : []),
     ].join(" ");
     return said ? { status: result.status, body: { ...result.body, files: said } } : result;
   }
 
-  return { stage, drop, dayRefusal, sent, attached, sentWith, returnedWith, forTurn, around, coordinate };
+  /** A deleted conversation or bot: the inbox copies made for it go, in its own folder and in its Local VM. The app
+   * keeps the rest of a conversation's folder, which holds what the bot made for the person. */
+  function forget(gone: { threadId?: string; botId?: string }): void {
+    const theirs = (batch: Batch) => Boolean(batch.to) && (gone.threadId ? batch.to!.threadId === gone.threadId : batch.to!.botId === gone.botId);
+    const state = load(), mine = state.batches.filter(theirs);
+    removeCopies(mine);
+    for (const batch of mine) { delete batch.placed; delete batch.to; }
+    const root = deps.taskWorkspaces ?? TASK_WORKSPACES_DIR;
+    try {
+      for (const bot of gone.botId ? [gone.botId] : readdirSync(root)) {
+        for (const thread of gone.threadId ? [gone.threadId] : readdirSync(join(root, bot))) removeInbox(join(root, bot, thread));
+      }
+    } catch { /* nothing there */ }
+    if (mine.length) save();
+  }
+  deps.changes?.((change) => {
+    const id = /^[A-Za-z0-9_-]{1,128}$/;
+    if (change.type === "thread.deleted" && change.threadId && id.test(change.threadId)) forget({ threadId: change.threadId });
+    else if (change.type === "bot.deleted" && change.botId && id.test(change.botId)) forget({ botId: change.botId });
+  });
+
+  return { stage, drop, reserveDay, releaseDay, sent, attached, sentWith, returnedWith, forTurn, around, coordinate, forget };
 }
 
 export type HandoffFiles = ReturnType<typeof createHandoffFiles>;
