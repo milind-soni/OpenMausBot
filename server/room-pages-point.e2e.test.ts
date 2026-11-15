@@ -36,7 +36,11 @@ it("sends a pick on a room page to the bot that made it, and to no other member"
   });
   expect(created.status, JSON.stringify(created.body)).toBeLessThan(300);
   const group = created.body.group;
-  const settled = async () => expect((await cli("wait", "--thread", group.threadId, "--timeout", "30")).status).toBe("settled");
+  const settled = async () => {
+    const waited = await cli("wait", "--thread", group.threadId, "--timeout", "30");
+    expect(waited.status).toBe("settled");
+    expect(waited.state).not.toBe("failed");
+  };
   const transcript = async () => (await api(`/api/threads/${group.threadId}/messages?limit=50`)).body.messages as any[];
 
   plan([{ tool: "show_html", arguments: { html: "<main><button>Go</button></main>", title: "Launch" } }]);
