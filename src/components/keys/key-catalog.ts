@@ -220,12 +220,12 @@ export function keyEntry(id: KeyId): KeyEntry {
   return entry;
 }
 
-/** With Azure OpenAI, Fish Audio, Gemini or ElevenLabs chosen for Live calls, the row for their key is about that service:
+/** With Azure OpenAI, a custom endpoint, Fish Audio, Gemini or ElevenLabs chosen for Live calls, the row for their key is about that service:
  * required, and no OpenAI key. With Fish Audio, Gemini or ElevenLabs it is that service's key itself, which its voices use too. */
 export function shownKeyEntry(id: KeyId, config: ConfigStatus | null | undefined): KeyEntry {
   const entry = keyEntry(id);
   const provider = config?.live?.provider;
-  if (id !== "liveKey" || (provider !== "azure" && provider !== "fish" && provider !== "gemini" && provider !== "elevenlabs") || !entry.target) return entry;
+  if (id !== "liveKey" || (provider !== "azure" && provider !== "custom" && provider !== "fish" && provider !== "gemini" && provider !== "elevenlabs") || !entry.target) return entry;
   const { shape: _openAiShape, ...target } = entry.target;
   if (provider === "fish") {
     return { ...entry, name: "Fish Audio", labelKey: "keys.label.fishAudio", purposeKey: "keys.purpose.liveKeyFish", target: keyEntry("fishAudio").target };
@@ -242,6 +242,10 @@ export function shownKeyEntry(id: KeyId, config: ConfigStatus | null | undefined
     };
     return { ...entry, name: "ElevenLabs", labelKey: "keys.label.elevenlabs", purposeKey: "keys.purpose.liveKeyElevenLabs", target: { ...voices, saved } };
   }
+  if (provider === "custom") {
+    const { href: _openAiPage, ...own } = target;
+    return { ...entry, name: "Custom endpoint", labelKey: "call.live.customKeyField", purposeKey: "keys.purpose.liveKeyCustom", target: { ...own, placeholder: "…" } };
+  }
   return { ...entry, name: "Azure OpenAI", labelKey: "call.live.azureKeyField", purposeKey: "keys.purpose.liveKeyAzure", target: { ...target, placeholder: "…", href: "https://portal.azure.com" } };
 }
 
@@ -255,11 +259,11 @@ export function savedState(entry: KeyEntry, config: ConfigStatus | null | undefi
   return entry.target?.saved(config) ?? entry.status?.(config) ?? { configured: false };
 }
 
-/** With Azure, Fish Audio, Gemini or ElevenLabs chosen, Live calls do not use the OpenAI key the Live calls row points at, so that row is
+/** With Azure, a custom endpoint, Fish Audio, Gemini or ElevenLabs chosen, Live calls do not use the OpenAI key the Live calls row points at, so that row is
  * hidden. */
 export function keyHidden(id: KeyId, config: ConfigStatus | null | undefined): boolean {
   const provider = config?.live?.provider;
-  return id === "liveCalls" && (provider === "azure" || provider === "fish" || provider === "gemini" || provider === "elevenlabs");
+  return id === "liveCalls" && (provider === "azure" || provider === "custom" || provider === "fish" || provider === "gemini" || provider === "elevenlabs");
 }
 
 /** With `config`, the row is matched as shown: the Live key row by the provider Live calls use. */
