@@ -32,9 +32,10 @@ describe("mcpOwner and botMayChange", () => {
     expect(owner(remote({ bot: "bot2" }))).toBe("theirs");
     expect(owner(remote({ bot: "bot1" }))).toBe("own");
   });
-  it("a Team Cloud personal server wins over everything else", () => {
+  it("a Team Cloud personal server wins over everything but another bot's own", () => {
     expect(owner(remote(), ["x"])).toBe("person");
-    expect(owner(stdio({ bot: "bot2" }), ["x"])).toBe("person");
+    expect(owner(stdio({ bot: "bot1" }), ["x"])).toBe("person");
+    expect(owner(remote({ bot: "bot2" }), ["x"])).toBe("theirs");
     expect(botMayChange("person")).toEqual({ ok: false, error: "This connection is each person's own. Change it in Settings." });
   });
   it("a bot's own server that runs elsewhere is elsewhere", () => {

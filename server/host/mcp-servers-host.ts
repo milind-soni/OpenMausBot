@@ -155,8 +155,11 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
       deps.persist(next);
       for (const name of Object.keys(before ?? {})) {
         if (Object.hasOwn(next, name)) continue;
-        deps.keys?.forgetServer(name);
-        deps.forgetSignIn?.(name);
+        try {
+          deps.keys?.forgetServer(name);
+        } finally {
+          deps.forgetSignIn?.(name);
+        }
       }
     },
     /** At start: the first time bots run boxed here, servers in one existing bot's folders become its own (said once);
