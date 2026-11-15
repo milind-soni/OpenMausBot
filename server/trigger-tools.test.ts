@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { listTriggers, parseTriggerRequest, triggerTarget } from "./trigger-tools.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import type { WebhookTrigger } from "./webhooks.ts";
+import type { AppTrigger } from "../shared/app-triggers.ts";
+import { addHeldSecretScrubber, redactSecretsInText } from "./redact.ts";
 
 const now = Date.parse("2026-10-17T10:00:00Z");
 const routine = (id: string, botId: string, prompt = "Summarize the inbox."): Routine => ({
@@ -18,6 +20,37 @@ const run = (id: string, routineId: string, botId: string, output = "done"): Rou
 });
 
 describe("listTriggers", () => {
+  it.each(["schedule", "webhook", "app_event"])("reads complete %s instructions only for an owned trigger id", (kind) => {
+    const prompt = "Review the queue.\n".repeat(250) + "Keep this final instruction.";
+    const input = {
+      botId: "bot-a", routines: kind === "schedule" ? [routine("r1", "bot-a", prompt)] : [],
+      webhooks: kind === "webhook" ? [{ ...webhook("r1", "bot-a"), prompt }] : [],
+      appTriggers: kind === "app_event" ? [{ id: "r1", botId: "bot-a", prompt, name: "Mail", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", delivery: "poll" } as AppTrigger] : [],
+      runs: [], timeZone: "UTC", now,
+    };
+    const preview = listTriggers(input).triggers![0]!;
+    expect(preview.instructionsTruncated).toBe(true);
+    expect(prompt.startsWith(preview.instructions)).toBe(true);
+    expect(preview.instructions.length).toBeLessThan(prompt.length);
+    const full = listTriggers({ ...input, triggerId: "r1" }).trigger!;
+    expect(full).toMatchObject({ instructions: prompt, instructionsTruncated: false, instructionsRedacted: false });
+    expect(listTriggers({ ...input, triggerId: "r1", botId: "bot-b" })).not.toHaveProperty("trigger");
+  });
+
+  it("redacts the entire detailed instruction text, including held secrets beyond the preview", () => {
+    const secret = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789";
+    const prompt = "Keep checking.\n".repeat(250) + `Use ${secret} and fixture-password.`;
+    const remove = addHeldSecretScrubber(text => text.replaceAll("fixture-password", "••••••"));
+    try {
+      const input = { botId: "bot-a", routines: [routine("r1", "bot-a", prompt)], webhooks: [], runs: [], timeZone: "UTC", now };
+      const full = listTriggers({ ...input, triggerId: "r1" }).trigger!;
+      expect(full).toMatchObject({ instructions: redactSecretsInText(prompt), instructionsTruncated: false, instructionsRedacted: true });
+      expect(JSON.stringify(full)).not.toContain(secret);
+      expect(JSON.stringify(full)).not.toContain("fixture-password");
+      expect(listTriggers(input).triggers![0]!.instructionsRedacted).toBe(true);
+    } finally { remove(); }
+  });
+
   it("lists only the bot's own schedules and webhooks, each with its kind, and scrubs credentials", () => {
     const listed = listTriggers({
       botId: "bot-a", routines: [routine("r1", "bot-a", "Use token sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789 to check."), routine("r2", "bot-b")],

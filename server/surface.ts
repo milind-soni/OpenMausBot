@@ -21,7 +21,7 @@ export interface SurfacePlan {
   browser: boolean;
   pinned: Surface | null;
   note: string;
-  /** A bot opened this thread, so no person watches its Screen panel: the browser is mounted beside any computer. */
+  /** A bot opened this thread, so no person watches its Screen panel: a missing place is reported to that bot. */
   botOpened?: true;
 }
 
@@ -48,7 +48,8 @@ export function computerSkippedNote(cause: string): string {
   return ` This turn answers a Team incidents report and your computer could not be prepared for it (${why}), so no computer is mounted: you cannot open, click or check anything on it this turn. Act through your teammates, or tell the person what only they can fix — never claim to have checked that computer yourself.`;
 }
 
-/** One place per turn, plus the browser beside it in a thread a bot opened. A person's pin beats the bot's default (only Off overrides it), an Auto pin yields to a Works on change, and a pin the turn cannot honour is reported, never swapped. */
+/** One computer per turn, with the built-in browser beside it whenever the browser is on, so one task can use a website
+ * and a desktop app at once. A person's pin beats the bot's default (only Off overrides it), an Auto pin yields to a Works on change, and a pin the turn cannot honour is reported, never swapped. */
 export function resolveSurface(input: {
   destination: Destination;
   pinnedSurface?: Surface | null;
@@ -59,12 +60,11 @@ export function resolveSurface(input: {
   return input.botOpened ? { ...plan, botOpened: true } : plan;
 }
 
-function placeOf(input: { destination: Destination; pinnedSurface?: Surface | null; browserOn: boolean; botOpened?: boolean }): SurfacePlan {
+function placeOf(input: { destination: Destination; pinnedSurface?: Surface | null; browserOn: boolean }): SurfacePlan {
   const { destination, browserOn } = input;
   if (destination === "off") {
     return { computer: "off", browser: false, pinned: null, note: OFF_NOTE };
   }
-  const beside = input.botOpened === true && browserOn;
   const pin = input.pinnedSurface ?? null;
   if (pin === "browser") {
     if (browserOn) return { computer: "off", browser: true, pinned: "browser", note: "" };
@@ -72,14 +72,14 @@ function placeOf(input: { destination: Destination; pinnedSurface?: Surface | nu
     return { computer: "off", browser: false, pinned: pin,
       note: " This conversation is pinned to the built-in browser, but its tools are unavailable this turn. No computer is mounted instead. Do not claim to have used it; a different place must be selected before acting there." };
   }
-  if (pin) return { computer: pin, browser: beside, pinned: pin, note: "" };
+  if (pin) return { computer: pin, browser: browserOn, pinned: pin, note: "" };
   if (destination === "browser") {
     return browserOn
       ? { computer: "off", browser: true, pinned: null, note: "" }
       : { computer: "off", browser: false, pinned: null, note: NO_BROWSER_NOTE };
   }
   if (destination !== undefined) {
-    return { computer: destination, browser: beside, pinned: null, note: "" };
+    return { computer: destination, browser: browserOn, pinned: null, note: "" };
   }
   return { computer: undefined, browser: browserOn, pinned: null, note: "" };
 }
@@ -103,6 +103,18 @@ export function ownCloudStateWithin(status: Promise<{ box?: { state?: string | n
     status.then((result) => ({ state: result.box?.state, unavailable: false }), () => unavailable),
     new Promise<typeof unavailable>((resolve) => { timer = setTimeout(() => resolve(unavailable), ms); }),
   ]).finally(() => clearTimeout(timer));
+}
+
+/** Opens the built-in browser for a turn. Beside a computer it is extra: a browser that fails to open is left out and
+ * the turn goes on with the computer alone, never failed. Where the browser is the only place, its failure stands. */
+export async function openBrowserBeside<T>(open: () => Promise<T | null>, computer: Surface | null, skipped: (error: unknown) => void): Promise<T | null> {
+  try {
+    return await open();
+  } catch (error) {
+    if (!computer) throw error;
+    skipped(error);
+    return null;
+  }
 }
 
 export function browserIsThePlace(plan: SurfacePlan): boolean {
@@ -173,6 +185,10 @@ const YOUR_COMPUTER_ALONE =
 const CONNECTED_APP_FIRST =
   " When a connected app can do the task, use it before any browser or screen. If that app is refused or fails, say so in one plain line with what fixes it (connecting it, or who can), and ask before doing the task on a screen instead.";
 
+/** Both surfaces stay mounted for the whole turn: a task that needs a website and a desktop app uses each for its part. */
+const BOTH_IN_ONE_TASK =
+  "Both stay available for the whole turn, so one task can use each for its own part (for example a website in the built-in browser and a desktop app or file on the computer) without asking anyone to switch; keep any one website on one surface for the whole task, and say in one short sentence which surface you move to.";
+
 const RESTATE_SENTENCE =
   " Before your first action on a screen or page in a task, say in one short sentence where you are working, using that same name.";
 
@@ -222,13 +238,13 @@ export function surfacePrompt(
   let text = "";
   if (mounted.computer === "local" && !opts.cloudHome) {
     text = mounted.browser
-      ? ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and this computer (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → this computer tools. Pick one surface for a task and stay on it; if you need the user to sign in, say which surface — the Browser tab or this computer.${YOUR_COMPUTER_BESIDE_BROWSER}`
+      ? ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and this computer (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → this computer tools. ${BOTH_IN_ONE_TASK} If you need the user to sign in, say which surface — the Browser tab or this computer.${YOUR_COMPUTER_BESIDE_BROWSER}`
       : YOUR_COMPUTER_ALONE;
   } else if (computer && mounted.browser) {
     // The two browsers usually share no cookies: "Web tasks → the built-in browser" alone sent a bot whose site was
     // signed in on the computer to a signed-out tab, where it asked the person to sign in again.
     text =
-      ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and ${computer} (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → ${computer} tools. Pick one surface for a task and stay on it; if you need the user to sign in, say which surface — the Browser tab or ${computer}. The built-in browser and ${computer} may not share sign-ins. When you pick the surface for a new task and the user did not name a place, if you already saw its site signed in on ${computer} with the account it needs, pick ${computer} instead of the Browser tab, unless the task needs something already in the Browser tab, such as a cart; if the site turns out signed out on ${computer}, use the Browser tab when it is signed in there.`;
+      ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and ${computer} (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → ${computer} tools. ${BOTH_IN_ONE_TASK} If you need the user to sign in, say which surface — the Browser tab or ${computer}. The built-in browser and ${computer} may not share sign-ins. When you pick the surface for a new task and the user did not name a place, if you already saw its site signed in on ${computer} with the account it needs, pick ${computer} instead of the Browser tab, unless the task needs something already in the Browser tab, such as a cart; if the site turns out signed out on ${computer}, use the Browser tab when it is signed in there.`;
   } else if (computer) {
     text =
       ` Everything you do on screen happens on ${computer}, web pages included, through its own browser; there is no separate built-in browser this turn. If you need the user to sign in, tell them it is on ${computer}.`;

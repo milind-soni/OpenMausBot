@@ -223,3 +223,13 @@ export function limitResetOccurrence(resetsAt: number | null, lastRunFor?: numbe
   const at = resetsAt + AFTER_RESET_MS;
   return lastRunFor !== undefined && at <= lastRunFor ? null : at;
 }
+
+export function noFutureResumeMessage(schedule: RoutineSchedule): string {
+  if (schedule.type === "interval") {
+    return "That interval routine has no future runs. Choose a later end time or remove the end restriction before resuming.";
+  }
+  if (schedule.type === "once") {
+    return "That one-time routine's scheduled time has passed. Update it to a new future time before resuming.";
+  }
+  return "That routine has no future runs. Update its schedule before resuming.";
+}

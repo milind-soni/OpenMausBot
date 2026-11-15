@@ -7615,6 +7615,7 @@
   "serverError.computer.notReadyDetail": "OpenMausBot 还无法使用这台电脑——{reason}",
   "serverError.computer.notReadyMacPermission": "OpenMausBot 还无法使用这台电脑——{reason}。授予缺少的 macOS 权限后请重新启动 OpenMausBot。",
   "chat.notice.copilotAccountRefused": "GitHub Copilot 拒绝为这个已登录账号处理请求。请检查它的 Copilot 方案和高级请求额度，然后重试。",
+  "chat.notice.devinAccountRefused": "Devin 拒绝了已登录账号的这个请求。请检查它的 Devin 套餐和额度，然后再试一次。",
   "chat.notice.acpQuietUsageLimit": "{name} 达到了使用上限{said}，正在不作回复地等待它重置，所以这个轮次已停止。",
   "chat.notice.acpQuietStuck": "{name} 在 {quiet} 内什么都没发送，也没有工具在运行、没有向模型发起的未完成请求、没有 CPU 占用，所以这个轮次被当作卡住而停止。请重新发送消息以重试。",
   "chat.notice.acpModelRequestFailed": "{name} 的模型请求失败：“{message}” {name} 可能会重试或停止；到目前为止已 {quiet} 没有回复。",

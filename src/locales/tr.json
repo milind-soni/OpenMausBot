@@ -5085,6 +5085,7 @@
   "homeLine.profile": "{name}, My Cloud'dan ayrı olarak sıfırdan başlar. Burada daha önce olan botlarınız My Cloud'da; eski bir kopyayı getirmek için yedeğini Ayarlar → Yedekler'de içe aktarın.",
   "homeLine.local": "{name} sıfırdan başlar: bu bilgisayarda kendi botları, sohbetleri ve dosyaları olan ayrı bir alan.",
   "native.places.profileFailed": "Bu bilgisayarın kendi alanı açılmadı. Birazdan tekrar deneyin.",
+  "chat.notice.devinAccountRefused": "Devin, oturum açılmış hesap için bu isteği reddetti. Devin planını ve kredilerini kontrol edip yeniden deneyin.",
   "rail.settingUp": "{name}: kuruluyor",
   "rail.waiting": "{name}: ödeme bekleniyor",
   "rail.attention": "{name}: size ihtiyaç var",
