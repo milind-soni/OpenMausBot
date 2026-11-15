@@ -36,7 +36,7 @@ import { extractSteerImages } from "../turn-images.ts";
 import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "../helper-followup.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { noteTypedSend } from "../typed-sends.ts";
-import { startFresh } from "../fresh-start.ts";
+import { engineSessionOutdated, startFresh } from "../fresh-start.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { refusalBody, userError } from "../user-errors.ts";
@@ -503,8 +503,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const bot = requestedTaskBot(m[1], body?.threadId);
       const notYours = cloudThreadRefusal(auth, bot.threadId);
       if (notYours) return json(res, 403, { error: notYours });
-      // After Start fresh the engine process still holds the conversation the person left, until the next turn replaces it.
-      const stale = store.taskByThread(bot.id, bot.threadId)?.rewound === true;
+      // The engine process answers for the conversation it last read, which the next turn may be about to replace.
+      const stale = engineSessionOutdated(store, bot.id, bot.threadId);
       const breakdown = stale ? null : await registry.get(bot.modelSelection.instanceId)?.adapter
         .contextBreakdown?.(bot.threadId, { signal: AbortSignal.timeout(CONTEXT_BREAKDOWN_WAIT_MS) }) ?? null;
       return json(res, 200, { threadId: bot.threadId, breakdown });

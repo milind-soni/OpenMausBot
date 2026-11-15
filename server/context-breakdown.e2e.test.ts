@@ -27,8 +27,10 @@ async function setup(extraEnv: NodeJS.ProcessEnv) {
     await control("send", "--bot", bot.id, "--task", thread, "--text", text);
     expect((await control("wait", "--bot", bot.id, "--task", thread, "--timeout", "30")).status).toBe("settled");
   };
+  const settled = async () => expect((await control("wait", "--bot", bot.id, "--task", thread, "--timeout", "30")).status).toBe("settled");
+  const records = () => (request(`/api/threads/${thread}/messages`, {}, fixture.info.url) as Promise<any>).then((r) => r.messages.filter((m: any) => m.kind === "compaction"));
   const close = async () => { try { await fixture.close(); } finally { expect(existsSync(fixture.info.dataDir)).toBe(false); } };
-  return { thread, post, context, send, close };
+  return { thread, post, context, send, settled, records, close };
 }
 
 it("answers with the engine's own count while its process holds the conversation, and with nothing otherwise", async () => {
@@ -53,6 +55,25 @@ it("answers with the engine's own count while its process holds the conversation
 
     await f.post("start-fresh");
     expect(await f.context()).toEqual({ threadId: f.thread, breakdown: null });
+  } finally {
+    await f.close();
+  }
+}, 60_000);
+
+it("has no breakdown between a summary of the conversation and the turn that starts the engine on it", async () => {
+  const f = await setup({ FAKE_CLAUDE_CONTEXT_USAGE: JSON.stringify(answer) });
+  try {
+    await f.send("hello");
+    expect((await f.context()).breakdown?.tokens).toBe(6000);
+
+    await f.post("compact");
+    await f.settled();
+    expect(await f.records()).toHaveLength(1);
+    // The engine process that read the whole conversation is still there and still answers 6,000.
+    expect(await f.context()).toEqual({ threadId: f.thread, breakdown: null });
+
+    await f.send("and now?");
+    expect((await f.context()).breakdown?.tokens).toBe(6000);
   } finally {
     await f.close();
   }
