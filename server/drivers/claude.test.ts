@@ -40,6 +40,7 @@ import { ephemeralWorkspaceTokenPath } from "../workspace-backup-policy.ts";
 import { registerPathDir, resetPathCacheForTests } from "../env-path.ts";
 import * as procs from "../procs.ts";
 import * as localInject from "./local-inject.ts";
+import { DEFER_TOOLS_ENV } from "./agents-claude-defer.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
 const dumpedPid = (dump: string): number => JSON.parse(readFileSync(dump, "utf8")).pid;
@@ -1350,8 +1351,9 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.mcpConfig.mcpServers.agents).toMatchObject({
       alwaysLoad: true,
       args: ["/fake/agents-proxy.js"],
-      env: { OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok" },
+      env: { OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok", [DEFER_TOOLS_ENV]: "1" },
     });
+    expect(seen.env.CLAUDE_CODE_DISABLE_CRON, "a deferred trigger must not lose to CronCreate").toBe("1");
     expect(JSON.stringify(seen.argv)).not.toContain("tok");
     const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
     expect(allowed).toContain("mcp__agents");
@@ -2027,18 +2029,20 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const turn = async (text: string, cwd?: string) => {
       const { turnId } = await instance.adapter.sendTurn({
         threadId: "t-tool-search-off", text, ...(cwd ? { cwd } : {}),
-        integrations: { composio: { command: process.execPath, args: ["/fake/composio.js"], env: {} } },
+        integrations: { composio: { command: process.execPath, args: ["/fake/composio.js"], env: {} }, agents: { command: process.execPath, args: ["/fake/agents.js"], env: {} } },
       });
       await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
-      return JSON.parse(readFileSync(dump, "utf8")) as { pid: number; settings: { env: Record<string, string> } };
+      return JSON.parse(readFileSync(dump, "utf8")) as { pid: number; settings: { env: Record<string, string> }; mcpConfig: { mcpServers: Record<string, { alwaysLoad?: boolean; env?: Record<string, string> }> } };
     };
 
     // The turn leaves the account's settings out (--setting-sources project), so the choice travels in --settings.
     const off = await turn("hi");
     expect(off.settings.env.ENABLE_TOOL_SEARCH).toBe("false");
+    expect(off.mcpConfig.mcpServers.agents, "without tool search every agents tool loads whole, as before").toEqual({ command: process.execPath, args: ["/fake/agents.js"], env: {}, alwaysLoad: true });
     writeFileSync(path, JSON.stringify({ env: { ENABLE_TOOL_SEARCH: "auto" } }));
     const on = await turn("again");
     expect(on.settings.env.ENABLE_TOOL_SEARCH).toBe("true");
+    expect(on.mcpConfig.mcpServers.agents).toEqual({ command: process.execPath, args: ["/fake/agents.js"], env: { [DEFER_TOOLS_ENV]: "1" }, alwaysLoad: true });
     expect(on.pid).not.toBe(off.pid);
     // The bot's project settings beat the account's.
     const project = join(scratch, "project-off");
