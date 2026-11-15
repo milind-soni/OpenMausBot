@@ -168,7 +168,7 @@ describe("the mark beside the ledger", () => {
     const w = world(), { ledger } = w.open();
     ledger.write([ran(START)]);
     vi.spyOn(console, "error").mockImplementation(() => {});
-    // A folder where the file should be: neither an append nor a read works, on any system.
+    // A folder where the file should be: neither an append nor a read works, on Windows as on any other system.
     rmSync(w.ledger);
     mkdirSync(w.ledger);
     expect(() => ledger.write([ran(START + HOUR)])).toThrow();

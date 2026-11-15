@@ -659,7 +659,7 @@ describe("the files", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const { ledger } = ledgerPaths(h.file);
     rmSync(ledger);
-    // A folder where the file should be: every append fails, on any system.
+    // A folder where the file should be: every append fails, on Windows as on any other system.
     mkdirSync(ledger);
     h.manager.update(h.routine().id, { name: "Fix the newest bugs" });
     expect(h.routine().name).toBe("Fix the newest bugs");
