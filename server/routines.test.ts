@@ -4102,7 +4102,7 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
 
     h.manager.runNow(routine.id);
     await h.manager.tick();
-    expect(h.manager.listRuns().at(-1)).toMatchObject({ status: "failed", error: paused });
+    expect(h.manager.listRuns().find((run) => run.manual)).toMatchObject({ status: "failed", error: paused });
     expect(h.failed).toHaveLength(1);
   });
 });
