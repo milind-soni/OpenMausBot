@@ -25,12 +25,17 @@ export function createWebhookRoutes({ webhooks, ingress, visible }: WebhookRoute
       return json(res, 200, { webhooks: shownHooks, attempts: webhooks.listAttempts().filter((attempt) => seen.everything || shownIds.has(attempt.webhookId)), ingress: ingress() });
     }
     if (path === "/api/webhooks" && method === "POST") {
-      const created = webhooks.create(await readBody(req));
+      const body = await readBody(req);
+      // Security: on a Team Cloud an admin may not see another person's private bot; a webhook into it is refused alike.
+      if (body && typeof body === "object" && !Array.isArray(body) && !webhookVisible(body, visible(auth))) return json(res, 404, { error: "no such bot" });
+      const created = webhooks.create(body);
       return json(res, 201, { webhook: created.webhook, ...withCredential(created.webhook, created.secret) });
     }
     const match = path.match(/^\/api\/webhooks\/([\w-]+)(?:\/(rotate|test|address))?$/);
     if (!match) return PASS;
     const id = match[1]!;
+    const known = webhooks.list().find((webhook) => webhook.id === id);
+    if (known && !webhookVisible(known, visible(auth))) return json(res, 404, { error: "no such webhook" });
     if (match[2] === "test" && method === "POST") {
       const result = webhooks.test(id, await readBody(req));
       return result ? json(res, 202, result) : json(res, 404, { error: "no such webhook" });

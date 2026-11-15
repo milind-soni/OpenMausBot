@@ -64,6 +64,13 @@ describe("a webhook's address for the person", () => {
     const theirs = hidden.webhooks.create({ name: "Hidden", prompt: "", botId: "bot-hidden" });
     expect(await hidden.call("GET", `/api/webhooks/${theirs.webhook.id}/address`)).toEqual({ status: 404, body: { error: "no such webhook" } });
     expect((await hidden.call("GET", "/api/webhooks")).body.webhooks).toEqual([]);
+    for (const [method, suffix] of [["POST", "/test"], ["POST", "/rotate"], ["PATCH", ""], ["DELETE", ""]] as const) {
+      expect(await hidden.call(method, `/api/webhooks/${theirs.webhook.id}${suffix}`, method === "PATCH" ? { name: "Mine" } : {})).toEqual({ status: 404, body: { error: "no such webhook" } });
+    }
+    expect(hidden.webhooks.list()).toEqual([expect.objectContaining({ id: theirs.webhook.id, name: "Hidden" })]);
+    expect(hidden.webhooks.authorize(theirs.webhook.endpointId, theirs.secret)).toBe(true);
+    expect((await hidden.call("POST", "/api/webhooks", { name: "Into theirs", prompt: "", botId: "bot-hidden" })).status).toBe(404);
+    expect((await hidden.call("POST", "/api/webhooks", { name: "Mine", prompt: "", botId: "bot-a" })).status).toBe(201);
 
     const file = join(folder(), "webhooks.json");
     const old = manager(file).create({ name: "Old", prompt: "", botId: "bot-a" });
