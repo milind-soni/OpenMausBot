@@ -149,7 +149,7 @@ export async function startControlPlaneStub(options: { otp?: string; endpointUrl
       }
       if (method === "DELETE") return send(204);
     }
-    const push = /^\/v1\/installations\/self\/push\/(register|unregister|send)$/.exec(path);
+    const push = /^\/v1\/installations\/self\/push\/(register|unregister|send|activity)$/.exec(path);
     if (push && method === "POST") {
       const inst = byCredential();
       if (!inst) return send(401, { error: "unauthorized" });

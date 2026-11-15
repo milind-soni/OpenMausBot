@@ -37,6 +37,7 @@ async function boot(env: Record<string, string>): Promise<Fixture> {
     features: { smartSetupChoices: false },
     instances: {
       quick: { driver: "claudeAgent", displayName: "Quick fixture", environment: { FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_REPLIES: JSON.stringify(Array.from({ length: 8 }, () => SECRET_REPLY)) }, config: { cli: FAKE_CLAUDE } },
+      slow: { driver: "claudeAgent", displayName: "Slow fixture", environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: join(home, "finish-gate") }, config: { cli: FAKE_CLAUDE } },
       curious: { driver: "grokAgent", displayName: "Curious fixture", environment: { FAKE_ACP_MODE: "question" }, config: { cli: FAKE_ACP, fullAuto: true } },
     },
   }));
@@ -174,4 +175,36 @@ describe("phone push switched on", () => {
     expect(sends()[2]!.body).toMatchObject({ token: APNS_A, pairing: "pair-tag-aaaa", notification: { kind: "done", title: "Herald finished" } });
     expect(on.stderr()).not.toContain(FCM_B);
   }, 120_000);
+});
+
+describe("Live Activities by push", () => {
+  it("updates and ends a closed phone's activity for a bot as it works, with the phone's own words and no reply text", async () => {
+    const ACTIVITY = "ac".repeat(40);
+    const phone = await pair(on, "Phone C");
+    const pip = await createBot(on, "Pip", "slow", "claude-sonnet-5");
+    expect((await api(on, "PUT", "/api/push/device", { platform: "apns", token: "c3".repeat(32) }, phone.token)).status).toBe(200);
+    const registered = await api(on, "PUT", "/api/push/activity", {
+      scheme: "openmausbot",
+      headlines: { needsYou: "{name} braucht dich", working: "{name} arbeitet" },
+      activities: [{ botId: pip.id, token: ACTIVITY }],
+      visuals: { [pip.id]: { color: "#7C5CFF", gradient: ["#B9A9FF", "#7C5CFF"], body: "round" } },
+    }, phone.token);
+    expect(registered.body).toMatchObject({ push: "on", activity: { activities: [pip.id], canStart: false } });
+    expect(JSON.stringify(registered.body)).not.toContain(ACTIVITY);
+    expect(stub.pushes.at(-1)!.body).toEqual({ v: 1, platform: "apns", purpose: "activity", token: ACTIVITY, environment: "production" });
+
+    const activityPushes = () => stub.pushes.filter((push) => push.path.endsWith("/push/activity")).map((push) => push.body);
+    expect((await api(on, "POST", `/api/bots/${pip.id}/messages`, { text: "go" })).status).toBe(202);
+    await expect.poll(() => activityPushes().map((body) => body.event), { timeout: 30_000 }).toEqual(["update"]);
+    writeFileSync(join(on.home, "finish-gate"), "");
+    await expect.poll(() => activityPushes().map((body) => body.event), { timeout: 30_000 }).toEqual(["update", "end"]);
+    expect(activityPushes()[0]).toEqual({
+      v: 1,
+      token: ACTIVITY,
+      event: "update",
+      activity: { botId: pip.id, botName: "Pip", kind: "working", headline: "Pip arbeitet", since: expect.any(Number), link: `openmausbot://chat/${pip.threadId}`, color: "#7C5CFF", gradient: ["#B9A9FF", "#7C5CFF"], body: "round" },
+    });
+    expect(JSON.stringify(activityPushes())).not.toContain("PRIVATE-REPLY-TEXT");
+    await expect.poll(() => stub.pushes.at(-1), { timeout: 10_000 }).toEqual({ path: "/v1/installations/self/push/unregister", body: { v: 1, platform: "apns", token: ACTIVITY } });
+  }, 90_000);
 });

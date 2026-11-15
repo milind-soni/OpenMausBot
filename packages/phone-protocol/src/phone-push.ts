@@ -122,3 +122,54 @@ export function isPushKind(kind: string): kind is PushKind {
 export function validPushToken(platform: PushPlatform, token: string): boolean {
   return platform === "apns" ? APNS_TOKEN.test(token) : FCM_TOKEN.test(token);
 }
+
+/** The phone's Live Activity and ongoing-notification registration on its computer or Cloud: `PUT` replaces it whole,
+ * `GET` reads it back, `DELETE` removes it. Keyed like `PHONE_PUSH_ROUTE`. */
+export const PHONE_ACTIVITY_ROUTE = "/api/push/activity";
+export const PHONE_ACTIVITY_RELAY_PATH = "/v1/installations/self/push/activity";
+
+/** What a bot's activity shows: it needs the person, or it is working. */
+export type ActivityKind = "needsYou" | "working";
+export type ActivityEvent = "start" | "update" | "end";
+
+/** How the phone draws a bot: its colour, body gradient and mascot body, as its own widgets do. */
+export interface ActivityVisual {
+  color: string;
+  gradient: string[];
+  body: string;
+}
+
+/** `PUT /api/push/activity`, from the phone. */
+export interface PhoneActivityRegistration {
+  /** The app's URL scheme, for the chat link a pushed activity opens. */
+  scheme: "openmausbot" | "openmausbot-dev" | "openmausbot-next";
+  /** The phone's own words, with `{name}` where the bot's name goes: "{name} needs you", "{name} is working". */
+  headlines: Record<ActivityKind, string>;
+  /** iOS: the app's Live Activity push-to-start token (hex). */
+  startToken?: string;
+  /** iOS: each running Live Activity's own update token (hex), by bot. */
+  activities?: Array<{ botId: string; token: string }>;
+  /** iOS: how each bot the phone knows is drawn, so a pushed activity looks like the app's own. */
+  visuals?: Record<string, ActivityVisual>;
+  fallbackVisual?: ActivityVisual;
+  /** Android: send the device's FCM token the ongoing "working" notification's data messages. */
+  ongoing?: boolean;
+  /** Which kinds the phone wants, from its Settings switches. Absent: both. */
+  kinds?: ActivityKind[];
+}
+
+/** What the server sends the relay for one activity change. */
+export interface PushRelayActivityRequest {
+  v: typeof PHONE_PUSH_WIRE_VERSION;
+  token: string;
+  event: ActivityEvent;
+  alert?: boolean;
+  activity: {
+    botId: string;
+    botName: string;
+    kind: ActivityKind;
+    headline: string;
+    since: number;
+    link: string;
+  } & ActivityVisual;
+}
