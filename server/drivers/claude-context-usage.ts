@@ -1,6 +1,7 @@
 // Claude Code counts its own context window by category: {type:"control_request", request:{subtype:"get_context_usage"}}
 // on stdin is answered by a control_response (2.1.325). With detail "summary" it answers from the last response's usage
 // and local estimates and makes no token-count call. A CLI that does not know the request answers subtype "error".
+import type { Writable } from "node:stream";
 import type { ContextBreakdown } from "../../shared/context-breakdown.ts";
 
 const ID_PREFIX = "context-usage-";
@@ -67,4 +68,19 @@ export function claudeContextUsage(write: (frame: unknown) => Promise<boolean>) 
       for (const id of pending.keys()) settle(id, null);
     },
   };
+}
+
+/** A CLI that already exited needs no answer: the write is skipped, like the driver's writeUser. */
+export function writeControlFrame(stdin: Writable, frame: unknown): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (!stdin.writable || stdin.destroyed) return resolve(false);
+    try { stdin.write(`${JSON.stringify(frame)}\n`, (err) => resolve(!err)); } catch { resolve(false); }
+  });
+}
+
+type LiveSession = { closing: boolean; child: { exitCode: number | null }; context: Pick<ReturnType<typeof claudeContextUsage>, "read"> };
+
+/** A session that is closing or whose CLI exited has nobody left to ask. */
+export async function liveContextBreakdown(session: LiveSession | undefined, signal?: AbortSignal): Promise<ContextBreakdown | null> {
+  return session && !session.closing && session.child.exitCode === null ? session.context.read(signal) : null;
 }

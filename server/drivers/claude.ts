@@ -19,8 +19,7 @@ import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
 import { claudeAuthFailure, claudeAuthRecovery, claudeOAuthExpired } from "./claude-auth-recovery.ts"; import { AWS_CREDENTIAL_ENV_KEYS, bedrockResultError, withBedrockCredentialError } from "./claude-bedrock-aws.ts";
 import { CLAUDE_MODEL_ID, STATIC_CLAUDE_MODELS, claudeModelExtras, currentEngineCatalog, endpointModelCatalog, withCliVersionGate } from "./claude-model-extras.ts";
 import { claudeAgentsMount, claudeToolSearchSetting } from "./claude-tool-search.ts"; import { claudeDisabledNativeSkillRules, unusableBuiltIns } from "./claude-unusable-tools.ts"; import { EMAIL_READ_TOOL_NAMES } from "../../shared/email.ts";
-import { claudeContextUsage } from "./claude-context-usage.ts";
-import { claudeElicitations } from "./claude-elicitation.ts"; import { spawnContractDiff } from "./claude-spawn-contract.ts";
+import { claudeElicitations } from "./claude-elicitation.ts"; import { spawnContractDiff } from "./claude-spawn-contract.ts"; import { claudeContextUsage, liveContextBreakdown, writeControlFrame } from "./claude-context-usage.ts";
 import { readCostHistory, recordCostState } from "./claude-cost-history.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { ClaudeLoginController } from "./claude-login-auth.ts";
@@ -1357,18 +1356,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         });
       }
       let markClosed!: () => void;
-      // A CLI that already exited needs no answer: the write is skipped, like writeUser's.
-      const writeControl = (frame: unknown) => new Promise<boolean>((resolve) => {
-        const { stdin } = session.child;
-        if (!stdin.writable || stdin.destroyed) return resolve(false);
-        try { stdin.write(`${JSON.stringify(frame)}\n`, (err) => resolve(!err)); } catch { resolve(false); }
-      });
       const session: Session = {
         closed: new Promise<void>((resolve) => { markClosed = resolve; }),
         child,
         broker,
-        elicit: claudeElicitations(writeControl, (event) => emit({ ...base(threadId, session.turn?.turnId ?? turnId), ...event })),
-        context: claudeContextUsage(writeControl),
+        elicit: claudeElicitations((frame) => writeControlFrame(session.child.stdin, frame), (event) => emit({ ...base(threadId, session.turn?.turnId ?? turnId), ...event })),
+        context: claudeContextUsage((frame) => writeControlFrame(session.child.stdin, frame)),
         mcpConfigPath,
         systemPromptPath,
         argsKey, cliVersion: cliHelpVersion, passedAutocompact,
@@ -2066,10 +2059,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         hasSession: (threadId) => active.has(threadId),
         enginePid: (threadId) => (active.has(threadId) ? sessions.get(threadId)?.child.pid : undefined),
         cacheKeepWarm: forks.adapter,
-        contextBreakdown: async (threadId, options) => {
-          const session = sessions.get(threadId);
-          return session && !session.closing && session.child.exitCode === null ? session.context.read(options?.signal) : null;
-        },
+        contextBreakdown: async (threadId, options) => liveContextBreakdown(sessions.get(threadId), options?.signal),
         stopAll: async () => {
           for (const { stop } of active.values()) stop();
           for (const threadId of Array.from(sessions.keys())) closeSession(threadId, "stopAll");
