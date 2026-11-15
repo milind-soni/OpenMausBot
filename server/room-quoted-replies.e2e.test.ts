@@ -44,10 +44,12 @@ beforeAll(async () => {
   if (!address || typeof address === "string") throw new Error("fixture provider address missing");
   fixture = await launchVerificationServer();
   const endpoint = `http://127.0.0.1:${address.port}`;
+  // The key check uses the saved base URL, so the fixture's URL is saved first and the key never reaches the real service.
   await api("PATCH", "/api/config", {
     openaiCompat: { key: "fixture-room-key", url: `${endpoint}/v1`, model: "fixture-model" },
-    decider: { key: "tsk_room_fixture", baseUrl: endpoint, enabled: true, jobs: { roomRouting: true } },
+    decider: { baseUrl: endpoint },
   });
+  await api("PATCH", "/api/config", { decider: { key: "tsk_room_fixture", enabled: true, jobs: { roomRouting: true } } });
   for (const name of ["Atlas", "Boreal", "Cyra"]) {
     const { bot } = await control(["new-bot", "--name", name]);
     await control(["set-model", "--bot", bot.id, "--instance", "openaiCompat", "--model", "fixture-model"]);
