@@ -101,9 +101,11 @@ it("sends a pick on a room page to the bot that made it, and to no other member"
   // A line pointing at two bots' pages whose round stops during the first bot's turn reports the other bot's part.
   expect((await api(`/api/groups/${group.id}/holds`, { botId: designer.id, held: false })).status).toBeLessThan(300);
   writeFileSync(planPath, JSON.stringify({ [designer.id]: { steps: [], reply: "Done." }, [helper.id]: { steps: [{ tool: "show_html", arguments: { html: "<main><p>Notes</p></main>", title: "Notes" } }], reply: "Done." } }));
+  const notesTurns = evidence(helper.id).length;
   expect((await api(`/api/groups/${group.id}/messages`, { text: "@Helper make a notes page", mentions: [helper.id] })).status).toBe(202);
   await expect.poll(async () => (await transcript()).find((message) => message.kind === "app" && message.from?.botId === helper.id)?.id, { timeout: 30_000 }).toBeTruthy();
   await settled(helper.id);
+  await expect.poll(() => evidence(helper.id).length, { timeout: 30_000 }).toBe(notesTurns + 1);
   const notes = (await transcript()).find((message) => message.kind === "app" && message.from?.botId === helper.id);
   const designerReady = join(fixture.info.dataDir, "designer-ready");
   writeFileSync(planPath, JSON.stringify({ [designer.id]: { steps: [], reply: "Done.", readyFile: designerReady, gateFile: join(fixture.info.dataDir, "designer-gate") }, [helper.id]: { steps: [], reply: "Done." } }));
