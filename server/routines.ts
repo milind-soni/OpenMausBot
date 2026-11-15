@@ -376,9 +376,10 @@ export class RoutineManager {
       cut.push(cloneRun(run));
     }
     const look = !this.noStartOffsChecked && this.options.moveFrozen?.() !== true;
-    if (look) this.turnedBackOn = turnBackOn(this.routines, this.runs, this.holds[0], this.now(), (schedule, now) => this.initialOccurrence(schedule, now)).filter((routine) => routine.enabled);
-    if (look) this.noStartOffsChecked = true;
-    if (cut.length > 0 || look) this.saveLater();
+    const back = look ? turnBackOn(this.routines, this.runs, this.holds[0], this.now(), (schedule, now) => this.initialOccurrence(schedule, now)) : [];
+    // The look is noted with the next save: reading a file in which nothing changes writes nothing.
+    if (look) { this.noStartOffsChecked = true; this.turnedBackOn = back.filter((routine) => routine.enabled); }
+    if (cut.length > 0 || back.length > 0) this.saveLater();
     for (const run of cut) {
       if (run.threadId) this.options.onRunCut?.(run);
       this.notifyRunChanged(run);
