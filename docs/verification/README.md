@@ -227,7 +227,8 @@ route module, and stale-response isolation.
 
 The [Slack for Team Clouds fixture](team-slack.md) checks a Slack message handed over with a member's own session:
 a channel's shared conversation, a direct message's private chat, who may ask and stop, and the signed reports a
-stand-in Admin takes. It reaches no Slack workspace and no real Admin.
+stand-in Admin takes; and the same on a My Cloud, where both are the owner's ordinary conversations. It reaches no
+Slack workspace and no real Admin.
 
 The [chat and settings polish fixture](chat-polish.md) exercises attachment
 galleries, opt-in video playback, persisted tool details, and responsive settings
