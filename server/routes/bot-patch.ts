@@ -7,6 +7,7 @@ import { normalizePhoneApps } from "../../shared/phone-apps.ts";
 import { parseToolScope, toolScopeWidens } from "../../shared/tool-scope.ts";
 import { parseToolsOff, TOOL_GROUPS } from "../../shared/tool-groups.ts";
 import { isMausColor, MAUS_COLOR_NAMES, type BotUpdateResponse, type WireBot, type WireGroup } from "../../shared/wire.ts";
+import { MAX_ALWAYS_ALLOW } from "../always-allow.ts";
 import { checkBrowserProfileChange, settleBrowserChange } from "../bot-browser-profile.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
@@ -571,7 +572,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (!Array.isArray(body.alwaysAllow) || body.alwaysAllow.some((t: unknown) => typeof t !== "string")) {
           return json(res, 400, { error: "alwaysAllow must be a list of tool keys" });
         }
-        patch.alwaysAllow = [...new Set(body.alwaysAllow as string[])].slice(0, 200);
+        const alwaysAllow = [...new Set(body.alwaysAllow as string[])];
+        if (alwaysAllow.length > MAX_ALWAYS_ALLOW) {
+          return json(res, 400, userError("serverError.bot.alwaysAllowFull", { max: MAX_ALWAYS_ALLOW }));
+        }
+        patch.alwaysAllow = alwaysAllow;
       }
       // Known gap: outside the packaged desktop, loopback is the owner, so these loosenings are one curl from
       // the bot they constrain. An originless, session-less loopback caller may loosen only while every bot is idle.

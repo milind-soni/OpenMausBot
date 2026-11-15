@@ -263,6 +263,19 @@ describe("PATCH /api/bots/:id toolsOff", () => {
   });
 });
 
+describe("PATCH /api/bots/:id alwaysAllow", () => {
+  it("stores the list once each, and refuses a list over the limit instead of cutting it", async () => {
+    const { store, bot, patch } = fixture();
+    const keys = Array.from({ length: 200 }, (_, i) => `tool_${i}`);
+    expect((await patch(bot.id, { alwaysAllow: [...keys, keys[0]] })).status).toBe(200);
+    expect(store.bot(bot.id)?.alwaysAllow).toEqual(keys);
+    const refused = await patch(bot.id, { alwaysAllow: [...keys, "tool_200"] });
+    expect(refused.status).toBe(400);
+    expect(refused.body.errorKey).toBe("serverError.bot.alwaysAllowFull");
+    expect(store.bot(bot.id)?.alwaysAllow).toEqual(keys);
+  });
+});
+
 describe("PATCH /api/bots/:id phoneApps", () => {
   it("stores phoneApps and clears it with null", async () => {
     const { store, bot, patch } = fixture();
