@@ -175,7 +175,7 @@ export const storedDefinitionSchema = z.object({
   schedule: storedScheduleSchema,
   runOn: z.enum(["maus", "cloud"]),
   durationMinutes: z.number().int().min(5).max(240),
-  timeoutMinutes: z.number().int().min(5).max(240).optional(),
+  timeoutMinutes: z.number().int().min(5).max(1_440).optional(),
   continuity: z.boolean().optional(),
   overlap: z.enum(["skip", "queue"]).optional(),
   runOnStartup: z.boolean().optional(),
@@ -185,7 +185,7 @@ export const storedChangesSchema = storedDefinitionSchema
   .partial()
   .extend({
     schedule: storedScheduleChangesSchema.optional(),
-    timeoutMinutes: z.number().int().min(5).max(240).nullable().optional(),
+    timeoutMinutes: z.number().int().min(5).max(1_440).nullable().optional(),
   })
   .strict()
   .refine(

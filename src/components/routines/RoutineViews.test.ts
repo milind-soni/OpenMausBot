@@ -28,6 +28,25 @@ describe("routine list", () => {
     expect(list()).not.toContain("Swap awake bots");
   });
 
+  it("says a routine whose cloud desktop keeps failing to start stays on, in the person's language", () => {
+    const markup = list({ routines: [{ ...routine, failureStreak: 3, noStartStreak: 3 }] });
+    expect(markup).toContain("Its cloud desktop did not start 3 runs in a row. This routine stays on and tries again less often until the cloud desktop starts.");
+    expect(markup).toContain("data-routine-no-start");
+    expect(list()).not.toContain("data-routine-no-start");
+    setLocale("pt-br");
+    try {
+      expect(list({ routines: [{ ...routine, noStartStreak: 4 }] })).toContain("O desktop na nuvem não iniciou em 4 execuções seguidas. Esta rotina continua ligada");
+    } finally { setLocale("en"); }
+  });
+
+  it("says saved routines could not be read instead of showing an empty list", () => {
+    const markup = list({ routines: [], runs: [], unreadable: true });
+    expect(markup).toContain("Your saved routines could not be read, so none of them can run right now. Nothing was deleted");
+    expect(markup).toContain('role="alert"');
+    expect(markup).not.toContain("No schedules yet");
+    expect(list({ routines: [], runs: [] })).not.toContain("data-routines-unreadable");
+  });
+
   it("shows saved skips and recent failure streaks without claiming all offline occurrences were counted", () => {
     const markup = list({ routines: [{ ...routine, skippedRuns: 3, lastSkippedAt: 100, failureStreak: 2 }] });
     expect(markup).toContain("Scheduled occurrences skipped while busy: 3");
@@ -108,6 +127,16 @@ describe("routine list", () => {
   it("never advertises a stale next timestamp for a paused routine", () => {
     expect(routineNextLabel({ ...routine, enabled: false })).toBe("Paused");
     expect(list({ routines: [{ ...routine, enabled: false }] })).not.toContain("Next Jan");
+  });
+
+  it("keeps showing the run at work as the latest while occurrences are skipped behind it", () => {
+    const working = { ...run, id: "working", createdAt: 200, scheduledFor: 200, status: "running" as const, output: undefined };
+    const counted = { ...run, id: "counted", createdAt: 300, scheduledFor: 300, status: "missed" as const, output: undefined, seenAt: 300,
+      error: "Skipped 4 scheduled runs because the previous run of this routine is still running", skipped: { count: 4, firstAt: 300, lastAt: 900 } };
+    expect(latestRoutineRun(routine.id, [working, counted])).toBe(working);
+    expect(list({ runs: [working, counted] })).toContain("Latest: Running");
+    const told = { ...counted, seenAt: undefined, skipped: { ...counted.skipped, told: true as const } };
+    expect(latestRoutineRun(routine.id, [working, told])).toBe(told);
   });
 
   it("chooses a new pending run ahead of an older run that finished later", () => {
