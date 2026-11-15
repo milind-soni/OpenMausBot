@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createOwnHome, oneOwner, ownServerOwner, type OwnServerFacts } from "./own-home.ts";
+import { createOwnHome, oneOwner, ownServerOwner, selfHostedPersonName, type OwnServerFacts } from "./own-home.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { SessionRecord } from "./sessions.ts";
 
@@ -61,5 +61,34 @@ describe("a server of one person's own", () => {
     expect(home.ownServer()).toBeNull();
     facts = { ...solo, shared: true };
     expect(home.ownServer()).toBeNull();
+  });
+});
+
+describe("what a self-hosted server calls someone on their lines", () => {
+  const profile = { name: "Ada Lovelace", email: "ada@example.test" };
+  const signIn = (scopes: Array<"admin" | "client">, email?: string) => ({ label: "Chrome on Mac", scopes, ...(email ? { email } : {}) });
+
+  it("is the profile's name for the profile's own address, and for the one admin by address or by their own device", () => {
+    expect(selfHostedPersonName(signIn(["client"], "Ada@Example.test"), [], profile)).toBe("Ada Lovelace");
+    expect(selfHostedPersonName(signIn(["admin", "client"]), [], profile)).toBe("Ada Lovelace");
+    expect(selfHostedPersonName(signIn(["admin", "client"], "me@example.test"), ["me@example.test"], profile)).toBe("Ada Lovelace");
+    expect(selfHostedPersonName(signIn(["admin", "client"]), ["me@example.test"], profile)).toBe("Ada Lovelace");
+  });
+
+  it("is someone else's address as a name, never the profile's", () => {
+    expect(selfHostedPersonName(signIn(["client"], "grace.hopper@example.test"), [], profile)).toBe("Grace Hopper");
+    expect(selfHostedPersonName(signIn(["admin", "client"], "grace@example.test"), ["me@example.test"], profile)).toBe("Grace");
+  });
+
+  it("keeps a device's label when it may be someone else's: one that may only chat, or one paired while several can pair", () => {
+    expect(selfHostedPersonName(signIn(["client"]), [], profile), "a device that may only chat").toBe("Chrome on Mac");
+    expect(selfHostedPersonName(signIn(["admin", "client"]), ["me@example.test", "grace@example.test"], profile)).toBe("Chrome on Mac");
+    expect(selfHostedPersonName(signIn(["admin", "client"]), ["@example.test"], profile), "everyone at a domain").toBe("Chrome on Mac");
+    expect(selfHostedPersonName({ label: "Nightly CI", scopes: ["admin", "client"], token: true }, [], profile), "a script token").toBe("Nightly CI");
+  });
+
+  it("falls back to the address or label while the profile has no name", () => {
+    expect(selfHostedPersonName(signIn(["admin", "client"]), [], { name: " ", email: "" })).toBe("Chrome on Mac");
+    expect(selfHostedPersonName(signIn(["client"], "ada@example.test"), [], { email: "ada@example.test" })).toBe("Ada");
   });
 });
