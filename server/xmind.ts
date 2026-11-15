@@ -8,6 +8,78 @@ import { extractZipMember, readZipDirectory } from "./zip-archive.ts";
 
 export const XMIND_MIME = "application/vnd.xmind.workbook";
 
+export interface ScratchBudgetOptions {
+  maxConcurrent?: number;
+  maxBytes?: number;
+}
+
+export interface ScratchReservation {
+  release(): void;
+  recordBytes(streamedBytes: number): void;
+}
+
+export class ScratchBudget {
+  readonly maxConcurrent: number;
+  readonly maxBytes: number;
+  private activeCount = 0;
+  private reservedBytes = 0;
+
+  constructor(options: ScratchBudgetOptions = {}) {
+    this.maxConcurrent = options.maxConcurrent ?? 2;
+    this.maxBytes = options.maxBytes ?? 4 * FILE_MAX_BYTES;
+  }
+
+  get stats() {
+    return {
+      activeCount: this.activeCount,
+      reservedBytes: this.reservedBytes,
+      maxConcurrent: this.maxConcurrent,
+      maxBytes: this.maxBytes,
+    };
+  }
+
+  reserve(initialBytes = FILE_MAX_BYTES): ScratchReservation | null {
+    if (this.activeCount >= this.maxConcurrent) return null;
+    if (this.reservedBytes + initialBytes > this.maxBytes) return null;
+
+    this.activeCount += 1;
+    let held = initialBytes;
+    this.reservedBytes += held;
+    let released = false;
+
+    return {
+      recordBytes: (bytes: number) => {
+        if (released) return;
+        const diff = bytes - held;
+        if (diff > 0) {
+          if (this.reservedBytes + diff > this.maxBytes) {
+            throw statusError(429, "scratch storage budget exceeded");
+          }
+          this.reservedBytes += diff;
+          held = bytes;
+        }
+      },
+      release: () => {
+        if (released) return;
+        released = true;
+        this.activeCount = Math.max(0, this.activeCount - 1);
+        this.reservedBytes = Math.max(0, this.reservedBytes - held);
+      },
+    };
+  }
+
+  reset(): void {
+    this.activeCount = 0;
+    this.reservedBytes = 0;
+  }
+}
+
+export const defaultScratchBudget = new ScratchBudget();
+
+export function getScratchBudgetStats() {
+  return defaultScratchBudget.stats;
+}
+
 const MAX_ARCHIVE_ENTRIES = 10_000;
 const MAX_CONTENT_BYTES = 32 * 1024 * 1024;
 const MAX_TOPICS = 100_000;
@@ -201,12 +273,18 @@ async function outlineFromArchive(archive: string, scratch: string): Promise<str
 export async function saveXmindUpload(
   chunks: AsyncIterable<Uint8Array>,
   originalName: string,
-  options: { uploadId?: string } = {},
+  options: { uploadId?: string; budget?: ScratchBudget } = {},
 ): Promise<SavedFile> {
   const name = `${originalName}.md`;
   sanitizeSharedFileName(name, "text/markdown");
-  const scratch = await mkdtemp(join(tmpdir(), "omb-xmind-"));
+  const budget = options.budget ?? defaultScratchBudget;
+  const reservation = budget.reserve(FILE_MAX_BYTES);
+  if (!reservation) {
+    throw statusError(429, "Too many concurrent XMind uploads or scratch budget exceeded");
+  }
+  let scratch = "";
   try {
+    scratch = await mkdtemp(join(tmpdir(), "omb-xmind-"));
     const archive = join(scratch, "map.xmind");
     let bytes = 0;
     await pipeline(
@@ -215,6 +293,7 @@ export async function saveXmindUpload(
         for await (const chunk of source) {
           bytes += chunk.byteLength;
           if (bytes > FILE_MAX_BYTES) throw statusError(413, `file exceeds ${FILE_MAX_BYTES} bytes`);
+          reservation.recordBytes(bytes);
           yield chunk;
         }
       },
@@ -231,6 +310,10 @@ export async function saveXmindUpload(
       uploadId: options.uploadId,
     });
   } finally {
-    await rm(scratch, { recursive: true, force: true });
+    try {
+      if (scratch) await rm(scratch, { recursive: true, force: true });
+    } finally {
+      reservation.release();
+    }
   }
 }

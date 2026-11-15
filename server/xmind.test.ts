@@ -8,7 +8,13 @@ import { buildZip, type ZipFixtureMember } from "./testing/zip-fixture.ts";
 const DATA_ROOT = mkdtempSync(join(tmpdir(), "omb-xmind-test-"));
 process.env.OMB_DATA_DIR = join(DATA_ROOT, "data");
 
-const { outlineFromJson, outlineFromXml, saveXmindUpload } = await import("./xmind.ts");
+const {
+  outlineFromJson,
+  outlineFromXml,
+  saveXmindUpload,
+  ScratchBudget,
+  getScratchBudgetStats,
+} = await import("./xmind.ts");
 
 afterAll(() => rmSync(DATA_ROOT, { recursive: true, force: true }));
 
@@ -153,5 +159,73 @@ describe("saveXmindUpload", () => {
     await expect(saveXmindUpload((async function* () {})(), "a.xmind")).rejects.toMatchObject({ status: 400, message: "empty file" });
     await expect(saveXmindUpload(archive([{ name: "content.json", data: CONTENT_JSON }]), "../a.xmind")).rejects.toMatchObject({ status: 400 });
     expect(scratchDirs()).toEqual(before);
+  });
+
+  it("rejects concurrent uploads exceeding scratch budget with 429 and cleans up partial files", async () => {
+    const before = scratchDirs();
+    let releaseGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+
+    async function* pausedStream(): AsyncIterable<Uint8Array> {
+      yield Buffer.from("PK\x03\x04");
+      await gate;
+      yield Buffer.from("more data");
+    }
+
+    const p1 = saveXmindUpload(pausedStream(), "upload1.xmind");
+    p1.catch(() => {});
+    const p2 = saveXmindUpload(pausedStream(), "upload2.xmind");
+    p2.catch(() => {});
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      await expect(
+        saveXmindUpload(pausedStream(), "upload3.xmind"),
+      ).rejects.toMatchObject({ status: 429 });
+    } finally {
+      releaseGate();
+      await Promise.allSettled([p1, p2]);
+      expect(scratchDirs()).toEqual(before);
+    }
+  });
+
+  it("cleans up temporary folder and releases budget when stream aborts unexpectedly", async () => {
+    const before = scratchDirs();
+    const statsBefore = getScratchBudgetStats();
+
+    async function* failingStream(): AsyncIterable<Uint8Array> {
+      yield Buffer.from("PK\x03\x04");
+      throw new Error("client aborted upload");
+    }
+
+    await expect(saveXmindUpload(failingStream(), "aborted.xmind")).rejects.toThrow("client aborted upload");
+    expect(scratchDirs()).toEqual(before);
+    expect(getScratchBudgetStats()).toEqual(statsBefore);
+  });
+
+  it("supports isolated ScratchBudget instances with custom concurrency and byte limits", async () => {
+    const customBudget = new ScratchBudget({ maxConcurrent: 1, maxBytes: 1024 * 1024 });
+    expect(customBudget.stats.maxConcurrent).toBe(1);
+
+    let releaseGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+
+    async function* pausedStream(): AsyncIterable<Uint8Array> {
+      yield Buffer.from("PK\x03\x04");
+      await gate;
+    }
+
+    const p1 = saveXmindUpload(pausedStream(), "first.xmind", { budget: customBudget });
+    p1.catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    await expect(
+      saveXmindUpload(pausedStream(), "second.xmind", { budget: customBudget }),
+    ).rejects.toMatchObject({ status: 429 });
+
+    releaseGate();
+    await Promise.allSettled([p1]);
+    expect(customBudget.stats.activeCount).toBe(0);
   });
 });
