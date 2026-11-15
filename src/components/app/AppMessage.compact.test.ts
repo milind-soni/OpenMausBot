@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-// A bot's page: a compact card that opens from anywhere on it, in the chat's page pane or, in a room, over the window.
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

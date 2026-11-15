@@ -70,7 +70,6 @@ export function AppHeader({
   );
 }
 
-/** Over the foot of a page preview: the page blurs and fades into the card, so the footer reads as part of it. */
 export const PAGE_GLAZE = "pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-composer to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,transparent,black)]";
 
 export function PageCardFooter({ title, detail, updated, glazed = false, infoId, infoOpen, onInfo, onReload, reloading = false }: {
