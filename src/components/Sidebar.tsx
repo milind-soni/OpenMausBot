@@ -1435,7 +1435,6 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                   <SidebarSectionHeader
                     name={sectionLabel(id)}
                     line={simple} reserveMenu={simple && !remoteClient}
-                    count={simple ? sectionChiefItems.length + sectionBotItems.length + sectionGroupItems.length : undefined}
                     onMenu={simple && !remoteClient && sectionName ? (button) => {
                       const rect = button.getBoundingClientRect();
                       openTeamMenu(sectionName, rect.right - 256, rect.bottom + 4, button);

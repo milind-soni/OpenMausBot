@@ -109,7 +109,7 @@ describe("SidebarSectionHeader as a Simple-mode line", () => {
     expect(html).not.toContain("Delete Work department");
     expect(html).not.toContain("lucide-grip-vertical");
     expect(html).not.toContain("lucide-trash");
-    expect(html).toMatch(/lucide-chevron-down absolute text-ink-secondary opacity-0 transition-opacity group-hover\/section:opacity-100 group-focus-within\/section:opacity-100 touch:opacity-100/);
+    expect(html).toMatch(/lucide-chevron-down shrink-0 text-ink-secondary opacity-0 transition-opacity group-hover\/section:opacity-100 group-focus-within\/section:opacity-100 touch:opacity-100/);
     expect(html.indexOf(">Work</span>")).toBeLessThan(html.indexOf("Actions for Work department"));
     const button = { id: "dots" };
     const dots = nodes(element.props.children).find((node) => node.props["aria-label"] === "Actions for Work department")!;
@@ -119,21 +119,21 @@ describe("SidebarSectionHeader as a Simple-mode line", () => {
     expect(renderToStaticMarkup(line())).not.toContain("Actions for Work department");
   });
 
-  it("shows how many rows the section holds at rest, crossfading to the chevron on hover or focus", () => {
-    const html = renderToStaticMarkup(line({ count: 3 }));
-    expect(html).toMatch(/class="h-\[30px\]|group\/section flex h-\[30px\] items-center gap-1\.5 rounded-\[6px\] px-2 pb-1\.5 pt-2 hover:bg-raised\/50/);
-    expect(html).toMatch(/<span class="text-\[12px\] tabular-nums leading-4 text-ink-secondary transition-opacity group-hover\/section:opacity-0 group-focus-within\/section:opacity-0 touch:opacity-0">3<\/span>/);
+  it("shows no row count, only the chevron on hover or focus", () => {
+    const html = renderToStaticMarkup(line());
+    expect(html).not.toContain("tabular-nums");
+    expect(html.replace(/<svg.*?<\/svg>/g, "")).not.toMatch(/>\d+</);
   });
 
-  it("keeps the count in the same column whether or not the line has a ⋯ menu", () => {
+  it("keeps the chevron in the same column whether or not the line has a ⋯ menu", () => {
     const slot = /<span aria-hidden="true" class="w-\[22px\] shrink-0"><\/span>/;
-    expect(renderToStaticMarkup(line({ count: 1, reserveMenu: true }))).toMatch(slot);
-    expect(renderToStaticMarkup(line({ count: 4, reserveMenu: true, onMenu: () => {} }))).not.toMatch(slot);
-    expect(renderToStaticMarkup(line({ count: 1 }))).not.toMatch(slot);
+    expect(renderToStaticMarkup(line({ reserveMenu: true }))).toMatch(slot);
+    expect(renderToStaticMarkup(line({ reserveMenu: true, onMenu: () => {} }))).not.toMatch(slot);
+    expect(renderToStaticMarkup(line())).not.toMatch(slot);
     expect(renderToStaticMarkup(line({ reserveMenu: true, naming: { value: "", label: "Name", onCommit: () => {}, onCancel: () => {} } }))).not.toMatch(slot);
     const top = (props: Parameters<typeof line>[0]) => Children.toArray(line(props).props.children).filter(isValidElement) as ReactElement<Props>[];
-    const reserved = top({ count: 1, reserveMenu: true });
-    const withMenu = top({ count: 4, onMenu: () => {} });
+    const reserved = top({ reserveMenu: true });
+    const withMenu = top({ onMenu: () => {} });
     expect(reserved.map((node) => node.type)).toEqual(["button", "span"]);
     expect(reserved[1].props).toMatchObject({ "aria-hidden": "true", className: "w-[22px] shrink-0" });
     expect(withMenu.map((node) => node.type)).toEqual(["button", "button"]);

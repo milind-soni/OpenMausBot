@@ -26,7 +26,6 @@ export function SidebarSectionHeader({
   onMenu,
   reserveMenu = false,
   menuOpen = false,
-  count,
   naming,
   dropInto = false,
 }: {
@@ -44,11 +43,9 @@ export function SidebarSectionHeader({
   onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
   line?: boolean;
   onMenu?: (button: HTMLButtonElement) => void;
-  /** Keep the ⋯ button's space when this line has none, so counts line up with lines that do (Simple). */
+  /** Keep the ⋯ button's space when this line has none, so chevrons line up with lines that do (Simple). */
   reserveMenu?: boolean;
   menuOpen?: boolean;
-  /** How many rows the section holds, shown at rest where the chevron shows on hover (Simple). */
-  count?: number;
   /** A name field in place of the name, for a department being made or renamed. */
   naming?: SectionNaming;
   /** A dragged bot would go into this department. */
@@ -78,11 +75,8 @@ export function SidebarSectionHeader({
   const dropMark = dropInto ? "bg-accent/10 outline outline-2 -outline-offset-2 outline-accent/70" : undefined;
 
   if (line) {
-    const tail = (
-      <span aria-hidden="true" className="relative flex size-4 shrink-0 items-center justify-center">
-        {count !== undefined && <span className={cn("text-[12px] tabular-nums leading-4 text-ink-secondary transition-opacity", onToggle && "group-hover/section:opacity-0 group-focus-within/section:opacity-0 touch:opacity-0")}>{count}</span>}
-        {onToggle && <Chevron size={14} className="absolute text-ink-secondary opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 touch:opacity-100" />}
-      </span>
+    const tail = onToggle && (
+      <Chevron size={14} aria-hidden="true" className="shrink-0 text-ink-secondary opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 touch:opacity-100" />
     );
     return (
       <div
