@@ -11,7 +11,7 @@ export interface ReplayEntry {
   id: string;
   role: "user" | "assistant";
   text: string;
-  /** Set only on the entry that stands for an earlier compaction summary: that summary's own text, before it is wrapped into `text`. */
+  /** On the entry standing for an earlier compaction summary: the summary's raw text, before it is JSON-quoted into `text`. */
   priorSummary?: string;
 }
 
