@@ -93,7 +93,7 @@ it.each([512, 3_200, MAX_SUMMARY_BYTES])("keeps multibyte summaries valid and wi
   ], maxBytes);
   expect(Buffer.byteLength(summary)).toBeLessThanOrEqual(maxBytes);
   expect(summary).toContain("最新訊息🙂");
-  expect(summary).not.toContain("�");
+  expect(summary).not.toContain("\uFFFD");
 });
 
 it("works without a model helper", async () => {
