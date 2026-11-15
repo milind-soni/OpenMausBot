@@ -2876,6 +2876,8 @@
   "engineSetup.sending": "Wysyłanie…",
   "engineSetup.sendRedirect": "Wyślij przekierowanie",
   "engineSetup.googleNoLink": "Logowanie przez Google nie zwróciło linku.",
+  "engineSetup.googleExpired": "Logowanie przez Google wygasło. Zacznij od nowa.",
+  "engineSetup.googleFailed": "Logowanie przez Google nie zostało ukończone. Zacznij od nowa.",
   "engineSetup.signInTitle": "Zaloguj się do {name}",
   "engineSetup.installTitle": "Zainstaluj {name}",
   "engineSetup.managedSignIn": "Każda konfiguracja Antigravity ma własne konto Google. Przeglądarka dokończy bezpieczne logowanie.",

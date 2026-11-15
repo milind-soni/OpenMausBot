@@ -14,20 +14,27 @@ import type {
 } from "../contracts.ts";
 import { createAcpDriver, type AcpConfig, type AcpSupport } from "./acp/core.ts";
 import {
-  AntigravityAuthController,
   antigravityProfileAuthenticated,
   antigravityProfileDirectory,
+  antigravitySessionSetup,
+  antigravityTokenPath,
+  authorizationUrlFromLine,
+  logoutAntigravity,
+  noteAntigravitySignInRequired,
   prepareAntigravityProfile,
   probeAntigravityModels,
   removeAntigravitySignIn,
   validateAntigravityRuntime,
+  verifyAntigravityBrowserHelper,
 } from "./antigravity-acp.ts";
+import { AntigravityAuthController } from "./antigravity-auth.ts";
 import {
   antigravityManagedInstallAvailable,
   installAntigravityRuntime,
   resolveAntigravityRuntime,
 } from "./antigravity-runtime.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
+import { AntigravityProcesses } from "./antigravity-processes.ts";
 import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravity-temp.ts";
 import { augmentedPath } from "../env-path.ts";
 import { bundledEngineCatalog } from "../model-manifest/bundled.ts";
@@ -53,6 +60,7 @@ export function antigravityPermissionMode(fullAuto: boolean, approvalMode?: Appr
 }
 
 const managedAsset = resolveAntigravityReleaseAsset();
+const runtimeProcesses = new AntigravityProcesses();
 
 const support: AcpSupport = {
   driverKind: "antigravityAgent",
@@ -109,6 +117,15 @@ const support: AcpSupport = {
     ? "oauth-personal"
     : null,
   authFailure: "fail",
+  // With a stored token Google no longer honours, agy_acp_server 1.4.3 prints its sign-in link and waits on
+  // `authenticate`; -32000 is ACP's auth_required.
+  signInRequest: {
+    stderrLine: (line) => authorizationUrlFromLine(line) !== null,
+    rpcError: (error) => (error as { code?: unknown } | null)?.code === -32000,
+    required: (instanceId) => noteAntigravitySignInRequired(antigravityTokenPath(instanceId)),
+  },
+  processStarted: (child, instanceId) => runtimeProcesses.track(instanceId, child),
+  sessionSetupParams: antigravitySessionSetup,
   requireAuthenticationBeforeSpawn: true,
   isAuthenticated: async (env, config, instanceId) => {
     try {
@@ -204,14 +221,26 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
             },
           }
         : {}),
+      authenticationMethod: "callback-url",
       startAuthentication: async () => {
         const { runtime, profile } = await runtimeAndProfile();
+        await verifyAntigravityBrowserHelper(profile);
         return auth.start(runtime, profile);
       },
+      getAuthentication: async (flowId) => auth.get(flowId),
       completeAuthentication: async (flowId, callbackUrl) => auth.complete(flowId, callbackUrl),
       cancelAuthentication: async () => auth.cancel(),
+      // A runtime process keeps the account it started with, and can write the token file again as it exits.
       signOut: async () => {
         auth.cancel();
+        await base.adapter.stopAll();
+        await runtimeProcesses.stopped(input.instanceId);
+        try {
+          const { runtime, profile } = await runtimeAndProfile();
+          if (await antigravityProfileAuthenticated(profile)) await logoutAntigravity(runtime, profile);
+        } catch {
+          console.warn("antigravity: the runtime did not confirm the sign-out; removing the stored sign-in.");
+        }
         await removeAntigravitySignIn(input.instanceId);
       },
       dispose: async () => {
