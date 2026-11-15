@@ -344,9 +344,19 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
     };
   }
 
+  /** Whether the turn about to start for `node` has files to be told of. Read at once, so a turn with none starts
+   * exactly as it would without this module. */
+  function awaits(node: Node, resumed: boolean, turn: ComposedTurn["turn"]): boolean {
+    if (!resumed) return Boolean(node.parentId && batchOf(node.id, "sent"));
+    return deps.children(node.id).some((child) => {
+      const batch = returnedBatch(child, node);
+      return Boolean(batch) && batch!.files.length > (turn === "rerun" ? 0 : batch!.listed ?? 0);
+    });
+  }
+
   /** Wraps the coordinator host's `run`: the turn's text gains the files note, after the copies are in place. */
   function around<Run extends (node: HandoffView, resumed: boolean, signal: AbortSignal, composed: ComposedTurn) => Promise<HostTurnResult>>(run: Run) {
-    return async (node: HandoffView, resumed: boolean, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult> => {
+    const delivered = async (node: HandoffView, resumed: boolean, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult> => {
       let files: Awaited<ReturnType<typeof forTurn>> | undefined;
       try {
         files = await forTurn(node, resumed, composed.turn);
@@ -358,6 +368,15 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
       const result = await run(node, resumed, signal, { ...composed, text: add(composed.text), note: add(composed.note) });
       if (!result.ok || result.cap) told.undo();
       return result;
+    };
+    return (node: HandoffView, resumed: boolean, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult> => {
+      let has = false;
+      try {
+        has = awaits(node, resumed, composed.turn);
+      } catch (error) {
+        deps.log?.(`handoff files: ${node.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return has ? delivered(node, resumed, signal, composed) : run(node, resumed, signal, composed);
     };
   }
 

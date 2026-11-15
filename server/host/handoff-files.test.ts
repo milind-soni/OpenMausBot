@@ -383,6 +383,19 @@ describe("returning", () => {
     expect((await files.forTurn(parent, true, "resume")).text).toBe(resumed.text);
   });
 
+  it("starts a turn that has no files at once, as it would without this module", async () => {
+    const { files, parent, child } = assigned(setup());
+    const order: string[] = [];
+    const composed = { text: "brief", note: "note", restartNote: "", turn: "first" as const };
+    const wrapped = files.around(async (_node, _resumed, _signal, turn) => { order.push(`run ${turn.text}`); return { ok: true, text: "" }; });
+    for (const [which, resumed] of [[child, false], [parent, true], [parent, false]] as const) {
+      const running = wrapped(which as never, resumed, new AbortController().signal, composed);
+      order.push("returned");
+      await running;
+    }
+    expect(order).toEqual(["run brief", "returned", "run brief", "returned", "run brief", "returned"]);
+  });
+
   it("tells a requester again when its resumed turn did not run to its end", async () => {
     const { files, parent, child } = assigned(setup());
     const { attachment: table, saved } = await attachment("table.csv");
