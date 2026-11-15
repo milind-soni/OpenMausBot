@@ -51,6 +51,8 @@ async function scriptedRelay(script: (socket: WebSocket) => void): Promise<{ url
   return { url: `ws://127.0.0.1:${port}`, dials: () => dials };
 }
 
+/** For waits on something that must happen: a runner several times slower than a laptop only stretches them. */
+const SLOW = 15_000;
 const hello = JSON.stringify({ t: "hello", v: 1, node: "relay1", sessionsMax: 16 });
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -126,9 +128,9 @@ describe("the relay client", () => {
     instance.start();
     await waitFor(() => instance.status === "connected");
     relay.restart();
-    await waitFor(() => instance.problem === "busy");
+    await waitFor(() => instance.problem === "busy", SLOW);
     expect(instance.status).toBe("connecting");
-    await waitFor(() => statuses.filter((status) => status.startsWith("connected")).length === 2, 5_000);
+    await waitFor(() => statuses.filter((status) => status.startsWith("connected")).length === 2, SLOW);
     expect(statuses.map((status) => status.split("@")[0])).toEqual(["connecting", "connected", "connecting", "connected"]);
   });
 
@@ -189,73 +191,75 @@ describe("the relay client", () => {
       socket.send(hello);
       socket.close(1011);
     });
-    const { instance } = client({ "relay1.openmausbot.com": relay });
+    // Immediate, then a minute: a count that reset on every hello would redial at once, over and over.
+    const { instance } = client({ "relay1.openmausbot.com": relay }, { timing: { backoffMs: [0, 60_000] } });
     instance.start();
-    await pause(1_500);
-    // Immediate, then 1 s: the count did not reset on each hello.
-    expect(relay.dials()).toBeLessThanOrEqual(3);
-    expect(instance.problem).toBe("unreachable");
+    await waitFor(() => relay.dials() === 2, SLOW);
+    await waitFor(() => instance.problem === "unreachable", SLOW);
+    await pause(500);
+    expect(relay.dials()).toBe(2);
   });
 
   it("resets the backoff once a socket has stayed connected long enough", async () => {
     const relay = await scriptedRelay((socket) => {
       socket.send(hello);
-      setTimeout(() => socket.close(1011), 150);
+      setTimeout(() => socket.close(1011), 1_000);
     });
-    const { instance } = client({ "relay1.openmausbot.com": relay }, { timing: { stableAfterMs: 50 } });
+    // Without the reset, the second drop would wait a minute.
+    const { instance } = client({ "relay1.openmausbot.com": relay }, { timing: { stableAfterMs: 50, backoffMs: [0, 60_000] } });
     instance.start();
-    await pause(1_200);
-    expect(relay.dials()).toBeGreaterThanOrEqual(5);
+    await waitFor(() => relay.dials() >= 4, SLOW);
   });
 
   it("drops a socket that never says hello and dials the next node", async () => {
     const silent = await relayAt();
     silent.silent = true;
     const second = await relayAt();
-    const { instance } = client({ "relay1.openmausbot.com": silent, "relay2.openmausbot.com": second }, { timing: { helloTimeoutMs: 200 } });
+    const { instance } = client({ "relay1.openmausbot.com": silent, "relay2.openmausbot.com": second }, { timing: { helloTimeoutMs: 1_000 } });
     instance.start();
-    await waitFor(() => instance.node === "relay2.openmausbot.com");
+    await waitFor(() => instance.node === "relay2.openmausbot.com", SLOW);
     expect(instance.problem).toBeNull();
-    expect(second.admitted(hid).size).toBe(2);
+    await waitFor(() => second.admitted(hid).size === 2, SLOW);
   });
 
   it("keeps a connected socket that answers its liveness check", async () => {
     const relay = await relayAt();
-    const { instance } = client({ "relay1.openmausbot.com": relay }, { timing: { livenessTimeoutMs: 200 } });
+    const { instance } = client({ "relay1.openmausbot.com": relay }, { timing: { livenessTimeoutMs: 5_000 } });
     instance.start();
-    await waitFor(() => instance.status === "connected");
+    await waitFor(() => instance.status === "connected", SLOW);
     const socket = relay.hosts.get(hid)!.control;
     instance.checkAlive();
-    await pause(400);
-    expect(relay.refreshes).toBe(1);
+    await waitFor(() => relay.refreshes === 1, SLOW);
     expect(instance.status).toBe("connected");
     expect(relay.hosts.get(hid)?.control).toBe(socket);
+    expect(relay.closes).toEqual([]);
   });
 
   it("dials again, once and with backoff, when a connected socket stops answering", async () => {
     const relay = await relayAt();
     const { instance, statuses } = client({ "relay1.openmausbot.com": relay }, { timing: { livenessTimeoutMs: 200, redialSpreadMs: 600 } });
     instance.start();
-    await waitFor(() => instance.status === "connected");
+    await waitFor(() => instance.status === "connected", SLOW);
     relay.silent = true;
     instance.checkAlive();
-    await waitFor(() => instance.problem === "no_answer");
+    await waitFor(() => instance.problem === "no_answer", SLOW);
     const droppedAt = Date.now();
     relay.silent = false;
-    await waitFor(() => statuses.filter((status) => status.startsWith("connected")).length === 2);
+    await waitFor(() => statuses.filter((status) => status.startsWith("connected")).length === 2, SLOW);
     // Not at once, though the backoff count is at its first step: a random part of the spread (here half of 600 ms).
+    // A lower bound only: a slow runner makes it longer, never shorter.
     expect(Date.now() - droppedAt).toBeGreaterThanOrEqual(250);
     expect(instance.problem).toBeNull();
   });
 
   it("waits for a new token when the relay answers a liveness check with 4401", async () => {
     const relay = await relayAt();
-    const { instance, rejected } = client({ "relay1.openmausbot.com": relay }, { token: token(2) });
+    const { instance, rejected } = client({ "relay1.openmausbot.com": relay });
     instance.start();
-    await waitFor(() => instance.status === "connected");
-    await pause(2_200);
+    await waitFor(() => instance.status === "connected", SLOW);
+    relay.refuseRefresh = true;
     instance.checkAlive();
-    await waitFor(() => rejected.length === 1);
+    await waitFor(() => rejected.length === 1, SLOW);
     expect(instance.status).toBe("connecting");
     expect(instance.problem).toBe("token_refused");
     instance.checkAlive();
@@ -267,7 +271,7 @@ describe("the relay client", () => {
     const relay = await relayAt();
     const { instance } = client({ "relay1.openmausbot.com": relay }, { timing: { livenessEveryMs: 100 } });
     instance.start();
-    await waitFor(() => relay.refreshes >= 2);
+    await waitFor(() => relay.refreshes >= 2, SLOW);
     expect(instance.status).toBe("connected");
   });
 
@@ -275,29 +279,27 @@ describe("the relay client", () => {
     const relay = await scriptedRelay((socket) => socket.close(4429));
     const { instance } = client({ "relay1.openmausbot.com": relay });
     instance.start();
-    await waitFor(() => instance.problem === "busy");
+    await waitFor(() => instance.problem === "busy", SLOW);
     await pause(500);
     expect(relay.dials()).toBe(1);
   });
 
   it("on a network change after a failed dial, dials now instead of waiting out its backoff", async () => {
     const relay = await scriptedRelay((socket) => socket.close(1011));
-    const { instance } = client({ "relay1.openmausbot.com": relay });
+    // The backoff after the first failure is 30 s, so a second dial within the wait below can only be the shortcut.
+    const { instance } = client({ "relay1.openmausbot.com": relay }, { timing: { backoffMs: [30_000] } });
     instance.start();
-    // Immediate, then 1 s: the third dial waits 2 s.
-    await waitFor(() => relay.dials() === 3);
-    await waitFor(() => instance.problem === "unreachable");
-    const at = Date.now();
+    await waitFor(() => instance.problem === "unreachable", SLOW);
+    expect(relay.dials()).toBe(1);
     instance.checkAlive();
-    await waitFor(() => relay.dials() === 4);
-    expect(Date.now() - at).toBeLessThan(1_000);
+    await waitFor(() => relay.dials() === 2, SLOW);
   });
 
   it("on a network change keeps a wait the relay asked for (4429)", async () => {
     const relay = await scriptedRelay((socket) => socket.close(4429));
     const { instance } = client({ "relay1.openmausbot.com": relay });
     instance.start();
-    await waitFor(() => instance.problem === "busy");
+    await waitFor(() => instance.problem === "busy", SLOW);
     instance.checkAlive();
     await pause(500);
     expect(relay.dials()).toBe(1);

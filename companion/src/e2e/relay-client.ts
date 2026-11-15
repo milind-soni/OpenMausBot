@@ -10,10 +10,11 @@ export type RelayStatus = "connected" | "connecting" | "off";
  * ("unreachable"), or another socket for this computer took over (4409). */
 export type RelayProblem = "no_answer" | "token_refused" | "busy" | "unreachable" | "replaced";
 
-const BACKOFF_MS = [0, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000];
 /** README section 10: 4429 means back off at least this long. */
 const LIMITED_MIN_MS = 30_000;
 const DEFAULT_TIMING = {
+  /** Reconnect delays by failure count (± a fifth); the last repeats. */
+  backoffMs: [0, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000],
   /** While on a later node, how often to try the first one again (± a fifth). */
   firstNodeRetryMs: 10 * 60_000,
   sleepCheckMs: 2_000,
@@ -254,7 +255,8 @@ export class RelayClient {
   }
 
   #backOff(index: number, atLeastMs = 0): void {
-    const delay = jitter(BACKOFF_MS[Math.min(this.#attempt, BACKOFF_MS.length - 1)], this.#random);
+    const ladder = this.#timing.backoffMs;
+    const delay = jitter(ladder[Math.min(this.#attempt, ladder.length - 1)], this.#random);
     this.#attempt += 1;
     this.#retry(index, Math.max(atLeastMs, delay));
   }
