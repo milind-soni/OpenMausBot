@@ -176,6 +176,7 @@ describe("Companion account service", () => {
       email: "ada@example.com",
       endpoint: ENDPOINT,
       message: "Secure access is not available right now. Local pairing still works.",
+      problem: "unreachable",
     });
     expect(store.writes).toHaveLength(0);
   });
@@ -309,6 +310,7 @@ describe("Companion account service", () => {
       email: "ada@example.com",
     });
     expect(JSON.stringify(await service.state())).not.toContain("invalid_otp");
+    expect((await service.state()).problem).toBe("sign_in");
   });
 
   it("handles an expired account session without deleting recovery credentials", async () => {

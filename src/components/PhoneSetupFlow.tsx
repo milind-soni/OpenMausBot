@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { t } from "@/lib/i18n";
+import { PairingFailureCheck } from "./RemoteAccessCheck";
 import {
   ArrowLeft,
   Check,
@@ -896,10 +897,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
         <h2 className="mt-3 text-[18px] font-semibold text-ink">
           {unavailable || failed ? t("phone.signIn.attention") : t("phone.signIn.title")}
         </h2>
-        <p
-          role={c.setupTimedOut ? "alert" : undefined}
-          className="mt-1 text-[13px] leading-relaxed text-ink-secondary"
-        >
+        <p role={c.setupTimedOut ? "alert" : undefined} className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
           {unavailable
             ? t("phone.signIn.unavailable")
             : c.setupTimedOut
@@ -908,6 +906,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
               ? c.account?.message ?? t("phone.signIn.failed")
               : t("phone.signIn.emailPrompt")}
         </p>
+        {(unavailable || failed) && <PairingFailureCheck account={c.account} state={c.state} setupTimedOut={c.setupTimedOut} />}
 
         {!unavailable && !failed && (
           <div className="mt-5 flex flex-col gap-3">
