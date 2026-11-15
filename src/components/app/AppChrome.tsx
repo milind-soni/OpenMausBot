@@ -70,6 +70,44 @@ export function AppHeader({
   );
 }
 
+/** The compact page card's footer: what the page is, with the card's own tools shown on hover, focus and touch. */
+export function PageCardFooter({ title, detail, updated, infoId, infoOpen, onInfo, onReload, reloading = false }: {
+  title: string;
+  detail: string;
+  updated: boolean;
+  infoId: string;
+  infoOpen: boolean;
+  onInfo(): void;
+  onReload?: () => void;
+  reloading?: boolean;
+}) {
+  return (
+    <div data-page-footer className="flex items-center gap-3 border-t border-ink/[0.08] px-4 py-3">
+      <AppWindow aria-hidden="true" size={16} className="shrink-0 text-ink-tertiary" />
+      <div className="min-w-0 flex-1">
+        <div title={title} className="truncate text-[13px] font-medium leading-[18px] text-ink"><bdi dir="auto">{title}</bdi></div>
+        <div className="truncate text-xs leading-4 text-ink-tertiary">{detail}</div>
+      </div>
+      {updated && <span role="status" data-page-updated className="shrink-0 rounded-full bg-accent/15 px-2 py-px text-[13px] font-medium text-accent-text">{t("chat.preview.updated")}</span>}
+      <div className={cn(
+        "relative z-[1] -me-1.5 flex shrink-0 items-center gap-0.5 transition-opacity duration-[120ms] motion-reduce:transition-none",
+        "group-hover/page:opacity-100 group-focus-within/page:opacity-100 touch:opacity-100",
+        !infoOpen && "opacity-0",
+      )}>
+        <button type="button" aria-label={t("app.info")} title={t("app.info")} aria-expanded={infoOpen} aria-controls={infoId} onClick={onInfo}
+          className={cn(ICON_BUTTON, infoOpen && "bg-ink/[0.07] text-ink")}>
+          <Info size={15} />
+        </button>
+        {onReload && (
+          <button type="button" aria-label={t("app.reload")} title={t("app.reload")} onClick={onReload} disabled={reloading} className={ICON_BUTTON}>
+            <RotateCw size={14} className={cn(reloading && "animate-spin motion-reduce:animate-none")} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function OriginList({ origins }: { origins: readonly string[] }) {
   if (!origins.length) return <span className="text-ink-tertiary">{t("app.info.nothing")}</span>;
   return <span className="[overflow-wrap:anywhere]">{origins.join(", ")}</span>;

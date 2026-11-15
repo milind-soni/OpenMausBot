@@ -7,7 +7,7 @@ import { appBlockedLine } from "./app-blocked";
 import { APP_FRAME_LIMITS } from "../../../shared/app-frame/bridge";
 import { AppDocumentError, fetchAppDocument, type AppFetchFailure } from "./app-api";
 import { APP_POOL_LIMITS, useAppPoolSlot, type AppPool } from "./app-pool";
-import { AppDone, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE } from "./AppChrome";
+import { AppDone, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE, PageCardFooter } from "./AppChrome";
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "./AppFrame";
 import type { AppSelection } from "./app-frame-host";
 import { PageCitationButton } from "../CitationUI";
@@ -225,13 +225,15 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   // The compact card clips the page at its natural size, so it reads as a preview of the real thing.
   const boxHeight = pane ? Math.min(height, PAGE_PREVIEW_HEIGHT) : height;
   const body = collapsed ? null : fullScreen && current ? (
-    <div data-app-box className={cn("relative w-full", bordered && "border-t border-ink/[0.08]")} style={{ height: boxHeight }}>
-      <AppPlaceholder height={boxHeight} open={() => setFullScreen(false)} label={t(pane ? "chat.preview.closePage" : "chat.preview.exitFullScreen")} />
+    <div data-app-box className={cn("relative w-full", bordered && !pane && "border-t border-ink/[0.08]")} style={{ height: boxHeight }}>
+      {pane
+        ? <AppPlaceholder height={boxHeight}><span className="ui-pill">{t("chat.preview.closePage")}</span></AppPlaceholder>
+        : <AppPlaceholder height={boxHeight} open={() => setFullScreen(false)} label={t("chat.preview.exitFullScreen")} />}
     </div>
   ) : noPage ? (
-    message.text ? <div dir="auto" className={cn("line-clamp-6 whitespace-pre-wrap text-[13px] leading-[18px] text-ink-secondary", bordered ? "px-4 pb-3" : "pb-2")}>{message.text}</div> : null
+    message.text ? <div dir="auto" className={cn("line-clamp-6 whitespace-pre-wrap text-[13px] leading-[18px] text-ink-secondary", pane ? "px-4 pt-3" : bordered ? "px-4 pb-3" : "pb-2")}>{message.text}</div> : null
   ) : (
-    <div data-app-box className={cn("relative w-full", pane && "overflow-hidden", bordered && "border-t border-ink/[0.08]", point.pointing && "ring-2 ring-inset ring-accent/60")}
+    <div data-app-box className={cn("relative w-full", pane && "overflow-hidden", bordered && !pane && "border-t border-ink/[0.08]", point.pointing && "ring-2 ring-inset ring-accent/60")}
       style={{ height: boxHeight }}>
       {current ? (
         <AppFrame
@@ -251,14 +253,15 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
       ) : (
         <AppPlaceholder height={boxHeight} loading={slot.live} open={slot.live ? undefined : reloadNow} />
       )}
-      {pane && current && !point.pointing && (
-        <button type="button" data-page-open onClick={() => setFullScreen(true)} aria-label={t("chat.preview.openPage")}
-          className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-panel via-transparent to-transparent pb-3">
-          <span className="ui-pill">{t("chat.preview.openPage")}</span>
-        </button>
-      )}
     </div>
   );
+  const info = infoOpen && <AppInfo id={infoId} network={payload.network ?? { connect: [], resources: [] }} bytes={payload.bytes ?? 0} bordered={bordered || Boolean(pane)} />;
+  const reopen = collapsed && (
+    <div className={cn("flex", bordered || pane ? "px-4 pb-3.5" : "pb-2", pane && "pt-3.5")}>
+      <AppOpenButton label={t("app.openAgain")} onClick={reloadNow} />
+    </div>
+  );
+  const kind = t("chat.preview.kind");
 
   return (
     <div
@@ -272,29 +275,52 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
       {...(room ? { "data-app-room": "" } : {})}
       className={cn("w-full text-start", WIDTH)}
     >
-      <div className={cn(bordered ? APP_SURFACE : "w-full")}>
-        <AppHeader
-          title={payload.title}
-          origin={origin}
-          infoId={infoId}
-          infoOpen={infoOpen}
-          onInfo={() => setInfoOpen((open) => !open)}
-          onReload={docKey ? reloadNow : undefined}
-          reloading={fetching && Boolean(current)}
-          bordered={bordered}
-        />
-        {page && <PageToolbar {...tools} className={bordered ? "px-4 pb-3" : "pb-2"} />}
-        {page && <PageNotes version={version} point={point} share={share} save={save} room={room} className={bordered ? "px-4 pb-3" : "pb-2"} />}
-        {infoOpen && <AppInfo id={infoId} network={payload.network ?? { connect: [], resources: [] }} bytes={payload.bytes ?? 0} bordered={bordered} />}
-        {collapsed && (
-          <div className={cn("flex", bordered ? "px-4 pb-3.5" : "pb-2")}>
-            <AppOpenButton label={t("app.openAgain")} onClick={reloadNow} />
+      {pane ? (
+        <div className={APP_SURFACE}>
+          <div className="group/page relative">
+            {reopen}
+            {body}
+            <PageCardFooter
+              title={payload.title}
+              detail={version.last > 0 ? `${kind} · ${t("chat.preview.version", { n: version.rev + 1 })}` : kind}
+              updated={version.flash}
+              infoId={infoId}
+              infoOpen={infoOpen}
+              onInfo={() => setInfoOpen((open) => !open)}
+              onReload={docKey ? reloadNow : undefined}
+              reloading={fetching && Boolean(current)}
+            />
+            {current && !point.pointing && (
+              <button type="button" data-page-open onClick={tools.fullScreen.toggle} aria-pressed={paneOpen}
+                aria-label={t(paneOpen ? "chat.preview.closePage" : "chat.preview.openPage")}
+                className="absolute inset-0 cursor-pointer rounded-2xl transition-colors duration-[120ms] hover:bg-ink/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus motion-reduce:transition-none" />
+            )}
           </div>
-        )}
-        {body}
-        {payload.done && <AppDone done={payload.done} bordered={bordered} />}
-        {strip && <AppStrip text={strip.text} action={strip.action} bordered={bordered} />}
-      </div>
+          {info}
+          {payload.done && <AppDone done={payload.done} bordered />}
+          {strip && <AppStrip text={strip.text} action={strip.action} bordered />}
+        </div>
+      ) : (
+        <div className={cn(bordered ? APP_SURFACE : "w-full")}>
+          <AppHeader
+            title={payload.title}
+            origin={origin}
+            infoId={infoId}
+            infoOpen={infoOpen}
+            onInfo={() => setInfoOpen((open) => !open)}
+            onReload={docKey ? reloadNow : undefined}
+            reloading={fetching && Boolean(current)}
+            bordered={bordered}
+          />
+          {page && <PageToolbar {...tools} className={bordered ? "px-4 pb-3" : "pb-2"} />}
+          {page && <PageNotes version={version} point={point} share={share} save={save} room={room} className={bordered ? "px-4 pb-3" : "pb-2"} />}
+          {info}
+          {reopen}
+          {body}
+          {payload.done && <AppDone done={payload.done} bordered={bordered} />}
+          {strip && <AppStrip text={strip.text} action={strip.action} bordered={bordered} />}
+        </div>
+      )}
       {!room && canWrite && (
         <PageCitationButton
           selection={selection && { text: selection.text, point: { left: selection.left, top: selection.bottom + 8 } }}
