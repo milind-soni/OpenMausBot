@@ -40,7 +40,7 @@ function place(label: string, bots: Bot[]) {
   const dir = mkdtempSync(join(tmpdir(), `bot-link-${label}-`));
   const threads = new Set<string>();
   const runs: Array<{ botId: string; threadId: string; text: string; resumed: boolean; requester: string; origin: unknown }> = [];
-  const sent: Array<{ recipient: string; threadId: string }> = [];
+  const sent: Array<{ recipient: string; threadId: string; roomId?: string }> = [];
   const results: Array<{ thread: string; name: string; status: string; result: string }> = [];
   const requests: string[] = [];
   const issued = new Map<string, string>();
@@ -65,7 +65,7 @@ function place(label: string, bots: Bot[]) {
       dataDir: dir, coordinator: () => coordinator, bots: () => bots, bot: (id) => bots.find((bot) => bot.id === id), level: () => "full",
       openThread: (bot) => { const id = `${bot.id}-work-${++opened}`; threads.add(id); return id; },
       hasThread: (_botId, threadId) => threads.has(threadId), personName: () => "Sam",
-      sentRow: (input) => { sent.push({ recipient: input.recipient.name, threadId: input.threadId }); },
+      sentRow: (input) => { sent.push({ recipient: input.recipient.name, threadId: input.threadId, ...(input.roomId ? { roomId: input.roomId } : {}) }); },
       resultRow: (parent, child, name) => { results.push({ thread: parent.threadId, name, status: child.status, result: child.result }); },
       kick: () => { queueMicrotask(() => { try { coordinator.tick(); } catch { /* closed */ } }); },
       revoke: (sessionId) => { for (const [token, id] of issued) if (id === sessionId) issued.delete(token); },
@@ -135,10 +135,11 @@ function place(label: string, bots: Bot[]) {
   }
 
   /** One of this place's bots takes a turn in which it hands work on; the turn then ends and waits for it. */
-  async function handOff(from: string, input: CoordinateBotsCall, local: (input: CoordinateBotsCall) => Promise<{ status: number; body: Record<string, unknown> }> = async () => ({ status: 200, body: { receipts: [] } })) {
-    const id = `${label}-turn-${++generation}`, address = { botId: from, threadId: `${from}-chat` };
+  async function handOff(from: string, input: CoordinateBotsCall, local: (input: CoordinateBotsCall) => Promise<{ status: number; body: Record<string, unknown> }> = async () => ({ status: 200, body: { receipts: [] } }),
+    room?: { id: string; problem?: string }) {
+    const id = `${label}-turn-${++generation}`, address = room ? { groupId: room.id, botId: from, threadId: `${room.id}-thread` } : { botId: from, threadId: `${from}-chat` };
     coordinator.beginTurn({ id, address, brief: "Sort it out", level: "full", origin: { kind: "user", request: "Sort it out" } });
-    const answer = await link.coordinate(input, { sender: bots.find((bot) => bot.id === from)!, address, generation: id, external: false, handed: () => {} }, local);
+    const answer = await link.coordinate(input, { sender: bots.find((bot) => bot.id === from)!, address, generation: id, external: false, handed: () => {}, ...(room?.problem ? { problem: room.problem } : {}) }, local);
     coordinator.endTurn(id, { ok: true, text: "Handed on." });
     return { id, answer, receipts: (answer.body.receipts ?? []) as Array<{ botId: string; outcome: string; detail: string; requestId?: string }> };
   }
@@ -669,6 +670,26 @@ describe("the link between a computer and its Cloud", () => {
     cloud.later(SPOOL_KEEP_MS);
     cloud.link.tidy();
     expect(readdirSync(root)).toEqual([]);
+  });
+
+  it("a room member hands work to a bot of the other place: it goes directly, and its result comes back to the room", async () => {
+    const { computer, cloud } = await two();
+    const { receipts } = await computer.handOff("local-writer", call(["Analyst"], "Count the orders"), undefined, { id: "newsroom" });
+    expect(receipts[0]).toMatchObject({ botId: onCloud("cloud-analyst"), outcome: "queued" });
+    await until(() => computer.results.length === 1, "the result is back in the room");
+    expect(computer.sent).toEqual([{ recipient: "Analyst (My Cloud)", threadId: "newsroom-thread", roomId: "newsroom" }]);
+    expect(computer.results[0]).toMatchObject({ thread: "newsroom-thread", name: "Analyst (My Cloud)", status: "completed" });
+    expect(cloud.runs.filter((run) => run.botId === "cloud-analyst").map((run) => run.threadId)).toEqual(["cloud-analyst-work-1"]);
+    await until(() => computer.runs.some((run) => run.resumed && run.threadId === "newsroom-thread"), "the member is resumed in the room");
+
+    const other = await computer.handOff("local-writer", call(["Analyst"], "Count again", { groupId: "another-room" }), undefined, { id: "newsroom" });
+    expect(other.answer.status).toBe(409);
+    expect(String(other.answer.body.error)).toContain("in no room here");
+    const left = await computer.handOff("local-writer", call(["Analyst"], "Count once more"), undefined, { id: "newsroom", problem: "Coordination needs a room you are a member of, or your own conversation." });
+    expect(left.answer.status).toBe(409);
+    expect(String(left.answer.body.error)).toContain("a room you are a member of");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(cloud.runs.filter((run) => run.botId === "cloud-analyst")).toHaveLength(1);
   });
 
   it("the link's sign-in reaches the link's own routes and nothing else", () => {
