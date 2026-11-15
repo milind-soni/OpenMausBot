@@ -9,6 +9,7 @@ let fixture: VerificationServer;
 let upstream: Server;
 const bots: Bot[] = [];
 let routingCalls = 0;
+let routingOptions: string[] = [];
 let keyChecks = 0;
 
 const api = async (method: string, path: string, body?: unknown) => {
@@ -37,6 +38,7 @@ beforeAll(async () => {
         return json({ answers: { answer: { type: "noul", noul: 0.99 } } });
       }
       routingCalls++;
+      routingOptions = Object.keys(body.questions.answer.criteria);
       const choice = bots[1]!.id;
       return json({ answers: { answer: { type: "choice", choice, confidence: 0.99, probabilities: { [choice]: 0.99 } } } });
     }
@@ -111,17 +113,38 @@ it("still asks the decision model for a reply to a person's message", async () =
   expect(routingCalls).toBe(before + 1);
 }, 120_000);
 
-it.each(["held", "hidden", "removed"])("falls back to Auto when the quoted bot is %s", async (unavailable) => {
+it.each(["held", "hidden", "removed", "paused", "department-paused"])("falls back to Auto when the quoted bot is %s", async (unavailable) => {
   const { room, quote } = await quotedRoom();
   if (unavailable === "held") await api("POST", `/api/groups/${room.id}/holds`, { botId: bots[0]!.id, held: true });
   if (unavailable === "hidden") await api("PATCH", `/api/bots/${bots[0]!.id}`, { hidden: true });
   if (unavailable === "removed") await api("PATCH", `/api/groups/${room.id}`, { memberIds: bots.slice(1).map((bot) => bot.id) });
+  if (unavailable === "paused") await api("POST", "/api/paused", { kind: "bot", id: bots[0]!.id, paused: true });
+  if (unavailable === "department-paused") {
+    await api("POST", "/api/sidebar-sections", { name: "Quoted pause fixture", botIds: [bots[0]!.id] });
+    await api("POST", "/api/paused", { kind: "department", id: "Quoted pause fixture", paused: true });
+  }
   try {
     const before = routingCalls;
     expect((await round(room, "Please review this.", quote.id)).replies.map((message) => message.from?.botId)).toEqual([bots[1]!.id]);
     expect(routingCalls).toBe(before + 1);
+    expect(routingOptions).not.toContain(bots[0]!.id);
   } finally {
     if (unavailable === "hidden") await api("PATCH", `/api/bots/${bots[0]!.id}`, { hidden: false });
+    if (unavailable === "paused") await api("POST", "/api/paused", { kind: "bot", id: bots[0]!.id, paused: false });
+    if (unavailable === "department-paused") await api("POST", "/api/paused", { kind: "department", id: "Quoted pause fixture", paused: false });
+  }
+}, 120_000);
+
+it("does not reroute an explicit mention of a paused bot", async () => {
+  const { room, quote } = await quotedRoom();
+  await api("POST", "/api/paused", { kind: "bot", id: bots[0]!.id, paused: true });
+  try {
+    const before = routingCalls;
+    expect((await round(room, "@Atlas please review this.", quote.id)).replies).toEqual([]);
+    expect(routingCalls).toBe(before);
+    expect((await api("GET", "/api/paused")).heldBots).toContain(bots[0]!.id);
+  } finally {
+    await api("POST", "/api/paused", { kind: "bot", id: bots[0]!.id, paused: false });
   }
 }, 120_000);
 

@@ -10734,7 +10734,7 @@ function startGroupTurn(
     .filter((bot): bot is NonNullable<typeof bot> => Boolean(bot));
   const availableMembers = members.filter((member) => !member.hidden);
   const isHeld = (member: { id: string }) => roomHeld(group, member.id);
-  const routableMembers = availableMembers.filter((member) => !isHeld(member));
+  const routableMembers = availableMembers.filter((member) => !isHeld(member) && !botHolds.held(member.id));
   const requestedGoalCoordinator = options.goalCoordinatorBotId
     ? availableMembers.find((member) => member.id === options.goalCoordinatorBotId)
     : undefined;
