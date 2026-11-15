@@ -1,6 +1,7 @@
 // This client never logs a header value.
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { BlockList, isIP } from "node:net";
 import { Readable } from "node:stream";
 
 import type { RemoteMcpSpec } from "./contracts.ts";
@@ -457,7 +458,7 @@ function isLoopback(host: string): boolean {
   return host === "localhost" || host.endsWith(".localhost") || host === "::1" || /^127\.\d+\.\d+\.\d+$/.test(host);
 }
 
-/** NO_PROXY by curl's rules: a name matches itself and subdomains, a leading dot or `*.` is ignored, `*` matches all, a port must match. */
+/** NO_PROXY by curl's rules: names match themselves and subdomains, IP literals match same-family CIDR entries, `*` matches all, and a port must match. */
 export function bypassesProxy(target: URL, noProxy: string): boolean {
   const host = target.hostname.replace(/^\[|\]$/g, "").toLowerCase();
   if (isLoopback(host)) return true;
@@ -466,6 +467,18 @@ export function bypassesProxy(target: URL, noProxy: string): boolean {
     const entry = raw.trim().toLowerCase();
     if (!entry) continue;
     if (entry === "*") return true;
+    const cidr = /^([^/%]+)\/(\d+)$/.exec(entry);
+    if (cidr) {
+      const family = isIP(cidr[1]);
+      const prefix = Number(cidr[2]);
+      if (family && isIP(host) === family && prefix <= (family === 4 ? 32 : 128)) {
+        const type = family === 4 ? "ipv4" : "ipv6";
+        const subnet = new BlockList();
+        subnet.addSubnet(cidr[1], prefix, type);
+        if (subnet.check(host, type)) return true;
+      }
+      continue;
+    }
     const bracketed = /^\[([^\]]+)\](?::(\d+))?$/.exec(entry);
     const hostPort = !bracketed && entry.split(":").length === 2 ? entry.split(":") : undefined;
     const name = (bracketed?.[1] ?? hostPort?.[0] ?? entry).replace(/^\*?\./, "");

@@ -63,7 +63,7 @@ describe("BotListItem", () => {
     expect(badge).not.toContain("size-3");
     expect(waiting).toContain('aria-hidden="true">!</span>');
     expect(waiting).toContain('class="flex min-w-0 items-center gap-1.5 truncate text-[13px] leading-[18px] font-semibold text-warning"');
-    expect(waiting).toContain('class="truncate">Waiting for you…</span>');
+    expect(waiting).toContain('class="min-w-0 overflow-hidden whitespace-nowrap">Waiting for you…</span>');
 
     const icons = opening(renderRow(bot({ activity: "waiting-on-you" }), "icons"), "waiting-dot");
     expect(icons).toContain("size-5");
@@ -75,7 +75,7 @@ describe("BotListItem", () => {
     const teammateDot = opening(teammate, "teammate-wait-dot");
     expect(teammateDot).toContain("size-2.5");
     expect(teammateDot).not.toContain("size-4");
-    expect(teammate).toContain('class="truncate">Waiting on a teammate…</span>');
+    expect(teammate).toContain('class="min-w-0 overflow-hidden whitespace-nowrap">Waiting on a teammate…</span>');
     expect(teammate).toContain("truncate text-[13px] leading-[18px] text-ink-secondary");
     expect(teammate).not.toContain("font-semibold text-warning");
 
@@ -87,7 +87,7 @@ describe("BotListItem", () => {
     const preview = renderRow(bot({
       messages: [{ id: "b1", role: "bot", kind: "text", text: "Created notes.txt", at: 2 }] as Bot["messages"],
     }));
-    expect(preview).toContain('class="truncate">Created notes.txt</span>');
+    expect(preview).toContain('class="min-w-0 overflow-hidden whitespace-nowrap">Created notes.txt</span>');
     expect(preview).toContain("truncate text-[13px] leading-[18px] text-ink-secondary");
     expect(preview).not.toContain("text-warning");
     expect(preview).not.toContain("waiting-dot");
