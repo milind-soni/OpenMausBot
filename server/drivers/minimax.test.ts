@@ -41,6 +41,7 @@ describe("MinimaxDriver", () => {
     expect(MinimaxDriver.models).toEqual({
       default: "MiniMax-M3",
       options: [
+        { id: "MiniMax-M3.1-Flash", label: "MiniMax M3.1 Flash", contextWindow: 1_000_000, custom: true },
         { id: "MiniMax-M3", label: "MiniMax M3", contextWindow: 1_000_000, custom: true },
         { id: "MiniMax-M2.7", label: "MiniMax M2.7", contextWindow: 204_800, custom: true },
         { id: "MiniMax-M2.7-highspeed", label: "MiniMax M2.7 Highspeed", contextWindow: 204_800, custom: true },
@@ -173,6 +174,30 @@ describe("MinimaxDriver", () => {
     expect(completed).toMatchObject({ ok: true, usage: { input: 12, output: 3 } });
     recorder.stop();
     await instance.dispose();
+  });
+
+  it("uses the MiniMax CLI's M3.1 Flash default for a turn", async () => {
+    mkdirSync(join(home, ".mmx"));
+    writeFileSync(join(home, ".mmx", "config.json"), JSON.stringify({ default_text_model: "MiniMax-M3.1-Flash" }));
+    let body: Record<string, unknown> | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response('data: {"choices":[{"delta":{"content":"hello"}}]}\n' + 'data: [DONE]\n',
+        { headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await MinimaxDriver.create({
+      instanceId: "minimax-flash", displayName: "MiniMax", enabled: true,
+      config: MinimaxDriver.defaultConfig(), environment: { MINIMAX_API_KEY: "fixture-key" },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "flash", text: "hello" });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      expect(body?.model).toBe("MiniMax-M3.1-Flash");
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
   });
 
   it("smoke: offers ask_user and returns the person's reply verbatim", async () => {
