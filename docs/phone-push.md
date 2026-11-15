@@ -86,6 +86,18 @@ FCM message with `title`, `tag`, `channelId`, `categoryId`, `threadIdentifier`
 and `body` (the same fields as JSON), and no message text. The exact shapes are
 in `cloudflare/control-plane/README.md` ("Phone push relay").
 
+A Live Activity push leaves `alert` unset. An activity `update` that carries
+`alert` lights the screen and pops the activity open in the Dynamic Island,
+which brings back the large expanded island the phone app removed (its own
+activities send no alert configuration, so the island stays a small mark).
+The person still hears about the ask: the closed-app alert above arrives as
+an ordinary notification. Only a push-to-start `start` carries `alert`,
+because ActivityKit does not start an activity remotely without one, and the
+control plane refuses `alert` on anything else. A phone that registers its
+status words (`statuses`) gets the activity in its content state version 1
+(`status`, `ask`, `waiting`, `version`); a phone that does not gets the
+earlier shape with `headline`, which the phone app also draws.
+
 ## No duplicates with local notifications
 
 A push goes only to a phone with no live stream, so most of the time only one

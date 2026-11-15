@@ -1,7 +1,7 @@
 import { instructionsUpdateRefusal } from "./automation-instructions.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-
+import { ROUTINE_RUN_LIMIT_MINUTES } from "../shared/routines.ts";
 import { formatInstant, routineCronText } from "./routine-cron-text.ts";
 import { conversationLanguage } from "./server-lines.ts";
 import { plainClock, plainTimeZone, plainWeekdays } from "../shared/plain-time-zone.ts";
@@ -215,8 +215,8 @@ function duration(value: number | undefined): number {
 
 function timeout(value: number | null | undefined): number | null | undefined {
   if (value == null) return value;
-  if (!Number.isInteger(value) || value < 5 || value > 240) {
-    throw new RoutineRequestError("timeoutMinutes must be a whole number from 5 to 240");
+  if (!Number.isInteger(value) || value < 5 || value > 1_440) {
+    throw new RoutineRequestError("timeoutMinutes must be a whole number from 5 to 1440");
   }
   return value;
 }
@@ -677,7 +677,7 @@ function cardCopy(
   // Credential-shaped values never travel back through the bot's MCP response or into the transcript.
   const visibleInstructions = redactSecretsInText(definition.instructions);
   const runLimit = definition.timeoutMinutes === undefined
-    ? "no run limit"
+    ? `default run limit (${ROUTINE_RUN_LIMIT_MINUTES / 60} hours of work)`
     : `${definition.timeoutMinutes} min limit`;
   return {
     title,
