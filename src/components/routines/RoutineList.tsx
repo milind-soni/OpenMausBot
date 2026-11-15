@@ -8,12 +8,14 @@ import { latestRoutineRun, routineDateTime, routineFinished, routineHeldNote, ro
 import type { Bot } from "@/state/store";
 import { Switch } from "../SettingsPrimitives";
 
-export function RoutineList({ routines, runs, bots, pausedBots, loading, error, onOpen, onLogs, onToggle }: {
+export function RoutineList({ routines, runs, bots, pausedBots, heldBots, loading, error, onOpen, onLogs, onToggle }: {
   routines: Routine[];
   runs: RoutineRun[];
   bots?: Bot[];
   /** Bots a Starter Cloud has paused: a routine on one runs nothing until it is swapped in. */
   pausedBots?: readonly string[];
+  /** Bots the person paused, by themselves or with their department. */
+  heldBots?: readonly string[];
   loading?: boolean;
   error?: boolean;
   onOpen: (routine: Routine) => void;
@@ -55,6 +57,7 @@ export function RoutineList({ routines, runs, bots, pausedBots, loading, error, 
           {t("routines.botPaused")}{" "}
           <button type="button" className="cursor-pointer text-accent hover:underline" onClick={() => showBotLimit("paused")}>{t("routines.botPausedSwap")}</button>
         </p>}
+        {routine.enabled && heldBots?.includes(routine.botId) && <p className="mt-2 text-[12px] leading-relaxed text-warning" data-routine-bot-held="">{t("routines.botHeld")}</p>}
         {routine.heldFor && <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{routineHeldNote(routine)}</p>}
         {!!routine.skippedRuns && <p className="mt-2 text-[12px] text-ink-secondary">
           {t("routines.skippedRuns", { count: routine.skippedRuns })}

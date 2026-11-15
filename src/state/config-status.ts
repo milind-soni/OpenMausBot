@@ -69,6 +69,10 @@ export interface ConfigStatus {
   awakeLimit?: number;
   /** Bots paused for the plan's limit: kept, but taking no turns. */
   pausedBots?: string[];
+  /** What the person paused (Pause in the sidebar menus): bots by id and departments by name. Absent from older servers. */
+  pausedByPerson?: { bots: string[]; departments: string[] };
+  /** Every bot taking no new work because the person paused it or its department. */
+  heldBots?: string[];
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   /** Prompt-cache keep-warm for idle Claude threads. Absent from older servers. */
