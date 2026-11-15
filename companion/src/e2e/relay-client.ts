@@ -29,6 +29,9 @@ const DEFAULT_TIMING = {
   livenessEveryMs: 2 * 60_000,
   /** A liveness check unanswered this long means the socket is dead: it is dropped and dialled again with backoff. */
   livenessTimeoutMs: 10_000,
+  /** That redial waits a random part of this at least, so the hosts a stalled node drops at once don't all redial at
+   * once. */
+  redialSpreadMs: 5_000,
 };
 
 export interface SessionSink {
@@ -168,11 +171,12 @@ export class RelayClient {
   }
 
   /** The network changed. A connected socket must answer a liveness check or it is dialled again; a socket waiting out
-   * its backoff dials now, keeping its backoff count. One waiting for a token keeps waiting. */
+   * its backoff after a failed or silent dial dials now, keeping its backoff count. A wait the relay asked for (4429,
+   * 4503, `restarting`) and one for a token are kept. */
   checkAlive(): void {
     if (this.#stopped || this.#awaitingToken) return;
     if (this.#status === "connected") return this.#probeLiveness();
-    if (!this.#retryTimer) return;
+    if (!this.#retryTimer || (this.#problem !== "unreachable" && this.#problem !== "no_answer")) return;
     clearTimeout(this.#retryTimer);
     this.#retryTimer = null;
     this.#connect(this.#retryIndex);
@@ -245,7 +249,8 @@ export class RelayClient {
     socket.close(1000);
     this.#problem = "no_answer";
     this.#setStatus("connecting");
-    this.#backOff(wasConnected ? this.#controlNode : this.#controlNode + 1);
+    if (wasConnected) this.#backOff(this.#controlNode, this.#random() * this.#timing.redialSpreadMs);
+    else this.#backOff(this.#controlNode + 1);
   }
 
   #backOff(index: number, atLeastMs = 0): void {

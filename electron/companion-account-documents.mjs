@@ -126,7 +126,7 @@ export function withAuthenticatedAccount(
   return next;
 }
 
-const PROBLEMS = new Set(["unreachable", "sign_in", "busy", "limit", "update", "address", "failed"]);
+const PROBLEMS = new Set(["unconfigured", "unreachable", "sign_in", "busy", "limit", "update", "address", "failed"]);
 const PROBLEM_OF = {
   control_plane_unavailable: "unreachable", network_unavailable: "unreachable",
   unauthorized: "sign_in", forbidden: "sign_in", signed_out: "sign_in", invalid_otp: "sign_in", otp_expired: "sign_in", invalid_email: "sign_in",

@@ -233,7 +233,7 @@ export function createCompanionAccountService({
       return publicState({
         available: false,
         status: "signed-out",
-        message: FRIENDLY_MESSAGES.control_plane_unavailable, problem: "unreachable",
+        message: FRIENDLY_MESSAGES.control_plane_unavailable, problem: "unconfigured",
       });
     }
     const document = credentials();

@@ -33,6 +33,8 @@ export interface RemoteAccessFacts {
   companion: (CompanionPairingRouteSource & Pick<CompanionState, "enabled" | "error" | "routes" | "e2e" | "devices" | "relayToken">) | null;
   setupTimedOut?: boolean;
   appVersion?: string | null;
+  /** The account is needed even with Anywhere and the HTTPS address off: the pairing screen is asking for it. */
+  accountWanted?: boolean;
 }
 
 type Problem = { reason: string; next: string[] };
@@ -40,7 +42,7 @@ type AccountProblem = NonNullable<CompanionAccountState["problem"]>;
 
 const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(?:-[0-9A-Za-z.]{1,32})?$/;
 const RELAY_NODE = /^(relay[1-9][0-9]?)\.openmausbot\.com$/;
-const ACCOUNT_PROBLEMS: ReadonlySet<string> = new Set<AccountProblem>(["unreachable", "sign_in", "busy", "limit", "update", "address", "failed"]);
+const ACCOUNT_PROBLEMS: ReadonlySet<string> = new Set<AccountProblem>(["unconfigured", "unreachable", "sign_in", "busy", "limit", "update", "address", "failed"]);
 const TOKEN_CODES: ReadonlySet<string> = new Set(["unavailable", "sign_in", "busy", "unreachable", "failed"]);
 const RELAY_PROBLEMS: ReadonlySet<string> = new Set(["no_answer", "token_refused", "busy", "unreachable", "replaced"]);
 
@@ -82,6 +84,9 @@ function accountStep(facts: RemoteAccessFacts): Evaluated {
   const { account, companion } = facts;
   if (!account) return { result: "unchecked", reason: t("remote.diagnosis.notChecked") };
   const problem = known(account.problem, ACCOUNT_PROBLEMS);
+  if (problem === "unconfigured") return { result: "unchecked", reason: t("remote.diagnosis.account.unconfigured") };
+  const used = companion?.routes?.relay?.on === true || companion?.routes?.https?.on === true;
+  if (!used && !facts.accountWanted) return { result: "unchecked", reason: t("remote.diagnosis.account.notNeeded") };
   if (!account.available) return { result: "failed", ...accountProblem(problem ?? "unreachable") };
   if (account.status === "signed-out") {
     return { result: "failed", reason: t("remote.diagnosis.account.signedOut"), next: [t("remote.diagnosis.next.signIn")] };
@@ -92,7 +97,7 @@ function accountStep(facts: RemoteAccessFacts): Evaluated {
     return { result: "failed", ...accountProblem(problem) };
   }
   if (companion?.relayToken?.state === "waiting") {
-    return { result: "failed", reason: t("remote.diagnosis.account.credential"), next: [t("remote.diagnosis.next.signIn")] };
+    return { result: "failed", reason: t("remote.diagnosis.account.credential"), next: [t("remote.diagnosis.next.askAgain")] };
   }
   return { result: "ok", reason: t("remote.diagnosis.account.signedIn") };
 }
@@ -100,14 +105,15 @@ function accountStep(facts: RemoteAccessFacts): Evaluated {
 function relayStep(facts: RemoteAccessFacts, accountResult: RemoteAccessStepResult): Evaluated {
   const companion = facts.companion;
   if (!companion || companion.routes?.relay?.on !== true) return { result: "unchecked", reason: t("remote.diagnosis.relay.off") };
-  if (accountResult === "failed") return { result: "unchecked", reason: t("remote.diagnosis.relay.needsAccount") };
   const e2e = companion.e2e;
   if (e2e?.enabled === true && e2e.relay === "connected") return { result: "ok", reason: t("remote.diagnosis.relay.connected") };
+  if (accountResult === "failed") return { result: "unchecked", reason: t("remote.diagnosis.relay.needsAccount") };
   if (e2e?.relayProblem === "replaced") {
     return { result: "failed", reason: t("remote.diagnosis.relay.replaced"), next: [t("remote.diagnosis.next.otherCopy")] };
   }
   const token = companion.relayToken;
   const tokenCode = known(token?.code, TOKEN_CODES);
+  if (token?.state === "off") return { result: "unchecked", reason: t("remote.diagnosis.relay.idle") };
   if (token?.state === "failed") {
     if (tokenCode === "unavailable") {
       return { result: "failed", reason: t("remote.diagnosis.relay.unavailable"), next: [t("remote.diagnosis.next.useWifi")] };

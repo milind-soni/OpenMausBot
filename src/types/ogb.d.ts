@@ -552,7 +552,7 @@ export interface CompanionAccountState {
    * updated and paired again. */
   tunnelRetired?: boolean;
   /** What failed, as one fixed word for the connection diagnosis. Absent on older builds. */
-  problem?: "unreachable" | "sign_in" | "busy" | "limit" | "update" | "address" | "failed";
+  problem?: "unconfigured" | "unreachable" | "sign_in" | "busy" | "limit" | "update" | "address" | "failed";
 }
 
 export type AndroidUsbDevice = {

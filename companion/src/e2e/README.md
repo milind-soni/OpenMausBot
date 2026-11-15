@@ -286,7 +286,8 @@ own the `sid`, and a `sid` is single-use with a 10 s life. The relay then splice
 | Phone direct attempt timeout / relay attempt timeout | 5 s / 10 s |
 | Host reconnect after loss | Immediate, then 1, 2, 4 … 60 s with ±20% jitter. The count resets only after a control socket has stayed connected 30 s, so a relay that accepts and then drops the socket at once is not redialled in a loop. After 4429, at least 30 s |
 | Host waits for `hello` | 15 s after dialling; then the socket is dropped and the next node dialled with the backoff above |
-| Host liveness check | Every 2 min ±20% while connected, and when the network changes: an `auth` with the current token, answered by `hello` within 10 s, or the socket is dropped and dialled again with the backoff above |
+| Host liveness check | Every 2 min ±20% while connected, and when the network changes: an `auth` with the current token, answered by `hello` within 10 s, or the socket is dropped and dialled again with the backoff above, after at least a random 0–5 s |
+| Host on a network change while not connected | After a failed or silent dial, dial now (the backoff count stays). A wait the relay asked for (4429, 4503, `restarting`) or a wait for a token is kept |
 | Host reconnect after `restarting` / 4503 | `reconnectInMs + random(0, tryForMs)`; default random 1–15 s |
 | Sleep detection (desktop) | A wall-clock jump of more than 5 s against the monotonic clock, checked every 2 s, or Electron `powerMonitor` `resume`: redial now |
 | Host returns to its first node | While on a later node, try the first every 10 min ±2 min. Move when it accepts: open the new control socket, then close the old one |

@@ -18,8 +18,8 @@ import { SettingsFoldRow } from "./SettingsPrimitives";
 
 const ICON = { ok: Check, failed: X, unchecked: Circle } as const;
 
-export function remoteAccessFacts(account: CompanionAccountState | null, state: CompanionState | null, setupTimedOut = false): RemoteAccessFacts {
-  return { account, companion: state, setupTimedOut, appVersion: desktopAppVersion() };
+export function remoteAccessFacts(account: CompanionAccountState | null, state: CompanionState | null, setupTimedOut = false, accountWanted = false): RemoteAccessFacts {
+  return { account, companion: state, setupTimedOut, appVersion: desktopAppVersion(), accountWanted };
 }
 
 /** The steps, what to try, and Copy diagnostics: shown under a failure message and in Settings, never on its own. */
@@ -67,7 +67,7 @@ export function RemoteAccessSteps({ diagnosis, className }: { diagnosis: RemoteA
 
 /** Under the pairing screen's failure message: the same model as Settings, without a second headline. */
 export function PairingFailureCheck({ account, state, setupTimedOut }: { account: CompanionAccountState | null; state: CompanionState | null; setupTimedOut: boolean }) {
-  return <RemoteAccessSteps className="mt-4" diagnosis={diagnoseRemoteAccess(remoteAccessFacts(account, state, setupTimedOut))} />;
+  return <RemoteAccessSteps className="mt-4" diagnosis={diagnoseRemoteAccess(remoteAccessFacts(account, state, setupTimedOut, true))} />;
 }
 
 /** Settings → Phone & devices: a closed row whose value is the headline; open, the steps. */

@@ -106,7 +106,7 @@ describe("relay tokens", () => {
     expect(service.status).toEqual({ state: "off", code: null });
   });
 
-  it("after a sign-in failure, wait for a wake-up instead of asking again on a timer", async () => {
+  it("after a sign-in failure, wait for a wake-up, with only an hourly fallback", async () => {
     const timers = manualTimers();
     const answers = [
       () => Promise.reject(Object.assign(new Error("signed out"), { code: "signed_out" })),
@@ -117,14 +117,36 @@ describe("relay tokens", () => {
     const service = createRelayTokenService({ fetchGrant, onGrant: () => {}, ...timers, now: () => 0, random: () => 0.5, wakeAfterSignInFailure: true });
     service.start();
     await new Promise((resolve) => setImmediate(resolve));
-    expect(timers.pending.size).toBe(0);
+    expect([...timers.pending.values()].map((timer) => timer.milliseconds)).toEqual([60 * 60_000]);
     expect(service.status).toEqual({ state: "waiting", code: "sign_in" });
-    await service.refreshNow();
-    expect(timers.pending.size).toBe(0);
+    await timers.fireAll();
+    expect(fetchGrant).toHaveBeenCalledTimes(2);
+    expect([...timers.pending.values()].map((timer) => timer.milliseconds)).toEqual([60 * 60_000]);
     expect(service.status).toEqual({ state: "waiting", code: "sign_in" });
     await service.refreshNow();
     expect(service.status).toEqual({ state: "ready", code: null });
     expect(fetchGrant).toHaveBeenCalledTimes(3);
+    service.stop();
+  });
+
+  it("asks again once a request in flight settles, when a wake-up arrived during it", async () => {
+    const timers = manualTimers();
+    let answerOld;
+    const answers = [
+      () => new Promise((_resolve, reject) => {
+        answerOld = () => reject(Object.assign(new Error("old credential"), { status: 401 }));
+      }),
+      () => grant(),
+    ];
+    const fetchGrant = vi.fn(async () => answers.shift()());
+    const service = createRelayTokenService({ fetchGrant, onGrant: () => {}, ...timers, now: () => 0, random: () => 0.5, wakeAfterSignInFailure: true });
+    service.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    const woken = service.refreshNow();
+    answerOld();
+    await woken;
+    expect(fetchGrant).toHaveBeenCalledTimes(2);
+    expect(service.status).toEqual({ state: "ready", code: null });
     service.stop();
   });
 

@@ -43,7 +43,7 @@ export interface CompanionAccountState {
    * updated and paired again. */
   tunnelRetired?: true;
   /** What failed, as one fixed word for the renderer's diagnosis: never a message or a control-plane code. */
-  problem?: "unreachable" | "sign_in" | "busy" | "limit" | "update" | "address" | "failed";
+  problem?: "unconfigured" | "unreachable" | "sign_in" | "busy" | "limit" | "update" | "address" | "failed";
 }
 
 export interface CompanionAccountService {

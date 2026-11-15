@@ -3,6 +3,10 @@
  * failed refresh; the relay keeps spliced sessions through an expired control socket anyway. */
 const MINUTE_MS = 60_000;
 const UNAVAILABLE_RETRY_MS = 30 * MINUTE_MS;
+/** After a sign-in failure the wake-ups (a new credential, pairing, resume) do the work; this bounds a 401 that came from
+ * a control-plane fault, not the credential. An hour is the healthy refresh cadence, so a computer with a dead
+ * credential asks no more often than a working one does. */
+const SIGN_IN_FALLBACK_MS = 60 * MINUTE_MS;
 const BACKOFF_MS = [MINUTE_MS, 2 * MINUTE_MS, 4 * MINUTE_MS, 8 * MINUTE_MS, 16 * MINUTE_MS, 32 * MINUTE_MS, 60 * MINUTE_MS];
 const MIN_REFRESH_MS = MINUTE_MS;
 const RELAY_HOST = /^relay[1-9][0-9]?\.openmausbot\.com$/;
@@ -51,13 +55,14 @@ export function createRelayTokenService({
   let timer = null;
   let failures = 0;
   let inFlight = null;
+  let followUp = null;
   let lastCode = null;
   let waiting = false;
 
   const jitter = (milliseconds) => Math.round(milliseconds * (0.8 + 0.4 * random()));
   const schedule = (milliseconds) => {
     if (timer) clearTimer(timer);
-    timer = running && milliseconds !== null ? setTimer(() => void refresh(), Math.max(0, milliseconds)) : null;
+    timer = running ? setTimer(() => void refresh(), Math.max(0, milliseconds)) : null;
   };
   const publish = (next) => {
     if (next === grant) return;
@@ -83,9 +88,8 @@ export function createRelayTokenService({
       if (code === "relay_unavailable" || signIn) {
         log(`relay token ${code || "refused"}`);
         publish(null);
-        // Only a new sign-in or credential can fix these; asking again on a timer cannot.
         waiting = signIn && wakeAfterSignInFailure;
-        return waiting ? schedule(null) : schedule(jitter(UNAVAILABLE_RETRY_MS));
+        return schedule(jitter(waiting ? SIGN_IN_FALLBACK_MS : UNAVAILABLE_RETRY_MS));
       }
       if (grant && grant.expiresAt <= now()) publish(null);
       const retryAfter = Number.isSafeInteger(error?.retryAfterMs) ? error.retryAfterMs : 0;
@@ -110,7 +114,7 @@ export function createRelayTokenService({
       return running;
     },
     /** For the desktop's diagnosis: "waiting" means a sign-in failure that waits for a sign-in, a new credential or a
-     * wake from sleep (`refreshNow`). `code` is one fixed word, never the token or a server's message. */
+     * wake from sleep (`refreshNow`), or at most about an hour. `code` is one fixed word, never the token or a server's message. */
     get status() {
       const state = !running ? "off" : grant ? "ready" : waiting ? "waiting" : lastCode ? "failed" : "fetching";
       return { state, code: running ? lastCode : null };
@@ -128,12 +132,18 @@ export function createRelayTokenService({
       waiting = false;
       publish(null);
     },
-    /** The relay said 4401, the computer woke up, or a sign-in or credential changed. */
+    /** The relay said 4401, the computer woke up, or a sign-in or credential changed. A request already on its way may
+     * carry the old credential, so a wake-up during it asks again once it settles. */
     refreshNow() {
       if (!running) return Promise.resolve();
       if (timer) clearTimer(timer);
       timer = null;
-      return refresh();
+      if (!inFlight) return refresh();
+      followUp ??= inFlight.then(() => {
+        followUp = null;
+        return running ? refresh() : undefined;
+      });
+      return followUp;
     },
   };
 }

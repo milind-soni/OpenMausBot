@@ -51,7 +51,7 @@ describe("the remote access diagnosis", () => {
     expect(diagnoseRemoteAccess({ account: { available: true, status: "signed-out" }, companion: companion() }).headline).toBe("Not signed in.");
     const refused = diagnoseRemoteAccess({ account: signedIn, companion: companion({ relayToken: { state: "waiting", code: "sign_in" }, e2e: { enabled: true, relay: "off", node: null, descriptor: null } }) });
     expect(refused.headline).toBe("This computer's sign-in was not accepted.");
-    expect(refused.next).toEqual(["Sign in again."]);
+    expect(refused.next).toEqual(["MausBot asks again on its own within the hour, or as soon as you pair a phone."]);
   });
 
   it("maps the account's control-plane codes to plain reasons", () => {
@@ -87,8 +87,38 @@ describe("the remote access diagnosis", () => {
 
   it("does not treat Anywhere being off as a failure", () => {
     const facts = { account: signedIn, companion: companion({ routes: { wifi: route(true), relay: route(false), tailscale: route(false), https: route(false) } }) };
-    expect(results(facts)).toEqual({ computer: "ok", account: "ok", relay: "unchecked", route: "ok" });
+    expect(results(facts)).toEqual({ computer: "ok", account: "unchecked", relay: "unchecked", route: "ok" });
     expect(diagnoseRemoteAccess(facts).steps[2].reason).toBe("Not used: Anywhere is off.");
+  });
+
+  it("does not ask a person using only Same Wi-Fi or Tailscale to sign in, unless pairing asks for the account", () => {
+    const wifiOnly = companion({ routes: { wifi: route(true), relay: route(false), tailscale: route(true, "mac.tailnet.ts.net"), https: route(false) } });
+    for (const account of [{ available: true, status: "signed-out" as const }, { available: false, status: "signed-out" as const, problem: "unreachable" as const }]) {
+      const diagnosis = diagnoseRemoteAccess({ account, companion: wifiOnly });
+      expect(diagnosis.steps[1]).toMatchObject({ result: "unchecked", reason: "Not needed for Same Wi-Fi or Tailscale." });
+      expect(diagnosis.failed).toBe(false);
+      expect(diagnosis.headline).toBe("Your phone can reach this computer on the same Wi-Fi.");
+    }
+    const pairing = diagnoseRemoteAccess({ account: { available: true, status: "signed-out" }, companion: wifiOnly, accountWanted: true });
+    expect(pairing.headline).toBe("Not signed in.");
+  });
+
+  it("reads a build with no control plane as not set up, not as a failure", () => {
+    const diagnosis = diagnoseRemoteAccess({ account: { available: false, status: "signed-out", problem: "unconfigured" }, companion: companion({ e2e: { enabled: false, relay: "off", node: null, descriptor: null }, relayToken: { state: "off", code: null } }), accountWanted: true });
+    expect(diagnosis.steps[1]).toMatchObject({ result: "unchecked", reason: "Not set up in this build of MausBot." });
+    expect(diagnosis.failed).toBe(false);
+    expect(remoteAccessDiagnosisText(diagnosis)).toContain("account: unavailable (unconfigured)");
+  });
+
+  it("reads a relay idle by design, with no phone needing it, as not checked", () => {
+    const facts = { account: signedIn, companion: companion({ e2e: { enabled: true, relay: "off", node: null, relayProblem: null, descriptor: null }, relayToken: { state: "off", code: null } }) };
+    expect(diagnoseRemoteAccess(facts).steps[2]).toMatchObject({ result: "unchecked", reason: "Starts when a phone needs it." });
+    expect(diagnoseRemoteAccess(facts).failed).toBe(false);
+  });
+
+  it("keeps a connected relay ok while MausBot's service can't be reached", () => {
+    const facts = { account: { available: false, status: "error" as const, problem: "unreachable" as const }, companion: companion() };
+    expect(results(facts)).toEqual({ computer: "ok", account: "failed", relay: "ok", route: "ok" });
   });
 
   it("names the phone's way in when Wi-Fi has no address, nothing is on, or only a failing HTTPS address is", () => {

@@ -144,6 +144,11 @@ describe("Companion account service", () => {
     });
   });
 
+  it("tells a build with no control plane apart from one that can't reach it", async () => {
+    const { service } = serviceFixture({ client: null });
+    await expect(service.state()).resolves.toMatchObject({ available: false, status: "signed-out", problem: "unconfigured" });
+  });
+
   it("hides account onboarding until the configured control plane is healthy", async () => {
     const client = readyClient({
       health: vi.fn(async () => {
