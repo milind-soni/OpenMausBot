@@ -23,7 +23,7 @@ describe("Antigravity skill staging", () => {
     const turn = { threadId: "thread", text, system: text, systemStable: text, systemVolatile: text, recoveryText: text, skillFiles: [file] };
     const staged = stageAntigravitySkills(turn, cwd);
     const target = JSON.parse(staged.text.slice(5)) as string;
-    expect(relative(realpathSync(cwd), realpathSync(target))).not.toMatch(/^\.\./);
+    expect(relative(realpathSync.native(cwd), realpathSync.native(target))).not.toMatch(/^\.\./);
     expect(readFileSync(target, "utf8")).toBe("Read references/guide.md.");
     expect(readFileSync(join(target, "..", "references", "guide.md"), "utf8")).toBe("Reviewed reference");
     for (const field of ["system", "systemStable", "systemVolatile", "recoveryText"] as const) expect(staged[field]).toBe(staged.text);
