@@ -46,9 +46,23 @@ export function usableFishAgent(live: LiveConfig | undefined, key: string): stri
   return live?.fishAgentFor === undefined || (key.trim() !== "" && live.fishAgentFor === fishKeyPrint(key)) ? id : null;
 }
 
-/** Fish API v1: a Live 3 agent in English named for `product`, with the client tool `delegate` and a system prompt each
- * session may override (`createFishLiveSession` sends one), published so sessions can start. Returns its id. */
-export async function setUpFishAgent(key: string, endpoint: LiveEndpoint, product: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+/** The `voice.speaking_language` codes Fish Audio agents take. */
+const FISH_SPEAKING_LANGUAGES = new Set([
+  "en", "ja", "zh", "ko", "es", "fr", "de", "pt", "it", "nl", "ar", "hi", "id", "tr", "ru", "bg", "sr", "hr", "cs", "sk", "pl", "uk", "ro",
+  "hu", "el", "sv", "da", "no", "fi", "et", "lv", "lt", "ca", "he", "fa", "ur", "kk", "ka", "hy", "bn", "ta", "te", "kn", "mr", "gu", "pa",
+  "ne", "th", "vi", "ms", "tl", "af",
+]);
+
+/** The language a Fish agent speaks and listens for with the app in `language` (a locale such as "vi" or "pt-br"):
+ * its base code when Fish Audio speaks it, else English. */
+export function fishSpeakingLanguage(language: string | undefined): string {
+  const base = language?.trim().toLowerCase().split(/[-_]/)[0] ?? "";
+  return FISH_SPEAKING_LANGUAGES.has(base) ? base : "en";
+}
+
+/** Fish API v1: a Live 3 agent speaking `language` named for `product`, with the client tool `delegate` and a system prompt
+ * each session may override (`createFishLiveSession` sends one), published so sessions can start. Returns its id. */
+export async function setUpFishAgent(key: string, endpoint: LiveEndpoint, product: string, language: string, fetchImpl: typeof fetch = fetch): Promise<string> {
   const call = (method: string, path: string, body: unknown) => fishSetupRequest(fetchImpl, key, method, `${endpoint.apiBase}${path}`, body);
   const tool = await call("POST", "/tools", {
     name: FISH_DELEGATE_TOOL,
@@ -62,13 +76,20 @@ export async function setUpFishAgent(key: string, endpoint: LiveEndpoint, produc
   if (!toolId) throw new LiveSessionError(FISH_UNEXPECTED, 502);
   const agent = await call("POST", "/agents", {
     name: `${product} Live calls`.slice(0, 120),
-    config: { voice: { engine: "live3", speaking_language: "en" }, tools: { enabled: true, tool_ids: [toolId] } },
+    config: { voice: { engine: "live3", speaking_language: language }, tools: { enabled: true, tool_ids: [toolId] } },
   });
   const agentId = typeof agent.agent_id === "string" && AGENT_ID.test(agent.agent_id) ? agent.agent_id : "";
   if (!agentId) throw new LiveSessionError(FISH_UNEXPECTED, 502);
   await call("PATCH", `/agents/${encodeURIComponent(agentId)}`, { overrides_allowed: ["system_prompt"] });
   await call("POST", `/agents/${encodeURIComponent(agentId)}/publish`, {});
   return agentId;
+}
+
+/** Fish API v1: the agent speaks and listens for `language` from its next session on (a draft config change, published). */
+export async function setFishAgentLanguage(key: string, endpoint: LiveEndpoint, agentId: string, language: string, fetchImpl: typeof fetch = fetch): Promise<void> {
+  const agent = `${endpoint.apiBase}/agents/${encodeURIComponent(agentId)}`;
+  await fishSetupRequest(fetchImpl, key, "PATCH", `${agent}/config`, { voice: { speaking_language: language } });
+  await fishSetupRequest(fetchImpl, key, "POST", `${agent}/publish`, {});
 }
 
 const FISH_UNEXPECTED = "Fish Audio returned an unexpected answer. Try the call again.";
