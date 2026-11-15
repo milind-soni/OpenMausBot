@@ -56,10 +56,10 @@ export function ThreadContextWarning({ bot }: { bot: Bot }) {
   );
 }
 
-export function RoomContextBadge({ percent }: { percent: number }) {
+export function RoomContextBadge({ tokens }: { tokens: string }) {
   return (
     <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border border-app bg-warning"
-      role="img" aria-label={t("contextWarning.short", { percent })} />
+      role="img" aria-label={t("contextWarning.short", { tokens })} />
   );
 }
 
@@ -71,10 +71,10 @@ export function RoomContextWarningsView({ warnings, pendingBotId, onCompact }: {
   if (!warnings.length) return null;
   return (
     <div className="flex flex-col gap-1" data-testid="room-context-warnings">
-      {warnings.map(({ bot, percent, requested }) => (
+      {warnings.map(({ bot, tokens, requested }) => (
         <p key={bot.id} role="status" className={cn(pill, "w-fit")}>
           <Gauge size={13} className="shrink-0 text-warning" aria-hidden="true" />
-          <span>{t("contextWarning.room", { name: bot.name, percent })}</span>
+          <span>{t("contextWarning.room", { name: bot.name, tokens: formatTokens(tokens) })}</span>
           {requested
             ? <span className="text-ink-secondary">{t("contextWarning.roomRequested")}</span>
             : <button type="button" className={action} disabled={pendingBotId === bot.id} onClick={() => onCompact(bot.id)}

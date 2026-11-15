@@ -21,11 +21,11 @@ export function threadContextWarning(usage: TaskUsage | undefined): ThreadContex
 }
 
 export function roomContextWarnings(group: Pick<Group, "memberContext">, members: readonly Bot[]):
-  Array<{ bot: Bot; percent: number; requested: boolean }> {
+  Array<{ bot: Bot; tokens: number; percent: number; requested: boolean }> {
   return members.flatMap((bot) => {
     const reading = group.memberContext?.[bot.id];
     if (!reading || !(reading.window > 0)) return [];
     const percent = Math.min(999, Math.round((reading.tokens / reading.window) * 100));
-    return percent >= CONTEXT_WARNING_PERCENT ? [{ bot, percent, requested: reading.compactRequested === true }] : [];
+    return percent >= CONTEXT_WARNING_PERCENT ? [{ bot, tokens: reading.tokens, percent, requested: reading.compactRequested === true }] : [];
   });
 }

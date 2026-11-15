@@ -10,6 +10,7 @@ import { effectivePlace, placeLabelKey } from "@/lib/place";
 import { openRoomPanel } from "@/lib/room-panel";
 import { chosenResponder, responderChoice, responderTitle } from "@/lib/room-responder";
 import { roomSpeakerIds } from "@/lib/room-threads";
+import { formatTokens } from "@/lib/usage";
 import { useStore, type Bot, type Group } from "@/state/store";
 import { BotAvatar } from "./Avatar";
 import { RoomContextBadge } from "./ContextWarning";
@@ -81,7 +82,7 @@ function memberMauses(group: Group, members: Bot[]) {
             ? t("room.holds.avatarHeld", { name: b.name })
             : queueTitle ?? (busyElsewhere
               ? t("room.memberWorkingElsewhere", { name: b.name })
-              : `${b.name}${busy ? ` — ${t("room.member.working")}` : ""}${contextWarning ? ` — ${t("contextWarning.short", { percent: contextWarning.percent })}` : ""}`)
+              : `${b.name}${busy ? ` — ${t("room.member.working")}` : ""}${contextWarning ? ` — ${t("contextWarning.short", { tokens: formatTokens(contextWarning.tokens) })}` : ""}`)
         }
         className={cn(
           "relative inline-flex rounded-full",
@@ -102,7 +103,7 @@ function memberMauses(group: Group, members: Bot[]) {
             <Pause size={8} strokeWidth={3} aria-hidden="true" />
           </span>
         )}
-        {contextWarning && <RoomContextBadge percent={contextWarning.percent} />}
+        {contextWarning && <RoomContextBadge tokens={formatTokens(contextWarning.tokens)} />}
         {busy && (
           showPlace ? (
             <span

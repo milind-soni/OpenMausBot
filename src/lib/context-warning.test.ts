@@ -27,13 +27,13 @@ describe("context warning", () => {
       Scout: { tokens: 170_000, window: 200_000 },
       Pixel: { tokens: 100_000, window: 200_000 },
     } }, members);
-    expect(warnings.map(({ bot: member, percent, requested }) => [member.id, percent, requested]))
-      .toEqual([["Scout", 85, false], ["Quill", 95, true]]);
+    expect(warnings.map(({ bot: member, tokens, requested }) => [member.id, tokens, requested]))
+      .toEqual([["Scout", 170_000, false], ["Quill", 190_000, true]]);
     expect(roomContextWarnings({ memberContext: null }, members)).toEqual([]);
 
     const onCompact = vi.fn();
     const markup = renderToStaticMarkup(createElement(RoomContextWarningsView, { warnings, pendingBotId: null, onCompact }));
-    expect(text(markup)).toBe("Scout's context in this room is 85% full. Compact now Quill's context in this room is 95% full. Compacts before its next turn.");
+    expect(text(markup)).toBe("Scout's context in this room is 170k. Compact now Quill's context in this room is 190k. Compacts before its next turn.");
   });
 
   it("shows the reading in a quiet pill, turns it into a warning at 80%, and locks Compact now while the bot works", () => {
