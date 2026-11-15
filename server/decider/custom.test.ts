@@ -107,6 +107,8 @@ describe("a custom decision endpoint", () => {
       messages: [{ role: "system" }, { role: "user" }],
     });
     expect(body).not.toHaveProperty("provider");
+    // A thinking model (Gemini 2.5 and later) counts its thinking against max_tokens; a cap sized for the answer alone could leave it empty.
+    expect(body).not.toHaveProperty("max_tokens");
     expect(JSON.stringify(init?.headers)).not.toContain("openrouter");
   });
 

@@ -20,7 +20,14 @@ export function customEndpoint(baseUrl: string | undefined, api: CustomApi): URL
 
 function requestBody(api: CustomApi, state: unknown, questions: Record<string, DeciderQuestion>, model: string) {
   if (api === "decisions") return decisionsBody(state, questions, model);
-  return api === "chat" ? chatRequestBody(state, questions, model) : systemOneBody(state, questions, model);
+  return api === "chat" ? customChatBody(state, questions, model) : systemOneBody(state, questions, model);
+}
+
+/** OpenRouter's chat body without its `max_tokens`: a thinking model behind the gateway (Gemini 2.5 and later) counts its thinking
+ * against that cap, which is sized for the answer alone, and could answer empty. The gateway's own limit applies instead. */
+function customChatBody(state: unknown, questions: Record<string, DeciderQuestion>, model: string) {
+  const { max_tokens: _answerOnly, ...body } = chatRequestBody(state, questions, model);
+  return body;
 }
 
 export function systemOneBody(state: unknown, questions: Record<string, DeciderQuestion>, model: string) {
