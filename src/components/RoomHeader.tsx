@@ -18,6 +18,7 @@ import { useCaptionChrome } from "./DesktopCapabilities";
 import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
 import { RoomHeaderCallButton } from "./GroupCallView";
 import { GroupUsageChip } from "./GroupUsageChip";
+import { PinnedMessagesMenu, pinnedPreview } from "./PinnedMessagesMenu";
 import { PlaceIcon } from "./PlaceIcon";
 import { roomMemberQueueTitle } from "./RoomQueueList";
 import { RoomWorkingFolderChip } from "./RoomWorkingFolder";
@@ -147,7 +148,16 @@ export function RoomHeader({
   membersTriggerRef: RefObject<HTMLButtonElement | null>;
 }) {
   const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle } = useCaptionChrome();
+  const { dispatch } = useStore();
   const faces = memberMauses(group, members);
+  const pinned = (
+    <PinnedMessagesMenu
+      pins={pinnedPreview(group.messages, group.pinnedMessageId, t("room.aBot"), false)}
+      triggerClassName="transition-colors hover:bg-ink/[0.06]"
+      onJump={(messageId) => dispatch({ type: "focusMessage", threadId: group.threadId, messageId })}
+      onUnpin={remoteClient ? undefined : () => dispatch({ type: "patchGroup", groupId: group.id, patch: { pinnedMessageId: "" } })}
+    />
+  );
   const membersLabel = members.length === 1
     ? t("room.members.ariaOne")
     : t("room.members.ariaMany", { count: members.length });
@@ -174,6 +184,7 @@ export function RoomHeader({
           </div>
           <div data-roomhead-controls className="flex shrink-0 items-center gap-1.5">
             <ThreadPresenceFaces threadId={group.threadId} />
+            {pinned}
             <button
               ref={membersTriggerRef}
               type="button"
@@ -222,6 +233,7 @@ export function RoomHeader({
           className="flex items-center gap-1.5 @max-3xl/roomhead:ml-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end"
         >
           <ThreadPresenceFaces threadId={group.threadId} />
+          {pinned}
           <button
             type="button"
             onClick={onToggleFind}
