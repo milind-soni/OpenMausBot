@@ -3807,7 +3807,6 @@
   "devices.computers.title": "Vos autres ordinateurs",
   "devices.computers.pairTitle": "Associer un autre ordinateur",
   "remote.tailscale.needsApproval": "Cet ordinateur attend d'être approuvé sur votre réseau Tailscale. Approuvez-le dans la console d'administration Tailscale, puis réessayez.",
-  "devices.computers.typeCode": "Sur votre autre ordinateur, ouvrez Se connecter à un serveur dans {app} et saisissez ce code.",
   "together.switch.title": "Cet ordinateur et Mon Cloud ensemble",
   "together.switch.line": "Désactivé par défaut. Les bots du Cloud et ceux de cet ordinateur s'affichent dans une seule liste, et chacun s'ouvre là où il se trouve.",
   "together.switch.failed": "Impossible d'enregistrer. Réessayez."

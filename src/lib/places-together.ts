@@ -1,48 +1,12 @@
-// This computer and My Cloud together (electron/places-together.mjs), as a page sees it: its own bots and the other
-// place's in one list. Ids are unique only within a place, so everything here is keyed by home and id.
+// This computer and My Cloud together (electron/places-together.mjs), as a page sees it: the other place's bots, listed
+// beside its own. Every row carries its `home`, and ids are unique only within a place, so rows are keyed by home and id.
 import { useEffect, useSyncExternalStore } from "react";
 import type { BotHome, PlaceBotRow, PlacesTogetherState } from "../../electron/places-together.mjs";
 
 export type { BotHome, PlaceBotRow, PlacesTogetherState };
 
-/** One bot of the joined list. `home` is where it lives; `here`: that is the place this page shows. */
-export interface PlacedBot {
-  key: string;
-  home: BotHome;
-  here: boolean;
-  id: string;
-  name: string;
-  unread: boolean;
-}
-
+/** A bot's key in a list that holds both places: ids are unique only within one. */
 export const placedKey = (home: BotHome, id: string): string => `${home}:${id}`;
-
-type OwnBot = { id: string; name: string; hidden?: boolean; movedTo?: unknown; unread?: boolean; tasks?: ReadonlyArray<{ unread?: boolean; routineRunId?: string; archivedAt?: number }> | null };
-
-const ownUnread = (bot: OwnBot): boolean => (bot.tasks?.length
-  ? bot.tasks.some((task) => Boolean(task.unread) && !task.routineRunId && task.archivedAt === undefined) : Boolean(bot.unread));
-
-/** This page's bots first, then the other place's, each with its home. With the switch off, only this page's. */
-export function placedBots(own: readonly OwnBot[], state: PlacesTogetherState | null): PlacedBot[] {
-  const here: BotHome = state?.here ?? "computer";
-  const mine = own.filter((bot) => !bot.hidden && !bot.movedTo)
-    .map((bot) => ({ key: placedKey(here, bot.id), home: here, here: true, id: bot.id, name: bot.name, unread: ownUnread(bot) }));
-  const theirs = (state?.on ? state.other?.bots ?? [] : [])
-    .map((bot) => ({ key: placedKey(bot.home, bot.id), home: bot.home, here: false, id: bot.id, name: bot.name, unread: bot.unread === true }));
-  return [...mine, ...theirs];
-}
-
-/** How many bots show unread in each place. */
-export function unreadByHome(bots: readonly PlacedBot[]): Record<BotHome, number> {
-  const count: Record<BotHome, number> = { computer: 0, cloud: 0 };
-  for (const bot of bots) if (bot.unread) count[bot.home] += 1;
-  return count;
-}
-
-/** Opens a bot in the place it lives: this page's own way for its own bots, main's switch for the other place's. */
-export function openPlaced(bot: Pick<PlacedBot, "here" | "id">, ways: { here(id: string): void; there(id: string): void }): void {
-  if (bot.here) ways.here(bot.id); else ways.there(bot.id);
-}
 
 /** The other place's rows that match what the person typed in the sidebar's search. */
 export function matchingRows(rows: readonly PlaceBotRow[], query: string): PlaceBotRow[] {

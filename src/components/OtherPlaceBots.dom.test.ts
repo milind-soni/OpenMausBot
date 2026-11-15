@@ -80,6 +80,23 @@ it("a sleeping, waking or unreachable Cloud keeps its bots, dimmed, under one sh
   expect(document.body.querySelector("[role=alert], [role=dialog]")).toBeNull();
 });
 
+it("a bot with the same id as one of this page's own is its own row: it carries the other home, and its click names that home's bot", async () => {
+  said = state({ other: { home: "cloud", state: "ready", bots: [row("cloud", "scout", "Scout there", { unread: true })] } });
+  await render(createElement("div", { key: "own", "data-own-bot": "scout" }, "Scout here"), createElement(OtherPlaceBots, { key: "list" }));
+  expect(q('[data-placed-bot="cloud:scout"]')!.getAttribute("data-bot-home")).toBe("cloud");
+  expect(q('[data-placed-bot="cloud:scout"]')!.textContent).toContain("Scout there");
+  expect(q("[data-own-bot] [data-testid='unread-dot']")).toBeNull();
+  await act(async () => q('[data-placed-bot="cloud:scout"]')!.click());
+  expect(page.open.mock.calls).toEqual([["scout"]]);
+});
+
+it("a Cloud this window is not signed in to says so in one line, with no rows", async () => {
+  said = state({ other: { home: "cloud", state: "signin", bots: [] } });
+  await render(createElement(OtherPlaceBots, { key: "list" }));
+  expect(q("[data-other-place-line]")!.textContent).toBe("Open My Cloud once to sign in.");
+  expect(all("[data-placed-bot]")).toEqual([]);
+});
+
 it("follows the sidebar's search, and hides the heading when nothing there matches", async () => {
   await render(createElement(OtherPlaceBots, { key: "list", query: "research" }));
   expect(all("[data-placed-bot]").map((item) => item.getAttribute("data-placed-bot"))).toEqual(["cloud:nova"]);
@@ -99,4 +116,15 @@ it("the switch: marked Early, off until turned on, and hidden where main does no
   said = state({ available: false, on: false, other: null });
   await act(async () => changed());
   expect(q("[data-places-together]")).toBeNull();
+});
+
+it("My Cloud's page shows the switch only to turn it off: turning it on is this computer's", async () => {
+  said = state({ here: "cloud", on: false, other: null });
+  await render(createElement(SettingsLook.Provider, { key: "switch", value: true }, createElement(PlacesTogetherSwitch)));
+  expect(q("[data-places-together]")).toBeNull();
+  said = state({ here: "cloud", other: { home: "computer", state: "ready", bots: [] } });
+  await act(async () => changed());
+  expect(q("[data-places-together]")!.getAttribute("data-places-together")).toBe("on");
+  await act(async () => q("[data-places-together] [role=switch]")!.click());
+  expect(page.set.mock.calls).toEqual([[false]]);
 });

@@ -21,6 +21,7 @@ const homeLabel = (home: BotHome): string => t(home === "cloud" ? "together.onCl
 function stateLine(state: OtherState, home: BotHome): string | null {
   if (state === "asleep") return t("together.state.asleep");
   if (state === "waking") return t("together.state.waking");
+  if (state === "signin") return t("together.state.signin");
   if (state === "offline") return t(home === "cloud" ? "together.state.offlineCloud" : "together.state.offlineComputer");
   return null;
 }

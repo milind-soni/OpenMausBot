@@ -37030,7 +37030,8 @@
       "together.state.offlineComputer": "6674e486fc361c62e6b2a88db89ca9fa42e8a85b6948cb1ad1c62fd54d0dea2c",
       "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
       "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
-      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8",
+      "together.state.signin": "010c70e3503b8907767eb9dd465788bb7698d05ccddc383e0685031935a70db2"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -47267,7 +47268,8 @@
       "together.state.offlineComputer": "6674e486fc361c62e6b2a88db89ca9fa42e8a85b6948cb1ad1c62fd54d0dea2c",
       "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
       "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
-      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8",
+      "together.state.signin": "010c70e3503b8907767eb9dd465788bb7698d05ccddc383e0685031935a70db2"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",

@@ -7790,7 +7790,6 @@
   "devices.computers.title": "내 다른 컴퓨터",
   "devices.computers.pairTitle": "다른 컴퓨터 페어링",
   "remote.tailscale.needsApproval": "이 컴퓨터는 Tailscale 네트워크에서 승인을 기다리고 있습니다. Tailscale 관리 콘솔에서 승인한 다음 다시 시도하세요.",
-  "devices.computers.typeCode": "다른 컴퓨터의 {app}에서 서버에 연결을 열고 이 코드를 입력하세요.",
   "together.switch.title": "이 컴퓨터와 내 클라우드 함께 보기",
   "together.switch.line": "기본값은 꺼짐입니다. 클라우드의 봇과 이 컴퓨터의 봇이 하나의 목록에 표시되며, 각 봇은 자기가 있는 곳에서 열립니다.",
   "together.switch.failed": "저장하지 못했습니다. 다시 시도하세요."
