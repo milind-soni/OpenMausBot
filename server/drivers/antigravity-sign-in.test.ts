@@ -13,6 +13,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import * as procs from "../procs.ts";
 import {
   ANTIGRAVITY_AUTH_PREFIX,
+  antigravityBrowserHelperProblem,
   antigravityProfileAuthenticated,
   antigravitySessionSetup,
   antigravityTokenPath,
@@ -364,21 +365,47 @@ describe("the runtime's launch environment", () => {
     expect(linuxCaBundle({}, () => false)).toBeUndefined();
   });
 
-  it("checks that the browser helper hands the link over before a sign-in may start", async () => {
-    const fake = fakeRuntime();
-    const runtime = await resolveAntigravityRuntime(fake.executable);
-    const profile = await prepareAntigravityProfile({ instanceId: "helper", runtime, baseDir: fake.directory });
-    await expect(verifyAntigravityBrowserHelper(profile)).resolves.toBeUndefined();
-    const noisy = join(fake.directory, process.platform === "win32" ? "noisy.cmd" : "noisy");
-    writeFileSync(noisy, process.platform === "win32" ? "@echo off\r\necho opened a browser\r\n" : "#!/bin/sh\necho opened a browser\n");
-    if (process.platform !== "win32") chmodSync(noisy, 0o755);
-    await expect(verifyAntigravityBrowserHelper(profile, noisy)).rejects.toThrow(/Google sign-in cannot start: .*\((?:it did not hand the sign-in link to the app|it could not be started|it stopped with an error)\)/u);
-    await expect(verifyAntigravityBrowserHelper(profile, join(fake.directory, "absent"))).rejects.toThrow("(it could not be started)");
-    if (process.platform !== "win32") {
-      const warns = join(fake.directory, "warns");
-      writeFileSync(warns, `#!/bin/sh\necho "(node) a warning the runtime also prints" >&2\nexec ${JSON.stringify(process.execPath)} "$@"\n`);
-      chmodSync(warns, 0o755);
-      await expect(verifyAntigravityBrowserHelper(profile, warns)).resolves.toBeUndefined();
+  describe("the browser helper check before a sign-in may start", () => {
+    async function helperProfile() {
+      const fake = fakeRuntime();
+      const runtime = await resolveAntigravityRuntime(fake.executable);
+      return { fake, profile: await prepareAntigravityProfile({ instanceId: "helper", runtime, baseDir: fake.directory }) };
     }
-  }, 60_000);
+    /** The app's own program as the helper, with a script loaded before the helper's. */
+    function preloading(fake: { directory: string }, profile: { environment: NodeJS.ProcessEnv }, script: string) {
+      const preload = join(fake.directory, "preload.cjs");
+      writeFileSync(preload, script);
+      return { ...profile.environment, NODE_OPTIONS: `--require "${preload.replaceAll("\\", "/")}"` };
+    }
+
+    it("passes the program the app runs on, started as the runtime starts it", async () => {
+      const { profile } = await helperProfile();
+      expect(await antigravityBrowserHelperProblem(profile.environment, process.execPath)).toBeNull();
+      await expect(verifyAntigravityBrowserHelper(profile)).resolves.toBeUndefined();
+    }, 60_000);
+
+    it("passes when the link is one stderr line among others", async () => {
+      const { fake, profile } = await helperProfile();
+      const environment = preloading(fake, profile, "process.stderr.write('(node) a warning the runtime also prints\\n');");
+      expect(await antigravityBrowserHelperProblem(environment, process.execPath)).toBeNull();
+    }, 60_000);
+
+    it("names the reason when the helper keeps the link or stops with an error", async () => {
+      const { fake, profile } = await helperProfile();
+      expect(await antigravityBrowserHelperProblem(preloading(fake, profile, "console.log('opened a browser'); process.exit(0);"), process.execPath))
+        .toBe("it did not hand the sign-in link to the app");
+      expect(await antigravityBrowserHelperProblem(preloading(fake, profile, "process.exit(3);"), process.execPath)).toBe("it stopped with an error");
+    }, 60_000);
+
+    it("turns a helper that cannot be started into the same message, never a raw spawn error", async () => {
+      const { fake, profile } = await helperProfile();
+      const absent = join(fake.directory, "absent");
+      expect(await antigravityBrowserHelperProblem(profile.environment, absent)).toBe("it could not be started");
+      await expect(verifyAntigravityBrowserHelper(profile, absent)).rejects.toThrow(
+        "Google sign-in cannot start: the helper that passes the sign-in link to OpenMausBot failed a check (it could not be started).");
+      const script = join(fake.directory, process.platform === "win32" ? "helper.cmd" : "helper.txt");
+      writeFileSync(script, "not a program\n");
+      expect(await antigravityBrowserHelperProblem(profile.environment, script)).toBe("it could not be started");
+    }, 60_000);
+  });
 });

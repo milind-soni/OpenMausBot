@@ -110,18 +110,28 @@ export function linuxCaBundle(env: NodeJS.ProcessEnv, exists: (path: string) => 
 
 /** A sign-in must hand its link to the app and never open a browser on the server: run the helper once the way the
  * runtime will, and refuse the sign-in unless it prints the marked link. Other stderr lines (a runtime warning) pass. */
+/** Why the helper fails the check, or null when it passes. The helper is a program started without a shell; one that
+ * cannot be started that way (Windows refuses a script with EINVAL) is a reason like any other. */
+export function antigravityBrowserHelperProblem(environment: NodeJS.ProcessEnv, helper: string): Promise<string | null> {
+  return new Promise((resolveRun) => {
+    try {
+      execFile(helper, ["-e", browserHelperSource, "--", BROWSER_PREFLIGHT_URL],
+        { env: environment, timeout: BROWSER_PREFLIGHT_MS, maxBuffer: 64 * 1024, windowsHide: true },
+        (error, _stdout, stderr) => {
+          if (error) return resolveRun(error.killed ? "it did not answer in 30 seconds" : typeof error.code === "string" ? "it could not be started" : "it stopped with an error");
+          const marked = String(stderr).split(/\r?\n/u).includes(`${BROWSER_MARKER}"${BROWSER_PREFLIGHT_URL}"`);
+          resolveRun(marked ? null : "it did not hand the sign-in link to the app");
+        }).once("error", () => resolveRun("it could not be started"));
+    } catch {
+      resolveRun("it could not be started");
+    }
+  });
+}
+
 export async function verifyAntigravityBrowserHelper(profile: AntigravityProfile, executable = process.execPath): Promise<void> {
   const helper = process.platform === "win32" ? executable.replaceAll("\\", "/") : executable;
   if (verifiedBrowserHelpers.has(helper)) return;
-  const reason = await new Promise<string | null>((resolveRun) => {
-    execFile(helper, ["-e", browserHelperSource, "--", BROWSER_PREFLIGHT_URL],
-      { env: profile.environment, timeout: BROWSER_PREFLIGHT_MS, maxBuffer: 64 * 1024, windowsHide: true },
-      (error, _stdout, stderr) => {
-        if (error) return resolveRun(error.killed ? "it did not answer in 30 seconds" : typeof error.code === "string" ? "it could not be started" : "it stopped with an error");
-        const marked = String(stderr).split(/\r?\n/u).includes(`${BROWSER_MARKER}"${BROWSER_PREFLIGHT_URL}"`);
-        resolveRun(marked ? null : "it did not hand the sign-in link to the app");
-      });
-  });
+  const reason = await antigravityBrowserHelperProblem(profile.environment, helper);
   if (reason) {
     throw new Error(`Google sign-in cannot start: the helper that passes the sign-in link to OpenMausBot failed a check (${reason}). Restart OpenMausBot and try again. If it keeps failing, share this message.`);
   }
