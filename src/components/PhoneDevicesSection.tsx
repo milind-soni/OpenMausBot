@@ -71,6 +71,11 @@ export function deriveTailscalePairingStatus(
     : { kind: "waiting", title, detail: t("remote.tailscale.linkOff") };
 }
 
+/** The control plane gives an app that serves the encrypted connection no free web address (`relay_capable`): the row shows only where one is held or on. */
+export function showHttpsAddressRow(state: Pick<CompanionState, "routes" | "endpoints" | "e2e">): boolean {
+  return state.routes?.https?.on === true || state.endpoints?.some((endpoint) => endpoint.kind === "hosted") === true || state.e2e === undefined;
+}
+
 /** Older app builds have no switch: on falls back to the check that turns it on, and off cannot be asked of them. */
 export function setCompanionTailscale(companion: CompanionBridge, on: boolean): Promise<CompanionState> {
   if (companion.setTailscale) return companion.setTailscale(on);
@@ -495,7 +500,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
                       onClick={() => void c.act((companion) => setCompanionTailscale(companion, !tailscaleOn))} />
                   </span>
                 </SettingRow>
-                <SettingRow title={t("devices.route.https")} subtitle={t("devices.route.httpsDetail", { app: productName() })}
+                {showHttpsAddressRow(state) && <SettingRow title={t("devices.route.https")} subtitle={t("devices.route.httpsDetail", { app: productName() })}
                   message={(httpsOn && hosted) || c.account?.status === "ready" || accountActionError ? <>
                     {httpsOn && hosted ? t("devices.route.httpsOn", { address: endpointHost(hosted.url) }) : null}
                     {c.account?.status === "ready" && <span className="block">{t("devices.route.httpsAccount", { app: productName() })}</span>}
@@ -508,13 +513,13 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
                       <button type="button" className="ui-button" disabled={c.busy || c.accountBusy || Boolean(managedBy)} onClick={() => setPairing("https")}>{t("devices.route.setUp")}</button>
                     )}
                   </span>
-                </SettingRow>
+                </SettingRow>}
               </SettingsFoldRow>
             )}
           </SettingsRows>
-          {moreOpen && tailscaleOn && state.routes?.tailscale?.name && <TailnetComputers c={c} state={state} blocked={managedBy} simple={simple} />}
         </SettingsGroup>
       )}
+      <TailnetComputers c={c} state={state} blocked={managedBy} simple={simple} status={tailscaleStatus} />
       <PhonesList />
       {(c.error || state.error) && <div className="px-4 text-[12px] leading-4 text-danger">{c.error ?? state.error}</div>}
     </div>

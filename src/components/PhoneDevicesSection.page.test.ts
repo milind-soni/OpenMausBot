@@ -16,7 +16,7 @@ vi.mock("./PhoneSetupFlow", () => ({
   loadCompanionBridgeState: () => null,
   shouldHydrateCompanionEmail: () => false,
 }));
-import { OpenCodeRow, PairDeviceDialog, PhoneDevicesSection, reachLine, routeStateText } from "./PhoneDevicesSection";
+import { OpenCodeRow, PairDeviceDialog, PhoneDevicesSection, reachLine, routeStateText, showHttpsAddressRow } from "./PhoneDevicesSection";
 
 const off = { on: false, since: null };
 const NOV_7 = new Date(2026, 10, 7).getTime();
@@ -80,6 +80,61 @@ describe("Phone & devices", () => {
     expect(html).toMatch(/Paired[\s\S]*?>Pair a phone<[\s\S]*?Ada's iPhone/);
     expect(html, "a switch that is on needs no line saying so").not.toContain("On · since");
     expect(html).not.toContain("data-reach-fold");
+  });
+});
+
+describe("Your other computers", () => {
+  it("shows in Simple mode with nothing on, outside More ways in, and in Advanced the same", () => {
+    for (const simple of [true, false]) {
+      const html = page(simple);
+      expect(html, String(simple)).toMatch(/data-settings-block="computers"[\s\S]*?Your other computers[\s\S]*?Needs Tailscale on both\.[\s\S]*?data-route-row="tailscale-computers"[\s\S]*?role="switch"/);
+      expect(html, String(simple)).not.toContain("More ways in");
+    }
+  });
+
+  it("stays its own row once Tailscale is on, after the ways a phone reaches this computer", () => {
+    f.state = state({ routes: routes({ tailscale: true }) });
+    const html = page(true);
+    expect(html).toMatch(/data-settings-block="reach"[\s\S]*?data-route-row="tailscale"[\s\S]*?data-settings-block="computers"[\s\S]*?data-route-row="tailscale-computers"/);
+    expect(html.match(/data-route-row="tailscale-computers"/g)).toHaveLength(1);
+  });
+});
+
+describe("Keep this computer awake", () => {
+  const awake = (html: string) => html.match(/<div role="group"[^>]*>(?:(?!<div role="group").)*?Keep this computer awake[\s\S]*?<button[^>]*role="switch"[^>]*>/)![0];
+
+  it("can be turned on when Your other computers is the only way in that is on", () => {
+    f.state = state({ routes: { ...routes({ tailscale: true }), tailscale: { on: true, since: NOV_7, name: "mac.tail1.ts.net", computers: true } } });
+    const row = awake(page(true));
+    expect(row).not.toContain("data-settings-inert");
+    expect(row).not.toContain('disabled=""');
+    f.state = state();
+    expect(page(true)).not.toContain("Keep this computer awake");
+  });
+});
+
+describe("the HTTPS address row", () => {
+  const hosted = { url: "https://c-0123456789abcdef0123456789abcdef.mausbot.si", kind: "hosted" as const, priority: 0 };
+  const relayCapable = { enabled: true, relay: "off" as const, node: null, descriptor: null };
+
+  it("is hidden on an app that serves the encrypted connection and holds no web address", () => {
+    const base = { routes: routes({ wifi: true }), e2e: relayCapable };
+    expect(showHttpsAddressRow(base)).toBe(false);
+    f.state = state(base);
+    const html = page(false);
+    expect(html).toContain("More ways in");
+    expect(html).not.toContain('data-route-row="https"');
+    expect(html).not.toContain("HTTPS address");
+  });
+
+  it("stays for a computer that still has its address, has the route on, or runs a build before the encrypted connection", () => {
+    expect(showHttpsAddressRow({ routes: routes(), e2e: relayCapable, endpoints: [hosted] })).toBe(true);
+    expect(showHttpsAddressRow({ routes: routes({ https: true }), e2e: relayCapable })).toBe(true);
+    expect(showHttpsAddressRow({ routes: routes() })).toBe(true);
+    f.state = state({ routes: routes({ https: true }), e2e: relayCapable, endpoints: [hosted] });
+    const html = page(true);
+    expect(html).toMatch(/HTTPS address[\s\S]*?data-route-row="https"[\s\S]*?>Turn off</);
+    expect(html).toContain("On · c-0123456789abcdef0123456789abcdef.mausbot.si");
   });
 });
 

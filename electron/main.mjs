@@ -568,7 +568,7 @@ function publicManagedCompanionState() {
 }
 
 function decorateDesktopCompanionState(state) {
-  syncCompanionKeepAwake(state.enabled && !state.error, state.keepAwake === true);
+  syncCompanionKeepAwake((state.enabled && !state.error) || tailnetShare.state().on === true, state.keepAwake === true);
   return { ...state, managedConnection: publicManagedCompanionState(), tailnetShare: tailnetShare.state(), relayToken: companionE2E?.relayToken ?? null };
 }
 
