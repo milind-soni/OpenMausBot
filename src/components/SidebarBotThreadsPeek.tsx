@@ -3,6 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState, type Dispatch, type Keyboa
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { isTypeaheadKey, typeaheadMatch, typeaheadText, type Typeahead } from "@/lib/menu-keys";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import type { Action, Bot, Task } from "@/state/store";
@@ -58,6 +59,7 @@ export function SidebarBotThreadsPeek({ bot, dispatch }: { bot: PeekBot; dispatc
   const timer = useRef<number | undefined>(undefined);
   const focusSheet = useRef(false);
   const focusAnchor = useRef(false);
+  const typed = useRef<Typeahead | null>(null);
   const [deleting, setDeleting] = useState<Task | null>(null);
   const labels = useId();
   const has = threads.length > 0;
@@ -142,6 +144,13 @@ export function SidebarBotThreadsPeek({ bot, dispatch }: { bot: PeekBot; dispatc
     } else if (event.key === "Tab") {
       anchor.current?.focus();
       close();
+    } else if (isTypeaheadKey(event)) {
+      typed.current = typeaheadText(typed.current, event.key, event.timeStamp);
+      const match = typeaheadMatch(items.map((item) => item.textContent ?? ""), at, typed.current.text);
+      if (match !== null) {
+        event.preventDefault();
+        items[match]?.focus();
+      }
     }
   };
   const now = Date.now();

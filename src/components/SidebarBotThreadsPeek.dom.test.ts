@@ -2,6 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TYPEAHEAD_RESET_MS } from "@/lib/menu-keys";
 import type { Action, Task } from "@/state/store";
 import { PEEK_CLOSE_MS, SidebarBotThreadsPeek } from "./SidebarBotThreadsPeek";
 
@@ -137,5 +138,30 @@ describe("the hover sheet of a bot's other conversations", () => {
     expect(document.activeElement).toBe(action("a", "delete"));
     await key("ArrowDown");
     expect(document.activeElement).toBe(thread("b"));
+  });
+
+  it("jumps to the conversation whose title starts with the letters typed", async () => {
+    await mount([task("a", { title: "Pricing review" }), task("b", { title: "Supplier follow-up" }), task("c", { title: "Price list" })]);
+    await open();
+    const type = async (text: string) => {
+      for (const key of text) {
+        const event = new KeyboardEvent("keydown", { key, bubbles: true });
+        Object.defineProperty(event, "timeStamp", { value: Date.now() });
+        await act(async () => { document.activeElement!.dispatchEvent(event); });
+      }
+    };
+    const thread = (id: string) => sheet()!.querySelector<HTMLElement>(`[data-peek-thread="${id}"]`)!;
+    sheet()!.querySelector<HTMLElement>("[role=menuitem]")!.focus();
+    await type("s");
+    expect(document.activeElement).toBe(thread("b"));
+    await wait(TYPEAHEAD_RESET_MS);
+    await type("pric");
+    expect(document.activeElement).toBe(thread("c"));
+    await type("i");
+    expect(document.activeElement).toBe(thread("a"));
+    action("a", "archive").focus();
+    await wait(TYPEAHEAD_RESET_MS);
+    await type("n");
+    expect(document.activeElement?.textContent).toBe("New thread");
   });
 });
