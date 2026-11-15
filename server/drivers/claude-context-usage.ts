@@ -71,7 +71,7 @@ export function claudeContextUsage(write: (frame: unknown) => Promise<boolean>) 
   };
 }
 
-/** A CLI that already exited needs no answer: the write is skipped, like the driver's writeUser. */
+/** A CLI that already exited needs no answer, so the write is skipped. */
 export function writeControlFrame(stdin: Writable, frame: unknown): Promise<boolean> {
   return new Promise((resolve) => {
     if (!stdin.writable || stdin.destroyed) return resolve(false);
