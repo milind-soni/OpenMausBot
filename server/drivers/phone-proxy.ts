@@ -167,7 +167,7 @@ const deviceShell = (onDevice: OnDevice, serial: string): Shell => async (...com
 const NO_FIELD_TEXT = "No text field is taking input, so nothing was cleared or typed. Tap the field first, then call type_text again.";
 // `dumpsys input_method` prints the current keyboard's own state under a header that names it (seen on Android 9).
 const adbKeyboardShown = (inputState: string) =>
-  /\bmIsInputViewShown=(\w+)/.exec(inputState.split("Input method service state for com.android.adbkeyboard.AdbIME@")[1] ?? "")?.[1] === "true";
+  /\bmIsInputViewShown=(\w+)/.exec(inputState.split("Input method service state for com.android.adbkeyboard.AdbIME@")[1]?.split("Input method service state for ")[0] ?? "")?.[1] === "true";
 
 export async function typePhoneText(shell: Shell, text: string, clear = false, unclaimed: Shell = shell): Promise<string> {
   if (!text || [...text].length > 256) throw new Error("Android text must be 1 to 256 characters");
