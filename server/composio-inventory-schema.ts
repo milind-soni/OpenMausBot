@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const ACCOUNT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
-const TOOLKIT_SLUG = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const TOOLKIT_SLUG = /^(?!__proto__$)[A-Za-z0-9_][A-Za-z0-9_-]*$/;
 
 const toolkitItemSchema = z.object({
   slug: z.string().optional(),

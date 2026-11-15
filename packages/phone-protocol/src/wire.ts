@@ -251,7 +251,7 @@ export interface ConnectorToolGrant {
 }
 
 /** Lowercased Composio service slug, e.g. `gmail`. */
-export const CONNECTOR_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,80}$/;
+export const CONNECTOR_SLUG_PATTERN = /^(?!__proto__$)[a-z0-9_][a-z0-9_-]{0,80}$/;
 /** Composio tool names are upper-snake, e.g. `GMAIL_SEND_EMAIL`. */
 export const CONNECTOR_TOOL_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
 

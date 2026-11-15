@@ -198,3 +198,10 @@ describe("per-account limits", () => {
     expect(widensConnectorScopes(undefined, scopes)).toBe(false);
   });
 });
+
+it.each(["_1password", "_" + "a".repeat(63), " _1PASSWORD "])("normalizes toolkit scope %s", (slug) => {
+  expect(normalizeConnectorScopes({ apps: { [slug]: "read" } })).toEqual({ apps: { [slug.trim().toLowerCase()]: "read" } });
+});
+it.each(["", "-x", "Bad Slug", "a/b", "__proto__", "a".repeat(65)])("rejects invalid toolkit scope %s", (slug) => {
+  expect(normalizeConnectorScopes({ apps: { [slug]: "read" } })).toBeNull();
+});

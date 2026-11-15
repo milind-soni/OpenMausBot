@@ -21,7 +21,7 @@ export interface ConnectorScopes {
   accounts?: Record<string, string[]>;
 }
 
-const TOOLKIT_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const TOOLKIT_SLUG = /^(?!__proto__$)[a-z0-9_][a-z0-9_-]{0,63}$/;
 const ACCOUNT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
 /** The toolkit a Composio slug belongs to: the part before the first
