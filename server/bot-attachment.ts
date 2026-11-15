@@ -1,7 +1,10 @@
 // The source opens through the message-file route's hardened resolver (realpath containment, O_NOFOLLOW, size cap) and is
 // copied into the private store, so the chat never reaches into a bot's workspace or VM home afterwards.
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { basename, join, posix } from "node:path";
 import {
+  ATTACHMENTS_DIR,
   extensionForFileMime,
   extensionForMime,
   FILE_MAX_BYTES,
@@ -55,6 +58,23 @@ export interface SaveBotAttachmentInput {
   guest?: { root: string; host: string };
   /** A file this turn saved outside the roots, at a place the person named: one copied file, never a folder or a link grant. */
   savedThisTurn?: { since: number; refuse: readonly string[] };
+  /** Store the copy under a name made from its bytes, so the same file passed between bots again is kept once. */
+  byContent?: boolean;
+}
+
+/** The upload id the store keeps a file under when it is named by its bytes: a version-8 UUID cut from their SHA-256. */
+export function contentUploadId(sha256: string): string {
+  const hex = sha256.slice(0, 32).split("");
+  hex[12] = "8";
+  hex[16] = "89ab"[Number.parseInt(hex[16]!, 16) % 4]!;
+  const id = hex.join("");
+  return `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
+}
+
+async function sha256Of(file: OpenedMessageFile): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of file.handle.createReadStream({ start: 0, autoClose: false })) hash.update(chunk as Buffer);
+  return hash.digest("hex");
 }
 
 /** Only the roots' outside_workspace refusal falls through, so a missing or oversized file in the folder says exactly that.
@@ -71,6 +91,9 @@ async function openSource(path: string, roots: readonly string[], savedThisTurn:
 export interface SavedBotAttachment {
   attachment: BotAttachment;
   bytes: number;
+  /** With `byContent`: the bytes' SHA-256, and whether this call put them in the store (false: they were there already). */
+  sha256?: string;
+  fresh?: boolean;
 }
 
 export async function saveBotAttachment(input: SaveBotAttachmentInput): Promise<SavedBotAttachment> {
@@ -84,19 +107,23 @@ export async function saveBotAttachment(input: SaveBotAttachmentInput): Promise<
   try {
     const mime = mimeFor(file.name);
     const name = displayNameFor(input.name, file.name);
-    if (extensionForMime(mime)) {
-      if (file.bytes > IMAGE_MAX_BYTES) throw statusError(413, `image exceeds ${IMAGE_MAX_BYTES} bytes`);
-      const saved = saveImage(await file.handle.readFile(), mime);
-      return { attachment: { kind: "image", path: saved.path, mime: saved.mime, name, source: file.path }, bytes: saved.bytes };
-    }
-    if (!extensionForFileMime(mime)) {
+    const imageExtension = extensionForMime(mime), fileExtension = extensionForFileMime(mime);
+    if (imageExtension && file.bytes > IMAGE_MAX_BYTES) throw statusError(413, `image exceeds ${IMAGE_MAX_BYTES} bytes`);
+    if (!imageExtension && !fileExtension) {
       throw statusError(415, `${file.name} is not a supported attachment type. Supported: ${ATTACH_SUPPORTED_TYPES}.`);
     }
-    if (file.bytes > FILE_MAX_BYTES) throw statusError(413, `file exceeds ${FILE_MAX_BYTES} bytes`);
+    if (!imageExtension && file.bytes > FILE_MAX_BYTES) throw statusError(413, `file exceeds ${FILE_MAX_BYTES} bytes`);
+    const sha256 = input.byContent ? await sha256Of(file) : undefined;
+    const uploadId = sha256 ? contentUploadId(sha256) : undefined;
+    const content = sha256 ? { sha256, fresh: !existsSync(join(ATTACHMENTS_DIR, `${uploadId}${imageExtension ?? fileExtension}`)) } : {};
+    if (imageExtension) {
+      const saved = saveImage(await file.handle.readFile(), mime, uploadId);
+      return { attachment: { kind: "image", path: saved.path, mime: saved.mime, name, source: file.path }, bytes: saved.bytes, ...content };
+    }
     const saved = await saveFile(file.handle.createReadStream({ start: 0, autoClose: false }), name || basename(file.name), mime, {
-      expectedBytes: file.bytes,
+      expectedBytes: file.bytes, ...(uploadId ? { uploadId } : {}),
     });
-    return { attachment: { kind: "file", path: saved.path, mime: saved.mime, name: saved.name, source: file.path }, bytes: saved.bytes };
+    return { attachment: { kind: "file", path: saved.path, mime: saved.mime, name: saved.name, source: file.path }, bytes: saved.bytes, ...content };
   } finally {
     await file.handle.close().catch(() => undefined);
   }

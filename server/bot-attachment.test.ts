@@ -127,6 +127,27 @@ describe("saveBotAttachment", () => {
   });
 });
 
+describe("saveBotAttachment by content", () => {
+  it("keeps the same bytes once under a name made from them, whatever the file is called, and says when it was already there", async () => {
+    writeFileSync(join(WORK, "passed.csv"), "a,b\n1,2\n");
+    writeFileSync(join(WORK, "passed-again.csv"), "a,b\n1,2\n");
+    writeFileSync(join(WORK, "other.csv"), "a,b\n3,4\n");
+    writeFileSync(join(WORK, "passed.png"), PNG);
+    const first = await saveBotAttachment({ path: "passed.csv", roots: [WORK], byContent: true });
+    const again = await saveBotAttachment({ path: "passed-again.csv", roots: [WORK], byContent: true });
+    const other = await saveBotAttachment({ path: "other.csv", roots: [WORK], byContent: true });
+    expect(first.fresh).toBe(true);
+    expect(again).toMatchObject({ fresh: false, sha256: first.sha256, attachment: { path: first.attachment.path, name: "passed-again.csv" } });
+    expect(other.attachment.path).not.toBe(first.attachment.path);
+    expect(readFileSync(first.attachment.path, "utf8")).toBe("a,b\n1,2\n");
+    const picture = await saveBotAttachment({ path: "passed.png", roots: [WORK], byContent: true });
+    expect(await saveBotAttachment({ path: "passed.png", roots: [WORK], byContent: true })).toMatchObject({ fresh: false, attachment: { kind: "image", path: picture.attachment.path } });
+    const plain = await saveBotAttachment({ path: "passed.csv", roots: [WORK] });
+    expect(plain.attachment.path).not.toBe(first.attachment.path);
+    expect(plain).not.toHaveProperty("fresh");
+  });
+});
+
 describe("saveBotAttachment for an archive", () => {
   // Typed by the name's last extension, like a person's upload: build.tar.gz is a .gz.
   const archives: Array<[string, string, string]> = [
