@@ -229,6 +229,22 @@ describe("Move from Grok Bot", () => {
     vi.useRealTimers();
   });
 
+  it("ends the link when the dialog closes", async () => {
+    vi.stubGlobal("ogb", { remoteClient: { active: false } });
+    const calls: string[] = [];
+    f.api.mockImplementation(async (path: string, init?: { method?: string }) => {
+      if (!path.startsWith("/api/setup-import/grok/connector")) return path === "/api/mcp/servers" ? { servers: [] } : {};
+      calls.push(`${init?.method} ${path}`);
+      return { available: true, connectorUrl: "https://quiet-test-words.trycloudflare.com/mcp/move/abc", arrived: [] };
+    });
+    await open();
+    expect(host.querySelector('input[aria-label="Link for Grok Bot"]')).not.toBeNull();
+    expect(calls).not.toContain("DELETE /api/setup-import/grok/connector");
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    expect(calls.at(-1)).toBe("DELETE /api/setup-import/grok/connector");
+  });
+
   it("says when the link stopped, keeps the Bots that had arrived, and offers a new link", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     vi.stubGlobal("ogb", { remoteClient: { active: false } });

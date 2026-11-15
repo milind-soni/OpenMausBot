@@ -182,7 +182,18 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
   /** The Bots in the preview came through the link, so a finished import ends it. */
   const viaLink = useRef(false);
   const arrived = useMemo(() => foundExports(arrivedFiles).bots, [arrivedFiles]);
+  /** Leaving the dialog ends the link, so nothing stays open to the internet once the person has left the move. */
+  const linkOpen = useRef(false);
+  const left = useRef(false);
+  useEffect(() => {
+    left.current = false;
+    return () => {
+      left.current = true;
+      if (linkOpen.current) void grokConnector("DELETE").catch(() => {});
+    };
+  }, []);
   const takeConnector = useCallback((next: GrokConnector) => {
+    linkOpen.current = Boolean(next.connectorUrl);
     setConnector({ available: next.available, stopped: next.stopped, ...(next.connectorUrl ? { connectorUrl: next.connectorUrl } : {}) });
     if (!next.connectorUrl && !next.stopped) {
       lastSeq.current = 0;
@@ -205,7 +216,10 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
   const connect = async () => {
     setConnecting(true);
     setConnectFailed(false);
-    await grokConnector("POST").then(takeConnector, () => setConnectFailed(true));
+    await grokConnector("POST").then((next) => {
+      if (!left.current) return takeConnector(next);
+      if (next.connectorUrl) void grokConnector("DELETE").catch(() => {});
+    }, () => setConnectFailed(true));
     setConnecting(false);
   };
 
