@@ -419,6 +419,8 @@ it("runs a room member's turn a restart cut again once, told so, and resumes the
   f.plan[f.target.id] = { reply: "Built CSV", gateFile };
   await f.start();
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
+  // The sender's turn records itself only as it ends, which can be just after the member's turn starts; only the member's turn is cut.
+  await expect.poll(() => { try { return f.provider().some((turn: any) => turn.botId === f.sender.id); } catch { return false; } }, { timeout: 15_000 }).toBe(true);
   await f.restart("SIGKILL");
   writeFileSync(gateFile, "open");
   await expect.poll(() => f.nodes().every((node: any) => node.status === "completed"), { timeout: 30_000 }).toBe(true);
