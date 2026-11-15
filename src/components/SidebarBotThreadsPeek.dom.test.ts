@@ -36,6 +36,7 @@ const cross = async (from: Element, to: Element) => {
   await act(async () => { for (const [type, target, related] of [["pointerout", from, to], ["pointerleave", from, to], ["pointerover", to, from], ["pointerenter", to, from]] as const) pointer(type, target, related); });
 };
 const wait = async (ms: number) => { await act(async () => { vi.advanceTimersByTime(ms); }); };
+const action = (threadId: string, kind: string) => sheet()!.querySelector(`[data-peek-thread="${threadId}"]`)!.parentElement!.querySelector<HTMLButtonElement>(`[data-peek-action="${kind}"]`)!;
 
 beforeEach(() => { vi.useFakeTimers(); dispatch.mockClear(); });
 afterEach(async () => {
@@ -89,5 +90,52 @@ describe("the hover sheet of a bot's other conversations", () => {
     expect(chevron().getAttribute("aria-expanded")).toBe("true");
     await act(async () => { scroller.dispatchEvent(new Event("scroll")); });
     expect(chevron().getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("archives a conversation from its row without opening it or closing the sheet", async () => {
+    await mount([task("a"), task("b")]);
+    await open();
+    const archive = action("a", "archive");
+    expect(archive.getAttribute("aria-labelledby")!.split(" ").map((id) => document.getElementById(id)?.textContent || document.getElementById(id)?.getAttribute("aria-label"))).toEqual(["Archive", "a"]);
+    await act(async () => { archive.click(); });
+    expect(dispatch.mock.calls).toEqual([[{ type: "updateTask", botId: "atlas", threadId: "a", patch: { archivedAt: expect.any(Number) } }]]);
+    expect(chevron().getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("deletes a conversation only after the same confirmation its thread row asks", async () => {
+    await mount([task("a")]);
+    await open();
+    await act(async () => { action("a", "delete").click(); });
+    expect(dispatch).not.toHaveBeenCalled();
+    const dialog = document.querySelector<HTMLElement>("[role=alertdialog], [role=dialog]")!;
+    expect(dialog.textContent).toContain("Delete thread?");
+    expect(dialog.textContent).toContain("“a” and its conversation will be deleted.");
+    await act(async () => { [...dialog.querySelectorAll("button")].find((button) => button.textContent === "Delete thread")!.click(); });
+    expect(dispatch.mock.calls).toEqual([[{ type: "deleteTask", botId: "atlas", threadId: "a" }]]);
+  });
+
+  it("offers neither action for a conversation that is working", async () => {
+    await mount([task("a", { busy: true })]);
+    await open();
+    expect(action("a", "archive").disabled).toBe(true);
+    expect(action("a", "delete").disabled).toBe(true);
+  });
+
+  it("reaches a row's actions with the arrow keys and moves on to the next row", async () => {
+    await mount([task("a"), task("b")]);
+    await open();
+    const key = async (name: string) => { await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true })); }); };
+    const thread = (id: string) => sheet()!.querySelector<HTMLElement>(`[data-peek-thread="${id}"]`)!;
+    thread("a").focus();
+    await key("ArrowRight");
+    expect(document.activeElement).toBe(action("a", "archive"));
+    await key("ArrowRight");
+    expect(document.activeElement).toBe(action("a", "delete"));
+    await key("ArrowRight");
+    expect(document.activeElement).toBe(thread("a"));
+    await key("ArrowLeft");
+    expect(document.activeElement).toBe(action("a", "delete"));
+    await key("ArrowDown");
+    expect(document.activeElement).toBe(thread("b"));
   });
 });

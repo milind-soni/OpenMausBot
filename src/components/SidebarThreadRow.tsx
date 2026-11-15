@@ -90,7 +90,7 @@ const tomorrowNineAm = () => {
   return when.getTime();
 };
 
-const isWorking = (task: Pick<Task, "activity" | "busy">): boolean => task.activity === "working" || Boolean(task.busy);
+export const isWorking = (task: Pick<Task, "activity" | "busy">): boolean => task.activity === "working" || Boolean(task.busy);
 
 const isWaitingOnTeammate = (task: Pick<Task, "waitingForTeammates">): boolean =>
   task.waitingForTeammates === true;
