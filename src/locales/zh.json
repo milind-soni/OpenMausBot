@@ -9600,6 +9600,7 @@
   "chat.notice.resumingAfterRestart": "重启后继续",
   "chat.notice.cutOffByRestart": "{name} 因重启被打断；正在继续",
   "chat.notice.stalled": "{minutes} 分钟没有活动——该轮次已停止",
+  "chat.notice.engineExited": "运行本轮 AI 的进程已结束，该轮次已停止",
   "chat.notice.followupInterrupted": "排队中的追问因重启或恢复而中断——它可能已经执行过。请先查看结果，再决定是否重新发送。",
   "chat.notice.usageLimit": "这个 {provider} 账号已达到使用上限{detail}。请等它重置，或把这个机器人切换到别的 AI。",
   "chat.notice.claudeExtraUsage": "Claude 拒绝了这个轮次，因为这个模型对你账号来说是走额外用量的，而那份额度已用完。你自己套餐的用量不受影响：请把这个机器人切换到套餐包含的模型，或在你的 Claude 账号里添加额外用量。",
