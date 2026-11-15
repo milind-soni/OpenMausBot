@@ -74,38 +74,39 @@ function currentContext(bot: Bot, messages: readonly Message[]) {
   return compactedSinceReading(messages) ? undefined : bot.tasks?.find((task) => task.threadId === bot.threadId)?.usage?.context;
 }
 
-const lastBreakdown = new Map<string, ContextBreakdown>();
+const lastBreakdown = new Map<string, { moment: string; breakdown: ContextBreakdown }>();
 
-/** The engine's own count, asked for when the panel opens and again whenever a turn starts or ends or the conversation
- * is summarized. The last answer shows until the new one lands, so the panel is not redrawn; no answer leaves the total alone. */
-function useContextBreakdown(bot: Bot, summarized: boolean): ContextBreakdown | null {
-  const { id, threadId } = bot;
-  const busy = Boolean(bot.busy);
+/** The engine's own count, asked for while the panel is open and again whenever a turn starts or ends. The last answer
+ * shows until the new one lands, unless the conversation was summarized or started fresh since. */
+function useContextBreakdown(bot: Bot | undefined, open: boolean): ContextBreakdown | null {
+  const id = bot?.id;
+  const threadId = bot?.threadId;
+  const busy = Boolean(bot?.busy);
+  const messages = bot ? visibleMessages(bot) : [];
   const slot = `${id}:${threadId ?? ""}`;
-  const moment = `${slot}:${summarized}`;
-  const [answer, setAnswer] = useState<{ moment: string; breakdown: ContextBreakdown | null } | null>(null);
+  const moment = `${messages.filter((message) => message.kind === "compaction").length}:${compactedSinceReading(messages)}`;
+  const [answer, setAnswer] = useState<{ slot: string; moment: string; breakdown: ContextBreakdown | null } | null>(null);
   useEffect(() => {
-    if (!threadId) return;
+    if (!open || !id || !threadId) return;
     let current = true;
     void api<{ breakdown: ContextBreakdown | null }>(`/api/bots/${id}/context`, { method: "POST", body: JSON.stringify({ threadId }) })
       .then((reply) => reply?.breakdown ?? null, () => null)
       .then((breakdown) => {
-        if (breakdown) lastBreakdown.set(slot, breakdown); else lastBreakdown.delete(slot);
-        if (current) setAnswer({ moment, breakdown });
+        if (breakdown) lastBreakdown.set(slot, { moment, breakdown }); else lastBreakdown.delete(slot);
+        if (current) setAnswer({ slot, moment, breakdown });
       });
     return () => { current = false; };
-  }, [id, threadId, slot, moment, busy]);
-  if (answer?.moment === moment) return answer.breakdown;
-  return summarized ? null : lastBreakdown.get(slot) ?? null;
+  }, [open, id, threadId, slot, moment, busy]);
+  if (!open) return null;
+  if (answer?.slot === slot && answer.moment === moment) return answer.breakdown;
+  const last = lastBreakdown.get(slot);
+  return last?.moment === moment ? last.breakdown : null;
 }
 
-function ChatContext({ bot, onDone }: { bot: Bot; onDone: () => void }) {
+function ChatContext({ bot, reading, breakdown, onDone }: { bot: Bot; reading: ContextReading | null; breakdown: ContextBreakdown | null; onDone: () => void }) {
   const compact = useContextAction();
   const fresh = useContextAction();
   const messages = visibleMessages(bot);
-  const context = currentContext(bot, messages);
-  const breakdown = useContextBreakdown(bot, compactedSinceReading(messages));
-  const reading = contextReading(context?.tokens, context?.window) ?? contextReading(breakdown?.tokens, breakdown?.window);
   const rows = contextRows(breakdown);
   const atFreshStart = messages.at(-1)?.compaction?.fresh === true;
   const idle = !bot.busy && !compact.pending && !fresh.pending && messages.length > 0 && !atFreshStart;
@@ -156,19 +157,18 @@ function RoomContext({ group, members }: { group: Group; members: readonly Bot[]
   );
 }
 
-/** How full the conversation's context is, beside the microphone, with the two ways to make it small again. In a room
- * every bot keeps its own context, so each one that has been measured there gets its own line. */
 export function ComposerContextMenu({ bot, group, members, className }: { bot?: Bot; group?: Group; members?: readonly Bot[]; className?: string }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLSpanElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const close = () => { setOpen(false); trigger.current?.focus(); };
   usePopoverDismiss(open, root, close);
+  const breakdown = useContextBreakdown(group ? undefined : bot, open);
   if (!bot && !group) return null;
   const context = bot && currentContext(bot, visibleMessages(bot));
   const fullest = group
     ? roomContextReadings(group, members ?? []).map((entry) => entry.reading).sort((a, b) => (b.percent ?? 0) - (a.percent ?? 0))[0]
-    : contextReading(context?.tokens, context?.window);
+    : contextReading(breakdown?.tokens, breakdown?.window) ?? contextReading(context?.tokens, context?.window);
   const name = fullest?.percent === undefined ? t("contextMenu.title") : t("contextWarning.short", { percent: fullest.percent });
   return (
     <span ref={root} data-composer-context className="relative flex shrink-0">
@@ -180,7 +180,7 @@ export function ComposerContextMenu({ bot, group, members, className }: { bot?: 
       {open && (
         <div role="dialog" aria-label={t("contextMenu.title")} data-context-panel
           className={cn("animate-pop-in absolute bottom-full end-0 z-50 mb-2 max-h-[min(28rem,calc(100dvh-8rem))] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain", MENU_SHEET)}>
-          {group ? <RoomContext group={group} members={members ?? []} /> : bot && <ChatContext bot={bot} onDone={close} />}
+          {group ? <RoomContext group={group} members={members ?? []} /> : bot && <ChatContext bot={bot} reading={fullest ?? null} breakdown={breakdown} onDone={close} />}
         </div>
       )}
     </span>

@@ -117,6 +117,39 @@ describe("the composer's context button", () => {
     expect(words()).toContain("The provider compacts this conversation automatically.");
   });
 
+  it("takes the total from the engine's count when it differs from the last turn's reading", async () => {
+    breakdown = {
+      tokens: 6_000, window: 200_000,
+      categories: [
+        { id: "system_prompt", kind: "used", tokens: 1_900 }, { id: "messages", kind: "used", tokens: 4_100 },
+        { id: "free_space", kind: "free", tokens: 194_000 },
+      ],
+    };
+    const bot = chat({ tokens: 12, window: 200_000 }, { id: "b3" });
+    await render({ bot });
+    expect(trigger().getAttribute("aria-label")).toBe("Context 0%");
+    await press(trigger());
+    expect(words()).toContain("3% used");
+    expect(words()).toContain("6k of 200k tokens");
+    expect(words()).not.toContain("0% used");
+    expect(panel()!.querySelector("[data-context-meter]")!.getAttribute("data-context-meter")).toBe("3");
+    expect(trigger().getAttribute("aria-label")).toBe("Context 3%");
+    expect([...panel()!.querySelectorAll("[data-context-breakdown] dd")].map((cell) => cell.textContent)).toEqual(["1.9k · 1%", "4.1k · 2.1%", "194k · 97%"]);
+
+    await press(trigger());
+    fetched.mockImplementation(() => new Promise<Response>(() => {}));
+    await render({ bot: { ...bot, messages: [...bot.messages!, line("m3", "bot", "compaction")] } as Bot });
+    await press(trigger());
+    expect(words()).toContain("No reading yet");
+    expect(panel()!.querySelector("[data-context-breakdown]")).toBeNull();
+
+    await press(trigger());
+    await render({ bot: { ...bot, threadId: "t2", tasks: [{ threadId: "t2", usage: { input: 0, output: 0, costUsd: null, turns: 1, context: { tokens: 50_000, window: 200_000 } } }] } as unknown as Bot });
+    await press(trigger());
+    expect(words()).toContain("25% used");
+    expect(panel()!.querySelector("[data-context-breakdown]")).toBeNull();
+  });
+
   it("keeps the total alone when the engine has no count, and the last count on screen while a new one loads", async () => {
     await render({ bot: chat({ tokens: 136_000, window: 200_000 }, { id: "b2" }) });
     await press(trigger());
