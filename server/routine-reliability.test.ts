@@ -841,7 +841,7 @@ describe("a routines.json that cannot be read", () => {
   it("saves through a temporary file and a rename, so a reader never sees half a file", () => {
     const h = harness();
     h.manager.create(every(60));
-    expect(readdirSync(dirname(h.file))).toEqual(["routines.json"]);
+    expect(readdirSync(dirname(h.file)).sort()).toEqual(["routines.json", "routines.ledger.jsonl", "routines.ledger.mark"]);
     expect(() => JSON.parse(readFileSync(h.file, "utf8"))).not.toThrow();
   });
 });

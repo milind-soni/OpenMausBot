@@ -55,6 +55,17 @@ describe("occurrences skipped for one cause", () => {
     expect(recordSkip(runs, make, cause, ROUTINE_DEFERRAL_NOTICE_MS * 2, 30).tell).toBe(false);
     expect(runs).toHaveLength(1);
   });
+
+  it("count with an occurrence the ones that came due before it while nothing could look", () => {
+    const runs: RoutineRun[] = [];
+    const make = () => { const row = run(`row-${runs.length}`, "queued"); runs.push(row); return row; };
+    const cause = { behind: "worker", why: "routines.server.part.stillRunning" as const };
+    recordSkip(runs, make, cause, 40, 45, { count: 3, scheduledFor: 10 });
+    expect(runs[0]).toMatchObject({ error: "Skipped 4 scheduled runs because the previous run of this routine is still running", skipped: { count: 4, firstAt: 10, lastAt: 40 } });
+    recordSkip(runs, make, cause, 70, 75, { count: 2, scheduledFor: 50 });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.skipped).toMatchObject({ count: 7, firstAt: 10, lastAt: 70 });
+  });
 });
 
 describe("skip counts read back from routines.json", () => {
