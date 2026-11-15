@@ -7,9 +7,10 @@ import { join } from "node:path";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
+import { antigravityPlanUsage } from "./drivers/antigravity-usage-limits.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
 
-export type PlanDriver = "claude" | "codex" | "grok" | "opencode";
+export type PlanDriver = "claude" | "codex" | "grok" | "opencode" | "antigravity";
 
 export interface PlanWindow {
   available: boolean;
@@ -94,7 +95,7 @@ export interface PlanResponse {
 
 export type PlanFetch = (
   url: string,
-  init: { headers: Record<string, string>; signal: AbortSignal },
+  init: { headers: Record<string, string>; signal: AbortSignal; method?: "POST"; body?: string; redirect?: "manual" },
 ) => Promise<PlanResponse>;
 
 export interface PlanUsageDeps {
@@ -136,18 +137,14 @@ const WEEK_MAX_SECONDS = 9 * 86400;
 const MONTH_MIN_SECONDS = 27 * 86400;
 const MONTH_MAX_SECONDS = 32 * 86400;
 
-const DRIVER_OF: Record<string, PlanDriver> = {
-  claudeAgent: "claude",
-  codex: "codex",
-  grokAgent: "grok",
-  opencodeGo: "opencode",
-};
+const DRIVER_OF: Record<string, PlanDriver> = { claudeAgent: "claude", codex: "codex", grokAgent: "grok", opencodeGo: "opencode", antigravityAgent: "antigravity" };
 
 const PRODUCT_NAME: Record<PlanDriver, string> = {
   claude: "Claude",
   codex: "Codex",
   grok: "Grok",
   opencode: "OpenCode",
+  antigravity: "Antigravity",
 };
 
 export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAccount[] {
@@ -921,6 +918,7 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
 
 async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow | null> { // null: OpenCode, in every fleet, with no key of its own
   let credential: PlanCredential;
+  if (account.driver === "antigravity") { const windows = await antigravityPlanUsage(account.id, deps); return windows && okRow(account, windows); } // null: no sign-in, or Google gave nothing
   try {
     credential = await deps.credentials.read(account);
   } catch {

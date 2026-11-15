@@ -351,6 +351,6 @@ export class LimitResetClock {
 
   private unnamed(engine: string): EngineLimit {
     const account = this.options.accounts().find((candidate) => candidate.id === engine);
-    return { engine, name: account?.name ?? engine, driver: account?.driver ?? "claude", window: null, usedPercent: null, resetsAt: null, blocked: false };
+    return { engine, name: account?.name ?? engine, driver: account && REPORTED_DRIVERS.has(account.driver) ? account.driver as Driver : "claude", window: null, usedPercent: null, resetsAt: null, blocked: false };
   }
 }
