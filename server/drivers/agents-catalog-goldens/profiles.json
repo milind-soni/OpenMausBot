@@ -231,7 +231,7 @@
   },
   "skills": {
     "bytes": 68623,
-    "sha256": "fe080966623a70481835f091ad3fff76dfb955c3346f4b237491491b41b2ff3b",
+    "sha256": "795ba52aea5df12fc17cbc9aec9e4a1a57223703e1b5eea6e854b5f06a9259c6",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -289,7 +289,7 @@
   },
   "skills+voice": {
     "bytes": 69404,
-    "sha256": "62dfc74f33e83d82ada2228ec4de46280589365165582b82d18868dc306415c6",
+    "sha256": "90fbe0cf45cf986b9ab7a5698e3fb5f74e0b951afa1be4409b7cf09dae9ffcb7",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -348,7 +348,7 @@
   },
   "skills+shared": {
     "bytes": 70888,
-    "sha256": "a75eddf928cd490a6e54acd18c2588d91a600b5f615bc845e0ae647aa1771e3e",
+    "sha256": "d6c3a30aff8ddf315dd12f3b3a5effbec18366ab89fecfbc1779d1bf423ab50e",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -408,7 +408,7 @@
   },
   "skills+shared+voice": {
     "bytes": 71669,
-    "sha256": "7d4e2912477eae230b3307abe91975e8108b709110e153484547696168b1d414",
+    "sha256": "3fe190166a036c56ce01e6ca1a04180350f39206452f65cc3400504522077c6e",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -671,7 +671,7 @@
   },
   "skills+non-chief": {
     "bytes": 58924,
-    "sha256": "4b8b1ecf78e2fcf988935c0cd83fe2dc2cbdb0faf6ea5a4e66ba630e07f8c361",
+    "sha256": "c02af69c45175f0fa6b276b5319ae6cc86ef15715b51d247f769699cd04d889e",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -722,7 +722,7 @@
   },
   "skills+voice+non-chief": {
     "bytes": 59705,
-    "sha256": "63bb5dfa16fd32177a7cdd26f2c813f55e8370340a9e614ce56efa9530e8ac97",
+    "sha256": "bdcd55f0b86c198d70a389ca9b20a89bed2a49071a4502845c78d981839e3e8e",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -774,7 +774,7 @@
   },
   "skills+shared+non-chief": {
     "bytes": 61189,
-    "sha256": "bba7c01cb4664ca74d959a8f97345a57753abe6ad5976261dc6ad6c3185b2aad",
+    "sha256": "c9f5f628a462a130651f02556575c65f26fa123b350614bc4ea8481842e66b11",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -827,7 +827,7 @@
   },
   "skills+shared+voice+non-chief": {
     "bytes": 61970,
-    "sha256": "e7ae301d82ff5f6264432ca11e4e5fe1f9fa4de517928e77f1fc17b4004a5f7b",
+    "sha256": "a8ab144664b6cb6a4100d43c8441a7b0ca1f3dc90a6460ec6740b80a4456969a",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -881,7 +881,7 @@
   },
   "skills+shared+voice+cloud-home": {
     "bytes": 71435,
-    "sha256": "08743603986806384fbd435f11e69efe161f63f2275683346bc95cadacf666df",
+    "sha256": "cd62785ad4ea02b3fc0e3beb31fe3946f84206ad7b99529fb1c7bc452a623e73",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -942,7 +942,7 @@
   },
   "skills+shared+voice+non-chief+cloud-home": {
     "bytes": 61736,
-    "sha256": "6bab63639456dbf9d40b7698445ee07919b6aa746ae442b22f0c2bf60f1e5c9c",
+    "sha256": "5fb0a8aae17a06414b07a5e26b3138144f2b580a4e2618b2d7d2a6bb127c4ac3",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -996,7 +996,7 @@
   },
   "skills+shared+voice+x": {
     "bytes": 75508,
-    "sha256": "21e7c8ebe877fde53a53b8bc336c573ead9e8103dd7b0e781c7dea0b81043309",
+    "sha256": "5a0297316fe9cf005858927ee68546059fa929db326836b2cd22c295cb4538a2",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1061,7 +1061,7 @@
   },
   "skills+shared+voice+x+team": {
     "bytes": 75508,
-    "sha256": "21e7c8ebe877fde53a53b8bc336c573ead9e8103dd7b0e781c7dea0b81043309",
+    "sha256": "5a0297316fe9cf005858927ee68546059fa929db326836b2cd22c295cb4538a2",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1126,7 +1126,7 @@
   },
   "skills+shared+voice+x+team+images": {
     "bytes": 76281,
-    "sha256": "e0333f24aecdb37fc477b8a336057bdfcaea13f23cd9bb316a65d51d1e46cd60",
+    "sha256": "10fc11615d4fb21a469372778b48104f97e765b20bcf494846635559aa723511",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1306,7 +1306,7 @@
   },
   "skills+shared+voice+mausbot": {
     "bytes": 72320,
-    "sha256": "2c9c13d2cb2b115d5d00c61b15cb77f9f61c3c3fd416f397e85cf012fb6b1c37",
+    "sha256": "60aca6245203d0c6ccf8f76caef51843c4f9c69b434418c74cd865264dc78937",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1574,7 +1574,7 @@
   },
   "skills+shared+voice+x+team+images+hosting": {
     "bytes": 78144,
-    "sha256": "86c9952d48776987498a138a083526435819a432048e8554c0ac0cc48fc96931",
+    "sha256": "38aceeff9662741d530831e34aa6c98446dd13e9395ebe1d5a022db9431f3d1b",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
