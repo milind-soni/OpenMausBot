@@ -116,6 +116,8 @@ describe("titleFromMessage", () => {
     expect(titleFromMessage('<pasted-text index="1">\n\n  Stack trace from the build\nline two\n</pasted-text>')).toBe("Stack trace from the build");
     expect(titleFromMessage('<pasted-text index="1">\n</pasted-text>\n\n<pasted-text index="2">\nSecond paste\n</pasted-text>')).toBe("Second paste");
     expect(titleFromMessage('<pasted-text index="1">\n\n</pasted-text>')).toBe(UNTITLED_TASK);
+    expect(titleFromMessage('<pasted-text index="1">\n\n</pasted-text>\n\n<attached-file path="/tmp/a.txt" name="a.txt" />')).toBe(UNTITLED_TASK);
+    expect(titleFromMessage('<pasted-text index="1">\n</pasted-text>\n\n<attached-image path="/tmp/b.png" name="b.png" />\n\n<pasted-text index="3">\nThird\n</pasted-text>')).toBe("Third");
   });
 
   it("keeps typed text first, and a typed wrapper with no pasted block stays as typed", () => {
