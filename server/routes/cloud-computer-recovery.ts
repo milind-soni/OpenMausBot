@@ -2,6 +2,7 @@ import type { CloudComputerAnswering } from "../../shared/cloud-computer-recover
 import { boatIdOf } from "../boat.ts";
 import { boatHealth, type BoatHealth } from "../boat-health.ts";
 import { boatReadiness, type BoatReadiness } from "../boat-ready.ts";
+import { cloudComputerDisk } from "../cloud-computer-disk.ts";
 import type { BoatRecovery } from "../boat-recovery.ts";
 import type { BotRecord, Store } from "../store.ts";
 import type { RemoteComputerProvider } from "./config.ts";
@@ -42,7 +43,7 @@ export function createCloudComputerRecoveryRoutes(deps: CloudComputerRecoveryRou
     const owner = deps.botComputerControlKey(bot);
     if (method === "GET") {
       res.setHeader("cache-control", "private, no-store");
-      return json(res, 200, { recovery: owner === bot.id ? deps.boatRecovery.status(owner) : null, answering: owner === bot.id ? cloudComputerAnswering(boatIdOf(owner)) : null });
+      return json(res, 200, { recovery: owner === bot.id ? deps.boatRecovery.status(owner) : null, answering: owner === bot.id ? cloudComputerAnswering(boatIdOf(owner)) : null, disk: owner === bot.id ? cloudComputerDisk.panel(boatIdOf(owner)) : null });
     }
     if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
       return json(res, 415, { error: "content-type must be application/json" });

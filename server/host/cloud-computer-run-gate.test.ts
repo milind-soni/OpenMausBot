@@ -7,7 +7,7 @@ import { createRunComputerGate, RUN_COMPUTER_WAIT_MS } from "./cloud-computer-ru
 
 const RUN = { routineId: "routine-1", botId: "bot-1", target: "bot", runOn: "cloud" };
 
-function harness(over: { state?: string; answers?: (wait: number) => boolean; wakes?: boolean } = {}) {
+function harness(over: { state?: string; answers?: (wait: number) => boolean; wakes?: boolean; disk?: (boxId: string) => Promise<void> } = {}) {
   let at = 0;
   const seen = { finds: 0, wakes: 0, waits: [] as boolean[], signals: [] as Array<AbortSignal | undefined>, used: 0 };
   const world = { verdict: null as RecoveryVerdict | null, verdictAt: 0, routine: "routine-1" as string | null, recovery: null as CloudComputerRecoveryState | null, machine: { id: "bx_23456789", state: over.state ?? "idle" } as { id: string; state: string } | null };
@@ -23,7 +23,7 @@ function harness(over: { state?: string; answers?: (wait: number) => boolean; wa
       return { ok: false, phase: "waking", waitedMs: 90_000 };
     },
     verdict: (_owner, since) => (world.verdict && world.verdictAt >= since ? world.verdict : null), recoveryState: () => world.recovery,
-    used: () => { seen.used++; }, routineOf: () => world.routine, log: () => {}, now: () => at,
+    used: () => { seen.used++; }, routineOf: () => world.routine, log: () => {}, now: () => at, ...(over.disk ? { disk: over.disk } : {}),
   });
   return { gate, seen, world, used: () => gate.callSettled("bot-1", "thread-1", true), now: () => at, advance: (ms: number) => { at += ms; } };
 }
@@ -42,6 +42,31 @@ describe("an unattended run and its cloud computer", () => {
     h.used();
     await expect(h.gate.prepare(RUN)).resolves.toBeNull();
     expect(h.seen).toMatchObject({ wakes: 0, waits: [false], used: 1 });
+  });
+
+  it("makes room on the computer's disk once it answers, before the run starts", async () => {
+    const order: string[] = [];
+    let cleaned!: () => void;
+    const h = harness({ disk: (boxId) => { order.push(`disk ${boxId}`); return new Promise<void>((resolve) => { cleaned = resolve; }); } });
+    h.used();
+    const starting = h.gate.prepare(RUN)!.then((reason) => { order.push(`start ${reason}`); });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(order).toEqual(["disk bx_23456789"]);
+    cleaned();
+    await starting;
+    expect(order).toEqual(["disk bx_23456789", "start null"]);
+  });
+
+  it("starts the run all the same when the disk cleanup fails, and never cleans a computer that did not answer", async () => {
+    const failing = harness({ disk: async () => { throw new Error("df failed"); } });
+    failing.used();
+    await expect(failing.gate.prepare(RUN)).resolves.toBeNull();
+
+    let asked = 0;
+    const silent = harness({ answers: () => false, disk: async () => { asked++; } });
+    silent.used();
+    await expect(silent.gate.prepare(RUN)).resolves.toBe(RUN_COMPUTER_LINES.noAnswer);
+    expect(asked).toBe(0);
   });
 
   it("wakes a sleeping computer and waits for its answer, however recently it answered", async () => {

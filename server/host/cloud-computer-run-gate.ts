@@ -31,6 +31,8 @@ export interface RunComputerGateDeps {
   /** Why the recovery left the owner's silent computer as it is, when it decided that at or after `since`. */
   verdict(owner: string, since: number): RecoveryVerdict | null;
   recoveryState(owner: string): CloudComputerRecoveryState | null;
+  /** Makes room on a computer whose disk was last seen nearly full; resolves when the run may start, and never rejects. */
+  disk?(boxId: string): Promise<void>;
   /** Restarts the owner's idle window, so the wait itself does not put the computer to sleep. */
   used(owner: string): void;
   /** The routine whose run is active in this bot's thread, if one is. */
@@ -66,6 +68,7 @@ export function createRunComputerGate(deps: RunComputerGateDeps) {
       if (signal?.aborted) return null;
       deps.used(owner);
       const answer = await deps.awaitAnswer(machine.id, { woke, deadline, ...(signal ? { signal } : {}) });
+      if (answer.ok && !signal?.aborted) await deps.disk?.(machine.id).catch(() => undefined);
       if (answer.ok || signal?.aborted) return null;
       // A verdict from before this wait belongs to an earlier silence, not this one.
       const why = deps.verdict(owner, began);

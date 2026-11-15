@@ -24,6 +24,16 @@ export interface CloudComputerAnswering {
   lastAnsweredAt: number | null;
 }
 
+/** From this share of the disk used, the computer's caches are cleared and the panel shows the figure. */
+export const DISK_WARN_PERCENT = 85;
+
+/** The computer's disk, beside `answering`, on the same route; absent or null while it is under DISK_WARN_PERCENT and
+ * no cleanup ran in the last day. `percent`: the fullest of its root and home filesystems. `clearedAt`: when its caches were last cleared. */
+export interface CloudComputerDisk {
+  percent: number;
+  clearedAt?: number;
+}
+
 /** What the bot is told, in place of a computer call, while its computer is being restarted or replaced. */
 export const CLOUD_COMPUTER_NOT_RESPONDING =
   "This bot's cloud computer isn't responding; MausBot is replacing it. Try again in a minute. Do not retry now.";

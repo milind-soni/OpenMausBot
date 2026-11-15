@@ -178,6 +178,47 @@ describe("cloud computer tools", () => {
     expect(calls.map(entry => entry.path)).toEqual(["/sandboxes/bx_3456789a/commands"]);
   });
 
+  describe("with the computer's disk watched", () => {
+    type Disk = NonNullable<Parameters<typeof tools.cloudComputerRpc>[1]["disk"]>;
+    const withDisk = (disk: Disk, name = "exec", args: Record<string, unknown> = { command: "printf fixture" }) =>
+      tools.cloudComputerRpc({ method: "tools/call", params: { name, arguments: args } }, {
+        cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: () => {}, disk,
+      }) as Promise<{ isError?: boolean; content: Array<{ type: string; text?: string }> }>;
+
+    it("tells the disk of the use before the call is sent, and ends the result with its note", async () => {
+      const seen: string[] = [];
+      const result = await withDisk({
+        used: (_cfg, boxId) => { seen.push(`used ${boxId} after ${calls.length} calls`); },
+        after: async (_cfg, boxId, texts) => { seen.push(`after ${boxId}: ${texts.join("|")}`); return "Disk note: this cloud computer's disk is 91% full."; },
+      });
+      expect(seen).toEqual(["used bx_23456789 after 0 calls", `after bx_23456789: ${JSON.stringify({ ok: true, exitCode: 0, stdout: "captured", stderr: "" })}`]);
+      expect(result.isError).toBeFalsy();
+      expect(result.content).toEqual([
+        { type: "text", text: JSON.stringify({ ok: true, exitCode: 0, stdout: "captured", stderr: "" }) },
+        { type: "text", text: "Disk note: this cloud computer's disk is 91% full." },
+      ]);
+    });
+
+    it("leaves the result as it is when there is nothing to say, and a failed command stays failed with the note after it", async () => {
+      expect((await withDisk({ used: () => {}, after: async () => null })).content).toHaveLength(1);
+      commandExit = 1;
+      const failed = await withDisk({ used: () => {}, after: async () => "Disk note: this cloud computer's disk is 99% full. Writes may fail until space is freed." });
+      expect(failed.isError).toBe(true);
+      expect(failed.content.map((part) => part.text)).toEqual([JSON.stringify({ ok: false, exitCode: 1, stdout: "captured", stderr: "" }), "Disk note: this cloud computer's disk is 99% full. Writes may fail until space is freed."]);
+    });
+
+    it("asks for no note after a call the computer did not answer", async () => {
+      commandStatus = 502;
+      let asked = 0;
+      const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "click", arguments: { x: 1, y: 2 } } }, {
+        cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: () => {}, budgetMs: 6_000,
+        disk: { used: () => {}, after: async () => { asked++; return "never shown"; } },
+      }) as { content: unknown[] };
+      expect(asked).toBe(0);
+      expect(result.content).toHaveLength(1);
+    });
+  });
+
   it("performs nothing when the gate let a call through and no Boat landed", async () => {
     const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "true" } } }, {
       cfg, boxId: () => null, signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: () => {},
@@ -337,7 +378,8 @@ describe("cloud computer tools", () => {
       // Every copy of the call carries the same claim, so the computer runs at most one of them.
       expect(copies.length).toBeGreaterThanOrEqual(2);
       expect(copies.every(command => command.startsWith(`k=${key};`))).toBe(true);
-      expect(sent.filter(command => command === "true").length).toBeGreaterThanOrEqual(1);
+      const { DISK_CHECK_COMMAND } = await import("./cloud-computer-disk.ts");
+      expect(sent.filter(command => command === "true" || command === DISK_CHECK_COMMAND).length).toBeGreaterThanOrEqual(1);
       expect(outcomes).toEqual([true]);
     });
 
