@@ -1258,6 +1258,8 @@
   "engineSetup.sending": "भेजा जा रहा है…",
   "engineSetup.sendRedirect": "रीडायरेक्ट भेजें",
   "engineSetup.googleNoLink": "Google साइन-इन ने कोई लिंक नहीं दिया।",
+  "engineSetup.googleExpired": "Google साइन-इन की समय सीमा समाप्त हो गई। फिर से शुरू करें।",
+  "engineSetup.googleFailed": "Google साइन-इन पूरा नहीं हुआ। फिर से शुरू करें।",
   "engineSetup.signInTitle": "{name} में साइन इन करें",
   "engineSetup.installTitle": "{name} इंस्टॉल करें",
   "engineSetup.managedSignIn": "हर Antigravity सेटअप का अपना Google खाता होता है। सुरक्षित साइन-इन आपका ब्राउज़र पूरा करता है।",

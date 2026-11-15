@@ -63,7 +63,7 @@ import { acpSessionOperationKey, acpShellRequest, answersAlone, permissionLaunch
 import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from "./question-requests.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
-import { AcpHost } from "./host.ts";
+import { AcpHost } from "./host.ts"; import { SignInRequests, type AcpDriverHooks } from "./driver-hooks.ts";
 import { exitDetail } from "./exit-report.ts";
 import { endTurn, trackRunningTool, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
@@ -91,7 +91,7 @@ export interface AcpConfig {
 }
 
 /** Per-CLI specifics plugged into the shared ACP runtime; `askTool` is the native tool `questionRequests` come from. */
-export interface AcpSupport {
+export interface AcpSupport extends AcpDriverHooks {
   questionRequests?: Readonly<Record<string, AcpQuestionRequest>>; askTool?: string;
   /** Verified native catalog parameters, applied before both new and restored sessions. */
   toolScopeSessionParams?(turn: SendTurnInput, initializeResult: unknown, hasMcp: boolean,
@@ -586,7 +586,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
       };
 
-      const hosts = new Set<AcpHost>();
+      const hosts = new Set<AcpHost>(), signIn = new SignInRequests(support, instanceId);
       // Between turns nothing is brokered; the agent must never block on an unanswered request.
       const refuse = (msg: any, send: (obj: unknown) => void) => {
         const question = questionRequestFor(support.questionRequests, msg.method);
@@ -607,7 +607,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         if (running) return running;
         const child = spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env), botThreads: hostKey !== null, ro: launch.ro } }, "bot");
         const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, unrouted: refuse });
-        hosts.add(host);
+        hosts.add(host); signIn.watch(host);
         child.once("close", () => hosts.delete(host));
         child.once("error", () => hosts.delete(host));
         return host;
@@ -1079,7 +1079,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           idleMs?: number,
           idleMessage?: string | (() => string),
         ): Promise<any> =>
-          session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage);
+          signIn.refused(session.host) ?? session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage);
 
         const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, repliedText: false, startupActivity: false, stopped: false, usagePeak: null, usageLast: null, usageCompacted: false, cancelling: false };
         let acknowledge = () => {};
@@ -1190,8 +1190,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   try {
                     await session.host.once("authenticate", () => request("authenticate", { methodId }, INIT_TIMEOUT));
                     session.authenticated = true;
-                  } catch {
-                    if (support.authFailure !== "continue") throw new Error(support.loginNote);
+                  } catch (error) {
+                    if (signIn.asked(error) || support.authFailure !== "continue") throw signIn.asked(error) ?? new Error(support.loginNote);
                   }
                 } else if (support.authFailure === "fail") {
                   throw new Error(support.loginNote);
@@ -1225,7 +1225,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 try {
                   await request(
                     support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                    { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams },
+                    { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams, ...support.sessionSetupParams?.(init) },
                     LOAD_SESSION_TIMEOUT,
                     (result) => {
                       if (result) {
@@ -1267,7 +1267,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
+              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams, ...support.sessionSetupParams?.(init) }, NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
                 receiveModelVariants(result, true);
@@ -1463,7 +1463,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               });
               settle(threadId, session, false, reason ?? "failed");
             }
-          } catch (e) {
+          } catch (raw) { const e = signIn.asked(raw) ?? raw;
             if (pendingSplitReceipt && state.promptSent && state.usageCompacted) {
               deletePromptSplitReceipt(DRIVER_KIND, pendingSplitReceipt.key);
             }
@@ -1508,7 +1508,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 ...((e as any)?.acpUsageLimit === true || (code === "quota_or_region_restriction" && LIMIT_WORDS.test(message)) ? support.limitFacts?.(message, cliTurn.model) ?? { limit: "engine" as const } : {}), // waited out, or the engine gave up: another AI can carry on
               });
               // Never replay an accepted prompt (it may have run tools); evict before listeners start the next turn.
-              if (!needsAuth && !accountError && ((e as any)?.acpPromptStall === true || (e as any)?.acpUsageLimit === true || (e as any)?.acpSessionFailure === true
+              if (signIn.is(e)) closeSession(threadId, "sign-in-required"); else if (!needsAuth && !accountError && ((e as any)?.acpPromptStall === true || (e as any)?.acpUsageLimit === true || (e as any)?.acpSessionFailure === true
                   || code === "upstream_outage") && session.child.exitCode === null && !session.closing) {
                 closeSession(threadId, (e as any)?.acpPromptStall === true ? "prompt-stall" : "rpc-failure");
               } else if (approvalUnconfirmed && session.child.exitCode === null && !session.closing) {
