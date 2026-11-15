@@ -2422,6 +2422,8 @@
   "chat.liveness.outputJustNow": "방금 마지막 출력",
   "chat.liveness.outputMinutes": "{count}분 전 마지막 출력",
   "chat.liveness.outputHours": "{count}시간 전 마지막 출력",
+  "chat.liveness.silentMinutes": "{count}분째 새 소식 없음",
+  "chat.liveness.silentHours": "{count}시간째 새 소식 없음",
   "chat.liveness.network": "네트워크 대기 중",
   "chat.liveness.busy": "바쁨, 아직 출력 없음",
   "chat.liveness.idle": "대기 중, 아직 출력 없음",

@@ -1,13 +1,26 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { RuntimeEvent } from "../../shared/runtime-events";
-import { noteTurnEvent, resetTurnLive, turnLive } from "./turn-status";
+import { lastFrameAt, noteTurnEvent, resetTurnLive, turnLive } from "./turn-status";
 
 let seq = 0;
 const note = (event: Partial<RuntimeEvent>, threadId = "t") =>
   noteTurnEvent({ eventId: `e${++seq}`, provider: "claudeAgent", threadId, createdAt: "2026-10-23T12:00:00.000Z", turnId: "turn-1", ...event } as RuntimeEvent);
 
 afterEach(() => resetTurnLive());
+
+describe("a thread's last frame", () => {
+  it("stamps every frame, even one that changes nothing on the line", () => {
+    expect(lastFrameAt("t")).toBeUndefined();
+    note({ type: "content.delta", streamKind: "assistant_text", delta: "a" } as Partial<RuntimeEvent>);
+    const first = lastFrameAt("t")!;
+    expect(first).toBeGreaterThan(0);
+    const status = turnLive("t");
+    note({ type: "content.delta", streamKind: "assistant_text", delta: "b" } as Partial<RuntimeEvent>);
+    expect(lastFrameAt("t")).toBeGreaterThanOrEqual(first);
+    expect(turnLive("t"), "the line's state is untouched, so nothing re-renders").toBe(status);
+  });
+});
 
 describe("a thread's live turn", () => {
   it("knows nothing before any frame", () => {

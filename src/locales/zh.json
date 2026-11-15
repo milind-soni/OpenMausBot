@@ -2771,6 +2771,8 @@
   "chat.liveness.outputJustNow": "最近输出：刚刚",
   "chat.liveness.outputMinutes": "最近输出：{count} 分钟前",
   "chat.liveness.outputHours": "最近输出：{count} 小时前",
+  "chat.liveness.silentMinutes": "已 {count} 分钟没有新动静",
+  "chat.liveness.silentHours": "已 {count} 小时没有新动静",
   "chat.liveness.network": "正在等待网络",
   "chat.liveness.busy": "忙碌中，尚无输出",
   "chat.liveness.idle": "空闲，尚无输出",

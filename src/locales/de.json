@@ -1093,6 +1093,8 @@
   "chat.liveness.outputJustNow": "letzte Ausgabe gerade eben",
   "chat.liveness.outputMinutes": "letzte Ausgabe vor {count} Min.",
   "chat.liveness.outputHours": "letzte Ausgabe vor {count} Std.",
+  "chat.liveness.silentMinutes": "seit {count} Min. nichts Neues",
+  "chat.liveness.silentHours": "seit {count} Std. nichts Neues",
   "chat.liveness.network": "wartet auf das Netzwerk",
   "chat.liveness.busy": "beschäftigt, noch keine Ausgabe",
   "chat.liveness.idle": "im Leerlauf, noch keine Ausgabe",

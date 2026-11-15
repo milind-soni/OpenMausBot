@@ -2533,6 +2533,8 @@
   "chat.liveness.outputJustNow": "最後の出力：たった今",
   "chat.liveness.outputMinutes": "最後の出力：{count} 分前",
   "chat.liveness.outputHours": "最後の出力：{count} 時間前",
+  "chat.liveness.silentMinutes": "{count} 分間、新しい動きなし",
+  "chat.liveness.silentHours": "{count} 時間、新しい動きなし",
   "chat.liveness.network": "ネットワーク待ち",
   "chat.liveness.busy": "処理中、まだ出力なし",
   "chat.liveness.idle": "待機中、まだ出力なし",

@@ -916,6 +916,8 @@
   "chat.liveness.outputJustNow": "dernière sortie à l’instant",
   "chat.liveness.outputMinutes": "dernière sortie il y a {count} min",
   "chat.liveness.outputHours": "dernière sortie il y a {count} h",
+  "chat.liveness.silentMinutes": "rien de nouveau depuis {count} min",
+  "chat.liveness.silentHours": "rien de nouveau depuis {count} h",
   "chat.liveness.network": "attend le réseau",
   "chat.liveness.busy": "occupé, pas encore de sortie",
   "chat.liveness.idle": "inactif, pas encore de sortie",

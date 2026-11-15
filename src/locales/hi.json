@@ -916,6 +916,8 @@
   "chat.liveness.outputJustNow": "आखिरी आउटपुट अभी-अभी",
   "chat.liveness.outputMinutes": "आखिरी आउटपुट {count} मिनट पहले",
   "chat.liveness.outputHours": "आखिरी आउटपुट {count} घंटे पहले",
+  "chat.liveness.silentMinutes": "{count} मिनट से कुछ नया नहीं",
+  "chat.liveness.silentHours": "{count} घंटे से कुछ नया नहीं",
   "chat.liveness.network": "नेटवर्क का इंतज़ार कर रहा है",
   "chat.liveness.busy": "व्यस्त, अभी तक कोई आउटपुट नहीं",
   "chat.liveness.idle": "निष्क्रिय, अभी तक कोई आउटपुट नहीं",
