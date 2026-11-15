@@ -125,6 +125,11 @@ describe("existing installs", () => {
     expect(withoutBotMcpServers(raw, "iris")).toEqual({ notes: raw.notes });
     expect(withoutBotMcpServers(raw, "paul")).toBeNull();
   });
+
+  it("drops a deleted bot's own web connection too", () => {
+    const raw = { linear_iris: { type: "http", url: "https://mcp.linear.app/mcp", headers: {}, enabled: true, bot: "iris" }, shared: { type: "http", url: "https://b.example/mcp", headers: {}, enabled: true } };
+    expect(withoutBotMcpServers(raw, "iris")).toEqual({ shared: raw.shared });
+  });
 });
 
 describe("a bot adding a server where bots are boxed", () => {
