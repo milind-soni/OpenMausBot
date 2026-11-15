@@ -85,6 +85,7 @@ const PREVIEW_MAX = 300;
 const ADDRESS = /^[\w.+][\w.+-]*@[\w-]+(?:\.[\w-]+)+$/;
 const PRIMARY_CALENDAR = { id: "primary", name: "primary", primary: true, owned: true, read: true } as const;
 const GONE = Symbol("gone");
+const SHORTENED = Symbol("shortened");
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -95,6 +96,8 @@ export const isAddress = (value: string): boolean => ADDRESS.test(value);
 
 /** The tool itself answered that it failed, as opposed to the relay or Composio failing around it. */
 class ToolAnswerError extends Error {}
+/** The connected-apps service sends an answer past its size limit as a short preview with no data: the read must ask for less. */
+class ShortenedAnswerError extends Error {}
 
 /** Whether a Gmail tool's own error says the message asked for is missing, while naming no account, connection, token,
  * permission or tool. */
@@ -139,7 +142,10 @@ export function toolData(slug: string, frame: Record<string, unknown> | null): u
     const response = record(results.map(record).find((item) => item?.tool_slug === slug)?.response);
     if (!response) throw new Error(`${slug}: missing from the answer`);
     if (response.successful === false) throw new ToolAnswerError(String(response.error ?? `${slug} failed`).slice(0, 300));
-    if (!("data" in response)) throw new Error(`${slug}: the answer had no data`);
+    if (!("data" in response)) {
+      if ("data_preview" in response) throw new ShortenedAnswerError(`${slug}: the answer was too large and came back shortened; ask for fewer`);
+      throw new Error(`${slug}: the answer had no data`);
+    }
     return response.data;
   }
   if (!("data" in body)) throw new Error(`${slug}: the answer had no data`);
@@ -424,7 +430,10 @@ export interface ConnectedReads {
   session(): ReadSession;
 }
 
-const GMAIL_PAGE = 50;
+// A 50-email page is past the connected-apps service's size limit and comes back shortened; 20 fits, and a page that
+// still comes back shortened is asked again at half the size, down to 5.
+const GMAIL_PAGE = 20;
+const GMAIL_PAGE_MIN = 5;
 const GMAIL_PAGES = 6;
 
 const appOf = (slug: string): ReadApp | "outlook" => (slug.startsWith("GMAIL_") ? "gmail" : slug.startsWith("OUTLOOK_") ? "outlook" : "googlecalendar");
@@ -447,9 +456,10 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
       return init.transportSessionId;
     }
 
-    /** One tool's data, or GONE when `gone` says the tool's own failure means the thing asked for is missing. */
-    async function call(slug: string, args: Record<string, unknown>, options: { signal?: AbortSignal; gone?: (toolError: string) => boolean } = {}): Promise<unknown> {
-      const { gone, signal = AbortSignal.timeout(readTimeoutMs) } = options;
+    /** One tool's data, GONE when `gone` says the tool's own failure means the thing asked for is missing, or SHORTENED
+     *  when `shortened` is set and the answer was too large to come back whole. */
+    async function call(slug: string, args: Record<string, unknown>, options: { signal?: AbortSignal; gone?: (toolError: string) => boolean; shortened?: boolean } = {}): Promise<unknown> {
+      const { gone, shortened, signal = AbortSignal.timeout(readTimeoutMs) } = options;
       const app = appOf(slug);
       let account: string | undefined;
       try {
@@ -478,6 +488,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
       } catch (error) {
         if (error instanceof SourceError) throw error;
         if (gone && error instanceof ToolAnswerError && gone(error.message)) return GONE;
+        if (shortened && error instanceof ShortenedAnswerError) return SHORTENED;
         if (signal.aborted) throw new SourceError(app, `${slug} did not answer within ${Math.round(readTimeoutMs / 1000)} seconds`);
         // Only the tool's own refusal points at the named account; a relay hiccup (HTTP 5xx) is a later try.
         throw new SourceError(app, errorText(error), account !== undefined && error instanceof ToolAnswerError);
@@ -536,11 +547,18 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
         requireFinite("gmail", sinceMs);
         const found: EmailHeader[] = [];
         let page: string | undefined;
-        for (let index = 0; index < GMAIL_PAGES; index++) {
+        let size = GMAIL_PAGE;
+        // Only whole pages count toward GMAIL_PAGES; a shortened answer is asked again smaller, at most twice per read.
+        for (let pages = 0; pages < GMAIL_PAGES;) {
           const data = await call(GMAIL_FETCH_TOOL, {
             user_id: "me", query: `in:inbox after:${seconds(sinceMs)} -category:promotions -category:social`,
-            max_results: GMAIL_PAGE, include_payload: false, verbose: false, ...(page ? { page_token: page } : {}),
-          });
+            max_results: size, include_payload: false, verbose: false, ...(page ? { page_token: page } : {}),
+          }, { shortened: size > GMAIL_PAGE_MIN });
+          if (data === SHORTENED) {
+            size = Math.max(GMAIL_PAGE_MIN, Math.floor(size / 2));
+            continue;
+          }
+          pages++;
           found.push(...parsed("gmail", () => emailsFromData(data)));
           page = nextPageOf(data);
           if (!page) break;
