@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { CLAUDE_ALWAYS_LOADED_TOOL_NAMES } from "../../server/drivers/agents-claude-defer.ts";
+import { contextSizes } from "./context.ts";
 import { bareToolName, scoreCase, summarize, type ToolChoiceCase } from "./score.ts";
 
 describe("tool-choice scoring", () => {
@@ -28,6 +30,13 @@ describe("tool-choice scoring", () => {
     for (const item of cases) {
       expect(item.tools.length, item.id).toBeGreaterThan(0);
       expect(item.why.length, item.id).toBeGreaterThan(0);
+    }
+  });
+
+  it("measures the deferred agents tools against the whole list, with no model", () => {
+    for (const row of contextSizes()) {
+      expect(row.after.total, row.profile).toBeLessThan(row.before.total / 5);
+      expect(row.loaded.every((name) => CLAUDE_ALWAYS_LOADED_TOOL_NAMES.has(name)), row.profile).toBe(true);
     }
   });
 });

@@ -420,6 +420,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     expect(JSON.parse(await nextLine()).result).toEqual(catalog);
   });
 
+  it("keeps each listed tool's _meta through a tool selection, so a deferred tool stays deferred", async () => {
+    const read = { name: "read", inputSchema: { type: "object" }, _meta: { "anthropic/alwaysLoad": false } };
+    start({ tools: [read, { name: "write", inputSchema: { type: "object" } }] }, selected, LISTING_UPSTREAM);
+    send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    expect(JSON.parse(await nextLine()).result).toEqual({ tools: [read] });
+  });
+
   describe("shaping an oversized result", () => {
     const products = Array.from({ length: 300 }, (_, i) => ({ id: `p${i}`, name: `Bar ${i}`, price: 100 + i, blurb: "x".repeat(300) }));
     const full = JSON.stringify({ nextOffset: "1", products });

@@ -307,6 +307,45 @@ describe("owner partition (audit H1, H2)", () => {
     await expect(nothingQueued(broker, computer.id)).resolves.toBeNull();
     broker.close();
   });
+  it("a desktop that pairs again is used while its old sign-in is still live", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const dir = mkdtempSync(join(tmpdir(), "omb-repaired-"));
+    const broker = new SharedComputers(id => id === "old" || id === "new", new LentComputers(join(dir, "lent.json")));
+    const computer = registration({ computer: true });
+    broker.register(computer, { session: "old", person: alice.person }, secret);
+    await vi.advanceTimersByTimeAsync(40_001);
+    broker.register(computer, { session: "new", person: alice.person }, other);
+    expect(broker.known(alice.person)).toMatchObject([{ id: computer.id, online: true }]);
+    expect(broker.status(alice.person)).toMatchObject([{ id: computer.id, online: true }]);
+    const operation = { computer_id: computer.id, action: "computer_tools" as const };
+    const result = broker.request(operation, alice.person, () => true);
+    const job = await broker.poll(computer.id, "new", other);
+    expect(job?.operation).toEqual(operation);
+    broker.complete(computer.id, "new", other, job!.id, { ok: true });
+    await expect(result).resolves.toEqual({ ok: true });
+    broker.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  it("a poll that ends after the desktop pairs again does not hand the next job to the old registration", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const broker = new SharedComputers(id => id === "old" || id === "new");
+    const computer = registration({ computer: true });
+    broker.register(computer, { session: "old", person: alice.person }, secret);
+    const gone = new AbortController();
+    const dropped = broker.poll(computer.id, "old", secret, gone.signal);
+    await vi.advanceTimersByTimeAsync(5_000);
+    broker.register(computer, { session: "new", person: alice.person }, other);
+    await vi.advanceTimersByTimeAsync(1);
+    gone.abort();
+    await expect(dropped).resolves.toBeNull();
+    const operation = { computer_id: computer.id, action: "computer_tools" as const };
+    const result = broker.request(operation, alice.person, () => true);
+    const job = await broker.poll(computer.id, "new", other);
+    expect(job?.operation).toEqual(operation);
+    broker.complete(computer.id, "new", other, job!.id, { ok: true });
+    await expect(result).resolves.toEqual({ ok: true });
+    broker.close();
+  });
   it("a second session cannot squat a lent computer's id, even after its owner goes offline", async () => {
     vi.useFakeTimers();
     const broker = new SharedComputers(() => true);

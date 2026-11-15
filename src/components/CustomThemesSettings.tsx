@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
-import { themeCssProblem, THEME_LIMITS, type ThemeExport, type ThemeFile, type ThemeList } from "../../shared/theme";
+import { themeCssProblem, THEME_LIMITS, type ThemeExport, type ThemeFile, type ThemeHistoryItem, type ThemeList } from "../../shared/theme";
 import { t } from "@/lib/i18n";
 import { isMacPlatform } from "@/lib/keyboard-shortcuts";
+import { relativeTime } from "@/lib/memory";
+import { SKINS } from "@/lib/skins";
 import { chooseTheme, loadTheme, resetLook, safeLook, subscribeTheme, wornTheme } from "@/lib/theme/runtime";
 import { api } from "@/state/api";
 import { SETTINGS_INPUT, SettingRow, SettingsEmptyRow, SettingsField, SettingsFormFoot, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
@@ -82,6 +84,42 @@ function ThemeEditor({ id, act, onClose, onDelete }: { id: string; act: Act; onC
   );
 }
 
+const SHOWN_CHANGES = 6;
+
+function changeText(item: ThemeHistoryItem): string {
+  const name = item.name ?? "";
+  switch (item.kind) {
+    case "made": return t("settings.customThemes.historyMade", { name });
+    case "edited": return t("settings.customThemes.historyEdited", { name });
+    case "deleted": return t("settings.customThemes.historyDeleted", { name });
+    case "wore": return t("settings.customThemes.historyWore", { name });
+    case "skin": return t("settings.customThemes.historySkin", { name: SKINS.find((skin) => skin.id === name)?.name ?? name });
+    case "default": return t("settings.customThemes.historyDefault");
+    case "undid": return t("settings.customThemes.historyUndid");
+  }
+}
+
+/** The person's latest look changes, from here or a bot, each one a way back to how the app looked right after it. */
+function LookHistory({ items, act }: { items: ThemeHistoryItem[]; act: Act }) {
+  if (items.length < 2) return null;
+  return (
+    <SettingsGroup label={t("settings.customThemes.history")} block="theme-history" description={t("settings.customThemes.historyHint")}>
+      <SettingsRows>
+        {items.slice(0, SHOWN_CHANGES).map((item) => (
+          <SettingRow key={item.index} title={changeText(item)} subtitle={relativeTime(Date.parse(item.at))}>
+            {item.index === 1
+              ? <span className="text-[12px] text-ink-tertiary">{t("settings.customThemes.historyNow")}</span>
+              : <button type="button" className="ui-button" onClick={() => void act(async () => {
+                await api("/api/themes/history", { method: "POST", body: JSON.stringify({ index: item.index }) });
+                await loadTheme();
+              })}>{t("settings.customThemes.restore")}</button>}
+          </SettingRow>
+        ))}
+      </SettingsRows>
+    </SettingsGroup>
+  );
+}
+
 /** Settings → Appearance: the person's saved themes, made by them or by a bot. */
 export function CustomThemesSettings() {
   const [list, setList] = useState<ThemeList | null>(null);
@@ -89,7 +127,11 @@ export function CustomThemesSettings() {
   const [status, setStatus] = useState<ReactNode>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const worn = useWornId();
-  const refresh = useCallback(() => api<ThemeList>("/api/themes").then(setList, (error: unknown) => setStatus(errorText(error))), []);
+  const [history, setHistory] = useState<ThemeHistoryItem[]>([]);
+  const refresh = useCallback(() => Promise.all([
+    api<ThemeList>("/api/themes").then(setList, (error: unknown) => setStatus(errorText(error))),
+    api<{ items: ThemeHistoryItem[] }>("/api/themes/history").then((answer) => setHistory(answer.items), () => setHistory([])),
+  ]), []);
   useEffect(() => {
     void refresh();
     return subscribeTheme(() => void refresh());
@@ -131,7 +173,7 @@ export function CustomThemesSettings() {
   });
   const keys = isMacPlatform() ? "⌘⌥⇧R" : "Ctrl+Alt+Shift+R";
 
-  return (
+  return (<>
     <SettingsGroup label={t("settings.customThemes.title")} block="custom-themes" description={t("settings.customThemes.description")}
       actions={<>
         <button type="button" className="ui-button" onClick={() => importRef.current?.click()}>{t("settings.customThemes.import")}</button>
@@ -162,5 +204,6 @@ export function CustomThemesSettings() {
         </SettingRow>
       </SettingsRows>
     </SettingsGroup>
-  );
+    <LookHistory items={history} act={act} />
+  </>);
 }

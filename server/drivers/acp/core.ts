@@ -6,8 +6,9 @@ import { type ServerText } from "../../../shared/server-text.ts";
 // `allow`-kind option approves, and option order is never a security contract.
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { lstat, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { resolveAcpClientPath } from "./client-path.ts";
 import { createHash } from "node:crypto";
 
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
@@ -165,7 +166,7 @@ export interface AcpSupport {
     env: Record<string, string | undefined>,
     config: AcpConfig,
     instanceId: string,
-  ): Promise<{ command: string; args?: string[]; env?: Record<string, string | undefined> }>;
+  ): Promise<{ command: string; args?: string[]; env?: Record<string, string | undefined>; ro?: readonly string[] }>;
   /** Snapshot override for agents whose binary has no conventional --version. */
   snapshot?(
     env: Record<string, string | undefined>,
@@ -186,6 +187,8 @@ export interface AcpSupport {
   shareProcess?: boolean;
   /** Route workspace file access through ACP so edits retain approval cards. */
   clientFileSystem?: boolean;
+  /** Additional server-owned directories this turn may read; writes remain confined to cwd. */
+  clientReadRoots?(turn: SendTurnInput): readonly string[];
   /** Sent as `clientCapabilities._meta` on initialize, where agents read vendor capabilities. */
   clientCapabilitiesMeta?: Record<string, unknown>;
   /** Made once per process: rewrites a session/update before the turn reads it, or drops it by returning null. */
@@ -598,11 +601,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         for (const host of hosts) if (host.key === hostKey && host.accepts(SHARED_SESSIONS_MAX, SHARED_SESSIONS_LIFETIME, threadId, cwd)) return host;
         return null;
       };
-      const hostFor = (threadId: string, launch: { command: string }, argv: string[], env: Record<string, string | undefined>, cwd: string,
+      const hostFor = (threadId: string, launch: { command: string; ro?: readonly string[] }, argv: string[], env: Record<string, string | undefined>, cwd: string,
         hostKey: string | null): AcpHost => {
         const running = sharedHost(hostKey, threadId, cwd);
         if (running) return running;
-        const child = spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env), botThreads: hostKey !== null } }, "bot");
+        const child = spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env), botThreads: hostKey !== null, ro: launch.ro } }, "bot");
         const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, unrouted: refuse });
         hosts.add(host);
         child.once("close", () => hosts.delete(host));
@@ -612,7 +615,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
       const openSession = (
         threadId: string,
-        launch: { command: string; args?: string[] },
+        launch: { command: string; args?: string[]; ro?: readonly string[] },
         argv: string[],
         env: Record<string, string | undefined>,
         cwd: string,
@@ -624,35 +627,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const acp = host.link(threadId, cwd);
         const send = (obj: unknown) => acp.send(obj);
 
-        const resolveClientPath = async (requestPath: unknown): Promise<string> => {
-          if (typeof requestPath !== "string" || !isAbsolute(requestPath)) {
-            throw new Error("ACP file paths must be absolute.");
-          }
-          const workspace = await realpath(cwd).catch(() => resolve(cwd));
-          const requested = resolve(requestPath);
-          const lexical = relative(resolve(cwd), requested);
-          if (lexical === ".." || lexical.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(lexical)) {
-            throw new Error("ACP file path is outside the session workspace.");
-          }
-          const suffix = [basename(requested)];
-          let ancestor = dirname(requested);
-          while (!(await lstat(ancestor).catch(() => null))) {
-            const parent = dirname(ancestor);
-            if (parent === ancestor) throw new Error("ACP file path has no accessible parent.");
-            suffix.unshift(basename(ancestor));
-            ancestor = parent;
-          }
-          const candidate = resolve(await realpath(ancestor), ...suffix);
-          const rel = relative(workspace, candidate);
-          if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) {
-            throw new Error("ACP file path is outside the session workspace.");
-          }
-          const existing = await lstat(candidate).catch(() => null);
-          if (existing?.isSymbolicLink()) throw new Error("ACP file path cannot be a symbolic link.");
-          return candidate;
-        };
-
-        const handleClientFileRequest = async (msg: any): Promise<void> => {
+        const handleClientFileRequest = async (msg: any, current: AcpTurn): Promise<void> => {
           const fail = (error: unknown) => send({
             jsonrpc: "2.0",
             id: msg.id,
@@ -661,7 +636,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           try {
             if (!support.clientFileSystem) throw new Error("Client file access is disabled.");
             const params = msg.params ?? {};
-            const path = await resolveClientPath(params.path);
+            const path = await resolveAcpClientPath(params.path, cwd, msg.method === "fs/read_text_file" ? support.clientReadRoots?.(current.turn) : undefined);
             if (msg.method === "fs/read_text_file") {
               const info = await stat(path);
               if (!info.isFile() || info.size > CLIENT_FILE_MAX_BYTES) {
@@ -697,7 +672,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const handleServerRequest = (msg: any, current: AcpTurn) => {
           current.state.startupActivity = true; if (current.state.promptSent) current.acknowledge();
           if (msg.method === "fs/read_text_file" || msg.method === "fs/write_text_file") {
-            void handleClientFileRequest(msg);
+            void handleClientFileRequest(msg, current);
             return;
           }
           const question = questionRequestFor(support.questionRequests, msg.method);
@@ -1027,7 +1002,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           resolvedModel !== undefined && resolvedModel !== turn.model
             ? { ...turn, model: resolvedModel }
             : turn;
-        let launch: { command: string; args?: string[]; env?: Record<string, string | undefined> };
+        let launch: { command: string; args?: string[]; env?: Record<string, string | undefined>; ro?: readonly string[] };
         try {
           launch = support.resolveCommand
             ? await support.resolveCommand(env, turnConfig, instanceId)
@@ -1054,7 +1029,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           ? createHash("sha256").update(support.toolScopeCacheKey({ config: turnConfig, env, cwd })).digest("hex") : null;
         const processContract = [launch.command, launch.args ?? [], spawnArgs,
           support.sessionScopedApproval ? null : turnConfig.fullAuto === true, envFingerprint,
-          support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null];
+          support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null, launch.ro ?? []];
         const contractKey = JSON.stringify([...processContract, cwd, turn.toolScope ?? null, inheritedScopeFingerprint]);
         const launchModel = support.sessionModelEnv && cliTurn.model && /^[\w.:/-]{1,200}$/u.test(cliTurn.model)
           && catalog.accountModels?.has(cliTurn.model) ? cliTurn.model : undefined;
@@ -1588,11 +1563,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         try {
           const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd } as SendTurnInput;
           support.applyTurnEnv?.(env, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [] });
-          const launch = support.resolveCommand ? await support.resolveCommand(env, turnConfig, instanceId) : { command: turnConfig.cli };
+          const launch: { command: string; args?: string[]; env?: Record<string, string | undefined>; ro?: readonly string[] } = support.resolveCommand ? await support.resolveCommand(env, turnConfig, instanceId) : { command: turnConfig.cli };
           const spawnEnv = launch.env ?? env;
           return await runAcpOneShot({
             displayName: support.displayName,
-            spawn: spawnCli, kill: killCliTree, box: { allowEnv: instanceEnvNames(input.environment, spawnEnv) },
+            spawn: spawnCli, kill: killCliTree, box: { allowEnv: instanceEnvNames(input.environment, spawnEnv), ro: launch.ro },
             command: launch.command,
             argv: [...(launch.args ?? []), ...support.spawnArgs(turnConfig, turn)],
             env: spawnEnv,
