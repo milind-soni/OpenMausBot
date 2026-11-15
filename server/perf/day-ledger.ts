@@ -1,11 +1,11 @@
 // The last day of turn timings by hour: one histogram per phase and per tool kind, and counts. Bounded at 25 hours of
 // fixed-size slots whatever the traffic.
 import { addTo, countOf, emptyHistogram, histogramQuantile, mergeInto, parseHistogram, PHASES, type Histogram, type Phase, type PhaseStats } from "./phases.ts";
-import { CODE, isLimitScope, isToolKind, KIND, type ToolKind, type TurnTiming } from "./turn-record.ts";
+import { activeMs, counter, isLimitScope, isRetryCode, isToolKind, KIND, type LimitScope, type ToolKind, type TurnTiming } from "./turn-record.ts";
 
 const HOUR = 3_600_000;
 export const DAY_HOURS = 24;
-/** A turn counts as slow past each of these (ms). */
+/** A turn counts as slow past each of these (ms) of its time less any wait on a person. */
 export const SLOW_TURN_MS = [60_000, 300_000, 900_000] as const;
 const REASONS_KEPT = 12, LIMIT_KEYS_KEPT = 12;
 
@@ -24,10 +24,10 @@ interface Slot {
 }
 
 const emptySlot = (hour: number): Slot => ({ hour, turns: 0, failed: 0, slow: SLOW_TURN_MS.map(() => 0), phases: {}, tools: {},
-  retries: { turns: 0, n: 0, backoffMs: 0, why: {} }, limits: {}, failovers: 0 });
+  retries: { turns: 0, n: 0, backoffMs: 0, why: counter() }, limits: counter(), failovers: 0 });
 
 const bump = (map: Record<string, number>, key: string, cap: number, by = 1) => {
-  if (!(key in map) && Object.keys(map).length >= cap) key = "other";
+  if (!Object.hasOwn(map, key) && Object.keys(map).length >= cap) key = "other";
   map[key] = (map[key] ?? 0) + by;
 };
 
@@ -75,8 +75,8 @@ export function createDayLedger(now: () => number) {
         const ms = turn.ms[phase];
         if (ms !== undefined) addTo(into.phases[phase] ??= emptyHistogram(), ms);
       }
-      const total = turn.ms.total ?? 0;
-      SLOW_TURN_MS.forEach((edge, index) => { if (total > edge) into.slow[index]! += 1; });
+      const active = activeMs(turn);
+      SLOW_TURN_MS.forEach((edge, index) => { if (active > edge) into.slow[index]! += 1; });
       if (turn.retries) {
         into.retries.turns += 1; into.retries.n += turn.retries; into.retries.backoffMs += turn.backoffMs;
         for (const why of turn.retryWhy ?? []) bump(into.retries.why, why, REASONS_KEPT);
@@ -84,12 +84,16 @@ export function createDayLedger(now: () => number) {
       if (turn.limit) bump(into.limits, `${turn.engine ?? "unknown"}:${turn.limit}`, LIMIT_KEYS_KEPT);
       if (turn.failover) into.failovers += 1;
     },
+    /** A usage limit refused a turn before it started: no turn to time, but the refusal counts. */
+    noteRefusal(engine: string | null, scope: LimitScope, at = now()) {
+      bump(slot(at).limits, `${engine ?? "unknown"}:${scope}`, LIMIT_KEYS_KEPT);
+    },
     read(windowMs: number = DAY_HOURS * HOUR): DayAggregate {
       const from = Math.floor((now() - windowMs) / HOUR);
       const phases: Partial<Record<Phase, Histogram>> = {};
       const tools: Partial<Record<ToolKind, ToolSlot>> = {};
       const out: DayAggregate = { turns: 0, failed: 0, phases: {}, slow: SLOW_TURN_MS.map(() => 0), tools: [],
-        retries: { turns: 0, n: 0, backoffMs: 0, why: {} }, limits: {}, failovers: 0 };
+        retries: { turns: 0, n: 0, backoffMs: 0, why: counter() }, limits: counter(), failovers: 0 };
       for (const entry of slots.values()) {
         if (entry.hour <= from) continue;
         out.turns += entry.turns; out.failed += entry.failed; out.failovers += entry.failovers;
@@ -124,14 +128,14 @@ export type DayLedger = ReturnType<typeof createDayLedger>;
 
 const whole = (value: unknown): number => (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0);
 const codes = (value: unknown, accept: (key: string) => boolean, cap: number): Record<string, number> => {
-  const out: Record<string, number> = {};
+  const out = counter();
   for (const [key, count] of Object.entries((value && typeof value === "object" ? value : {}) as Record<string, unknown>).slice(0, cap)) {
     if (accept(key)) out[key] = whole(count);
   }
   return out;
 };
 const limitKey = (key: string) => key === "other" || (isLimitScope(key.slice(key.lastIndexOf(":") + 1)) && KIND.test(key.slice(0, key.lastIndexOf(":"))));
-const reasonKey = (key: string) => CODE.test(key);
+const reasonKey = (key: string) => isRetryCode(key);
 
 function parseSlot(raw: Record<string, unknown> | null): Slot | null {
   if (!raw || typeof raw !== "object" || !Number.isSafeInteger(raw.hour)) return null;

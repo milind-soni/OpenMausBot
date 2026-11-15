@@ -79,6 +79,8 @@ export interface ProcessSamplerOptions {
   utilization?: () => number | null;
   /** The sampler's timer fired this much later than it was due. */
   stalled?: (driftMs: number) => void;
+  /** The engine processes the server started, by pid, with their engine kinds. */
+  engines?: () => ReadonlyMap<number, string>;
   /** After each timed sample: other once-a-sample checks ride the same timer. */
   afterSample?: () => void;
 }
@@ -103,7 +105,7 @@ export function createProcessSampler(options: ProcessSamplerOptions) {
 
   const take = (list: ProcessList, driftMs: number) => {
     const at = monotonic();
-    const buckets = classifyProcesses(list.rows, serverPid, options.scope === "tree");
+    const buckets = classifyProcesses(list.rows, serverPid, options.scope === "tree", options.engines?.());
     const cpu: Partial<Record<ProcessBucket, number>> = {}, procs: Partial<Record<ProcessBucket, number>> = {}, rss: Partial<Record<ProcessBucket, number>> = {};
     const rows = new Map<number, { start: string; cpuMs: number; bucket: ProcessBucket; ppid: number }>();
     let browsers = 0;

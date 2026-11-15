@@ -1,11 +1,12 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { EngineLimitsReport } from "../../shared/limit-reset.ts";
+import type { RuntimeEvent } from "../contracts.ts";
 import { createPerfDiagnosticsRoutes, PERF_DIAGNOSTICS_PATH } from "../routes/perf-diagnostics.ts";
 import { PASS, type RouteContext } from "../routes/table.ts";
-import { createPerfHost, LOG_EVERY_MS, rateLimitedLog } from "./perf-host.ts";
+import { createPerfHost, LOG_EVERY_MS, PERF_FILE, PERF_UNAVAILABLE, rateLimitedLog } from "./perf-host.ts";
 import { createProcessSampler } from "./process-sampler.ts";
 
 const dirs: string[] = [];
@@ -36,10 +37,10 @@ describe("slow-event log lines", () => {
       limits: () => { if (!limits) throw new ReferenceError("not made yet"); return limits; },
       bus: { subscribe: () => () => {} }, store: { onChange: () => () => {}, botByThread: () => null },
     });
-    expect(host.health().holds).toEqual([]);
+    expect(host.health()?.holds).toEqual([]);
     host.checkHolds();
     limits = { checkedAt: clock, engines: [{ engine: "claude-2", name: "Ada's Claude", driver: "claude", window: "weekly", usedPercent: 100, resetsAt: clock + 3_600_000, blocked: true }] };
-    expect(host.health().holds).toEqual([{ driver: "claude", window: "weekly", usedPercent: 100, resetsAt: clock + 3_600_000, blocked: true, held: false }]);
+    expect(host.health()?.holds).toEqual([{ driver: "claude", window: "weekly", usedPercent: 100, resetsAt: clock + 3_600_000, blocked: true, held: false }]);
     expect(host.text()).toContain("Usage limits now: claude weekly 100% refusing work until");
     host.checkHolds();
     host.checkHolds();
@@ -48,6 +49,38 @@ describe("slow-event log lines", () => {
     host.checkHolds();
     expect(lines).toEqual(["[perf] usage limit hold started: claude:weekly", "[perf] usage limit hold ended: claude:weekly"]);
     host.stop();
+  });
+});
+
+describe("the host's guard rails", () => {
+  it("saves the turns since the last write when the server shuts down", () => {
+    const dir = mkdtempSync(join(tmpdir(), "perf-host-"));
+    dirs.push(dir);
+    const listeners: Array<(event: RuntimeEvent) => void> = [];
+    const sampler = createProcessSampler({ list: () => null, intervalMs: 60_000, scope: "tree" });
+    const host = createPerfHost({ dataDir: dir, timer: false, sampler, wholeMachine: false, log: () => {},
+      bus: { subscribe: (listener) => { listeners.push(listener); return () => {}; } }, store: { onChange: () => () => {}, botByThread: () => null } });
+    host.timings.flush();
+    for (const type of ["turn.started", "turn.completed"]) for (const listener of listeners) listener({ eventId: "e", provider: "codex", threadId: "th_1", createdAt: "", turnId: "tu_1", type, ok: true } as RuntimeEvent);
+    expect(JSON.parse(readFileSync(join(dir, PERF_FILE), "utf8")).ring).toEqual([]);
+    host.stop();
+    expect(JSON.parse(readFileSync(join(dir, PERF_FILE), "utf8")).ring).toMatchObject([{ turnId: "tu_1", threadId: "th_1" }]);
+  });
+
+  it("a recorder that throws costs a log line, never its caller: no event, report or export fails", () => {
+    const dir = mkdtempSync(join(tmpdir(), "perf-host-"));
+    dirs.push(dir);
+    const lines: string[] = [];
+    const listeners: Array<(event: RuntimeEvent) => void> = [];
+    const broken = { report: () => { throw new RangeError("x"); }, start() {}, stop() {}, sampleNow: async () => {} } as unknown as ReturnType<typeof createProcessSampler>;
+    const host = createPerfHost({ dataDir: dir, timer: false, sampler: broken, wholeMachine: false, log: (line) => lines.push(line),
+      bus: { subscribe: (listener) => { listeners.push(listener); return () => {}; } }, store: { onChange: () => () => {}, botByThread: () => { throw new Error("store"); } } });
+    expect(() => listeners[0]!({ eventId: "e", provider: "codex", threadId: "th_1", createdAt: "", turnId: "tu_1", type: "turn.started" } as RuntimeEvent)).not.toThrow();
+    expect(host.health()).toBeNull();
+    expect(host.lines({ threadIds: [], botIds: [] })).toEqual(PERF_UNAVAILABLE);
+    expect(host.text()).toBe(PERF_UNAVAILABLE.join("\n"));
+    expect(lines).toEqual(["[perf] the performance recorder failed (event): Error", "[perf] the performance recorder failed (health): RangeError",
+      "[perf] the performance recorder failed (lines): RangeError", "[perf] the performance recorder failed (text): RangeError"]);
   });
 });
 

@@ -18,7 +18,11 @@ export type FailoverWhy = "limit" | "signed-out";
 /** Stop reasons drivers settle a turn with that may be shown as they are; any other becomes "other". */
 const STOP_CODES: ReadonlySet<string> = new Set(["ok", "interrupted", "auth_required", "rpc_error", "shutdown_timeout", "provider_safety",
   "update_required", "spawn_error", "quota", "tool_error", "exit_before_result", "error_during_execution", "error", "failed", "cap",
-  "max_tokens", "stalled", "stdin_write_failed", "timeout"]);
+  "max_tokens", "stalled", "stdin_write_failed", "timeout", "waiting_on_person", "other"]);
+/** Why drivers say they retry (classifyError's reasons and the chat runtime's own); any other becomes "other". */
+const RETRY_CODES: ReadonlySet<string> = new Set(["rate_limited", "overloaded", "server_error", "connection_reset", "timeout", "auth", "quota",
+  "unknown_model", "invalid_request", "not_found", "interrupted", "unknown", "provider_safety", "terminal_exit", "tool_limit", "request_too_large",
+  "tool_use_failed", "stream_truncated", "api_error", "max_output_tokens", "compression", "retry", "other"]);
 
 export const ID = /^[A-Za-z0-9_-]{1,64}$/;
 export const KIND = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
@@ -62,7 +66,7 @@ export function toolKindOf(title: string | undefined, summary: string | undefine
 export const stopCode = (ok: boolean, stopReason: unknown): string =>
   ok ? "ok" : typeof stopReason === "string" && STOP_CODES.has(stopReason) ? stopReason : stopReason ? "other" : "failed";
 
-export const retryCode = (reason: unknown): string => matchOr(CODE, reason, "other");
+export const retryCode = (reason: unknown): string => (typeof reason === "string" && RETRY_CODES.has(reason) ? reason : "other");
 
 const count = (value: unknown, max = 1e10): number =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.min(Math.round(value), max) : 0;
@@ -91,6 +95,14 @@ export function parseTurnTiming(value: unknown): TurnTiming | null {
     tools,
   };
 }
+
+export const isRetryCode = (value: string): boolean => RETRY_CODES.has(value);
+
+/** A turn's time less its wait on a person: what "slow" is judged on, so an unanswered card never makes a turn slow. */
+export const activeMs = (turn: Pick<TurnTiming, "ms">): number => Math.max(0, (turn.ms.total ?? 0) - (turn.ms.person ?? 0));
+
+/** A count map safe for keys from outside (`__proto__`, `constructor`): no prototype to fall through to. */
+export const counter = (): Record<string, number> => Object.create(null) as Record<string, number>;
 
 export const isToolKind = (value: unknown): value is ToolKind => TOOL_KINDS.has(value as string);
 export const isLimitScope = (value: unknown): value is LimitScope => LIMIT_SCOPES.has(value as string);

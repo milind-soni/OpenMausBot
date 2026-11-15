@@ -12,10 +12,12 @@ export type Phase = (typeof PHASES)[number];
 export type PhaseMs = Partial<Record<Phase, number>>;
 
 /** Upper bucket edges, ms; one more bucket counts everything slower. A percentile read from them is the edge of its
- * bucket, so it errs high by at most the step to the next edge (about 1.5x). */
+ * bucket (never above the largest value seen), so it reads high by at most the step to that edge: x1.28 from 100 ms to
+ * 5 s, where handshakes and first tokens fall, x1.5 elsewhere, and up to 50 ms below 50 ms. */
 export const BUCKET_EDGES_MS = [
-  100, 250, 500, 1_000, 2_000, 3_000, 5_000, 7_500, 10_000, 15_000, 20_000, 30_000, 45_000, 60_000, 90_000,
-  120_000, 180_000, 300_000, 450_000, 600_000, 900_000, 1_200_000, 1_800_000, 2_700_000, 3_600_000, 5_400_000, 7_200_000,
+  50, 75, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1_000, 1_250, 1_600, 2_000, 2_500, 3_200, 4_000, 5_000,
+  7_500, 10_000, 15_000, 20_000, 30_000, 45_000, 60_000, 90_000, 120_000, 180_000, 240_000, 300_000, 450_000, 600_000,
+  900_000, 1_200_000, 1_800_000, 2_700_000, 3_600_000, 5_400_000, 7_200_000,
 ] as const;
 const BUCKETS = BUCKET_EDGES_MS.length + 1;
 

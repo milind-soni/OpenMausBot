@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RuntimeEvent } from "../contracts.ts";
-import { createTurnTimings, RING_CAP, type SlowNote } from "./turn-timings.ts";
+import { createTurnTimings, LIVE_TTL_MS, RING_CAP, type SlowNote } from "./turn-timings.ts";
 
 const START = 1_800_000_000_000;
 const dirs: string[] = [];
@@ -169,5 +169,136 @@ describe("the ring and its file", () => {
     expect(recent[0]!.turnId).toBe("t26");
     expect(recent.at(-1)).toMatchObject({ threadId: null, engine: null, tools: [] });
     expect(again.day().turns).toBe(RING_CAP + 25);
+  });
+});
+
+describe("turns that never ran", () => {
+  it("a start refused by a usage limit with a backup AI: one refused record with its limit, the backup's turn with the move, nothing left running", () => {
+    const w = world();
+    w.say();
+    w.emit({ type: "turn.started" }, "thread_1", "turn_refused");
+    w.advance(2_000);
+    w.timings.noteNotStarted("thread_1", "turn_refused", { limit: "engine", engine: "claudeAgent", resetsAt: START + 3_600_000 });
+    w.timings.noteFailover("thread_1", "limit");
+    w.advance(500);
+    w.timings.noteEvent({ eventId: "e", provider: "codex", threadId: "thread_1", createdAt: "", turnId: "turn_backup", type: "turn.started" } as RuntimeEvent);
+    w.advance(3_000);
+    w.timings.noteEvent({ eventId: "e", provider: "codex", threadId: "thread_1", createdAt: "", turnId: "turn_backup", type: "turn.completed", ok: true } as RuntimeEvent);
+    expect(w.timings.recent().map(({ turnId, engine, stop, limit, failover }) => ({ turnId, engine, stop, limit, failover }))).toEqual([
+      { turnId: "turn_refused", engine: "claudeAgent", stop: "quota", limit: "engine", failover: undefined },
+      { turnId: "turn_backup", engine: "codex", stop: "ok", limit: undefined, failover: "limit" },
+    ]);
+    expect(w.timings.day()).toMatchObject({ turns: 2, limits: { "claudeAgent:engine": 1 }, failovers: 1 });
+    expect(w.timings.live()).toEqual([]);
+    expect(w.slow.map((note) => note.kind)).toEqual(["limit"]);
+  });
+
+  it("a start refused with no backup leaves no phantom running turn", () => {
+    const w = world();
+    w.emit({ type: "turn.started" }, "thread_1", "turn_refused");
+    w.timings.noteNotStarted("thread_1", "turn_refused", { signedOut: true });
+    expect(w.timings.live()).toEqual([]);
+    expect(w.timings.recent()).toMatchObject([{ turnId: "turn_refused", stop: "auth_required", ok: false }]);
+  });
+
+  it("the server's own refusal before any engine ran counts the limit, times no turn, and leaves another thread's turn alone", () => {
+    const w = world();
+    w.emit({ type: "turn.started" }, "thread_2", "turn_other");
+    w.timings.noteNotStarted("thread_1", "signed-out-1", { limit: "model", engine: "claudeAgent" });
+    w.timings.noteNotStarted("thread_2", "not-that-turn", {});
+    expect(w.timings.day()).toMatchObject({ turns: 0, limits: { "claudeAgent:model": 1 } });
+    expect(w.timings.live()).toHaveLength(1);
+  });
+
+  it("a turn replaced by a new one in its thread is finished as stopped, not dropped", () => {
+    const w = world();
+    w.emit({ type: "turn.started" }, "thread_1", "turn_a");
+    w.advance(1_000);
+    w.emit({ type: "turn.started" }, "thread_1", "turn_b");
+    expect(w.timings.recent()).toMatchObject([{ turnId: "turn_a", stop: "other", ok: false, ms: { total: 1_000 } }]);
+    expect(w.timings.live()).toMatchObject([{ state: "model" }]);
+  });
+});
+
+describe("a message whose turn never starts", () => {
+  it("does not time the next turn from it, three hours on", () => {
+    for (const end of ["refused", "failure row", "age"] as const) {
+      const w = world();
+      w.say();
+      if (end === "refused") w.timings.noteNotStarted("thread_1", null);
+      if (end === "failure row") w.timings.noteMessage("thread_1", { at: w.now(), role: "bot", kind: "activity", tool: { name: "error: x", ok: false } } as never);
+      w.advance(3 * 3_600_000);
+      w.say();
+      w.advance(1_000);
+      w.emit({ type: "turn.started" });
+      w.emit({ type: "turn.completed", ok: true });
+      expect(w.timings.recent()[0]!.ms.queue, end).toBe(1_000);
+    }
+  });
+
+  it("keeps the wait across the server's own notices while the turn waits", () => {
+    const w = world();
+    w.say();
+    w.timings.noteHeld("thread_1", "memory");
+    w.timings.noteMessage("thread_1", { at: w.now(), role: "bot", kind: "activity", tool: { name: "notice: Waiting for memory", ok: true } } as never);
+    w.advance(90_000);
+    w.emit({ type: "turn.started" });
+    w.emit({ type: "turn.completed", ok: true });
+    expect(w.timings.recent()[0]).toMatchObject({ queueWhy: "memory", ms: { queue: 90_000 } });
+  });
+});
+
+describe("what counts as slow, and odd clocks", () => {
+  it("time waiting on a person never makes a turn slow, and is still reported", () => {
+    const w = world({ slowTurnMs: 60_000 });
+    w.emit({ type: "turn.started" });
+    w.emit({ type: "request.opened", requestType: "question", tool: "AskUserQuestion", summary: "s" });
+    w.advance(20 * 60_000);
+    w.emit({ type: "request.resolved", behavior: "answer", source: "user" });
+    w.advance(30_000);
+    w.emit({ type: "turn.completed", ok: true });
+    expect(w.timings.recent()[0]!.ms).toMatchObject({ person: 20 * 60_000, total: 20 * 60_000 + 30_000 });
+    expect(w.timings.day().slow).toEqual([0, 0, 0]);
+    expect(w.timings.window().slow).toEqual([0, 0, 0]);
+    expect(w.slow).toEqual([]);
+  });
+
+  it("a clock set back mid-turn gives zero, never a negative duration", () => {
+    const w = world();
+    w.emit({ type: "turn.started" });
+    w.advance(-10_000);
+    w.emit({ type: "session.started", sessionId: null });
+    w.emit({ type: "content.delta", streamKind: "assistant_text", delta: "x" });
+    const [live] = w.timings.live();
+    expect(live!.ageMs).toBe(0);
+    expect(live!.stateMs).toBe(0);
+    w.emit({ type: "turn.completed", ok: true });
+    const { ms } = w.timings.recent()[0]!;
+    expect(Object.values(ms).every((value) => value >= 0)).toBe(true);
+    expect(ms).toMatchObject({ handshake: 0, ttft: 0, total: 0 });
+  });
+
+  it("a turn past the live limit leaves the running list; one waiting on a person is finished as such", () => {
+    const w = world();
+    w.emit({ type: "turn.started" }, "thread_1", "lost");
+    w.emit({ type: "turn.started" }, "thread_2", "asking");
+    w.emit({ type: "request.opened", requestType: "question", tool: "AskUserQuestion", summary: "s" }, "thread_2", "asking");
+    w.advance(LIVE_TTL_MS + 1);
+    expect(w.timings.live()).toEqual([]);
+    expect(w.timings.recent()).toMatchObject([{ turnId: "asking", stop: "waiting_on_person", ms: { person: LIVE_TTL_MS + 1 } }]);
+  });
+
+  it("keys from outside never reach an object's prototype", () => {
+    const w = world();
+    w.emit({ type: "turn.started" });
+    for (const reason of ["constructor", "__proto__", "toString", "hasOwnProperty", "rate_limited"]) w.emit({ type: "turn.retrying", attempt: 1, delayMs: 0, reason });
+    w.emit({ type: "turn.completed", ok: false, stopReason: "constructor" });
+    w.timings.noteNotStarted("thread_9", null, { limit: "engine", engine: "__proto__" });
+    w.timings.noteNotStarted("thread_9", null, { limit: "engine", engine: "constructor" });
+    const day = w.timings.day();
+    expect({ ...day.retries.why }).toEqual({ other: 4 });
+    expect(w.timings.recent()[0]).toMatchObject({ retryWhy: ["other", "other", "other", "other"], stop: "other" });
+    expect(Object.keys(day.limits).sort()).toEqual(["constructor:engine", "unknown:engine"]);
+    expect(JSON.stringify(day)).not.toContain("native code");
   });
 });

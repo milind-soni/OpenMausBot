@@ -257,8 +257,10 @@ export interface CloudHealthDeps {
   room?: () => RoomReport;
   /** CPU steal and pressure, boot and wake times, and how long messages wait for their engine. */
   speed?: CloudSpeed;
-  /** Turn phase timings, usage-limit holds, process buckets and event-loop lag: at most PERF_HEALTH_MAX_BYTES. */
-  perf?: () => PerfHealth;
+  /** Turn phase timings, usage-limit holds, process buckets and event-loop lag: at most PERF_HEALTH_MAX_BYTES. A throw
+   * reads as null: the Admin restarts a home whose health read fails, so this optional part never fails it. */
+  perf?: () => PerfHealth | null;
+  log?: (line: string) => void;
   now?: () => number;
 }
 
@@ -279,6 +281,13 @@ export function createCloudHealth(deps: CloudHealthDeps) {
   deps.bus.subscribe((event) => { ledger.noteEvent(event); speed.noteEvent(event); });
   const connectors = backgroundLookup(deps.connectors, CONNECTORS_TTL_MS, now);
   const version = match(VERSION, deps.version) ?? "unknown", image = match(IMAGE, deps.image);
+  let perfWarnedAt = -Infinity;
+  const perf = () => {
+    try { return deps.perf?.() ?? null; } catch (error) {
+      if (now() - perfWarnedAt >= 60_000) { perfWarnedAt = now(); (deps.log ?? console.warn)(`cloud health: perf left out: ${error instanceof Error ? error.name : "error"}`); }
+      return null;
+    }
+  };
 
   const engines = () => {
     const used = new Set(deps.store.bots.flatMap((bot) => bot.modelSelection ? [bot.modelSelection.instanceId] : []));
@@ -307,7 +316,7 @@ export function createCloudHealth(deps: CloudHealthDeps) {
         turns: read.turns, routines: read.routines, engines: engines(), connectors: connectorState(),
         browser: { available: browser.available, installing: browser.installing, interrupted: browser.interrupted },
         box: boxSummary(deps.box?.()),
-        firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null, speed: speed.report(), perf: deps.perf?.() ?? null,
+        firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null, speed: speed.report(), perf: perf(),
         system: { ...memory, rssBytes: process.memoryUsage.rss(), load1: loadavg()[0] ?? 0, cpus: availableParallelism(), disk: diskBytes(deps.dataDir), eventLogWritable: writable(deps.eventsDir) },
       };
       let budget = CLOUD_HEALTH_MAX_BYTES - JSON.stringify({ ...base, cursor: ledger.cursor(read.seq), truncated: true, incidents: [] }).length;

@@ -33,8 +33,7 @@ const RUNTIMES = new Set(["node", "npx", "npm exec", "uv", "uvx", "python", "pyt
 const RUNTIME_PREFIXES = ["python3."];
 
 export function nameBucket(name: string): ProcessBucket | null {
-  const engine = ENGINE_NAMES[name];
-  if (engine) return `engine:${engine}`;
+  if (Object.hasOwn(ENGINE_NAMES, name)) return `engine:${ENGINE_NAMES[name]!}`;
   if (BROWSER_PREFIXES.some((prefix) => name.startsWith(prefix))) return "browser";
   if (COMPUTER_NAMES.has(name) || COMPUTER_PREFIXES.some((prefix) => name.startsWith(prefix))) return "computer";
   if (BUILD_NAMES.has(name)) return "build";
@@ -44,12 +43,15 @@ export function nameBucket(name: string): ProcessBucket | null {
 const runtime = (name: string) => RUNTIMES.has(name) || RUNTIME_PREFIXES.some((prefix) => name.startsWith(prefix));
 const INHERITED: ReadonlySet<ProcessBucket> = new Set(["browser", "computer", "mcp", "build", "commands"]);
 
+const ENGINE_KIND = /^[A-Za-z][A-Za-z0-9-]{0,47}$/;
+
 /**
- * Every row's bucket. A row named on a list is that; a runtime an engine or the server started is an MCP server; anything
+ * Every row's bucket. A pid the server knows runs an engine is that engine, whatever its executable (an engine started
+ * through `node`); a row named on a list is that; a runtime an engine or the server started is an MCP server; anything
  * else under an engine or the server is a command a bot ran; below those, a row takes its parent's. With `treeOnly`,
  * rows that do not descend from the server are left out.
  */
-export function classifyProcesses(rows: readonly ProcessRow[], serverPid: number, treeOnly: boolean): Map<number, ProcessBucket> {
+export function classifyProcesses(rows: readonly ProcessRow[], serverPid: number, treeOnly: boolean, engines: ReadonlyMap<number, string> = new Map()): Map<number, ProcessBucket> {
   const byPid = new Map(rows.map((row) => [row.pid, row]));
   const out = new Map<number, ProcessBucket | null>();
   const visit = (row: ProcessRow, depth: number): ProcessBucket | null => {
@@ -60,7 +62,8 @@ export function classifyProcesses(rows: readonly ProcessRow[], serverPid: number
     else {
       const parent = row.ppid !== row.pid && depth < 64 ? byPid.get(row.ppid) : undefined;
       const above = parent ? visit(parent, depth + 1) : null;
-      const named = nameBucket(row.name);
+      const engineKind = engines.get(row.pid);
+      const named: ProcessBucket | null = engineKind !== undefined ? `engine:${ENGINE_KIND.test(engineKind) ? engineKind : "unknown"}` : nameBucket(row.name);
       if (treeOnly && above === null) bucket = null;
       else if (named) bucket = named;
       else if (above === "server" || above?.startsWith("engine:")) bucket = runtime(row.name) ? "mcp" : "commands";

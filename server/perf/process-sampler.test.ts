@@ -25,6 +25,17 @@ describe("process buckets, from the executable's name and parent only", () => {
     expect([...tree.keys()].sort((a, b) => a - b)).toEqual([100, 200, 201, 202, 203, 204, 205, 300, 301, 401, 600]);
   });
 
+  it("never takes a bucket from an object's prototype", () => {
+    const rows = ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"].map((name, index) => row(200 + index, 1, name));
+    expect(new Set(classifyProcesses(rows, SERVER, false).values())).toEqual(new Set(["other"]));
+  });
+
+  it("files a pid the server knows runs an engine under that engine, whatever its executable", () => {
+    const rows = [row(SERVER, 1, "node"), row(200, SERVER, "node"), row(201, 200, "node"), row(202, SERVER, "node"), row(203, SERVER, "node")];
+    const buckets = classifyProcesses(rows, SERVER, true, new Map([[200, "geminiAgent"], [203, "claude --key sk-x"]]));
+    expect(Object.fromEntries(buckets)).toEqual({ 100: "server", 200: "engine:geminiAgent", 201: "mcp", 202: "mcp", 203: "engine:unknown" });
+  });
+
   it("survives a parent loop and a missing parent", () => {
     expect(Object.fromEntries(classifyProcesses([row(7, 8, "a"), row(8, 7, "b"), row(9, 999, "bash")], SERVER, false))).toEqual({ 7: "other", 8: "other", 9: "other" });
   });

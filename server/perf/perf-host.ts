@@ -7,7 +7,8 @@ import type { RuntimeEvent } from "../contracts.ts";
 import type { StoreChange } from "../store.ts";
 import { duration, limitHolds, perfHealth, perfLines, turnLine, type PerfHealth } from "./perf-report.ts";
 import { createProcessSampler, linuxProcessList, LINUX_SAMPLE_MS, nodeUtilization, OTHER_SAMPLE_MS, psProcessList, type ProcessSampler } from "./process-sampler.ts";
-import { createTurnTimings, type SlowNote, type TurnTimings } from "./turn-timings.ts";
+import type { FailoverWhy } from "./turn-record.ts";
+import { createTurnTimings, type Refusal, type SlowNote, type TurnTimings } from "./turn-timings.ts";
 
 export const PERF_FILE = "perf-timings.json";
 /** One line per kind of slow event at most this often; the ones held back are counted on the next. */
@@ -27,7 +28,12 @@ export interface PerfHostDeps {
   timer?: false;
   now?: () => number;
   sampler?: ProcessSampler;
+  /** The engine processes the server tracks, with the threads each runs (engine-memory, on a Cloud home). */
+  engines?: () => ReadonlyArray<{ pid: number; threads: readonly string[] }>;
 }
+
+/** What a report shows when the recorder failed: diagnostics never fail because of it. */
+export const PERF_UNAVAILABLE = ["## Performance", "(timings unavailable: the recorder failed; see the server log)"];
 
 /** A log line per kind at most every LOG_EVERY_MS. */
 export function rateLimitedLog(log: (line: string) => void, now: () => number) {
@@ -53,8 +59,12 @@ export function createPerfHost(deps: PerfHostDeps) {
     file: join(deps.dataDir, PERF_FILE), now, botOf: (threadId) => deps.store.botByThread(threadId)?.id ?? null,
     slow: (note) => say(note.kind, slowLine(note, now())),
   });
-  deps.store.onChange((change) => { if (change.type === "message") timings.noteMessage(change.threadId, change.message); });
-  deps.bus.subscribe((event) => timings.noteEvent(event));
+  /** Runs `read`, or logs once a minute and returns `fallback`: nothing the recorder does may fail its caller. */
+  const guarded = <T>(what: string, read: () => T, fallback: T): T => {
+    try { return read(); } catch (error) { say(`failed:${what}`, `the performance recorder failed (${what}): ${error instanceof Error ? error.name : "error"}`); return fallback; }
+  };
+  deps.store.onChange((change) => { if (change.type === "message") guarded("message", () => timings.noteMessage(change.threadId, change.message), undefined); });
+  deps.bus.subscribe((event) => guarded("event", () => timings.noteEvent(event), undefined));
 
   /** The limit clock is made after this host; until it is, there are no limits to read. */
   const limits = () => { try { return deps.limits?.() ?? null; } catch { return null; } };
@@ -65,10 +75,11 @@ export function createPerfHost(deps: PerfHostDeps) {
     for (const key of held) if (!current.has(key)) say(`hold:${key}`, `usage limit hold ended: ${key}`);
     held = current;
   };
+  const enginePids = () => new Map((deps.engines?.() ?? []).map(({ pid, threads }) => [pid, threads.map(timings.engineOf).find((kind) => kind !== null) ?? "unknown"] as const));
   const linux = process.platform === "linux", windows = process.platform === "win32";
   const sampler = deps.sampler ?? createProcessSampler({
     list: linux ? () => linuxProcessList() : psProcessList, intervalMs: linux ? LINUX_SAMPLE_MS : OTHER_SAMPLE_MS,
-    scope: deps.wholeMachine && linux ? "all" : "tree", utilization: nodeUtilization(), now,
+    scope: deps.wholeMachine && linux ? "all" : "tree", utilization: nodeUtilization(), now, engines: enginePids,
     stalled: (ms) => say("loop", `event loop stalled: the ${linux ? 60 : 300}s sampler fired ${duration(ms)} late`), afterSample: watchHolds,
   });
   if (deps.timer !== false && !windows) sampler.start();
@@ -77,20 +88,22 @@ export function createPerfHost(deps: PerfHostDeps) {
   return {
     timings,
     sampler,
-    noteHeld: timings.noteHeld,
-    noteFailover: timings.noteFailover,
+    noteHeld: (threadId: string, why: "plan-limit" | "memory") => guarded("held", () => timings.noteHeld(threadId, why), undefined),
+    noteFailover: (threadId: string, why: FailoverWhy) => guarded("failover", () => timings.noteFailover(threadId, why), undefined),
+    noteNotStarted: (threadId: string, turnId: string | null, refusal?: Refusal) => guarded("refused", () => timings.noteNotStarted(threadId, turnId, refusal), undefined),
     /** Logs a usage-limit hold that started or ended since the last check; the sampler runs it after each sample. */
     checkHolds: watchHolds,
-    health: (): PerfHealth => perfHealth(sources()),
+    health: (): PerfHealth | null => guarded("health", () => perfHealth(sources()), null),
     /** For a @devs report: these conversations' and bots' latest turns, then everything else. */
     lines(filter: { threadIds: readonly string[]; botIds: readonly string[] }): string[] {
-      return perfLines(sources(), timings.recent({ ...filter, limit: RECENT_IN_REPORT }), "Latest turns in this conversation or of its bots, newest last:");
+      return guarded("lines", () => perfLines(sources(), timings.recent({ ...filter, limit: RECENT_IN_REPORT }), "Latest turns in this conversation or of its bots, newest last:"), PERF_UNAVAILABLE);
     },
     /** For the desktop's diagnostics export: every bot's latest turns. */
     text(): string {
-      return perfLines(sources(), timings.recent({ limit: RECENT_IN_REPORT }), "Latest turns, newest last:").join("\n");
+      return guarded("text", () => perfLines(sources(), timings.recent({ limit: RECENT_IN_REPORT }), "Latest turns, newest last:"), PERF_UNAVAILABLE).join("\n");
     },
-    stop() { sampler.stop(); timings.flush(); },
+    /** The graceful shutdown: no more samples, and the turns since the last save written now. */
+    stop() { sampler.stop(); guarded("save", () => timings.flush(), undefined); },
   };
 }
 export type PerfHost = ReturnType<typeof createPerfHost>;

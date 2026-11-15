@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -62,7 +62,6 @@ async function seeded() {
     message(threadId, `${SECRETS.join(" ")} please`);
     advance(4_000);
     emit(threadId, { type: "turn.started" });
-    emit(threadId, { type: "turn.started", provider: "claudeAgent --token sk-ant-api03-PRIVATEPRIVATEPRIVATE1234567890" });
     emit(threadId, { type: "session.started", sessionId: "ada@example.test", model: "Ada's Claude" });
     emit(threadId, { type: "content.delta", streamKind: "assistant_text", delta: SECRETS.join("\n") });
     emit(threadId, { type: "item.started", itemType: "tool", itemId: "x1", title: "mcp__acme-internal__lookup_customer", input: SECRETS.join(" ") });
@@ -80,6 +79,11 @@ async function seeded() {
     advance(10_000);
     emit(threadId, { type: "turn.completed", ok: false, stopReason: "OMB_SECRET_VALUE_42 at /Users/ada/Projects/acme-merger/plan.md" });
   }
+  const poisoned = { provider: "claudeAgent --token sk-ant-api03-PRIVATEPRIVATEPRIVATE1234567890", turnId: "turn_poisoned" };
+  emit("thread_ok", { type: "turn.started", ...poisoned });
+  emit("thread_ok", { type: "runtime.error", message: "x", limit: "engine", ...poisoned });
+  emit("thread_ok", { type: "turn.completed", ok: false, stopReason: "quota", ...poisoned });
+  perf.noteNotStarted("thread_ok", null, { limit: "credits", engine: "hunter2-password at https://intranet.acme.test/q?token=abc" });
   emit("thread_ok", { type: "turn.started", turnId: "turn_live" });
   emit("thread_ok", { type: "item.started", itemType: "tool", itemId: "y", title: "mcp__acme-internal__lookup_customer", turnId: "turn_live" });
   advance(30_000);
@@ -102,7 +106,9 @@ describe("performance diagnostics carry no content", () => {
     const text = perf.text();
     const saved = readFileSync(join(dir, PERF_FILE), "utf8");
     expect(logged.length).toBeGreaterThan(0);
-    expect(health).toContain('"turns":3');
+    expect(health).toContain('"turns":4');
+    expect(perf.timings.recent().find((turn) => turn.turnId === "turn_poisoned")).toMatchObject({ engine: null, limit: "engine" });
+    expect(Object.keys(perf.timings.day().limits).sort()).toEqual(["claudeAgent:engine", "unknown:credits", "unknown:engine"]);
     expect(report.diagnostics).toContain("## Performance");
     expect(report.diagnostics).toContain("thread_ok");
     expect(text).toContain("mcp ");
@@ -119,8 +125,33 @@ describe("performance diagnostics carry no content", () => {
       browser: () => ({ available: true, installing: false, interrupted: 0 }), now: () => START };
     expect(createCloudHealth(base).report(undefined).perf).toBeNull();
     const report = createCloudHealth({ ...base, perf: perf.health }).report(undefined);
-    expect(report.perf).toMatchObject({ v: 1, h24: { turns: 3, failovers: 3, limits: { "claudeAgent:engine": 3 } }, holds: [{ driver: "claude", window: "5-hour", blocked: true }] });
+    expect(report.perf).toMatchObject({ v: 1, h24: { turns: 4, failovers: 3, limits: { "claudeAgent:engine": 3 } }, holds: [{ driver: "claude", window: "5-hour", blocked: true }] });
     expect(leaks(JSON.stringify(report.perf))).toEqual([]);
+  });
+});
+
+describe("a tampered file read back", () => {
+  it("passes nothing but checked fields: every string a secret, every key a trap", () => {
+    const dir = mkdtempSync(join(tmpdir(), "perf-tampered-"));
+    dirs.push(dir);
+    const file = join(dir, PERF_FILE);
+    const bad = SECRETS.join(" ");
+    const hour = Math.floor(START / 3_600_000);
+    writeFileSync(file, JSON.stringify({ v: 1,
+      ring: [{ startedAt: START - 5_000, endedAt: START - 1_000, ok: true, stop: bad, turnId: bad, threadId: "/Users/ada/Projects/acme-merger/plan.md", botId: "ada@example.test",
+        engine: "https://intranet.acme.test/q?token=abc", queueWhy: bad, retryWhy: [bad, "__proto__", "constructor"], limit: bad, failover: bad, retries: 1, backoffMs: 1,
+        ms: { total: 4_000, [bad]: 1, __proto__: { polluted: 1 } }, tools: [{ kind: bad, n: 1 }, { kind: "browser", n: 1, ms: 9, max: 9, errors: 0, open: 0, extra: bad }] }],
+      day: [{ hour, turns: 1, failed: 0, slow: [0, 0, 0], failovers: 0, phases: { total: { counts: [bad], max: 1, sum: 1 } },
+        tools: { [bad]: { hist: {} }, constructor: { hist: {} } }, retries: { turns: 1, n: 1, backoffMs: 1, why: { [bad]: 1, toString: 2, overloaded: 1 } },
+        limits: { [bad]: 1, "constructor:engine": 1, [`${bad}:engine`]: 1 } }] }));
+    const timings = createTurnTimings({ file, now: () => START });
+    const out = JSON.stringify({ recent: timings.recent(), hour: timings.window(), day: timings.day(),
+      health: perfHealth({ hour: timings.window(), day: timings.day(), live: timings.live(), limits: null, process: null }) });
+    expect(leaks(out)).toEqual([]);
+    expect(timings.recent()[0]).toMatchObject({ threadId: null, botId: null, engine: null, stop: "ok", retryWhy: ["other", "other", "other"], tools: [{ kind: "browser" }] });
+    expect({ ...timings.day().retries.why }).toEqual({ overloaded: 1 });
+    expect({ ...timings.day().limits }).toEqual({ "constructor:engine": 1 });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 });
 
