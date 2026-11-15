@@ -540,16 +540,15 @@ export class Runtime {
   progress(id: string): void {
     const now = this.clock.now();
     const turn = this.turns.get(id);
-    const n = this.store.get(id);
     if (turn) {
       turn.activeAt = this.clock.monotonic();
       this.rootActivity.set(turn.rootId, now);
-    } else if (n?.status === "running") {
-      this.rootActivity.set(n.rootId, now);
     }
-    if (!n || n.status !== "running" || now - n.lastActivityAt < PROGRESS_WRITE_MS) return;
-    n.lastActivityAt = now;
     try {
+      const n = this.store.get(id);
+      if (!turn && n?.status === "running") this.rootActivity.set(n.rootId, now);
+      if (!n || n.status !== "running" || now - n.lastActivityAt < PROGRESS_WRITE_MS) return;
+      n.lastActivityAt = now;
       const root = n.rootId === n.id ? undefined : this.store.get(n.rootId);
       this.store.transaction(() => {
         this.store.update(n);
@@ -559,8 +558,8 @@ export class Runtime {
         }
       });
     } catch (error) {
-      // Bookkeeping only: a failed stamp never ends the turn or the caller that reported progress.
-      this.log(`progress(${id}) write failed: ${String(error)}`);
+      // Bookkeeping only: a failed read or stamp never ends the turn or the caller that reported progress.
+      this.log(`progress(${id}) failed: ${String(error)}`);
     }
   }
 
