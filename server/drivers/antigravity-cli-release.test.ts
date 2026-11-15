@@ -1,3 +1,7 @@
+// Adapted from pingdotgg/t3code@b732621b51, MIT License, Copyright (c) 2026
+// T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified:
+//   - apps/server/src/provider/antigravityCliRelease.test.ts (the manifest
+//     fixture, the table of platforms and the refused manifests).
 import { describe, expect, it } from "vitest";
 
 import { ANTIGRAVITY_CLI_MANIFEST_BASE, antigravityCliTarget, hostUsesMusl, latestAntigravityCliRelease, parseAntigravityCliRelease } from "./antigravity-cli-release.ts";
