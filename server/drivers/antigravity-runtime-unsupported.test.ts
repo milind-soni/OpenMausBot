@@ -7,6 +7,10 @@ vi.mock("./antigravity-release.ts", async (importOriginal) => ({
   ...await importOriginal<typeof import("./antigravity-release.ts")>(),
   resolveAntigravityReleaseAsset: () => null,
 }));
+vi.mock("./antigravity-cli-release.ts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./antigravity-cli-release.ts")>(),
+  antigravityCliTarget: () => null,
+}));
 
 const { resolveAntigravityRuntime } = await import("./antigravity-runtime.ts");
 
