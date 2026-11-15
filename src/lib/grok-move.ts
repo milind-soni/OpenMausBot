@@ -20,6 +20,36 @@ export function lookForGrokBot(): Promise<GrokLook> {
   );
 }
 
+/** The MausBot bot in Grok Bot: it sends each Bot's setup to the link below. */
+export const MAUSBOT_GROK_TEMPLATE_URL = "https://x.ai/bot/3i4Tvjckmdk05UwntFeNo";
+
+/** The link Grok Bot sends Bots to, when this app can make one, and what arrived through it. */
+export interface GrokConnector {
+  available: boolean;
+  connectorUrl?: string;
+  /** The link was made and no longer works; what arrived through it is still here. */
+  stopped: boolean;
+  arrived: GrokLook["files"];
+  /** The last arrival's number: the next look asks for what came after it. */
+  seq: number;
+}
+
+/** POST opens the link (or gives the one already open; a new one takes a few seconds), GET looks for what arrived after `after`, DELETE ends it. */
+export async function grokConnector(method: "GET" | "POST" | "DELETE", after = 0): Promise<GrokConnector> {
+  const answer = await api<{ available?: boolean; connectorUrl?: string; stopped?: boolean; arrived?: Array<{ seq: number; at: number; text: string }> } | null>(
+    `/api/setup-import/grok/connector${method === "GET" && after ? `?after=${after}` : ""}`,
+    { method, timeoutMs: 60_000, ...(method === "POST" ? { body: "{}" } : {}) },
+  );
+  const arrived = Array.isArray(answer?.arrived) ? answer.arrived : [];
+  return {
+    available: answer?.available === true,
+    ...(typeof answer?.connectorUrl === "string" ? { connectorUrl: answer.connectorUrl } : {}),
+    stopped: answer?.stopped === true,
+    arrived: arrived.map((item) => ({ name: String(item.seq), modifiedAt: item.at, text: item.text })),
+    seq: arrived.reduce((last, item) => Math.max(last, item.seq), after),
+  };
+}
+
 /** A refusal or an unreadable reply, in the person's words. */
 export function grokErrorText(cause: unknown): string {
   if (!(cause instanceof GrokImportError)) return cause instanceof Error ? cause.message : String(cause);
