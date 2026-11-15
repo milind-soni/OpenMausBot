@@ -73,7 +73,7 @@ export function HiddenEngines() {
       <p className="mt-2 text-[12px] text-ink-secondary">{t("engines.hiddenHint")}</p>
       <div className="mt-2 flex flex-col gap-1.5">
         {hidden.map((entry) => (
-          <div key={entry.instanceId} className="flex items-center justify-between gap-3 rounded-lg border border-hairline/40 bg-inset px-3 py-2">
+          <div key={entry.instanceId} className="flex items-center justify-between gap-3 rounded-lg bg-control px-3 py-2">
             <span className="min-w-0 truncate text-[13px] text-ink">{entry.displayName}</span>
             <button type="button" data-unhide-engine={entry.instanceId} disabled={busy !== null} onClick={() => unhide(entry.instanceId)}
               className="shrink-0 text-[12px] font-medium text-accent hover:underline disabled:opacity-50">
