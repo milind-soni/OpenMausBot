@@ -30,7 +30,7 @@ export function TailnetComputers({ c, state, blocked, simple }: { c: PhoneSetupC
           {on ? t("devices.route.turnOff") : t("devices.route.turnOn")}
         </button>
       </div>
-      {on && state.tailnetShare?.origin && <ServerPairingCard simple={simple} reveal={false} />}
+      {on && state.tailnetShare?.origin && <ServerPairingCard simple={simple} reveal={false} forComputer />}
     </div>
   );
 }

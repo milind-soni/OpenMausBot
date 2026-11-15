@@ -7126,5 +7126,8 @@
   "computer.recovery.restartTitle": "Ferma e riavvia questo computer cloud. I programmi aperti vengono chiusi; i suoi file restano.",
   "computer.recovery.replace": "Sostituisci computer",
   "computer.recovery.replaceTitle": "Elimina questo computer cloud e ne dà uno nuovo al bot. I file che sono solo lì vanno persi.",
-  "composer.command.burstDesc": "Esegui molte parti di un lavoro insieme, poi unisci i risultati"
+  "composer.command.burstDesc": "Esegui molte parti di un lavoro insieme, poi unisci i risultati",
+  "devices.computers.pairButton": "Associa un computer",
+  "devices.computers.pairTitle": "Associa un altro computer",
+  "devices.computers.typeCode": "Sull'altro computer, apri Connetti a un server in {app} e digita questo codice."
 }

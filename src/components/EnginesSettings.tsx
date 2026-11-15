@@ -6,6 +6,7 @@ import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./Engin
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotice, isApiKeyEngine } from "./EngineSetup";
 import { AppCopyNotice } from "./EngineAppCopy";
 import { forgetAppCopySwitches } from "@/state/engine-install";
@@ -19,6 +20,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
 import { SettingsFoldRow, SettingsGroup, SettingsMark, SettingsRows, StatusDot } from "./SettingsPrimitives";
 import { OllamaModels, ollamaShortStatus } from "./OllamaStatusLine";
+import { isAddedServer } from "@/lib/openai-compat-endpoints";
 import { InstanceProviderMark } from "./ProviderIcons";
 import { HiddenEngines, HiddenProviderRows, useHiddenProviders } from "./HiddenProviders";
 
@@ -327,9 +329,9 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
   );
 }
 
-/** Remove drops an added Antigravity account; Sign out forgets a signed-in account's sign-in (Antigravity's Google one, or
- * a CLI's own login such as Kimi's) and never hides the provider, which stays listed with Set up. */
-function EngineAccountAction({ instance, action, cli = false }: { instance: InstanceInfo; action: "remove" | "signOut"; cli?: boolean }) {
+/** Remove drops an added Antigravity account or an added server; Sign out forgets a signed-in account's sign-in (Antigravity's
+ * Google one, or a CLI's own login such as Kimi's) and never hides the provider, which stays listed with Set up. */
+function EngineAccountAction({ instance, action, cli = false, removeBody = "accounts.removeBodyAntigravity" }: { instance: InstanceInfo; action: "remove" | "signOut"; cli?: boolean; removeBody?: LocaleKey }) {
   const { state, dispatch, refreshInstances } = useStore();
   const [confirming, setConfirming] = useState(false);
   const [running, setRunning] = useState(false);
@@ -361,7 +363,7 @@ function EngineAccountAction({ instance, action, cli = false }: { instance: Inst
     </div>
     {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
     <ConfirmDialog open={confirming} title={t(remove ? "accounts.removeTitle" : "accounts.signOutTitle", { name: instance.displayName })}
-      body={remove ? t("accounts.removeBodyAntigravity") : cli
+      body={remove ? t(removeBody) : cli
         // The CLI's own sign-in is the one removed: its files in the home folder of the computer this app runs on.
         ? <>{t("accounts.signOutBody")}<span data-sign-out-cli="" className="mt-2 block">{t("accounts.signOutCliBody", { name: instance.displayName })}</span></>
         : t("accounts.signOutBody")}
@@ -399,6 +401,8 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
       {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} description={instance.codexEndpoint ? t("agentEndpoints.codexHint") : undefined} unframed />}
       {engineReady(instance) && <ApiKeyEngineManage instance={instance} className="mt-3" />}
       {engineReady(instance) && instance.serverKind === "ollama" && <OllamaModels instance={instance} className="mt-3" />}
+      {/* A server added by address (LM Studio, Ollama, a gateway) is removed here too, not only from API keys. */}
+      {isAddedServer(instance) && <div className="mt-3"><EngineAccountAction instance={instance} action="remove" removeBody="claudeEndpoints.removeBody" /></div>}
       {/* The setup panel that first said so is gone once the engine is Ready. */}
       {engineReady(instance) && <AppCopyNotice instance={instance} className="mt-3" />}
       {instance.snapshot.update && <EngineUpdateNotice update={instance.snapshot.update} instance={instance} className="mt-3" quiet />}

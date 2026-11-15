@@ -5,6 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { CompanionState, PhoneSetupController } from "./PhoneSetupFlow";
 import { TailnetComputers, tailnetShareLine } from "./TailnetComputers";
 
+vi.mock("./ServerPairingCard", async () => {
+  const { createElement: h } = await import("react");
+  return { ServerPairingCard: (props: { forComputer?: boolean }) => h("div", { "data-pairing-card": props.forComputer ? "computer" : "phone" }) };
+});
 vi.mock("../lib/session", async (original) => ({ ...await original<typeof import("../lib/session")>(), readSessionState: async () => ({ kind: "loopback" }) }));
 
 const controller = { busy: false, accountBusy: false, act: async () => {} } as unknown as PhoneSetupController;
@@ -48,5 +52,9 @@ describe("the row under the Tailscale route", () => {
     expect(on).toContain("Turn off");
     expect(on).toContain("data-tailnet-share");
     expect(on).toContain("http://macmini.tail1234.ts.net:8799");
+  });
+
+  it("makes a code for another computer, not a phone", () => {
+    expect(row(true, { on: true, origin: "http://macmini.tail1234.ts.net:8799", https: false, problem: null })).toContain('data-pairing-card="computer"');
   });
 });
