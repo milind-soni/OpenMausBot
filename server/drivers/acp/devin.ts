@@ -25,19 +25,21 @@ const API_KEY_ENV = "WINDSURF_API_KEY";
 const LOGIN_NOTE = `Devin is not signed in. Run ${SIGN_IN} in a terminal, or set ${API_KEY_ENV}, then check again.`;
 export const DEVIN_MODE = { ask: "accept-edits", full: "bypass" } as const;
 
-/** Where `devin auth login` stores the sign-in (docs.devin.ai/cli/enterprise/devin-auth): `%APPDATA%\devin` on
- * Windows; elsewhere the XDG data folder, `$XDG_DATA_HOME/devin` or `~/.local/share/devin`. Not the config folder
- * (`~/.config/devin`), where Devin keeps `config.json`. */
-export function devinCredentialsFile(env: Record<string, string | undefined>, platform: NodeJS.Platform = process.platform): string {
-  const dir = platform === "win32"
-    ? env.APPDATA?.trim() || join(userHome(env), "AppData", "Roaming")
-    : env.XDG_DATA_HOME?.trim() || join(userHome(env), ".local", "share");
-  return join(dir, "devin", "credentials.toml");
+/** Where `devin auth login` may have stored the sign-in. On Windows, `%APPDATA%\devin`. Elsewhere two folders are
+ * accepted: the XDG data folder Devin's documentation names (docs.devin.ai/cli/enterprise/devin-auth), `$XDG_DATA_HOME/devin`
+ * or `~/.local/share/devin`; and the XDG config folder, `$XDG_CONFIG_HOME/devin` or `~/.config/devin`, which this driver
+ * read when it was checked against devin 3000.12.57 and 3000.12.59. */
+export function devinCredentialsFiles(env: Record<string, string | undefined>, platform: NodeJS.Platform = process.platform): string[] {
+  const home = userHome(env);
+  const dirs = platform === "win32"
+    ? [env.APPDATA?.trim() || join(home, "AppData", "Roaming")]
+    : [env.XDG_DATA_HOME?.trim() || join(home, ".local", "share"), env.XDG_CONFIG_HOME?.trim() || join(home, ".config")];
+  return dirs.map((dir) => join(dir, "devin", "credentials.toml"));
 }
 
 /** Signed in by WINDSURF_API_KEY, or by the `credentials.toml` that `devin auth login` writes. */
 export function devinSignedIn(env: Record<string, string | undefined>, platform: NodeJS.Platform = process.platform): boolean {
-  return Boolean(env[API_KEY_ENV]?.trim()) || existsSync(devinCredentialsFile(env, platform));
+  return Boolean(env[API_KEY_ENV]?.trim()) || devinCredentialsFiles(env, platform).some((file) => existsSync(file));
 }
 
 /** No exit grace: devin 3000.12.57 exits on EOF but orphans the MCP servers it started from its own config, which then
