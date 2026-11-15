@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Search, SquarePen } from "lucide-react";
 
 import { cn } from "@/lib/cn";
-import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 import { activeLocale, t } from "@/lib/i18n";
 import { SIDEBAR_INLINE, useMediaQuery } from "@/lib/use-media-query";
 import { api, currentTaskBot, openBotThread, useStore, visibleMessages, type Bot, type Message } from "@/state/store";
@@ -63,11 +62,10 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const [searching, setSearching] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const generatedTitles = llmThreadTitlesEnabled(state.config);
   const actions = useMemo(() => {
-    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive } = threadRowActions(bot.id, dispatch, generatedTitles);
+    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive } = threadRowActions(bot.id, dispatch);
     return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive };
-  }, [bot.id, dispatch, generatedTitles]);
+  }, [bot.id, dispatch]);
 
   const side = useConversationSide(bot);
   const tasks = bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }];
