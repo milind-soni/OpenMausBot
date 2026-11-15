@@ -1,6 +1,8 @@
 // Google Antigravity through its official ACP server: managed runtime, isolated Google profile,
 // model/mode configuration and OAuth.
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
+import { dirname, join } from "node:path";
+import { stageAntigravitySkills } from "./antigravity-skills.ts";
 import { antigravityAccount } from "./antigravity-account.ts";
 import type {
   DriverCreateInput,
@@ -14,6 +16,7 @@ import { createAcpDriver, type AcpConfig, type AcpSupport } from "./acp/core.ts"
 import {
   AntigravityAuthController,
   antigravityProfileAuthenticated,
+  antigravityProfileDirectory,
   prepareAntigravityProfile,
   probeAntigravityModels,
   removeAntigravitySignIn,
@@ -27,21 +30,10 @@ import {
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravity-temp.ts";
 import { augmentedPath } from "../env-path.ts";
+import { bundledEngineCatalog } from "../model-manifest/bundled.ts";
+import { currentEngineCatalog } from "../model-manifest/manifest.ts";
 
-export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = {
-  default: "gemini-3.8-flash",
-  options: [
-    {
-      id: "gemini-3.8-flash",
-      label: "Gemini 3.8 Flash",
-      variants: [
-        { id: "low", label: "Low" },
-        { id: "medium", label: "Medium" },
-        { id: "high", label: "High" },
-      ],
-    },
-  ],
-};
+export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = bundledEngineCatalog("antigravity");
 
 /** Bots saved before the thinking-level option hold ids like `gemini-3.8-flash-medium` or `gemini-4-argon-high`;
  * the official runtime offers only the base model with that option, so run the base at the saved level. A runtime
@@ -66,7 +58,7 @@ const support: AcpSupport = {
   driverKind: "antigravityAgent",
   // Named for what people look for: Google moved personal Gemini subscriptions (free, AI Pro, AI Ultra) from Gemini CLI to Antigravity on 2026-06-18.
   displayName: "Google Gemini (Antigravity)",
-  models: STATIC_ANTIGRAVITY_MODELS,
+  get models() { return currentEngineCatalog("antigravity"); },
   defaultCli: "agy", // migration alias: resolveAntigravityRuntime treats it as managed
   nativeSource: "antigravity.acp",
   loginNote: "Antigravity needs a Google account — choose Sign in with Google in engine setup",
@@ -87,6 +79,7 @@ const support: AcpSupport = {
   sessionScopedApproval: true,
   resumeMethod: "resume",
   clientFileSystem: true,
+  clientReadRoots: (turn) => (turn.skillFiles ?? []).map(dirname),
   sanitizeToolPayload: true,
 
   resolveCommand: async (env, config, instanceId) => {
@@ -97,6 +90,7 @@ const support: AcpSupport = {
       command: runtime.executablePath,
       args: process.platform === "linux" ? ["--uid="] : [],
       env: profile.environment,
+      ro: [join(profile.directory, "omb-skills")],
     };
   },
 
@@ -107,7 +101,7 @@ const support: AcpSupport = {
     return probeAntigravityModels({
       runtime,
       profile,
-      fallbackDefault: STATIC_ANTIGRAVITY_MODELS.default,
+      fallbackDefault: currentEngineCatalog("antigravity").default,
     });
   },
 
@@ -180,6 +174,10 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     };
     return {
       ...base,
+      adapter: {
+        ...base.adapter,
+        sendTurn: async (turn) => base.adapter.sendTurn(stageAntigravitySkills(turn, antigravityProfileDirectory(input.instanceId))),
+      },
       get models() {
         return base.models;
       },

@@ -151,6 +151,17 @@ describe("health from real calls", () => {
     host.appCall({ slugs: ["SLACK_SEND_MESSAGE"], status: 200, bytes: reply(JSON.stringify({ successful: true })), contentType: "application/json" });
     expect((await read()).apps.slack.health).toBe("working");
   });
+
+  it("does not expire a working app because its error metadata names resource 401", async () => {
+    const bytes = new TextEncoder().encode(JSON.stringify({
+      jsonrpc: "2.0", id: 1,
+      result: { isError: true, content: [{ type: "text", text: JSON.stringify({ error: "Message not found", resource: "/messages/401" }) }] },
+    }));
+    host.appCall({ slugs: ["SLACK_SEND_MESSAGE"], status: 200, bytes, contentType: "application/json" });
+    const { apps } = await read();
+    expect(apps.slack).toMatchObject({ health: "working", lastUsedAt: "2026-11-10T10:00:00.000Z" });
+    expect(apps.slack.lastError).toBeUndefined();
+  });
 });
 
 describe("the admin read", () => {

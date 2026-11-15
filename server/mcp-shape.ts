@@ -74,16 +74,18 @@ export function describeShape(value: unknown): string {
 
 /** A query that is valid against this exact value, so the model's first attempt is never a syntax lesson. */
 export function exampleQuery(value: unknown): string {
+  const identifier = (key: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ? key : JSON.stringify(key);
   const pick = (items: readonly unknown[], prefix: string): string => {
     const first = items.find((item) => item !== null && item !== undefined);
     if (!isRecord(first)) return `${prefix}[0:20]`;
-    const fields = Object.keys(first).slice(0, 2).map((key) => `${key}: ${key}`);
+    const fields = Object.keys(first).slice(0, 2).map((key) => `${identifier(key)}: ${identifier(key)}`);
+    if (!fields.length) return `${prefix}[0:20]`;
     return `${prefix}[0:20].{${fields.join(", ")}}`;
   };
   if (Array.isArray(value)) return pick(value, "");
   if (isRecord(value)) {
     const array = Object.keys(value).find((key) => Array.isArray(value[key]));
-    if (array) return pick(value[array] as unknown[], array);
+    if (array !== undefined) return pick(value[array] as unknown[], identifier(array));
     return "keys(@)";
   }
   return "@";
@@ -103,7 +105,7 @@ export class ResultStore {
 
   put(tool: string, value: unknown, bytes?: number): string {
     const handle = `r${this.#next++}`;
-    const size = bytes ?? (JSON.stringify(value)?.length ?? 0);
+    const size = bytes ?? Buffer.byteLength(JSON.stringify(value) ?? "", "utf8");
     this.#entries.set(handle, { tool, value, bytes: size });
     this.#bytes += size;
     for (const [oldest, held] of this.#entries) {

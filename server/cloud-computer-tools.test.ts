@@ -7,19 +7,25 @@ const jpeg = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBw
 let server: Server;
 let tools: typeof import("./cloud-computer-tools.ts");
 let holdCommand = false;
+let commandStatus = 200;
+let commandExit = 0;
 let commandStarted: (() => void) | undefined;
 const calls: Array<{ path: string; body: any; authorization?: string }> = [];
 const cfg: AppConfig = { box: { token: "synthetic-box-key" } } as AppConfig;
 
 beforeAll(async () => {
   server = createServer(async (req, res) => {
+    // Every answer closes its connection: the tests that leave a command hanging close the server's sockets, and a pooled
+    // keep-alive socket reused after that fails the next test's request with "other side closed".
+    res.setHeader("connection", "close");
     let body = "";
     for await (const part of req) body += part;
     const path = req.url ?? "";
     calls.push({ path, body: body ? JSON.parse(body) : null, authorization: req.headers.authorization });
     if (path.endsWith("/commands")) {
       commandStarted?.();
-      if (!holdCommand) res.end(JSON.stringify({ exitCode: 0, stdout: "captured", stderr: "" }));
+      if (commandStatus !== 200) { res.writeHead(commandStatus); res.end(JSON.stringify({ ok: false, code: "upstream_unavailable" })); return; }
+      if (!holdCommand) res.end(JSON.stringify({ exitCode: commandExit, stdout: "captured", stderr: "" }));
       return;
     }
     if (path.includes("/artifacts?")) { res.end(Buffer.from(jpeg, "base64")); return; }
@@ -32,16 +38,17 @@ beforeAll(async () => {
   vi.stubEnv("OMB_CLOUD_BOAT_TOKEN", undefined);
   tools = await import("./cloud-computer-tools.ts");
 });
-beforeEach(() => { calls.length = 0; holdCommand = false; commandStarted = undefined; });
+beforeEach(() => { calls.length = 0; holdCommand = false; commandStarted = undefined; commandStatus = 200; commandExit = 0; });
 afterAll(async () => { vi.unstubAllEnvs(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
 
-const rpc = (request: unknown, gate: { held: boolean; reason?: "person"; blockedReason?: string } = { held: false }, signal = new AbortController().signal) => {
+type Recovery = NonNullable<Parameters<typeof import("./cloud-computer-tools.ts").cloudComputerRpc>[1]["recovery"]>;
+const rpc = (request: unknown, gate: { held: boolean; reason?: "person"; blockedReason?: string } = { held: false }, signal = new AbortController().signal, recovery?: Recovery) => {
   let gated = 0;
   let checks = 0;
   const done = tools.cloudComputerRpc(request as never, {
     cfg, boxId: () => "bx_23456789", signal,
     gate: async () => { gated++; return gate; },
-    assertActive: () => { checks++; },
+    assertActive: () => { checks++; }, recovery,
   });
   return { done, gated: () => gated, checks: () => checks };
 };
@@ -208,5 +215,47 @@ describe("cloud computer tools", () => {
     expect(Date.now() - started).toBeLessThan(1_500);
     expect(calls.filter(entry => entry.path.endsWith("/commands"))).toHaveLength(1);
     server.closeAllConnections();
+  });
+
+  describe("a computer that stopped answering", () => {
+    const words = () => import("../shared/cloud-computer-recovery.ts");
+    const call = (name: string, args: Record<string, unknown>, recovery?: Recovery) =>
+      rpc({ method: "tools/call", params: { name, arguments: args } }, { held: false }, new AbortController().signal, recovery).done as Promise<{ isError?: boolean; content: Array<{ type: string; text?: string }> }>;
+
+    it("says a call got no answer, instead of an empty failed result", async () => {
+      commandStatus = 502;
+      const result = await call("click", { x: 1, y: 2 });
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: (await words()).CLOUD_COMPUTER_NO_ANSWER }] });
+    });
+
+    it("refuses calls without touching the computer while it is being restarted or replaced", async () => {
+      const { CLOUD_COMPUTER_NOT_RESPONDING } = await words();
+      const result = await call("click", { x: 1, y: 2 }, { refusal: (_box, phase) => phase === "before" ? CLOUD_COMPUTER_NOT_RESPONDING : null, notice: () => null });
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: CLOUD_COMPUTER_NOT_RESPONDING }] });
+      expect(calls).toEqual([]);
+    });
+
+    it("tells what is known about a computer that did not answer, and leaves a command's own failure as it is", async () => {
+      const { CLOUD_COMPUTER_UNREACHABLE } = await words();
+      const recovery: Recovery = { refusal: (_box, phase) => phase === "after" ? CLOUD_COMPUTER_UNREACHABLE : null, notice: () => null };
+      commandStatus = 502;
+      expect((await call("click", { x: 1, y: 2 }, recovery)).content).toEqual([{ type: "text", text: CLOUD_COMPUTER_UNREACHABLE }]);
+      commandStatus = 200;
+      commandExit = 1;
+      const failed = await call("exec", { command: "false" }, recovery);
+      expect(failed.isError).toBe(true);
+      expect(JSON.parse(failed.content[0]!.text!)).toMatchObject({ ok: false, exitCode: 1 });
+    });
+
+    it("puts the replacement notice once before the first result on the new computer", async () => {
+      const { CLOUD_COMPUTER_REPLACED } = await words();
+      let owed = true;
+      const recovery: Recovery = { refusal: () => null, notice: () => (owed ? ((owed = false), CLOUD_COMPUTER_REPLACED) : null) };
+      const first = await call("get_screen_size", {}, recovery);
+      expect(first.content[0]).toEqual({ type: "text", text: CLOUD_COMPUTER_REPLACED });
+      expect(first.content).toHaveLength(2);
+      const second = await call("get_screen_size", {}, recovery);
+      expect(second.content).toHaveLength(1);
+    });
   });
 });

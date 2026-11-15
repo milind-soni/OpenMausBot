@@ -29,7 +29,7 @@ const stand = async (harness: Server): Promise<string> => {
     createProxyHandler({
       harnessPort,
       authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
-      redeem: () => ({ error: "not in this test" }),
+      redeem: () => ({ error: "not in this test", code: "pairing_code_wrong" }),
       serverName: () => "Ada's computer",
     }),
   );
@@ -115,7 +115,7 @@ describe("an upstream that fails mid-stream", () => {
       createProxyHandler({
         harnessPort,
         authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
-        redeem: () => ({ error: "not in this test" }),
+        redeem: () => ({ error: "not in this test", code: "pairing_code_wrong" }),
         serverName: () => "Ada's computer",
       }),
     );

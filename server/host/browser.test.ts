@@ -151,11 +151,25 @@ describe("the bots' browser host with browserEngine.engine set to chrome", () =>
     expect(host.signedInSitesRefusal("work")).toContain("does not list signed-in sites yet");
   });
 
-  it("says in the status which engine runs the bots' browsers", () => {
+  it("reports saved and active proxy status for both built-in browser engines", () => {
     const { cfg, host } = setup("chrome");
-    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toMatchObject({ engine: "chrome", myChrome: true });
-    cfg.browserEngine = { engine: "agent-browser" };
-    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toEqual({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true, engine: "agent-browser" });
+    cfg.browserEngine = { engine: "chrome", egress: { proxy: "socks5://127.0.0.1:1080" } };
+    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toMatchObject({
+      engine: "chrome", myChrome: true, proxySaved: true, proxyConfigured: true,
+    });
+    cfg.browserEngine = { engine: "agent-browser", egress: { proxy: "socks5://127.0.0.1:1080" } };
+    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toMatchObject({
+      kind: "unavailable", engine: "agent-browser", proxySaved: true, proxyConfigured: true,
+    });
+    cfg.browserEngine = { engine: "chrome", egress: { proxy: "invalid" } };
+    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toMatchObject({
+      engine: "chrome", proxySaved: true,
+    });
+    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true }).proxyConfigured).toBeUndefined();
+    cfg.features!.browser = false;
+    cfg.browserEngine = { engine: "chrome", egress: { proxy: "socks5://127.0.0.1:1080" } };
+    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toMatchObject({ proxySaved: true });
+    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true }).proxyConfigured).toBeUndefined();
   });
 
   it("offers the owner's local-sites switch on a self-hosted server, but never on a shared company workspace", () => {

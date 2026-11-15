@@ -5,13 +5,14 @@ import { cloudPlanView } from "./cloud-plan";
 import type { Action } from "@/state/store";
 import { readMembership } from "./membership";
 import { isOwnerOrAdmin, readSessionState, type SessionState } from "./session";
+import { scrollWithin } from "./scroll-within";
 
 export type PhonePairingTarget = "computer" | "cloud" | "server";
 
 export const phonePairingSettingsAction = (): Extract<Action, { type: "toggleAppSettings" }> => ({
   type: "toggleAppSettings",
   open: true,
-  section: "companion",
+  section: "phone",
   phonePairing: true,
 });
 
@@ -90,7 +91,8 @@ export function resetPhonePairingAccess(): void {
 const PHONE_PAIRING_ACTION = "data-phone-pairing-action";
 
 interface PairingRoot {
-  scrollIntoView?: (options: ScrollIntoViewOptions) => void;
+  /** the Settings pane holding it, scrolled on its own so the sheet never moves */
+  closest?: (selector: string) => Element | null;
   querySelector: (selector: string) => { focus: (options?: FocusOptions) => void } | null;
   focus: (options?: FocusOptions) => void;
 }
@@ -102,24 +104,44 @@ export function revealPhonePairing(
 ): boolean {
   if (!root) return false;
   schedule(() => {
-    root.scrollIntoView?.({ block: "start" });
+    const pane = root.closest?.("[data-settings-scroll]") as HTMLElement | null | undefined;
+    if (pane) scrollWithin(pane, root as unknown as HTMLElement, "start", (pane.querySelector<HTMLElement>("[data-settings-header]")?.offsetHeight ?? 96) + 8);
     (root.querySelector(`[${PHONE_PAIRING_ACTION}]:not([disabled])`) ?? root).focus({ preventScroll: true });
   });
   return true;
 }
 
-/** `?desktop-settings=phone` only opens Settings on the phone pairing; it never makes a code by itself. */
-export function takePhonePairingRequest(href: string): string | null {
+let pairOnOpen = false;
+
+/** `?desktop-settings=phone` opens Settings on the phone pairing. Only with `pair=open`, and only in the desktop app's
+ * own window (never a browser tab), does it also open Pair a phone once, so a link can't show a code on someone's screen
+ * unasked. */
+export function takePhonePairingRequest(href: string, desktop = typeof window !== "undefined" && Boolean(window.ogb)): string | null {
   const url = new URL(href);
   if (url.searchParams.get("desktop-settings") !== "phone") return null;
+  pairOnOpen = desktop && url.searchParams.get("pair") === "open";
   url.searchParams.delete("desktop-settings");
+  url.searchParams.delete("pair");
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
-/** Where a page signed in by the app goes next: the phone pairing, or back to a path of this same server. */
+/** True once, after a `pair=open` link: the phone page opens Pair a phone as it loads. */
+export function takePairOnOpen(): boolean {
+  const asked = pairOnOpen;
+  pairOnOpen = false;
+  return asked;
+}
+
+/** Where a page signed in by the app goes next: the phone pairing, back to a path of this same server, or a linked thread. */
 export function pairedDestination(search: string): string {
   const params = new URLSearchParams(search);
-  if (params.get("desktop-settings") === "phone") return "/?desktop-settings=phone";
+  if (params.get("desktop-settings") === "phone") return params.get("pair") === "open" ? "/?desktop-settings=phone&pair=open" : "/?desktop-settings=phone";
   const next = params.get("next");
-  return next && /^\/(?!\/)/.test(next) && !next.startsWith("/pair") && !/[\\\s]/.test(next) ? next : "/";
+  if (next && /^\/(?!\/)/.test(next) && !next.startsWith("/pair") && !/[\\\s]/.test(next)) return next;
+  const thread = params.get("thread");
+  if (thread === null) return "/";
+  const keep = new URLSearchParams({ thread });
+  const bot = params.get("bot");
+  if (bot !== null) keep.set("bot", bot);
+  return `/?${keep}`;
 }

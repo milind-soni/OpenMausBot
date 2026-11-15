@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
@@ -145,6 +145,9 @@ export async function prepareAntigravityProfile(input: {
   const directory = resolve(input.profileDirectory ?? antigravityProfileDirectory(input.instanceId, input.baseDir));
   const acpDirectory = join(directory, "antigravity-acp");
   await mkdir(acpDirectory, { recursive: true, mode: 0o700 });
+  const skillsDirectory = join(directory, "omb-skills");
+  await mkdir(skillsDirectory, { recursive: true, mode: 0o700 });
+  if (!(await lstat(skillsDirectory)).isDirectory()) throw new Error("Antigravity staging path must be a real directory.");
   if (process.platform !== "win32") {
     const { chmod } = await import("node:fs/promises");
     await chmod(directory, 0o700);
@@ -240,7 +243,7 @@ export class AntigravityAcpClient {
     this.child = spawnCli(
       runtime.executablePath,
       process.platform === "linux" ? ["--uid="] : [],
-      { cwd, env: profile.environment, stdio: ["pipe", "pipe", "pipe"], ...(relay ? { box: { relay: relay.socketPath } } : {}) },
+      { cwd, env: profile.environment, stdio: ["pipe", "pipe", "pipe"], box: { ro: [join(profile.directory, "omb-skills")], ...(relay ? { relay: relay.socketPath } : {}) } },
       "bot",
     );
     this.child.stdout!.setEncoding("utf8");

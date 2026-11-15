@@ -8,8 +8,8 @@ import { completionPatch } from "@/lib/onboarding";
 import { updaterMessage, useUpdaterState } from "@/lib/updater";
 import { productName } from "../lib/brand";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
-import { NewBrowserSettings } from "./BrowserSettingsRows";
-import { Card, SettingRow, Switch } from "./SettingsPrimitives";
+import { UsbPhoneTakeoverSettings } from "./UsbPhoneTakeoverSettings";
+import { MoreText, SettingRow, SettingsGroup, SettingsRows, Switch } from "./SettingsPrimitives";
 import { LearnedSkillsSettings } from "./ShareLearnedSkillsSettings";
 import { effortLabel } from "./ModelPicker";
 import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
@@ -130,7 +130,7 @@ export function NewBotEffortRow() {
   return (
     <SettingRow
       title={t("settings.newBotEffort.title")}
-      subtitle={t("settings.newBotEffort.subtitle")}
+      subtitle={t("settings.newBotEffort.short")}
       message={effort.error ? <p role="alert" className="text-danger">{effort.error}</p> : null}
     >
       <NewBotEffortSelect effort={effort} className="w-full max-w-[240px]" />
@@ -155,7 +155,7 @@ export function NewBotDefaultsRow({ onEdit, onShare }: { onEdit: () => void; onS
   );
 }
 
-function ReplayAppTourButton() {
+function ReplayAppTourButton({ label = t("settings.welcome.appTour") }: { label?: string }) {
   const { state, dispatch } = useStore();
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -183,28 +183,26 @@ function ReplayAppTourButton() {
         }}
         className="ui-button"
       >
-        {t("settings.welcome.appTour")}
+        {label}
       </button>
       {failed && <p role="alert" className="mt-2 text-[13px] text-danger">{t("onboarding.tour.error")}</p>}
     </div>
   );
 }
 
+/** The two tours, one row each, each with its one Replay. */
 export function ReplayTourRow() {
-  const { dispatch } = useStore();
-  return (
-    <SettingRow title={t("settings.welcome.title")} subtitle={t("settings.welcome.subtitleShort")}>
-      <div className="flex flex-wrap justify-end gap-2">
-        <ReplayAppTourButton />
-        <button
-          onClick={() => dispatch({ type: "toggleWelcome", open: true })}
-          className="ui-button"
-        >
-          {t("settings.welcome.replay")}
-        </button>
-      </div>
+  const { state, dispatch } = useStore();
+  // A team member's app has no tours of its own to replay.
+  if (state.config?.team) return null;
+  return <>
+    <SettingRow title={t("settings.welcome.appTour")} subtitle={t("settings.welcome.appTourLine")}>
+      <ReplayAppTourButton label={t("settings.welcome.replayShort")} />
     </SettingRow>
-  );
+    <SettingRow title={t("settings.welcome.replay")} subtitle={t("settings.welcome.subtitleShort")}>
+      <button type="button" onClick={() => dispatch({ type: "toggleWelcome", open: true })} className="ui-button">{t("settings.welcome.replayShort")}</button>
+    </SettingRow>
+  </>;
 }
 
 export function LanguageRow({ simple = false }: { simple?: boolean }) {
@@ -298,7 +296,7 @@ export function AdvancedModeRow({ simple = false }: { simple?: boolean }) {
 export function ShowThreadsRow() {
   const enabled = useShowThreadsChoice();
   return (
-    <SettingRow title={t("settings.threadDisplay.title")} subtitle={t("settings.threadDisplay.subtitle")}>
+    <SettingRow title={t("settings.threadDisplay.title")} subtitle={t("settings.threadDisplay.short")}>
       <Switch
         checked={enabled}
         aria-label={t("settings.threadDisplay.show")}
@@ -311,7 +309,7 @@ export function ShowThreadsRow() {
 export function PinnedCirclesRow() {
   const enabled = usePinnedCircles();
   return (
-    <SettingRow title={t("settings.pinnedCircles.title")} subtitle={t("settings.pinnedCircles.subtitle")}>
+    <SettingRow title={t("settings.pinnedCircles.title")} subtitle={t("settings.pinnedCircles.short")}>
       <Switch
         checked={enabled}
         aria-label={t("settings.pinnedCircles.title")}
@@ -324,7 +322,7 @@ export function PinnedCirclesRow() {
 export function RunCardRow() {
   const enabled = useShowRunCard();
   return (
-    <SettingRow title={t("settings.runCard.title")} subtitle={t("settings.runCard.subtitle")}>
+    <SettingRow title={t("settings.runCard.rowTitle")} subtitle={t("settings.runCard.line")}>
       <Switch
         checked={enabled}
         aria-label={t("settings.runCard.show")}
@@ -373,7 +371,7 @@ export function ToolCallsRow() {
   return (
     <SettingRow
       title={t("settings.toolCalls.title")}
-      subtitle={<>{t("settings.toolCalls.subtitle")} {t("settings.toolCalls.detail")}</>}
+      subtitle={t("settings.toolCalls.short")}
       message={error ? <p role="alert" className="text-danger">{error}</p> : null}
     >
       <Switch
@@ -411,26 +409,22 @@ export function ExperimentalFeaturesRow() {
   };
 
   return (
-    <Card title={t("settings.experimental.title")} subtitle={t("settings.experimental.subtitle")}>
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-[14px] font-medium text-ink">{t("settings.experimental.skillAuthoring")}</div>
-          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            {t("settings.experimental.skillAuthoringDetail")}
-          </div>
-        </div>
-        <Switch
-          checked={skillAuthoring}
-          aria-label={t("settings.experimental.skillAuthoringAria")}
-          disabled={saving}
-          onClick={() => void toggle(!skillAuthoring)}
-          className="disabled:cursor-wait disabled:opacity-50"
-        />
-      </div>
-      {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
-      <LearnedSkillsSettings />
-      <NewBrowserSettings />
-    </Card>
+    <SettingsGroup label={t("settings.experimental.title")} description={t("settings.experimental.short")} block="early-features">
+      <SettingsRows>
+        <SettingRow title={t("settings.experimental.skillAuthoring")} tag={t("settings.early.tag")} subtitle={<MoreText short={t("settings.experimental.skillAuthoringShort")} long={t("settings.experimental.skillAuthoringDetail")} />}
+          message={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
+          <Switch
+            checked={skillAuthoring}
+            aria-label={t("settings.experimental.skillAuthoringAria")}
+            disabled={saving}
+            onClick={() => void toggle(!skillAuthoring)}
+            className="disabled:cursor-wait disabled:opacity-50"
+          />
+        </SettingRow>
+        <LearnedSkillsSettings />
+        <UsbPhoneTakeoverSettings />
+      </SettingsRows>
+    </SettingsGroup>
   );
 }
 
@@ -438,9 +432,6 @@ export function BrowserProfilesRow() {
   const { state } = useStore();
   const profiles = state.config?.browserProfiles ?? [];
   if (!builtInBrowserEnabled(state.config) && profiles.length === 0) return null;
-  return (
-    <Card title={t("settings.profiles.title")} subtitle={t("settings.profiles.sharedSubtitle")}>
-      <BrowserProfilesManager />
-    </Card>
-  );
+  // The manager draws its own section, with Add as the section's action.
+  return <BrowserProfilesManager />;
 }

@@ -4,6 +4,7 @@
 import { resolveAgentsCall } from "../../shared/agents-tool-names.ts";
 import { TOOL_BRIDGE_ENV, createToolBridge } from "./agents-bridge.ts";
 import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
+import { DEFER_TOOLS_ENV, withDeferMarks } from "./agents-claude-defer.ts";
 import { callTool, capResult, toolCallContextFromEnv } from "./agents-call.ts";
 import { sendToolReceipt } from "./agents-timing.ts";
 import type { Json } from "./agents-client.ts";
@@ -13,7 +14,7 @@ import { capToolListResult, toolLimitFromEnv } from "../tool-count-limit.ts";
 export function agentsToolList(env: NodeJS.ProcessEnv) {
   const available = availableTools(catalogProfileFromEnv(env));
   const bridge = env[TOOL_BRIDGE_ENV] === "1" ? createToolBridge(available) : undefined;
-  return { available, bridge, listed: bridge ? bridge.listed : available };
+  return { available, bridge, listed: bridge ? bridge.listed : env[DEFER_TOOLS_ENV] === "1" ? withDeferMarks(available) : available };
 }
 
 export function agentsMcp(env: NodeJS.ProcessEnv): (msg: Json) => Promise<Json | undefined> {

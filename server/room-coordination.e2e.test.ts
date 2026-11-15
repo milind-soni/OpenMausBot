@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
@@ -90,6 +90,19 @@ it("coordinates in a room that mixes departments, with a Chief that manages none
   expect(children.map((node: any) => node.botId).sort()).toEqual([chief.id, outsider.id].sort());
   expect(children.every((node: any) => node.status === "completed" && node.groupId === f.source.id)).toBe(true);
 }), 45_000);
+
+it("keeps each member's engine through hand-offs between rooms and the person's next messages", () => withRooms(async f => {
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  for (const round of [2, 3, 4]) {
+    await f.cli("send-channel", "--channel", f.source.id, "--text", `@Director Next assignment ${round}`);
+    expect((await f.wait()).status).toBe("settled");
+  }
+  const native = join(f.session.info.dataDir, "native");
+  const closes = readdirSync(native).flatMap((file) => readFileSync(join(native, file), "utf8").split("\n").filter(Boolean)
+    .map((line) => JSON.parse(line)).filter((row) => row.source === "claude.session" && row.msg?.close).map((row) => row.msg));
+  expect(closes).toEqual([]);
+  expect(f.handoffs().filter((node: any) => node.botId === f.target.id).map((node: any) => node.status)).toEqual(["completed", "completed", "completed", "completed"]);
+}), 90_000);
 
 it("runs room-destined work in the room's own conversation, opening no thread on the recipient", () => withRooms(async f => {
   const tasksOf = async (botId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === botId).tasks ?? [];
@@ -213,7 +226,12 @@ it("receipts a retried duplicate of a failed hand-off as failed, not queued behi
   f.plan[f.target.id].fail = true;
   f.plan[f.sender.id].resumeSteps = [{ arguments: f.plan[f.sender.id].steps[0].arguments, expectError: true }];
   await f.start(); expect((await f.wait()).status).toBe("settled");
-  expect(f.provider().map((turn: any) => turn.botId)).toEqual([f.sender.id, f.target.id, f.sender.id]);
+  // The main Chief got department A when it was made, so it also hears of the failed run, in a turn of its own.
+  const chief = (await f.api("/api/bots")).bots.find((bot: any) => bot.chiefOfStaff);
+  expect(chief.managedSections).toEqual(["A"]);
+  await expect.poll(() => f.provider().filter((turn: any) => turn.botId === chief.id)
+    .map((turn: any) => /incident report.*Engineer's run in the room \\"Engineering\\" failed/.test(JSON.stringify(turn.prompt))), { timeout: 15_000 }).toEqual([true]);
+  expect(f.provider().map((turn: any) => turn.botId).filter((id: string) => id !== chief.id)).toEqual([f.sender.id, f.target.id, f.sender.id]);
   const [assigned, retried] = f.provider().filter((turn: any) => turn.botId === f.sender.id);
   expect(assigned.resumed).toBe(false);
   const first = JSON.parse(assigned.evidence.find((entry: any) => entry.step).response.result.content[0].text);

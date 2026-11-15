@@ -50,4 +50,16 @@ describe("a server of one person's own", () => {
     expect(home.here(), "others sign in now").toBe(false);
     expect(home.takesMove()).toBe(false);
   });
+
+  it("names its one admin's address for shared computers, and is no server of one person's own once others sign in", () => {
+    let facts = solo;
+    const home = createOwnHome({ dataDir: tmpdir(), facts: () => facts });
+    expect(home.ownServer()).toEqual({ admin: null });
+    facts = { ...solo, admins: ["me@example.test"] };
+    expect(home.ownServer()).toEqual({ admin: "me@example.test" });
+    facts = { ...solo, admins: ["me@example.test", "her@example.test"] };
+    expect(home.ownServer()).toBeNull();
+    facts = { ...solo, shared: true };
+    expect(home.ownServer()).toBeNull();
+  });
 });

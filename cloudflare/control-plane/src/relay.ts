@@ -4,7 +4,7 @@
 import { z } from "zod";
 
 import { errorResponse, HTTPError, json, readBoundedJSON } from "./http";
-import { recordReportedAppVersion, requireInstallation } from "./installations";
+import { installationKindSchema, recordInstallationKind, recordReportedAppVersion, requireInstallation } from "./installations";
 
 const HOUR_MS = 60 * 60 * 1_000;
 export const RELAY_TOKEN_TTL_S = 12 * 60 * 60;
@@ -23,6 +23,7 @@ const requestSchema = z.strictObject({
     e2e: z.number().int().min(0).max(100),
     legacy: z.number().int().min(0).max(100),
   }),
+  kind: installationKindSchema.optional(),
 });
 
 export interface RelaySettings {
@@ -275,24 +276,27 @@ export interface RelayStanding {
   bucket: number | null;
   /** It also holds a relay token from the last two days: the relay is what it is using. */
   proven: boolean;
+  /** It has asked for a relay token at least once (a `relay_adoption` row), which no released server does. True
+   * when that cannot be read, so a desktop is never taken for a server. */
+  asked: boolean;
 }
 
 /** `relayAdmits` for one installation, making its host id if it has none. A database that cannot answer (a Worker
  * ahead of migration 0012) reads as served and unproven, which is what a relay-capable desktop got before. */
 export async function relayStanding(env: Env, installationId: string, now = Date.now()): Promise<RelayStanding> {
   const settings = await readRelaySettings(env);
-  if (!settings) return { serves: false, bucket: null, proven: false };
+  if (!settings) return { serves: false, bucket: null, proven: false, asked: true };
   let host: { hostId: string; blocked: boolean };
   try {
     host = await hostIdFor(env, installationId);
   } catch {
-    return { serves: true, bucket: null, proven: false };
+    return { serves: true, bucket: null, proven: false, asked: true };
   }
   const { admitted, bucket } = await relayAdmits(settings, { installationId, hostId: host.hostId, blocked: host.blocked });
-  if (!admitted) return { serves: false, bucket, proven: false };
+  if (!admitted) return { serves: false, bucket, proven: false, asked: true };
   const adoption = await env.DB.prepare("SELECT token_at FROM relay_adoption WHERE installation_id = ?")
-    .bind(installationId).first<{ token_at: number | null }>().catch(() => null);
-  return { serves: true, bucket, proven: (adoption?.token_at ?? 0) >= now - RELAY_FRESH_MS };
+    .bind(installationId).first<{ token_at: number | null }>().catch(() => undefined);
+  return { serves: true, bucket, proven: (adoption?.token_at ?? 0) >= now - RELAY_FRESH_MS, asked: adoption !== null };
 }
 
 export async function issueRelayToken(request: Request, env: Env): Promise<Response> {
@@ -305,6 +309,7 @@ export async function issueRelayToken(request: Request, env: Env): Promise<Respo
   if (parsed.data.appVersion !== installation.app_version) {
     await recordReportedAppVersion(env, installation.installation_id, parsed.data.appVersion).catch(() => undefined);
   }
+  if (parsed.data.kind) await recordInstallationKind(env, installation.installation_id, parsed.data.kind);
   const [limited] = await env.DB.batch([limitStatement(env, installation.installation_id, now)]);
   if (limited?.meta.changes === 0) {
     const response = errorResponse(429, "rate_limited");

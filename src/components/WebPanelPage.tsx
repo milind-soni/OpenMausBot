@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
+import { SITE_FRAME_SANDBOX } from "@/lib/published-apps";
 import { setWebPanels, useWebPanels } from "@/lib/web-panel-preferences";
 import { isAppOrigin, type PinnedChatPage, type WebPanel } from "@/lib/web-panels";
 import { api } from "@/state/api";
@@ -85,7 +86,7 @@ export function WebPanelPage() {
           key={`${panel.id}:${reloads}`}
           src={panel.url}
           title={panel.name}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          sandbox={SITE_FRAME_SANDBOX}
           referrerPolicy="no-referrer"
           onLoad={() => setStatus("loaded")}
           onError={() => setStatus("failed")}

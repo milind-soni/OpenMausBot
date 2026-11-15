@@ -155,14 +155,17 @@ it("the desktop lends to a server of the person's own once they allow it, with n
     expect(await sharing.ownServer(env)).toMatchObject({ sessionId: owner.id });
     const offered = await sharing.ownOffer(env);
     expect(offered).toMatchObject({ sessionId: owner.id });
+    // Every full-access pairing lends as one person here, so this one also sees the earlier tests' computers.
+    const listed = async () => ((await api("GET", "/api/shared-computers", undefined, bearer(owner.token))).body.computers ?? []) as Array<{ id: string; online: boolean; scopes: { screen: boolean; terminal: boolean } }>;
+    const earlier = new Set((await listed()).map((computer) => computer.id));
+    const ours = async () => (await listed()).filter((computer) => !earlier.has(computer.id));
     const lent = await sharing.lendOwn(env, { computer: true });
     expect(lent).toMatchObject({ enabled: true, own: true, computer: true, terminal: false, folders: [] });
-    const listed = async () => ((await api("GET", "/api/shared-computers", undefined, bearer(owner.token))).body.computers ?? []) as Array<{ online: boolean; scopes: { screen: boolean; terminal: boolean } }>;
-    await vi.waitFor(async () => expect((await listed()).some((computer) => computer.online && computer.scopes.screen && !computer.scopes.terminal)).toBe(true), { timeout: 15_000 });
+    await vi.waitFor(async () => expect((await ours()).some((computer) => computer.online && computer.scopes.screen && !computer.scopes.terminal)).toBe(true), { timeout: 15_000 });
     expect(await sharing.ownOffer(env), "answered for this pairing: not asked again").toBeNull();
     expect((await internal("GET", "/api/internal/shared-computers")).status, "the bots' route once a computer is lent").toBe(200);
     sharing.revoke(env);
-    await vi.waitFor(async () => expect((await listed()).some((computer) => computer.online)).toBe(false), { timeout: 15_000 });
+    await vi.waitFor(async () => expect((await ours()).some((computer) => computer.online)).toBe(false), { timeout: 15_000 });
   } finally { sharing.close(); }
 });
 

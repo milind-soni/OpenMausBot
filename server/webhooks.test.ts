@@ -737,3 +737,19 @@ describe("wrong-secret calls, counted", () => {
     ]);
   });
 });
+
+describe("webhook that keeps one conversation", () => {
+  it("saves the option, hands it to each run, and turns it off again", () => {
+    const h = harness();
+    const { webhook, secret } = h.manager.create({ name: "Leads", prompt: "Handle it", botId: "maus-1", sameConversation: true });
+    expect(webhook.sameConversation).toBe(true);
+    h.manager.receive(webhook.endpointId, secret, { payload: {}, deliveryId: "one" });
+    expect(h.queued.at(-1)).toMatchObject({ webhookId: webhook.id, sameConversation: true });
+    expect(h.manager.update(webhook.id, { name: "Renamed" })?.sameConversation).toBe(true);
+    expect(new WebhookManager(h.options).list().find((candidate) => candidate.id === webhook.id)?.sameConversation).toBe(true);
+
+    expect(h.manager.update(webhook.id, { sameConversation: false })).not.toHaveProperty("sameConversation");
+    h.manager.receive(webhook.endpointId, secret, { payload: {}, deliveryId: "two" });
+    expect(h.queued.at(-1)?.sameConversation).toBeUndefined();
+  });
+});

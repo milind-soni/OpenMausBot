@@ -102,3 +102,15 @@ test("Tailscale is seen by its own interface, never by a 100.64/10 address alone
   assert.equal(hasTailnetAddress({ tailscale0: [{ family: "IPv4", address: "100.70.0.1" }] }), true);
   assert.equal(hasTailnetAddress({ Tailscale: [{ family: "IPv4", address: "100.70.0.1" }] }), true);
 });
+
+test("the switch for other computers lives on the Tailscale route and goes with it", () => {
+  const on = setRoute(defaultCompanionSettings(), "tailscale", true, { now: 5, name: "mac.tail1.ts.net" });
+  assert.equal(on.routes.tailscale.computers, undefined, "off unless the person turns it on");
+  const shared = setRoute(on, "tailscale", true, { now: 6, computers: true });
+  assert.deepEqual(shared.routes.tailscale, { on: true, since: 5, name: "mac.tail1.ts.net", computers: true });
+  assert.equal(setRoute(shared, "tailscale", true, { now: 7, name: "mac.tail1.ts.net" }).routes.tailscale.computers, true, "a name refresh keeps it");
+  assert.equal(setRoute(shared, "tailscale", true, { now: 7, computers: false }).routes.tailscale.computers, undefined);
+  assert.deepEqual(setRoute(shared, "tailscale", false).routes.tailscale, { on: false, since: null });
+  const read = readCompanionSettings({ version: COMPANION_SETTINGS_VERSION, routes: { tailscale: { on: true, since: 5, name: "mac.tail1.ts.net", computers: "yes" } } });
+  assert.equal(read.routes.tailscale.computers, undefined, "anything but true is off: this opens a listener");
+});

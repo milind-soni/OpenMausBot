@@ -19,6 +19,7 @@ export interface ServiceInstallInput {
   tailscale?: boolean;
   publicUrl?: string;
   lan?: boolean;
+  relay?: boolean;
   label?: string;
   sentinel?: boolean;
   /** Defaults to the platform's Sentinel folder. */
@@ -43,13 +44,14 @@ export interface ServiceIo {
 
 /** The same `serve` flags the person gave, so the service reaches people the way `serve` did. Not a terminal, `serve`
  * prints no pairing code into the service log. */
-export function serviceServeArgs(input: Pick<ServiceInstallInput, "port" | "dataDir" | "domain" | "tunnel" | "tailscale" | "publicUrl" | "lan" | "label">): string[] {
+export function serviceServeArgs(input: Pick<ServiceInstallInput, "port" | "dataDir" | "domain" | "tunnel" | "tailscale" | "publicUrl" | "lan" | "relay" | "label">): string[] {
   const args = ["--port", String(input.port), "--data-dir", input.dataDir];
   if (input.domain) args.push("--domain", input.domain);
   else if (input.tunnel) args.push("--tunnel");
   else if (input.tailscale) args.push("--tailscale");
   if (input.publicUrl && !input.domain && !input.tunnel) args.push("--public-url", input.publicUrl);
   if (input.lan) args.push("--lan");
+  if (input.relay && !input.tunnel) args.push("--relay");
   if (input.label) args.push("--label", input.label);
   return args;
 }

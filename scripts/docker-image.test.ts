@@ -296,6 +296,34 @@ describe("container images", () => {
     expect(keys.env!.CLOUD_HOME_ENGINES).toBe("@anthropic-ai/claude-code @openai/codex");
   });
 
+  it.skipIf(process.platform === "win32")("installs the engines once more when one does not start, and fails the build when it still does not", () => {
+    const engines = all.find(s => s.name === "cloud-home")!.steps.find(step => npmInstall(step) && step.args.includes("$CLOUD_HOME_ENGINES"))!;
+    // `broken` lists what each install leaves out: one line per npm run, read in turn.
+    const run = (broken: string[], packages = "@anthropic-ai/claude-code@2.1.291 @openai/codex@0.160.1") => {
+      const root = mkdtempSync(join(tmpdir(), "omb-engines-"));
+      temporaryDirectories.push(root);
+      writeFileSync(join(root, "plan"), broken.join("\n") + "\n");
+      writeFileSync(join(root, "npm"), `#!/bin/sh\necho "$*" >> "${root}/npm.log"\nsed -n "$(wc -l < "${root}/npm.log")p" "${root}/plan" > "${root}/broken"\n`, { mode: 0o755 });
+      for (const cli of ["claude", "codex"]) {
+        writeFileSync(join(root, cli), `#!/bin/sh\ngrep -qx ${cli} "${root}/broken" && { echo "Missing optional dependency" >&2; exit 1; }\necho ${cli} 1.0\n`, { mode: 0o755 });
+      }
+      const result = spawnSync("sh", ["-c", engines.args], {
+        env: { PATH: `${root}:/usr/bin:/bin`, CLOUD_HOME_ENGINES: packages, ENGINES_CACHE_TAG: "" }, encoding: "utf8",
+      });
+      const installs = readFileSync(join(root, "npm.log"), "utf8").trim().split("\n");
+      return { status: result.status, installs: installs.length, stderr: result.stderr };
+    };
+    expect(run([""])).toMatchObject({ status: 0, installs: 1 });
+    // npm leaving out Codex's platform package the first time: a second install puts it in
+    expect(run(["codex", ""])).toMatchObject({ status: 0, installs: 2 });
+    const stillBroken = run(["codex", "codex"]);
+    expect(stillBroken).toMatchObject({ installs: 2 });
+    expect(stillBroken.status).not.toBe(0);
+    expect(stillBroken.stderr).toContain("@openai/codex@0.160.1 installed, but codex does not start");
+    // names without versions, as the default build argument has them
+    expect(run(["claude", "claude"], "@anthropic-ai/claude-code @openai/codex").status).not.toBe(0);
+  });
+
   it.skipIf(!jq)("resolves the current Chrome and engine releases, and keys on the date when a lookup fails", () => {
     const keys = (workflow.jobs.publish.steps as { id?: string; run?: string; env?: Record<string, string> }[]).find(step => step.id === "keys")!;
     const resolve = (ok: boolean) => {
@@ -329,6 +357,29 @@ describe("container images", () => {
       const service = parse(readFileSync(new URL(file, import.meta.url), "utf8")).services.omb;
       expect(service.init, file).toBe(true);
       expect(service.shm_size, file).toBe("512m");
+    }
+  });
+
+  // Caddy in the server's network (network_mode: service:omb) stayed in the old, dead one whenever the server's
+  // container restarted alone, and HTTPS was refused while both looked healthy. It reaches the server over sockets in
+  // a volume both mount instead, and the Caddyfile names the paths the server listens on.
+  it("runs Caddy in its own container, reaching the server's sockets, never in the server's network", () => {
+    for (const [file, caddyfile] of [["../compose.yaml", "../deploy/local/Caddyfile"], ["../deploy/docker-compose.yml", "../deploy/Caddyfile"]]) {
+      const { services, volumes } = parse(readFileSync(new URL(file, import.meta.url), "utf8"));
+      expect(services.caddy.network_mode, file).toBeUndefined();
+      // `OMB_PHONE_RELAY=1` in .env reaches the server, never Caddy.
+      expect(Object.keys(services.omb.environment), file).toContain("OMB_PHONE_RELAY");
+      expect(Object.keys(services.caddy.environment ?? {}), file).not.toContain("OMB_PHONE_RELAY");
+      expect(services.omb.ports, file).toBeUndefined();
+      expect(services.caddy.ports.length, file).toBeGreaterThan(0);
+      expect(services.omb.volumes, file).toContain("edge:/run/openmausbot");
+      expect(services.caddy.volumes, file).toContain("edge:/run/openmausbot");
+      expect(volumes.edge.driver_opts.type, file).toBe("tmpfs");
+      const { OMB_TUNNEL_SOCKET: api, OMB_WEBHOOK_SOCKET: hooks } = services.omb.environment;
+      expect([api, hooks], file).toEqual(["/run/openmausbot/http.sock", "/run/openmausbot/hooks.sock"]);
+      // The local Caddyfile proxies the API twice: once for the trusted TLS terminator, once for everyone else.
+      const proxied = [...new Set([...readFileSync(new URL(caddyfile, import.meta.url), "utf8").matchAll(/reverse_proxy (\S+)/g)].map((m) => m[1]))];
+      expect(proxied, caddyfile).toEqual([`unix/${hooks}`, `unix/${api}`]);
     }
   });
 });

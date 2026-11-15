@@ -2,7 +2,7 @@
 // own MausBot with its chats and notes, their private chats with every bot (messages, notifications, the files only
 // those chats used, and the files they uploaded and never sent), the routines that live in those chats, their memory
 // layers, their
-// engine home (its transcripts), their "About you", their own connections, their own browsers, and every session and
+// engine home (its transcripts), their "About you", their own connections and saved secrets, their own browsers, and every session and
 // phone of theirs. Nothing of it is handed to an admin. A routine they wrote for a shared place keeps running, as the
 // routine of whoever looks after its bot now (the Admins when nobody does), and admin activity says it was handed over.
 // They come off every bot's sharing and "Looked after by" (what they looked after falls to the Admins), so joining again
@@ -22,11 +22,20 @@ import { audienceHome } from "../engine-homes/layout.ts";
 import { forgetBotMemoryJournal, journalFile } from "../memory-journal.ts";
 import { deleteBotMemoryFiles } from "../message-db.ts";
 import { personKey } from "../person-key.ts";
+import { removeMemoryLayer, type MemoryLayerRecords } from "./delete-leftovers.ts";
 import { memberUploads } from "./member-uploads.ts";
 
 /** A file in attachments/, by its URL or by its path (as JSON escapes it) a sent document's tag carries. */
 const ATTACHMENT = /attachments(?:\/|\\)+([A-Za-z0-9][\w.-]{0,200})/g;
 const PERSON = /^p_[\w-]{22}$/;
+
+export const memoryLayerRecords: MemoryLayerRecords = {
+  journalFile,
+  forget(layer) {
+    deleteBotMemoryFiles(layer);
+    forgetBotMemoryJournal(layer);
+  },
+};
 
 export interface TeamMemberLeftDeps {
   dataDir: string;
@@ -38,6 +47,8 @@ export interface TeamMemberLeftDeps {
   openedBy(person: string): string[];
   /** The person a conversation is private to (audience.ts), else null. */
   privateTo(threadId: string): string | null;
+  /** Their conversations shared with one person become that person's own, before their private chats go. */
+  sharesLeft?(person: string): void;
   /** Ends every session and open pairing code of this address; how many sessions ended. */
   revokeSessions(email: string): number;
   busy(botId: string, threadId: string): boolean;
@@ -53,7 +64,9 @@ export interface TeamMemberLeftDeps {
   deleteAttachment(name: string): void;
   eraseBrowsers(audience: Audience): Promise<boolean>;
   /** Their own connections, keys and MCP sign-ins (team-connections.ts). */
-  forgetConnections(person: string): void;
+  forgetConnections(person: string): void | Promise<void>;
+  /** The secrets they typed into cards in their own chats (vault-store.ts). */
+  forgetSecrets(person: string): void;
   /** Every routine: `home` is the person whose private chat it lives in (routine-home.ts), `writer` who last wrote it,
    * `files` the attachments/ names it carries. */
   routines(): ReadonlyArray<{ id: string; name: string; botId: string; home: string | null; writer: string | undefined; files: readonly string[] }>;
@@ -92,6 +105,7 @@ export function createTeamMemberLeft(deps: TeamMemberLeftDeps): (email: string) 
       deps.record({ category: "bot", action: "routine.handover", target: { kind: "routine", id: routine.id, name: routine.name }, after: { owner: to } });
     }
     for (const routine of ownRoutines) deps.deleteRoutine(routine.id);
+    deps.sharesLeft?.(person);
     const mine = new Set(deps.openedBy(person).filter((threadId) => deps.privateTo(threadId) === person));
     let chats = 0;
     const files = new Set<string>([...memberUploads(deps.dataDir, person), ...ownRoutines.flatMap((routine) => routine.files)]);
@@ -135,15 +149,13 @@ export function createTeamMemberLeft(deps: TeamMemberLeftDeps): (email: string) 
     let entries: string[] = [];
     try { entries = readdirSync(workspaces); } catch {}
     for (const layer of entries.filter((entry) => entry.endsWith(`--member-${person}`))) {
-      rmSync(join(workspaces, layer), { recursive: true, force: true });
-      rmSync(journalFile(layer), { force: true });
-      deleteBotMemoryFiles(layer);
-      forgetBotMemoryJournal(layer);
+      removeMemoryLayer(deps.dataDir, layer, memoryLayerRecords);
       layers++;
     }
     rmSync(join(deps.dataDir, "people", person), { recursive: true, force: true });
     rmSync(audienceHome(deps.dataDir, memberAudience(person)), { recursive: true, force: true });
-    deps.forgetConnections(person);
+    await Promise.resolve(deps.forgetConnections(person)).catch((error: unknown) => { console.warn(`[team] a leaving member's connections were not all removed: ${error instanceof Error ? error.message : String(error)}`); });
+    try { deps.forgetSecrets(person); } catch (error) { console.warn(`[team] a leaving member's saved secrets were not removed: ${error instanceof Error ? error.message : String(error)}`); }
     const browsers = await deps.eraseBrowsers(memberAudience(person)).catch(() => false);
     // Counts of shared things only: nothing here says what was theirs alone.
     deps.record({ category: "people", action: "member.left", target: { kind: "person", name: address }, after: { botsHandedBack, routinesHandedOver: written.length } });

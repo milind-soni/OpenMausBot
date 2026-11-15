@@ -226,7 +226,7 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
   if (!credential) throw new NoVoiceConfigured("key");
   const voice = voiceId || cfg.tts?.voice;
   if (!voice) throw new NoVoiceConfigured("voice");
-  return elevenlabs.synthesize(text, voice, credential.token, credential.api).audio;
+  return elevenlabs.synthesize(text, voice, credential.token, credential.api, credential.included).audio;
 }
 
 export type { Voice } from "./elevenlabs.ts";

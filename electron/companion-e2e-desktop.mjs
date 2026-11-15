@@ -8,7 +8,7 @@ const signedOut = () => Promise.reject(Object.assign(new Error("signed out"), { 
 
 /** The desktop app's end-to-end connection, wired to its sidecar, its account and the power monitor. Dark in a
  * development build unless OMB_CONTROL_PLANE_URL names a control plane. */
-export function createDesktopCompanionE2E({ isPackaged, appVersion, readCredentials, updateCredentials, powerMonitor, log }) {
+export function createDesktopCompanionE2E({ isPackaged, appVersion, readCredentials, updateCredentials, powerMonitor, log, onState }) {
   let client = null;
   try {
     const baseURL = resolveCompanionControlPlaneURL({ isPackaged });
@@ -26,6 +26,7 @@ export function createDesktopCompanionE2E({ isPackaged, appVersion, readCredenti
     companionState,
     post: postCompanionMessage,
     log,
+    onState,
   });
   setCompanionE2EHooks({ initialMessage: () => e2e.message(), tokenRejected: e2e.tokenRejected, changed: () => void e2e.reconcile() });
   powerMonitor?.on("resume", () => e2e.resumed());

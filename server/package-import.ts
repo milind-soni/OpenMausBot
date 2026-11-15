@@ -1,7 +1,7 @@
 // Packages are untrusted: import only adds new records, sets every privilege-bearing field itself, and rolls back on any failure.
 import { createHash, randomUUID } from "node:crypto";
 
-import { mcpServerNameError, MAX_MCP_SERVERS, parseStoredMcpServer } from "./mcp-registry.ts";
+import { mcpServerNameError, mcpSharedServerRoom, parseStoredMcpServer } from "./mcp-registry.ts";
 import {
   AGENT_PARTS, agentReleaseValues, connectionLocalValue, connectionReleaseValue, pair, pairs, playbookValues,
   ROOM_PARTS, roomReleaseValues, ROUTINE_PARTS, routineReleaseValues, scheduleValue, sha256Hex, TEAM_PARTS,
@@ -66,6 +66,8 @@ export interface PackageImportDeps {
   /** The most bots this workspace holds, every plan alike. */
   maxBots?: number;
   presets?: PresetRegistry;
+  /** A Team Cloud: the member adding the package, who looks after its bots. */
+  createdBy?: string;
 }
 
 export interface OrgImportContext {
@@ -258,7 +260,7 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
       const next: Record<string, unknown> = { ...deps.mcp.servers() };
       for (const connection of pkg.connections) {
         const part = `connections[${connection.key}]`;
-        if (Object.keys(next).length >= MAX_MCP_SERVERS) {
+        if (mcpSharedServerRoom(next) === 0) {
           skipped.push({ part, reason: "too_many_connections" });
           continue;
         }
@@ -298,6 +300,7 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
           modelSelection: selection,
           section,
           ...(options.visibility ? { visibility: options.visibility } : {}),
+          ...(deps.createdBy ? { createdBy: deps.createdBy } : {}),
         },
         { seedMessages: false },
       );

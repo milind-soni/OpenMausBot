@@ -2,7 +2,9 @@ import type { Bot, BotAnnouncement, Group } from "@/state/store";
 
 type FolderBot = Pick<Bot, "id" | "threadId" | "unread" | "tasks">;
 type DepartmentBot = FolderBot & Pick<Bot, "section" | "hidden">;
-type DepartmentGroup = Pick<Group, "id" | "unread" | "section" | "dm">;
+type DepartmentGroup = Pick<Group, "id" | "threadId" | "unread" | "section" | "dm"> & {
+  tasks?: Array<Pick<NonNullable<Group["tasks"]>[number], "threadId" | "unread">>;
+};
 
 export function botUnreadThreadIds(bot: FolderBot): string[] {
   if (!bot.tasks?.length) return bot.unread ? [bot.threadId] : [];
@@ -66,7 +68,10 @@ export async function markDepartmentRead(
 ): Promise<void> {
   for (const bot of unread.bots) await markBotRead(bot, request as (path: string, init?: RequestInit) => Promise<{ bot: BotAnnouncement }>, onBot);
   for (const group of unread.groups) {
-    const result = await request(`/api/groups/${group.id}/read`, { method: "POST" });
-    if (result.group) onGroup(result.group);
+    const threadIds = group.tasks?.filter((task) => task.unread).map((task) => task.threadId) ?? [group.threadId];
+    for (const threadId of threadIds) {
+      const result = await request(`/api/groups/${group.id}/read`, { method: "POST", body: JSON.stringify({ threadId }) });
+      if (result.group) onGroup(result.group);
+    }
   }
 }

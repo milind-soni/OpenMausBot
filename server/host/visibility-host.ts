@@ -4,6 +4,7 @@
 // only their own private chats (audience.ts).
 import { basename } from "node:path";
 
+import { baseBotId } from "../audience.ts";
 import { audienceEquals, narrowestAudience, roomFeeds, routineRunVisible, routineVisible, SEES_EVERYTHING, VisibleSet, type PathSubject, type ThreadAudiences, type ThreadOwner, type Viewer } from "../bot-visibility.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
@@ -83,8 +84,12 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
   /** The one visibility check every member request naming a subject passes through (a team's admin's too). */
   function subjectVisible(subject: PathSubject, visible: VisibleSet): boolean {
     switch (subject.kind) {
-      case "bot":
-        return !store.bot(subject.id) || visible.bot(subject.id);
+      case "bot": {
+        // Security invariant: on a Team Cloud a bot hidden from the viewer and an id no bot has are refused here alike,
+        // before any route can answer them differently.
+        const bot = store.bot(subject.id) ?? (deps.team ? store.bot(baseBotId(subject.id)) : undefined);
+        return bot ? visible.bot(bot.id) : !deps.team;
+      }
       case "thread":
         return !threadOwner(subject.id) || visible.thread(subject.id);
       case "group":

@@ -72,7 +72,7 @@ beforeAll(async () => {
   owner = (await team.pair(OWNER)).token!;
   admin = (await team.pair(ADMIN)).token!;
   bob = (await team.pair(BOB)).token!;
-  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout" });
+  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   bot = created.body.bot;
   // Bob's private chat: his words, his note, his picture and his About you.

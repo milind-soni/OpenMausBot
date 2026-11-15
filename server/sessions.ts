@@ -11,8 +11,10 @@ import {
   PAIRING_CODE_ALPHABET,
   PAIRING_CODE_LENGTH,
   PAIRING_CREDENTIAL_PREFIX,
+  PAIRING_INPUT_PROBLEM_CODE,
   PAIRING_INPUT_PROBLEM_KEY,
   readPairingInput,
+  type PairingErrorCode,
 } from "../shared/pairing-code.ts";
 import { userError, type UserError } from "./user-errors.ts";
 
@@ -136,7 +138,7 @@ export interface PublicPairing {
 
 export type ExchangeResult =
   | { ok: true; token: string; session: PublicSession }
-  | ({ ok: false; status: 400 | 401 | 403 | 429 } & UserError);
+  | ({ ok: false; status: 400 | 401 | 403 | 429; code: PairingErrorCode } & UserError);
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 /** The English fallback's clock; a client words `until` in its own time zone. */
@@ -446,7 +448,7 @@ export class SessionRegistry {
     this.prune();
     const now = this.now();
     const read = readPairingInput(input.code);
-    if (read.kind === "wrong" && read.problem !== "notACode") return { ok: false, status: 400, ...userError(PAIRING_INPUT_PROBLEM_KEY[read.problem]) };
+    if (read.kind === "wrong" && read.problem !== "notACode") return { ok: false, status: 400, code: PAIRING_INPUT_PROBLEM_CODE[read.problem], ...userError(PAIRING_INPUT_PROBLEM_KEY[read.problem]) };
     // A credential is hashed as presented: normalizePairingCode folds 0 to O and 1 to I, which would merge distinct secrets.
     const presented = sha256(read.kind === "credential" ? read.credential : read.kind === "code" ? read.code : normalizePairingCode(input.code));
     const browser = input.browser === true;
@@ -457,18 +459,18 @@ export class SessionRegistry {
     const lock = unnamed ? { locked: false, retryAfterMs: 0 } : this.lockState(this.codeFailures, input.source);
     if (lock.locked) {
       const until = now + lock.retryAfterMs;
-      return { ok: false, status: 429, ...userError("serverError.pair.tooMany", { seconds: Math.ceil(lock.retryAfterMs / 1000), until, time: utcClock(until) }) };
+      return { ok: false, status: 429, code: "pairing_too_many", ...userError("serverError.pair.tooMany", { seconds: Math.ceil(lock.retryAfterMs / 1000), until, time: utcClock(until) }) };
     }
     const index = this.pairings.findIndex((p) => (p.browser === true) === browser &&
       (sameDigest(p.credentialHash, presented) || (!p.browser && sameDigest(p.codeHash, presented))));
     if (index < 0) {
       if (unnamed) this.wrongFromUnnamed();
       else this.recordFailure(this.codeFailures, PAIRING_LOCKOUT, input.source);
-      return { ok: false, status: 401, ...userError("serverError.pair.codeWrong") };
+      return { ok: false, status: 401, code: "pairing_code_wrong", ...userError("serverError.pair.codeWrong") };
     }
     const [pairing] = this.pairings.splice(index, 1);
     this.codeFailures.delete(input.source);
-    if (this.personal(pairing.scopes)) return { ok: false, status: 403, ...this.adminOnly! };
+    if (this.personal(pairing.scopes)) return { ok: false, status: 403, code: "cloud_personal", ...this.adminOnly! };
     const token = `omb_sess_${randomBytes(32).toString("base64url")}`;
     const checkedAt = pairing.memberCheckedAt ?? now;
     const record: SessionRecord = {
@@ -701,6 +703,18 @@ export class SessionRegistry {
     return this.sessions.map(publicSession);
   }
 
+  /** The stored digest of each live bearer session among `ids`: the phone relay derives a phone's keys from it. */
+  bearerDigests(ids: ReadonlySet<string>): Array<{ id: string; tokenHash: string }> {
+    this.prune();
+    return this.sessions.filter((s) => ids.has(s.id) && !s.cookieOnly && !this.personal(s.scopes)).map((s) => ({ id: s.id, tokenHash: s.tokenHash }));
+  }
+
+  /** The credential digests of the newest open pairing windows a device may redeem (never a browser sign-in's). */
+  pairingDigests(max: number): string[] {
+    this.prune();
+    return this.pairings.filter((p) => !p.browser).sort((a, b) => b.createdAt - a.createdAt).slice(0, max).map((p) => p.credentialHash);
+  }
+
   /** The live sessions a Team Cloud member's own codes opened: their phones. Never an Admin-signed pairing (an app). */
   memberPhones(): PublicSession[] {
     this.prune();
@@ -765,6 +779,12 @@ export class SessionRegistry {
     const expiresAt = this.now() + STREAM_TICKET_TTL_MS;
     this.tickets.set(sha256(ticket), { sessionId, expiresAt });
     return { ticket, expiresAt };
+  }
+
+  /** Whose a stream ticket is, without spending it. */
+  ticketOwner(ticket: string): string | null {
+    const entry = this.tickets.get(sha256(ticket));
+    return entry && entry.expiresAt > this.now() ? entry.sessionId : null;
   }
 
   redeemStreamTicket(ticket: string): SessionRecord | null {

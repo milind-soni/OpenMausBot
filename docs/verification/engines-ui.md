@@ -47,7 +47,7 @@ recreating a removed fixture directory.
 6. Expand Kimi to find **Install Kimi on this server**, and OpenCode to find
    **Update OpenCode on this server**. Click each and confirm the fixture error
    appears with its button usable again. Terminal commands remain under
-   **Prefer a terminal?**. These clicks never perform a real installation.
+   **Prefer a terminal?**. Check that OMP appears as a custom engine beside Pi. These clicks never perform a real installation.
 7. Expand Claude and use **Add another Claude account** inside its card. Enter
    an account name, collapse/reopen the card, and confirm the draft remains.
    Cancel, then repeat with **Add another ChatGPT account** in the ChatGPT card.
@@ -90,7 +90,7 @@ pnpm exec vitest run src/state/engine-refresh.test.ts src/components/EngineSetup
 ```sh
 pnpm exec vitest run scripts/verify-engines-ui.test.mjs
 pnpm exec vitest run server/antigravity-account-api.test.ts server/drivers/antigravity-account.test.ts src/components/ChatGptPlanSignIn.interaction.test.ts
-pnpm exec vitest run src/components/EngineLibrary.test.ts src/components/EnginesSettings.test.ts src/components/EngineSetup.test.ts src/components/ClaudeSignIn.test.ts src/components/ClaudeSignIn.interaction.test.ts src/components/ChatGptPlanSignIn.interaction.test.ts src/components/DeviceSignIn.test.ts src/components/GrokSignIn.interaction.test.ts src/components/EngineSetup.grok.test.ts src/components/EngineUpdateNotice.test.ts src/components/SettingsModal.appearance.test.ts src/components/ModelPicker.test.ts
+pnpm exec vitest run src/components/EngineLibrary.test.ts src/components/EnginesSettings.test.ts src/components/EngineSetup.test.ts src/components/ClaudeSignIn.test.ts src/components/ClaudeSignIn.interaction.test.ts src/components/ChatGptPlanSignIn.interaction.test.ts src/components/DeviceSignIn.test.ts src/components/GrokSignIn.interaction.test.ts src/components/EngineSetup.grok.test.ts src/components/EngineUpdateNotice.test.ts src/components/settings/SettingsWindow.test.ts src/components/ModelPicker.test.ts
 pnpm typecheck
 pnpm i18n:check
 pnpm build

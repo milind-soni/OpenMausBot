@@ -1,6 +1,7 @@
 // Rows are `display: contents` wrappers with no box, so their last child is what gets scrolled and highlighted.
-import { useEffect } from "react";
-import { api, MESSAGE_PAGE_SIZE, useStore, type Action, type AppState, type Message } from "@/state/store";
+import { useEffect, type RefObject } from "react";
+import { api, MESSAGE_PAGE_SIZE, type Action, type AppState, type Message } from "@/state/store";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import type { SearchHit } from "@/lib/search-hit";
 import { t } from "@/lib/i18n";
 
@@ -99,9 +100,8 @@ function matchRange(root: HTMLElement, text: string): Range | null {
   return null;
 }
 
-export function useFocusMessage(threadId: string, ready: boolean) {
-  const { state, dispatch } = useStore();
-  const focus = state.focusMessage;
+export function useFocusMessage(threadId: string, ready: boolean, rootRef?: RefObject<HTMLElement | null>) {
+  const focus = useStoreSelector((state) => state.focusMessage), dispatch = useStoreDispatch();
   useEffect(() => {
     if (!focus || focus.consumed || focus.threadId !== threadId || !ready) return;
     let tries = 0;
@@ -113,7 +113,7 @@ export function useFocusMessage(threadId: string, ready: boolean) {
     let highlight: Highlight | null = null;
     const attempt = () => {
       if (cancelled) return;
-      const wrapper = document.querySelector<HTMLElement>(`[data-mid="${CSS.escape(focus.messageId)}"]`);
+      const wrapper = (rootRef?.current ?? document).querySelector<HTMLElement>(`[data-mid="${CSS.escape(focus.messageId)}"]`);
       const row = wrapper?.lastElementChild as HTMLElement | null;
       target = focus.matchText ? row?.querySelector<HTMLElement>("[data-chat-bubble]") ?? row : row;
       if (!target) {

@@ -25,6 +25,31 @@ const ok = <T,>(result: { skills: T[] } | { error: string }) => {
 };
 
 describe("importing a skill's whole folder", () => {
+  it.each([
+    "https://github.com/a/b/tree/feature%2Fpdf/skills/pdf",
+    "https://github.com/a/b/blob/feature%2Fpdf/skills/pdf/SKILL.md",
+    "https://raw.githubusercontent.com/a/b/feature%2Fpdf/skills/pdf/SKILL.md",
+    "https://raw.githubusercontent.com/a/b/refs/heads/feature%2Fpdf/skills/pdf/SKILL.md",
+  ])("decodes the branch segment once when importing %s", async (source) => {
+    const github = fakeGitHub({ "a/b": PDF_SKILL });
+    const expected = "https://api.github.com/repos/a/b/commits/feature%2Fpdf";
+    const fetcher: typeof fetch = async (input, init) => {
+      if (String(input).includes("/commits/") && String(input) !== expected) return new Response(null, { status: 404 });
+      return github.fetch(input, init);
+    };
+    expect(parseSkillSource(source)).toMatchObject({ ref: "feature/pdf", path: "skills/pdf" });
+    const [skill] = ok(await fetchSkillFromSource(source, fetcher));
+    expect(skill!.github).toMatchObject({ ref: "feature/pdf", commit: github.commitOf("a/b") });
+    expect(github.requests[0]).toBe(expected);
+    const [updated] = ok(await fetchSkillFromSource(githubSkillLink(skill!.github!), fetcher));
+    expect(updated!.github).toEqual(skill!.github);
+  });
+
+  it("preserves literal percent escapes in a branch and rejects malformed URL escapes", () => {
+    expect(parseSkillSource("https://github.com/a/b/tree/feature%252Fpdf/skills/pdf")).toMatchObject({ ref: "feature%2Fpdf" });
+    expect(parseSkillSource("https://github.com/a/b/tree/bad%ZZ/skills/pdf")).toHaveProperty("error");
+  });
+
   it("brings in every file below the folder at one commit, binaries and executable bits included", async () => {
     const github = fakeGitHub({ "a/b": PDF_SKILL });
     const [skill] = ok(await fetchSkillFromSource("https://github.com/a/b/tree/main/skills/pdf", github.fetch));

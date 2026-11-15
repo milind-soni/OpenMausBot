@@ -13,7 +13,7 @@
   "devDependencies": {
     "@types/node": "24.19.2",
     "@types/ws": "8.18.2",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/main.ts",

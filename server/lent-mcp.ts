@@ -85,7 +85,7 @@ export function lentDefinition(name: string, server: StoredMcpServer): LentMcpSe
 const definitionKey = (definition: LentMcpServer) => createHash("sha256").update(JSON.stringify(definition)).digest("hex");
 
 type ElsewhereServer = StoredMcpServer & { runsOn: McpRunsOn };
-type Bot = { id: string; mcpServers?: string[]; toolScope?: unknown };
+type Bot = { id: string; name?: string; color?: string; mcpServers?: string[]; toolScope?: unknown };
 
 /** The saved servers that run on another computer and that this bot's turns use: on, for this bot, in its list and its
  * tool selection. */
@@ -223,7 +223,7 @@ export function createLentMcp(deps: LentMcpDeps) {
       const params = (message.params ?? {}) as { name?: unknown; arguments?: unknown };
       if (typeof params.name !== "string" || !params.name) return callError(id, "Name the tool to call.");
       const args = params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments) ? params.arguments as Record<string, unknown> : {};
-      const result = await deps.computers.request({ computer_id: state.computerId, action: "mcp_call", server: definition, tool_name: params.name, arguments: args }, principal, active);
+      const result = await deps.computers.request({ computer_id: state.computerId, action: "mcp_call", server: definition, tool_name: params.name, arguments: args }, principal, active, bot?.name && bot.color ? { name: bot.name, color: bot.color } : null);
       return reply(id, result && typeof result === "object" ? result : { content: [] });
     } catch (error) {
       return refuse(error instanceof Error ? error.message : `${name} did not answer.`);

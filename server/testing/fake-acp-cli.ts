@@ -6,6 +6,7 @@
 //     (FAKE_ACP_REJECT_LIVE_LOAD_DSH=1: with dsh 0.2's -32602 "session is already active" instead of -32000)
 //   FAKE_ACP_CACHED_LIVE_LOAD  a live session/load is acknowledged but keeps the old MCP credentials, like Qwen
 //   FAKE_ACP_TEXT_REPLY  answer every session/prompt with only this text
+//   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (stream-script.ts)
 //   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt
 //     | abort-in-prompt (a sign-in link, then a TCMalloc CHECK line on stderr, then exit 134 as bubblewrap reports SIGABRT) | hang
 //     | hang-initialize | unkeyed-tool | finished-tools (tool_call frames that arrive already completed or failed, one updated again)
@@ -73,11 +74,59 @@
 //   FAKE_ACP_CANCEL_STOP_REASON  the stopReason a cancelled hanging prompt answers (default cancelled; OpenCode answers end_turn)
 //   FAKE_ACP_HANG_ONCE_FILE  with FAKE_ACP_HANG_ON, only the first matching prompt hangs; it writes this file
 //   FAKE_ACP_HOLD_FILE  while this file exists, a session/prompt waits before it is answered
+//   FAKE_ACP_MODE=hermes-steer  hermes-agent's ACP `/steer`: sessions advertise `steer`; a prompt says "working. ", waits for
+//     FAKE_ACP_GATE_FILE, then says "done" and every steer it took; `/steer <text>` during it answers "⏩ Steer queued for
+//     the active turn: …" (FAKE_ACP_STEER_FAIL=1: "⚠️ Steer failed: …"; =rpc: a JSON-RPC error), and with no prompt running it runs <text>
+//     as a prompt that says "ran: <text>". FAKE_ACP_STEER_HOLD_FILE holds a `/steer` while it exists;
+//     FAKE_ACP_HERMES_COMMANDS lists the commands sessions advertise (default help,steer,queue).
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
+
+// The scripted replies every fake plays (FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE); inlined, since tests copy this fake
+// out of the repo.
+type StreamStep = { say?: string; think?: string; tool?: string; fail?: string };
+type StreamScript = { steps: StreamStep[]; chars: number; ms: number };
+function streamScript(prompt: string): StreamScript | null {
+  if (!process.env.FAKE_STREAM_SCRIPT) return null;
+  let scripts: Record<string, StreamStep[]>;
+  try { scripts = JSON.parse(readFileSync(process.env.FAKE_STREAM_SCRIPT, "utf8")); } catch { return null; }
+  // A prompt can carry earlier requests as context: the newest marker in it is the request.
+  const marker = Object.keys(scripts).filter((key) => prompt.includes(key)).sort((a, b) => prompt.lastIndexOf(b) - prompt.lastIndexOf(a) || b.length - a.length)[0];
+  if (!marker) return null;
+  const [chars = 4, ms = 40] = (process.env.FAKE_STREAM_CADENCE ?? "4:40").split(":").map(Number);
+  return { steps: scripts[marker]!, chars: Math.max(1, chars), ms: Math.max(0, ms) };
+}
+function playStreamScript(script: StreamScript, play: { chunk(step: StreamStep, piece: string): void; end(step: StreamStep): void; done(failure?: string): void; cancelled(): boolean }): void {
+  const queue = script.steps.slice();
+  const next = (): void => {
+    if (play.cancelled()) return;
+    const step = queue.shift();
+    if (!step) return play.done();
+    if (step.fail !== undefined) return play.done(step.fail);
+    if (step.tool !== undefined) {
+      play.end(step);
+      setTimeout(next, script.ms);
+      return;
+    }
+    const text = step.say ?? step.think ?? "";
+    let at = 0;
+    const send = (): void => {
+      if (play.cancelled()) return;
+      if (at < text.length) {
+        play.chunk(step, text.slice(at, at += script.chars));
+        setTimeout(send, script.ms);
+        return;
+      }
+      play.end(step);
+      setTimeout(next, script.ms);
+    };
+    send();
+  };
+  next();
+}
 
 // Follow the spawning server down; on Windows ppid does not change after parent exit.
 {
@@ -220,6 +269,7 @@ const dumpEnv = Object.fromEntries(
     "PATH",
     "HOME",
     "USERPROFILE",
+    "PI_CODING_AGENT_SESSION_DIR",
     "TEMP",
     "TMP",
     "SystemRoot",
@@ -273,6 +323,7 @@ const dumpEnv = Object.fromEntries(
     "GITHUB_TOKEN",
     "COMMAND_CODE_API_KEY",
     "KIRO_API_KEY",
+    "WINDSURF_API_KEY",
   ].flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]] as const)),
 );
 const dumpState: Record<string, unknown> = { argv, env: dumpEnv, pid: process.pid };
@@ -438,6 +489,7 @@ let pendingAskQuestionId: number | null = null;
 let onAskQuestionAnswered: (() => void) | null = null;
 
 let hangingPromptId: unknown = null;
+let streamingPromptId: unknown = null;
 let hangKeepAlive: ReturnType<typeof setInterval> | null = null;
 
 type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
@@ -660,6 +712,63 @@ function heldByHoldFile(msg: any): boolean {
   return true;
 }
 
+function advertiseHermesCommands(sessionId: string) {
+  out({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "available_commands_update",
+    availableCommands: (process.env.FAKE_ACP_HERMES_COMMANDS ?? "help,steer,queue").split(",").map((name) => ({ name, description: name })) } } });
+}
+
+let hermesTurn: { steers: string[] } | null = null;
+/** hermes-agent's prompt, `/steer` included, as acp_adapter/server.py and commands.py answer them. */
+function hermesPrompt(msg: any) {
+  const text = (Array.isArray(msg.params?.prompt) ? msg.params.prompt : []).map((block: any) => block?.text ?? "").join("").trim();
+  const say = (line: string) => out({ jsonrpc: "2.0", method: "session/update",
+    params: { sessionId: msg.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: line } } } });
+  const steer = /^\/steer\s+([\s\S]+)$/.exec(text)?.[1]?.trim();
+  const held = process.env.FAKE_ACP_STEER_HOLD_FILE;
+  if (steer !== undefined && held && existsSync(held)) {
+    const poll = setInterval(() => {
+      if (existsSync(held)) return;
+      clearInterval(poll);
+      hermesPrompt(msg);
+    }, 50);
+    return;
+  }
+  if (steer !== undefined && hermesTurn) {
+    recordMethod("session/prompt.steer");
+    if (process.env.FAKE_ACP_STEER_FAIL === "rpc") {
+      out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "unsupported_control" } });
+      return;
+    }
+    if (process.env.FAKE_ACP_STEER_FAIL === "1") say("⚠️ Steer failed: the agent is compressing its context");
+    else {
+      hermesTurn.steers.push(steer);
+      say(`⏩ Steer queued for the active turn: ${steer.slice(0, 80)}${steer.length > 80 ? "..." : ""}\n`);
+    }
+    result(msg.id, { stopReason: "end_turn" });
+    return;
+  }
+  if (steer !== undefined) {
+    say(`ran: ${steer}`);
+    result(msg.id, { stopReason: "end_turn", _meta: { inputTokens: 3, outputTokens: 2 } });
+    return;
+  }
+  const turn = { steers: [] as string[] };
+  hermesTurn = turn;
+  say("working. ");
+  const finish = () => {
+    hermesTurn = null;
+    say(`done${turn.steers.length ? `; steered: ${turn.steers.join(" | ")}` : ""}`);
+    result(msg.id, { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } });
+  };
+  const gate = process.env.FAKE_ACP_GATE_FILE;
+  if (!gate || existsSync(gate)) return finish();
+  const poll = setInterval(() => {
+    if (!existsSync(gate)) return;
+    clearInterval(poll);
+    finish();
+  }, 50);
+}
+
 /** Applies one ACP message while preserving the fake CLI's launcher-owned MCP behavior. */
 function handle(msg: any) {
   if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined) && msg.id === pendingAskQuestionId) {
@@ -773,6 +882,7 @@ function handle(msg: any) {
         ...(opts ? { configOptions: opts } : {}),
         ...(mdls ? { models: mdls } : {}),
       }, "session/new", liveSession);
+      if (mode === "hermes-steer") advertiseHermesCommands(liveSession);
       break;
     }
     case "session/close":
@@ -815,6 +925,7 @@ function handle(msg: any) {
       const mdls = sessionModels();
       liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
       resultAndConfigUpdates(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) }, "session/load", msg.params.sessionId);
+      if (mode === "hermes-steer") advertiseHermesCommands(msg.params.sessionId);
       break;
     }
     case "session/resume": {
@@ -946,6 +1057,10 @@ function handle(msg: any) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.prompt.json`, JSON.stringify(msg.params?.prompt ?? null, null, 2));
       }
       if (failRpc(msg)) return;
+      if (mode === "hermes-steer") {
+        hermesPrompt(msg);
+        return;
+      }
       if (process.env.FAKE_ACP_TOOL_LIMIT) {
         const limit = Number(process.env.FAKE_ACP_TOOL_LIMIT);
         const handshake = process.env.FAKE_ACP_MCP_HANDSHAKE ? JSON.parse(process.env.FAKE_ACP_MCP_HANDSHAKE) : GROK_MCP_HANDSHAKE;
@@ -1008,6 +1123,28 @@ function handle(msg: any) {
             : { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } },
         );
       };
+      const script = streamScript((Array.isArray(msg.params?.prompt) ? msg.params.prompt : []).map((block: any) => block?.text ?? "").join(""));
+      if (script) {
+        streamingPromptId = msg.id;
+        const update = (u: Record<string, unknown>) => out({ jsonrpc: "2.0", method: "session/update", params: { update: u } });
+        let tools = 0;
+        playStreamScript(script, {
+          cancelled: () => streamingPromptId !== msg.id,
+          chunk: (step, piece) => update({ sessionUpdate: step.think !== undefined ? "agent_thought_chunk" : "agent_message_chunk", content: { text: piece } }),
+          end: (step) => {
+            if (step.tool === undefined) return;
+            const id = `script-tool-${++tools}`;
+            update({ sessionUpdate: "tool_call", toolCallId: id, title: step.tool, rawInput: { command: step.tool } });
+            update({ sessionUpdate: "tool_call_update", toolCallId: id, status: "completed" });
+          },
+          done: (failure) => {
+            streamingPromptId = null;
+            if (failure) out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: failure } });
+            else complete();
+          },
+        });
+        return;
+      }
       if (mode === "quiet-then-answer") {
         const lines: string[] = process.env.FAKE_ACP_QWEN_LOG ? JSON.parse(process.env.FAKE_ACP_QWEN_LOG) : [];
         let logTimer: ReturnType<typeof setInterval> | null = null;
@@ -1469,6 +1606,10 @@ function handle(msg: any) {
       break;
     }
     case "session/cancel":
+      if (streamingPromptId !== null) {
+        result(streamingPromptId, { stopReason: "cancelled", _meta: {} });
+        streamingPromptId = null;
+      }
       if (hangingPromptId !== null && process.env.FAKE_ACP_IGNORE_CANCEL !== "1") {
         result(hangingPromptId, { stopReason: process.env.FAKE_ACP_CANCEL_STOP_REASON ?? "cancelled", _meta: {} });
         if (hangKeepAlive) clearInterval(hangKeepAlive);

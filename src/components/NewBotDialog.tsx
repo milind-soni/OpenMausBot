@@ -13,7 +13,6 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { announceNewBot, reportsToFor, startingTemplate, type BotDefaultsAnswer } from "@/lib/new-bot";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { openServerMenu } from "./DesktopWorkspaceSwitcher";
 import { useTeamPeople } from "@/state/team-people";
 import { visibilityFromForm, type VisibilityMode } from "./bot-settings/VisibilitySection";
 import type { Routine } from "@/lib/routines";
@@ -31,8 +30,7 @@ import { RoutineEditor } from "./RoutinesPage";
 import { Layer, useIsTopLayer } from "./Layer";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { SharePresetDialog } from "./SharePresetDialog";
-import { SettingRow } from "./SettingsPrimitives";
-import { NewBotDefaultsRow } from "./AppSettingsRows";
+import { SettingRow, SettingsLinkRow } from "./SettingsPrimitives";
 import { Select } from "./Select";
 
 const SECTIONS = ["Identity", "Soul", "Skills", "Memory", "Routines", "Access", "Model", "Permissions", "Voice & alerts"] as const;
@@ -76,7 +74,8 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
   const ownerOrAdmin = useOwnerOrAdmin();
   const showThreads = useShowThreads();
   const sections = useAdvancedMode() ? SECTIONS : SECTIONS.filter((section) => section !== "Model");
-  const choosesVisibility = !defaultsMode && typeof window !== "undefined" && !window.ogb && ownerOrAdmin === true;
+  const [everyone, setEveryone] = useState(false);
+  const choosesVisibility = !team && !defaultsMode && typeof window !== "undefined" && !window.ogb && ownerOrAdmin === true;
   const dialog = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -122,7 +121,7 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
   const save = async () => {
     if (!ready || savingRef.current || parent.state.botCreationPending) return;
     if (!defaultsMode && draft.bot.approvalMode === "auto" && draft.bot.computer === "local" && !draft.consent.acknowledgeLocalAuto) { setWarning("local"); return; }
-    const visibility = choosesVisibility ? visibilityFromForm(audience, people) : null;
+    const visibility = choosesVisibility ? visibilityFromForm(audience, people) : team && everyone ? { ok: true as const, visibility: "everyone" as const } : null;
     if (visibility && !visibility.ok) { setError(t("botSettings.visibility.needPeople")); return; }
     savingRef.current = true; setSaving(true); setError("");
     parent.dispatch({ type: "botCreationPending", on: true });
@@ -167,7 +166,7 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
         <button type="button" onClick={() => closeRef.current()} aria-label={t("common.close")}
           className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"><X size={18} className="pointer-events-none" /></button>
       </div>
-        {team && !defaultsMode && teamName && <SharedInTeam team={teamName} />}
+        {team && !defaultsMode && teamName && <WhoCanUse team={teamName} everyone={everyone} disabled={saving} onChange={setEveryone} />}
         {choosesVisibility && (
           <div className="flex flex-wrap items-center gap-2 px-5 pt-3 text-[13px] text-ink-secondary" data-new-bot-visibility>
             <label className="flex items-center gap-2">
@@ -222,14 +221,15 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
   </div>;
 }
 
-function SharedInTeam({ team }: { team: string }) {
-  const bridge = typeof window === "undefined" ? undefined : window.ogb?.workspaces;
-  return <div data-new-bot-shared className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline/40 bg-raised/30 px-5 py-2.5 text-[13px] text-ink-secondary">
-    <span>{t("newBot.sharedWith", { team })}</span>
-    {bridge
-      ? <button type="button" onClick={() => void openServerMenu(bridge).catch(() => {})} className="font-medium text-accent hover:underline">{t("newBot.justForYou")}</button>
-      : <span>{t("newBot.justForYou").replace(/\s*→$/, "")}</span>}
-  </div>;
+/** A team bot is its maker's until they share it; this is the one place to share it with everyone from the start. */
+function WhoCanUse({ team, everyone, disabled, onChange }: { team: string; everyone: boolean; disabled: boolean; onChange(everyone: boolean): void }) {
+  return <label data-new-bot-shared={everyone ? "everyone" : "me"} className="flex flex-wrap items-center gap-2 border-b border-hairline/40 bg-raised/30 px-5 py-2.5 text-[13px] text-ink-secondary">
+    {t("botAccess.general")}
+    <Select size="sm" value={everyone ? "everyone" : "me"} disabled={disabled} onChange={(event) => onChange(event.target.value === "everyone")}>
+      <option value="me">{t("teamSide.me")}</option>
+      <option value="everyone">{t("teamSettings.everyone", { team })}</option>
+    </Select>
+  </label>;
 }
 
 function DraftSection({ active, draft, defaultsMode, owner }: { active: Section; draft: BotCreationDraft; defaultsMode: boolean;
@@ -247,7 +247,7 @@ function DraftSection({ active, draft, defaultsMode, owner }: { active: Section;
         <option value="">{t("teamSettings.general")}</option>{[...new Set([...(state.sections ?? []), ...state.bots.map(bot => bot.section ?? "")])].filter(Boolean).map(name => <option key={name}>{name}</option>)}
       </Select>
     </label>
-    {owner && team && <label className="block text-[13px] text-ink-secondary" data-new-bot-reports-to>{t("lookedAfter.newBot")}
+    {owner && team && <label className="block text-[13px] text-ink-secondary" data-new-bot-reports-to>{t("lookedAfter.owner")}
       <Select size="lg" className="mt-1.5 w-full" value={owner.value ?? ""} onChange={event => owner.choose(event.target.value)}>
         {team.people.map(person => <option key={person.email} value={person.email}>{person.you ? t("owner.you", { name: person.name }) : person.name}</option>)}
       </Select>
@@ -369,7 +369,12 @@ export function DefaultBotSettings({ simple = false }: { simple?: boolean }) {
     {open && <NewBotDialog defaultsMode onClose={() => setOpen(false)} />}
     {sharing && <SharePresetDialog onClose={() => setSharing(false)} />}
   </>;
-  if (simple) return <><NewBotDefaultsRow onEdit={() => setOpen(true)} onShare={() => setSharing(true)} />{dialogs}</>;
+  // One control per row: the defaults open their editor; sharing them as a preset is a row of its own.
+  if (simple) return <>
+    <SettingsLinkRow title={t("newBot.defaults")} subtitle={t("settings.newBot.defaultsLine")} onClick={() => setOpen(true)} data={{ "data-new-bot-defaults": "" }} />
+    <SettingRow title={t("newBot.sharePresetRow")}><button type="button" className="ui-button" data-new-bot-share="" onClick={() => setSharing(true)}>{t("newBot.shareAction")}</button></SettingRow>
+    {dialogs}
+  </>;
 
   const content = <>
     <div className="flex shrink-0 gap-2">

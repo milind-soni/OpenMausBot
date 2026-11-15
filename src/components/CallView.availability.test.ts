@@ -88,8 +88,8 @@ describe("call capability guidance", () => {
   it("keeps Take turns off on Windows until a Fish Audio key is saved, and says where to add one", () => {
     const fish = capabilities({ available: true, engine: "fish-audio", onDevice: false }, "win32");
     expect(callCapabilityHelp(fish, true, false)).toEqual({
-      label: "Add a Fish Audio key to take turns on calls",
-      reason: "On this computer, Take turns hears you through Fish Audio speech-to-text. Add a Fish Audio key in Settings → API keys.",
+      label: "Add a Fish Audio or ElevenLabs key to take turns on calls",
+      reason: "On this computer, Take turns hears you through Fish Audio or ElevenLabs speech-to-text. Add either key in Settings → API keys.",
     });
     expect(callCapabilityHelp(fish, true, true)).toBeNull();
   });

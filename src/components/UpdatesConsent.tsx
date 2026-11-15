@@ -3,6 +3,7 @@ import { Mail } from "lucide-react";
 import type { UpdatesConsentBridge, UpdatesConsentState, UpdatesConsentStatus } from "../../electron/updates-consent.mjs";
 import { t } from "@/lib/i18n";
 import { Layer } from "./Layer";
+import { productName } from "@/lib/brand";
 import { SettingRow, Switch } from "./SettingsPrimitives";
 
 export const UPDATES_CONSENT_POPUP = "[data-updates-consent-popup]";
@@ -95,7 +96,7 @@ export function UpdatesConsentRow() {
     {t("settings.updatesConsent.subtitle")}
     {on && state.email && <>{" "}{t("settings.updatesConsent.to", { email: state.email })}</>}
   </>;
-  return <SettingRow title={t("settings.updatesConsent.title")} subtitle={subtitle}
+  return <SettingRow title={t("settings.account.getUpdates", { app: productName() })} subtitle={subtitle}
     message={failed ? <span role="alert" className="text-danger">{t("updatesConsent.failed")}</span> : undefined}>
     <Switch checked={on} disabled={busy} aria-label={t("settings.updatesConsent.aria")}
       onClick={() => {

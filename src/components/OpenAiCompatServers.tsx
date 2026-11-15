@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Loader2, Pencil, Plus, RotateCw, Trash2 } from "lucide-react";
+import { Pencil, RotateCw, Trash2 } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { keySaved } from "@/lib/product-events";
@@ -120,15 +120,15 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
 
   return (
     <div data-api-keys-other>
-      <div className="mb-0.5 text-[13px] leading-[18px] text-ink">{t("apiInstances.title")}</div>
+      <div className="mb-0.5 text-[13px] font-medium leading-[18px] text-ink">{t("apiInstances.title")}</div>
       <p className="mb-2 text-[12px] leading-4 text-ink-secondary">{t("apiInstances.subtitle")}</p>
       {servers.length === 0 && <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.empty")}</p>}
       {servers.map((server) => (
-        <div key={server.instanceId} className="mb-1.5 rounded-lg border border-hairline/60 bg-inset px-3 py-1.5">
+        <div key={server.instanceId} className="py-1.5">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[12px] text-ink">{server.displayName}</div>
-              {server.url && <div className="truncate font-mono text-[11px] text-ink-secondary">{server.url}</div>}
+              <div className="truncate text-[13px] leading-5 text-ink">{server.displayName}</div>
+              {server.url && <div className="truncate text-[12px] leading-4 text-ink-secondary">{server.url}</div>}
             </div>
             <ReplyWaitSelect
               server={server}
@@ -174,7 +174,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
           {editing === server.instanceId && (
             <div className="mt-1.5 flex flex-col gap-1.5">
               <input value={editText} onChange={(e) => setEditText(e.target.value)} placeholder={t("apiInstances.models")}
-                aria-label={t("apiInstances.modelsFor", { name: server.displayName })} spellCheck={false} disabled={busy !== null} className={cn(INPUT, "font-mono")} />
+                aria-label={t("apiInstances.modelsFor", { name: server.displayName })} spellCheck={false} disabled={busy !== null} className={INPUT} />
               <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.editModelsHint")}</p>
               <div className="flex gap-1.5">
                 <button
@@ -204,7 +204,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
           type="button"
           onClick={() => { setName(GEMINI_PRESET.name); setUrl(GEMINI_PRESET.url); }}
           disabled={busy !== null}
-          className="ui-button self-start"
+          className="ui-button self-end"
         >
           {t("apiInstances.geminiPreset")}
         </button>
@@ -212,19 +212,18 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("apiInstances.name")} aria-label={t("apiInstances.name")}
           spellCheck={false} disabled={busy !== null} className={INPUT} />
         <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.example.com/v1" aria-label={t("apiInstances.url")}
-          spellCheck={false} disabled={busy !== null} className={cn(INPUT, "font-mono")} />
+          spellCheck={false} disabled={busy !== null} className={INPUT} />
         <input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={t("apiInstances.key")} aria-label={t("apiInstances.key")}
-          autoComplete="off" disabled={busy !== null} className={cn(INPUT, "font-mono")} />
+          autoComplete="off" disabled={busy !== null} className={INPUT} />
         <input value={models} onChange={(e) => setModels(e.target.value)} placeholder={t("apiInstances.models")} aria-label={t("apiInstances.models")}
-          spellCheck={false} disabled={busy !== null} className={cn(INPUT, "font-mono")} />
+          spellCheck={false} disabled={busy !== null} className={INPUT} />
         <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.modelsHint")}</p>
         <button
           type="button"
           onClick={add}
           disabled={busy !== null || !ready}
-          className="ui-button self-start"
+          className="ui-button self-end"
         >
-          {busy === "add" ? <Loader2 size={12} aria-hidden="true" className="animate-spin" /> : <Plus size={12} aria-hidden="true" />}
           {busy === "add" ? t("apiInstances.adding") : t("apiInstances.add")}
         </button>
       </div>
@@ -280,11 +279,11 @@ export function LmStudioServer({ heading = true }: { heading?: boolean } = {}) {
   };
 
   return (
-    <div className={cn(heading && "rounded-lg border border-hairline/40 bg-inset px-3 py-2")}>
+    <div>
       {heading && <div className="text-[13px] text-ink">{t("lmStudio.title")}</div>}
       <p className={cn("text-[12px] leading-4 text-ink-secondary", heading && "mt-1")}>{t("lmStudio.desc")}</p>
       <div className="mt-2 flex flex-col gap-1.5">
-        <label className="flex flex-col gap-1 text-[12px] leading-4 text-ink-secondary">
+        <label className="flex flex-col gap-1.5 text-[13px] font-medium leading-[18px] text-ink">
           {t("lmStudio.port")}
           <input
             inputMode="numeric"
@@ -293,7 +292,7 @@ export function LmStudioServer({ heading = true }: { heading?: boolean } = {}) {
             aria-label={t("lmStudio.port")}
             spellCheck={false}
             disabled={busy}
-            className={cn(INPUT, "font-mono")}
+            className={INPUT}
           />
         </label>
         <input
@@ -304,17 +303,16 @@ export function LmStudioServer({ heading = true }: { heading?: boolean } = {}) {
           aria-label={t("lmStudio.token")}
           autoComplete="off"
           disabled={busy}
-          className={cn(INPUT, "font-mono")}
+          className={INPUT}
         />
         <p className="text-[12px] leading-4 text-ink-secondary">{t("lmStudio.tokenHint")}</p>
-        {url && <p className="truncate font-mono text-[12px] leading-4 text-ink-secondary">{url}</p>}
+        {url && <p className="truncate text-[12px] leading-4 text-ink-secondary">{url}</p>}
         <button
           type="button"
           onClick={add}
           disabled={busy || !url || present}
-          className="ui-button self-start"
+          className="ui-button self-end"
         >
-          {busy ? <Loader2 size={12} aria-hidden="true" className="animate-spin" /> : <Plus size={12} aria-hidden="true" />}
           {busy ? t("lmStudio.adding") : t("lmStudio.add")}
         </button>
         {present && <p className="text-[12px] text-ink-secondary">{t("lmStudio.added")}</p>}

@@ -2,26 +2,32 @@
 
 OpenMausBot can use a fast decision model to pick things for your bots. It
 answers in a few hundred milliseconds for a fraction of a cent. It never does
-the work: the chosen bot still runs its own turn on its own engine. Three
+the work: the chosen bot still runs its own turn on its own engine. Four
 providers are supported: Cloudflare's Clef on
 [Workers AI](https://developers.cloudflare.com/workers-ai/) (free tier),
-TypeSafe's [Jev](https://typesafe.ai) (the default) and a model of your choice
-on [OpenRouter](https://openrouter.ai).
+TypeSafe's [Jev](https://typesafe.ai) (the default), a model of your choice
+on [OpenRouter](https://openrouter.ai), and a custom endpoint of your own that
+speaks System One or OpenAI Decisions.
 
-Everything is in **Settings → Decision and extraction** (Advanced mode): the
-Cloudflare Workers AI card, the Jev/OpenRouter picker under **Another key**,
-for OpenRouter the model, one master switch, each key with **Save** and
+Everything is in **Settings › AI › Routing and extraction** (Advanced mode): the
+Cloudflare Workers AI card, the Jev/OpenRouter/Custom endpoint picker under
+**Another key**, for OpenRouter the model, for a custom endpoint its base URL,
+model ID and protocol, one master switch, each key with **Save** and
 **Test**, and a switch for room routing (**Who answers in rooms**). Each
-provider keeps its own key, but picking a provider does not choose whose key
-decides: the fixed order below does. To use Workers AI or OpenRouter while a
+provider keeps its own key. Picking **Custom endpoint** makes it the only one
+that decides; picking Jev or OpenRouter does not choose whose key decides: the
+fixed order below does. To use Workers AI or OpenRouter while a
 Jev key is saved, clear the Jev key (an `OMB_JEV_API_KEY` in the environment
 replaces the saved one, so remove it too). OpenRouter needs no key here when
 you already saved one under **Settings → API keys**: the decision model uses
 that one.
 
-With several keys saved, one fixed order picks whose key decides: your own Jev
-key, then your own Workers AI key, then Cloud's included decisions, then
-OpenRouter.
+With **Custom endpoint** picked, only the custom endpoint decides, and nothing
+does until its base URL and key are saved; any other key saved stays unused
+until another provider is picked. Otherwise, with several keys saved, one fixed
+order picks whose key decides: your own Jev key, then your own Workers AI key,
+then Cloud's included decisions, then OpenRouter. A custom endpoint's key is
+not part of that order.
 
 ## Cloudflare Workers AI (free tier)
 
@@ -68,12 +74,33 @@ A failed decision falls back as described in "It fails open".
   answer in the same shape through chat completions, and its probabilities
   are its own estimate.
 
-The model list holds decisions models only: a curated set, in the order of
-OpenRouter's decisions ranking, that shows only what OpenRouter's public
-catalog (`/models?output_modalities=decisions`) still lists, then the rest of
-that catalog. Chat models are not offered, though one saved by hand with
-`openrouterApi: "chat"` still works. If OpenRouter's catalog cannot be
-loaded, Settings shows the curated list and says so. A model saved by id (`decider.openrouterModel`) is
+- **Custom endpoint** sends decisions to a gateway you run or rent. Give it a
+  **Base URL** (for example `https://gateway.example.com/v1`; https, or http to
+  this machine only), the **Model ID** it serves, its **Protocol** and its API
+  key, sent as `Authorization: Bearer <key>`:
+  - **System One** posts Jev's request (`model`, `state`, `questions` keyed by
+    id) to `{base URL}/systemone` and reads `answers` by question id.
+  - **OpenAI Decisions** posts `model`, `input` (the state as text) and an
+    ordered `questions` list (`predicate`, `choice` with `choices`, `score`
+    with `levels`) to `{base URL}/decisions`, with `stream: false`, and reads
+    `answers` by position.
+
+  Answers go through the same checks as every other provider's. A custom
+  endpoint decides only: it does not read mail or a bot's `extract` calls,
+  which keep the reading providers below. **Test** shows how long it took,
+  like OpenRouter's.
+
+The model list holds decisions models first: a curated set, in the order of
+OpenRouter's decisions ranking (Google's Gemini Decision 1 included), that
+shows only what OpenRouter's public catalog
+(`/models?output_modalities=decisions`) still lists, then the rest of that
+catalog. Last, under **Gemini chat models (not calibrated)**, come the Gemini
+Flash chat models that catalog's text list (`/models?output_modalities=text`)
+says take a strict JSON schema; picking one saves `openrouterApi: "chat"`, so
+its probabilities are its own estimate (and extraction uses it too, as with
+any chat model). Use **Test** to check it answers in time. Other chat models are not offered, though
+one saved by hand with `openrouterApi: "chat"` still works. If OpenRouter's
+catalog cannot be loaded, Settings shows the curated list and says so. A model saved by id (`decider.openrouterModel`) is
 used even if the list does not carry it. **Test** shows how long the model took;
 above 1.5 seconds, rooms would fall back to the lead, so pick a faster one.
 
@@ -101,7 +128,7 @@ is awaited only when the room's turn starts, within 1.5 seconds.
 
 A reply whose speaker the decision model picked shows a small line under it:
 *Picked by Jev · 94%*, *Picked by OpenRouter · 94%* or
-*Picked by Clef · 94%*.
+*Picked by Clef · 94%* or *Picked by your decision endpoint · 94%*.
 
 New rooms start on Auto while the decider and its room job are on. Existing
 rooms keep their mode. With the decision model off, an Auto room shows a
@@ -137,7 +164,8 @@ from the approvals log in `decisions/`.
 ```
 
 With OpenRouter, `provider` is `"openrouter"` and the row also has a `model`
-field with the model id that was asked. With Workers AI, `provider` is
+field with the model id that was asked; a custom endpoint's rows say
+`"custom"` and carry its model ID the same way. With Workers AI, `provider` is
 `"workersai"` and a successful row has `model`, the model that answered. A row
 never holds the message text, the bots' descriptions or the key; a
 16-character hash of the state is enough to spot repeats. Failed calls record
@@ -150,18 +178,22 @@ The log stays on this machine: workspace backups leave it out.
 - **Desktop app:** in the operating system's encrypted store
   (`credentials.bin`), like the other workspace keys. The server receives the
   Jev key as `OMB_JEV_API_KEY`, the OpenRouter key as
-  `OMB_OPENROUTER_DECIDER_KEY` and the Workers AI token as
-  `OMB_WORKERS_AI_TOKEN` at start-up; `config.json` keeps only an empty
+  `OMB_OPENROUTER_DECIDER_KEY`, the Workers AI token as
+  `OMB_WORKERS_AI_TOKEN` and a custom endpoint's key as
+  `OMB_CUSTOM_DECIDER_KEY` at start-up; `config.json` keeps only an empty
   placeholder.
 - **Server or browser use:** in the server's own `config.json` (mode 0600),
-  under `decider.key` (Jev), `decider.openrouterKey` (OpenRouter) or
-  `decider.workersAiToken` (Workers AI). `OMB_JEV_API_KEY`,
-  `OMB_OPENROUTER_DECIDER_KEY` and `OMB_WORKERS_AI_TOKEN` override them.
+  under `decider.key` (Jev), `decider.openrouterKey` (OpenRouter),
+  `decider.workersAiToken` (Workers AI) or `decider.customKey` (a custom
+  endpoint). `OMB_JEV_API_KEY`, `OMB_OPENROUTER_DECIDER_KEY`,
+  `OMB_WORKERS_AI_TOKEN` and `OMB_CUSTOM_DECIDER_KEY` override them.
+- **A custom endpoint's base URL, model ID and protocol are not secrets.**
+  They are kept in `config.json` and shown back in Settings.
 - **The Cloudflare account ID is not a secret.** It is kept in `config.json`
   as `decider.workersAiAccountId` and shown back in Settings.
 - **The OpenRouter key is shared with your OpenRouter models.** The decision
   model uses the first of these it finds:
-  1. a key saved here, in **Settings → Decision and extraction**
+  1. a key saved here, in **Settings › AI › Routing and extraction**
      (`decider.openrouterKey` or `OMB_OPENROUTER_DECIDER_KEY`): the optional
      "use a different key" override, which wins so a key saved before
      sharing keeps working;
@@ -215,7 +247,8 @@ Cloudflare, or the server `workersAiBaseUrl` points to, which also receives the
 token. With OpenRouter that is OpenRouter and the host it routes the model to,
 under OpenRouter's privacy settings and your account's data policy, or the
 server `openrouterBaseUrl` points to, which also receives the key;
-OpenMausBot does not set a data-collection preference.
+OpenMausBot does not set a data-collection preference. With a custom endpoint
+it is the server at its base URL, which also receives its key.
 
 Inbox triage first has each new email read, when a reading provider is set:
 the first of your own Workers AI key (Clairic and Clef-flash each get the
@@ -260,11 +293,15 @@ mentioned**.
   "workersAiToken": "",
   "workersAiAccountId": "",
   "workersAiBaseUrl": "https://api.cloudflare.com/client/v4",
+  "customKey": "",
+  "customBaseUrl": "https://gateway.example.com/v1",
+  "customModel": "<decision-model-id>",
+  "customApi": "systemone",
   "jobs": { "roomRouting": true, "inboxTriage": true }
 }
 ```
 
-`provider` is `"jev"`, `"openrouter"` or `"off"`. A config with no
+`provider` is `"jev"`, `"openrouter"`, `"custom"` or `"off"`. A config with no
 `provider` is Jev, so existing files keep working unchanged. `openrouterKey` is
 optional: left empty, the decision model uses the top-level `openrouter.key`.
 
@@ -286,6 +323,11 @@ decisions model's go to `/alpha/decisions` beside it (for the default base,
 `https://openrouter.ai/api/alpha/decisions`), with Jev's request body. That
 API is alpha at OpenRouter and may change. The model list comes from
 `GET /api/decider/models`, which needs no key and spends nothing.
+
+`customBaseUrl` follows the same https-or-loopback rule, and a custom key is
+used only with one. `customApi` is `"systemone"` (the default) or
+`"decisions"`; requests go to `{customBaseUrl}/systemone` or
+`{customBaseUrl}/decisions` with `customModel` as the model.
 
 `workersAiAccountId` is 32 hexadecimal characters. `workersAiBaseUrl` has no
 Settings UI and follows the same https-or-loopback rule. It is the REST root

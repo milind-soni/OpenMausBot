@@ -24,7 +24,7 @@ export const CONNECTOR_META_TOOLS: readonly string[] = [
 ];
 
 /** What a bot's tools/list offers: its grants, and the apps' sandbox's code tools while its turn runs at Full access (the
- * relay judges each call again). */
+ * relay judges each call again). The caller passes false for a bot with per-app scopes: the relay refuses it the sandbox. */
 export function advertisedGrants(grants: Record<string, ConnectorToolGrant> | undefined, fullAccess: boolean): Record<string, ConnectorToolGrant> | undefined {
   if (grants === undefined || !fullAccess) return grants;
   return { ...grants, [APP_SANDBOX_SERVICE]: { tools: [...APP_SANDBOX_TOOLS] } };

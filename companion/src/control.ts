@@ -51,6 +51,8 @@ export interface E2EStatus {
   enabled: boolean;
   relay: "connected" | "connecting" | "off";
   node: string | null;
+  /** Why the relay's control socket is not connected; null once the relay acknowledged it. */
+  relayProblem?: "no_answer" | "token_refused" | "busy" | "unreachable" | "replaced" | null;
   /** What the pairing QR carries as `e2e`. */
   descriptor: E2EDescriptor | null;
 }

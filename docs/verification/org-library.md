@@ -23,7 +23,7 @@ checks the following:
 - **Catalog (§7.3.1).** Unknown fields are ignored and a bad entry is
   dropped. A bad envelope, another organization's catalog, a digest that
   does not name the bytes, and a plain-http Admin each keep the last
-  catalog. A `formatVersion: 3` entry shows as "update" and its file is
+  catalog. A `formatVersion: 4` entry shows as "update" and its file is
   never read.
 - **Files (§7.3.2).** A file whose bytes do not match its name is refused on
   read: shown as not downloaded, Add answers `503 blob_unavailable`, and the

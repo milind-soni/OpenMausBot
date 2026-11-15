@@ -243,3 +243,31 @@ describe("engineFailure", () => {
     expect(engineFailure("Grok", "429 Too Many Requests", { kind: "rate_limit" })).toEqual({ message: expect.stringContaining("rate limit") });
   });
 });
+
+describe("a model the engine has no route to", () => {
+  // OpenCode 2.2.5's session/prompt answer for a model declared under a provider it has no SDK package for, as acpRpcError words it.
+  const raw = (model: string, pkg = "unknown") => `Internal error: Unsupported package for ${model}: ${pkg} (session/prompt, service: session, provider.no-route)`;
+
+  it("says in one plain sentence that the named model can't be used here, with no Internal error", () => {
+    const failure = engineFailure("OpenCode", raw("chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017"))!;
+    expect(failure.message).toBe("OpenCode can't use the model chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017 here, so choose another model for this bot.");
+    expect(failure.text).toEqual({ key: "chat.notice.modelNoRoute", params: { provider: "OpenCode", model: "chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017" } });
+    expect(engineFailureMessage("OpenCode", raw("ollama-cloud/deepseek-v4.1-flash:1017", ""))).toBe("OpenCode can't use the model ollama-cloud/deepseek-v4.1-flash:1017 here, so choose another model for this bot.");
+    expect(engineFailureMessage("OpenCode", "Internal error: Model unavailable: test/missing (session/prompt, service: session, provider.no-route)"))
+      .toBe("OpenCode can't use the model test/missing here, so choose another model for this bot.");
+    expect(engineFailure("OpenCode", "Internal error (session/prompt, service: session, provider.no-route)")).toEqual({
+      message: "OpenCode can't use this bot's model here, so choose another model for this bot.",
+      text: { key: "chat.notice.modelNoRouteUnnamed", params: { provider: "OpenCode" } },
+    });
+  });
+
+  it("is a final failure, raw or in plain words, and no other failure is", () => {
+    const plain = engineFailureMessage("OpenCode", raw("chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017"))!;
+    for (const text of [raw("chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017"), plain, engineFailureMessage("OpenCode", "provider.no-route")!]) {
+      expect(classifyError({ text })).toEqual({ transient: false, reason: "unknown_model" });
+    }
+    expect(engineFailureKind(raw("x/y"))).toBe("model_no_route");
+    expect(engineFailureKind("Internal error: Cannot connect to API: ECONNREFUSED (session/prompt, service: session, APIError)")).toBeNull();
+    expect(classifyError({ text: "Internal error: OpenCode service failure (session/prompt)" }).reason).toBe("unknown");
+  });
+});

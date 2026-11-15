@@ -10,21 +10,17 @@ import { harnessHome, splitCliString } from "../../env-path.ts";
 import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { bundledEngineCatalog } from "../../model-manifest/bundled.ts";
+import { currentEngineCatalog } from "../../model-manifest/manifest.ts";
+import { ENGINE_MODEL_ID } from "../../model-manifest/schema.ts";
 import type { AcpQuestionRequest } from "./question-requests.ts";
 import { allowsTool, canUseMcpServer, narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
 import { OWN_APPS_SERVER } from "../../../shared/own-apps.ts";
 import { MAX_QUESTIONS, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById, repeatsQuestionText } from "../../../shared/ask-question.ts";
 
-export const STATIC_GROK_MODELS: ModelCatalog = {
-  default: "grok-4.7",
-  options: [
-    { id: "grok-4.7", label: "Grok 4.7", contextWindow: 500_000 },
-    { id: "grok-4.6", label: "Grok 4.6" },
-    { id: "grok-4.5", label: "Grok 4.5" },
-  ],
-};
+export const STATIC_GROK_MODELS: ModelCatalog = bundledEngineCatalog("grok");
 
-const SLUG = /^[a-z0-9][a-z0-9._-]*$/i;
+const SLUG = ENGINE_MODEL_ID.grok;
 
 /** `$GROK_HOME`, else `~/.grok`: Grok's sign-in, config and catalog. */
 export function grokHome(env: Record<string, string | undefined> = process.env): string {
@@ -84,15 +80,16 @@ function unquote(raw: string): string {
 
 /** Local slugs from ~/.grok/config.toml, which `grok -m <slug>` accepts, plus the cloud defaults. */
 export function readGrokModelCatalog(env: Record<string, string | undefined> = process.env): ModelCatalog {
+  const fixed = currentEngineCatalog("grok");
   const path = join(grokHome(env), "config.toml");
   let text = "";
   try {
     text = readFileSync(path, "utf8");
   } catch {
-    return STATIC_GROK_MODELS;
+    return fixed;
   }
 
-  const options = STATIC_GROK_MODELS.options.map((o) => ({ ...o }));
+  const options = fixed.options.map((o) => ({ ...o }));
   const seen = new Set(options.map((o) => o.id));
   let configuredDefault: string | null = null;
   let current: { slug: string; name?: string } | null = null;
@@ -138,7 +135,7 @@ export function readGrokModelCatalog(env: Record<string, string | undefined> = p
   flush();
 
   return {
-    default: configuredDefault && seen.has(configuredDefault) ? configuredDefault : STATIC_GROK_MODELS.default,
+    default: configuredDefault && seen.has(configuredDefault) ? configuredDefault : fixed.default,
     options,
   };
 }
@@ -177,7 +174,7 @@ export function ensureGrokInjectSlug(
     text = "";
   }
 
-  const taken = new Set<string>(STATIC_GROK_MODELS.options.map((option) => option.id));
+  const taken = new Set<string>(currentEngineCatalog("grok").options.map((option) => option.id));
   let current: { slug: string; model?: string; baseUrl?: string } | null = null;
   const flush = () => {
     if (!current) return;
@@ -388,7 +385,7 @@ const support: AcpSupport = {
   displayName: "Grok",
   images: true,
   acceptsUnadvertisedImages: grokAcceptsUnadvertisedImages,
-  models: STATIC_GROK_MODELS,
+  get models() { return currentEngineCatalog("grok"); },
   resolveModels: (env) => mergeLocalInject(readGrokModelCatalog(env), env),
   // Grok's levels vary by model and the CLI validates lazily (a rejected level only logs); grok-4.5 rejects xhigh.
   effortLevels: ["low", "medium", "high"],

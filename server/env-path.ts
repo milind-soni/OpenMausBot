@@ -197,6 +197,7 @@ export function findCliCandidates(name: string, path: string = augmentedPath()):
 export interface ResolvedSpawn {
   command: string;
   args: string[];
+  env?: NodeJS.ProcessEnv;
 }
 
 /** A mini tokenizer, never a shell: quotes group segments; no escapes, no substitution, nothing evaluated. */
@@ -337,6 +338,18 @@ function parseCmdShim(shim: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | nu
     return null;
   }
   const dir = dirname(shim);
+  if (basename(shim).toLowerCase() === "dsh.cmd" && /^set "ELECTRON_RUN_AS_NODE=1"\r?$/im.test(text)) {
+    const desktop = /^"%~dp0([^"\r\n]+\.exe)" --expose-internals "%~dp0((?:[^"\r\n]+\\)?app\.asar)\\([^"\r\n]+\.js)" %\*\r?$/im.exec(text);
+    if (desktop) {
+      const command = join(dir, desktop[1]);
+      const archive = join(dir, desktop[2]);
+      const script = join(archive, desktop[3]);
+      if (isFile(command) && isFile(archive)) {
+        return { command, args: ["--expose-internals", script], env: { ELECTRON_RUN_AS_NODE: "1" } };
+      }
+    }
+    return null;
+  }
   const portableHermes = resolvePortableHermes(shim, text);
   if (portableHermes) return portableHermes;
   // npm's own npm.cmd/npx.cmd name their entry as SET "NPX_CLI_JS=%~dp0\…"; a launcher switch to a global npm is not followed.
@@ -389,7 +402,7 @@ function resolveWord(cli: string, args: string[], env?: NodeJS.ProcessEnv): Reso
   const ext = extname(file).toLowerCase();
   if (ext === ".cmd" || ext === ".bat") {
     const direct = parseCmdShim(file, env);
-    return direct ? { command: direct.command, args: [...direct.args, ...args] } : { command: file, args };
+    return direct ? { ...direct, args: [...direct.args, ...args] } : { command: file, args };
   }
   if (ext === ".exe" || ext === ".com") return { command: file, args };
   const viaNode = parseNodeShebang(file, env);

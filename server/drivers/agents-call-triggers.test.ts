@@ -11,7 +11,7 @@ function context(answers: { api?: unknown; response?: { ok: boolean; status: num
       return answers.response ?? { ok: true, status: 201, body: { resultId: "t-1", summary: "When an email arrives in Gmail from acme.com, Scout follows: Draft." } };
     },
   };
-  return { calls, context: { botId: "scout", threadId: "thread-1", depth: 0, externalRuntime: false, sharedComputers: false, client } as unknown as ToolCallContext };
+  return { calls, context: { botId: "scout", threadId: "thread-1", externalRuntime: false, sharedComputers: false, client } as unknown as ToolCallContext };
 }
 
 describe("app events in the trigger tools", () => {
@@ -122,5 +122,22 @@ describe("delete_trigger", () => {
     const result = await callTool("delete_trigger", { trigger_id: " t-1 ", for_bot_id: "helper" }, ctx);
     expect(result.text).toContain("Applied delete to trigger t-1 (trigger id t-1). It applied at once");
     expect(calls).toEqual([{ path: "/api/internal/trigger-requests", body: { fromBotId: "scout", fromThreadId: "thread-1", action: "delete", triggerId: "t-1", forBotId: "helper" } }]);
+  });
+});
+
+describe("same_conversation in the trigger tool", () => {
+  it("sends it for an app event, webhook or update, and refuses it elsewhere before anything is sent", async () => {
+    const { calls, context: ctx } = context();
+    await callTool("trigger", { action: "create", when: "app_event", name: "Acme", instructions: "Draft.", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", same_conversation: true }, ctx);
+    expect(calls[0]!.body).toMatchObject({ action: "create", kind: "app", trigger: { sameConversation: true } });
+    await callTool("trigger", { action: "update", trigger_id: "t-1", same_conversation: false }, ctx);
+    expect(calls[1]!.body).toMatchObject({ action: "update", triggerId: "t-1", changes: { sameConversation: false } });
+    const refused = context();
+    const text = async (args: Record<string, unknown>) => (await callTool("trigger", args, refused.context)).text;
+    expect(await text({ action: "create", when: "schedule", name: "A", instructions: "B", schedule: { type: "daily", time: "09:00" }, same_conversation: true }))
+      .toBe("same_conversation applies only to when=app_event or when=webhook.");
+    expect(await text({ action: "create", when: "app_event", name: "A", instructions: "B", app: "gmail", event: "X", same_conversation: "yes" }))
+      .toBe("same_conversation must be true or false.");
+    expect(refused.calls).toEqual([]);
   });
 });

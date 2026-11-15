@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { codexLimitResetsAt } from "./drivers/codex-errors.ts";
 import { engineLimitFromUsage, LimitResetClock, nearLimitNote, UNNAMED_LIMIT_MS } from "./limit-resets.ts";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
-import { parseClaudeUsage, parseCodexUsage, parseCopilotUsage, parseOpenCodeUsage, type PlanProviderRow, type PlanUsageReport, type PlanWindows } from "./plan-usage.ts";
+import { parseClaudeUsage, parseCodexUsage, parseCopilotUsage, parseOpenCodeUsage, planAccountsFromInstances, type PlanProviderRow, type PlanUsageReport, type PlanWindows } from "./plan-usage.ts";
 
 const NOW = Date.parse("2026-10-19T10:00:00Z");
 const HOUR = 3_600_000;
@@ -34,8 +34,15 @@ const codex = (primary: [number, number], secondary: [number, number]) => row("c
 }));
 const report = (...providers: PlanProviderRow[]): PlanUsageReport => ({ fetchedAt: iso(NOW), providers });
 
-describe("a Claude account whose usage is not read", () => {
-  it("stops a full reading from holding it, even one saved before an update stopped reading it, and keeps a refusal's hold", () => {
+describe("a Claude account's usage", () => {
+  it("reaches the app's limits for a Claude instance with no setting, beside the other engines", () => {
+    const accounts = planAccountsFromInstances({ claude: { driver: "claudeAgent" }, codex: { driver: "codex" } });
+    const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
+    instance.noteUsage(report(claude([38, NOW + 2 * HOUR], [12, NOW + 50 * HOUR]), codex([20, NOW + HOUR], [5, NOW + 90 * HOUR])));
+    expect(instance.report().engines.map((limit) => [limit.engine, limit.usedPercent])).toEqual([["claude", 38], ["codex", 20]]);
+  });
+
+  it("stops a full reading from holding it once its config sets usageMeter to false, and keeps a refusal's hold", () => {
     const account = { id: "claude", name: "Claude", driver: "claude" as const, environment: {} };
     let accounts: Array<typeof account & { noUsage?: true }> = [account];
     const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
@@ -462,7 +469,7 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.blockedUntil("claude")).toBeNull();
   });
 
-  it("re-reads usage every few minutes while an engine is held, with nothing else waiting, and so ends a hold that reset early", async () => {
+  it("re-reads usage every few minutes while an engine is held and turns run, with nothing else waiting, and so ends a hold that reset early", async () => {
     vi.useFakeTimers({ now: NOW });
     let usage = report(claude([100, NOW + 23 * HOUR], [8, NOW + 5 * 24 * HOUR]));
     const loadUsage = vi.fn(async () => ({ ...usage, fetchedAt: iso(Date.now()) }));
@@ -470,7 +477,9 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     instance.start();
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(loadUsage, "nothing held, nothing waiting: no reads").not.toHaveBeenCalled();
-    instance.noteRefusal("claude", Date.now() + 23 * HOUR);
+    // A turn on Claude meets its limit: the home is in use.
+    instance.noteRuntimeEvent("claude", { eventId: "e", provider: "claudeAgent", createdAt: iso(Date.now()), threadId: "t1", type: "runtime.error",
+      message: "limit", limitResetsAt: Date.now() + 23 * HOUR } as RuntimeEvent);
     await vi.advanceTimersByTimeAsync(6_000);
     expect(instance.blockedUntil("claude"), "the read soon after the refusal still shows the full window").not.toBeNull();
     usage = report(claude([2, NOW + 5 * HOUR], [8, NOW + 5 * 24 * HOUR]));

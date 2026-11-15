@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Fake of the pi coding agent's `--mode rpc --no-session` stdio surface for pi.ts tests. Env knobs:
+//   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (stream-script.ts)
 //   FAKE_PI_MODE  happy (default) | tooluse | priced | priced-stop | permission | interleave | question-select | question-input
 //     | turn-error | no-models | exit-early | compaction | compaction-recovery
 //     | compaction-recovery-upstream | prompt-reject | omp-chunk
@@ -10,6 +11,7 @@
 //   FAKE_PI_STEER_OUT_OF_ORDER  hold the first steer until a second arrives, then refuse the first and accept the second
 
 import { appendFileSync, readFileSync } from "node:fs";
+import { playStreamScript, streamScript, type StreamScript } from "./stream-script.ts";
 
 const mode = process.env.FAKE_PI_MODE ?? "happy";
 const modelPairs = (process.env.FAKE_PI_MODELS ?? "ollama-cloud/glm-5.2,openai/gpt-4o")
@@ -95,6 +97,32 @@ const streamTurn = () => {
   }
   send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 12, output: 3 } }, usage: { input: 12, output: 3 } });
   send({ type: "agent_end" });
+};
+
+let scriptRun = 0;
+const streamScriptTurn = (script: StreamScript) => {
+  const run = ++scriptRun;
+  let tools = 0;
+  const usage = { input: 0, output: 0 };
+  send({ type: "agent_start" });
+  send({ type: "turn_start" });
+  playStreamScript(script, {
+    cancelled: () => run !== scriptRun,
+    chunk: (step, piece) => send({ type: "message_update", usage, assistantMessageEvent: "think" in step
+      ? { type: "thinking_delta", contentIndex: 0, delta: piece } : { type: "text_delta", contentIndex: 0, delta: piece } }),
+    end: (step) => {
+      if (!("tool" in step)) return;
+      const id = `script_call_${++tools}`;
+      send({ type: "tool_execution_start", toolCallId: id, toolName: "bash", args: { command: step.tool } });
+      send({ type: "tool_execution_end", toolCallId: id, toolName: "bash", isError: false, result: { content: [{ type: "text", text: "ok" }] } });
+      send({ type: "turn_end", message: { stopReason: "toolUse", usage }, usage });
+      send({ type: "turn_start" });
+    },
+    done: (failure) => {
+      send({ type: "turn_end", message: failure ? { stopReason: "error", errorMessage: failure, usage } : { stopReason: "end_turn", usage: { input: 12, output: 3 } }, usage });
+      send({ type: "agent_end" });
+    },
+  });
 };
 
 // Un-negotiated, the v1 transport replaces each chunked frame with the `rpc_frame_error` stub.
@@ -381,7 +409,8 @@ function handle(cmd: any) {
         } catch {}
       }
       send({ type: "response", command: "prompt", success: true });
-      if (mode === "tooluse") streamToolTurn();
+      if (streamScript(String(cmd.message ?? ""))) streamScriptTurn(streamScript(String(cmd.message ?? ""))!);
+      else if (mode === "tooluse") streamToolTurn();
       else if (mode === "priced") streamPricedTurn();
       else if (mode === "priced-stop") startPricedToolTurn();
       else if (mode === "permission") streamPermissionTurn();
@@ -431,6 +460,7 @@ function handle(cmd: any) {
       else if (cmd.id === "ask-select" || cmd.id === "ask-input") finishPermissionTurn();
       return;
     case "abort":
+      scriptRun += 1;
       send({ type: "turn_end", message: { stopReason: "cancelled", usage: { input: 0, output: 0 } }, usage: { input: 0, output: 0 } });
       return;
     default:

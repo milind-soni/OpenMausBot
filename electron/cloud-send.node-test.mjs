@@ -76,19 +76,26 @@ test("a bot's fields reach My Cloud without Custom approval", () => {
   const body = botPatch(ember, ["soul", "access", "team", "model"]);
   assert.deepEqual(body, { soul: "Be brief.", alwaysAllow: ["Bash(ls)"], section: "Ops", modelSelection: { instanceId: "claude", model: "m" }, requireAvailableModel: true });
   assert.ok(!Object.values(BOT_PARTS).flat().includes("cwd"), "a working folder is this computer's");
-  assert.deepEqual(parseSendState({ auto: false, clouds: { "javascript:alert(1)": {}, [CLOUD]: { off: { a: "you", b: "nonsense" }, created: { "bot:x": true, "login:y": true }, creating: { "bot:z": true, "skill:q": true }, release: [{ id: "mcp:a", digest: "d" }, { id: 3 }] } } }),
+  assert.deepEqual(parseSendState({ auto: false, clouds: { "javascript:alert(1)": {}, [CLOUD]: { off: { a: "you", b: "nonsense" }, created: { "bot:x": true, "login:y": true }, creating: { "bot:z": true, "skill:q": true }, release: [{ id: "mcp:a", digest: "d" }, { id: 3 }],
+    verified: { "t-1": { newest: "m9", rows: 9, there: 9 }, "t-2": { newest: 3 }, "bad id": { newest: "m", rows: 1, there: 1 } }, stamped: { "t-1": true, "t-2": "yes" } } } }),
     { v: 1, clouds: { [CLOUD]: { sent: {}, off: { a: "you" }, dismissed: "", last: null, whole: null, arrived: { bots: 0, updatedBots: 0, skills: 0, logins: 0, settings: 0, onePassword: false, chats: { conversations: 0, messages: 0 } },
-      chats: {}, created: { "bot:x": true }, creating: { "bot:z": true }, release: [{ id: "mcp:a", digest: "d" }], files: {}, on: {} } } }, "nothing is kept of the switch that once sent by itself");
+      chats: {}, created: { "bot:x": true }, creating: { "bot:z": true }, release: [{ id: "mcp:a", digest: "d" }], files: {}, on: {}, verified: { "t-1": { newest: "m9", rows: 9, there: 9 } }, stamped: { "t-1": true } } } },
+    "nothing is kept of the switch that once sent by itself");
 });
 
 function fakeSides({ cloudItems = [], localItems = [], refuse = {} } = {}) {
   const calls = [];
+  const bodies = {};
+  const sent = [];
   const reply = (status, body) => ({ status, ok: status < 400, body });
   const session = {
-    call: async (method, route) => {
+    call: async (method, route, body) => {
       calls.push(`${method} ${route}`);
+      bodies[`${method} ${route}`] = body;
+      sent.push([`${method} ${route}`, body]);
       if (route === "/api/cloud-send" || route === "/api/cloud-send?move=1") return reply(200, summary(cloudItems));
-      if (refuse[route]) return reply(refuse[route].status, { error: refuse[route].error });
+      const refused = refuse[`${method} ${route}`] ?? refuse[route];
+      if (refused) return reply(refused.status, { error: refused.error });
       return reply(200, {});
     },
     upload: async (route) => { calls.push(`UPLOAD ${route}`); return reply(201, { path: "/data/attachments/abc.png" }); },
@@ -97,6 +104,8 @@ function fakeSides({ cloudItems = [], localItems = [], refuse = {} } = {}) {
   const localJson = (value) => new Response(JSON.stringify(value), { status: 200 });
   return {
     calls,
+    bodies,
+    sent,
     deps: {
       local: async (route) => {
         if (route === "/api/cloud-send" || route === "/api/cloud-send?move=1") return localJson(summary(localItems));
@@ -236,7 +245,7 @@ function preload({ remote = false, activation = false } = {}) {
 }
 
 test("the bridge: either page gets only the move's line and the switch that keeps this computer's bots here; its Try again, moving a bot into a team, and turning that switch go only from the person's click on My Cloud's page", async () => {
-  const keys = ["notice", "dismiss", "moveRetry", "teams", "moveToTeam", "moveToTeamCoded", "teamRetry", "openTeam", "teamBring", "teamBringMove", "teamBringStatus", "keepHere", "setKeepHere", "onNotice"];
+  const keys = ["notice", "dismiss", "moveRetry", "teams", "moveToTeam", "moveToTeamCoded", "teamRetry", "openTeam", "teamBring", "teamBringMove", "teamBringStatus", "botMoveState", "botChoices", "moveBots", "moveEverything", "botMoveRetry", "openMyCloud", "keepHere", "setKeepHere", "onNotice"];
   const local = preload();
   assert.equal(local.bridge.cloudSend, undefined);
   assert.equal(local.bridge.cloudLogins, undefined);
@@ -251,6 +260,8 @@ test("the bridge: either page gets only the move's line and the switch that keep
   await assert.rejects(page.bridge.cloudSendPage.teamRetry(), /Try again/);
   await assert.rejects(page.bridge.cloudSendPage.teamBringMove("scout"), /Choose Move/);
   await assert.rejects(page.bridge.cloudSendPage.setKeepHere(true), /Turn the switch/);
+  await assert.rejects(page.bridge.cloudSendPage.moveBots(["scout"]), /Choose which bots/);
+  await assert.rejects(page.bridge.cloudSendPage.moveEverything(), /Choose which bots/);
   await page.bridge.cloudSendPage.keepHere();
   assert.deepEqual(page.invoked.filter(([channel]) => channel.startsWith("cloud-send") || channel === "one-home:keep-set"), []);
   assert.deepEqual(page.invoked, [["one-home:keep"]], "reading the switch needs no click");
@@ -387,6 +398,54 @@ test("1Password refused on My Cloud is told in words for this computer, not My C
   other.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {} } });
   const busy = await createCloudSend(other.deps).send();
   assert.equal(busy.result.failed[0].final, undefined, "any other refusal can be tried again");
+});
+
+test("1Password items with bots of their own keep them on My Cloud; a Cloud too old for that fails out loud", async () => {
+  const onePassword = { key: itemKey.onePassword(), kind: "1password", label: "1Password", parts: { token: "t" } };
+  const sides = fakeSides({ localItems: [onePassword] });
+  sides.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: { v1: [] }, itemGrants: { "v1:i1": "all", "bad:id:x": "all" } } });
+  const outcome = await createCloudSend(sides.deps).send();
+  assert.equal(outcome.result.failed.length, 0);
+  assert.ok(sides.calls.includes("PATCH /api/logins/1password/vaults/v1"));
+  // All of this computer's item choices in one go, so one handed back to its vault here is handed back there too.
+  assert.deepEqual(sides.bodies["PUT /api/logins/1password/items"], { items: { "v1:i1": "all" } }, "a malformed item key is skipped");
+  assert.ok(!sides.calls.includes("DELETE /api/logins/1password"));
+  const items = { "/api/logins/1password/items": { status: 405, error: "method not allowed" } };
+  const old = fakeSides({ localItems: [onePassword], refuse: items });
+  old.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {}, itemGrants: { "v1:i1": [] } } });
+  const refused = await createCloudSend(old.deps).send();
+  assert.deepEqual(refused.result.failed.map((entry) => entry.key), ["1password"], "never left open to every bot there");
+  assert.ok(!old.calls.includes("POST /api/logins/1password"), "a refused item choice never connects the token");
+  const plain = fakeSides({ localItems: [onePassword], refuse: items });
+  plain.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {} } });
+  assert.equal((await createCloudSend(plain.deps).send()).result.failed.length, 0, "a Cloud too old for item choices takes a vault-only 1Password");
+  assert.ok(!plain.calls.includes("DELETE /api/logins/1password"));
+  const vaults = fakeSides({ localItems: [onePassword], refuse: { "/api/logins/1password/vaults/v1": { status: 500, error: "boom" } } });
+  vaults.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: { v1: [] } } });
+  assert.equal((await createCloudSend(vaults.deps).send()).result.failed.length, 1);
+  assert.ok(vaults.calls.includes("DELETE /api/logins/1password"), "a vault choice that did not take closes the token too");
+  // This computer's item choices are in place there before the token is, leaving every other item there as it was; the
+  // whole map (handing back what was handed back here) goes only after the token and the vaults took.
+  const puts = sides.sent.filter(([call]) => call === "PUT /api/logins/1password/items").map(([, body]) => body);
+  assert.deepEqual(puts, [{ items: { "v1:i1": "all" }, keep: true }, { items: { "v1:i1": "all" } }]);
+  assert.ok(sides.calls.indexOf("PUT /api/logins/1password/items") < sides.calls.indexOf("POST /api/logins/1password"));
+  assert.ok(sides.calls.lastIndexOf("PUT /api/logins/1password/items") > sides.calls.indexOf("PATCH /api/logins/1password/vaults/v1"));
+  // A token My Cloud did not take never hands an item back to a vault whose new choice did not arrive either.
+  const token = fakeSides({ localItems: [onePassword], refuse: { "POST /api/logins/1password": { status: 400, error: "bad token" } } });
+  token.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: { v1: [] }, itemGrants: { "v1:i2": [] } } });
+  assert.equal((await createCloudSend(token.deps).send()).result.failed.length, 1);
+  assert.deepEqual(token.sent.filter(([call]) => call === "PUT /api/logins/1password/items").map(([, body]) => body), [{ items: { "v1:i2": [] }, keep: true }]);
+  assert.ok(!token.calls.includes("PATCH /api/logins/1password/vaults/v1"));
+  // Nor does a vault choice that did not take: the token this send connected is taken off again.
+  const late = fakeSides({ localItems: [onePassword], refuse: { "/api/logins/1password/vaults/v1": { status: 500, error: "boom" } } });
+  late.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: { v1: [] }, itemGrants: {} } });
+  assert.equal((await createCloudSend(late.deps).send()).result.failed.length, 1);
+  assert.deepEqual(late.sent.filter(([call]) => call === "PUT /api/logins/1password/items").map(([, body]) => body), [{ items: {}, keep: true }]);
+  const stuck = fakeSides({ localItems: [onePassword], refuse: { "/api/logins/1password/vaults/v1": { status: 500, error: "boom" }, "DELETE /api/logins/1password": { status: 500, error: "down" } } });
+  stuck.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: { v1: [] } } });
+  const left = (await createCloudSend(stuck.deps).send()).result.failed;
+  assert.equal(left.length, 1);
+  assert.match(JSON.stringify(left[0]), /Disconnect 1Password/, "a token that could not be taken off again is said out loud");
 });
 
 test("chats by row: the cursor moves only past what My Cloud took; one removed there is never sent again; one being answered waits", async () => {

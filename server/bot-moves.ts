@@ -1,16 +1,22 @@
-// My Cloud's side of moving one of its bots into one of its person's teams (electron/team-move.mjs runs the move). While
-// the bot goes it takes no turns here and its automations are off, and which ones were on is kept, so they come back on
-// if the move stops. Once it lives in the team its routines are gone from here (they run there), and the bot stays here
-// archived, with its notes about the person, as the line that opens it in the team.
+// The server's side of moving one of its bots to another home: from My Cloud into one of its person's teams
+// (electron/team-move.mjs runs the move), or from this computer to My Cloud (electron/bot-move-main.mjs). While the bot goes
+// it takes no turns here and its automations are off, and which ones were on is kept, so they come back on if the move
+// stops. Once it lives there the bot stays here archived, as the line that opens it there. Its routines are gone from
+// here when it went into a team; a bot that went to My Cloud keeps them here switched off, and comes back as it was if
+// My Cloud ends.
 import type { BotMovedTo } from "../shared/wire.ts";
 import type { AppTriggerManager } from "./app-triggers.ts";
 import type { RoutineManager } from "./routines.ts";
-import type { BotRecord } from "./store.ts";
+import type { BotRecord, GroupRecord } from "./store.ts";
 import type { WaitManager } from "./waits.ts";
 import type { WebhookManager } from "./webhooks.ts";
 
+/** The "team" a bot moving from this computer to My Cloud goes to. */
+export const MY_CLOUD_TEAM = "my-cloud";
+
 export interface BotMovesDeps {
-  store: { bot(id: string): BotRecord | null | undefined; patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null };
+  store: { bot(id: string): BotRecord | null | undefined; patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null;
+    groups?: ReadonlyArray<Pick<GroupRecord, "id" | "memberIds" | "dm">>; patchGroup?(id: string, patch: { memberIds: string[] }): unknown };
   routines(): Pick<RoutineManager, "listRoutines" | "update" | "removeForBot"> | null;
   webhooks(): Pick<WebhookManager, "list" | "update"> | null;
   appEvents(): Pick<AppTriggerManager, "list" | "update"> | null;
@@ -56,6 +62,15 @@ export function createBotMoves(deps: BotMovesDeps) {
     for (const wait of waits?.all() ?? []) if (wait.botId === botId) waits!.cancel(wait.id, botId);
   };
 
+  /** A room some of whose bots stay goes on here without this one; one all of whose bots left is kept as it was. */
+  const leaveRooms = (botId: string) => {
+    for (const room of deps.store.groups ?? []) {
+      if (room.dm || !room.memberIds.includes(botId)) continue;
+      if (room.memberIds.every((id) => id === botId || deps.store.bot(id)?.movedTo || deps.store.bot(id)?.defaultBot)) continue;
+      deps.store.patchGroup?.(room.id, { memberIds: room.memberIds.filter((id) => id !== botId) });
+    }
+  };
+
   return {
     /** The bot stops here for the move: no turns, its automations off and its waits cancelled. Busy while it answers; a
      * bot already moved stays moved. Holding it again keeps what the first hold switched off. */
@@ -96,11 +111,20 @@ export function createBotMoves(deps: BotMovesDeps) {
       const held = movedOf(bot);
       if (!bot || !held || held.team.id !== team.id) return { refused: "This bot is not moving to that team." };
       if (held.state !== "moved") {
-        deps.routines()?.removeForBot(botId);
+        if (team.id === MY_CLOUD_TEAM) leaveRooms(botId); else deps.routines()?.removeForBot(botId);
         cancelWaits(botId);
         deps.store.patchBot(botId, { movedTo: { ...held, state: "moved", at: now() }, hidden: true } as Partial<BotRecord>);
       }
       return { movedTo: movedOf(deps.store.bot(botId))! };
+    },
+    /** My Cloud ended: a bot that moved there is here again as it was when it went, its automations left off. */
+    back(botId: string): { released: true } | { refused: string } {
+      const bot = deps.store.bot(botId);
+      const held = movedOf(bot);
+      if (!bot || !held) return { released: true };
+      if (held.team.id !== MY_CLOUD_TEAM) return { refused: botMoveRefusal(bot)! };
+      deps.store.patchBot(botId, { movedTo: undefined, hidden: false } as Partial<BotRecord>);
+      return { released: true };
     },
   };
 }

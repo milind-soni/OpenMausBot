@@ -38,8 +38,8 @@ interface Viewer { socket: Socket; close: () => void; owner?: string; botId?: st
 export function createDesktopViewer(deps: {
   target: (id: string) => DesktopTarget | undefined;
   live: (auth: RequestAuth) => boolean;
-  /** Binds a viewer to a control lease: answers only while `controlLeaseId` holds `botId`'s computer and the target is
-   * that computer. Shared and pool targets are refused: a bot hold cannot reserve their desktop. */
+  /** Binds a viewer to a control lease: answers only while `controlLeaseId` holds the control key that pauses every bot
+   * on the target, and the target is that computer. Pool targets are refused: no hold reserves one seat. */
   lease?: (id: string, botId: string, controlLeaseId: string, threadId?: string) => (() => boolean) | undefined;
   /** The server's shared upgrade gate; a viewer made without one keeps its own. */
   upgrades?: Upgrades;
@@ -70,8 +70,8 @@ export function createDesktopViewer(deps: {
     }
     if (botId === null && threadId !== undefined) return json(res, 400, { error: "threadId needs botId and controlLeaseId" });
     // A saved or constructed socket URL must not bypass the join refusal: a bot's lease does not exclude other users of a shared desktop.
-    if (botId !== null && (match[1] === "local/shared" || match[1].startsWith("local/pool-"))) {
-      return json(res, 409, { error: "Phone control requires a per-bot Local VM. Select per-bot mode in Settings → Computers." });
+    if (botId !== null && match[1].startsWith("local/pool-")) {
+      return json(res, 409, { error: "Phone control is not available in pool mode. Select shared or per-bot mode in Settings → Computers." });
     }
     const bound = botId === null ? undefined : deps.lease!(match[1], botId, controlLeaseId!, threadId);
     if (botId !== null && !bound) return json(res, 409, { error: "Take control of this computer first" });
@@ -159,6 +159,8 @@ export function createDesktopViewer(deps: {
       if (pending.head.length) remote.write(pending.head);
       pending.head = Buffer.alloc(0);
       socket.pipe(remote).pipe(socket);
+      // A phone that vanishes without closing is found by TCP keepalive; the lease's beats then stop.
+      socket.setKeepAlive(true, 15_000);
       connection.touch?.();
       recheck = setInterval(() => {
         if (!live() || !holds()) upgrade.close();
@@ -183,6 +185,8 @@ export function createDesktopViewer(deps: {
       }
       return closed;
     },
+    /** Desktop viewers open on this bot's computer now. */
+    viewing: (botId: string) => [...viewers.values()].filter((viewer) => viewer.botId === botId && !viewer.socket.destroyed).length,
     closeAll: () => {
       stopped = true;
       if (ownGate) upgrades.close();
