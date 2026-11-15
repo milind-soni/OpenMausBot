@@ -9,7 +9,7 @@ import type { ProviderInstance } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { BUILT_IN_DRIVERS } from "../builtIn.ts";
-import { classifyDevinError, DevinAgentDriver, devinConfigDir, devinPermissionRequest, devinSignedIn, resolveDevinModels } from "./devin.ts";
+import { classifyDevinError, DevinAgentDriver, devinCredentialsFile, devinPermissionRequest, devinSignedIn, resolveDevinModels } from "./devin.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
 const MODELS = "swe-1-6-fast,claude-sonnet-5-5";
@@ -24,12 +24,14 @@ describe("Devin sign-in", () => {
     await removeTempDir(scratch);
   });
 
-  it("looks for Devin's config in %APPDATA% on Windows and ~/.config elsewhere", () => {
+  it("looks for the sign-in where `devin auth login` stores it: %APPDATA% on Windows, the XDG data folder elsewhere", () => {
     const home = join(scratch, "home");
-    expect(devinConfigDir({ HOME: home }, "linux")).toBe(join(home, ".config", "devin"));
-    expect(devinConfigDir({ HOME: home }, "darwin")).toBe(join(home, ".config", "devin"));
-    expect(devinConfigDir({ HOME: home, XDG_CONFIG_HOME: join(scratch, "cfg") }, "linux")).toBe(join(scratch, "cfg", "devin"));
-    expect(devinConfigDir({ USERPROFILE: home, APPDATA: join(scratch, "roaming") }, "win32")).toBe(join(scratch, "roaming", "devin"));
+    expect(devinCredentialsFile({ HOME: home }, "linux")).toBe(join(home, ".local", "share", "devin", "credentials.toml"));
+    expect(devinCredentialsFile({ HOME: home }, "darwin")).toBe(join(home, ".local", "share", "devin", "credentials.toml"));
+    expect(devinCredentialsFile({ HOME: home, XDG_DATA_HOME: join(scratch, "data") }, "linux")).toBe(join(scratch, "data", "devin", "credentials.toml"));
+    expect(devinCredentialsFile({ HOME: home, XDG_DATA_HOME: "  " }, "darwin")).toBe(join(home, ".local", "share", "devin", "credentials.toml"));
+    expect(devinCredentialsFile({ USERPROFILE: home, APPDATA: join(scratch, "roaming") }, "win32")).toBe(join(scratch, "roaming", "devin", "credentials.toml"));
+    expect(devinCredentialsFile({ USERPROFILE: home }, "win32")).toBe(join(home, "AppData", "Roaming", "devin", "credentials.toml"));
   });
 
   it("is signed in by the credentials `devin auth login` stored, or by WINDSURF_API_KEY", () => {
@@ -37,12 +39,31 @@ describe("Devin sign-in", () => {
     expect(devinSignedIn({ HOME: home }, "linux")).toBe(false);
     expect(devinSignedIn({ HOME: home, WINDSURF_API_KEY: "  " }, "linux")).toBe(false);
     expect(devinSignedIn({ HOME: home, WINDSURF_API_KEY: "fixture-key" }, "linux")).toBe(true);
-    const dir = devinConfigDir({ HOME: home }, "linux");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "config.json"), "{}");
+    for (const platform of ["linux", "darwin"] as const) {
+      const signedIn = join(scratch, `${platform}-home`);
+      const file = devinCredentialsFile({ HOME: signedIn }, platform);
+      mkdirSync(dirname(file), { recursive: true });
+      expect(devinSignedIn({ HOME: signedIn }, platform)).toBe(false);
+      writeFileSync(file, "token = \"fixture\"\n");
+      expect(devinSignedIn({ HOME: signedIn }, platform)).toBe(true);
+    }
+  });
+
+  it("does not read Devin's config folder, present before any sign-in, as one", () => {
+    const home = join(scratch, "home");
+    const config = join(home, ".config", "devin");
+    mkdirSync(config, { recursive: true });
+    writeFileSync(join(config, "config.json"), "{}");
     expect(devinSignedIn({ HOME: home }, "linux")).toBe(false);
-    writeFileSync(join(dir, "credentials.toml"), "token = \"fixture\"\n");
-    expect(devinSignedIn({ HOME: home }, "linux")).toBe(true);
+    expect(devinSignedIn({ HOME: home }, "darwin")).toBe(false);
+  });
+
+  it("finds a Windows sign-in under %APPDATA%", () => {
+    const roaming = join(scratch, "roaming");
+    mkdirSync(join(roaming, "devin"), { recursive: true });
+    expect(devinSignedIn({ USERPROFILE: join(scratch, "home"), APPDATA: roaming }, "win32")).toBe(false);
+    writeFileSync(join(roaming, "devin", "credentials.toml"), "token = \"fixture\"\n");
+    expect(devinSignedIn({ USERPROFILE: join(scratch, "home"), APPDATA: roaming }, "win32")).toBe(true);
   });
 
   it("reads Devin's signed-out prompt refusal as a missing login, and nothing else", () => {

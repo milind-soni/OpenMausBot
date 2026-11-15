@@ -25,15 +25,19 @@ const API_KEY_ENV = "WINDSURF_API_KEY";
 const LOGIN_NOTE = `Devin is not signed in. Run ${SIGN_IN} in a terminal, or set ${API_KEY_ENV}, then check again.`;
 export const DEVIN_MODE = { ask: "accept-edits", full: "bypass" } as const;
 
-/** Devin keeps its user config in `%APPDATA%\devin` on Windows and `~/.config/devin` elsewhere. */
-export function devinConfigDir(env: Record<string, string | undefined>, platform: NodeJS.Platform = process.platform): string {
-  if (platform === "win32") return join(env.APPDATA?.trim() || join(userHome(env), "AppData", "Roaming"), "devin");
-  return join(env.XDG_CONFIG_HOME?.trim() || join(userHome(env), ".config"), "devin");
+/** Where `devin auth login` stores the sign-in (docs.devin.ai/cli/enterprise/devin-auth): `%APPDATA%\devin` on
+ * Windows; elsewhere the XDG data folder, `$XDG_DATA_HOME/devin` or `~/.local/share/devin`. Not the config folder
+ * (`~/.config/devin`), where Devin keeps `config.json`. */
+export function devinCredentialsFile(env: Record<string, string | undefined>, platform: NodeJS.Platform = process.platform): string {
+  const dir = platform === "win32"
+    ? env.APPDATA?.trim() || join(userHome(env), "AppData", "Roaming")
+    : env.XDG_DATA_HOME?.trim() || join(userHome(env), ".local", "share");
+  return join(dir, "devin", "credentials.toml");
 }
 
 /** Signed in by WINDSURF_API_KEY, or by the `credentials.toml` that `devin auth login` writes. */
 export function devinSignedIn(env: Record<string, string | undefined>, platform: NodeJS.Platform = process.platform): boolean {
-  return Boolean(env[API_KEY_ENV]?.trim()) || existsSync(join(devinConfigDir(env, platform), "credentials.toml"));
+  return Boolean(env[API_KEY_ENV]?.trim()) || existsSync(devinCredentialsFile(env, platform));
 }
 
 /** No exit grace: devin 3000.12.57 exits on EOF but orphans the MCP servers it started from its own config, which then
