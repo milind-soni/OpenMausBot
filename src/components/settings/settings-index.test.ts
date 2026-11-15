@@ -77,6 +77,19 @@ describe("the pages", () => {
     expect(find("backups", simple)[0]).toMatchObject({ entry: { page: "transfer" }, advanced: undefined });
   });
 
+  it("finds Your other computers without Advanced mode, on this computer only", () => {
+    for (const advanced of [false, true]) {
+      for (const query of ["other computers", "another computer", "tailscale", "your other", "laptop"]) {
+        const hit = find(query, fullContext({ advanced })).find((found) => found.entry.id === "other-computers");
+        expect(hit, query).toMatchObject({ entry: { page: "phone", anchor: "computers" }, elsewhere: false });
+        expect(hit!.advanced, query).toBeUndefined();
+      }
+      expect(find("tailscale", fullContext({ advanced }))[0]?.entry.id).toBe("other-computers");
+    }
+    const cloud = find("other computers", fullContext({ desktop: false, here: false, cloud: true, environments: false }));
+    expect(cloud.filter((found) => found.entry.id === "other-computers")).toEqual([]);
+  });
+
   it("names Phone & devices the same on every place: there is no This server page", () => {
     for (const ctx of Object.values(PEOPLE)) expect(visiblePages(ctx).find((page) => page.id === "phone")?.labelKey).toBe("settings.section.phoneDevices");
     expect(JSON.stringify(SETTINGS_PAGES)).not.toContain("thisServer");
