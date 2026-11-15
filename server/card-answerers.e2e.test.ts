@@ -14,7 +14,9 @@ import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
-const PORT = workerPort(28800, 10_000);
+// Below 32768, where Linux starts handing out ephemeral ports (net.ipv4.ip_local_port_range), so an outgoing
+// connection elsewhere on the runner never holds this port or the one above it.
+const PORT = workerPort(28800, 3_900);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
 const BOSS = "boss@example.test";
