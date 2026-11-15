@@ -699,7 +699,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
           const toolCall = params.toolCall ?? {};
           const isQuestion = String(toolCall.toolCallId ?? "").startsWith("interaction_");
-          if (current.turnConfig.fullAuto && current.turn.approvalMode === undefined && !isQuestion && answersAlone(toolCall.rawInput?.command)) {
+          if ((support.allowsAlone?.(instanceId, current.turn, toolCall) || (current.turnConfig.fullAuto && current.turn.approvalMode === undefined)) && !isQuestion && answersAlone(toolCall.rawInput?.command)) {
             const allow = optionFor("allow");
             if (!allow) missing("allow");
             return send({ jsonrpc: "2.0", id: msg.id, result: allow ? { outcome: { outcome: "selected", optionId: allow } } : cancelled });

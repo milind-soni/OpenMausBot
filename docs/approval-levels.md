@@ -257,6 +257,19 @@ level under another name, not a separate permission setting, applies at once
 like Full access, and covers every model in that Antigravity instance,
 including Gemini.
 
+The native Antigravity CLI (1.5.0 and later) rejects `yolo` and `auto_edit`,
+so it stays in its `default` mode at every level and asks before each action.
+On Auto the app answers those requests itself, and on Auto-accept edits it
+answers the edit requests, so neither level shows more approval cards than it
+does on the pinned runtime. A turn fails rather than start when the CLI does
+not confirm `default`.
+
+A computer that already has the pinned runtime keeps it. To move an
+Antigravity account to the native CLI, set its **CLI path** to `antigravity`
+and choose **Install official Antigravity**; to move back, set the CLI path to
+`agy`. New installs get the native CLI when Google's channel can be reached and
+the pinned runtime otherwise.
+
 A new Antigravity bot starts on Auto, the default. Old Antigravity
 `auto` / `autoApprove` settings still behave as Ask and are displayed as Ask;
 they never become unrestricted access on upgrade. Switching back to Ask
@@ -302,6 +315,7 @@ multi-question card renders its structured form on current apps instead.
 | Claude | Native `default` | Native `acceptEdits` | Native `auto` | Native `bypassPermissions` |
 | Cursor | Native default | not offered | Native `--auto-review` | Native `--force` |
 | Antigravity | Native `default` | Native `auto_edit` | Legacy `auto` behaves as Ask; UI Auto selects Full access | Native `yolo` plus automatic approval of remaining tool-permission requests; shown as Auto |
+| Antigravity (native CLI, 1.5.0 and later) | Native `default` | Native `default`; the app answers its edit requests itself | as Antigravity | Native `default`; the app answers every tool-permission request, never-list commands excepted; shown as Auto |
 | Grok Build | Native `default` | Native `acceptEdits` | Native `--permission-mode auto`; availability of Grok's reviewer depends on its feature rollout | Native `bypassPermissions` plus automatic approval of remaining tool-permission requests |
 | OpenCode | Ask | not offered | Ask | Approve individual ACP permission requests, never task questions |
 | Qwen Code | Native `default` | Native `--approval-mode auto-edit` | Native `--approval-mode auto` (Qwen's LLM classifier approves safe actions, blocks risky ones) | `--yolo`, plus automatic approval of remaining ACP permission requests |

@@ -370,9 +370,9 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
           {busy === "install" ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
           {busy === "install" ? t("engineSetup.installing") : managed.label}
         </button>
-        <p className="mt-1.5 text-center text-[11px] text-ink-tertiary">
+        {managed.downloadBytes !== undefined && <p className="mt-1.5 text-center text-[11px] text-ink-tertiary">
           {t("engineSetup.downloadNote", { mb: Math.ceil(managed.downloadBytes / 1024 / 1024) })}
-        </p>
+        </p>}
         {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
       </div>
     );

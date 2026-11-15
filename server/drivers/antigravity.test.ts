@@ -686,7 +686,7 @@ describe("official Antigravity runtime", () => {
     expect(installAntigravityRuntime(options)).toBe(first);
     const installed = await first;
     expect(readFileSync(installed.executablePath, "utf8")).toBe("#!/bin/sh\nexit 0\n");
-    expect(readFileSync(installed.harnessPath, "utf8")).toBe("#!/bin/sh\nexit 0\n");
+    expect(readFileSync(installed.harnessPath!, "utf8")).toBe("#!/bin/sh\nexit 0\n");
     await installAntigravityRuntime(options);
     expect(fetches).toBe(1);
     expect(validations).toBe(2);
@@ -848,7 +848,7 @@ describe("Antigravity driver over shared ACP", () => {
   it("uses managed setup and defaults to approval cards", () => {
     expect(AntigravityDriver.defaultConfig()).toEqual({ cli: "agy", fullAuto: false, workspace: undefined });
     expect(AntigravityDriver.install?.docsUrl).toContain("antigravity-acp");
-    if (resolveAntigravityReleaseAsset()) expect(AntigravityDriver.install?.managed?.downloadBytes).toBeGreaterThan(0);
+    expect(AntigravityDriver.install?.managed).toEqual({ label: "Install official Antigravity" });
     expect(antigravityPermissionMode(false)).toBe("default");
     expect(antigravityPermissionMode(false, "ask")).toBe("default");
     expect(antigravityPermissionMode(false, "auto")).toBe("default");
