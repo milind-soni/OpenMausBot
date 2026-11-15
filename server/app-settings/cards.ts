@@ -19,14 +19,20 @@ export const SETTINGS_CARDS: Record<SettingsCardId, SettingsCard> = {
     where: "Settings → Phone & devices",
     when: "when the person asks how to connect or open this computer from another computer",
     text: "Your other computers: this is turned on in MausBot on the computer itself, in Settings → Phone & devices.",
-    guide: "Tell the user in two or three plain sentences: turn it on in the card (both computers need Tailscale, signed in to the same Tailscale account), choose Pair a computer and Copy link, then on the other computer open Connect to a server in MausBot and paste the link.",
+    guide: "Tell the user in two or three plain sentences: if the card shows a switch, turn it on there; otherwise open MausBot on that computer, Settings → Phone & devices (both computers need Tailscale, signed in to the same Tailscale account). Then choose Pair a computer and Copy link, and on the other computer open Connect to a server in MausBot and paste the link.",
   },
 };
 
-/** Fixed words only: the state is a yes or no the server already holds, never the address. */
-export function cardShownStatus(card: SettingsCard, on: boolean | null): string {
-  const state = on === null ? "" : on ? ` ${card.label} is on now.` : ` ${card.label} is off now.`;
-  return `Card shown: ${card.label}.${state} Only the user can change it, in the card; you cannot, and you never see what it shows. ${card.guide}`;
+/** Fixed words only, never the address. `on`: true when the setting is known to be on; null when the server cannot
+ * tell (off, or on with nothing answering yet), so the bot never calls something off that is on. */
+export function cardShownStatus(card: SettingsCard, on: true | null): string {
+  const state = on ? ` ${card.label} is on now.` : ` Whether ${card.label} is on is not known to you: it may be off, or on but not reachable yet, so do not say it is off; the card shows the user which.`;
+  return `Card shown: ${card.label}.${state} Only the user can change it; you cannot, and you never see what the card shows. ${card.guide}`;
+}
+
+/** A room draws no settings control: the bot is told so, and where the person finds it. */
+export function cardNotInRoom(card: SettingsCard): string {
+  return `No card shown: a settings control is not drawn in a room. Tell the user in one line to open ${card.where} → ${card.label} in MausBot on the computer itself, or to ask you in your own chat, where you can show it.`;
 }
 
 export function cardElsewhere(card: SettingsCard): string {

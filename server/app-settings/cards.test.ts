@@ -18,7 +18,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 });
 
-function fixture(options: { owner?: boolean; guest?: boolean; here?: boolean; on?: boolean | null; cards?: false } = {}) {
+function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; here?: boolean; on?: true | null; cards?: false } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "settings-cards-"));
   dirs.push(dataDir);
   const messages: Array<Message & { threadId: string }> = [];
@@ -37,9 +37,9 @@ function fixture(options: { owner?: boolean; guest?: boolean; here?: boolean; on
     turnOwner: () => (options.owner === false ? null : "owner"),
     guestDriven: () => options.guest === true,
     requestCredential: async () => ({ status: 500, body: {} }),
-    connectorThread: () => null,
+    connectorThread: () => (options.group ? { group: { id: "g", name: "Room" } as never } : null),
     language: () => "en",
-    ...(options.cards === false ? {} : { cards: { here: () => options.here !== false, on: () => (options.on === undefined ? false : options.on) } }),
+    ...(options.cards === false ? {} : { cards: { here: () => options.here !== false, on: () => options.on ?? null } }),
   });
   const show = (card: unknown, generation = "g1") => host.handle({ action: "show_card", card }, { botId: "kiwi", threadId: "t-kiwi", generation });
   return { show, messages };
@@ -57,21 +57,31 @@ describe("app_settings show_card", () => {
   });
 
   it("posts a row that names the setting only, and tells the bot one fixed status", async () => {
-    const { show, messages } = fixture({ on: false });
+    const { show, messages } = fixture({ on: true });
     const answer = await show("other-computers");
     expect(answer.status).toBe(200);
     expect(messages).toEqual([{ id: "m1", threadId: "t-kiwi", role: "bot", kind: "text", text: SETTINGS_CARDS["other-computers"].text, settingsCard: { id: "other-computers" } }]);
-    expect(answer.body).toEqual({ text: expect.stringMatching(/^Card shown: Your other computers\. Your other computers is off now\. Only the user can change it, in the card; you cannot, and you never see what it shows\./) });
+    expect(answer.body).toEqual({ text: expect.stringMatching(/^Card shown: Your other computers\. Your other computers is on now\. Only the user can change it; you cannot, and you never see what the card shows\./) });
+    expect(String(answer.body.text)).toContain("if the card shows a switch, turn it on there; otherwise open MausBot on that computer, Settings → Phone & devices");
     expect(String(answer.body.text)).toContain("Connect to a server");
   });
 
-  it("says on, off or nothing about the state, in fixed words", async () => {
-    expect(String((await fixture({ on: true }).show("other-computers")).body.text)).toContain("Your other computers is on now.");
-    expect(String((await fixture({ on: null }).show("other-computers")).body.text)).not.toMatch(/ is (on|off) now/);
+  it("never tells the bot the setting is off: the server knows on, or cannot tell (off, or on with nothing answering)", async () => {
+    const unknown = String((await fixture({ on: null }).show("other-computers")).body.text);
+    expect(unknown).toContain("Whether Your other computers is on is not known to you: it may be off, or on but not reachable yet, so do not say it is off");
+    expect(unknown).not.toMatch(/is (on|off) now/);
+    expect(String((await fixture({ on: true }).show("other-computers")).body.text)).not.toContain("not known");
+  });
+
+  it("in a room, where no control is drawn, posts nothing and tells the bot where the person finds it", async () => {
+    const { show, messages } = fixture({ group: true, on: true });
+    const answer = await show("other-computers");
+    expect(answer).toEqual({ status: 200, body: { text: "No card shown: a settings control is not drawn in a room. Tell the user in one line to open Settings → Phone & devices → Your other computers in MausBot on the computer itself, or to ask you in your own chat, where you can show it." } });
+    expect(messages).toEqual([]);
   });
 
   it("never puts a code, a link or an address in the reply, the row or the transcript the engine reads", async () => {
-    for (const on of [true, false, null]) {
+    for (const on of [true, null] as const) {
       const { show, messages } = fixture({ on });
       const answer = await show("other-computers");
       const row = messages[0]!;
@@ -97,7 +107,7 @@ describe("app_settings show_card", () => {
     }
   });
 
-  it("shows only in the owner's own turn: not for a guest, a webhook or a routine run", async () => {
+  it("shows only in a turn the server counts as the owner's own (turnOwner), and never where a guest drives the thread", async () => {
     for (const options of [{ owner: false }, { guest: true }]) {
       const { show, messages } = fixture(options);
       expect((await show("other-computers")).status).toBe(403);

@@ -9,7 +9,7 @@ import { UNDO_STALE } from "../direct-apply.ts";
 import { serverLine } from "../server-lines.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
 import type { ThemeTool } from "../themes/tool.ts";
-import { cardElsewhere, cardShownStatus, SETTINGS_CARDS } from "./cards.ts";
+import { cardElsewhere, cardNotInRoom, cardShownStatus, SETTINGS_CARDS } from "./cards.ts";
 import type { TakenPicture } from "./picture-file.ts";
 import { findSettings, personOnly, type SettingEntry, type WritableEntry } from "./registry.ts";
 
@@ -73,8 +73,8 @@ export interface AppSettingsDeps {
   themes?: ThemeTool;
   /** For a setting that takes a picture file: stores the file the bot names, or says why not. */
   pictures?: { take(turn: Turn, path: string): Promise<TakenPicture>; discard(avatarUrl: string): void };
-  /** Settings cards: whether a card's control exists on this server's own computer, and whether its setting is on (null when not known). Absent: no cards here. */
-  cards?: { here(id: SettingsCardId): boolean; on(id: SettingsCardId): boolean | null };
+  /** Settings cards: whether a card's control exists on this server's own computer, and whether its setting is known to be on (null when the server cannot tell). Absent: no cards here. */
+  cards?: { here(id: SettingsCardId): boolean; on(id: SettingsCardId): true | null };
 }
 
 export function createAppSettings(deps: AppSettingsDeps) {
@@ -182,9 +182,10 @@ export function createAppSettings(deps: AppSettingsDeps) {
     if (!bot) return refuse(404, "This bot no longer exists.");
     if (deps.guestDriven(turn.threadId) || deps.turnOwner(turn) === null) return refuse(403, "A settings card shows only in the owner's own conversation, when they asked. This turn was not started by the owner here, so nothing was shown.");
     if (!deps.cards?.here(body.card)) return reply(200, { text: cardElsewhere(card) });
+    if (deps.connectorThread(bot.id, turn.threadId)?.group) return reply(200, { text: cardNotInRoom(card) });
     const budget = spendWrite(turn);
     if (budget) return refuse(429, budget);
-    store.appendMessage(turn.threadId, { role: "bot", kind: "text", text: card.text, settingsCard: { id: body.card }, ...from(bot, turn.threadId) });
+    store.appendMessage(turn.threadId, { role: "bot", kind: "text", text: card.text, settingsCard: { id: body.card } });
     return reply(200, { text: cardShownStatus(card, deps.cards.on(body.card)) });
   }
 
