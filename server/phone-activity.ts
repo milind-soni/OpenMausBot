@@ -103,6 +103,8 @@ export class PhoneActivity {
   private readonly seen = new Map<string, { name: string; threadId: string }>();
   /** What each phone was last sent per bot, so only a change goes out. */
   private readonly shown = new Map<string, Map<string, ActivityKind>>();
+  /** The bots each phone has been told about since its app last connected; any other may still show what the app drew. */
+  private readonly told = new Map<string, Set<string>>();
   private queue: Promise<unknown> = Promise.resolve();
   private readonly pending = new Map<string, unknown>();
   private readonly reach = new Map<string, (key: string) => boolean>();
@@ -253,14 +255,24 @@ export class PhoneActivity {
         if (this.options.push.isLive(phone.key)) {
           // Its app draws its own activities while connected; after, the server starts from nothing.
           this.shown.delete(phone.key);
+          this.told.delete(phone.key);
           continue;
         }
         if (!reaches(phone.key)) continue;
         const shown = this.shown.get(phone.key) ?? new Map<string, ActivityKind>();
         this.shown.set(phone.key, shown);
+        const told = this.told.get(phone.key) ?? new Set<string>();
+        this.told.set(phone.key, told);
+        const firstNews = !told.has(botId);
+        told.add(botId);
         const wanted = kind && (phone.registration.kinds ?? ["needsYou", "working"]).includes(kind) ? kind : undefined;
         const was = shown.get(botId);
-        if (wanted === was) continue;
+        if (wanted === was) {
+          // The app may have drawn this bot before it went quiet: end what it left, once.
+          const drawn = phone.registration.ongoing === true || phone.registration.activities?.some((entry) => entry.botId === botId) === true;
+          if (firstNews && !wanted && drawn) this.enqueue(phone, botId, undefined, "working");
+          continue;
+        }
         if (wanted) shown.set(botId, wanted);
         else shown.delete(botId);
         this.enqueue(phone, botId, wanted, was);

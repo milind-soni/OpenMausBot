@@ -163,7 +163,9 @@ describe("pushing a bot's activity while the app is closed", () => {
     const { activity, activityCalls, step } = harness();
     await activity.register(IPHONE, registration({ kinds: ["needsYou"], activities: [{ botId: "bot_1", token: ACT }] }));
     await step({ busy: true });
-    expect(activityCalls()).toEqual([]);
+    await step({ busy: true }, runtime("turn.started"));
+    // Never an update for a kind the phone did not ask for; only the one end for what its app may have drawn.
+    expect(activityCalls().map((body) => body.event)).toEqual(["end"]);
   });
 
   it("drops an activity token the provider calls dead", async () => {
@@ -185,5 +187,18 @@ describe("pushing a bot's activity while the app is closed", () => {
     const { activity } = harness();
     expect(() => activity.offer({ kind: "bot", bot: null }, everyone)).not.toThrow();
     expect(() => activity.offer({ kind: "notify", notification: "x" }, everyone)).not.toThrow();
+  });
+
+  it("ends what the app drew for a bot that went quiet after the phone's stream closed, once", async () => {
+    const { push, activity, activityCalls, live, step } = harness();
+    await push.register(ANDROID, { platform: "fcm", token: FCM });
+    await activity.register(ANDROID, registration({ ongoing: true }));
+    await activity.register(IPHONE, registration({}));
+    live.add(ANDROID);
+    await step({ busy: true });
+    live.delete(ANDROID);
+    await step({ busy: false });
+    await step({ busy: false });
+    expect(activityCalls().map((body) => [body.token === FCM, body.event])).toEqual([[true, "end"]]);
   });
 });
