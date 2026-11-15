@@ -3,6 +3,7 @@ import type { WorkOrigin } from "./peer-provenance.ts";
 import type { LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import type { Answerer, Assignment, EnvelopeNames, Level, Limits, Mode, Origin, Outcome, Owner, Reply, Requester, StatusView, TurnEvidence } from "./runtime/types.ts";
 import type { ModelSelection } from "../shared/wire.ts";
+import type { PassedFile } from "./host/handoff-files.ts";
 
 /** One coordinate_bots call, as the internal route hands it to the server. */
 export type CoordinateBotsCall = {
@@ -22,6 +23,8 @@ export type CoordinateBotsCall = {
   projectId?: string;
   /** The assignment whose question the message answers, instead of new work. */
   answers?: string;
+  /** Files that travel with the work, already in the attachment store (server/host/handoff-files.ts). */
+  files?: readonly PassedFile[];
   /** start_thread's report_back: the one target is the sender's own new thread, run on this model. */
   ownThread?: { modelSelection?: ModelSelection; approvalMode?: "ask" };
   /** post_to_thread: one message into this existing thread; wake starts a run there, else it waits for the next one. */

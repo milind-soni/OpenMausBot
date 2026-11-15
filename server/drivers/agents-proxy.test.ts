@@ -693,7 +693,7 @@ describe("agents-proxy MCP surface", () => {
     expect(coordinate.description).toContain("Never target whoever assigned you this work or anyone above it");
     expect(coordinate.inputSchema.properties.reply.description).toContain("one-way notice");
     expect(coordinate.inputSchema.properties.consult.description).toContain("acting on nothing");
-    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when", "answers"]);
+    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when", "answers", "files"]);
     expect(coordinate.inputSchema.properties.thread).toEqual({ type: "string", description: expect.stringContaining("new (its own history and run)") });
     expect(coordinate.inputSchema.properties.reply.enum).toEqual(["resume", "none"]);
     expect(coordinate.inputSchema.properties.consult.type).toBe("boolean");
@@ -2415,7 +2415,7 @@ describe("coordinate_bots arguments", () => {
       lastCoordinateBody = null;
       const res = await callTool("coordinate_bots", args);
       expect(res.result.isError, JSON.stringify(args)).toBe(true);
-      expect(res.result.content[0].text).toContain('thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when and answers are optional');
+      expect(res.result.content[0].text).toContain('thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when, answers and files (an array of at most 5 file paths) are optional');
       expect(lastCoordinateBody).toBeNull();
     }
   });
@@ -2441,7 +2441,7 @@ describe("coordinate_bots arguments", () => {
     });
     expect(res.result.isError).toBe(true);
     const text = res.result.content[0].text;
-    for (const field of ["bot_ids", "message", "group_id", "reason", "rework", "thread", "reply", "consult", "in_my_folder", "done_when", "answers"]) {
+    for (const field of ["bot_ids", "message", "group_id", "reason", "rework", "thread", "reply", "consult", "in_my_folder", "done_when", "answers", "files"]) {
       expect(text).toContain(field);
     }
     expect(text).toContain("botIds");

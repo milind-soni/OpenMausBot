@@ -292,7 +292,7 @@ import { threadModelFallback, type ThreadEngine } from "./thread-model.ts";
 import { computerEngineMoveText, removedComputerInstanceIds, writeComputerEngineMoveLines } from "./computer-engine-removal.ts";
 import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "./peer-delivery.ts";
 import { createRoomAccess, PRIVATE_CHAT_ROOM_WRITE } from "./host/room-access.ts";
-import { outsideRoomNote, sentRow, teammateResultRow, WAIT_CARD_CLOSED_REASON } from "./host/handoff-sent.ts";
+import { outsideRoomNote, sentRow, teammateResultRow, WAIT_CARD_CLOSED_REASON } from "./host/handoff-sent.ts"; import { createHandoffFiles, handoffFilesSchema, inboxRead, turnsRunInOwnFolder } from "./host/handoff-files.ts";
 import { createWebhookRoomPost } from "./host/webhook-room-deps.ts";
 import { createRoomJobs, parallelRoomJobsEnabled, type RoomRoundLine } from "./host/room-jobs.ts";
 import { markGroupThreadUnreadAfterTurn } from "./group-task-state.ts";
@@ -3906,6 +3906,8 @@ const questionRouting = createQuestionRouting({ store, handedInUnproven, active:
   answerLive: async (threadId, requestId, text) => await answerRequest(threadId, botForThread(store.botByThread(threadId)?.id ?? "", threadId)?.modelSelection.instanceId ?? "", requestId, "answer", text) === "answered", settleSignIns: (node) => signInSettle.answeredElsewhere(node),
   keptPrivate: (node, requester) => keptPrivate({ child: teamHost.privateTo(node.threadId), parent: teamHost.privateTo(requester.threadId) }),
   steer: async (threadId, text) => canSteerThread(threadId) && (await steerThread(threadId, text)) !== "refused", mayReach: outsideLineage.mayReach });
+const handoffFiles = createHandoffFiles({ dataDir: DATA_DIR, attachmentsDir: ATTACHMENTS_DIR, botName: (id) => store.bot(id)?.name, node: (id) => coordinator.node(id), children: (id) => coordinator.children(id), discard: deleteAttachment, threadsReferencing, changes: (listener) => store.onChange(listener), log: (line) => console.error(line),
+  worksInOwnFolder: (botId, threadId) => turnsRunInOwnFolder(botId, threadId, store.taskByThread(botId, threadId)?.cwd, store.bot(botId)?.cwd, Boolean(store.groupByThread(threadId))), vmHome: (botId) => localVmMode(cfg) === "per-bot" ? perBotLocalVmTarget(botId).workspaceDir : null, withheld: (child, parent) => Boolean(roomHandoffProblem(child, parent)) || keptPrivate({ child: teamHost.privateTo(child.threadId), parent: teamHost.privateTo(parent.threadId) }) });
 const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoordinator({
   dataDir: DATA_DIR,
   now: Date.now, wrote: handoffTicks.kick, handoffLimit: { refusal: (botId, open) => botHolds.handoff(botId) ?? starterCaps.handoffs.refusal(botId, open) },
@@ -3973,7 +3975,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
       const problem = roomHandoffProblem(child, parent);
       store.appendMessage(parent.threadId, {
         role: "bot", kind: "activity",
-        roomRequest: { id: child.id, phase: "result" },
+        roomRequest: { id: child.id, phase: "result" }, ...handoffFiles.returnedWith(child, parent),
         from: bot ? { botId: bot.id, name: bot.name, color: bot.color } : undefined,
         tool: {
           name: teammateResultRow(threadLanguage(parent.threadId), child, ownThreads.name(parent, child) ?? bot?.name, problem, child.groupId ? store.group(child.groupId)?.name : undefined),
@@ -3998,7 +4000,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
           { botId: parent.botId, name: store.bot(parent.botId)?.name ?? childTask.openedBy.name, at: Date.now() });
       }
     },
-    run: async (node, resumed, signal, composed: ComposedTurn) => {
+    run: handoffFiles.around(async (node, resumed, signal, composed: ComposedTurn) => {
       const group = node.groupId ? store.group(node.groupId) : undefined;
       const bot = store.bot(node.botId)!; if (node.answeredBy) askCards.decided(node, (node.answeredBy.kind === "bot" ? store.bot(node.answeredBy.botId)?.name : undefined) ?? bot.name);
       if (!node.parentId && !group && !resumed) return runRootTurn(node, bot, signal, composed);
@@ -4012,7 +4014,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
       const request = coordinator.sharedRequest(node);
       if (!resumed && !store.messagesFor(node.threadId).some(m => m.roomRequest?.id === request.id && m.roomRequest.phase === "request")) {
         store.appendMessage(node.threadId, { role: "bot", kind: "text",
-          roomRequest: { id: request.id, phase: "request" },
+          roomRequest: { id: request.id, phase: "request" }, ...handoffFiles.sentWith(node.id),
           from: sender ? { botId: sender.id, name: sender.name, color: sender.color } : undefined,
           text: `${request.botIds.map(id => `@${store.bot(id)?.name ?? "Teammate"}`).join(" ")} ${node.text}`,
         });
@@ -4071,7 +4073,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
           undefined, error => { result.stopReason = error; }, () => operation.cancelled,
           () => groupProviderHandshakeStarted(operation), () => groupProviderHandshakeSettled(operation),
           { claimed: true }, { roomHandoffId: node.id, resumed, systemInstructions, turnInstructions: brief, turnNote: composed.note, turnRestartNote: composed.restartNote, liveRoster, followMentions: false, result, coordination }, operation));
-    },
+    }),
     names: (node, parent) => {
       const scope = parent ?? node;
       const person = personNameIn(scope.threadId);
@@ -11086,6 +11088,14 @@ function messageFileRootsForThread(senderId: string, threadId: string): string[]
   });
 }
 
+/** A bot's own file copied into the attachment store, for attach_file and coordinate_bots' files alike. The store is no source: only the
+ * bot's own files are (its conversation's inbox of received files among them), or one saved outside them this turn, never from the data dir. */
+function saveTurnFile(capability: InternalCapability, botId: string, vm: LocalVmTarget | undefined, path: string, name: string | undefined, byContent: boolean) {
+  return saveBotAttachment({ path, name, byContent, roots: messageFileRootsForThread(botId, capability.threadId).filter((root) => root !== ATTACHMENTS_DIR), inbox: inboxRead(botId, capability.threadId),
+    ...(vm ? { guest: { root: VM_WORKSPACE_GUEST, host: vm.workspaceDir } } : {}),
+    ...(capability.deliversSavedFiles && capability.turnStartedAt !== undefined ? { savedThisTurn: { since: capability.turnStartedAt, refuse: [DATA_DIR] } } : {}) });
+}
+
 async function attachmentVmForTurn(capability: InternalCapability): Promise<LocalVmTarget | undefined> {
   const slot = autoVmClaims.get(capability.threadId);
   if (!localVmThreadTargets.has(capability.threadId) &&
@@ -13186,24 +13196,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         try {
           const vm = await attachmentVmForTurn(internalCapability);
           const outcome = await attachForTurn(internalCapability, MAX_ATTACHED_FILES_PER_TURN, {
-            save: () => {
-              return saveBotAttachment({
-                path: requestedPath,
-                name: requestedName,
-                // The attachment store is not a source: only the bot's own files are.
-                roots: messageFileRootsForThread(from.id, threadId).filter((root) => root !== ATTACHMENTS_DIR),
-                ...(vm ? { guest: { root: VM_WORKSPACE_GUEST, host: vm.workspaceDir } } : {}),
-                // Saved outside those folders this turn, never from the data dir, which holds every bot's memory and the app's state.
-                ...(internalCapability.deliversSavedFiles && internalCapability.turnStartedAt !== undefined
-                  ? { savedThisTurn: { since: internalCapability.turnStartedAt, refuse: [DATA_DIR] } }
-                  : {}),
-              });
-            },
+            save: () => saveTurnFile(internalCapability, from.id, vm, requestedPath, requestedName, Boolean(internalCapability.roomHandoffId)),
             stillLive: () => internalCapabilityIsActive({ ...internalCapability, ...(vm ? { localVmTarget: vm } : {}) }) &&
               connectorThread(from.id, threadId) !== null,
-            publish: (saved) => store.appendMessage(threadId, attachedFileLine(saved.attachment, liveTurnByThread.get(threadId),
-              source.group ? { botId: from.id, name: from.name, color: from.color } : undefined)),
-            discard: (saved) => deleteAttachment(saved.attachment.path),
+            publish: (saved) => { store.appendMessage(threadId, attachedFileLine(saved.attachment, liveTurnByThread.get(threadId),
+              source.group ? { botId: from.id, name: from.name, color: from.color } : undefined)); handoffFiles.attached(internalCapability.roomHandoffId, saved.attachment, saved.bytes); },
+            discard: (saved) => saved.fresh === undefined ? deleteAttachment(saved.attachment.path) : handoffFiles.drop(saved.fresh ? [saved.attachment.path] : []),
           });
           if (outcome.status === "limit") {
             return json(res, 429, { error: `You already attached ${MAX_ATTACHED_FILES_PER_TURN} files this turn. Put the rest in one document or archive summary instead.` });
@@ -13729,6 +13727,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               ...(call.doneWhen ? { doneWhen: call.doneWhen } : {}),
             });
             usageTrace.link(node.id, node.parentId, { threadId: internalCapability.threadId, turnId: liveTurnByThread.get(internalCapability.threadId) ?? "" }); if (!duplicate) { actingPeople.handOn(internalCapability, node, lends); if (!lends && !room && !lane) handedInUnproven(routed.threadId); }
+            if (!duplicate && call.files?.length) handoffFiles.sent(node.id, { botId: internalSender.id, name: internalSender.name }, call.files);
             if (duplicate && createdThread) store.deleteTask(target.botId, createdThread);
             else if (createdThread) {
               threadStarters.set(createdThread, opener);
@@ -13759,7 +13758,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (!duplicate) {
               if (!EXTERNAL) delegatedThisTurn(node.id);
               if (!post) store.appendMessage(address.threadId, sentRow({ sender: internalSender, recipient, threadId: node.threadId, room: addressedRoom, via, language: threadLanguage(address.threadId),
-                reason: call.reason, doneWhen: call.doneWhen ? redactSecretsInText(call.doneWhen) : undefined, title: store.taskByThread(recipient.id, node.threadId)?.title }));
+                reason: call.reason, doneWhen: call.doneWhen ? redactSecretsInText(call.doneWhen) : undefined, title: store.taskByThread(recipient.id, node.threadId)?.title, ...handoffFiles.sentWith(node.id) }));
             }
           } catch (error) {
             if (createdThread) store.deleteTask(target.botId, createdThread);
@@ -13840,11 +13839,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           reply: z.enum(["resume", "none"]).default("resume"),
           consult: z.boolean().default(false),
           inMyFolder: z.boolean().optional(),
-          done_when: z.string().trim().max(1000).optional(), answers: z.string().trim().min(1).max(128).optional(),
+          done_when: z.string().trim().max(1000).optional(), answers: z.string().trim().min(1).max(128).optional(), files: handoffFilesSchema,
         }).safeParse(await readInternalBody());
-        if (!parsed.success) return json(res, 400, { error: coordinateTooLong(parsed.error.issues) ?? "Provide 1-4 distinct botIds and a message of 1-4000 characters; thread is standing, new or the id of a thread you opened on that teammate, title one line of at most 80 characters, reply is resume or none, consult is a boolean, done_when at most 1000 characters." });
-        const { groupId, botIds, message, reason, rework, thread, title, reply, consult, inMyFolder, done_when: doneWhen, answers } = parsed.data;
-        const result = await coordinateBots({ groupId, botIds, message, reason: reason || undefined, rework, thread, title: title || undefined, reply, consult, inMyFolder, doneWhen: doneWhen || undefined, ...(answers ? { answers } : {}) }); refusedHandoffs.settled(internalCapability.threadId, internalSender, botIds, result.status);
+        if (!parsed.success) return json(res, 400, { error: coordinateTooLong(parsed.error.issues) ?? "Provide 1-4 distinct botIds and a message of 1-4000 characters; thread is standing, new or the id of a thread you opened on that teammate, title one line of at most 80 characters, reply is resume or none, consult is a boolean, done_when at most 1000 characters, files at most 5 paths." });
+        const { groupId, botIds, message, reason, rework, thread, title, reply, consult, inMyFolder, done_when: doneWhen, answers, files: paths } = parsed.data;
+        const result = await handoffFiles.coordinate({ paths, answers, senderId: internalSender.id, recipients: botIds.length, saveOne: async (path) => saveTurnFile(internalCapability, internalSender.id, await attachmentVmForTurn(internalCapability), path, undefined, true),
+          send: (files) => coordinateBots({ groupId, botIds, message, reason: reason || undefined, rework, thread, title: title || undefined, reply, consult, inMyFolder, doneWhen: doneWhen || undefined, ...(answers ? { answers } : {}), ...(files ? { files } : {}) }) }); refusedHandoffs.settled(internalCapability.threadId, internalSender, botIds, result.status);
         return json(res, result.status, result.body);
       } if (method === "POST" && path === "/api/internal/post-to-thread") { const posted = await postToThread(await readInternalBody(), { senderId: internalSender.id, fromThreadId: internalCapability.threadId, store, coordinateBots, waitsOn: (threadId) => threadWaitsOn(coordinator, internalCapability.roomHandoffId ?? internalCapability.generation, threadId) }); return json(res, posted.status, posted.body); }
       if (method === "GET" && path === "/api/internal/room-targets") {
@@ -13863,7 +13863,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         })).filter(g => g.members.length);
         return json(res, 200, { currentRoom: source ? { id: source.id, name: source.name, workingFolder: source.cwd || null } : null,
           bots: personalReach.peers(store.bots, internalSender, internalCapability.threadId).map(bot => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section, busy: bot.busy })),
-          rooms, note: "Each bot uses its own environment and permissions. Files are not transferred: pass absolute paths only when accessible to the recipient, otherwise pass the content." });
+          rooms, note: "Each bot uses its own environment and permissions. To give a teammate a file, pass it with coordinate_bots files; a bare path only works when the recipient can already read it." });
       }
       if (method === "POST" && path === "/api/internal/retry-thread") {
         const body = await readInternalBody();

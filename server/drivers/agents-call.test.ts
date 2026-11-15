@@ -530,6 +530,18 @@ describe("coordinate_bots", () => {
     return { result, calls };
   }
 
+  it("passes files on as given, and refuses a files value that is not a short list of paths", async () => {
+    const { result, calls } = await coordinate({ ...BASE, files: ["report.pdf", "/home/cua/workspace/chart.png"] });
+    expect(result.isError).toBeFalsy();
+    expect(calls[0]!.body).toEqual({ botIds: ["bot-scout"], message: "Review the draft.", files: ["report.pdf", "/home/cua/workspace/chart.png"] });
+    for (const blank of [[], [""], null, ""]) expect((await coordinate({ ...BASE, files: blank })).calls[0]!.body, JSON.stringify(blank)).not.toHaveProperty("files");
+    for (const files of ["report.pdf", [1], ["a", "b", "c", "d", "e", "f"]]) {
+      const refused = await coordinate({ ...BASE, files });
+      expect(refused.result.isError, JSON.stringify(files)).toBe(true);
+      expect(refused.calls).toEqual([]);
+    }
+  });
+
   it("drops an empty-string group_id instead of posting it", async () => {
     const { result, calls } = await coordinate({ ...BASE, group_id: "" });
     expect(result.isError).toBeFalsy();
