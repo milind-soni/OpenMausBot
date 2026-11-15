@@ -549,14 +549,19 @@ export class Runtime {
     }
     if (!n || n.status !== "running" || now - n.lastActivityAt < PROGRESS_WRITE_MS) return;
     n.lastActivityAt = now;
-    const root = n.rootId === n.id ? undefined : this.store.get(n.rootId);
-    this.store.transaction(() => {
-      this.store.update(n);
-      if (root && !isTerminal(root)) {
-        root.lastActivityAt = now;
-        this.store.update(root);
-      }
-    });
+    try {
+      const root = n.rootId === n.id ? undefined : this.store.get(n.rootId);
+      this.store.transaction(() => {
+        this.store.update(n);
+        if (root && !isTerminal(root) && now - root.lastActivityAt >= PROGRESS_WRITE_MS) {
+          root.lastActivityAt = now;
+          this.store.update(root);
+        }
+      });
+    } catch (error) {
+      // Bookkeeping only: a failed stamp never ends the turn or the caller that reported progress.
+      this.log(`progress(${id}) write failed: ${String(error)}`);
+    }
   }
 
   /** A parked question is answered, by the person unless `by` says otherwise; the next turn carries it. */

@@ -371,6 +371,30 @@ describe("Runtime: one tree, one lane", () => {
     invariants(w);
   });
 
+  it("writes the root's activity stamp at most once per cadence, however many children report", () => {
+    const w = world(() => "hold");
+    const root = w.runtime.begin(beginReq());
+    const a = ok(w.runtime.enqueue(toBot("a", root.id)));
+    w.runtime.tick();
+    const b = ok(w.runtime.enqueue(toBot("b", root.id)));
+    w.runtime.tick();
+    // Both dispatched at T. a reports at T+10s: the node and the root are stamped.
+    w.clock.advance(PROGRESS_WRITE_MS);
+    w.runtime.progress(a.id);
+    const rootStamp = w.store.get(root.id)!.lastActivityAt;
+    expect(rootStamp).toBe(w.clock.t);
+    // b reports at T+11s: its own row is still due, but the root is not — it stays at T+10s.
+    w.clock.advance(1_000);
+    w.runtime.progress(b.id);
+    expect(w.store.get(b.id)!.lastActivityAt).toBe(w.clock.t);
+    expect(w.store.get(root.id)!.lastActivityAt).toBe(rootStamp);
+    // Once the root's window has passed, the next report moves it again.
+    w.clock.advance(PROGRESS_WRITE_MS);
+    w.runtime.progress(b.id);
+    expect(w.store.get(root.id)!.lastActivityAt).toBe(w.clock.t);
+    invariants(w);
+  });
+
   it("reconciles a restart from stored data: rerun once, cut after handing out work, re-park, fail a rerun cut again", async () => {
     const store = openRuntimeStore(":memory:");
     const first = world(() => "hold", {}, store);
