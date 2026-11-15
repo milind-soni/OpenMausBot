@@ -22,7 +22,7 @@ type State =
   | { kind: "preparing" }
   | { kind: "downloading"; pin: ChromeForTestingPin; progress: DownloadProgress }
   | Ready
-  | { kind: "failed"; reason: string };
+  | { kind: "failed"; reason: string; cause: unknown };
 
 type LaunchSpec = { command: string; env?: Record<string, string | undefined> };
 
@@ -184,7 +184,7 @@ export class ChromeLauncher implements BrowserLaunch {
       this.log(`browser: ${this.describe()}`);
     }, (error: unknown) => {
       // A launcher that already works is kept as it is: switching browsers under a running session would lose its pages.
-      this.state = previous ? { ...previous, fingerprint: this.fingerprintOr(previous) } : { kind: "failed", reason: message(error) };
+      this.state = previous ? { ...previous, fingerprint: this.fingerprintOr(previous) } : { kind: "failed", reason: message(error), cause: error };
       this.log(`browser: Chrome could not be prepared (${message(error)}); ${previous ? "keeping the browser already set up" : "bots keep the engine's own browser"}`);
     }).finally(() => { this.preparing = null; });
     return this.preparing;
@@ -314,7 +314,7 @@ export class ChromeLauncher implements BrowserLaunch {
         ? `Getting the browser ready (${megabytes(state.progress.received)} of ${megabytes(state.progress.total)} MB). Try again in a minute.`
         : "Getting the browser ready. Try again in a moment.");
     }
-    if (state.kind === "failed") throw new Error(`Chrome could not be started (${state.reason}).`);
+    if (state.kind === "failed") throw new Error(`Chrome could not be started (${state.reason}).`, { cause: state.cause });
     if (state.kind !== "ready") throw new Error("Chrome is not ready yet. Try again in a moment.");
     return { path: state.chrome.path, identity: state.identity, product: state.product, source: state.chrome.source };
   }
