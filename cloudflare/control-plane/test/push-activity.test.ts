@@ -164,11 +164,12 @@ describe("Live Activities and ongoing notifications by push", () => {
     const worker = createWorker(fetch, providers.fetch);
     const credential = await installation(worker, environment, "activity-fcm@example.test");
     await register(worker, environment, credential, { platform: "fcm", token: FCM_TOKEN, environment: undefined });
-    expect((await push(worker, environment, credential, { token: FCM_TOKEN, event: "update", alert: true })).status).toBe(202);
+    expect((await push(worker, environment, credential, { token: FCM_TOKEN, event: "update" })).status).toBe(202);
     expect((await push(worker, environment, credential, { token: FCM_TOKEN, event: "update", activity: { ...activity, kind: "working", headline: "Scout is working" } })).status).toBe(202);
     const [needs, working] = providers.fcm().map((one) => (JSON.parse(one.text) as { message: { data: Record<string, string>; android: { priority: string } } }).message);
-    expect(needs!.data).toMatchObject({ omb_kind: "activity", event: "update", bot_id: "bot_1", bot_name: "Scout", kind: "needsYou", headline: "Scout needs you", since: "1794700000000", link: "openmausbot://chat/th_1", alert: "1" });
+    expect(needs!.data).toMatchObject({ omb_kind: "activity", event: "update", bot_id: "bot_1", bot_name: "Scout", kind: "needsYou", headline: "Scout needs you", since: "1794700000000", link: "openmausbot://chat/th_1" });
     expect(needs!.data.title).toBeUndefined();
+    expect(needs!.data.alert).toBeUndefined();
     expect(needs!.android.priority).toBe("HIGH");
     expect(working!.android.priority).toBe("NORMAL");
   });
@@ -192,5 +193,41 @@ describe("Live Activities and ongoing notifications by push", () => {
       expect((await push(worker, environment, credential, { token: ACTIVITY_TOKEN, event: "update", ...body })).status, JSON.stringify(body)).toBe(400);
     }
     expect(providers.calls).toEqual([]);
+  });
+
+  it("never alerts an update or an end, and always gives a remote start the alert ActivityKit needs", async () => {
+    const environment = await pushEnv();
+    const providers = fakeProviders();
+    const worker = createWorker(fetch, providers.fetch);
+    const credential = await installation(worker, environment, "activity-quiet@example.test");
+    await register(worker, environment, credential, { purpose: "activity", token: ACTIVITY_TOKEN });
+    await register(worker, environment, credential, { purpose: "activity-start", token: START_TOKEN });
+    for (const event of ["update", "end"]) {
+      expect((await push(worker, environment, credential, { token: ACTIVITY_TOKEN, event, alert: true })).status, event).toBe(400);
+    }
+    expect((await push(worker, environment, credential, { token: ACTIVITY_TOKEN, event: "update" })).status).toBe(202);
+    expect((await push(worker, environment, credential, { token: START_TOKEN, event: "start" })).status).toBe(202);
+    const [update, start] = providers.apns().map((one) => ({ priority: one.headers["apns-priority"], aps: (JSON.parse(one.text) as { aps: Record<string, unknown> }).aps }));
+    expect(update).toMatchObject({ priority: "5" });
+    expect(update!.aps.alert).toBeUndefined();
+    expect(start).toMatchObject({ priority: "10", aps: { alert: { title: "Scout needs you", body: "Scout", sound: "default" } } });
+  });
+
+  it("sends content state version 1 when asked, all of it or none", async () => {
+    const environment = await pushEnv();
+    const providers = fakeProviders();
+    const worker = createWorker(fetch, providers.fetch);
+    const credential = await installation(worker, environment, "activity-v1@example.test");
+    await register(worker, environment, credential, { purpose: "activity", token: ACTIVITY_TOKEN });
+    const v1 = { ...activity, version: 1, ask: "approval", status: "Needs your approval", waiting: 2 };
+    expect((await push(worker, environment, credential, { token: ACTIVITY_TOKEN, event: "update", activity: v1 })).status).toBe(202);
+    const props = JSON.parse((JSON.parse(providers.apns()[0]!.text) as { aps: { "content-state": { props: string } } }).aps["content-state"].props);
+    expect(props).toEqual({
+      version: 1, botId: "bot_1", name: "Scout", color: "#7C5CFF", body: "round", mood: "needsYou", kind: "needsYou",
+      ask: "approval", status: "Needs your approval", waiting: 2, since: 1_794_700_000_000, link: "openmausbot://chat/th_1", answers: [],
+    });
+    for (const partial of [{ ...activity, version: 1 }, { ...activity, status: "Working" }, { ...v1, ask: "done" }, { ...v1, status: "two\nlines" }]) {
+      expect((await push(worker, environment, credential, { token: ACTIVITY_TOKEN, event: "update", activity: partial })).status, JSON.stringify(partial)).toBe(400);
+    }
   });
 });

@@ -92,9 +92,11 @@ which brings back the large expanded island the phone app removed (its own
 activities send no alert configuration, so the island stays a small mark).
 The person still hears about the ask: the closed-app alert above arrives as
 an ordinary notification. Only a push-to-start `start` carries `alert`,
-because ActivityKit does not start an activity remotely without one.
-`server/phone-activity.ts` sets `alert` today on every move into needs-you,
-on updates as well as starts; it should set it on starts only.
+because ActivityKit does not start an activity remotely without one, and the
+control plane refuses `alert` on anything else. A phone that registers its
+status words (`statuses`) gets the activity in its content state version 1
+(`status`, `ask`, `waiting`, `version`); a phone that does not gets the
+earlier shape with `headline`, which the phone app also draws.
 
 ## No duplicates with local notifications
 

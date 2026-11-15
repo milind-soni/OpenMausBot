@@ -186,6 +186,7 @@ describe("Live Activities by push", () => {
     const registered = await api(on, "PUT", "/api/push/activity", {
       scheme: "openmausbot",
       headlines: { needsYou: "{name} braucht dich", working: "{name} arbeitet" },
+      statuses: { working: "Arbeitet", needsYou: { approval: "Braucht deine Freigabe", question: "Hat eine Frage", signIn: "Braucht deine Anmeldung", other: "Braucht dich" } },
       activities: [{ botId: pip.id, token: ACTIVITY }],
       visuals: { [pip.id]: { color: "#7C5CFF", gradient: ["#B9A9FF", "#7C5CFF"], body: "round" } },
     }, phone.token);
@@ -202,8 +203,12 @@ describe("Live Activities by push", () => {
       v: 1,
       token: ACTIVITY,
       event: "update",
-      activity: { botId: pip.id, botName: "Pip", kind: "working", headline: "Pip arbeitet", since: expect.any(Number), link: `openmausbot://chat/${pip.threadId}`, color: "#7C5CFF", gradient: ["#B9A9FF", "#7C5CFF"], body: "round" },
+      activity: {
+        botId: pip.id, botName: "Pip", kind: "working", headline: "Pip arbeitet", since: expect.any(Number), link: `openmausbot://chat/${pip.threadId}`, color: "#7C5CFF", gradient: ["#B9A9FF", "#7C5CFF"], body: "round",
+        version: 1, ask: "other", status: "Arbeitet", waiting: 0,
+      },
     });
+    for (const body of activityPushes()) expect(body).not.toHaveProperty("alert");
     expect(JSON.stringify(activityPushes())).not.toContain("PRIVATE-REPLY-TEXT");
     await expect.poll(() => stub.pushes.at(-1), { timeout: 10_000 }).toEqual({ path: "/v1/installations/self/push/unregister", body: { v: 1, platform: "apns", token: ACTIVITY } });
   }, 90_000);

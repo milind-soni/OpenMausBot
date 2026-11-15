@@ -139,7 +139,7 @@ describe("pushing a bot's activity while the app is closed", () => {
     await step({ ask: false, busy: false }, runtime("turn.completed"));
     expect(activityCalls().map((body) => [body.token === FCM, body.event, (body.activity as { kind: string }).kind, body.alert ?? false])).toEqual([
       [true, "update", "working", false],
-      [true, "update", "needsYou", true],
+      [true, "update", "needsYou", false],
       [true, "end", "needsYou", false],
     ]);
   });
@@ -200,5 +200,32 @@ describe("pushing a bot's activity while the app is closed", () => {
     await step({ busy: false });
     await step({ busy: false });
     expect(activityCalls().map((body) => [body.token === FCM, body.event])).toEqual([[true, "end"]]);
+  });
+
+  it("never alerts a running activity's update, only a remote start", async () => {
+    const { activity, activityCalls, step } = harness();
+    await activity.register(IPHONE, registration({ activities: [{ botId: "bot_1", token: ACT }], startToken: START }));
+    await step({ busy: true });
+    await step({ ask: true }, notify("approval"));
+    expect(activityCalls().map((body) => [body.token === ACT, body.event, (body.activity as { kind: string }).kind, "alert" in body])).toEqual([
+      [true, "update", "working", false],
+      [true, "update", "needsYou", false],
+    ]);
+  });
+
+  it("sends content state version 1, in the phone's words for the ask, only to a phone that registered them", async () => {
+    const { activity, activityCalls, step } = harness();
+    const statuses = { working: "Working", needsYou: { approval: "Needs your approval", question: "Has a question", signIn: "Needs you to sign in", other: "Needs you" } };
+    await activity.register(IPHONE, registration({ activities: [{ botId: "bot_1", token: ACT }], statuses }));
+    await activity.register(ANDROID, registration({ activities: [{ botId: "bot_1", token: START }] }));
+    await step({ busy: true });
+    await step({ ask: true }, notify("sign-in"));
+    const sent = activityCalls().map((body) => [body.token, body.activity as Record<string, unknown>] as const);
+    const v1 = sent.filter(([token]) => token === ACT).map(([, body]) => [body.version, body.ask, body.status, body.waiting]);
+    expect(v1).toEqual([[1, "other", "Working", 0], [1, "signIn", "Needs you to sign in", 1]]);
+    const earlier = sent.filter(([token]) => token === START).map(([, body]) => body);
+    expect(earlier).toHaveLength(2);
+    for (const body of earlier) expect(["version", "ask", "status", "waiting"].some((field) => field in body)).toBe(false);
+    expect(activityRegistrationSchema.safeParse({ scheme: "openmausbot", headlines: HEADLINES, statuses: { ...statuses, working: "Work\ning" } }).success).toBe(false);
   });
 });
