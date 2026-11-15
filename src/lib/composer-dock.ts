@@ -12,7 +12,6 @@ export function transcriptEndPad(composerHeightPx: number): string {
   return `calc(${height}px + ${TRANSCRIPT_GAP})`;
 }
 
-/** From the dock's bottom edge up to the top of the message box, leaving out the chips and attachments stacked above it. */
 export function messageBoxHeight(dock: Pick<DOMRect, "bottom">, box: Pick<DOMRect, "top"> | undefined): number {
   return box ? Math.max(0, dock.bottom - box.top) : 0;
 }
