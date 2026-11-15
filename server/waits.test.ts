@@ -236,7 +236,7 @@ describe("WaitManager", () => {
     const storedAtFollowUp: number[] = [];
     h.followUp.mockImplementation(() => { storedAtFollowUp.push(JSON.parse(readFileSync(h.file, "utf8")).waits.length); });
     const reloaded = h.reload(); h.postOk = true; await reloaded.tick();
-    expect(storedAtFollowUp).toEqual([0]);
+    expect(storedAtFollowUp).toEqual([1]);
     expect(h.post).toHaveBeenCalledTimes(2);
     expect(h.posts).toHaveLength(1);
     expect(h.followUp).toHaveBeenCalledTimes(1);

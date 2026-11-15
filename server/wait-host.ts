@@ -1,3 +1,4 @@
+import { redactSecretsInText } from "./redact.ts";
 import { waitNoticeText } from "./wait-notice-text.ts";
 import { redactParams } from "../shared/redact.ts";
 import type { Notification } from "../shared/notification.ts";
@@ -49,7 +50,7 @@ export function cancelWaitFromCard(
   return false;
 }
 
-export function createWaitHost(deps: WaitHostDeps): Pick<WaitManagerOptions, "sourceAlive" | "botBusy" | "post" | "followUp" | "showCard" | "settleCard"> {
+export function createWaitHost(deps: WaitHostDeps): Pick<WaitManagerOptions, "sourceAlive" | "botBusy" | "post" | "followUp" | "showCard" | "settleCard" | "followUpFailed"> {
   const { store } = deps;
   const now = deps.now ?? Date.now;
   return {
@@ -81,8 +82,18 @@ export function createWaitHost(deps: WaitHostDeps): Pick<WaitManagerOptions, "so
         deliveryId: wait.id,
         receivedAt: now(),
         eventSource: "wait",
+        ...(wait.condition.kind === "github_completion" ? { ownerGitHub: { webhookId: wait.condition.webhookId, repository: wait.condition.repository } } : {}),
         ...(deps.cloudHome ? {} : { resultsThreadId: wait.threadId }),
       });
+    },
+    followUpFailed(wait, error) {
+      const bot = store.bot(wait.botId);
+      if (!bot) return;
+      const text = `Completion arrived for ${wait.label}, but its continuation could not be queued: ${redactSecretsInText(error).slice(0, 500)}. Delivery remains pending and will retry.`;
+      store.appendMessage(wait.threadId, { role: "bot", kind: "text", text });
+      store.patchTask(wait.botId, wait.threadId, { unread: true });
+      deps.wrote(bot, wait.threadId);
+      deps.notify(buildNotification("routine-failed", bot, wait.threadId, text));
     },
     showCard(wait) {
       const bot = store.bot(wait.botId);

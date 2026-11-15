@@ -120,7 +120,7 @@ export interface RoutineRun extends RoutineLineCodes {
   waitedMs?: number;
   triggerSource?: RoutineRunTrigger;
   /** "app": a connected-app event started it; "wait": a wait's follow-up did (its triggerSource stays "webhook", an outside event). sameConversation: its trigger keeps one conversation (routine-same-conversation.ts). */
-  eventSource?: "app" | "wait"; sameConversation?: true;
+  eventSource?: "app" | "wait"; sameConversation?: true; ownerGitHub?: import("./github-completion.ts").GitHubScope;
   webhookId?: string;
   deliveryId?: string;
   sourceThreadId?: string;
@@ -740,7 +740,7 @@ export class RoutineManager {
 
   enqueueWebhook(input: {
     webhookId: string; webhookName: string; prompt: string; botId: string; runOn: RoutineRunOn; deliveryId: string; receivedAt: number;
-    eventSource?: "app" | "wait"; sameConversation?: boolean;
+    eventSource?: "app" | "wait"; sameConversation?: boolean; ownerGitHub?: import("./github-completion.ts").GitHubScope;
     /** Where the run reports, instead of the event's own results chat. */
     resultsThreadId?: string;
   }): { id: string } {
@@ -754,7 +754,7 @@ export class RoutineManager {
       id: randomUUID(), routineId: input.webhookId, routineName: input.webhookName, prompt: input.prompt, target: "bot",
       botId: input.botId, runOn: input.runOn, scheduledFor: input.receivedAt, status: "queued", manual: false,
       triggerSource: "webhook", webhookId: input.webhookId, deliveryId: input.deliveryId, attachments: [], createdAt: this.now(),
-      resultsThreadId: input.resultsThreadId ?? this.options.eventResultsThread?.(input), ...(input.eventSource ? { eventSource: input.eventSource } : {}), ...(input.sameConversation ? { sameConversation: true } : {}),
+      ...(input.eventSource === "wait" && input.ownerGitHub ? { ownerGitHub: input.ownerGitHub } : {}), resultsThreadId: input.resultsThreadId ?? this.options.eventResultsThread?.(input), ...(input.eventSource ? { eventSource: input.eventSource } : {}), ...(input.sameConversation ? { sameConversation: true } : {}),
     };
     this.commitEvent(run, input.deliveryId, () => { this.runs.push(run); });
     return cloneRun(run);

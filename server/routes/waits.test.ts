@@ -29,6 +29,19 @@ async function call(method: string, path: string, body?: unknown, overrides: Par
 }
 
 describe("the waits route", () => {
+  it("binds GitHub registration to an owned enabled receiver and confines chained waits to their registered scope", async () => {
+    const scope = { webhookId: "github", repository: "example/project" };
+    const body = { label: "build", kind: "github_completion", github: { webhook_id: scope.webhookId, repository: scope.repository, revision: "a".repeat(40), run_id: 1, run_attempt: 1 } };
+    expect(await call("POST", "/api/internal/waits", body)).toMatchObject({ status: 403 });
+    expect(await call("POST", "/api/internal/waits", body, { webhookOwned: () => true })).toMatchObject({ status: 201 });
+    expect(await call("POST", "/api/internal/waits", body, { webhookOwned: () => true }, true)).toMatchObject({ status: 400 });
+    const chained = { sourceRefusal: () => WAIT_MESSAGES.notPerson, githubScope: () => scope, webhookOwned: () => true };
+    expect(await call("POST", "/api/internal/waits", body, chained)).toMatchObject({ status: 201 });
+    expect(await call("POST", "/api/internal/waits", { ...body, github: { ...body.github, repository: "other/repo" } }, chained)).toMatchObject({ status: 403 });
+    expect(await call("POST", "/api/internal/waits", FILE_WAIT, chained)).toMatchObject({ status: 403 });
+    expect(await call("POST", "/api/internal/waits", body, { ...chained, guest: () => true })).toMatchObject({ status: 403 });
+    expect(await call("POST", "/api/internal/waits", body, { ...chained, githubScope: () => null })).toMatchObject({ status: 403 });
+  });
   it("passes requests that are not its own", async () => {
     expect((await call("GET", "/api/internal/triggers")).outcome).toBe(PASS);
     expect((await call("DELETE", "/api/internal/waits")).outcome).toBe(PASS);

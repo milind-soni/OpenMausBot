@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import { WAIT_HOURS, type WaitKind } from "../shared/waits.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { redactSecretsInText } from "./redact.ts";
 import { DATA_DIR } from "./config.ts";
+import { githubCompletionSchema, gitHubCompletionFromEvent, sameGitHubCompletion, type GitHubCompletion } from "./github-completion.ts";
+import type { WebhookEvent } from "./webhooks.ts";
 import { startDueTimer, type DueTimer } from "./due-timer.ts";
 import {
   expandHome,
@@ -28,11 +31,13 @@ export const WAIT_WAKE_MS = 30 * 60_000;
 export const NO_PROCESS_LIST = "This computer can't list its programs, so a program wait can't work here. Wait for a file or a page instead.";
 
 export type NewWaitCondition =
+  | GitHubCompletion
   | { kind: "url_contains" | "url_missing"; url: string; text: string }
   | { kind: "file_exists" | "file_missing" | "file_changed"; path: string }
   | { kind: "process_running" | "process_gone"; process: string }
   | { kind: "bot_idle"; botId: string; botName: string };
 export type WaitCondition =
+  | GitHubCompletion
   | { kind: "url_contains"; url: string; text: string }
   /** `sawText`: a check found the text, so its going counts (a page its scripts draw reads bare from the start). */
   | { kind: "url_missing"; url: string; text: string; sawText: boolean }
@@ -47,6 +52,7 @@ export interface WaitRecord {
   createdAt: number; expiresAt: number; nextCheckAt: number; errors: number; cardMessageId?: string;
   /** Decided and saved first; posted once its chat is free. */
   ending?: WaitNotice;
+  deliveryError?: string;
 }
 export interface NewWait {
   botId: string; threadId: string; label: string; condition: NewWaitCondition; followUp?: string; hours?: number; assignmentId?: string;
@@ -66,12 +72,14 @@ export interface WaitManagerOptions {
   /** False while a turn runs in the chat: try again next tick. */
   post(wait: WaitRecord, notice: WaitNotice): boolean;
   followUp(wait: WaitRecord & { followUp: string }): void;
+  followUpFailed?(wait: WaitRecord, error: string): void;
   showCard(wait: WaitRecord & { followUp: string }): string | undefined;
   settleCard(wait: WaitRecord, how: "fired" | "expired" | "cancelled"): void;
 }
 
 const stampSchema = z.object({ size: z.number(), mtimeMs: z.number() });
 const conditionSchema = z.union([
+  githubCompletionSchema,
   z.object({ kind: z.literal("url_contains"), url: z.string(), text: z.string() }),
   z.object({ kind: z.literal("url_missing"), url: z.string(), text: z.string(), sawText: z.boolean() }),
   z.object({ kind: z.enum(["file_exists", "file_missing"]), path: z.string() }),
@@ -92,12 +100,17 @@ const recordSchema = z.object({
   nextCheckAt: z.number(),
   errors: z.number(),
   cardMessageId: z.string().optional(),
+  deliveryError: z.string().optional(),
   ending: z.object({ status: z.enum(["fired", "expired", "stopped"]), text: z.string() }).optional(),
 });
+const completionReceiptSchema = z.object({ botId: z.string(), at: z.number(), completion: githubCompletionSchema });
 const fileSchema = z.object({ version: z.literal(1), waits: z.array(z.unknown()) });
+const githubFileSchema = fileSchema.extend({ githubCompletions: z.array(completionReceiptSchema).catch([]).default([]) });
+const COMPLETION_RECEIPT_MS = 7 * 24 * 60 * 60_000;
 
 export function describeCondition(condition: NewWaitCondition | WaitCondition): string {
   switch (condition.kind) {
+    case "github_completion": return `${condition.repository} ${condition.subject.kind} ${condition.subject.id} at ${condition.revision}`;
     case "url_contains": return `${condition.url} says “${condition.text}”`;
     case "url_missing": return `${condition.url} no longer says “${condition.text}”`;
     case "file_exists": return `${condition.path} exists`;
@@ -111,6 +124,7 @@ export function describeCondition(condition: NewWaitCondition | WaitCondition): 
 
 function firedDetail(condition: WaitCondition): string {
   switch (condition.kind) {
+    case "github_completion": return "The registered GitHub completion arrived. Recheck authoritative state before continuing; completion is not approval or proof of success.";
     case "url_contains": return `${condition.url} now says “${condition.text}”.`;
     case "url_missing": return `${condition.url} no longer says “${condition.text}”.`;
     case "file_exists": return `${condition.path} is there now.`;
@@ -126,7 +140,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 export function waitList(waits: readonly WaitRecord[]): string {
   return waits
-    .map((w) => `- ${w.id} · ${w.label} · until ${describeCondition(w.condition)} · made ${iso(w.createdAt)} · stops ${iso(w.expiresAt)}${w.followUp ? ` · follow_up: ${w.followUp}` : ""}`)
+    .map((w) => `- ${w.id} · ${w.label} · until ${describeCondition(w.condition)} · made ${iso(w.createdAt)} · stops ${iso(w.expiresAt)}${w.followUp ? ` · follow_up: ${w.followUp}` : ""}${w.deliveryError ? ` · continuation delivery failed (retry pending): ${w.deliveryError}` : ""}`)
     .join("\n");
 }
 
@@ -145,10 +159,12 @@ type Verdict = { met: boolean; gone?: boolean; unlisted?: boolean; page?: { ok: 
 
 export class WaitManager {
   private readonly file: string;
+  private readonly githubFile: string;
   private readonly now: () => number;
   private readonly probes: WaitProbes;
   private readonly options: WaitManagerOptions;
   private waits: WaitRecord[] = [];
+  private githubCompletions: z.infer<typeof completionReceiptSchema>[] = [];
   private timer: DueTimer | null = null;
   private running = false;
   private stopped = false;
@@ -159,6 +175,7 @@ export class WaitManager {
   constructor(options: WaitManagerOptions) {
     this.options = options;
     this.file = options.file ?? join(DATA_DIR, "waits.json");
+    this.githubFile = `${this.file}.github`;
     this.now = options.now ?? Date.now;
     this.probes = {
       page: (url) => fetchPageText(url),
@@ -177,6 +194,18 @@ export class WaitManager {
     } catch {
       this.waits = [];
     }
+    try {
+      const parsed = githubFileSchema.safeParse(JSON.parse(readFileSync(this.githubFile, "utf8")));
+      if (parsed.success) {
+        this.githubCompletions = parsed.data.githubCompletions.filter((receipt) => receipt.at >= this.now() - COMPLETION_RECEIPT_MS).slice(-500);
+        this.waits.push(...parsed.data.waits.flatMap((candidate) => {
+          const record = recordSchema.safeParse(candidate);
+          return record.success && record.data.condition.kind === "github_completion" ? [record.data as WaitRecord] : [];
+        }));
+      }
+    } catch {
+      this.githubCompletions = [];
+    }
   }
 
   /**
@@ -185,6 +214,8 @@ export class WaitManager {
    * the work that asked for the wait can end meanwhile.
    */
   async create(input: NewWait): Promise<CreateWaitResult> {
+    const duplicate = this.githubDuplicate(input);
+    if (duplicate) return duplicate;
     const full = this.limitRefusal(input);
     if (full) return full;
     const condition = await this.startingCondition(input.condition);
@@ -193,10 +224,15 @@ export class WaitManager {
     if (verdict.unlisted) return { state: "refused", status: 400, error: NO_PROCESS_LIST };
     if (verdict.page && !verdict.page.ok && verdict.page.refused) return { state: "refused", status: 400, error: verdict.page.error };
     if (verdict.met) return { state: "already", text: `${describeCondition(condition)} already. Nothing was set up: tell the person now.` };
+    const repeated = this.githubDuplicate(input);
+    if (repeated) return repeated;
     const crowded = this.limitRefusal(input);
     if (crowded) return crowded;
     const ended = input.stillAllowed?.();
     if (ended) return { state: "refused", status: 403, error: ended };
+    if (condition.kind === "github_completion" && this.githubCompletions.some((receipt) => receipt.botId === input.botId
+      && receipt.at >= this.now() - COMPLETION_RECEIPT_MS && sameGitHubCompletion(receipt.completion, condition)))
+      return { state: "already", text: "The registered GitHub completion has already arrived. Nothing was queued: recheck authoritative state now and continue only the already authorized work." };
     const now = this.now();
     const wait: WaitRecord = {
       id: randomUUID(),
@@ -224,6 +260,27 @@ export class WaitManager {
         ? `The page does not say “${condition.text}” now, as a plain check reads it (without running its scripts), so this fires only once it says it and then stops. It may be gone already, or shown only by the page's scripts: tell the person.`
         : undefined;
     return { state: "created", wait: cloneWait(wait), ...(note ? { note } : {}) };
+  }
+
+  private githubDuplicate(input: NewWait): CreateWaitResult | null {
+    if (input.condition.kind !== "github_completion") return null;
+    const existing = this.waits.find((wait) => wait.botId === input.botId && wait.threadId === input.threadId
+      && JSON.stringify(wait.condition) === JSON.stringify(input.condition));
+    return existing ? { state: "already", text: `Already waiting for ${existing.label} (wait id ${existing.id}). No second continuation was registered.` } : null;
+  }
+
+  githubCompleted(webhookId: string, botId: string, event: WebhookEvent): void {
+    const completion = gitHubCompletionFromEvent(webhookId, event);
+    if (!completion) return;
+    const repeated = this.githubCompletions.some((receipt) => receipt.botId === botId && sameGitHubCompletion(receipt.completion, completion));
+    const matching = this.waits.filter((wait) => wait.botId === botId && !wait.ending && wait.expiresAt > this.now()
+      && this.options.sourceAlive(wait.botId, wait.threadId) && wait.condition.kind === "github_completion"
+      && sameGitHubCompletion(wait.condition, completion));
+    if (!matching.length && repeated) return;
+    this.commit(() => {
+      if (!repeated) this.githubCompletions = [...this.githubCompletions.filter((receipt) => receipt.at >= this.now() - COMPLETION_RECEIPT_MS), { botId, at: this.now(), completion }].slice(-500);
+      for (const wait of matching) wait.ending = { status: "fired", text: `${wait.label}: done. ${firedDetail(wait.condition)}` };
+    });
   }
 
   private limitRefusal({ botId, threadId, assignmentId }: Pick<NewWait, "botId" | "threadId" | "assignmentId">): CreateWaitResult | null {
@@ -259,7 +316,7 @@ export class WaitManager {
   }
 
   list(botId: string): WaitRecord[] {
-    return this.waits.filter((w) => w.botId === botId && !w.ending).map(cloneWait);
+    return this.waits.filter((w) => w.botId === botId && (!w.ending || w.deliveryError !== undefined)).map(cloneWait);
   }
 
   /** Every wait, those ended but not yet posted too. */
@@ -383,8 +440,18 @@ export class WaitManager {
         try { posted = this.options.post(wait, wait.ending); } catch (error) { console.error(`wait ${wait.id}: could not post`, error); }
         if (!posted) continue;
         const status = wait.ending.status;
+        if (status === "fired" && wait.followUp) {
+          try { this.options.followUp(wait as WaitRecord & { followUp: string }); }
+          catch (error) {
+            const message = redactSecretsInText(error instanceof Error ? error.message : String(error)).slice(0, 1000);
+            if (wait.deliveryError !== message) {
+              this.commit(() => { wait.deliveryError = message; });
+              this.safely(() => this.options.followUpFailed?.(wait, message));
+            }
+            continue;
+          }
+        }
         this.commit(() => { this.waits = this.waits.filter((w) => w !== wait); });
-        if (status === "fired" && wait.followUp) this.safely(() => this.options.followUp(wait as WaitRecord & { followUp: string }));
         if (wait.cardMessageId) this.safely(() => this.options.settleCard(wait, status === "fired" ? "fired" : "expired"));
       }
     } finally {
@@ -406,6 +473,7 @@ export class WaitManager {
 
   private async probe(condition: WaitCondition, processes: (() => Promise<ProcessEntry[]>) | undefined): Promise<Verdict> {
     switch (condition.kind) {
+      case "github_completion": return { met: false };
       case "url_contains":
       case "url_missing": {
         const page = await this.runPage(condition.url);
@@ -441,6 +509,7 @@ export class WaitManager {
   }
 
   private commit(mutate: () => void): void {
+    const receipts = this.githubCompletions;
     const before = this.waits.map(cloneWait);
     const identity = this.waits.slice();
     try {
@@ -453,12 +522,16 @@ export class WaitManager {
         Object.assign(w, before[i]);
       });
       this.waits = identity;
+      this.githubCompletions = receipts;
       throw error;
     }
   }
 
   private save(): void {
     mkdirSync(dirname(this.file), { recursive: true });
-    writeFileAtomic(this.file, JSON.stringify({ version: 1, waits: this.waits }, null, 2), { mode: 0o600 });
+    writeFileAtomic(this.file, JSON.stringify({ version: 1, waits: this.waits.filter((wait) => wait.condition.kind !== "github_completion") }, null, 2), { mode: 0o600 });
+    const githubWaits = this.waits.filter((wait) => wait.condition.kind === "github_completion");
+    if (githubWaits.length || this.githubCompletions.length || existsSync(this.githubFile))
+      writeFileAtomic(this.githubFile, JSON.stringify({ version: 1, waits: githubWaits, githubCompletions: this.githubCompletions }, null, 2), { mode: 0o600 });
   }
 }

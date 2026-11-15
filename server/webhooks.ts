@@ -58,6 +58,7 @@ export interface WebhookReceiveResult {
 
 export interface WebhookManagerOptions {
   file?: string;
+  admitted?: (webhook: WebhookTrigger, event: WebhookEvent) => void;
   now?: () => number;
   emit?: (event: WebhookManagerEvent) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
@@ -794,6 +795,7 @@ export class WebhookManager {
     const admitted = this.admit(trigger, event, byPerson, now);
     if ("receipt" in admitted) return admitted.receipt;
     const { deliveryId } = admitted;
+    if (!byPerson) this.options.admitted?.(publicTrigger(trigger), event);
     if (trigger.delivery === "post") {
       // Never fall through to a task run.
       if (!this.options.post) fail(503, "This server cannot post webhook messages to chat");

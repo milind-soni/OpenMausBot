@@ -31,6 +31,18 @@ function world(over: Partial<OutsideLineageDeps> = {}) {
 const webhookRun = (threadId: string, more: Partial<RoutineRun> = {}) => ({ id: "run-1", routineId: "hook", routineName: "Inbox", botId: "bot", threadId, status: "running", triggerSource: "webhook", ...more }) as RoutineRun;
 
 describe("work from outside stays with that work", () => {
+  it("keeps a registered payload-free owner continuation in its original chat without relaxing outside records", () => {
+    const w = world();
+    const ownerGitHub = { webhookId: "github", repository: "example/project" };
+    w.runs.set("person-work", webhookRun("person-work", { eventSource: "wait", ownerGitHub, resultsThreadId: "person-work" }));
+    expect(w.lineage.outsideDrivenThread("person-work")).toBe(false);
+    w.runs.set("hook-run", webhookRun("hook-run", { eventSource: "wait", ownerGitHub, resultsThreadId: "person-work" }));
+    expect(w.lineage.outsideDrivenThread("hook-run")).toBe(true);
+    w.runs.set("chat", webhookRun("chat", { ownerGitHub, resultsThreadId: "chat" }));
+    expect(w.lineage.outsideDrivenThread("chat")).toBe(true);
+    w.lineage.mark("person-work");
+    expect(w.lineage.outsideDrivenThread("person-work")).toBe(true);
+  });
   it("keeps a conversation confined after its run has ended, for good", () => {
     const w = world();
     w.runs.set("hook-run", webhookRun("hook-run"));

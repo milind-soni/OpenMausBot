@@ -28,13 +28,17 @@ export const WAIT_TOOL_DEFINITIONS = [
         kind: {
           type: "string",
           enum: [...WAIT_KINDS],
-          description: "url_*: the page at url has or lacks text. file_*: path exists, is gone or changes. process_*: process (name or pid) runs or stops. bot_idle: bot (name or id) finishes its work.",
+          description: "url_*: the page at url has or lacks text. file_*: path exists, is gone or changes. process_*: process (name or pid) runs or stops. bot_idle: bot (name or id) finishes its work. github_completion: an authenticated completion from your webhook resumes this original chat; use a registered exact repository/revision and run attempt or pull request, then recheck actual gates.",
         },
         url: { type: "string" },
         text: { type: "string" },
         path: { type: "string" },
         process: { type: "string" },
         bot: { type: "string" },
+        github: { type: "object", additionalProperties: false, properties: {
+          webhook_id: { type: "string" }, repository: { type: "string" }, revision: { type: "string", pattern: "^[a-fA-F0-9]{40}$" },
+          run_id: { type: "integer", minimum: 1 }, run_attempt: { type: "integer", minimum: 1 }, pull_request: { type: "integer", minimum: 1 },
+        }, required: ["webhook_id", "repository", "revision"] },
         follow_up: {
           type: "string",
           maxLength: 2000,

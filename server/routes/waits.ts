@@ -2,6 +2,7 @@ import type { ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 
+import { githubWaitInputSchema, type GitHubCompletion, type GitHubScope } from "../github-completion.ts";
 import { WAIT_HOURS, WAIT_KINDS, type WaitKind } from "../../shared/waits.ts";
 import type { Surface } from "../../shared/wire.ts";
 import type { json as sendJson } from "../harness/http.ts";
@@ -29,6 +30,7 @@ export const WAIT_MESSAGES = {
 } as const;
 
 export interface WaitRequest {
+  github?: GitHubCompletion;
   label: string; kind: WaitKind; url?: string; text?: string; path?: string; process?: string; bot?: string; followUp?: string; hours: number;
 }
 
@@ -38,6 +40,7 @@ const FIELD_KINDS = {
   path: ["file_exists", "file_missing", "file_changed"],
   process: ["process_running", "process_gone"],
   bot: ["bot_idle"],
+  github: ["github_completion"],
 } as const satisfies Record<string, readonly WaitKind[]>;
 type WaitField = keyof typeof FIELD_KINDS;
 const FIELDS = Object.keys(FIELD_KINDS) as WaitField[];
@@ -109,6 +112,11 @@ export function parseWaitRequest(body: unknown, home: string): { ok: true; reque
     if (bot === null) return lengthError("bot", 128);
     request.bot = bot;
   }
+  if (needed.includes("github")) {
+    const parsed = githubWaitInputSchema.safeParse(body.github);
+    if (!parsed.success) return fail("github needs a valid webhook_id, repository, full revision and either run_id/run_attempt or pull_request; no destination or instructions.");
+    request.github = parsed.data;
+  }
   if (!absent(body.follow_up)) {
     const followUp = size("follow_up", 2000, true);
     if (followUp === null) return lengthError("follow_up", 2000);
@@ -170,6 +178,8 @@ export interface WaitRouteContext {
   readBody: () => Promise<unknown>;
   sourceRefusal: (op: "create" | "cancel", assignmentId: string | undefined) => string | null;
   assignmentId?: () => string | undefined;
+  webhookOwned?: (id: string) => boolean;
+  githubScope?: () => GitHubScope | null;
   hostRefusal: () => string | null;
   /** A Cloud guest's turn: its follow-up would run later as the owner's, so a guest's wait only tells. */
   guest: () => boolean;
@@ -197,7 +207,8 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
 
     const assignmentId = ctx.assignmentId?.();
     const refusal = ctx.sourceRefusal(ctx.path === CANCEL ? "cancel" : "create", assignmentId);
-    if (refusal) return void json(res, 403, { error: refusal });
+    const chained = ctx.path === WAITS && refusal === WAIT_MESSAGES.notPerson && !ctx.guest() && ctx.githubScope?.();
+    if (refusal && !chained) return void json(res, 403, { error: refusal });
     const body = await ctx.readBody();
     if (assignmentId !== undefined && ctx.assignmentId?.() !== assignmentId) return void json(res, 403, { error: WAIT_MESSAGES.notPerson });
 
@@ -213,6 +224,11 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
     const parsed = parseWaitRequest(body, home());
     if (!parsed.ok) return void json(res, 400, { error: parsed.error });
     const { request } = parsed;
+    const sameScope = () => {
+      const scope = ctx.githubScope?.();
+      return scope && request.github?.webhookId === scope.webhookId && request.github.repository === scope.repository;
+    };
+    if (chained && !sameScope()) return void json(res, 403, { error: "A completion can continue waiting only for its registered GitHub repository and webhook." });
     if (request.followUp && ctx.guest()) return void json(res, 403, { error: WAIT_MESSAGES.guestFollowUp });
     if (request.kind.startsWith("file_") || request.kind.startsWith("process_")) {
       const away = ctx.hostRefusal();
@@ -220,7 +236,11 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
     }
 
     let condition: NewWaitCondition;
-    if (request.kind === "bot_idle") {
+    if (request.kind === "github_completion") {
+      if (deps.cloudHome) return void json(res, 400, { error: "GitHub owner continuations currently require a local app or self-hosted workspace; Cloud follow-ups use a separate conversation." });
+      if (!ctx.webhookOwned?.(request.github!.webhookId)) return void json(res, 403, { error: "Choose an enabled GitHub webhook owned by this bot. The event cannot choose another conversation." });
+      condition = request.github!;
+    } else if (request.kind === "bot_idle") {
       const peer = ctx.peer(request.bot!);
       if (peer === "self") return void json(res, 400, { error: WAIT_MESSAGES.self });
       if (!peer) {
@@ -243,7 +263,13 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
       condition,
       ...(request.followUp ? { followUp: request.followUp } : {}),
       hours: request.hours,
-      ...(assignmentId ? { assignmentId, stillAllowed: () => (ctx.assignmentId?.() === assignmentId ? null : WAIT_MESSAGES.notPerson) } : {}),
+      ...(assignmentId ? { assignmentId } : {}),
+      ...(assignmentId || request.github ? { stillAllowed: () => {
+        if (assignmentId !== undefined && ctx.assignmentId?.() !== assignmentId) return WAIT_MESSAGES.notPerson;
+        const refused = ctx.sourceRefusal("create", assignmentId);
+        if (refused && !(chained && refused === WAIT_MESSAGES.notPerson && sameScope())) return refused;
+        return request.github && !ctx.webhookOwned?.(request.github.webhookId) ? "The registered webhook is no longer enabled for this bot." : null;
+      } } : {}),
     });
     if (result.state === "refused") return void json(res, result.status, { error: result.error });
     if (result.state === "already") return void json(res, 200, { text: result.text });

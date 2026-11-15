@@ -7,6 +7,7 @@ import type { HandoffView } from "../coordinator.ts";
 import type { RoutineRun } from "../routines.ts";
 import { serverLine } from "../server-lines.ts";
 import type { Store } from "../store.ts";
+import { registeredGitHubOwnerRun } from "../github-completion.ts";
 
 /** What a turn hears when it tries to carry outside work into a conversation that is not outside. */
 export const OUTSIDE_STAYS_HERE = "This work came in from outside, so it stays in this conversation and can't reach that one. Finish it here and say plainly what a person would need to do.";
@@ -67,7 +68,7 @@ export function createOutsideLineage(deps: OutsideLineageDeps) {
   /** A webhook or app event drove this conversation: its record, its run, a payload posted into it, or a conversation that handed it the work. */
   const outsideDrivenThread = (threadId: string): boolean => outsideDriven(threadId, {
     marked,
-    webhookRun: (id) => deps.activeRun(id)?.triggerSource === "webhook",
+    webhookRun: (id) => { const run = deps.activeRun(id); return run?.triggerSource === "webhook" && !registeredGitHubOwnerRun(run); },
     webhookPosted: (id) => store.messagesFor(id).some((line) => line.webhookPost),
     handedFrom: (id) => deps.active().filter((node) => node.threadId === id).flatMap((node) => handedFrom(node.id)),
   });

@@ -1,6 +1,7 @@
 // Routines and runs as routines.json holds them, read back into the shapes RoutineManager works with: anything a hand
 // edit or an older version left out of range is dropped, never trusted.
 import { z } from "zod";
+import { githubScopeSchema } from "./github-completion.ts";
 
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 import { ROUTINE_CHECKS, type RoutineCheck } from "../shared/routines.ts";
@@ -122,6 +123,7 @@ export function loadRun(run: RoutineRun): RoutineRun {
   const loaded: RoutineRun = {
     ...run,
     target,
+    ownerGitHub: run.eventSource === "wait" ? githubScopeSchema.optional().catch(undefined).parse(run.ownerGitHub) : undefined,
     goalStatus: loadGoalStatus(run.goalStatus, target),
     groupId: loadGroupId(run.groupId, target),
     runOn: run.runOn ?? "maus",

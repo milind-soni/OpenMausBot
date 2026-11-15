@@ -14,6 +14,7 @@ export function waitNoticeText(wait: WaitRecord, notice: WaitNotice): ServerText
   }
   const condition = wait.condition;
   if (notice.status === "stopped") return condition.kind === "bot_idle" ? { key: "chat.notice.waitBotGone", params: { ...params, botName: condition.botName } } : undefined;
+  if (condition.kind === "github_completion") return undefined;
   const key = `chat.notice.waitDone.${FIRED_KEY[condition.kind]}`;
   switch (condition.kind) {
     case "url_contains": case "url_missing": return { key, params: { ...params, url: condition.url, text: condition.text } };

@@ -42,7 +42,7 @@ describe("wait tools", () => {
     expect([...WAIT_TOOL_NAMES]).toEqual(["wait_until", "list_waits", "cancel_wait"]);
     const waitUntil = WAIT_TOOL_DEFINITIONS.find((tool) => tool.name === "wait_until")!;
     const properties = (waitUntil.inputSchema as unknown as { properties: Record<string, { enum?: string[] }> }).properties;
-    expect(Object.keys(properties)).toEqual(["label", "kind", "url", "text", "path", "process", "bot", "follow_up", "hours"]);
+    expect(Object.keys(properties)).toEqual(["label", "kind", "url", "text", "path", "process", "bot", "github", "follow_up", "hours"]);
     expect(properties.kind!.enum).toEqual([...WAIT_KINDS]);
     expect(JSON.stringify(WAIT_TOOL_DEFINITIONS)).not.toMatch(/"then"|with then|give then/);
   });
@@ -58,7 +58,7 @@ describe("wait tools", () => {
     expect(list!.description).toMatch(/^Your waits in this chat that have not ended/);
     // The advertised bytes ride every turn that lists it: the catalog wire test budgets them, this keeps them small.
     const [advertised] = availableTools(catalogProfileFromEnv({ OMB_BOT_ID: "scout" })).filter((tool) => tool.name === "wait_until");
-    expect(JSON.stringify(advertised).length).toBeLessThan(1_100);
+    expect(JSON.stringify(advertised).length).toBeLessThan(1_700);
   });
 });
 
