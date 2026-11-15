@@ -21,6 +21,7 @@ const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_SIGNATURE = 0x02014b50;
 const LOCAL_SIGNATURE = 0x04034b50;
 const MAX_EOCD_BYTES = 22 + 0xffff;
+export const MAX_CENTRAL_DIRECTORY_BYTES = 8 * 1024 * 1024;
 const UNIX_TYPE_MASK = 0o170000;
 const UNIX_FILE = 0o100000;
 const UNIX_DIRECTORY = 0o040000;
@@ -56,7 +57,10 @@ export async function readZipDirectory(path: string, maxEntries: number): Promis
     const eocdOffset = tailOffset + eocd;
     if (
       disk !== 0 || directoryDisk !== 0 || diskEntries !== entryCount || entryCount > maxEntries
+      || diskEntries === 0xffff || entryCount === 0xffff
       || directoryBytes === 0xffffffff || directoryOffset === 0xffffffff
+      || directoryBytes > MAX_CENTRAL_DIRECTORY_BYTES || directoryBytes > info.size
+      || directoryBytes < entryCount * 46
       || directoryOffset + directoryBytes > eocdOffset
     ) throw new Error("The verified archive uses an unsupported ZIP layout.");
 
