@@ -5,9 +5,11 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { peerLine } from "@/lib/peer-message";
 import { citationPreviewText } from "@/lib/citations";
+import { isTypeaheadKey, typeaheadMatch, typeaheadText, type Typeahead } from "@/lib/menu-keys";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { useMenuMotion } from "./MenuMotion";
 import { MENU_LABEL, MENU_SHEET, SIMPLE_MENU_META, SIMPLE_MENU_ROW } from "./menu-recipe";
+import { nextMenuIndex } from "./SidebarPopoverMenu";
 
 export type PinnedPreview = { id: string; sender: string; text: string };
 
@@ -20,7 +22,6 @@ export function pinnedPreview(messages: readonly Message[], pinnedId: string | u
   return text ? [{ id: pinned.id, sender, text }] : [];
 }
 
-/** The conversation's pinned messages behind one header button: each row jumps to its message, and Unpin sits beside it. */
 export function PinnedMessagesMenu({ pins, onJump, onUnpin, triggerClassName }: {
   pins: readonly PinnedPreview[];
   onJump: (messageId: string) => void;
@@ -32,23 +33,43 @@ export function PinnedMessagesMenu({ pins, onJump, onUnpin, triggerClassName }: 
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
-  usePopoverDismiss(open, root, () => { setOpen(false); trigger.current?.focus(); });
+  const typed = useRef<Typeahead | null>(null);
+  const close = () => { setOpen(false); trigger.current?.focus(); };
+  usePopoverDismiss(open, root, close);
   useEffect(() => {
     if (open) menu.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
   }, [open]);
-  if (!pins.length) return null;
+  const empty = pins.length === 0;
+  useEffect(() => {
+    if (empty) setOpen(false);
+  }, [empty]);
+  if (empty) return null;
+
+  const unpin = (messageId: string) => {
+    if (pins.length === 1) {
+      setOpen(false);
+      const beside = [...(root.current?.parentElement?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? [])];
+      (beside.find((button) => !root.current?.contains(button) && button.checkVisibility?.() !== false) ?? trigger.current)?.focus();
+    }
+    onUnpin?.(messageId);
+  };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Tab") {
+      event.preventDefault();
+      close();
+      return;
+    }
     const items = Array.from(menu.current?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? []);
     const at = items.indexOf(document.activeElement as HTMLElement);
-    const next = event.key === "ArrowDown" ? items[(at + 1) % items.length]
-      : event.key === "ArrowUp" ? items[(at - 1 + items.length) % items.length]
-      : event.key === "Home" ? items[0]
-      : event.key === "End" ? items[items.length - 1]
-      : undefined;
-    if (!next) return;
+    let next = nextMenuIndex(event.key, at, items.length);
+    if (next === null && isTypeaheadKey(event)) {
+      typed.current = typeaheadText(typed.current, event.key, event.timeStamp);
+      next = typeaheadMatch(items.map((item) => item.getAttribute("aria-label") ?? item.textContent ?? ""), at, typed.current.text);
+    }
+    if (next === null) return;
     event.preventDefault();
-    next.focus();
+    items[next]?.focus();
   };
 
   return (
@@ -94,7 +115,7 @@ export function PinnedMessagesMenu({ pins, onJump, onUnpin, triggerClassName }: 
                   role="menuitem"
                   aria-label={t("chat.unpinMessage")}
                   title={t("chat.unpin")}
-                  onClick={() => onUnpin(pin.id)}
+                  onClick={() => unpin(pin.id)}
                   className="flex size-[30px] shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-ink/[0.06] hover:text-ink focus:bg-ink/[0.06] focus:text-ink touch:size-10"
                 >
                   <PinOff size={16} />
