@@ -184,6 +184,7 @@
   "server.connect.secretHandoff": "휴대폰이나 컴퓨터의 OpenMausBot에서 {label}을(를) 안전하게 입력하세요. 채팅에는 절대 추가되지 않아요.",
   "server.connect.secretFile": "{bot}의 명령은 24시간 동안 비공개 파일에서 이 값을 읽을 수 있어요. 채팅에는 절대 추가되지 않아요.",
   "server.connect.secretRef": "{bot}은(는) OpenMausBot 도구에서 한 번만 쓸 수 있는 참조를 받고, 값 자체는 볼 수 없어요.",
+  "server.connect.secretSavedAsRef": "{label}은(는) 이미 저장되어 있지만 OpenMausBot 도구 전용이에요. {bot}의 명령에는 파일로 필요하니 여기에 다시 입력해 주세요.",
   "server.connect.secretNeverRead": "{bot}은(는) 이 값을 쓸 수 있지만 다시 읽을 수는 없어요.",
   "server.connect.emailOutgoingLabel": "{address}의 보내는 메일 서버",
   "server.connect.emailOutgoingNote": "메일을 보내는 서버를 입력하세요. {bot}은(는) 비밀번호를 절대 보지 못합니다.",

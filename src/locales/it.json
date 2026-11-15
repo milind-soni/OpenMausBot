@@ -140,6 +140,7 @@
   "server.connect.secretHandoff": "Fornisci {label} in modo sicuro da OpenMausBot sul telefono o sul computer. Non viene mai aggiunto alla chat.",
   "server.connect.secretFile": "I comandi di {bot} possono leggerlo da un file privato per 24 ore; non viene mai aggiunto alla chat.",
   "server.connect.secretRef": "{bot} riceve un riferimento monouso per gli strumenti di OpenMausBot e non lo vede mai.",
+  "server.connect.secretSavedAsRef": "{label} è già salvato, ma solo per gli strumenti di OpenMausBot. {bot} ne ha bisogno come file per i suoi comandi, quindi inseriscilo di nuovo qui.",
   "server.connect.secretNeverRead": "{bot} può usarlo, ma non può mai rileggerlo.",
   "server.connect.emailOutgoingLabel": "Server in uscita di {address}",
   "server.connect.emailOutgoingNote": "Indica da dove invia la posta. {bot} non vede mai la password.",
