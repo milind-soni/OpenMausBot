@@ -398,6 +398,22 @@ describe("DecisionModelSettings", () => {
       expect(optionsOf(view.model!)).toEqual(["newvendor/brand-new", "openai/gpt-4.1-nano", "meta-llama/llama-3.3-70b-instruct", "acme/zippy"]);
     });
 
+    it("shows OpenRouter's Gemini chat group and saves its chat protocol", async () => {
+      const model = { id: "google/gemini-2.5-flash", name: "Google: Gemini 2.5 Flash", group: "chat", api: "chat" };
+      fixture.api.mockResolvedValueOnce({ ...MODELS, models: [...MODELS.models, model] });
+      render();
+      runEffects();
+      await flush();
+      const view = render();
+      expect(view.model!.props.options).toEqual(expect.arrayContaining([
+        expect.objectContaining({ value: model.id, label: model.name, group: en["decider.model.geminiChat"] }),
+      ]));
+      fixture.api.mockResolvedValueOnce(openrouter({ model: model.id }));
+      change(view.model!, model.id);
+      await flush();
+      expect(fixture.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { openrouterModel: model.id, openrouterApi: "chat" } }) });
+    });
+
     it("says when only the built-in list could be loaded, and survives a failed load", async () => {
       fixture.api.mockResolvedValueOnce({ ...MODELS, source: "builtin" });
       render();

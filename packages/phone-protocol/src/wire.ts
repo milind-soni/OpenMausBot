@@ -39,7 +39,7 @@ import type { CompanionEndpointsSnapshot } from "./responses.ts";
 /** What a team bot's main chat is called, beside each person's own chats. */
 export const SHARED_CHAT_TITLE = "Shared chat";
 
-export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken, LiveFishTransport, LiveKeySource, LiveProvider, LiveSettings } from "./live-call-wire.ts";
+export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveElevenLabsSession, LiveElevenLabsTransport, LiveEndReason, LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken, LiveFishTransport, LiveGeminiSession, LiveGeminiTransport, LiveKeySource, LiveProvider, LiveSettings } from "./live-call-wire.ts";
 export type { ForkOrigin, TaskClosedBy, TaskOpenedBy } from "./task-provenance.ts";
 export type { AuthPairResponse, BotsResponse, CompanionE2EDescriptor, CompanionEndpointsSnapshot, PairedDevice, PairedSession, PairResponse, WireComputerControl, WireMessagePage } from "./responses.ts";
 
@@ -981,7 +981,7 @@ export type ServerFrame =
   | DataBroadcast
   | { kind: "bot.deleted"; botId: string }
   /** The whole fleet (PUT /api/bots/order) or every room (PUT /api/groups/order) in its new order; a member is sent only the ones they see. */
-  | { kind: "bots.order"; botIds: string[] } | { kind: "groups.order"; groupIds: string[] } | WindowPrefFrame
+  | { kind: "bots.order"; botIds: string[] } | { kind: "groups.order"; groupIds: string[] } | WindowPrefFrame | { kind: "theme"; skin?: string }
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
   /** A job is waiting for the phone whose registry key this is; it polls now. */
   | { kind: "device.job"; phone: string; id: string }

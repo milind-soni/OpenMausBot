@@ -4,7 +4,7 @@ import { setLocale, t } from "@/lib/i18n";
 import type { ConfigStatus } from "@/state/store";
 import { WORKSPACE_CREDENTIAL_ENV } from "../../../server/credential-env.ts";
 import { CREDENTIAL_TARGETS, credentialConfigPatch, desktopCredentialSlot, isConfigCredentialTarget } from "../../../shared/credential-request";
-import { KEY_CATALOG, KEY_SECTIONS, keyEntry, keyForInstance, keyHidden, keyMatches, looksLikeOtherKey, savedState, type KeyId } from "./key-catalog";
+import { KEY_CATALOG, KEY_SECTIONS, keyEntry, keyForInstance, keyHidden, keyMatches, looksLikeOtherKey, savedState, shownKeyEntry, type KeyId } from "./key-catalog";
 
 const NOT_A_PERSONS_KEY: Record<string, string> = {
   OMB_ANTHROPIC_API_URL: "the address the Anthropic key goes to, set by a hosted install",
@@ -95,6 +95,12 @@ describe("every credential has one home on the keys page", () => {
     expect(savedState(live, config)).toEqual({ configured: true, last4: "a1b2" });
     expect(t(live.labelKey)).toBe("OpenAI key");
     expect(t(keyEntry("openai").labelKey)).toBe("OpenAI API key");
+  });
+
+  it("never shows Cloud's included voices on the ElevenLabs Live key row: Live calls need the person's own key", () => {
+    const config = { live: { provider: "elevenlabs" }, tts: { provider: "elevenlabs", configured: true, included: true } } as ConfigStatus;
+    expect(savedState(shownKeyEntry("liveKey", config), config)).toEqual({ configured: false });
+    expect(savedState(keyEntry("elevenlabs"), config)).toEqual({ configured: false, included: true });
   });
 });
 

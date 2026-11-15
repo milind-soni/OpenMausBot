@@ -522,6 +522,7 @@
   "homeLine.profile": "{name} начинается с чистого листа, отдельно от My Cloud. Боты, которые были здесь, находятся в My Cloud; чтобы вернуть старую копию, импортируйте её резервную копию в Настройки → Резервные копии.",
   "homeLine.local": "{name} начинается с чистого листа: отдельное место на этом компьютере со своими ботами, чатами и файлами.",
   "native.places.profileFailed": "Не удалось открыть место этого компьютера. Повторите попытку чуть позже.",
+  "chat.notice.devinAccountRefused": "Devin отклонил этот запрос для подключённого аккаунта. Проверьте тариф и кредиты Devin, затем попробуйте снова.",
   "rail.settingUp": "{name}: настраивается",
   "rail.waiting": "{name}: ждёт оплаты",
   "rail.attention": "{name}: нужно ваше внимание",
@@ -1698,7 +1699,7 @@
   "teamShare.skip.skill_changed": "изменён после проверки",
   "teamShare.skip.skill_conflict": "у двух ботов есть разные навыки с таким названием",
   "teamShare.skip.bot_skill_limit": "бот может передать не более 30 навыков (сначала идут включённые)",
-  "teamShare.skip.team_skill_limit": "отдел может передать не более 60 навыков",
+  "teamShare.skip.team_skill_limit": "отдел может передать не более 120 навыков",
   "teamShare.field.soul": "постоянные инструкции",
   "teamShare.field.notes": "начальные заметки",
   "teamShare.field.brief": "общие инструкции",
@@ -4599,7 +4600,7 @@
   "routines.botCountOne": "{count} бот",
   "routines.botCountMany": "{count} ботов",
   "routines.group": "Группа",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Телефон",
   "computer.browserSwitch.title": "Разрешить {name} пользоваться браузером",
   "computer.tab.browser": "Браузер",
   "computer.tab.data": "Данные",
@@ -5976,6 +5977,7 @@
   "botSettings.search": "Поиск",
   "botSettings.searchAria": "Поиск по настройкам",
   "botSettings.searchNone": "Ничего не найдено по запросу «{query}»",
+  "botSettings.searchLoading": "Ищем среди подключённых приложений…",
   "botSettings.sections.skills": "Навыки",
   "botSettings.sections.memory": "Память",
   "botSettings.sections.routines": "Процедуры",
@@ -7341,5 +7343,6 @@
   "decider.gemini.error.overloaded": "Gemini перегружен. Повторите попытку чуть позже.",
   "decider.gemini.error.malformed": "Gemini отправил ответ, который {app} не удалось прочитать.",
   "decider.gemini.error.http": "Gemini вернул ошибку ({status}). Повторите попытку чуть позже.",
-  "room.routedBy.gemini": "Выбрал Gemini · {percent}%"
+  "room.routedBy.gemini": "Выбрал Gemini · {percent}%",
+  "composer.command.burstDesc": "Запускает много частей задачи сразу и объединяет результаты"
 }

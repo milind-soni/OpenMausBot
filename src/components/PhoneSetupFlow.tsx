@@ -49,6 +49,7 @@ import {
   preparePhonePairingRoute,
   queuePhonePairingAttempt,
   releasePhonePairingAttempt,
+  pairThroughRelayWithoutAddress, relayServesPairing,
   secureAddressRequestLapsed,
   shouldArmPhoneSetupProvisioningTimeout,
   shouldPrepareSecureAddress,
@@ -321,7 +322,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
       }
       setError(null);
       try {
-        const started = await preparePhonePairingRoute(
+        let started = await preparePhonePairingRoute(
           routeMode,
           Boolean(state?.enabled),
           {
@@ -352,18 +353,17 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
         const prepare = remote?.prepare && shouldPrepareSecureAddress(routeMode, gate, accountOverride ?? account)
           ? remote.prepare
           : null;
+        let mode = routeMode;
         if (gate !== "open") {
-          setProvisioning(gate === "wait" || gate === "start");
-          if (prepare) {
-            const next = await mutateCompanionBridgeState(companionMutationEpoch, () => prepare());
-            if (isCurrent()) setAccount(next);
-          }
-          return;
-        }
-        if (prepare) void Promise.resolve().then(() => prepare()).catch(() => {});
-        if (explicitRoute && !companionPairingRoute(started, routeMode)) {
+          const relayed = await pairThroughRelayWithoutAddress(gate, accountOverride ?? account, started, { prepare: prepare && (() => mutateCompanionBridgeState(companionMutationEpoch, () => prepare())), latest: () => companion.state(), isCurrent, setAccount, setProvisioning });
+          if (!relayed) return;
+          setState((started = relayed));
+          mode = "local";
+          dispatchFlow({ type: "use-local" });
+        } else if (prepare) void Promise.resolve().then(() => prepare()).catch(() => {});
+        if (mode !== "automatic" && !companionPairingRoute(started, mode)) {
           setProvisioning(false);
-          setError(routeMode === "tailscale"
+          setError(mode === "tailscale"
             ? t("phone.error.tailscaleUnavailable")
             : directPairingUnavailable());
           dispatchFlow({ type: "reset" });
@@ -392,7 +392,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
           paired,
           started.pairing?.token ?? null,
         );
-        const routePin = pairingFailure ? null : companionPairingRoutePin(paired, routeMode);
+        const routePin = pairingFailure ? null : companionPairingRoutePin(paired, mode);
         if (pairingFailure || !routePin || !pairingWindow) {
           await closePhonePairingIfOwned(
             paired,
@@ -407,9 +407,9 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
           publishPairingRoutePin(null);
           setState({ ...paired, pairing: null });
           setProvisioning(false);
-          setError(pairingFailure ?? (routeMode === "local"
+          setError(pairingFailure ?? (mode === "local"
             ? directPairingUnavailable()
-            : routeMode === "tailscale"
+            : mode === "tailscale"
               ? t("phone.error.tailscaleUnavailable")
               : protectedPairingUnavailable()));
           dispatchFlow({ type: "reset" });
@@ -703,7 +703,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
       return;
     }
     if (
-      phonePairingGate(account, state, false) === "open"
+      phonePairingGate(account, state, false) === "open" || relayServesPairing(account, state)
       || (!provisioning && secureAddressRequestLapsed(account, state))
     ) {
       void openPairing("automatic");

@@ -29,7 +29,8 @@ const COPY: Record<Provider, { master: LocaleKey; needsKey: LocaleKey; keyLabel:
 const ROOM_BUDGET_MS = 1_500;
 
 type Provider = "jev" | "gemini" | "openrouter" | "custom";
-type ModelList = { source: "openrouter" | "builtin"; models: Array<{ id: string; name: string; group: "recommended" | "more"; api?: "chat" | "decisions" }> };
+type ModelList = { source: "openrouter" | "builtin"; models: Array<{ id: string; name: string; group: "recommended" | "more" | "chat"; api?: "chat" | "decisions" }> };
+const MODEL_GROUP = { recommended: "decider.model.recommended", more: "decider.model.more", chat: "decider.model.geminiChat" } as const satisfies Record<string, LocaleKey>;
 type TestResult = { ok: true; latencyMs: number } | { ok: false; reason: string; status?: number };
 
 const FAILURES: Record<string, LocaleKey> = {
@@ -376,8 +377,8 @@ export function DecisionModelSettings() {
                 aria-label={t("decider.model.label")}
                 options={[
                   ...(decider?.model && !models?.models.some((model) => model.id === decider.model) ? [{ value: decider.model, label: decider.model }] : []),
-                  ...(["recommended", "more"] as const).flatMap((group) => (models?.models.filter((model) => model.group === group) ?? []).map((model) => ({
-                    value: model.id, label: model.name, group: t(group === "recommended" ? "decider.model.recommended" : "decider.model.more"),
+                  ...(["recommended", "more", "chat"] as const).flatMap((group) => (models?.models.filter((model) => model.group === group) ?? []).map((model) => ({
+                    value: model.id, label: model.name, group: t(MODEL_GROUP[group]),
                   }))),
                 ]}
               />

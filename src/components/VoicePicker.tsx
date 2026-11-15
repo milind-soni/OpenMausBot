@@ -253,7 +253,7 @@ export function VoicePicker({
   const sheet = motion.shown && (
     <div
       ref={sheetRef}
-      data-voice-picker-list
+      data-voice-picker-list data-look="popover"
       {...motion.exitProps}
       style={{ position: "fixed", ...place, visibility: place ? undefined : "hidden" }}
       className={cn(

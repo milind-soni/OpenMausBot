@@ -522,6 +522,7 @@
   "homeLine.profile": "{name} zaczyna od zera, osobno od My Cloud. Dotychczasowe boty z tego komputera są w My Cloud; aby przywrócić starszą kopię, zaimportuj jej kopię zapasową w Ustawienia → Kopie zapasowe.",
   "homeLine.local": "{name} zaczyna od zera: osobne miejsce na tym komputerze, z własnymi botami, czatami i plikami.",
   "native.places.profileFailed": "Nie udało się otworzyć miejsca tego komputera. Spróbuj ponownie za chwilę.",
+  "chat.notice.devinAccountRefused": "Devin odrzucił to żądanie dla zalogowanego konta. Sprawdź plan i środki w Devin, a potem spróbuj ponownie.",
   "rail.settingUp": "{name}: konfigurowanie",
   "rail.waiting": "{name}: czeka na płatność",
   "rail.attention": "{name}: potrzebuje ciebie",
@@ -1692,7 +1693,7 @@
   "teamShare.skip.skill_changed": "zmieniono po przeglądzie",
   "teamShare.skip.skill_conflict": "dwa boty mają różne umiejętności o tej samej nazwie",
   "teamShare.skip.bot_skill_limit": "bot może udostępnić maksymalnie 30 umiejętności (najpierw włączone umiejętności)",
-  "teamShare.skip.team_skill_limit": "dział może udostępnić maksymalnie 60 umiejętności",
+  "teamShare.skip.team_skill_limit": "dział może udostępnić maksymalnie 120 umiejętności",
   "teamShare.field.soul": "stałe instrukcje",
   "teamShare.field.notes": "notatki startowe",
   "teamShare.field.brief": "wspólne instrukcje",
@@ -4548,7 +4549,7 @@
   "routines.botCountOne": "{count} bot",
   "routines.botCountMany": "Boty: {count}",
   "routines.group": "Grupa",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Telefon",
   "computer.browserSwitch.title": "Pozwól botowi {name} używać przeglądarki",
   "computer.tab.browser": "Przeglądarka",
   "computer.tab.data": "Dane",
@@ -5927,6 +5928,7 @@
   "botSettings.search": "Szukaj",
   "botSettings.searchAria": "Szukaj w ustawieniach",
   "botSettings.searchNone": "Brak wyników dla „{query}”",
+  "botSettings.searchLoading": "Przeszukuję połączone aplikacje…",
   "botSettings.sections.skills": "Umiejętności",
   "botSettings.sections.memory": "Pamięć",
   "botSettings.sections.routines": "Rutyny",
@@ -7288,5 +7290,6 @@
   "decider.gemini.error.overloaded": "Gemini jest przeciążony. Spróbuj ponownie za chwilę.",
   "decider.gemini.error.malformed": "Gemini wysłał odpowiedź, której {app} nie mógł odczytać.",
   "decider.gemini.error.http": "Gemini zwrócił błąd ({status}). Spróbuj ponownie za chwilę.",
-  "room.routedBy.gemini": "Wybrane przez Gemini · {percent}%"
+  "room.routedBy.gemini": "Wybrane przez Gemini · {percent}%",
+  "composer.command.burstDesc": "Uruchom wiele części zadania naraz, a potem połącz wyniki"
 }

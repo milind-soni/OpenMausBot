@@ -85,6 +85,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   assignment_status: "activity.tool.team.assignmentStatus",
   attach_file: "activity.tool.team.attachFile",
   close_thread: "activity.tool.team.closeThread",
+  rename_thread: "activity.tool.team.renameThread",
   coordinate_bots: "activity.tool.team.coordinateBots",
   create_bot: "activity.tool.team.createBot",
   create_room: "activity.tool.team.createRoom",

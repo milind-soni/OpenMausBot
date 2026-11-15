@@ -87,7 +87,7 @@ import {
 } from "./companion-account-service.mjs";
 import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
-import { pairingPageUrl } from "./server-address.mjs"; import { createServerConnect } from "./server-probe.mjs"; import { createTailnetShare, remotePolicyAllows } from "./tailnet-share.mjs"; import { checkTailscale } from "./tailscale-check.mjs"; import { onTailnet } from "./tailnet.mjs"; import { checkServer, createServerStatus, installServerStatus } from "./server-status.mjs";
+import { pairingPageUrl, vouchForPlainHttpServers } from "./server-address.mjs"; import { createServerConnect } from "./server-probe.mjs"; import { createTailnetShare, remotePolicyAllows } from "./tailnet-share.mjs"; import { checkTailscale } from "./tailscale-check.mjs"; import { onTailnet } from "./tailnet.mjs"; import { checkServer, createServerStatus, installServerStatus } from "./server-status.mjs";
 import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
 import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs"; import { installServerLending } from "./server-lending.mjs"; import { ownEnvironmentIds } from "./lent-mcp.mjs";
@@ -97,7 +97,7 @@ import { reviveAfterFailedSwitch, switchLocalEnvironment } from "./environment-s
 import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDesktopStore } from "./managed-desktop.mjs";
 import { CHECKOUT_SOURCES, cloudMenuSublabel, cloudTarget, createCloudAccountClient as cloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
 import { installCloudPlanIpc } from "./cloud-plan-ipc.mjs";
-import { cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNotice, installCloudBuy, lookFile } from "./cloud-buy.mjs";
+import { cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNotice, installCloudBuy, lookFile } from "./cloud-buy.mjs"; import { unreadBadgeIcon } from "./color-dot.mjs";
 import { createTrialNotices } from "./cloud-trial-notice.mjs";
 import { createDesktopText, DESKTOP_PORTS, jsonFile, registerDesktopPrefs, relabelDesktop } from "./desktop-prefs.mjs";
 import { createDesktopIncludedX } from "./included-x.mjs"; import { createDesktopIncludedPages } from "./included-pages.mjs"; import { createPhoneLinkFact } from "./phone-link-fact.mjs";
@@ -159,7 +159,7 @@ let organizationEntryReady = false;
 let mainWindow = null;
 const serverUnavailableWindows = new WeakSet();
 let unreadCount = 0;
-let unreadOverlayIcon = null;
+let unreadOverlayIcon;
 
 const windowStateFile = createWindowStateFile({ file: () => path.join(app.getPath("userData"), "window-state.json"), log: message => slog(message) });
 
@@ -167,9 +167,9 @@ function applyUnreadBadge(win = mainWindow) {
   const count = normalizeUnreadCount(unreadCount);
   if (process.platform === "win32") {
     if (!win || win.isDestroyed()) return;
-    unreadOverlayIcon ??= nativeImage.createFromPath(APP_ICON).resize({ width: 16, height: 16 });
+    if (unreadOverlayIcon === undefined) unreadOverlayIcon = unreadBadgeIcon(nativeImage); // a dot: the overlay sits on the app's own icon
     win.setOverlayIcon(
-      count > 0 && !unreadOverlayIcon.isEmpty() ? unreadOverlayIcon : null,
+      count > 0 ? unreadOverlayIcon : null,
       count > 0 ? nativeT(count === 1 ? "native.badge.one" : "native.badge.many", { count }) : nativeT("native.badge.none"),
     );
     return;
@@ -450,7 +450,7 @@ let logStream = null;
 let desktopShutdownStarted = false;
 import { companionAdvertisedHostedUrl, companionEnabledAtRest, companionOriginTarget, companionPairing, companionPairingRenew, companionDeviceRoutes, companionStartsAtLaunch, companionCloudDesktopAccess, companionRouteOn, dismissCompanionNotice, rememberCompanionRoute, setCompanionMigrationFacts,
   companionBrowserControlAccess, companionRevoke, companionRunning, companionSettings, companionState, rememberCompanionKeepAwake, setCompanionHostedUrl, setCompanionLifecycleListener, startCompanion, stopCompanion } from "./companion.mjs";
-import { createDesktopCompanionE2E, deviceCounts } from "./companion-e2e-desktop.mjs";
+import { createDesktopCompanionE2E, deviceCounts } from "./companion-e2e-desktop.mjs"; import { startCheckedManagedConnection } from "./managed-companion-start.mjs";
 import { autoStartCompanion } from "./companion-autostart.mjs";
 import { createPhoneLinkRoutes } from "./phone-link-routes.mjs";
 import { createRoutineWakeHold, rememberRoutineWake, routineWakeSettings } from "./routine-wake.mjs";
@@ -600,7 +600,7 @@ function ensureManagedCompanionConnector() {
     runtimeExecutable: process.execPath,
     runtimeRoot: path.join(app.getPath("userData"), "managed-companion-tunnel"),
     onChange: (status) => {
-      slog(`managed companion connection ${status.status}`);
+      slog(`managed companion connection ${status.status}`); companionAccountService?.connectorChanged(status);
       if (!companionDesiredThisLaunch) return;
       void reconcileCompanionAdvertisement(status.ready ? status.endpoint : null);
     },
@@ -663,7 +663,7 @@ async function startDesktopCompanion({ waitForHosted = true, remember = true, ro
   }
   if (remember) for (const route of routes.filter((name) => ["wifi", "relay"].includes(name))) await rememberCompanionRoute(route, true);
   phoneLinkRoutes.touched();
-  await startManagedCompanionConnection({ waitForVerification: waitForHosted });
+  await startCheckedManagedConnection({ check: () => (companionRouteOn("https") && managedCompanionTunnelAccess(secureCredentials) ? companionAccountService?.checkStoredAddress() : null), start: startManagedCompanionConnection, wait: waitForHosted && routes.length > 0 && !companionRouteOn("relay"), desired: () => companionDesiredThisLaunch });
   return desktopCompanionState();
 }
 
@@ -748,7 +748,7 @@ function ensureCompanionAccountService() {
     onDemand: true,
     managedEndpointNeeded: async () =>
       companionRunning() ? managedEndpointNeed(await companionState().catch(() => null)) : null,
-    relay: { capable: () => companionE2E?.enabled === true, legacyDevices: async () => (companionRunning() ? deviceCounts(await companionState().catch(() => null)).legacy : null) },
+    relay: { capable: () => companionE2E?.enabled === true, legacyDevices: async () => (companionRunning() ? deviceCounts(await companionState().catch(() => null)).legacy : null) }, installationChanged: () => void companionE2E?.prime(),
     log: (line) => slog(line),
   });
   return companionAccountService;
@@ -1494,7 +1494,7 @@ function environmentsFile() {
   return path.join(app.getPath("userData"), cloudTarget(process.env).environments);
 }
 
-const environmentsStore = createEnvironmentsFile({ file: environmentsFile, fs, path, log: slog });
+const environmentsStore = createEnvironmentsFile({ file: environmentsFile, fs, path, log: slog }); vouchForPlainHttpServers(app.commandLine, environmentsStore.read().environments);
 
 function activeOrigin() {
   return activeEnvironment(environmentsState)?.origin ?? rendererOrigin();
@@ -2470,8 +2470,8 @@ ipcMain.handle("companion-account:verify-code", localOnly("companion-account:ver
 ));
 ipcMain.handle("companion-account:retry", localOnly("companion-account:retry", () => ensureCompanionAccountService().retry()));
 ipcMain.handle("companion-account:prepare", localOnly("companion-account:prepare", () => {
-  const refusal = managedRemoteAccessRefusal();
-  if (refusal) throw new Error(refusal);
+  const refusal = managedRemoteAccessRefusal(); if (refusal) throw new Error(refusal);
+  void companionE2E?.prime(); // a person is pairing: with Anywhere on, the encrypted connection starts before a code opens
   return rememberCompanionRoute("https", true).then(() => ensureCompanionAccountService().prepare());
 }));
 ipcMain.handle("companion-account:sign-out", localOnly("companion-account:sign-out", () => ensureCompanionAccountService().signOut()));

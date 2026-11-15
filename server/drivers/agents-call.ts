@@ -20,7 +20,7 @@ import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
-import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts";
+import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts";
 import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
 import { callBurstTool } from "./agents-burst-tool.ts";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
@@ -35,7 +35,6 @@ import { callDevsTool, DEVS_TOOL_NAMES } from "./agents-devs-tools.ts";
 export interface ToolCallContext {
   botId: string;
   threadId: string;
-  depth: number;
   /** A standing external runtime: its capability cannot reach the result cache, so big results are cut. */
   externalRuntime: boolean;
   // Presentation only: the server still authenticates and scopes every call.
@@ -54,7 +53,6 @@ export function toolCallContextFromEnv(env: NodeJS.ProcessEnv): ToolCallContext 
   return {
     botId: profile.botId,
     threadId: env.OMB_THREAD_ID ?? "",
-    depth: Number(env.OMB_TURN_DEPTH ?? "0") || 0,
     externalRuntime: env.OMB_EXTERNAL_RUNTIME === "1",
     sharedComputers: profile.sharedComputers,
     client: harnessClientFromEnv(env),
@@ -219,7 +217,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   const refused = outOfBounds(name, fullInputSchema(name), args);
   if (refused) return { text: refused, isError: true };
   const member = agentsCallMember(name, args);
-  const { botId: BOT_ID, threadId: THREAD_ID, depth: DEPTH } = context;
+  const { botId: BOT_ID, threadId: THREAD_ID } = context;
   const { api, apiResponse } = context.client;
   if (name === "vm_exec") {
     const { ok, body } = await apiResponse("/api/internal/vm-exec", {
@@ -406,6 +404,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     };
   }
   if (name === THREAD_POST_TOOL) return callThreadPostTool(args, context);
+  if (name === RENAME_THREAD_TOOL) return callRenameThreadTool(args, context);
   if (name === "select_computer") {
     if (args.surface !== undefined && (typeof args.surface !== "string" || !["auto", "cloud", "vm", "local", "browser"].includes(args.surface))) {
       return { text: "Choose auto, cloud, vm, local or browser; omit surface to inspect connected choices.", isError: true };
@@ -453,7 +452,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!title || !message) return { text: "start_thread needs title (one short line) and message (the complete first message).", isError: true };
     const toBotId = typeof args.bot_id === "string" ? args.bot_id.trim() : "";
     const folder = typeof args.folder === "string" ? args.folder.trim() : "";
-    const body: Record<string, unknown> = { fromBotId: BOT_ID, fromThreadId: THREAD_ID, title, message, depth: DEPTH };
+    const body: Record<string, unknown> = { fromBotId: BOT_ID, fromThreadId: THREAD_ID, title, message };
     if (toBotId) body.toBotId = toBotId;
     if (folder) body.folder = folder;
     if (args.model_selection !== undefined) {
@@ -690,8 +689,9 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (typeof args.cwd === "string") changes.cwd = args.cwd.trim();
     if (typeof args.notifications === "boolean") changes.notifications = args.notifications;
     if (typeof args.speakReplies === "boolean") changes.speakReplies = args.speakReplies;
+    if (typeof args.browserProfile === "string") changes.browserProfile = args.browserProfile.trim();
     if (!Object.keys(changes).length) {
-      return { text: "propose_profile needs at least one of name, title, description, soul, cwd, notifications, or speakReplies.", isError: true };
+      return { text: "propose_profile needs at least one of name, title, description, soul, cwd, notifications, speakReplies, or browserProfile.", isError: true };
     }
     const forBotId = String(args.for_bot_id ?? "").trim();
     const r = await api("/api/internal/profile-requests", {

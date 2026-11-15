@@ -10,6 +10,7 @@ import { HELPER_TOOL_DEFINITIONS } from "./agents-helper-tools.ts";
 import { USAGE_LIMITS_TOOL_DEFINITION } from "./agents-usage-tool.ts";
 import { APP_SETTINGS_TOOL_DEFINITION } from "./agents-app-settings-tool.ts";
 import { THREAD_POST_TOOL_DEFINITION } from "./agents-thread-post-tool.ts";
+import { RENAME_THREAD_TOOL_DEFINITION } from "./agents-thread-title-tool.ts";
 import { WAIT_TOOL_DEFINITIONS, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
 import { COMPUTER_ASK_TOOL_DEFINITIONS, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
 import { IMAGE_TOOL_DEFINITIONS, IMAGE_TOOL_NAMES } from "./agents-image-tools.ts";
@@ -313,6 +314,7 @@ const TOOL_DEFINITIONS = [
       required: ["thread_id"],
     },
   },
+  RENAME_THREAD_TOOL_DEFINITION,
   {
     name: "start_thread",
     description:
@@ -376,7 +378,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "attach_file",
     description:
-      `Attach a finished file to the chat so the user can preview and download it: an image, video, audio clip, PDF, spreadsheet, slide deck or other document you made. Pass its path: a path inside your computer's /home/cua/workspace (for example /home/cua/workspace/report.pdf), or a file in your working folder. Do this instead of pasting a VM path as a link; a path inside a VM cannot be opened from chat. Supported: images (png, jpg, gif, webp), video (mp4, webm, mov), audio (mp3, m4a, aac, wav, ogg, opus, flac), pdf, Word/Excel/PowerPoint and OpenDocument files, and csv, tsv, txt, md, json, rtf. Up to ${limitMegabytes(FILE_MAX_BYTES)} MB (images 10 MB). Finish writing the file first, then call this directly: it reports an error if the file is missing, so you do not need to list or open the folder to check.`,
+      `Attach a finished file to the chat so the user can preview and download it: an image, video, audio clip, PDF, spreadsheet, slide deck or other document you made. Pass its path: a path inside your computer's /home/cua/workspace (for example /home/cua/workspace/report.pdf), or a file in your working folder. Do this instead of pasting a VM path as a link; a path inside a VM cannot be opened from chat. Supported: images (png, jpg, gif, webp), video (mp4, webm, mov), audio (mp3, m4a, aac, wav, ogg, opus, flac), pdf, Word/Excel/PowerPoint and OpenDocument files, csv, tsv, txt, md, json, rtf, and archives (zip, rar, 7z, tar, gz, tgz, bz2, xz). Up to ${limitMegabytes(FILE_MAX_BYTES)} MB (images 10 MB). Finish writing the file first, then call this directly: it reports an error if the file is missing, so you do not need to list or open the folder to check.`,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -659,7 +661,7 @@ const TOOL_DEFINITIONS = [
       additionalProperties: false,
       properties: {
         action: { type: "string", enum: ["list", "events"] },
-        trigger_id: { type: "string", description: "list: one trigger's details and recent fires." },
+        trigger_id: { type: "string", description: "Full instructions and fires; edit redactions in Automations." },
         include_address: { type: "boolean", description: "list, with a webhook's trigger_id: also its private address. For the bot that owns it, or a Chief of Staff." },
         for_bot_id: { type: "string", description: "list: ANOTHER bot's triggers in your section, from list_bots." },
         app: { type: "string", description: "events: optional app slug, e.g. gmail." },
@@ -735,6 +737,7 @@ const TOOL_DEFINITIONS = [
           type: "boolean",
           description: "Speak this bot's replies aloud as they settle, without being asked.",
         },
+        browserProfile: { type: "string", maxLength: 100, description: "With for_bot_id, only when the person asked: an idle teammate's browser profile, an existing one's name or id; \"\" = its own browser." },
         reason: { type: "string", minLength: 1, maxLength: 500, description: "One sentence the user will see explaining why." },
         for_bot_id: {
           type: "string",
@@ -826,7 +829,7 @@ const TOOL_DEFINITIONS = [
           type: "array",
           maxItems: 8,
           description:
-            "Optional detail files (32KB each) for when SKILL.md would pass 32KB: keep the core steps in SKILL.md, move long rules or examples here, and link each from SKILL.md. On update, omitted references stay; empty content removes one.",
+            "Optional detail files (32KB each) for when SKILL.md would pass 64KB: keep the core steps in SKILL.md, move long rules or examples here, and link each from SKILL.md. On update, omitted references stay; empty content removes one.",
           items: {
             type: "object",
             additionalProperties: false,
@@ -938,11 +941,12 @@ const CHIEF_ONLY_TOOL_NAMES = new Set([
   "create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread",
 ]);
 const CHIEF_TARGET_TOOL_NAMES = new Set(["propose_profile", "propose_model", "reset_cloud_computer"]);
+const CHIEF_TARGET_FIELDS = new Set(["for_bot_id", "browserProfile"]);
 const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
 
 const LOCAL_VM_TOOL_NAMES = new Set(["vm_exec"]);
 /** Refused in a room's thread (routes/waits.ts), and list_waits, since a room holds no wait. */
-const ROOM_REFUSED_TOOL_NAMES = new Set([...WAIT_TOOL_NAMES, "burst"]);
+const ROOM_REFUSED_TOOL_NAMES = new Set([...WAIT_TOOL_NAMES, "burst", "rename_thread"]);
 const CLOUD_HOME_SURFACE = {
   type: "string", enum: ["auto", "cloud", "browser"],
   description: "auto = suitable configured computer, cloud = the bot's cloud computer, browser = built-in browser. Omit to list. This server runs in the cloud: the user's own computer and a Local VM are not places here.",
@@ -989,7 +993,7 @@ function catalogTools(profile: CatalogProfile) {
     ? RESEARCH_READY_TOOLS
     : RESEARCH_READY_TOOLS.filter((tool) => !CHIEF_ONLY_TOOL_NAMES.has(tool.name)).map((tool) => {
       if (!CHIEF_TARGET_TOOL_NAMES.has(tool.name)) return tool;
-      const properties = Object.fromEntries(Object.entries(tool.inputSchema.properties).filter(([key]) => key !== "for_bot_id"));
+      const properties = Object.fromEntries(Object.entries(tool.inputSchema.properties).filter(([key]) => !CHIEF_TARGET_FIELDS.has(key)));
       return { ...tool, description: tool.description.replace(CHIEF_PROFILE_TARGET, ""), inputSchema: { ...tool.inputSchema, properties } };
     });
   return [...ROLE_TOOLS, ...(profile.mausbot === true ? MAUSBOT_TOOL_DEFINITIONS : [])];

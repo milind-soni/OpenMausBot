@@ -4,6 +4,7 @@ import {
   addDisabledMcpServer,
   listMcpServers,
   MAX_MCP_SERVERS,
+  mcpSharedServerRoom,
   mcpServerNameError,
   parseMcpServerMutation,
   parseMcpServersImport,
@@ -384,5 +385,17 @@ describe("the \"Show its apps in chat\" switch", () => {
       ok: true, server: { type: "http", url: "https://mcp.excalidraw.com/mcp", headers: {}, enabled: true },
     });
     expect(parseStoredMcpServer("draw", { command: "npx", apps: "no" }).ok).toBe(false);
+  });
+});
+
+describe("mcpSharedServerRoom", () => {
+  const own = (bot: string) => ({ command: "x", args: [], env: {}, enabled: false, bot });
+  const shared = { command: "x", args: [], env: {}, enabled: false };
+  it("is what is left for every bot: 20 less the shared ones and the most any one bot has of its own, within 100 in all", () => {
+    expect(mcpSharedServerRoom({})).toBe(MAX_MCP_SERVERS);
+    expect(mcpSharedServerRoom({ s: shared, a1: own("a"), a2: own("a"), b1: own("b") })).toBe(MAX_MCP_SERVERS - 3);
+    const full: Record<string, unknown> = {};
+    for (let i = 0; i < 100; i++) full[`b${i}`] = own(`bot${i}`);
+    expect(mcpSharedServerRoom(full)).toBe(0);
   });
 });

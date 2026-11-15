@@ -49,7 +49,7 @@ import type { Routine, RoutineInput, RoutineRun, RoutineRunStatusFilter } from "
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { duplicateBotProfile, restrictedCopyRequest } from "@/lib/bot-duplicate";
 import { markVisibleBotThreadsRead, markVisibleGroupThreadsRead } from "./read-visible";
-import { applyWindowPref } from "@/lib/window-prefs";
+import { applyWindowPref } from "@/lib/window-prefs"; import { applyThemeFrame } from "@/lib/theme/runtime";
 import { placeUnreadDivider, threadOpensUnread, threadReadCursor, unreadDividerFor, type UnreadDivider } from "@/lib/unread-divider";
 import type { ComputerStart } from "@/lib/computer-start";
 import { parseComputerHelp } from "@/lib/computer-control";
@@ -428,7 +428,7 @@ export interface InstanceInfo extends InstanceEndpointInfo {
     authenticationUnavailableReason?: string;
     account?: { email?: string; organization?: string; method?: "login" | "api-key" };
     version?: string | null;
-    update?: { title: string; message: string; command: string };
+    update?: { title: string; message: string; command?: string };
     billing?: "metered" | "subscription";
     warning?: { title: string; message: string }; ollama?: import("../../shared/local-model").OllamaProblem;
   };
@@ -3187,9 +3187,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           break;
         }
-        case "window-pref":
-          applyWindowPref(frame);
-          break;
+        case "window-pref": applyWindowPref(frame); break;
+        case "theme": applyThemeFrame(frame); break;
         case "config":
           rawDispatch({
             type: "configStatus",

@@ -1,10 +1,34 @@
 // A stand-in for the bot's browser in fill_login tests: one happy-dom page answering the engine commands
 // login-fill sends and taking typed text, keys and clicks like the input relay. It records every engine command, so a
 // test can prove no secret went through one.
-import { Window } from "happy-dom";
+import { type Document, type Element, type ShadowRoot, Window } from "happy-dom";
 
 /** What the site does with a sent form: show another page (a sign-in that worked, or a next step), or stay and say why. */
 export type SiteAnswer = { navigate: { url: string; html: string } } | { error: string } | null;
+
+/** The focused element, resolving into open shadow roots: a browser's document.activeElement is the host, not the inner field. */
+function activeElement(window: Window): Element | null {
+  let node = window.document.activeElement;
+  while (node && node.shadowRoot && node.shadowRoot.activeElement) node = node.shadowRoot.activeElement;
+  return node;
+}
+
+/** querySelectorAll over the light DOM and every open shadow root it reaches. */
+function deepQuery(root: Document | ShadowRoot, selector: string): Element[] {
+  const found = Array.from(root.querySelectorAll(selector));
+  for (const host of Array.from(root.querySelectorAll("*"))) {
+    if (host.shadowRoot) found.push(...deepQuery(host.shadowRoot, selector));
+  }
+  return found;
+}
+
+/** Gives the host element an open shadow root holding `inner`; tests build component pages with it. */
+export function openShadowRoot(window: Window, selector: string, inner: string): void {
+  const host = window.document.querySelector(selector);
+  if (!host) throw new Error(`host not found: ${selector}`);
+  const root = host.attachShadow({ mode: "open" });
+  (root as unknown as { innerHTML: string }).innerHTML = inner;
+}
 
 export class FakeLoginPage {
   window: Window;
@@ -64,6 +88,11 @@ export class FakeLoginPage {
     return this.window.document.querySelector(selector) as unknown as { value: string };
   }
 
+  /** The first element matching `selector` in the light DOM or an open shadow root. */
+  deepField(selector: string): { value: string } {
+    return deepQuery(this.window.document, selector)[0] as unknown as { value: string };
+  }
+
   /** What the engine answers: its `data`, or null for a stopped browser. */
   async engine(args: string[]): Promise<Record<string, unknown> | null> {
     this.engineCalls.push(args);
@@ -77,7 +106,7 @@ export class FakeLoginPage {
   /** `keyboard insertText` over the relay: into the focused field at its caret, with beforeinput and input events. */
   async insertText(text: string): Promise<void> {
     this.typed.push(text);
-    const field = this.window.document.activeElement as unknown as { value: string; dispatchEvent(event: unknown): boolean } | null;
+    const field = activeElement(this.window) as unknown as { value: string; dispatchEvent(event: unknown): boolean } | null;
     if (!field || typeof field.value !== "string") return;
     const InputEvent = this.window.InputEvent;
     field.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, data: text, inputType: "insertText" }));
@@ -90,7 +119,7 @@ export class FakeLoginPage {
   async press(key: string): Promise<void> {
     this.pressed.push(key);
     this.onKey?.(key);
-    const field = this.window.document.activeElement as unknown as { form?: unknown } | null;
+    const field = activeElement(this.window) as unknown as { form?: unknown } | null;
     const form = field?.form as unknown as { requestSubmit(): void; querySelectorAll(selector: string): ArrayLike<{ type?: string }> } | null | undefined;
     if (key !== "Enter" || !form) return;
     const buttons = Array.from(form.querySelectorAll("button, input[type=submit]")).filter((el) => el.type === "submit");

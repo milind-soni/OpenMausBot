@@ -1791,7 +1791,7 @@
   "routines.editor.goalWhere": "यह कहाँ चलता है",
   "routines.editor.goalOneOnOne": "सिर्फ़ बॉट, उसकी अपनी चैट में",
   "routines.editor.goalOneOnOneHelp": "बॉट लक्ष्य पूरा होने तक अपनी चैट में उस पर काम करता है।",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "फ़ोन",
   "computer.tab.browser": "ब्राउज़र",
   "computer.tabsAria": "बॉट पैनल का दृश्य",
   "computer.simple.needsSetup": "{name} के डेस्कटॉप को पहले एक सेटअप चरण चाहिए।",
@@ -2669,6 +2669,7 @@
   "homeLine.profile": "{name} नए सिरे से शुरू होता है, My Cloud से अलग। आपके पहले के बॉट्स My Cloud पर हैं; पुरानी कॉपी लाने के लिए सेटिंग्स → Backups में उसका बैकअप इंपोर्ट करें।",
   "homeLine.local": "{name} नए सिरे से शुरू होता है: इस कंप्यूटर पर एक अलग जगह, अपने बॉट्स, चैट और फ़ाइलों के साथ।",
   "native.places.profileFailed": "इस कंप्यूटर की अपनी जगह नहीं खुली। थोड़ी देर में फिर से कोशिश करें।",
+  "chat.notice.devinAccountRefused": "Devin ने साइन-इन खाते के लिए यह अनुरोध अस्वीकार कर दिया। उसका Devin प्लान और क्रेडिट जाँचें, फिर दोबारा कोशिश करें।",
   "rail.settingUp": "{name}: सेट हो रहा है",
   "rail.waiting": "{name}: भुगतान का इंतज़ार",
   "rail.attention": "{name}: आपकी ज़रूरत है",
@@ -3680,5 +3681,6 @@
   "decider.gemini.error.overloaded": "Gemini पर अभी ज़्यादा लोड है। कुछ देर बाद फिर कोशिश करें।",
   "decider.gemini.error.malformed": "Gemini ने ऐसा जवाब भेजा जिसे {app} पढ़ नहीं सका।",
   "decider.gemini.error.http": "Gemini ने त्रुटि लौटाई ({status})। कुछ देर बाद फिर कोशिश करें।",
-  "room.routedBy.gemini": "Gemini ने चुना · {percent}%"
+  "room.routedBy.gemini": "Gemini ने चुना · {percent}%",
+  "composer.command.burstDesc": "किसी काम के कई हिस्से एक साथ चलाएं, फिर नतीजे मिलाएं"
 }

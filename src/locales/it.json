@@ -518,6 +518,7 @@
   "homeLine.profile": "{name} riparte da zero, separato da My Cloud. I bot che avevi qui sono su My Cloud; per riportare una copia precedente, importa il suo backup in Impostazioni → Backup.",
   "homeLine.local": "{name} riparte da zero: uno spazio a parte su questo computer, con i suoi bot, chat e file.",
   "native.places.profileFailed": "Lo spazio di questo computer non si è aperto. Riprova tra un momento.",
+  "chat.notice.devinAccountRefused": "Devin ha rifiutato questa richiesta per l'account connesso. Controlla il piano e i crediti di Devin, poi riprova.",
   "rail.settingUp": "{name}: in configurazione",
   "rail.waiting": "{name}: in attesa del pagamento",
   "rail.attention": "{name}: ha bisogno di te",
@@ -1665,7 +1666,7 @@
   "teamShare.skip.skill_changed": "è cambiata dopo la revisione",
   "teamShare.skip.skill_conflict": "due bot hanno abilità diverse con questo nome",
   "teamShare.skip.bot_skill_limit": "un bot può condividere al massimo 30 abilità (prima quelle attive)",
-  "teamShare.skip.team_skill_limit": "un reparto può condividere al massimo 60 abilità",
+  "teamShare.skip.team_skill_limit": "un reparto può condividere al massimo 120 abilità",
   "teamShare.field.soul": "istruzioni permanenti",
   "teamShare.field.notes": "note iniziali",
   "teamShare.field.brief": "istruzioni condivise",
@@ -5763,6 +5764,7 @@
   "botSettings.search": "Cerca",
   "botSettings.searchAria": "Cerca nelle impostazioni",
   "botSettings.searchNone": "Nessun risultato per “{query}”",
+  "botSettings.searchLoading": "Cerco tra le app collegate…",
   "botSettings.sections.skills": "Abilità",
   "botSettings.sections.memory": "Memoria",
   "botSettings.sections.routines": "Routine",
@@ -7147,5 +7149,6 @@
   "decider.gemini.error.overloaded": "Gemini è sovraccarico. Riprova tra poco.",
   "decider.gemini.error.malformed": "Gemini ha inviato una risposta che {app} non ha potuto leggere.",
   "decider.gemini.error.http": "Gemini ha restituito un errore ({status}). Riprova tra poco.",
-  "room.routedBy.gemini": "Scelto da Gemini · {percent}%"
+  "room.routedBy.gemini": "Scelto da Gemini · {percent}%",
+  "composer.command.burstDesc": "Esegui molte parti di un lavoro insieme, poi unisci i risultati"
 }

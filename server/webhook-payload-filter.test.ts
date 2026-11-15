@@ -89,7 +89,7 @@ describe("webhook_payload_filter in the trigger tool", () => {
         return { ok: true, status: 201, body: { resultId: "t-1", summary: "When another app sends something, Scout follows: Answer." } };
       },
     };
-    return { calls, context: { botId: "scout", threadId: "thread-1", depth: 0, externalRuntime: false, sharedComputers: false, client } as unknown as ToolCallContext };
+    return { calls, context: { botId: "scout", threadId: "thread-1", externalRuntime: false, sharedComputers: false, client } as unknown as ToolCallContext };
   }
 
   it("sends the filter on a webhook create and update", async () => {

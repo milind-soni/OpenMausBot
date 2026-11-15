@@ -1228,7 +1228,7 @@
   "teamShare.skip.skill_changed": "incelendikten sonra değiştirildi",
   "teamShare.skip.skill_conflict": "iki bot bu ada sahip farklı becerilere sahip",
   "teamShare.skip.bot_skill_limit": "bir bot en fazla 30 beceri paylaşabilir (açık olan beceriler önce gelir)",
-  "teamShare.skip.team_skill_limit": "bir departman en fazla 60 beceri paylaşabilir",
+  "teamShare.skip.team_skill_limit": "bir departman en fazla 120 beceri paylaşabilir",
   "teamShare.field.soul": "kalıcı talimatlar",
   "teamShare.field.notes": "başlangıç notları",
   "teamShare.field.brief": "paylaşılan talimatlar",
@@ -3622,7 +3622,7 @@
   "routines.editor.goalWhere": "Nerede çalışır",
   "routines.editor.goalOneOnOne": "Yalnızca bot, kendi sohbetinde",
   "routines.editor.goalOneOnOneHelp": "Bot, hedef tamamlanana kadar kendi sohbetinde hedef üzerinde çalışır.",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Telefon",
   "computer.browserSwitch.title": "{name} botunun tarayıcı kullanmasına izin ver",
   "computer.tab.browser": "Tarayıcı",
   "computer.tab.data": "Veri",
@@ -5085,6 +5085,7 @@
   "homeLine.profile": "{name}, My Cloud'dan ayrı olarak sıfırdan başlar. Burada daha önce olan botlarınız My Cloud'da; eski bir kopyayı getirmek için yedeğini Ayarlar → Yedekler'de içe aktarın.",
   "homeLine.local": "{name} sıfırdan başlar: bu bilgisayarda kendi botları, sohbetleri ve dosyaları olan ayrı bir alan.",
   "native.places.profileFailed": "Bu bilgisayarın kendi alanı açılmadı. Birazdan tekrar deneyin.",
+  "chat.notice.devinAccountRefused": "Devin, oturum açılmış hesap için bu isteği reddetti. Devin planını ve kredilerini kontrol edip yeniden deneyin.",
   "rail.settingUp": "{name}: kuruluyor",
   "rail.waiting": "{name}: ödeme bekleniyor",
   "rail.attention": "{name}: size ihtiyaç var",
@@ -6028,5 +6029,6 @@
   "decider.gemini.error.overloaded": "Gemini şu anda aşırı yüklü. Biraz sonra tekrar deneyin.",
   "decider.gemini.error.malformed": "Gemini, {app} tarafından okunamayan bir yanıt gönderdi.",
   "decider.gemini.error.http": "Gemini bir hata döndürdü ({status}). Biraz sonra tekrar deneyin.",
-  "room.routedBy.gemini": "Gemini tarafından seçildi · %{percent}"
+  "room.routedBy.gemini": "Gemini tarafından seçildi · %{percent}",
+  "composer.command.burstDesc": "Bir işin birçok parçasını aynı anda çalıştırın, sonra sonuçları birleştirin"
 }

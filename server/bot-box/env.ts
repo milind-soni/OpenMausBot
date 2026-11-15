@@ -17,7 +17,7 @@ export const BOX_ENV_NAMES: ReadonlySet<string> = new Set([
  * proxies it starts. Security: no other `OMB_` name passes, whatever the operator set on the server (an SMTP URL, a
  * token); env.test.ts lists every `OMB_` name the server knows, so a new one needs a decision. */
 export const BOX_ENV_OMB_NAMES: ReadonlySet<string> = new Set([
-  "OMB_HARNESS_URL", "OMB_BOT_ID", "OMB_THREAD_ID", "OMB_COMMS_TOKEN", "OMB_TURN_DEPTH", "OMB_EXTERNAL_RUNTIME",
+  "OMB_HARNESS_URL", "OMB_BOT_ID", "OMB_THREAD_ID", "OMB_COMMS_TOKEN", "OMB_EXTERNAL_RUNTIME",
   "OMB_CHIEF_OF_STAFF", "OMB_MAUSBOT", "OMB_SKILL_AUTHORING_ENABLED", "OMB_MEMORY_ENABLED", "OMB_SHARED_COMPUTERS_ENABLED",
   "OMB_VOICE_NOTES", "OMB_X_RESEARCH", "OMB_RESEARCH", "OMB_TEAM_PEOPLE", "OMB_COMPUTER_SELECTION", "OMB_ROOM",
   "OMB_IMAGE_GENERATION", "OMB_MEETINGS", "OMB_APP_HOSTING", "OMB_AGENTS_TOOL_BRIDGE", "OMB_TOOL_LIMIT", "OMB_TOOL_SCHEMA_PROFILE",
