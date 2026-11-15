@@ -3032,6 +3032,8 @@
   "server.routines.held.planCancelled": "Deine Routinen sind pausiert, weil der Tarif gekündigt wurde. Damit eine bis zum Ende des Tarifs weiterläuft, schalte sie unter Routines wieder ein.",
   "server.routines.held.noEngine": "Deine Routinen sind pausiert: Keines deiner KI-Konten ist hier noch angemeldet. Sie schalten sich von selbst wieder ein, wenn du dich erneut anmeldest.",
   "server.routines.held.noConnections": "Deine Routinen sind pausiert: Alle verbundenen Apps und MCP-Server wurden entfernt. Sie schalten sich wieder ein, wenn du eine App oder einen MCP-Server verbindest oder eine Routine unter Routines wieder einschaltest.",
+  "server.routines.card.conversationKept": "Jede Ausführung setzt die Unterhaltung der vorherigen fort",
+  "server.routines.card.sessionContinues": "jede Ausführung setzt die Unterhaltung der vorherigen fort",
   "voice.everyReply": "Sprachnachricht zu jeder Antwort",
   "voice.everyReply.allHelp": "Jeder Bot schickt jede Antwort auch als Sprachnachricht. In den Einstellungen eines Bots kannst du das nur für ihn ein- oder ausschalten.",
   "voice.everyReply.followsOn": "Folgt deiner Spracheinstellung (an)",

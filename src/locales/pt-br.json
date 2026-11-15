@@ -10098,6 +10098,8 @@
   "server.routines.held.planCancelled": "Suas rotinas estão pausadas porque o plano foi cancelado. Para manter uma delas rodando até o fim do plano, ligue-a novamente em “Rotinas”.",
   "server.routines.held.noEngine": "Suas rotinas estão pausadas: nenhuma das suas contas de IA continua conectada aqui. O app liga as rotinas automaticamente quando você entrar novamente.",
   "server.routines.held.noConnections": "Suas rotinas estão pausadas: todos os apps conectados e servidores MCP foram removidos. O app liga as rotinas quando você conectar um deles. Você também pode ligar uma rotina novamente em “Rotinas”.",
+  "server.routines.card.conversationKept": "Cada execução continua a conversa da execução anterior",
+  "server.routines.card.sessionContinues": "cada execução continua a conversa da execução anterior",
   "mcp.request.change": "Alterar",
   "mcp.request.remove": "Remover",
   "secretCard.greenference.description": "Roda modelos do Greenference com sua própria chave.",

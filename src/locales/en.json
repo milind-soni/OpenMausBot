@@ -10167,6 +10167,8 @@
   "server.routines.held.planCancelled": "Your routines are paused because the plan was cancelled. To keep one running until the plan ends, turn it back on in Routines.",
   "server.routines.held.noEngine": "Your routines are paused: none of your AI accounts is signed in here any more. They turn back on by themselves when you sign in again.",
   "server.routines.held.noConnections": "Your routines are paused: every connected app and MCP server was removed. They turn back on when you connect one, or turn one back on in Routines.",
+  "server.routines.card.conversationKept": "Each run continues the previous run's conversation",
+  "server.routines.card.sessionContinues": "each run continues the previous run's conversation",
   "mcp.request.change": "Change",
   "mcp.request.remove": "Remove",
   "secretCard.greenference.description": "Runs Greenference models with your own key.",
