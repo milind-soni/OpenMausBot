@@ -66,6 +66,8 @@ export interface DevsReportInput {
   noSummary?: string;
   problems: string[];
   log: string[];
+  /** One line per cloud computer used since the server started: its opaque id and counts, nothing it ran. */
+  cloudComputers?: string[];
   contactEmail?: string;
 }
 
@@ -151,6 +153,7 @@ function diagnose(input: DevsReportInput, redact: (text: string) => string): str
   lines.push("", "## Recent problems in this conversation, newest last");
   const problems = input.problems.slice(-DEVS_REPORT_LIMITS.problems).map((line) => oneLine(redact(line), DEVS_REPORT_LIMITS.problemChars));
   lines.push(...(problems.length ? problems : ["(none)"]));
+  if (input.cloudComputers?.length) lines.push("", "## Cloud computers since the server started", ...input.cloudComputers.slice(0, DEVS_REPORT_LIMITS.problems).map((line) => oneLine(redact(line), DEVS_REPORT_LIMITS.problemChars)));
   lines.push("", "## Server warnings and errors, newest last");
   const log = input.log.slice(-DEVS_REPORT_LIMITS.logLines).map((line) => oneLine(redact(line), DEVS_REPORT_LIMITS.logLineChars));
   lines.push(...(log.length ? log : ["(none since the server started)"]));

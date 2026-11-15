@@ -94,7 +94,7 @@ import type { DirectSendInput, DirectSendReceipt } from "./direct-send.ts";
 import { finishedWithoutSummaryLine, ROOM_SUMMARY_REASK, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
 import { chosenPlace, pickComputer } from "./computer-selection.ts";
 import * as boat from "./boat.ts"; import { keyHint, keyStatus, nestedKeyStatus, withoutKeyHints } from "./key-hint.ts";
-import { cloudComputerRpc } from "./cloud-computer-tools.ts"; import { createBoatRecovery } from "./boat-recovery.ts"; import { CLOUD_COMPUTER_PERSON_LINES } from "../shared/cloud-computer-recovery.ts";
+import { cloudComputerRpc } from "./cloud-computer-tools.ts"; import { createBoatRecovery } from "./boat-recovery.ts"; import { CLOUD_COMPUTER_PERSON_LINES, CLOUD_COMPUTER_RESTORING, RUN_COMPUTER_LINES } from "../shared/cloud-computer-recovery.ts"; import { boatReadiness } from "./boat-ready.ts"; import { createRunComputerGate } from "./host/cloud-computer-run-gate.ts";
 import { chartRenderer, compileChart, dataEngine, validateVegaLite } from "./data/deps.ts";
 import { BUILT_IN_DATA_SYSTEM_PROMPT } from "./data/instructions.ts";
 import { DATA_INTERNAL_MCP_PATH, dataRpc } from "./data/rpc.ts";
@@ -5673,7 +5673,7 @@ const meetingsHost = createMeetingsHost({ cfg, dataDir: DATA_DIR, store, startTu
   routineComputer: routine => { const bot = store.bot(routine.botId); return bot && turnProvider(bot, routine.runOn) === "box" ? botComputerControlKey(bot) : null; },
   busy: owner => computerProviderConfigTransitions.has("box") || boatLifecycleBusyBots.has(owner) || managedBoatOwners().some(entry => entry.botId === owner && entry.inUse) || meetingsHost.keepsAwake(owner),
   claim: owner => { const team = teamComputers.list().find(entry => teamComputerOwner(entry.id) === owner); return team ? claimTeamComputerLifecycle(team) : claimBotComputerLifecycle(owner); },
-}); const boatRecovery = createBoatRecovery({ cfg: () => cfg, log: line => console.warn(line), eligible: owner => { const bot = store.bot(owner); return Boolean(bot) && botComputerControlKey(bot!) === owner; }, personActive: owner => computerControl.snapshot(owner).held || desktopViewer.viewing(owner) > 0, tell: (owner, key) => { const team = teamComputers.list().find(entry => teamComputerOwner(entry.id) === owner); if (team) { teamComputers.setProblem(team.id, serverLine(appLanguage(), CLOUD_COMPUTER_PERSON_LINES.teamNotResponding, { name: team.name })); return; } const bot = store.bot(owner); if (!bot) return; const text = serverLine(conversationLanguage(bot.threadId), CLOUD_COMPUTER_PERSON_LINES[key], { name: bot.name }); store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: { name: `recovery: ${text}`, ok: true } }); notify(buildNoticeNotification(bot, bot.threadId, text)); } });
+}); const boatRecovery = createBoatRecovery({ cfg: () => cfg, log: line => console.warn(line), eligible: owner => { const bot = store.bot(owner); return Boolean(bot) && botComputerControlKey(bot!) === owner; }, personActive: owner => computerControl.snapshot(owner).held || desktopViewer.viewing(owner) > 0, tell: (owner, key) => { const team = teamComputers.list().find(entry => teamComputerOwner(entry.id) === owner); if (team) { teamComputers.setProblem(team.id, serverLine(appLanguage(), CLOUD_COMPUTER_PERSON_LINES.teamNotResponding, { name: team.name })); return; } const bot = store.bot(owner); if (!bot) return; const text = serverLine(conversationLanguage(bot.threadId), CLOUD_COMPUTER_PERSON_LINES[key], { name: bot.name }); store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: { name: `recovery: ${text}`, ok: true } }); notify(buildNoticeNotification(bot, bot.threadId, text)); } }); const runComputers = createRunComputerGate({ computerOf: (run) => { const bot = store.bot(run.botId); return bot && turnProvider(bot, run.runOn as RoutineRunOn | undefined) === "box" ? botComputerControlKey(bot) : null; }, find: (owner) => boat.findBoat(cfg, owner), wake: (owner, budgetMs) => boat.readyBoat(cfg, owner, budgetMs), awaitAnswer: (boxId, opts) => boatReadiness.awaitAnswer(cfg, boxId, opts), verdict: (owner, since) => boatRecovery.verdict(owner, since), recoveryState: (owner) => boatRecovery.status(owner)?.state ?? null, used: (owner) => cloudComputerPower.used(owner), routineOf: (botId, threadId) => { const run = routines?.activeRunForBot(botId); return run?.threadId === threadId ? run.routineId : null; }, log: (line) => console.warn(line) });
 
 function inheritedTeamComputer(bot: Pick<BotRecord, "section" | "computer" | "cloudBackend">): TeamComputerRecord | undefined {
   return teamComputers.forBot(bot);
@@ -5794,7 +5794,7 @@ async function attachTeamBoat(computer: TeamComputerRecord, owner: TurnOwner, on
   if (!machine || boat.boatTurnLifecycleAction(typeof machine.state === "string" ? machine.state : null) !== "attach") {
     throw new Error("The team computer is not ready; check it in the Team map");
   }
-  if (turnResourceOwners.get(owner.threadId)?.generation !== owner.generation ||
+  await cloudComputerPower.answering(machine.id as string, { woke: action === "wake" }); if (turnResourceOwners.get(owner.threadId)?.generation !== owner.generation ||
       !turnResources.owns(`computer:box:${machine.id}`, owner)) throw new Error("This computer turn ended while its machine was starting");
   return { boxId: machine.id as string, capture: () => boat.screenshotBoat(cfg, ownerId, machine!.id) };
 }
@@ -5900,7 +5900,7 @@ function mountBotBoat(
       try {
         attached = await attachBotBoat(bot, owner, {
           budgetMs: CLOUD_COMPUTER_START_BUDGET_MS,
-          onSeated: () => { slot.pendingReason = CLOUD_COMPUTER_STARTING; }, existingOnly: opts.existingOnly,
+          onSeated: () => { slot.pendingReason = CLOUD_COMPUTER_STARTING; }, onRestoring: () => { slot.pendingReason = CLOUD_COMPUTER_RESTORING; }, existingOnly: opts.existingOnly,
         });
         if (!attached) throw new Error(opts.existingOnly ? "this bot no longer has a cloud computer of its own" : "the cloud computer could not be created or reached");
       } catch (error) {
@@ -5922,12 +5922,12 @@ function claimedBoatId(capability: InternalCapability): string | undefined {
 }
 
 /** The Cloud place is the consent boundary to create or wake a Boat (which un-pauses billing); Auto never reaches here. */
-async function attachBotBoat(bot: BotRecord, owner: TurnOwner, start: { budgetMs: number; onSeated: () => void; existingOnly?: boolean }) {
+async function attachBotBoat(bot: BotRecord, owner: TurnOwner, start: { budgetMs: number; onSeated: () => void; onRestoring?: () => void; existingOnly?: boolean }) {
   // Claim before any network await so setup itself cannot race another turn.
   await bindTurnComputer(owner, `computer:box-bot:${bot.id}`, true);
   start.onSeated();
   const machine = await withinBudget(cloudComputerPower.start(bot, owner, { existingOnly: start.existingOnly, budgetMs: start.budgetMs }), start.budgetMs, CLOUD_COMPUTER_DID_NOT_START);
-  if (!machine) return null;
+  if (!machine) return null; await cloudComputerPower.answering(machine.id as string, { onRestoring: start.onRestoring });
   await bindTurnComputer(owner, `computer:box:${machine.id}`);
   return {
     boxId: machine.id as string,
@@ -6370,7 +6370,7 @@ bus.subscribe((event: RuntimeEvent) => {
     const publicEvent = event.type === "request.opened" ? { ...event, command: undefined, commandLine: undefined, reads: undefined } : publicReplyEvent(event, groupSpeakers.get(event.threadId)?.botId);
     broadcast({ kind: "runtime", event: publicEvent });
   }
-  const routineRun = privateImageEvent ? null : (routines?.handleRuntimeEvent(event) ?? null);
+  if (event.type === "turn.completed") { const note = runComputers.turnEnded(event.threadId, event.ok); if (note) store.appendMessage(event.threadId, { role: "bot", kind: "activity", tool: { name: `recovery: ${note}`, ok: true } }); } const routineRun = privateImageEvent ? null : (routines?.handleRuntimeEvent(event) ?? null);
   const replayed = savedSteps.dispatch.answering(event); limitClock.noteRuntimeEvent(replayed ? undefined : runningTurnEngines.get(event.threadId)?.instanceId, event);
   const ownerBot = store.botByThread(event.threadId); // A quick route's model is the one this turn ran on, so its holds and its working turns are that model's.
   const bot = ownerBot ? botForThread(ownerBot.id, event.threadId) ?? undefined : undefined; if (bot && !replayed) limitTakeover.noteRuntimeEvent(bot.id, { ...bot.modelSelection, model: quickFallback.routedModel(event.threadId) ?? bot.modelSelection.model }, event);
@@ -8789,7 +8789,7 @@ routines = new RoutineManager({
   limitBackup: (botId, scope) => { const bot = store.bot(botId); return quotaSwitchEnabled() ? Boolean(bot && limitTakeover.backups(botId, bot.modelSelection, scope, approvalModeFor(bot)).length) : Boolean(bot && startupBackups(bot, cfg.automaticRecovery).length); },
   launchId: DESKTOP_MANAGED && /^[\w-]{1,100}$/.test(process.env.OMB_DESKTOP_LAUNCH_ID ?? "")
     ? process.env.OMB_DESKTOP_LAUNCH_ID : undefined,
-  skipStartupRuns: (startedFromSleep = Boolean(CLOUD_HOME) && wokeFromSleep(DATA_DIR)), // a Cloud home waking from a sleep it was stopped for
+  skipStartupRuns: (startedFromSleep = Boolean(CLOUD_HOME) && wokeFromSleep(DATA_DIR)), prepareRun: (run, signal) => runComputers.prepare(run, signal), preparing: RUN_COMPUTER_LINES.waking, // a Cloud home waking from a sleep it was stopped for
   hasPendingDelegations: runtimeWorkPending, refusedHandoff: refusedHandoffs.take, handedOffWorkLive: (threadId) => coordinator.outstandingFor(threadId).length > 0,
   routineTurn: (threadId) => directRequestOwners.get(threadId)?.automation !== undefined, personTurn: (threadId) => directRequestOwners.get(threadId)?.origin?.kind === "user",
   botState: unattendedDispatchState, pausedText: (botId) => botHolds.text(botId, threadLanguage(store.bot(botId)?.threadId ?? "")) ?? starterCaps.pausedText(botId, threadLanguage(store.bot(botId)?.threadId ?? "")), held: (botId) => botHolds.held(botId),
@@ -13091,7 +13091,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           cfg, signal: abort.signal, folder: () => messageFileRootsForThread(internalCapability.botId, internalCapability.threadId)[0],
           boxId: () => internalCapability.boxId ?? claimedBoatId(internalCapability),
           gate: () => computerCallGate(internalCapability, abort.signal),
-          assertActive: requireActiveInternalCapability, recovery: boatRecovery,
+          assertActive: requireActiveInternalCapability, recovery: boatRecovery, settled: (answered) => runComputers.callSettled(internalCapability.botId, internalCapability.threadId, answered),
         }) });
       }
       // DuckDB runs here on the bot's own database; the agent process holds only the turn's capability.

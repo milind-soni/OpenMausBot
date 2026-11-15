@@ -9,6 +9,12 @@ let tools: typeof import("./cloud-computer-tools.ts");
 let holdCommand = false;
 let commandStatus = 200;
 let commandExit = 0;
+/** This many commands in a row get the gateway's 502 before the machine answers again. */
+let unansweredFirst = 0;
+/** The Boat starts a detached command whose text says `forever` and reports it running until it is stopped; any other one has ended by the first read. */
+let neverEnds = false;
+const forever = new Set<number>();
+let nextProcess = 100;
 let commandStarted: (() => void) | undefined;
 const calls: Array<{ path: string; body: any; authorization?: string }> = [];
 const cfg: AppConfig = { box: { token: "synthetic-box-key" } } as AppConfig;
@@ -22,8 +28,20 @@ beforeAll(async () => {
     for await (const part of req) body += part;
     const path = req.url ?? "";
     calls.push({ path, body: body ? JSON.parse(body) : null, authorization: req.headers.authorization });
+    const read = /\/commands\/(\d+)\?/.exec(path);
+    if (neverEnds && read) {
+      res.end(JSON.stringify(forever.has(Number(read[1])) ? { running: true, status: "running", stdout: "compiling", stderr: "" } : { running: false, status: "exited", exitCode: 0, stdout: "captured", stderr: "" }));
+      return;
+    }
+    if (neverEnds && path.endsWith("/commands") && JSON.parse(body).detached === true) {
+      const id = nextProcess++;
+      if (String(JSON.parse(body).command).includes("forever")) forever.add(id);
+      res.end(JSON.stringify({ processId: id }));
+      return;
+    }
     if (path.endsWith("/commands")) {
       commandStarted?.();
+      if (unansweredFirst > 0) { unansweredFirst--; res.writeHead(502); res.end(JSON.stringify({ ok: false, code: "upstream_unavailable" })); return; }
       if (commandStatus !== 200) { res.writeHead(commandStatus); res.end(JSON.stringify({ ok: false, code: "upstream_unavailable" })); return; }
       if (!holdCommand) res.end(JSON.stringify({ exitCode: commandExit, stdout: "captured", stderr: "" }));
       return;
@@ -38,17 +56,17 @@ beforeAll(async () => {
   vi.stubEnv("OMB_CLOUD_BOAT_TOKEN", undefined);
   tools = await import("./cloud-computer-tools.ts");
 });
-beforeEach(() => { calls.length = 0; holdCommand = false; commandStarted = undefined; commandStatus = 200; commandExit = 0; });
+beforeEach(() => { calls.length = 0; holdCommand = false; commandStarted = undefined; commandStatus = 200; commandExit = 0; unansweredFirst = 0; neverEnds = false; forever.clear(); });
 afterAll(async () => { vi.unstubAllEnvs(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
 
 type Recovery = NonNullable<Parameters<typeof import("./cloud-computer-tools.ts").cloudComputerRpc>[1]["recovery"]>;
-const rpc = (request: unknown, gate: { held: boolean; reason?: "person"; blockedReason?: string } = { held: false }, signal = new AbortController().signal, recovery?: Recovery) => {
+const rpc = (request: unknown, gate: { held: boolean; reason?: "person"; blockedReason?: string } = { held: false }, signal = new AbortController().signal, recovery?: Recovery, budgetMs?: number, settled?: (answered: boolean) => void) => {
   let gated = 0;
   let checks = 0;
   const done = tools.cloudComputerRpc(request as never, {
     cfg, boxId: () => "bx_23456789", signal,
     gate: async () => { gated++; return gate; },
-    assertActive: () => { checks++; }, recovery,
+    assertActive: () => { checks++; }, recovery, ...(budgetMs === undefined ? {} : { budgetMs }), ...(settled ? { settled } : {}),
   });
   return { done, gated: () => gated, checks: () => checks };
 };
@@ -199,7 +217,9 @@ describe("cloud computer tools", () => {
     await started;
     abort.abort();
     await rejected;
-    expect(calls.filter(entry => entry.path.endsWith("/commands"))).toHaveLength(1);
+    expect(calls.filter(entry => entry.path.endsWith("/commands") && String(entry.body.command).includes("printf fixture"))).toHaveLength(1);
+    // The person stopped the turn, so the command it was waiting on is stopped too, by the call's own key.
+    await vi.waitFor(() => expect(calls.some(entry => entry.path.endsWith("/commands") && String(entry.body.command).includes("kill -TERM"))).toBe(true));
     server.closeAllConnections();
   });
 
@@ -213,19 +233,116 @@ describe("cloud computer tools", () => {
     expect(result).toEqual({ isError: true, content: [{ type: "text", text: (await import("./cloud-computer-background.ts")).EXEC_LATE }] });
     expect(Date.now() - started).toBeGreaterThanOrEqual(550);
     expect(Date.now() - started).toBeLessThan(1_500);
-    expect(calls.filter(entry => entry.path.endsWith("/commands"))).toHaveLength(1);
+    expect(calls.filter(entry => entry.path.endsWith("/commands") && String(entry.body.command).includes("sleep 600"))).toHaveLength(1);
+    expect(calls.some(entry => String(entry.body?.command).includes("kill -TERM"))).toBe(false);
     server.closeAllConnections();
+  });
+
+  it("hands a command that outlasts its call back still running, with a process id exec_status follows, instead of an error", async () => {
+    neverEnds = true;
+    const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "make forever" } } }, {
+      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, budgetMs: 32_000, assertActive: () => {}, gate: async () => ({ held: false }),
+    }) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
+    expect(result.isError).toBeFalsy();
+    const handed = JSON.parse(result.content[0]!.text!);
+    expect(handed).toMatchObject({ status: "running", stdout: "compiling", next: tools.EXEC_STILL_RUNNING });
+    expect(calls.filter(entry => entry.path.endsWith("/commands") && entry.body?.detached === true)).toHaveLength(1);
+    const status = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec_status", arguments: { process_id: handed.processId } } }, {
+      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, assertActive: () => {}, gate: async () => ({ held: false }),
+    }) as { content: Array<{ text?: string }> };
+    expect(JSON.parse(status.content[0]!.text!)).toMatchObject({ status: "running", processId: handed.processId });
+  }, 60_000);
+
+  it("sends pointer calls, key calls and screenshots the direct way, in one round trip, and exec the way that survives a long run", async () => {
+    await rpc({ method: "tools/call", params: { name: "click", arguments: { x: 1, y: 2 } } }).done;
+    await rpc({ method: "tools/call", params: { name: "screenshot", arguments: {} } }).done;
+    await rpc({ method: "tools/call", params: { name: "exec", arguments: { command: "pwd" } } }).done;
+    expect(calls.filter(entry => entry.path.endsWith("/commands")).map(entry => entry.body.detached === true)).toEqual([false, false, true]);
+  });
+
+  it("answers that the command ran out of time, as a result and before the call's own limit, when its start gets no reply", async () => {
+    holdCommand = true;
+    const before = Date.now();
+    const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "make" } } }, {
+      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, budgetMs: 8_000, assertActive: () => {}, gate: async () => ({ held: false }),
+    });
+    expect(result).toEqual({ isError: true, content: [{ type: "text", text: (await import("./cloud-computer-background.ts")).EXEC_LATE }] });
+    expect(Date.now() - before).toBeLessThan(7_000);
+    server.closeAllConnections();
+  }, 20_000);
+
+  describe("with five long-running commands already left on the computer by earlier exec calls", () => {
+    const exec = (command: string, budgetMs?: number) => tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command } } }, {
+      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, assertActive: () => {}, gate: async () => ({ held: false }), ...(budgetMs ? { budgetMs } : {}),
+    }) as Promise<{ isError?: boolean; content: Array<{ type: string; text?: string }> }>;
+    const fiveDevServers = async () => {
+      neverEnds = true;
+      const { noteLeftRunning } = await import("./boat-command.ts");
+      for (const id of [1, 2, 3, 4, 5]) { forever.add(id); noteLeftRunning("bx_23456789", id); }
+    };
+
+    it("still runs the command that stops them, and any other short command", async () => {
+      await fiveDevServers();
+      const stopped = await exec("pkill -f devserver");
+      expect(stopped.isError).toBeFalsy();
+      expect(JSON.parse(stopped.content[0]!.text!)).toMatchObject({ ok: true, exitCode: 0 });
+      expect((await exec("ls")).isError).toBeFalsy();
+      const click = await rpc({ method: "tools/call", params: { name: "click", arguments: { x: 1, y: 2 } } }).done as { isError?: boolean };
+      expect(click.isError).toBeFalsy();
+    });
+
+    it("stops a sixth one when its call's time runs out, instead of leaving it, and says how to see and stop the others", async () => {
+      await fiveDevServers();
+      const sixth = await exec("devserver forever", 32_000);
+      expect(sixth).toEqual({ isError: true, content: [{ type: "text", text: tools.TOO_MANY_LEFT_RUNNING }] });
+      expect(tools.TOO_MANY_LEFT_RUNNING).toMatch(/background: true.*ps -eo.*kill <pid>/s);
+      const sent = calls.filter(entry => entry.path.endsWith("/commands")).map(entry => String(entry.body.command));
+      const key = /^k=([0-9a-f]{16});/.exec(sent.find(command => command.includes("devserver forever"))!)![1]!;
+      expect(sent.some(command => command.startsWith(`k=${key}; p=;`) && command.includes("kill -TERM"))).toBe(true);
+      // With one of the five gone, the next long command is handed back as usual.
+      forever.delete(5);
+      const next = await exec("watcher forever", 32_000);
+      expect(next.isError).toBeFalsy();
+      expect(JSON.parse(next.content[0]!.text!)).toMatchObject({ status: "running" });
+    }, 120_000);
   });
 
   describe("a computer that stopped answering", () => {
     const words = () => import("../shared/cloud-computer-recovery.ts");
-    const call = (name: string, args: Record<string, unknown>, recovery?: Recovery) =>
-      rpc({ method: "tools/call", params: { name, arguments: args } }, { held: false }, new AbortController().signal, recovery).done as Promise<{ isError?: boolean; content: Array<{ type: string; text?: string }> }>;
+    /** A call with little time left, so a computer that never answers is given up on at once. */
+    const SHORT = 6_000;
+    const call = (name: string, args: Record<string, unknown>, recovery?: Recovery, budgetMs: number | undefined = SHORT, settled?: (answered: boolean) => void) =>
+      rpc({ method: "tools/call", params: { name, arguments: args } }, { held: false }, new AbortController().signal, recovery, budgetMs, settled).done as Promise<{ isError?: boolean; content: Array<{ type: string; text?: string }> }>;
 
     it("says a call got no answer, instead of an empty failed result", async () => {
       commandStatus = 502;
-      const result = await call("click", { x: 1, y: 2 });
-      expect(result).toEqual({ isError: true, content: [{ type: "text", text: (await words()).CLOUD_COMPUTER_NO_ANSWER }] });
+      const outcomes: boolean[] = [];
+      const result = await call("click", { x: 1, y: 2 }, undefined, SHORT, (answered) => outcomes.push(answered));
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: (await words()).CLOUD_COMPUTER_STILL_WAKING }] });
+      expect(outcomes).toEqual([false]);
+    });
+
+    it("rides out a short burst of gateway errors inside the call: the bot gets the result, and the command ran once", async () => {
+      unansweredFirst = 2;
+      const outcomes: boolean[] = [];
+      const result = await call("exec", { command: "printf fixture" }, undefined, 60_000, (answered) => outcomes.push(answered));
+      expect(result.isError).toBeFalsy();
+      expect(JSON.parse(result.content[0]!.text!)).toMatchObject({ ok: true, exitCode: 0, stdout: "captured" });
+      const sent = calls.filter(entry => entry.path.endsWith("/commands")).map(entry => String(entry.body.command));
+      const copies = sent.filter(command => command.includes("printf fixture"));
+      const key = /^k=([0-9a-f]{16});/.exec(copies[0]!)?.[1];
+      expect(key).toBeDefined();
+      // Every copy of the call carries the same claim, so the computer runs at most one of them.
+      expect(copies.length).toBeGreaterThanOrEqual(2);
+      expect(copies.every(command => command.startsWith(`k=${key};`))).toBe(true);
+      expect(sent.filter(command => command === "true").length).toBeGreaterThanOrEqual(1);
+      expect(outcomes).toEqual([true]);
+    });
+
+    it("takes a screenshot again once the computer answers, since a screenshot changes nothing", async () => {
+      unansweredFirst = 1;
+      const result = await call("screenshot", {}, undefined, 60_000);
+      expect(result.content[0]).toMatchObject({ type: "image", mimeType: "image/jpeg" });
     });
 
     it("refuses calls without touching the computer while it is being restarted or replaced", async () => {

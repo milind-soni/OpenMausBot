@@ -1,3 +1,7 @@
+import type { CloudComputerAnswering } from "../../shared/cloud-computer-recovery.ts";
+import { boatIdOf } from "../boat.ts";
+import { boatHealth, type BoatHealth } from "../boat-health.ts";
+import { boatReadiness, type BoatReadiness } from "../boat-ready.ts";
 import type { BoatRecovery } from "../boat-recovery.ts";
 import type { BotRecord, Store } from "../store.ts";
 import type { RemoteComputerProvider } from "./config.ts";
@@ -14,8 +18,21 @@ export interface CloudComputerRecoveryRouteDeps {
   cloudComputerUsed(owner: string): void;
 }
 
+/** Whether a computer this server has used answers its commands; null for one it has not used since it started. */
+export function cloudComputerAnswering(
+  boxId: string | null, health: Pick<BoatHealth, "notRespondingSince" | "lastAnsweredAt"> = boatHealth, readiness: Pick<BoatReadiness, "waitingOn"> = boatReadiness,
+): CloudComputerAnswering | null {
+  if (!boxId) return null;
+  const lastAnsweredAt = health.lastAnsweredAt(boxId);
+  const silentSince = health.notRespondingSince(boxId);
+  if (silentSince !== null) return { state: "not-responding", since: silentSince, lastAnsweredAt };
+  const waiting = readiness.waitingOn(boxId);
+  if (waiting) return { state: waiting.phase, since: waiting.since, lastAnsweredAt };
+  return lastAnsweredAt === null ? null : { state: "awake", lastAnsweredAt };
+}
+
 /** GET and POST /api/bots/:id/computer/recovery: what MausBot is doing about a bot's cloud computer that stopped answering,
- * and the computer panel's Restart computer and Replace computer. Admin-only like every computer route. */
+ * whether it answers now, and the computer panel's Restart computer and Replace computer. Admin-only like every computer route. */
 export function createCloudComputerRecoveryRoutes(deps: CloudComputerRecoveryRouteDeps): RouteHandler {
   return async ({ req, res, path, method, json, readBody }) => {
     const m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/recovery$/);
@@ -25,7 +42,7 @@ export function createCloudComputerRecoveryRoutes(deps: CloudComputerRecoveryRou
     const owner = deps.botComputerControlKey(bot);
     if (method === "GET") {
       res.setHeader("cache-control", "private, no-store");
-      return json(res, 200, { recovery: owner === bot.id ? deps.boatRecovery.status(owner) : null });
+      return json(res, 200, { recovery: owner === bot.id ? deps.boatRecovery.status(owner) : null, answering: owner === bot.id ? cloudComputerAnswering(boatIdOf(owner)) : null });
     }
     if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
       return json(res, 415, { error: "content-type must be application/json" });
