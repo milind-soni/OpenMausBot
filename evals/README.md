@@ -63,6 +63,18 @@ bridge, a shorter description, a removed built-in.
 
 Each case is one real turn on your account, so name the cases you need. It is closed unless `OMB_EVAL_LIVE=1`, never runs in CI, and its data folder is temporary. Add `OMB_AGENTS_TOOL_BRIDGE=1 OMB_EVAL_LIVE_PASS_ENV=OMB_AGENTS_TOOL_BRIDGE` to try the bridge. Only the scoring has an offline test.
 
+On Claude with tool search on, a turn sends a few agents tools whole and the rest by name only, so the model has to look them up with ToolSearch. Ten cases that check it still finds them:
+
+    --only remember-this,daily-automation,jobs-per-pull-request,publish-a-page,ask-me-which-day,which-triggers,ask-the-chief,show-a-chart,what-did-we-decide,tell-the-team
+
+`--context` runs no model and prints the bytes a Claude turn sends of the agents tools up front, whole against deferred.
+
+## Dream — what a nightly dream keeps
+
+`evals/dream` grades a dream's answer as `runDream` keeps it: `parseDream`, then the fact checks, before anything is written. Each case in `cases.json` holds a few chats, the notebook as it stands, the lines a dream should save (any of a few words, ignoring case) and words no saved line may contain. A case passes when the answer is JSON, every expected line is saved and nothing forbidden is. Saved lines no expectation covers are listed as `unexpected`, for a person or a judge to read. Only the scoring runs offline, in the evals suite; nothing calls a model yet.
+
+    npx vitest run --config evals/vitest.config.ts evals/dream
+
 ## Tier 3 — opt-in live-model smoke
 
 Live-model runs never execute by default: `pnpm eval --live` prints one skip line and exits 0 unless the gate is open.

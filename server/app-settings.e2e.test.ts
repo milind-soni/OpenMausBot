@@ -1,7 +1,8 @@
 // A real server and the real injected agents proxy; only the provider's planning is scripted (room-handoff-agent).
 // The bot is on Full access, the default: changes apply at once with Undo, and no card waits on an answer.
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 
@@ -212,6 +213,43 @@ it("a Full-access bot's own approval mode changes at once on every thread, and U
   expect((await botNow()).approvalMode).toBe("full");
 }, 90_000);
 
+it("a bot gives itself and the person a picture from a file in its workspace, refuses a fake picture and a file outside, and Undo takes each back", async () => {
+  const PNG = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from("a picture")]);
+  const workspace = join(dataDir, "workspaces", bot.id);
+  const elsewhere = mkdtempSync(join(tmpdir(), "omb-picture-outside-"));
+  try {
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(join(workspace, "face.png"), PNG);
+    writeFileSync(join(workspace, "fake.png"), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+    writeFileSync(join(elsewhere, "outside.png"), PNG);
+    await start("PICTURES", [
+      step({ action: "set", id: "bots.picture", value: JSON.stringify({ botId: bot.id, path: join(workspace, "face.png") }) }),
+      step({ action: "set", id: "profile.photo", value: JSON.stringify({ path: "face.png" }) }),
+      step({ action: "set", id: "bots.picture", value: JSON.stringify({ botId: bot.id, path: join(workspace, "fake.png") }) }, true),
+      step({ action: "set", id: "profile.photo", value: JSON.stringify({ path: join(elsewhere, "outside.png") }) }, true),
+    ], 60_000);
+    const [given, photo, fake, outside] = results(await finished("PICTURES"));
+    expect(given).toMatchObject({ isError: false, text: expect.stringMatching(/^Done: Give Setter the picture face\.png\./) });
+    expect(photo).toMatchObject({ isError: false, text: expect.stringMatching(/^Done: Make face\.png your photo\./) });
+    expect(fake).toMatchObject({ isError: true, text: expect.stringContaining("fake.png is not a PNG, JPEG, GIF or WebP picture.") });
+    expect(outside).toMatchObject({ isError: true, text: expect.stringContaining("is outside your workspace") });
+
+    const shown = await botNow();
+    expect(shown).toMatchObject({ avatarUrl: expect.stringMatching(/^\/api\/attachments\/[\w-]+\.png$/), avatarCrop: "circle" });
+    const served = await fetch(url + shown.avatarUrl, { headers: { origin: url } });
+    expect(Buffer.from(await served.arrayBuffer()).equals(PNG), "the stored copy is served as the bot's picture").toBe(true);
+    expect(config().profile.avatarUrl).toMatch(/^\/api\/attachments\/[\w-]+\.png$/);
+    expect((await api("GET", "/api/config")).profile.avatarUrl).toBe(config().profile.avatarUrl);
+
+    await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: (await newest("bots.picture")).requestId });
+    await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: (await newest("profile.photo")).requestId });
+    expect(await botNow()).toMatchObject({ avatarUrl: null, avatarCrop: "mascot" });
+    expect(config().profile.avatarUrl ?? "").toBe("");
+  } finally {
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
+}, 90_000);
+
 it("pinning a bot goes through the sidebar's own bot route, and Undo unpins it", async () => {
   const pinnedNow = async () => (await api("GET", "/api/bots")).bots.find((one: any) => one.id === bot.id)?.pinned === true;
   expect(await pinnedNow()).toBe(false);
@@ -255,6 +293,64 @@ it("a window preference changes only while the app window's stream is open: refu
   expect(reopened.frames()).toContain('"value":"dusk"');
   await reopened.close();
 }, 120_000);
+
+it("a theme turn reads the guide, saves and wears a theme with a picture from its own folder, and only the person's windows hear of it", async () => {
+  const closed = new AbortController();
+  const stream = await fetch(`${url}/api/events?window=1`, { headers: { origin: url }, signal: closed.signal });
+  const reader = stream.body!.getReader();
+  let seen = "";
+  const pump = (async () => { try { for (;;) { const { value, done } = await reader.read(); if (done) return; seen += new TextDecoder().decode(value); } } catch {} })();
+  await expect.poll(() => seen.includes('"kind":"hello"')).toBe(true);
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+  mkdirSync(join(dataDir, "workspaces", bot.id), { recursive: true });
+  writeFileSync(join(dataDir, "workspaces", bot.id, "stars.png"), png);
+  writeFileSync(join(dataDir, "outside.png"), png);
+  const css = '[data-look="chat"] { background: url("/api/theme-assets/neon/stars.png") center / cover; }';
+  await start("THEME", [
+    step({ action: "theme" }),
+    step({ action: "set_theme", id: "neon", theme: JSON.stringify({ name: "Neon", canvas: "#0b1020", accent: "#ff2bd6" }) }),
+    step({ action: "add_theme_asset", id: "neon", path: join(dataDir, "workspaces", bot.id, "stars.png") }),
+    step({ action: "add_theme_asset", id: "neon", path: join(dataDir, "outside.png") }, true),
+    step({ action: "set_theme", id: "neon", theme: JSON.stringify({ name: "Neon", canvas: "#0b1020", css: 'input[value^="a"] { background: url(https://example.com/?a) }' }) }, true),
+    step({ action: "set_theme", id: "neon", theme: JSON.stringify({ name: "Neon", canvas: "#0b1020", accent: "#ff2bd6", css }) }),
+  ]);
+  const [read, saved, added, outside, leak, wear] = results(await finished("THEME"));
+  expect(JSON.parse(read.text).guide).toContain('[data-look="composer"]');
+  expect(saved).toMatchObject({ isError: false, text: expect.stringMatching(/^Done: Save the theme Neon and wear it\./) });
+  expect(added).toMatchObject({ isError: false, text: expect.stringContaining('url("/api/theme-assets/neon/stars.png")') });
+  expect(outside.isError).toBe(true);
+  expect(leak).toMatchObject({ isError: true, text: expect.stringContaining("never the internet") });
+  expect(wear.isError).toBe(false);
+  expect(await api("GET", "/api/themes/active")).toMatchObject({ id: "neon", theme: { name: "Neon", css } });
+  const served = await fetch(`${url}/api/theme-assets/neon/stars.png`);
+  expect(served.headers.get("content-type")).toBe("image/png");
+  expect(Buffer.from(await served.arrayBuffer()).equals(png)).toBe(true);
+  expect(seen).toContain('"kind":"theme"');
+  closed.abort();
+  await pump;
+
+  const card = (await settingCards(bot.threadId)).filter((one) => one.card.appSettingRequest.settingId === "appearance.theme").at(-1);
+  expect(await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: card.card.requestId })).toMatchObject({ ok: true, undone: true });
+  expect((await api("GET", "/api/themes/active")).theme.css).toBeUndefined();
+
+  await start("THEME-BACK", [
+    step({ action: "set_theme", id: "pixel", theme: JSON.stringify({ name: "Pixel Quest", canvas: "#1a1033", accent: "#9b5cff" }) }),
+    step({ action: "set_theme", id: "pixel", theme: JSON.stringify({ name: "Pixel Quest", canvas: "#1a1033", accent: "#ffcc00" }) }),
+    step({ action: "undo_theme" }),
+    step({ action: "theme_history" }),
+  ]);
+  const [first, second, back, history] = results(await finished("THEME-BACK"));
+  expect([first.isError, second.isError]).toEqual([false, false]);
+  expect(back).toMatchObject({ isError: false, text: expect.stringContaining("Undo the last look change (edited Pixel Quest)") });
+  expect(await api("GET", "/api/themes/active")).toMatchObject({ id: "pixel", theme: { accent: "#9b5cff" } });
+  expect(JSON.parse(history.text).changes.slice(0, 3).map((change: any) => change.what)).toEqual(["went back 1 change", "edited Pixel Quest", "made Pixel Quest"]);
+  expect((await api("GET", "/api/themes/history")).items[0]).toMatchObject({ index: 1, kind: "undid", count: 1 });
+
+  await start("THEME-DEFAULT", [step({ action: "set_theme", id: "none" })]);
+  const [reset] = results(await finished("THEME-DEFAULT"));
+  expect(reset.isError).toBe(false);
+  expect(await api("GET", "/api/themes/active")).toEqual({ id: null, theme: null });
+}, 90_000);
 
 it("a webhook's run may read a setting but not change it", async () => {
   const value = config().rooms?.turnTimeoutMinutes;

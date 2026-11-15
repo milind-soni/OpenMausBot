@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { json, readBody } from "../harness/http.ts";
 import { requiredScope } from "../request-auth.ts";
 import type { BotRecord } from "../store.ts";
-import { createCloudComputerRecoveryRoutes, type CloudComputerRecoveryRouteDeps } from "./cloud-computer-recovery.ts";
+import { cloudComputerAnswering, createCloudComputerRecoveryRoutes, type CloudComputerRecoveryRouteDeps } from "./cloud-computer-recovery.ts";
 import { dispatchRoutes } from "./table.ts";
 
 const servers: Server[] = [];
@@ -45,6 +45,29 @@ async function serve(deps: Partial<CloudComputerRecoveryRouteDeps> = {}, actions
 const post = (url: string, body: unknown, contentType = "application/json") =>
   fetch(url, { method: "POST", headers: { "content-type": contentType }, body: JSON.stringify(body) });
 
+describe("whether a cloud computer answers", () => {
+  const health = (silentSince: number | null, lastAnsweredAt: number | null) => ({ notRespondingSince: () => silentSince, lastAnsweredAt: () => lastAnsweredAt });
+  const waiting = (on: { phase: "waking" | "restoring"; since: number } | null) => ({ waitingOn: () => on });
+
+  it("says nothing about a computer this server has not used", () => {
+    expect(cloudComputerAnswering(null, health(null, null), waiting(null))).toBeNull();
+    expect(cloudComputerAnswering("bx_23456789", health(null, null), waiting(null))).toBeNull();
+  });
+
+  it("is awake once a command was answered, with when", () => {
+    expect(cloudComputerAnswering("bx_23456789", health(null, 500), waiting(null))).toEqual({ state: "awake", lastAnsweredAt: 500 });
+  });
+
+  it("is waking or restoring its disk while a call waits for its first answer", () => {
+    expect(cloudComputerAnswering("bx_23456789", health(null, 500), waiting({ phase: "waking", since: 900 }))).toEqual({ state: "waking", since: 900, lastAnsweredAt: 500 });
+    expect(cloudComputerAnswering("bx_23456789", health(null, null), waiting({ phase: "restoring", since: 900 }))).toEqual({ state: "restoring", since: 900, lastAnsweredAt: null });
+  });
+
+  it("is not responding, since when, once it counts as silent, whatever is waiting on it", () => {
+    expect(cloudComputerAnswering("bx_23456789", health(700, 500), waiting({ phase: "waking", since: 900 }))).toEqual({ state: "not-responding", since: 700, lastAnsweredAt: 500 });
+  });
+});
+
 describe("the computer panel's recovery routes", () => {
   it("are for admins only", () => {
     expect(requiredScope("GET", "/api/bots/bot-1/computer/recovery")).toBe("admin");
@@ -55,7 +78,7 @@ describe("the computer panel's recovery routes", () => {
     const { base } = await serve();
     const response = await fetch(`${base}/bot-1/computer/recovery`);
     expect(response.headers.get("cache-control")).toContain("no-store");
-    expect(await response.json()).toEqual({ recovery: { state: "replaced", at: 1 } });
+    expect(await response.json()).toEqual({ recovery: { state: "replaced", at: 1 }, answering: null });
     expect((await fetch(`${base}/nobody/computer/recovery`)).status).toBe(404);
   });
 

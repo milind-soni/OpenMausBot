@@ -4,7 +4,6 @@ import { userError } from "../user-errors.ts";
 import { randomUUID } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { z } from "zod";
 
 import {
   CREDENTIAL_TARGETS,
@@ -28,7 +27,6 @@ import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import { addHeldSecretScrubber } from "../redact.ts";
 import { SECRET_VALUE_MAX_BYTES, SecretVault, type SavedSecret, type SecretFileHome } from "../secret-vault.ts";
 import {
-  PHONE_SECRET_PROTOCOL_VERSION,
   PhoneSecretError,
   assertPhoneSecretRequestMatches,
   phoneSecretOperationId,
@@ -44,17 +42,9 @@ import { fittingChoices } from "../vault/choices.ts";
 import { linkedSecretNames } from "../vault/providers.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { serverLine } from "../server-lines.ts";
+import { phoneSecretEnvelopeSchema } from "../../shared/phone-secret-envelope.ts";
 
-export const phoneSecretEnvelopeSchema = z.object({
-  version: z.literal(PHONE_SECRET_PROTOCOL_VERSION),
-  threadId: z.string().regex(/^[\w-]{1,128}$/),
-  keyId: z.string().regex(/^[A-Za-z0-9_-]{22}$/),
-  deviceId: z.string().regex(/^[\w-]{1,128}$/),
-  target: z.string().regex(/^[A-Za-z][A-Za-z0-9]{0,63}$/),
-  requestKey: z.string().regex(/^[\w-]{1,128}$/),
-  encapsulatedKey: z.string().regex(/^[A-Za-z0-9_-]{87}$/),
-  ciphertext: z.string().regex(/^[A-Za-z0-9_-]{23,5483}$/),
-}).strict();
+export { phoneSecretEnvelopeSchema };
 
 export interface SecretCardsDeps {
   store: Pick<Store, "activePath" | "appendMessage" | "patchMessage" | "messagesFor" | "botByThread" | "groupByThread" | "onChange">;

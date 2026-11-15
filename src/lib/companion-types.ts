@@ -56,7 +56,16 @@ export interface CompanionState {
   /** Windows has that network down as Public, where its firewall drops a phone's connection. */
   publicNetwork?: string;
   /** The end-to-end connection; absent or `enabled: false` until this computer serves it. */
-  e2e?: { enabled: boolean; relay: "connected" | "connecting" | "off"; node: string | null; descriptor: PairingE2EDescriptor | null };
+  e2e?: {
+    enabled: boolean;
+    relay: "connected" | "connecting" | "off";
+    node: string | null;
+    /** Why the relay connection is not up; null once the relay acknowledged this computer. Absent on older builds. */
+    relayProblem?: "no_answer" | "token_refused" | "busy" | "unreachable" | "replaced" | null;
+    descriptor: PairingE2EDescriptor | null;
+  };
+  /** The relay access token's state and last failure code (never the token). Absent on older builds. */
+  relayToken?: { state: "off" | "fetching" | "ready" | "failed" | "waiting"; code: "unavailable" | "sign_in" | "busy" | "unreachable" | "failed" | null } | null;
   error?: string;
 }
 

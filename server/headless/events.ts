@@ -113,7 +113,12 @@ export async function eventsVerb(ctx: VerbContext): Promise<VerbOutcome> {
     if (signal.aborted) break;
     const delay = Math.min(10_000, 1_000 * 2 ** Math.min(attempt, 4));
     ctx.output.progress({ event: "reconnecting", inMs: delay, ...(cursor ? { cursor } : {}) });
-    await new Promise((resolve) => { const timer = setTimeout(resolve, delay); signal.addEventListener("abort", () => { clearTimeout(timer); resolve(undefined); }, { once: true }); });
+    await new Promise<void>((resolve) => {
+      const done = () => { clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); };
+      const timer = setTimeout(done, delay);
+      signal.addEventListener("abort", done, { once: true });
+      if (signal.aborted) done();
+    });
   }
   await refreshing;
   if (!settled && ctx.signal.aborted) return { result: { ok: true, cursor }, exitCode: EXIT.interrupted, human: [], printed: true };

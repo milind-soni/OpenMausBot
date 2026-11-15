@@ -80,7 +80,7 @@ export function MemberApps() {
   return (
     <div className="glass-popup-frame" style={glassPopupFrameStyle()} onMouseDown={(event) => event.target === event.currentTarget && close()}>
       <div aria-hidden="true" className="glass-scrim pointer-events-none absolute inset-0" />
-      <div ref={dialog} data-member-apps role="dialog" aria-modal="true" aria-labelledby="member-apps-title" tabIndex={-1}
+      <div ref={dialog} data-member-apps role="dialog" data-look="dialog" aria-modal="true" aria-labelledby="member-apps-title" tabIndex={-1}
         className="glass-surface glass-popup animate-pop-in relative flex max-w-[780px] flex-col overflow-hidden rounded-2xl">
         <header className="px-5 pb-4 pt-5 sm:px-7 sm:pt-6">
           <div className="flex items-center justify-between gap-3">

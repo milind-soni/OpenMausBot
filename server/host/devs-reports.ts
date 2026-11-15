@@ -33,6 +33,7 @@ import { personKey } from "../person-key.ts";
 import type { RecentLog } from "../recent-log.ts";
 import { PASS } from "../routes/table.ts";
 import { serverLine, type LineLanguage } from "../server-lines.ts";
+import { cloudComputerCounters } from "../cloud-computer-counters.ts";
 import type { PublicSession } from "../sessions.ts";
 import type { BotRecord, Message, Store, StoreChange } from "../store.ts";
 import { droppedLine, fullLine, laterLine, notYetLine, refusedLine, sentLine } from "./devs-report-words.ts";
@@ -348,7 +349,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
       threadId: entry.threadId, messageId: entry.messageId, ...(groupId ? { groupId } : {}), where, message: entry.text, words: entry.words,
       bots: bots.map((bot) => reported(bot, entry.threadId)),
       ...("bot" in author ? { summary: { by: author.bot.name, text: author.summary } } : { noSummary: author.why }),
-      problems: conversationProblems(store.activePath(entry.threadId)), log: deps.recentLog(), contactEmail: contact,
+      problems: conversationProblems(store.activePath(entry.threadId)), log: deps.recentLog(), cloudComputers: cloudComputerCounters.lines(), contactEmail: contact,
     }, secrets());
     return { payload, ...(contact ? { contact } : {}) };
   }

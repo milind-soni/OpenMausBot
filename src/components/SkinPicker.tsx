@@ -2,6 +2,7 @@
 // subtree.
 import { Check } from "lucide-react";
 import { SKINS, applySkin, resolveSkin, type SkinId } from "@/lib/skins";
+import { takeOffTheme } from "@/lib/theme/runtime";
 import { cn } from "@/lib/cn";
 import { t, tFromServer } from "@/lib/i18n";
 import { setDressUp, useDressUp } from "@/lib/festival-dress";
@@ -89,7 +90,7 @@ export function SkinPicker() {
           {SKINS.map((skin) => {
             const selected = skin.id === active;
             return (
-              <button key={skin.id} type="button" role="radio" aria-checked={selected} onClick={() => applySkin(skin.id)}
+              <button key={skin.id} type="button" role="radio" aria-checked={selected} onClick={() => { applySkin(skin.id); takeOffTheme(); }}
                 title={tFromServer(`skins.tagline.${skin.id}`, skin.tagline)}
                 className="group flex cursor-pointer flex-col gap-2 rounded-lg text-left focus-visible:outline-none">
                 {/* Every preview: a 0.5 px frame. The chosen one adds the 2 px ink ring and a 16 px check at its top right. */}
@@ -120,6 +121,7 @@ export function SkinPicker() {
               type="button"
               onClick={() => {
                 applySkin(skin.id);
+                takeOffTheme();
               }}
               aria-pressed={selected}
               className={cn(

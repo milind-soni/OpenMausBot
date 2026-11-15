@@ -470,7 +470,7 @@ export function PluginsPanel() {
       <div
         ref={dialogRef}
         data-tour="apps-panel"
-        role="dialog"
+        role="dialog" data-look="dialog"
         aria-modal="true"
         aria-labelledby="plugins-title"
         tabIndex={-1}

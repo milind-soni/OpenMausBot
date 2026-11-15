@@ -311,6 +311,9 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/updates\/check$/ },
   { methods: ["POST"], path: /^\/api\/auth\/stream-ticket$/ },
   { methods: ["POST"], path: /^\/api\/auth\/logout$/ },
+  // A Team Cloud member's own themes: the route answers each person with theirs alone, and a limited session elsewhere with none.
+  { methods: ["GET", "PUT", "PATCH", "POST", "DELETE"], path: /^\/api\/themes(?:\/[a-z0-9-]+(?:\/(?:duplicate|export))?)?$/ },
+  { methods: ["GET", "HEAD"], path: /^\/api\/theme-assets\/[a-z0-9-]+\/[\w.-]+$/ },
   // A Team Cloud member's own phone: the code carries their address and role, never more (routes/team-phone.ts).
   { methods: ["POST"], path: /^\/api\/team\/phone-pairing$/ },
   // The phones those codes opened: a member lists and removes their own only (routes/team-phone.ts visiblePhones).
@@ -325,6 +328,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET", "PUT", "DELETE"], path: /^\/api\/phones\/self$/ },
   { methods: ["GET"], path: /^\/api\/phones\/self\/jobs$/ },
   { methods: ["POST"], path: /^\/api\/phones\/self\/jobs\/[\w-]+\/(?:lease|result)$/ },
+  // This phone's own push registrations, alerts and Live Activities, keyed by its session (routes/phone-push.ts).
+  { methods: ["GET", "PUT", "DELETE"], path: /^\/api\/push\/(?:device|activity)$/ },
   { methods: ["GET"], path: /^\/api\/health$/ },
   { methods: ["GET"], path: /^\/api\/edition$/ },
   { methods: ["GET"], path: /^\/api\/brand$/ },
@@ -536,11 +541,11 @@ export function botProfileSettings(fields: Record<string, unknown>): Record<stri
   return Object.fromEntries(Object.entries(fields).filter(([key]) => BOT_PROFILE_SETTINGS.has(key)));
 }
 
-/** What a Team Cloud member who can edit a bot may change: its profile and model (as a bot they bring in), and which of
- * the team's connected apps and MCP servers it uses. Never what it may do on its computer, where it runs, its department
- * or whom it answers to or directs: those stay an admin's. */
+/** What a Team Cloud member who can edit a bot may change: its profile and model (as a bot they bring in), which of the
+ * team's connected apps and MCP servers it uses, and which built-in tool groups it is shown. Never what it may do on its
+ * computer, where it runs, its department or whom it answers to or directs: those stay an admin's. */
 const EDITOR_BOT_PATCH_FIELDS: ReadonlySet<string> = new Set([
-  ...BOT_PROFILE_SETTINGS, "threadId", "composio", "connectorTools", "connectorScopes", "mcpServers",
+  ...BOT_PROFILE_SETTINGS, "threadId", "composio", "connectorTools", "connectorScopes", "mcpServers", "toolsOff",
 ]);
 /** A member who can only view a bot marks it read, nothing else. */
 const VIEWER_BOT_PATCH_FIELDS: ReadonlySet<string> = new Set(["unread"]);

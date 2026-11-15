@@ -854,7 +854,7 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   const scope = { message: streaming ? undefined : message, imageOffsets: streaming ? undefined : parts[0]?.imageOffsets, threads, currentBotId, delivered, originals };
   return (
     <MessageScopeContext.Provider value={scope}>
-      <div className="chat-md min-w-0 [&>*+*]:mt-2">
+      <div data-look="bot-text" className="chat-md min-w-0 [&>*+*]:mt-2">
         {parts.map((part, index) => (
           // The whole text's tree puts a line break between its top-level blocks; the parts keep it.
           <Fragment key={index}>{index > 0 && "\n"}{part.fence ? <CodeBlock code={part.fence.code} lang={part.fence.lang} initialWrap={part.fence.wrap} open /> : draw(part)}</Fragment>

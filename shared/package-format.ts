@@ -1,9 +1,9 @@
-// The OpenMausBot package file ("openmaus.package"), v1 or v2; every reader
-// returns v2. The single validation gate for the server, the renderer and the
-// Admin upload, so it imports only zod, yaml, croner and pure shared modules
-// (no Buffer, no node:*). The schema has no field for chat history, secrets,
-// model choices, computers, visibility or personal settings, and unknown
-// fields are stripped.
+// The OpenMausBot package file ("openmaus.package"), v1, v2 or v3 (v2 with
+// more skills); every reader returns v2 or v3. The single validation gate for
+// the server, the renderer and the Admin upload, so it imports only zod, yaml,
+// croner and pure shared modules (no Buffer, no node:*). The schema has no
+// field for chat history, secrets, model choices, computers, visibility or
+// personal settings, and unknown fields are stripped.
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
@@ -15,10 +15,15 @@ import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES } from "
 
 export const PACKAGE_FORMAT = "openmaus.package";
 /** The newest version this module reads and writes. */
-export const PACKAGE_VERSION = 2;
+export const PACKAGE_VERSION = 3;
+/** Every writer stamps v2 unless the package needs v3's larger skill cap, so
+ * apps that read only v2 still open everything they can represent and say
+ * "update the app" for the rest. */
+export const PACKAGE_V2_VERSION = 2;
+export const PACKAGE_V2_MAX_SKILLS = 60;
 /** Canonical UTF-8 bytes of the whole document. */
 export const PACKAGE_MAX_BYTES = 4 * 1024 * 1024;
-export const PACKAGE_MAX_SKILLS = 60, AGENT_MAX_SKILLS = 30, PACKAGE_MAX_PRESETS = 20, PACKAGE_MAX_CONNECTIONS = 20;
+export const PACKAGE_MAX_SKILLS = 120, AGENT_MAX_SKILLS = 30, PACKAGE_MAX_PRESETS = 20, PACKAGE_MAX_CONNECTIONS = 20;
 /** Decoded picture bytes. */
 export const AVATAR_MAX_BYTES = 64 * 1024;
 export const SEED_FILE_MAX_BYTES = 256 * 1024, SEED_MAX_FILES = 100, SEED_MAX_BYTES = 1024 * 1024;
@@ -427,7 +432,7 @@ const connectionSchema = z.object({
 
 export const packageDocumentSchema = z.object({
   format: z.literal(PACKAGE_FORMAT, { error: "This is not an OpenMaus package" }),
-  version: z.literal(PACKAGE_VERSION, { error: "Package version is not supported" }),
+  version: z.union([z.literal(PACKAGE_V2_VERSION), z.literal(PACKAGE_VERSION)], { error: "Package version is not supported" }),
   package: z.object({
     /** The package slug: its identity across releases. */
     id: slug,
@@ -729,6 +734,11 @@ function validateV2(source: unknown): PackageDocument {
   return parsed.data;
 }
 
+/** The version a writer stamps: v3 only when the skills outgrow v2. */
+export function packageVersionFor(pkg: { skills?: { entries: readonly unknown[] } }): typeof PACKAGE_V2_VERSION | typeof PACKAGE_VERSION {
+  return (pkg.skills?.entries.length ?? 0) > PACKAGE_V2_MAX_SKILLS ? PACKAGE_VERSION : PACKAGE_V2_VERSION;
+}
+
 /** Normalize a v1 release ("01.2.03" → "1.2.3"): numeric parts, no leading zeros. */
 function normalizedRelease(release: string): string {
   return release.split(".").map((part) => String(Number.parseInt(part, 10))).join(".");
@@ -740,7 +750,7 @@ export function upgradeV1(document: PackageDocumentV1): PackageDocument {
   const { chiefOfStaff, ...pkg } = document.package;
   return validateV2({
     format: PACKAGE_FORMAT,
-    version: PACKAGE_VERSION,
+    version: PACKAGE_V2_VERSION,
     package: {
       ...pkg,
       release: normalizedRelease(pkg.release),
@@ -766,7 +776,7 @@ export function parsePackageDocument(value: unknown, options: { trust?: PackageT
     if (typeof version === "number" && Number.isInteger(version) && version > PACKAGE_VERSION) {
       throw new PackageFormatError("newer_version", NEWER_PACKAGE_MESSAGE);
     }
-    if (version !== PACKAGE_V1_VERSION && version !== PACKAGE_VERSION) {
+    if (version !== PACKAGE_V1_VERSION && version !== PACKAGE_V2_VERSION && version !== PACKAGE_VERSION) {
       throw new PackageFormatError("unsupported_version", "Package version is not supported");
     }
     // A cheap guard before any schema work; the exact cap is re-checked on

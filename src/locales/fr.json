@@ -1791,7 +1791,7 @@
   "routines.editor.goalWhere": "Où il s'exécute",
   "routines.editor.goalOneOnOne": "Seulement le bot, dans sa propre discussion",
   "routines.editor.goalOneOnOneHelp": "Le bot travaille sur l'objectif dans sa propre discussion jusqu'à ce qu'il soit atteint.",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Téléphone",
   "computer.tab.browser": "Navigateur",
   "computer.tabsAria": "Vue du panneau du bot",
   "computer.simple.needsSetup": "Le bureau de {name} a d'abord besoin d'une étape de configuration.",
@@ -2669,6 +2669,7 @@
   "homeLine.profile": "{name} repart de zéro, séparé de My Cloud. Les bots que vous aviez ici sont sur My Cloud ; pour récupérer une ancienne copie, importez sa sauvegarde dans Paramètres → Backups.",
   "homeLine.local": "{name} repart de zéro : un espace à part sur cet ordinateur, avec ses propres bots, discussions et fichiers.",
   "native.places.profileFailed": "L'espace propre à cet ordinateur ne s'est pas ouvert. Réessayez dans un instant.",
+  "chat.notice.devinAccountRefused": "Devin a refusé cette demande pour le compte connecté. Vérifie l'offre et les crédits Devin, puis réessaie.",
   "rail.settingUp": "{name} : configuration en cours",
   "rail.waiting": "{name} : en attente du paiement",
   "rail.attention": "{name} : a besoin de vous",
@@ -3802,5 +3803,9 @@
   "computer.recovery.restart": "Redémarrer l'ordinateur",
   "computer.recovery.restartTitle": "Arrête puis relance cet ordinateur cloud. Les programmes ouverts sont fermés ; ses fichiers restent.",
   "computer.recovery.replace": "Remplacer l'ordinateur",
-  "computer.recovery.replaceTitle": "Supprime cet ordinateur cloud et en donne un nouveau au bot. Les fichiers qui ne sont que dessus sont perdus."
+  "computer.recovery.replaceTitle": "Supprime cet ordinateur cloud et en donne un nouveau au bot. Les fichiers qui ne sont que dessus sont perdus.",
+  "composer.command.burstDesc": "Lancer plusieurs parties d'un travail en même temps, puis fusionner les résultats",
+  "devices.computers.pairButton": "Associer un ordinateur",
+  "devices.computers.pairTitle": "Associer un autre ordinateur",
+  "devices.computers.typeCode": "Sur votre autre ordinateur, ouvrez Se connecter à un serveur dans {app} et saisissez ce code."
 }

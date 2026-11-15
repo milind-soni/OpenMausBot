@@ -44,3 +44,12 @@ export function dotIcons(nativeImage, hexes = BOT_COLOR_HEX) {
     return made.get(color) ?? null;
   };
 }
+
+/** The Windows taskbar's unread overlay: a red dot (16 px, sharp at 2x); null where it cannot be drawn. */
+export function unreadBadgeIcon(nativeImage) {
+  try {
+    const image = nativeImage.createEmpty();
+    for (const scaleFactor of [1, 2]) image.addRepresentation({ scaleFactor, dataURL: colorDotPng(BOT_COLOR_HEX.red, 16 * scaleFactor, 14 * scaleFactor) });
+    return image.isEmpty() ? null : image;
+  } catch { return null; }
+}
