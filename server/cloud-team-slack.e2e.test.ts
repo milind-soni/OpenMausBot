@@ -438,8 +438,8 @@ it("when a member leaves, their direct-message conversations go with their priva
   expect((await rows(tom, channelThread)).filter((row) => row.role === "user").length).toBeGreaterThanOrEqual(3);
 }, hostTimeout(120_000));
 
-it("off a Team Cloud every route answers 404", async () => {
-  for (const ask of [fx.onCloud, fx.local]) {
+it("off a Cloud, on a desktop's own server, every route answers 404", async () => {
+  for (const ask of [fx.local]) {
     for (const [method, path, body] of [["GET", "/api/slack/team/bots", undefined], ["POST", "/api/slack/team/messages", { v: 1, id: randomUUID(), audience: "team", bot: { default: true }, conversationId: null, text: "hello" }],
       ["POST", `/api/slack/team/messages/${randomUUID()}/stop`, { v: 1 }]] as const) {
       const answer = await ask(method, path, body);

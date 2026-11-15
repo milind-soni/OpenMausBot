@@ -1,6 +1,6 @@
-// Slack for Team Clouds: the three routes the Admin calls with a session it opened for the member who wrote in Slack
-// (docs/team-slack.md). Only a Team Cloud has them; anywhere else each answers 404 with no code, which the Admin reads
-// as a Cloud that can't take Slack messages yet.
+// Slack for Clouds: the three routes the Admin calls with a session it opened for the member who wrote in Slack, or
+// for a personal Cloud's owner (docs/team-slack.md). Only a Cloud has them; anywhere else each answers 404 with no
+// code, which the Admin reads as a Cloud that can't take Slack messages yet.
 import type { ServerResponse } from "node:http";
 
 import type { TeamSlackAnswer, TeamSlackHost } from "../host/team-slack-host.ts";

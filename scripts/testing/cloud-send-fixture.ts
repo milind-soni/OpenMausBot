@@ -23,6 +23,7 @@ import { freePortBlock } from "../../server/testing/ports.ts";
 
 const SERVER_DIR = fileURLToPath(new URL("../../server/", import.meta.url));
 export const CLOUD_HOST = "omb-t-5e6d7c8b9a0f.fly.dev";
+const CLOUD_MACHINE_ID = "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
 const EDGE = { host: CLOUD_HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", origin: `https://${CLOUD_HOST}` };
 const parse = (text: string) => { try { return JSON.parse(text); } catch { return null; } };
 
@@ -33,6 +34,9 @@ export interface CloudSendFixture {
   /** The owner's own device on My Cloud, through the edge: what the window's Cloud session is. */
   owner: string;
   ownerCapability: string;
+  /** What the Admin signs with and My Cloud reports with, and the machine id My Cloud reports as. */
+  secret: string;
+  cloudMachineId: string;
   edge: typeof EDGE;
   /** Every answer either server gave, for the no-secret check. */
   answers: string[];
@@ -254,7 +258,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   let desktop = await startDesktop();
   const cloudPort = await freePortBlock([0, 1]);
   const cloudBase = `http://127.0.0.1:${cloudPort}`;
-  const startCloud = (more: NodeJS.ProcessEnv = {}) => start("cloud", { OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
+  const startCloud = (more: NodeJS.ProcessEnv = {}) => start("cloud", { OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: CLOUD_MACHINE_ID, OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
     OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}), ...cloudEnv, ...more }, cloudPort, [], false, cloudOnePasswordToken, 0, cloudEngine, cloudSignedIn);
   let cloud = await startCloud();
 
@@ -549,7 +553,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   listen();
 
   return {
-    root, desktopBase, cloudBase, get owner() { return owner; }, ownerCapability, edge: EDGE, answers, labels, logs: () => logs, local, onCloud, desktopInstallation,
+    root, desktopBase, cloudBase, get owner() { return owner; }, ownerCapability, secret, cloudMachineId: CLOUD_MACHINE_ID, edge: EDGE, answers, labels, logs: () => logs, local, onCloud, desktopInstallation,
     account, journalFile, spies, teamJournalFile,
     get beforeTeamJournalWrite() { return fixture.beforeTeamJournalWrite; },
     set beforeTeamJournalWrite(hook) { fixture.beforeTeamJournalWrite = hook; },
