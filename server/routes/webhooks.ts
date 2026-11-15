@@ -1,5 +1,7 @@
 // The person's side of webhook automations. Deliveries land on a separate webhook-only loopback listener, so a relay never
 // exposes the rest of the control surface. Only the list is a client route; the rest, the address included, needs admin.
+import { randomUUID } from "node:crypto";
+
 import { webhookVisible } from "../bot-visibility.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { webhookCredential } from "../webhook-ingress.ts";
@@ -26,8 +28,9 @@ export function createWebhookRoutes({ webhooks, ingress, visible }: WebhookRoute
     }
     if (path === "/api/webhooks" && method === "POST") {
       const body = await readBody(req);
-      // Security: on a Team Cloud an admin may not see another person's private bot; a webhook into it is refused alike.
-      if (body && typeof body === "object" && !Array.isArray(body) && !webhookVisible(body, visible(auth))) return json(res, 404, { error: "no such bot" });
+      // Security: on a Team Cloud an admin may not see another person's own MausBot; a webhook into it is answered
+      // exactly as one into a bot that does not exist.
+      if (body && typeof body === "object" && !Array.isArray(body) && !webhookVisible(body, visible(auth))) body.botId = randomUUID();
       const created = webhooks.create(body);
       return json(res, 201, { webhook: created.webhook, ...withCredential(created.webhook, created.secret) });
     }
