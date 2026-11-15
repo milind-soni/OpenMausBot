@@ -36991,7 +36991,22 @@
       "routines.server.part.heldUp": "063962b8b2377401fc7c77570d5b83e349db2aab6b118886331359dc4bca259f",
       "routines.server.restored": "00cd6b284581fcc1d33a42f19a12ff4900e11019a4db0359d0a18618f6c7bb12",
       "routines.server.restoredMany": "39401539696f40bc0c2f3cd39a1d4a42fd1b76e740722dfc91f4c44c9e1e36f4",
-      "routines.server.duplicate": "7516b9e9ffcc2126a9074d00d7277d204e0887e1d13c77fe94920e0428006fcd"
+      "routines.server.duplicate": "7516b9e9ffcc2126a9074d00d7277d204e0887e1d13c77fe94920e0428006fcd",
+      "engines.unhideAria": "69da7203caed81388e25e663947d80d80a2f54c62d5c4b49800c7225e539a9e8",
+      "accounts.signOutCliBody": "dec35f25acc8211621523f7a2d962b28a9a3e91a3aa4864e9c4e87894d40b0a2",
+      "accounts.signOutAria": "2986263f26f5e9fe9d5e4722b51d0c989a02d3ff6875adf711e66ed3ef50f4b6",
+      "grokMove.connect.title": "258886432223ed609b43aea59f149f6e7054bdd85da86efcf0f4b1157e110e7b",
+      "grokMove.connect.hint": "7a241b41eaf05433ec31d3568f14606731c5da2f773ab3472b840d58622d3737",
+      "grokMove.connect.start": "9d90aa15bc7a4c547ce397b8b762c571d5e02e7397d25c58a657c9d0672afaba",
+      "grokMove.connect.linkLabel": "100176877e0dbfe56e346c4e5b53e15535ae19d240ab1e9b57b131c894498c54",
+      "grokMove.connect.copy": "53132f004487995da147edfee02c074f76f0dde85598cf07d243d8d96e332546",
+      "grokMove.connect.where": "13538cf7887a425f0e7ddf1d5eff10ca3f6a2370aca2cb840829dee227cc97a4",
+      "grokMove.connect.private": "a9d3aecd33df05ca7fb1b094172eb0554bf3a3db737033295bee05c0e0002923",
+      "grokMove.connect.stopped": "5a1732fead803b08c12e33d7165e94dc0db90195b508b345aca354acc993cd57",
+      "grokMove.connect.addBot": "ffee88c88f8243f57dc33b2fca984b64706d6100ed5e891cf03fb11ea2efbeb1",
+      "grokMove.connect.arrived": "1885ff17c85883f753a51d1839159ea84c69f96218afae4126a5be85c522a01c",
+      "grokMove.connect.failed": "3a7ca59425083c7483f7b2acdff85e6a2789f8de218b8563750ccd03058396c6",
+      "settings.ai.hiddenStatus": "cdcd49ccafe7bb5dd24259d6f44022e07a18dfb7654a6d36aff5c0de1ea7c23f"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -47215,7 +47230,11 @@
       "routines.server.part.heldUp": "063962b8b2377401fc7c77570d5b83e349db2aab6b118886331359dc4bca259f",
       "routines.server.restored": "00cd6b284581fcc1d33a42f19a12ff4900e11019a4db0359d0a18618f6c7bb12",
       "routines.server.restoredMany": "39401539696f40bc0c2f3cd39a1d4a42fd1b76e740722dfc91f4c44c9e1e36f4",
-      "routines.server.duplicate": "7516b9e9ffcc2126a9074d00d7277d204e0887e1d13c77fe94920e0428006fcd"
+      "routines.server.duplicate": "7516b9e9ffcc2126a9074d00d7277d204e0887e1d13c77fe94920e0428006fcd",
+      "engines.unhideAria": "69da7203caed81388e25e663947d80d80a2f54c62d5c4b49800c7225e539a9e8",
+      "accounts.signOutCliBody": "dec35f25acc8211621523f7a2d962b28a9a3e91a3aa4864e9c4e87894d40b0a2",
+      "accounts.signOutAria": "2986263f26f5e9fe9d5e4722b51d0c989a02d3ff6875adf711e66ed3ef50f4b6",
+      "settings.ai.hiddenStatus": "cdcd49ccafe7bb5dd24259d6f44022e07a18dfb7654a6d36aff5c0de1ea7c23f"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
