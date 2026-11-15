@@ -306,7 +306,7 @@ export function fetchDeepSeekCatalog(
     initId = send("initialize", {
       protocolVersion: 1,
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
-      clientInfo: { name: "openmausbot", version: "catalog" },
+      clientInfo: { name: "obot", version: "catalog" },
     });
   });
 }

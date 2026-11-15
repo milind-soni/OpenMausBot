@@ -4,10 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import { createUpdateChecker, installKind, isNewerVersion, LATEST_RELEASE_URL, STABLE_CHANNEL_URL, updateChannel } from "./update-check.ts";
 
 const release = (tag: string) =>
-  ({ ok: true, status: 200, json: async () => ({ tag_name: tag, html_url: `https://github.com/milind-soni/OpenMausBot/releases/tag/${tag}` }) }) as Response;
+  ({ ok: true, status: 200, json: async () => ({ tag_name: tag, html_url: `https://github.com/alnatourm/Obot/releases/tag/${tag}` }) }) as Response;
 
 const promoted = (version: string) =>
-  ({ ok: true, status: 200, json: async () => ({ channel: "stable", version, image: `ghcr.io/milind-soni/openmausbot@sha256:${"a".repeat(64)}`, releaseUrl: `https://github.com/milind-soni/OpenMausBot/releases/tag/v${version}` }) }) as Response;
+  ({ ok: true, status: 200, json: async () => ({ channel: "stable", version, image: `ghcr.io/alnatourm/obot@sha256:${"a".repeat(64)}`, releaseUrl: `https://github.com/alnatourm/Obot/releases/tag/v${version}` }) }) as Response;
 const missing = { ok: false, status: 404, json: async () => ({}) } as Response;
 /** GitHub's newest release is `newest`; the stable channel names `stable`, or does not exist yet. */
 const github = (newest: string, stable: string | null) => vi.fn(async (url: string | URL | Request) =>
@@ -16,14 +16,14 @@ const github = (newest: string, stable: string | null) => vi.fn(async (url: stri
 describe("server update check", () => {
   it("tells how this server was installed", () => {
     const none = () => false;
-    const root = ["", "srv", "OpenMausBot", "server"].join(sep);
+    const root = ["", "srv", "Obot", "server"].join(sep);
     expect(installKind({ desktopManaged: true, managed: false, serverRoot: root, exists: () => true })).toBe("desktop");
     expect(installKind({ desktopManaged: false, managed: true, serverRoot: root, exists: () => true })).toBe("managed");
     expect(installKind({ desktopManaged: false, managed: false, serverRoot: root, exists: (path) => path === "/.dockerenv" })).toBe("docker");
     expect(installKind({ desktopManaged: false, managed: false, serverRoot: root, exists: (path) => path === "/run/.containerenv" })).toBe("podman");
     expect(installKind({
       desktopManaged: false, managed: false, exists: none,
-      serverRoot: ["", "usr", "lib", "node_modules", "openmausbot", "dist-server"].join(sep),
+      serverRoot: ["", "usr", "lib", "node_modules", "obot", "dist-server"].join(sep),
     })).toBe("npm");
     expect(installKind({ desktopManaged: false, managed: false, serverRoot: root, exists: (path) => path === join(root, "..", ".git") })).toBe("git");
     expect(installKind({ desktopManaged: false, managed: false, serverRoot: root, exists: none })).toBe("unknown");
@@ -54,13 +54,13 @@ describe("server update check", () => {
       channel: "stable",
       latest: "0.1.93",
       available: true,
-      releaseUrl: "https://github.com/milind-soni/OpenMausBot/releases/tag/v0.1.93",
+      releaseUrl: "https://github.com/alnatourm/Obot/releases/tag/v0.1.93",
       command: "git pull && ./update.sh",
       restart: false,
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(STABLE_CHANNEL_URL, expect.anything());
-    expect(await createUpdateChecker({ current: "0.1.92", install: "npm", fetch })()).toMatchObject({ latest: "0.1.93", command: "npm install -g openmausbot@0.1.93", restart: true });
+    expect(await createUpdateChecker({ current: "0.1.92", install: "npm", fetch })()).toMatchObject({ latest: "0.1.93", command: "npm install -g obot@0.1.93", restart: true });
   });
 
   it("offers nothing to a server that is already on the stable version or past it", async () => {
@@ -110,7 +110,7 @@ describe("server update check", () => {
     let now = 0;
     const fetch = github("v0.1.92", "0.1.92");
     const check = createUpdateChecker({ current: "0.1.92", install: "npm", fetch, now: () => now });
-    expect(await check()).toMatchObject({ available: false, latest: "0.1.92", command: "npm install -g openmausbot@0.1.92", restart: true });
+    expect(await check()).toMatchObject({ available: false, latest: "0.1.92", command: "npm install -g obot@0.1.92", restart: true });
     now = 59 * 60_000;
     await check();
     expect(fetch).toHaveBeenCalledTimes(1);

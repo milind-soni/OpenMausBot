@@ -439,7 +439,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
     async function open(signal: AbortSignal): Promise<string | undefined> {
       const init = await deps.relay({
         jsonrpc: "2.0", id: "omb-check-init", method: "initialize",
-        params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "openmausbot-checks", version: "1" } },
+        params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "obot-checks", version: "1" } },
       }, undefined, signal);
       if (init.status !== 200) throw new Error(`connected apps answered HTTP ${init.status}`);
       // Streamable-HTTP MCP servers expect the initialized notification before the first request.

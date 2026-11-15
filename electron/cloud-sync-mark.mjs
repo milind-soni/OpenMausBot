@@ -8,7 +8,7 @@ export function createDownloadMarker({ platform = process.platform, run = execFi
     try {
       if (platform === "win32") write(`${file}:Zone.Identifier`, "[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=about:internet\r\n");
       else if (platform === "darwin") {
-        const flag = `0081;${Math.floor(now() / 1000).toString(16)};OpenMausBot;`;
+        const flag = `0081;${Math.floor(now() / 1000).toString(16)};Obot;`;
         await new Promise((resolve) => run("/usr/bin/xattr", ["-w", "com.apple.quarantine", flag, file], () => resolve()));
       }
     } catch {}

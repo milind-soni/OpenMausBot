@@ -1,4 +1,4 @@
-# SPEC: steer-without-interrupt + double-Enter gesture (codex)
+﻿# SPEC: steer-without-interrupt + double-Enter gesture (codex)
 
 Status: FROZEN. Criterion (d) revised 2026-09-16 by user ruling: rooms and
 groups get the same steer treatment as 1:1 threads, not queue-only.
@@ -30,7 +30,7 @@ Native mid-turn steering EXISTS; no child kill or restart is needed.
 - Semantics: steering redirects the RUNNING turn. Codex aborts the in-flight
   model stream at a safe boundary (turn-level abort via protocol) and continues
   the same turn/session with the new input folded in. The app-server child and
-  the native thread stay alive; nothing is SIGTERMed or restarted. The OpenMausBot
+  the native thread stay alive; nothing is SIGTERMed or restarted. The Obot
   codex driver already runs one app-server per turn, so `turn/steer` rides the
   live request instance that owns the running turn.
 
@@ -109,3 +109,4 @@ after Stop.
 ## Boundary
 
 Phase 1 adds this SPEC only: no driver, server, or UI changes.
+

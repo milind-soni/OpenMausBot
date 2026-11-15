@@ -92,7 +92,7 @@ describe("browser tool shaping", () => {
       expect(shaped.content[0].text).toContain("missing libraries the browser needs (libatk-1.0.so.0)");
       // agent-browser's longer-stderr form of the marker counts too
       expect(shape({ content: [{ type: "text", text: launch.replace("Chrome stderr:", "Chrome stderr (last 20 lines):") }], isError: true }).content[0].text).toContain("--with-deps");
-      expect(shaped.content[0].text).toContain("`sudo openmausbot browser install --with-deps`");
+      expect(shaped.content[0].text).toContain("`sudo obot browser install --with-deps`");
       // a page that merely mentions the loader's words, or another failure, gets no install advice
       const echoed = "Error: page script failed: /usr/bin/app: error while loading shared libraries: libfoo.so.1: cannot open shared object file";
       // a page error that quotes a whole launch error, marker included, did not come from our launch
@@ -116,7 +116,7 @@ describe("browser tool shaping", () => {
     const text = "line of accessibility tree\n".repeat(4_000);
     const shaped = shapeBrowserToolResult({ content: [{ type: "text", text }], structuredContent: {} }, { toolName: "agent_browser_snapshot" }) as { content: Array<{ text: string }> };
     expect(shaped.content[0].text.length).toBeLessThan(DEFAULT_BROWSER_RESULT_BUDGET + 600);
-    expect(shaped.content[0].text).toContain("TRUNCATED by OpenMausBot");
+    expect(shaped.content[0].text).toContain("TRUNCATED by Obot");
     expect(shaped.content[0].text).toContain("agent_browser_get_text");
     const custom = shapeBrowserToolResult({ content: [{ type: "text", text }] }, { budget: 1_000 }) as { content: Array<{ text: string }> };
     expect(custom.content[0].text.length).toBeLessThan(1_600);

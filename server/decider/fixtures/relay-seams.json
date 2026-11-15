@@ -1,6 +1,6 @@
 {
   "about": [
-    "Shared contract between OpenMausBot (server/decider/relay.ts) and the openmaus-cloud Admin's decision relay.",
+    "Shared contract between Obot (server/decider/relay.ts) and the openmaus-cloud Admin's decision relay.",
     "OMB sends POST <OMB_CLOUD_DECIDER_URL>/v1/systemone with Authorization: Bearer <OMB_CLOUD_DECIDER_TOKEN>, the header below naming the seam, and `body` as the JSON body (Jev's System One shape).",
     "The relay accepts a request only when the named seam's shape check passes; `accepts` is that verdict. OMB never sends one it would refuse (tests check both sides agree).",
     "An oversize request is answered 413; OMB reads that as too large, says so plainly and never retries it.",
@@ -23,7 +23,7 @@
   "seams": {
     "keyCheck": {
       "state": {
-        "purpose": "OpenMausBot is checking that a decision-model key works."
+        "purpose": "Obot is checking that a decision-model key works."
       },
       "question": "Is this a connection check?"
     },
@@ -74,7 +74,7 @@
       "accepts": true,
       "body": {
         "state": {
-          "purpose": "OpenMausBot is checking that a decision-model key works."
+          "purpose": "Obot is checking that a decision-model key works."
         },
         "model": "jev-latest",
         "questions": {

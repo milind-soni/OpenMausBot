@@ -215,11 +215,11 @@ describe("toPost", () => {
 describe("search", () => {
   it("calls anyapi's search with the token, a cost ceiling and Latest, and returns compact posts", async () => {
     const { fetcher, calls } = fakeFetch({ body: anyapi({ items: [searchRow("12"), searchRow("11")], nextCursor: "" }) });
-    const result = await clientWith(fetcher).search({ query: "mausbot", sort: "latest", limit: 20 });
+    const result = await clientWith(fetcher).search({ query: "obot", sort: "latest", limit: 20 });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.method).toBe("POST");
     expect(calls[0]!.url.href).toBe(`${RELAY}/call/anyapi.x.search.posts`);
-    expect(calls[0]!.body).toEqual({ query: "mausbot", queryType: "Latest", limit: 20 });
+    expect(calls[0]!.body).toEqual({ query: "obot", queryType: "Latest", limit: 20 });
     expect(calls[0]!.headers.get("authorization")).toBe("Bearer omb_xd_test");
     // Our treg key, the customer tag and the cost ceiling are the relay's to add; nothing of treg's is sent from here.
     expect(calls[0]!.headers.get("x-treg-token")).toBeNull();

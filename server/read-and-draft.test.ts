@@ -75,7 +75,7 @@ describe("the fence around a read-and-draft run", () => {
     expect(gate.answers({ ...(event as object), threadId: "main-chat" } as never, bot, say)).toBe(false);
   });
 
-  it("lets it reach only conversation reads, its own results, hooks and the relay of OpenMausBot's routes", () => {
+  it("lets it reach only conversation reads, its own results, hooks and the relay of Obot's routes", () => {
     const { gate } = fence();
     for (const route of [["GET", "/api/internal/session-search"], ["POST", "/api/internal/hook"], ["POST", "/api/internal/connectors/mcp"]]) {
       expect(gate.refusesRoute(bot, "run-thread", route[0]!, route[1]!)).toBe(false);

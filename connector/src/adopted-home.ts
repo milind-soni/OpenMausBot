@@ -1,5 +1,5 @@
-// The home on a customer-run server: the MausBot server its owner installed with Docker Compose (deploy/install.sh:
-// project `openmausbot`, service `omb`, Caddy in front, the data in a folder beside the Compose file). The connector
+// The home on a customer-run server: the Obot server its owner installed with Docker Compose (deploy/install.sh:
+// project `obot`, service `omb`, Caddy in front, the data in a folder beside the Compose file). The connector
 // attaches to it and never makes a second one: it starts and stops those containers, copies that folder, and hands an
 // update to the server's own updater. It never writes the owner's settings and never picks the home's image itself.
 import { randomBytes } from "node:crypto";
@@ -15,12 +15,12 @@ import type { CopyInfo, HomeHealth, HomeReport, HomeState, JobError, JobReply, J
 import { BACKUPS_KEPT, HOME_STOP_TIMEOUT_S, LABELS, NAMES } from "./settings.ts";
 import type { HomeRecord, Operation, StateStore } from "./state.ts";
 
-export const COMPOSE_PROJECT = "openmausbot";
+export const COMPOSE_PROJECT = "obot";
 const SERVICE = "omb";
 const FRONT = "caddy";
 const PROJECT_LABEL = "com.docker.compose.project";
 const SERVICE_LABEL = "com.docker.compose.service";
-const HOME_REPOSITORY = "ghcr.io/milind-soni/openmausbot";
+const HOME_REPOSITORY = "ghcr.io/alnatourm/obot";
 const COPY_CAPS = ["CHOWN", "DAC_OVERRIDE", "DAC_READ_SEARCH", "FOWNER", "FSETID"];
 const READ_CAPS = ["DAC_READ_SEARCH"];
 const DELETE_CAPS = ["DAC_OVERRIDE", "DAC_READ_SEARCH"];
@@ -30,7 +30,7 @@ export const UPDATE_FILES = { runner: "runner", request: "request", result: "res
 /** deploy/update.sh's exit codes; from the runner itself, 5 for an image older than the one running and 127 when the server has no update.sh. */
 const UPDATE_EXIT = { done: 0, rolledBack: 1, rollbackFailed: 2, busy: 3, notStarted: 4, older: 5, missing: 127 } as const;
 /** Who asked for a backup, kept on its volume: one sender's backups never push out the other's. */
-const MADE_BY_LABEL = "com.mausbot.by";
+const MADE_BY_LABEL = "com.obot.by";
 
 const lastLine = (text: string) => text.trim().split("\n").pop()?.slice(0, 300) ?? "";
 const gb = (bytes: number) => Math.round((bytes / 1e9) * 10) / 10;
@@ -45,24 +45,24 @@ export interface Install {
 export async function findInstall(docker: Docker): Promise<{ ok: true; install: Install } | { ok: false; why: string }> {
   const [found] = await docker.listContainers({ [PROJECT_LABEL]: COMPOSE_PROJECT, [SERVICE_LABEL]: SERVICE });
   const container = found ? await docker.containerInspect(found.Id) : null;
-  if (!container) return { ok: false, why: "MausBot is not installed on this server yet. Install it first with the server's install command, then connect it." };
+  if (!container) return { ok: false, why: "Obot is not installed on this server yet. Install it first with the server's install command, then connect it." };
   const image = container.Config.Image;
   if (!image.startsWith(`${HOME_REPOSITORY}:`) && !image.startsWith(`${HOME_REPOSITORY}@`)) {
-    return { ok: false, why: "The MausBot on this server was built here, not downloaded from MausBot's registry, so MausBot cannot update it. Move it to the published image first: ./update.sh --replace-local-build" };
+    return { ok: false, why: "The Obot on this server was built here, not downloaded from Obot's registry, so Obot cannot update it. Move it to the published image first: ./update.sh --replace-local-build" };
   }
   const data = (container.Mounts ?? []).find((mount) => mount.Destination === "/data");
-  if (!data || data.Type !== "bind") return { ok: false, why: "The MausBot on this server does not keep its data in a folder beside its Compose file, so it is not one the server installer made. Install it with the server's install command, then connect it." };
+  if (!data || data.Type !== "bind") return { ok: false, why: "The Obot on this server does not keep its data in a folder beside its Compose file, so it is not one the server installer made. Install it with the server's install command, then connect it." };
   return { ok: true, install: { container, dataDir: data.Source } };
 }
 
-/** True when a MausBot server its owner installed runs here: an `operated` connector must not start a second home beside it. */
+/** True when a Obot server its owner installed runs here: an `operated` connector must not start a second home beside it. */
 export async function standaloneServerPresent(docker: Docker): Promise<boolean> {
   return (await docker.listContainers({ [PROJECT_LABEL]: COMPOSE_PROJECT, [SERVICE_LABEL]: SERVICE })).length > 0;
 }
 
 /**
  * Why this server cannot be enrolled in `mode`, in a sentence for the person at the terminal, or null. An `operated`
- * connector makes its own home, so it is refused where a MausBot its owner installed already runs: that would be two.
+ * connector makes its own home, so it is refused where a Obot its owner installed already runs: that would be two.
  */
 export async function enrolmentRefusal(mode: ServerMode, docker: Docker): Promise<string | null> {
   if (mode === "customer-run") {
@@ -70,7 +70,7 @@ export async function enrolmentRefusal(mode: ServerMode, docker: Docker): Promis
     return found.ok ? null : found.why;
   }
   return (await standaloneServerPresent(docker))
-    ? "MausBot already runs on this server, installed by its owner. Connecting it this way would start a second MausBot beside it. Run the install command again and it connects the one that is here, keeping its data."
+    ? "Obot already runs on this server, installed by its owner. Connecting it this way would start a second Obot beside it. Run the install command again and it connects the one that is here, keeping its data."
     : null;
 }
 
@@ -80,7 +80,7 @@ export interface AdoptedHomeOptions {
   log: Log;
   /** Free bytes where Docker keeps its volumes, so where a backup goes. */
   diskFree: () => number;
-  /** The folder shared with the server's updater (mausbot-update-runner.sh), as the connector sees it. */
+  /** The folder shared with the server's updater (obot-update-runner.sh), as the connector sees it. */
   updateDir: string;
   onStep?: (step: { id: string; type: Operation["type"]; step: string; detail?: Record<string, unknown> }) => void;
   now?: () => number;
@@ -210,12 +210,12 @@ export class AdoptedHome {
    */
   update(jobId: string, image: string): Promise<JobResults["update"]> {
     return this.exclusive(async () => {
-      if (!CUSTOMER_HOME_IMAGE.test(image)) throw new JobFailure("image_refused", `${image} is not MausBot's server image pinned by digest. Nothing was changed.`);
+      if (!CUSTOMER_HOME_IMAGE.test(image)) throw new JobFailure("image_refused", `${image} is not Obot's server image pinned by digest. Nothing was changed.`);
       const { container } = await this.install();
       const previous = await this.imageOf(container);
       const dir = this.options.updateDir;
       if (!existsSync(join(dir, UPDATE_FILES.runner))) {
-        throw new JobFailure("update_unavailable", "This server has no updater for MausBot to hand an update to. Run the connector's install command again to add it; until then, update with ./update.sh on the server.");
+        throw new JobFailure("update_unavailable", "This server has no updater for Obot to hand an update to. Run the connector's install command again to add it; until then, update with ./update.sh on the server.");
       }
       await this.refuseOlder(image, container);
       const wasRunning = container.State.Running;
@@ -424,7 +424,7 @@ export class AdoptedHome {
 
   private async bringUp(): Promise<void> {
     const home = await this.container(SERVICE);
-    if (!home) throw new JobFailure("no_home", "MausBot's container is gone from this server. Run the server's install command again to repair it.");
+    if (!home) throw new JobFailure("no_home", "Obot's container is gone from this server. Run the server's install command again to repair it.");
     const wasRunning = home.State.Running;
     try {
       await this.docker.startContainer(home.Id);
@@ -452,7 +452,7 @@ export class AdoptedHome {
   }
 
   private async helper(image: string, mounts: Mount[], command: string[], caps: string[]): Promise<{ code: number; output: string }> {
-    const name = `mausbot-helper-${randomBytes(4).toString("hex")}`;
+    const name = `obot-helper-${randomBytes(4).toString("hex")}`;
     await this.docker.createContainer(name, helperSpec(image, mounts, command, caps));
     try {
       await this.docker.startContainer(name);
@@ -524,7 +524,7 @@ function updateFailure(code: number | null, previous: string | null): JobFailure
     case UPDATE_EXIT.busy: return new JobFailure("busy", "Another update is already running on this server.");
     case UPDATE_EXIT.notStarted: return new JobFailure("update_not_started", `The server's updater did not start the update, and nothing was changed. ${log}`);
     case UPDATE_EXIT.older: return new JobFailure("older_version", "The server's updater refused the image: it is older than the version running, or names no version. Nothing was changed.");
-    case UPDATE_EXIT.missing: return new JobFailure("update_unavailable", "This server has no update.sh in its install folder, so MausBot cannot update it. Add deploy/update.sh there, or update by hand.");
+    case UPDATE_EXIT.missing: return new JobFailure("update_unavailable", "This server has no update.sh in its install folder, so Obot cannot update it. Add deploy/update.sh there, or update by hand.");
     case null: return new JobFailure("interrupted", "The server's updater did not answer in time. It finishes or undoes an update by itself; ask for the status to see which version runs.");
     default: return new JobFailure("docker", `The server's updater stopped with code ${code}. ${log}`);
   }
@@ -534,3 +534,4 @@ function copyInfo(id: string, kind: CopyInfo["kind"], labels: Record<string, str
   const created = Number(labels?.[LABELS.created]);
   return { id, kind, createdAt: Number.isFinite(created) ? created : 0, image: labels?.[LABELS.image] ?? null };
 }
+

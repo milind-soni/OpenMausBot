@@ -420,13 +420,13 @@ describe("one body for every bot", () => {
       roundBot,
       { ...bot, id: "edits", yourAccess: "edit" },
       { ...bot, id: "chats", yourAccess: "chat" },
-      { ...bot, id: "my-mausbot", yourAccess: "chat", defaultBot: { person: "me@example.test" } },
-      { ...bot, id: "their-mausbot", yourAccess: "chat", defaultBot: { person: "ada@example.test" } },
+      { ...bot, id: "my-obot", yourAccess: "chat", defaultBot: { person: "me@example.test" } },
+      { ...bot, id: "their-obot", yourAccess: "chat", defaultBot: { person: "ada@example.test" } },
     ] as Bot[];
     await openEditor(roundBot);
     expect(everywhere()?.textContent).toBe("Give this body to the other bots (2)");
     click(everywhere());
-    expect(fixture.dispatch.mock.calls.map(([action]) => action.botId)).toEqual(["edits", "my-mausbot"]);
+    expect(fixture.dispatch.mock.calls.map(([action]) => action.botId)).toEqual(["edits", "my-obot"]);
   });
 
   it("is not offered once every bot wears this body, or while the bot shows a picture", async () => {

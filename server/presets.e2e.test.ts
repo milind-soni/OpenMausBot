@@ -148,7 +148,7 @@ it("offers an organization library's presets in New bot until the publisher with
     });
     const relay = (body: string) => call("POST", "/api/testing/org-library", {
       library: { adminOrigin: "https://admin.example.com", organizationId: "11111111-1111-4111-8111-111111111111", organizationName: "Customer Co", digest: sha(body), catalog: body },
-    }, { "x-openmausbot-test-org-library": key });
+    }, { "x-obot-test-org-library": key });
     expect((await relay(catalog(false))).status).toBe(200);
     const added = await call("POST", "/api/org-library/add", { packageId });
     expect(added.status).toBe(201);

@@ -1,4 +1,4 @@
-// The bots' browser runs on agent-browser or, with browserEngine.engine set to "chrome", on OpenMausBot's own Chrome
+// The bots' browser runs on agent-browser or, with browserEngine.engine set to "chrome", on Obot's own Chrome
 // driver. A session's spec says which: the new engine's names the profile it drives. Everything that reaches a browser
 // goes through the two routers here, which keep the agent-browser engine's API.
 import { existsSync } from "node:fs";

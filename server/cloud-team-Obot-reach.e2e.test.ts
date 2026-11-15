@@ -1,7 +1,7 @@
-// A person's own MausBot hands work to the team's shared bots, on a Team Cloud with the synthetic Claude CLI. Mira (a
-// User) asks her MausBot; the work runs in Sales' own private chat with her, at her level, and its result comes back whole
+// A person's own Obot hands work to the team's shared bots, on a Team Cloud with the synthetic Claude CLI. Mira (a
+// User) asks her Obot; the work runs in Sales' own private chat with her, at her level, and its result comes back whole
 // to her private chat. Ben (a User) and Ada (an Admin) see none of it: not by id, not in lists, counts, search,
-// notifications, streams, Sales' shared chat or its notes. A bot Mira cannot see is never named to her MausBot, a bot she
+// notifications, streams, Sales' shared chat or its notes. A bot Mira cannot see is never named to her Obot, a bot she
 // can only view refuses work, and a turn her own request isn't behind hands nothing on. The engine plays a script through
 // the real agents tools, so this proves the routes and what each person can see, not a model's judgement.
 import { randomBytes } from "node:crypto";
@@ -31,11 +31,11 @@ type Line = { id: string; role: string; text?: string };
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
 let ada = "", mira = "", ben = "";
-let sales: Bot, archive: Bot, payroll: Bot, counsel: Bot, mausbot: Bot, mine = "";
+let sales: Bot, archive: Bot, payroll: Bot, counsel: Bot, obot: Bot, mine = "";
 let room = "";
 
 const planPath = () => join(team.home, "plan.json");
-const dataDir = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
+const dataDir = (...rest: string[]) => join(team.home, ".obot", ...rest);
 const turns = (): Turn[] => existsSync(`${planPath()}.evidence.jsonl`)
   ? readFileSync(`${planPath()}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Turn) : [];
 const turn = (key: string): Turn => { const found = turns().find((one) => one.planKey === key); if (!found) throw new Error(`no turn ${key}`); return found; };
@@ -48,7 +48,7 @@ const status = async (token: string, threadId: string) => (await team.as(token, 
 const botsOf = async (token: string) => (await team.as(token, "GET", "/api/bots?messages=0")).body.bots as Bot[];
 const settled = async () => (await Promise.all([ada, mira, ben].map(botsOf))).flat().every((one) => !(one as { busy?: boolean }).busy
   && !((one.tasks ?? []) as Array<{ busy?: boolean; waitingForTeammates?: boolean }>).some((task) => task.busy || task.waitingForTeammates));
-async function say(text: string, threadId = mine, token = mira, bot: Bot = mausbot) {
+async function say(text: string, threadId = mine, token = mira, bot: Bot = obot) {
   await expect.poll(settled, { timeout: 30_000 }).toBe(true);
   const posted = await team.as(token, "POST", `/api/bots/${bot.id}/messages`, { text, threadId });
   expect(posted.status, JSON.stringify(posted.body)).toBe(202);
@@ -94,16 +94,16 @@ beforeAll(async () => {
   counsel = await create("Counsel");
   await share(archive, { everyone: "view", people: {} });
   await share(payroll, { everyone: "none", people: { [BEN.email]: "chat" } });
-  mausbot = (await botsOf(mira)).find((bot) => bot.defaultBot?.person === MIRA.email)!;
-  expect(mausbot, "every member has their own MausBot").toBeDefined();
-  const chat = await team.as(mira, "POST", `/api/bots/${mausbot.id}/tasks`, { title: "Mine" });
+  obot = (await botsOf(mira)).find((bot) => bot.defaultBot?.person === MIRA.email)!;
+  expect(obot, "every member has their own Obot").toBeDefined();
+  const chat = await team.as(mira, "POST", `/api/bots/${obot.id}/tasks`, { title: "Mine" });
   expect(chat.status, JSON.stringify(chat.body)).toBe(201);
   mine = chat.body.task.threadId as string;
   const made = await team.as(ada, "POST", "/api/groups", { name: "All hands", memberIds: [sales.id] });
   expect(made.status, JSON.stringify(made.body)).toBe(201);
   room = (made.body.group as { id: string }).id;
   writeFileSync(planPath(), JSON.stringify({
-    [mausbot.id]: { script: [
+    [obot.id]: { script: [
       { key: "M-LIST", match: ["WHO-CAN-YOU-REACH"], reply: "Listed.", steps: [{ tool: "list_bots", arguments: {} }] },
       { key: "M-SALES", match: ["HAND-TO-SALES"], reply: "Asked Sales.", steps: [{ arguments: { bot_ids: ["Sales"], message: ASK, reason: "Mira asked" } }] },
       { key: "M-RESUMED", repeat: true, match: ["report on assignment"], reply: "M-RESUMED done" },
@@ -160,7 +160,7 @@ it("hands work to Sales privately: the result comes back to Mira whole, and Ben 
   await expect.poll(settled, { timeout: 30_000 }).toBe(true);
 
   const work = turn("S-WORK");
-  expect(sent(work)).toMatch(/\[From @MausBot \(bot\) · assignment \S+ for Mira · on their behalf at your level\]/);
+  expect(sent(work)).toMatch(/\[From @Obot \(bot\) · assignment \S+ for Mira · on their behalf at your level\]/);
   expect(sent(turn("M-RESUMED")), "her result comes back whole: this is her own chat").toContain("Q3 was 120k");
   const seen = (await botsOf(mira)).find((bot) => bot.id === sales.id)!.tasks!.find((task) => task.threadId === work.threadId)!;
   expect(seen, "Sales' chat with Mira is listed for her").toBeDefined();
@@ -232,8 +232,8 @@ it("never into a room, nor into Sales' shared chat", async () => {
   expect(JSON.stringify(await lines(ada, sales.threadId))).not.toContain("pull the numbers for Mira");
 }, hostTimeout(120_000));
 
-it("works from her MausBot's main chat too, which is hers alone", async () => {
-  const main = (await botsOf(mira)).find((bot) => bot.id === mausbot.id)!.mainThreadId;
+it("works from her Obot's main chat too, which is hers alone", async () => {
+  const main = (await botsOf(mira)).find((bot) => bot.id === obot.id)!.mainThreadId;
   expect(main).toBeTruthy();
   await say("FROM-MY-MAIN-CHAT", main);
   await ran("S-FROM-MAIN");
@@ -246,10 +246,10 @@ it("works from her MausBot's main chat too, which is hers alone", async () => {
 it("a line another app relays into her private chat hands nothing on", async () => {
   await expect.poll(settled, { timeout: 30_000 }).toBe(true);
   const leaf = (await team.as(mira, "GET", `/api/threads/${mine}/messages?limit=1`)).body.activeLeafId ?? null;
-  const mode = (await botsOf(mira)).find((bot) => bot.id === mausbot.id)!.approvalMode ?? "ask";
-  const relayed = await fetch(`${team.base}/api/bots/${mausbot.id}/messages/guarded`, {
+  const mode = (await botsOf(mira)).find((bot) => bot.id === obot.id)!.approvalMode ?? "ask";
+  const relayed = await fetch(`${team.base}/api/bots/${obot.id}/messages/guarded`, {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ threadId: mine, sendId: "slackjob_mausbot_reach_1", text: "RELAYED-LINE", expectedActiveLeafId: leaf, expectedApprovalMode: mode, onBehalfOf: { email: MIRA.email, name: "Mira" } }),
+    body: JSON.stringify({ threadId: mine, sendId: "slackjob_obot_reach_1", text: "RELAYED-LINE", expectedActiveLeafId: leaf, expectedApprovalMode: mode, onBehalfOf: { email: MIRA.email, name: "Mira" } }),
   });
   expect(relayed.status, await relayed.clone().text()).toBe(202);
   await ran("M-RELAYED");
@@ -259,7 +259,7 @@ it("a line another app relays into her private chat hands nothing on", async () 
 
 it("her routine, with nobody behind it, hands nothing on", async () => {
   await expect.poll(settled, { timeout: 30_000 }).toBe(true);
-  const created = await team.as(mira, "POST", "/api/routines", { name: "Nightly", prompt: "ROUTINE-LINE", botId: mausbot.id, schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } });
+  const created = await team.as(mira, "POST", "/api/routines", { name: "Nightly", prompt: "ROUTINE-LINE", botId: obot.id, schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   expect((await team.as(mira, "POST", `/api/routines/${created.body.routine.id}/run`)).status).toBe(201);
   await ran("M-ROUTINE");
@@ -269,22 +269,22 @@ it("her routine, with nobody behind it, hands nothing on", async () => {
 
 it("cannot answer a question waiting in Ben's private work, even knowing its id", async () => {
   await expect.poll(settled, { timeout: 30_000 }).toBe(true);
-  const bensMausbot = (await botsOf(ben)).find((bot) => bot.defaultBot?.person === BEN.email)!;
-  const bensChat = (await team.as(ben, "POST", `/api/bots/${bensMausbot.id}/tasks`, { title: "Mine" })).body.task.threadId as string;
+  const bensObot = (await botsOf(ben)).find((bot) => bot.defaultBot?.person === BEN.email)!;
+  const bensChat = (await team.as(ben, "POST", `/api/bots/${bensObot.id}/tasks`, { title: "Mine" })).body.task.threadId as string;
   const plan = JSON.parse(readFileSync(planPath(), "utf8"));
-  plan[bensMausbot.id] = { script: [{ key: "B-ASKS", match: ["BEN-HANDS-ON"], reply: "Asking.", steps: [{ arguments: { bot_ids: ["Counsel"], message: "BEN-ASKS-COUNSEL", reason: "Ben asked" } }] }, { key: "B-RESUMED", repeat: true, match: ["on assignment"], reply: "B-RESUMED done" }] };
+  plan[bensObot.id] = { script: [{ key: "B-ASKS", match: ["BEN-HANDS-ON"], reply: "Asking.", steps: [{ arguments: { bot_ids: ["Counsel"], message: "BEN-ASKS-COUNSEL", reason: "Ben asked" } }] }, { key: "B-RESUMED", repeat: true, match: ["on assignment"], reply: "B-RESUMED done" }] };
   writeFileSync(planPath(), JSON.stringify(plan));
-  await say("BEN-HANDS-ON", bensChat, ben, bensMausbot);
+  await say("BEN-HANDS-ON", bensChat, ben, bensObot);
   await ran("C-ASKS");
   await expect.poll(async () => (await workRows()).some((row) => row.status === "needs_input"), { timeout: 60_000 }).toBe(true);
   const waiting = (await workRows()).find((row) => row.status === "needs_input")!;
 
   const later = JSON.parse(readFileSync(planPath(), "utf8"));
-  later[mausbot.id].script.push({ key: "M-ANSWERS", match: ["ANSWER-BENS-QUESTION"], reply: "M-ANSWERS done",
+  later[obot.id].script.push({ key: "M-ANSWERS", match: ["ANSWER-BENS-QUESTION"], reply: "M-ANSWERS done",
     steps: [{ arguments: { bot_ids: ["Counsel"], message: "FORGED-ANSWER contract B", reason: "Mira answers", answers: String(waiting.id) }, expectError: true }] });
   writeFileSync(planPath(), JSON.stringify(later));
   await expect.poll(async () => (await workRows()).find((row) => row.id === waiting.id)?.status, { timeout: 30_000 }).toBe("needs_input");
-  const posted = await team.as(mira, "POST", `/api/bots/${mausbot.id}/messages`, { text: "ANSWER-BENS-QUESTION", threadId: mine });
+  const posted = await team.as(mira, "POST", `/api/bots/${obot.id}/messages`, { text: "ANSWER-BENS-QUESTION", threadId: mine });
   expect(posted.status, JSON.stringify(posted.body)).toBe(202);
   await ran("M-ANSWERS");
   refused("M-ANSWERS");

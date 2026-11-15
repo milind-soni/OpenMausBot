@@ -1,5 +1,5 @@
-{
-  "title": "MausBot",
+﻿{
+  "title": "Obot",
   "root": true,
   "pages": [
     "index",
@@ -16,3 +16,4 @@
     "contributing"
   ]
 }
+

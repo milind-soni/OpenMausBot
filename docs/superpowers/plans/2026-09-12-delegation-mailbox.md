@@ -1,4 +1,4 @@
-# Delegation Mailbox Implementation Plan
+﻿# Delegation Mailbox Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -267,13 +267,13 @@ with:
 In the `list_bots` tool definition, change the description's opening sentence from:
 
 ```
-"List the other bots (agents) in your OpenMausBot section, with their model and whether they're busy.
+"List the other bots (agents) in your Obot section, with their model and whether they're busy.
 ```
 
 to:
 
 ```
-"List the other bots (agents) in your OpenMausBot section, with their model and what each is doing right now (available, working, waiting on the user, not responding, or unavailable).
+"List the other bots (agents) in your Obot section, with their model and what each is doing right now (available, working, waiting on the user, not responding, or unavailable).
 ```
 
 Leave the rest of that description string unchanged.
@@ -1032,3 +1032,4 @@ Do not push. Report the branch state, and hand over this checklist for an OMB2 s
 1. Bot A delegates to Bot B while B is mid-task → one "waiting — they're busy" chip in A's chat. It's delivered when B finishes.
 2. Open an approval card on B, then have A delegate → A's chip says B is waiting on you, and A's `list_bots` shows "waiting on the user".
 3. Chat with B three or more times before it picks up A's handoff → still delivered, with no "canceled" chip.
+

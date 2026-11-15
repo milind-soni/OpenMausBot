@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
+﻿import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -68,7 +68,7 @@ describe("relay tokens", () => {
 describe("descriptors", () => {
   it("round-trip, with and without the relay", () => {
     const T = generateKeyPair();
-    const withRelay = descriptorFor(T.publicKey, { hostId: Buffer.alloc(16, 1), nodes: ["relay1.openmausbot.com"] });
+    const withRelay = descriptorFor(T.publicKey, { hostId: Buffer.alloc(16, 1), nodes: ["relay1.obot.com"] });
     const parsed = parseDescriptor(encodeDescriptor(withRelay));
     expect(parsed.outcome === "ok" && parsed.descriptor).toEqual(withRelay);
     const direct = descriptorFor(T.publicKey);
@@ -84,3 +84,4 @@ describe("descriptors", () => {
     expect(parseDescriptor(null).outcome).toBe("reject");
   });
 });
+

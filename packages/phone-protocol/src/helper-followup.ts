@@ -1,4 +1,4 @@
-// MausBot's follow-up after its first look around, under its intro (HelperIntro). The server writes it once, in English,
+// Obot's follow-up after its first look around, under its intro (HelperIntro). The server writes it once, in English,
 // as a real message the model and the sidebar's preview read; clients say it in the viewer's language from its facts.
 // ENGLISH mirrors src/locales/en.json helperIntro.followup.*. It never names the AI it thinks with.
 

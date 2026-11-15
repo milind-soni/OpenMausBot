@@ -32,8 +32,8 @@ const NODE_REQUIRE = {
 const ENTRY_POINTS = [
   "index.ts",
   "message-search.worker.ts",
-  // the `openmausbot` command
-  "openmausbot.ts",
+  // the `obot` command
+  "obot.ts",
   "pair-cli.ts",
   "workspace-backup.worker.ts",
   // the OMB Cloud Pro home image's entry point
@@ -99,7 +99,7 @@ await build({
   plugins: [serverLocalePlugin],
 });
 
-// `openmausbot serve --tunnel` spawns the connector guardian as its own
+// `obot serve --tunnel` spawns the connector guardian as its own
 // process, so it must exist as a file beside the server.
 await build({
   entryPoints: [join(root, "electron", "managed-companion-guardian-main.mjs")],

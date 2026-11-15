@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -252,7 +252,7 @@ const SCENES = {
         who: "DODO needs a secret",
         iconId: "key",
         title: "Dodo Payments live API key",
-        expl: "For the dodo MCP server. OpenMausBot puts it in the server's settings. DODO never sees it.",
+        expl: "For the dodo MCP server. Obot puts it in the server's settings. DODO never sees it.",
         field: "Paste the key",
         buttons: [
           { label: "Decline", icon: "x", onClick: (el) => settleInto(el, `<span class="s">Dodo Payments live API key</span> · Declined`, icon("x", 13)) },
@@ -287,3 +287,4 @@ show(SCENES[location.hash.slice(1)] ? location.hash.slice(1) : "signin");
 </script>
 </body>
 </html>
+

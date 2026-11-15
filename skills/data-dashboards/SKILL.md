@@ -85,7 +85,7 @@ Cut cards rather than adding a fifth chart.
 
 - The chat shows about 640 px of height before scrolling: keep to KPIs, two charts and a short table.
 - The chat sets the light or dark theme on the page; the template follows it.
-- The template tells you which filters the person picked (`mausbot.setContext`), so a follow-up like "why did it drop?" has context.
+- The template tells you which filters the person picked (`obot.setContext`), so a follow-up like "why did it drop?" has context.
 
 ## Before you hand it over
 
@@ -103,9 +103,9 @@ Cut cards rather than adding a fifth chart.
 **Building blocks a `jsx` file can import**, nothing else (pinned, loaded from cdn.jsdelivr.net):
 - `react` (19.3): hooks and all; `react-dom` for portals.
 - `lucide-react` icons: `import { Check, ArrowRight } from "lucide-react"`, sized with `size={16}`.
-- `echarts` (6.1), or `import { Chart, useTheme } from "mausbot"`: `<Chart option={…} height={280} label="…" />`
+- `echarts` (6.1), or `import { Chart, useTheme } from "obot"`: `<Chart option={…} height={280} label="…" />`
   follows the light or dark theme; `useTheme()` returns `"light"` or `"dark"`.
-- `mausbot` also has `send(text)`, `open(url)` and `setContext(text)`, as in the tool's description.
+- `obot` also has `send(text)`, `open(url)` and `setContext(text)`, as in the tool's description.
 - Tailwind classes (4.3) need no import. `dark:` follows the chat's theme.
 TypeScript types are fine. A file that doesn't read, or imports anything else, comes back as an error with the
 line: fix it and send the whole file again. Errors while it runs show on the page and reach you with the next message.

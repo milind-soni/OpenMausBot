@@ -1,4 +1,4 @@
-# Optional personal OMB Cloud account
+﻿# Optional personal OMB Cloud account
 
 Personal Cloud is independent of Settings → Organization, the hosted Companion
 account, local profile fields, providers, bots and chat history. Fresh startup
@@ -7,18 +7,18 @@ Cloud authentication is optional; its failure never blocks free local use.
 
 ## Contract and boundaries
 
-The installed desktop uses only `https://cloud.openmausbot.com`. The renderer
+The installed desktop uses only `https://cloud.obot.com`. The renderer
 cannot supply an origin, callback URL, account credential, checkout URL or Pro
 flag. Explicitly injected HTTP loopback is available only to isolated fixtures.
 These endpoints belong to the remote Cloud service, not the local app server.
 
-- `POST https://cloud.openmausbot.com/api/cloud/desktop/authorize` accepts
+- `POST https://cloud.obot.com/api/cloud/desktop/authorize` accepts
   `deviceName`, `platform` and optional `appVersion`. It returns `cloudContractVersion: 1`, a private
   `deviceCode`, a display `userCode`, `expiresIn` (at most 600 seconds),
   `interval` (5–60 seconds), and the exact same-origin browser destination
   `/cloud/desktop?code=<userCode>`.
 - The browser completes email-code authentication and explicit device approval.
-  Electron polls `POST https://cloud.openmausbot.com/api/cloud/desktop/token`
+  Electron polls `POST https://cloud.obot.com/api/cloud/desktop/token`
   with the private device code.
   A successful response has `cloudContractVersion: 1`, `accessToken` (`omc_`
   plus 43 base64url characters), `expiresAt`, `device: {id}` and
@@ -27,7 +27,7 @@ These endpoints belong to the remote Cloud service, not the local app server.
 - Electron persists only the credential and identity in a separate OS-encrypted
   `cloud-account.bin`. It never persists Pro, writes the local workspace config,
   or sends this token to renderer JavaScript, organization services or engines.
-- `GET https://cloud.openmausbot.com/api/cloud/desktop/session` with the bearer
+- `GET https://cloud.obot.com/api/cloud/desktop/session` with the bearer
   returns the same identity,
   contract version and expiry, plus
   `entitlement: {plan: "free" | "pro", tier?: string, status: "active" | "inactive",
@@ -49,14 +49,14 @@ These endpoints belong to the remote Cloud service, not the local app server.
   restored from disk. The browser dashboard is the fixed `/cloud` URL. Opening
   it does not activate Pro. Refresh checks the server after a purchase.
 - Sign-out independently deletes the local credential and requests
-  `DELETE https://cloud.openmausbot.com/api/cloud/desktop/session`. A failed
+  `DELETE https://cloud.obot.com/api/cloud/desktop/session`. A failed
   remote revocation is disclosed; failure to clear the durable record blocks
   a new sign-in until cleanup works.
   Sign-out does not cancel the subscription or disconnect the organization.
 
 There is no credential-bearing deep link and no checkout-result callback.
 Device polling completes browser approval automatically. The existing
-`openmausbot://organization` action is unchanged.
+`obot://organization` action is unchanged.
 
 ## Automated fixtures
 
@@ -97,3 +97,4 @@ entitlements are synthetic, and credential storage is in memory. Real OTP,
 billing-webhook activation, keychain persistence and a shipped desktop build
 need separate qualification. Server-side enforcement of paid service requests
 must remain authoritative; the settings display is not an access-control gate.
+

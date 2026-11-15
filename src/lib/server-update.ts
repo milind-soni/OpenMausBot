@@ -108,7 +108,7 @@ function reasonText(reason: ServerUpdateReason, status: ServerUpdateStatus, run?
   const [folder, owners, mode] = run?.detail?.split(" ") ?? [];
   return t(REASON_TEXT[reason], {
     version: run?.target ?? status.latest ?? "", command: command ?? "", folder: folder ? `${folder} (${owners}, ${mode})` : "",
-    list: "docker volume ls --filter label=com.mausbot.role=update-backup", remove: "docker volume rm <name>",
+    list: "docker volume ls --filter label=com.obot.role=update-backup", remove: "docker volume rm <name>",
   });
 }
 
@@ -130,7 +130,7 @@ function runNote(status: ServerUpdateStatus | null): Pick<ServerUpdateView, "not
       return { note: `${t("serverUpdate.rollbackFailed")}${detail}`, noteTone: "danger" };
     }
     case "not-changed": return { note: `${t("serverUpdate.notChanged")} ${reasonText(run.reason ?? "failed", status!, run)}`, noteTone: "danger" };
-    case "not-started": return { note: `${t("serverUpdate.notStarted")} ${t("serverUpdate.runOnServer", { command: "systemctl status openmausbot-update.path" })}`, noteTone: "danger" };
+    case "not-started": return { note: `${t("serverUpdate.notStarted")} ${t("serverUpdate.runOnServer", { command: "systemctl status obot-update.path" })}`, noteTone: "danger" };
     default: return {};
   }
 }

@@ -3,8 +3,8 @@
 // - the engine runs confined (no shell, no reads outside the thread's own empty folder) and at Ask, whatever the bot's
 //   level, with no saved allowance; an engine that cannot be confined doesn't take the call;
 // - of a turn's tools only the engine's hooks are mounted: no computer, browser, phone, connected apps, MCP servers, data
-//   or OpenMausBot's own tools, so it can start, schedule, change or remember nothing;
-// - of OpenMausBot's own routes it may reach only the engine's hooks and the paging of its own long results;
+//   or Obot's own tools, so it can start, schedule, change or remember nothing;
+// - of Obot's own routes it may reach only the engine's hooks and the paging of its own long results;
 // - its system prompt keeps the bot's standing instructions, its saved memory and the rules for reading who sent a line,
 //   and nothing about the person or their work;
 // - what it says never reaches the person's other conversations, and its problems are no report to a Chief, whose turn has

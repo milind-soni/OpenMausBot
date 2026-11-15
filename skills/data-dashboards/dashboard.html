@@ -431,7 +431,7 @@ async function refresh() {
   render();
   $("dash").classList.remove("is-updating");
   const period = PERIODS.find((p) => p.months === state.months)?.label ?? "";
-  window.mausbot?.setContext?.(`The person is looking at ${state.region || "all regions"}, ${period.toLowerCase()}.`)?.catch(() => {});
+  window.obot?.setContext?.(`The person is looking at ${state.region || "all regions"}, ${period.toLowerCase()}.`)?.catch(() => {});
 }
 
 function showError(error) {

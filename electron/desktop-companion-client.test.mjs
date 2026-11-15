@@ -49,7 +49,7 @@ describe("desktop companion endpoint", () => {
     ]);
     expect(desktopCompanionRendererArguments("http://127.0.0.1:8798", access)).toEqual([
       "--omb-local-origin=http://127.0.0.1:8798",
-      "--openmausbot-remote-client",
+      "--obot-remote-client",
     ]);
   });
 
@@ -60,47 +60,47 @@ describe("desktop companion endpoint", () => {
     expect(normalizeTailscaleCompanionEndpoint("http://HOST.example-tailnet.ts.net:9910/")).toBe(
       "http://host.example-tailnet.ts.net:9910",
     );
-    expect(normalizeDesktopCompanionEndpoint(`https://${LABEL}.openmausbot.com`)).toBe(
-      `https://${LABEL}.openmausbot.com`,
+    expect(normalizeDesktopCompanionEndpoint(`https://${LABEL}.obot.com`)).toBe(
+      `https://${LABEL}.obot.com`,
     );
-    expect(normalizeDesktopCompanionEndpoint(`${LABEL}.openmausbot.com`)).toBe(
-      `https://${LABEL}.openmausbot.com`,
+    expect(normalizeDesktopCompanionEndpoint(`${LABEL}.obot.com`)).toBe(
+      `https://${LABEL}.obot.com`,
     );
     // The control plane's second Cloudflare account gives addresses here.
-    expect(normalizeDesktopCompanionEndpoint(`https://${LABEL}.mausbot.si`)).toBe(
-      `https://${LABEL}.mausbot.si`,
+    expect(normalizeDesktopCompanionEndpoint(`https://${LABEL}.obot.si`)).toBe(
+      `https://${LABEL}.obot.si`,
     );
-    expect(normalizeDesktopCompanionEndpoint(` ${LABEL.toUpperCase()}.Mausbot.SI/ `)).toBe(
-      `https://${LABEL}.mausbot.si`,
+    expect(normalizeDesktopCompanionEndpoint(` ${LABEL.toUpperCase()}.Obot.SI/ `)).toBe(
+      `https://${LABEL}.obot.si`,
     );
     for (const endpoint of [
       "https://unrelated.example.com",
-      `http://${LABEL}.openmausbot.com`,
+      `http://${LABEL}.obot.com`,
       "http://10.0.0.4:8810",
       "http://host.local:8810",
       "https://10.0.0.4",
       "http://host.example-tailnet.ts.net/path",
-      `https://${LABEL}.openmausbot.com/path`,
+      `https://${LABEL}.obot.com/path`,
       "http://user@host.example-tailnet.ts.net",
       "http://host.example-tailnet.ts.net.evil.test",
-      `https://${LABEL}.openmausbot.com.evil.test`,
-      `http://${LABEL}.mausbot.si`,
-      `https://${LABEL}.mausbot.si/path`,
-      `https://${LABEL}.mausbot.si.evil.test`,
-      "https://mausbot.si",
-      "mausbot.si",
-      "https://evilmausbot.si",
-      `https://${LABEL}.evilmausbot.si`,
-      "https://www.mausbot.si",
-      "https://app.mausbot.si",
-      "https://accounts.openmausbot.com",
-      "https://c-opaque.openmausbot.com",
-      "https://c-opaque.mausbot.si",
-      `https://${LABEL.slice(0, -1)}.mausbot.si`,
-      `https://${LABEL}0.mausbot.si`,
-      `https://${LABEL.replace("c-", "d-")}.mausbot.si`,
-      `https://${LABEL}.extra.mausbot.si`,
-      `https://www.${LABEL}.mausbot.si`,
+      `https://${LABEL}.obot.com.evil.test`,
+      `http://${LABEL}.obot.si`,
+      `https://${LABEL}.obot.si/path`,
+      `https://${LABEL}.obot.si.evil.test`,
+      "https://obot.si",
+      "obot.si",
+      "https://evilobot.si",
+      `https://${LABEL}.evilobot.si`,
+      "https://www.obot.si",
+      "https://app.obot.si",
+      "https://accounts.obot.com",
+      "https://c-opaque.obot.com",
+      "https://c-opaque.obot.si",
+      `https://${LABEL.slice(0, -1)}.obot.si`,
+      `https://${LABEL}0.obot.si`,
+      `https://${LABEL.replace("c-", "d-")}.obot.si`,
+      `https://${LABEL}.extra.obot.si`,
+      `https://www.${LABEL}.obot.si`,
     ]) {
       expect(normalizeDesktopCompanionEndpoint(endpoint), endpoint).toBe("");
     }
@@ -109,7 +109,7 @@ describe("desktop companion endpoint", () => {
   it("accepts one c-<32 hex> label under each listed domain, and only those", () => {
     // The third domain is a one-line change; until the owner names it, nothing new is accepted.
     expect(NEXT_MANAGED_COMPANION_HOST_SUFFIX).toBe("");
-    expect(MANAGED_COMPANION_HOST_SUFFIXES).toEqual(["openmausbot.com", "mausbot.si"]);
+    expect(MANAGED_COMPANION_HOST_SUFFIXES).toEqual(["obot.com", "obot.si"]);
     expect(Object.isFrozen(MANAGED_COMPANION_HOST_SUFFIXES)).toBe(true);
     for (const suffix of MANAGED_COMPANION_HOST_SUFFIXES) {
       expect(suffix).toMatch(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/);
@@ -127,22 +127,22 @@ describe("desktop companion endpoint", () => {
         expect(normalizeDesktopCompanionEndpoint(near), near).toBe("");
       }
     }
-    for (const unlisted of ["example.net", "openmausbot.net", "mausbot.com", "si", "com", ""]) {
+    for (const unlisted of ["example.net", "obot.net", "obot.com", "si", "com", ""]) {
       expect(normalizeDesktopCompanionEndpoint(`https://${LABEL}.${unlisted}`), unlisted).toBe("");
     }
   });
 
   it("validates, adds, and removes the encrypted credential document field", () => {
-    const hostedAccess = { ...access, endpoint: `https://${LABEL}.openmausbot.com` };
+    const hostedAccess = { ...access, endpoint: `https://${LABEL}.obot.com` };
     expect(desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: hostedAccess })).toEqual(
       hostedAccess,
     );
-    const secondDomain = { ...access, endpoint: `https://${LABEL}.mausbot.si` };
+    const secondDomain = { ...access, endpoint: `https://${LABEL}.obot.si` };
     expect(desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: secondDomain })).toEqual(
       secondDomain,
     );
     expect(
-      desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: { ...access, endpoint: "https://app.mausbot.si" } }),
+      desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: { ...access, endpoint: "https://app.obot.si" } }),
     ).toBeNull();
 
     expect(desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: access })).toEqual(access);
@@ -193,40 +193,40 @@ describe("desktop companion pairing", () => {
       }),
     );
     const paired = await pairDesktopCompanion({
-      endpoint: `https://${LABEL}.openmausbot.com`,
+      endpoint: `https://${LABEL}.obot.com`,
       code: "654321",
       deviceName: "Desktop client",
       requestId: "request-https-01",
       fetchImpl,
     });
-    expect(paired).toEqual({ ...access, endpoint: `https://${LABEL}.openmausbot.com` });
+    expect(paired).toEqual({ ...access, endpoint: `https://${LABEL}.obot.com` });
     expect(fetchImpl).toHaveBeenCalledWith(
-      `https://${LABEL}.openmausbot.com/api/pair`,
+      `https://${LABEL}.obot.com/api/pair`,
       expect.objectContaining({ method: "POST" }),
     );
 
     const secondDomain = await pairDesktopCompanion({
-      endpoint: `${LABEL}.mausbot.si`,
+      endpoint: `${LABEL}.obot.si`,
       code: "654321",
       deviceName: "Desktop client",
       requestId: "request-https-02",
       fetchImpl,
     });
-    expect(secondDomain).toEqual({ ...access, endpoint: `https://${LABEL}.mausbot.si` });
+    expect(secondDomain).toEqual({ ...access, endpoint: `https://${LABEL}.obot.si` });
     expect(fetchImpl).toHaveBeenLastCalledWith(
-      `https://${LABEL}.mausbot.si/api/pair`,
+      `https://${LABEL}.obot.si/api/pair`,
       expect.objectContaining({ method: "POST" }),
     );
 
     await expect(
       pairDesktopCompanion({
-        endpoint: "https://app.mausbot.si",
+        endpoint: "https://app.obot.si",
         code: "654321",
         deviceName: "Desktop client",
         requestId: "request-https-03",
         fetchImpl,
       }),
-    ).rejects.toThrow("OpenMausBot HTTPS companion address");
+    ).rejects.toThrow("Obot HTTPS companion address");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 

@@ -1,4 +1,4 @@
-// The watcher takes its addresses and its two moves as functions, so no sockets.
+﻿// The watcher takes its addresses and its two moves as functions, so no sockets.
 import { describe, expect, it } from "vitest";
 
 import { createAddressWatcher, type AddressWatchOptions } from "../src/advertise-watch.ts";
@@ -201,7 +201,7 @@ describe("address watcher", () => {
   });
 
   it("re-advertises when the computer is renamed", async () => {
-    let name = "OpenMausBot";
+    let name = "Obot";
     const { watcher, calls } = rig(["192.168.1.42"], { name: () => name });
     await watcher.check();
     await watcher.check();
@@ -210,3 +210,4 @@ describe("address watcher", () => {
     expect(calls).toEqual(["advertise 192.168.1.42", "advertise 192.168.1.42"]);
   });
 });
+

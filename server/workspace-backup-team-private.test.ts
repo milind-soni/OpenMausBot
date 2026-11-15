@@ -34,7 +34,7 @@ function teamData(root: string): void {
   json(join(root, "thread-starters.json"), { "bob-chat": BOB, "room-thread": BOB, "outside-thread": CLOUD_OUTSIDE_KEY });
   json(join(root, "groups.json"), [{ id: "room", threadId: "room-thread", memberIds: ["bot"], tasks: [{ threadId: "room-thread" }] }]);
   json(join(root, "bots.json"), [{ id: "bot", name: "Scout", threadId: "main", avatarUrl: "/api/attachments/avatar.png", tasks: [{ threadId: "main", title: "Scout" }, { threadId: "bob-chat", title: "Bob's" }, { threadId: "outside-thread", title: "Webhook" }] },
-    { id: "bobs-own", name: "MausBot", threadId: "bobs-own-main", defaultBot: { person: "bob@acme.test" }, tasks: [{ threadId: "bobs-own-main", title: "MausBot" }, { threadId: "bobs-inbox", title: "Inbox" }] }]);
+    { id: "bobs-own", name: "Obot", threadId: "bobs-own-main", defaultBot: { person: "bob@acme.test" }, tasks: [{ threadId: "bobs-own-main", title: "Obot" }, { threadId: "bobs-inbox", title: "Inbox" }] }]);
   json(join(root, "person-inbox.json"), { items: [{ text: "Bob's inbox line" }] });
   file(join(root, "workspaces", "bobs-own", "MEMORY.md"), "Bob's own bot's notes");
   json(join(root, "config.json"), { language: "en" });

@@ -1,6 +1,6 @@
-# Localization
+﻿# Localization
 
-OpenMausBot ships its translations inside the app. It does not contact a
+Obot ships its translations inside the app. It does not contact a
 translation service at runtime, and contributors do not need an API key.
 English in `src/locales/en.json` is the source catalog; the other JSON files
 are partial overlays that fall back to English for missing keys.
@@ -80,3 +80,4 @@ Model output is a draft, not an authority. Review tone, terminology, grammar,
 product names, and safety-sensitive copy before committing it. AI translation
 does not run in GitHub Actions: normal CI stays deterministic, secret-free,
 and safe for forks.
+

@@ -108,7 +108,7 @@ describe("a card", () => {
 });
 
 it("an https address has a host and nothing hidden in it", () => {
-  expect(isHttpsUrl("https://github.com/milind-soni/OpenMausBot")).toBe(true);
+  expect(isHttpsUrl("https://github.com/alnatourm/Obot")).toBe(true);
   for (const bad of ["https://localhost/x", "https:// spaced.com", "https://a.com/\u0000", "ftp://a.com", "//a.com"]) expect(isHttpsUrl(bad), bad).toBe(false);
 });
 

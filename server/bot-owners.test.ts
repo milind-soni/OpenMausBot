@@ -22,7 +22,7 @@ describe("forgetMember", () => {
       { id: "made", createdBy: BOB },
       { id: "listed", visibility: { people: [BOB, "@acme.test"] } },
       { id: "scout", createdBy: "olive@acme.test", reportsTo: "ada@acme.test" },
-      { id: "mausbot", defaultBot: { person: BOB }, reportsTo: BOB },
+      { id: "obot", defaultBot: { person: BOB }, reportsTo: BOB },
     ]);
     const shared: Array<[string, BotAccess]> = [];
     const handedBack = forgetMember(store, "Bob@Acme.test", (bot, access) => { shared.push([bot.id, access]); store.patchBot(bot.id, { access }); });
@@ -30,7 +30,7 @@ describe("forgetMember", () => {
     expect(store.bot("ledger")).toMatchObject({ reportsTo: undefined, createdBy: undefined });
     expect(store.bot("made")?.createdBy).toBeUndefined();
     expect(store.bot("scout")).toMatchObject({ reportsTo: "ada@acme.test", createdBy: "olive@acme.test" });
-    expect(store.bot("mausbot")?.reportsTo).toBe(BOB);
+    expect(store.bot("obot")?.reportsTo).toBe(BOB);
     expect(shared).toEqual([
       ["ledger", { everyone: "none", people: { "ben@acme.test": "chat" } }],
       ["listed", { everyone: "none", people: { "@acme.test": "chat" } }],

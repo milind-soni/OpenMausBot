@@ -14,7 +14,7 @@ export interface CloudComputerRecoveryRouteDeps {
   cloudComputerUsed(owner: string): void;
 }
 
-/** GET and POST /api/bots/:id/computer/recovery: what MausBot is doing about a bot's cloud computer that stopped answering,
+/** GET and POST /api/bots/:id/computer/recovery: what Obot is doing about a bot's cloud computer that stopped answering,
  * and the computer panel's Restart computer and Replace computer. Admin-only like every computer route. */
 export function createCloudComputerRecoveryRoutes(deps: CloudComputerRecoveryRouteDeps): RouteHandler {
   return async ({ req, res, path, method, json, readBody }) => {

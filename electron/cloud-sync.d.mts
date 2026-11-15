@@ -22,7 +22,7 @@ export interface CloudFilesState {
   lastSyncedAt: number | null;
   disk: CloudFilesDisk | null;
   shared: SharedFolder[];
-  /** What Cloud bots make, kept in `dir` (Documents/MausBot): one folder per bot, one inside it per conversation. */
+  /** What Cloud bots make, kept in `dir` (Documents/Obot): one folder per bot, one inside it per conversation. */
   outputs: { enabled: boolean; dir: string; folders: number; problem: string | null };
 }
 /** A folder the person picked, checked on this computer before anything is shared. `token` stands for its path in `share`. */

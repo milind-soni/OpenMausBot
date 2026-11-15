@@ -20,7 +20,7 @@ function setup(options: { zone: string; start: string; morning?: string; overnig
   dirs.push(dir);
   let now = Date.parse(options.start);
   const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }));
-  const chief = store.createBot({ name: "MausBot" });
+  const chief = store.createBot({ name: "Obot" });
   store.setChiefOfStaff(chief.id);
   const pushed: string[] = [];
   const hooks: { pushed?: () => void } = {};

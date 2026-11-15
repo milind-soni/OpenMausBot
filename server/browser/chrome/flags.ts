@@ -105,7 +105,7 @@ export function chromeArgs(input: ChromeFlagsInput): string[] {
   else if (input.windowPosition) args.push(`--window-position=${Math.round(input.windowPosition.x)},${Math.round(input.windowPosition.y)}`);
   if (input.locale && LOCALE.test(input.locale)) args.push(`--lang=${input.locale}`);
   if (input.egressPort !== undefined && input.egressPort !== null) {
-    if (!Number.isInteger(input.egressPort) || input.egressPort < 1 || input.egressPort > 65_535) throw new Error("The browser only goes through OpenMausBot's own local gate.");
+    if (!Number.isInteger(input.egressPort) || input.egressPort < 1 || input.egressPort > 65_535) throw new Error("The browser only goes through Obot's own local gate.");
     args.push(...gateChromeFlags(input.egressPort, platform));
   } else {
     args.push(...credentialStoreFlags(platform));

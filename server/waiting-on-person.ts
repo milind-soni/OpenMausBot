@@ -79,7 +79,7 @@ export class UnansweredApprovals {
     const noted = this.byThread.get(threadId);
     if (!noted || noted.turnId !== turnId) return text;
     const one = noted.actions.length === 1;
-    const note = `[OpenMausBot: nobody answered the ${one ? "approval" : "approvals"} for ${noted.actions.map(action => `“${action}”`).join(", ")} in time, so ${one ? "it" : "they"} did not run. Do not report ${one ? "it" : "them"} as done; ${one ? "it needs" : "they need"} the person's approval.]`;
+    const note = `[Obot: nobody answered the ${one ? "approval" : "approvals"} for ${noted.actions.map(action => `“${action}”`).join(", ")} in time, so ${one ? "it" : "they"} did not run. Do not report ${one ? "it" : "them"} as done; ${one ? "it needs" : "they need"} the person's approval.]`;
     if (!text) return note;
     return ok ? `${note}\n\n${text}` : `${text}\n\n${note}`;
   }

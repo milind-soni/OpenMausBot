@@ -25,7 +25,7 @@ const LOOK_MS = 3_000;
 const ALL = 6;
 const DELAYS = [INTRO_TIMING.first, INTRO_TIMING.line, INTRO_TIMING.line, INTRO_TIMING.typing, INTRO_TIMING.followup, INTRO_TIMING.chips];
 
-/** MausBot's three lines: who it is, what it does here, and that it is looking around. A MausBot that is not the Chief
+/** Obot's three lines: who it is, what it does here, and that it is looking around. A Obot that is not the Chief
  * keeps its helper's lines; a Team Cloud member's leaves their day to the team's Chief. */
 export function introLines(input: { name: string; chief: boolean; person?: string; team?: string }): string[] {
   const team = input.team ? t("helperIntro.team", { team: input.team }) : "";
@@ -110,7 +110,7 @@ function useArrival(first: boolean, ai: boolean, ready: boolean): { shown: numbe
   return { shown: run ?? (animate ? 0 : ALL), staged: run !== null };
 }
 
-/** MausBot's first messages in Simple mode, in the viewer's language: three short bubbles, its follow-up once it has looked
+/** Obot's first messages in Simple mode, in the viewer's language: three short bubbles, its follow-up once it has looked
  * around (a real message, helperFollowup, which a first run asks the server for) and chips for what is still missing.
  * The chips go once the person writes anything after it (`answered`). */
 export function SimpleHelperIntro({ botId, threadId, message, answered, followup }: {
@@ -122,7 +122,7 @@ export function SimpleHelperIntro({ botId, threadId, message, answered, followup
   const bot = state.bots.find((candidate) => candidate.id === botId);
   const team = bot?.defaultBot?.person ? state.config?.team?.name : undefined;
   const person = greetingName(state.config?.profile?.name) || undefined;
-  const lines = introLines({ name: bot?.name ?? "MausBot", chief: Boolean(bot?.chiefOfStaff), person, team });
+  const lines = introLines({ name: bot?.name ?? "Obot", chief: Boolean(bot?.chiefOfStaff), person, team });
   const look = useLookAround(!answered);
   const ai = thinksWith(bot, state.instances);
   const connects = whoConnectsAi(useTeamPeople());

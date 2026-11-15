@@ -1,13 +1,13 @@
-// The internal calls behind MausBot's list_unread_notifications and mark_notifications_read tools. Runs inside index.ts's
+// The internal calls behind Obot's list_unread_notifications and mark_notifications_read tools. Runs inside index.ts's
 // /api/internal/ block after the capability bearer is checked; the bot is the capability's. The only write is "read".
 import type { ServerResponse } from "node:http";
 
 import type { json as sendJson } from "../harness/http.ts";
-import { listUnread, markRead, type NotificationsHost } from "../mausbot-notifications.ts";
+import { listUnread, markRead, type NotificationsHost } from "../obot-notifications.ts";
 import { markNotificationLogRead, recentNotificationLog } from "../message-db.ts";
 import { PASS } from "./table.ts";
 
-export interface MausBotNotificationsContext {
+export interface ObotNotificationsContext {
   method: string;
   path: string;
   res: ServerResponse;
@@ -22,7 +22,7 @@ export type LiveNotificationsDeps = Pick<NotificationsHost, "bot" | "team"> & { 
 const LIST = "/api/internal/notifications";
 const READ = "/api/internal/notifications/read";
 
-export function createMausBotNotificationRoutes(deps: LiveNotificationsDeps | NotificationsHost) {
+export function createObotNotificationRoutes(deps: LiveNotificationsDeps | NotificationsHost) {
   const host: NotificationsHost = "recent" in deps ? deps : {
     bot: deps.bot,
     team: deps.team,
@@ -31,7 +31,7 @@ export function createMausBotNotificationRoutes(deps: LiveNotificationsDeps | No
     announceRead: (threadId, ids) => deps.broadcast({ kind: "notifications.read", threadId, ids }),
     now: Date.now,
   };
-  return async (ctx: MausBotNotificationsContext): Promise<typeof PASS | void> => {
+  return async (ctx: ObotNotificationsContext): Promise<typeof PASS | void> => {
     if (!((ctx.method === "GET" && ctx.path === LIST) || (ctx.method === "POST" && ctx.path === READ))) return PASS;
     let result;
     if (ctx.path === LIST) result = listUnread(host, ctx.botId);
@@ -40,6 +40,6 @@ export function createMausBotNotificationRoutes(deps: LiveNotificationsDeps | No
       result = markRead(host, ctx.botId, body && typeof body === "object" ? (body as Record<string, unknown>).ids : undefined);
     }
     if (result.ok) return void ctx.json(ctx.res, 200, { text: result.text });
-    return void ctx.json(ctx.res, result.error.startsWith("Only MausBot") ? 403 : 400, { error: result.error });
+    return void ctx.json(ctx.res, result.error.startsWith("Only Obot") ? 403 : 400, { error: result.error });
   };
 }

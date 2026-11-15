@@ -104,7 +104,7 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
       return json(res, 400, { error: "Invalid request URL" });
     }
     if (req.method === "GET" && url.pathname === "/health") {
-      return json(res, 200, { app: "openmausbot-webhooks", ready: true });
+      return json(res, 200, { app: "obot-webhooks", ready: true });
     }
     if (door && await door(req, res, url)) return;
     const match = url.pathname.match(/^\/hooks\/(wh_[A-Za-z0-9_-]+)(?:\/([^/]+))?$/);

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// MausBot's first messages. Simple mode: three short bubbles, a follow-up once it has looked around (written once by
+// Obot's first messages. Simple mode: three short bubbles, a follow-up once it has looked around (written once by
 // the server, as a real message) and chips for only what is still missing. Advanced mode: the one bubble with asks it
 // always had.
 import { act, createElement } from "react";
@@ -54,10 +54,10 @@ const { SIMPLE_BOT_BUBBLE } = await import("./chat-bubble");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const claude = (ready: boolean): InstanceInfo => ({ instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude",
   snapshot: { state: ready ? "available" : "unavailable", authenticated: ready }, models: { default: "m", options: [] } });
-const maus = (extra: Partial<Bot> = {}): Bot => ({ id: "maus", threadId: "t", name: "MausBot", title: "", description: "", notifications: true,
+const maus = (extra: Partial<Bot> = {}): Bot => ({ id: "maus", threadId: "t", name: "Obot", title: "", description: "", notifications: true,
   color: "chrome", unread: false, modelSelection: { instanceId: "claude", model: "m" }, messages: [], defaultBot: {}, chiefOfStaff: true, ...extra });
-const intro: Message = { id: "intro", role: "bot", kind: "options", at: 1, helperIntro: true, text: "Hey! I'm MausBot. I'm new here.",
-  card: { title: "Hey! I'm MausBot. I'm new here.", subtitle: "", options: ["What are my bots up to?"] } };
+const intro: Message = { id: "intro", role: "bot", kind: "options", at: 1, helperIntro: true, text: "Hey! I'm Obot. I'm new here.",
+  card: { title: "Hey! I'm Obot. I'm new here.", subtitle: "", options: ["What are my bots up to?"] } };
 const saved = (facts: HelperFollowupFacts): Message => ({ id: "f", role: "bot", kind: "text", at: 2, text: "English", helperFollowup: facts });
 
 let host: HTMLDivElement, root: Root;
@@ -101,22 +101,22 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-describe("what MausBot says first", () => {
+describe("what Obot says first", () => {
   it("as the Chief: who it is, what it does here, and that it is looking around, never by the person's name", () => {
     const said = [
-      "Hey! I'm MausBot. I'm new here.",
+      "Hey! I'm Obot. I'm new here.",
       "I'm here to be your Chief of Staff. I can manage your other bots. Task me with anything. I'll make sure it gets to the right bot.",
       "I'm taking a look around to see if there's anything I can pick up for you. I'll follow up in a moment.",
     ];
-    expect(introLines({ name: "MausBot", chief: true })).toEqual(said);
-    expect(introLines({ name: "MausBot", chief: true, person: "Ada" })).toEqual(said);
-    expect(introLines({ name: "MausBot", chief: true, team: "Acme" })[1]).toBe(`${said[1]} On Acme, I'm here for you and look after your own bots.`);
+    expect(introLines({ name: "Obot", chief: true })).toEqual(said);
+    expect(introLines({ name: "Obot", chief: true, person: "Ada" })).toEqual(said);
+    expect(introLines({ name: "Obot", chief: true, team: "Acme" })[1]).toBe(`${said[1]} On Acme, I'm here for you and look after your own bots.`);
   });
 
-  it("keeps a helper's lines for a MausBot that is not the Chief", () => {
-    expect(introLines({ name: "MausBot", chief: false })[0]).toBe("Hi! I'm MausBot, your helper for everything here.");
-    expect(introLines({ name: "MausBot", chief: false, person: "Ada" })[0]).toBe("Hi Ada! I'm MausBot, your helper for everything here.");
-    const member = introLines({ name: "MausBot", chief: false, team: "Acme" });
+  it("keeps a helper's lines for a Obot that is not the Chief", () => {
+    expect(introLines({ name: "Obot", chief: false })[0]).toBe("Hi! I'm Obot, your helper for everything here.");
+    expect(introLines({ name: "Obot", chief: false, person: "Ada" })[0]).toBe("Hi Ada! I'm Obot, your helper for everything here.");
+    const member = introLines({ name: "Obot", chief: false, team: "Acme" });
     expect(member[1]).toBe("Ask me how to do anything here. I can set up bots, apps and routines with you. On Acme, I'm here for you and look after your own bots.");
   });
 
@@ -221,7 +221,7 @@ describe("in the chat (Simple mode)", () => {
     expect(chipAction("cloud")).toEqual({ type: "openCloudAdd", source: "app_onboarding" });
   });
 
-  it("says nothing while the Chief step still introduces MausBot", async () => {
+  it("says nothing while the Chief step still introduces Obot", async () => {
     setWelcomingBot("maus");
     await show();
     expect(host.querySelector("[data-helper-intro]")).toBeNull();
@@ -287,7 +287,7 @@ describe("in Advanced mode", () => {
 
   it("is the one bubble it always was: who it is, the setup still to do, and asks", async () => {
     await show();
-    expect(host.textContent).toContain(t("helperIntro.title", { name: "MausBot" }));
+    expect(host.textContent).toContain(t("helperIntro.title", { name: "Obot" }));
     expect(host.textContent).toContain(t("helperIntro.chief"));
     expect(host.querySelector('[data-helper-ask="helperIntro.ask.overview"]')).not.toBeNull();
     expect(chips()).toEqual(["bots", "apps", "phone", "cloud"]);

@@ -1,6 +1,6 @@
 # scrcpy server provenance
 
-OpenMausBot shows the screen of a USB Android phone with the official scrcpy
+Obot shows the screen of a USB Android phone with the official scrcpy
 server 5.0.1. The server file comes from Genymobile's GitHub release:
 
 <https://github.com/Genymobile/scrcpy/releases/tag/v5.0.1>
@@ -14,16 +14,16 @@ downloads it on first use from
 
 <https://github.com/Genymobile/scrcpy/releases/download/v5.0.1/scrcpy-server-v5.0.1>
 
-into `scrcpy/scrcpy-server-v5.0.1` in its data directory (`~/.openmausbot`
+into `scrcpy/scrcpy-server-v5.0.1` in its data directory (`~/.obot`
 unless `OMB_DATA_DIR` says otherwise), and uses it only when its SHA-256
 equals the digest above. Every later use verifies the saved file again.
 
 On a server without internet access, download the release asset on another
 machine, check its digest, and save it at that path under that name.
 
-OpenMausBot copies the file to the phone with `adb push`, runs it there with
+Obot copies the file to the phone with `adb push`, runs it there with
 `app_process`, and removes it when the view closes. Nothing is installed on
-the phone. The file is used unmodified; OpenMausBot's own client
+the phone. The file is used unmodified; Obot's own client
 (`server/phone-screen/`) speaks the protocol of this one release, so a new
 scrcpy version needs the client checked against it before the pin moves.
 

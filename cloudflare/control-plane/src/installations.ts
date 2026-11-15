@@ -1,4 +1,4 @@
-import { z } from "zod";
+﻿import { z } from "zod";
 import { timingSafeEqual } from "node:crypto";
 
 import type { ControlPlaneAuth } from "./auth";
@@ -47,7 +47,7 @@ function printableString(maxLength: number) {
 const printableName = printableString(80);
 export const printableVersion = printableString(64);
 
-/** The desktop app, or a self-hosted server (`openmausbot serve`, a fleet container). Optional on every request
+/** The desktop app, or a self-hosted server (`obot serve`, a fleet container). Optional on every request
  * that carries it: accepted here before any client sends it, since the request schemas are strict. */
 export const installationKindSchema = z.enum(["desktop", "server"]);
 export type InstallationKind = z.infer<typeof installationKindSchema>;
@@ -432,3 +432,4 @@ export async function installationSelf(request: Request, env: Env): Promise<Resp
     credentialExpiresAt: installation.expires_at,
   });
 }
+

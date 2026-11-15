@@ -3,7 +3,7 @@
 ## 目的
 
 #1637 を `main`（`6d72b3ac`）へマージした push CI
-https://github.com/milind-soni/OpenMausBot/actions/runs/35702797939
+https://github.com/alnatourm/Obot/actions/runs/35702797939
 が落ちている。直前の `main`（`e8729497`）は緑だった。落ちている検査を、製品のピン留めと更新順を戻さずに通す。
 
 ## 失敗
@@ -27,3 +27,4 @@ iOS UI は PR head で落ち、マージ後の run では通った。今回は�
 - iOS のトグル検査。マージ後の CI では通っている。
 - `comms.test.ts` の `ECONNRESET`。今回の差分では再現手順がない。
 - Vercel のデプロイ認可。
+

@@ -1,4 +1,4 @@
-# Feature switches
+﻿# Feature switches
 
 The server stores these options under `features` in its `config.json`. Some have
 Settings controls; others currently need a file edit. They apply to the server
@@ -10,7 +10,7 @@ packaged releases may differ, including which controls Settings shows.
 
 ## Change a switch
 
-The default file is `~/.openmausbot/config.json` on the machine running the server.
+The default file is `~/.obot/config.json` on the machine running the server.
 If the server uses `OMB_DATA_DIR`, edit `config.json` in that directory instead.
 Stop that server (or quit the app if it runs the server), back up the file, merge
 only the keys you want into its existing `features` object, then start it again.
@@ -84,7 +84,7 @@ The desktop asks its person before ordinary server lending. There is an
 exception after **Make &lt;server&gt; my home** moves the bots to a server owned by
 that person alone: the computer then works for its home automatically, without
 another access dialog, even when `sharedComputers` is `false`. Use the
-OpenMausBot menu bar item to **Pause** that lending. Cloud homes also have their
+Obot menu bar item to **Pause** that lending. Cloud homes also have their
 own lending rules; this flag is not a universal pause control. See
 [Self-hosting](self-hosting.md) for the move, pairing and trust boundaries.
 
@@ -122,3 +122,4 @@ also dropped, so check spelling rather than relying on an unrecognized key.
 The accepted fields are defined in [the server configuration schema](../server/config.ts).
 The effective defaults also account for the individual feature's dependencies
 and, where listed above, environment overrides.
+

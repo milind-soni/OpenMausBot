@@ -16,7 +16,7 @@ it("lists a bot none of the groups its person turned off, from its next turn, an
   await new Promise<void>((resolve) => stub.listen(0, "127.0.0.1", resolve));
   const stubUrl = `http://127.0.0.1:${(stub.address() as { port: number }).port}`;
   const session = await launchVerificationServer({ ...process.env, OMB_FAKE_IMAGE_API_URL: `${stubUrl}/v1` }, undefined, undefined, undefined, undefined, { scripted: true }, [], stubUrl);
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OBOT_URL: session.info.url } }) as Promise<any>;
   const api = (path: string, body?: unknown, method = "POST") =>
     request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
   const planPath = join(session.info.dataDir, "room-plan.json");

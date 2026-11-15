@@ -329,7 +329,7 @@ describe("the inbox as its panel lists it", () => {
     f.team.inbox.markRead(key(BEN.email), deck!.id);
     expect(f.changed, "a second mark changes nothing").toEqual([inbox]);
     expect(f.team.inbox.view(key(CLEO.email))?.rows ?? [], "Cleo's inbox holds nothing of Ben's").toEqual([]);
-    expect(f.team.inbox.view(key(ADA.email)), "no Chief, no MausBot: no inbox").toBeNull();
+    expect(f.team.inbox.view(key(ADA.email)), "no Chief, no Obot: no inbox").toBeNull();
   });
 });
 

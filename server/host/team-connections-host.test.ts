@@ -225,7 +225,7 @@ describe("apps each person connects", () => {
     const scout = { id: "scout", name: "Scout", connectorTools: { gmail: { tools: "*" as const } } };
     await host.appsIntegrations(scout, "main-chat", "g1");
     await host.appsIntegrations(scout, "work-chat", "g2");
-    await host.appsIntegrations({ id: "mausbot", name: "MausBot" }, "work-chat", "g3");
+    await host.appsIntegrations({ id: "obot", name: "Obot" }, "work-chat", "g3");
     await host.appsIntegrations({ ...scout, connectorScopes: { apps: { gmail: "read" } } }, "work-chat", "g4");
     const offered = composio.mcpIntegration.mock.calls.map(([, context]) => context as typeof context & { connectorTools?: unknown })
       .filter((context) => !context.as).map((context) => context.connectorTools);

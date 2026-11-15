@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+﻿import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import { Provider } from '@/components/provider';
 import { appName, siteUrl } from '@/lib/shared';
@@ -12,7 +12,7 @@ export const metadata: Metadata = {
     default: appName,
     template: `%s · ${appName}`,
   },
-  description: 'MausBot docs: install, configure and extend your local-first team of AI agents. MausBot is free and open source (Apache 2.0).',
+  description: 'Obot docs: install, configure and extend your local-first team of AI agents. Obot is free and open source (Apache 2.0).',
   openGraph: {
     title: appName,
     siteName: appName,
@@ -34,3 +34,4 @@ export default function Layout({ children }: LayoutProps<'/'>) {
     </html>
   );
 }
+

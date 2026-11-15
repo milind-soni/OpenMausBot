@@ -200,7 +200,7 @@ describe("the brief", () => {
 
   it("a routine run that published a page offers Open page, which opens the page itself, beside Open for its chat", async () => {
     const s = setup({ needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
-    const PAGE = "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/";
+    const PAGE = "https://abcdefghijklmnopqrstuvwxyz.obot.page/";
     const run = (id: string, name: string, card?: "live" | "unpublished"): RoutineRun => {
       const threadId = s.store.createTask(s.chief.id, name, false)!.threadId, startedAt = Date.now();
       if (card) s.store.appendMessage(threadId, { role: "bot", kind: "text", text: `Published “Sales”: ${PAGE}`, publishedPage: { state: card, title: "Sales", pageId: "abcdefghijklmnopqrstuvwxyz", url: PAGE } });

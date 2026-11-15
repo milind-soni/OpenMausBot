@@ -1,24 +1,24 @@
-# Connect apps through Composio
+﻿# Connect apps through Composio
 
-OpenMausBot uses one Composio project API key and one reusable Composio Session. That project key is the only Composio credential users need to provide. The Session enables Composio's multi-account mode with explicit account selection, so one OpenMausBot installation can keep several Slack, Gmail, Calendar, or other accounts connected without silently replacing the first one.
+Obot uses one Composio project API key and one reusable Composio Session. That project key is the only Composio credential users need to provide. The Session enables Composio's multi-account mode with explicit account selection, so one Obot installation can keep several Slack, Gmail, Calendar, or other accounts connected without silently replacing the first one.
 
 ## Packaged desktop app
 
 1. Open your project's [API Keys page](https://dashboard.composio.dev/~/project/settings/api-keys) in the Composio Dashboard (sign in or create a project first if asked).
 2. Create a project key there if the project has none, then copy it (it begins with `ak_`). The `ck_` key on the personal **Sessions & API Key** page is a different key and won't work.
-3. In OpenMausBot, open **Settings → API keys** and save it under **Self-host connected apps → Composio project key**.
+3. In Obot, open **Settings → API keys** and save it under **Self-host connected apps → Composio project key**.
 4. Open **Connected apps** and choose Gmail, GitHub, Slack, or another service. Enter a unique label such as `work` or `personal`, then finish the authorization in your normal browser.
 5. To connect another account for the same app, choose **Add account**, give it a unique label, and finish the second authorization in your browser.
 
-The Connected tab lists every account separately. **Disconnect** revokes only the account named on that row. OpenMausBot asks for a label for every new account and configures Composio to require explicit selection when more than one account could run a tool; a new OAuth flow never silently becomes the default for an existing connection.
+The Connected tab lists every account separately. **Disconnect** revokes only the account named on that row. Obot asks for a label for every new account and configures Composio to require explicit selection when more than one account could run a tool; a new OAuth flow never silently becomes the default for an existing connection.
 
 The desktop app validates the key before saving it. The key is encrypted using Electron's operating-system-backed `safeStorage`; the local JSON configuration stores only the non-secret Composio user and Session identifiers.
 
-## MausBot Cloud
+## Obot Cloud
 
-A MausBot Cloud plan includes connected apps: there is no key to add. At every start a Cloud home's server makes sure it has its own installation on OpenMausBot's managed connection service, the same one the packaged desktop app registers with (`server/cloud-connected-apps.ts`, sharing `electron/managed-composio.mjs` with the app):
+A Obot Cloud plan includes connected apps: there is no key to add. At every start a Cloud home's server makes sure it has its own installation on Obot's managed connection service, the same one the packaged desktop app registers with (`server/cloud-connected-apps.ts`, sharing `electron/managed-composio.mjs` with the app):
 
-- The first start registers the installation (`POST /v1/installations`) and keeps its token in `connected-apps-installation.json` in the data folder (`/data/.openmausbot`), owner-only (0600). The token is never written to `config.json`, sent to a client or logged.
+- The first start registers the installation (`POST /v1/installations`) and keeps its token in `connected-apps-installation.json` in the data folder (`/data/.obot`), owner-only (0600). The token is never written to `config.json`, sent to a client or logged.
 - Every later start serves that token at once and checks it with `GET /v1/me`. Only a refusal (401) registers a new installation; an outage or a rate limit keeps the token, so the Cloud's connected accounts are never stranded.
 - While the Cloud has no token (the service is down or refuses new registrations), the server keeps booting and serving, Connected apps says the service is temporarily unavailable, and it tries again after 30 seconds, then 1, 2, 5, 10 and every 30 minutes, with some jitter.
 - The file never goes into a backup or a move to another computer, and a restore keeps the Cloud's own (`server/workspace-backup-policy.ts`): its connected accounts belong to that installation.
@@ -58,7 +58,7 @@ schedule that checks the app, or a webhook, does the job instead.
 
 ## Keeping traffic off the managed service
 
-**With your own project key saved**, the desktop app and a Cloud home do not register or check in with OpenMausBot's managed service, and connected apps go to Composio directly. An app-event automation made before the key was saved can still be paused, deleted or restored, but only here: its copy on the service is left alone and removed if you later go back to the service.
+**With your own project key saved**, the desktop app and a Cloud home do not register or check in with Obot's managed service, and connected apps go to Composio directly. An app-event automation made before the key was saved can still be paused, deleted or restored, but only here: its copy on the service is left alone and removed if you later go back to the service.
 
 **`OMB_COMPOSIO_BROKER=off`** in the environment of the desktop app, a server or a Cloud home turns the service off whether or not a key is saved: no registration, check-in, tool calls or app events. Connected apps then need your own key, and show the setup message until there is one. A saved installation is kept for if the switch is removed. `OMB_COMPOSIO_BROKER_URL` is not a switch: left blank it means the default service.
 
@@ -86,17 +86,17 @@ Set the key in the server environment:
 COMPOSIO_API_KEY=ak_your_project_key pnpm dev:server
 ```
 
-The browser-only development UI can also save a key to the owner-only `~/.openmausbot/config.json` file. Using the environment variable is preferred for headless and shared development machines.
+The browser-only development UI can also save a key to the owner-only `~/.obot/config.json` file. Using the environment variable is preferred for headless and shared development machines.
 
-OpenMausBot creates a stable random user identifier for the installation, stores the returned Session identifier, and reuses that Session across launches. A fresh personal installation that connects a project key uses the Composio user of an earlier OpenMausBot installation in that project when there is exactly one such user and it still has a live connection, so the apps connected there come back after a reinstall or on another computer. A Team Cloud, or a self-hosted server several people sign in to, never does this and does not even list the project's accounts, because every member's bots would then get that person's apps. No Gmail, GitHub, Slack, or other provider tokens are stored by OpenMausBot; Composio owns their connection lifecycle.
+Obot creates a stable random user identifier for the installation, stores the returned Session identifier, and reuses that Session across launches. A fresh personal installation that connects a project key uses the Composio user of an earlier Obot installation in that project when there is exactly one such user and it still has a live connection, so the apps connected there come back after a reinstall or on another computer. A Team Cloud, or a self-hosted server several people sign in to, never does this and does not even list the project's accounts, because every member's bots would then get that person's apps. No Gmail, GitHub, Slack, or other provider tokens are stored by Obot; Composio owns their connection lifecycle.
 
-Sessions created by older OpenMausBot versions are upgraded in place by creating a multi-account Session for the same stable Composio user. Connected accounts belong to that user, so existing grants remain available while the new Session adds explicit multi-account routing. Each toolkit is capped at five usable accounts.
+Sessions created by older Obot versions are upgraded in place by creating a multi-account Session for the same stable Composio user. Connected accounts belong to that user, so existing grants remain available while the new Session adds explicit multi-account routing. Each toolkit is capped at five usable accounts.
 
 ## Multiple Google and Slack accounts
 
-Yes. Gmail, Google Calendar, Google Drive, and the other Google toolkits can each hold multiple labeled authorizations, and Slack can hold multiple labeled workspace/account authorizations. Accounts are scoped to the OpenMausBot installation's stable Composio user and appear by alias and connected-account ID in **Connected apps**.
+Yes. Gmail, Google Calendar, Google Drive, and the other Google toolkits can each hold multiple labeled authorizations, and Slack can hold multiple labeled workspace/account authorizations. Accounts are scoped to the Obot installation's stable Composio user and appear by alias and connected-account ID in **Connected apps**.
 
-If a provider or restricted Composio project policy prevents another authorization, the safe fallback is a separate OpenMausBot installation/configuration using its own Composio project key, which gives it its own Composio user; a second personal installation on the same project key picks up the earlier installation's user instead. Re-authorizing the same single-account Session is not a safe workaround: it can change which grant is selected. Do not share raw provider tokens or place them in bot prompts.
+If a provider or restricted Composio project policy prevents another authorization, the safe fallback is a separate Obot installation/configuration using its own Composio project key, which gives it its own Composio user; a second personal installation on the same project key picks up the earlier installation's user instead. Re-authorizing the same single-account Session is not a safe workaround: it can change which grant is selected. Do not share raw provider tokens or place them in bot prompts.
 
 The hosted/managed connected-apps broker exposes the same account-aware response shape and account-specific removal routes as the self-hosted project-key mode; it does not send broker or provider credentials to the renderer.
 
@@ -107,17 +107,17 @@ Each app you connect uses the Composio project's authorization for that app. Unl
 - **Filters, the vacation responder, IMAP and POP settings** need `https://www.googleapis.com/auth/gmail.settings.basic`.
 - **Forwarding addresses, send-as aliases and delegates** need `https://www.googleapis.com/auth/gmail.settings.sharing`.
 
-Without the permission, Google refuses the call with `403 ACCESS_TOKEN_SCOPE_INSUFFICIENT`. Reconnecting the account does not help: the consent screen asks for the same permissions every time. OpenMausBot adds a note to that refusal, so the bot tells you what to change instead of retrying.
+Without the permission, Google refuses the call with `403 ACCESS_TOKEN_SCOPE_INSUFFICIENT`. Reconnecting the account does not help: the consent screen asks for the same permissions every time. Obot adds a note to that refusal, so the bot tells you what to change instead of retrying.
 
 To grant the permission:
 
 1. In the [Composio Dashboard](https://dashboard.composio.dev), open your project's **Auth Configs** and create an auth config for the app (for example Gmail) that uses your own OAuth app credentials.
 2. Add the permissions you need to it and keep it enabled.
-3. In OpenMausBot, open **Connected apps** and reconnect the account. The consent screen now asks for the added permissions.
+3. In Obot, open **Connected apps** and reconnect the account. The consent screen now asks for the added permissions.
 
-OpenMausBot uses your project's own auth config for an app automatically, in place of the Composio-managed one. If there are several enabled ones for the same app, it uses the most recently created, and it skips disabled ones. Google may require your OAuth app to list the added permissions on its consent screen, and to be verified before people outside your organization can grant them.
+Obot uses your project's own auth config for an app automatically, in place of the Composio-managed one. If there are several enabled ones for the same app, it uses the most recently created, and it skips disabled ones. Google may require your OAuth app to list the added permissions on its consent screen, and to be verified before people outside your organization can grant them.
 
-On a MausBot Cloud plan, connected apps run through OpenMausBot's managed connection service rather than your own Composio project, so you cannot add permissions yourself; ask OpenMausBot support instead.
+On a Obot Cloud plan, connected apps run through Obot's managed connection service rather than your own Composio project, so you cannot add permissions yourself; ask Obot support instead.
 
 ## Apps with no Composio-managed sign-in
 
@@ -125,16 +125,16 @@ Some apps, such as Xero and Buffer, have no sign-in that Composio provides: they
 
 With your own Composio project key, create the auth config in the Composio dashboard (**Auth Configs → Create**), keep it enabled, then connect the app. Nothing else is needed:
 
-- A Tool Router Session uses one of your auth configs only while that config is *enabled for Tool Router*. A config you made yourself can have that off, and the dashboard may not show it. When an app is connected (its Connect card appears, you click **Connect**, or a bot's call to it fails for want of a config), OpenMausBot turns it on for the app's config through Composio's API. It changes nothing else in your project, and nothing for apps you don't connect.
-- OpenMausBot then names the config in its Session (`auth_configs`), changing the Session in place, so a bot that is already running keeps its tools and picks the config up on its next call. If Composio won't change the Session, a new one is made under the same Composio user, so existing connections stay.
-- If an app has several enabled auth configs, OpenMausBot uses the most recently created and tells the bot which one in the card's tool result.
-- OpenMausBot reads your project's auth configs at most once a minute, and again right away when Composio reports a missing one, so a config made while a bot is working is found on the next try. If they cannot be read, the Session keeps the ones it last read; if Composio refuses a config, connecting that app says what Composio said.
+- A Tool Router Session uses one of your auth configs only while that config is *enabled for Tool Router*. A config you made yourself can have that off, and the dashboard may not show it. When an app is connected (its Connect card appears, you click **Connect**, or a bot's call to it fails for want of a config), Obot turns it on for the app's config through Composio's API. It changes nothing else in your project, and nothing for apps you don't connect.
+- Obot then names the config in its Session (`auth_configs`), changing the Session in place, so a bot that is already running keeps its tools and picks the config up on its next call. If Composio won't change the Session, a new one is made under the same Composio user, so existing connections stay.
+- If an app has several enabled auth configs, Obot uses the most recently created and tells the bot which one in the card's tool result.
+- Obot reads your project's auth configs at most once a minute, and again right away when Composio reports a missing one, so a config made while a bot is working is found on the next try. If they cannot be read, the Session keeps the ones it last read; if Composio refuses a config, connecting that app says what Composio said.
 
-An account you connected in the Composio dashboard belongs to a different Composio user than OpenMausBot's, so OpenMausBot does not see it: connect the app once from OpenMausBot.
+An account you connected in the Composio dashboard belongs to a different Composio user than Obot's, so Obot does not see it: connect the app once from Obot.
 
-A bot can also name one auth config for an app: `COMPOSIO_MANAGE_CONNECTIONS` with `"auth_config_id": "ac_…"` next to a single toolkit, or `toolkits: [{ "name": "xero", "action": "add", "auth_config_id": "ac_…" }]` (`auth_config_override` is read as well). OpenMausBot adds `auth_config_id` to the tool's description so bots can see it. It checks the id in your project before it shows the Connect card (it must exist, belong to that app and be enabled) and keeps the choice in `composio-auth-configs.json` in the data folder, so later Sessions use it while it stays usable.
+A bot can also name one auth config for an app: `COMPOSIO_MANAGE_CONNECTIONS` with `"auth_config_id": "ac_…"` next to a single toolkit, or `toolkits: [{ "name": "xero", "action": "add", "auth_config_id": "ac_…" }]` (`auth_config_override` is read as well). Obot adds `auth_config_id` to the tool's description so bots can see it. It checks the id in your project before it shows the Connect card (it must exist, belong to that app and be enabled) and keeps the choice in `composio-auth-configs.json` in the data folder, so later Sessions use it while it stays usable.
 
-OpenMausBot's managed connection service (the desktop default and MausBot Cloud) runs on OpenMausBot's own Composio project, which cannot use an auth config in yours. For such an app it says so in one line: add your own Composio project key in **Settings → API keys**; OpenMausBot then uses your auth config for that app from that project.
+Obot's managed connection service (the desktop default and Obot Cloud) runs on Obot's own Composio project, which cannot use an auth config in yours. For such an app it says so in one line: add your own Composio project key in **Settings → API keys**; Obot then uses your auth config for that app from that project.
 
 ## Browser authorization recovery
 
@@ -161,7 +161,7 @@ app whose accounts all stopped working shows **Reconnect**, which removes the
 newest stopped account and signs in again under its label; each stopped account
 beside a working one has its own **Reconnect**. When a connected-app call fails
 because the account is signed out (Composio's `USER_NOT_LOGGED_IN`, a 401, or no
-connected account), OpenMausBot adds a note telling the bot to call
+connected account), Obot adds a note telling the bot to call
 `COMPOSIO_MANAGE_CONNECTIONS`, which shows the person a reconnect card. That
 tool stays available to a bot with no app grants, and a failed `tools/list` is
 retried once and then answered with the last list the connection service gave.
@@ -204,7 +204,7 @@ The workspace-level connections above say which accounts exist. A second, per-bo
 
 A bot with no grant record at all keeps the legacy behavior: every tool on every connected app it can see. Assigning the first grant switches the bot to exact-tool mode — a service not on the list grants nothing, even when the workspace is connected to it.
 
-**Nothing changes until you assign.** Upgrading OpenMausBot does not alter any bot's access: existing bots keep the all-tools default until someone edits their grants. An emptied grant list is deliberate and means "no tools on any connected app." The one exception is an app a bot's **Apps** switch turns on (its read or write level) that its tool list leaves out: that app gets all of its tools, so a switch that shows an app on always lets the bot use it.
+**Nothing changes until you assign.** Upgrading Obot does not alter any bot's access: existing bots keep the all-tools default until someone edits their grants. An emptied grant list is deliberate and means "no tools on any connected app." The one exception is an app a bot's **Apps** switch turns on (its read or write level) that its tool list leaves out: that app gets all of its tools, so a switch that shows an app on always lets the bot use it.
 
 **Imported bots land with no grants.** Shareable packages and team imports never carry grants — an imported bot starts with connected apps off, and any grants it later gets are chosen by the importing workspace. Grants also never appear in exports; only the workspace's own private team backup keeps them.
 
@@ -215,3 +215,4 @@ A bot with no grant record at all keeps the legacy behavior: every tool on every
 Grants are enforced on the real tool names at call time (including batches inside the MULTI_EXECUTE meta-tool), the tool list offered to the model is filtered to the granted set, and every allow/deny writes a decision-log row. Refusals do not enumerate what else is granted. Paired phones see each bot's grants read-only in its profile (What this bot does → App tools); grants are assigned on the computer, never from a phone.
 
 Connected-app sends also follow the bot's **Permissions → Sending on your behalf** setting at every access level, including Full access. **Ask every time** requires approval for each send regardless of prompt language. **Send without asking** lets sends go out on their own, with no daily limit. A Full-access bot with no setting here sends without asking. Reading and drafting are not sends; below Full access, code the app can't read always asks, even under Send without asking; at Full access it goes out without a card unless the rule is Ask every time.
+

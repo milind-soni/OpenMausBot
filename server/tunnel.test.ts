@@ -191,7 +191,7 @@ describe("login and logout against the control plane", () => {
 
     const status = fakeIo([]);
     await runStatus(options(dir, { command: "status" }), status.io);
-    expect(status.out.join("\n")).toContain(`MausBot web address: ${stub.endpointUrl}`);
+    expect(status.out.join("\n")).toContain(`Obot web address: ${stub.endpointUrl}`);
 
     const bye = fakeIo([]);
     expect(await runLogout(options(dir, { command: "logout" }), bye.io)).toBe(0);
@@ -318,11 +318,11 @@ describe.skipIf(!posix)("startTunnel: guardian, gateway and connector, verified 
     writeFileSync(fake, `#!/bin/sh\necho $$ > "${pidFile}"\nexec sleep 300\n`, { mode: 0o755 });
     const harness = createServer((req, res) => {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ app: "openmausbot", url: req.url, peer: req.socket.remoteAddress ?? null }));
+      res.end(JSON.stringify({ app: "obot", url: req.url, peer: req.socket.remoteAddress ?? null }));
     });
     await new Promise<void>((done) => harness.listen(origin.socketPath, done));
     const originPort = await freePortBlock([0], 29_600);
-    const endpoint = "https://c-stub.openmausbot.invalid";
+    const endpoint = "https://c-stub.obot.invalid";
     const guardian = guardianEntry();
     expect(guardian).toBeTruthy();
     const states: string[] = [];
@@ -340,7 +340,7 @@ describe.skipIf(!posix)("startTunnel: guardian, gateway and connector, verified 
       const settled = await tunnel.started;
       expect(settled.status, states.join(",")).toBe("ready");
       const viaGateway: any = await (await fetch(`http://127.0.0.1:${originPort}/api/health`)).json();
-      expect(viaGateway.app).toBe("openmausbot");
+      expect(viaGateway.app).toBe("obot");
       expect(viaGateway.peer).toBeNull();
       // the connector is spawned right after the gateway binds; its shell writes the pid a moment later
       const connectorPidOtherThan = async (previous: number) => {

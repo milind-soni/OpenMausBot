@@ -32,7 +32,7 @@ import type { ValueKind } from "./value-ledger.ts";
 
 export { WATCH_INSTRUCTIONS, WATCH_NAME } from "./default-watch.ts";
 export const WATCH_FILE = "watch.json";
-/** The engines whose every tool use outside a run's allowlist reaches OpenMausBot's answerer and is refused there. */
+/** The engines whose every tool use outside a run's allowlist reaches Obot's answerer and is refused there. */
 const FENCED_ENGINES = new Set(["claudeAgent"]);
 const READ_SLUG: Record<ReadApp, string> = { gmail: "GMAIL_FETCH_EMAILS", googlecalendar: "GOOGLECALENDAR_EVENTS_LIST" };
 const ACTIVE = new Set(["queued", "running", "waiting"]);
@@ -225,7 +225,7 @@ export function createProactive(deps: ProactiveDeps) {
 
   /** The proactive bot's default routine, once, when connected apps are there to read: pausing or deleting it is how it
    * is switched off, so it is never made again. Asked at start and every minute, since a Cloud's access arrives later,
-   * and a MausBot can arrive after the routine was made. */
+   * and a Obot can arrive after the routine was made. */
   function ensureWatch(): Routine | null {
     const manager = deps.routines();
     const bot = owner();

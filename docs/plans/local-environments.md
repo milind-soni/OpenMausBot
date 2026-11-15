@@ -1,4 +1,4 @@
-# Plan: Local environments
+﻿# Plan: Local environments
 
 Status: implemented (Oct 2026, `feat/local-environments`). Full design:
 [2026-10-07 local environments design](../superpowers/specs/2026-10-07-local-environments-design.md).
@@ -7,7 +7,7 @@ Manual checks: [verification recipe](../verification/local-environments.md).
 ## Problem
 
 One desktop installation runs one configuration at a time: the bots,
-providers, groups, routines and history under `~/.openmausbot`. People who
+providers, groups, routines and history under `~/.obot`. People who
 work on several unrelated projects — a ham-radio bot team and a mobile-app
 bot team, say — want completely separate teams, model choices and histories,
 and want to pick the right one at the start of a work session.
@@ -17,7 +17,7 @@ and want to pick the right one at the start of a work session.
 **Named local environments**: additional data directories the same
 installation can restart onto, managed beside the saved servers, one active
 at a time. Creating one registers a name and a data folder ("My environment"
-→ `~/.openmausbot-my-environment`, or a folder chosen through the native
+→ `~/.obot-my-environment`, or a folder chosen through the native
 picker); switching stops the app's server child, moves it onto the target
 directory, health-probes it, and reloads the window — roughly fifteen
 seconds, and a failed switch leaves you exactly where you were. The current
@@ -59,3 +59,4 @@ Same as the spec: two environments at once, hot-swapping inside a live
 server, copying or cloning an existing environment (the Copy installation
 feature covers moving setups), per-environment cloud sync or companion
 pairing, and multi-tenancy.
+

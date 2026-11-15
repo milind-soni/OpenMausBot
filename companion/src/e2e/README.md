@@ -1,7 +1,7 @@
-# End-to-end encrypted phone connection, wire spec v1
+﻿# End-to-end encrypted phone connection, wire spec v1
 
 The phone and this computer agree on keys at QR pairing, and every connection proves both sides. The same encrypted
-connection runs over three routes: straight over Wi-Fi, over Tailscale, and through MausBot Relay, which passes sealed
+connection runs over three routes: straight over Wi-Fi, over Tailscale, and through Obot Relay, which passes sealed
 bytes between the two and can't open them. This file is the normative spec; `vectors/v1.json` is the contract every
 implementation (desktop, relay, phones) tests against.
 
@@ -47,11 +47,11 @@ reveals nothing about `psk`: the two are separate HMAC outputs under different l
 
 ## 3. Pairing payload (QR link) and descriptors
 
-- **The QR link** (`openmausbot://pair?...`, built by `shared/pairing-link.ts`) keeps every field it has today and gains one query parameter:
+- **The QR link** (`obot://pair?...`, built by `shared/pairing-link.ts`) keeps every field it has today and gains one query parameter:
   `e2e=<b64u(JSON)>`, where the JSON is:
 
 ```json
-{"v":1,"k":"<b64u 65-byte T.pub, 87 chars>","h":"<b64u 16-byte hostId, 22 chars>","r":["relay1.openmausbot.com","relay2.openmausbot.com"]}
+{"v":1,"k":"<b64u 65-byte T.pub, 87 chars>","h":"<b64u 16-byte hostId, 22 chars>","r":["relay1.obot.com","relay2.obot.com"]}
 ```
 
 - **Field rules:**
@@ -60,7 +60,7 @@ reveals nothing about `psk`: the two are separate HMAC outputs under different l
   - `h` and `r` are present only when the computer has a relay token (signed in, relay enabled). A device restricted to "Wi-Fi and
     Tailscale only" still gets them: they admit nothing by themselves, and they let a restricted phone away from home probe the relay
     now and then (4404 until it is allowed again).
-  - `r` lists 1 to 4 hostnames in the order to try. Each MUST match `^relay[1-9][0-9]?\.openmausbot\.com$`.
+  - `r` lists 1 to 4 hostnames in the order to try. Each MUST match `^relay[1-9][0-9]?\.obot\.com$`.
   - `routes` is optional, `"any"` or `"local"`. `"local"` means the computer restricted this device to Wi-Fi and
     Tailscale; it may come with `h` and `r` (an older computer sends it without them). Absent means `"any"`, so a
     descriptor without `h` and `r` and without `"local"` only says the computer has no relay right now (signed out, or
@@ -70,7 +70,7 @@ reveals nothing about `psk`: the two are separate HMAC outputs under different l
 - **Phone parsing rules:**
   - A malformed `e2e` rejects the whole invite. That includes bad base64, bad JSON, a bad point, `h` without `r` or `r` without `h`, and a host
     outside the allowlist.
-  - `v > 1` shows "Update the MausBot app to pair with this computer". It NEVER falls back to plain pairing.
+  - `v > 1` shows "Update the Obot app to pair with this computer". It NEVER falls back to plain pairing.
   - Old app builds ignore the unknown parameter, as they do today.
 - **Direct routes** come from the existing `endpoints` and `hosts` parameters. The phone turns each `lan`, `bonjour` or `tailnet` URL
   `http://H:P` into `ws://H:P/v1/e2e`. A `hosted` URL is never used for E2E.
@@ -215,7 +215,7 @@ This uses the yamux wire format (`hashicorp/yamux` spec): a 12-byte header of `v
 
 ## 9. Relay protocol (outside the encryption)
 
-- **Hosts.** The relay nodes are `relay1.openmausbot.com` and `relay2.openmausbot.com`, WSS on 443. Caddy terminates TLS and proxies to the
+- **Hosts.** The relay nodes are `relay1.obot.com` and `relay2.obot.com`, WSS on 443. Caddy terminates TLS and proxies to the
   relay on `127.0.0.1:8080`. Auth is always the **first WebSocket message**, which works with every WebSocket client (Node's built-in client
   included).
 - **Pre-auth rules:**
@@ -267,7 +267,7 @@ own the `sid`, and a `sid` is single-use with a 10 s life. The relay then splice
 **Control plane endpoint:** `POST /v1/installations/self/relay-token` with `Authorization: Bearer <omb_install_…>`.
 - **Request body:** `{"appVersion":"0.1.150","devices":{"e2e":2,"legacy":1}}`. The counts are for adoption gates and carry no
   identifiers.
-- **200 response:** `{"token","hostId","nodes":["relay1.openmausbot.com","relay2.openmausbot.com"],"expiresAt","refreshAfter"}`.
+- **200 response:** `{"token","hostId","nodes":["relay1.obot.com","relay2.obot.com"],"expiresAt","refreshAfter"}`.
   - `refreshAfter = iat + 1 h`.
   - `nodes` is ordered by rendezvous hash: highest `SHA256(hostId ‖ nodeName)[0:8]` first. A future US node is ranked first when the
     request's `cf.continent` is NA or SA.
@@ -317,13 +317,13 @@ own the `sid`, and a `sid` is single-use with a 10 s life. The relay then splice
 |---|---|
 | Every route failed and the relay answered 4404 from every node | "Your computer is asleep or offline." |
 | The phone has no network (path monitor) | "You're offline." |
-| Direct routes failed and the relay couldn't be reached | "Can't reach MausBot Relay right now. Trying again…" |
+| Direct routes failed and the relay couldn't be reached | "Can't reach Obot Relay right now. Trying again…" |
 | Restricted device, not on the home Wi-Fi or the tailnet | "This phone is set to Wi-Fi and Tailscale only." |
 | Message 2 failed / pin mismatch | "Couldn't verify your computer. Pair again from your computer's Settings." |
 | GoAway(3) inside the session, or close 4001 on a direct route | "This phone was removed from your computer. Pair again." |
 | Close 4001 through the relay with no GoAway(3) before it | Nothing yet: a relay can forge close codes, so keep retrying with backoff. It reads as "removed" only if a direct route also answers 4001 |
-| `e2e.v > 1` or 426 | "Update the MausBot app to connect to this computer." |
-| 4429 / 4503 lasting more than 30 s | "MausBot Relay is busy. Trying again…" |
+| `e2e.v > 1` or 426 | "Update the Obot app to connect to this computer." |
+| 4429 / 4503 lasting more than 30 s | "Obot Relay is busy. Trying again…" |
 
 ## 13. Rules the vectors pin
 
@@ -406,3 +406,4 @@ phone. `{"consume":{"stream":1,"bytes":N}}` reports N bytes consumed. `{"in":{"h
 frame; `"fill": 0` instead of `payload` means `length` zero bytes. With `"accept":"immediate"` the computer accepts each
 stream as it opens; with `"never"` it doesn't. The expectation is either `errorAt` (the index of the step that must be
 refused) or `sent` (every frame the mux sent, in order).
+

@@ -20,7 +20,7 @@ const APP_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/;
 const BLOB_NAME = /^([a-f0-9]{64})\.json$/, OWNED_BLOB_FILE = /^[a-f0-9]{64}\.json(?:\.[0-9a-f-]{36}\.tmp)?$/;
 const STATES = new Set(["installed", "failed", "removed", "withdrawn"]);
 const REASONS = new Set(["blob_unavailable", "invalid_package", "import_failed", "newer_app_required", "connection_refused_by_policy", "removed_locally", "withdrawn_by_publisher"]);
-export const LIBRARY_STATE_MESSAGE = "openmausbot:managed-library-state";
+export const LIBRARY_STATE_MESSAGE = "obot:managed-library-state";
 
 // oxlint-disable-next-line no-control-regex
 const safeText = (value, max) => typeof value === "string" && value.length > 0 && value.length <= max && !/[\x00-\x1f\x7f]/.test(value);

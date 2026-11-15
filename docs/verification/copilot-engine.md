@@ -1,4 +1,4 @@
-# GitHub Copilot engine
+﻿# GitHub Copilot engine
 
 ```sh
 pnpm exec vitest run server/drivers/acp/copilot.test.ts server/drivers/acp/custom-model-catalog.test.ts
@@ -41,7 +41,7 @@ file, credentials stay out of argv, changed tools or credentials restart the
 process, and disposal removes the files without changing the person's Copilot
 configuration. On Linux bot boxes, the `@FILE` path is mounted read-only into
 the box so the launcher can load it without exposing other temporary files.
-ACP permissions still go through OpenMausBot's approval broker.
+ACP permissions still go through Obot's approval broker.
 The fake Copilot rejects client-supplied stdio servers too: the driver tests
 require the real agents proxy's routine tools and a synthetic browser's tools
 to be discoverable, and check narrowed selections, credential refresh,
@@ -95,3 +95,4 @@ lists models even with an invalid `COPILOT_GITHUB_TOKEN`, so the probe could
 not provoke one without a prompt. GitHub documents ACP support in Copilot CLI as public preview. Its ACP
 server reference does not document model selection; the driver relies on the
 `model` config option the CLI advertises.
+

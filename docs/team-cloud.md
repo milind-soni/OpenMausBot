@@ -1,4 +1,4 @@
-# Team Clouds: the `team` role and the audience rule
+﻿# Team Clouds: the `team` role and the audience rule
 
 A **Team Cloud** is one Cloud machine several people use: the shared home of a team's bots. The Admin
 (openmaus-cloud, `docs/team-cloud.md` there) makes it, invites people and signs each person's pairing. This page is the
@@ -32,7 +32,7 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   the team (or are removed), your private chats and everything only yours there are deleted, never handed to an admin
   (below). The Owner's export of the team's machine (the workspace backup, `OMB_CLOUD_EXPORT_ONLY`) leaves them out too
   (`server/workspace-backup-team-private.ts`): no private conversation, none of its work folders or files only it used, no
-  routine that lives in one nor any run that names one, no member's memory layer, no member's own MausBot, their inbox
+  routine that lives in one nor any run that names one, no member's memory layer, no member's own Obot, their inbox
   or anything under `people/`. Restoring such an export gives a team back everything but those.
 - **The order of bots.** Each User's list of bots is in their own order (`bot-orders.json`): their reorder (`PUT
   /api/bots/order`, any level, Can view included) changes only their list and reaches only their streams. Whoever has
@@ -109,10 +109,10 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   session across a restart; a My Cloud revokes every session that is not its owner's at each boot.
 
 
-- **In a browser, with nothing installed.** The join page's Open <team> (and a User's team home on MausBot Cloud) signs the
+- **In a browser, with nothing installed.** The join page's Open <team> (and a User's team home on Obot Cloud) signs the
   browser in here as that person, at their role: the Admin's browser sign-in with their member claim, "Open Acme as
   <address>" and one Continue (`/pair#signin=`, BrowserSignInPage). The browser is the same app, at phone width too.
-  When its session ends, the sign-in page offers "Open Acme with MausBot Cloud": the person's team page there, which their
+  When its session ends, the sign-in page offers "Open Acme with Obot Cloud": the person's team page there, which their
   signed-in session told this browser (`/api/auth/session` `teamSignIn`, kept in the browser); never told before sign-in.
   With the team's rule turning remote access off, a User's browser sign-in is refused (`remote_access_off`) and their open
   browsers sign out with their phones (`closeMemberBrowsers`); an Owner's and an Admin's stay, since their admin pages
@@ -124,12 +124,12 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   `people/<person>/welcome.json` (`GET /api/me` `welcome: { invitedBy, welcomedAt, hints }`, `PUT /api/me/welcome {
   welcomed: true }`). Only the Owner, who set the team up, gets the Cloud's own welcome and its setup list (the session's
   `team.role`); its record (shown, done, hidden: `TEAM_PERSONAL_HINTS`) is each person's, kept in the same file (the Owner
-  also keeps what the team's record said before). An empty team starts fresh: the Owner's own MausBot and the team's first
+  also keeps what the team's record said before). An empty team starts fresh: the Owner's own Obot and the team's first
   bot don't count as bots already there. The finished list ("Acme is ready") shows once: it is recorded as done as it
   shows, names the first bot ("Say hi to Poppy", never a Chief of Staff) and offers Invite people, the team's People page
-  on MausBot Cloud.
+  on Obot Cloud.
 - **What a User isn't shown.** No sponsor card (the Owner and Admins, who choose the team's providers, still get them), no
-  "Meet MausBot" card (an Admin gets it at a later launch than their welcome, without the line about a Chief of Staff's
+  "Meet Obot" card (an Admin gets it at a later launch than their welcome, without the line about a Chief of Staff's
   powers), no Rename on a bot they can't edit, and in Settings no AI, bots' computers, usage, import or domain: what only
   an admin can change is left out instead of shown with "Only an admin of this installation…". A refusal the server still
   sends them reads "Only the owner or an admin can do that.", with the server's words under Details. **Connect apps** opens
@@ -241,7 +241,7 @@ this server shares with every bot. It exists only on a Team Cloud.
   `refused`, `account-failed`, `cant-connect`, `timeout`, `not-found`, `bad-answer`; never what a server said),
   `lastUsedAt` (the last real tool call on it), `addedBy` (`{ email, name }`, `name` null when they set none) with
   `addedAt` (recorded from when this was built, so older connections have none), and `bots` (the names of the team bots
-  that use it; each member's own MausBot is left out). An `mcp` entry adds `expiresAt` for a sign-in that expires and
+  that use it; each member's own Obot is left out). An `mcp` entry adds `expiresAt` for a sign-in that expires and
   that nothing can refresh, and each app account adds `health`, its status word as one of the four (`ACTIVE` working,
   `FAILED` refused, `EXPIRED`, `INACTIVE` and an unfinished connection needs-sign-in).
   - **Real use decides it.** A tool call that works marks it working. One a server refuses with HTTP 401 on a sign-in
@@ -271,9 +271,9 @@ this server shares with every bot. It exists only on a Team Cloud.
   shows there as metadata only: its usage counts and cost by person and bot, an activity row's when, bot, tool and
   outcome; never its runs' titles or a decision's words. To anyone but its person a usage row from a private chat names
   no conversation (the export's `thread` is empty), a routine that lives in one is the one line *Private routine* (key
-  `routine:private`, no name, no id) and a person's own MausBot is *Private bot* (`bot:private`); the amounts still count
+  `routine:private`, no name, no id) and a person's own Obot is *Private bot* (`bot:private`); the amounts still count
   toward the person's and the team's totals (`server/host/private-records.ts`). What a person changes on their own
-  MausBot is never recorded in admin activity.
+  Obot is never recorded in admin activity.
 - For a business sign-in (Claude or ChatGPT on this server), the Admin opens this server's own pages signed in as that
   admin (a browser sign-in with the member's claim) at `/?connect=ai` (or `apps`, `mcp`, `keys`, and `bots` for Settings → Bot access, which opens for an admin only).
 
@@ -281,7 +281,7 @@ this server shares with every bot. It exists only on a Team Cloud.
 
 Every app (a Composio toolkit) and MCP server has a scope. `team`, the default and what every connection made before this
 is, is one connection an Admin makes and every turn uses. `person` is one connection per member, made by that member on
-their team page in MausBot Cloud (the Admin's Cloud page calls the routes below as them).
+their team page in Obot Cloud (the Admin's Cloud page calls the routes below as them).
 
 - **Who gets a member's own connection.** Only a turn that acts for them (server/host/acting-person.ts), read from the
   harness's records, and only in a chat that is theirs alone, where nobody else reads what their connection brings back.
@@ -336,7 +336,7 @@ mcp: { <name>: [address] } }`: who has connected each, never with what.
 The Admin signs the usual pairing body with two more fields:
 
 ```json
-{ "label": "OpenMausBot app (Team Cloud)", "ttlSeconds": 300,
+{ "label": "Obot app (Team Cloud)", "ttlSeconds": 300,
   "team": { "id": "<team id>", "name": "Acme" },
   "member": { "email": "mira@example.com", "role": "owner" | "admin" | "member" } }
 ```
@@ -367,7 +367,7 @@ a member's own request never sets it.
 /api/cloud/team/member-left` with `{ "email": "<address>" }`, signed with its body like the sleep request (400
 `invalid_member` for a bad address; only on a Team Cloud). The machine then deletes what was that person's alone and
 answers `{ ok, chats, layers, sessions, files, browsers, bots, routines, routinesHandedOver, botsHandedBack }`: every
-session and phone of theirs and any open code of theirs end at once; their own MausBot is deleted as the app deletes a
+session and phone of theirs and any open code of theirs end at once; their own Obot is deleted as the app deletes a
 bot, with its chats and notes (`bots`, its chats counted in `chats`), and should they join again they get a new one;
 their private chats with every bot are deleted as the app deletes a conversation (messages, notifications, follow-ups,
 a running turn stopped first), with the routines that live in them (`routines`, below "Routines"), the uploaded files
@@ -504,7 +504,7 @@ changes what those do.
 
 ## Routines
 
-A routine lives where it was made or where it reports (`server/routine-home.ts`). One for a member's own MausBot, or that
+A routine lives where it was made or where it reports (`server/routine-home.ts`). One for a member's own Obot, or that
 names someone's private chat (the chat a bot made it in, `sourceThreadId`, or the one it reports into,
 `resultsThreadId`), is that person's alone, as the chat is: no other member and no Admin, the Super admin included, sees
 it or learns of it, in `GET /api/routines`, the `routine` and `routine.run` frames, a bot's overview, the Today counts, a
@@ -528,13 +528,13 @@ routine its writer's alone, as Just me does; when no private chat can be opened 
 that reports into a chat whose audience is not its own, such as one made before this for the shared chat whose results
 chat was opened privately for its writer, gets a results chat of its own place at its next run; the old chat stays
 where it is, unchanged. The chat a routine opened for its own results does not make it anyone's until they write in it.
-The routine picker lists only the bots the person can chat with and never a teammate's own MausBot, which takes no
+The routine picker lists only the bots the person can chat with and never a teammate's own Obot, which takes no
 routine from anyone else (404 *no such bot*).
 
 ## The shared chat's name
 
 A team bot's main chat is called *"Shared chat"* on every person's copy (`WireTask.sharedChat`), whatever its stored title,
-so nobody takes it for one of their own, and it can't be renamed. A member's own MausBot has none.
+so nobody takes it for one of their own, and it can't be renamed. A member's own Obot has none.
 
 ## Just me and Team
 
@@ -543,17 +543,17 @@ the sidebar in each of its shapes: full width, the rail of icons (two icon butto
 in the window's rail of Clouds, which is the desktop window's own chrome: a browser and a phone have none, one place has
 none, and the person can hide it.
 
-- **Just me** lists the bots the person can chat with privately (their own MausBot among them), each with their own
+- **Just me** lists the bots the person can chat with privately (their own Obot among them), each with their own
   conversations with it, and no group chat. A bot opens the person's own chat with it, made through `POST
   /api/bots/<id>/tasks` the first time.
 - **Team** lists the bots shared with someone (everyone, or at least one person besides whoever looks after it), each
-  with its shared conversations only, and the group chats. A bot opens its shared chat. A person's own MausBot is not
+  with its shared conversations only, and the group chats. A bot opens its shared chat. A person's own Obot is not
   listed there, and neither is a bot only its owner and the admins can use (`sharedWithOthers`): that one is under Just
   me whole, its main chat with it, which still says who reads it by the message box (*"Shared · only people added and
   admins can see"*) and is never called private. No new conversation is
   offered beside a shared chat: a conversation a person opens is always private, so New conversation is under Just me.
 - **Which side a conversation is on is the server's answer**, never the switch: `private: true` on the task (or a
-  conversation this page just made through that route, or the person's own MausBot) is Just me; everything else, a
+  conversation this page just made through that route, or the person's own Obot) is Just me; everything else, a
   conversation the page knows nothing of included, is Team. Neither side's list shows a conversation, an unread mark or a
   preview line of the other's.
 - **By the message box**, every conversation on a team says who can read it, from that same answer: *"Private · only
@@ -603,7 +603,7 @@ already in it and its files included, and that it can't be made private again (`
 
 ## Saving to team memory
 
-**Save to team memory** on a message of a conversation with a team bot (not a group chat, not one's own MausBot) puts
+**Save to team memory** on a message of a conversation with a team bot (not a group chat, not one's own Obot) puts
 that message into the bot's team notes (MEMORY.md in its own folder, which every conversation with it reads) in one
 click, as one line saying who saved it and the day: *"We ship on 3 March (saved by Rui, 2026-11-11)"*. A message longer
 than one note keeps its start and says *"shortened"*. Undo on the toast takes it out again (`POST`/`GET
@@ -647,25 +647,25 @@ private chat goes to that person instead), and it retries their threads and chan
 chat with it is their inbox (below). A crowned bot nobody owns stays its department's Chief, as on any other server.
 The app offers no crown on a team, so this is reached only through the API (`PATCH /api/bots/<id>` with `chiefOfStaff`).
 
-**A person's MausBot hands work to the bots they can use.** A member's MausBot is not crowned and has no authority over any
+**A person's Obot hands work to the bots they can use.** A member's Obot is not crowned and has no authority over any
 bot, but from a chat private to its person, with their own request behind the turn, it can hand work to any team bot that
-person may chat with, at their level (`server/host/personal-reach.ts`): the receiving bot reads it as `[From @MausBot (bot)
+person may chat with, at their level (`server/host/personal-reach.ts`): the receiving bot reads it as `[From @Obot (bot)
 · assignment … for Mira · on their behalf at your level]`. The work runs in that bot's own private chat with the person,
 exactly as if they had opened it themselves: it is created private to them before anyone's app hears of it, reads and
 writes their layer, and comes back whole to the chat they asked in. Nothing of it reaches the bot's shared chat, a room,
 the team's notes, another member or an admin, in lists, counts, search, notifications or streams. It never widens what the
-person could do: a bot they cannot see is never named to their MausBot (by name or id it is refused exactly like a bot that
+person could do: a bot they cannot see is never named to their Obot (by name or id it is refused exactly like a bot that
 does not exist, and it is never counted), and a bot they can only view is refused. A routine, a relayed line, an event, a
 guest and another person's words can't use this, and it can answer a waiting question only in that person's own chats.
-The same holds for an Owner's or Admin's MausBot, which reaches every bot but other people's MausBots. Nothing reaches a
-person's MausBot from outside it: no other bot is told of it.
+The same holds for an Owner's or Admin's Obot, which reaches every bot but other people's Obots. Nothing reaches a
+person's Obot from outside it: no other bot is told of it.
 
 **Every bot reaches every bot.** Departments are folders, not walls. Any bot can ask, hand work to or @mention any
 other bot on the team, in any department, someone's Chief included, with nothing to set up (`canReach` in
 `server/peer-roster.ts`). Each bot's roster lists them all, its own department first; a Chief's lists its own team
 first and everyone else as reachable. Reaching a bot gives no authority over it: supervision, incidents, the inbox,
 setup changes and automations follow ownership and departments as above (`hasAuthority`, `canManage`). Only two
-things narrow reach: archived bots, and the audience rule below (a bot shared with different people; a person's own MausBot is the
+things narrow reach: archived bots, and the audience rule below (a bot shared with different people; a person's own Obot is the
 one exception, above). A turn in someone's
 private chat may ask any bot, and the work it hands on stays in that person's audience; it never hands work into a room
 or posts in one.
@@ -678,7 +678,7 @@ Every bot still reaches every bot there.
 Someone with a My Cloud moves a bot into a team from two places: **Move to Acme** in the bot's menu on My Cloud, and on the
 team's own page in the desktop app, **Bring your stuff**, which lists My Cloud's bots with one **Move** each. Both say the
 same before anything moves: that only they and the team's admins can use it there until they share it, what goes (instructions, skills, files, routines, their chats), what
-stays on My Cloud (what the bot remembers, their connections, MausBot), and that there is no way back.
+stays on My Cloud (what the bot remembers, their connections, Obot), and that there is no way back.
 
 A team's server isn't the person's own, so its page gets less than My Cloud's does (`electron/team-move-main.mjs`). It reads
 only the names of My Cloud's bots and which can go, and only while it is the window's active page and the Admin's verified
@@ -708,7 +708,7 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
   current member of the team (an older list's address or `@domain` may stay), and the owner is never stored. The bot's
   `visibility` follows in the same write (everyone when everyone may at least view it, else the owner and the people
   added), so every rule of the audience rule above that reads who sees a bot holds unchanged. A member's own
-  MausBot stays theirs alone, as before.
+  Obot stays theirs alone, as before.
 - **A new bot is its maker's until they share it** (`server/new-bot-sharing.ts`, the one place that decides, set on the
   store before anything is made). A bot made on a team starts as Only people added with nobody added: whoever looks
   after it and the admins reach it, and to every other member it does not exist. That holds for New bot, a preset, a
@@ -738,7 +738,7 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
 - **Being told.** Sharing a bot with a person (`PUT /api/bots/<id>/access` newly naming a User who could not use it)
   puts one line in that person's inbox, "Ada shared Quotes with you.", linked to the bot (`server/host/share-notice.ts`).
   Sharing with everyone tells nobody, and neither does adding an admin or someone who could already use it.
-- **A person's own MausBot exists for nobody else.** To every other member and every Admin, the Owner included, it is
+- **A person's own Obot exists for nobody else.** To every other member and every Admin, the Owner included, it is
   in no list, stream, search, export, routine picker or group chat, whatever its stored sharing says
   (`VisibleSet.bot`), and every route naming it, by path (its memory layers too) or in a body, answers exactly as an id
   no bot has: on a Team Cloud both are refused at the one gate, 404 *no such bot*, before any route can answer them
@@ -771,7 +771,7 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
   until they are removed, so the levels keep working underneath for a finer switch later. Someone who can only view a
   bot sees "You can view Payroll, not chat with it." where the composer would be (and in a room with that bot), opens
   its main chat rather than a new one of their own, and is offered no New conversation. Off a team none of this shows.
-- **Bot access** (its own Settings page, for a team's admins): one row per team bot (each person's own MausBot stays
+- **Bot access** (its own Settings page, for a team's admins): one row per team bot (each person's own Obot stays
   out) with its owner, what everyone gets and the faces of those added; a row opens that bot's Share dialog.
   Everyone's access reads as one column, "Everyone can use it" or "Only people added". By person lists each User, and
   opening one shows their bots, each with Remove where they were added. The same sharing as the Share dialog, applied at
@@ -840,7 +840,7 @@ started by hand reads *"No AI is connected yet, so nothing can run."*
 ## One inbox per person
 
 Everything addressed to a person reaches one place, their **inbox** (`server/host/person-inbox.ts`): their own private
-chat with their own MausBot (every member gets one; a Chief of Staff of their own, crowned through the API or before the
+chat with their own Obot (every member gets one; a Chief of Staff of their own, crowned through the API or before the
 app stopped offering it, holds it instead). It is the chat that bot opens to for them (`WireTask.inbox`, sent to its
 person alone): the one their brief was in, else their newest own chat with that bot, else a new one, "Inbox". Nothing is
 turned on: every member of a team has one, and off a team none exists. The app shows the inbox as one list, newest first, with a dot on
@@ -968,7 +968,7 @@ A private chat shows none of it. Nothing says when someone was last here, and no
   the people and its own session again, so a role the Admin changed shows without reopening the team. A stream that
   reconnects without its replay reads the people again and sends its window again. Types: `shared/team-presence.ts`.
 - **Private means private.** A conversation counts only when more than one person can read it (the team's or a group
-  chat's audience, with nobody's own MausBot in it) and the person sending can read it; anything else, a private chat
+  chat's audience, with nobody's own Obot in it) and the person sending can read it; anything else, a private chat
   above all, is taken as no conversation and is never kept. Each list is checked again as it is sent, against who may
   read the conversation then (`VisibleSet.thread`). So nobody, the Owner and every Admin included, learns from
   presence that a person has a private chat open, which bot they talk to privately, or that a private chat exists: that
@@ -1040,11 +1040,11 @@ opens the team's page on the Cloud site (`/cloud/team/<id>`), not a chat. Nothin
 
 ## The desktop app and a team it was invited to
 
-- **`openmausbot://team/<team id>`** (the join page's Open in the MausBot app; `electron/team-join.mjs`): the id only. Main
+- **`obot://team/<team id>`** (the join page's Open in the Obot app; `electron/team-join.mjs`): the id only. Main
   opens the team as the verified session lists it: signed in as the same address it reads the session again at once and
   opens the team; signed out it starts its own browser sign-in and opens the team once signed in; signed in as someone
   the team isn't listed for, main's own dialog says so and offers to sign in with another address (Add another account:
-  the one in use stays signed in). A link left waiting is dropped after 30 minutes. `openmausbot://cloud` is unchanged.
+  the one in use stays signed in). A link left waiting is dropped after 30 minutes. `obot://cloud` is unchanged.
 - **Landing** (`landing` in the Admin's session: no Cloud of the account's own, invited into a team): the window moves to the
   team only on a sign-in this app just saw, the first on this device (`team-landing.json` keeps the accounts signed in here
   and the teams opened here), with no place of the person's own on screen (My Cloud, a remembered place); then once. Any
@@ -1052,3 +1052,4 @@ opens the team's page on the Cloud site (`/cloud/team/<id>`), not a chat. Nothin
   in Settings (`cloudPlanView` `invited`).
 - A sign-in the link started that finishes as an address the team isn't listed for says so, with the way to sign in with
   the other address, never nothing.
+

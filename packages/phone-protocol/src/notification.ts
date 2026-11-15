@@ -32,7 +32,7 @@ export type NotifyKind =
   | "brief"
   /** A wait a bot set up (wait_until) fired: what it was waiting for happened. */
   | "wait"
-  /** Something OpenMausBot changed on its own that the person hears about
+  /** Something Obot changed on its own that the person hears about
    * once: a tool turned off for the bots it doesn't start for. */
   | "notice";
 

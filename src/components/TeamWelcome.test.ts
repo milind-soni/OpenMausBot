@@ -16,7 +16,7 @@ vi.mock("@/state/team-people", async (original) => ({ ...await original<typeof i
 import { TeamWelcome } from "./TeamWelcome";
 import { teamPrivateChatsLineDue } from "./TeamPrivateChatsLine";
 import { finishTeamWelcome, markTeamWelcomeShown, parseTeamWelcome, resetTeamWelcome, invitedToTeam, teamWelcomeDue, teamWelcomeView, WELCOME_USE_MS } from "@/lib/team-welcome";
-import { teamQuiet } from "./MausBotWelcome";
+import { teamQuiet } from "./ObotWelcome";
 
 const ACME = { id: "team-acme", name: "Acme" };
 const people = [
@@ -26,7 +26,7 @@ const people = [
 ];
 const bot = (id: string, name: string, extra: Record<string, unknown> = {}) => ({ id, name, title: "", description: "", tasks: [], threadId: `${id}-main`, mainThreadId: `${id}-main`, avatarCrop: "mascot", ...extra });
 const bots = [
-  bot("mine", "MausBot", { defaultBot: { person: "sam@acme.test" } }),
+  bot("mine", "Obot", { defaultBot: { person: "sam@acme.test" } }),
   bot("payroll", "Payroll", { description: "Runs payroll every month.\nAsk it anything about pay.", yourAccess: "view" }),
   bot("support", "Support", { title: "Answers customers" }),
   bot("old", "Old", { hidden: true }),
@@ -53,7 +53,7 @@ describe("a new member's first screen in a team", () => {
     expect(container.querySelector("[data-team-welcome-invited]")?.textContent).toBe("Ada Lovelace invited you to Acme.");
     expect([...container.querySelectorAll("[data-team-welcome-person] span.truncate")].map((row) => row.textContent)).toEqual(["Ada Lovelace", "ben@acme.test"]);
     expect(container.querySelector('[data-team-welcome-person="ada@acme.test"] img')?.getAttribute("src")).toBe("/api/team/people/p_a/picture?v=1");
-    // Their own MausBot isn't shared with them, and a hidden bot isn't shown; one line each.
+    // Their own Obot isn't shared with them, and a hidden bot isn't shown; one line each.
     expect([...container.querySelectorAll("[data-team-welcome-bot]")].map((row) => row.textContent)).toEqual(["PayrollRuns payroll every month.", "SupportAnswers customers"]);
     expect(container.querySelectorAll("[data-team-private-chats]")).toHaveLength(1);
     expect(container.querySelector("[data-team-private-chats]")?.textContent).toBe("Your chats in Acme are private. Only you can see them: not other members, not Acme's admins.");
@@ -77,7 +77,7 @@ describe("a new member's first screen in a team", () => {
     render(null);
     expect(container.querySelector("[data-team-welcome-invited]")?.textContent).toBe("You’re in Acme now.");
     expect(container.querySelector("[data-team-welcome-person]")).toBeNull();
-    expect(container.textContent).toContain("No bots are shared with you in Acme yet. Your own MausBot is in the sidebar.");
+    expect(container.textContent).toContain("No bots are shared with you in Acme yet. Your own Obot is in the sidebar.");
     expect([...container.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Look around"]);
   });
 });
@@ -144,7 +144,7 @@ describe("its manners", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("MausBot's own card never reaches a team's member, and its admins never over their welcome or a run", () => {
+  it("Obot's own card never reaches a team's member, and its admins never over their welcome or a run", () => {
     const owner = { hosted: false, canSave: true, cloudHome: true, teamRole: "owner" }, admin = { ...owner, teamRole: "admin" }, member = { ...owner, canSave: false, teamRole: "member" };
     const idle = { config: { team: ACME }, bots: [{ busy: false }] }, seen = { invitedBy: null, welcomedAt: 1, hints: [] };
     expect(teamQuiet(idle, member, seen), "a member, even after their welcome").toBe(true);

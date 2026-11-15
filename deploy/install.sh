@@ -1,11 +1,11 @@
 #!/bin/sh
-# MausBot on a server of your own: checks the server, then installs the MausBot server with HTTPS on your domain.
+# Obot on a server of your own: checks the server, then installs the Obot server with HTTPS on your domain.
 # Running it again repairs or updates the install and never touches your data.
 #
-#   curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
+#   curl -fsSL https://raw.githubusercontent.com/alnatourm/Obot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
 #   ... | sudo sh -s -- --check --domain maus.example.com    only checks the server; changes nothing
 #   ... | sudo sh -s -- --uninstall                          stops the server; keeps your data
-#   ... | sudo sh -s -- --domain maus.example.com <code>     also connects the server to MausBot with a one-time code
+#   ... | sudo sh -s -- --domain maus.example.com <code>     also connects the server to Obot with a one-time code
 #
 # Nothing runs until the last line calls main, so a download that is cut off part-way runs nothing. It sends no
 # telemetry. The addresses it contacts are the ones the checks name: the image registries, Let's Encrypt, GitHub's
@@ -14,14 +14,14 @@ set -eu
 
 settings() {
   SYSROOT="${OMB_INSTALL_SYSROOT:-}"
-  INSTALL_DIR="${OMB_INSTALL_DIR:-/opt/openmausbot}"
-  IMAGE_REPO=milind-soni/openmausbot
-  RELEASES_URL=https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest
-  ADMIN_URL="${MAUSBOT_ADMIN_URL:-https://cloud.openmausbot.com}"
-  SCRIPT_URL=https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh
+  INSTALL_DIR="${OMB_INSTALL_DIR:-/opt/obot}"
+  IMAGE_REPO=alnatourm/obot
+  RELEASES_URL=https://api.github.com/repos/alnatourm/Obot/releases/latest
+  ADMIN_URL="${OBOT_ADMIN_URL:-https://cloud.obot.com}"
+  SCRIPT_URL=https://raw.githubusercontent.com/alnatourm/Obot/main/deploy/install.sh
   # Where the files this installer places come from: this repository at the tag of the version it installs, and at
   # main when that tag does not have them. OMB_INSTALL_SOURCE names one copy to use instead (https://… or file:///…).
-  REPOSITORY_FILES=https://raw.githubusercontent.com/milind-soni/OpenMausBot
+  REPOSITORY_FILES=https://raw.githubusercontent.com/alnatourm/Obot
   SOURCE_ASKED="${OMB_INSTALL_SOURCE:-}"
   SOURCE=""
   SOURCE_NAME=""
@@ -31,7 +31,7 @@ settings() {
   SANDBOX_WARN_ONLY="keyring-denied hostname-private cpu-list-readable fly-api-hidden egress-public-allowed"
   SECCOMP=seccomp-omb-home.json
   APPARMOR_PROFILE=omb-home-narrow
-  PROJECT=openmausbot
+  PROJECT=obot
   MIN_DOCKER=24
   MIN_CPUS=2
   MIN_MEMORY_MB=3500
@@ -79,9 +79,9 @@ usage() {
   say "  --domain NAME      the name people will open, already pointing at this server"
   say "  --email ADDRESS    the first admin's email, so they can sign in with an emailed code"
   say "  --install-docker   install Docker with Docker's official script when it is missing, without asking"
-  say "  --dir PATH         where the install lives (default /opt/openmausbot)"
+  say "  --dir PATH         where the install lives (default /opt/obot)"
   say "  --no-sandbox       do not prepare this server for the bots' sandbox (only for a server you alone sign in to)"
-  say "  <code>             the one-time code MausBot shows, to also connect this server to MausBot"
+  say "  <code>             the one-time code Obot shows, to also connect this server to Obot"
 }
 
 parse() {
@@ -126,11 +126,11 @@ parse() {
     *) fail "That email address doesn't look right. Give one address, like you@example.com." ;;
   esac
   case "$CODE" in
-    *[!A-Za-z0-9-]*) fail "That code doesn't look right. Copy the install command from MausBot again." ;;
+    *[!A-Za-z0-9-]*) fail "That code doesn't look right. Copy the install command from Obot again." ;;
   esac
   case "$INSTALL_DIR" in
     /?*) ;;
-    *) fail "--dir needs a full path, like /opt/openmausbot." ;;
+    *) fail "--dir needs a full path, like /opt/obot." ;;
   esac
   case "$INSTALL_DIR" in
     *[!A-Za-z0-9/._-]*) fail "--dir may hold only letters, digits, / . _ and -." ;;
@@ -185,7 +185,7 @@ check_tools() {
 check_os() {
   release="$SYSROOT/etc/os-release"
   if [ ! -r "$release" ]; then
-    fix "This server's operating system can't be identified. MausBot's installer runs on Ubuntu 22.04 or 24.04: pick one of those."
+    fix "This server's operating system can't be identified. Obot's installer runs on Ubuntu 22.04 or 24.04: pick one of those."
     return
   fi
   field() { sed -n "s/^$1=//p" "$release" | head -n 1 | tr -d '"'; }
@@ -199,7 +199,7 @@ check_os() {
       if [ "${OMB_INSTALL_ALLOW_UNTESTED_OS:-}" = 1 ]; then
         note "This server runs $os_name, which the installer is not tested on; going on as asked."
       else
-        fix "This server runs $os_name. MausBot's installer runs on Ubuntu 22.04 or 24.04: pick one of those, or run again with OMB_INSTALL_ALLOW_UNTESTED_OS=1 to try anyway."
+        fix "This server runs $os_name. Obot's installer runs on Ubuntu 22.04 or 24.04: pick one of those, or run again with OMB_INSTALL_ALLOW_UNTESTED_OS=1 to try anyway."
       fi
       ;;
   esac
@@ -220,7 +220,7 @@ check_cpus() {
   if [ "$cpus" -ge "$MIN_CPUS" ]; then
     ok "processor cores: $cpus"
   else
-    fix "This server has $cpus processor core. MausBot needs at least $MIN_CPUS: pick a bigger server."
+    fix "This server has $cpus processor core. Obot needs at least $MIN_CPUS: pick a bigger server."
   fi
 }
 
@@ -229,7 +229,7 @@ check_memory() {
   case "$memory_mb" in '' | *[!0-9]*) memory_mb=0 ;; esac
   memory_gb=$(awk -v m="$memory_mb" 'BEGIN { printf "%.1f", m / 1024 }')
   if [ "$memory_mb" -lt "$MIN_MEMORY_MB" ]; then
-    fix "This server has $memory_gb GB of memory. MausBot needs at least 4 GB: pick a bigger server."
+    fix "This server has $memory_gb GB of memory. Obot needs at least 4 GB: pick a bigger server."
     return
   fi
   ok "memory: $memory_gb GB"
@@ -262,7 +262,7 @@ check_disk() {
   if [ "$least" -ge "$MIN_DISK_GB" ]; then
     ok "free disk: $least GB"
   else
-    fix "This server has only $least GB free at $least_place. MausBot needs at least $MIN_DISK_GB GB: free some space or add a disk."
+    fix "This server has only $least GB free at $least_place. Obot needs at least $MIN_DISK_GB GB: free some space or add a disk."
   fi
 }
 
@@ -287,13 +287,13 @@ check_docker() {
   major=${server%%.*}
   case "$major" in '' | *[!0-9]*) major=0 ;; esac
   if [ "$major" -lt "$MIN_DOCKER" ]; then
-    fix "Docker $server is too old; MausBot needs Docker $MIN_DOCKER or newer. Update it with: curl -fsSL https://get.docker.com | sudo sh  and then run this again."
+    fix "Docker $server is too old; Obot needs Docker $MIN_DOCKER or newer. Update it with: curl -fsSL https://get.docker.com | sudo sh  and then run this again."
     return
   fi
   security=$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null || true)
   case "$security" in
     *rootless*)
-      fix "Docker runs in rootless mode here. MausBot needs the standard Docker service: run curl -fsSL https://get.docker.com | sudo sh  and then run this again."
+      fix "Docker runs in rootless mode here. Obot needs the standard Docker service: run curl -fsSL https://get.docker.com | sudo sh  and then run this again."
       return
       ;;
   esac
@@ -395,8 +395,8 @@ check_outbound() {
     return
   fi
   ok "outbound: the image registries and Let's Encrypt are reachable"
-  if ! reachable https://accounts.openmausbot.com/; then
-    note "accounts.openmausbot.com is not reachable, so signing in with an emailed code needs a mail server of your own (OMB_SIGNIN_SMTP_URL). Pairing codes work without it."
+  if ! reachable https://accounts.obot.com/; then
+    note "accounts.obot.com is not reachable, so signing in with an emailed code needs a mail server of your own (OMB_SIGNIN_SMTP_URL). Pairing codes work without it."
   fi
 }
 
@@ -404,7 +404,7 @@ check_userns() {
   max=$(cat "$SYSROOT/proc/sys/user/max_user_namespaces" 2>/dev/null || echo 1)
   clone=$(cat "$SYSROOT/proc/sys/kernel/unprivileged_userns_clone" 2>/dev/null || echo 1)
   if [ "$max" = 0 ] || [ "$clone" != 1 ]; then
-    fix "This server switches off user namespaces, which the bots' sandbox needs. Run: printf 'user.max_user_namespaces=63000\\nkernel.unprivileged_userns_clone=1\\n' | sudo tee /etc/sysctl.d/90-mausbot.conf && sudo sysctl --system  and then run this again."
+    fix "This server switches off user namespaces, which the bots' sandbox needs. Run: printf 'user.max_user_namespaces=63000\\nkernel.unprivileged_userns_clone=1\\n' | sudo tee /etc/sysctl.d/90-obot.conf && sudo sysctl --system  and then run this again."
   else
     ok "user namespaces: on"
   fi
@@ -555,16 +555,16 @@ check_version() {
   fi
   release=$(newest_release || true)
   if [ -z "$release" ]; then
-    fix "The newest MausBot release could not be read from api.github.com. Check this server's outbound HTTPS, then run this again in a few minutes."
+    fix "The newest Obot release could not be read from api.github.com. Check this server's outbound HTTPS, then run this again in a few minutes."
     return
   fi
   registry_ask "$release"
   if [ "$REGISTRY_STATUS" = 404 ]; then
-    fix "MausBot $release has no server image yet. Run this again in a few minutes."
+    fix "Obot $release has no server image yet. Run this again in a few minutes."
     return
   fi
   if [ "$REGISTRY_STATUS" != 200 ]; then
-    fix "The image registry ghcr.io did not say whether it has MausBot $release (it answered $REGISTRY_STATUS). Run this again in a few minutes."
+    fix "The image registry ghcr.io did not say whether it has Obot $release (it answered $REGISTRY_STATUS). Run this again in a few minutes."
     return
   fi
   IMAGE="ghcr.io/$IMAGE_REPO:$release"
@@ -632,12 +632,12 @@ write_file() { # path, with the content on standard input: replaced in one step
 
 write_compose() {
   write_file "$INSTALL_DIR/compose.yaml" <<'COMPOSE'
-# Written by MausBot's installer (deploy/install.sh), and written again each time it runs: put your own settings in
+# Written by Obot's installer (deploy/install.sh), and written again each time it runs: put your own settings in
 # .env beside this file, which the installer keeps. The server only listens on loopback inside its container, and on
 # two Unix sockets in the `edge` volume, which Caddy, in its own container, reaches it through. A request on a socket is
 # always a remote one to the server. Caddy does not share the server's network: a server that restarted on its own came
 # back in a new one, and left Caddy refusing HTTPS in the old one.
-name: openmausbot
+name: obot
 services:
   omb:
     image: ${OMB_IMAGE:?run the installer again}
@@ -646,16 +646,16 @@ services:
     shm_size: 512m
     volumes:
       - ./data:/data
-      - edge:/run/openmausbot
+      - edge:/run/obot
       # The Update server button (update-runner.sh, root's folder): the server leaves a request in the first, reads the
       # outcome in the second.
-      - /var/lib/openmausbot-update/request:/run/omb-update/request
-      - /var/lib/openmausbot-update/status:/run/omb-update/status:ro
+      - /var/lib/obot-update/request:/run/omb-update/request
+      - /var/lib/obot-update/status:/run/omb-update/status:ro
     environment:
       OMB_PORT: "8799"
       OMB_WEBHOOK_PORT: "8800"
-      OMB_TUNNEL_SOCKET: /run/openmausbot/http.sock
-      OMB_WEBHOOK_SOCKET: /run/openmausbot/hooks.sock
+      OMB_TUNNEL_SOCKET: /run/obot/http.sock
+      OMB_WEBHOOK_SOCKET: /run/obot/hooks.sock
       OMB_WEBHOOK_PUBLIC_URL: https://${DOMAIN}
       OMB_PUBLIC_URL: https://${DOMAIN}
       OMB_SERVER_NAME: ${OMB_SERVER_NAME:-${DOMAIN}}
@@ -664,10 +664,10 @@ services:
       OMB_SIGNIN_MEMBER_EMAILS:
       OMB_SIGNIN_SMTP_URL:
       OMB_SIGNIN_SMTP_FROM:
-      # "1": phones pair by QR through MausBot Relay. Sign in once: docker compose exec omb openmausbot login --relay
+      # "1": phones pair by QR through Obot Relay. Sign in once: docker compose exec omb obot login --relay
       OMB_PHONE_RELAY:
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q obot"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -687,7 +687,7 @@ services:
       DOMAIN: ${DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - edge:/run/openmausbot
+      - edge:/run/obot
       - ./caddy/data:/data
       - ./caddy/config:/config
 
@@ -711,7 +711,7 @@ write_caddyfile() {
 	# own per-hook secrets), so it sits outside any login. The path is passed
 	# through unchanged: the receiver routes on /hooks/<id>.
 	handle /hooks/* {
-		reverse_proxy unix//run/openmausbot/hooks.sock
+		reverse_proxy unix//run/obot/hooks.sock
 	}
 
 	handle {
@@ -721,7 +721,7 @@ write_caddyfile() {
 		#   }
 		# and set both variables in .env (hash with `caddy hash-password`,
 		# every `$` doubled for Compose).
-		reverse_proxy unix//run/openmausbot/http.sock {
+		reverse_proxy unix//run/obot/http.sock {
 			# SSE: stream events as they arrive
 			flush_interval -1
 			# Compression is `encode`'s job above; the server would gzip its
@@ -751,7 +751,7 @@ unset_env() { # name
 write_settings() {
   if [ ! -f "$INSTALL_DIR/.env" ]; then
     write_file "$INSTALL_DIR/.env" 600 <<'ENV'
-# MausBot's settings on this server. The installer sets DOMAIN, OMB_IMAGE and COMPOSE_FILE and keeps every other line.
+# Obot's settings on this server. The installer sets DOMAIN, OMB_IMAGE and COMPOSE_FILE and keeps every other line.
 # Who may sign in with an emailed code: OMB_SIGNIN_EMAILS (admins) and OMB_SIGNIN_MEMBER_EMAILS, comma-separated.
 ENV
   fi
@@ -795,7 +795,7 @@ from_repository() { # what-to-fetch
   version=$(image_version || true)
   if [ -n "$version" ]; then
     SOURCE="$REPOSITORY_FILES/$version"
-    SOURCE_NAME="MausBot $version's own"
+    SOURCE_NAME="Obot $version's own"
     if "$1"; then return 0; fi
   fi
   SOURCE="$REPOSITORY_FILES/main"
@@ -865,7 +865,7 @@ prepare_sandbox() {
   if ! image_has_sandbox; then
     unset_env COMPOSE_FILE
     SANDBOX=absent
-    note "This MausBot version has no bots' sandbox yet. Run this command again after updating to a version that has it."
+    note "This Obot version has no bots' sandbox yet. Run this command again after updating to a version that has it."
     return
   fi
   if ! from_repository fetch_sandbox; then
@@ -873,7 +873,7 @@ prepare_sandbox() {
   fi
   say "Preparing this server for the bots' sandbox..."
   note "The sandbox's files are $SOURCE_NAME."
-  MAUSBOT_PROFILES_DIR="$INSTALL_DIR/box/profiles" sh "$INSTALL_DIR/box/prepare-host.sh" >/dev/null ||
+  OBOT_PROFILES_DIR="$INSTALL_DIR/box/profiles" sh "$INSTALL_DIR/box/prepare-host.sh" >/dev/null ||
     fail "This server could not be prepared for the bots' sandbox (the reason is above). Fix that and run this again; or add --no-sandbox to install without the sandbox, on a server you alone sign in to."
   set_env COMPOSE_FILE compose.yaml:compose.box.yaml
   SANDBOX=on
@@ -892,11 +892,11 @@ check_sandbox_runs() {
   report=$(compose exec -T omb node dist-server/bot-box/box-check.js --public=none 2>/dev/null | tr -d '\n' || true)
   case "$report" in
     *'"box":"bwrap"'*'"results":[{'*) ;;
-    *) fail "MausBot is running, but its bots' sandbox gave no answer to its self-check, so bots may not be separated from the server. $see" ;;
+    *) fail "Obot is running, but its bots' sandbox gave no answer to its self-check, so bots may not be separated from the server. $see" ;;
   esac
   case "$report" in
     *'"id":"config-hidden","ok":true'*) ;;
-    *) fail "MausBot is running, but its sandbox self-check did not show that a bot cannot read the server's settings (config-hidden), so bots are not safely separated from the server. $see" ;;
+    *) fail "Obot is running, but its sandbox self-check did not show that a bot cannot read the server's settings (config-hidden), so bots are not safely separated from the server. $see" ;;
   esac
   stopping=""
   set -f
@@ -927,7 +927,7 @@ check_sandbox_runs() {
       *) case "$report" in *'"ok":false'*) ;; *) stopping=" checks it did not name," ;; esac ;;
     esac
   fi
-  [ -z "$stopping" ] || fail "MausBot is running, but its bots' sandbox failed its self-check:${stopping%,}. Bots are not safely separated from the server. $see"
+  [ -z "$stopping" ] || fail "Obot is running, but its bots' sandbox failed its self-check:${stopping%,}. Bots are not safely separated from the server. $see"
   say "The bots' sandbox is on: a bot cannot read the server's settings, keys or other bots' files."
 }
 
@@ -937,7 +937,7 @@ prepare_data() {
   owner=$(docker run --rm --network none --entrypoint id "$IMAGE" -u 2>/dev/null || true)
   group=$(docker run --rm --network none --entrypoint id "$IMAGE" -g 2>/dev/null || true)
   case "$owner:$group" in
-    *[!0-9:]* | : | :* | *:) fail "The MausBot image did not say which user it runs as. Run this again; if it still fails, send us this line." ;;
+    *[!0-9:]* | : | :* | *:) fail "The Obot image did not say which user it runs as. Run this again; if it still fails, send us this line." ;;
   esac
   mkdir -m 700 "$INSTALL_DIR/data"
   chown "$owner:$group" "$INSTALL_DIR/data"
@@ -955,7 +955,7 @@ wait_healthy() {
 }
 
 https_answers() {
-  curl -fsS --max-time 10 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/health" 2>/dev/null | grep -q openmausbot
+  curl -fsS --max-time 10 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/health" 2>/dev/null | grep -q obot
 }
 
 wait_https() {
@@ -987,71 +987,71 @@ make_folders() { # folder...
 
 install_server() {
   say ""
-  say "Installing MausBot in $INSTALL_DIR..."
+  say "Installing Obot in $INSTALL_DIR..."
   if [ -d "$INSTALL_DIR/data" ]; then close_to_others "$INSTALL_DIR/data"; fi
   make_folders "$INSTALL_DIR" "$INSTALL_DIR/caddy" "$INSTALL_DIR/caddy/data" "$INSTALL_DIR/caddy/config"
   write_compose
   write_caddyfile
   write_settings
-  say "Downloading MausBot..."
-  compose_quietly pull -q || fail "MausBot could not be downloaded (Docker's message is above). Check this server's outbound HTTPS, then run this again."
+  say "Downloading Obot..."
+  compose_quietly pull -q || fail "Obot could not be downloaded (Docker's message is above). Check this server's outbound HTTPS, then run this again."
   place_update
   prepare_sandbox
   prepare_data
   place_button
-  say "Starting MausBot..."
-  compose_quietly up -d --remove-orphans || fail "MausBot could not be started (Docker's message is above). Fix that, then run this again."
-  wait_healthy || fail "MausBot started but did not report healthy within $HEALTH_WAIT_S seconds. Its log: cd $INSTALL_DIR && sudo docker compose logs omb --tail 50"
+  say "Starting Obot..."
+  compose_quietly up -d --remove-orphans || fail "Obot could not be started (Docker's message is above). Fix that, then run this again."
+  wait_healthy || fail "Obot started but did not report healthy within $HEALTH_WAIT_S seconds. Its log: cd $INSTALL_DIR && sudo docker compose logs omb --tail 50"
   check_sandbox_runs
   say "Waiting for the HTTPS certificate of $DOMAIN..."
-  wait_https || fail "MausBot is running, but https://$DOMAIN did not answer within $HTTPS_WAIT_S seconds, usually because the certificate could not be issued. Check that $DOMAIN points at this server and that ports 80 and 443 are open in your provider's firewall, then run this again. Caddy's reason: cd $INSTALL_DIR && sudo docker compose logs caddy --tail 30"
+  wait_https || fail "Obot is running, but https://$DOMAIN did not answer within $HTTPS_WAIT_S seconds, usually because the certificate could not be issued. Check that $DOMAIN points at this server and that ports 80 and 443 are open in your provider's firewall, then run this again. Caddy's reason: cd $INSTALL_DIR && sudo docker compose logs caddy --tail 30"
 }
 
-# The connector has its own installer, which MausBot serves with its address and the connector's image filled in.
+# The connector has its own installer, which Obot serves with its address and the connector's image filled in.
 # It is run as it is, with the code.
 connect_server() {
   say ""
-  say "Connecting this server to MausBot..."
-  connector_script="${MAUSBOT_CONNECTOR_INSTALLER:-}"
+  say "Connecting this server to Obot..."
+  connector_script="${OBOT_CONNECTOR_INSTALLER:-}"
   fetched=""
   if [ -z "$connector_script" ]; then
     fetched=$(mktemp)
     connector_script=$fetched
     if ! curl -fsSL --max-time 60 "$ADMIN_URL/install.sh" -o "$connector_script"; then
       rm -f "$fetched"
-      fail "MausBot is installed and running here, but the connector's installer could not be downloaded from $ADMIN_URL. Nothing needs reinstalling: run this again with your code once that address answers."
+      fail "Obot is installed and running here, but the connector's installer could not be downloaded from $ADMIN_URL. Nothing needs reinstalling: run this again with your code once that address answers."
     fi
   fi
-  if ! grep -q 'mausbot-connector' "$connector_script" 2>/dev/null; then
+  if ! grep -q 'obot-connector' "$connector_script" 2>/dev/null; then
     [ -z "$fetched" ] || rm -f "$fetched"
-    fail "MausBot is installed and running here, but what $ADMIN_URL sent is not the connector's installer. Nothing needs reinstalling: copy the install command from MausBot again."
+    fail "Obot is installed and running here, but what $ADMIN_URL sent is not the connector's installer. Nothing needs reinstalling: copy the install command from Obot again."
   fi
   # Always customer-run, on this install's folder (--dir included): the connector attaches to the server installed here
   # and never starts a second one beside it. A connector installer that does not know --customer-run refuses it, and
   # nothing is connected.
   status=0
   if [ "$INSTALL_DOCKER" = 1 ]; then
-    MAUSBOT_ADMIN_URL="$ADMIN_URL" MAUSBOT_INSTALL_DIR="$INSTALL_DIR" sh "$connector_script" "$CODE" --customer-run --install-docker || status=$?
+    OBOT_ADMIN_URL="$ADMIN_URL" OBOT_INSTALL_DIR="$INSTALL_DIR" sh "$connector_script" "$CODE" --customer-run --install-docker || status=$?
   else
-    MAUSBOT_ADMIN_URL="$ADMIN_URL" MAUSBOT_INSTALL_DIR="$INSTALL_DIR" sh "$connector_script" "$CODE" --customer-run || status=$?
+    OBOT_ADMIN_URL="$ADMIN_URL" OBOT_INSTALL_DIR="$INSTALL_DIR" sh "$connector_script" "$CODE" --customer-run || status=$?
   fi
   [ -z "$fetched" ] || rm -f "$fetched"
-  [ "$status" = 0 ] || fail "MausBot is installed and running here, but connecting it did not finish (the reason is above). Nothing needs reinstalling: fix that and run this again with a new code."
+  [ "$status" = 0 ] || fail "Obot is installed and running here, but connecting it did not finish (the reason is above). Nothing needs reinstalling: fix that and run this again with a new code."
 }
 
-# The first admin's one-time sign-in link, as `openmausbot pair` prints it: its code line (until when it works) and the
+# The first admin's one-time sign-in link, as `obot pair` prints it: its code line (until when it works) and the
 # link. Nothing when the server would not make one.
 first_admin_link() {
-  made=$(compose exec -T omb openmausbot pair --label "First admin" 2>/dev/null) || return 1
+  made=$(compose exec -T omb obot pair --label "First admin" 2>/dev/null) || return 1
   lines=$(printf '%s\n' "$made" | grep -E '^(Pairing code|Link) ' || true)
   case "$lines" in *"Link "*"https://$DOMAIN/pair#code="*) printf '%s\n' "$lines" | sed 's/^/  /' ;; *) return 1 ;; esac
 }
 
 finish() {
   say ""
-  say "MausBot is running at https://$DOMAIN"
+  say "Obot is running at https://$DOMAIN"
   say ""
-  pair_command="cd $INSTALL_DIR && sudo docker compose exec omb openmausbot pair --label \"First admin\""
+  pair_command="cd $INSTALL_DIR && sudo docker compose exec omb obot pair --label \"First admin\""
   # Only to a terminal: in a log, the link would let whoever reads it sign in as the admin until it is used or expires.
   if [ -t 1 ] && link=$(first_admin_link); then
     say "To sign in as the first admin, open this one-time link in your browser. Anyone who has it can use it, once:"
@@ -1099,26 +1099,26 @@ run_check() {
     fail "This server is not ready: fix the $FAILED line(s) marked FIX above. Nothing was changed."
   fi
   say ""
-  say "This server is ready for MausBot. Nothing was changed."
+  say "This server is ready for Obot. Nothing was changed."
 }
 
 # Stops the server and removes its containers. The data, the settings and the certificates stay where they are.
 run_uninstall() {
   need_root --uninstall
-  [ -f "$INSTALL_DIR/compose.yaml" ] || fail "MausBot isn't installed in $INSTALL_DIR, so there is nothing to stop."
-  command -v docker >/dev/null 2>&1 || fail "Docker isn't installed here, so MausBot isn't running. Your data is in $INSTALL_DIR/data."
-  say "Stopping MausBot..."
-  compose_quietly down --remove-orphans || fail "MausBot could not be stopped (Docker's message is above)."
+  [ -f "$INSTALL_DIR/compose.yaml" ] || fail "Obot isn't installed in $INSTALL_DIR, so there is nothing to stop."
+  command -v docker >/dev/null 2>&1 || fail "Docker isn't installed here, so Obot isn't running. Your data is in $INSTALL_DIR/data."
+  say "Stopping Obot..."
+  compose_quietly down --remove-orphans || fail "Obot could not be stopped (Docker's message is above)."
   if [ -f "$INSTALL_DIR/update-runner.sh" ]; then sh "$INSTALL_DIR/update-runner.sh" --remove --dir "$INSTALL_DIR" >/dev/null 2>&1 || true; fi
-  say "MausBot is stopped and its containers are removed."
+  say "Obot is stopped and its containers are removed."
   say "Your data is kept in $INSTALL_DIR/data, your settings in $INSTALL_DIR/.env and the HTTPS certificates in $INSTALL_DIR/caddy."
   say "To start it again: $(command_line "--domain $(env_value DOMAIN)")"
   say "This command never deletes your data. To delete it yourself: sudo rm -rf $INSTALL_DIR"
-  if [ -f "$SYSROOT/etc/mausbot/$SECCOMP" ]; then
-    say "The sandbox's two profiles stay on this server: /etc/mausbot/$SECCOMP and /etc/apparmor.d/$APPARMOR_PROFILE."
+  if [ -f "$SYSROOT/etc/obot/$SECCOMP" ]; then
+    say "The sandbox's two profiles stay on this server: /etc/obot/$SECCOMP and /etc/apparmor.d/$APPARMOR_PROFILE."
   fi
-  if [ -n "$(docker ps -aq --filter name=mausbot-connector 2>/dev/null || true)" ]; then
-    say "This server is still connected to MausBot. To disconnect it, run the uninstall command MausBot shows for the connector."
+  if [ -n "$(docker ps -aq --filter name=obot-connector 2>/dev/null || true)" ]; then
+    say "This server is still connected to Obot. To disconnect it, run the uninstall command Obot shows for the connector."
   fi
 }
 

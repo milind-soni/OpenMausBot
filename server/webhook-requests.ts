@@ -1,4 +1,4 @@
-// Webhook triggers a bot makes or changes from chat. Every change applies at once (OpenMausBot adds no confirmation
+// Webhook triggers a bot makes or changes from chat. Every change applies at once (Obot adds no confirmation
 // card of its own); the conversation gets a receipt card with Undo, which never carries the address.
 import { z } from "zod";
 

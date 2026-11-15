@@ -111,7 +111,7 @@ export function deciderCredential(
 }
 
 /** X research's relay token on a signed-in desktop: the desktop's main process
- * fetches it with its MausBot Cloud sign-in while the plan is paid
+ * fetches it with its Obot Cloud sign-in while the plan is paid
  * (electron/main.mjs) and hands it over on the private parent port. Held in
  * memory only, never written to config. */
 let desktopX: ServiceCredential | null = null;
@@ -120,11 +120,11 @@ let desktopXRefused = false;
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
-/** `{ type: "openmausbot:included-x", access: { url, token } | null }` from
+/** `{ type: "obot:included-x", access: { url, token } | null }` from
  * the desktop's main process. True when it was one (then applied), false for
  * any other message; a malformed one throws and changes nothing. */
 export function applyIncludedXMessage(message: unknown): boolean {
-  if (!message || typeof message !== "object" || (message as { type?: unknown }).type !== "openmausbot:included-x") return false;
+  if (!message || typeof message !== "object" || (message as { type?: unknown }).type !== "obot:included-x") return false;
   const access = (message as { access?: unknown }).access;
   if (access === null) {
     desktopX = null;

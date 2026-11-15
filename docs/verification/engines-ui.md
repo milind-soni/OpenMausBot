@@ -1,4 +1,4 @@
-# Engine library: onboarding and Settings
+﻿# Engine library: onboarding and Settings
 
 Use the actual renderer with sample engine statuses and a disposable server:
 
@@ -70,7 +70,7 @@ recreating a removed fixture directory.
 8. Expand **ChatGPT plan**. Its setup card offers **Continue with ChatGPT**,
    not a device code or terminal login. Toggle the sample plan connection:
    the first-use dialog should focus **Got it**, fit at 390px, and explain
-   ChatGPT plan usage separately from MausBot Cloud. Dismiss it, disconnect
+   ChatGPT plan usage separately from Obot Cloud. Dismiss it, disconnect
    and reconnect the sample: it must not return. The connected card retains
    **Using ChatGPT plan**, **Manage usage**, the synthetic account address,
    and protected sign-out. Check Midnight and Atelier; no horizontal overflow.
@@ -115,3 +115,4 @@ from `ui.close()`. The app server and its disposable data are cleaned first;
 verify those outcomes rather than treating that development-tool exit code as
 an installed-app failure. Ready preview shutdown exits 0; startup cancellation
 reports the launch-cancelled error.
+

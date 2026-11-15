@@ -69,7 +69,7 @@ export function createCloudLook({ store, accountId, homeEntry, saveEntry }) {
   };
 }
 
-/** openmausbot://cloud, the same with or without a checkout waiting: the sheet while a purchase made here is under way
+/** obot://cloud, the same with or without a checkout waiting: the sheet while a purchase made here is under way
  * (a checkout opened in the last day, a payment being linked, setup), else Settings, which signs in or opens the Cloud. */
 export function cloudLinkOpensSheet(state) {
   return Boolean((state?.checkout && !state.checkout.done) || (state?.adding && !state.adding.done) || state?.purchase || state?.machine?.status === "provisioning");
@@ -111,7 +111,7 @@ export function installCloudBuy({ ipcMain, guard, client, offersReady, clipboard
   handle("signInVerify", (_event, code) => client().emailVerify(plain(code)));
   handle("signInCancel", () => { client().emailCancel(); });
   handle("reopenCheckout", async (_event, plan, source) => {
-    if (!(await offersReady())) throw new Error("MausBot Cloud isn't offered in this app.");
+    if (!(await offersReady())) throw new Error("Obot Cloud isn't offered in this app.");
     const account = client();
     if (account.checkoutLink()) return account.reopenCheckout();
     if (typeof plan !== "string" || !CHECKOUT_SOURCES.includes(source)) throw new Error("Choose a plan to continue.");

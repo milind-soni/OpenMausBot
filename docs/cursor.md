@@ -1,6 +1,6 @@
-# Cursor Agent CLI
+﻿# Cursor Agent CLI
 
-Cursor is an optional OpenMausBot engine. OpenMausBot runs the official
+Cursor is an optional Obot engine. Obot runs the official
 [`cursor-agent` CLI](https://cursor.com/docs/cli) in ACP stdio mode (`cursor-agent acp`), so
 sessions, streaming, coding tools, permission requests, MCP integrations,
 resume, and cancellation use the same runtime as the other ACP engines.
@@ -19,21 +19,21 @@ key.
 
    Windows (native): `irm 'https://cursor.com/install?win32=true' | iex`
 
-   On Windows, OpenMausBot does not spawn cursor-agent.cmd (Node rejects a .cmd). It starts the powershell.exe -File launch from that shim’s sibling cursor-agent.ps1. After installing from the terminal, use Refresh engines so the version check runs again.
+   On Windows, Obot does not spawn cursor-agent.cmd (Node rejects a .cmd). It starts the powershell.exe -File launch from that shim’s sibling cursor-agent.ps1. After installing from the terminal, use Refresh engines so the version check runs again.
 
 2. Sign in from Cursor's card in the app (**Sign in to Cursor**), or with `cursor-agent login`
    in a terminal, or set `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN` in the environment of the
-   Cursor instance. The card runs `cursor-agent login` where OpenMausBot runs, with
+   Cursor instance. The card runs `cursor-agent login` where Obot runs, with
    `NO_OPEN_BROWSER` set, and shows the one link Cursor prints
    (`https://cursor.com/loginDeepControl?…`): open it on any device and sign in, and the
    CLI where the bots run finishes the sign-in. Only a cursor.com sign-in link carrying
    Cursor's request (`challenge`, `uuid` and its own flags) is ever shown.
 
 3. Confirm `cursor-agent --version` works. Cursor's docs call the command `agent`;
-   the installer adds `cursor-agent` beside it, and OpenMausBot runs that name,
+   the installer adds `cursor-agent` beside it, and Obot runs that name,
    because other tools also install an `agent`. The binary installs to
    `~/.local/bin` by default (`%LOCALAPPDATA%\cursor-agent` on Windows);
-   OpenMausBot already looks in both, so a CLI installed while the app is open
+   Obot already looks in both, so a CLI installed while the app is open
    is found without restarting.
 
 The engine stays unavailable until the `cursor-agent` executable is found, and
@@ -44,7 +44,7 @@ which answers `--version` with its own banner. Settings' CLI test refuses such a
 the same way. A missing login shows as
 unauthenticated rather than crashing the fleet.
 
-## MausBot Cloud
+## Obot Cloud
 
 A Cloud has no terminal, so on Linux Cursor's card installs Cursor's own build itself
 (**Install Cursor here**): the build `https://cursor.com/install` downloads, pinned to the
@@ -68,7 +68,7 @@ install says so in one line.
 ## Models
 
 The picker starts from a small static catalog and refreshes from the models an
-ACP session advertises: OpenMausBot opens `cursor-agent acp`, sends
+ACP session advertises: Obot opens `cursor-agent acp`, sends
 `initialize` and `session/new` in an empty folder, and stops, so the refresh
 sends no prompt. Each advertised model shows once under its plain slug
 (`grok-4.7[...]` as `grok-4.7`, `default[]` as `auto`). A static entry stays
@@ -83,7 +83,7 @@ catalog (then the static fallback) rather than emptying the rail.
 starts on `default[]` (Auto). The pick only lands through ACP
 `session/set_model`, which accepts only the parameterised ids the session
 advertises, such as `grok-4.7[context=256k,reasoning_effort=high,fast=true]`.
-OpenMausBot maps the picker slug onto that list: `auto` to `default[]`, a
+Obot maps the picker slug onto that list: `auto` to `default[]`, a
 plain slug to its Standard variant, `-fast` to `fast=true`, and an effort
 slug such as `grok-4.7-high-fast` to the variant with that effort. The
 session advertises one variant per base, so a slug with another effort
@@ -98,17 +98,17 @@ a notice that names it.
 
 For compatibility with direct driver embedders, an instance `fullAuto: true`
 adds `--force` (the CLI's documented auto-approve switch) only when a turn
-does not provide a bot approval level. OpenMausBot app turns always provide
+does not provide a bot approval level. Obot app turns always provide
 one: both **Ask for approval** and **Approve for me** launch Cursor without
-`--force`, then OpenMausBot handles its permission requests according to the
+`--force`, then Obot handles its permission requests according to the
 bot's current level.
 
 ## Questions
 
-Cursor's AskQuestion tool sends `cursor/ask_question`. OpenMausBot shows all
+Cursor's AskQuestion tool sends `cursor/ask_question`. Obot shows all
 of its questions on one question card, including multi-select questions, and
 answers with the option ids the person picked. Cursor's reply format has no
-free text. If any answer is in the person's own words, OpenMausBot replies
+free text. If any answer is in the person's own words, Obot replies
 `skipped` and puts every answer in the reason, which Cursor gives the model
 as it is. An unanswered card replies `cancelled`. A question that arrives as
 one `session/request_permission` per question (Cursor's fallback) still
@@ -116,13 +116,13 @@ becomes the one-question card it was before.
 
 ## Team tools (agents MCP)
 
-OpenMausBot mounts its own coordination and team-setup tools (`coordinate_bots`,
+Obot mounts its own coordination and team-setup tools (`coordinate_bots`,
 `create_bot`, `list_team_setup`, `propose_team_setup`, …) on Cursor turns the
 same way as on other ACP engines. The driver:
 
 - passes `--approve-mcps` on every ACP launch so Cursor accepts those
   session-provided servers without a silent approval gate;
-- sends OpenMausBot's own servers over HTTP (`ownMcpOverHttp`) when the harness
+- sends Obot's own servers over HTTP (`ownMcpOverHttp`) when the harness
   is on `127.0.0.1`, matching Cursor's advertised `mcpCapabilities.http`;
 - restarts the CLI process when MCP credentials change between turns.
 
@@ -140,3 +140,4 @@ same way as on other ACP engines. The driver:
 Normal unit and ACP protocol tests use the scripted fake CLI and do not
 require a Cursor subscription. Do not print credentials or upload native
 protocol logs from a credentialed live run.
+

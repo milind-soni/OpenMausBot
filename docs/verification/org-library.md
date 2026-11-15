@@ -1,4 +1,4 @@
-# The organization library
+﻿# The organization library
 
 This recipe covers **Templates → From {Organization}**: the catalog Electron
 relays, **Add** with `trust: "org"`, the stamps, withdrawn releases, the
@@ -105,7 +105,7 @@ The first command renders the shelf cards and the preview to markup. It
 checks:
 
 - Add appears only for a checked file, and there is no confirm step;
-- Added, "Update OpenMausBot to add this", the Recommended badge, the
+- Added, "Update Obot to add this", the Recommended badge, the
   waiting-release sentence and "Withdrawn by …";
 - "Included skills — switched on";
 - a skills-only preview with no team;
@@ -244,3 +244,4 @@ Not tested: an actual process kill (the restart test disposes the library
 and opens a new one on the same files). Adoption after a lost `state.json`
 starts an empty list by design; see [../org-library.md](../org-library.md).
 Not production qualification.
+

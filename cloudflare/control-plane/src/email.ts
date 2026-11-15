@@ -1,4 +1,4 @@
-export interface TransactionalEmailSender {
+﻿export interface TransactionalEmailSender {
   send(message: {
     to: string;
     from: { email: string; name: string };
@@ -15,10 +15,10 @@ export interface OTPEmailInput {
 }
 
 const SUBJECTS = {
-  "sign-in": "Your OpenMausBot sign-in code",
-  "email-verification": "Verify your OpenMausBot email",
-  "forget-password": "Reset your OpenMausBot password",
-  "change-email": "Confirm your OpenMausBot email change",
+  "sign-in": "Your Obot sign-in code",
+  "email-verification": "Verify your Obot email",
+  "forget-password": "Reset your Obot password",
+  "change-email": "Confirm your Obot email change",
 } as const satisfies Record<OTPEmailInput["type"], string>;
 
 export function buildOTPEmail(from: string, input: OTPEmailInput) {
@@ -27,7 +27,7 @@ export function buildOTPEmail(from: string, input: OTPEmailInput) {
   const html = `<!doctype html><html><body><h1>${subject}</h1><p>Your one-time code is:</p><p style="font-size:32px;font-weight:700;letter-spacing:0.15em">${input.otp}</p><p>It expires in 10 minutes. If you did not request this code, you can ignore this email.</p></body></html>`;
   return {
     to: input.email,
-    from: { email: from, name: "OpenMausBot" },
+    from: { email: from, name: "Obot" },
     subject,
     html,
     text,
@@ -48,3 +48,4 @@ export async function sendOTPEmail(
     console.error(JSON.stringify({ message: "transactional email send failed", requestId }));
   }
 }
+

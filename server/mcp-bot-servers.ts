@@ -57,7 +57,7 @@ export function botFolderUse(server: StdioMcpSpec, dataDir: string): BotFolderUs
   return botId ? { botId, temporary } : null;
 }
 
-/** A path of this server's that is in the data folder and is no bot's folder and no engine OpenMausBot installed: the
+/** A path of this server's that is in the data folder and is no bot's folder and no engine Obot installed: the
  * server's own files (settings, sessions, saved logins), which no bot's command may name. */
 export function serverFileUse(server: StdioMcpSpec, dataDir: string): string | null {
   const root = resolve(dataDir);

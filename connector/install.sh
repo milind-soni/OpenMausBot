@@ -1,40 +1,40 @@
 #!/bin/sh
-# MausBot on a server of your own: checks the server, installs the bot box's two security profiles, starts the MausBot
-# connector and connects it to MausBot with the one-time code MausBot shows. Running it again repairs the install.
+# Obot on a server of your own: checks the server, installs the bot box's two security profiles, starts the Obot
+# connector and connects it to Obot with the one-time code Obot shows. Running it again repairs the install.
 #
-#   curl -fsSL https://cloud.openmausbot.com/install.sh | sudo sh -s -- <code>
+#   curl -fsSL https://cloud.obot.com/install.sh | sudo sh -s -- <code>
 #
-# On a server where you already installed MausBot yourself (deploy/install.sh, in /opt/openmausbot) it connects that
-# MausBot instead of starting another: the connector then runs in customer-run mode, where MausBot may only start,
+# On a server where you already installed Obot yourself (deploy/install.sh, in /opt/obot) it connects that
+# Obot instead of starting another: the connector then runs in customer-run mode, where Obot may only start,
 # stop, update and back up your server and learns only its versions, health and seat count (connector/src/customer-run.ts).
 #
-#   curl -fsSL https://cloud.openmausbot.com/install.sh | sudo sh -s -- uninstall               (keeps your data)
-#   curl -fsSL https://cloud.openmausbot.com/install.sh | sudo sh -s -- uninstall --delete-data (deletes it too)
+#   curl -fsSL https://cloud.obot.com/install.sh | sudo sh -s -- uninstall               (keeps your data)
+#   curl -fsSL https://cloud.obot.com/install.sh | sudo sh -s -- uninstall --delete-data (deletes it too)
 #
-# MausBot serves this file with its own address and the connector's image (pinned by digest) filled in below.
+# Obot serves this file with its own address and the connector's image (pinned by digest) filled in below.
 set -eu
 
-ADMIN_URL="${MAUSBOT_ADMIN_URL:-@MAUSBOT_ADMIN_URL@}"
-CONNECTOR_IMAGE="${MAUSBOT_CONNECTOR_IMAGE:-@MAUSBOT_CONNECTOR_IMAGE@}"
+ADMIN_URL="${OBOT_ADMIN_URL:-@OBOT_ADMIN_URL@}"
+CONNECTOR_IMAGE="${OBOT_CONNECTOR_IMAGE:-@OBOT_CONNECTOR_IMAGE@}"
 
-ETC_DIR="${MAUSBOT_ETC_DIR:-/etc/mausbot}"
-AUDIT_DIR="${MAUSBOT_AUDIT_DIR:-/var/log/mausbot}"
-APPARMOR_DIR="${MAUSBOT_APPARMOR_DIR:-/etc/apparmor.d}"
+ETC_DIR="${OBOT_ETC_DIR:-/etc/obot}"
+AUDIT_DIR="${OBOT_AUDIT_DIR:-/var/log/obot}"
+APPARMOR_DIR="${OBOT_APPARMOR_DIR:-/etc/apparmor.d}"
 PROFILE=omb-home-narrow
 SECCOMP=seccomp-omb-home.json
-CONNECTOR=mausbot-connector
-CONNECTOR_NEXT=mausbot-connector-next
-HOME_CONTAINER=mausbot-home
-DATA_VOLUME=mausbot-data
-STATE_VOLUME=mausbot-connector
-SNAPSHOT_VOLUME=mausbot-snapshot
-ROLE_LABEL=com.mausbot.role
-INSTALL_DIR="${MAUSBOT_INSTALL_DIR:-/opt/openmausbot}"
-UPDATE_DIR="${MAUSBOT_UPDATE_DIR:-/var/lib/mausbot/update}"
-SBIN_DIR="${MAUSBOT_SBIN_DIR:-/usr/local/sbin}"
-SYSTEMD_DIR="${MAUSBOT_SYSTEMD_DIR:-/etc/systemd/system}"
-UPDATE_RUNNER=mausbot-update-runner
-UPDATE_UNIT=mausbot-update
+CONNECTOR=obot-connector
+CONNECTOR_NEXT=obot-connector-next
+HOME_CONTAINER=obot-home
+DATA_VOLUME=obot-data
+STATE_VOLUME=obot-connector
+SNAPSHOT_VOLUME=obot-snapshot
+ROLE_LABEL=com.obot.role
+INSTALL_DIR="${OBOT_INSTALL_DIR:-/opt/obot}"
+UPDATE_DIR="${OBOT_UPDATE_DIR:-/var/lib/obot/update}"
+SBIN_DIR="${OBOT_SBIN_DIR:-/usr/local/sbin}"
+SYSTEMD_DIR="${OBOT_SYSTEMD_DIR:-/etc/systemd/system}"
+UPDATE_RUNNER=obot-update-runner
+UPDATE_UNIT=obot-update
 MODE=operated
 MIN_DOCKER=24
 MIN_CPUS=2
@@ -58,10 +58,10 @@ need_root() {
 
 need_settings() {
   case "$ADMIN_URL" in
-    @*) fail "This installer was not downloaded from MausBot. Copy the install command from MausBot and run that." ;;
+    @*) fail "This installer was not downloaded from Obot. Copy the install command from Obot and run that." ;;
   esac
   case "$CONNECTOR_IMAGE" in
-    @*) fail "This installer was not downloaded from MausBot. Copy the install command from MausBot and run that." ;;
+    @*) fail "This installer was not downloaded from Obot. Copy the install command from Obot and run that." ;;
   esac
 }
 
@@ -71,17 +71,17 @@ tty_available() {
 }
 
 check_os() {
-  [ -r /etc/os-release ] || fail "This server's operating system can't be identified. MausBot runs on Ubuntu 22.04 or 24.04, or Debian 12."
+  [ -r /etc/os-release ] || fail "This server's operating system can't be identified. Obot runs on Ubuntu 22.04 or 24.04, or Debian 12."
   os_id=$(. /etc/os-release && printf '%s' "${ID:-}")
   os_version=$(. /etc/os-release && printf '%s' "${VERSION_ID:-}")
   os_name=$(. /etc/os-release && printf '%s' "${PRETTY_NAME:-$os_id $os_version}")
   case "$os_id $os_version" in
     "ubuntu 22.04" | "ubuntu 24.04" | "debian 12") note "operating system: $os_name" ;;
     *)
-      if [ "${MAUSBOT_ALLOW_UNTESTED_OS:-}" = 1 ]; then
-        note "operating system: $os_name (not one MausBot is tested on; going on as asked)"
+      if [ "${OBOT_ALLOW_UNTESTED_OS:-}" = 1 ]; then
+        note "operating system: $os_name (not one Obot is tested on; going on as asked)"
       else
-        fail "MausBot runs on Ubuntu 22.04 or 24.04, or Debian 12. This server runs $os_name. Please pick one of those, or run again with MAUSBOT_ALLOW_UNTESTED_OS=1 to try anyway."
+        fail "Obot runs on Ubuntu 22.04 or 24.04, or Debian 12. This server runs $os_name. Please pick one of those, or run again with OBOT_ALLOW_UNTESTED_OS=1 to try anyway."
       fi
       ;;
   esac
@@ -89,7 +89,7 @@ check_os() {
 
 check_arch() {
   arch=$(uname -m)
-  [ "$arch" = x86_64 ] || fail "This server has an ARM processor ($arch). MausBot runs on Intel or AMD (x86-64) servers for now. Please pick an x86-64 server."
+  [ "$arch" = x86_64 ] || fail "This server has an ARM processor ($arch). Obot runs on Intel or AMD (x86-64) servers for now. Please pick an x86-64 server."
   note "processor: x86-64"
 }
 
@@ -103,7 +103,7 @@ install_docker() {
 }
 
 offer_docker() { # what is wrong, in one sentence
-  if [ "${MAUSBOT_INSTALL_DOCKER:-}" = 1 ]; then
+  if [ "${OBOT_INSTALL_DOCKER:-}" = 1 ]; then
     install_docker
     return
   fi
@@ -132,13 +132,13 @@ check_docker() {
   docker_server
   # Debian 12's own Docker is 20.10: Docker's script replaces it with the current one, keeping its containers and volumes.
   if [ "$major" -lt "$MIN_DOCKER" ]; then
-    offer_docker "Docker $server is too old; MausBot needs Docker $MIN_DOCKER or newer."
+    offer_docker "Docker $server is too old; Obot needs Docker $MIN_DOCKER or newer."
     docker_server
     [ "$major" -ge "$MIN_DOCKER" ] || fail "Docker is still $server after the update (Docker's output is above). Fix that, then run this command again."
   fi
   security=$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null || true)
   case "$security" in
-    *rootless*) fail "Docker runs in rootless mode here. MausBot needs the standard Docker service: run curl -fsSL https://get.docker.com | sudo sh" ;;
+    *rootless*) fail "Docker runs in rootless mode here. Obot needs the standard Docker service: run curl -fsSL https://get.docker.com | sudo sh" ;;
   esac
   note "Docker: $server"
 }
@@ -165,21 +165,21 @@ check_userns() {
   max=$(cat /proc/sys/user/max_user_namespaces 2>/dev/null || echo 1)
   clone=$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo 1)
   if [ "$max" = 0 ] || [ "$clone" != 1 ]; then
-    fail "Your server switches off a Linux feature our bots' safety box needs. Run: printf 'user.max_user_namespaces=63000\\nkernel.unprivileged_userns_clone=1\\n' | sudo tee /etc/sysctl.d/90-mausbot.conf && sudo sysctl --system  and then run this command again."
+    fail "Your server switches off a Linux feature our bots' safety box needs. Run: printf 'user.max_user_namespaces=63000\\nkernel.unprivileged_userns_clone=1\\n' | sudo tee /etc/sysctl.d/90-obot.conf && sudo sysctl --system  and then run this command again."
   fi
 }
 
 check_resources() {
   cpus=$(nproc 2>/dev/null || echo 1)
-  [ "$cpus" -ge "$MIN_CPUS" ] || fail "This server has $cpus processor core. MausBot needs at least $MIN_CPUS. Please pick a bigger server."
+  [ "$cpus" -ge "$MIN_CPUS" ] || fail "This server has $cpus processor core. Obot needs at least $MIN_CPUS. Please pick a bigger server."
   memory_mb=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
   memory_gb=$(awk -v m="$memory_mb" 'BEGIN { printf "%.1f", m / 1024 }')
-  [ "$memory_mb" -ge "$MIN_MEMORY_MB" ] || fail "This server has $memory_gb GB of memory. MausBot needs at least 4 GB (and 32 GB for a team of five). Please pick a bigger server."
+  [ "$memory_mb" -ge "$MIN_MEMORY_MB" ] || fail "This server has $memory_gb GB of memory. Obot needs at least 4 GB (and 32 GB for a team of five). Please pick a bigger server."
   root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
   [ -d "$root" ] || root=/
   free_gb=$(df -Pk "$root" | awk 'NR == 2 { print int($4 / 1048576) }')
   used_pct=$(df -Pk "$root" | awk 'NR == 2 { sub("%", "", $5); print $5 }')
-  [ "$free_gb" -ge "$MIN_DISK_GB" ] || fail "Your server has only $free_gb GB free. MausBot needs at least $MIN_DISK_GB GB: free some space or add a disk."
+  [ "$free_gb" -ge "$MIN_DISK_GB" ] || fail "Your server has only $free_gb GB free. Obot needs at least $MIN_DISK_GB GB: free some space or add a disk."
   note "size: $cpus cores, $memory_gb GB memory, $free_gb GB free disk"
   if [ "$memory_mb" -lt 7500 ]; then note "note: with $memory_gb GB of memory, bots will be slow when several work at once. We suggest at least 8 GB."; fi
   if [ "${used_pct:-0}" -ge 85 ]; then note "note: the disk is $used_pct% full. Free some space or add a disk before it fills up."; fi
@@ -199,11 +199,11 @@ check_network() {
   done
   if [ -n "$blocked" ]; then
     if [ -n "${https_proxy:-}${HTTPS_PROXY:-}" ]; then
-      fail "This server reaches the internet only through a web proxy, and MausBot can't use a web proxy yet. It needs direct outbound HTTPS (port 443) to:$blocked"
+      fail "This server reaches the internet only through a web proxy, and Obot can't use a web proxy yet. It needs direct outbound HTTPS (port 443) to:$blocked"
     fi
     fail "Your network blocks outbound HTTPS (port 443) to:$blocked. Ask your IT team to allow it, then run this command again."
   fi
-  note "network: MausBot, ghcr.io and Cloudflare reachable"
+  note "network: Obot, ghcr.io and Cloudflare reachable"
 }
 
 check_clock() {
@@ -214,7 +214,7 @@ check_clock() {
       skew=$(( $(date +%s) - theirs ))
       [ "$skew" -lt 0 ] && skew=$(( -skew ))
       if [ "$skew" -gt 300 ]; then
-        fail "Your server's clock is $(( skew / 60 )) minutes off, so it can't check MausBot's messages. Run: sudo timedatectl set-ntp true  and then run this command again."
+        fail "Your server's clock is $(( skew / 60 )) minutes off, so it can't check Obot's messages. Run: sudo timedatectl set-ntp true  and then run this command again."
       fi
     fi
   fi
@@ -225,7 +225,7 @@ check_clock() {
 
 pull_connector() {
   if ! docker image inspect "$CONNECTOR_IMAGE" >/dev/null 2>&1; then
-    docker pull -q "$CONNECTOR_IMAGE" >/dev/null || fail "The MausBot connector could not be downloaded from ghcr.io. Check that this server can reach https://ghcr.io, then run this command again."
+    docker pull -q "$CONNECTOR_IMAGE" >/dev/null || fail "The Obot connector could not be downloaded from ghcr.io. Check that this server can reach https://ghcr.io, then run this command again."
   fi
 }
 
@@ -244,7 +244,7 @@ install_profiles() {
   fi
 }
 
-# A MausBot its owner installed is here: the connector attaches to it and never starts a second one.
+# A Obot its owner installed is here: the connector attaches to it and never starts a second one.
 own_server_here() {
   [ -f "$INSTALL_DIR/compose.yaml" ]
 }
@@ -255,7 +255,7 @@ install_updater() {
   install -d -m 0700 "$UPDATE_DIR"
   rm -f "$UPDATE_DIR/runner"
   if ! command -v systemctl >/dev/null 2>&1 || [ ! -d "$SYSTEMD_DIR" ]; then
-    note "note: this server has no systemd, so MausBot cannot update it for you. Update it yourself with: $INSTALL_DIR/update.sh"
+    note "note: this server has no systemd, so Obot cannot update it for you. Update it yourself with: $INSTALL_DIR/update.sh"
     return
   fi
   install -d -m 0755 "$SBIN_DIR"
@@ -265,7 +265,7 @@ install_updater() {
   mv "$SBIN_DIR/$UPDATE_RUNNER.tmp" "$SBIN_DIR/$UPDATE_RUNNER"
   cat >"$SYSTEMD_DIR/$UPDATE_UNIT.path" <<UNIT
 [Unit]
-Description=Runs MausBot's updater when the MausBot connector asks for an update
+Description=Runs Obot's updater when the Obot connector asks for an update
 
 [Path]
 PathExists=$UPDATE_DIR/request
@@ -275,21 +275,21 @@ WantedBy=multi-user.target
 UNIT
   cat >"$SYSTEMD_DIR/$UPDATE_UNIT.service" <<UNIT
 [Unit]
-Description=MausBot's updater ($INSTALL_DIR/update.sh), for an update the MausBot connector asked for
+Description=Obot's updater ($INSTALL_DIR/update.sh), for an update the Obot connector asked for
 
 [Service]
 Type=oneshot
-Environment=MAUSBOT_UPDATE_DIR=$UPDATE_DIR MAUSBOT_INSTALL_DIR=$INSTALL_DIR
+Environment=OBOT_UPDATE_DIR=$UPDATE_DIR OBOT_INSTALL_DIR=$INSTALL_DIR
 ExecStart=$SBIN_DIR/$UPDATE_RUNNER
 UNIT
   systemctl daemon-reload >/dev/null 2>&1 || true
   if systemctl enable --now "$UPDATE_UNIT.path" >/dev/null 2>&1; then
     echo 1 >"$UPDATE_DIR/runner"
   else
-    note "note: the updater could not be switched on, so MausBot cannot update this server for you. Update it yourself with: $INSTALL_DIR/update.sh"
+    note "note: the updater could not be switched on, so Obot cannot update this server for you. Update it yourself with: $INSTALL_DIR/update.sh"
   fi
   if [ ! -f "$INSTALL_DIR/update.sh" ]; then
-    note "note: there is no update.sh in $INSTALL_DIR yet. Until it is there, MausBot's updates are refused and nothing is changed."
+    note "note: there is no update.sh in $INSTALL_DIR yet. Until it is there, Obot's updates are refused and nothing is changed."
   fi
 }
 
@@ -301,37 +301,37 @@ remove_updater() {
 }
 
 start_connector() {
-  say "Starting the MausBot connector..."
+  say "Starting the Obot connector..."
   docker volume create "$STATE_VOLUME" >/dev/null
   install -d -m 0755 "$ETC_DIR"
-  # The audit log: every job MausBot runs here, root's, for you to read (mausbot-connector audit).
+  # The audit log: every job Obot runs here, root's, for you to read (obot-connector audit).
   install -d -m 0750 "$AUDIT_DIR"
   docker rm -f "$CONNECTOR" "$CONNECTOR_NEXT" >/dev/null 2>&1 || true
   instance=$(cat /proc/sys/kernel/random/uuid)
-  set -- --label "$ROLE_LABEL=connector" --label "com.mausbot.instance=$instance" \
-    -e "MAUSBOT_INSTANCE=$instance" -e "MAUSBOT_CONNECTOR_IMAGE=$CONNECTOR_IMAGE"
-  case "${MAUSBOT_UPDATE_WAIT_S:-}" in
+  set -- --label "$ROLE_LABEL=connector" --label "com.obot.instance=$instance" \
+    -e "OBOT_INSTANCE=$instance" -e "OBOT_CONNECTOR_IMAGE=$CONNECTOR_IMAGE"
+  case "${OBOT_UPDATE_WAIT_S:-}" in
     '' | *[!0-9]*) ;;
-    *) set -- "$@" -e "MAUSBOT_UPDATE_WAIT_S=$MAUSBOT_UPDATE_WAIT_S" ;;
+    *) set -- "$@" -e "OBOT_UPDATE_WAIT_S=$OBOT_UPDATE_WAIT_S" ;;
   esac
   if [ "$MODE" = customer-run ]; then
-    set -- "$@" -e MAUSBOT_MODE=customer-run -v "$UPDATE_DIR:/var/lib/mausbot/update"
+    set -- "$@" -e OBOT_MODE=customer-run -v "$UPDATE_DIR:/var/lib/obot/update"
   fi
   docker run -d --name "$CONNECTOR" --restart unless-stopped --network host \
     --security-opt no-new-privileges=true --cap-drop ALL --read-only --tmpfs /tmp \
-    -v /var/run/docker.sock:/var/run/docker.sock -v "$STATE_VOLUME:/state" -v "$ETC_DIR:/etc/mausbot:ro" -v "$AUDIT_DIR:/var/log/mausbot" \
+    -v /var/run/docker.sock:/var/run/docker.sock -v "$STATE_VOLUME:/state" -v "$ETC_DIR:/etc/obot:ro" -v "$AUDIT_DIR:/var/log/obot" \
     --log-opt max-size=10m --log-opt max-file=3 \
-    "$@" "$CONNECTOR_IMAGE" run >/dev/null || fail "The MausBot connector could not be started (Docker's message is above). Run this command again."
+    "$@" "$CONNECTOR_IMAGE" run >/dev/null || fail "The Obot connector could not be started (Docker's message is above). Run this command again."
   for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if docker exec "$CONNECTOR" mausbot-connector version >/dev/null 2>&1; then return; fi
+    if docker exec "$CONNECTOR" obot-connector version >/dev/null 2>&1; then return; fi
     sleep 1
   done
-  fail "The MausBot connector did not start. Its log: $(docker logs --tail 5 "$CONNECTOR" 2>&1 | tr '\n' ' ')"
+  fail "The Obot connector did not start. Its log: $(docker logs --tail 5 "$CONNECTOR" 2>&1 | tr '\n' ' ')"
 }
 
 check_box() {
   say "Checking that the bots' safety box works here..."
-  probe=$(docker exec "$CONNECTOR" mausbot-connector probe 2>&1 || true)
+  probe=$(docker exec "$CONNECTOR" obot-connector probe 2>&1 || true)
   problems=$(printf '%s\n' "$probe" | sed -n 's/^fail [a-z]* //p')
   warnings=$(printf '%s\n' "$probe" | sed -n 's/^warn [a-z]* //p')
   if [ -n "$warnings" ]; then printf '%s\n' "$warnings" | sed 's/^/  note: /'; fi
@@ -342,49 +342,49 @@ check_box() {
 connect() {
   code=$1
   if [ -n "$code" ]; then
-    say "Connecting to MausBot..."
+    say "Connecting to Obot..."
     # The code works once: its refusal is read from this one attempt.
-    if ! refusal=$(printf '%s\n' "$code" | docker exec -i -e "MAUSBOT_ADMIN_URL=$ADMIN_URL" "$CONNECTOR" mausbot-connector enroll 2>&1 >/dev/null); then
+    if ! refusal=$(printf '%s\n' "$code" | docker exec -i -e "OBOT_ADMIN_URL=$ADMIN_URL" "$CONNECTOR" obot-connector enroll 2>&1 >/dev/null); then
       fail "$(printf '%s\n' "$refusal" | tail -n 1)"
     fi
-  elif ! docker exec "$CONNECTOR" mausbot-connector status | grep -q '"enrolled":true'; then
-    fail "Add the one-time code MausBot shows next to the install command, like this: $(command_line '<code>')"
+  elif ! docker exec "$CONNECTOR" obot-connector status | grep -q '"enrolled":true'; then
+    fail "Add the one-time code Obot shows next to the install command, like this: $(command_line '<code>')"
   fi
   waited=0
   while [ "$waited" -lt 60 ]; do
-    if docker exec "$CONNECTOR" mausbot-connector status 2>/dev/null | grep -q '"connected":true'; then return; fi
+    if docker exec "$CONNECTOR" obot-connector status 2>/dev/null | grep -q '"connected":true'; then return; fi
     sleep 1
     waited=$((waited + 1))
   done
-  fail "The connector could not reach MausBot at $ADMIN_URL. Its log: $(docker logs --tail 5 "$CONNECTOR" 2>&1 | tr '\n' ' ')"
+  fail "The connector could not reach Obot at $ADMIN_URL. Its log: $(docker logs --tail 5 "$CONNECTOR" 2>&1 | tr '\n' ' ')"
 }
 
 install_connector() {
   code=""
   for arg in "$@"; do
     case "$arg" in
-      --install-docker) MAUSBOT_INSTALL_DOCKER=1 ;;
+      --install-docker) OBOT_INSTALL_DOCKER=1 ;;
       --customer-run) MODE=customer-run ;;
       -*) fail "Unknown option $arg. Usage: $(command_line '<code>')" ;;
       *) code=$arg ;;
     esac
   done
   case "$code" in
-    *[!A-Za-z0-9-]*) fail "That code doesn't look right. Copy the install command from MausBot again." ;;
+    *[!A-Za-z0-9-]*) fail "That code doesn't look right. Copy the install command from Obot again." ;;
   esac
   need_root "${code:-<code>}"
   need_settings
   if own_server_here; then
     MODE=customer-run
   elif [ "$MODE" = customer-run ]; then
-    fail "MausBot isn't installed in $INSTALL_DIR yet. Install it first with the server's install command, then run this again to connect it."
+    fail "Obot isn't installed in $INSTALL_DIR yet. Install it first with the server's install command, then run this again to connect it."
   fi
   say "Checking this server..."
   check_os
   check_arch
   check_docker
   if [ "$MODE" = customer-run ]; then
-    note "MausBot is already installed in $INSTALL_DIR: connecting that server, as it is"
+    note "Obot is already installed in $INSTALL_DIR: connecting that server, as it is"
     check_resources
     check_network
     check_clock
@@ -393,11 +393,11 @@ install_connector() {
     start_connector
     connect "$code"
     say ""
-    say "Connected. Your server shows up in MausBot in a minute, for your team's Owner to accept."
-    say "You run this server: MausBot can start, stop, update and back it up, and sees its versions, health and seat count."
-    say "  What it was asked to do:  sudo docker exec $CONNECTOR mausbot-connector audit"
-    say "  Pause remote management:  sudo docker exec $CONNECTOR mausbot-connector pause"
-    say "Only you can replace the connector or restore a backup: sudo docker exec $CONNECTOR mausbot-connector job <self-update|restore>"
+    say "Connected. Your server shows up in Obot in a minute, for your team's Owner to accept."
+    say "You run this server: Obot can start, stop, update and back it up, and sees its versions, health and seat count."
+    say "  What it was asked to do:  sudo docker exec $CONNECTOR obot-connector audit"
+    say "  Pause remote management:  sudo docker exec $CONNECTOR obot-connector pause"
+    say "Only you can replace the connector or restore a backup: sudo docker exec $CONNECTOR obot-connector job <self-update|restore>"
     return
   fi
   check_apparmor
@@ -411,7 +411,7 @@ install_connector() {
   check_box
   connect "$code"
   say ""
-  say "Connected. Your server shows up in MausBot in a minute, for your team's Owner to accept."
+  say "Connected. Your server shows up in Obot in a minute, for your team's Owner to accept."
 }
 
 # Removal never deletes the data, its safety copy or its backups unless --delete-data is typed.
@@ -424,9 +424,9 @@ uninstall() {
     esac
   done
   need_root uninstall
-  command -v docker >/dev/null 2>&1 || fail "Docker isn't installed here, so MausBot isn't either."
+  command -v docker >/dev/null 2>&1 || fail "Docker isn't installed here, so Obot isn't either."
   if own_server_here; then
-    say "Disconnecting this server from MausBot..."
+    say "Disconnecting this server from Obot..."
     docker rm -f "$CONNECTOR" "$CONNECTOR_NEXT" >/dev/null 2>&1 || true
     for container in $(docker ps -aq --filter "label=$ROLE_LABEL=helper" 2>/dev/null); do
       docker rm -f "$container" >/dev/null 2>&1 || true
@@ -438,14 +438,14 @@ uninstall() {
         docker volume rm "$volume" >/dev/null 2>&1 || true
       done
       rm -rf "$AUDIT_DIR"
-      say "This server is disconnected. The backups MausBot made and the audit log are deleted."
+      say "This server is disconnected. The backups Obot made and the audit log are deleted."
     else
-      say "This server is disconnected. The backups MausBot made are kept as Docker volumes, and the audit log in $AUDIT_DIR."
+      say "This server is disconnected. The backups Obot made are kept as Docker volumes, and the audit log in $AUDIT_DIR."
     fi
-    say "Your MausBot in $INSTALL_DIR and its data were not touched, and it keeps running."
+    say "Your Obot in $INSTALL_DIR and its data were not touched, and it keeps running."
     return
   fi
-  say "Stopping MausBot on this server..."
+  say "Stopping Obot on this server..."
   docker rm -f "$CONNECTOR" "$CONNECTOR_NEXT" >/dev/null 2>&1 || true
   docker stop -t 30 "$HOME_CONTAINER" >/dev/null 2>&1 || true
   for container in "$HOME_CONTAINER" $(docker ps -aq --filter "label=$ROLE_LABEL=helper" 2>/dev/null); do
@@ -461,9 +461,9 @@ uninstall() {
       docker volume rm "$volume" >/dev/null 2>&1 || true
     done
     rm -rf "$AUDIT_DIR"
-    say "MausBot is removed from this server, and so is its data."
+    say "Obot is removed from this server, and so is its data."
   else
-    say "MausBot is removed from this server. Your data is kept in the Docker volume $DATA_VOLUME, with its backups, and the audit log in $AUDIT_DIR."
+    say "Obot is removed from this server. Your data is kept in the Docker volume $DATA_VOLUME, with its backups, and the audit log in $AUDIT_DIR."
     say "To delete the data too, run: $(command_line uninstall --delete-data)"
   fi
 }

@@ -73,7 +73,7 @@ export function installTwoPlacesMain({ ipcMain, guard, localRequest, fetch: fetc
   const twoPlaces = createTwoPlaces({
     local: async () => (moved() ? null : json(await localRequest("/api/cloud-send?move=1", { signal: AbortSignal.timeout(10_000) }))),
     here: {
-      name: async () => (label ??= (await json(await localRequest("/.well-known/openmausbot/environment", { signal: AbortSignal.timeout(10_000) })))?.label ?? null),
+      name: async () => (label ??= (await json(await localRequest("/.well-known/obot/environment", { signal: AbortSignal.timeout(10_000) })))?.label ?? null),
       tell: async (payload) => sent(await localRequest(ROUTE, { ...put(payload), headers: { "content-type": "application/json" } }), t("rail.thisComputer")),
     },
     t, places, settled, quiet: () => !settled() && !moved(), dismissed, onChange: tell, log });

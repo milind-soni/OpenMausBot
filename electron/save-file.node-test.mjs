@@ -26,7 +26,7 @@ let botHome;
 
 before(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "omb-save-file-"));
-  botHome = path.join(home, ".openmausbot");
+  botHome = path.join(home, ".obot");
   fs.mkdirSync(path.join(botHome, "workspaces", "bot"), { recursive: true });
   fs.writeFileSync(path.join(botHome, "workspaces", "bot", "report.docx"), "docx");
   fs.writeFileSync(path.join(home, "secret.txt"), "private");
@@ -51,9 +51,9 @@ describe("save-file path validation", () => {
     const realBotHome = path.join(realHome, "bot-data");
     fs.mkdirSync(realBotHome, { recursive: true });
     fs.writeFileSync(path.join(realBotHome, "report.docx"), "docx");
-    fs.symlinkSync(realBotHome, path.join(linkedHome, ".openmausbot"));
+    fs.symlinkSync(realBotHome, path.join(linkedHome, ".obot"));
 
-    const viaLink = path.join(linkedHome, ".openmausbot", "report.docx");
+    const viaLink = path.join(linkedHome, ".obot", "report.docx");
     assert.equal(await resolveSavablePath(viaLink, { home: linkedHome }), await fs.promises.realpath(viaLink));
 
     fs.rmSync(realHome, { recursive: true, force: true });
@@ -400,7 +400,7 @@ describe("openLogsFolder", () => {
   it("opens exactly main's own logs folder, making it first, and says where it is when the system cannot open it", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "omb-logs-folder-"));
     try {
-      const folder = path.join(root, "OpenMausBot", "logs");
+      const folder = path.join(root, "Obot", "logs");
       const opened = [];
       assert.deepEqual(await openLogsFolder(folder, { open: async (target) => { opened.push(target); return ""; } }), { folder, opened: true });
       assert.deepEqual(opened, [folder]);

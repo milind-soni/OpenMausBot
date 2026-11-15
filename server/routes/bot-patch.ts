@@ -107,7 +107,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "body must be a JSON object" });
       }
-      const pairedDevice = req.headers["x-openmausbot-companion"] === "1";
+      const pairedDevice = req.headers["x-obot-companion"] === "1";
       if ((auth.kind === "session" && !auth.scopes.includes("admin")) || pairedDevice) {
         const session = auth.kind === "session" ? auth.session : undefined;
         const level = pairedDevice ? "chat" : deps.levelOf(auth, m[1]);

@@ -47,7 +47,7 @@ async function api(method: string, path: string, options: { body?: unknown; toke
 }
 
 async function adminPairing(): Promise<string> {
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: "Obot app (Cloud)", ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const response = await fetch(`${base}/api/cloud/pairing`, { method: "POST", headers: {
     host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", "content-type": "application/json",
@@ -60,7 +60,7 @@ async function adminPairing(): Promise<string> {
 /** The person's Windows PC, lending its apps and screen and its Chrome but no terminal and no folder, as the desktop app
  * registers it; it answers computer_tools with its own tool list, as cua-driver there would. */
 async function lendPc(): Promise<void> {
-  const environmentId = (await api("GET", "/.well-known/openmausbot/environment")).body.environmentId as string;
+  const environmentId = (await api("GET", "/.well-known/obot/environment")).body.environmentId as string;
   const headers = { "x-omb-computer-secret": PC.secret };
   const connected = await api("POST", "/api/shared-computers/connect", { token: owner, headers, body: {
     id: PC.id, name: "OFFICE-PC", environmentId, folders: [], terminal: false, computer: true, platform: "win32", chrome: true,
@@ -81,7 +81,7 @@ async function lendPc(): Promise<void> {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-cloud-lent-screen-"));
-  dataDir = join(home, ".openmausbot");
+  dataDir = join(home, ".obot");
   mkdirSync(dataDir, { recursive: true });
   const claude = join(home, "claude-cli.mjs");
   writeFileSync(claude, `#!/usr/bin/env node

@@ -530,7 +530,7 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenSe
       category: "Imported",
       author: { name: "Grok Bot" },
       license: "See source",
-      outcomes: [clip(`${name} runs in OpenMausBot with your own engine and apps.`, 240)],
+      outcomes: [clip(`${name} runs in Obot with your own engine and apps.`, 240)],
       setupMinutes: 5,
       requirements: { apps: [], capabilities: [] },
       team: { name: clip(name, 60) },

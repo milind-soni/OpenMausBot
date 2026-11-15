@@ -1,4 +1,4 @@
-// A web page that tries to reach OpenMausBot from inside a bot's browser, served from its own process the way a dev
+// A web page that tries to reach Obot from inside a bot's browser, served from its own process the way a dev
 // server a bot started would be. Prints its port, then serves:
 //   /                 an ordinary page the test drives
 //   /sw.js?to=<json>  a service worker that fetches every URL in `to` while it installs

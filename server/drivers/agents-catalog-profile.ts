@@ -22,8 +22,8 @@ export interface CatalogProfile {
   botId: string;
   /** A Team Cloud: message_person is mounted. */
   team?: boolean;
-  /** The person's MausBot with a Chief's powers: its notification tools are mounted. */
-  mausbot?: boolean;
+  /** The person's Obot with a Chief's powers: its notification tools are mounted. */
+  obot?: boolean;
   /** A direct chat whose bot may pick where it works (Works on is not Off and no team computer is its own): select_computer
    * is mounted, and the harness refuses a pick on any turn but a person's own message. */
   computerSelection?: boolean;
@@ -51,7 +51,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     chief: env.OMB_CHIEF_OF_STAFF === "1",
     botId: env.OMB_BOT_ID ?? "",
     team: env.OMB_TEAM_PEOPLE === "1",
-    mausbot: env.OMB_MAUSBOT === "1",
+    obot: env.OMB_OBOT === "1",
     computerSelection: env.OMB_COMPUTER_SELECTION === "1",
     room: env.OMB_ROOM === "1",
     imageGeneration: env.OMB_IMAGE_GENERATION === "1",

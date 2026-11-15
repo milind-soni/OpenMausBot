@@ -146,7 +146,7 @@ export function claudeInheritWarning(env: NodeJS.ProcessEnv): ProviderSnapshot["
   return {
     title: "Bots inherit this machine's Claude Code setup",
     message:
-      "OMB_CLAUDE_INHERIT_USER_CONFIG=1 is set on the OpenMausBot process, so every Claude bot also loads this " +
+      "OMB_CLAUDE_INHERIT_USER_CONFIG=1 is set on the Obot process, so every Claude bot also loads this " +
       "computer's own MCP servers, connectors, skills, hooks and personal CLAUDE.md on every turn — often thousands " +
       "of extra tokens per model call, and tools nobody gave the bot. Unless a bot genuinely needs a server from " +
       "your user-scope Claude config, remove the variable and restart; add the server under Settings → MCP servers " +
@@ -245,7 +245,7 @@ export function claudeCliUpdate(version: string | null, cli: string): ProviderSn
   const missing = (Object.keys(CLAUDE_FLAG_FLOORS) as (keyof typeof CLAUDE_FLAG_FLOORS)[])
     .filter((flag) => !claudeCliSupports(parsed, flag));
   const effects = [
-    ...(missing.includes("--autocompact") ? ["no compaction window picked by OpenMausBot"] : []),
+    ...(missing.includes("--autocompact") ? ["no compaction window picked by Obot"] : []),
     ...(missing.includes("--setting-sources") ? ["bots still see this machine's own Claude Code setup"] : []),
     ...(missing.includes("--system-prompt-snapshot") ? ["resumed turns cannot refresh stale system prompts"] : []),
   ];
@@ -341,13 +341,13 @@ type AskBehavior = "allow" | "deny" | "answer";
 type AskResolutionSource = "user" | "timeout" | "system";
 
 const DENY_TIMEOUT_NOTE =
-  "OpenMausBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
-const DUPLICATE_ASK_ID_NOTE = "OpenMausBot: duplicate ask id — skipping this request.";
+  "Obot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
+const DUPLICATE_ASK_ID_NOTE = "Obot: duplicate ask id — skipping this request.";
 
 function systemEndedReply(kind: Ask["kind"]): { behavior: AskBehavior; message: string } {
   return kind === "question"
-    ? { behavior: "answer", message: "OpenMausBot: the turn is ending — wrap up." }
-    : { behavior: "deny", message: "OpenMausBot: the turn ended" };
+    ? { behavior: "answer", message: "Obot: the turn is ending — wrap up." }
+    : { behavior: "deny", message: "Obot: the turn ended" };
 }
 
 function askQuestions(ask: Ask): AskQuestion[] | null {

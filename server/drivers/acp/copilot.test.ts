@@ -199,7 +199,7 @@ describe("GitHub Copilot ACP driver", () => {
   it("removes only the session folder the discovery itself left behind", async () => {
     const home = join(scratch, "copilot-home");
     // The fields and their plain-scalar style are Copilot CLI 1.0.105's own workspace.yaml.
-    const session = (id: string, cwd: string, client = "openmausbot-model-discovery") => {
+    const session = (id: string, cwd: string, client = "obot-model-discovery") => {
       mkdirSync(join(home, "session-state", id, "checkpoints"), { recursive: true });
       writeFileSync(join(home, "session-state", id, "workspace.yaml"), `id: ${id}\ncwd: ${cwd}\nclient_name: ${client}\nuser_named: false\n`
         + "summary_count: 0\nfork_count: 0\ncreated_at: 2026-10-28T01:45:38.058Z\nupdated_at: 2026-10-28T01:45:38.116Z\n");

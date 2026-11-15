@@ -14,7 +14,7 @@ export const done = (cloud = {}) => ({ v: 1, phase: "done", cloud: { origin: CLO
 export const json = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
 
 /**
- * The window onto My Cloud with fakes on every side: the journal, this computer's freeze marker, the MausBot Cloud
+ * The window onto My Cloud with fakes on every side: the journal, this computer's freeze marker, the Obot Cloud
  * sign-in (its power word, wake, pairing code), My Cloud's answers (`cloud`), the window (where it went), the startup
  * screen and a manual clock.
  */
@@ -100,7 +100,7 @@ export function world({ clean = null, journal = done(), marker = null, state = c
         w.redeemed.push([atClient ? "client" : atTeam ? "team" : "cloud", JSON.parse(init.body)]);
         return server.redeems === false ? json({ error: "invalid code" }, 400) : json({ kind: "session" });
       }
-      if (route === "/.well-known/openmausbot/environment") return json({ version: server.version });
+      if (route === "/.well-known/obot/environment") return json({ version: server.version });
       return json({}, 404);
     },
     power: { asleep: () => w.power?.state === "asleep", hold: () => { w.power = { state: "asleep", since: 1 }; }, woke: () => w.calls.push("woke") },

@@ -75,7 +75,7 @@ function seededDay() {
   const api = w.say(w.pepper.threadId, { role: "user", kind: "text", text: "Refresh the orders sheet", at: at(12), via: "api" });
   w.fail(w.pepper.threadId, at(12, 20), "no activity for 20 minutes — the turn was stopped", {}, "t4");
   w.digest(w.pepper.threadId, w.pepper.id, at(12, 20, 5), "t4", "", false, api.id);
-  w.fail(w.pepper.threadId, at(13), "turn interrupted — OpenMausBot restarted");
+  w.fail(w.pepper.threadId, at(13), "turn interrupted — Obot restarted");
 
   const digestTask = w.store.createTask(w.pepper.id, "Inbox digest", false)!;
   w.runs.push({ id: "run-digest", routineId: "r-digest", routineName: "Inbox digest", botId: w.pepper.id, status: "completed", manual: true,
@@ -83,7 +83,7 @@ function seededDay() {
   w.runs.push({ id: "run-leads", routineId: "r-leads", routineName: "Lead sweep", botId: w.pepper.id, status: "failed", manual: false,
     triggerSource: "webhook", scheduledFor: at(8), finishedAt: at(8), error: "Could not create a task for this run" });
   w.runs.push({ id: "run-kpi", routineId: "r-kpi", routineName: "Weekly KPI report", botId: w.atlas.id, status: "missed", manual: false,
-    triggerSource: "schedule", scheduledFor: at(6), error: "OpenMausBot was not running at 06:00" });
+    triggerSource: "schedule", scheduledFor: at(6), error: "Obot was not running at 06:00" });
   w.runs.push({ id: "run-stopped", routineId: "r-brief", routineName: "Morning briefing", botId: w.atlas.id, status: "cancelled", manual: true, scheduledFor: at(7), finishedAt: at(7, 5) });
   w.runs.push({ id: "run-live", routineId: "r-brief", routineName: "Morning briefing", botId: w.atlas.id, status: "running", manual: true, scheduledFor: at(14, 50), startedAt: at(14, 50) });
   w.routineList.push({ botId: w.atlas.id }, { botId: w.pepper.id });
@@ -114,13 +114,13 @@ describe("today's report", () => {
     const { lines, moreLines } = todayReport(w.sources(), ADMIN, MIDNIGHT, NOW);
     expect(lines.map(({ id: _id, ...line }) => line)).toEqual([
       { at: at(14, 0, 30), botId: w.pepper.id, threadId: w.digestTask.threadId, routineId: "r-digest", title: "Inbox digest", ok: true, startedBy: "manual", outcomes: { report: 1 } },
-      { at: at(13), botId: w.pepper.id, threadId: w.pepper.threadId, title: "", ok: false, error: "turn interrupted — OpenMausBot restarted", outcomes: {} },
+      { at: at(13), botId: w.pepper.id, threadId: w.pepper.threadId, title: "", ok: false, error: "turn interrupted — Obot restarted", outcomes: {} },
       { at: at(12, 20, 5), botId: w.pepper.id, threadId: w.pepper.threadId, title: "", ok: false, error: "no activity for 20 minutes — the turn was stopped", outcomes: {}, startedBy: "api" },
       { at: at(11, 5), botId: w.pepper.id, threadId: w.sweep.threadId, title: "Posted the lead list to #sales.", ok: true, outcomes: { message: 1, lead: 1 }, startedBy: "bot" },
       { at: at(10, 2), botId: w.atlas.id, threadId: w.atlas.threadId, title: "Sent the refund reply to Sam. It went out at 10:01.", ok: true, outcomes: { emailSent: 1 }, startedBy: "person" },
       { at: at(9, 2, 30), botId: w.atlas.id, threadId: w.briefing.threadId, routineId: "r-brief", title: "Morning briefing", ok: true, startedBy: "schedule", outcomes: { emailRead: 2, draft: 1, report: 1 } },
       { at: at(8), botId: w.pepper.id, routineId: "r-leads", title: "Lead sweep", ok: false, error: "Could not create a task for this run", startedBy: "webhook", outcomes: {} },
-      { at: at(6), botId: w.atlas.id, routineId: "r-kpi", title: "Weekly KPI report", ok: false, error: "OpenMausBot was not running at 06:00", startedBy: "schedule", outcomes: {} },
+      { at: at(6), botId: w.atlas.id, routineId: "r-kpi", title: "Weekly KPI report", ok: false, error: "Obot was not running at 06:00", startedBy: "schedule", outcomes: {} },
     ]);
     expect(moreLines).toBe(0);
   });
@@ -185,7 +185,7 @@ describe("needs you", () => {
     w.fail(rex.threadId, at(10), TRIAL_CREDIT_REFUSED.used_up);
     w.fail(rex.threadId, at(10, 5), "This month's cloud desktop hours are used up.", { place: { state: "cc-no-hours", params: { bot: "Rex" }, source: "works-on" } });
     w.fail(zed.threadId, at(10, 6), "Cloud computers can't start right now.", { place: { state: "cc-unavailable", params: { bot: "Zed" }, source: "works-on" } });
-    w.fail(zed.threadId, at(10, 7), "turn interrupted — OpenMausBot restarted");
+    w.fail(zed.threadId, at(10, 7), "turn interrupted — Obot restarted");
     w.tool(w.atlas.threadId, at(11), "mcp__composio__GMAIL_SEND_EMAIL", false, { output: "Error: 401 Unauthorized. The connected account's token has expired; reconnect Gmail." });
     w.tool(w.atlas.threadId, at(11, 1), "mcp__composio__SLACK_SEND_MESSAGE", false, { output: "channel_not_found" });
     const zedTask = w.store.createTask(zed.id, "Newsletter", false)!;

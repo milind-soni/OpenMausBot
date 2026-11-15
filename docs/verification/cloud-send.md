@@ -1,4 +1,4 @@
-# The move to My Cloud
+﻿# The move to My Cloud
 
 What it covers: the one-time move of everything on this computer to My Cloud
 (its transport, what it carries and its check), and the line either page shows
@@ -167,7 +167,7 @@ node --test electron/one-home.node-test.mjs
 ```
 
 The same two servers, with main's move wiring (`electron/one-home-main.mjs`)
-and a fake MausBot Cloud sign-in whose word the test sets (`fx.account`). The
+and a fake Obot Cloud sign-in whose word the test sets (`fx.account`). The
 fixture can kill and start again either server on its own data (`fx.relaunch`),
 and can fail any request main sends My Cloud (`fx.intercept`). The e2e checks:
 
@@ -212,4 +212,5 @@ tests check:
 - the report goes a moment after a change, at most once a minute, every 15
   minutes otherwise, holds off six hours from an Admin without the route, and a
   send that fails, throws or never answers changes nothing in the move.
+
 

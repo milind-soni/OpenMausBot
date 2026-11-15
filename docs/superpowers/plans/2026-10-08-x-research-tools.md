@@ -252,11 +252,11 @@ describe("toPost", () => {
 describe("search", () => {
   it("calls anyapi's search with the token, a cost ceiling and Latest, and returns compact posts", async () => {
     const { fetcher, calls } = fakeFetch({ body: anyapi({ items: [searchRow("12"), searchRow("11")], nextCursor: "" }) });
-    const result = await clientWith(fetcher).search({ query: "mausbot", sort: "latest", limit: 20 });
+    const result = await clientWith(fetcher).search({ query: "obot", sort: "latest", limit: 20 });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.method).toBe("POST");
     expect(calls[0]!.url.href).toBe("https://treg.to/call/anyapi.x.search.posts");
-    expect(calls[0]!.body).toEqual({ query: "mausbot", queryType: "Latest", limit: 20 });
+    expect(calls[0]!.body).toEqual({ query: "obot", queryType: "Latest", limit: 20 });
     expect(calls[0]!.headers.get("x-treg-token")).toBe("test-token");
     expect(calls[0]!.headers.get("x-treg-route-max-cost")).toBe("0.05");
     expect(result.posts.map((post) => post.id)).toEqual(["12", "11"]);
@@ -1371,7 +1371,7 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 
 function handleFrom(raw: string): string {
   const handle = normalizeHandle(raw);
-  if (!handle) throw new XResearchError("bad_input", "handle must be an X handle such as @openmausbot, or an x.com profile link.");
+  if (!handle) throw new XResearchError("bad_input", "handle must be an X handle such as @obot, or an x.com profile link.");
   return handle;
 }
 
@@ -2073,7 +2073,7 @@ Expected: all green. Fix any failure where it comes from. Never update a golden 
 
 These need Omkar's treg token, entered by him in the app, never in a shell or a file. With the OMB2 build from Step 3:
   - Press Test in Settings → API keys. It should show "Works. $X left on treg." Confirm the figure matches `treg balance`. If `/auth/me` or the balance route refuses the `X-Treg-Token` header, fix `accountInfo`.
-  - Ask a switched-on bot: "Search X for posts mentioning MausBot this week." Confirm the posts and links are real.
+  - Ask a switched-on bot: "Search X for posts mentioning Obot this week." Confirm the posts and links are real.
   - Ask it to run the same search with the `newestId` it got as `sinceId`. Confirm it returns no repeats. If `since_id:` breaks the query, the client-side filter alone must still return no repeats.
   - Temporarily paste a wrong token, then call `x_search`. The bot should say "treg rejected the token…". Look up an account that does not exist with `x_profile` and record how treg answers a full miss; adjust the not-found path if it is not `username: null`.
 
@@ -2083,4 +2083,5 @@ Use the repo's `verify-omb` skill (isolated fake-engine instance) to confirm, be
 
 - [ ] **Step 4: Hand off for a local test**
 
-Use the `test-locally` skill to build OMB2 from `feat/x-research-tools`. Do not touch `/Applications/OpenMausBot.app`. Report the branch, the commits, and what Omkar should try. Do not push or open a PR.
+Use the `test-locally` skill to build OMB2 from `feat/x-research-tools`. Do not touch `/Applications/Obot.app`. Report the branch, the commits, and what Omkar should try. Do not push or open a PR.
+

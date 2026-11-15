@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
+﻿import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import { register } from "./index.ts";
@@ -30,7 +30,7 @@ describe("license keys", () => {
     const old = keypair();
     const fresh = keypair();
     const key = issueLicenseKey(claims, old.privateJwk);
-    expect(() => verifyLicenseKey(key, { publicKeys: [fresh.x], now: new Date("2026-12-01") })).toThrow(/does not match any OpenMausBot signing key/);
+    expect(() => verifyLicenseKey(key, { publicKeys: [fresh.x], now: new Date("2026-12-01") })).toThrow(/does not match any Obot signing key/);
     expect(verifyLicenseKey(key, { publicKeys: [fresh.x, old.x], now: new Date("2026-12-01") }).customer).toBe(claims.customer);
   });
 
@@ -72,3 +72,4 @@ describe("license keys", () => {
     expect(() => register({ licenseKey: "omb1.bad.key" })).toThrow(/OMB_LICENSE_KEY/);
   });
 });
+

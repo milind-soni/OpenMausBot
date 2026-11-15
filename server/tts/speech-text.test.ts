@@ -26,7 +26,7 @@ describe("speakable", () => {
   });
 
   it("turns a bare URL into a noun", () => {
-    expect(speakable("Deployed to https://openmausbot.example.com/status now")).toBe(
+    expect(speakable("Deployed to https://obot.example.com/status now")).toBe(
       "Deployed to a link now",
     );
   });

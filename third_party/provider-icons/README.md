@@ -12,4 +12,4 @@ artwork at runtime.
   <https://github.com/lobehub/lobe-icons>, MIT License.
 
 OpenAI, Anthropic, xAI, Qwen, and Moonshot reuse provider marks that were
-already part of OpenMausBot.
+already part of Obot.

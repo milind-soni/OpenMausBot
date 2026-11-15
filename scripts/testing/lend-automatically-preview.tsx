@@ -9,7 +9,7 @@ import { markSimpleModePromptSeen } from "../../src/lib/simple-mode-prompt";
 import { applySkin, type SkinId } from "../../src/lib/skins";
 import "../../src/styles.css";
 
-// Served only by scripts/verify-lend-automatically.ts: the real app's Settings → MausBot Cloud, against the disposable
+// Served only by scripts/verify-lend-automatically.ts: the real app's Settings → Obot Cloud, against the disposable
 // fake-engine server. ?page=local is this computer's own page, its desktop bridge's verified Cloud sign-in answered
 // here (a Pro plan, My Cloud ready); ?page=cloud is My Cloud's own page in the desktop window, the fixture server's
 // config read as a Cloud home's. ?skin= picks the skin.

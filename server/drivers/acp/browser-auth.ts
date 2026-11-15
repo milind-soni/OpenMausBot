@@ -185,7 +185,7 @@ export class AcpBrowserAuth {
       // request the engine itself raises is refused: this session grants nothing and decides nothing.
       request("initialize", {
         protocolVersion: 1,
-        clientInfo: { name: "openmausbot", version: "0.0.0" },
+        clientInfo: { name: "obot", version: "0.0.0" },
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       }, INIT_TIMEOUT_MS).then((raw) => {
         if (this.flow !== flow) return;

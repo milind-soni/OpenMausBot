@@ -242,7 +242,7 @@ export function createThemeStore(deps: { dataDir: string }) {
     const theme = read(person, id);
     if (!theme) return null;
     const files = Object.fromEntries(assets(person, id).map((name) => [name, `data:${themeAssetType(name)};base64,${readFileSync(join(assetsDir(person, id), name)).toString("base64")}`]));
-    return { mausbotTheme: THEME_EXPORT_VERSION, id, theme, ...(Object.keys(files).length ? { assets: files } : {}) };
+    return { obotTheme: THEME_EXPORT_VERSION, id, theme, ...(Object.keys(files).length ? { assets: files } : {}) };
   }
 
   /** Saves an exported theme under a new id, with its files stored again and its CSS pointed at them. */

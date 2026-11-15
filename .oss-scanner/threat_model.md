@@ -1,4 +1,4 @@
-# OpenMausBot threat model
+﻿# Obot threat model
 
 Guidance for automated security scanning (Anthropic OSS Scanner). The scope
 notes in `/src/SECURITY.md` and the documents named below describe the same
@@ -8,7 +8,7 @@ product decisions.
 
 ## What this project is
 
-OpenMausBot runs AI agents, called **bots**, on a person's own computer or
+Obot runs AI agents, called **bots**, on a person's own computer or
 server. A bot is a conversation plus settings that drives an **engine**: a
 real agent CLI (Claude Code, Codex, Grok, Gemini, Cursor, OpenCode, ACP
 agents) or an API-key chat-completions provider. Engines run as child
@@ -18,12 +18,12 @@ The same TypeScript **harness server** (`server/`) runs in four places:
 
 - **Desktop app** (`electron/`, macOS, Windows, Linux). The app starts the
   server on `127.0.0.1` and shows the web UI (`src/`, React) in its window.
-- **Self-hosted server** (`openmausbot serve`, from npm or the root
+- **Self-hosted server** (`obot serve`, from npm or the root
   `Dockerfile`). People pair browsers, desktops and phones with it.
 - **Hosted or shared workspaces.** Several people sign in to one server
-  (email sign-in, members, `openmausbot fleet`). Members and roles live in
+  (email sign-in, members, `obot fleet`). Members and roles live in
   `enterprise/`, and the hook point is `server/enterprise.ts`.
-- **MausBot Cloud home.** Each customer gets one Fly app with one machine
+- **Obot Cloud home.** Each customer gets one Fly app with one machine
   (the `cloud-home` stage of the root `Dockerfile`, plus `deploy/fly/`). Caddy
   terminates TLS, and the server stays on loopback. See `docs/cloud-pro.md`.
 
@@ -56,7 +56,7 @@ Bots have tools:
      must sign in.
 2. **Desktop per-launch capability and paired sessions.**
    - In the desktop app, every public loopback mutation must carry the app's
-     private per-launch token (`x-openmausbot-desktop-owner`), which only the
+     private per-launch token (`x-obot-desktop-owner`), which only the
      app's own window sends. GETs that cause effects are classed as
      mutations (`mutatingPublicRoute`).
    - Off-machine access needs a **paired session**: a bearer token, or a
@@ -90,14 +90,14 @@ Bots have tools:
    - The pairing page (`companion/src/control.ts`) is loopback-only and needs
      a per-launch token.
    - The managed Cloudflare tunnel reaches only the desktop's own gateway
-     on `:8812`, or the server's tunnel socket (`openmausbot serve --tunnel`,
+     on `:8812`, or the server's tunnel socket (`obot serve --tunnel`,
      `OMB_TUNNEL_SOCKET`). It never reaches the LAN listener on `:8810`.
      Requests that arrive over the tunnel socket always need a paired session.
 6. **Egress gate for bots' browsers** (`server/browser/egress/`).
    - Every connection a bot's Chrome makes goes through a SOCKS5 gate on
      loopback. The gate resolves names itself and checks every address before
      it connects.
-   - These are always refused, on every host: OpenMausBot's own ports,
+   - These are always refused, on every host: Obot's own ports,
      link-local addresses, cloud metadata (`169.254.169.254`,
      `fd00:ec2::254`, `100.100.100.200`) and reserved ranges.
    - The local network (including `fc00::/7`, which holds Fly's private
@@ -127,7 +127,7 @@ Bots have tools:
      (`server/cloud-secrets.ts`).
    - Text that crosses a boundary is redacted (`shared/redact.ts`).
 9. **Per-bot workspaces and memory.**
-   - Each bot's workspace (`~/.openmausbot/workspaces/<botId>`) holds its
+   - Each bot's workspace (`~/.obot/workspaces/<botId>`) holds its
      memory. Harness tools such as memory, `session_search`, recall and the
      recent-work brief must return only the calling bot's own conversations
      and the rooms it belongs to.
@@ -157,7 +157,7 @@ These are deliberate product decisions. Do not report them.
   `shared/approval-mode.ts`). At Full access each engine runs in its own most
   permissive mode. Where an engine has no such mode, the harness answers the
   permission requests it leaves.
-- **OpenMausBot adds no approval prompts of its own.** Approvals belong to
+- **Obot adds no approval prompts of its own.** Approvals belong to
   each engine's native permission system, at the level the person picked.
   When a bot changes its own routines, skills, webhooks, profile or model,
   the change applies at once and the conversation gets a receipt with Undo,
@@ -287,7 +287,7 @@ These are deliberate product decisions. Do not report them.
 - **Out of scope:**
   - `apps/docs/` (the documentation site), `evals/`, and test fixtures under
     `server/testing/`;
-  - `third_party/` (vendored upstream code), unless OpenMausBot's own use of
+  - `third_party/` (vendored upstream code), unless Obot's own use of
     it creates the issue;
   - the mobile apps and the Cloud Admin, which live in other repositories;
   - CI workflows under `.github/`.
@@ -308,7 +308,7 @@ pnpm exec vitest run server/browser/egress/
 pnpm exec vitest run companion/
 pnpm exec vitest run server/webhooks.test.ts server/webhook-ingress.test.ts
 pnpm broker:test                                             # composio-broker Worker
-pnpm --filter @openmausbot/control-plane test                # control-plane Worker
+pnpm --filter @obot/control-plane test                # control-plane Worker
 ```
 
 The whole suite runs one file at a time and takes over an hour, so run
@@ -322,7 +322,7 @@ directory. It prints a pairing code:
 
 ```sh
 D=$(mktemp -d)
-node --experimental-strip-types server/openmausbot.ts serve --data-dir "$D" --port 8799 --no-open &
+node --experimental-strip-types server/obot.ts serve --data-dir "$D" --port 8799 --no-open &
 curl -s http://127.0.0.1:8799/api/health
 ```
 
@@ -332,7 +332,7 @@ Set `OMB_LOOPBACK_TRUST=service` to act as a shared workspace. Send a
 ## Reports and patches
 
 - Give a minimal reproducer against the server
-  (`server/openmausbot.ts serve --data-dir <tmp>`), as a script or a few
+  (`server/obot.ts serve --data-dir <tmp>`), as a script or a few
   `curl` commands, and say which host type it needs: desktop, self-hosted,
   `service` trust, or Cloud.
 - State the boundary crossed (from the list above), the attacker's starting
@@ -342,3 +342,4 @@ Set `OMB_LOOPBACK_TRUST=service` to act as a shared workspace. Send a
 - Write in plain language. Reports go privately to the contact in this
   enrollment, which is the address in `SECURITY.md`. Do not open public
   issues or pull requests for vulnerabilities.
+

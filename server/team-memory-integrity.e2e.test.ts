@@ -49,7 +49,7 @@ it("preserves team identity, rejects stale writes and searches omitted shared no
     await api("/api/sidebar-sections", "POST", { name: "Editing" });
     expect((await api("/api/team-memory?section=Editing")).entries).toEqual([]);
     const minted = await fetch(fixture.info.url + "/api/testing/internal-capability", { method: "POST",
-      headers: { "content-type": "application/json", "x-openmausbot-test-capability": capabilityKey }, body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, kind: "agents" }) });
+      headers: { "content-type": "application/json", "x-obot-test-capability": capabilityKey }, body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, kind: "agents" }) });
     expect(minted.status).toBe(201);
     const { token } = await minted.json() as { token: string };
     for (let i = 0; i < 16; i++) await api("/api/team-memory?section=Postproduction", "POST", { kind: "term", name: `Note ${i}`, detail: "Background notes. ".repeat(30) }, undefined, 201);

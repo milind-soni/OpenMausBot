@@ -1,8 +1,8 @@
-# X Research for Cloud Plans Implementation Plan
+﻿# X Research for Cloud Plans Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:executing-plans. Each task is test-first (superpowers:test-driven-development). Omkar asked for one pass; this plan names files, interfaces and tests rather than listing full code.
 
-**Goal:** X research becomes an included service of paid OpenMausBot Cloud plans: an Admin relay with per-tier monthly allowances, tokens for Cloud homes and signed-in desktops, and no bring-your-own token.
+**Goal:** X research becomes an included service of paid Obot Cloud plans: an Admin relay with per-tier monthly allowances, tokens for Cloud homes and signed-in desktops, and no bring-your-own token.
 
 **Spec:** `docs/superpowers/specs/2026-10-09-x-research-pro-relay-design.md`
 
@@ -14,7 +14,7 @@
 - Relay endpoint allow-list is exactly the eight ids in the spec.
 - Allowances: personal 1,500, pro 5,000, max 15,000 per account per UTC month; unknown plan `OMB_CLOUD_X_CALLS_PER_MONTH` (default 1,500).
 - Token prefixes: home `omb_x_`, desktop `omb_xd_`. Env: `OMB_CLOUD_TREG_KEY` (Admin), `OMB_CLOUD_X_URL` + secret `OMB_CLOUD_X_TOKEN` (homes).
-- App parent-port message: `{ type: "openmausbot:included-x", access: { url, token } | null }`.
+- App parent-port message: `{ type: "obot:included-x", access: { url, token } | null }`.
 - The included token is never written to config.json, never reported to a client, never in an engine's environment.
 
 ## Review Focus
@@ -54,7 +54,7 @@
 - `cloud-machines.ts` passes `accountAccess` from billing's entitlement; `main.ts` reads `OMB_CLOUD_TREG_KEY` and `OMB_CLOUD_X_CALLS_PER_MONTH` and adds them to the Fly requirement, startup lines and docs.
 - Tests: paid gets a token that the relay accepts; free gets 402; a second request replaces the first token; sign-out revokes; the route through the portal (native device path, no same-origin header needed).
 
-## App tasks (OpenMausBot)
+## App tasks (Obot)
 
 ### Task A1: Remove the person's treg token
 - Files:
@@ -100,3 +100,4 @@
 ## Final
 
 The full suites in both repos (`pnpm lint && pnpm typecheck && pnpm test` for the app; `pnpm check && pnpm test && pnpm test:deploy` for the Admin), then a fresh whole-branch review of both, then hand-off. Nothing is pushed.
+

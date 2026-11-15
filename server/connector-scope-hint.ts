@@ -23,10 +23,10 @@ export function scopeHint(slugs: readonly string[]): string {
   const app = slug ? appName(slug) : null;
   const scope = slug ? requiredScope(slug) : null;
   const permission = scope ? `the ${scope} permission` : "the permission this action needs";
-  return `OpenMausBot note: ${app ?? "The app"} refused this because the connected account has not granted ${permission}. ` +
+  return `Obot note: ${app ?? "The app"} refused this because the connected account has not granted ${permission}. ` +
     `Reconnecting will not add it: the default Composio connection never asks for it. ` +
     `To allow it, the person creates their own ${app ? `${app} ` : ""}auth config in their Composio project that includes ${permission}, ` +
-    `then reconnects ${app ?? "the app"} under Connected apps; OpenMausBot uses that config automatically. ` +
+    `then reconnects ${app ?? "the app"} under Connected apps; Obot uses that config automatically. ` +
     `Tell the person this. Do not retry this call.`;
 }
 

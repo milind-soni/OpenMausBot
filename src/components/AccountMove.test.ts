@@ -134,7 +134,7 @@ describe("the move's row in the account menu", () => {
     expect(busy).toHaveLength(1);
     expect(busy[0]).toMatchObject({ label: "Try My Cloud move again", disabled: true });
     expect(markup(busy[0]!.icon)).toContain("animate-spin");
-    expect(rows(failing, { unanswered: "OpenMausBot on this computer did not answer." })[0]!.title).toBe("OpenMausBot on this computer did not answer.");
+    expect(rows(failing, { unanswered: "Obot on this computer did not answer." })[0]!.title).toBe("Obot on this computer did not answer.");
     // Main gave no words: the reason it had stays.
     expect(rows(failing, { unanswered: "Your bots couldn't move to My Cloud yet." })[0]!.title).toBe("My Cloud did not answer.");
   });
@@ -188,7 +188,7 @@ describe("useAccountMove", () => {
     expect(await shown(notice)).toEqual({ kind: null, items: [] });
     f.values = [];
     expect(await shown({ ...notice, running: true, runningReason: "first", last: { at: 3, reason: "first", failed: 2, seen: false, sent: { bots: 2, updatedBots: 0, skills: 0, logins: 0, onePassword: false, settings: 0, chats: null },
-      reasons: [{ what: { bots: [], skills: 0, logins: 2, onePassword: false, settings: 0, chats: false }, error: "OpenMausBot on this computer did not answer." }] } })).toEqual({ kind: null, items: [] });
+      reasons: [{ what: { bots: [], skills: 0, logins: 2, onePassword: false, settings: 0, chats: false }, error: "Obot on this computer did not answer." }] } })).toEqual({ kind: null, items: [] });
     f.values = [];
     vi.stubGlobal("window", {});
     expect(hook()).toEqual({ kind: null, items: [] });
@@ -219,11 +219,11 @@ describe("useAccountMove", () => {
 
   it("says main's words in the tooltip when Try again goes unanswered", async () => {
     const failing = await shown({ ...notice, move: { phase: "copy", failing: { error: "My Cloud did not answer." } } });
-    page.moveRetry = vi.fn().mockRejectedValue(new Error("Error invoking remote method 'cloud-send:move-retry': Error: OpenMausBot on this computer did not answer."));
+    page.moveRetry = vi.fn().mockRejectedValue(new Error("Error invoking remote method 'cloud-send:move-retry': Error: Obot on this computer did not answer."));
     failing.items[0]!.onSelect(); await flush();
     const after = hook();
-    expect(after.items[0]).toMatchObject({ title: "OpenMausBot on this computer did not answer.", disabled: false });
-    expect(lineHook().retry).toMatchObject({ retrying: false, why: "OpenMausBot on this computer did not answer." });
+    expect(after.items[0]).toMatchObject({ title: "Obot on this computer did not answer.", disabled: false });
+    expect(lineHook().retry).toMatchObject({ retrying: false, why: "Obot on this computer did not answer." });
   });
 
   it("the line's Try again and the menu's are one: either runs it, both wait for it, and it runs once at a time", async () => {

@@ -1,4 +1,4 @@
-# One bot, folders, independent threads
+﻿# One bot, folders, independent threads
 
 The existing direct-bot **Tasks** become **Threads**. They remain the same
 durable records and transcript IDs, not a second conversation system.
@@ -92,7 +92,7 @@ T3's provider sessions keyed by thread informed the ownership model. Hermes's
 [session turn leases](https://github.com/NousResearch/hermes-agent/blob/b2aa855b626ff8688eb34b95c60ee8b6a4af3679/gateway/turn_lease.py)
 and [entry-level memory updates](https://github.com/NousResearch/hermes-agent/blob/b2aa855b626ff8688eb34b95c60ee8b6a4af3679/tools/memory_tool_store.py)
 informed generation-checked cleanup and latest-state memory edits. We reuse
-OpenMausBot's store, provider adapters, MCP bridge and UI components; no new
+Obot's store, provider adapters, MCP bridge and UI components; no new
 orchestration framework or database is needed.
 
 Sidebar reference: [T3 Code at 5e6cc2b895](https://github.com/pingdotgg/t3code/tree/5e6cc2b89534a8e01772bf647b79a1f2da2f9664/apps/web/src/components).
@@ -103,3 +103,4 @@ See [chat verification](../verification/chat-turns.md),
 `server/independent-threads-api.test.ts`, `server/bot-projects-api.test.ts`,
 and the store/resource tests for isolated fake-engine proofs. UI interaction
 must also be checked on an isolated renderer before release.
+

@@ -1,4 +1,4 @@
-# Chat widgets
+﻿# Chat widgets
 
 A bot shows a widget with `show_widget`, the person presses a button on it, and
 the press reaches the bot as their next message. Design:
@@ -46,7 +46,7 @@ the samples in `shared/widget-samples.ts` to `/api/internal/options-card` as
 file to let the turn finish, then:
 
 ```sh
-H=/tmp/openmausbot-verify-data-XXXXXX/ui.json
+H=/tmp/obot-verify-data-XXXXXX/ui.json
 pnpm control:omb ui snapshot --ui $H
 pnpm control:omb ui click --ui $H --name "Create routine"
 pnpm control:omb ui wait-settle --ui $H --timeout 60
@@ -71,3 +71,4 @@ Meadow (`evidence/widgets/settled-details-meadow.png`).
 ![A pull-request list widget with two buttons under it](evidence/widgets/list-midnight.png)
 
 ![The settled routine form, opened read-only with the values that were sent](evidence/widgets/settled-details-meadow.png)
+

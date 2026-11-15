@@ -62,14 +62,14 @@ describe("an Azure Live call", () => {
   describe("in the desktop app", () => {
     const place = { resolve: DESKTOP };
     it("goes to the app's own window", () => {
-      expect(verdict({ ...LOCAL, "x-openmausbot-desktop-owner": "desktop-secret" }, place)).toBe(CALL);
+      expect(verdict({ ...LOCAL, "x-obot-desktop-owner": "desktop-secret" }, place)).toBe(CALL);
     });
     it("goes to the owner's phone, through the companion that authenticated it", () => {
-      expect(verdict({ ...LOCAL, "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1", "x-openmausbot-companion-auth": "relay-secret" }, place)).toBe(CALL);
+      expect(verdict({ ...LOCAL, "x-obot-companion": "1", "x-obot-companion-device": "phone-1", "x-obot-companion-auth": "relay-secret" }, place)).toBe(CALL);
     });
     it("is refused to a bot's shell and to a forged companion", () => {
       expect(verdict(LOCAL, place)).toMatch(/^sign-in gate 403: forbidden: this change must come from the desktop app/);
-      expect(verdict({ ...LOCAL, "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1", "x-openmausbot-companion-auth": "guessed" }, place)).toMatch(/^sign-in gate 403: forbidden: invalid companion/);
+      expect(verdict({ ...LOCAL, "x-obot-companion": "1", "x-obot-companion-device": "phone-1", "x-obot-companion-auth": "guessed" }, place)).toMatch(/^sign-in gate 403: forbidden: invalid companion/);
     });
     it("is refused to a remote device paired chat-only", () => {
       expect(verdict(device(["client"]), place)).toBe(AT_SIGN_IN);
@@ -148,9 +148,9 @@ describe("an Azure Live call", () => {
       expect(verdict(riding("null"))).toBe("sign-in gate 403: forbidden: cross-origin request");
     });
     it("is refused inside the desktop app's window too, where the app adds its owner header to every request", () => {
-      const sandboxed = { ...LOCAL, "x-openmausbot-desktop-owner": "desktop-secret", origin: "null", "sec-fetch-site": "cross-site", "sec-fetch-dest": "empty" };
+      const sandboxed = { ...LOCAL, "x-obot-desktop-owner": "desktop-secret", origin: "null", "sec-fetch-site": "cross-site", "sec-fetch-dest": "empty" };
       expect(verdict(sandboxed, { resolve: DESKTOP })).toBe("sign-in gate 403: forbidden: cross-origin request");
-      const sameHostPage = { ...LOCAL, "x-openmausbot-desktop-owner": "desktop-secret", origin: "http://127.0.0.1:9999", "sec-fetch-site": "same-site", "sec-fetch-dest": "empty" };
+      const sameHostPage = { ...LOCAL, "x-obot-desktop-owner": "desktop-secret", origin: "http://127.0.0.1:9999", "sec-fetch-site": "same-site", "sec-fetch-dest": "empty" };
       expect(verdict(sameHostPage, { resolve: DESKTOP })).toMatch(/^sign-in gate 401: unauthorized: this browser is not signed in/);
     });
     it("is refused with no credential at all", () => {
@@ -194,7 +194,7 @@ describe("a Fish Audio Live call", () => {
   const TEAM = { ...FISH, ...SERVICE, othersOnLoopback: true };
 
   it("goes to the desktop app's own window, the owner, and a team admin, as on Azure", () => {
-    expect(verdict({ ...LOCAL, "x-openmausbot-desktop-owner": "desktop-secret" }, { ...FISH, resolve: DESKTOP })).toBe(CALL);
+    expect(verdict({ ...LOCAL, "x-obot-desktop-owner": "desktop-secret" }, { ...FISH, resolve: DESKTOP })).toBe(CALL);
     expect(verdict(LOCAL, FISH)).toBe(CALL);
     expect(verdict(device(["admin", "client"]), FISH)).toBe(CALL);
     expect(verdict(teamMember("admin"), TEAM)).toBe(CALL);

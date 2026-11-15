@@ -201,7 +201,7 @@ describe("keepChatsOutOfCodexHistory", () => {
     return env;
   };
 
-  it("runs a turn on the person's own login in MausBot's Codex home, with their login and setup linked in", () => {
+  it("runs a turn on the person's own login in Obot's Codex home, with their login and setup linked in", () => {
     write(join(shared, "auth.json"), "person's sign-in");
     write(join(shared, "config.toml"), 'model = "gpt-5"\n');
     expect(turnEnv()).toMatchObject({ CODEX_HOME: mausHome("codex"), CODEX_SQLITE_HOME: mausHome("codex") });
@@ -210,7 +210,7 @@ describe("keepChatsOutOfCodexHistory", () => {
     expect(turnEnv({ CODEX_HOME: shared, CODEX_SQLITE_HOME: join(root, "elsewhere") }).CODEX_SQLITE_HOME).toBe(mausHome("codex"));
   });
 
-  it("keeps the person's home when the login may be in the keyring, cannot be linked, or the home is MausBot's already", () => {
+  it("keeps the person's home when the login may be in the keyring, cannot be linked, or the home is Obot's already", () => {
     write(join(shared, "auth.json"), "person's sign-in");
     write(join(shared, "config.toml"), 'cli_auth_credentials_store = "keyring"\n');
     expect(turnEnv().CODEX_HOME).toBeUndefined();
@@ -243,7 +243,7 @@ describe("keepChatsOutOfCodexHistory", () => {
     expect(turnEnv({}, false, [managed]).CODEX_HOME).toBe(mausHome("codex"));
   });
 
-  it("keeps the person's home, and the turn going, when MausBot's Codex home cannot be made", () => {
+  it("keeps the person's home, and the turn going, when Obot's Codex home cannot be made", () => {
     write(join(shared, "auth.json"), "person's sign-in");
     write(join(data(), "providers", "codex-own"), "a file where a folder should be");
     let env: Record<string, string | undefined> = {};

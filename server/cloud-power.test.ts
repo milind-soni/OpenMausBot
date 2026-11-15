@@ -186,7 +186,7 @@ describe("what woke the home", () => {
     h.power.prepareSleep();
     // Suspended, then resumed for a request: noticed by the request itself, before the clock tick does.
     h.jump(33_000);
-    h.power.arrived("/.well-known/openmausbot/environment", { "x-omb-background": "1" });
+    h.power.arrived("/.well-known/obot/environment", { "x-omb-background": "1" });
     expect(h.power.sleeping()).toBe(false);
     expect(h.power.report()).toMatchObject({ wokeAt: h.now(), wokeBy: { by: "version", background: true } });
     h.power.arrived("/api/threads", {});
@@ -201,7 +201,7 @@ describe("what woke the home", () => {
   });
 
   it("names each kind of request by its path alone", () => {
-    const paths = ["/api/events", "/api/sync/changes", "/api/shared-computers/abc/poll", "/.well-known/openmausbot/environment", "/api/phones/self/jobs",
+    const paths = ["/api/events", "/api/sync/changes", "/api/shared-computers/abc/poll", "/.well-known/obot/environment", "/api/phones/self/jobs",
       "/api/presence/active", "/api/auth/session", "/api/auth/pair", "/pair", "/api/cloud/pairing", "/api/health", "/hooks", "/mcp-oauth/callback",
       "/api/bots/b1/read", "/", "/assets/index.js"];
     expect(paths.map(wakeCode)).toEqual(["events", "sync", "lending", "version", "phone", "presence", "session", "pair", "pair", "admin", "health", "webhook",

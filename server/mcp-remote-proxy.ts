@@ -50,7 +50,7 @@ function fail(message: string): never {
 }
 
 const CREDENTIALS_REFUSED = "This MCP server refused its credentials (HTTP 401). If it uses a sign-in, send the message again: "
-  + "OpenMausBot refreshes sign-ins when a message starts. If it still fails, open Plugins → MCP servers and sign in to it again, "
+  + "Obot refreshes sign-ins when a message starts. If it still fails, open Plugins → MCP servers and sign in to it again, "
   + "or check its header values.";
 
 /** A refusal of our own: its words carry nothing remote, so they are relayed. */
@@ -184,7 +184,7 @@ let closing = false;
 /** A tool only an MCP app's view may call is never listed to the engine, and a call to it is refused. */
 async function upstream(method: string, params: unknown, signal: AbortSignal): Promise<unknown> {
   if (method === "initialize") {
-    const result = await client.initialize("OpenMausBot tool proxy", signal, HANDSHAKE);
+    const result = await client.initialize("Obot tool proxy", signal, HANDSHAKE);
     if (client.extensions === "refused") process.stderr.write("mcp-remote-proxy: the server refused the MCP Apps extension; connected without it\n");
     observer?.initialized(result);
     return result;

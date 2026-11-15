@@ -1151,13 +1151,13 @@ describe("RuntimeCoordinator: restarts", () => {
       after.coordinator.tick();
       expect(after.host.runs).toHaveLength(1);
       expect(after.host.runs[0]!.resumed).toBe(false);
-      expect(after.host.runs[0]!.text).toMatch(/^OpenMausBot restarted while your previous turn here was running and cut it off;.*\n\[From /);
+      expect(after.host.runs[0]!.text).toMatch(/^Obot restarted while your previous turn here was running and cut it off;.*\n\[From /);
       await flush();
       expect(after.coordinator.node(node.id)).toMatchObject({ status: "completed", restarts: 1 });
       after.coordinator.tick();
       const resume = after.host.runs[1]!;
       expect(resume.node.id).toBe("gen-1");
-      expect(resume.text).toMatch(/^OpenMausBot restarted before your previous turn here finished, after it sent work to teammates\..*A restart cut these teammates' turns: builder \(resumed once in place and told to check what it had already done\)\. Check their results as usual\.\nYour downstream room requests have settled\./);
+      expect(resume.text).toMatch(/^Obot restarted before your previous turn here finished, after it sent work to teammates\..*A restart cut these teammates' turns: builder \(resumed once in place and told to check what it had already done\)\. Check their results as usual\.\nYour downstream room requests have settled\./);
       await flush();
       expect(after.coordinator.node("gen-1")?.status).toBe("completed");
       after.coordinator.close();
@@ -1386,7 +1386,7 @@ describe("RuntimeCoordinator: modes and openers", () => {
 });
 
 describe("RuntimeCoordinator: every turn a root (beginTurn, endTurn, answerRoot, parkedDirect)", () => {
-  const CONNECTED = "OpenMausBot connection update: the user securely connected GitHub. Continue the task.";
+  const CONNECTED = "Obot connection update: the user securely connected GitHub. Continue the task.";
   const bridge: RoomAddress = { botId: "bridge", threadId: "bridge-chat" };
   const begin = (w: World, id = "gen-1", over: Partial<BeginTurnRequest> = {}) =>
     w.coordinator.beginTurn({ id, address: chief, brief: "Ship the CSV export", level: "auto", origin: userOrigin, ...over });
@@ -1511,7 +1511,7 @@ describe("RuntimeCoordinator: every turn a root (beginTurn, endTurn, answerRoot,
       expect(run.node).toMatchObject({ id: "gen-1", status: "running", executions: 2, restarts: 1, restart: "rerun" });
       expect(run.resumed).toBe(false);
       expect(run.composed.turn).toBe("rerun");
-      expect(run.composed.restartNote).toMatch(/^OpenMausBot restarted while your previous turn here was running and cut it off; this turn continues it\./);
+      expect(run.composed.restartNote).toMatch(/^Obot restarted while your previous turn here was running and cut it off; this turn continues it\./);
       expect(run.text.startsWith(run.composed.restartNote)).toBe(true);
       expect(run.text.endsWith('Continue the request you were working on: "Ship the CSV export".')).toBe(true);
       expect(run.text).not.toContain("· assignment ");
@@ -1711,7 +1711,7 @@ describe("RuntimeCoordinator: every turn a root (beginTurn, endTurn, answerRoot,
 });
 
 describe("RuntimeCoordinator: outward restart policy, answerNode, continuation on the view", () => {
-  const CONNECTED = "OpenMausBot connection update: the user securely connected GitHub. Continue the task.";
+  const CONNECTED = "Obot connection update: the user securely connected GitHub. Continue the task.";
   const beginRoot = (w: World, id: string, address: RoomAddress = chief) =>
     w.coordinator.beginTurn({ id, address, brief: "Ship the CSV export", level: "auto", origin: userOrigin });
 
@@ -1725,7 +1725,7 @@ describe("RuntimeCoordinator: outward restart policy, answerNode, continuation o
       const asked: string[] = [];
       after.host.outward = node => { asked.push(node.id); return node.id === "gen-1" ? ["GMAIL_SEND_EMAIL", "git push"] : []; };
       expect(after.coordinator.node("gen-1")).toMatchObject({ status: "failed", outcome: "interrupted", restarts: 0, executions: 1,
-        outcomeDetail: "Interrupted by an OpenMausBot restart after it already sent an email (GMAIL_SEND_EMAIL), pushed (git push); not resumed, so nothing is done twice." });
+        outcomeDetail: "Interrupted by an Obot restart after it already sent an email (GMAIL_SEND_EMAIL), pushed (git push); not resumed, so nothing is done twice." });
       expect(asked).toEqual(["gen-1"]);
       expect("restart" in after.coordinator.node("gen-1")!).toBe(false);
       expect(after.host.reports).toEqual([{ child: expect.objectContaining({ id: "gen-1", status: "failed", outcome: "interrupted" }) }]);
@@ -1744,7 +1744,7 @@ describe("RuntimeCoordinator: outward restart policy, answerNode, continuation o
       const last = world(undefined, {}, dir);
       last.host.outward = n => n.id === node.id ? ["SLACK_SEND_MESSAGE"] : [];
       expect(last.coordinator.node(node.id)).toMatchObject({ status: "failed", outcome: "interrupted", restarts: 0, reported: true,
-        outcomeDetail: "Interrupted by an OpenMausBot restart after it already sent a message (SLACK_SEND_MESSAGE); not resumed, so nothing is done twice." });
+        outcomeDetail: "Interrupted by an Obot restart after it already sent a message (SLACK_SEND_MESSAGE); not resumed, so nothing is done twice." });
       expect(last.host.reports.map(r => [r.child.id, r.parent?.id])).toEqual([[node.id, "gen-2"]]);
       expect(last.coordinator.node("gen-2")).toMatchObject({ status: "waiting", restart: "teammates" });
       last.coordinator.tick();
@@ -1752,7 +1752,7 @@ describe("RuntimeCoordinator: outward restart policy, answerNode, continuation o
       expect(resume.node.id).toBe("gen-2");
       expect(resume.composed.turn).toBe("resume");
       expect(resume.composed.restartNote).toBe("A restart cut these teammates' turns: builder (cut after an outward action, not resumed: see its result). Check their results as usual.\n");
-      expect(resume.text).toContain(`[From @builder (bot) · report on assignment ${node.id}: failed (interrupted): Interrupted by an OpenMausBot restart after it already sent a message (SLACK_SEND_MESSAGE)`);
+      expect(resume.text).toContain(`[From @builder (bot) · report on assignment ${node.id}: failed (interrupted): Interrupted by an Obot restart after it already sent a message (SLACK_SEND_MESSAGE)`);
       await flush();
       expect(last.coordinator.node("gen-2")?.status).toBe("completed");
       expect(last.host.runs).toHaveLength(1);
@@ -1800,7 +1800,7 @@ describe("RuntimeCoordinator: outward restart policy, answerNode, continuation o
     expect("cards" in run.node).toBe(false);
     expect(run.composed.turn).toBe("answered");
     expect(run.text.startsWith(`[From @chief (bot) · assignment ${node.id} for Milind · on their behalf at your level]`)).toBe(true);
-    expect(run.text.endsWith('The person answered: "OpenMausBot connection update: the user securely connected GitHub. Continue the task.".')).toBe(true);
+    expect(run.text.endsWith('The person answered: "Obot connection update: the user securely connected GitHub. Continue the task.".')).toBe(true);
     expect(run.text).not.toContain("Your question was");
     await flush();
     expect(w.coordinator.node(node.id)).toMatchObject({ status: "completed", result: "builder done", executions: 2, reported: true });

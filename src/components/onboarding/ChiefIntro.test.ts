@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// The first run's second screen: MausBot as the Chief of Staff (Create) or a bot the person already has (Choose).
+// The first run's second screen: Obot as the Chief of Staff (Create) or a bot the person already has (Choose).
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,16 +12,16 @@ vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f
 vi.mock("@/components/Avatar", () => ({ BotAvatar: () => null, MausAvatar: () => null }));
 vi.mock("@/components/mascot-clock", () => ({ usePrefersReducedMotion: () => f.reduced }));
 vi.mock("@/lib/default-bot", async (original) => ({ ...(await original<typeof import("@/lib/default-bot")>()), useViewerEmail: () => null }));
-vi.mock("@/lib/mausbot-landing", () => ({ FLIGHT_MS: 700, landInSidebar: (input: { botId: string; commit: () => void }) => { f.landed(input.botId); input.commit(); } }));
+vi.mock("@/lib/obot-landing", () => ({ FLIGHT_MS: 700, landInSidebar: (input: { botId: string; commit: () => void }) => { f.landed(input.botId); input.commit(); } }));
 const { CHIEF_FADE_MS, CHIEF_GUARD_MS, ChiefIntro } = await import("./ChiefIntro");
-const { FLIGHT_MS } = await import("@/lib/mausbot-landing");
+const { FLIGHT_MS } = await import("@/lib/obot-landing");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const bot = (id: string, name: string, extra: Partial<Bot> = {}): Bot => ({
   id, threadId: `${id}-t`, name, title: "", description: "", notifications: true, color: "blue", unread: false,
   modelSelection: { instanceId: "claude", model: "m" }, messages: [], ...extra,
 });
-const maus = (extra: Partial<Bot> = {}) => bot("maus", "MausBot", { defaultBot: {}, chiefOfStaff: true, color: "chrome", ...extra });
+const maus = (extra: Partial<Bot> = {}) => bot("maus", "Obot", { defaultBot: {}, chiefOfStaff: true, color: "chrome", ...extra });
 const CLAUDE = { instanceId: "claude", capabilities: { agentsMcp: true } };
 const CHAT_ONLY = { instanceId: "chat-only", capabilities: { agentsMcp: false } };
 
@@ -69,7 +69,7 @@ afterEach(async () => {
 });
 
 describe("Create", () => {
-  it("fades the dialog and scrim, flies MausBot to its tile, and opens the chat when the flight ends, on its own clock", async () => {
+  it("fades the dialog and scrim, flies Obot to its tile, and opens the chat when the flight ends, on its own clock", async () => {
     f.reduced = false;
     await show();
     await press("Create Chief of Staff");
@@ -88,7 +88,7 @@ describe("Create", () => {
     expect(f.onDone).toHaveBeenCalledExactlyOnceWith("maus");
   });
 
-  it("on a new install is the only action: MausBot, already its Chief, lands in the sidebar and its chat opens", async () => {
+  it("on a new install is the only action: Obot, already its Chief, lands in the sidebar and its chat opens", async () => {
     await show();
     expect(text()).toContain("Introducing your Chief of Staff");
     expect(text()).toContain("Your main point of contact. It checks in on its own and coordinates work with your other bots.");
@@ -103,7 +103,7 @@ describe("Create", () => {
     expect(introStaged("maus")).toBe(true);
   });
 
-  it("makes MausBot the Chief where the place has none, and brings it back to the sidebar", async () => {
+  it("makes Obot the Chief where the place has none, and brings it back to the sidebar", async () => {
     f.state = { ...f.state, bots: [maus({ chiefOfStaff: false, sidebarHidden: true })] };
     await show();
     await choose("Create Chief of Staff");
@@ -162,7 +162,7 @@ describe("Choose an existing bot", () => {
     ]);
     expect(f.onLeave).toHaveBeenCalledOnce();
     expect(f.onDone).toHaveBeenCalledExactlyOnceWith("research");
-    expect(introStaged("maus"), "MausBot's first messages are not where the person lands").toBe(false);
+    expect(introStaged("maus"), "Obot's first messages are not where the person lands").toBe(false);
   });
 
   it("picks with the arrow keys, and goes back to the introduction with Back or Escape", async () => {

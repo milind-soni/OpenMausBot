@@ -43,7 +43,7 @@ async function request(deps: LiveRouteDeps, method: string, path: string, body?:
   return { status: response.status, body: await response.json() };
 }
 
-const fromPhone = (device = "phone-1") => ({ "x-openmausbot-companion": "1", "x-openmausbot-companion-device": device });
+const fromPhone = (device = "phone-1") => ({ "x-obot-companion": "1", "x-obot-companion-device": device });
 
 function deps(overrides: Partial<LiveRouteDeps> = {}): LiveRouteDeps & { saved: SettingsPatch[] } {
   const saved: SettingsPatch[] = [];
@@ -203,7 +203,7 @@ describe("live routes", () => {
     it("is bound to no phone without the companion's word, or with a malformed id", async () => {
       const d = deps();
       await request(d, "POST", "/api/live/session", { botId: "bot1", sdp: "v=0", client: "desktop" });
-      await request(d, "POST", "/api/live/session", { botId: "bot1", sdp: "v=0", client: "ios" }, { "x-openmausbot-companion-device": "phone-1" });
+      await request(d, "POST", "/api/live/session", { botId: "bot1", sdp: "v=0", client: "ios" }, { "x-obot-companion-device": "phone-1" });
       await request(d, "POST", "/api/live/session", { botId: "bot1", sdp: "v=0", client: "ios" }, fromPhone("../phone"));
       for (const [input] of vi.mocked(d.calls.start).mock.calls) expect(input.device).toBeUndefined();
     });
@@ -221,8 +221,8 @@ describe("live routes", () => {
     });
     it("takes the unpairing only from the companion, for a well-formed phone", async () => {
       const d = deps();
-      expect((await request(d, "POST", "/api/live/device-revoked", undefined, { "x-openmausbot-companion-device": "phone-1" })).status).toBe(403);
-      expect((await request(d, "POST", "/api/live/device-revoked", undefined, { "x-openmausbot-companion": "1" })).status).toBe(400);
+      expect((await request(d, "POST", "/api/live/device-revoked", undefined, { "x-obot-companion-device": "phone-1" })).status).toBe(403);
+      expect((await request(d, "POST", "/api/live/device-revoked", undefined, { "x-obot-companion": "1" })).status).toBe(400);
       expect((await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone("a/b"))).status).toBe(400);
       expect(d.calls.deviceRevoked).not.toHaveBeenCalled();
     });

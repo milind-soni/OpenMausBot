@@ -7,7 +7,7 @@ import { readConfig } from "../src/config";
 import { createWorker } from "../src/index";
 import { forgetFcmAccessToken } from "../src/push-fcm";
 
-const BASE_URL = "https://auth.openmausbot.test";
+const BASE_URL = "https://auth.obot.test";
 const ACTIVITY_TOKEN = "ac".repeat(40);
 const START_TOKEN = "5a".repeat(40);
 const ALERT_TOKEN = "a1".repeat(32);
@@ -47,9 +47,9 @@ async function pushEnv(): Promise<Env> {
     ...env,
     APNS_KEY_ID: "KEY1234567",
     APNS_TEAM_ID: "TEAM123456",
-    APNS_BUNDLE_ID: "com.example.mausbot",
+    APNS_BUNDLE_ID: "com.example.obot",
     APNS_PRIVATE_KEY: pem(await crypto.subtle.exportKey("pkcs8", ec.privateKey) as ArrayBuffer),
-    FCM_SERVICE_ACCOUNT: JSON.stringify({ project_id: "mausbot-test-1", client_email: "push@mausbot-test-1.iam.gserviceaccount.com", private_key: pem(await crypto.subtle.exportKey("pkcs8", rsa.privateKey) as ArrayBuffer) }),
+    FCM_SERVICE_ACCOUNT: JSON.stringify({ project_id: "obot-test-1", client_email: "push@obot-test-1.iam.gserviceaccount.com", private_key: pem(await crypto.subtle.exportKey("pkcs8", rsa.privateKey) as ArrayBuffer) }),
   } as unknown as Env;
 }
 
@@ -82,7 +82,7 @@ const activity = {
   kind: "needsYou",
   headline: "Scout needs you",
   since: 1_794_700_000_000,
-  link: "openmausbot://chat/th_1",
+  link: "obot://chat/th_1",
   color: "#7C5CFF",
   gradient: ["#7C5CFF", "#4A2FE0"],
   body: "round",
@@ -107,7 +107,7 @@ describe("Live Activities and ongoing notifications by push", () => {
 
     const [sent] = providers.apns();
     expect(sent!.url).toBe(`https://api.push.apple.com/3/device/${ACTIVITY_TOKEN}`);
-    expect(sent!.headers).toMatchObject({ "apns-push-type": "liveactivity", "apns-topic": "com.example.mausbot.push-type.liveactivity", "apns-priority": "5" });
+    expect(sent!.headers).toMatchObject({ "apns-push-type": "liveactivity", "apns-topic": "com.example.obot.push-type.liveactivity", "apns-priority": "5" });
     expect(sent!.headers["apns-collapse-id"]).toBeUndefined();
     const body = JSON.parse(sent!.text) as { aps: Record<string, unknown> & { "content-state": { name: string; props: string } } };
     expect(body.aps).toMatchObject({ event: "update", "content-state": { name: "BotActivity" } });
@@ -115,7 +115,7 @@ describe("Live Activities and ongoing notifications by push", () => {
     expect(body.aps.alert).toBeUndefined();
     expect(JSON.parse(body.aps["content-state"].props)).toEqual({
       botId: "bot_1", name: "Scout", color: "#7C5CFF", gradient: ["#7C5CFF", "#4A2FE0"], body: "round",
-      mood: "working", kind: "working", headline: "Scout is working", line: "", since: 1_794_700_000_000, link: "openmausbot://chat/th_1", answers: [],
+      mood: "working", kind: "working", headline: "Scout is working", line: "", since: 1_794_700_000_000, link: "obot://chat/th_1", answers: [],
     });
   });
 
@@ -131,7 +131,7 @@ describe("Live Activities and ongoing notifications by push", () => {
 
     const [start, end] = providers.apns().map((one) => ({ headers: one.headers, aps: (JSON.parse(one.text) as { aps: Record<string, unknown> }).aps }));
     expect(start!.headers["apns-priority"]).toBe("10");
-    expect(start!.aps).toMatchObject({ event: "start", "attributes-type": "LiveActivityAttributes", attributes: { url: "openmausbot://chat/th_1" }, alert: { title: "Scout needs you", body: "Scout", sound: "default" } });
+    expect(start!.aps).toMatchObject({ event: "start", "attributes-type": "LiveActivityAttributes", attributes: { url: "obot://chat/th_1" }, alert: { title: "Scout needs you", body: "Scout", sound: "default" } });
     expect(end!.aps.event).toBe("end");
     expect(end!.aps["dismissal-date"]).toEqual(expect.any(Number));
     expect(end!.aps["stale-date"]).toBeUndefined();
@@ -167,7 +167,7 @@ describe("Live Activities and ongoing notifications by push", () => {
     expect((await push(worker, environment, credential, { token: FCM_TOKEN, event: "update", alert: true })).status).toBe(202);
     expect((await push(worker, environment, credential, { token: FCM_TOKEN, event: "update", activity: { ...activity, kind: "working", headline: "Scout is working" } })).status).toBe(202);
     const [needs, working] = providers.fcm().map((one) => (JSON.parse(one.text) as { message: { data: Record<string, string>; android: { priority: string } } }).message);
-    expect(needs!.data).toMatchObject({ omb_kind: "activity", event: "update", bot_id: "bot_1", bot_name: "Scout", kind: "needsYou", headline: "Scout needs you", since: "1794700000000", link: "openmausbot://chat/th_1", alert: "1" });
+    expect(needs!.data).toMatchObject({ omb_kind: "activity", event: "update", bot_id: "bot_1", bot_name: "Scout", kind: "needsYou", headline: "Scout needs you", since: "1794700000000", link: "obot://chat/th_1", alert: "1" });
     expect(needs!.data.title).toBeUndefined();
     expect(needs!.android.priority).toBe("HIGH");
     expect(working!.android.priority).toBe("NORMAL");
@@ -181,7 +181,7 @@ describe("Live Activities and ongoing notifications by push", () => {
     await register(worker, environment, credential, { purpose: "activity", token: ACTIVITY_TOKEN });
     for (const body of [
       { activity: { ...activity, line: "the reply text" } },
-      { activity: { ...activity, answers: [{ label: "Allow", link: "openmausbot://answer?key=secret" }] } },
+      { activity: { ...activity, answers: [{ label: "Allow", link: "obot://answer?key=secret" }] } },
       { activity: { ...activity, headline: "Scout\nneeds you" } },
       { activity: { ...activity, link: "https://example.com/phish" } },
       { activity: { ...activity, color: "red" } },
@@ -194,3 +194,4 @@ describe("Live Activities and ongoing notifications by push", () => {
     expect(providers.calls).toEqual([]);
   });
 });
+

@@ -22,7 +22,7 @@ import {
 } from "./phone-push.ts";
 
 const CREDENTIAL = `omb_install_${"a".repeat(22)}.${"b".repeat(43)}`;
-const ACCESS = { controlPlane: "https://accounts.openmausbot.test", credential: CREDENTIAL };
+const ACCESS = { controlPlane: "https://accounts.obot.test", credential: CREDENTIAL };
 const APNS = "ab".repeat(32);
 const APNS_2 = "cd".repeat(32);
 const FCM = `fcmInstance_1:APA91b${"x".repeat(140)}`;
@@ -353,21 +353,21 @@ describe("where the relay credential comes from", () => {
 
   it("prefers the desktop app's message, including its 'none'", () => {
     writeFileSync(tunnelFile(), JSON.stringify({ companionInstallationCredential: CREDENTIAL }));
-    const source = new PhonePushAccessSource({ env: { OMB_PUSH_CREDENTIAL: CREDENTIAL }, tunnelFile: tunnelFile(), defaultControlPlane: "https://accounts.openmausbot.com" });
+    const source = new PhonePushAccessSource({ env: { OMB_PUSH_CREDENTIAL: CREDENTIAL }, tunnelFile: tunnelFile(), defaultControlPlane: "https://accounts.obot.com" });
     expect(source.receive({ type: "something-else" })).toBe(false);
-    expect(source.receive({ type: PHONE_PUSH_DESKTOP_MESSAGE, access: { controlPlane: "https://accounts.openmausbot.com/", credential: CREDENTIAL } })).toBe(true);
-    expect(source.current()).toEqual({ controlPlane: "https://accounts.openmausbot.com", credential: CREDENTIAL });
+    expect(source.receive({ type: PHONE_PUSH_DESKTOP_MESSAGE, access: { controlPlane: "https://accounts.obot.com/", credential: CREDENTIAL } })).toBe(true);
+    expect(source.current()).toEqual({ controlPlane: "https://accounts.obot.com", credential: CREDENTIAL });
     source.receive({ type: PHONE_PUSH_DESKTOP_MESSAGE, access: null });
     expect(source.current()).toBeNull();
     source.receive({ type: PHONE_PUSH_DESKTOP_MESSAGE, access: { controlPlane: "http://evil.example", credential: CREDENTIAL } });
     expect(source.current()).toBeNull();
   });
 
-  it("then OMB_PUSH_CREDENTIAL, a fleet's credential, then `openmausbot login`'s file", () => {
-    const at = (env: NodeJS.ProcessEnv) => new PhonePushAccessSource({ env, tunnelFile: tunnelFile(), defaultControlPlane: "https://accounts.openmausbot.com" }).current();
+  it("then OMB_PUSH_CREDENTIAL, a fleet's credential, then `obot login`'s file", () => {
+    const at = (env: NodeJS.ProcessEnv) => new PhonePushAccessSource({ env, tunnelFile: tunnelFile(), defaultControlPlane: "https://accounts.obot.com" }).current();
     expect(at({})).toBeNull();
     writeFileSync(tunnelFile(), JSON.stringify({ companionInstallationCredential: CREDENTIAL }));
-    expect(at({})).toEqual({ controlPlane: "https://accounts.openmausbot.com", credential: CREDENTIAL });
+    expect(at({})).toEqual({ controlPlane: "https://accounts.obot.com", credential: CREDENTIAL });
     expect(at({ OMB_PUSH_CREDENTIAL: "not-a-credential" })).toBeNull();
     expect(at({ OMB_INSTALLATION_CREDENTIAL: CREDENTIAL, OMB_CONTROL_PLANE_URL: "http://127.0.0.1:8787" })).toEqual({ controlPlane: "http://127.0.0.1:8787", credential: CREDENTIAL });
   });

@@ -1,6 +1,6 @@
 // `doctor --host`: can this Linux machine run the server and the bots' sandbox? It only looks: files under /proc and /sys,
 // version queries to docker, podman and timedatectl, the sockets already listening, and one HEAD request for the time. On
-// a server that runs the MausBot connector it also asks that for its own checks, which start one throwaway box probe.
+// a server that runs the Obot connector it also asks that for its own checks, which start one throwaway box probe.
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statfsSync } from "node:fs";
 import { arch, cpus, homedir, release, totalmem } from "node:os";
@@ -75,7 +75,7 @@ function systemCheck(probe: HostProbe): HostCheck {
 function archCheck(probe: HostProbe): HostCheck {
   if (probe.arch === "x64") return ok("arch", "x86_64");
   if (probe.arch === "arm64") return warn("arch", "arm64: the server runs here, but a self-hosted Team server is supported on x86_64 only");
-  return fail("arch", `${probe.arch}: OpenMausBot's images are built for x86_64 and arm64 only`, "use an x86_64 server");
+  return fail("arch", `${probe.arch}: Obot's images are built for x86_64 and arm64 only`, "use an x86_64 server");
 }
 
 async function containerCheck(probe: HostProbe): Promise<HostCheck> {
@@ -92,12 +92,12 @@ async function containerCheck(probe: HostProbe): Promise<HostCheck> {
   return fail("containers", "Neither Docker nor Podman is installed", "sudo apt-get install -y docker.io   (or podman)");
 }
 
-/** What the MausBot connector on this server says of it, when one runs there: its own checks (connector/src/host.ts). */
+/** What the Obot connector on this server says of it, when one runs there: its own checks (connector/src/host.ts). */
 export interface ConnectorReport {
   checks: { id: string; ok: boolean; warning?: boolean; fix?: string }[];
 }
 
-const CONNECTOR = "mausbot-connector";
+const CONNECTOR = "obot-connector";
 
 /** Asks the connector's container, as root may; null where none runs or it cannot be asked. */
 export async function connectorReport(probe: HostProbe): Promise<ConnectorReport | null> {
@@ -116,10 +116,10 @@ export async function connectorReport(probe: HostProbe): Promise<ConnectorReport
 function connectorChecks(report: ConnectorReport | null): HostCheck[] {
   if (!report) return [];
   const problems = report.checks.filter((check) => !check.ok || check.warning);
-  if (!problems.length) return [ok("connector", `MausBot connector: its ${report.checks.length} checks pass, the bots' box among them`)];
+  if (!problems.length) return [ok("connector", `Obot connector: its ${report.checks.length} checks pass, the bots' box among them`)];
   return problems.map((check) => check.ok
-    ? warn(`connector-${check.id}`, `MausBot connector: ${check.id}`, check.fix)
-    : fail(`connector-${check.id}`, `MausBot connector: the ${check.id} check fails`, check.fix ?? "run MausBot's install command again"));
+    ? warn(`connector-${check.id}`, `Obot connector: ${check.id}`, check.fix)
+    : fail(`connector-${check.id}`, `Obot connector: the ${check.id} check fails`, check.fix ?? "run Obot's install command again"));
 }
 
 function userNamespaceCheck(probe: HostProbe, connector: ConnectorReport | null): HostCheck {
@@ -129,12 +129,12 @@ function userNamespaceCheck(probe: HostProbe, connector: ConnectorReport | null)
     return fail("userns", "Bot sandbox: this kernel has no user namespaces", "use a stock Ubuntu or Debian kernel (CONFIG_USER_NS)");
   }
   if (sysctl("kernel.apparmor_restrict_unprivileged_userns") === "1") {
-    // A MausBot home runs under its own AppArmor profile (omb-home-narrow), which allows them for that container alone.
+    // A Obot home runs under its own AppArmor profile (omb-home-narrow), which allows them for that container alone.
     if (connector?.checks.some((check) => check.id === "box" && check.ok)) {
-      return ok("userns", "Unprivileged user namespaces: AppArmor restricts them here, and MausBot's home has them through its own AppArmor profile");
+      return ok("userns", "Unprivileged user namespaces: AppArmor restricts them here, and Obot's home has them through its own AppArmor profile");
     }
     return fail("userns", "Bot sandbox: AppArmor blocks unprivileged user namespaces", connector
-      ? "run MausBot's install command again: it loads the home's own AppArmor profile, so this server-wide switch can stay on"
+      ? "run Obot's install command again: it loads the home's own AppArmor profile, so this server-wide switch can stay on"
       : keep("kernel.apparmor_restrict_unprivileged_userns=0"));
   }
   if (sysctl("kernel.unprivileged_userns_clone") === "0") {
@@ -213,7 +213,7 @@ async function portChecks(probe: HostProbe, options: HostOptions): Promise<HostC
   const taken = listeningPorts(probe);
   const ours = taken.has(options.port) && await probe.serverAnswers(options.port);
   const server = !taken.has(options.port) ? ok("port", `Port ${options.port} is free for the server`)
-    : ours ? ok("port", `OpenMausBot already answers on port ${options.port}`)
+    : ours ? ok("port", `Obot already answers on port ${options.port}`)
       : fail("port", `Port ${options.port} is taken by another program`, `stop it (sudo ss -ltnp 'sport = :${options.port}' names it), or run the server with --port N`);
   const web = [80, 443].filter((port) => taken.has(port));
   if (!web.length) return [server, ok("web-ports", "Ports 80 and 443 are free")];
@@ -242,7 +242,7 @@ async function clockCheck(probe: HostProbe): Promise<HostCheck> {
 export async function checkHost(probe: HostProbe, options: HostOptions): Promise<HostCheck[]> {
   if (probe.platform !== "linux") {
     const name = probe.platform === "darwin" ? "macOS" : probe.platform === "win32" ? "Windows" : probe.platform;
-    return [fail("platform", `doctor --host checks a Linux server, and this is ${name}`, "run it on the Linux server that will host OpenMausBot")];
+    return [fail("platform", `doctor --host checks a Linux server, and this is ${name}`, "run it on the Linux server that will host Obot")];
   }
   const [containers, ports, clock, connector] = await Promise.all([containerCheck(probe), portChecks(probe, options), clockCheck(probe), connectorReport(probe)]);
   return [systemCheck(probe), archCheck(probe), containers, userNamespaceCheck(probe, connector), seccompCheck(probe), cgroupCheck(probe),
@@ -303,7 +303,7 @@ export function systemProbe(): HostProbe {
     async serverAnswers(port) {
       try {
         const response = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(2_000) });
-        return ((await response.json()) as { app?: unknown }).app === "openmausbot";
+        return ((await response.json()) as { app?: unknown }).app === "obot";
       } catch {
         return false;
       }
@@ -316,7 +316,7 @@ export async function hostDoctor(ctx: VerbContext, probe: HostProbe = systemProb
   const port = Number(rawPort);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) throw usageError("--port must be 1-65535");
   // A Linux machine's path, also when the checks are tested on Windows.
-  const dataDir = posix.resolve(flag(ctx.flags, "data-dir") ?? (ctx.env.OMB_DATA_DIR || join(homedir(), ".openmausbot")));
+  const dataDir = posix.resolve(flag(ctx.flags, "data-dir") ?? (ctx.env.OMB_DATA_DIR || join(homedir(), ".obot")));
   const domain = flag(ctx.flags, "domain")?.trim().toLowerCase();
   return hostReport(await checkHost(probe, { dataDir, port, ...(domain ? { domain } : {}) }));
 }

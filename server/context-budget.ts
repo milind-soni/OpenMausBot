@@ -12,7 +12,7 @@ export function contextWindowFor(model: string | undefined, catalog?: ModelCatal
   return positive(inferred) ? inferred : DEFAULT_CONTEXT_WINDOW;
 }
 
-/** A "meter" reading (an ACP agent's own usage_update) is shown only; it never times OpenMausBot's compaction. */
+/** A "meter" reading (an ACP agent's own usage_update) is shown only; it never times Obot's compaction. */
 export function compactionReading<T>(capabilities: { contextReading?: "meter" } | undefined, reading: T | undefined): T | undefined {
   return capabilities?.contextReading === "meter" ? undefined : reading;
 }

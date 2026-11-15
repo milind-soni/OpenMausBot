@@ -154,7 +154,7 @@ export function CloudPlanOnCloud({ bridge, usage = null, upgrade, extra }: { bri
 }
 
 /** Security: the public native snapshot carries no credential and cannot activate a plan. */
-/** `onSignIn`: the sheet's email-code sign-in (the browser approval stays for openmausbot://cloud and Sign in again). */
+/** `onSignIn`: the sheet's email-code sign-in (the browser approval stays for obot://cloud and Sign in again). */
 /** On a Team Cloud: its people and plan live on the Cloud page, where the person signs in with their own email. */
 export function TeamPeopleCard({ team }: { team: { name: string; cloudPage?: string } }) {
   return <Card title={t("cloudAccount.teamPeopleTitle")}>
@@ -165,7 +165,7 @@ export function TeamPeopleCard({ team }: { team: { name: string; cloudPage?: str
   </Card>;
 }
 
-/** One MausBot account, shown as two pages: `account` (who is signed in, sign in and out) and `plan` (the plan, its Cloud
+/** One Obot account, shown as two pages: `account` (who is signed in, sign in and out) and `plan` (the plan, its Cloud
  * and cancelling it). */
 export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamHome, onAddCloud, onSignIn, part = "plan", advanced = true, usage = null, upgrade, extra, avatar }: {
   /** the person's picture, for the account card's leading slot */
@@ -260,7 +260,7 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
     // and Sign out as the card's last row. A Cloud's page draws the same card with "from This computer" in that place.
     const blank = <span aria-hidden="true" />;
     return <>
-      <SettingsGroup label={t("settings.account.mausbot", { app: productName() })} block="mausbot-account">
+      <SettingsGroup label={t("settings.account.obot", { app: productName() })} block="obot-account">
         <SettingsRows icons>
           {(!account || view.kind === "unknown") && <SettingRow title={t("cloudAccount.loading")} leading={avatar ?? blank}>{!account && <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.state())}>{t("organization.refresh")}</button>}</SettingRow>}
           {signedOut && <SettingRow title={t("settings.account.signInTitle", { app: productName() })} subtitle={t("settings.account.signInBody")} message={message && <p role="status">{message}</p>} leading={avatar ?? blank}>

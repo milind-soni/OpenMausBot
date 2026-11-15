@@ -95,12 +95,12 @@ describe("the team's people in the sidebar", () => {
     expect(needsYouVersion(tasks(2), [], [])).toBe(needsYouVersion(tasks(2), [], []));
   });
 
-  it("finds the person's inbox with their own Chief, else their own MausBot", () => {
-    const mausbot = bot({ id: "mm", name: "MausBot", defaultBot: { person: BEN.email } });
+  it("finds the person's inbox with their own Chief, else their own Obot", () => {
+    const obot = bot({ id: "mm", name: "Obot", defaultBot: { person: BEN.email } });
     const chief = bot({ id: "mc", name: "Ben's Chief", chiefOfStaff: true, reportsTo: BEN.email });
     const cleos = bot({ id: "pc", chiefOfStaff: true, reportsTo: CLEO.email });
-    expect(inboxBotOf([mausbot, cleos, chief], BEN.email)?.id).toBe("mc");
-    expect(inboxBotOf([mausbot, cleos], BEN.email)?.id).toBe("mm");
+    expect(inboxBotOf([obot, cleos, chief], BEN.email)?.id).toBe("mc");
+    expect(inboxBotOf([obot, cleos], BEN.email)?.id).toBe("mm");
     expect(inboxBotOf([cleos], BEN.email)).toBeUndefined();
   });
 });

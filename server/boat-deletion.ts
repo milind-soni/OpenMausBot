@@ -39,7 +39,7 @@ export function boatDeletionOperation(
   return { id, kind: "sandbox", targetId: boxId, status: status as BoatDeletionOperation["status"], stage };
 }
 
-/** Blocked only until Boat finishes on its own: OpenMausBot's delete is done. */
+/** Blocked only until Boat finishes on its own: Obot's delete is done. */
 export const blockedUntilBoatFinishes = (operation: BoatDeletionOperation) =>
   operation.status === "blocked" && SELF_FINISHING_STAGES.has(operation.stage ?? "");
 
@@ -51,6 +51,6 @@ export const keptForNewerSnapshots = (operation: BoatDeletionOperation) =>
 export function deletionBlockedError(boxId: string, kept: boolean): Error & { status: number } {
   return Object.assign(new Error(kept
     ? `boat.dev deleted cloud computer ${boxId} but is keeping its stored data, because a fork or named snapshot made from it still uses that data. To erase the data, delete those in boat.dev.`
-    : `boat.dev accepted the deletion of cloud computer ${boxId}, but says it is blocked without a reason OpenMausBot knows. boat.dev keeps retrying on its own; if ${boxId} is still listed in boat.dev later, delete it there.`,
+    : `boat.dev accepted the deletion of cloud computer ${boxId}, but says it is blocked without a reason Obot knows. boat.dev keeps retrying on its own; if ${boxId} is still listed in boat.dev later, delete it there.`,
   ), { status: 409 });
 }

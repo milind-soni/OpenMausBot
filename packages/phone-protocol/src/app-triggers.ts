@@ -170,7 +170,7 @@ export function gmailSearchQuery(filter: AppTriggerFilter | undefined): string {
   ].filter(Boolean).join(" ");
 }
 
-/** Whether Composio filters this app's events itself from the plain filter (its config), or OpenMausBot does on arrival. */
+/** Whether Composio filters this app's events itself from the plain filter (its config), or Obot does on arrival. */
 export function filtersAtSource(app: string): boolean {
   return app === GMAIL_APP;
 }

@@ -1,4 +1,4 @@
-# MCP sign-in and plugin catalog — design
+﻿# MCP sign-in and plugin catalog — design
 
 Date: 2026-09-30 · Status: awaiting review · Scope: desktop (macOS, Windows)
 
@@ -8,7 +8,7 @@ Adding Higgsfield (`https://mcp.higgsfield.ai/mcp`) failed two ways:
 
 1. **As a URL server** the app got `HTTP 401` and told the person to "check the
    address and headers". Higgsfield has no API key; it wants an OAuth sign-in,
-   and OpenMausBot's URL servers only support static headers.
+   and Obot's URL servers only support static headers.
 2. **Through `npx mcp-remote`** the Test button reported "The server did not
    answer in time." mcp-remote had opened a browser sign-in; the probe kills
    every server after 8 s (`server/mcp-probe.ts`, `DEFAULT_TIMEOUT_MS`), long
@@ -61,11 +61,11 @@ probe returns `{ ok: false, auth: "required" }` instead of the misleading
 
 - **Client identity:** Dynamic Client Registration (RFC 7591) when
   `registration_endpoint` exists, as a public client
-  (`token_endpoint_auth_method: none`), `client_name: "OpenMausBot"`, one
+  (`token_endpoint_auth_method: none`), `client_name: "Obot"`, one
   loopback redirect URI. The registration is cached per authorization server.
   Without DCR, the catalog entry may carry a pre-registered `clientId`; a
   pasted URL without either shows "This server needs an app registration
-  OpenMausBot doesn't have yet."
+  Obot doesn't have yet."
 - **Loopback callback:** the server listens on `127.0.0.1` on a port derived
   from the server URL (stable across attempts, so one registration is reused;
   falls back to an ephemeral port and re-registers if taken). Path
@@ -203,3 +203,4 @@ computer" for Needs sign-in. Small label change on iOS and Android.
 5. Phone labels.
 
 Each step is shippable on its own; 1–2 can be one PR, 3–4 a second, 5 a third.
+

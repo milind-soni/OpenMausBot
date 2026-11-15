@@ -64,7 +64,7 @@ export interface ControlPlaneClient {
     installationCredential: string,
     options?: { appVersion?: string; kind?: InstallationKind },
   ): Promise<{ endpoint: ControlPlaneEndpoint; connectorToken: string }>;
-  /** MausBot Relay: the control plane's 200 body (checked by relay-token.mjs's validRelayGrant), or a
+  /** Obot Relay: the control plane's 200 body (checked by relay-token.mjs's validRelayGrant), or a
    * ControlPlaneError with code `relay_unavailable` (503) outside the rollout. */
   relayToken(
     installationCredential: string,

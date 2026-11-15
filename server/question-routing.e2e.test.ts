@@ -261,7 +261,7 @@ describe("Ask me first: a question waits for the person, and an answer counts wh
     const question = "Nur den Abschlusstext oder auch den Einladungstext?";
     script(fuchs.id, handOn("AF3", dachs, "AF3-BRIEF: Setz den Fix um."), done("AF3"));
     script(dachs.id,
-      { key: "AF3-B2", match: ["AF3-BRIEF", "OpenMausBot restarted"], reply: "AF3-B2: Beides angepasst, wie im Auftrag." },
+      { key: "AF3-B2", match: ["AF3-BRIEF", "Obot restarted"], reply: "AF3-B2: Beides angepasst, wie im Auftrag." },
       { key: "AF3-B", match: ["AF3-BRIEF"], timeoutMs: 120_000, steps: [{ server: "ogb", tool: "ask_user", arguments: { question, choices: ["Nur den Abschlusstext", "Beides"] } }], reply: "AF3-B: nie erreicht." });
     await say(fuchs, inbox, "AF3-JOB: Lass Dachs den Fix umsetzen.");
     const work = await (async () => { await until(async () => Boolean(await workThread())); return (await workThread())!; })();

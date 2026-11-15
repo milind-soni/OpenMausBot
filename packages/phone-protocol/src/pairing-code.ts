@@ -30,7 +30,7 @@ export type PairingInputProblem = "emailCode" | "oldCode" | "scriptKey" | "notAC
 /** English for each problem; src/locales/en.json carries the same sentences under the same keys. */
 export const PAIRING_INPUT_PROBLEM_TEXT = {
   "serverError.pair.emailCode": "That's a sign-in code from an email. Pairing needs a 12-character code like 7KQ2-M9XD-H4TP.",
-  "serverError.pair.oldCode": "That's a code from an older MausBot. Make a new one on the other computer: Phone & devices → Pair a device.",
+  "serverError.pair.oldCode": "That's a code from an older Obot. Make a new one on the other computer: Phone & devices → Pair a device.",
   "serverError.pair.scriptKey": "That's a script key. Pairing needs a pairing code.",
   "serverError.pair.notACode": "That isn't a pairing code. Pairing needs a 12-character code like 7KQ2-M9XD-H4TP.",
 } as const;
@@ -84,7 +84,7 @@ function fromLink(raw: string): string | null {
   return url.searchParams.get("token") ?? url.searchParams.get("code") ?? hash.get("code");
 }
 
-/** Reads a typed code, an `omb_pair_` credential, or a link that carries either (`openmausbot://pair?…`,
+/** Reads a typed code, an `omb_pair_` credential, or a link that carries either (`obot://pair?…`,
  * `…/pair#code=…`, `?code=…`). */
 export function readPairingInput(raw: string): PairingInput {
   let value = raw.trim();

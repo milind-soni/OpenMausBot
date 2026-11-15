@@ -60,7 +60,7 @@ async function installEngine(client: HeadlessClient, instanceId: string): Promis
     method: "POST", headers: { "content-type": "application/json" }, body: "{}", stream: true, signal: AbortSignal.timeout(INSTALL_TIMEOUT_MS),
   });
   const text = await response.text();
-  if (!response.ok) throw Object.assign(new Error(`OpenMausBot API error (${response.status}): ${text || response.statusText}`), { status: response.status });
+  if (!response.ok) throw Object.assign(new Error(`Obot API error (${response.status}): ${text || response.statusText}`), { status: response.status });
   let body: Rec = {};
   try { body = JSON.parse(text) as Rec; } catch { }
   return (body.instances as Rec[] | undefined)?.find((instance) => instance.instanceId === instanceId)?.snapshot?.state;
@@ -138,6 +138,6 @@ export async function engineVerb(ctx: VerbContext): Promise<VerbOutcome> {
     ? `${result.dryRun ? "Would set" : "Set"} ${result.changed.join(", ")} for ${kind}`
     : `${kind} was already set up; nothing changed (pass --rotate to replace its key)`;
   const installed = result.installed === undefined ? "" : result.installed === "already" ? " Its command was already installed." : " Installed its command.";
-  return { result, exitCode: EXIT.done, human: [`${done}.${installed} Bots use it as ${result.instanceId}/MODEL (openmausbot models).`,
+  return { result, exitCode: EXIT.done, human: [`${done}.${installed} Bots use it as ${result.instanceId}/MODEL (obot models).`,
     ...((result.warnings ?? []) as string[]).map((line) => `warning: ${line}`)] };
 }

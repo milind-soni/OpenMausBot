@@ -9,12 +9,12 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 // can load in-process.
 const hostArch = process.arch === "arm64" ? "arm64" : "x64";
 const resources = process.env.OMB_CUA_RESOURCES ?? join(root, "dist-native", hostArch);
-process.env.OPENMAUSBOT_CUA_SDK_LIBRARY = join(resources, "cua-sdk/native/libcua_driver_sdk.dylib");
+process.env.OBOT_CUA_SDK_LIBRARY = join(resources, "cua-sdk/native/libcua_driver_sdk.dylib");
 process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED = "0";
 const sdk = pathToFileURL(join(resources, "cua-sdk/cua-sdk.mjs")).href;
 const binary = join(resources, "cua-driver");
 const { EmbeddedCuaDriverHost } = await import(sdk);
-const host = new EmbeddedCuaDriverHost(binary, "com.openmausbot.app");
+const host = new EmbeddedCuaDriverHost(binary, "com.obot.app");
 let proxy;
 
 try {
@@ -24,7 +24,7 @@ try {
       ...process.env,
       ...Object.fromEntries(connection.mcp.environment.map(({ name, value }) => [name, value])),
       CUA_DRIVER_EMBEDDED: "1",
-      CUA_DRIVER_HOST_BUNDLE_ID: "com.openmausbot.app",
+      CUA_DRIVER_HOST_BUNDLE_ID: "com.obot.app",
       CUA_DRIVER_RS_TELEMETRY_ENABLED: "0",
     },
     stdio: ["pipe", "pipe", "pipe"],
@@ -65,7 +65,7 @@ try {
   await rpc("initialize", {
     protocolVersion: "2024-11-05",
     capabilities: {},
-    clientInfo: { name: "openmausbot-package-smoke", version: "1" },
+    clientInfo: { name: "obot-package-smoke", version: "1" },
   });
   proxy.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
   const listed = await rpc("tools/list");

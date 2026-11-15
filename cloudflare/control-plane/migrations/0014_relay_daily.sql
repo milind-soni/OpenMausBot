@@ -1,4 +1,4 @@
--- MausBot Relay usage per UTC day, as counts only: how many installations asked for a relay token, got one, reported
+-- Obot Relay usage per UTC day, as counts only: how many installations asked for a relay token, got one, reported
 -- end-to-end phones, or asked for the first time. A row is (day, kind, installs); no installation id, device or
 -- address is kept in it. The three timestamps on relay_adoption let a request tell whether its installation was
 -- already counted today.

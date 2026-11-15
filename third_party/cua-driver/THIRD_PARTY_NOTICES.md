@@ -1,6 +1,6 @@
 # Cua Driver 0.41.3 third-party notices
 
-OpenMausBot redistributes two executables from the official Cua Driver 0.41.3 Linux x64 release: `cua-driver` and `cua-cursor-theme`.
+Obot redistributes two executables from the official Cua Driver 0.41.3 Linux x64 release: `cua-driver` and `cua-cursor-theme`.
 
 - Upstream source commit: [`bd0e299c67dec6397b3d41a259452b2ea13a1cd5`](https://github.com/trycua/cua/commit/bd0e299c67dec6397b3d41a259452b2ea13a1cd5)
 - Upstream `Cargo.lock` SHA-256: `02ee8ebd8415e097036870a7fd39ba379c5e0d212a116715ca0660e83116f447`
@@ -22,7 +22,7 @@ The shipped build graph contains exactly the following MPL-2.0 components. Their
 - [uniffi_meta@0.31.0 source](https://crates.io/api/v1/crates/uniffi_meta/0.31.0/download) — crate SHA-256 `9df6d413db2827c68588f8149d30d49b71d540d46539e435b23a7f7dbd4d4f86`;
 - [uniffi_pipeline@0.31.0 source](https://crates.io/api/v1/crates/uniffi_pipeline/0.31.0/download) — crate SHA-256 `a806dddc8208f22efd7e95a5cdf88ed43d0f3271e8f63b47e757a8bbdb43b63a`;
 
-The complete MPL-2.0 text and package copyright notices appear in `THIRD_PARTY_LICENSES.html`. These files remain under their original licenses; OpenMausBot's and Cua's MIT licenses do not replace them.
+The complete MPL-2.0 text and package copyright notices appear in `THIRD_PARTY_LICENSES.html`. These files remain under their original licenses; Obot's and Cua's MIT licenses do not replace them.
 
 ## Scope and method
 

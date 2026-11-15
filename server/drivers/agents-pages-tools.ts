@@ -1,5 +1,5 @@
 // The agents catalog's page tools and the internal route behind each. Shown to every bot: a server signed in to no
-// MausBot account answers with the sentence asking the person to sign in.
+// Obot account answers with the sentence asking the person to sign in.
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
 

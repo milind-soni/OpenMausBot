@@ -1,8 +1,8 @@
-# The organization library on the desktop
+﻿# The organization library on the desktop
 
 When an Organization shares packages with its members, or a partner shares
 them with its Customers, Admin builds a catalog for each receiving
-Organization. A connected OpenMausBot desktop keeps a verified copy of that
+Organization. A connected Obot desktop keeps a verified copy of that
 catalog and of each package's release file, so **Templates → From
 {Organization}** can show and add them. This page describes the desktop's half
 of that channel: Electron main. The runtime's shelf, the Add button and the
@@ -64,7 +64,7 @@ connection generation as company backups: signing out aborts it.
 | `<data dir>/org-library/blobs/<sha256>.json` | release files, owner-only, written atomically | Electron main |
 | `<data dir>/org-library/state.json`, `presets.json` | what this installation added | the runtime |
 
-`<data dir>` is `~/.openmausbot` unless `OMB_DATA_DIR` says otherwise.
+`<data dir>` is `~/.obot` unless `OMB_DATA_DIR` says otherwise.
 
 Workspace and company backups leave out `catalog.json` and `blobs/`, because
 main downloads them again and sign-out deletes them. They keep the runtime's
@@ -93,14 +93,14 @@ Electron main → runtime, over the private utility-process port (never HTTP,
 never a remote server):
 
 ```jsonc
-{ "type": "openmausbot:managed-library", "requestId": "…",
+{ "type": "obot:managed-library", "requestId": "…",
   "library": { "adminOrigin": "https://admin.example.com", "organizationId": "…", "organizationName": "Beta Clinic",
                "digest": "<sha256 of catalog.json>", "catalog": { /* the parsed catalog */ } } }
 // or "library": null: hide the shelf, change nothing else
 ```
 
 The runtime swaps its in-memory catalog and answers at once, before any
-install work, with `{ "type": "openmausbot:managed-desktop-result", "requestId", "ok": true }`
+install work, with `{ "type": "obot:managed-desktop-result", "requestId", "ok": true }`
 (the relay gives up after 15 s). It reads release files from `blobs/` itself
 and checks their SHA-256 on every read.
 
@@ -108,7 +108,7 @@ Runtime → Electron main, unsolicited, after it processed a relayed catalog and
 after any change to what it added:
 
 ```jsonc
-{ "type": "openmausbot:managed-library-state", "digest": "<the relayed digest>",
+{ "type": "obot:managed-library-state", "digest": "<the relayed digest>",
   "packages": [{ "packageId": "…", "release": "1.3.0", "sha256": "…", "state": "installed" }] }
 ```
 
@@ -133,13 +133,14 @@ Main waits 5 s after a snapshot arrives and sends only the newest one.
 
 | Desktop \ Admin | Admin without `capabilities.library` | Admin with it |
 |---|---|---|
-| OpenMausBot before this channel | as before | ignores the pointer, stays connected |
-| OpenMausBot with it | no library request, no shelf; file import and export work | the shelf |
+| Obot before this channel | as before | ignores the pointer, stays connected |
+| Obot with it | no library request, no shelf; file import and export work | the shelf |
 | No organization account | as before | — |
 
-This channel and the runtime's handler for `openmausbot:managed-library`
+This channel and the runtime's handler for `obot:managed-library`
 (`server/org-library.ts`) ship in the same release. A runtime without that
 handler never acknowledges, so main would relay again on every sync and wait
 out the 15 s timeout each time.
 
 How this is tested: [verification/desktop-library.md](verification/desktop-library.md).
+

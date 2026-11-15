@@ -34,7 +34,7 @@ export interface CloudAccountState {
   addCloud?: { canAdd: true } | { canAdd: false; blocked: CloudAddBlock };
   /** With `clouds`, for the account a Team plan with organizations is billed to: whether ＋ may add one to it now. */
   organizations?: import("./cloud-list.mjs").CloudOrganizations;
-  /** The newest OpenMausBot release the Admin knows, while it follows releases (with `clouds`); absent otherwise. */
+  /** The newest Obot release the Admin knows, while it follows releases (with `clouds`); absent otherwise. */
   latestVersion?: string;
   /** Another Cloud this app is buying (in the last 24 hours): its id, name, swatch and plan, when its checkout opened,
    * whether main keeps that page (`link`), and `done` once it was opened or announced. */
@@ -231,7 +231,7 @@ export interface CloudPlanSnapshot {
 export interface CloudPlanBridge {
   state(): Promise<CloudPlanSnapshot>;
   manage(): Promise<void>;
-  /** This device's MausBot Cloud sign-in, again, once it has ended: only from the person's click. */
+  /** This device's Obot Cloud sign-in, again, once it has ended: only from the person's click. */
   signIn?(): Promise<void>;
   /** The trial's popup due now was shown: main shows it no more today. Absent on an older app. */
   noticeSeen?(): Promise<void>;

@@ -1,4 +1,4 @@
-# Independent threads and sidebar
+﻿# Independent threads and sidebar
 
 Launch the real renderer and server with only an offline provider and a
 disposable data directory:
@@ -70,7 +70,7 @@ switching and Stop can be exercised without a real provider or account.
     sibling has its own activity entry under that bot. Follow a notification,
     a thread chip or a search hit to a third thread of that bot: the sibling
     keeps its unread entry, and the third thread is read once open. An
-    `openmausbot://bot/<id>` link opens the main thread. A row or tile with a
+    `obot://bot/<id>` link opens the main thread. A row or tile with a
     mark on it opens the thread the mark is about (waiting on you, then unread,
     then work under way, a thread another bot opened included); a second click
     returns to the main thread.
@@ -190,3 +190,4 @@ print retained JSON evidence paths next to the server logs.
 
 Stop the foreground launcher with Ctrl-C. It closes only its own UI/server
 and deletes its disposable home; the printed server log remains available.
+

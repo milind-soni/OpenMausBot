@@ -62,7 +62,7 @@ it("a bot on Ask adds a server switched off, the person taps Turn on, and the bo
   expect(config().mcpServers.notes.enabled).toBe(true);
 
   let resumed: any;
-  await expect.poll(() => { resumed = dump(); return JSON.stringify(resumed?.prompt ?? "").includes("OpenMausBot MCP server decision"); }, { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => { resumed = dump(); return JSON.stringify(resumed?.prompt ?? "").includes("Obot MCP server decision"); }, { timeout: 20_000 }).toBe(true);
   expect(JSON.stringify(resumed.prompt)).toContain("Test: it started and listed its tools: read_notes.");
   expect(resumed.mcpConfig.mcpServers.notes, "the resumed turn already has the server").toBeDefined();
   await expect.poll(async () => (await card()).card.mcpRequest.resumed, { timeout: 20_000 }).toBe(true);

@@ -1,4 +1,4 @@
-# Data viewer with real DuckDB
+﻿# Data viewer with real DuckDB
 
 Launch the full app with a disposable server, home, browser session and real
 DuckDB database:
@@ -19,7 +19,7 @@ review** and the **Data** tab if needed. The printed `ui` path also works with
 the shared [chat UI controls](chat-ui.md):
 
 ```sh
-H=/tmp/openmausbot-verify-data-XXXXXX/ui.json
+H=/tmp/obot-verify-data-XXXXXX/ui.json
 pnpm control:omb ui snapshot --ui "$H" --interactive
 pnpm control:omb ui click --ui "$H" --name History
 pnpm control:omb ui snapshot --ui "$H" --interactive
@@ -130,3 +130,4 @@ receipt explains that the result must be opened in the workspace app.
 **Export** writes to the workspace host, not a browser download. Workspace
 backups currently omit the DuckDB database, so exports must be kept separately
 if the loaded and derived data needs to survive a workspace restore.
+

@@ -242,7 +242,7 @@ describe("sharing the conversation on screen, on a team", () => {
     expect(shareKeys(withSide({ shared: true, sharedWith: { name: "Rui" } }))).toEqual([]);
     expect(shareKeys(withSide({ shared: true }))).toEqual([]);
     expect(shareKeys(withSide({}))).toEqual([]);
-    expect(shareKeys({ ...withSide({ private: true }), defaultBot: { person: "rui@acme.test" } } as Bot), "a chat with their own MausBot").toEqual([]);
+    expect(shareKeys({ ...withSide({ private: true }), defaultBot: { person: "rui@acme.test" } } as Bot), "a chat with their own Obot").toEqual([]);
   });
 
   it("is not offered off a team", () => {

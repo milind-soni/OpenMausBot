@@ -1,10 +1,10 @@
-// The server owner's own rules for what MausBot may do here: /etc/mausbot/policy.json on the host, root's, which the
-// connector reads (mounted read-only) before each job MausBot sends and never writes. Jobs root runs on the server
+// The server owner's own rules for what Obot may do here: /etc/obot/policy.json on the host, root's, which the
+// connector reads (mounted read-only) before each job Obot sends and never writes. Jobs root runs on the server
 // itself are the owner's own and are not limited by it.
 //
 //   { "jobs": ["status", "host-health", "update", "backup"], "updates": "hold" }
 //
-// `jobs`: the only kinds MausBot may run here (absent: all of them). `updates: "hold"`: MausBot's home updates wait.
+// `jobs`: the only kinds Obot may run here (absent: all of them). `updates: "hold"`: Obot's home updates wait.
 // A self-update of the connector is always accepted, so a held or locked-down server never strands an old connector.
 import { readFileSync } from "node:fs";
 
@@ -44,11 +44,12 @@ export function readPolicy(file: string): ReturnType<typeof parsePolicy> {
   return parsePolicy(text);
 }
 
-/** Why the server's policy refuses `job` from MausBot, or null. A self-update is never refused. */
+/** Why the server's policy refuses `job` from Obot, or null. A self-update is never refused. */
 export function policyRefusal(job: Job, read: ReturnType<typeof parsePolicy>, file: string): string | null {
   if (job.type === "self-update") return null;
-  if (!read.ok) return READS.has(job.type) ? null : `This server's policy ${file} cannot be used (${read.problem}), so MausBot changes nothing here until it is fixed.`;
-  if (read.policy.jobs && !read.policy.jobs.includes(job.type)) return `This server's policy ${file} does not let MausBot run ${job.type} jobs.`;
+  if (!read.ok) return READS.has(job.type) ? null : `This server's policy ${file} cannot be used (${read.problem}), so Obot changes nothing here until it is fixed.`;
+  if (read.policy.jobs && !read.policy.jobs.includes(job.type)) return `This server's policy ${file} does not let Obot run ${job.type} jobs.`;
   if (job.type === "update" && read.policy.updates === "hold") return `This server's policy ${file} holds updates.`;
   return null;
 }
+

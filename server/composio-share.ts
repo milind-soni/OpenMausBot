@@ -1,4 +1,4 @@
-// One person's connected apps on this computer and on their own Cloud. With OpenMausBot's connected-apps service, this
+// One person's connected apps on this computer and on their own Cloud. With Obot's connected-apps service, this
 // computer's installation mints a code for the Cloud's installation, which then acts as the same Composio user. With the
 // person's own Composio project, the Cloud saves the same key and user. A Cloud whose own apps are already connected
 // keeps them: each app connected here is then connected there once.

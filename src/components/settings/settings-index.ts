@@ -17,7 +17,7 @@ export interface SettingsContext {
   /** main says this page is the app's home (home:page): This computer's page, or My Cloud's own page once it is home.
    * The one source for whether This app's rows (Open at login, Logs and diagnostics) and the account live here. */
   home: boolean;
-  /** a MausBot Cloud's page, personal or a team's */
+  /** a Obot Cloud's page, personal or a team's */
   cloud: boolean;
   team: boolean;
   /** this app drives another computer (paired-client mode) */
@@ -77,9 +77,9 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "installations", owner: "place", labelKey: "settings.section.workspaces", icon: Server, when: (ctx) => !ctx.client && ctx.installations,
     synonyms: ["installations", "fleet", "clients", "tenants"] },
   { id: "account", owner: "account", labelKey: "settings.page.account", when: () => true,
-    synonyms: ["account", "sign in", "log in", "log out", "sign out", "email", "organization", "mausbot cloud"] },
+    synonyms: ["account", "sign in", "log in", "log out", "sign out", "email", "organization", "obot cloud"] },
   { id: "plan", owner: "account", labelKey: "settings.page.plan", icon: CreditCard, when: (ctx) => !ctx.client && ctx.plan,
-    synonyms: ["plan", "billing", "subscription", "invoice", "receipt", "payment", "card", "upgrade", "trial", "cancel", "refund", "usage & billing", "mausbot cloud", "weekly", "limits"] },
+    synonyms: ["plan", "billing", "subscription", "invoice", "receipt", "payment", "card", "upgrade", "trial", "cancel", "refund", "usage & billing", "obot cloud", "weekly", "limits"] },
   { id: "app", owner: "app", labelKey: "settings.page.app", when: () => true,
     synonyms: ["this app", "updates", "update", "version", "help", "about", "servers", "your computers", "environments", "diagnostics", "logs", "tour"] },
   { id: "general", owner: "app", labelKey: "settings.section.general", icon: SlidersHorizontal, when: advancedOnly(() => true),
@@ -214,7 +214,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "activity", page: "data", anchor: "activity", labelKey: "settings.section.activity", when: browserAdmin, topFor: ["activity", "audit", "audit log"], synonyms: ["history", "who did what"] },
   { id: "members", page: "people", anchor: "members", labelKey: "settings.people.members", synonyms: ["invite", "roles", "admins"] },
   { id: "bot-access", page: "people", anchor: "bot-access", labelKey: "settings.section.botAccess", synonyms: ["who can", "share", "permissions"] },
-  { id: "account", page: "account", labelKey: "settings.page.account", topFor: ["sign in", "log in", "log out", "sign out", "email"], synonyms: ["account", "mausbot cloud"] },
+  { id: "account", page: "account", labelKey: "settings.page.account", topFor: ["sign in", "log in", "log out", "sign out", "email"], synonyms: ["account", "obot cloud"] },
   { id: "organization", page: "account", anchor: "organization", labelKey: "settings.section.organization", when: (ctx) => ctx.organization, synonyms: ["company", "organisation", "managed"] },
   { id: "emails", page: "account", anchor: "emails", labelKey: "settings.account.emails", when: desk, synonyms: ["newsletter", "product updates", "email updates"] },
   { id: "plan", page: "plan", anchor: "plan", labelKey: "settings.page.plan", topFor: ["billing", "subscription", "invoice", "receipt", "payment", "card", "upgrade", "plan", "trial", "cancel", "cancel plan", "cancel subscription", "cancel trial", "unsubscribe", "refund"], synonyms: ["usage & billing", "manage subscription"] },

@@ -267,8 +267,8 @@ describe("a team bot is its maker's until they share it", () => {
     const adas = await made("ada", { name: "Ada's, shared with Rui" });
     expect((await as("ada", "PUT", `/api/bots/${adas.id}/access`, { everyone: "none", people: { [RUI.email]: "edit" } })).status).toBe(200);
     expect((await as("rui", "DELETE", `/api/bots/${adas.id}`)).status, "a bot he can edit but does not look after").toBe(403);
-    const mausbot = (await bots("rui")).find((bot) => (bot as Bot & { defaultBot?: { person?: string } }).defaultBot?.person === RUI.email);
-    if (mausbot) expect((await as("rui", "DELETE", `/api/bots/${mausbot.id}`)).status, "his own MausBot stays").toBe(409);
+    const obot = (await bots("rui")).find((bot) => (bot as Bot & { defaultBot?: { person?: string } }).defaultBot?.person === RUI.email);
+    if (obot) expect((await as("rui", "DELETE", `/api/bots/${obot.id}`)).status, "his own Obot stays").toBe(409);
 
     expect((await as("rui", "PUT", `/api/bots/${own.id}/access`, PRIVATE)).status).toBe(200);
     const gone = await as("rui", "DELETE", `/api/bots/${own.id}`);

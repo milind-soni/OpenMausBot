@@ -1,4 +1,4 @@
-# Exact command allowlist
+﻿# Exact command allowlist
 
 Open **Command allowlist** from the composer's approval menu (after Full access)
 or a bot's Permissions settings. Save a complete command and working folder,
@@ -27,7 +27,7 @@ Keep the launcher running. In a second terminal, pass the exact `ui.json` path
 it printed to the asserted recipe:
 
 ```sh
-node --experimental-strip-types scripts/verify-command-allowlist-ui.ts /tmp/openmausbot-verify-data-XXXXXX/ui.json
+node --experimental-strip-types scripts/verify-command-allowlist-ui.ts /tmp/obot-verify-data-XXXXXX/ui.json
 ```
 
 The script uses the real app, accessible control names and the fixture's HTTP
@@ -92,3 +92,4 @@ and malformed files. Backup policy tests exclude these installation-local rules.
 These checks do not prove live-account model behavior or the Electron privileged
 Full access bridge. See [Full Access verification](full-access.md) for its
 independent regression coverage.
+

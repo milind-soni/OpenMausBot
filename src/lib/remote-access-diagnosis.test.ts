@@ -13,7 +13,7 @@ const companion = (overrides: Partial<Companion> = {}): Companion => ({
   devices: [],
   routes: { wifi: route(true), relay: route(true), tailscale: route(false), https: route(false) },
   endpoints: [{ url: "http://192.168.1.23:8810", kind: "lan", priority: 0 }],
-  e2e: { enabled: true, relay: "connected", node: "relay1.openmausbot.com", relayProblem: null, descriptor: null },
+  e2e: { enabled: true, relay: "connected", node: "relay1.obot.com", relayProblem: null, descriptor: null },
   relayToken: { state: "ready", code: null },
   ...overrides,
 });
@@ -28,52 +28,52 @@ describe("the remote access diagnosis", () => {
     expect(results({ account: signedIn, companion: companion() })).toEqual({ computer: "ok", account: "ok", relay: "ok", route: "ok" });
     expect(diagnosis.failed).toBe(false);
     expect(diagnosis.headline).toBe("Your phone can reach this computer from anywhere.");
-    expect(diagnosis.steps.map((step) => step.label)).toEqual(["This computer", "MausBot account", "MausBot Relay", "Your phone's way in"]);
+    expect(diagnosis.steps.map((step) => step.label)).toEqual(["This computer", "Obot account", "Obot Relay", "Your phone's way in"]);
   });
 
   it("stops at this computer when the phone link is off, and checks nothing after it", () => {
     const diagnosis = diagnoseRemoteAccess({ account: signedIn, companion: companion({ enabled: false }) });
     expect(diagnosis.steps.map((step) => step.result)).toEqual(["failed", "unchecked", "unchecked", "unchecked"]);
     expect(diagnosis.headline).toBe("The phone link is off.");
-    expect(diagnosis.next).toEqual(["Turn on Same Wi-Fi or Anywhere, through MausBot."]);
+    expect(diagnosis.next).toEqual(["Turn on Same Wi-Fi or Anywhere, through Obot."]);
   });
 
-  it("names the account when MausBot can't be reached, and still finds Same Wi-Fi working", () => {
+  it("names the account when Obot can't be reached, and still finds Same Wi-Fi working", () => {
     const facts = { account: { available: false, status: "signed-out" as const, problem: "unreachable" as const }, companion: companion({ e2e: { enabled: false, relay: "off", node: null, descriptor: null }, relayToken: { state: "failed", code: "unreachable" } }) };
     const diagnosis = diagnoseRemoteAccess(facts);
     expect(results(facts)).toEqual({ computer: "ok", account: "failed", relay: "unchecked", route: "ok" });
-    expect(diagnosis.headline).toBe("This computer can't reach MausBot right now.");
+    expect(diagnosis.headline).toBe("This computer can't reach Obot right now.");
     expect(diagnosis.next[0]).toMatch(/internet connection/);
-    expect(diagnosis.steps[2].reason).toBe("Needs the MausBot account first.");
+    expect(diagnosis.steps[2].reason).toBe("Needs the Obot account first.");
   });
 
   it("asks to sign in when signed out, or when the relay refused this computer's sign-in", () => {
     expect(diagnoseRemoteAccess({ account: { available: true, status: "signed-out" }, companion: companion() }).headline).toBe("Not signed in.");
     const refused = diagnoseRemoteAccess({ account: signedIn, companion: companion({ relayToken: { state: "waiting", code: "sign_in" }, e2e: { enabled: true, relay: "off", node: null, descriptor: null } }) });
     expect(refused.headline).toBe("This computer's sign-in was not accepted.");
-    expect(refused.next).toEqual(["MausBot asks again on its own within the hour, or as soon as you pair a phone."]);
+    expect(refused.next).toEqual(["Obot asks again on its own within the hour, or as soon as you pair a phone."]);
   });
 
   it("maps the account's control-plane codes to plain reasons", () => {
     const reason = (problem: Account["problem"]) => diagnoseRemoteAccess({ account: { available: true, status: "error", problem }, companion: companion() }).headline;
     expect(reason("sign_in")).toBe("Your sign-in expired.");
-    expect(reason("busy")).toBe("MausBot is busy right now.");
+    expect(reason("busy")).toBe("Obot is busy right now.");
     expect(reason("limit")).toBe("This account has reached its computer limit.");
-    expect(reason("update")).toBe("This version of MausBot is too old to connect.");
+    expect(reason("update")).toBe("This version of Obot is too old to connect.");
     expect(reason("failed")).toBe("Signing in didn't finish.");
   });
 
   it("names the relay when it is off for this computer, busy, silent, or taken over", () => {
     const relayFailure = (overrides: Partial<Companion>) => diagnoseRemoteAccess({ account: signedIn, companion: companion(overrides) });
     const off = { enabled: true, relay: "connecting" as const, node: null, descriptor: null };
-    expect(relayFailure({ relayToken: { state: "failed", code: "unavailable" }, e2e: { ...off, relay: "off" } }).headline).toBe("MausBot Relay isn't available for this computer right now.");
-    expect(relayFailure({ relayToken: { state: "failed", code: "busy" }, e2e: { ...off, relay: "off" } }).headline).toBe("MausBot Relay is busy.");
+    expect(relayFailure({ relayToken: { state: "failed", code: "unavailable" }, e2e: { ...off, relay: "off" } }).headline).toBe("Obot Relay isn't available for this computer right now.");
+    expect(relayFailure({ relayToken: { state: "failed", code: "busy" }, e2e: { ...off, relay: "off" } }).headline).toBe("Obot Relay is busy.");
     const silent = relayFailure({ e2e: { ...off, relayProblem: "no_answer" } });
-    expect(silent.headline).toBe("MausBot Relay didn't answer.");
+    expect(silent.headline).toBe("Obot Relay didn't answer.");
     expect(silent.next).toHaveLength(2);
-    expect(relayFailure({ e2e: { ...off, relayProblem: "unreachable" } }).headline).toBe("This computer can't reach MausBot Relay.");
-    expect(relayFailure({ e2e: { ...off, relayProblem: "busy" } }).headline).toBe("MausBot Relay is busy.");
-    expect(relayFailure({ e2e: { ...off, relay: "off", relayProblem: "replaced" } }).headline).toBe("Another copy of MausBot took over this computer's relay connection.");
+    expect(relayFailure({ e2e: { ...off, relayProblem: "unreachable" } }).headline).toBe("This computer can't reach Obot Relay.");
+    expect(relayFailure({ e2e: { ...off, relayProblem: "busy" } }).headline).toBe("Obot Relay is busy.");
+    expect(relayFailure({ e2e: { ...off, relay: "off", relayProblem: "replaced" } }).headline).toBe("Another copy of Obot took over this computer's relay connection.");
   });
 
   it("reads a relay still connecting, or renewing its access, as not checked rather than failed", () => {
@@ -105,7 +105,7 @@ describe("the remote access diagnosis", () => {
 
   it("reads a build with no control plane as not set up, not as a failure", () => {
     const diagnosis = diagnoseRemoteAccess({ account: { available: false, status: "signed-out", problem: "unconfigured" }, companion: companion({ e2e: { enabled: false, relay: "off", node: null, descriptor: null }, relayToken: { state: "off", code: null } }), accountWanted: true });
-    expect(diagnosis.steps[1]).toMatchObject({ result: "unchecked", reason: "Not set up in this build of MausBot." });
+    expect(diagnosis.steps[1]).toMatchObject({ result: "unchecked", reason: "Not set up in this build of Obot." });
     expect(diagnosis.failed).toBe(false);
     expect(remoteAccessDiagnosisText(diagnosis)).toContain("account: unavailable (unconfigured)");
   });
@@ -116,7 +116,7 @@ describe("the remote access diagnosis", () => {
     expect(diagnoseRemoteAccess(facts).failed).toBe(false);
   });
 
-  it("keeps a connected relay ok while MausBot's service can't be reached", () => {
+  it("keeps a connected relay ok while Obot's service can't be reached", () => {
     const facts = { account: { available: false, status: "error" as const, problem: "unreachable" as const }, companion: companion() };
     expect(results(facts)).toEqual({ computer: "ok", account: "failed", relay: "ok", route: "ok" });
   });
@@ -136,10 +136,10 @@ describe("the remote access diagnosis", () => {
   it("copies the steps, what to try and the facts as one block", () => {
     const diagnosis = diagnoseRemoteAccess({ account: signedIn, companion: companion({ e2e: { enabled: true, relay: "connecting", node: null, relayProblem: "no_answer", descriptor: null } }), setupTimedOut: true, appVersion: "0.1.158" });
     const text = remoteAccessDiagnosisText(diagnosis);
-    expect(text.split("\n")[0]).toBe("MausBot remote access: MausBot Relay didn't answer.");
-    expect(text).toContain("MausBot Relay: failed · MausBot Relay didn't answer.");
+    expect(text.split("\n")[0]).toBe("Obot remote access: Obot Relay didn't answer.");
+    expect(text).toContain("Obot Relay: failed · Obot Relay didn't answer.");
     expect(text).toContain("This computer: ok · The phone link is on.");
-    expect(text).toContain("- A VPN or firewall on this computer can block MausBot Relay.");
+    expect(text).toContain("- A VPN or firewall on this computer can block Obot Relay.");
     expect(text).toContain("app: 0.1.158");
     expect(text).toContain("relay: connecting (no_answer)");
     expect(text).toContain("ways_on: wifi,relay");
@@ -148,12 +148,12 @@ describe("the remote access diagnosis", () => {
 
   it("never copies an email, address, hostname, IP, pairing code, token, key or device name", () => {
     const secrets = [
-      "person@example.com", "c-0123abcd", "mausbot.si", "192.168.1.23", "100.64.0.9", "mac.tailnet.ts.net", "mac.local",
+      "person@example.com", "c-0123abcd", "obot.si", "192.168.1.23", "100.64.0.9", "mac.tailnet.ts.net", "mac.local",
       "482913", "pairtoken_secret", "PUBKEY_secret", "hhash_secret", "eyJ2IjoxfQ", "omb_install_secret", "req_8f3a",
-      "device-secret-id", "Ana's iPhone", "Bearer", "relay9.example.com", "openmausbot.com",
+      "device-secret-id", "Ana's iPhone", "Bearer", "relay9.example.com", "obot.com",
     ];
     const account = {
-      available: true, status: "error", email: "person@example.com", endpoint: "https://c-0123abcd.mausbot.si",
+      available: true, status: "error", email: "person@example.com", endpoint: "https://c-0123abcd.obot.si",
       message: "Could not finish. Reference: req_8f3a.", problem: "Bearer omb_install_secret",
     } as unknown as Account;
     const leaky = {
@@ -162,13 +162,13 @@ describe("the remote access diagnosis", () => {
       hosts: ["mac.local", "mac.tailnet.ts.net"], discovery: { advertising: true, name: "mac.local" },
       endpoints: [
         { url: "http://192.168.1.23:8810", kind: "lan", priority: 0 },
-        { url: "https://c-0123abcd.mausbot.si", kind: "hosted", priority: 1 },
+        { url: "https://c-0123abcd.obot.si", kind: "hosted", priority: 1 },
         { url: "http://mac.tailnet.ts.net:8810", kind: "tailnet", priority: 2 },
       ],
       routes: { wifi: route(true), relay: route(true), tailscale: route(true, "mac.tailnet.ts.net"), https: route(true) },
       pairing: { code: "482913", token: "pairtoken_secret", expiresAt: 1 },
       devices: [{ id: "device-secret-id", name: "Ana's iPhone", createdAt: 1, lastSeenAt: 1, cloudDesktopAccess: false }],
-      e2e: { enabled: true, relay: "connecting", node: "relay9.example.com", relayProblem: "no_answer", descriptor: { v: 1, k: "PUBKEY_secret", h: "hhash_secret", r: ["relay1.openmausbot.com"] } },
+      e2e: { enabled: true, relay: "connecting", node: "relay9.example.com", relayProblem: "no_answer", descriptor: { v: 1, k: "PUBKEY_secret", h: "hhash_secret", r: ["relay1.obot.com"] } },
       relayToken: { state: "failed", code: "eyJ2IjoxfQ.c2lnbmF0dXJl" },
       error: undefined,
     } as unknown as Companion;

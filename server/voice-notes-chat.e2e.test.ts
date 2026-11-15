@@ -1,4 +1,4 @@
-// Voice notes on OpenMausBot's own chat runtime (an API-key provider): a loopback provider scripts the model, and a
+// Voice notes on Obot's own chat runtime (an API-key provider): a loopback provider scripts the model, and a
 // loopback speech stub stands in for the voice provider, so no external service is reached.
 import { createServer, type Server } from "node:http";
 import { existsSync, readdirSync } from "node:fs";

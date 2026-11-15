@@ -71,7 +71,7 @@ function stillDistinct(root: WidgetRoot): boolean {
   return new Set(labels).size === labels.length && new Set(names).size === names.length;
 }
 
-const DEVS_TAP_REFUSAL = "widget: a tap can't tag @devs; only words the person types send a bug report to the MausBot team. Show no button or option for it: ask them in your message to type @devs and what went wrong.";
+const DEVS_TAP_REFUSAL = "widget: a tap can't tag @devs; only words the person types send a bug report to the Obot team. Show no button or option for it: ask them in your message to type @devs and what went wrong.";
 
 /** A press is recorded as the person's message, but a tap is never their own @devs tag: a bot asks them to type it instead. */
 function offersDevsTap(root: WidgetRoot): boolean {

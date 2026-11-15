@@ -437,7 +437,7 @@ const PRELOAD = readFileSync(new URL("./preload.cjs", import.meta.url), "utf8");
 function preload(origin, { home = false, activation = false, pairedElsewhere = false } = {}) {
   let bridge; const invoked = [], synced = [], listeners = new Map();
   vm.runInNewContext(PRELOAD, {
-    process: { platform: "darwin", argv: [`--omb-local-origin=${LOCAL}`, ...(pairedElsewhere ? ["--openmausbot-remote-client"] : ["--omb-company-desktop=1"])] },
+    process: { platform: "darwin", argv: [`--omb-local-origin=${LOCAL}`, ...(pairedElsewhere ? ["--obot-remote-client"] : ["--omb-company-desktop=1"])] },
     location: { origin }, navigator: { userActivation: { isActive: activation } }, TextEncoder, localStorage: { getItem: () => null },
     queueMicrotask,
     require: () => ({ webUtils: {}, contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } },
@@ -740,7 +740,7 @@ test("a team on screen signs in again before its hour ends, without moving the p
   assert.deepEqual(w.teamPairs, ["team-acme"], "not before its time");
   await w.later(1);
   assert.deepEqual(w.teamPairs, ["team-acme", "team-acme"]);
-  assert.deepEqual(w.redeemed, [["team", { code: "TTTT-EEEE-AAAA", cookie: true, label: "OpenMausBot app" }]]);
+  assert.deepEqual(w.redeemed, [["team", { code: "TTTT-EEEE-AAAA", cookie: true, label: "Obot app" }]]);
   assert.equal(w.went.length, went, "the page never moved");
   assert.equal(w.pairs, 0, "never My Cloud's pairing");
   await w.later(TEAM_RENEW_MS);
@@ -917,7 +917,7 @@ test("another Cloud of the person's own that the Admin says is asleep is never a
   w.url = `${CLIENT}/`;
   w.home.navigated(w.url);
   await w.tick();
-  const versions = () => w.fetched.filter(([route]) => route === "client:/.well-known/openmausbot/environment");
+  const versions = () => w.fetched.filter(([route]) => route === "client:/.well-known/obot/environment");
   const read = versions().length;
   assert.ok(read > 0, "the shown Cloud's version is read while it is awake");
   // The Clouds list says it sleeps (`power`, contract v1): any request reaching it would wake it.
@@ -929,7 +929,7 @@ test("another Cloud of the person's own that the Admin says is asleep is never a
   w.state = { ...w.state, clouds: [{ ...CLIENT_A, power: { state: "awake", since: 6, sleeps: true } }] };
   await w.tick();
   assert.equal(versions().length, read + 1, "awake again, it is asked");
-  assert.deepEqual(versions().at(-1), ["client:/.well-known/openmausbot/environment", "1"], "as a background read");
+  assert.deepEqual(versions().at(-1), ["client:/.well-known/obot/environment", "1"], "as a background read");
 });
 
 test("another Cloud the Admin says is no longer theirs is dropped at once and My Cloud opens, with no line; one being set up shows its setup with its name", async () => {

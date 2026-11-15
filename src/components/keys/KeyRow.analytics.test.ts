@@ -69,7 +69,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("the ModelGo row", () => {
-  const URL_EXACT = "https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=app&campaign_id=openmausbot&ad_group_id=app";
+  const URL_EXACT = "https://modelgo.ai/?utm_source=obot&utm_medium=sponsorship&utm_content=app&campaign_id=obot&ad_group_id=app";
   const offers = () => fixture.track.mock.calls.filter(([name]) => name === "modelgo_offer").map(([, props]) => props);
   const link = (props: Parameters<typeof KeyRow>[0]) => render(props).find((node) => node.type === "a")! as ReactElement<Props & { href?: string }>;
 

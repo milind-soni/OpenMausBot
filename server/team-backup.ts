@@ -80,7 +80,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       })),
     }));
   };
-  // A bot none of whose conversations the exporter may read (another member's own MausBot) is not theirs to export.
+  // A bot none of whose conversations the exporter may read (another member's own Obot) is not theirs to export.
   const histories = new Map(store.bots.map((bot) => [bot.id, history(bot)]));
   const exported = store.bots.filter((bot) => histories.get(bot.id)!.length > 0);
   const botIds = new Set(exported.map((bot) => bot.id));

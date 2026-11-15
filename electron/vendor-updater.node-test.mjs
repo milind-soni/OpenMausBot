@@ -108,8 +108,8 @@ test("the shipped installer replaces the AppImage and queues its original path f
   t.after(() => { lease.release(); rmSync(workspace, { recursive: true, force: true }); });
 
   // The user launches a versioned filename — the case upstream renames.
-  const launched = join(workspace, "OpenMausBot-0.1.43-x86_64.AppImage");
-  const staged = join(workspace, "pending", "OpenMausBot-0.1.44-x86_64.AppImage");
+  const launched = join(workspace, "Obot-0.1.43-x86_64.AppImage");
+  const staged = join(workspace, "pending", "Obot-0.1.44-x86_64.AppImage");
   mkdirSync(join(workspace, "pending"));
   writeFileSync(launched, "old", { mode: 0o755 });
   writeFileSync(staged, "new", { mode: 0o755 });
@@ -136,7 +136,7 @@ test("the shipped installer replaces the AppImage and queues its original path f
 
   assert.equal(readFileSync(launched, "utf8"), "new", "the update must land on the launched path");
   assert.equal(existsSync(staged), false, "the staged download must be consumed");
-  assert.deepEqual(readdirSync(workspace).sort(), ["OpenMausBot-0.1.43-x86_64.AppImage", "data", "pending"]);
+  assert.deepEqual(readdirSync(workspace).sort(), ["Obot-0.1.43-x86_64.AppImage", "data", "pending"]);
   assert.deepEqual(relaunched, { execPath: launched, args: [] });
   assert.deepEqual(relaunchEnvironment, { appImage: launched, silent: "true" });
   assert.equal(process.env.APPIMAGE_SILENT_INSTALL, previousSilent, "the old process keeps its environment");
@@ -152,7 +152,7 @@ test("a rejected AppImage relaunch is reported without quitting the desktop", (t
   const { AppImageUpdater, BaseUpdater } = createRequire(import.meta.url)("./vendor/electron-updater.cjs");
   const workspace = mkdtempSync(join(tmpdir(), "omb-appimage-relaunch-failed-"));
   t.after(() => rmSync(workspace, { recursive: true, force: true }));
-  const launched = join(workspace, "OpenMausBot.AppImage");
+  const launched = join(workspace, "Obot.AppImage");
   const staged = join(workspace, "pending.AppImage");
   writeFileSync(launched, "old");
   writeFileSync(staged, "new");
@@ -196,7 +196,7 @@ test("the running AppImage is never removed before its replacement is in place",
   const workspace = mkdtempSync(join(tmpdir(), "omb-appimage-failed-"));
   t.after(() => rmSync(workspace, { recursive: true, force: true }));
 
-  const launched = join(workspace, "OpenMausBot-0.1.43-x86_64.AppImage");
+  const launched = join(workspace, "Obot-0.1.43-x86_64.AppImage");
   writeFileSync(launched, "the app the user has", { mode: 0o755 });
 
   const previous = process.env.APPIMAGE;
@@ -243,8 +243,8 @@ test("Electron relaunch waits for deferred cleanup and the replacement acquires 
 }, async (t) => {
   const workspace = mkdtempSync(join(tmpdir(), "omb-appimage-relaunch-"));
   t.after(() => rmSync(workspace, { recursive: true, force: true }));
-  const launched = join(workspace, "OpenMausBot-1.0.0.AppImage");
-  const staged = join(workspace, "OpenMausBot-2.0.0.AppImage");
+  const launched = join(workspace, "Obot-1.0.0.AppImage");
+  const staged = join(workspace, "Obot-2.0.0.AppImage");
   const receipt = join(workspace, "restarted.json");
   const fixture = join(workspace, "main.cjs");
   mkdirSync(join(workspace, "user-data"));

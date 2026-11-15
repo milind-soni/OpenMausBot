@@ -1,4 +1,4 @@
-# Optional desktop organization connection
+﻿# Optional desktop organization connection
 
 Run the actual renderer and production desktop preload/client in a disposable
 Electron window:
@@ -68,7 +68,7 @@ and preservation of personal controls have focused renderer regressions.
 
 Use **Server → Sign in with your organization…** in the installed desktop app, or
 **Use desktop app → Open desktop app** in Admin. The fixed
-`openmausbot://organization` link opens local settings only; it carries no
+`obot://organization` link opens local settings only; it carries no
 credentials and does not approve enrollment. Remote pages do not gain access
 to the organization bridge. Existing hosted server selections are not reset
 on an ordinary update.
@@ -240,3 +240,4 @@ Tested, not production qualification:
 - `scripts/verify-organization-settings.mjs` and
   `scripts/verify-server-connection.mjs` now look for the new labels. They were
   not run locally, because they launch the real Electron app.
+

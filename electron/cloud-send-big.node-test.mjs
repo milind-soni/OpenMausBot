@@ -58,7 +58,7 @@ function slowCloud({ manifest }, { down = () => false } = {}) {
     return 0;
   };
   const answer = (method, route, body) => {
-    if (route === "/.well-known/openmausbot/environment") return reply(200, { capabilities: { cloudHome: true, move: 1 } });
+    if (route === "/.well-known/obot/environment") return reply(200, { capabilities: { cloudHome: true, move: 1 } });
     if (route.startsWith("/api/cloud-send/manifest")) {
       const query = new URLSearchParams(route.split("?")[1] ?? "");
       const { attachments: _a, files: _f, ...rest } = manifest;
@@ -241,7 +241,7 @@ function wholeMove() {
     return 0;
   };
   const answer = (method, route, body) => {
-    if (route === "/.well-known/openmausbot/environment") return reply(200, { capabilities: { cloudHome: true, move: 1 } });
+    if (route === "/.well-known/obot/environment") return reply(200, { capabilities: { cloudHome: true, move: 1 } });
     if (route === "/api/cloud-send?move=1") return reply(200, { v: 1, appVersion: "0.1.151", items: [...items.values()], chats: 1 });
     const item = /^\/api\/cloud-send\?item=([^&]+)/u.exec(route);
     if (item) return reply(200, { v: 1, appVersion: "0.1.151", items: [...items.values()].filter((entry) => entry.key === decodeURIComponent(item[1])), chats: 1 });
@@ -323,7 +323,7 @@ test("a gateway error on My Cloud's own description is waited out, never read as
   const cloud = slowCloud(workspace);
   const call = cloud.session.call;
   let bad = 2;
-  cloud.session.call = async (method, route, body, options) => (route === "/.well-known/openmausbot/environment" && bad-- > 0 ? reply(503, {}) : call(method, route, body, options));
+  cloud.session.call = async (method, route, body, options) => (route === "/.well-known/obot/environment" && bad-- > 0 ? reply(503, {}) : call(method, route, body, options));
   assert.equal((await mover(workspace, cloud).send.check()).ok, true);
   assert.equal(bad, -1);
 });

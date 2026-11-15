@@ -1,4 +1,4 @@
-// A bot's Live Activity on iPhone (APNs `liveactivity`) and its ongoing "working" notification on Android (an FCM data
+﻿// A bot's Live Activity on iPhone (APNs `liveactivity`) and its ongoing "working" notification on Android (an FCM data
 // message), started, updated and ended by push while the phone app is closed. Names, kind and a headline only: never
 // message text, never an answer link.
 import { z } from "zod";
@@ -19,7 +19,7 @@ const ID = /^[\w-]{1,120}$/;
 const HEX = /^#[0-9A-Fa-f]{6}$/;
 const BODY = /^[a-z][a-z0-9-]{0,39}$/;
 /** A chat link in any of the app's schemes. */
-const LINK = /^openmausbot(?:-dev|-next)?:\/\/chat\/[A-Za-z0-9%_.-]{1,360}$/;
+const LINK = /^obot(?:-dev|-next)?:\/\/chat\/[A-Za-z0-9%_.-]{1,360}$/;
 
 function oneLine(max: number) {
   return z.string().min(1).max(max * 4).refine((value) => {
@@ -120,3 +120,4 @@ export async function sendActivityPush(request: Request, env: Env, pushFetch: ty
     return { kind: "apns", config: config.apns, pushType: "liveactivity", priority, expiresInSeconds: ACTIVITY_EXPIRATION_SECONDS, payload: liveActivityPayload(body, now) };
   });
 }
+

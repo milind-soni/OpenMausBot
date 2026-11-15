@@ -54,7 +54,7 @@ export function usageCardView(input: { usage: CloudUsage | null | undefined; tea
   return input.dismissed === dismissKey ? null : { meters, band, dismissKey };
 }
 
-const DISMISS_KEY = "openmausbot.usageCard.dismissed.v1";
+const DISMISS_KEY = "obot.usageCard.dismissed.v1";
 export function readUsageCardDismissed(): string | null {
   try { return globalThis.localStorage?.getItem(DISMISS_KEY) ?? null; } catch { return null; }
 }

@@ -1,10 +1,10 @@
-# Approval levels
+﻿# Approval levels
 
 Approval levels belong to a bot and apply to its next provider turn, including
 when that provider resumes an existing native thread. You can also change one
 while the bot is working (see below). Each level is one of the
 provider's own permission modes, passed through. A native tool request that
-reaches you is one the provider left for you. OpenMausBot only answers from an
+reaches you is one the provider left for you. Obot only answers from an
 explicit grant: Full Access, a saved exact command or MCP read-shaped tool,
 the narrow built-in web-search allowance under Approve for me, or a bot reading
 its own files. In Full Access, OMB also applies its own configuration tools
@@ -36,7 +36,7 @@ from the operator's dedicated policy.
 | **Auto-accept edits** | Approves file edits automatically; other actions can still require approval. Offered where the provider has such a mode (Claude, Grok, Antigravity). |
 | **Approve for me** | Uses the provider's automatic review on Codex, Claude, Cursor, and Grok to approve routine actions and ask about others. Providers without an equivalent fall back to asking. |
 | **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Residual native permission prompts are answered for you. OMB profile changes, routine actions, team setup, bot deletion, and enabled skill authoring apply without a second approval. Peer-review prompts are skipped within the bot's authorized scope. Sends through connected apps (email, messages, posts, payments) follow the bot's Sending on your behalf setting: Ask every time requires consent, and Send without asking, or no setting at all, sends with no daily limit. Apps outside the bot's connected-app scope are still refused. Work handed on with `coordinate_bots` uses the receiving bot's setting, never the sender's — except from a Chief of Staff, whose level flows down (below). Actual questions and missing credentials still need your input. |
-| **Custom (`config.toml`)** | Codex only. OpenMausBot reads and reapplies the effective approval and sandbox settings from your Codex configuration. |
+| **Custom (`config.toml`)** | Codex only. Obot reads and reapplies the effective approval and sandbox settings from your Codex configuration. |
 
 Full access applies the moment you pick it: no confirmation dialog, no second
 step. It can be turned on from any client that can reach the app's API: the
@@ -108,7 +108,7 @@ set a level on follows the default, and so does each of its threads without a
 level of its own. Bots and threads that saved Ask before Full access became
 the default keep it: choose Full access in the bot's settings, or **Set for
 all bots in this team…**, to move a bot and every one of its threads at once.
-OpenMausBot adds no review card of its own at any level: a bot's profile,
+Obot adds no review card of its own at any level: a bot's profile,
 working folder, model, skill, team setup and team memory changes apply at
 once and leave a one-line receipt with Undo, so the bot continues in the same
 turn. Routine requests keep their own rule until Triggers v2 replaces them,
@@ -123,7 +123,7 @@ when such a turn asked.
 ### Approvals relayed by another bot, a webhook or an outside page
 
 An approval only counts when the person gives it to the bot that acts. Every
-line a bot reads opens with a note OpenMausBot writes, `[From <who> · <what> ·
+line a bot reads opens with a note Obot writes, `[From <who> · <what> ·
 <authority>]` (`server/provenance-label.ts`, see
 [team-cloud.md](team-cloud.md)). A person's own typed or spoken line, or their
 answer on that bot's own card, is *their own request*. A line from another bot,
@@ -135,7 +135,7 @@ another bot or a webhook does not authorize anything, and the bot asks or stops
 instead. This is on purpose. Anyone who can make a bot read text, such as a web
 page, an email or a webhook call, could otherwise write "the owner approved
 this" and borrow your authority; a note written inside a message is escaped
-(`escapeNotes`, `server/peer-provenance.ts`), so only OpenMausBot opens one.
+(`escapeNotes`, `server/peer-provenance.ts`), so only Obot opens one.
 
 The supported ways to have a bot act on your approval:
 
@@ -216,7 +216,7 @@ conversations, including newly delegated work. Saved entries are visible and
 revocable in the bot's Access settings.
 
 The harness's own agents tools (coordinating teammates, threads, memory) never
-ask on Claude, Codex or API models: OpenMausBot authorizes each of those
+ask on Claude, Codex or API models: Obot authorizes each of those
 routes itself.
 
 Auto-accept edits and Ask card whatever the provider asks about. Approve for
@@ -315,12 +315,12 @@ multi-question card renders its structured form on current apps instead.
 These settings apply on each turn, including resumed conversations. Switching
 to a different provider while on Custom requires leaving Custom first;
 choose Ask. Switching models within Antigravity keeps the selected level.
-Native modes require a CLI version that supports them; OpenMausBot does not
+Native modes require a CLI version that supports them; Obot does not
 silently substitute unrestricted access when a mode is rejected.
 
 ### Read-only integration tools
 
-OpenMausBot's built-in agents MCP server describes its scoped reads with
+Obot's built-in agents MCP server describes its scoped reads with
 explicit read-only, non-destructive, idempotent, closed-world metadata:
 `list_bots`, `list_rooms`, `list_threads`, `assignment_status`,
 `session_search`, `trigger_info`, and `skills_list`.
@@ -336,7 +336,7 @@ The level set follows the provider-boundary approach in
 [T3 Code's permission modes](https://github.com/pingdotgg/t3code/blob/e16b8b059c9f5ff6dfed1addecffb831c6aee043/docs/user/permission-modes.md):
 Supervised, Auto-accept edits, Auto, and Full access, each a provider mode
 rather than an app rule, with a remembered approval that belongs to the
-provider's session. Its default is Full access, and so is OpenMausBot's
+provider's session. Its default is Full access, and so is Obot's
 (`DEFAULT_APPROVAL_MODE` in `shared/approval-mode.ts`).
 
 ## Verification for contributors
@@ -358,3 +358,4 @@ the quality of a provider's automatic reviewer. No live user data is used.
 Grok coverage exercises two model selections across fresh/resumed Auto turns,
 real built-in MCP reads under a scripted native reviewer, returning to Ask,
 and held deletion, credential, spoofed-title command, and question requests.
+

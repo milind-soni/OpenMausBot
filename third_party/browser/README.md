@@ -11,12 +11,12 @@ The desktop application ships two separate components:
   is no root-level NOTICE in that tag. All six official macOS/Linux binaries
   were downloaded and their SHA-256 digests checked against GitHub's release
   metadata on 2026-09-08.
-- **Windows exception: agent-browser 0.36.0-omb.1** is an OpenMausBot vendor
+- **Windows exception: agent-browser 0.36.0-omb.1** is an Obot vendor
   build, not an official or unmodified Vercel executable. It starts from exact
   v0.36.0 commit `eb05921bad874cd2a1b4fa5d1149f1ed26576cae` and carries
   the Windows handle-inheritance fix contributed by `holny` in upstream
   [PR1781](https://github.com/vercel-labs/agent-browser/pull/1781), commit
-  `81a98c349d04195396ffae6898bd375ad64280de`, plus OpenMausBot's Windows-only
+  `81a98c349d04195396ffae6898bd375ad64280de`, plus Obot's Windows-only
   `CREATE_NO_WINDOW` flag for Chrome children and a native console regression test
   in candidate revision `0.36.0-omb.2`. The release resolver retains `0.36.0-omb.1`
   until the candidate passes native checks and its published digest is reviewed.
@@ -59,13 +59,13 @@ or incomplete staged resources fail the pre-signing package check.
 Archives and extracted binaries are generated build output, not git content.
 Set `OMB_BROWSER_ARCHIVE_DIR` to a directory of reviewed vendor assets for an
 offline build; cached bytes are still verified. Browser dependencies are
-updated through reviewed OpenMausBot releases, not a silent browser updater.
+updated through reviewed Obot releases, not a silent browser updater.
 
-On macOS, release signing applies OpenMausBot's Developer ID to native
+On macOS, release signing applies Obot's Developer ID to native
 executables and libraries after validating the upstream bytes. The original
 notices remain intact. Packaged browser profiles, cookies and downloads are
 never included here; those belong in the user's isolated bot data directory.
 
 Google, Chromium and Vercel are their owners' names; their inclusion does not
-imply endorsement of OpenMausBot. This provenance record is not legal advice
+imply endorsement of Obot. This provenance record is not legal advice
 or a replacement for the included upstream licenses.

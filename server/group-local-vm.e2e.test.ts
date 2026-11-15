@@ -824,7 +824,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
 
   it.skipIf(process.platform === "linux")("carries the recorded macOS permission failure into the failed turn", async () => {
     const { bots, group } = await room();
-    const reason = "embedded host failed: Screen Recording required; grant access in System Settings and restart OpenMausBot";
+    const reason = "embedded host failed: Screen Recording required; grant access in System Settings and restart Obot";
     mkdirSync(dirname(cuaDescriptor), { recursive: true });
     writeFileSync(cuaDescriptor, JSON.stringify({ mode: "unavailable", reason }), { mode: 0o600 });
     await appHandsItOver();
@@ -833,7 +833,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
       await send(group.id);
       const state = await until(() => api("GET", "/api/bots?messages=30"),
         value => JSON.stringify(value).includes(reason));
-      if (process.platform === "darwin") expect(JSON.stringify(state)).toContain("Relaunch OpenMausBot after granting the missing macOS permission");
+      if (process.platform === "darwin") expect(JSON.stringify(state)).toContain("Relaunch Obot after granting the missing macOS permission");
       await idle(bots[0].id);
       expect(existsSync(dumpFile)).toBe(false);
     } finally {

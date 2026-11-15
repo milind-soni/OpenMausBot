@@ -3,7 +3,7 @@ import { productName } from "@/lib/brand";
 import { t } from "@/lib/i18n";
 import { SettingsDialog } from "./SettingsDialog";
 
-/** "Sign out of MausBot?": the one confirm for every Sign out (the outer menu, Account, a browser's sign-out). It says
+/** "Sign out of Obot?": the one confirm for every Sign out (the outer menu, Account, a browser's sign-out). It says
  * what keeps running, so a slip off Help never signs anyone out by itself. */
 export function SignOutConfirm({ here, cloud, browser = false, onConfirm, onClose }: {
   /** the place this computer is called by on the rail */

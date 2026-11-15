@@ -159,7 +159,7 @@ describe("Boat create idempotency", () => {
     scenario = "lost-response";
     vi.resetModules();
     const { provisionBoat } = await import("./boat.ts");
-    // Keys this OpenMausBot holds stay here; the Boat gets none of them.
+    // Keys this Obot holds stay here; the Boat gets none of them.
     const held = { OPENAI_API_KEY: process.env.OPENAI_API_KEY, CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN };
     process.env.OPENAI_API_KEY = "sk-openai-held-here";
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "claude-oauth-held-here";
@@ -513,7 +513,7 @@ describe("Boat create idempotency", () => {
         elapsed?: number;
       };
       await expectCleanWorkerExit(worker, "vanishing-lock worker");
-      expect(result.error).toMatch(/locked by another OpenMausBot process/i);
+      expect(result.error).toMatch(/locked by another Obot process/i);
       expect(result.elapsed).toBeGreaterThanOrEqual(1_500);
       expect(result.elapsed).toBeLessThan(5_000);
     } finally {
@@ -576,7 +576,7 @@ describe("Boat create idempotency", () => {
         elapsed?: number;
       };
       await expectCleanWorkerExit(worker, "replaced-lock worker");
-      expect(result.error).toMatch(/locked by another OpenMausBot process/i);
+      expect(result.error).toMatch(/locked by another Obot process/i);
       expect(result.elapsed).toBeGreaterThanOrEqual(1_500);
       expect(result.elapsed).toBeLessThan(5_000);
     } finally {
@@ -633,8 +633,8 @@ describe("Boat create idempotency", () => {
         expectCleanWorkerExit(second, "second live-reaper contender"),
       ]);
 
-      expect(firstResult.error).toMatch(/locked by another OpenMausBot process/i);
-      expect(secondResult.error).toMatch(/locked by another OpenMausBot process/i);
+      expect(firstResult.error).toMatch(/locked by another Obot process/i);
+      expect(secondResult.error).toMatch(/locked by another Obot process/i);
       expect(readFileSync(lockPath, "utf8")).toBe(lockContents);
       expect(readFileSync(`${lockPath}.reap-${lockToken}`, "utf8")).toBe(reaperContents);
       expect(() => readFileSync(join(dataDir, "box-create-requests.json"), "utf8")).toThrow();

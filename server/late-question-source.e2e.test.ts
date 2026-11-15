@@ -14,7 +14,7 @@ it("does not retarget a deleted room asker's late answer to the current speaker"
     });
     return { status: response.status, body: await response.json() };
   };
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: fixture.info.url } }) as Promise<any>;
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OBOT_URL: fixture.info.url } }) as Promise<any>;
   let socket: Socket | undefined;
   console.log(`late-question source fixture: ${fixture.info.logPath}`);
   try {

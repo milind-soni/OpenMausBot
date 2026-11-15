@@ -9,11 +9,11 @@ import en from "./en.json";
 import { locales } from "./index";
 
 const RETIRED: ReadonlyArray<readonly [string, RegExp, string]> = [
-  ["OMB Cloud", /OMB Cloud/i, "MausBot Cloud"],
-  ["OpenMausBot Cloud", /OpenMausBot Cloud/i, "MausBot Cloud"],
-  ["MausBot Pro", /MausBot Pro\b/, "MausBot Cloud"],
+  ["OMB Cloud", /OMB Cloud/i, "Obot Cloud"],
+  ["Obot Cloud", /Obot Cloud/i, "Obot Cloud"],
+  ["Obot Pro", /Obot Pro\b/, "Obot Cloud"],
   // \b before "_" fails, so environment names such as OMB_PUBLIC_IPV4 pass.
-  ["OMB", /\bOMB\b/, "MausBot"],
+  ["OMB", /\bOMB\b/, "Obot"],
   ["Cloud box", /Cloud box/i, "cloud desktop"],
   ["Hosted desktop", /Hosted desktop/i, "cloud desktop"],
   ["Cloud VM", /Cloud VM/i, "cloud desktop"],
@@ -58,7 +58,7 @@ const isSource = (name: string) => /\.(?:ts|tsx|mjs|cjs|js)$/.test(name) && !/\.
 const ALLOWED: ReadonlyArray<{ file: string; snippet?: string; why: string }> = [
   { file: "packages/phone-protocol/src/credential-request.ts", snippet: "when Boat is selected", why: "the card that asks for a person's own Boat key" },
   { file: "server/boat-create-idempotency.ts", snippet: "unnamed Boat", why: "own-key repair: boat.dev's own name for a machine" },
-  { file: "src/lib/boat-offer.ts", snippet: "MausBot introduced me", why: "the email a person sends Boat to claim its credit" },
+  { file: "src/lib/boat-offer.ts", snippet: "Obot introduced me", why: "the email a person sends Boat to claim its credit" },
   { file: "server/workspace-backup.ts", snippet: "OMB-WORKSPACE-1", why: "a backup file's format marker" },
   { file: "electron/company-backups.mjs", snippet: "OMB-WORKSPACE-1", why: "a backup file's format marker" },
 ];
@@ -104,7 +104,7 @@ const allows = (entry: (typeof ALLOWED)[number], finding: { file: string; text: 
   entry.file === finding.file && (entry.snippet === undefined || finding.text.includes(entry.snippet));
 
 describe("one name per thing", () => {
-  it("English copy uses MausBot Cloud, the Cloud, Cloud desktop, This computer and Plan page", () => {
+  it("English copy uses Obot Cloud, the Cloud, Cloud desktop, This computer and Plan page", () => {
     const offending = Object.entries(en as Record<string, string>)
       .filter(([key]) => !PENDING_KEY_PREFIXES.some((prefix) => key.startsWith(prefix)) && !Object.hasOwn(EN_ALLOWED, key))
       // English keys are UI copy, so lower-case "boat" counts too.
@@ -112,13 +112,13 @@ describe("one name per thing", () => {
     expect(offending).toEqual([]);
   });
 
-  const productNames = RETIRED.filter(([, , use]) => use === "MausBot Cloud");
-  it("translations never show OMB, T3 or an old name for MausBot Cloud, keep its name as it is, and say Boat only where the English does", () => {
+  const productNames = RETIRED.filter(([, , use]) => use === "Obot Cloud");
+  it("translations never show OMB, T3 or an old name for Obot Cloud, keep its name as it is, and say Boat only where the English does", () => {
     const offending = Object.entries(locales).filter(([code]) => code !== "en").flatMap(([code, pack]) =>
       Object.entries(pack)
         .filter(([key]) => !PENDING_KEY_PREFIXES.some((prefix) => key.startsWith(prefix)))
         .filter(([key, value]) => /\bOMB\b|\bT3\b/.test(value!) || productNames.some(([, pattern]) => pattern.test(value!))
-          || (/MausBot Cloud/.test((en as Record<string, string>)[key]!) && !/MausBot Cloud/.test(value!))
+          || (/Obot Cloud/.test((en as Record<string, string>)[key]!) && !/Obot Cloud/.test(value!))
           || (/boat/i.test(value!) && !/\bboats?\b/i.test((en as Record<string, string>)[key]!)))
         .map(([key]) => `${code}: ${key}`));
     expect([...new Set(offending)]).toEqual([]);
@@ -137,8 +137,8 @@ describe("one name per thing", () => {
     expect(staleKeys).toEqual([]);
   });
 
-  it("the public docs name MausBot Cloud and the Cloud as the app does", () => {
-    const names = new Set(["OMB Cloud", "OpenMausBot Cloud", "MausBot Pro", "Connect to my Cloud", "your Cloud", "my Cloud"]);
+  it("the public docs name Obot Cloud and the Cloud as the app does", () => {
+    const names = new Set(["OMB Cloud", "Obot Cloud", "Obot Pro", "Connect to my Cloud", "your Cloud", "my Cloud"]);
     const cloudNames = RETIRED.filter(([word]) => names.has(word));
     const pages = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
       const path = join(dir, name);
@@ -185,14 +185,14 @@ describe("one name per thing", () => {
 
   it("the check catches each retired word, and lets own-key Boat and env names through", () => {
     for (const bad of [
-      "Sign in to OMB Cloud", "Sign in to OpenMausBot Cloud", "Get OpenMausBot Pro", "MausBot Pro plans",
+      "Sign in to OMB Cloud", "Sign in to Obot Cloud", "Get Obot Pro", "Obot Pro plans",
       "restart OMB", "Cloud box", "Hosted desktop", "Run it in its cloud VM", "Boat cloud runner",
       "Open your Cloud dashboard", "Connect to my Cloud", "Your Cloud is ready", "Let my Cloud use this Mac",
       "Local (this computer)", "Choose Cloud to wake", "Auto, Cloud or Browser", "including one from T3",
       "Auto uses this Boat", "New Boat computer",
     ]) expect(retiredIn(bad), bad).not.toEqual([]);
     for (const good of [
-      "Sign in to MausBot Cloud", "Pro active · verified by MausBot Cloud", "Restart OpenMausBot", "locked by another OpenMausBot process",
+      "Sign in to Obot Cloud", "Pro active · verified by Obot Cloud", "Restart Obot", "locked by another Obot process",
       "set OMB_PUBLIC_IPV4", "Open My Cloud", "Open the Cloud", "Choose Cloud desktop to wake", "Auto, Cloud desktop or Browser",
       "Included with your Cloud plan", "Add a Boat API key in Settings → API keys", "Connect Boat", "Check boat.dev",
       "Bots here can get their own cloud desktops from Boat, a paid service", "Cloud desktops by Boat",

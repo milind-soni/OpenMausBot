@@ -54,11 +54,11 @@ app.whenReady().then(async () => {
   harness.stderr.on("data", (chunk) => { logs += chunk; });
   const api = async (path, method = "GET", body) => {
     const response = await fetch(`http://127.0.0.1:${port}${path}`, { method, signal: AbortSignal.timeout(5000),
-      headers: { "x-openmausbot-desktop-owner": owner, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      headers: { "x-obot-desktop-owner": owner, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     return { status: response.status, body: await response.json() };
   };
   await until(() => fetch(`http://127.0.0.1:${port}/api/health`).then((response) => response.ok).catch(() => false));
-  harness.postMessage({ type: "openmausbot:desktop-mutation-token", token: owner });
+  harness.postMessage({ type: "obot:desktop-mutation-token", token: owner });
   await until(() => api("/api/logins").then((answer) => answer.status === 200).catch(() => false));
   const saved = await api("/api/logins", "POST", { site: "https://accounts.example.test/login", username: "alice", password, totp: "JBSWY3DPEHPK3PXP" });
   assert.equal(saved.status, 201);

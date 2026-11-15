@@ -1,6 +1,6 @@
-# Codex browser routing
+﻿# Codex browser routing
 
-Codex bot processes use OpenMausBot's selected browser/desktop bridge. Process-local overrides disable the bundled desktop-only browser/computer plugins and, with `features.plugins=false`, the plugins the signed-in ChatGPT account installed (their skills and the `request_plugin_install` tool); they do not uninstall plugins, change the user's Codex configuration, or disable native web search.
+Codex bot processes use Obot's selected browser/desktop bridge. Process-local overrides disable the bundled desktop-only browser/computer plugins and, with `features.plugins=false`, the plugins the signed-in ChatGPT account installed (their skills and the `request_plugin_install` tool); they do not uninstall plugins, change the user's Codex configuration, or disable native web search.
 
 ## Regression checks
 
@@ -30,3 +30,4 @@ node --experimental-strip-types scripts/verify-codex-search-acceptance.ts
 The browser check gives goal-only prompts to open Google Calendar and read the public project page. It independently observes the active browser URL and saves screenshots. Calendar's public landing page or sign-in page proves navigation only, not authenticated calendar access. It approves only the fixture's navigation/observation tools; shell, login and unrelated requests remain blocked. The search check requires successful native search and openPage records, and the answer must cite the same official URL returned by that page fetch. Missing actions, other actions, failed fetches, and unrelated citations do not pass. Report-writing failures still run fixture cleanup.
 
 Inspect `acceptance.json` including failures and final responses. Website redirects, network errors and model variability remain possible; do not replace a failed run's evidence with a later success.
+

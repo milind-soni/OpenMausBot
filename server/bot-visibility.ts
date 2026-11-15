@@ -237,7 +237,7 @@ export class VisibleSet {
     return seen;
   }
 
-  /** Security invariant: on a Team Cloud a person's own MausBot exists for that person alone. No other member and no
+  /** Security invariant: on a Team Cloud a person's own Obot exists for that person alone. No other member and no
    * admin, the Owner included, sees it, whatever its stored sharing says; only a session-less local service does. */
   private someoneElsesOwn(bot: VisibilityBot): boolean {
     const person = this.audiences ? defaultBotPerson(bot) : "";
@@ -465,7 +465,7 @@ function shownConversations<T extends object>(bot: T, visible: VisibleSet): T {
   return namedSharedChat(out) as T;
 }
 
-/** A team bot's main chat goes by what it is, so nobody takes it for one of their own. A member's own MausBot has none. */
+/** A team bot's main chat goes by what it is, so nobody takes it for one of their own. A member's own Obot has none. */
 function namedSharedChat(bot: Record<string, unknown>): Record<string, unknown> {
   const main = bot.mainThreadId, tasks = bot.tasks;
   if (typeof main !== "string" || !Array.isArray(tasks) || (bot.defaultBot as { person?: unknown } | undefined)?.person) return bot;

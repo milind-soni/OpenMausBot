@@ -50,7 +50,7 @@ async function api(method: string, path: string, options: { body?: unknown; remo
 }
 
 async function ownerPairing(): Promise<string> {
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: "Obot app (Cloud)", ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const granted = await api("POST", "/api/cloud/pairing", { remote: true, headers: {
     "content-type": "application/json", "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce,
@@ -61,7 +61,7 @@ async function ownerPairing(): Promise<string> {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-lent-e2e-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".obot");
   mkdirSync(dataDir, { recursive: true });
   const cli = join(home, "fixture-claude.mjs");
   writeFileSync(cli, `#!/usr/bin/env node
@@ -78,7 +78,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     },
   }));
   mkdirSync(join(home, "web"));
-  writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>OpenMausBot</title>");
+  writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>Obot</title>");
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
   const offlinePrelude = `data:text/javascript,${encodeURIComponent('globalThis.fetch = async () => new Response("offline fixture", { status: 503 });')}`;
@@ -159,20 +159,20 @@ it("a lent folder keeps working while the Mac is away: read from the copy, chang
   });
   const files = createCloudFilesService({
     settingsFile: join(pc, "user", "files.json"), stateFile: join(pc, "user", "state.db"),
-    documentsDir: join(pc, "Documents"), localDataDir: join(pc, ".openmausbot"), homeDir: join(pc, "home"), platform: process.platform, hostname: hostname(),
+    documentsDir: join(pc, "Documents"), localDataDir: join(pc, ".obot"), homeDir: join(pc, "home"), platform: process.platform, hostname: hostname(),
     cloudOrigin: () => PC_ORIGIN, fetch: desktopFetch as typeof fetch, markDownloaded: async () => {}, watch: () => () => {}, now: () => Date.now() + 60_000,
     trashItem: async (file: string) => renameSync(file, join(trash, `${readdirSync(trash).length}-${file.split(/[\\/]/).at(-1)}`)),
     lending: lendingForFiles({ environment: () => env, sharing: () => connector, validate: validateSharedFolders }),
   });
   try {
-    // The person lends Notes with editing, as Settings → MausBot Cloud does.
+    // The person lends Notes with editing, as Settings → Obot Cloud does.
     await connector.saveCloud(env, { folders: [{ id: randomUUID(), path: notes, write: true }], screen: false, internet: false });
     await vi.waitFor(() => expect(connector.cloudState(env).connected).toBe(true), { timeout: 15_000 });
     // Files copies it by itself: nothing to choose.
     await files.pass();
     expect(files.state().shared, JSON.stringify(files.state())).toMatchObject([{ name: "Notes", lent: true, status: "synced" }]);
     // The copy is in the data folder, which no bot's box shows: only shared_computer, with lending's rules, reaches it.
-    const copy = join(home, ".openmausbot", "sync", "lent");
+    const copy = join(home, ".obot", "sync", "lent");
     const [computerDir] = readdirSync(copy);
     expect(readFileSync(join(copy, computerDir!, "Notes", "plan.md"), "utf8")).toBe("the plan");
     expect(existsSync(join(home, "Synced", computerDir!, "Notes"))).toBe(false);

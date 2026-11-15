@@ -25,7 +25,7 @@ function harness() {
   const io: HeadlessIo = { out: (text) => out.push(text), err: () => undefined, readStdin: async () => "" };
   const run = async (argv: string[]) => {
     out.length = 0;
-    const code = await runHeadless(argv, { env: { OPENMAUSBOT_URL: "http://127.0.0.1:19999" }, io, callTool: callTool as any, request: request as any });
+    const code = await runHeadless(argv, { env: { OBOT_URL: "http://127.0.0.1:19999" }, io, callTool: callTool as any, request: request as any });
     return { code, out: [...out] };
   };
   return { calls, run };

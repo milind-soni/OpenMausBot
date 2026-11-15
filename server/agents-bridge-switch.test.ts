@@ -243,7 +243,7 @@ describe("which engines a turn is bridged on", () => {
 
     it("is not bridged when a settings file's deny or ask rules match tools by pattern, whatever server they are about", () => {
       // The CLI matches a deny or ask rule's whole tool name as a glob, so
-      // such a rule can reach a MausBot tool by pattern even when it was
+      // such a rule can reach a Obot tool by pattern even when it was
       // written for another server; allow rules do not glob.
       expect(agentsToolBridgeRefusal(ON, bot, inFolder("settings.json", { permissions: { deny: ["mcp__github__*"] } }))).toBe(WILDCARD);
       expect(agentsToolBridgeRefusal(ON, bot, inFolder("settings.json", { permissions: { ask: ["*exec*"] } }))).toBe(WILDCARD);

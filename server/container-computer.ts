@@ -51,21 +51,21 @@ export const BASE_IMAGE_DIGEST = "sha256:274eb636f5cf3fc58f705916ee72b7a701270b3
 export const BASE_IMAGE = `${BASE_IMAGE_REPOSITORY}@${BASE_IMAGE_DIGEST}`;
 // localhost/ is explicit: Podman prepends it to unqualified build tags and may then resolve the name on Docker Hub.
 // Image and container labels, not this mutable tag, decide compatibility.
-export const IMAGE_REPOSITORY = "localhost/openmausbot/cua-local-vm";
+export const IMAGE_REPOSITORY = "localhost/obot/cua-local-vm";
 export const IMAGE_LAYER_VERSION = "9";
-export const IMAGE_LAYER_LABEL = "com.openmausbot.image-layer";
+export const IMAGE_LAYER_LABEL = "com.obot.image-layer";
 export const IMAGE = `${IMAGE_REPOSITORY}:driver-${CUA_DRIVER_VERSION}-v${IMAGE_LAYER_VERSION}`;
-export const CONTAINER = "openmausbot-computer";
-export const MANAGED_LABEL = "com.openmausbot.local-vm";
-export const DRIVER_LABEL = "com.openmausbot.cua-driver";
-export const BASE_IMAGE_LABEL = "com.openmausbot.cua-base";
-export const WORKSPACE_LABEL = "com.openmausbot.workspace";
-export const TARGET_LABEL = "com.openmausbot.local-vm-target";
+export const CONTAINER = "obot-computer";
+export const MANAGED_LABEL = "com.obot.local-vm";
+export const DRIVER_LABEL = "com.obot.cua-driver";
+export const BASE_IMAGE_LABEL = "com.obot.cua-base";
+export const WORKSPACE_LABEL = "com.obot.workspace";
+export const TARGET_LABEL = "com.obot.local-vm-target";
 export const VM_WORKSPACE_DIR = join(DATA_DIR, "vm-home");
 export const VM_WORKSPACE_GUEST = "/home/cua/workspace";
 export const DISPLAY = ":1";
-export const CUA_SOCKET = "/run/user/1000/openmausbot-cua.sock";
-export const CUA_EXECUTABLE = "/usr/local/libexec/openmausbot/cua-driver";
+export const CUA_SOCKET = "/run/user/1000/obot-cua.sock";
+export const CUA_EXECUTABLE = "/usr/local/libexec/obot/cua-driver";
 
 const RUNTIMES = ["docker", "podman", "container"] as const;
 export type Runtime = (typeof RUNTIMES)[number];
@@ -182,7 +182,7 @@ ${workspacePreparationDockerfile(VM_WORKSPACE_GUEST)}
 # A bot's own desktop: a 200 ms (not 800) watch for windows an action opens still sees Firefox popups; no cursor glide; plain logs; Chrome's own sandbox off, since it needs namespaces this hardened container (capabilities dropped, runtime seccomp) refuses and Chrome exits with code 21; the container is the isolation boundary here. --grant existing-profile lets the bot attach the browser tools to Chromium it opened on this desktop; without it every attach is refused with browser_consent_required.
 RUN printf '%s\\n' \\
       '#!/bin/sh' \\
-      '/usr/local/bin/prepare-openmausbot-workspace.sh' \\
+      '/usr/local/bin/prepare-obot-workspace.sh' \\
       'attempt=0' \\
       'until DISPLAY=:1 xset q >/dev/null 2>&1; do' \\
       '  attempt=$((attempt + 1))' \\
@@ -190,12 +190,12 @@ RUN printf '%s\\n' \\
       '  sleep 1' \\
       'done' \\
       'exec env CUA_DRIVER_BROWSER_NO_SANDBOX=1 CUA_DRIVER_INSTALL_CHANNEL=python_package CUA_DRIVER_RS_TELEMETRY_ENABLED=0 CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS=200 NO_COLOR=1 ${CUA_EXECUTABLE} serve --socket ${CUA_SOCKET} --permission-mode standard --grant existing-profile --cursor-reduced-motion on' \\
-      > /usr/local/bin/start-openmausbot-cua-driver.sh \\
-    && chmod 0755 /usr/local/bin/start-openmausbot-cua-driver.sh
+      > /usr/local/bin/start-obot-cua-driver.sh \\
+    && chmod 0755 /usr/local/bin/start-obot-cua-driver.sh
 RUN printf '%s\\n' \\
       '' \\
-      '[program:openmausbot-cua-driver]' \\
-      'command=/usr/local/bin/start-openmausbot-cua-driver.sh' \\
+      '[program:obot-cua-driver]' \\
+      'command=/usr/local/bin/start-obot-cua-driver.sh' \\
       'user=cua' \\
       'environment=HOME="/home/cua",USER="cua",DISPLAY=":1"' \\
       'autorestart=true' \\
@@ -391,7 +391,7 @@ function statusProblem(status: ContainerComputerStatus): string | null {
 
 function existingContainerProblem(status: ContainerComputerStatus): string | null {
   if (!status.imageMatches) return "The existing Local VM uses an older desktop or Cua Driver; recreate it";
-  if (!status.managed) return "The existing container was not created by OpenMausBot; recreate it";
+  if (!status.managed) return "The existing container was not created by Obot; recreate it";
   if (status.network === "unsafe") return "The existing Local VM exposes its viewer publicly; recreate it";
   if (status.security === "unsafe") return "The existing Local VM is missing safety limits; recreate it";
   if (status.persistence === "unsafe") return "The existing Local VM is missing its durable folder; recreate it";
@@ -629,7 +629,7 @@ export async function containerComputerStatus(
       ) {
         throw new Error(`Cua health report is ${report.overall ?? "invalid"}`);
       }
-      const readinessShot = "/tmp/openmausbot-readiness.png";
+      const readinessShot = "/tmp/obot-readiness.png";
       await runner(
         status.runtime,
         cuaExecArgs([
@@ -858,7 +858,7 @@ function baseImagePullArgs(runtime: Runtime): string[] {
 
 async function prepareManagedImage(runtime: Runtime, runner: CommandRunner): Promise<void> {
   await runner(runtime, baseImagePullArgs(runtime), 10 * 60_000);
-  const context = await mkdtemp(join(tmpdir(), "openmausbot-cua-image-"));
+  const context = await mkdtemp(join(tmpdir(), "obot-cua-image-"));
   try {
     await writeFile(join(context, "Dockerfile"), managedImageDockerfile(), { mode: 0o600 });
     await runner(runtime, ["build", ...(runtime === "container" ? [] : ["--force-rm"]), "-t", IMAGE, context], 10 * 60_000); // the legacy builder keeps a failed step's container without --force-rm
@@ -899,7 +899,7 @@ export async function containerComputerAction(
   if (action === "remove" && !before.managed) {
     throw Object.assign(
       new Error(
-        `The existing container named ${target.containerName} was not created by OpenMausBot; remove it manually in ${runtime}`,
+        `The existing container named ${target.containerName} was not created by Obot; remove it manually in ${runtime}`,
       ),
       { status: 409 },
     );
@@ -977,7 +977,7 @@ export async function containerComputerFrame(
   }
   if (cacheable) screenshotStatusCache.set(target.key, { status, expiresAt: now + SCREENSHOT_STATUS_TTL_MS });
   try {
-    const screenshot = "/tmp/openmausbot-preview.png";
+    const screenshot = "/tmp/obot-preview.png";
     await runner(
       status.runtime,
       cuaExecArgs([

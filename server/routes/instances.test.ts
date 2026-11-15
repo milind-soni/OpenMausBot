@@ -125,9 +125,9 @@ describe("whether the server can start a bot", () => {
         { instanceId: "broken" },
       ],
     });
-    expect(await call("GET", "/api/health/engines")).toEqual({ app: "openmausbot", engines: 2 });
+    expect(await call("GET", "/api/health/engines")).toEqual({ app: "obot", engines: 2 });
     const none = await serve({ describeInstances: async () => [{ instanceId: "codex", snapshot: { state: "unavailable" } }] });
-    expect(await none.call("GET", "/api/health/engines")).toEqual({ app: "openmausbot", engines: 0 });
+    expect(await none.call("GET", "/api/health/engines")).toEqual({ app: "obot", engines: 0 });
   });
 });
 

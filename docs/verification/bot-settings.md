@@ -1,4 +1,4 @@
-# Bot settings
+﻿# Bot settings
 
 Launch the isolated renderer fixture directly:
 
@@ -156,7 +156,7 @@ tabbed panel instead, and that one is driven through
 
 ```sh
 node --experimental-strip-types scripts/control-omb.ts ui launch
-H=/tmp/openmausbot-verify-data-XXXXXX/ui.json
+H=/tmp/obot-verify-data-XXXXXX/ui.json
 # The preview reads as an existing install, so it starts in Advanced mode.
 pnpm control:omb ui eval --ui $H --js "localStorage.setItem('omb-advanced-mode','0'); location.reload(); 'simple'"
 pnpm control:omb ui click --ui $H --name "Open Pepper's profile"
@@ -221,3 +221,4 @@ Undo then succeeded and recorded the exact prior text, proving the current
 history revision was retained too. A fake key-shaped prior version showed
 the unavailable-restore explanation without an Undo button; safe rows kept
 their buttons. The dedicated tab and fixture were closed afterward.
+

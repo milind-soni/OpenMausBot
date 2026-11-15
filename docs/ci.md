@@ -385,7 +385,7 @@ instead (Settings → Secrets and variables → Actions → Variables; anything 
   this repository, when the repository owner authored the PR and both pushed
   and started the run (`github.actor`, `github.triggering_actor`). Boat runs a
   public repository's job only for the users on its allow-list
-  (`boat ci public milind-soni on --users "milind-soni"`) and fails any
+  (`boat ci public alnatourm on --users "alnatourm"`) and fails any
   other job at once (a teammate's PR got nine failed Boat jobs that way), so
   every other run stays on GitHub: forks, teammates, bots, re-runs by anyone
   else, the nightly run and manual runs (the release lane needs every
@@ -438,7 +438,7 @@ per merge group, the main lane, and the same `CI` check name.
 
 GitHub offers the queue only to repositories an organization owns ("Pull
 request merge queues are available in any public repository owned by an
-organization", GitHub's docs, October 2026). `milind-soni/OpenMausBot` is
+organization", GitHub's docs, October 2026). `alnatourm/Obot` is
 owned by a user account, so the rule below appears only after the repository
 moves to an organization (such as `SupaMaus`). The move changes the URL the
 desktop updater reads (see Updater migration invariant in `releasing.md`), so
@@ -470,7 +470,7 @@ default branch):
 The same rule through the API, keeping the ruleset's existing check:
 
 ```sh
-gh api -X PUT repos/<org>/OpenMausBot/rulesets/<main-ci-gate id> --input - <<'JSON'
+gh api -X PUT repos/<org>/Obot/rulesets/<main-ci-gate id> --input - <<'JSON'
 {"rules": [
   {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "CI", "integration_id": 15368}],
     "strict_required_status_checks_policy": false, "do_not_enforce_on_create": false}},
@@ -493,3 +493,4 @@ merging** on the same ruleset: a PR merges only after CI passed on it with
 main's newest commit in it. Every merge then makes the other open PRs update
 their branch and run CI again before they can merge, so it trades merge
 throughput for that guarantee.
+

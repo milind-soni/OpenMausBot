@@ -1,6 +1,6 @@
 # Per-bot tool selection for local models
 
-Design for [#2047](https://github.com/milind-soni/OpenMausBot/issues/2047).
+Design for [#2047](https://github.com/alnatourm/Obot/issues/2047).
 
 ## Purpose and acceptance
 
@@ -298,3 +298,4 @@ attach it to the Codex task. Never merge it.
 - Unsupported native-provider guarantees or untested physical-device claims.
 - Other projects' code, data, device shutdowns, or configuration without
   the owner's explicit authorization.
+

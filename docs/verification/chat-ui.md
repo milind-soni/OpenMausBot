@@ -1,4 +1,4 @@
-# Chat UI, driven headlessly
+﻿# Chat UI, driven headlessly
 
 The `ui` group of `control-omb` drives the real React renderer — the same
 `<App/>` the desktop shell loads, mounted by `scripts/testing/threads-preview.tsx`
@@ -7,7 +7,7 @@ The `ui` group of `control-omb` drives the real React renderer — the same
 `scripts/testing/control-omb-ui.ts`). Everything it touches is disposable: the
 fake-engine fixture from `launch`, a Vite preview of the app, and one browser
 session whose `HOME` is the fixture's data directory. The user's app on port
-8799 and `~/.openmausbot` are never involved.
+8799 and `~/.obot` are never involved.
 
 ## Launch
 
@@ -28,7 +28,7 @@ session named `omb-ui-<port>`, and prints a handle:
 ```json
 {
   "ok": true,
-  "ui": "/tmp/openmausbot-verify-data-XXXXXX/ui.json",
+  "ui": "/tmp/obot-verify-data-XXXXXX/ui.json",
   "url": "http://127.0.0.1:PORT",
   "previewUrl": "http://127.0.0.1:5178/__threads.html",
   "botId": "…", "dataDir": "…", "logPath": "…"
@@ -43,7 +43,7 @@ a browser it did not launch.
 ## Drive
 
 ```sh
-H=/tmp/openmausbot-verify-data-XXXXXX/ui.json
+H=/tmp/obot-verify-data-XXXXXX/ui.json
 pnpm control:omb ui flag --ui $H --set features.showToolCalls=true --dry-run
 pnpm control:omb ui flag --ui $H --set features.showToolCalls=true
 pnpm control:omb ui snapshot --ui $H --interactive
@@ -355,3 +355,4 @@ browser panel and updater UI, and anything `Show threads` gates (that toggle is
 renderer localStorage, outside `ui flag`). `AGENT_BROWSER_HEADLESS=1` is set
 for consistency with the harness, but agent-browser 0.37.0 is headless by
 default and reads `AGENT_BROWSER_HEADED` to opt out.
+

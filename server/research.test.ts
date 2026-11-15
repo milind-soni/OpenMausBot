@@ -59,8 +59,8 @@ describe("research with the person's own treg key", () => {
 
   it("sends a body endpoint's params as JSON and its query as the query string, arrays as the endpoint encodes them", async () => {
     const { fetcher, calls } = fakeFetch({ body: { endpoint: COMPANIES } }, { body: { tasks: [] } });
-    await createResearchClient(OWN, { fetcher }).call({ id: "dataforseo.domains.bulk", params: [{ target: "openmausbot.com" }], query: { fields: ["rank", "traffic"] } });
-    expect(calls[1]).toMatchObject({ method: "POST", url: "https://treg.example.test/call/dataforseo.domains.bulk?fields=rank%2Ctraffic", body: [{ target: "openmausbot.com" }] });
+    await createResearchClient(OWN, { fetcher }).call({ id: "dataforseo.domains.bulk", params: [{ target: "obot.com" }], query: { fields: ["rank", "traffic"] } });
+    expect(calls[1]).toMatchObject({ method: "POST", url: "https://treg.example.test/call/dataforseo.domains.bulk?fields=rank%2Ctraffic", body: [{ target: "obot.com" }] });
     expect(researchRequest(COMPANIES, { id: COMPANIES.id })).toEqual({ search: "", body: "{}" });
     expect(() => researchRequest(PEOPLE, { id: PEOPLE.id, params: { q: "a" }, query: { q: "b" } })).toThrow(/params or as query, not both/);
   });

@@ -9,8 +9,8 @@ import {
 } from "../src/protocol.ts";
 import { generateKeyPair, seal, unseal } from "../src/signed.ts";
 
-const HOME = `ghcr.io/milind-soni/openmausbot-cloud-home@sha256:${"a".repeat(64)}`;
-const CONNECTOR = `ghcr.io/milind-soni/mausbot-connector@sha256:${"b".repeat(64)}`;
+const HOME = `ghcr.io/alnatourm/obot-cloud-home@sha256:${"a".repeat(64)}`;
+const CONNECTOR = `ghcr.io/alnatourm/obot-connector@sha256:${"b".repeat(64)}`;
 const env = {
   OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
   OMB_PUBLIC_URL: "https://acme.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: "S".repeat(43),
@@ -35,10 +35,10 @@ describe("the connector protocol", () => {
     expect(image("update", HOME)).toBe(true);
     expect(image("self-update", CONNECTOR)).toBe(true);
     for (const value of [
-      "ghcr.io/milind-soni/openmausbot-cloud-home:latest", "ghcr.io/milind-soni/openmausbot-cloud-home:v0.1.130",
-      `ghcr.io/someone-else/openmausbot-cloud-home@sha256:${"a".repeat(64)}`, `docker.io/library/ubuntu@sha256:${"a".repeat(64)}`,
-      `ghcr.io/milind-soni/openmausbot-cloud-home@sha256:${"A".repeat(64)}`, `ghcr.io/milind-soni/openmausbot-cloud-home@sha256:${"a".repeat(63)}`,
-      `ghcr.io/milind-soni/openmausbot-cloud-home@sha256:${"a".repeat(64)} --privileged`, `ghcr.io/milind-soni/openmausbot@sha256:${"a".repeat(64)}`,
+      "ghcr.io/alnatourm/obot-cloud-home:latest", "ghcr.io/alnatourm/obot-cloud-home:v0.1.130",
+      `ghcr.io/someone-else/obot-cloud-home@sha256:${"a".repeat(64)}`, `docker.io/library/ubuntu@sha256:${"a".repeat(64)}`,
+      `ghcr.io/alnatourm/obot-cloud-home@sha256:${"A".repeat(64)}`, `ghcr.io/alnatourm/obot-cloud-home@sha256:${"a".repeat(63)}`,
+      `ghcr.io/alnatourm/obot-cloud-home@sha256:${"a".repeat(64)} --privileged`, `ghcr.io/alnatourm/obot@sha256:${"a".repeat(64)}`,
     ]) {
       expect(image("start", value), value).toBe(false);
       expect(image("update", value), value).toBe(false);
@@ -87,7 +87,7 @@ describe("the connector protocol", () => {
     }
   });
 
-  it("keeps an enrolment answer only when every field is the Admin's shape, and a code only as MausBot shows it", () => {
+  it("keeps an enrolment answer only when every field is the Admin's shape, and a code only as Obot shows it", () => {
     const key = generateKeyPair().publicKey;
     const good = { boxId: "box_1a2b3c4d5e6f", teamId: "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93", adminKeys: { k1: key }, state: "pending" };
     expect(checkEnrollResponse(good)).toEqual({ ok: true, value: good });
@@ -156,3 +156,4 @@ describe("the connector protocol", () => {
     for (const bad of [`${body}`, `${body}.${signature}.x`, "", 7, `${"x".repeat(300_000)}.y`]) expect(unseal(bad, { k1: admin.publicKey }).ok).toBe(false);
   });
 });
+

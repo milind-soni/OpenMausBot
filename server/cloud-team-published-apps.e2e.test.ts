@@ -1,7 +1,7 @@
 // Published apps on a real Team Cloud (OMB_CLOUD_ROLE=team) with the synthetic Claude CLI, tried as the people the
 // rule must hold against: two members, an Admin and the Owner. A shared bot's Netlify site is listed for whoever can
 // read the conversation it was published in (the conversation's own folder holds its record, or the bot's own message
-// carries its link), a member's own MausBot's site for that member alone, and nobody's private project for anyone
+// carries its link), a member's own Obot's site for that member alone, and nobody's private project for anyone
 // else, by list or by id. Delete uses the team's saved Netlify token against a loopback stand-in for Netlify.
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -80,7 +80,7 @@ beforeAll(async () => {
   ben = (await team.pair(BEN)).token!;
   mira = (await team.as(owner, "POST", "/api/bots", { name: "Mira", visibility: "everyone" })).body.bot;
   adaMaus = (await botsOf(ada)).find((bot) => bot.defaultBot?.person === ADA.email)!;
-  expect(adaMaus, "Ada has a MausBot of her own").toBeTruthy();
+  expect(adaMaus, "Ada has a Obot of her own").toBeTruthy();
   mainThread = mira.mainThreadId ?? mira.threadId;
   adaThread = (await team.as(ada, "POST", `/api/bots/${mira.id}/tasks`, { title: "Ada's shop" })).body.task.threadId;
   benThread = (await team.as(ben, "POST", `/api/bots/${mira.id}/tasks`, { title: "Ben's plan" })).body.task.threadId;
@@ -91,7 +91,7 @@ beforeAll(async () => {
   await turn(owner, mira, mainThread, "The team site is live: https://team-site.netlify.app");
   await turn(ada, adaMaus, adaMaus.threadId, "Your diary is at https://adas-diary.netlify.app");
 
-  const data = join(team.home, ".openmausbot");
+  const data = join(team.home, ".obot");
   // Ada's shop was published from her conversation's own folder; the bot never wrote its link anywhere.
   expect(existsSync(join(data, "task-workspaces", mira.id, adaThread)), "a conversation's turns work in its own folder").toBe(true);
   record(join(data, "task-workspaces", mira.id, adaThread, "shop"), "adas-shop", shopId);
@@ -139,7 +139,7 @@ it("answers another member, an Admin and the Owner guessing at a private project
       expect(await team.as(token, "POST", "/api/published-apps/delete", { id }), `${who}: ${id}`).toEqual(GONE);
     }
   }
-  const data = join(team.home, ".openmausbot");
+  const data = join(team.home, ".obot");
   expect(existsSync(join(data, "task-workspaces", mira.id, adaThread, "shop", SITE_FILE))).toBe(true);
   expect(existsSync(join(data, "workspaces", adaMaus.id, "diary", SITE_FILE))).toBe(true);
   expect(await titles(ada)).toEqual(["adas-diary site", "adas-notes site", "adas-shop site", "team-site site"]);
@@ -152,15 +152,15 @@ it("refuses a member who only chats with the shared bot for what it published in
 });
 
 it("checks framing only for an address the asker is shown or a public hosting address, and refuses anything else", async () => {
-  const framing = (token: string, url: string) => team.as(token, "GET", `/api/published-apps/framing?url=${encodeURIComponent(url)}&origin=${encodeURIComponent("https://acme.mausbot.cloud")}`);
+  const framing = (token: string, url: string) => team.as(token, "GET", `/api/published-apps/framing?url=${encodeURIComponent(url)}&origin=${encodeURIComponent("https://acme.obot.cloud")}`);
   for (const url of ["http://169.254.169.254/latest/meta-data", "http://127.0.0.1:8799/api/bots", "https://example.com/", `${team.base}/api/bots`]) {
     expect((await framing(ben, url)).status, url).toBe(404);
   }
-  expect(await team.as(ben, "GET", "/api/web-panels/framing?url=https%3A%2F%2Fexample.com&origin=https%3A%2F%2Facme.mausbot.cloud")).toMatchObject({ status: 403 });
+  expect(await team.as(ben, "GET", "/api/web-panels/framing?url=https%3A%2F%2Fexample.com&origin=https%3A%2F%2Facme.obot.cloud")).toMatchObject({ status: 403 });
 });
 
 it("deletes with the team's saved token for whoever may delete, says so plainly without one, and never for someone else's project", async () => {
-  const data = join(team.home, ".openmausbot");
+  const data = join(team.home, ".obot");
   const shop = join(data, "task-workspaces", mira.id, adaThread, "shop", SITE_FILE), teamSite = join(data, "workspaces", mira.id, "team-site", SITE_FILE);
   const withoutToken = await team.as(ada, "POST", "/api/published-apps/delete", { id: `netlify-${mira.id}-${shopId}` });
   expect(withoutToken).toEqual({ status: 409, body: { error: expect.stringContaining("can't be deleted from here"), code: "no_token", manageUrl: "https://app.netlify.com/projects/adas-shop" } });

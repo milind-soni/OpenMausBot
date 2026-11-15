@@ -1,4 +1,4 @@
-// A server of one person's own (`openmausbot serve` on their VPS or Mac mini) can be their home, as My Cloud is: its owner
+// A server of one person's own (`obot serve` on their VPS or Mac mini) can be their home, as My Cloud is: its owner
 // moves a computer's bots into it, and that computer then works for it. Security: only where nobody else signs in, so no
 // one else's bots or turns ever reach a computer lent this way, and never a Cloud, a team's Cloud or a hosted workspace.
 import { movedFrom } from "./cloud-send-arrived.ts";
@@ -6,7 +6,7 @@ import type { OwnServer } from "./person-key.ts";
 import type { RequestAuth } from "./request-auth.ts";
 
 export interface OwnServerFacts {
-  /** A Cloud home, a team's Cloud or a hosted workspace: MausBot or an organization runs it, never one person. */
+  /** A Cloud home, a team's Cloud or a hosted workspace: Obot or an organization runs it, never one person. */
   managed: boolean;
   /** Others sign in here: a team, an organization's members, or members on the sign-in list. */
   shared: boolean;

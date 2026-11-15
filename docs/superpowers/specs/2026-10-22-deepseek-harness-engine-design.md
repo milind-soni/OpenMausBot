@@ -1,4 +1,4 @@
-# DeepSeek Harness as a MausBot engine
+# DeepSeek Harness as a Obot engine
 
 Date: 2026-10-22. Status: design, approved for build under stated assumptions
 (the request was "wire this"; the calls below are the builder's, marked as such).
@@ -6,9 +6,9 @@ Date: 2026-10-22. Status: design, approved for build under stated assumptions
 ## Intent
 
 People should be able to pick DeepSeek Harness (`dsh`, github.com/deepseek-ai/deepseek-harness)
-as the engine behind a MausBot bot, the same way they pick Kimi, Droid or
+as the engine behind a Obot bot, the same way they pick Kimi, Droid or
 Hermes today: it appears on the Engines page, Settings can install it, a
-DeepSeek API key pasted in MausBot makes it ready, and bots run turns on it
+DeepSeek API key pasted in Obot makes it ready, and bots run turns on it
 with the normal approval cards, model picker and reasoning-effort control.
 
 ## Verified facts about dsh (0.2.1-rc.2, probed 2026-10-22)
@@ -61,7 +61,7 @@ with the normal approval cards, model picker and reasoning-effort control.
 - "Full access" / "Auto-accept edits" approval levels (dsh has no modes; it
   stays ask/auto like Kimi and Hermes).
 - Phone apps: engines come from the server, phones only need a provider mark;
-  that is a separate mausbot-mobile change and is noted in the hand-over.
+  that is a separate obot-mobile change and is noted in the hand-over.
 - Managed download of dsh; npm is the install route.
 
 ## Anti-goals
@@ -163,3 +163,4 @@ with the normal approval cards, model picker and reasoning-effort control.
   scratchpad is acceptable).
 - Whether `resolveModels` reuses a helper from another driver or carries its
   own 40-line JSON-RPC client.
+

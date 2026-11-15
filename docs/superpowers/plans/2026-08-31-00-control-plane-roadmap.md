@@ -1,10 +1,10 @@
-# Vendor-Neutral Control Plane — Roadmap
+﻿# Vendor-Neutral Control Plane — Roadmap
 
 > **For agentic workers:** this is the sequencing document, not an executable plan.
 > Each numbered plan below is its own file and its own working, testable deliverable.
 > Execute them with superpowers:subagent-driven-development, one plan at a time.
 
-**Goal:** Close the gap between what OpenMausBot already is (an engine-neutral harness
+**Goal:** Close the gap between what Obot already is (an engine-neutral harness
 that owns memory, skills, permissions, and computers) and what it is not yet packaged
 as (a portable Bot Profile, a real connections surface, and a machine that stays on).
 
@@ -115,3 +115,4 @@ comparison. Routing rules come after, driven by that data.
   supervisor role with a concurrency cap. `MAX_COMMS_DEPTH = 1` is what makes
   recursive delegation structurally impossible today (`server/delegations.ts:29`), and
   that property is worth keeping by default.
+

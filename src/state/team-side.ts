@@ -16,7 +16,7 @@ type SideGroup = { id: string; unread?: boolean };
 
 /**
  * Security invariant: a conversation is "Just me" only when the server marked it private, or this page made it through
- * the server's private new-conversation route, or it is a chat with the person's own MausBot, which the server sends to
+ * the server's private new-conversation route, or it is a chat with the person's own Obot, which the server sends to
  * nobody else. Anything else, a conversation this page knows nothing of included, is the team's. So nothing ever says
  * "only you" over a composer whose words others can read.
  */
@@ -42,7 +42,7 @@ export function sharedWithOthers(bot: SharedBot): boolean {
  * "Team" lists only what is shared with someone. What the conversation says of its readers stays `sideOfThread`'s. */
 export const listedSide = (bot: SharedBot & Pick<SideBot, "tasks">, threadId: string): TeamSide => (sharedWithOthers(bot) ? sideOfThread(bot, threadId) : "me");
 
-/** The bot's shared chat, as the server names it; null for a bot that has none (a person's own MausBot). */
+/** The bot's shared chat, as the server names it; null for a bot that has none (a person's own Obot). */
 export const teamThreadOf = (bot: Pick<SideBot, "tasks" | "defaultBot">): string | null =>
   bot.defaultBot?.person ? null : bot.tasks?.find((task) => task.sharedChat === true && task.private !== true)?.threadId ?? null;
 

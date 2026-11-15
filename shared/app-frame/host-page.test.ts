@@ -71,7 +71,7 @@ describe("the host page", () => {
     page.load();
     page.viewSays({ jsonrpc: "2.0", id: 1, method: "ui/initialize", params: { protocolVersion: "2026-01-26" } });
     await page.tick();
-    expect(page.fromView[0]).toMatchObject({ id: 1, result: { hostInfo: { name: "mausbot", version: "1.4.0" }, hostContext: { theme: "light" } } });
+    expect(page.fromView[0]).toMatchObject({ id: 1, result: { hostInfo: { name: "obot", version: "1.4.0" }, hostContext: { theme: "light" } } });
     page.viewSays({ jsonrpc: "2.0", method: "ui/notifications/initialized" });
     expect(page.toNative.at(-1)).toEqual({ v: 1, type: "initialized" });
     page.viewSays({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: { height: 900 } });
@@ -138,7 +138,7 @@ describe("the host page", () => {
     const api = startAppHostPage(win as unknown as globalThis.Window);
     expect(api).not.toBeNull();
     expect((win as unknown as { appHost: unknown }).appHost).toBe(injected);
-    expect((win as unknown as { mausbotAppHost: unknown }).mausbotAppHost).toBe(api);
+    expect((win as unknown as { obotAppHost: unknown }).obotAppHost).toBe(api);
     expect(JSON.parse(sent[0]!)).toEqual({ v: 1, type: "ready" });
     const native = (message: AppHostFromNative) => injected.onmessage!({ data: JSON.stringify(message) });
     native({ v: 1, call: "load", args: [{ v: 1, doc: DOC, hostContext: {} }] });

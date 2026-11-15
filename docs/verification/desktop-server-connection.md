@@ -1,4 +1,4 @@
-# Desktop server connection
+﻿# Desktop server connection
 
 Run the real Settings connection component in disposable Electron windows:
 
@@ -73,7 +73,7 @@ sidebar search → **Connect to a server…**, or open **Settings →
 Servers**. Enter the server's HTTPS address or full pairing link and an
 optional name. Confirm the host in the native dialog, then complete pairing or
 email sign-in on that server. To generate an owner link without the CLI's
-phone wizard, run `npx openmausbot pair --label "My desktop"` on the server.
+phone wizard, run `npx obot pair --label "My desktop"` on the server.
 Treat this link as a secret. Existing limited-access links retain their limits.
 
 Select **This computer** or a saved hosted workspace to switch. Each origin
@@ -224,3 +224,4 @@ style Cua MCP handshake/image transport using a stand-in. They do not operate
 the user's screen or prove real Cua actions on each supported OS. No live VPS,
 public HTTPS, Windows desktop, or macOS screen permission was exercised by this
 recipe. Run those release smoke checks separately before claiming coverage.
+

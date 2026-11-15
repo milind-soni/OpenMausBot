@@ -83,7 +83,7 @@ test("a page changes only its own place's colour: a Cloud's on the Admin first, 
     assert.deepEqual(await computer.call("workspaces:look"), { name: "This computer", color: null, swatch: null, change: "local" }, "this computer's page: plain until a colour is picked");
     assert.deepEqual(await computer.call("workspaces:color", "rose"), { outcome: "saved", look: { name: "This computer", color: "red", swatch: "rose", change: "local" } });
     assert.deepEqual([computer.asked, computer.saved, computer.state().localColor], [[], [["local", "red"]], "red"],
-      "this computer's colour is this app's own, kept beside its saved places, whether or not it is signed in to MausBot Cloud");
+      "this computer's colour is this app's own, kept beside its saved places, whether or not it is signed in to Obot Cloud");
     assert.deepEqual(await computer.call("workspaces:look"), { name: "This computer", color: "red", swatch: "rose", change: "local" }, "read back as chosen");
     assert.deepEqual(await computer.call("workspaces:color", "slate"), { outcome: "saved", look: { name: "This computer", color: null, swatch: null, change: "local" } }, "None: plain again");
     assert.equal(Object.hasOwn(computer.state(), "localColor"), false);
@@ -106,7 +106,7 @@ test("main's own wiring: This computer's page reads and changes its own colour, 
   assert.deepEqual(await call("workspaces:look"), { name: "This computer", color: null, swatch: null, change: "local" }, "plain until a colour is picked");
   assert.deepEqual((await call("workspaces:color", "amber")).look, { name: "This computer", color: "yellow", swatch: "amber", change: "local" });
   assert.deepEqual([persisted.length, context.environmentsState.localColor, context.environmentsState.environments], [1, "yellow", [typed]],
-    "kept beside the saved places, signed out of MausBot Cloud");
+    "kept beside the saved places, signed out of Obot Cloud");
   assert.equal(environments.parseEnvironments(environments.serializeEnvironments(context.environmentsState)).localColor, "yellow", "and in the file");
   assert.deepEqual((await call("workspaces:color", "slate")).look.color, null, "None");
   assert.equal(Object.hasOwn(context.environmentsState, "localColor"), false);

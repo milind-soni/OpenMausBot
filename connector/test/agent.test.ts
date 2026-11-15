@@ -97,7 +97,7 @@ async function connected(options: Parameters<typeof makeConnector>[1] & { accept
   return { admin, ...fixture };
 }
 
-describe("the connector's connection to MausBot", () => {
+describe("the connector's connection to Obot", () => {
   it("enrols once with the one-time code and a key it made, pins the Admin's keys, and proves its key on every connection", async () => {
     const { admin, record, statuses, lines, agent } = await connected();
     const box = admin.boxes.get(record.current.boxId)!;
@@ -112,9 +112,9 @@ describe("the connector's connection to MausBot", () => {
     await until(() => admin.connections.length === 2 && agent.connected);
     expect(admin.connections.map((connection) => connection.count)).toEqual([1, 2]);
     expect(lines.join("\n")).not.toContain(record.current.privateKey);
-    expect(lines).toContain("connected to MausBot (waiting for the team's Owner to accept this server)");
+    expect(lines).toContain("connected to Obot (waiting for the team's Owner to accept this server)");
     await expect(enroll({ admin: admin.origin, code: [...admin.codes][0] ?? "MB-USED-CODE", host, connector })).rejects.toThrow(
-      "This code isn't valid anymore: a code works once, for one hour. Make a new one in MausBot and run the install command again.");
+      "This code isn't valid anymore: a code works once, for one hour. Make a new one in Obot and run the install command again.");
   });
 
   it("drops a connection whose hello no key it pinned signed, and never takes a job on it", async () => {
@@ -126,8 +126,8 @@ describe("the connector's connection to MausBot", () => {
     await until(() => admin.connections.length >= 2);
     expect(fixture.agent.connected).toBe(false);
     expect(fixture.statuses).not.toContainEqual(expect.objectContaining({ connected: true }));
-    expect(fixture.statuses).toContainEqual({ lastError: `the MausBot at ${admin.origin} did not prove it holds MausBot's key (the signature does not verify)` });
-    expect(fixture.lines).toContain("dropping the connection to MausBot: MausBot's hello did not verify: the signature does not verify");
+    expect(fixture.statuses).toContainEqual({ lastError: `the Obot at ${admin.origin} did not prove it holds Obot's key (the signature does not verify)` });
+    expect(fixture.lines).toContain("dropping the connection to Obot: Obot's hello did not verify: the signature does not verify");
     admin.impostor = null;
     await until(() => fixture.agent.connected);
   });
@@ -145,11 +145,11 @@ describe("the connector's connection to MausBot", () => {
     expect((await admin.job("status", {}, "signed-2")).ok).toBe(true);
     expect(handled.map((job) => job.id)).toEqual(["signed-1", "signed-2"]);
     expect(refusals).toEqual([
-      { code: "unsigned_job", message: "a job MausBot did not sign" },
+      { code: "unsigned_job", message: "a job Obot did not sign" },
       { code: "wrong_box", message: "the job was signed for another server", id: "wrong-box-1", type: "host-health" },
       { code: "expired_job", message: "the job's signature is too old", id: "old-1", type: "host-health" },
-      { code: "unsigned_job", message: "a job MausBot did not sign (the signature does not verify)" },
-      { code: "unsigned_job", message: "a job MausBot did not sign (not an envelope)" },
+      { code: "unsigned_job", message: "a job Obot did not sign (the signature does not verify)" },
+      { code: "unsigned_job", message: "a job Obot did not sign (not an envelope)" },
     ]);
     expect(admin.replies.map((reply) => reply.id)).not.toContain("bare-1");
     expect(admin.replies.map((reply) => reply.id)).not.toContain("stranger-1");
@@ -158,7 +158,7 @@ describe("the connector's connection to MausBot", () => {
   it("keeps a server the team's Owner has not accepted to jobs that only read, until the Owner accepts it", async () => {
     const { admin, record, handled, agent } = await connected();
     expect((await admin.job("status", {}, "read-1")).ok).toBe(true);
-    expect(await admin.job("stop", {}, "stop-1")).toEqual({ id: "stop-1", ok: false, error: { code: "pending_box", message: "The team's Owner has not accepted this server in MausBot yet." } });
+    expect(await admin.job("stop", {}, "stop-1")).toEqual({ id: "stop-1", ok: false, error: { code: "pending_box", message: "The team's Owner has not accepted this server in Obot yet." } });
     admin.accept(record.current.boxId);
     await until(() => agent.state === "accepted");
     expect((await admin.job("stop", {}, "stop-2")).ok).toBe(true);
@@ -197,8 +197,8 @@ describe("the connector's connection to MausBot", () => {
     admin.revoke(record.current.boxId);
     await until(() => statuses.some((status) => status.unauthorized === true));
     expect(admin.closes).toEqual([{ boxId: record.current.boxId, code: CLOSE_UNAUTHORIZED }]);
-    expect(statuses).toContainEqual({ connected: false, unauthorized: true, lastError: "MausBot no longer knows this server" });
-    expect(lines).toContain("MausBot no longer knows this server; run the install command again with a new code to connect it");
+    expect(statuses).toContainEqual({ connected: false, unauthorized: true, lastError: "Obot no longer knows this server" });
+    expect(lines).toContain("Obot no longer knows this server; run the install command again with a new code to connect it");
     expect(retries).toContain(5 * 60_000);
   });
 
@@ -213,7 +213,7 @@ describe("the connector's connection to MausBot", () => {
     expect(copy.agent.connected).toBe(false);
     expect(admin.closes).toContainEqual({ boxId: record.current.boxId, code: CLOSE_KEY_COPIED });
     for (const status of [...statuses, ...copy.statuses].filter((entry) => entry.unauthorized)) {
-      expect(status.lastError).toBe("MausBot saw another server use this server's key, so it stopped trusting the key");
+      expect(status.lastError).toBe("Obot saw another server use this server's key, so it stopped trusting the key");
     }
   });
 
@@ -262,12 +262,12 @@ describe("the connector's connection to MausBot", () => {
     cleanups.push(() => new Promise<void>((resolve) => home.close(() => resolve())));
     let port = (home.address() as AddressInfo).port;
     const { admin, audits } = await connected({ accepted: true, homePort: () => port });
-    expect(await admin.fetch("/api/cloud/health?x=1", { host: "mausbot.acme.example" })).toEqual({ status: 204, body: "" });
+    expect(await admin.fetch("/api/cloud/health?x=1", { host: "obot.acme.example" })).toEqual({ status: 204, body: "" });
     const claim = JSON.stringify({ label: "Ada's laptop", member: { email: "ada@acme.example", role: "admin" } });
-    expect(await admin.fetch("/api/cloud/pairing", { method: "POST", body: claim, host: "mausbot.acme.example" })).toEqual({ status: 200, body: '{"code":"SECRET-PAIRING-CODE"}' });
+    expect(await admin.fetch("/api/cloud/pairing", { method: "POST", body: claim, host: "obot.acme.example" })).toEqual({ status: 200, body: '{"code":"SECRET-PAIRING-CODE"}' });
     expect(seen).toEqual([
-      { method: "GET", url: "/api/cloud/health?x=1", host: "mausbot.acme.example", body: "" },
-      { method: "POST", url: "/api/cloud/pairing", host: "mausbot.acme.example", body: claim },
+      { method: "GET", url: "/api/cloud/health?x=1", host: "obot.acme.example", body: "" },
+      { method: "POST", url: "/api/cloud/pairing", host: "obot.acme.example", body: claim },
     ]);
     port = 9;
     expect(await admin.fetch("/api/cloud/health")).toEqual({ status: 502, body: "" });
@@ -290,7 +290,7 @@ describe("the connector's connection to MausBot", () => {
   it("drops a connection the Admin went silent on, and opens a new one", async () => {
     const { admin, agent, lines } = await connected({ accepted: true, pingMs: 50, deadMs: 300 });
     admin.freeze();
-    await until(() => lines.includes("dropping the connection to MausBot: nothing from MausBot for 0 s"));
+    await until(() => lines.includes("dropping the connection to Obot: nothing from Obot for 0 s"));
     await until(() => admin.connections.length === 2 && agent.connected);
   });
 
@@ -307,13 +307,13 @@ describe("the connector's connection to MausBot", () => {
     expect(connectUrl("https://cloud.example.test")).toBe("wss://cloud.example.test/api/cloud/box/v1/connect");
     expect(connectUrl("http://127.0.0.1:8123")).toBe("ws://127.0.0.1:8123/api/cloud/box/v1/connect");
     expect(adminOrigin("https://cloud.example.test/")).toBe("https://cloud.example.test");
-    expect(() => adminOrigin("http://cloud.example.test")).toThrow("is not a MausBot address this connector may use.");
-    expect(() => adminOrigin(undefined)).toThrow("The install command did not say which MausBot to connect to.");
+    expect(() => adminOrigin("http://cloud.example.test")).toThrow("is not a Obot address this connector may use.");
+    expect(() => adminOrigin(undefined)).toThrow("The install command did not say which Obot to connect to.");
   });
 
-  it("says plainly when MausBot cannot be reached at enrolment", async () => {
-    await expect(enroll({ admin: "http://127.0.0.1:9", code: "MB-1A2B-3C4D", host, connector })).rejects.toThrow(/^This server can't reach MausBot at http:\/\/127\.0\.0\.1:9 /);
-    await expect(enroll({ admin: "http://127.0.0.1:9", code: "MB 1A2B", host, connector })).rejects.toThrow("the code is the one-time code MausBot shows next to the install command");
+  it("says plainly when Obot cannot be reached at enrolment", async () => {
+    await expect(enroll({ admin: "http://127.0.0.1:9", code: "MB-1A2B-3C4D", host, connector })).rejects.toThrow(/^This server can't reach Obot at http:\/\/127\.0\.0\.1:9 /);
+    await expect(enroll({ admin: "http://127.0.0.1:9", code: "MB 1A2B", host, connector })).rejects.toThrow("the code is the one-time code Obot shows next to the install command");
   });
 
   it("refuses a job before the handshake, and a binary message before it, by closing the connection", async () => {
@@ -323,4 +323,5 @@ describe("the connector's connection to MausBot", () => {
     await until(() => admin.connections.length === 2 && agent.connected);
   });
 });
+
 

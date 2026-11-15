@@ -67,7 +67,7 @@ describe("GET /api/threads/:id/export", () => {
     expect((await markdown.text()).split("\n").slice(2)).toEqual([
       "**Milind:**", "", "What is open?", "",
       "**Scout:**", "",
-      "**Pull requests** · mausbot-mobile · 3 open",
+      "**Pull requests** · obot-mobile · 3 open",
       "- iOS: mid-turn steer · #750 · 4 files · passed 2h ago · Ready",
       "- Android: thread pin parity · #739 · 2 files · passed 5h ago · Ready",
       "- iOS: file links, send, attach · #719 · 9 files · 1 test failing · Failing",

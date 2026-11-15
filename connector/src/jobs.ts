@@ -14,7 +14,7 @@ const CHANGES: ReadonlySet<JobType> = new Set(["start", "stop", "restart", "upda
 const MAX_WAITING = 8;
 
 export interface RunnerDeps {
-  /** On a server MausBot operates: the home the connector makes and keeps running. */
+  /** On a server Obot operates: the home the connector makes and keeps running. */
   home?: Home;
   /** On a customer-run server: the home its owner installed. Every job goes to it, and `home` is never used. */
   adopted?: AdoptedHome;
@@ -124,9 +124,9 @@ export interface DeskDeps {
   audit: AuditLog;
   log: Log;
   policyFile?: string;
-  /** Absent: `operated`. On a customer-run server a job outside that mode's lists is refused: one list for MausBot, a longer one for root on the server. */
+  /** Absent: `operated`. On a customer-run server a job outside that mode's lists is refused: one list for Obot, a longer one for root on the server. */
   mode?: ServerMode;
-  /** The server's admin has paused remote management: every job from MausBot is refused until they resume it. */
+  /** The server's admin has paused remote management: every job from Obot is refused until they resume it. */
   paused?: () => boolean;
 }
 
@@ -152,7 +152,7 @@ export function jobDesk(deps: DeskDeps): Desk {
       };
       const outsideMode = deps.mode === "customer-run" ? customerRunRefusal(job.type, by) : null;
       if (outsideMode) return refuse("refused_by_mode", outsideMode);
-      if (by === "admin" && deps.paused?.()) return refuse("paused", "This server's admin has paused remote management. They resume it with: mausbot-connector resume");
+      if (by === "admin" && deps.paused?.()) return refuse("paused", "This server's admin has paused remote management. They resume it with: obot-connector resume");
       const refusal = by === "admin" && deps.policyFile ? policyRefusal(job, readPolicy(deps.policyFile), deps.policyFile) : null;
       if (refusal) return refuse("refused_by_policy", refusal);
       const reply = await deps.run(job, by);
@@ -178,3 +178,4 @@ function resultDetail(result: Record<string, unknown>): Record<string, unknown> 
   if (connector) Object.assign(detail, { connector: connector.version, connectorImage: connector.image ?? null });
   return detail;
 }
+

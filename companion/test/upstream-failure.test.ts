@@ -1,4 +1,4 @@
-// A fake harness, so the failure happens on demand: after the phone's response
+﻿// A fake harness, so the failure happens on demand: after the phone's response
 // has opened, when writeHead would throw ERR_HTTP_HEADERS_SENT.
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
@@ -126,9 +126,10 @@ describe("an upstream that fails mid-stream", () => {
       const res = await fetch(`${base}/api/health`, { headers: { authorization: "Bearer omb_x" } });
       expect(res.status).toBe(502);
       expect((await res.json()) as { error: string }).toEqual({
-        error: "OpenMausBot is not running on this computer",
+        error: "Obot is not running on this computer",
       });
     });
     expect(escaped).toEqual([]);
   }, 20_000);
 });
+

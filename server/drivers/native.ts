@@ -77,7 +77,7 @@ export function appendNative(threadId: string, entry: { dir: "in" | "out"; sourc
   if (lines) lines.push(line);
   else held.set(threadId, [line]);
   heldChars += line.length;
-  // What OpenMausBot sent is a few lines a turn, and the line a bug report most needs: it lands at once.
+  // What Obot sent is a few lines a turn, and the line a bug report most needs: it lands at once.
   if (entry.dir === "out") flushNativeLog(threadId);
   else if (heldChars >= MAX_HELD_CHARS) flushNativeLogs();
   else if (!timer) {

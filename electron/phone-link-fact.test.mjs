@@ -34,20 +34,20 @@ describe("the phone link fact for the local server", () => {
   it("tells the server how many paired phones have an older app once the link ended, and only when the number changes", () => {
     const f = harness();
     f.fact.observe(state([OLD, NEW]));
-    expect(f.posted).toEqual([{ type: "openmausbot:phone-link", olderPhoneApps: 1 }]);
+    expect(f.posted).toEqual([{ type: "obot:phone-link", olderPhoneApps: 1 }]);
     f.fact.observe(state([OLD, NEW]));
     expect(f.posted, "the 30-second check with nothing new").toHaveLength(1);
     f.fact.observe(state([NEW, { ...OLD, e2eAt: 3 }]));
-    expect(f.posted.at(-1), "the old phone updated and used the encrypted connection").toEqual({ type: "openmausbot:phone-link", olderPhoneApps: 0 });
+    expect(f.posted.at(-1), "the old phone updated and used the encrypted connection").toEqual({ type: "obot:phone-link", olderPhoneApps: 0 });
   });
 
   it("says 0 while the link was not ended, whatever phones are paired", () => {
     const f = harness(signedIn);
     f.fact.observe(state([OLD]));
-    expect(f.posted).toEqual([{ type: "openmausbot:phone-link", olderPhoneApps: 0 }]);
+    expect(f.posted).toEqual([{ type: "obot:phone-link", olderPhoneApps: 0 }]);
     f.document = { ...signedIn, [COMPANION_TUNNEL_RETIRED_FIELD]: true };
     f.fact.observe(state([OLD]));
-    expect(f.posted.at(-1), "the next check after the control plane ended it").toEqual({ type: "openmausbot:phone-link", olderPhoneApps: 1 });
+    expect(f.posted.at(-1), "the next check after the control plane ended it").toEqual({ type: "obot:phone-link", olderPhoneApps: 1 });
   });
 
   it("keeps the last readable device list over a sidecar that errs, and tells a restarted server again", () => {
@@ -56,7 +56,7 @@ describe("the phone link fact for the local server", () => {
     f.fact.observe({ enabled: true, devices: [], pairing: null, error: "the companion is not responding" });
     f.fact.observe({ enabled: true, devicesUnreadable: true, devices: [] });
     f.fact.observe(null);
-    expect(f.posted).toEqual([{ type: "openmausbot:phone-link", olderPhoneApps: 1 }]);
+    expect(f.posted).toEqual([{ type: "obot:phone-link", olderPhoneApps: 1 }]);
     f.proc = { postMessage: (message) => f.posted.push(message) };
     f.fact.observe(state([OLD]));
     expect(f.posted, "a new server process").toHaveLength(2);

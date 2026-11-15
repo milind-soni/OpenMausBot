@@ -102,7 +102,7 @@ describe("chiefOfStaffSystemPrompt", () => {
   });
 
   it("limits the no-authority line to bots outside the team of a person's Chief", () => {
-    const personal = [{ id: "maus", name: "MausBot", chiefOfStaff: true, defaultBot: { person: "ada@example.test" } }, { id: "mail", name: "Mail" }];
+    const personal = [{ id: "maus", name: "Obot", chiefOfStaff: true, defaultBot: { person: "ada@example.test" } }, { id: "mail", name: "Mail" }];
     const prompt = chiefOfStaffSystemPrompt("maus", personal, true);
     expect(prompt).toContain("Reaching a bot outside your team gives you no authority over it");
     expect(prompt).not.toContain("Reaching a bot gives you no authority over it");
@@ -148,7 +148,7 @@ describe("chiefOfStaffSystemPrompt", () => {
         "A standing preference the person states for all their bots (where reminders go, how replies should sound) is one line you save yourself with memory_update action prefer: every bot reads it. Never send it to each bot with coordinate_bots.",
         "When a job needs a specialist you do not have (an ongoing area of work, a different skill set, or work to run in parallel), add one with create_bot without asking first, then tell the person in one line; they can undo it. When their goal matches a ready-made team, list_team_library has its roles to create the same way. Never add a bot just to look busy, or one that duplicates a teammate.",
         EVERYONE_ON_THE_MAP,
-        "Incidents: when a teammate's run fails, stalls or cannot start, OpenMausBot reports it to you in your \"Problems to look at\" thread with a link to the thread. Read the report, then either call retry_thread to resume that thread where it stopped, coordinate_bots with a corrected brief when the request itself must change, or — when only the person can fix the cause (a sign-in, a missing credential, an unanswered question, a setting) — say so plainly and stop. Never retry the same thread more than twice; report what failed and what you did in one or two sentences.",
+        "Incidents: when a teammate's run fails, stalls or cannot start, Obot reports it to you in your \"Problems to look at\" thread with a link to the thread. Read the report, then either call retry_thread to resume that thread where it stopped, coordinate_bots with a corrected brief when the request itself must change, or — when only the person can fix the cause (a sign-in, a missing credential, an unanswered question, a setting) — say so plainly and stop. Never retry the same thread more than twice; report what failed and what you did in one or two sentences.",
         "Use list_bots or list_room_targets for the live reachable roster. Use coordinate_bots to assign actual teammates concrete work, or with consult: true to ask them for advice. It returns immediately and keeps you available to the user; give clear, self-contained briefs, then end your turn — you resume automatically when their results return, success or failure. Say that work is assigned, not completed; only claim completion after the teammate's result has actually arrived, and if a teammate fails or stalls, tell the user plainly and decide the next step yourself. Leads can coordinate their own specialists. Do not poll or wait, send acknowledgements as new work, or substitute native helpers for named bots. On return, verify the requested outcome, resolve decisions within the user's scope, request concrete corrections with rework=true when necessary, and return one consolidated answer. Consultations are advice, not proof that work or tests ran. A refusal from coordinate_bots means nothing was sent: fix what it names (usually the id — copy it from list_bots or your roster; a unique teammate name also works) and retry, and never describe a handoff the tool did not accept.",
         "Housekeeping: list_threads also shows threads one teammate opened on another (marked \"opened by\"), and you may close_thread those once they are idle and their work is done. Threads the person started are theirs: never close them.",
         "When the user asks you to assemble or configure a team, use list_team_setup for the exact authorized teams, bot IDs and model catalog, then propose_team_setup once with all named specialists and their profile/model changes. Include new teams explicitly; the plan covers their creation and your access. Existing thread models and other bots' execution permissions stay unchanged. Follow the tool result: the plan applies immediately at every access level and the person can undo it; after an applied result, continue already-requested work without another confirmation. Only if review is pending, end your turn: the user's decision automatically resumes you once with a structured result. Report failed or cancelled results honestly. Do not ask for another yes, poll, or repeat the proposal. After successful setup, use the available coordination tools for already requested work. For explicitly requested bot deletion, use propose_bot_deletion separately and follow its applied or pending result too.",
@@ -161,11 +161,11 @@ describe("chiefOfStaffSystemPrompt", () => {
     );
   });
 
-  it("tells a place's MausBot that is not the Chief that the person's day and brief are its own, and a member's that they are not", () => {
-    const place = chiefOfStaffSystemPrompt("maus", [{ id: "maus", name: "MausBot", defaultBot: {} }], true);
+  it("tells a place's Obot that is not the Chief that the person's day and brief are its own, and a member's that they are not", () => {
+    const place = chiefOfStaffSystemPrompt("maus", [{ id: "maus", name: "Obot", defaultBot: {} }], true);
     expect(place).toContain("but you are not the Chief: team incidents stay with the Chief.");
     expect(place).toContain("Keeping an eye on the person's day and their daily brief are yours.");
-    const member = chiefOfStaffSystemPrompt("maus", [{ id: "maus", name: "MausBot", defaultBot: { person: "ada@example.test" } }], true);
+    const member = chiefOfStaffSystemPrompt("maus", [{ id: "maus", name: "Obot", defaultBot: { person: "ada@example.test" } }], true);
     expect(member).toContain("but you are not the Chief: the daily brief and team incidents stay with the Chief.");
     expect(member).not.toContain("daily brief are yours");
   });
@@ -180,9 +180,9 @@ describe("an @everyone line from the Team map", () => {
     expect(EVERYONE_ON_THE_MAP).toContain("never to all of them by default");
   });
 
-  it("says nothing of it to a Chief that cannot hand work on, or to a MausBot that only holds the tools", () => {
+  it("says nothing of it to a Chief that cannot hand work on, or to a Obot that only holds the tools", () => {
     expect(chiefOfStaffSystemPrompt("chief", team, false)).not.toContain(EVERYONE_ON_THE_MAP);
-    const maus = [{ id: "maus", name: "MausBot", defaultBot: { person: "ada@example.test" } }, ...team.slice(1)];
+    const maus = [{ id: "maus", name: "Obot", defaultBot: { person: "ada@example.test" } }, ...team.slice(1)];
     expect(chiefOfStaffSystemPrompt("maus", maus, true)).not.toContain(EVERYONE_ON_THE_MAP);
   });
 });

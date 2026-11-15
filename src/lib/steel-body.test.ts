@@ -8,7 +8,7 @@ import { steelBodyImage, type SteelImage } from "./steel-body";
 
 const images: SteelImage[] = [40, 56, 88, 128, 192, 256].map((px) => ({ body: "cursor", px, url: `/steel/cursor-${px}.webp` }));
 
-describe("MausBot's rendered steel body", () => {
+describe("Obot's rendered steel body", () => {
   it("picks the smallest image with a device pixel for every pixel drawn, from the popup down to the cursor", () => {
     expect(steelBodyImage("cursor", 20, 2, images)).toBe("/steel/cursor-40.webp");
     expect(steelBodyImage("cursor", 28, 2, images)).toBe("/steel/cursor-56.webp");

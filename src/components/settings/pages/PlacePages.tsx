@@ -97,7 +97,7 @@ export function OverviewPage() {
       <SettingsRows><PlaceLookRows /><DefaultBotSidebarRow simple /></SettingsRows>
     </SettingsGroup>
     {ctx.desktop && ctx.cloud && team && team.cloudPage && <div data-settings-block="people-and-plan"><TeamPeopleCard team={team} /></div>}
-    {/* Address: a self-hosted server's own web address, Advanced only. A Cloud's address is MausBot's to manage, so it
+    {/* Address: a self-hosted server's own web address, Advanced only. A Cloud's address is Obot's to manage, so it
         has none here (no administrator or proxy steps for a person who has no server to set up). */}
     {place.kind === "server" && !ctx.client && ctx.advanced && <CustomDomainSettings />}
   </>;

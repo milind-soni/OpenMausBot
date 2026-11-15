@@ -1,4 +1,4 @@
-// The OpenMausBot package file ("openmaus.package"), v1, v2 or v3 (v2 with
+// The Obot package file ("openmaus.package"), v1, v2 or v3 (v2 with
 // more skills); every reader returns v2 or v3. The single validation gate for
 // the server, the renderer and the Admin upload, so it imports only zod, yaml,
 // croner and pure shared modules (no Buffer, no node:*). The schema has no
@@ -35,7 +35,7 @@ export const PACKAGE_V1_MAX_SKILLS = 20;
 export const BOTMRR_MARKDOWN_VERSION = 1;
 const BOTMRR_MARKDOWN_MAX_BYTES = 1_000_000;
 
-export const NEWER_PACKAGE_MESSAGE = "This file was made by a newer OpenMausBot. Update the app, then import it again.";
+export const NEWER_PACKAGE_MESSAGE = "This file was made by a newer Obot. Update the app, then import it again.";
 
 export type PackageTrust = "file" | "org";
 export type PackageFormatErrorCode = "not_a_package" | "unsupported_version" | "newer_version" | "invalid" | "too_large";
@@ -373,7 +373,7 @@ const routineSchema = z.object({
   timeoutMinutes: z.number().int().min(1).max(1_440).optional(),
   overlap: z.enum(["skip", "queue"]).optional(),
   continuity: z.boolean().optional(),
-  /** Also run once each time OpenMausBot starts. Repeating routines only. */
+  /** Also run once each time Obot starts. Repeating routines only. */
   runOnStartup: z.boolean().optional(),
   /** The publisher's intent. File imports always arrive paused. */
   enabledAfterInstall: z.boolean(),
@@ -795,16 +795,16 @@ export function parsePackageDocument(value: unknown, options: { trust?: PackageT
 export function downgradeToV1(document: PackageDocument):
   { document: PackageDocumentV1; dropped: string[] } | { error: string } {
   const pkg = document.package;
-  if (!pkg.agents.length || !pkg.team) return { error: "Packages without bots cannot be opened by older versions of OpenMausBot." };
+  if (!pkg.agents.length || !pkg.team) return { error: "Packages without bots cannot be opened by older versions of Obot." };
   const referenced = new Set(pkg.agents.flatMap((agent) => agent.skills ?? []));
   const skills = (pkg.skills?.entries ?? []).filter((skill) => referenced.has(skill.name));
   if (skills.length > PACKAGE_V1_MAX_SKILLS) {
-    return { error: `Older versions of OpenMausBot accept at most ${PACKAGE_V1_MAX_SKILLS} skills in a package.` };
+    return { error: `Older versions of Obot accept at most ${PACKAGE_V1_MAX_SKILLS} skills in a package.` };
   }
   const crowded = pkg.agents.find((agent) => (agent.skills?.length ?? 0) > PACKAGE_V1_MAX_SKILLS);
-  if (crowded) return { error: `Older versions of OpenMausBot accept at most ${PACKAGE_V1_MAX_SKILLS} skills per bot (${crowded.key} has more).` };
+  if (crowded) return { error: `Older versions of Obot accept at most ${PACKAGE_V1_MAX_SKILLS} skills per bot (${crowded.key} has more).` };
   const outOfRange = (pkg.routines ?? []).find((routine) => routine.timeoutMinutes !== undefined && (routine.timeoutMinutes < 5 || routine.timeoutMinutes > 240));
-  if (outOfRange) return { error: `Older versions of OpenMausBot accept run limits from 5 to 240 minutes (${outOfRange.key} has ${outOfRange.timeoutMinutes}).` };
+  if (outOfRange) return { error: `Older versions of Obot accept run limits from 5 to 240 minutes (${outOfRange.key} has ${outOfRange.timeoutMinutes}).` };
 
   const dropped: string[] = [];
   if (pkg.publisher) dropped.push("package.publisher");
@@ -851,7 +851,7 @@ export function downgradeToV1(document: PackageDocument):
   try {
     return { document: parsePackageV1({ format: PACKAGE_FORMAT, version: PACKAGE_V1_VERSION, package: v1 }), dropped };
   } catch (error) {
-    return { error: error instanceof Error ? error.message : "This package cannot be written for older versions of OpenMausBot." };
+    return { error: error instanceof Error ? error.message : "This package cannot be written for older versions of Obot." };
   }
 }
 

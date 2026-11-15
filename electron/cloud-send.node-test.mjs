@@ -369,7 +369,7 @@ test("My Cloud's notice says what did not go, by kind, with each reason: logins 
   const login = (id, site) => ({ key: itemKey.login(site, "amit"), kind: "login", label: site, detail: "amit", id, parts: { saved: id } });
   const sides = fakeSides({ localItems: [bot("ember", { soul: "s" }), login("l1", "bank.example"), login("l2", "crm.example"), { key: itemKey.onePassword(), kind: "1password", label: "1Password", parts: { token: "t" } }] });
   sides.deps.handoff = async (what) => {
-    if (what.kind === "login") throw new Error("OpenMausBot on this computer did not answer. Try again.");
+    if (what.kind === "login") throw new Error("Obot on this computer did not answer. Try again.");
     throw new Error("1Password did not accept this computer's token, so it was not sent to My Cloud.");
   };
   const send = createCloudSend(sides.deps);
@@ -379,7 +379,7 @@ test("My Cloud's notice says what did not go, by kind, with each reason: logins 
   const notice = sendNotice(send.snapshot());
   const none = { bots: [], skills: 0, logins: 0, onePassword: false, settings: 0, connections: 0, chats: false };
   assert.deepEqual(notice.last.reasons, [
-    { what: { ...none, logins: 2 }, error: "OpenMausBot on this computer did not answer. Try again." },
+    { what: { ...none, logins: 2 }, error: "Obot on this computer did not answer. Try again." },
     { what: { ...none, onePassword: true }, error: "1Password did not accept this computer's token, so it was not sent to My Cloud." },
   ]);
   assert.equal(notice.last.error, undefined, "the send itself did not stop");
@@ -471,7 +471,7 @@ test("chats by row: the cursor moves only past what My Cloud took; one removed t
   };
   const local = sides.deps.local;
   sides.deps.local = async (route) => {
-    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.openmausbot", conversations: heads() }), { status: 200 });
+    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.obot", conversations: heads() }), { status: 200 });
     const asked = /^\/api\/cloud-send\/chats\/rows\?thread=([\w-]+)&after=(\d+)&id=/u.exec(route);
     if (asked) {
       const list = rows[asked[1]], from = Number(asked[2]);
@@ -534,7 +534,7 @@ function chatSides({ threads, page = 300, answer = () => "accepted", onPost = ()
   const local = sides.deps.local;
   const json = (value) => new Response(JSON.stringify(value), { status: 200 });
   sides.deps.local = async (route) => {
-    if (route === "/api/cloud-send/chats") return json({ v: 1, dataDir: "/desk/.openmausbot", conversations: Object.entries(rows).map(([threadId, list]) => ({ bot: "ember", threadId, last: list.length, lastId: list.at(-1).id, busy: false })) });
+    if (route === "/api/cloud-send/chats") return json({ v: 1, dataDir: "/desk/.obot", conversations: Object.entries(rows).map(([threadId, list]) => ({ bot: "ember", threadId, last: list.length, lastId: list.at(-1).id, busy: false })) });
     const asked = /^\/api\/cloud-send\/chats\/rows\?thread=([\w-]+)&after=(\d+)&id=/u.exec(route);
     if (asked) {
       onRead(asked[1]);
@@ -617,7 +617,7 @@ test("a room's chats go with the room, whatever bots My Cloud has, and never as 
   const local = sides.deps.local;
   const room = { name: "Launch", memberIds: ["ember"], bulletin: "Ship it." };
   sides.deps.local = async (route) => {
-    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.openmausbot", conversations: [
+    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.obot", conversations: [
       { bot: "ember", threadId: "t-a", last: 1, lastId: "t-a-1", busy: false }, { room: "r-launch", threadId: "t-room", last: 1, lastId: "t-room-1", busy: false },
       { room: "r-busy", threadId: "t-busy", last: 1, lastId: "t-busy-1", busy: true }, { bot: "ember", room: "r-both", threadId: "t-both", last: 1, lastId: "t-both-1", busy: false },
     ] }), { status: 200 });
@@ -646,7 +646,7 @@ test("a room nobody wrote in yet goes once as its thread with no rows, so My Clo
   const room = { name: "Quiet", memberIds: ["ember"], bulletin: "" };
   const asked = [];
   sides.deps.local = async (route) => {
-    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.openmausbot", conversations: [{ bot: "ember", threadId: "t-a", last: 1, lastId: "t-a-1", busy: false }],
+    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.obot", conversations: [{ bot: "ember", threadId: "t-a", last: 1, lastId: "t-a-1", busy: false }],
       rooms: [{ room: "r-quiet", threadId: "t-quiet", members: ["ember"] }, { room: "r-lonely", threadId: "t-lonely", members: [] }] }), { status: 200 });
     if (route.startsWith("/api/cloud-send/chats/rows?thread=t-quiet&")) {
       asked.push(route);

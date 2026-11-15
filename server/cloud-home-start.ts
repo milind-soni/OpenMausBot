@@ -185,7 +185,7 @@ export function tunnelCommand(bin: string, token: string): { command: string; ar
 
 /** The server's data directory on the volume. */
 export function cloudHomeDataDir(env: NodeJS.ProcessEnv, home: string): string {
-  return env.OMB_DATA_DIR || posix.join(home, ".openmausbot");
+  return env.OMB_DATA_DIR || posix.join(home, ".obot");
 }
 
 /** flock(1)'s exit status when another process holds the lock (its --conflict-exit-code). */
@@ -214,7 +214,7 @@ export function holdVolume(home: string, lock: VolumeLock = flockVolume): void {
     return;
   }
   closeSync(fd);
-  if (result.status === VOLUME_HELD) throw new Error("Another MausBot home is already running on this volume. No data was changed.");
+  if (result.status === VOLUME_HELD) throw new Error("Another Obot home is already running on this volume. No data was changed.");
   const why = result.error?.message ?? (String(result.stderr ?? "").trim().split("\n")[0] || `exit ${result.status}`);
   throw new Error(`This home could not lock its volume (${why}), so it will not start: another home might be using it. No data was changed.`);
 }
@@ -329,7 +329,7 @@ function dropCapabilities(env: NodeJS.ProcessEnv): string {
 }
 
 /** Where an own server's connector mounts the home's secrets, read-only, instead of putting them in its environment. */
-export const CLOUD_SECRETS_FILE = "/run/mausbot/secrets.json";
+export const CLOUD_SECRETS_FILE = "/run/obot/secrets.json";
 /** What the file may hold: the server's secrets, and the tunnel's token, which only cloudflared gets. */
 export const CLOUD_SECRETS_FILE_KEYS = [...CLOUD_HOME_SECRET_KEYS, "OMB_CLOUD_TUNNEL_TOKEN"] as const;
 
@@ -394,7 +394,7 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
   const home = processEnv.HOME || "/data";
   const env = root ? { ...processEnv, ...readCloudSecretsFile(home) } : processEnv;
   const config = cloudHomeConfiguration(env);
-  if (!config) throw new Error("This image runs a My Cloud machine for MausBot Cloud; set its boot contract (docs/cloud-pro.md).");
+  if (!config) throw new Error("This image runs a My Cloud machine for Obot Cloud; set its boot contract (docs/cloud-pro.md).");
   // Logged here once: the server child never sees what they are about.
   for (const warning of config.warnings) console.warn(`cloud home: ${warning}`);
   const { server, edge, edgeFiles, tunnelToken, secrets, dropped } = cloudHomeChildEnvironments(config, env, home);

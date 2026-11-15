@@ -539,7 +539,7 @@ export function browserEngineStatus(options: BrowserLookupOptions = {}): Browser
     return { kind: "ready", binaryPath, version, managed, ...(warning ? { warning } : {}) };
   }
   if (bundle && (options.exists ?? existsSync)(bundle.directory)) {
-    return { kind: "unavailable", reason: "The desktop browser bundle is incomplete. Reinstall or update OpenMausBot to repair it.", installable: false };
+    return { kind: "unavailable", reason: "The desktop browser bundle is incomplete. Reinstall or update Obot to repair it.", installable: false };
   }
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;

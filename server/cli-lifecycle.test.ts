@@ -88,7 +88,7 @@ beforeEach(() => {
   mocks.clearLeftoverTailscaleServe.mockResolvedValue(false);
   mocks.createTunnelAccount.mockReturnValue({ credentials: { status: "available", read: () => ({}) }, service: { retry: async () => ({}), restore: async () => ({}), dispose: vi.fn() } });
   mocks.describeTunnelAccount.mockReturnValue({ email: "fixture@example.test" });
-  mocks.tunnelAccess.mockReturnValue({ endpoint: "https://fixture.openmausbot.test" });
+  mocks.tunnelAccess.mockReturnValue({ endpoint: "https://fixture.obot.test" });
   mocks.ensureCloudflared.mockResolvedValue("/fixture/cloudflared");
   mocks.guardianEntry.mockReturnValue("/fixture/guardian");
   mocks.createTunnelOrigin.mockReturnValue({ socketPath: join(dataDir, "fixture.sock") });
@@ -174,7 +174,7 @@ describe("CLI startup lifecycle", () => {
       healthRequests++;
       if (healthRequests === 1) return Response.json({}, { status: 503 });
       if (healthRequests === 3) interrupt();
-      return Response.json({ app: "openmausbot", pid: childPid });
+      return Response.json({ app: "obot", pid: childPid });
     }));
     expect(await runServe({ ...options, tunnel: true }, vi.fn())).toBe(0);
     expect(healthRequests).toBe(3);
@@ -188,7 +188,7 @@ describe("CLI startup lifecycle", () => {
     // Nothing answers before serve starts its server; then it is up.
     vi.stubGlobal("fetch", vi.fn(async () => (++healthRequests === 1
       ? Response.json({}, { status: 503 })
-      : Response.json({ app: "openmausbot", pid: childPid }))));
+      : Response.json({ app: "obot", pid: childPid }))));
     const service = { retry: vi.fn(async () => ({})), restore: vi.fn(), dispose: vi.fn() };
     mocks.createTunnelAccount.mockReturnValue({ credentials: { status: "available", read: () => ({}) }, service });
     const running = { started: Promise.resolve(), stop: vi.fn().mockResolvedValue(undefined) };
@@ -214,13 +214,13 @@ describe("CLI startup lifecycle", () => {
 
   it("reopens a matching desktop workspace even when its server PID differs from the lease owner", async () => {
     writeFileSync(join(dataDir, "environment-id"), workspaceId);
-    writeFileSync(join(dataDir, "openmausbot-server.lease"), JSON.stringify({
+    writeFileSync(join(dataDir, "obot-server.lease"), JSON.stringify({
       version: 1, pid: process.pid, host: hostname(), token: workspaceId, createdAt: Date.now(),
     }));
     vi.stubEnv("OMB_DATA_DIR", process.env.OMB_DATA_DIR);
     for (const stream of [process.stdin, process.stdout]) Object.defineProperty(stream, "isTTY", { value: true, configurable: true });
     vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => String(url).endsWith("/api/health")
-      ? Response.json({ app: "openmausbot", pid: childPid })
+      ? Response.json({ app: "obot", pid: childPid })
       : Response.json({ environmentId: workspaceId })));
     const start = vi.fn();
     const open = vi.fn().mockResolvedValue(true);
@@ -233,7 +233,7 @@ describe("CLI startup lifecycle", () => {
 
   it("does not mistake another workspace on the same port for this one", async () => {
     writeFileSync(join(dataDir, "environment-id"), workspaceId);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json({ app: "openmausbot", pid: childPid }))
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json({ app: "obot", pid: childPid }))
       .mockResolvedValueOnce(Response.json({ environmentId: "different-workspace" })));
     expect(await isWorkspaceRunning(options)).toBe(false);
   });
@@ -245,9 +245,9 @@ describe("CLI startup lifecycle", () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       const address = String(url);
       if (address.endsWith("/api/health")) {
-        return ++healthRequests === 1 ? Response.json({}, { status: 503 }) : Response.json({ app: "openmausbot", pid: childPid });
+        return ++healthRequests === 1 ? Response.json({}, { status: 503 }) : Response.json({ app: "obot", pid: childPid });
       }
-      if (address.endsWith("/.well-known/openmausbot/environment")) return Response.json({ environmentId: workspaceId, label: "fixture box" });
+      if (address.endsWith("/.well-known/obot/environment")) return Response.json({ environmentId: workspaceId, label: "fixture box" });
       expect(address).toBe(`http://127.0.0.1:${options.port}/api/auth/pairing`);
       expect(init?.method).toBe("POST");
       pairings.push(JSON.parse(String(init?.body)));
@@ -271,7 +271,7 @@ describe("CLI startup lifecycle", () => {
       requests.push(address);
       expect(init?.method).not.toBe("POST");
       if (address.endsWith("/api/health")) {
-        return ++healthRequests === 1 ? Response.json({}, { status: 503 }) : Response.json({ app: "openmausbot", pid: childPid });
+        return ++healthRequests === 1 ? Response.json({}, { status: 503 }) : Response.json({ app: "obot", pid: childPid });
       }
       if (address.startsWith("https://")) {
         if (failure === "unreachable") throw new Error("Fixture endpoint offline");
@@ -283,7 +283,7 @@ describe("CLI startup lifecycle", () => {
     expect(await runServe({ ...options, pair: true, phone: "android", publicUrl: "https://fixture.example.test" }, log)).toBe(0);
     expect(log).toHaveBeenCalledWith(expect.stringContaining("no phone pairing code was created"));
     expect(requests.some((url) => url.includes("/api/auth/pairing"))).toBe(false);
-    expect(requests).toContain("https://fixture.example.test/.well-known/openmausbot/environment");
+    expect(requests).toContain("https://fixture.example.test/.well-known/obot/environment");
   });
 
   it("offers Android client pairing only after verifying the same workspace, without claiming it is connected", async () => {
@@ -291,14 +291,14 @@ describe("CLI startup lifecycle", () => {
     const code = "ABCD-EFGH-JKLM";
     const expiresAt = Date.now() + 300_000;
     const pairingUrl = `${origin}/pair#code=${code}`;
-    // A real server mints both encodings of one window; Android can only scan the openmausbot:// one.
+    // A real server mints both encodings of one window; Android can only scan the obot:// one.
     const credential = `omb_pair_${"a".repeat(43)}`;
-    const inviteUrl = `openmausbot://pair?address=${encodeURIComponent(origin)}&token=${credential}&name=fixture`;
+    const inviteUrl = `obot://pair?address=${encodeURIComponent(origin)}&token=${credential}&name=fixture`;
     let healthRequests = 0;
     const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       const address = String(url);
       if (address.endsWith("/api/health")) {
-        return ++healthRequests === 1 ? Response.json({}, { status: 503 }) : Response.json({ app: "openmausbot", pid: childPid });
+        return ++healthRequests === 1 ? Response.json({}, { status: 503 }) : Response.json({ app: "obot", pid: childPid });
       }
       if (address === `http://127.0.0.1:${options.port}/api/auth/pairing`) {
         expect(init?.method).toBe("POST");
@@ -308,7 +308,7 @@ describe("CLI startup lifecycle", () => {
         // the public address with --public-url and must build both from that.
         return Response.json({ code, url: null, expiresAt, credential, serverName: "fixture", hint: "set OMB_PUBLIC_URL" });
       }
-      expect(address).toMatch(/\/\.well-known\/openmausbot\/environment$/);
+      expect(address).toMatch(/\/\.well-known\/obot\/environment$/);
       expect(init?.method).not.toBe("POST");
       expect(init?.body).toBeUndefined();
       return Response.json({ environmentId: workspaceId });
@@ -319,16 +319,16 @@ describe("CLI startup lifecycle", () => {
     const requests = fetcher.mock.calls.map(([url]) => String(url));
     const pairingRequest = `http://127.0.0.1:${options.port}/api/auth/pairing`;
     expect(requests.filter((url) => url === pairingRequest)).toHaveLength(1);
-    expect(requests).toContain(`http://127.0.0.1:${options.port}/.well-known/openmausbot/environment`);
-    expect(requests).toContain(`${origin}/.well-known/openmausbot/environment`);
-    expect(requests.indexOf(`${origin}/.well-known/openmausbot/environment`)).toBeLessThan(requests.indexOf(pairingRequest));
+    expect(requests).toContain(`http://127.0.0.1:${options.port}/.well-known/obot/environment`);
+    expect(requests).toContain(`${origin}/.well-known/obot/environment`);
+    expect(requests.indexOf(`${origin}/.well-known/obot/environment`)).toBeLessThan(requests.indexOf(pairingRequest));
     const output = log.mock.calls.map(([line]) => line).join("\n");
     expect(output).toContain(`Pairing code   ${code}   works once, until`);
     expect(output).toContain("· chat and approvals");
     expect(output).toContain(`Link           ${pairingUrl}`);
     expect(output).toMatch(/[▀▄█]/);
     expect(output).toContain(`Or open ${origin}/pair on your phone and enter the code.`);
-    expect(output).toContain("On Android, open the OpenMausBot app and scan the QR with its pairing scanner.");
+    expect(output).toContain("On Android, open the Obot app and scan the QR with its pairing scanner.");
     expect(output).toContain(qrToString(inviteUrl));
     expect(output).not.toContain(qrToString(pairingUrl));
     expect(output).toContain("client access: chat and approvals, not settings or pairing administration");

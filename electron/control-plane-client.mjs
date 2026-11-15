@@ -296,7 +296,7 @@ export function createControlPlaneClient({
       });
       if (
         payload.ok !== true ||
-        payload.service !== "openmausbot-control-plane"
+        payload.service !== "obot-control-plane"
       ) {
         throw new ControlPlaneError("control_plane_unavailable");
       }
@@ -429,7 +429,7 @@ export function createControlPlaneClient({
       return { endpoint, connectorToken };
     },
 
-    /** MausBot Relay: `{token, hostId, nodes, expiresAt, refreshAfter}`, or `relay_unavailable` (503) while this
+    /** Obot Relay: `{token, hostId, nodes, expiresAt, refreshAfter}`, or `relay_unavailable` (503) while this
      * computer is outside the rollout. */
     async relayToken(installationCredential, { appVersion, devices, kind }) {
       if (typeof installationCredential !== "string" || !INSTALLATION_CREDENTIAL.test(installationCredential)) {

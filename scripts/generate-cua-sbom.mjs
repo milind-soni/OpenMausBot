@@ -285,8 +285,8 @@ function registryComponent(pkg, cargoLockPackages) {
         : []),
     ],
     properties: [
-      { name: "openmausbot:cargo:package-id", value: pkg.id },
-      { name: "openmausbot:cargo:crate-sha256", value: locked.checksum },
+      { name: "obot:cargo:package-id", value: pkg.id },
+      { name: "obot:cargo:crate-sha256", value: locked.checksum },
     ],
   };
 }
@@ -328,10 +328,10 @@ function interComponent() {
     ],
     properties: [
       {
-        name: "openmausbot:font:name-table-version",
+        name: "obot:font:name-table-version",
         value: "Version 4.001;git-66647c0bb",
       },
-      { name: "openmausbot:font:embedded-sha256", value: INTER_FONT_SHA256 },
+      { name: "obot:font:embedded-sha256", value: INTER_FONT_SHA256 },
     ],
   };
 }
@@ -474,7 +474,7 @@ function renderLicenseHtml(records, registryPackages) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OpenMausBot — Cua Driver third-party licenses</title>
+  <title>Obot — Cua Driver third-party licenses</title>
   <style>body{font:14px system-ui,sans-serif;line-height:1.45;max-width:960px;margin:2rem auto;padding:0 1rem;color:#171717}pre{white-space:pre-wrap;border:1px solid #ddd;border-radius:6px;padding:1rem;overflow-wrap:anywhere}a{color:#2563eb}table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #ddd;padding:.45rem;text-align:left;vertical-align:top}code{overflow-wrap:anywhere}</style>
 </head>
 <body>
@@ -629,24 +629,24 @@ const bom = {
         },
       ],
       properties: [
-        { name: "openmausbot:archive:sha256", value: ARCHIVE_SHA256 },
-        { name: "openmausbot:cargo-lock:sha256", value: CARGO_LOCK_SHA256 },
-        { name: "openmausbot:target", value: "x86_64-unknown-linux-gnu" },
-        { name: "openmausbot:feature", value: "cua-driver/portal-input" },
+        { name: "obot:archive:sha256", value: ARCHIVE_SHA256 },
+        { name: "obot:cargo-lock:sha256", value: CARGO_LOCK_SHA256 },
+        { name: "obot:target", value: "x86_64-unknown-linux-gnu" },
+        { name: "obot:feature", value: "cua-driver/portal-input" },
         {
-          name: "openmausbot:registry-component-count",
+          name: "obot:registry-component-count",
           value: String(EXPECTED_REGISTRY_UNION_COUNT),
         },
         {
-          name: "openmausbot:trycua-component-count",
+          name: "obot:trycua-component-count",
           value: String(TRYCUA_COMPONENTS.length),
         },
         {
-          name: "openmausbot:file:cua-driver:sha256",
+          name: "obot:file:cua-driver:sha256",
           value: DRIVER_SHA256,
         },
         {
-          name: "openmausbot:file:cua-cursor-theme:sha256",
+          name: "obot:file:cua-cursor-theme:sha256",
           value: CURSOR_THEME_SHA256,
         },
       ],
@@ -680,7 +680,7 @@ const mplSourceRows = EXPECTED_MPL_COMPONENTS.map((component) => {
 });
 const notices = `# Cua Driver ${RELEASE_VERSION} third-party notices
 
-OpenMausBot redistributes two executables from the official Cua Driver ${RELEASE_VERSION} Linux x64 release: \`cua-driver\` and \`cua-cursor-theme\`.
+Obot redistributes two executables from the official Cua Driver ${RELEASE_VERSION} Linux x64 release: \`cua-driver\` and \`cua-cursor-theme\`.
 
 - Upstream source commit: [\`${SOURCE_COMMIT}\`](https://github.com/trycua/cua/commit/${SOURCE_COMMIT})
 - Upstream \`Cargo.lock\` SHA-256: \`${CARGO_LOCK_SHA256}\`
@@ -696,7 +696,7 @@ The shipped build graph contains exactly the following MPL-2.0 components. Their
 
 ${mplSourceRows.join("\n")}
 
-The complete MPL-2.0 text and package copyright notices appear in \`THIRD_PARTY_LICENSES.html\`. These files remain under their original licenses; OpenMausBot's and Cua's MIT licenses do not replace them.
+The complete MPL-2.0 text and package copyright notices appear in \`THIRD_PARTY_LICENSES.html\`. These files remain under their original licenses; Obot's and Cua's MIT licenses do not replace them.
 
 ## Scope and method
 

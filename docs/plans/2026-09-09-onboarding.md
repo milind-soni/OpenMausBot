@@ -1,4 +1,4 @@
-# New-user onboarding
+﻿# New-user onboarding
 
 Status: built on `feat/onboarding`. This is the as-built design; the
 exploratory plan it replaced considered recorded clips and a field-guide
@@ -7,7 +7,7 @@ real interface.
 
 ## Goal
 
-A new install should leave the first session knowing what OpenMausBot is
+A new install should leave the first session knowing what Obot is
 (agents with hands, connected apps, channels, automations, the terminal)
 and where each of those lives in the app, without reading a manual. Every
 part is skippable, replayable from Settings, and never shown on a paired
@@ -107,3 +107,4 @@ sweep, and beats swap without the view transition.
 - A skin picker inside the welcome flow.
 - Per-user onboarding state (prepared for `feat/rbac-users`, moved there).
 - The CLI setup wizard in `server/cli-setup.ts`.
+

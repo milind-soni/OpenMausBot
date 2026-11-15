@@ -139,7 +139,7 @@ try {
 const fs = require('node:fs');
 let args = process.argv.slice(2);
 if (args[0] === '-H') args = args.slice(2);
-const labels = ${JSON.stringify({ "com.openmausbot.local-vm": "1", "com.openmausbot.cua-driver": CUA_DRIVER_VERSION, "com.openmausbot.cua-base": BASE_IMAGE_DIGEST, "com.openmausbot.image-layer": IMAGE_LAYER_VERSION, "com.openmausbot.workspace": "1" })};
+const labels = ${JSON.stringify({ "com.obot.local-vm": "1", "com.obot.cua-driver": CUA_DRIVER_VERSION, "com.obot.cua-base": BASE_IMAGE_DIGEST, "com.obot.image-layer": IMAGE_LAYER_VERSION, "com.obot.workspace": "1" })};
 const imageId = 'sha256:' + 'a'.repeat(64);
 const counter = ${JSON.stringify(join(scratch, "captures"))};
 const target = fs.existsSync(${JSON.stringify(fixtureTarget)}) ? JSON.parse(fs.readFileSync(${JSON.stringify(fixtureTarget)}, 'utf8')) : null;
@@ -153,7 +153,7 @@ else if (args[0] === 'exec') result = args.includes('--version') ? 'cua-driver $
   : args.includes('health_report') ? {schema_version:'1',overall:'ok',checks:[]} : {};
 else if (args[0] === 'info') result = 'fixture';
 else if (args[0] === 'image' && args[1] === 'inspect') result = [{Id:imageId,Config:{Labels:labels}}];
-else if (args[0] === 'inspect' && (args[1] === 'openmausbot-computer' || args[1] === target?.containerName)) result = [{
+else if (args[0] === 'inspect' && (args[1] === 'obot-computer' || args[1] === target?.containerName)) result = [{
   Config:{Image:${JSON.stringify(IMAGE)},Labels:args[1] === target?.containerName ? {...labels,${JSON.stringify(TARGET_LABEL)}:target.label} : labels,Env:['VNC_PW=fixture-password']},
   State:{Running:true},Image:imageId,
   Mounts:[{Type:'bind',Source:args[1] === target?.containerName
@@ -189,7 +189,7 @@ process.stdout.write(typeof result === 'string' ? result : JSON.stringify(result
   const companionPort = await freePort();
   const controlPort = await freePort();
   const controlToken = randomBytes(32).toString("base64url");
-  const controlHeaders = { "x-openmausbot-control-token": controlToken };
+  const controlHeaders = { "x-obot-control-token": controlToken };
   const companionHome = join(scratch, "companion-home");
   mkdirSync(companionHome);
   sidecar = spawn(process.execPath, ["--experimental-strip-types", join(root, "companion", "src", "index.ts")], {
@@ -217,7 +217,7 @@ process.stdout.write(typeof result === 'string' ? result : JSON.stringify(result
     log: fixture.info.logPath,
   }, null, 2));
   console.log("Pair the Simulator with the address and code above. Allow computer view with:");
-  console.log(`  curl -X POST -H "x-openmausbot-control-token: ${controlToken}" http://127.0.0.1:${controlPort}/devices/<device-id>/cloud-desktop`);
+  console.log(`  curl -X POST -H "x-obot-control-token: ${controlToken}" http://127.0.0.1:${controlPort}/devices/<device-id>/cloud-desktop`);
   // What the phone has done to the desktop, and who holds the computer.
   const eventsPort = await freePort();
   createHttpServer(async (_req, res) => {

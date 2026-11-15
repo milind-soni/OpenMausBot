@@ -1,7 +1,7 @@
 // Apps on the hosting the Cloud plan includes, on the Published apps page of the real renderer against a launched
 // server. A loopback stand-in is the Admin's relay and serves what is published; a second one is Netlify, for a site on
 // the person's own account beside them. The bot publishes folders of its own through its tool's route; the page shows
-// the plan's count, each card's source, the preview beside the chat, an app MausBot took down, and Delete through the
+// the plan's count, each card's source, the preview beside the chat, an app Obot took down, and Delete through the
 // relay. Nothing here reaches the real Admin or Netlify. Needs the pinned agent-browser binary: runs when one resolves
 // (tools directory, OMB_AGENT_BROWSER_PATH or PATH) or OMB_UI_E2E=1 asks for the verified download; otherwise skipped.
 import { spawn } from "node:child_process";
@@ -106,7 +106,7 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     // The bot publishes two folders of its own through its tool's route: the server reads them and asks the relay.
     const bot = ((await api("GET", "/api/bots")).bots as Array<{ id: string; threadId: string }>).find((one) => one.id === info.botId)!;
     const { token: capability } = await fetch(`${info.url}/api/testing/internal-capability`, { method: "POST",
-      headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY }, body: JSON.stringify({ botId: bot.id, threadId: bot.threadId }) }).then((answer) => answer.json()) as { token: string };
+      headers: { "content-type": "application/json", "x-obot-test-capability": CAPABILITY_KEY }, body: JSON.stringify({ botId: bot.id, threadId: bot.threadId }) }).then((answer) => answer.json()) as { token: string };
     const workspace = join(info.dataDir, "workspaces", info.botId);
     const tool = async (input: Record<string, unknown>) => {
       const answer = await fetch(`${info.url}/api/internal/apps/publish`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${capability}` }, body: JSON.stringify(input) });
@@ -160,7 +160,7 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     await shot("preview-desktop");
     await press('aside[data-app-preview] button[aria-label="Close preview"]');
 
-    // MausBot takes one down: it stays on the page, marked, with nothing to open, and still counts until it is deleted.
+    // Obot takes one down: it stays on the page, marked, with nothing to open, and still counts until it is deleted.
     hosting.takeDown(saleKey);
     await new Promise((done) => setTimeout(done, 2_100));
     await openPage();

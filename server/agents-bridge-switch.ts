@@ -26,7 +26,7 @@ export const AGENTS_PROXY_ENV = { ...AGENTS_NODE_FLAG, [TOOL_BRIDGE_ENV]: "0" } 
 
 type BridgeConfig = { features?: { agentsToolBridge?: boolean; claudeUserMcp?: boolean } };
 
-/** The workspace switch: `{"features": {"agentsToolBridge": true}}` in ~/.openmausbot/config.json, or
+/** The workspace switch: `{"features": {"agentsToolBridge": true}}` in ~/.obot/config.json, or
  * OMB_AGENTS_TOOL_BRIDGE set to exactly "1" or "0", which wins over the saved setting. */
 export function agentsToolBridgeEnabled(cfg: BridgeConfig, env: NodeJS.ProcessEnv = process.env): boolean {
   const override = env[TOOL_BRIDGE_ENV];
@@ -188,7 +188,7 @@ function walkSettings(value: unknown, found: SettingsFindings): void {
 type SettingsReading = "silent" | "names" | "hooks" | "wildcard" | "managed-only" | "unreadable";
 
 /** What one Claude settings file means for the bridge; the first reading that holds wins. Security:
- * OpenMausBot's own hooks reach the CLI through a private --settings file this never reads, so none of
+ * Obot's own hooks reach the CLI through a private --settings file this never reads, so none of
  * them may be a PreToolUse or PermissionRequest hook. */
 function claudeSettings(file: string, managed: boolean): SettingsReading {
   const text = textOf(file);

@@ -1,4 +1,4 @@
-// The server's side of MausBot Relay against the fake relay, driven by the reference phone: the server's own sessions
+// The server's side of Obot Relay against the fake relay, driven by the reference phone: the server's own sessions
 // are the phones, and every relayed request reaches the handler as a remote one.
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -22,7 +22,7 @@ const SERVER_VERSION = (JSON.parse(readFileSync(new URL("../package.json", impor
 
 const signingKey = generateKeyPairSync("ed25519").privateKey;
 const keys = new Map([["k1", ed25519RawPublicKey(signingKey)]]);
-const NODE = "relay1.openmausbot.com";
+const NODE = "relay1.obot.com";
 
 const cleanup: Array<() => unknown> = [];
 afterEach(async () => {
@@ -63,7 +63,7 @@ function serverHandler(sessions: SessionRegistry, relay: () => PhoneRelay | null
       return;
     }
     const gate = resolveRequestAuth(req, { sessions, cookieName: "omb_session", streamPath: "/api/events", url });
-    if (url.pathname === "/api/health" && !gate.auth) return send(200, { app: "openmausbot" });
+    if (url.pathname === "/api/health" && !gate.auth) return send(200, { app: "obot" });
     if (!gate.auth) return send(gate.status, { error: gate.error });
     return send(200, { kind: gate.auth.kind, id: gate.auth.kind === "session" ? gate.auth.session.id : null, source: requestSource(req), host: req.headers.host, via: gate.auth.kind === "session" ? gate.auth.via : null });
   };
@@ -139,7 +139,7 @@ async function pairPhone(server: Server): Promise<{ token: string; id: string; k
   return { token: reply.token, id: reply.device.id, k, session };
 }
 
-describe("phones through MausBot Relay on a server", () => {
+describe("phones through Obot Relay on a server", () => {
   it("stays off unless asked for, and never runs where the desktop's companion or a Cloud carries phones", () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-phone-relay-off-"));
     cleanup.push(() => removeTempDir(dir));
@@ -149,8 +149,8 @@ describe("phones through MausBot Relay on a server", () => {
     const base = { dataDir: dir, sessions, handle: () => {}, serverName: () => "VPS", publicOrigin: () => null, version: "0.1.152", log: (line: string) => logs.push(line) };
     expect(startPhoneRelay({ ...base, env: {}, refusal: null })).toBeNull();
     expect(startPhoneRelay({ ...base, env: { OMB_PHONE_RELAY: "true" }, refusal: null })).toBeNull();
-    expect(startPhoneRelay({ ...base, env: { OMB_PHONE_RELAY: "1" }, refusal: "a MausBot Cloud home" })).toBeNull();
-    expect(logs).toEqual(["phone relay: off on a MausBot Cloud home"]);
+    expect(startPhoneRelay({ ...base, env: { OMB_PHONE_RELAY: "1" }, refusal: "a Obot Cloud home" })).toBeNull();
+    expect(logs).toEqual(["phone relay: off on a Obot Cloud home"]);
     expect(() => statSync(join(dir, PHONE_RELAY_KEY_FILE))).toThrow();
   });
 
@@ -160,7 +160,7 @@ describe("phones through MausBot Relay on a server", () => {
     expect(server.logs).toContain(`phone relay: connected via ${NODE}`);
     const opened = server.sessions.openPairing({ scopes: ["client"] });
     const link = server.phoneRelay.invite(opened.credential, "VPS", null)!;
-    expect(link).toMatch(/^openmausbot:\/\/pair\?address=relay-only\.invalid%3A443&token=omb_pair_/);
+    expect(link).toMatch(/^obot:\/\/pair\?address=relay-only\.invalid%3A443&token=omb_pair_/);
     const descriptor = descriptorOf(link);
     expect(descriptor).toEqual({ v: 1, k: expect.any(String), h: b64u(server.hostId), r: [NODE] });
     const k = fromB64u(descriptor.k)!;
@@ -168,7 +168,7 @@ describe("phones through MausBot Relay on a server", () => {
     await waitFor(() => server.relay.admitted(b64u(server.hostId)).has(admissionHash(admission(credentialHash(opened.credential), server.hostId))));
 
     const session = await waitFor(() => viaRelay(server, k, opened.credential).catch(() => null), 6_000);
-    expect(json(await http(session, "GET", "/api/health"))).toEqual({ app: "openmausbot" });
+    expect(json(await http(session, "GET", "/api/health"))).toEqual({ app: "obot" });
     expect(await http(session, "GET", "/api/auth/session").then((reply) => [reply.status, json(reply).error])).toEqual([401, "pair this phone first"]);
 
     const paired = await http(session, "POST", "/api/pair", { body: JSON.stringify({ credential: opened.credential, deviceName: "Pixel" }), headers: { "content-type": "application/json" } });
@@ -181,7 +181,7 @@ describe("phones through MausBot Relay on a server", () => {
     // The same session now speaks for the new phone, with its own session.
     expect(json(await http(session, "GET", "/api/auth/session", { token: reply.token }))).toEqual({ kind: "session", id: reply.device.id, source: `relay-${reply.device.id}`, host: "phone-relay.invalid", via: "bearer" });
     // Whatever the phone writes, a relayed request is never this machine's.
-    const spoofed = await http(session, "GET", "/api/auth/session", { headers: { host: "127.0.0.1:8799", "x-openmausbot-cli-owner": "x", "x-forwarded-for": "127.0.0.1", cookie: "omb_session=x" } });
+    const spoofed = await http(session, "GET", "/api/auth/session", { headers: { host: "127.0.0.1:8799", "x-obot-cli-owner": "x", "x-forwarded-for": "127.0.0.1", cookie: "omb_session=x" } });
     expect(spoofed.status).toBe(403);
     expect(json(spoofed).error).toMatch(/proxy/);
     // A token inside the session must be the one whose key opened it.
@@ -302,9 +302,9 @@ describe("phones through MausBot Relay on a server", () => {
     expect(tunnelHolder({}, dir)).toBeNull();
     expect(tunnelHolder({ OMB_SERVES_TUNNEL: "1", OMB_TUNNEL_SOCKET: join(dir, "t.sock") }, dir)).toBe("this server runs with --tunnel");
     // Docker's Caddy reaches the server over a socket too: that is no tunnel.
-    expect(tunnelHolder({ OMB_TUNNEL_SOCKET: "/run/openmausbot/http.sock" }, dir)).toBeNull();
+    expect(tunnelHolder({ OMB_TUNNEL_SOCKET: "/run/obot/http.sock" }, dir)).toBeNull();
     expect(tunnelHolder({ OMB_INSTALLATION_CREDENTIAL: "omb_install_y" }, dir)).toMatch(/^OMB_INSTALLATION_CREDENTIAL is set/);
-    writeFileSync(account, JSON.stringify({ companionInstallationCredential: "omb_install_x", managedCompanionEndpointUrl: "https://c-0123456789abcdef0123456789abcdef.openmausbot.com" }));
+    writeFileSync(account, JSON.stringify({ companionInstallationCredential: "omb_install_x", managedCompanionEndpointUrl: "https://c-0123456789abcdef0123456789abcdef.obot.com" }));
     expect(tunnelHolder({}, dir)).toMatch(/holds a tunnel address/);
     writeFileSync(account, "not json");
     expect(tunnelHolder({}, dir)).toMatch(/could not be read/);

@@ -1,4 +1,4 @@
-# One browser engine: agent-browser
+﻿# One browser engine: agent-browser
 
 **Decision (Sep 6, 2026):** the bots' browser is [agent-browser](https://github.com/vercel-labs/agent-browser)
 (Vercel Labs, Apache-2.0), pinned, on every platform: macOS, Windows and Linux
@@ -12,7 +12,7 @@ Stagehand, browser-use, browserless, Lightpanda) is summarised at the end.
   sandbox, and Electron 43 exits before ready with it on Windows
   (electron/electron#51761). A browser that is its own Chrome process, driven
   over CDP, does not depend on that.
-- **Servers have no browser today.** `openmausbot serve` and the Docker stack
+- **Servers have no browser today.** `obot serve` and the Docker stack
   run without Electron, so `availableBrowserConnection()` is null and the
   toggle is greyed.
 - **One engine, one contract.** A skill written on a Mac runs on a VPS.
@@ -151,7 +151,7 @@ system prompt teaches them. No adapter.
 - **Where it applies.** The desktop app, where the bots run on the person's
   computer, and My Cloud (a personal Cloud home, never a Team Cloud) once a
   Mac or PC lends its Chrome. That computer lends Chrome only by its own
-  **Your Chrome** switch in Settings → MausBot Cloud, which is off by default,
+  **Your Chrome** switch in Settings → Obot Cloud, which is off by default,
   never part of the default grant, and dropped when lending is turned off.
   Chrome travels over the device link that carries the internet connection:
   agent-browser on My Cloud attaches through a loopback door per browser
@@ -170,7 +170,7 @@ system prompt teaches them. No adapter.
   is now where My Chrome is when it cannot be found by itself (another port or
   machine); setting it also makes My Chrome available on a server. It no
   longer attaches every bot. Details of the lent Chrome:
-  [MausBot Cloud](../cloud-pro.md#your-chrome).
+  [Obot Cloud](../cloud-pro.md#your-chrome).
 - **Why My Chrome and not a headed built-in browser.** Measured Oct 12 with
   agent-browser 0.37.0 and Chrome 154 on macOS, entering an account that
   does not exist at accounts.google.com: the headless built-in browser and a
@@ -347,3 +347,4 @@ included), and for any bot whose work depends on a page that silently fails.
 | Stagehand, browser-use, Skyvern | Agents or model-driven SDKs: a second model loop under our agents. |
 | browserless | SSPL / commercial licence. |
 | Lightpanda | Not Chrome (partial web compatibility), AGPL. |
+

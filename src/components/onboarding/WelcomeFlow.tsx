@@ -125,7 +125,7 @@ export function WelcomeFlow({
     setChiefStepOpen(true);
     return () => setChiefStepOpen(false);
   }, [chief, embedded]);
-  // The scrim fades with the dialog and lets clicks through while MausBot lands.
+  // The scrim fades with the dialog and lets clicks through while Obot lands.
   const fadeScrim = useCallback(() => {
     if (!root.current) return;
     root.current.style.pointerEvents = "none";

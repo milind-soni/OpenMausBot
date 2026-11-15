@@ -1,4 +1,4 @@
-# Phase 0 — foundation: the harness sees what a bot did, and starts measuring
+﻿# Phase 0 — foundation: the harness sees what a bot did, and starts measuring
 
 Implementation note (Sep 19): this remains the original design, not a list of
 shipped capabilities. The current foundation covers receipts, observed-work
@@ -13,7 +13,7 @@ Status: plan (Sep 14, 2026). First phase of the harness-upgrade programme descri
 Touches no bot-to-bot behaviour: delegation, rooms, peer comms and shared memory are untouched
 until Phase 6.
 
-**Standing rule (owner, Sep 14): OpenMausBot is model- and CLI-agnostic, and every item here must
+**Standing rule (owner, Sep 14): Obot is model- and CLI-agnostic, and every item here must
 hold for every engine.** The engine families on main are: **Claude Code** (stream-json,
 `drivers/claude.ts`), **Codex** (app-server JSON-RPC, `drivers/codex.ts`), **pi** (rpc mode,
 `drivers/pi.ts`), the **ACP family** sharing `drivers/acp/core.ts` (Cursor, Gemini, Droid, Grok
@@ -446,3 +446,4 @@ Follow `docs/verification/README.md`: every claim below is proven against an iso
   `recallMessages` (kind-aware boost) and rendered with a visible `[digest]` label.
 - **Budget denies a human's turn.** Mitigation: `kind: "turn"` from a person is never denied by the
   hourly/daily caps, only by `maxConcurrent`; the sidebar shows why.
+

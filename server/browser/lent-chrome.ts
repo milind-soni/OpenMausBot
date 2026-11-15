@@ -179,9 +179,9 @@ export function lentChromeGuidance(problem: LentChromeProblem | CloudLendingRefu
   const device = lender?.device ?? "computer";
   switch (problem) {
     case "offline":
-      return `${name} is lent but offline: OpenMausBot on it is closed or the ${device} is asleep. Tell the person in one sentence to open OpenMausBot on that ${device}. Do not switch to another browser.`;
+      return `${name} is lent but offline: Obot on it is closed or the ${device} is asleep. Tell the person in one sentence to open Obot on that ${device}. Do not switch to another browser.`;
     case "not-lent":
-      return "No computer lends its Chrome to My Cloud now. Tell the person in one sentence to open OpenMausBot on their Mac or PC, which lends its Chrome by itself (updating OpenMausBot there if it is an older version), or to switch this profile to Built-in under Settings → Browser profiles.";
+      return "No computer lends its Chrome to My Cloud now. Tell the person in one sentence to open Obot on their Mac or PC, which lends its Chrome by itself (updating Obot there if it is an older version), or to switch this profile to Built-in under Settings → Browser profiles.";
     case "no-chrome":
       return `Chrome on ${name} isn't open with remote debugging on. Tell the person in one sentence to open Chrome on that ${device}, turn on remote debugging at chrome://inspect/#remote-debugging, and allow the connection when Chrome asks.`;
     case "unreachable":

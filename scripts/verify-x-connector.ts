@@ -1,5 +1,5 @@
 // The X card in the real Apps pop-up, against fake-engine servers and one loopback stand-in for both treg and the
-// MausBot Cloud relay: no real treg key, account or call.
+// Obot Cloud relay: no real treg key, account or call.
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { mkdirSync } from "node:fs";

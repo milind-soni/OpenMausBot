@@ -1,6 +1,6 @@
 {
   "about": [
-    "Shared contract between OpenMausBot (server/extractor/contract.ts) and the openmaus-cloud Admin's relay.",
+    "Shared contract between Obot (server/extractor/contract.ts) and the openmaus-cloud Admin's relay.",
     "OMB sends POST <OMB_CLOUD_DECIDER_URL>/v1/extract with Authorization: Bearer <OMB_CLOUD_DECIDER_TOKEN>, the x-omb-seam header naming the seam, and `body` as JSON: { seam, fields, input } (the seam in both).",
     "The relay answers { values: { [field]: value | null }, model }, refuses any request whose `accepts` would be false, and answers 413 for one over the caps; OMB never sends one, and never retries a 413.",
     "Body cap: 256 KB counting each image's data as empty; then at most 4 images of at most 1 MB decoded each (so a raw body can reach about 6 MB).",
@@ -35,7 +35,7 @@
         }
       },
       "input": {
-        "text": "OpenMausBot is checking that an extraction-model key works."
+        "text": "Obot is checking that an extraction-model key works."
       }
     },
     "inboxTriage": {
@@ -95,7 +95,7 @@
           }
         },
         "input": {
-          "text": "OpenMausBot is checking that an extraction-model key works."
+          "text": "Obot is checking that an extraction-model key works."
         }
       }
     },

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { peerExchange, peerLine, peerPreview, peerRequest } from "./peer-message";
 
 const NOTE = (opening: string, name: string, rest: string) =>
-  `[${opening} @${name}, another bot in this OpenMausBot workspace${rest}]`;
+  `[${opening} @${name}, another bot in this Obot workspace${rest}]`;
 
 describe("peerLine", () => {
   it("is null for the person's own line and for bot lines", () => {

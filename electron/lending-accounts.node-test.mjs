@@ -22,7 +22,7 @@ async function fixture(t, { screen = () => false } = {}) {
       const route = new URL(url).pathname;
       f.routes.push(route);
       if (route === "/api/auth/session") return Response.json({ kind: "session", id: identity.sessionId, cloudHome: true, scopes: ["admin"] });
-      if (route === "/.well-known/openmausbot/environment") return Response.json({ environmentId: identity.environmentId, capabilities: { sharedComputers: true, computerAsks: true, asks: true } });
+      if (route === "/.well-known/obot/environment") return Response.json({ environmentId: identity.environmentId, capabilities: { sharedComputers: true, computerAsks: true, asks: true } });
       if (route.endsWith("/poll")) await hold(signal, f.polls);
       if (route === "/api/shared-computers/asks") await hold(signal, f.asks);
       return Response.json({ ok: true });

@@ -1,4 +1,4 @@
-// The real sidecar process and the real relay process, with a fake harness, driven by the reference phone.
+﻿// The real sidecar process and the real relay process, with a fake harness, driven by the reference phone.
 import { createHash, randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -31,13 +31,13 @@ const state = () => rig.control("GET", "/state");
 describe("the sidecar's end-to-end connection, through the real relay", () => {
   it("pairs through the relay with the pairing token, then serves the new device in the same session", async () => {
     const before = await rig.control("POST", "/pairing");
-    expect(before.e2e.descriptor).toEqual({ v: 1, k: expect.any(String), h: rig.hid, r: ["relay1.openmausbot.com"] });
+    expect(before.e2e.descriptor).toEqual({ v: 1, k: expect.any(String), h: rig.hid, r: ["relay1.obot.com"] });
     await rig.control("DELETE", "/pairing");
     const paired = await pairViaRelay(rig);
     deviceToken = paired.token;
     deviceId = paired.id;
     expect((await http(paired.session, "GET", "/api/threads/t1/messages", { token: "omb_other" })).status).toBe(401);
-    expect(json(await http(paired.session, "GET", "/api/health", { token: deviceToken }))).toEqual({ app: "openmausbot" });
+    expect(json(await http(paired.session, "GET", "/api/health", { token: deviceToken }))).toEqual({ app: "obot" });
     expect((await state()).devices).toEqual([expect.objectContaining({ id: deviceId, route: "relay", routes: "any", e2eAt: expect.any(Number) })]);
     paired.session.shutdown();
   });
@@ -124,7 +124,7 @@ describe("the sidecar's end-to-end connection, through the real relay", () => {
     const closed = relayed.closed.then((code) => ((closedAt = Date.now()), code));
     await rig.control("PUT", `/devices/${deviceId}/routes`, { routes: "local" });
     expect(await closed).toBeGreaterThan(0);
-    const local = { v: 1, k: current.e2e.descriptor!.k, h: rig.hid, r: ["relay1.openmausbot.com"], routes: "local" };
+    const local = { v: 1, k: current.e2e.descriptor!.k, h: rig.hid, r: ["relay1.obot.com"], routes: "local" };
     // Heard inside the relayed session itself, well before the relay closed it.
     expect(relayedEvents.pushed.map((event) => event.data)).toEqual([expect.objectContaining({ kind: "companion.endpoints", serverName: "Test Mac", e2e: local })]);
     expect(closedAt - relayedEvents.pushed[0].at).toBeGreaterThanOrEqual(200);
@@ -142,7 +142,7 @@ describe("the sidecar's end-to-end connection, through the real relay", () => {
     // Allowed again: admitted first, then told, on the session that stayed.
     await rig.control("PUT", `/devices/${deviceId}/routes`, { routes: "any" });
     await waitFor(() => directEvents.pushed.length === 2);
-    expect(directEvents.pushed[1].data).toEqual(expect.objectContaining({ kind: "companion.endpoints", e2e: { v: 1, k: current.e2e.descriptor!.k, h: rig.hid, r: ["relay1.openmausbot.com"] } }));
+    expect(directEvents.pushed[1].data).toEqual(expect.objectContaining({ kind: "companion.endpoints", e2e: { v: 1, k: current.e2e.descriptor!.k, h: rig.hid, r: ["relay1.obot.com"] } }));
     const back = await waitFor(() => rig.viaRelay(current, deviceToken).catch(() => null), 5_000);
     expect((await http(back, "GET", "/api/health", { token: deviceToken })).status).toBe(200);
     // The harness's own stream is untouched: no id was spent and its events still arrive.
@@ -169,3 +169,4 @@ describe("the sidecar's end-to-end connection, through the real relay", () => {
     await expect(rig.direct(current, deviceToken)).rejects.toEqual(new SessionClosed(4001));
   });
 });
+

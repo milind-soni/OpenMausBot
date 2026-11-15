@@ -1,4 +1,4 @@
-# Bot concurrency: fan-out membership, serialized turns, queued wakes
+﻿# Bot concurrency: fan-out membership, serialized turns, queued wakes
 
 Status: decision record (Sep 2, 2026). Scopes the "parallel runtime" part of
 `2026-08-22-channels-plan.md` against how Grok Bot actually behaves.
@@ -25,7 +25,7 @@ the conservative per-bot lane described here.
 - Memory is per bot, files per user; no concurrent-write semantics are published — the product
   pushes conflicts to "a single owner at each stage".
 
-## Decision for OpenMausBot
+## Decision for Obot
 
 1. **Default stays serial per bot; membership fans out; a busy bot is *woken later*, never
    skipped.** Ordinary room turns join the same bounded wait that goals use (`waitForGroupGoalBot`
@@ -62,3 +62,4 @@ brianlovin.com (first impressions), flaviocopes.com/grok-bot (Matt Palmer), curs
 Comparison: Buzz (one prompt in flight per channel, agents × channels sessions), OpenClaw (per-session
 lane, `maxConcurrent` across sessions, steer/followup/collect/interrupt), Hermes kanban
 (`max_in_progress_per_profile`), Claude Code agent teams (one teammate = one process, one task).
+

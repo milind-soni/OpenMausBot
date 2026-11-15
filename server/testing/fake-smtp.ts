@@ -18,7 +18,7 @@ export function testCertificate(names: string[]): TestCertificate | undefined {
     // A config of its own, so no system openssl.cnf is needed (Windows).
     writeFileSync(join(dir, "openssl.cnf"), [
       "[req]", "distinguished_name = dn", "x509_extensions = v3", "prompt = no",
-      "[dn]", "CN = OpenMausBot fake mail",
+      "[dn]", "CN = Obot fake mail",
       "[v3]", "basicConstraints = critical,CA:TRUE", "keyUsage = critical,digitalSignature,keyCertSign",
       "extendedKeyUsage = serverAuth", `subjectAltName = ${names.map((name) => `DNS:${name}`).join(",")}`, "",
     ].join("\n"));

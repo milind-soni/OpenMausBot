@@ -12,9 +12,9 @@ button{font:inherit;padding:8px 14px;border-radius:10px;border:1px solid var(--c
 <script>
 let count = 0;
 const shown = document.getElementById("count");
-document.getElementById("more").onclick = () => { count += 1; shown.textContent = String(count); mausbot.setContext("The counter shows " + count + " cups."); };
-document.getElementById("tell").onclick = () => mausbot.send("I have had " + count + " cups of coffee today.");
-document.getElementById("docs").onclick = () => mausbot.open("https://www.fda.gov/consumers/consumer-updates/spilling-beans-how-much-caffeine-too-much");
+document.getElementById("more").onclick = () => { count += 1; shown.textContent = String(count); obot.setContext("The counter shows " + count + " cups."); };
+document.getElementById("tell").onclick = () => obot.send("I have had " + count + " cups of coffee today.");
+document.getElementById("docs").onclick = () => obot.open("https://www.fda.gov/consumers/consumer-updates/spilling-beans-how-much-caffeine-too-much");
 </script></body></html>`;
 
 const CHART = `<!DOCTYPE html>
@@ -56,7 +56,7 @@ function play(i) {
   [...grid.children].forEach((b, j) => { b.textContent = cells[j]; });
   const won = winner();
   document.getElementById("status").textContent = won ? (won[0] === "X" ? "You win" : "I win") : free.length ? "Your move (X)" : "Draw";
-  if (won) mausbot.setContext("Tic-tac-toe ended: " + (won[0] === "X" ? "the person won" : "the bot won") + ".");
+  if (won) obot.setContext("Tic-tac-toe ended: " + (won[0] === "X" ? "the person won" : "the bot won") + ".");
 }
 </script></body></html>`;
 

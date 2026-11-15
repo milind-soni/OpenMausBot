@@ -1,4 +1,4 @@
-# Voice in OpenMausBot
+﻿# Voice in Obot
 
 Historical decision doc, 2026-08-14. It records the original ElevenLabs-only
 shape; the current product also supports Fish Audio, built-in Mac voices, and
@@ -121,3 +121,4 @@ hand real work to specialists with `coordinate_bots` — no new machinery requir
   microphone session or a stale `currentCall` behind.
 - Synthesis requests are abortable from the renderer and individual utterances
   are capped server-side to bound accidental hosted-voice spend.
+

@@ -2,9 +2,9 @@
 import type { RuntimeStore } from "./store.ts";
 import { terminal, type Assignee, type Assignment, type Mode, type Owner, type TurnEvidence } from "./types.ts";
 
-export const CUT_TWICE = "Interrupted by another OpenMausBot restart after resuming once; not resumed again. Some of its steps may already have taken effect.";
+export const CUT_TWICE = "Interrupted by another Obot restart after resuming once; not resumed again. Some of its steps may already have taken effect.";
 
-export const INTERRUPTED_OUTWARD = "Interrupted by an OpenMausBot restart after it already";
+export const INTERRUPTED_OUTWARD = "Interrupted by an Obot restart after it already";
 
 const OUTWARD_SHOWN = 4;
 const OUTWARD_LABEL_MAX = 48;
@@ -150,8 +150,8 @@ export function ownsConversation(n: Assignment, owner: Owner): boolean {
 export function restartNote(n: Assignment, children: readonly Assignment[], nameOf: (child: Assignment) => string): string {
   if (!n.restart) return "";
   const own = n.restart === "rerun"
-    ? "OpenMausBot restarted while your previous turn here was running and cut it off; this turn continues it. First check what that turn already did (files, commits, messages, anything sent or started) and verify anything uncertain, so nothing is done twice; then finish and report as usual. A restart alone is not a blocker."
-    : n.restart === "cut" ? "OpenMausBot restarted before your previous turn here finished, after it sent work to teammates. Check what that turn already did before repeating any of it." : "";
+    ? "Obot restarted while your previous turn here was running and cut it off; this turn continues it. First check what that turn already did (files, commits, messages, anything sent or started) and verify anything uncertain, so nothing is done twice; then finish and report as usual. A restart alone is not a blocker."
+    : n.restart === "cut" ? "Obot restarted before your previous turn here finished, after it sent work to teammates. Check what that turn already did before repeating any of it." : "";
   const cut = children.filter(child => child.restarts > 0 || outwardInterrupted(child)).map(child => `${nameOf(child)} (${
     outwardInterrupted(child) ? "cut after an outward action, not resumed: see its result"
       : child.outcome === "interrupted" ? "cut again while resuming, so not resumed a second time: it may be partly done"

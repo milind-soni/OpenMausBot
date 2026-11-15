@@ -99,7 +99,7 @@ const month = () => new Date().toISOString().slice(0, 7);
 posixOnly("admin activity log", () => {
   beforeAll(async () => {
     home = mkdtempSync(join(tmpdir(), "omb-admin-activity-"));
-    data = join(home, ".openmausbot");
+    data = join(home, ".obot");
     mkdirSync(join(data, "decisions"), { recursive: true });
     writeFileSync(join(data, "config.json"), JSON.stringify({ signIn: { admins: [BOSS], members: [ADA] } }));
     // One card Ada answered earlier, as the decision log recorded it.
@@ -133,7 +133,7 @@ posixOnly("admin activity log", () => {
     expect((await api("PUT", "/api/config", { anthropic: { key: SECRET } }, BOSS)).status).toBe(200);
     expect((await api("PUT", "/api/config", { budgets: { monthlyUsd: 75 } }, BOSS)).status).toBe(200);
     expect((await api("PUT", "/api/config", { decisions: { retentionDays: 400 } })).status).toBe(200); // the owner, on this machine
-    expect((await api("PUT", "/api/config", { profile: { name: "Ops desk" } }, undefined, { "x-openmausbot-cli": "1" })).status).toBe(200);
+    expect((await api("PUT", "/api/config", { profile: { name: "Ops desk" } }, undefined, { "x-obot-cli": "1" })).status).toBe(200);
 
     const people = (await activity("?what=people"))[0];
     expect(people).toMatchObject({ type: "admin", who: BOSS, what: "people", action: "people.update", changed: ["signIn.members"],

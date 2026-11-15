@@ -1,4 +1,4 @@
-# OpenMausBot control plane
+# Obot control plane
 
 This directory is an isolated Cloudflare Worker for cloud account identity,
 installation ownership, and per-installation managed companion endpoints. It
@@ -113,7 +113,7 @@ Account bearer tokens are rejected.
   recoverable from GET or D1. After an idle reclaim the same call allocates a
   new tunnel behind the **same hostname**, so a paired phone keeps its
   address; it may also take back an endpoint whose reclaim is still pending.
-  The desktop app (Remote access on) and `openmausbot serve --tunnel` ask
+  The desktop app (Remote access on) and `obot serve --tunnel` ask
   `GET` every 15 minutes, even while their connector reports ready, and make
   this call when the endpoint is gone or in `error`; a `401` from `GET` (the
   90-day installation credential expired) sends them through account
@@ -392,7 +392,7 @@ limit below the real quota turns a genuine rate limit at that count into a
 ten-minute capacity gate for that account and, with several accounts, makes
 the account look full, so new endpoints go elsewhere while it still has
 room). `wrangler.jsonc` sets `OMB_DNS_RECORD_LIMIT` to 3500 because the
-`openmausbot.com` zone is on Pro.
+`obot.com` zone is on Pro.
 
 `GET /healthz` keeps `ok` and `service` unchanged (desktops gate hosted sign-in
 on them; a full quota must not hide sign-in or recovery) and adds a
@@ -427,7 +427,7 @@ ID):
   "reclaim": { "mode": "on", "pending": 12 },
   "accounts": [
     {
-      "hostSuffix": "openmausbot.com",
+      "hostSuffix": "obot.com",
       "newEndpoints": true,
       "status": "full",
       "checkedAt": 1790000060000,
@@ -437,7 +437,7 @@ ID):
       "reclaimPending": 12
     },
     {
-      "hostSuffix": "mausbot.si",
+      "hostSuffix": "obot.si",
       "newEndpoints": true,
       "status": "ok",
       "checkedAt": 1790000000000,
@@ -481,9 +481,9 @@ repository:
 [
   {
     "accountId": "<32-hex Cloudflare account ID>",
-    "zoneId": "<32-hex zone ID of mausbot.si in that account>",
-    "companionHostSuffix": "mausbot.si",
-    "apiTokenSecret": "CLOUDFLARE_API_TOKEN_MAUSBOT_SI",
+    "zoneId": "<32-hex zone ID of obot.si in that account>",
+    "companionHostSuffix": "obot.si",
+    "apiTokenSecret": "CLOUDFLARE_API_TOKEN_OBOT_SI",
     "tunnelLimit": 1000,
     "dnsRecordLimit": 200,
     "minAppVersion": "0.1.104"
@@ -584,9 +584,9 @@ Cloudflare. Every such refusal, with one account too, logs
 and `errorCode`; only an operator can fix the token.
 
 **Why `minAppVersion`.** Desktop releases up to 0.1.103 accept only
-`openmausbot.com` names for **Remote computer → Desktop companion** pairing
+`obot.com` names for **Remote computer → Desktop companion** pairing
 (phones, pairing links, and Tailscale have no domain rule). The desktop app
-accepts `mausbot.si` from the release that ships this change, and from the
+accepts `obot.si` from the release that ships this change, and from the
 same release it reports its version with every endpoint request; older apps
 are judged by the version they registered with. Set `minAppVersion` to that
 release so a computer on an older release keeps an address every desktop can
@@ -617,7 +617,7 @@ Tailscale still work).
    (`POST accounts/<account id>/cfd_tunnel` with
    `{"name": "omb-token-check", "config_src": "cloudflare"}`) and a TXT record
    in the zone, then delete both.
-5. `wrangler secret put CLOUDFLARE_API_TOKEN_MAUSBOT_SI` (or the name you
+5. `wrangler secret put CLOUDFLARE_API_TOKEN_OBOT_SI` (or the name you
    chose). Never put a token in `vars`, `.dev.vars.example`, logs, or CI output.
 6. Set `CLOUDFLARE_ENDPOINT_ACCOUNTS` with `dnsRecordLimit` equal to the
    zone's real quota and `minAppVersion` as above. Add the token's secret name
@@ -653,9 +653,9 @@ the same Cloudflare user share its 1,200 requests per five minutes. On
 Workers Free, three accounts with `OMB_CLEANUP_SWEEP_LIMIT` 3 use the whole
 50-subrequest budget; a fourth needs the limit at 2.
 
-### MausBot Relay
+### Obot Relay
 
-Phones reach a desktop through MausBot Relay, end-to-end encrypted: the relay passes sealed bytes and can't open them
+Phones reach a desktop through Obot Relay, end-to-end encrypted: the relay passes sealed bytes and can't open them
 (`companion/src/e2e/README.md`). This Worker only lets a computer onto the relay. It mints a 12-hour host token signed
 with Ed25519; the relay holds only the public key and checks tokens offline, so it can't mint one itself.
 
@@ -685,7 +685,7 @@ old one; no identifiers) answers:
 - **Usage per day** (`migrations/0014`). `relay_daily` counts installations once per UTC day and kind: `seen` (asked
   for a token), `token` (got one), `e2e` (reported end-to-end phones), `new` (asked for the first time). It holds only
   the day, the kind and a count; `relay_adoption.first_seen_at`, `token_at` and `e2e_at` tell a request whether its
-  installation was already counted today. The stats dashboard (stats.openmausbot.com) charts it. A Worker without the
+  installation was already counted today. The stats dashboard (stats.obot.com) charts it. A Worker without the
   migration keeps minting tokens and writing `relay_adoption`, and logs `relay_daily_schema` once per isolate.
 - **Tunnels.** From `RELAY_CAPABLE_MIN_VERSION`, a desktop at that version or later that the relay can carry (it is
   on, the computer is inside the rollout and not blocked) and that reports `legacyDevices: 0` gets `409 relay_capable`
@@ -735,7 +735,7 @@ hostname stay, so a later provisioning call returns the same address.
   removal still refused as connected after its rounds does not count as waiting: it backs off (5 minutes up to 24
   hours) and retries while the sweep and the marking go on. A marked row is a final delete: its owner is answered
   `409 endpoint_busy` until the sweep has removed it.
-- **Self-hosted servers.** A server (`openmausbot serve --tunnel`, a fleet container with `OMB_INSTALLATION_CREDENTIAL`)
+- **Self-hosted servers.** A server (`obot serve --tunnel`, a fleet container with `OMB_INSTALLATION_CREDENTIAL`)
   has no phone relay of its own: its tunnel is its public address (web UI, the desktop app's connection to it,
   webhooks). Provisioning never answers a server `relay_capable` (no `retired`, no `full`; at the limit it gets
   `503 endpoint_capacity`), and the cron never marks a server's tunnel for `relay_proven` or `legacy_cutoff`. The
@@ -806,8 +806,8 @@ non-production scoped `CLOUDFLARE_API_TOKEN`, apply the migrations locally, and
 start Wrangler:
 
 ```sh
-pnpm --filter @openmausbot/control-plane exec wrangler d1 migrations apply DB --local --config wrangler.jsonc
-pnpm --filter @openmausbot/control-plane exec wrangler dev --config wrangler.jsonc
+pnpm --filter @obot/control-plane exec wrangler d1 migrations apply DB --local --config wrangler.jsonc
+pnpm --filter @obot/control-plane exec wrangler dev --config wrangler.jsonc
 ```
 
 Do not commit `.dev.vars`. Because `wrangler.jsonc` declares
@@ -845,7 +845,7 @@ companion on port `8810` also does not prove managed HTTPS is ready.
 2. Check the scope of failures without exporting account or installation data:
 
    ```sh
-   pnpm --filter @openmausbot/control-plane exec wrangler d1 execute DB --remote --command "SELECT provider_account, status, last_error_code, COUNT(*) AS endpoints FROM installation_endpoints GROUP BY provider_account, status, last_error_code"
+   pnpm --filter @obot/control-plane exec wrangler d1 execute DB --remote --command "SELECT provider_account, status, last_error_code, COUNT(*) AS endpoints FROM installation_endpoints GROUP BY provider_account, status, last_error_code"
    ```
 
 3. Check **account-wide** undeleted tunnel usage in the endpoint's Cloudflare
@@ -921,7 +921,7 @@ Before a production deployment, an operator must:
    the APNs and FCM secrets listed under **Phone push relay**. Without them the
    push routes answer `503 push_unavailable` and nothing else changes.
 9. Deploy the Worker and verify that `GET <BETTER_AUTH_URL>/healthz` returns
-   `"ok": true` and `"service": "openmausbot-control-plane"` over HTTPS
+   `"ok": true` and `"service": "obot-control-plane"` over HTTPS
    before shipping the desktop build. Electron probes this endpoint and
    keeps new hosted onboarding hidden until it is healthy; an already signed-in
    user remains visible so cleanup and recovery are not stranded.
@@ -931,3 +931,4 @@ only its tunnel connector token, which can run that one remotely managed tunnel.
 The public companion service still enforces its own pairing and application
 authentication; the tunnel is transport, not user authentication. This control
 plane does not collect marketing consent.
+

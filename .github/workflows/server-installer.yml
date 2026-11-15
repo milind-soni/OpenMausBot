@@ -1,4 +1,4 @@
-name: Server installer
+﻿name: Server installer
 
 # The self-hosted server's installer (deploy/install.sh) on a stock ubuntu-24.04 runner, as a person runs it on a fresh
 # server: shellcheck, its checks against made-up servers, then the checks and a real install of the published image
@@ -67,10 +67,10 @@ jobs:
             exit 0
           fi
           docker run -d --name installer-registry -p 127.0.0.1:5000:5000 registry:2 >/dev/null
-          docker build -q -t localhost:5000/openmausbot:e2e .
-          docker push -q localhost:5000/openmausbot:e2e
-          docker image rm localhost:5000/openmausbot:e2e >/dev/null
-          echo "image=localhost:5000/openmausbot:e2e" >> "$GITHUB_OUTPUT"
+          docker build -q -t localhost:5000/obot:e2e .
+          docker push -q localhost:5000/obot:e2e
+          docker image rm localhost:5000/obot:e2e >/dev/null
+          echo "image=localhost:5000/obot:e2e" >> "$GITHUB_OUTPUT"
       - name: Check, install, run again and uninstall
         env:
           OUT: ${{ runner.temp }}/server-installer
@@ -83,3 +83,4 @@ jobs:
           name: server-installer
           path: ${{ runner.temp }}/server-installer
           retention-days: 14
+

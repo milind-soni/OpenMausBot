@@ -4,7 +4,7 @@ export type ServerPlatform = "aix" | "android" | "cygwin" | "darwin" | "freebsd"
 /** How an operator's server was installed. */
 export type ServerInstall = "npx" | "global" | "docker" | "source";
 
-/** GET /.well-known/openmausbot/environment, served without auth, and the `environment` of a POST /api/auth/pair answer:
+/** GET /.well-known/obot/environment, served without auth, and the `environment` of a POST /api/auth/pair answer:
  * a saved connection checks it still reaches the same server. */
 export interface EnvironmentDescriptor {
   environmentId: string;

@@ -45,7 +45,7 @@ async function api(method: string, path: string, options: { body?: unknown; toke
 }
 
 async function adminPairing(): Promise<string> {
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: "Obot app (Cloud)", ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const response = await fetch(`${base}/api/cloud/pairing`, { method: "POST", headers: {
     host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", "content-type": "application/json",
@@ -107,7 +107,7 @@ async function connected(call: ReturnType<typeof engineFor>) {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-cloud-lent-mcp-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".obot");
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(turnDumps());
   const cli = join(home, "fixture-claude.mjs");
@@ -187,7 +187,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect((await api("PATCH", `/api/mcp/servers/${name}`, { token: owner, body: { enabled: true } })).status).toBe(200);
   }
   const notYet = await api("POST", "/api/mcp/servers/local/test", { token: owner });
-  expect(notYet).toEqual({ status: 409, body: { error: "local runs on Ada's Mac, which isn't lent to My Cloud: it works once OpenMausBot is open on that computer and signed in to My Cloud." } });
+  expect(notYet).toEqual({ status: 409, body: { error: "local runs on Ada's Mac, which isn't lent to My Cloud: it works once Obot is open on that computer and signed in to My Cloud." } });
 
   // The Mac lends itself to My Cloud through the real connector, terminal off as lending starts.
   const env = { id: "my-cloud", name: "My Cloud", origin: base };
@@ -225,16 +225,16 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const answer = await call("tools/call", { name: "search_notes", arguments: { q: "plan" } });
   expect(answer.result).toEqual({ content: [{ type: "text", text: "On the Mac: plan" }] });
   // It reached the Mac's server from the Mac's connector, with the key saved on My Cloud.
-  expect(macRequests.filter((request) => request.method === "initialize").every((request) => request.client === "openmausbot-lent")).toBe(true);
+  expect(macRequests.filter((request) => request.method === "initialize").every((request) => request.client === "obot-lent")).toBe(true);
   expect(macRequests.every((request) => request.authorization === "Bearer mac-header-key")).toBe(true);
   expect(connector.activity(env.id).map((entry) => [entry.action, entry.ok])).toEqual(expect.arrayContaining([["mcp_tools", true], ["mcp_call", true]]));
 
-  // Were the Mac's own OpenMausBot server on that port, the Mac refuses the call itself, in words the bot reads, and
+  // Were the Mac's own Obot server on that port, the Mac refuses the call itself, in words the bot reads, and
   // nothing reaches the port.
   macServerPorts = [Number(new URL(macUrl).port)];
   const reached = macRequests.length;
   const own = await call("tools/call", { name: "search_notes", arguments: { q: "plan" } });
-  expect(own.result).toEqual({ content: [{ type: "text", text: "Only an MCP server on its own port (1024 or higher) at this computer's address can be reached, never this computer's own OpenMausBot or Chrome ports" }], isError: true });
+  expect(own.result).toEqual({ content: [{ type: "text", text: "Only an MCP server on its own port (1024 or higher) at this computer's address can be reached, never this computer's own Obot or Chrome ports" }], isError: true });
   expect(macRequests.length).toBe(reached);
   macServerPorts = [];
 
@@ -262,7 +262,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   connector.pause();
   await expect.poll(async () => (await api("POST", "/api/mcp/servers/local/test", { token: owner })).status, { timeout: 8000 }).toBe(409);
   const paused = await api("POST", "/api/mcp/servers/local/test", { token: owner });
-  expect(paused.body.error).toMatch(/^local runs on .+, which no longer lends itself to My Cloud: OpenMausBot on it is paused or signed out\.$/);
+  expect(paused.body.error).toMatch(/^local runs on .+, which no longer lends itself to My Cloud: Obot on it is paused or signed out\.$/);
   const before = macRequests.length;
   const refused = await call("tools/call", { name: "search_notes", arguments: { q: "plan" } });
   expect(refused.result.isError).toBe(true);

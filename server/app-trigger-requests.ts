@@ -1,4 +1,4 @@
-// App-event automations a bot makes or changes from chat. Every change applies at once (OpenMausBot adds no
+// App-event automations a bot makes or changes from chat. Every change applies at once (Obot adds no
 // confirmation card of its own); the conversation gets one receipt card with Pause, Edit and Undo.
 import { z } from "zod";
 

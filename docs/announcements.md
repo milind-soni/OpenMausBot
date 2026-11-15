@@ -7,10 +7,10 @@ change to it on `main` and every install that runs this version or later picks i
 ## How it works
 
 - **One file on `main`.** The app's server downloads
-  `https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/announcements/announcements.json` when a page of the app
+  `https://raw.githubusercontent.com/alnatourm/Obot/main/announcements/announcements.json` when a page of the app
   asks for the cards: at launch, then about hourly while the app is in use. Whoever can merge to `main` can publish a card;
   there is no other sign-in and no backend.
-- **The server fetches, the page decides.** The desktop app's own server, a MausBot Cloud and a self-hosted server all
+- **The server fetches, the page decides.** The desktop app's own server, a Obot Cloud and a self-hosted server all
   download the file the same way (`server/announcements/feed.ts`) and hand the cards to their pages at
   `GET /api/announcements`. Each page then decides, from what it already knows, whether a card is for the person looking
   at it (`src/lib/announcements.ts`). Nothing about the person goes anywhere.
@@ -77,8 +77,8 @@ shows it again to everyone.
       "kind": "sponsor",
       "label": "Sponsor",
       "title": "Acme Inference: $5 of free credit",
-      "body": "Acme Inference sponsors MausBot. New accounts get $5 of credit for any model they serve.",
-      "primary": { "label": "Get a key", "action": { "open_url": "https://example.com/acme?utm_source=openmausbot&utm_medium=sponsorship" } },
+      "body": "Acme Inference sponsors Obot. New accounts get $5 of credit for any model they serve.",
+      "primary": { "label": "Get a key", "action": { "open_url": "https://example.com/acme?utm_source=obot&utm_medium=sponsorship" } },
       "secondary": { "label": "Add a key", "action": { "open": "api_keys" } },
       "starts": "2026-12-01T00:00:00Z",
       "ends": "2026-12-15T00:00:00Z",
@@ -127,7 +127,7 @@ characters and characters that reorder or hide text are refused.
   nothing added to the address. Put any campaign parameters in the address yourself.
 - `{ "open": "<place>" }`: opens one of the app's own places: `api_keys` (Settings → API keys), `ai_engines` (Settings →
   AI engines), `connected_apps` (Connected apps), `new_bot` (makes a new bot, as the sidebar's New bot does) or `my_cloud`
-  (Settings → MausBot Cloud). `api_keys`, `ai_engines` and `new_bot` change a place's settings, so a card with one of them
+  (Settings → Obot Cloud). `api_keys`, `ai_engines` and `new_bot` change a place's settings, so a card with one of them
   is not shown to someone who cannot (a Team Cloud's members).
 
 Anything else makes the card invalid.
@@ -139,7 +139,7 @@ so a card written for a newer app never reaches an older one by accident):
 | --- | --- | --- |
 | `minVersion`, `maxVersion` | `"0.1.153"` | The page's app version, inclusive. A Cloud's page has its Cloud's version. |
 | `platforms` | `mac`, `windows`, `linux`, `ios`, `android` | The device the page is open on. |
-| `surfaces` | `desktop`, `cloud`, `server` | The desktop app's own page; a MausBot Cloud's page (in a browser or in the desktop's window); any other server's page (self-hosted, or the app in a browser). |
+| `surfaces` | `desktop`, `cloud`, `server` | The desktop app's own page; a Obot Cloud's page (in a browser or in the desktop's window); any other server's page (self-hosted, or the app in a browser). |
 | `plans` | `none`, `cloud`, `team` | `none`: no Cloud plan of one's own (signed out, or a free account); `cloud`: a Cloud of one's own, or its page; `team`: a Team Cloud's page. Known on the desktop app's page and on a Cloud's page; a card with `plans` never shows on another server's page. |
 | `people` | `new`, `existing` | `existing`: a bot here has answered someone before this launch; `new`: none has. |
 | `languages` | the language codes above | The app's language, or its language without the region. |
@@ -163,7 +163,7 @@ that use it.
   that launch and follows it there.
 - **At most one remote card a launch**, and **at most one `sponsor` card in any 7 days** per person (counted from the day
   one was shown).
-- **Never** in the launch whose welcome just finished, over MausBot's first-launch card, during a live call, or while a
+- **Never** in the launch whose welcome just finished, over Obot's first-launch card, during a live call, or while a
   move to My Cloud is under way (the built-in sponsor card's exclusions).
 - **Never on a branded build** (`brandStatus().source === "file"`), any kind, as the What's new popup.
 - **Sponsor cards** also skip a desktop whose organization's policy limits the AI providers (company models only, or a
@@ -208,3 +208,4 @@ that version, older ones keep showing the built-in card.
   (`node scripts/check-announcements.mjs --write-schema`), and CI fails when the two differ. An install reads the file
   leniently (unknown fields are dropped, an unknown audience key is kept so the card matches no one); CI reads it
   strictly, where an unknown field is a typo.
+

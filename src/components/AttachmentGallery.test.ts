@@ -129,8 +129,8 @@ describe("message gallery", () => {
   });
 
   it("sends a Windows path with its backslash before punctuation intact", () => {
-    expect(collectMessageFiles("[report](C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md)")).toEqual([
-      { path: "C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md", name: "report.md", linked: true },
+    expect(collectMessageFiles("[report](C:\\Users\\Maus\\.obot\\workspaces\\bot\\report.md)")).toEqual([
+      { path: "C:\\Users\\Maus\\.obot\\workspaces\\bot\\report.md", name: "report.md", linked: true },
     ]);
   });
 
@@ -185,7 +185,7 @@ describe("message gallery", () => {
 describe("explicit local video preview", () => {
   const route = "/api/threads/thread%2Fone/messages/message%20two/file";
   const linkResponse = (body: unknown) => new Response(JSON.stringify(body), {
-    headers: { "content-type": "application/json", "x-openmausbot-media": "1" },
+    headers: { "content-type": "application/json", "x-obot-media": "1" },
   });
 
   it("asks the message route for a streaming link and plays that link without downloading the file", async () => {

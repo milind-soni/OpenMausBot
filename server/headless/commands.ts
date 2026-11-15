@@ -19,7 +19,7 @@ const DAY = 24 * 3_600_000;
 async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
   const client = await ctx.client();
   // A shared server lets a local caller without a session count its engines, not list them: in the server's container
-  // (`docker compose exec omb openmausbot doctor`, as deploy/update.sh runs it) that count is the answer.
+  // (`docker compose exec omb obot doctor`, as deploy/update.sh runs it) that count is the answer.
   const counted = (refusal: unknown) => (refusal as { status?: unknown })?.status === 403
     ? client.json<Rec>("/api/health/engines").then((answer) => ({ counted: Number(answer?.engines) || 0 }), () => Promise.reject(refusal))
     : Promise.reject(refusal);
@@ -30,22 +30,22 @@ async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
   const availableCount = typeof models?.counted === "number" ? models.counted : availableEngines.length;
   const quietly = <T>(read: Promise<T>) => read.catch(() => null);
   const [server, session, config] = await Promise.all([
-    quietly(client.json<Rec>("/.well-known/openmausbot/environment")),
+    quietly(client.json<Rec>("/.well-known/obot/environment")),
     quietly(client.json<Rec>("/api/auth/session")),
     quietly(client.json<Rec>("/api/config")),
   ]);
   const problems: string[] = [];
   const warnings: string[] = [];
-  const isOmb = health.app === "openmausbot";
-  if (!isOmb) problems.push(`${client.baseUrl} answered, but it is not OpenMausBot`);
+  const isOmb = health.app === "obot";
+  if (!isOmb) problems.push(`${client.baseUrl} answered, but it is not Obot`);
   const tooOld = Boolean(server) && server!.capabilities?.jobs !== true;
-  if (tooOld) problems.push(`OpenMausBot ${server!.version ?? "(unknown version)"} is too old for the headless commands: it cannot report a conversation's job`);
-  if (isOmb && !availableCount) problems.push("no engine is available: set one up with `openmausbot engine set KIND --key-env VAR`");
+  if (tooOld) problems.push(`Obot ${server!.version ?? "(unknown version)"} is too old for the headless commands: it cannot report a conversation's job`);
+  if (isOmb && !availableCount) problems.push("no engine is available: set one up with `obot engine set KIND --key-env VAR`");
   if (session?.kind === "session" && typeof session.expiresAt === "number" && session.expiresAt - Date.now() < 14 * DAY) {
-    warnings.push(`this session expires in ${Math.max(0, Math.floor((session.expiresAt - Date.now()) / DAY))} days: get a new one with openmausbot connect`);
+    warnings.push(`this session expires in ${Math.max(0, Math.floor((session.expiresAt - Date.now()) / DAY))} days: get a new one with obot connect`);
   }
   const browser = config?.browserEngine ?? null;
-  if (browser && browser.kind !== "engine") warnings.push(`bots have no built-in browser here: ${browser.reason ?? "not installed"}${browser.installable ? " (install it with `openmausbot browser install`)" : ""}`);
+  if (browser && browser.kind !== "engine") warnings.push(`bots have no built-in browser here: ${browser.reason ?? "not installed"}${browser.installable ? " (install it with `obot browser install`)" : ""}`);
   const ok = isOmb && !tooOld && availableCount > 0;
   const who = !session ? "unknown" : session.kind === "loopback"
     ? `this computer${session.trust === "service" ? " (as a local service, not the owner)" : " (the owner)"}`
@@ -60,7 +60,7 @@ async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
     },
     exitCode: ok ? EXIT.done : isOmb && !tooOld ? EXIT.failed : EXIT.unreachable,
     human: [
-      `${server ? `OpenMausBot ${server.version} ("${server.label}")` : "OpenMausBot"} at ${client.baseUrl}: ${ok ? "ready" : "not ready"}`,
+      `${server ? `Obot ${server.version} ("${server.label}")` : "Obot"} at ${client.baseUrl}: ${ok ? "ready" : "not ready"}`,
       `You are: ${who}`,
       `Engines available: ${availableEngines.length ? availableEngines.join(", ") : availableCount ? `${availableCount} (which ones needs a session)` : "none"}`,
       ...(browser ? [`Bots' browser: ${browser.kind === "engine" ? `installed${browser.version ? ` (${browser.version})` : ""}` : "not available"}`] : []),
@@ -137,7 +137,7 @@ export async function send(ctx: VerbContext): Promise<VerbOutcome> {
   return {
     result: title !== undefined ? { ...result, newConversation: { title } } : result, exitCode: EXIT.done,
     human: [`Sent to ${target.name ?? target.id} ${title !== undefined ? `in a new conversation, "${title}", ` : ""}(thread ${result.taskId})${result.queued ? "; it waits until the turn running there ends" : ""}.`,
-      `Follow it with: openmausbot wait --thread ${result.taskId}`],
+      `Follow it with: obot wait --thread ${result.taskId}`],
   };
 }
 
@@ -162,14 +162,14 @@ function modelArgs(ctx: VerbContext, required: boolean): Rec {
   const instance = flag(ctx.flags, "instance")?.trim();
   const effort = flag(ctx.flags, "effort")?.trim();
   if (!model) {
-    if (instance || effort || required) throw usageError("--model is required (INSTANCE/MODEL, such as claude/claude-sonnet-5-5)", "openmausbot models lists them");
+    if (instance || effort || required) throw usageError("--model is required (INSTANCE/MODEL, such as claude/claude-sonnet-5-5)", "obot models lists them");
     return {};
   }
   let instanceId = instance;
   let modelId = model;
   if (!instanceId) {
     const slash = model.indexOf("/");
-    if (slash <= 0 || slash === model.length - 1) throw usageError("--model must be INSTANCE/MODEL, such as claude/claude-sonnet-5-5", "openmausbot models lists them");
+    if (slash <= 0 || slash === model.length - 1) throw usageError("--model must be INSTANCE/MODEL, such as claude/claude-sonnet-5-5", "obot models lists them");
     instanceId = model.slice(0, slash);
     modelId = model.slice(slash + 1);
   }
@@ -195,7 +195,7 @@ export async function newChannel(ctx: VerbContext): Promise<VerbOutcome> {
   const memberIds = wanted.map((member) => {
     const found = bots.filter((bot) => bot.id === member);
     const byName = found.length ? found : bots.filter((bot) => String(bot.name).trim().toLowerCase() === member.toLowerCase());
-    if (byName.length !== 1) throw usageError(byName.length ? `"${member}" names ${byName.length} bots: use their ids` : `no bot named "${member}"`, "openmausbot bots lists them");
+    if (byName.length !== 1) throw usageError(byName.length ? `"${member}" names ${byName.length} bots: use their ids` : `no bot named "${member}"`, "obot bots lists them");
     return byName[0]!.id as string;
   });
   const team = (flag(ctx.flags, "team") ?? flag(ctx.flags, "section"))?.trim();
@@ -219,7 +219,7 @@ export async function edit(ctx: VerbContext): Promise<VerbOutcome> {
   const explicit = flag(ctx.flags, "bot")?.trim();
   const [first, second] = ctx.positionals;
   const target: Target | undefined = explicit ? { type: "bot", id: explicit, ...(flag(ctx.flags, "task") ? { taskId: flag(ctx.flags, "task")!.trim() } : {}) } : undefined;
-  if (!target && !first) throw usageError("a bot is required", "openmausbot edit BOT --message ID TEXT, or --bot ID");
+  if (!target && !first) throw usageError("a bot is required", "obot edit BOT --message ID TEXT, or --bot ID");
   const messageId = requiredFlag(ctx.flags, "message");
   const text = await readMessage(ctx, target ? first : second);
   const resolved = target ?? await resolveTarget(ctx, first, "bot");

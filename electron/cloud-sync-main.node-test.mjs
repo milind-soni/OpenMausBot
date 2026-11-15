@@ -12,7 +12,7 @@ test("Files keeps its settings in the folder main names (the staging Admin's own
     const installed = installCloudFiles({
       app: { getPath: (name) => join(dir, name) }, ipcMain: { handle: () => {} }, dialog: {}, shell: { trashItem: async () => {} }, powerMonitor: { on: () => {} },
       fetch: async () => { throw new Error("offline"); }, localWorkspaceOnly: (_channel, handler) => handler, send: () => {}, cloudOrigin: () => null,
-      cloudAccount: () => ({ openDashboard: async () => {} }), localDataDir: join(dir, "home", ".openmausbot"), ...(stateDir ? { stateDir } : {}),
+      cloudAccount: () => ({ openDashboard: async () => {} }), localDataDir: join(dir, "home", ".obot"), ...(stateDir ? { stateDir } : {}),
     });
     // Close before removing: Windows will not delete a folder whose Files database is still open.
     t.after(() => { installed.close(); rmSync(dir, { recursive: true, force: true }); });
@@ -37,7 +37,7 @@ test("Files channels answer this computer's own window only, and share only a fo
     fetch: async () => { throw new Error("offline"); },
     localWorkspaceOnly: (channel, handler) => { guards.push(channel); return handler; },
     send: () => {}, cloudOrigin: () => null, cloudAccount: () => ({ openDashboard: async () => {} }),
-    localDataDir: join(dir, "home", ".openmausbot"),
+    localDataDir: join(dir, "home", ".obot"),
   });
   t.after(() => installed.close());
   assert.deepEqual(guards, ["files:state", "files:pick", "files:check", "files:share", "files:stop", "files:deletes", "files:locate", "files:outputs", "files:open", "files:more-space"]);
@@ -58,7 +58,7 @@ test("Files channels answer this computer's own window only, and share only a fo
   assert.equal(await handlers.get("files:pick")({}), null);
   await assert.rejects(handlers.get("files:check")({}, "not a list"));
   await handlers.get("files:open")({}, { outputs: true });
-  assert.deepEqual(opened, [join(dir, "documents", "MausBot")]);
+  assert.deepEqual(opened, [join(dir, "documents", "Obot")]);
   // before-quit runs twice when quitting: closing again must not throw.
   installed.close();
   assert.doesNotThrow(() => installed.close());
@@ -72,10 +72,10 @@ test("Files starts when the Documents folder can't be found, and keeps bot outpu
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, dialog: {},
     shell: { trashItem: async () => {}, openPath: async (folder) => { opened.push(folder); return ""; } }, powerMonitor: { on: () => {} },
     fetch: async () => { throw new Error("offline"); }, localWorkspaceOnly: (_channel, handler) => handler, send: () => {}, cloudOrigin: () => null,
-    cloudAccount: () => ({ openDashboard: async () => {} }), localDataDir: join(dir, "home", ".openmausbot"),
+    cloudAccount: () => ({ openDashboard: async () => {} }), localDataDir: join(dir, "home", ".obot"),
   });
   t.after(() => { installed.close(); rmSync(dir, { recursive: true, force: true }); });
-  const outputs = join(dir, "home", "Documents", "MausBot");
+  const outputs = join(dir, "home", "Documents", "Obot");
   assert.equal((await handlers.get("files:state")({})).outputs.dir, outputs);
   await handlers.get("files:open")({}, { outputs: true });
   assert.deepEqual(opened, [outputs]);
@@ -97,7 +97,7 @@ test("a folder added on the Files page is lent, read only, and Stop sharing take
     app: { getPath: (name) => join(dir, name) }, ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [picked] }) }, shell: { trashItem: async () => {} }, powerMonitor: { on: () => {} },
     fetch: async () => { throw new Error("offline"); }, localWorkspaceOnly: (_channel, handler) => handler, send: () => {}, cloudOrigin: () => null,
-    cloudAccount: () => ({ openDashboard: async () => {}, state: () => ({}) }), localDataDir: join(dir, "home", ".openmausbot"),
+    cloudAccount: () => ({ openDashboard: async () => {}, state: () => ({}) }), localDataDir: join(dir, "home", ".obot"),
     lending: { environment: () => env, sharing: () => sharing, validate: async ([folder]) => [{ ...folder, name: "Clients" }] },
   });
   // Close before removing: Windows will not delete a folder whose Files database is still open.

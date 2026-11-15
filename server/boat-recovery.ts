@@ -323,7 +323,7 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
     }
     const outcome = await lane(owner, () => replace(owner, dead, { dead: true }));
     if (outcome === "capped") {
-      throw Object.assign(new Error("it stopped working within an hour of being replaced, and MausBot replaces it at most once an hour; Replace computer in the computer panel tries once more"), { status: 409 });
+      throw Object.assign(new Error("it stopped working within an hour of being replaced, and Obot replaces it at most once an hour; Replace computer in the computer panel tries once more"), { status: 409 });
     }
     if (outcome === "kept") throw Object.assign(new Error(CLOUD_COMPUTER_NOT_RESPONDING), { status: 409 });
     if (outcome === "waiting") throw Object.assign(new Error(CLOUD_COMPUTER_DEAD_WAITING), { status: 409 });

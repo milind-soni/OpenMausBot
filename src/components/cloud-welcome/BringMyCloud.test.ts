@@ -7,7 +7,7 @@ import { WelcomeBring } from "./WelcomeBring";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const TEAM = { id: "team-acme", name: "Acme", ready: true };
-const ATLAS = { id: "atlas", name: "Atlas" }, BEACON = { id: "beacon", name: "Beacon" }, MAUS = { id: "maus", name: "MausBot", stays: "default" as const };
+const ATLAS = { id: "atlas", name: "Atlas" }, BEACON = { id: "beacon", name: "Beacon" }, MAUS = { id: "maus", name: "Obot", stays: "default" as const };
 const movingAtlas = { bot: { id: "atlas", name: "Atlas" }, team: { id: "team-acme", name: "Acme" }, phase: "moving" as const };
 
 let host: HTMLElement, root: Root;
@@ -22,14 +22,14 @@ function page(bots: unknown[], over: Record<string, unknown> = {}) {
 const draw = async () => { await act(async () => { root.render(createElement(BringMyCloud)); }); await act(async () => {}); };
 const moveButton = (id: string) => host.querySelector<HTMLButtonElement>(`[data-bring-move="${id}"]`);
 
-it("lists My Cloud's bots with one Move each, and says why MausBot stays", async () => {
+it("lists My Cloud's bots with one Move each, and says why Obot stays", async () => {
   page([MAUS, ATLAS, BEACON]);
   await draw();
   expect(host.textContent).toContain("Move a bot here from My Cloud");
   expect(moveButton("atlas")).not.toBeNull();
   expect(moveButton("beacon")).not.toBeNull();
   expect(moveButton("maus")).toBeNull();
-  expect(host.querySelector('[data-bring-bot="maus"]')?.textContent).toContain("MausBot");
+  expect(host.querySelector('[data-bring-bot="maus"]')?.textContent).toContain("Obot");
   expect(host.querySelector('[data-bring-bot="maus"]')?.textContent).toContain("Stays on My Cloud: everyone on a team gets their own");
 });
 

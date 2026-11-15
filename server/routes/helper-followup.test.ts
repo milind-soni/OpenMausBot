@@ -1,5 +1,5 @@
-// POST /api/bots/:id/helper-followup: MausBot's follow-up after its first look around, written once under its intro as
-// a real bot message, by MausBot's own person only.
+// POST /api/bots/:id/helper-followup: Obot's follow-up after its first look around, written once under its intro as
+// a real bot message, by Obot's own person only.
 import { readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -55,7 +55,7 @@ async function fixture(person?: string, teamAiOwnerName?: () => string) {
   return { store, maus, post };
 }
 
-describe("MausBot's follow-up", () => {
+describe("Obot's follow-up", () => {
   it("is written once under the intro, as a bot message the model reads, with the server's own counts", async () => {
     const { store, maus, post } = await fixture();
     store.createBot({ name: "Scout" });
@@ -76,7 +76,7 @@ describe("MausBot's follow-up", () => {
     expect(store.messagesFor(maus.threadId)).toHaveLength(2);
   });
 
-  it("is MausBot's own person's only: never a bot's shell, nor another member on a Team Cloud", async () => {
+  it("is Obot's own person's only: never a bot's shell, nor another member on a Team Cloud", async () => {
     const place = await fixture();
     expect((await place.post({ ai: "own" }, BOT_SHELL)).status).toBe(403);
     expect((await place.post({ ai: "own" }, session("someone@example.com"))).status).toBe(403);

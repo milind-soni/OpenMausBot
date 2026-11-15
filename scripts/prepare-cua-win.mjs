@@ -43,7 +43,7 @@ async function binaryVersion(candidate) {
 }
 
 async function officialBinary() {
-  const cache = join(root, "node_modules", ".cache", "openmausbot", `cua-driver-${release.version}-win`);
+  const cache = join(root, "node_modules", ".cache", "obot", `cua-driver-${release.version}-win`);
   const cachedBinary = join(cache, "cua-driver.exe");
   if ((await binaryVersion(cachedBinary)) === expectedVersion) return cachedBinary;
 
@@ -52,7 +52,7 @@ async function officialBinary() {
   const url = `https://github.com/trycua/cua/releases/download/cua-driver-rs-v${release.version}/${release.file}`;
   console.log(`Downloading CUA Driver ${release.version} from the official release…`);
   const response = await fetch(url, {
-    headers: { "user-agent": "OpenMausBot-packager" },
+    headers: { "user-agent": "Obot-packager" },
     signal: AbortSignal.timeout(120_000),
   });
   if (!response.ok) throw new Error(`CUA Driver download failed: HTTP ${response.status}`);
@@ -132,7 +132,7 @@ await build({
       'export { EmbeddedCuaDriverHost } from "@trycua/cua-driver/embedded";',
     ].join("\n"),
     resolveDir: root,
-    sourcefile: "openmausbot-cua-entry.mjs",
+    sourcefile: "obot-cua-entry.mjs",
     loader: "js",
   },
   bundle: true,
@@ -140,13 +140,13 @@ await build({
   target: "node20",
   format: "esm",
   banner: {
-    js: 'import { createRequire as __openmausbotCreateRequire } from "node:module"; const require = __openmausbotCreateRequire(import.meta.url);',
+    js: 'import { createRequire as __obotCreateRequire } from "node:module"; const require = __obotCreateRequire(import.meta.url);',
   },
   outfile: bundle,
   logLevel: "silent",
 });
 // The SDK resolves its native library through @ubjs at runtime; the bundled
-// resolver is patched so OPENMAUSBOT_CUA_SDK_LIBRARY (the staged DLL) wins over
+// resolver is patched so OBOT_CUA_SDK_LIBRARY (the staged DLL) wins over
 // node_modules lookups that do not exist in the packaged app.
 const bundledSource = await readFile(bundle, "utf8");
 const resolverPattern = /function resolveLibPath\d*\(opts\) \{/g;
@@ -158,7 +158,7 @@ await writeFile(
   bundle,
   bundledSource.replace(
     resolverPattern,
-    `${resolvers[0]}\n      if (process.env.OPENMAUSBOT_CUA_SDK_LIBRARY) return resolveOverride(opts.crateName, process.env.OPENMAUSBOT_CUA_SDK_LIBRARY);`,
+    `${resolvers[0]}\n      if (process.env.OBOT_CUA_SDK_LIBRARY) return resolveOverride(opts.crateName, process.env.OBOT_CUA_SDK_LIBRARY);`,
   ),
 );
 

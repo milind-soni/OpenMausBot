@@ -11,7 +11,7 @@ const POLL_MS = 3_000;
 type Bringable = { id: string; name: string; stays?: "default" | "chief" | "last" };
 
 const WHY_IT_STAYS: Record<NonNullable<Bringable["stays"]>, LocaleKey> = {
-  default: "cloudWelcome.bring.mausBotStays", chief: "teamMove.blockedChief", last: "teamMove.blockedLast",
+  default: "cloudWelcome.bring.obotStays", chief: "teamMove.blockedChief", last: "teamMove.blockedLast",
 };
 const bridge = () => (typeof window !== "undefined" && !window.ogb?.remoteClient?.active ? window.ogb?.cloudSendPage : undefined);
 

@@ -1,4 +1,4 @@
-// Postiz (postiz.com), the social media scheduler, through its own MCP server. OpenMausBot only calls Postiz's public
+// Postiz (postiz.com), the social media scheduler, through its own MCP server. Obot only calls Postiz's public
 // MCP and OAuth endpoints: Postiz is AGPL-3.0 and none of its code is copied here.
 
 /** The MCP server name bots see the Postiz tools under (`mcp__postiz__…` on Claude Code). */

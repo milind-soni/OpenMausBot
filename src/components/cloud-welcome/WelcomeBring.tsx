@@ -14,9 +14,9 @@ export function WelcomeBring({ name, desktop, older = false, cloudHasWork, sent 
   name: string;
   /** A Team Cloud: nothing comes here from a person's computer by itself; it starts with bots of its own. */
   team?: boolean;
-  /** The OpenMausBot app's own window, which brings this computer's bots here by itself. */
+  /** The Obot app's own window, which brings this computer's bots here by itself. */
   desktop: boolean;
-  /** An OpenMausBot app from before it brought bots by itself: it needs an update first. */
+  /** An Obot app from before it brought bots by itself: it needs an update first. */
   older?: boolean;
   /** The Cloud has bots or chats of its own (from a phone, say). */
   cloudHasWork: boolean;

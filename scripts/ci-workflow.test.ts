@@ -324,13 +324,13 @@ describe("CI concurrency", () => {
 type Step = { id?: string; name?: string; if?: string; run?: string; uses?: string; shell?: string; env?: Record<string, string> };
 
 /** The contexts a run's static job is routed by: a pull request from `author`, a push, a merge group or a scheduled run. */
-function runContext({ boat = "on", event = "pull_request", actor = "milind-soni", triggering = actor, author = actor, head = "milind-soni/OpenMausBot" }: {
+function runContext({ boat = "on", event = "pull_request", actor = "alnatourm", triggering = actor, author = actor, head = "alnatourm/Obot" }: {
   boat?: string | null; event?: string; actor?: string; triggering?: string; author?: string; head?: string | null;
 } = {}) {
   return {
     vars: boat === null ? {} : { BOAT_CI: boat },
     github: {
-      event_name: event, actor, triggering_actor: triggering, repository: "milind-soni/OpenMausBot", repository_owner: "milind-soni",
+      event_name: event, actor, triggering_actor: triggering, repository: "alnatourm/Obot", repository_owner: "alnatourm",
       event: event === "pull_request" ? { pull_request: { user: { login: author }, head: { repo: head === null ? null : { full_name: head } } } } : {},
     },
   };
@@ -356,8 +356,8 @@ describe("CI on Boat", () => {
   it.each([
     ["while BOAT_CI is not set", { boat: null }, 15],
     ["while BOAT_CI is off", { boat: "off" }, 15],
-    ["for a fork's pull request", { head: "someone/OpenMausBot", author: "someone", actor: "someone" }, 45],
-    ["for a fork's pull request the owner started", { head: "someone/OpenMausBot", author: "someone" }, 45],
+    ["for a fork's pull request", { head: "someone/Obot", author: "someone", actor: "someone" }, 45],
+    ["for a fork's pull request the owner started", { head: "someone/Obot", author: "someone" }, 45],
     ["for a deleted fork's pull request", { head: null }, 45],
     ["for a teammate's pull request on this repository", { author: "teammate", actor: "teammate" }, 45],
     ["for the owner's pull request that a teammate pushed to", { actor: "teammate" }, 45],

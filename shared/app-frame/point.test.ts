@@ -83,7 +83,7 @@ describe("the page's point script", () => {
     say(pointMessage(true));
     expect(document.documentElement.style.cursor).toBe("crosshair");
     pro.dispatchEvent(new PointerEvent("pointermove", { bubbles: true }));
-    expect(document.querySelector("[data-mausbot-point]")).not.toBeNull();
+    expect(document.querySelector("[data-obot-point]")).not.toBeNull();
     const event = new MouseEvent("click", { bubbles: true, cancelable: true });
     pro.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
@@ -100,13 +100,13 @@ describe("the page's point script", () => {
 
   it("outlines the parts waiting in the composer with their numbers, only on the parent's word, and never picks an outline", () => {
     const { say } = boot();
-    const outlines = () => Array.from(document.querySelectorAll("[data-mausbot-point=mark]"), (mark) => mark.textContent);
+    const outlines = () => Array.from(document.querySelectorAll("[data-obot-point=mark]"), (mark) => mark.textContent);
     say(marksMessage(["#plans > div:nth-of-type(1) > button", "#gone", "a:::bad", "footer > a"]), { name: "not the parent" });
     expect(outlines()).toEqual([]);
     say(marksMessage(["#plans > div:nth-of-type(1) > button", "#gone", "a:::bad", "footer > a"]));
     expect(outlines()).toEqual(["1", "4"]);
     say(pointMessage(true));
-    const mark = document.querySelector("[data-mausbot-point=mark]")!;
+    const mark = document.querySelector("[data-obot-point=mark]")!;
     mark.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     expect(posted).toEqual([]);
     say(marksMessage([]));
@@ -119,7 +119,7 @@ describe("the page's point script", () => {
     let rect = { left: 0, top: 0, width: 0, height: 0 };
     target.getBoundingClientRect = () => ({ ...rect, right: rect.left + rect.width, bottom: rect.top + rect.height, x: rect.left, y: rect.top, toJSON: () => rect }) as DOMRect;
     say(marksMessage(["footer > a"]));
-    const mark = document.querySelector<HTMLElement>("[data-mausbot-point=mark]")!;
+    const mark = document.querySelector<HTMLElement>("[data-obot-point=mark]")!;
     expect(mark.style.display).toBe("none");
     rect = { left: 10, top: 40, width: 50, height: 20 };
     document.querySelector("main")!.insertAdjacentHTML("afterbegin", "<p>opened</p>");

@@ -8,7 +8,7 @@ export interface RoomAccessDeps {
   /** The person a conversation is private to on a Team Cloud; null elsewhere. */
   privateTo?(threadId: string): string | null;
   lookedAfterBy?: LookedAfterBy;
-  /** A person's own MausBot reaching the bots they may chat with (personal-reach.ts). */
+  /** A person's own Obot reaching the bots they may chat with (personal-reach.ts). */
   personalReach?(): Pick<PersonalReach, "carries" | "refusal">;
 }
 

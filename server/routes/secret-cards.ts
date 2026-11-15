@@ -84,10 +84,10 @@ export function createSecretCardRoutes(deps: SecretCardRouteDeps): RouteHandler 
     // An HPKE envelope bound to the paired device, bot, task, card and target; only the embedded Electron server holds the key to open it.
     m = path.match(/^\/api\/bots\/([\w-]+)\/secret-cards\/([\w-]+)\/provide$/);
     if (m && method === "POST") {
-      if (req.headers["x-openmausbot-companion"] !== "1") {
+      if (req.headers["x-obot-companion"] !== "1") {
         return json(res, 403, { error: "Secure phone entry must come from a paired phone" });
       }
-      const rawDeviceId = req.headers["x-openmausbot-companion-device"];
+      const rawDeviceId = req.headers["x-obot-companion-device"];
       const authenticatedDeviceId = Array.isArray(rawDeviceId) ? "" : String(rawDeviceId ?? "");
       if (!/^[\w-]{1,128}$/.test(authenticatedDeviceId)) {
         return json(res, 401, { error: "This paired phone could not be verified" });

@@ -37,11 +37,11 @@ afterEach(async () => {
 async function boot(env: NodeJS.ProcessEnv, config: Record<string, unknown> = {}) {
   chmodSync(FAKE_CLAUDE, 0o755);
   const home = mkdtempSync(join(tmpdir(), "omb-live-azure-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".obot");
   const fetches = join(home, "fetches.log");
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(join(home, "web"));
-  writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>OpenMausBot</title>");
+  writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>Obot</title>");
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     instances: {
       ...Object.fromEntries(["codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
@@ -90,7 +90,7 @@ async function boot(env: NodeJS.ProcessEnv, config: Record<string, unknown> = {}
   };
   /** A pairing the Admin signs, for a Cloud's owner or a team's member. */
   const signedSession = async (claim: Record<string, unknown> = {}): Promise<Headers> => {
-    const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300, ...claim });
+    const body = JSON.stringify({ label: "Obot app (Cloud)", ttlSeconds: 300, ...claim });
     const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
     const response = await fetch(`${base}/api/cloud/pairing`, { method: "POST", headers: {
       ...REMOTE, "content-type": "application/json", "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce, "x-omb-cloud-signature": `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}`,
@@ -179,7 +179,7 @@ it("on a Team Cloud: a Super admin and an Admin get through; a User is refused i
   const phone = await s.redeem(made.body.code);
   expect(await s.start(botId, phone)).toEqual(REFUSED);
   // The companion's header carries no authority.
-  expect(await s.start(botId, { ...member, "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1" })).toEqual(REFUSED);
+  expect(await s.start(botId, { ...member, "x-obot-companion": "1", "x-obot-companion-device": "phone-1" })).toEqual(REFUSED);
   expect(await s.start(botId)).toMatchObject({ status: 403, body: { error: expect.stringContaining("may only use the service routes") } });
   expect(s.liveSessions()).toHaveLength(2);
 

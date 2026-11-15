@@ -1,4 +1,4 @@
-# One OpenMausBot tenant: the harness server plus Caddy for TLS + login.
+# One Obot tenant: the harness server plus Caddy for TLS + login.
 #
 # The server only listens on loopback inside its container, and on two Unix
 # sockets in the `edge` volume; Caddy, in its own container, reaches it through
@@ -21,7 +21,7 @@ services:
         ENGINES: ${ENGINES:-}
     # update.sh pins OMB_IMAGE in .env to the stable version's digest. Without it: `latest`, prebuilt on every main
     # push; `docker compose up --build` builds from source instead.
-    image: ${OMB_IMAGE:-ghcr.io/milind-soni/openmausbot:latest}
+    image: ${OMB_IMAGE:-ghcr.io/alnatourm/obot:latest}
     restart: unless-stopped
     # The bots' browsers (docs/browser-packaging.md, "Process hygiene"): an
     # init collects the browser processes whose parents exit, and Chrome
@@ -30,13 +30,13 @@ services:
     shm_size: 512m
     volumes:
       - data:/data
-      - edge:/run/openmausbot
+      - edge:/run/obot
     environment:
       OMB_PORT: "8799"
       OMB_WEBHOOK_PORT: "8800"
       # What Caddy connects to (deploy/Caddyfile).
-      OMB_TUNNEL_SOCKET: /run/openmausbot/http.sock
-      OMB_WEBHOOK_SOCKET: /run/openmausbot/hooks.sock
+      OMB_TUNNEL_SOCKET: /run/obot/http.sock
+      OMB_WEBHOOK_SOCKET: /run/obot/hooks.sock
       # what the app prints as hook URLs — Caddy passes /hooks/* straight through
       OMB_WEBHOOK_PUBLIC_URL: https://${DOMAIN}
       # pairing links for remote clients point here (docs/self-hosting.md)
@@ -51,11 +51,11 @@ services:
       OMB_SIGNIN_MEMBER_EMAILS:
       OMB_SIGNIN_SMTP_URL:
       OMB_SIGNIN_SMTP_FROM:
-      # "1": phones pair by QR through MausBot Relay (docs/phone-relay-server.md). Sign the
-      # container in once first: docker compose exec omb openmausbot login --relay
+      # "1": phones pair by QR through Obot Relay (docs/phone-relay-server.md). Sign the
+      # container in once first: docker compose exec omb obot login --relay
       OMB_PHONE_RELAY:
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q obot"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -76,7 +76,7 @@ services:
       DOMAIN: ${DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - edge:/run/openmausbot
+      - edge:/run/obot
       - caddy_data:/data
       - caddy_config:/config
 
@@ -91,3 +91,4 @@ volumes:
       o: mode=1777,size=1m
   caddy_data:
   caddy_config:
+

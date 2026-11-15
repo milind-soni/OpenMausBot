@@ -24,7 +24,7 @@ const SEAMS: ReadonlySet<string> = new Set<ExtractSeam>(["inboxTriage", "botExtr
 
 export const EXTRACT_KEY_CHECK = {
   fields: { ok: { type: "boolean", description: "Is this a connection check?" } } satisfies FieldSchema,
-  input: { text: "OpenMausBot is checking that an extraction-model key works." },
+  input: { text: "Obot is checking that an extraction-model key works." },
 };
 
 /** The proactive inbox reads these from one email, and the relay takes inbox triage only with exactly these. */

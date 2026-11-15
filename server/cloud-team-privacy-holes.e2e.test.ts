@@ -1,6 +1,6 @@
 // Private means private on a Team Cloud (docs/team-cloud.md), tried as the people it must hold against: an Admin, the
 // Owner and another member, on a real Team Cloud (OMB_CLOUD_ROLE=team) with the synthetic Claude CLI. Usage counts what
-// Rui spent and never says on what; Rui's own MausBot exists for nobody but Rui, on every route and in every list; and a
+// Rui spent and never says on what; Rui's own Obot exists for nobody but Rui, on every route and in every list; and a
 // routine made with no audience named is its writer's alone.
 import { randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -28,7 +28,7 @@ let fx: CloudSendFixture, team: CloudTeamFixture;
 let owner = "", admin = "", rui = "", marta = "";
 let quotes: Bot, ruiMaus: Bot;
 let ruiThread = "", ruiRoutine = "", ariRoutine = "";
-/** Every id that is Rui's alone: his private conversations, his private routine and its runs, his MausBot. */
+/** Every id that is Rui's alone: his private conversations, his private routine and its runs, his Obot. */
 const ruiIds = new Set<string>();
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
@@ -86,10 +86,10 @@ beforeAll(async () => {
   marta = (await team.pair(MARTA)).token!;
   quotes = (await team.as(owner, "POST", "/api/bots", { name: "Quotes", visibility: "everyone" })).body.bot;
   ruiMaus = (await botsOf(rui)).find((bot) => bot.defaultBot?.person === RUI.email)!;
-  expect(ruiMaus, "Rui has a MausBot of his own").toBeTruthy();
+  expect(ruiMaus, "Rui has a Obot of his own").toBeTruthy();
 
   const renamed = await team.as(rui, "PATCH", `/api/bots/${ruiMaus.id}`, { name: `Confidant ${MARK}` });
-  expect(renamed.status, "he names his own MausBot").toBe(200);
+  expect(renamed.status, "he names his own Obot").toBe(200);
   ruiThread = (await team.as(rui, "POST", `/api/bots/${quotes.id}/tasks`, { title: `Salary talk ${MARK}` })).body.task.threadId;
   await sayAndWait(rui, quotes, ruiThread, `What should I ask for? ${MARK}`);
   await sayAndWait(rui, ruiMaus, ruiMaus.threadId, `Remember my ceiling ${MARK}`);
@@ -132,7 +132,7 @@ it("usage tells an Admin and the Owner how much Rui used, never on what", async 
     expect((await usage(token, "user")).groups.find((group) => group.key === `user:${RUI.email}`)?.turns, "his turns count as his").toBe(3);
     const byBot = await usage(token, "bot");
     expect(byBot.groups.reduce((sum, group) => sum + group.turns, 0), "and toward the team's total").toBe(byBot.total.turns);
-    expect(byBot.groups.find((group) => group.key === "bot:private"), "his MausBot's turn is counted without the bot").toMatchObject({ label: "Private bot" });
+    expect(byBot.groups.find((group) => group.key === "bot:private"), "his Obot's turn is counted without the bot").toMatchObject({ label: "Private bot" });
     expect((await team.as(token, "GET", "/api/usage/traces")).body.roots.filter((root: { title?: string }) => leaksIn(JSON.stringify(root)).length)).toEqual([]);
   }
 }, hostTimeout(60_000));
@@ -173,11 +173,11 @@ async function everyRoute(token: string, ids: readonly [string, string]): Promis
   return out;
 }
 
-it("Rui's own MausBot answers an Admin, the Owner and another member exactly as an id no bot has, on every route", async () => {
+it("Rui's own Obot answers an Admin, the Owner and another member exactly as an id no bot has, on every route", async () => {
   const before = (await botsOf(rui)).find((bot) => bot.id === ruiMaus.id)!;
   for (const [who, token] of [["an Admin", admin], ["the Owner", owner], ["another member", marta]] as const) {
     const told = (await everyRoute(token, [ruiMaus.id, randomUUID()])).filter(({ answers: [hidden, missing] }) => JSON.stringify(hidden) !== JSON.stringify(missing));
-    expect(told.map(({ route, answers }) => `${who}: ${route} → ${JSON.stringify(answers)}`), "a route that tells his MausBot from a missing id").toEqual([]);
+    expect(told.map(({ route, answers }) => `${who}: ${route} → ${JSON.stringify(answers)}`), "a route that tells his Obot from a missing id").toEqual([]);
     const layer = `--member-${personKey({ id: "", email: RUI.email })}`;
     for (const suffix of ["/memory", "/memory/file", "/memory/journal"]) {
       expect(await team.as(token, "GET", `/api/bots/${ruiMaus.id}${layer}${suffix}`), `${who}: his layer of it`).toEqual(await team.as(token, "GET", `/api/bots/${randomUUID()}${layer}${suffix}`));
@@ -193,7 +193,7 @@ it("Rui's own MausBot answers an Admin, the Owner and another member exactly as 
   expect({ name: after.name, tasks: after.tasks?.length }, "and nothing of it changed").toEqual({ name: before.name, tasks: before.tasks?.length });
 }, hostTimeout(240_000));
 
-it("naming his MausBot in a request's body is naming no bot", async () => {
+it("naming his Obot in a request's body is naming no bot", async () => {
   const asked = async (token: string, method: string, path: string, body: (botId: string) => unknown) => {
     const missing = randomUUID();
     const said = async (botId: string) => JSON.parse(JSON.stringify(await team.as(token, method, path, body(botId))).replaceAll(botId, "<id>")) as Answer;
@@ -202,9 +202,9 @@ it("naming his MausBot in a request's body is naming no bot", async () => {
   for (const [who, token] of [["an Admin", admin], ["the Owner", owner]] as const) {
     const routine = await asked(token, "POST", "/api/routines", (botId) => ({ name: "Peek", prompt: "Say what you know", botId, schedule: LATER }));
     expect(routine[0], `${who}: a routine for it`).toEqual(NO_SUCH_BOT);
-    const room = await asked(token, "POST", "/api/groups", (botId) => ({ name: "With his MausBot", memberIds: [quotes.id, botId] }));
+    const room = await asked(token, "POST", "/api/groups", (botId) => ({ name: "With his Obot", memberIds: [quotes.id, botId] }));
     expect(room[0], `${who}: a group chat with it`).toEqual(room[1]);
-    const hook = await asked(token, "POST", "/api/webhooks", (botId) => ({ name: "Into his MausBot", botId }));
+    const hook = await asked(token, "POST", "/api/webhooks", (botId) => ({ name: "Into his Obot", botId }));
     expect(hook[0], `${who}: a webhook into it`).toEqual(hook[1]);
     const handed = await asked(token, "PUT", "/api/team/reports-to", (botId) => ({ botIds: [botId], email: ADMIN.email }));
     expect(handed[0], `${who}: looking after it`).toEqual(handed[1]);
@@ -218,7 +218,7 @@ const LISTS = ["/api/bots", "/api/bots?messages=1", "/api/groups", "/api/routine
   "/api/team/phones", "/api/team/my-connections", "/api/mcp/servers", "/api/connectors/connected", "/api/team-computers", "/api/computers/boxes", "/api/limit-resets",
   "/api/sync/folders", "/api/app-triggers", "/api/browser-sites", "/api/auth/session", "/api/auth/sessions", "/api/section-context", "/api/bot-defaults",
   "/api/admin-activity", "/api/admin-activity.csv", "/api/decisions", "/api/decisions.csv", "/api/usage/traces", `/api/search?q=${MARK}`, "/api/search?q=Salary",
-  "/api/search?q=MausBot", "/api/plan-usage", "/api/shared-computers", "/api/profile/learned", "/api/vault", "/api/logins"];
+  "/api/search?q=Obot", "/api/plan-usage", "/api/shared-computers", "/api/profile/learned", "/api/vault", "/api/logins"];
 
 it("no list, search, export, stream or signed read names anything of Rui's to an Admin, the Owner or another member", async () => {
   for (const [who, token] of [["an Admin", admin], ["the Owner", owner], ["another member", marta]] as const) {
@@ -241,14 +241,14 @@ it("no list, search, export, stream or signed read names anything of Rui's to an
   expect(leaksIn(JSON.stringify(signed.body)), "the Admin's signed read").toEqual([]);
 }, hostTimeout(180_000));
 
-it("Rui keeps every use of his own MausBot, and of what is his", async () => {
+it("Rui keeps every use of his own Obot, and of what is his", async () => {
   expect((await botsOf(rui)).some((bot) => bot.id === ruiMaus.id), "it is in his list").toBe(true);
   expect((await team.as(rui, "GET", `/api/bots/${ruiMaus.id}/memory/mine`)).status).toBe(200);
   expect((await team.as(rui, "PATCH", `/api/bots/${ruiMaus.id}`, { color: "blue" })).status, "he changes how it looks").toBe(200);
   const chat = await team.as(rui, "POST", `/api/bots/${ruiMaus.id}/tasks`, { title: "Another chat of his" });
   expect(chat.status).toBe(201);
   await sayAndWait(rui, ruiMaus, chat.body.task.threadId, "Still there?");
-  const forIt = await team.as(rui, "POST", "/api/routines", { name: "His MausBot's morning note", prompt: "Say good morning", botId: ruiMaus.id, schedule: LATER });
+  const forIt = await team.as(rui, "POST", "/api/routines", { name: "His Obot's morning note", prompt: "Say good morning", botId: ruiMaus.id, schedule: LATER });
   expect(forIt.status, JSON.stringify(forIt.body)).toBe(201);
   expect((await routinesOf(rui)).routines.map((routine) => routine.id)).toEqual(expect.arrayContaining([ruiRoutine, forIt.body.routine.id]));
   expect((await team.as(rui, "GET", `/api/threads/${ruiThread}/messages?limit=20`)).status).toBe(200);
@@ -281,10 +281,10 @@ it("a routine made with no audience named is its writer's alone; one sent to the
   expect(JSON.stringify(await routinesOf(marta))).not.toContain(unsaid.body.routine.id);
 }, hostTimeout(180_000));
 
-it("when Rui leaves, the Cloud itself still finds and deletes his MausBot", async () => {
+it("when Rui leaves, the Cloud itself still finds and deletes his Obot", async () => {
   const left = await team.signed("POST", "/api/cloud/team/member-left", { email: RUI.email });
   expect(left.status, JSON.stringify(left.body)).toBe(200);
-  expect(left.body.bots, "his own MausBot").toBe(1);
+  expect(left.body.bots, "his own Obot").toBe(1);
   expect(await team.as(admin, "GET", `/api/bots/${ruiMaus.id}`)).toEqual(NO_SUCH_BOT);
   const exported = await team.as(owner, "POST", "/api/teams/export", { format: "backup" });
   expect(exported.status, "and the team's backup still works").toBe(200);

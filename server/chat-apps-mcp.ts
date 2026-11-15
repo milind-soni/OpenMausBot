@@ -122,7 +122,7 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => console.info(`chat apps: ${line}`));
   const catalog = deps.catalog ?? new McpAppCatalog(deps.dataDir ? `${deps.dataDir}/mcp-app-catalog.json` : null);
-  // A command server OpenMausBot starts by itself (the background probe, an app's own connection) runs where the bots'
+  // A command server Obot starts by itself (the background probe, an app's own connection) runs where the bots'
   // turns run it: in the bot box where that is on, never beside the server.
   const asBot = (name: string) => {
     const stored = storedServer(name, deps.storedServers()[name]);
@@ -322,7 +322,7 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
     try { problems = validate && !validate(callArgs) ? schemaProblems(validate.errors) : undefined; } catch { problems = undefined; }
     if (problems?.length) return rpcError(400, -32602, `Invalid arguments: ${problems.join("; ")}`);
     // A change follows the bot's approval level: it runs at Full access, and at any other level, where the bot
-    // itself would ask first, it is declined. OpenMausBot draws no Allow card of its own.
+    // itself would ask first, it is declined. Obot draws no Allow card of its own.
     const annotations = isRecord(tool.annotations) ? tool.annotations : {};
     const runs = annotations.readOnlyHint === true
       || (!visibility.includes("model") && annotations.destructiveHint !== true)

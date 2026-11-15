@@ -8,9 +8,9 @@ import { openAppPreview, type AppPreview } from "./app-preview";
 import { browserAvailable, builtInBrowserEnabled, type FeatureFlagConfig } from "./feature-flags";
 import { knownPublishedApp, showable } from "./published-apps";
 
-export const PAGES_DOMAIN = "mausbot.page";
+export const PAGES_DOMAIN = "obot.page";
 
-/** A link to a page a bot published: https://<page id>.mausbot.page/… Never an app, chat or prompt link. */
+/** A link to a page a bot published: https://<page id>.obot.page/… Never an app, chat or prompt link. */
 export function isPublishedPageUrl(value: string | null | undefined): value is string {
   if (typeof value !== "string") return false;
   let url: URL;

@@ -93,7 +93,7 @@ describe("computer inventory request wiring", () => {
     const local = confirmComputerAction(perBotLocalVmDeletePlan(cloudVm), confirm);
     const cloudDelete = confirmComputerAction(cloudComputerActionPlan("delete", ownedCloudComputer), confirm);
     const cloudSleep = confirmComputerAction(cloudComputerActionPlan("sleep", ownedCloudComputer), confirm);
-    const vpsName = "openmausbot-vps-current-123456abcdef";
+    const vpsName = "obot-vps-current-123456abcdef";
     const vps = confirmComputerAction(vpsComputerRemovePlan({
       name: vpsName,
       state: "running",
@@ -231,7 +231,7 @@ describe("Local VM inventory UI", () => {
     }));
 
     expect(markup).toContain("Not managed");
-    expect(markup).toContain("not managed by MausBot");
+    expect(markup).toContain("not managed by Obot");
     expect(markup).toContain("remove it directly in Docker or Podman");
     expect(markup).not.toContain(">Delete</button>");
     expect(markup).not.toContain("Container labels do not match");
@@ -441,7 +441,7 @@ describe("cloud computer inventory UI", () => {
 
 describe("VPS computer inventory UI", () => {
   const ownedVps: VpsComputerInventoryInstance = {
-    name: "openmausbot-vps-current-123456abcdef",
+    name: "obot-vps-current-123456abcdef",
     state: "running",
     vpsAlias: "production-vps",
     ownerBotId: "current-owner",
@@ -464,7 +464,7 @@ describe("VPS computer inventory UI", () => {
     }));
 
   it("shows the configured host, owners, orphans, and status without raw container details", () => {
-    const orphanName = "openmausbot-vps-deleted-abcdef123456";
+    const orphanName = "obot-vps-deleted-abcdef123456";
     const markup = renderCard({
       instances: [
         ownedVps,
@@ -491,7 +491,7 @@ describe("VPS computer inventory UI", () => {
   });
 
   it("derives a stable identifier without exposing the bot-derived container name", () => {
-    expect(vpsComputerShortId("openmausbot-vps-deleted-abcdef123456")).toBe("ef123456");
+    expect(vpsComputerShortId("obot-vps-deleted-abcdef123456")).toBe("ef123456");
     expect(vpsComputerShortId("unexpected-provider-name")).toBe("unknown");
   });
 
@@ -515,13 +515,13 @@ describe("VPS computer inventory UI", () => {
     expect(disconnected.match(/No VPS is set up yet/g)).toHaveLength(1);
     expect(disconnected).not.toContain("aria-busy");
     expect(renderCard({ unavailableReason: "SSH host cannot be reached" })).toContain("SSH host cannot be reached");
-    expect(renderCard()).toContain("No MausBot desktops found on your VPS");
+    expect(renderCard()).toContain("No Obot desktops found on your VPS");
   });
 
   it("tags computers on more than one server and keeps reachable rows beside the warning", () => {
     const second = {
       ...ownedVps,
-      name: "openmausbot-vps-second-123456abcdef",
+      name: "obot-vps-second-123456abcdef",
       vpsAlias: "alpha-vps",
       ownerName: "Ops",
     };

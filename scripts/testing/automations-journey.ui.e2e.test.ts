@@ -448,7 +448,7 @@ const OUTSIDE_WHY = "A webhook's run made or changed this routine, so it runs wi
  * no network beyond loopback, the scripted engine, and the owner's paired device. */
 async function launchCloudHome() {
   const home = mkdtempSync(join(SHORT_TMP, "omb-cloud-journey-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".obot");
   mkdirSync(join(home, "tmp"), { recursive: true });
   mkdirSync(dataDir, { recursive: true });
   const planPath = join(home, "room-plan.json");
@@ -473,7 +473,7 @@ await import(${JSON.stringify(pathToFileURL(join(ROOT, "server", "testing", "fak
   const { server: serverEnv, secrets } = cloudHomeChildEnvironments(cloudHomeConfiguration(offered)!, offered, home);
   const env = { ...serverEnv, OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_TEST_SEALED_PATH: "1", TMPDIR: join(home, "tmp") };
   const offline = `data:text/javascript,${encodeURIComponent('const real = globalThis.fetch; globalThis.fetch = async (url, init) => String(url).startsWith("http://127.0.0.1:") ? real(url, init) : new Response("offline fixture", { status: 503 });')}`;
-  const evidenceDir = join(tmpdir(), "openmausbot-verification-evidence");
+  const evidenceDir = join(tmpdir(), "obot-verification-evidence");
   mkdirSync(evidenceDir, { recursive: true });
   const logPath = join(evidenceDir, `cloud-journey-${Date.now()}-${process.pid}.log`);
   const log = createWriteStream(logPath);
@@ -489,7 +489,7 @@ await import(${JSON.stringify(pathToFileURL(join(ROOT, "server", "testing", "fak
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
   const edge = { host: CLOUD_HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https" };
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: "Obot app (Cloud)", ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const granted = await (await fetch(`${url}/api/cloud/pairing`, { method: "POST", headers: { ...edge, "content-type": "application/json",
     "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce, "x-omb-cloud-signature": `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}` }, body })).json() as { code: string };
@@ -555,7 +555,7 @@ await import(${JSON.stringify(pathToFileURL(join(ROOT, "server", "testing", "fak
     await expect.poll(() => rowText(FORM), { timeout: 30_000 }).toMatch(/Working · last ran today/);
     await evaluate(`${"[...document.querySelectorAll('[data-automation]')]"}.find((item) => item.innerText.includes(${JSON.stringify(FORM)})).querySelector("button").click(); true`);
     await expect.poll(panel).toContain("Copy address");
-    expect(await panel()).not.toContain("Keep OpenMausBot open");
+    expect(await panel()).not.toContain("Keep Obot open");
     await evaluate(`document.querySelector('aside[aria-label="Automation"] details summary').click(); true`);
     await expect.poll(() => evaluate(`[...document.querySelectorAll('aside[aria-label="Automation"] [data-call]')].map((item) => item.innerText.replace(/\\n/g, " "))`))
       .toEqual([expect.stringMatching(/✗ Wrong secret$/), expect.stringMatching(/✓ Received$/)]);

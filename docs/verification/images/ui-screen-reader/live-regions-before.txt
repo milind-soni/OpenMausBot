@@ -1,4 +1,4 @@
-OpenMausBot ui/screen-reader, BEFORE (origin/main f5e8f60c). Isolated fixture (control-omb launch, fake engine: FAKE_CLAUDE_MODE=slow with a finish gate, 2 scripted tool calls, no mid-turn text), Vite dev UI on 127.0.0.1:5467, headless Chromium via Playwright. Base origin/main f5e8f60c.
+﻿Obot ui/screen-reader, BEFORE (origin/main f5e8f60c). Isolated fixture (control-omb launch, fake engine: FAKE_CLAUDE_MODE=slow with a finish gate, 2 scripted tool calls, no mid-turn text), Vite dev UI on 127.0.0.1:5467, headless Chromium via Playwright. Base origin/main f5e8f60c.
 
 Counted: text changes of any live region (nearest aria-live wins, off = silent; else role=log/status/alert), deduplicated per region per mutation batch.
 
@@ -20,3 +20,4 @@ events (ms after send, region, tail of region text):
 +  6370  div[role=log aria-live=polite label="Conversation with Pepper"]  …Today 12:42 AMHi, I'm Pepper. What would you like me to do?12:42 AMhello12:42 AMThinking6s
 +  7371  div[role=log aria-live=polite label="Conversation with Pepper"]  …Today 12:42 AMHi, I'm Pepper. What would you like me to do?12:42 AMhello12:42 AMThinking7s
 +  8259  div[role=log aria-live=polite label="Conversation with Pepper"]  …MHi, I'm Pepper. What would you like me to do?12:42 AMhello12:42 AMreply to: hello12:42 AM
+

@@ -117,7 +117,7 @@ describe("sidebar virtual sections", () => {
     expect(home.section).toBe("Home");
   });
 
-  it("finds the viewer's own hidden MausBot in a search, never someone else's", () => {
+  it("finds the viewer's own hidden Obot in a search, never someone else's", () => {
     const mine = { id: "nova", defaultBot: {}, sidebarHidden: true, section: "C Suite" };
     const theirs = { id: "theirs", defaultBot: { person: "sam@example.com" }, section: "C Suite" };
     expect(partitionSidebarBots([mine, theirs], { viewerEmail: null }).sectionedBots).toEqual([]);
@@ -310,10 +310,10 @@ describe("the primary tile", () => {
     expect(tiled.unsectionedBots.map((candidate) => candidate.id)).toEqual(["bea"]);
   });
 
-  it("falls back to the person's MausBot, and leaves a department's Chief in its department", () => {
-    const parts = partitionSidebarBots([bot("lead", { chiefOfStaff: true, section: "Work" }), bot("mausbot"), bot("bea")]);
-    const tiled = withPrimaryTile(parts, "mausbot");
-    expect(tiled.primary?.id).toBe("mausbot");
+  it("falls back to the person's Obot, and leaves a department's Chief in its department", () => {
+    const parts = partitionSidebarBots([bot("lead", { chiefOfStaff: true, section: "Work" }), bot("obot"), bot("bea")]);
+    const tiled = withPrimaryTile(parts, "obot");
+    expect(tiled.primary?.id).toBe("obot");
     expect(tiled.unsectionedBots.map((candidate) => candidate.id)).toEqual(["bea"]);
     expect(tiled.sectionChiefs.map((candidate) => candidate.id)).toEqual(["lead"]);
     expect(withPrimaryTile(parts, undefined).primary).toBeNull();

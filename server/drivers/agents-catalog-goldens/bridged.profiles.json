@@ -518,7 +518,7 @@
       "use_tool"
     ]
   },
-  "default+mausbot": {
+  "default+obot": {
     "bytes": 17072,
     "sha256": "4365fc3a77ff6e6454ca6e478022c4061ed8409aef1936ffb52f8b044ed03a58",
     "tools": [
@@ -541,7 +541,7 @@
       "use_tool"
     ]
   },
-  "skills+shared+voice+mausbot": {
+  "skills+shared+voice+obot": {
     "bytes": 17920,
     "sha256": "282d8c98b62975d5d892f97d960b94d2d47c82fe3c17b701c0f8455da6556125",
     "tools": [

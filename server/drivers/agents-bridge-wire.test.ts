@@ -66,7 +66,7 @@ function profiles(): Record<string, Record<string, string>> {
   all["skills+shared+voice+x+team"] = { ...all["skills+shared+voice+x"]!, OMB_TEAM_PEOPLE: "1" };
   all["skills+shared+voice+x+team+images"] = { ...all["skills+shared+voice+x+team"]!, OMB_IMAGE_GENERATION: "1" };
   all["default+legacy-switches"] = { ...all.default!, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1", OMB_ACTIVE_WAITS: "0" };
-  for (const name of ["default", "skills+shared+voice"]) all[`${name}+mausbot`] = { ...all[name]!, OMB_MAUSBOT: "1" };
+  for (const name of ["default", "skills+shared+voice"]) all[`${name}+obot`] = { ...all[name]!, OMB_OBOT: "1" };
   all["default+no-computer-pick"] = { ...all.default!, OMB_COMPUTER_SELECTION: "0" };
   for (const name of ["default", "non-chief"]) all[`${name}+room`] = { ...all[name]!, OMB_COMPUTER_SELECTION: "0", OMB_ROOM: "1" };
   all["default+images"] = { ...all.default!, OMB_IMAGE_GENERATION: "1" };
@@ -108,8 +108,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+shared+voice+x": 17929,
   "skills+shared+voice+x+team": 17929,
   "default+legacy-switches": 17020,
-  "default+mausbot": 17072,
-  "skills+shared+voice+mausbot": 17920,
+  "default+obot": 17072,
+  "skills+shared+voice+obot": 17920,
   "default+no-computer-pick": 15808,
   "default+room": 15749,
   "non-chief+room": 15632,
@@ -125,7 +125,7 @@ type RpcAnswer = { id: number; result?: { tools?: unknown[]; content?: Array<{ t
 /** One freshly spawned proxy's raw answer lines to `requests`, in the order
  * asked, read off its stdout as they arrive. */
 async function proxyLines(entry: string, env: Record<string, string>, requests: Array<{ method: string; params?: unknown }>): Promise<string[]> {
-  // A developer shell (or an OpenMausBot turn running this suite) can carry
+  // A developer shell (or an Obot turn running this suite) can carry
   // OMB_* switches of its own; the profile must be the only source.
   const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("OMB_")));
   const child = spawn(process.execPath, [entry], {

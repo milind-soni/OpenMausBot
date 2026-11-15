@@ -1,7 +1,7 @@
-# Cline engine
+﻿# Cline engine
 
 Install the standalone Cline CLI (`npm install -g cline`) and run `cline auth`
-in a terminal to choose its provider, model and account. OpenMausBot's **Cline**
+in a terminal to choose its provider, model and account. Obot's **Cline**
 model provider uses **Cline default (configured)**; provider/model selection
 stays in Cline. A missing CLI or unconfigured account remains unavailable.
 Use **Set CLI** for a wrapper with `--config` or `--data-dir` when needed.
@@ -12,7 +12,7 @@ the selected API key in `CLINE_API_KEY` for saved API providers; OAuth login
 and refresh remain Cline's responsibility. A saved custom model is pinned
 over ACP before the prompt so it cannot silently become a catalog fallback.
 
-Permissions always go through OpenMausBot's ACP approval broker, including
+Permissions always go through Obot's ACP approval broker, including
 Full Access. Cline's terminal auto-approval default is explicitly disabled.
 MCP tools use the existing scoped integration gate. Native tool selection is
 not advertised: removing native tools from a bot's allowlist is refused.
@@ -94,3 +94,4 @@ fake provider CLIs; it does not claim another native Cline execution.
 ![Cline settings in a narrow viewport](assets/cline/after-mobile.png)
 
 ![Configured Cline model in the real chat picker with fake provider CLIs](assets/cline/after-picker.png)
+

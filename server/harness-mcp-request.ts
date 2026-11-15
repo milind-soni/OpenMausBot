@@ -1,4 +1,4 @@
-// One MCP request to OpenMausBot's own browser, computer, data, Email or phone tools, made with a turn's capability: the
+// One MCP request to Obot's own browser, computer, data, Email or phone tools, made with a turn's capability: the
 // stdio proxy an engine starts and the HTTP endpoint an engine reaches both answer through it.
 import { DATA_INSTRUCTIONS } from "./data/instructions.ts";
 import { EMAIL_INSTRUCTIONS } from "./email/instructions.ts";
@@ -29,10 +29,10 @@ export function parseHarnessMcpKind(value: unknown): HarnessMcpKind | null {
 function unansweredText(error: unknown, name: string, timeoutMs: number): string {
   const code = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
   const call = `this ${name.toLowerCase()} call`;
-  if (code === "ECONNREFUSED") return `OpenMausBot is restarting, so ${call} did not reach it and did not run. Wait a few seconds, then make it again.`;
-  if (code === "ECONNRESET" || code === "UND_ERR_SOCKET") return `OpenMausBot restarted while ${call} was running, so it may or may not have taken effect. Check its result before repeating it.`;
+  if (code === "ECONNREFUSED") return `Obot is restarting, so ${call} did not reach it and did not run. Wait a few seconds, then make it again.`;
+  if (code === "ECONNRESET" || code === "UND_ERR_SOCKET") return `Obot restarted while ${call} was running, so it may or may not have taken effect. Check its result before repeating it.`;
   if ((error as { name?: unknown } | null)?.name === "TimeoutError") {
-    return `OpenMausBot did not answer ${call} within ${timeoutMs / 1_000} seconds. It may still be running, or it may already have taken effect. Do not repeat it until its result is checked.`;
+    return `Obot did not answer ${call} within ${timeoutMs / 1_000} seconds. It may still be running, or it may already have taken effect. Do not repeat it until its result is checked.`;
   }
   return error instanceof Error && !/fetch failed|abort|timeout|terminated/i.test(error.message)
     ? error.message : `${name} connection was interrupted. Do not repeat the action until its state is checked.`;
@@ -74,7 +74,7 @@ export async function harnessMcpRequest(
   if (message.method === "initialize") return {
     jsonrpc: "2.0", id,
     result: {
-      protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: `openmausbot-${connection.kind}`, version: "1" },
+      protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: `obot-${connection.kind}`, version: "1" },
       ...(INSTRUCTIONS[connection.kind] ? { instructions: INSTRUCTIONS[connection.kind] } : {}),
     },
   };
@@ -83,7 +83,7 @@ export async function harnessMcpRequest(
   try {
     const url = new URL(connection.url);
     if (!connection.token || url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
-      throw new Error(`${name} connection is not configured. Start a new bot turn from OpenMausBot.`);
+      throw new Error(`${name} connection is not configured. Start a new bot turn from Obot.`);
     }
     const body = JSON.stringify({ method: message.method, params: message.params ?? {} });
     if (Buffer.byteLength(body) > MAX_INPUT_BYTES) throw new Error(`${name} request exceeded the size limit.`);

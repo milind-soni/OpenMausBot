@@ -10,7 +10,7 @@ export const INLINE_CATEGORY_COUNT = 5;
 export const CATEGORY_SECTION_COUNT = 3;
 export const CATEGORY_SECTION_SIZE = 4;
 
-/** Categories by how many apps they hold; `keep` ones (an app of OpenMausBot's own lives there) always show inline. */
+/** Categories by how many apps they hold; `keep` ones (an app of Obot's own lives there) always show inline. */
 export function rankCategories(cards: readonly CatalogCard[], inline = INLINE_CATEGORY_COUNT, keep: readonly string[] = []): { inline: string[]; more: string[] } {
   const counts = new Map<string, number>();
   for (const card of cards) for (const category of new Set(card.categories ?? [])) counts.set(category, (counts.get(category) ?? 0) + 1);

@@ -7,17 +7,17 @@ export type SidebarToolsLayout = "rows" | "toolbar";
 
 export const SIDEBAR_TOOLS_LAYOUTS: readonly SidebarToolsLayout[] = ["rows", "toolbar"];
 
-export const SIDEBAR_DENSITY_KEY = "openmausbot.sidebarDensity";
-export const SIDEBAR_TOOLS_LAYOUT_KEY = "openmausbot.sidebarToolsLayout";
-export const SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth";
-export const SIMPLE_SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth.simple";
-export const SIDEBAR_ATTENTION_PINNED_KEY = "openmausbot.sidebarAttentionPinned.v1";
-export const SIDEBAR_COLLAPSED_SECTIONS_KEY = "openmausbot.sidebarCollapsedSections.v1";
-export const SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.v1";
-export const SIMPLE_SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.simple.v1";
-export const PINNED_CIRCLES_KEY = "openmausbot.pinnedCircles";
-export const UNIVERSAL_PINS_KEY = "openmausbot.universalPins";
-export const PINNED_CIRCLE_ORDER_KEY = "openmausbot.pinnedCircleOrder.v1";
+export const SIDEBAR_DENSITY_KEY = "obot.sidebarDensity";
+export const SIDEBAR_TOOLS_LAYOUT_KEY = "obot.sidebarToolsLayout";
+export const SIDEBAR_WIDTH_KEY = "obot.sidebarWidth";
+export const SIMPLE_SIDEBAR_WIDTH_KEY = "obot.sidebarWidth.simple";
+export const SIDEBAR_ATTENTION_PINNED_KEY = "obot.sidebarAttentionPinned.v1";
+export const SIDEBAR_COLLAPSED_SECTIONS_KEY = "obot.sidebarCollapsedSections.v1";
+export const SIDEBAR_SECTION_ORDER_KEY = "obot.sidebarSectionOrder.v1";
+export const SIMPLE_SIDEBAR_SECTION_ORDER_KEY = "obot.sidebarSectionOrder.simple.v1";
+export const PINNED_CIRCLES_KEY = "obot.pinnedCircles";
+export const UNIVERSAL_PINS_KEY = "obot.universalPins";
+export const PINNED_CIRCLE_ORDER_KEY = "obot.pinnedCircleOrder.v1";
 
 /** What the sidebar's key keeps for the column of avatars. The values an older app kept there ("compact", "icons") open
  * the sidebar as it is. */
@@ -459,7 +459,7 @@ export function saveSimpleSectionOrder(
 }
 
 /** Bots whose sidebar thread list stays at "Show all N threads" until the person picks "Show fewer". */
-export const SIDEBAR_SHOW_ALL_KEY = "openmausbot.sidebarShowAllThreads.v1";
+export const SIDEBAR_SHOW_ALL_KEY = "obot.sidebarShowAllThreads.v1";
 
 let showAllBots: ReadonlySet<string> | null = null;
 const showAllListeners = new Set<() => void>();

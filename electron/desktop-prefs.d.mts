@@ -4,7 +4,7 @@ export interface DesktopNoticesState {
   /** Notices this desktop has shown and someone closed, on whichever page of its window; This computer's own workspace
    * record counts too (an earlier close of the What's new popup). */
   seen: string[];
-  /** This desktop sells MausBot Cloud: the installed app, not a branded build, not connected to another computer. */
+  /** This desktop sells Obot Cloud: the installed app, not a branded build, not connected to another computer. */
   cloud: boolean;
 }
 /** On every page this desktop's window shows: this computer's, My Cloud's or another saved server's. */
@@ -102,7 +102,7 @@ export declare function registerDesktopPrefs(options: {
   /** The window's frame: `made()`, the frame the window was made with (null before it is); `restarts`, a change waits for
    * the app to start again; `changed()`, the pages hear it. */
   frame?: { made(): boolean | null; restarts: boolean; changed(): void } | null;
-  /** The MausBot Cloud sign-in client: with it, the product-updates question is asked and its answer kept here. */
+  /** The Obot Cloud sign-in client: with it, the product-updates question is asked and its answer kept here. */
   cloudAccount?(): import("./updates-consent.mjs").UpdatesConsentClient | null;
   now?: () => number;
   systemName?(): Promise<string | null>;

@@ -1,10 +1,10 @@
-# Memory Surface Implementation Plan
+﻿# Memory Surface Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make what a bot believes visible, editable, and auditable — a memory browser with a real capacity gauge, and a journal that records every change an agent makes to its own memory so the user can read it back and revert it.
 
-**Architecture:** No new source of truth. `server/workspace.ts` already owns `MEMORY.md` and `memory/<topic>.md` as plain markdown under `~/.openmausbot/workspaces/<botId>/`. This plan adds a read/write module over those files with hard path containment, a change journal kept **outside** the workspace (so a bot cannot edit its own audit trail with the file tools it already has), a diff taken at turn boundaries, and one bot-scoped UI panel.
+**Architecture:** No new source of truth. `server/workspace.ts` already owns `MEMORY.md` and `memory/<topic>.md` as plain markdown under `~/.obot/workspaces/<botId>/`. This plan adds a read/write module over those files with hard path containment, a change journal kept **outside** the workspace (so a bot cannot edit its own audit trail with the file tools it already has), a diff taken at turn boundaries, and one bot-scoped UI panel.
 
 **Tech Stack:** TypeScript strict, Node 24, Vitest, React 19, Tailwind, zod.
 
@@ -32,7 +32,7 @@ See [the roadmap](2026-08-31-00-control-plane-roadmap.md#global-constraints). Th
 
 | Thing | Where | Status |
 |---|---|---|
-| `~/.openmausbot/workspaces/<botId>/MEMORY.md` | `ensureWorkspace()`, seeded, `0600` | exists |
+| `~/.obot/workspaces/<botId>/MEMORY.md` | `ensureWorkspace()`, seeded, `0600` | exists |
 | `memory/<topic>.md`, read on demand by the bot's file tools | `ensureWorkspace()` creates the dir `0700` | exists |
 | Load budget — `MEMORY_MAX_LINES = 200`, `MEMORY_MAX_BYTES = 24_000` | `loadMemory()` | exists |
 | Any way for the user to SEE what is in there | — | **missing** |
@@ -41,7 +41,7 @@ See [the roadmap](2026-08-31-00-control-plane-roadmap.md#global-constraints). Th
 
 The consequence: `loadMemory()` silently truncates at 200 lines, and nothing tells the user that the memory they are relying on stopped loading forty lines ago. That is the single highest-value thing this plan fixes.
 
-**Explicitly NOT in scope: pluggable third-party memory providers** (Mem0, Honcho, Supermemory and friends). OpenMausBot's memory is plain markdown the user can open in any editor, and that is a product position, not a limitation. Routing memory through a hosted service would trade it for a vendor dependency and a second place secrets live. If it is ever wanted, it is its own plan with its own argument.
+**Explicitly NOT in scope: pluggable third-party memory providers** (Mem0, Honcho, Supermemory and friends). Obot's memory is plain markdown the user can open in any editor, and that is a product position, not a limitation. Routing memory through a hosted service would trade it for a vendor dependency and a second place secrets live. If it is ever wanted, it is its own plan with its own argument.
 
 ---
 
@@ -402,7 +402,7 @@ git commit -m "feat(memory): contained read/write/delete over bot memory files w
   export function revertMemoryChange(botId: string, at: string, file: string): boolean;
   ```
 
-**Where the journal lives, and why not in the workspace:** `~/.openmausbot/memory-journal/<botId>.ndjson`. The workspace is the bot's own desk — it has file tools pointed at it and `acceptEdits` on. An audit trail of what the bot changed, stored where the bot can rewrite it, is not an audit trail.
+**Where the journal lives, and why not in the workspace:** `~/.obot/memory-journal/<botId>.ndjson`. The workspace is the bot's own desk — it has file tools pointed at it and `acceptEdits` on. An audit trail of what the bot changed, stored where the bot can rewrite it, is not an audit trail.
 
 - [ ] **Step 1: Write the failing snapshot/diff test**
 
@@ -906,7 +906,7 @@ git commit -m "feat(memory): a memory panel with a real capacity gauge and a rev
 
 - [ ] **Step 1: Write `docs/memory.md`**
 
-Cover, in this order: where memory lives on disk (`~/.openmausbot/workspaces/<botId>/`), that it is plain markdown the user can edit in any editor, what the 200-line / 24 KB budget means and what happens past it, that `memory/<topic>.md` files are read on demand and not budgeted, where the journal lives and why it is outside the workspace, and how to revert.
+Cover, in this order: where memory lives on disk (`~/.obot/workspaces/<botId>/`), that it is plain markdown the user can edit in any editor, what the 200-line / 24 KB budget means and what happens past it, that `memory/<topic>.md` files are read on demand and not budgeted, where the journal lives and why it is outside the workspace, and how to revert.
 
 - [ ] **Step 2: Add the README bullet**
 
@@ -928,3 +928,4 @@ git commit -m "docs(memory): what memory is, where it lives, and what the budget
 **Placeholders.** None: every code step carries the code, every test step carries the test. Two steps say "read the neighbouring handler and match it" rather than inventing an HTTP helper the file may not have — that is a deliberate instruction to follow an existing pattern, not a deferred decision. Task 3 Step 1 and Step 5 name a test-harness helper that may not exist under that name and tell the engineer to reuse whatever `server/index.test.ts` already does.
 
 **Type consistency.** `MemoryOverview`, `MemoryCapacity`, `MemoryTopic`, `MemoryChange`, `MemorySnapshot` are defined once in Tasks 1–2 and mirrored in `src/lib/memory.ts` in Task 4. `resolveMemoryPath` / `memoryOverview` / `readMemoryDoc` / `writeMemoryDoc` / `deleteMemoryDoc` / `snapshotMemory` / `recordMemoryChanges` / `readMemoryJournal` / `revertMemoryChange` keep the same names from definition through routes through client.
+

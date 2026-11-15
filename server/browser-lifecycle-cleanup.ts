@@ -45,7 +45,7 @@ const browserCleanupJournalSchema = z.array(browserCleanupTargetSchema).max(MAX_
   }
 });
 const browserCleanupResultSchema = z.object({
-  type: z.literal("openmausbot:browser-lifecycle-result"),
+  type: z.literal("obot:browser-lifecycle-result"),
   requestId: z.string().regex(REQUEST_ID),
   ok: z.boolean(),
 }).strict();
@@ -53,7 +53,7 @@ const browserCleanupResultSchema = z.object({
 export type BrowserCleanupKind = "bot" | "profile";
 export type BrowserCleanupRequest = z.infer<typeof browserCleanupTargetSchema>;
 export type BrowserCleanupWireRequest = {
-  type: "openmausbot:browser-bot-deleted" | "openmausbot:browser-profile-deleted";
+  type: "obot:browser-bot-deleted" | "obot:browser-profile-deleted";
   requestId: string;
   botId?: string;
   partitionId?: string;
@@ -113,7 +113,7 @@ function unavailableJournalError(error: Error): Error & { status: number } {
 export function requireBrowserCleanupAcknowledged(ok: boolean, target: string): void {
   if (ok) return;
   const error = Object.assign(new Error(
-    `${target} was removed, but OpenMausBot could not confirm its local browser data was erased. `
+    `${target} was removed, but Obot could not confirm its local browser data was erased. `
     + "Restart the desktop app before reusing it; cleanup will retry automatically.",
   ), { status: 503 });
   throw error;
@@ -264,7 +264,7 @@ export class BrowserCleanupCoordinator {
 
   /** A late success still clears the durable journal even after the request's timeout fired. */
   receive(message: BrowserCleanupIncomingMessage | undefined): boolean {
-    if (message?.type !== "openmausbot:browser-lifecycle-result") return false;
+    if (message?.type !== "obot:browser-lifecycle-result") return false;
     const parsed = browserCleanupResultSchema.safeParse(message);
     if (!parsed.success) throw new Error("invalid browser lifecycle result");
     const result = parsed.data;
@@ -317,8 +317,8 @@ export class BrowserCleanupCoordinator {
     });
     const sent = this.#send({
       type: current.kind === "bot"
-        ? "openmausbot:browser-bot-deleted"
-        : "openmausbot:browser-profile-deleted",
+        ? "obot:browser-bot-deleted"
+        : "obot:browser-profile-deleted",
       requestId: current.requestId,
       ...(current.kind === "bot" ? { botId: current.id } : { partitionId: current.partitionId }),
     });

@@ -1,6 +1,6 @@
 "use strict";
 
-const DESKTOP_MUTATION_HEADER = "X-OpenMausBot-Desktop-Owner";
+const DESKTOP_MUTATION_HEADER = "X-Obot-Desktop-Owner";
 
 /** Chromium's webRequest hook cannot see Node fetch, so both paths add the owner capability here. */
 function desktopServerHeaders(headers, { packaged, token }) {

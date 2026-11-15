@@ -100,7 +100,7 @@ describe("the plan's included apps on a person's own Cloud", () => {
     expect(listed.map((app) => [app.id, app.bot.id])).toEqual([[`included-${ledger.key}`, "bens-own"]]);
   });
 
-  it("shows an app MausBot took down, and one that was never live, without an address to open as live", async () => {
+  it("shows an app Obot took down, and one that was never live, without an address to open as live", async () => {
     const bakery = await publish("mira", join(workspace("mira"), "bakery"), "Bakery order page");
     const rota = await publish("mira", join(workspace("mira"), "rota"), "Staff rota");
     fake.takeDown(bakery.key);

@@ -88,12 +88,12 @@ export function hostedModelPolicy(dataDirectory: string, env: NodeJS.ProcessEnv 
       if (catalog.openai.length) configs.codex = {
         driver: "codex", displayName: "Company · Codex",
         config: { cli: cli("CODEX"), managed: { url: `${base}/openai/v1`, models: catalog.openai } },
-        environment: { OPENMAUSBOT_COMPANY_API_KEY: token, CODEX_HOME: home("codex") },
+        environment: { OBOT_COMPANY_API_KEY: token, CODEX_HOME: home("codex") },
       };
       if (catalog.openrouter.length) configs.opencode = {
         driver: "openai-compat", displayName: "Company · OpenRouter",
-        config: { url: `${base}/openrouter/v1`, apiKeyEnv: "OPENMAUSBOT_COMPANY_API_KEY", provider: "", model: catalog.openrouter[0], managedModels: catalog.openrouter },
-        environment: { OPENMAUSBOT_COMPANY_API_KEY: token },
+        config: { url: `${base}/openrouter/v1`, apiKeyEnv: "OBOT_COMPANY_API_KEY", provider: "", model: catalog.openrouter[0], managedModels: catalog.openrouter },
+        environment: { OBOT_COMPANY_API_KEY: token },
       };
       return configs;
     },

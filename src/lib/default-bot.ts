@@ -28,7 +28,7 @@ export function useViewerEmail(): string | null | undefined {
   }, () => email, () => undefined);
 }
 
-/** Someone else's MausBot on a Team Cloud: an Admin may open it, but it is never in their sidebar. */
+/** Someone else's Obot on a Team Cloud: an Admin may open it, but it is never in their sidebar. */
 export function someoneElsesDefaultBot(bot: DefaultBotFields, viewer: string | null | undefined): boolean {
   const person = defaultBotPerson(bot);
   return Boolean(bot.defaultBot && person && person !== (viewer ?? ""));
@@ -44,19 +44,19 @@ export function myDefaultBot<T extends DefaultBotFields>(bots: readonly T[], vie
 
 type ChiefCandidate = DefaultBotFields & OwnedBot & { id: string; hidden?: boolean };
 
-/** The Chief of Staff in MausBot's scope (its department, or its person on a Team Cloud), if one is there to see. */
+/** The Chief of Staff in Obot's scope (its department, or its person on a Team Cloud), if one is there to see. */
 export function chiefFor<T extends ChiefCandidate>(bots: readonly T[], maus: T | undefined): T | undefined {
   const scope = chiefScope(maus ?? {});
   return bots.find((bot) => bot.chiefOfStaff && !bot.hidden && chiefScope(bot) === scope);
 }
 
-/** The bots a person may make their Chief instead of MausBot: their own, in MausBot's scope, in their sidebar. */
+/** The bots a person may make their Chief instead of Obot: their own, in Obot's scope, in their sidebar. */
 export function chiefChoices<T extends ChiefCandidate>(bots: readonly T[], maus: T | undefined, viewer: string | null | undefined): T[] {
   const scope = chiefScope(maus ?? {});
   return bots.filter((bot) => !bot.defaultBot && !bot.hidden && !hiddenFromSidebar(bot, viewer) && chiefScope(bot) === scope);
 }
 
-/** The first run shows its Chief step only for a MausBot not yet introduced, where no other bot is the Chief in its
+/** The first run shows its Chief step only for a Obot not yet introduced, where no other bot is the Chief in its
  * scope; otherwise the first run ends in the chat. */
 export function chiefStepFits<T extends ChiefCandidate>(bots: readonly T[], maus: (T & { welcomed?: boolean }) | undefined): boolean {
   if (!maus || maus.welcomed || maus.hidden) return false;
@@ -81,7 +81,7 @@ export function useChiefStepOpen(): boolean {
   }, () => chiefStep, () => false);
 }
 
-/** What Create saves on MausBot: seen, in the sidebar, and the Chief only where there is none, so a Chief someone
+/** What Create saves on Obot: seen, in the sidebar, and the Chief only where there is none, so a Chief someone
  * already has is never replaced. */
 export function createChiefPatch(maus: DefaultBotFields, chief: { id: string } | undefined): { welcomed: true; sidebarHidden?: false; chiefOfStaff?: true } {
   return { welcomed: true, ...(maus.sidebarHidden ? { sidebarHidden: false as const } : {}), ...(chief ? {} : { chiefOfStaff: true as const }) };
@@ -89,7 +89,7 @@ export function createChiefPatch(maus: DefaultBotFields, chief: { id: string } |
 
 export type SetupStep = "ai" | "bots" | "apps" | "phone" | "cloud";
 
-/** What MausBot's intro offers to set up in Advanced mode, each optional: only what is still to do, and on a place with
+/** What Obot's intro offers to set up in Advanced mode, each optional: only what is still to do, and on a place with
  * bots of the person's own only an AI, which nothing works without. On a Team Cloud the team's admins set those up. */
 export function setupSteps(input: { aiReady: boolean; ownBots: number; onCloud: boolean; team: boolean; remote: boolean }): SetupStep[] {
   if (input.team) return [];
@@ -116,10 +116,10 @@ export interface IntroFacts {
   importFound?: boolean;
 }
 
-/** At most this many chips under MausBot's look around: a step done or tapped leaves, and the next takes its place. */
+/** At most this many chips under Obot's look around: a step done or tapped leaves, and the next takes its place. */
 export const INTRO_CHIPS = 3;
 
-/** The chips under MausBot's look around (Simple mode), in order, before the cap: what is still missing, and on a place
+/** The chips under Obot's look around (Simple mode), in order, before the cap: what is still missing, and on a place
  * with bots of the person's own only an AI. Adding a bot lives on the sidebar's +. */
 export function introChips(input: IntroFacts): IntroChip[] {
   if (input.team) return [];
@@ -136,7 +136,7 @@ export function introChips(input: IntroFacts): IntroChip[] {
 let welcoming: string | null = null;
 const welcomingListeners = new Set<() => void>();
 
-/** The MausBot being introduced (its first-launch card, or the first run's Chief screen): kept out of the sidebar and
+/** The Obot being introduced (its first-launch card, or the first run's Chief screen): kept out of the sidebar and
  * its chat says nothing yet, until it lands. */
 export function setWelcomingBot(id: string | null): void {
   if (welcoming === id) return;

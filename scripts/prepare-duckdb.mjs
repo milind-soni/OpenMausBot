@@ -191,7 +191,7 @@ export async function stageDuckdb({
   nodeModules = join(root, "node_modules"),
   stage = join(root, "dist-native", "duckdb"),
   targets = targetsFor(),
-  cache = join(nodeModules, ".cache", "openmausbot", "duckdb"),
+  cache = join(nodeModules, ".cache", "obot", "duckdb"),
   pack = packedPackage,
   sign = process.platform === "darwin",
   log = console.log,

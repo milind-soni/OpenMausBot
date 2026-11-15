@@ -77,7 +77,7 @@ export type RoutineAccess = "read-and-draft";
 /** Where a routine's results go. `brief`: they become rows of the main agent's brief, not chat lines of their own. */
 export type RoutineDelivery = "brief";
 
-/** Why OpenMausBot paused a routine by itself, after its owner left: no AI of theirs is signed in here any more, they
+/** Why Obot paused a routine by itself, after its owner left: no AI of theirs is signed in here any more, they
  * removed every connected app and server, or the plan was cancelled. It turns back on once that changes. */
 export type RoutineHoldCause = "plan_cancelled" | "no_engine" | "no_connections";
 export const ROUTINE_HOLD_CAUSES: readonly RoutineHoldCause[] = ["plan_cancelled", "no_engine", "no_connections"];
@@ -99,7 +99,7 @@ export type RoutineRunStatus =
   | "cancelled"
   | "missed";
 
-/** Why a run started a second time by itself: its engine stalled, OpenMausBot
+/** Why a run started a second time by itself: its engine stalled, Obot
  * restarted while it ran, the provider rate-limited it or failed for a moment,
  * it waited for its engine's usage limit to reset, or it failed some other way.
  * A run gets one. */
@@ -139,7 +139,7 @@ export interface Routine {
   continuity?: boolean;
   /** The model each run's thread uses instead of its bot's. Missing means the bot's model. */
   modelSelection?: ModelSelection;
-  /** Also run once each time OpenMausBot starts. */
+  /** Also run once each time Obot starts. */
   runOnStartup?: boolean;
   checks?: RoutineCheck[];
   access?: RoutineAccess;
@@ -160,7 +160,7 @@ export interface Routine {
   weekRuns?: { ok: number; total: number };
   /** A plain sentence when the routine names a path that cannot exist on the computer that runs it. */
   warning?: string;
-  /** Set while OpenMausBot keeps it paused because its owner left; turning it on or off clears it. */
+  /** Set while Obot keeps it paused because its owner left; turning it on or off clears it. */
   heldFor?: RoutineHoldCause;
   attachments?: RoutineContextAttachment[];
   sourceThreadId?: string;

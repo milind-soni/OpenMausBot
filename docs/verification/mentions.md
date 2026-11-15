@@ -1,4 +1,4 @@
-# Mention highlighting
+﻿# Mention highlighting
 
 Launch a disposable fake-engine server and the real channel/direct chat views:
 
@@ -67,7 +67,7 @@ node --experimental-strip-types scripts/control-omb.ts messages --channel 18b5bf
 ```
 
 Printed log:
-`%TEMP%/openmausbot-verification-evidence/server-1788957885515-22688.log`.
+`%TEMP%/obot-verification-evidence/server-1788957885515-22688.log`.
 As always, fresh runs must use their own printed URL and returned channel ID.
 The 65 focused tests (including direction forwarding, existing bidi controls,
 mention rendering and cloudflared retries), typecheck, production renderer
@@ -139,7 +139,7 @@ node --experimental-strip-types scripts/control-omb.ts messages --channel ec952c
 ```
 
 The printed server log was
-`%TEMP%/openmausbot-verification-evidence/server-1788790736762-24868.log`.
+`%TEMP%/obot-verification-evidence/server-1788790736762-24868.log`.
 Fresh runs must use their own printed URL and channel ID.
 
 ### Review fixes and mentions authored by bots
@@ -175,7 +175,7 @@ node --experimental-strip-types scripts/control-omb.ts messages --channel 2ee9e1
 ```
 
 Recorded on 2026-09-07; printed log:
-`%TEMP%/openmausbot-verification-evidence/server-1788791336713-2520.log`.
+`%TEMP%/obot-verification-evidence/server-1788791336713-2520.log`.
 The channel settled. Evidence: [wait](evidence/mentions/bot-reply-wait.json),
 [transcript](evidence/mentions/bot-reply-messages.json),
 [DOM palettes](evidence/mentions/bot-reply-dom.json),
@@ -194,3 +194,4 @@ roster; historical names no longer in that roster stay plain text.
 | --- | --- | --- |
 | Midnight | ![Before: plain mentions](evidence/mentions/before-dark.png) | ![After: highlighted mentions](evidence/mentions/after-dark.png) |
 | Atelier | ![Before: plain mentions](evidence/mentions/before-light.png) | ![After: highlighted mentions](evidence/mentions/after-light.png) |
+

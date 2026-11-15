@@ -1,6 +1,6 @@
-# Decision model
+﻿# Decision model
 
-OpenMausBot can use a fast decision model to pick things for your bots. It
+Obot can use a fast decision model to pick things for your bots. It
 answers in a few hundred milliseconds for a fraction of a cent. It never does
 the work: the chosen bot still runs its own turn on its own engine. Four
 providers are supported: Cloudflare's Clef on
@@ -156,7 +156,7 @@ account is out of credits for a 402.
 ## What is logged
 
 Each call that reaches the model adds one row to
-`~/.openmausbot/decider-log/YYYY-MM.ndjson` (mode 0600). This is separate
+`~/.obot/decider-log/YYYY-MM.ndjson` (mode 0600). This is separate
 from the approvals log in `decisions/`.
 
 ```json
@@ -247,7 +247,7 @@ Cloudflare, or the server `workersAiBaseUrl` points to, which also receives the
 token. With OpenRouter that is OpenRouter and the host it routes the model to,
 under OpenRouter's privacy settings and your account's data policy, or the
 server `openrouterBaseUrl` points to, which also receives the key;
-OpenMausBot does not set a data-collection preference. With a custom endpoint
+Obot does not set a data-collection preference. With a custom endpoint
 it is the server at its base URL, which also receives its key.
 
 Inbox triage first has each new email read, when a reading provider is set:
@@ -346,3 +346,4 @@ $0.002 per run. The same eval runs against OpenRouter with
 model in `OMB_OPENROUTER_EVAL_MODEL` (else the default); the cost depends on
 the model. It is the check for whether a model's own probabilities hold up at
 the 0.6 threshold.
+

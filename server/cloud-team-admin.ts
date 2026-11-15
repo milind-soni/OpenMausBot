@@ -24,7 +24,7 @@ export interface ConnectionStatus {
   /** The admin who added it, by address and the name they go by on the team (null when they set none). */
   addedBy?: { email: string; name: string | null };
   addedAt?: string;
-  /** The team bots that use it (each member's own MausBot is left out). */
+  /** The team bots that use it (each member's own Obot is left out). */
   bots?: string[];
 }
 

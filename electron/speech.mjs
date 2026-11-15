@@ -29,7 +29,7 @@ const SRC = path.join(__dirname, "resources", "speech-helper.swift");
 const INFO = path.join(__dirname, "resources", "speech-helper-Info.plist");
 // A signed app bundle must never be rewritten: lazy compilation would break its seal.
 const BUNDLE = app.isPackaged
-  ? path.join(process.resourcesPath, "OpenMausBot Speech.app")
+  ? path.join(process.resourcesPath, "Obot Speech.app")
   : speechHelperBundle;
 const BIN = app.isPackaged
   ? path.join(BUNDLE, "Contents", "MacOS", "speech-helper")
@@ -107,7 +107,7 @@ export function startSpeech(target, options = {}) {
   }
 
   // A direct spawn loses the bundle identity and TCC kills it; LaunchServices keeps it. `open` sends stdout/stderr to files, tailed here.
-  const sessionDir = mkdtempSync(path.join(app.getPath("temp"), "openmausbot-speech-"));
+  const sessionDir = mkdtempSync(path.join(app.getPath("temp"), "obot-speech-"));
   const outputPath = path.join(sessionDir, "stdout.ndjson");
   const errorPath = path.join(sessionDir, "stderr.log");
   const stopPath = path.join(sessionDir, "stop");

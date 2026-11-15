@@ -1,7 +1,7 @@
-# Bring your own engine
+﻿# Bring your own engine
 
-Two zero-code ways to run OpenMausBot bots on an engine the app doesn't ship.
-Both live in `~/.openmausbot/config.json` under `"instances"`; restart the app
+Two zero-code ways to run Obot bots on an engine the app doesn't ship.
+Both live in `~/.obot/config.json` under `"instances"`; restart the app
 after editing (instance entries are read at boot).
 
 ## Provider icons
@@ -45,7 +45,7 @@ instance at it:
   the instance's row. An instance without a command shows up with exactly that
   hint instead of failing at first message.
 - **Sign in first.** The driver has no auth flow of its own — run the CLI once
-  in a terminal and log in there; OpenMausBot spawns it with your login intact.
+  in a terminal and log in there; Obot spawns it with your login intact.
 - **Choose models per bot.** Open the bot's model picker and use **Refresh models**
   to load the models advertised by the agent. Select a model and, when offered,
   its thinking level. Bot defaults and individual conversation overrides are
@@ -66,7 +66,7 @@ instance at it:
 
 [Mistral Vibe](https://github.com/mistralai/mistral-vibe) ships an ACP entry
 point, `vibe-acp`, so it runs as a custom ACP engine with your Mistral account's
-own sign-in, not a Mistral API key saved in OpenMausBot.
+own sign-in, not a Mistral API key saved in Obot.
 
 1. Install it: `uv tool install mistral-vibe` (or `pipx install mistral-vibe`).
    This puts `vibe` and `vibe-acp` in `~/.local/bin`.
@@ -74,7 +74,7 @@ own sign-in, not a Mistral API key saved in OpenMausBot.
    Mistral account (Vibe offers a browser sign-in through Mistral AI Studio, or
    an API key). Vibe uses the first credential it finds in the shell
    environment, `~/.vibe/.env`, or the OS keyring, and `vibe-acp` uses it too.
-3. Add the instance and restart OpenMausBot:
+3. Add the instance and restart Obot:
 
    ```json
    {
@@ -94,7 +94,7 @@ own sign-in, not a Mistral API key saved in OpenMausBot.
 4. Pick **Mistral Vibe** for a bot. Its model menu shows **Agent default**,
    which runs the model Vibe itself uses by default.
 
-OpenMausBot never passes its own `MISTRAL_API_KEY` to the CLI, so turns use the
+Obot never passes its own `MISTRAL_API_KEY` to the CLI, so turns use the
 Vibe sign-in from step 2. Without it, the chat shows `Missing API key for
 mistral provider`: sign in again from a terminal (step 2).
 
@@ -110,8 +110,8 @@ a custom ACP engine with your own Command Code sign-in. (Checked with
 2. Sign in once from a terminal: run `cmd login` (`cmdc login` on Windows).
    On a server without a browser, create an API key in Command Code Studio
    instead and put it in the instance's `environment` as
-   `COMMAND_CODE_API_KEY`; OpenMausBot passes it to the CLI.
-3. Add the instance and restart OpenMausBot:
+   `COMMAND_CODE_API_KEY`; Obot passes it to the CLI.
+3. Add the instance and restart Obot:
 
    ```json
    {
@@ -223,3 +223,4 @@ and the [Zhipu BigModel guide](https://docs.bigmodel.cn/cn/guide/develop/openai/
   as plaintext in that file. Prefer keys scoped to the one engine.
 - A typo'd `driver` or invalid `config` never breaks the app: the instance
   shows as unavailable with the reason, and the rest of the fleet loads.
+

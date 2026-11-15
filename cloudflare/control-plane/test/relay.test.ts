@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+﻿import { env } from "cloudflare:workers";
 import { applyD1Migrations, createExecutionContext, createScheduledController, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
@@ -9,7 +9,7 @@ import { createWorker } from "../src/index";
 import { forgetTunnelRelease, releaseTunnels } from "../src/tunnel-release";
 import { forgetRelayAdoption, importSigningSeed, mintRelayToken, orderNodes, RELAY_TOKEN_LIMIT, rolloutBucket } from "../src/relay";
 
-const BASE_URL = "https://auth.openmausbot.test";
+const BASE_URL = "https://auth.obot.test";
 const hex = (text: string) => Uint8Array.from(text.match(/../g)!.map((pair) => Number.parseInt(pair, 16)));
 const b64u = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const fromB64u = (text: string) => Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (text.length % 4)) % 4)), (c) => c.charCodeAt(0));
@@ -100,7 +100,7 @@ describe("relay host tokens", () => {
     const { credential, id } = await installation("mint@example.test");
     const before = Math.floor(Date.now() / 1000);
     // Two nodes, whatever wrangler.jsonc lists today, so the order is still tested.
-    const twoNodes = relayEnv({ RELAY_NODES: "relay1.openmausbot.com,relay2.openmausbot.com" });
+    const twoNodes = relayEnv({ RELAY_NODES: "relay1.obot.com,relay2.obot.com" });
     const first = await (await ask(twoNodes, credential)).json<Issued>();
     const second = await (await ask(twoNodes, credential)).json<Issued>();
     expect(second.hostId).toBe(first.hostId);
@@ -113,7 +113,7 @@ describe("relay host tokens", () => {
     expect(claims.iat as number).toBeGreaterThanOrEqual(before);
     expect(first.expiresAt).toBe((claims.exp as number) * 1000);
     expect(first.refreshAfter).toBe(((claims.iat as number) + 3600) * 1000);
-    expect(first.nodes).toEqual(await orderNodes(fromB64u(first.hostId), { nodes: ["relay1.openmausbot.com", "relay2.openmausbot.com"], americasNodes: new Set() }, null));
+    expect(first.nodes).toEqual(await orderNodes(fromB64u(first.hostId), { nodes: ["relay1.obot.com", "relay2.obot.com"], americasNodes: new Set() }, null));
   });
 
   it("admit by rollout bucket, or by name, and never a blocked installation", async () => {
@@ -203,7 +203,7 @@ describe("relay usage per UTC day", () => {
 });
 
 describe("node order", () => {
-  const nodes = ["relay1.openmausbot.com", "relay2.openmausbot.com", "relay3.openmausbot.com"];
+  const nodes = ["relay1.obot.com", "relay2.obot.com", "relay3.obot.com"];
 
   it("is the rendezvous hash: highest SHA256(hostId ‖ node)[0:8] first", async () => {
     const hostId = crypto.getRandomValues(new Uint8Array(16));
@@ -217,8 +217,8 @@ describe("node order", () => {
 
   it("puts an Americas node first for a computer in the Americas only", async () => {
     const hostId = crypto.getRandomValues(new Uint8Array(16));
-    const settings = { nodes, americasNodes: new Set(["relay3.openmausbot.com"]) };
-    expect((await orderNodes(hostId, settings, "SA"))[0]).toBe("relay3.openmausbot.com");
+    const settings = { nodes, americasNodes: new Set(["relay3.obot.com"]) };
+    expect((await orderNodes(hostId, settings, "SA"))[0]).toBe("relay3.obot.com");
     expect(await orderNodes(hostId, settings, "EU")).toEqual(await orderNodes(hostId, { nodes, americasNodes: new Set() }, null));
   });
 });
@@ -271,7 +271,7 @@ describe("a Worker deployed before migration 0012", () => {
     const health = await call(oldEnv, "/healthz", { method: "GET" });
     expect(health.status).toBe(200);
     const body = await health.json<Record<string, unknown>>();
-    expect(body).toMatchObject({ ok: true, service: "openmausbot-control-plane" });
+    expect(body).toMatchObject({ ok: true, service: "obot-control-plane" });
     expect(body).not.toHaveProperty("relayAdoption");
 
     const token = await ask(oldEnv, credential);
@@ -353,3 +353,4 @@ describe("a Worker deployed before migration 0015", () => {
     expect((await call(oldEnv, "/v1/installations/self", { token: credential, method: "GET" })).status).toBe(200);
   });
 });
+

@@ -103,12 +103,12 @@ describe("the engine's loopback command relay", () => {
 describe("preview frames over the relay", () => {
   it("returns the picture the daemon wrote, and leaves no file behind", async () => {
     const daemon = await fake();
-    const before = readdirSync(tmpdir()).filter((name) => name.startsWith("openmausbot-browser-")).length;
+    const before = readdirSync(tmpdir()).filter((name) => name.startsWith("obot-browser-")).length;
     const frame = await captureFrame(new RelayPorts(), daemon.target);
     expect(frame.format).toBe("jpeg");
     expect(Buffer.from(frame.png, "base64")).toEqual(daemon.picture);
     expect(daemon.commands.find((command) => command.action === "screenshot")).toMatchObject({ format: "jpeg", quality: 80 });
-    expect(readdirSync(tmpdir()).filter((name) => name.startsWith("openmausbot-browser-")).length).toBe(before);
+    expect(readdirSync(tmpdir()).filter((name) => name.startsWith("obot-browser-")).length).toBe(before);
   });
 
   it("never starts a browser: no daemon, or a Chrome that is not connected, gives no frame and sends no capture", async () => {

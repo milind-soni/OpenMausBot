@@ -8,7 +8,7 @@ import { buildOTPEmail, sendOTPEmail } from "../src/email";
 import worker from "../src/index";
 import { sha256 } from "../src/installations";
 
-const BASE_URL = "https://auth.openmausbot.test";
+const BASE_URL = "https://auth.obot.test";
 
 interface CallOptions {
   method?: string;
@@ -233,7 +233,7 @@ describe("control-plane migrations and health", () => {
           (installation_id, hostname, tunnel_name, tunnel_id, dns_record_id, status,
            last_reconciled_at, created_at, updated_at)
          VALUES ('before-0007', ?, ?, '10000000-0000-4000-8000-000000000001', 'dns-1', 'ready', 5, 1, 5)`,
-      ).bind(`c-${"a".repeat(32)}.openmausbot.com`, `omb-c-${"a".repeat(32)}`),
+      ).bind(`c-${"a".repeat(32)}.obot.com`, `omb-c-${"a".repeat(32)}`),
       db.prepare(
         `UPDATE managed_endpoint_capacity
             SET scan_page = 7, tunnel_count = 1000, dns_record_count = 990, reclaim_pending = 3,
@@ -249,14 +249,14 @@ describe("control-plane migrations and health", () => {
       "SELECT provider_account, hostname, status FROM installation_endpoints WHERE installation_id = 'before-0007'",
     ).first()).toEqual({
       provider_account: env.CLOUDFLARE_ACCOUNT_ID,
-      hostname: `c-${"a".repeat(32)}.openmausbot.com`,
+      hostname: `c-${"a".repeat(32)}.obot.com`,
       status: "ready",
     });
     // A Worker that predates the column keeps inserting into the same account.
     await db.prepare(
       `INSERT INTO installation_endpoints (installation_id, hostname, tunnel_name, status, created_at, updated_at)
        VALUES ('older-worker', ?, ?, 'pending', 1, 1)`,
-    ).bind(`c-${"b".repeat(32)}.openmausbot.com`, `omb-c-${"b".repeat(32)}`).run();
+    ).bind(`c-${"b".repeat(32)}.obot.com`, `omb-c-${"b".repeat(32)}`).run();
     expect(await db.prepare(
       "SELECT provider_account FROM installation_endpoints WHERE installation_id = 'older-worker'",
     ).first()).toEqual({ provider_account: env.CLOUDFLARE_ACCOUNT_ID });
@@ -285,7 +285,7 @@ describe("control-plane migrations and health", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      service: "openmausbot-control-plane",
+      service: "obot-control-plane",
       capacity: {
         status: "unknown",
         checkedAt: null,
@@ -399,7 +399,7 @@ describe("control-plane migrations and health", () => {
       COMPANION_HOST_SUFFIX: env.COMPANION_HOST_SUFFIX,
       CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN,
       CLOUDFLARE_ENDPOINT_ACCOUNTS: env.CLOUDFLARE_ENDPOINT_ACCOUNTS,
-      CLOUDFLARE_API_TOKEN_MAUSBOT_SI: env.CLOUDFLARE_API_TOKEN_MAUSBOT_SI,
+      CLOUDFLARE_API_TOKEN_OBOT_SI: env.CLOUDFLARE_API_TOKEN_OBOT_SI,
       OMB_TUNNEL_LIMIT: env.OMB_TUNNEL_LIMIT,
       OMB_DNS_RECORD_LIMIT: env.OMB_DNS_RECORD_LIMIT,
       OMB_TUNNEL_RECLAIM: env.OMB_TUNNEL_RECLAIM,
@@ -1013,20 +1013,21 @@ describe("HTTP boundary hardening", () => {
     blocked.headers.forEach((value, name) => { serializedHeaders += `${name}: ${value}\n`; });
     expect(serializedHeaders).not.toContain("*");
 
-    const allowed = await call("/v1/me", { origin: "https://app.openmausbot.test" });
+    const allowed = await call("/v1/me", { origin: "https://app.obot.test" });
     expect(allowed.status).toBe(401);
-    expect(allowed.headers.get("access-control-allow-origin")).toBe("https://app.openmausbot.test");
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("https://app.obot.test");
     expect(allowed.headers.get("cache-control")).toBe("no-store");
 
     const deniedPreflight = await call("/v1/installations", {
       method: "OPTIONS",
-      origin: "https://app.openmausbot.test",
+      origin: "https://app.obot.test",
       headers: {
         "access-control-request-method": "POST",
         "access-control-request-headers": "authorization, x-unexpected",
       },
     });
     expect(deniedPreflight.status).toBe(403);
-    expect(deniedPreflight.headers.get("access-control-allow-origin")).toBe("https://app.openmausbot.test");
+    expect(deniedPreflight.headers.get("access-control-allow-origin")).toBe("https://app.obot.test");
   });
 });
+

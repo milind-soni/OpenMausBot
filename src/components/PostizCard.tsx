@@ -19,7 +19,7 @@ const SERVER = encodeURIComponent(POSTIZ_SERVER);
 const OWN_SIGN_IN_POLL_MS = 1_500;
 const OWN_SIGN_IN_WAIT_MS = 5 * 60_000;
 
-/** OpenMausBot's own mark for Postiz: no Postiz artwork is bundled. */
+/** Obot's own mark for Postiz: no Postiz artwork is bundled. */
 export function PostizIcon() {
   return (
     <svg viewBox="0 0 40 40" className="size-10 shrink-0 rounded-[8px]" aria-hidden="true">

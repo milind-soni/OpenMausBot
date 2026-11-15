@@ -1601,7 +1601,7 @@ describe("RoutineManager", () => {
     // A second restart while that second start runs fails it.
     const again = new RoutineManager(h.options);
     expect(again.listRuns()).toMatchObject([
-      { routineId: routine.id, status: "failed", retried: "restarted", threadId: "thread-1", error: "OpenMausBot restarted while this routine was running" },
+      { routineId: routine.id, status: "failed", retried: "restarted", threadId: "thread-1", error: "Obot restarted while this routine was running" },
     ]);
     expect(failureWasPersistedBeforeCallback).toBe(true);
     expect(cut).toHaveLength(2);
@@ -1611,7 +1611,7 @@ describe("RoutineManager", () => {
         routineName: "Morning brief",
         status: "failed",
         threadId: "thread-1",
-        error: "OpenMausBot restarted while this routine was running",
+        error: "Obot restarted while this routine was running",
       },
     ]);
     expect(new RoutineManager(h.options).listRuns()).toHaveLength(1);
@@ -4003,7 +4003,7 @@ describe("routine paths that cannot exist where the routine runs", () => {
     h.manager.update(routine.id, { prompt: routine.prompt });
     h.manager.runNow(routine.id);
     await h.manager.tick();
-    expect(h.started[0]!.prompt).toContain("[OpenMausBot: this run is on a Linux computer, where C:\\Users\\Ada\\Reports\\weekly.xlsx cannot exist.");
+    expect(h.started[0]!.prompt).toContain("[Obot: this run is on a Linux computer, where C:\\Users\\Ada\\Reports\\weekly.xlsx cannot exist.");
     expect(JSON.parse(readFileSync(h.options.file!, "utf8")).routines[0]).not.toHaveProperty("warning");
   });
 });

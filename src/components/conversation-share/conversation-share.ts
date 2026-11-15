@@ -37,14 +37,14 @@ export function useConversationDialog(): ConversationDialog | null {
 }
 
 /** What this person can do with a conversation's sharing: its own person shares a private one either way, and widens one
- * they shared with one person to the team. Never a bot's shared chat or a chat with their own MausBot. */
+ * they shared with one person to the team. Never a bot's shared chat or a chat with their own Obot. */
 export function shareChoices(bot: Pick<Bot, "defaultBot">, task: Pick<Task, "private" | "shared" | "sharedWith" | "sharedChat"> | undefined, onTeam: boolean): { team: boolean; person: boolean } {
   if (!onTeam || !task || bot.defaultBot?.person || task.sharedChat) return { team: false, person: false };
   if (task.private === true && !task.shared) return { team: true, person: true };
   return { team: task.sharedWith?.byYou === true, person: false };
 }
 
-/** Saving a message to the bot's team memory: on a team, for a bot the person can chat with that isn't their own MausBot. */
+/** Saving a message to the bot's team memory: on a team, for a bot the person can chat with that isn't their own Obot. */
 export function savesToTeamMemory(bot: Pick<Bot, "defaultBot" | "yourAccess"> | undefined, onTeam: boolean): boolean {
   return onTeam && Boolean(bot) && !bot!.defaultBot?.person && bot!.yourAccess !== "view";
 }

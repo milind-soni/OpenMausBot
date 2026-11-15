@@ -1,5 +1,5 @@
-// A Team Cloud member's own MausBot: its main chat is theirs alone, on a Team Cloud with the synthetic Claude CLI. No
-// admin or other member reads it through any route, and its notes go to the person's own layer. A MausBot made before
+// A Team Cloud member's own Obot: its main chat is theirs alone, on a Team Cloud with the synthetic Claude CLI. No
+// admin or other member reads it through any route, and its notes go to the person's own layer. A Obot made before
 // this gets the same at the next start, its earlier notes moved out of the bot's own folder.
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -25,11 +25,11 @@ let fx: CloudSendFixture, team: CloudTeamFixture;
 let olive = "", mira = "", ben = "";
 
 const planPath = () => join(team.home, "plan.json");
-const dataDir = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
+const dataDir = (...rest: string[]) => join(team.home, ".obot", ...rest);
 const turns = (): Array<{ planKey?: string }> => existsSync(`${planPath()}.evidence.jsonl`)
   ? readFileSync(`${planPath()}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 const botsOf = async (token: string, messages = "") => (await team.as(token, "GET", `/api/bots${messages}`)).body.bots as Bot[];
-const ownMausBot = async (token: string) => (await botsOf(token)).find((bot) => bot.defaultBot?.person)!;
+const ownObot = async (token: string) => (await botsOf(token)).find((bot) => bot.defaultBot?.person)!;
 const layer = (bot: Bot, email: string) => dataDir("workspaces", `${bot.id}--member-${personKey({ id: "", email })}`, "MEMORY.md");
 const read = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : "");
 /** Everything a person can fetch about a bot and its main chat, in one string. */
@@ -54,9 +54,9 @@ afterAll(async () => {
 });
 
 it("is the person's own: private on the wire, its notes in their layer, and nobody else reads it through any route", async () => {
-  const maus = await ownMausBot(mira);
+  const maus = await ownObot(mira);
   expect(maus.tasks!.find((task) => task.threadId === maus.threadId)?.private, "her main chat is marked hers").toBe(true);
-  expect((maus as Bot & { mainThreadId?: string }).mainThreadId, "and it is still her MausBot's main chat").toBe(maus.threadId);
+  expect((maus as Bot & { mainThreadId?: string }).mainThreadId, "and it is still her Obot's main chat").toBe(maus.threadId);
   const other = await team.as(mira, "POST", `/api/bots/${maus.id}/tasks`, { title: "Another chat" });
   expect(other.status).toBe(201);
   expect(((await botsOf(mira)).find((bot) => bot.id === maus.id) as Bot & { mainThreadId?: string }).mainThreadId, "a newer chat of hers doesn't become it").toBe(maus.threadId);
@@ -80,7 +80,7 @@ it.each([
 ])("moves earlier notes to their person's layer in %s when the server is English", async (language, reason) => {
   expect((await team.as(olive, "PUT", "/api/config", { language: "en" })).status).toBe(200);
   expect((await team.as(ben, "POST", "/api/presence/active", { source: "desktop", language })).status).toBe(200);
-  const maus = await ownMausBot(ben);
+  const maus = await ownObot(ben);
   expect((await team.as(ben, "POST", `/api/bots/${maus.id}/messages`, { text: "NO-SCRIPT Heron77 hello", threadId: maus.threadId })).status).toBe(202);
   await expect.poll(async () => JSON.stringify((await team.as(ben, "GET", `/api/threads/${maus.threadId}/messages?limit=50`)).body), { timeout: 60_000 }).toContain("Heron77");
   // As an earlier version left it: no person for the main chat, and a note in the bot's own folder.
@@ -102,7 +102,7 @@ it.each([
   expect(journal.find((row) => row.id === `old-${language}`)).toMatchObject({ before: null, canRevert: false, revertUnavailableReason: reason });
   expect(read(dataDir("workspaces", maus.id, "MEMORY.md"))).not.toContain(OLD_NOTE);
   expect(read(dataDir("memory-journal", `${maus.id}.ndjson`))).not.toContain(OLD_NOTE);
-  expect((await ownMausBot(ben)).tasks!.find((task) => task.threadId === maus.threadId)?.private).toBe(true);
+  expect((await ownObot(ben)).tasks!.find((task) => task.threadId === maus.threadId)?.private).toBe(true);
   expect(await everything(ben, maus)).toContain("Heron77");
   expect((await team.as(olive, "GET", `/api/threads/${maus.threadId}/messages?limit=1`)).status).toBe(404);
   expect(await everything(olive, maus)).not.toContain("Heron77");

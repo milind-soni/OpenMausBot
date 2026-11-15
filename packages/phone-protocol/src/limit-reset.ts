@@ -33,7 +33,7 @@ export interface LimitWindowUsage {
   resetsAt: number | null;
 }
 
-/** One engine's usage limit as OpenMausBot knows it now. */
+/** One engine's usage limit as Obot knows it now. */
 export interface EngineLimit {
   /** Engine instance id. */
   engine: string;

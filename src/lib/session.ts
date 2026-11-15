@@ -32,7 +32,7 @@ export function profileForSession(profile: SessionProfile | undefined, sessionSt
 }
 
 const TEAM_SIGN_IN_KEY = "omb.team-sign-in";
-/** A team session's page on MausBot Cloud, kept by this browser for this server, so the page its session ended on can offer
+/** A team session's page on Obot Cloud, kept by this browser for this server, so the page its session ended on can offer
  * the way back. Nothing that signs anyone in: an address the signed-in session was told. */
 export function rememberTeamSignIn(url: string | undefined): void {
   try { if (url) globalThis.localStorage?.setItem(TEAM_SIGN_IN_KEY, url); } catch {}

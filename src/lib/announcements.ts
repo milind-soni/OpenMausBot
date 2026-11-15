@@ -89,7 +89,7 @@ export function announcementPlatform(userAgent: string | undefined): Announcemen
   return null;
 }
 
-/** The desktop app's own page, a MausBot Cloud's page, or any other server's. */
+/** The desktop app's own page, a Obot Cloud's page, or any other server's. */
 export function announcementSurface(local: boolean, cloudHome: boolean): AnnouncementSurface {
   return local ? "desktop" : cloudHome ? "cloud" : "server";
 }

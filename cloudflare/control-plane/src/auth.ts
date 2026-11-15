@@ -1,4 +1,4 @@
-import { betterAuth } from "better-auth";
+﻿import { betterAuth } from "better-auth";
 import { bearer, emailOTP } from "better-auth/plugins";
 
 import type { ControlPlaneConfig } from "./config";
@@ -11,7 +11,7 @@ export function createAuth(
   requestId: string,
 ) {
   return betterAuth({
-    appName: "OpenMausBot",
+    appName: "Obot",
     baseURL: config.authBaseURL,
     basePath: "/api/auth",
     secret: env.BETTER_AUTH_SECRET,
@@ -96,3 +96,4 @@ export async function accountSession(request: Request, auth: ControlPlaneAuth) {
     headers: new Headers({ authorization: `Bearer ${match[1]}` }),
   });
 }
+

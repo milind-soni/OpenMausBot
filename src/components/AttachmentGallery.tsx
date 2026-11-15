@@ -186,7 +186,7 @@ async function readMessageVideo(
 ): Promise<Blob | string> {
   const response = await requestMessageFile(file.path, message, signal, { mediaLink: true });
   progress();
-  if (response.headers.get("x-openmausbot-media") === "1") return messageVideoLink(await response.json().catch(() => null), message);
+  if (response.headers.get("x-obot-media") === "1") return messageVideoLink(await response.json().catch(() => null), message);
   const mime = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (!mime || !VIDEO_MIMES.includes(mime)) {
     await response.body?.cancel();

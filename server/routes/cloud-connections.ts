@@ -1,7 +1,7 @@
 // The routes a one-time move to the person's own Cloud uses for connections. GET /api/cloud-connections, on either
 // side, names this server's connections (never a secret) with the engines it runs and the programs it has. On a Cloud
 // home: POST /api/cloud-connections/connected-apps makes this Cloud act as the computer's connected-apps account (a
-// one-time code from OpenMausBot's service, or the person's own Composio project); PUT
+// one-time code from Obot's service, or the person's own Composio project); PUT
 // /api/cloud-connections/mcp/<name>/sign-in takes a sign-in that moved; PUT
 // /api/cloud-connections/held-keys keeps a trial's moved keys unused while its Claude credit lasts; PUT
 // /api/cloud-connections/email takes the person's mailboxes. Admin scope
@@ -31,7 +31,7 @@ export interface ConnectionsAnswer {
   engines: string[];
   /** Programs a command-line MCP server may start that this server has. */
   commands: string[];
-  /** False on a server with no connected-apps service of MausBot's: connected apps through that service can't move here. */
+  /** False on a server with no connected-apps service of Obot's: connected apps through that service can't move here. */
   managedApps?: false;
 }
 

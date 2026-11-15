@@ -1,4 +1,4 @@
-export const BOT_ROW_DRAG_TYPE = "application/x-openmausbot-sidebar-bot";
+export const BOT_ROW_DRAG_TYPE = "application/x-obot-sidebar-bot";
 
 /** Where a dragged bot lands against the row under the pointer: above it, below it, or with it in a new department. */
 export type BotDropPlace = "before" | "after" | "group";

@@ -1,7 +1,7 @@
 // Runs INSIDE a bot box (self-check.ts starts it) and tries what a hostile bot would: the server's database and settings,
 // another bot's folders, another turn's process and environment, the server's own loopback routes, the local network,
 // the cloud metadata service and the engines every turn runs; and what a legitimate turn needs: its own folders, an
-// engine OpenMausBot installed, the harness routes and the public internet. Prints one JSON line of results. Every
+// engine Obot installed, the harness routes and the public internet. Prints one JSON line of results. Every
 // check is named here once, so the report's `checks: n/n` means these.
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -22,7 +22,7 @@ export interface ProbeSpec {
   serverFiles: string[];
   otherWorkspace: string;
   otherTaskWorkspace: string;
-  /** An engine installed like OpenMausBot installs one: `name` on PATH, linked from `bin`, printing `says`. */
+  /** An engine installed like Obot installs one: `name` on PATH, linked from `bin`, printing `says`. */
   engine: { bin: string; name: string; says: string };
   marker: string;
   canaryPid: number;

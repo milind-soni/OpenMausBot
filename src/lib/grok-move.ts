@@ -20,8 +20,8 @@ export function lookForGrokBot(): Promise<GrokLook> {
   );
 }
 
-/** The MausBot bot in Grok Bot: it sends each Bot's setup to the link below. */
-export const MAUSBOT_GROK_TEMPLATE_URL = "https://x.ai/bot/3i4Tvjckmdk05UwntFeNo";
+/** The Obot bot in Grok Bot: it sends each Bot's setup to the link below. */
+export const OBOT_GROK_TEMPLATE_URL = "https://x.ai/bot/3i4Tvjckmdk05UwntFeNo";
 
 /** The link Grok Bot sends Bots to, when this app can make one, and what arrived through it. */
 export interface GrokConnector {

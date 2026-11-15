@@ -1,7 +1,7 @@
-# OpenMausBot Contributor License Agreement
+# Obot Contributor License Agreement
 
 This agreement covers contributions to the `enterprise/` directory of the
-OpenMausBot repository, which is licensed under the OpenMausBot Enterprise
+Obot repository, which is licensed under the Obot Enterprise
 License rather than Apache 2.0. Contributions anywhere else do not require
 this agreement or a DCO sign-off (see [LICENSING.md](LICENSING.md)).
 
@@ -17,7 +17,7 @@ modelled on the Apache Individual Contributor License Agreement, shortened.
    worldwide, non-exclusive, no-charge, royalty-free, irrevocable license to
    reproduce, prepare derivative works of, publicly display, publicly perform,
    sublicense, and distribute your contribution and such derivative works,
-   under any license, including the OpenMausBot Enterprise License and the
+   under any license, including the Obot Enterprise License and the
    Apache License 2.0.
 2. **Patent license.** You grant the same parties a perpetual, worldwide,
    non-exclusive, no-charge, royalty-free, irrevocable patent license to make,

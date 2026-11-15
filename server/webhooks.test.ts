@@ -260,7 +260,7 @@ describe("WebhookManager", () => {
     expect(h.posted).toHaveLength(0);
   });
 
-  it("gives a delivery:\"post\" webhook one stable dedicated thread, independent of the bot's live selection, and it survives a restart (OpenMausBot#2071)", () => {
+  it("gives a delivery:\"post\" webhook one stable dedicated thread, independent of the bot's live selection, and it survives a restart (Obot#2071)", () => {
     const h = harness();
     const { webhook, secret } = h.manager.create({ name: "Brief", prompt: "", botId: "maus-1", delivery: "post" });
 

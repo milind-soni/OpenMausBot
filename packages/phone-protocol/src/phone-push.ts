@@ -142,7 +142,7 @@ export interface ActivityVisual {
 /** `PUT /api/push/activity`, from the phone. */
 export interface PhoneActivityRegistration {
   /** The app's URL scheme, for the chat link a pushed activity opens. */
-  scheme: "openmausbot" | "openmausbot-dev" | "openmausbot-next";
+  scheme: "obot" | "obot-dev" | "obot-next";
   /** The phone's own words, with `{name}` where the bot's name goes: "{name} needs you", "{name} is working". */
   headlines: Record<ActivityKind, string>;
   /** iOS: the app's Live Activity push-to-start token (hex). */

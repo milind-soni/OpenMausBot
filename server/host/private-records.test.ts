@@ -74,7 +74,7 @@ describe("what an admin reads of other people's records on a Team Cloud", () => 
     expect(rows.map(records(false).usageRow(admin(ANA)))).toEqual(rows);
   });
 
-  it("a decision in someone's private chat keeps when, tool and outcome, and names their own MausBot to nobody", () => {
+  it("a decision in someone's private chat keeps when, tool and outcome, and names their own Obot to nobody", () => {
     const decision = (fields: Partial<DecisionRow>): DecisionRow => ({ at: "2026-11-10T10:00:00.000Z", threadId: "rui-chat", botId: "quotes", botName: "Quotes", tool: "Bash",
       summary: "rm -rf salary.xlsx", summaryCode: "notice.ran", summaryParams: { file: "salary.xlsx" }, rule: "rm .*", requestId: "req-1", decision: "allowed", source: "user", ...fields } as DecisionRow);
     const read = records().decisionRow(admin(ANA));
@@ -87,7 +87,7 @@ describe("what an admin reads of other people's records on a Team Cloud", () => 
     expect(records().decisionRow(admin(RUI))(mine)).toBe(mine);
   });
 
-  it("an admin action on a person's own MausBot is listed to that person only", () => {
+  it("an admin action on a person's own Obot is listed to that person only", () => {
     const action = (id: string): AdminActionRow => ({ at: "2026-11-10T10:00:00.000Z", category: "bot", action: "bot.update", target: { kind: "bot", id, name: "Confidant" }, actor: { kind: "session" } as AdminActionRow["actor"] });
     expect([action("ruis-maus"), action("quotes"), action("deleted-team-bot")].map(records().adminActionShown(admin(ANA)))).toEqual([false, true, true]);
     expect(records().adminActionShown(admin(RUI))(action("ruis-maus"))).toBe(true);

@@ -114,7 +114,7 @@ beforeAll(async () => {
     if (Date.now() > deadline) throw new Error(`the server did not start:\n${log}`);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: "Obot app (Cloud)", ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const granted = await (await realFetch(`${base}/api/cloud/pairing`, { method: "POST", body, headers: {
     ...EDGE, "content-type": "application/json",

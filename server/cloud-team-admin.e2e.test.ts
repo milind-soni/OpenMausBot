@@ -31,7 +31,7 @@ function signed(method: "GET" | "POST", path: string, body = "") {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-team-admin-"));
-  dataDir = join(home, ".openmausbot");
+  dataDir = join(home, ".obot");
   mkdirSync(dataDir, { recursive: true });
   const cli = join(home, "fixture-claude.mjs");
   writeFileSync(cli, `#!/usr/bin/env node
@@ -51,7 +51,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     mcpServers: { linear: { type: "http", url: "https://mcp.linear.app/sse?token=query-never-shown", headers: { Authorization: "Bearer header-never-shown" } } },
   }));
   mkdirSync(join(home, "web"));
-  writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>OpenMausBot</title>");
+  writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>Obot</title>");
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
   const prelude = `data:text/javascript,${encodeURIComponent("globalThis.fetch = async () => new Response(\"offline fixture\", { status: 503 });")}`;
@@ -97,7 +97,7 @@ it("the Admin reads a Team Cloud's shared connections and AI by a signed request
 
 it("an Owner or Admin's paired session (as the Admin holds one) sets a team key and removes an MCP server through the app's own routes; a User's can't; the team's default language is the server's until it sets its own", async () => {
   const session = async (role: string) => {
-    const granted = await signed("POST", "/api/cloud/pairing", JSON.stringify({ label: "Team admin (MausBot Cloud)", ttlSeconds: 300, team: TEAM, member: { email: `${role}@acme.test`, role } }));
+    const granted = await signed("POST", "/api/cloud/pairing", JSON.stringify({ label: "Team admin (Obot Cloud)", ttlSeconds: 300, team: TEAM, member: { email: `${role}@acme.test`, role } }));
     const token = (await call("POST", "/api/auth/pair", { body: JSON.stringify({ code: granted.body.code }), headers: { "content-type": "application/json" } })).body.token as string;
     return (method: string, path: string, body?: unknown) => call(method, path, { ...(body === undefined ? {} : { body: JSON.stringify(body) }), headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) } });
   };
@@ -126,7 +126,7 @@ it("an Owner or Admin's paired session (as the Admin holds one) sets a team key 
 
 it("the signed read says who added a server, which bots use it and how it is doing, from the bots' own tool calls", async () => {
   const session = async (role: string) => {
-    const granted = await signed("POST", "/api/cloud/pairing", JSON.stringify({ label: "Team admin (MausBot Cloud)", ttlSeconds: 300, team: TEAM, member: { email: `${role}@acme.test`, role } }));
+    const granted = await signed("POST", "/api/cloud/pairing", JSON.stringify({ label: "Team admin (Obot Cloud)", ttlSeconds: 300, team: TEAM, member: { email: `${role}@acme.test`, role } }));
     const token = (await call("POST", "/api/auth/pair", { body: JSON.stringify({ code: granted.body.code }), headers: { "content-type": "application/json" } })).body.token as string;
     return (method: string, path: string, body?: unknown) => call(method, path, { ...(body === undefined ? {} : { body: JSON.stringify(body) }), headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) } });
   };

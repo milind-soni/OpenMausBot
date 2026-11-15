@@ -66,7 +66,7 @@ async function idle(id: string) {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-claude-account-api-"));
-  dataDir = join(home, ".openmausbot");
+  dataDir = join(home, ".obot");
   mkdirSync(dataDir, { recursive: true });
   cli = join(home, "fixture-claude.mjs");
   // The official-style auth probe stays synthetic; turns reuse the repository
@@ -224,7 +224,7 @@ describe("Claude account HTTP API", () => {
     expect(instance.authentication).toBeUndefined();
     expect(JSON.stringify(created.body)).not.toContain(fields.token);
     expect(saved().instances[id].environment.CODEX_HOME).toContain(id);
-    expect(saved().instances[id].environment.OPENMAUSBOT_CODEX_API_KEY).toBe(fields.token);
+    expect(saved().instances[id].environment.OBOT_CODEX_API_KEY).toBe(fields.token);
     expect((await api("POST", `/api/instances/${id}/auth/start`)).status).not.toBe(200);
     expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { baseUrl: "https://other.example/v1" })).status).toBe(400);
     expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { model: "another-model" })).status).toBe(200);

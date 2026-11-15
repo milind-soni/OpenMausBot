@@ -31,7 +31,7 @@ it("opening My Cloud from the app needs no click and no code to type", async () 
   vi.stubGlobal("window", { ogb: { workspaces: {} } });
   f.pair.mockResolvedValue({ ok: true });
   const html = render(code);
-  expect(html).toContain("Connecting to this MausBot…");
+  expect(html).toContain("Connecting to this Obot…");
   expect(html).not.toContain("Pairing code"); expect(html).not.toContain("<form");
   f.effects[0](); await flush();
   expect(f.pair).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code }));
@@ -54,7 +54,7 @@ it("a browser keeps the code in the form for the person to confirm", () => {
 
 it("My Cloud says where its connection starts, never 'the code shown on the server'", () => {
   const cloud = pairIntro({ mode: "code", sent: false, email: "", cloudHome: true });
-  expect(cloud).toContain(`choose ${en["cloudHome.connect"]} in the MausBot app`);
+  expect(cloud).toContain(`choose ${en["cloudHome.connect"]} in the Obot app`);
   expect(cloud).toContain(`Settings → ${en["settings.section.cloudAccount"]}`);
   expect(cloud).toContain("on your Plan page");
   expect(cloud).not.toContain("from the server");
@@ -67,7 +67,7 @@ it("a team's Cloud is called by the team's name, a person's own Cloud My Cloud",
   expect(pairTitle(descriptor({ cloudHome: true, cloudTeam: true }), "code")).toBe("Acme Labs");
   expect(pairTitle(descriptor({ cloudHome: true }), "code")).toBe("My Cloud");
   expect(pairTitle(descriptor({}), "email")).toBe("Sign in to Acme Labs");
-  expect(pairTitle(null, "code")).toBe("Connect to this MausBot");
+  expect(pairTitle(null, "code")).toBe("Connect to this Obot");
 });
 
 it("names a wrong kind of code instead of letting it be sent as a wrong one", () => {
@@ -80,8 +80,8 @@ it("names a wrong kind of code instead of letting it be sent as a wrong one", ()
 });
 
 it("opens the phone app at this server with the code filled in", () => {
-  expect(openInAppLink("https://maus.example.com", "7kq2m9xdh4tp")).toBe("openmausbot://pair?address=https%3A%2F%2Fmaus.example.com&code=7KQ2-M9XD-H4TP");
-  expect(openInAppLink("http://192.168.1.20:8799", "")).toBe("openmausbot://pair?address=http%3A%2F%2F192.168.1.20%3A8799");
+  expect(openInAppLink("https://maus.example.com", "7kq2m9xdh4tp")).toBe("obot://pair?address=https%3A%2F%2Fmaus.example.com&code=7KQ2-M9XD-H4TP");
+  expect(openInAppLink("http://192.168.1.20:8799", "")).toBe("obot://pair?address=http%3A%2F%2F192.168.1.20%3A8799");
 });
 
 it("warns only on plain http across the open internet", () => {
@@ -97,18 +97,18 @@ it("asks for the code first, with email sign-in as a link below, and says how to
   const html = render(code);
   expect(html).toContain(en["pair.notEncrypted"].replace("'", "&#x27;"));
   expect(html).toContain(en["pair.fromLink"]);
-  expect(html).toContain("openmausbot://pair?address=http%3A%2F%2F203.0.113.9%3A8799&amp;code=ABCD-EFGH-JK23");
-  expect(html).toContain("npx openmausbot pair");
+  expect(html).toContain("obot://pair?address=http%3A%2F%2F203.0.113.9%3A8799&amp;code=ABCD-EFGH-JK23");
+  expect(html).toContain("npx obot pair");
   expect(html.indexOf("<form")).toBeLessThan(html.indexOf(en["pair.code"]));
 });
 
-it("a team's Cloud whose session ended offers the way back through MausBot Cloud, as the signed-in session told this browser, and only to an https page", () => {
+it("a team's Cloud whose session ended offers the way back through Obot Cloud, as the signed-in session told this browser, and only to an https page", () => {
   const team = { environmentId: "e", label: "Acme", platform: "linux", version: "1", capabilities: { remoteSessions: true as const, cloudHome: true as const, cloudTeam: true as const } } as unknown as EnvironmentDescriptor;
-  expect(teamPage(team, "https://cloud.openmausbot.com/cloud/team/t1")).toBe("https://cloud.openmausbot.com/cloud/team/t1");
+  expect(teamPage(team, "https://cloud.obot.com/cloud/team/t1")).toBe("https://cloud.obot.com/cloud/team/t1");
   expect(teamPage(team, null), "never told before sign-in").toBeNull();
   for (const bad of ["javascript:alert(1)", "http://evil.example/cloud", "https://u:p@cloud.example/x", "https://cloud.example/x#signin=1", "nope"]) expect(teamPage(team, bad)).toBeNull();
-  expect(teamPage({ ...team, capabilities: { remoteSessions: true, cloudHome: true } } as unknown as EnvironmentDescriptor, "https://cloud.openmausbot.com/cloud/team/t1"), "a My Cloud has no team page").toBeNull();
-  expect(en["pair.team.open"].replace("{team}", "Acme")).toBe("Open Acme with MausBot Cloud");
+  expect(teamPage({ ...team, capabilities: { remoteSessions: true, cloudHome: true } } as unknown as EnvironmentDescriptor, "https://cloud.obot.com/cloud/team/t1"), "a My Cloud has no team page").toBeNull();
+  expect(en["pair.team.open"].replace("{team}", "Acme")).toBe("Open Acme with Obot Cloud");
 });
 
 it("a team's page whose person is no longer in the team says so in one sentence, with nothing to sign in to", () => {

@@ -66,7 +66,7 @@ describe("how a new bot is shared", () => {
     expect(nobodys).toMatchObject({ access: PRIVATE, visibility: "admins" });
   });
 
-  it("on a team what the request chose wins, and a member's own MausBot stays theirs alone", () => {
+  it("on a team what the request chose wins, and a member's own Obot stays theirs alone", () => {
     const store = teamStore();
     expect(accessOf(store.createBot({ name: "Open", createdBy: ADA, visibility: "everyone" }))).toEqual({ everyone: "chat", people: {} });
     expect(memberLevel(store.createBot({ name: "Listed", createdBy: ADA, visibility: { people: [MARTA] } }), MARTA)).toBe("chat");

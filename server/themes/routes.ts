@@ -80,7 +80,7 @@ export function createThemeRoutes(deps: ThemeRoutesDeps): RouteHandler {
     }
     if (path === "/api/themes/import" && method === "POST") {
       const parsed = themeExportSchema.safeParse(await readBody(req, IMPORT_LIMIT));
-      if (!parsed.success) return json(res, 400, { error: "This is not a MausBot theme file." });
+      if (!parsed.success) return json(res, 400, { error: "This is not a Obot theme file." });
       const imported = store.importTheme(person, parsed.data);
       return isRefusal(imported) ? json(res, 400, { error: imported.refusal }) : json(res, 200, imported);
     }

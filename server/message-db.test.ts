@@ -288,7 +288,7 @@ describe("message-db", () => {
     );
     insertMessage("dm", msg("m-old", relayed));
     insertMessage("dm", msg("m-user", "please get the pricing audit emailed to me"));
-    insertMessage("dm", msg("m-bot", "I saw a [Message from @Scout, another bot in this OpenMausBot workspace] earlier about the pricing audit", { role: "bot" }));
+    insertMessage("dm", msg("m-bot", "I saw a [Message from @Scout, another bot in this Obot workspace] earlier about the pricing audit", { role: "bot" }));
     closeMessageDb();
     const raw = new DatabaseSync(join(DATA_DIR, "messages.db"));
     raw.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)")

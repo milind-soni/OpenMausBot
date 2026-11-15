@@ -76,7 +76,7 @@ export interface WebhookManagerOptions {
   /** delivery:"post" sink: lands in the trigger's own stable thread, never a caller-supplied one. */
   post?: (botId: string, threadId: string, text: string) => void;
   /** Absent, every post delivery fails with 503 rather than falling back to an ambient thread
-   *  (https://github.com/milind-soni/OpenMausBot/issues/2071). */
+   *  (https://github.com/alnatourm/Obot/issues/2071). */
   resolvePostThread?: (trigger: WebhookTrigger, forceNew: boolean) => string | undefined;
   /** delivery:"post" with a groupId: the room sink. Absent, a room delivery fails with 503
    *  rather than downgrading to a thread post. */
@@ -319,7 +319,7 @@ function serializePayload(payload: JsonValue): string {
     }
   }
   if (text.length <= MAX_EVENT_CHARS) return text;
-  return `${text.slice(0, MAX_EVENT_CHARS)}\n\n[Payload truncated by OpenMausBot]`;
+  return `${text.slice(0, MAX_EVENT_CHARS)}\n\n[Payload truncated by Obot]`;
 }
 
 function previewPayload(payload: JsonValue): string {
@@ -659,7 +659,7 @@ export class WebhookManager {
       payload,
       contentType: "application/json",
       eventName,
-      userAgent: "OpenMausBot webhook tester",
+      userAgent: "Obot webhook tester",
       deliveryId: `test-${randomUUID()}`,
     }, true);
   }

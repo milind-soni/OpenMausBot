@@ -31,7 +31,7 @@ const streams: SseRecorder[] = [];
 
 async function boot(env: Record<string, string>): Promise<Fixture> {
   const home = mkdtempSync(join(tmpdir(), "omb-phone-push-"));
-  const data = join(home, ".openmausbot");
+  const data = join(home, ".obot");
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, "config.json"), JSON.stringify({
     features: { smartSetupChoices: false },
@@ -184,7 +184,7 @@ describe("Live Activities by push", () => {
     const pip = await createBot(on, "Pip", "slow", "claude-sonnet-5");
     expect((await api(on, "PUT", "/api/push/device", { platform: "apns", token: "c3".repeat(32) }, phone.token)).status).toBe(200);
     const registered = await api(on, "PUT", "/api/push/activity", {
-      scheme: "openmausbot",
+      scheme: "obot",
       headlines: { needsYou: "{name} braucht dich", working: "{name} arbeitet" },
       activities: [{ botId: pip.id, token: ACTIVITY }],
       visuals: { [pip.id]: { color: "#7C5CFF", gradient: ["#B9A9FF", "#7C5CFF"], body: "round" } },
@@ -202,7 +202,7 @@ describe("Live Activities by push", () => {
       v: 1,
       token: ACTIVITY,
       event: "update",
-      activity: { botId: pip.id, botName: "Pip", kind: "working", headline: "Pip arbeitet", since: expect.any(Number), link: `openmausbot://chat/${pip.threadId}`, color: "#7C5CFF", gradient: ["#B9A9FF", "#7C5CFF"], body: "round" },
+      activity: { botId: pip.id, botName: "Pip", kind: "working", headline: "Pip arbeitet", since: expect.any(Number), link: `obot://chat/${pip.threadId}`, color: "#7C5CFF", gradient: ["#B9A9FF", "#7C5CFF"], body: "round" },
     });
     expect(JSON.stringify(activityPushes())).not.toContain("PRIVATE-REPLY-TEXT");
     await expect.poll(() => stub.pushes.at(-1), { timeout: 10_000 }).toEqual({ path: "/v1/installations/self/push/unregister", body: { v: 1, platform: "apns", token: ACTIVITY } });

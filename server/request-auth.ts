@@ -43,7 +43,7 @@ export const SERVICE_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Re
   { methods: ["GET"], path: /^\/api\/auth\/session$/ },
   { methods: ["GET"], path: /^\/api\/edition$/ },
   { methods: ["GET"], path: /^\/api\/brand$/ },
-  { methods: ["GET"], path: /^\/api\/seats$/ }, // a number: the MausBot connector on the same server reads it
+  { methods: ["GET"], path: /^\/api\/seats$/ }, // a number: the Obot connector on the same server reads it
   { methods: ["GET"], path: /^\/api\/bots$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { methods: ["GET"], path: /^\/api\/attachments\/[\w.-]+$/ },
@@ -89,7 +89,7 @@ function loopbackTrust(input: Parameters<typeof resolveLoopbackTrust>[0]): { tru
   const raw = (input.env ?? process.env).OMB_LOOPBACK_TRUST;
   const requested = raw?.trim().toLowerCase();
   if (input.cloudHome) {
-    return { trust: "service", reason: "MausBot Cloud home", ...(raw !== undefined && requested !== "service" ? { warning: "OMB_LOOPBACK_TRUST is ignored on a MausBot Cloud home: a local request is always a service" } : {}) };
+    return { trust: "service", reason: "Obot Cloud home", ...(raw !== undefined && requested !== "service" ? { warning: "OMB_LOOPBACK_TRUST is ignored on a Obot Cloud home: a local request is always a service" } : {}) };
   }
   if (input.desktopManaged) {
     return { trust: "owner", reason: "desktop app", ...(raw !== undefined ? { warning: "OMB_LOOPBACK_TRUST is ignored in the desktop app" } : {}) };
@@ -155,7 +155,7 @@ function localBrowserTrust(env: NodeJS.ProcessEnv, fromSource: boolean, trust: L
   return { trusted: true, warning: `${LOCAL_BROWSER_TRUST}=1: browsers on this machine act as the owner (development only)` };
 }
 
-export const BROWSER_SIGN_IN = "unauthorized: this browser is not signed in. Open the sign-in link that openmausbot serve or openmausbot pair prints on this computer, or pair it with a code from Settings → Remote access";
+export const BROWSER_SIGN_IN = "unauthorized: this browser is not signed in. Open the sign-in link that obot serve or obot pair prints on this computer, or pair it with a code from Settings → Remote access";
 
 export function isAllowedOrigin(origin: string | undefined | null): boolean {
   if (!origin) return true; // non-browser clients (CLIs, curl, tests) send none
@@ -358,7 +358,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/compact$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/start-fresh$/ },
-  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/helper-followup$/ }, // MausBot's own person only: see mayFollowUp
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/helper-followup$/ }, // Obot's own person only: see mayFollowUp
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/interrupt$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/read$/ },
   { methods: ["DELETE"], path: /^\/api\/bots\/[\w-]+\/queue\/[\w-]+$/ },
@@ -512,20 +512,20 @@ const CLIENT_BOT_PATCH_FIELDS = new Set([
 const SHARED_LOOK_FIELDS = new Set([
   "color", "mascotExpression", "mascotBody", "mascotFaceColor", "avatarUrl", "avatarCrop", "avatarZoom", "avatarFocusX", "avatarFocusY",
 ]);
-/** `ownMausBot`: the session's own MausBot on a Team Cloud, which its member may also rename. `teamMember`: a Team Cloud
+/** `ownObot`: the session's own Obot on a Team Cloud, which its member may also rename. `teamMember`: a Team Cloud
  * member's session, which changes no other bot's look. */
-export function clientBotPatchViolation(body: unknown, ownMausBot = false, teamMember = false): string | null {
+export function clientBotPatchViolation(body: unknown, ownObot = false, teamMember = false): string | null {
   if (!body || typeof body !== "object" || Array.isArray(body)) return "body";
   for (const key of Object.keys(body)) {
-    if (ownMausBot && key === "name") continue;
-    if (!CLIENT_BOT_PATCH_FIELDS.has(key) || (teamMember && !ownMausBot && SHARED_LOOK_FIELDS.has(key))) return key;
+    if (ownObot && key === "name") continue;
+    if (!CLIENT_BOT_PATCH_FIELDS.has(key) || (teamMember && !ownObot && SHARED_LOOK_FIELDS.has(key))) return key;
   }
   return null;
 }
 
 /** All a paired device or a Team Cloud move-in may give a bot it makes or brings in: who the bot is, how it looks, its
  * own playbooks, projects and library skills, and which of this place's models it runs on. Everything else (what it may
- * do and reach, where it runs, its department, whom it answers to or directs, whether it is the MausBot or a package's
+ * do and reach, where it runs, its department, whom it answers to or directs, whether it is the Obot or a package's
  * bot) only an admin on the host sets. */
 const BOT_PROFILE_SETTINGS: ReadonlySet<string> = new Set([
   ...CLIENT_BOT_PATCH_FIELDS, ...BOT_PROFILE_PATCH_FIELDS, "hidden",
@@ -550,8 +550,8 @@ const EDITOR_BOT_PATCH_FIELDS: ReadonlySet<string> = new Set([
 /** A member who can only view a bot marks it read, nothing else. */
 const VIEWER_BOT_PATCH_FIELDS: ReadonlySet<string> = new Set(["unread"]);
 
-export function memberBotPatchViolation(body: unknown, level: "view" | "chat" | "edit", ownMausBot = false, teamMember = false): string | null {
-  if (level === "chat") return clientBotPatchViolation(body, ownMausBot, teamMember);
+export function memberBotPatchViolation(body: unknown, level: "view" | "chat" | "edit", ownObot = false, teamMember = false): string | null {
+  if (level === "chat") return clientBotPatchViolation(body, ownObot, teamMember);
   if (!body || typeof body !== "object" || Array.isArray(body)) return "body";
   const allowed = level === "edit" ? EDITOR_BOT_PATCH_FIELDS : VIEWER_BOT_PATCH_FIELDS;
   return Object.keys(body).find((key) => !allowed.has(key)) ?? null;
@@ -585,7 +585,7 @@ export interface ResolveOptions {
   features?: { sharedComputers?: boolean };
   /** Absent is `owner`; ignored while loopbackMutationToken is in force. */
   loopbackTrust?: LoopbackTrust;
-  /** Under `service`: a per-launch secret from `openmausbot serve` over stdin (never env, which other children read); it opens only pairing codes. */
+  /** Under `service`: a per-launch secret from `obot serve` over stdin (never env, which other children read); it opens only pairing codes. */
   cliOwnerToken?: string;
   /** resolveLoopbackTrust's `localBrowsers`: a development server lets this machine's browsers use loopback trust. */
   trustLocalBrowser?: boolean;
@@ -595,10 +595,10 @@ export interface ResolveOptions {
   scopeRefusal?(method: string, path: string): string | null;
 }
 
-const CLI_OWNER_HEADER = "x-openmausbot-cli-owner";
+const CLI_OWNER_HEADER = "x-obot-cli-owner";
 const CLI_OWNER_ROUTE = /^\/api\/auth\/pairing$/;
 
-const DESKTOP_OWNER_HEADER = "x-openmausbot-desktop-owner";
+const DESKTOP_OWNER_HEADER = "x-obot-desktop-owner";
 
 function mutatingPublicRoute(method: string, path: string): boolean {
   const upper = method.toUpperCase();
@@ -683,15 +683,15 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
   const proxied = isProxied(req);
   const loopback = !proxied && isLoopbackHost(headerValue(req.headers.host)) && isAllowedOrigin(headerValue(req.headers.origin));
   if (loopback) {
-    const companionToken = headerValue(req.headers["x-openmausbot-companion-auth"]);
+    const companionToken = headerValue(req.headers["x-obot-companion-auth"]);
     if (companionToken && options.loopbackMutationToken !== undefined) {
       if (
         !secureTokenMatch(companionToken, options.companionMutationToken ?? "") ||
-        req.headers["x-openmausbot-companion"] !== "1" ||
-        !/^[\w-]{1,128}$/.test(headerValue(req.headers["x-openmausbot-companion-device"]) ?? "") ||
+        req.headers["x-obot-companion"] !== "1" ||
+        !/^[\w-]{1,128}$/.test(headerValue(req.headers["x-obot-companion-device"]) ?? "") ||
         (companionDenial({ path, method, authenticated: true }) && !isCompanionNotice(method, path))
       ) return deny(403, "forbidden: invalid companion request");
-      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, companionDevice: headerValue(req.headers["x-openmausbot-companion-device"]) }, status: 401, error: "" };
+      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, companionDevice: headerValue(req.headers["x-obot-companion-device"]) }, status: 401, error: "" };
     }
     const desktopOwner = options.loopbackMutationToken !== undefined &&
       secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), options.loopbackMutationToken) && fromOwnPage(req);

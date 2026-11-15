@@ -5,21 +5,21 @@ export const CONNECTOR_VERSION = "1.0.0";
 
 /** Docker objects the connector owns. */
 export const NAMES = {
-  connector: "mausbot-connector",
-  connectorNext: "mausbot-connector-next",
-  home: "mausbot-home",
-  dataVolume: "mausbot-data",
-  stateVolume: "mausbot-connector",
-  snapshotVolume: "mausbot-snapshot",
-  backupPrefix: "mausbot-backup-",
+  connector: "obot-connector",
+  connectorNext: "obot-connector-next",
+  home: "obot-home",
+  dataVolume: "obot-data",
+  stateVolume: "obot-connector",
+  snapshotVolume: "obot-snapshot",
+  backupPrefix: "obot-backup-",
 } as const;
 
 export const LABELS = {
-  role: "com.mausbot.role",
-  instance: "com.mausbot.instance",
-  created: "com.mausbot.created",
-  image: "com.mausbot.image",
-  env: "com.mausbot.env",
+  role: "com.obot.role",
+  instance: "com.obot.instance",
+  created: "com.obot.created",
+  image: "com.obot.image",
+  env: "com.obot.env",
 } as const;
 
 /** Backups the connector keeps; a newer one replaces the oldest. */
@@ -27,18 +27,18 @@ export const BACKUPS_KEPT = 3;
 
 /** Inside the connector's container. */
 export const PATHS = {
-  state: process.env.MAUSBOT_STATE_DIR || "/state",
-  docker: process.env.MAUSBOT_DOCKER_SOCKET || "/var/run/docker.sock",
-  /** /etc/mausbot on the host, mounted read-only: the seccomp profile install.sh put there. */
-  hostConfig: process.env.MAUSBOT_HOST_CONFIG_DIR || "/etc/mausbot",
+  state: process.env.OBOT_STATE_DIR || "/state",
+  docker: process.env.OBOT_DOCKER_SOCKET || "/var/run/docker.sock",
+  /** /etc/obot on the host, mounted read-only: the seccomp profile install.sh put there. */
+  hostConfig: process.env.OBOT_HOST_CONFIG_DIR || "/etc/obot",
   /** The connector's own copies, which install.sh installs from this image. */
-  profiles: process.env.MAUSBOT_PROFILES_DIR || "/app/profiles",
-  /** /var/log/mausbot on the host, mounted read-write: the audit log the server's owner reads. */
-  audit: process.env.MAUSBOT_AUDIT_DIR || "/var/log/mausbot",
-  /** In the container's own /tmp: `mausbot-connector job` reaches the running connector here. */
-  jobs: process.env.MAUSBOT_JOBS_SOCKET || "/tmp/mausbot-jobs.sock",
-  /** /var/lib/mausbot/update on the host, on a customer-run server only: where an update is handed to the server's own updater. */
-  update: process.env.MAUSBOT_UPDATE_DIR || "/var/lib/mausbot/update",
+  profiles: process.env.OBOT_PROFILES_DIR || "/app/profiles",
+  /** /var/log/obot on the host, mounted read-write: the audit log the server's owner reads. */
+  audit: process.env.OBOT_AUDIT_DIR || "/var/log/obot",
+  /** In the container's own /tmp: `obot-connector job` reaches the running connector here. */
+  jobs: process.env.OBOT_JOBS_SOCKET || "/tmp/obot-jobs.sock",
+  /** /var/lib/obot/update on the host, on a customer-run server only: where an update is handed to the server's own updater. */
+  update: process.env.OBOT_UPDATE_DIR || "/var/lib/obot/update",
 } as const;
 
 export const AUDIT_FILE = "audit.jsonl";
@@ -81,7 +81,7 @@ export const HOME_SECRET_ENV = [
   "OMB_CLOUD_CONNECTED_APPS_GRANT", "OMB_CLOUD_X_TOKEN", "OMB_CLOUD_HOSTING_TOKEN", "OMB_CLOUD_TUNNEL_TOKEN",
 ] as const;
 /** In the home: a read-only folder holding only `secrets.json`, root's alone. The launcher reads it at start. */
-export const HOME_SECRETS_TARGET = "/run/mausbot";
+export const HOME_SECRETS_TARGET = "/run/obot";
 /** In the connector's state volume: the folder mounted at HOME_SECRETS_TARGET. */
 export const HOME_SECRETS_DIR = "home-secrets";
 export const HOME_SECRETS_FILE = "secrets.json";

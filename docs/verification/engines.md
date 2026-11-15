@@ -1,8 +1,8 @@
-# Engines and Doctor
+﻿# Engines and Doctor
 
 ## Sub-features
 
-- Confirm the endpoint identifies itself as OpenMausBot.
+- Confirm the endpoint identifies itself as Obot.
 - List configured provider instances without exposing executable paths.
 - Distinguish available and unavailable engines.
 - Add named Claude accounts and select them independently for bots.
@@ -18,7 +18,7 @@ pnpm control:omb doctor --url http://127.0.0.1:PORT
 pnpm control:omb models --url http://127.0.0.1:PORT
 ```
 
-`doctor.ok` is true only when the endpoint is OpenMausBot and at least one
+`doctor.ok` is true only when the endpoint is Obot and at least one
 engine is available. The isolated fixture should expose `claude`.
 
 ## Named Claude accounts
@@ -51,7 +51,7 @@ prove real OAuth login or native Windows execution.
 
 ## OMP (Oh My Pi)
 
-Install with `npm install -g @oh-my-pi/pi-coding-agent`, then run `omp login` or configure a provider in `~/.omp/agent/models.yml`. OpenMausBot launches `omp acp`, discovers its advertised models and per-model thinking choices, and resumes each thread's native OMP session. OMP remains responsible for its own provider credentials and approvals; OpenMausBot answers ACP permission requests through the normal approval cards.
+Install with `npm install -g @oh-my-pi/pi-coding-agent`, then run `omp login` or configure a provider in `~/.omp/agent/models.yml`. Obot launches `omp acp`, discovers its advertised models and per-model thinking choices, and resumes each thread's native OMP session. OMP remains responsible for its own provider credentials and approvals; Obot answers ACP permission requests through the normal approval cards.
 
 ```sh
 pnpm exec vitest run server/drivers/acp/omp.test.ts server/drivers/acp/custom-model-catalog.test.ts server/runtime/capabilities.test.ts server/drivers/tool-scope-coverage.test.ts server/agents-bridge-switch.test.ts server/engine-updates.test.ts server/built-in-instances.test.ts src/lib/analytics-allowlist.test.ts server/engine-memory.test.ts
@@ -63,7 +63,7 @@ The following is a one-time author qualification against OMP 18.13.1, not a chec
 
 ## Mistral Vibe
 
-Install `vibe-acp` from `mistral.ai/vibe/install.sh` (the vendor's `mistral-vibe` package through uv), from [github.com/mistralai/mistral-vibe/releases](https://github.com/mistralai/mistral-vibe/releases), or through the app's install pin (`mistral-vibe-release.ts`), then either run a first `vibe` session once so the browser sign-in saves `$VIBE_HOME/whoami_cache.json`, or let the workspace Mistral key from Settings → Connections reach the CLI as `MISTRAL_API_KEY`. OpenMausBot launches `vibe-acp` (ACP by default, no extra arguments), picks the `browser-auth` method when the sign-in gate fires — the CLI opens the browser itself and the authenticate request blocks until the person finishes — and selects models through session/new's `model` config option. Model refresh runs in a temporary working directory and never sends a prompt, so it leaves no record in the person's Vibe history, and threads resume their native Vibe sessions.
+Install `vibe-acp` from `mistral.ai/vibe/install.sh` (the vendor's `mistral-vibe` package through uv), from [github.com/mistralai/mistral-vibe/releases](https://github.com/mistralai/mistral-vibe/releases), or through the app's install pin (`mistral-vibe-release.ts`), then either run a first `vibe` session once so the browser sign-in saves `$VIBE_HOME/whoami_cache.json`, or let the workspace Mistral key from Settings → Connections reach the CLI as `MISTRAL_API_KEY`. Obot launches `vibe-acp` (ACP by default, no extra arguments), picks the `browser-auth` method when the sign-in gate fires — the CLI opens the browser itself and the authenticate request blocks until the person finishes — and selects models through session/new's `model` config option. Model refresh runs in a temporary working directory and never sends a prompt, so it leaves no record in the person's Vibe history, and threads resume their native Vibe sessions.
 
 ```sh
 pnpm exec vitest run server/drivers/acp/mistral-vibe.test.ts server/drivers/acp/custom-model-catalog.test.ts server/runtime/capabilities.test.ts server/drivers/tool-scope-coverage.test.ts server/built-in-instances.test.ts src/lib/analytics-allowlist.test.ts server/engine-memory.test.ts server/config.test.ts
@@ -185,3 +185,4 @@ These fixtures do not prove a real gateway's Responses or Messages protocol,
 streaming, tool execution, TLS, DNS, or account authentication. Verify those
 against a separately provisioned test gateway before marking the draft ready.
 Never use the person's live workspace or credentials for fixture verification.
+

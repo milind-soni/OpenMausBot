@@ -65,13 +65,13 @@ test("a server or computer of the person's own that signed in with their account
     teamId: null, primary: false, managed: false, lastSeenAt: 1_761_000_000_000, version: "0.1.118" }], "only reachable on its own network; fields this app doesn't know are ignored");
   assert.equal(parseCloudList([{ ...mini, status: "ready", origin: "https://mini.example.ts.net" }])[0].origin, "https://mini.example.ts.net");
   for (const bad of [{ managed: "false" }, { managed: 0 }, { managed: null }, { managed: false, runsOn: "cloud" }]) {
-    assert.deepEqual(parseCloudList([cloud(bad)]), [], `${JSON.stringify(bad)}: whether MausBot vouches for it is never guessed`);
+    assert.deepEqual(parseCloudList([cloud(bad)]), [], `${JSON.stringify(bad)}: whether Obot vouches for it is never guessed`);
   }
   const [loose] = parseCloudList([{ ...mini, lastSeenAt: "yesterday", version: "<b>1</b>" }]);
   assert.deepEqual([loose.lastSeenAt, loose.version], [undefined, undefined], "a malformed last-seen time or version is left out");
   assert.deepEqual(parseCloudList([{ ...mini, lastSeenAt: null, version: null }])[0], parseCloudList([{ ...mini, lastSeenAt: undefined, version: undefined }])[0]);
   assert.equal(parseCloudList([cloud({ managed: true })])[0].managed, true);
-  assert.equal(parseCloudList([cloud({ status: "offline", origin: null })]).length, 0, "a Cloud MausBot runs still needs its address");
+  assert.equal(parseCloudList([cloud({ status: "offline", origin: null })]).length, 0, "a Cloud Obot runs still needs its address");
   const list = parseCloudList([primary, mini, { ...mini, id: "s-vps", name: "VPS", status: "ready", origin: "https://vps.example.com", primary: true }]);
   assert.deepEqual(list.map(entry => entry.primary), [true, false, false], "never My Cloud");
   assert.deepEqual([otherOwnClouds(list), ownCloudPlaces(list)], [[], []], "nor another Cloud of theirs: nothing pairs with it by id or lends to it");
@@ -144,7 +144,7 @@ test("the switcher lists another own Cloud like a team's: no Forget, the window 
   assert.deepEqual(menu.map(item => item.id), ["workspace-home", "workspace-a"]);
   const before = environments.workspaceMenuTemplate(state, { onSwitch() {}, onConnect() {}, onForget() {} });
   assert.equal(before.some(item => item.id === "workspace-forget"), false);
-  assert.equal(environments.workspaceWindowTitle(state, null, HOME), "OpenMausBot — Client A");
+  assert.equal(environments.workspaceWindowTitle(state, null, HOME), "Obot — Client A");
 });
 
 test("home places: the session's other Clouds become saved places, one remembered is opened next time, and one the session drops is forgotten", () => {

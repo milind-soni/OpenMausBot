@@ -1,4 +1,4 @@
-// Many client workspaces on one Linux server, each its own OS user and `openmausbot@<slug>` service. This module only plans:
+// Many client workspaces on one Linux server, each its own OS user and `obot@<slug>` service. This module only plans:
 // it renders files and fixed argument lists as steps, and never builds a shell command string.
 import { posix } from "node:path";
 
@@ -28,18 +28,18 @@ export interface FleetLayout {
 export function fleetLayout(root = "/"): FleetLayout {
   const at = (...parts: string[]) => join(root, ...parts);
   return {
-    etcDir: at("etc", "openmausbot"),
-    registryFile: at("etc", "openmausbot", "fleet.json"),
-    instancesDir: at("etc", "openmausbot", "instances"),
-    unitFile: at("etc", "systemd", "system", "openmausbot@.service"),
-    fenceFile: at("etc", "openmausbot", "fence.nft"),
-    fenceUnitFile: at("etc", "systemd", "system", "openmausbot-fence.service"),
+    etcDir: at("etc", "obot"),
+    registryFile: at("etc", "obot", "fleet.json"),
+    instancesDir: at("etc", "obot", "instances"),
+    unitFile: at("etc", "systemd", "system", "obot@.service"),
+    fenceFile: at("etc", "obot", "fence.nft"),
+    fenceUnitFile: at("etc", "systemd", "system", "obot-fence.service"),
     caddyDir: at("etc", "caddy", "omb.d"),
     caddyfile: at("etc", "caddy", "Caddyfile"),
-    homesDir: at("var", "lib", "openmausbot"),
-    agentUnitFile: at("etc", "systemd", "system", "openmausbot-fleet.service"),
-    socketPath: at("run", "openmausbot", "fleet.sock"),
-    auditFile: at("var", "log", "openmausbot", "fleet.jsonl"),
+    homesDir: at("var", "lib", "obot"),
+    agentUnitFile: at("etc", "systemd", "system", "obot-fleet.service"),
+    socketPath: at("run", "obot", "fleet.sock"),
+    auditFile: at("var", "log", "obot", "fleet.jsonl"),
   };
 }
 
@@ -48,16 +48,16 @@ export function agentUnit(spec: { node: string; script: string; operator: string
   const layout = spec.layout ?? fleetLayout();
   const strip = spec.script.endsWith(".ts") ? " --experimental-strip-types" : "";
   return [
-    "# Written by `openmausbot fleet init`. The operator workspace creates and manages workspaces through this.",
+    "# Written by `obot fleet init`. The operator workspace creates and manages workspaces through this.",
     "[Unit]",
-    "Description=OpenMausBot fleet agent",
+    "Description=Obot fleet agent",
     "After=network-online.target",
     "Wants=network-online.target",
     "",
     "[Service]",
     "Type=simple",
     `ExecStart=${spec.node}${strip} ${spec.script} fleet agent --socket ${layout.socketPath} --group ${spec.operator}`,
-    "RuntimeDirectory=openmausbot",
+    "RuntimeDirectory=obot",
     "RuntimeDirectoryMode=0755",
     "Restart=always",
     "RestartSec=3",
@@ -116,7 +116,7 @@ export function workspaceHome(layout: FleetLayout, slug: string): string {
 }
 
 export function workspaceDataDir(layout: FleetLayout, slug: string): string {
-  return join(workspaceHome(layout, slug), ".openmausbot");
+  return join(workspaceHome(layout, slug), ".obot");
 }
 
 export function assertSlug(slug: string): void {
@@ -146,12 +146,12 @@ export function templateUnit(spec: { node: string; script: string; layout?: Flee
   const layout = spec.layout ?? fleetLayout();
   const strip = spec.script.endsWith(".ts") ? " --experimental-strip-types" : "";
   return [
-    "# Written by `openmausbot fleet init`. One unit for every workspace: %i is the slug.",
+    "# Written by `obot fleet init`. One unit for every workspace: %i is the slug.",
     "[Unit]",
-    "Description=OpenMausBot workspace %i",
-    "After=network-online.target openmausbot-fence.service",
+    "Description=Obot workspace %i",
+    "After=network-online.target obot-fence.service",
     "Wants=network-online.target",
-    "Requires=openmausbot-fence.service",
+    "Requires=obot-fence.service",
     "",
     "[Service]",
     "Type=simple",
@@ -181,9 +181,9 @@ export function templateUnit(spec: { node: string; script: string; layout?: Flee
 
 export function fenceUnit(layout = fleetLayout()): string {
   return [
-    "# Written by `openmausbot fleet init`: keeps each workspace's loopback ports to its own user.",
+    "# Written by `obot fleet init`: keeps each workspace's loopback ports to its own user.",
     "[Unit]",
-    "Description=OpenMausBot per-workspace loopback fence",
+    "Description=Obot per-workspace loopback fence",
     "",
     "[Service]",
     "Type=oneshot",
@@ -198,7 +198,7 @@ export function fenceUnit(layout = fleetLayout()): string {
 
 /** nftables: only a workspace's own user, Caddy and root may open its loopback ports, so a bot's shell cannot reach a sibling's API. */
 export function fenceRules(workspaces: FleetWorkspace[]): string {
-  const lines = ["#!/usr/sbin/nft -f", "# Written by `openmausbot fleet`; regenerated on every create, suspend, resume and delete.", "add table inet openmausbot", "flush table inet openmausbot", "table inet openmausbot {", "\tchain output {", "\t\ttype filter hook output priority 0; policy accept;"];
+  const lines = ["#!/usr/sbin/nft -f", "# Written by `obot fleet`; regenerated on every create, suspend, resume and delete.", "add table inet obot", "flush table inet obot", "table inet obot {", "\tchain output {", "\t\ttype filter hook output priority 0; policy accept;"];
   for (const workspace of [...workspaces].sort((a, b) => a.slug.localeCompare(b.slug))) {
     if (workspace.status !== "running" && workspace.status !== "suspended" && workspace.status !== "retained" && !workspace.accountCreated) continue;
     lines.push(`\t\toif lo tcp dport { ${workspace.port}, ${workspace.webhookPort} } meta skuid != { ${fleetUser(workspace.slug)}, caddy, root } reject`);
@@ -312,8 +312,8 @@ export function initPlan(input: { domain: string; node: string; script: string; 
     ...(input.operator ? [{ kind: "write" as const, path: layout.agentUnitFile, content: agentUnit({ node: input.node, script: input.script, operator: input.operator, layout }), mode: 0o644 }] : []),
     { kind: "append-once", path: layout.caddyfile, line: caddyImportLine(layout) },
     { kind: "run", argv: ["systemctl", "daemon-reload"], why: "load the workspace template and the fence unit" },
-    { kind: "run", argv: ["systemctl", "enable", "--now", "openmausbot-fence.service"], why: "apply the loopback fence now and at boot" },
-    ...(input.operator ? [{ kind: "run" as const, argv: ["systemctl", "enable", "--now", "openmausbot-fleet.service"], why: `start the fleet agent for ${input.operator}` }] : []),
+    { kind: "run", argv: ["systemctl", "enable", "--now", "obot-fence.service"], why: "apply the loopback fence now and at boot" },
+    ...(input.operator ? [{ kind: "run" as const, argv: ["systemctl", "enable", "--now", "obot-fleet.service"], why: `start the fleet agent for ${input.operator}` }] : []),
     { kind: "run", argv: ["systemctl", "reload", "caddy"], why: "start serving the workspaces folder" },
     { kind: "note", text: `point *.${registry.domain} at this server (a wildcard A/AAAA record); each workspace gets its own certificate when created` },
     ...(input.operator ? [{ kind: "note" as const, text: `the installation running as ${input.operator} can now manage installations from Settings → Installations` }] : []),
@@ -385,14 +385,14 @@ export function createPlan(input: {
     { kind: "write", path: join(layout.instancesDir, `${workspace.slug}.env`), content: instanceEnv({ workspace, dataDir, licenseKey: input.licenseKey, portalUrl: input.seed.portalUrl }), mode: 0o600 },
     ...(input.memoryMax
       ? [
-          { kind: "mkdir" as const, path: join(layout.unitFile.replace(/openmausbot@\.service$/, ""), `openmausbot@${workspace.slug}.service.d`), mode: 0o755 },
-          { kind: "write" as const, path: join(layout.unitFile.replace(/openmausbot@\.service$/, ""), `openmausbot@${workspace.slug}.service.d`, "limits.conf"), content: `[Service]\nMemoryMax=${input.memoryMax}\n`, mode: 0o644 },
+          { kind: "mkdir" as const, path: join(layout.unitFile.replace(/obot@\.service$/, ""), `obot@${workspace.slug}.service.d`), mode: 0o755 },
+          { kind: "write" as const, path: join(layout.unitFile.replace(/obot@\.service$/, ""), `obot@${workspace.slug}.service.d`, "limits.conf"), content: `[Service]\nMemoryMax=${input.memoryMax}\n`, mode: 0o644 },
         ]
       : []),
     { kind: "write", path: layout.fenceFile, content: fenceRules(Object.values(registry.workspaces)), mode: 0o600 },
     { kind: "run", argv: ["nft", "-f", layout.fenceFile], why: "fence the new ports to their user" },
     { kind: "run", argv: ["systemctl", "daemon-reload"], why: "pick up the workspace's environment and limits" },
-    { kind: "run", argv: ["systemctl", "enable", "--now", `openmausbot@${workspace.slug}.service`], why: "start the workspace now and at boot" },
+    { kind: "run", argv: ["systemctl", "enable", "--now", `obot@${workspace.slug}.service`], why: "start the workspace now and at boot" },
     { kind: "health", url: `http://127.0.0.1:${workspace.port}/api/health`, why: "wait for the workspace to answer" },
     { kind: "write", path: join(layout.caddyDir, `${workspace.slug}.caddy`), content: caddySite(workspace), mode: 0o644 },
     { kind: "run", argv: ["systemctl", "reload", "caddy"], why: `serve https://${workspace.host} and fetch its certificate` },
@@ -422,7 +422,7 @@ export function suspendPlan(input: { registry: FleetRegistry; slug: string; layo
   return {
     registry,
     steps: [
-      { kind: "run", argv: ["systemctl", "disable", "--now", `openmausbot@${workspace.slug}.service`], why: "stop the workspace and keep it stopped at boot" },
+      { kind: "run", argv: ["systemctl", "disable", "--now", `obot@${workspace.slug}.service`], why: "stop the workspace and keep it stopped at boot" },
       { kind: "write", path: join(layout.caddyDir, `${workspace.slug}.caddy`), content: caddySite(workspace), mode: 0o644 },
       { kind: "run", argv: ["systemctl", "reload", "caddy"], why: "show the suspended page instead" },
       { kind: "write", path: layout.registryFile, content: `${JSON.stringify(registry, null, 2)}\n`, mode: 0o600 },
@@ -436,7 +436,7 @@ export function resumePlan(input: { registry: FleetRegistry; slug: string; layou
   return {
     registry,
     steps: [
-      { kind: "run", argv: ["systemctl", "enable", "--now", `openmausbot@${workspace.slug}.service`], why: "start the workspace again" },
+      { kind: "run", argv: ["systemctl", "enable", "--now", `obot@${workspace.slug}.service`], why: "start the workspace again" },
       { kind: "health", url: `http://127.0.0.1:${workspace.port}/api/health`, why: "wait for the workspace to answer" },
       { kind: "write", path: join(layout.caddyDir, `${workspace.slug}.caddy`), content: caddySite(workspace), mode: 0o644 },
       { kind: "run", argv: ["systemctl", "reload", "caddy"], why: "serve it again" },
@@ -453,15 +453,15 @@ export function deletePlan(input: { registry: FleetRegistry; slug: string; keepD
   assertManagedWorkspace(workspace);
   const { [input.slug]: _gone, ...rest } = input.registry.workspaces;
   const registry: FleetRegistry = { ...input.registry, workspaces: input.keepData ? { ...rest, [input.slug]: { ...workspace, status: "retained" } } : rest };
-  const unitsDir = layout.unitFile.replace(/openmausbot@\.service$/, "");
+  const unitsDir = layout.unitFile.replace(/obot@\.service$/, "");
   return {
     registry,
     steps: [
-      { kind: "run", argv: ["systemctl", "disable", "--now", `openmausbot@${workspace.slug}.service`], why: "stop the workspace" },
+      { kind: "run", argv: ["systemctl", "disable", "--now", `obot@${workspace.slug}.service`], why: "stop the workspace" },
       { kind: "remove", path: join(layout.caddyDir, `${workspace.slug}.caddy`) },
       { kind: "run", argv: ["systemctl", "reload", "caddy"], why: "stop serving its address" },
       { kind: "remove", path: join(layout.instancesDir, `${workspace.slug}.env`) },
-      { kind: "remove", path: join(unitsDir, `openmausbot@${workspace.slug}.service.d`, "limits.conf") },
+      { kind: "remove", path: join(unitsDir, `obot@${workspace.slug}.service.d`, "limits.conf") },
       { kind: "write", path: layout.fenceFile, content: fenceRules(Object.values(registry.workspaces)), mode: 0o600 },
       { kind: "run", argv: ["nft", "-f", layout.fenceFile], why: input.keepData ? "keep the retained account's fence" : "drop its fence rule" },
       // Keep the nologin account too: recycling its UID would hand the preserved home to a new workspace.
@@ -476,13 +476,13 @@ export function deletePlan(input: { registry: FleetRegistry; slug: string; keepD
 export function upgradePlan(input: { registry: FleetRegistry }): FleetStep[] {
   const running = Object.values(input.registry.workspaces).filter((workspace) => workspace.status === "running").sort((a, b) => a.slug.localeCompare(b.slug));
   return [
-    { kind: "run", argv: ["npm", "install", "-g", "openmausbot@latest"], why: "install the release every workspace runs from" },
-    ...running.map((workspace) => ({ kind: "run" as const, argv: ["systemctl", "restart", `openmausbot@${workspace.slug}.service`], why: `restart ${workspace.slug} on the new release` })),
+    { kind: "run", argv: ["npm", "install", "-g", "obot@latest"], why: "install the release every workspace runs from" },
+    ...running.map((workspace) => ({ kind: "run" as const, argv: ["systemctl", "restart", `obot@${workspace.slug}.service`], why: `restart ${workspace.slug} on the new release` })),
     ...running.map((workspace) => ({ kind: "health" as const, url: `http://127.0.0.1:${workspace.port}/api/health`, why: `wait for ${workspace.slug}` })),
   ];
 }
 
-/** The same shape `openmausbot access` writes; the server reads it live. */
+/** The same shape `obot access` writes; the server reads it live. */
 export function applySignIn(configText: string, action: "add" | "remove", email: string, chatOnly: boolean): { config: string; summary: string } {
   const entry = email.trim().toLowerCase();
   assertEmailOrDomain(entry);

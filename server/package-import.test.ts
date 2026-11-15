@@ -111,13 +111,13 @@ describe("importing a whole team", () => {
     expect(app.events.filter((kind) => kind === "bot")).toHaveLength(3);
   });
 
-  it("brings a new install's chrome MausBot back in chrome from its own export", async () => {
+  it("brings a new install's chrome Obot back in chrome from its own export", async () => {
     const app = await installation();
     app.store.seedIfEmpty();
     const { createBotPackageExport } = await import("./package-export.ts");
     const exported = createBotPackageExport({ name: "Mine", groups: [], routines: [], bots: app.store.bots });
     const document: PackageDocument = app.parsePackageDocument(JSON.parse(JSON.stringify(exported)));
-    expect(document.package.agents.map((agent) => [agent.name, agent.appearance?.color])).toEqual([["MausBot", "chrome"]]);
+    expect(document.package.agents.map((agent) => [agent.name, agent.appearance?.color])).toEqual([["Obot", "chrome"]]);
     const result = app.importer.importPackageDocument(document, { trust: "file", mode: "add" }, app.deps);
     if (result.alreadyAdded) throw new Error("unexpected");
     expect(result.bots.map((bot) => app.store.bot(bot.id)?.color)).toEqual(["chrome"]);

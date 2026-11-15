@@ -1,10 +1,10 @@
 ---
 title: Data and backups
-description: Know what MausBot stores locally and what to preserve.
+description: Know what Obot stores locally and what to preserve.
 icon: DatabaseBackup
 ---
 
-MausBot keeps its application state under `~/.openmausbot`, including configuration, transcripts, message attachments, device pairing state, and the SQLite message store.
+Obot keeps its application state under `~/.obot`, including configuration, transcripts, message attachments, device pairing state, and the SQLite message store.
 
 ## Copy from the desktop app
 
@@ -21,7 +21,7 @@ paused. It needs the desktop app paired with an owner code, and a server whose
 email sign-in lets someone besides you in never receives one. Copying again
 replaces the backup **Swap back** would put back; the app says so first.
 
-`openmausbot serve`, `openmausbot service install` and the Docker and Podman
+`obot serve`, `obot service install` and the Docker and Podman
 images start the server again on their own after the copy; a server you
 started some other way finishes installing it at its next start.
 
@@ -69,7 +69,7 @@ replaced. Type **REPLACE** to confirm, then fully quit and reopen the desktop ap
 or restart the hosted server process. Closing a desktop window is not enough.
 
 Restore **replaces**, rather than combines, workspace data. The previous data is
-kept under `.openmausbot/.backups/safety-<restore-id>/`. A failed or interrupted
+kept under `.obot/.backups/safety-<restore-id>/`. A failed or interrupted
 replacement recovers the previous files before the server loads them. Keep that
 safety directory until you have checked the restored workspace. It contains
 private data; do not share it.
@@ -108,7 +108,7 @@ paths are not copied or rewritten; check them when moving between computers.
 
 ## Filesystem-level backups
 
-Close MausBot before taking a filesystem-level backup so SQLite and configuration files are captured consistently. Preserve the entire `.openmausbot` directory rather than selecting individual database files.
+Close Obot before taking a filesystem-level backup so SQLite and configuration files are captured consistently. Preserve the entire `.obot` directory rather than selecting individual database files.
 
 Raw filesystem snapshots differ from Settings exports: they may include saved
 credentials, CLI homes and browser sessions. A Docker snapshot of the whole

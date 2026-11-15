@@ -524,13 +524,13 @@ describe("the bots' browser host by default", () => {
 
 describe("a deleted bot's browser", () => {
   const PATH_ENGINE = "/usr/local/bin/agent-browser";
-  const MANAGED_ENGINE = "/data/.openmausbot/tools/agent-browser";
+  const MANAGED_ENGINE = "/data/.obot/tools/agent-browser";
   const folders: string[] = [];
   afterEach(() => {
     vi.unstubAllEnvs();
     for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
   });
-  /** agent-browser on PATH, as the Cloud image installs it; with `managed`, also the one OpenMausBot installed. */
+  /** agent-browser on PATH, as the Cloud image installs it; with `managed`, also the one Obot installed. */
   function engines({ managed = false }: { managed?: boolean } = {}) {
     vi.mocked(browserEngineStatus).mockImplementation((options) => (options?.managedOnly && !managed
       ? { kind: "unavailable", reason: "not installed", installable: true }
@@ -546,7 +546,7 @@ describe("a deleted bot's browser", () => {
     vi.stubEnv("XDG_RUNTIME_DIR", folder);
     vi.mocked(runningBrowserSessionNames).mockResolvedValue(sessions);
   }
-  const deleted = { type: "openmausbot:browser-bot-deleted" as const, requestId: "00000000-0000-4000-8000-000000000000", botId: "gone" };
+  const deleted = { type: "obot:browser-bot-deleted" as const, requestId: "00000000-0000-4000-8000-000000000000", botId: "gone" };
   const closed = () => vi.mocked(closeBrowserSession).mock.calls.map(([binary, env]) => `${binary} ${env.AGENT_BROWSER_SESSION}`);
 
   it("on a Cloud home, is closed and its sign-ins erased with the image's agent-browser", async () => {
@@ -558,7 +558,7 @@ describe("a deleted bot's browser", () => {
     expect(await host.eraseDeletedBrowser(deleted)).toBe(false);
   });
 
-  it("elsewhere, is erased only with the agent-browser OpenMausBot installed, and otherwise just closed", async () => {
+  it("elsewhere, is erased only with the agent-browser Obot installed, and otherwise just closed", async () => {
     engines();
     const { host } = setup(undefined);
     expect(await host.eraseDeletedBrowser(deleted)).toBe(true);
@@ -591,7 +591,7 @@ describe("a deleted bot's browser", () => {
     vi.mocked(clearBrowserSessionState).mockClear();
     // After a restart too: which audiences had browsers is kept on disk.
     const again = setup(undefined, { cloudHome: true, audienceOf: teamAudiences });
-    expect(await again.host.eraseDeletedBrowser({ ...deleted, type: "openmausbot:browser-profile-deleted", botId: undefined, partitionId: "p-work" })).toBe(true);
+    expect(await again.host.eraseDeletedBrowser({ ...deleted, type: "obot:browser-profile-deleted", botId: undefined, partitionId: "p-work" })).toBe(true);
     expect(vi.mocked(clearBrowserSessionState).mock.calls.map(([, session]) => session)).toEqual(["p-work", `p-work${ADA}`, `p-work${ROOM}`]);
   });
 

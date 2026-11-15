@@ -18,7 +18,7 @@ const available = detection.box === "bwrap" && detection.tools !== null;
 const root = mkdtempSync(join(tmpdir(), "omb-box-ask-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-const home = join(root, "home"), dataDir = join(home, ".openmausbot"), cwd = join(dataDir, "task-workspaces", "bot-a", "t-1");
+const home = join(root, "home"), dataDir = join(home, ".obot"), cwd = join(dataDir, "task-workspaces", "bot-a", "t-1");
 const env = { PATH: "/usr/bin:/bin", HOME: home };
 
 /** One ask_user call through the helper in a box that puts back `rw`; the helper's MCP result. */

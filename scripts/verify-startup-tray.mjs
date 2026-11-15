@@ -11,7 +11,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const flag = "--omb-startup-fixture";
 if (!process.versions.electron) {
-  const output = mkdtempSync(join(tmpdir(), "openmausbot-startup-evidence-"));
+  const output = mkdtempSync(join(tmpdir(), "obot-startup-evidence-"));
   const env = { ...process.env, HOME: output, USERPROFILE: output,
     APPDATA: join(output, "roaming"), LOCALAPPDATA: join(output, "local") };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -61,7 +61,7 @@ if (!process.versions.electron) {
     await delay(150);
     mkdirSync(output, { recursive: true });
     writeFileSync(join(output, "startup-screen.png"), (await active.webContents.capturePage()).toPNG());
-    assert.equal(await active.webContents.executeJavaScript("document.querySelector('h1').textContent"), "OpenMausBot");
+    assert.equal(await active.webContents.executeJavaScript("document.querySelector('h1').textContent"), "Obot");
     assert.equal(await active.webContents.executeJavaScript("typeof process"), "undefined");
     // Exercise the actual renderer close button.
     await active.webContents.executeJavaScript("document.querySelector('button').click()");

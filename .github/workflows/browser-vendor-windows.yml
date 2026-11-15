@@ -1,4 +1,4 @@
-# Temporary, reviewed Windows-only agent-browser backport. This workflow
+﻿# Temporary, reviewed Windows-only agent-browser backport. This workflow
 # produces a candidate, never publishes it. Pin its verified artifact digest
 # before the normal package/release gates consume it.
 name: Windows browser vendor build
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      # This is upstream's package manager, not OpenMausBot's pnpm version.
+      # This is upstream's package manager, not Obot's pnpm version.
       - run: npm install --global pnpm@11.1.3
       - name: Install the pinned Rust toolchain and upstream Windows linker
         run: |
@@ -80,3 +80,4 @@ jobs:
           New-Item -ItemType Directory -Path $resources | Out-Null
           Copy-Item -Recurse "$env:GITHUB_WORKSPACE/dist-native/browser/win32-x64" "$resources/browser-engine"
           node scripts/smoke-browser-bundle.mjs --resources "$resources" --engine-candidate "$env:RUNNER_TEMP/browser-vendor/agent-browser-win32-x64.exe"
+

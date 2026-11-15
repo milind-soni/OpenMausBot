@@ -1,20 +1,20 @@
-# Deploy OpenMausBot on a VPS
+# Deploy Obot on a VPS
 
-To keep MausBot and its agents on your current computer and use a VPS only as a
+To keep Obot and its agents on your current computer and use a VPS only as a
 bot’s remote desktop, see [Bring Your Own VPS](byo-vps.md) and the
-[published setup guide](https://docs.openmausbot.com/docs/computers/byo-vps).
+[published setup guide](https://docs.obot.com/docs/computers/byo-vps).
 
-From a blank Linux server to OpenMausBot running on it around the clock, reachable from your laptop, the desktop app and your phone, with your bots working while every laptop is closed. It assumes nothing beyond being able to open a terminal and paste commands. About twenty minutes, most of it waiting.
+From a blank Linux server to Obot running on it around the clock, reachable from your laptop, the desktop app and your phone, with your bots working while every laptop is closed. It assumes nothing beyond being able to open a terminal and paste commands. About twenty minutes, most of it waiting.
 
 ## Quick start: one command on your own domain
 
 For a fresh Ubuntu 22.04 or 24.04 server (x86-64, at least 2 CPUs, 4 GB of memory and 20 GB of free disk) and a domain name whose A record already points at it:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
+curl -fsSL https://raw.githubusercontent.com/alnatourm/Obot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
 ```
 
-The installer ([`deploy/install.sh`](https://github.com/milind-soni/OpenMausBot/blob/main/deploy/install.sh)) does path B below for you and ends with MausBot answering at `https://maus.example.com`.
+The installer ([`deploy/install.sh`](https://github.com/alnatourm/Obot/blob/main/deploy/install.sh)) does path B below for you and ends with Obot answering at `https://maus.example.com`.
 
 **It checks the server first, and changes nothing while it checks.** Each check that fails prints one sentence saying what to fix, and nothing is installed until all pass:
 
@@ -31,23 +31,23 @@ The installer ([`deploy/install.sh`](https://github.com/milind-soni/OpenMausBot/
 | User namespaces | switched on, for the bots' sandbox |
 | Bots' sandbox | AppArmor is on with its tools, as it is on a stock Ubuntu |
 | Clock | within five minutes of the internet's |
-| Version | a MausBot release to install was found |
+| Version | a Obot release to install was found |
 
 To run only the checks, add `--check`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --check --domain maus.example.com
+curl -fsSL https://raw.githubusercontent.com/alnatourm/Obot/main/deploy/install.sh | sudo sh -s -- --check --domain maus.example.com
 ```
 
 If Docker is missing, the installer asks before installing it with Docker's official script (`get.docker.com`); `--install-docker` says yes ahead of time. It installs nothing else on the server.
 
-**Then it installs** everything under one folder, `/opt/openmausbot` (`--dir` picks another):
+**Then it installs** everything under one folder, `/opt/obot` (`--dir` picks another):
 
 | Path | What |
 |---|---|
 | `compose.yaml`, `Caddyfile` | the same server-plus-Caddy setup as path B, Caddy in its own container reaching the server over a socket; written again on every run |
 | `.env` | your settings: `DOMAIN`, the pinned version (`OMB_IMAGE`) and anything you add, such as [who may sign in with an email](self-hosting.md#sign-in-with-your-email). The installer keeps your lines |
-| `data/` | everything MausBot stores: chats, bots, engine sign-ins, paired devices. Never touched once it exists |
+| `data/` | everything Obot stores: chats, bots, engine sign-ins, paired devices. Never touched once it exists |
 | `caddy/` | the HTTPS certificates |
 | `update.sh` | the update command, once this repository has it (see below) |
 | `compose.box.yaml`, `box/` | the sandbox's settings and the files that prepare the server for it |
@@ -56,24 +56,24 @@ If Docker is missing, the installer asks before installing it with Docker's offi
 
 It runs the newest release, pinned by its version; once a `stable` channel is published it follows that instead. If that version has no bots' sandbox, the checks (`--check` too) say so before anything is downloaded. It never runs `latest`, which follows every commit. It then waits until the server reports healthy and `https://maus.example.com` answers with a valid certificate, and prints the address.
 
-**The bots' sandbox.** A MausBot version with the hardened profile runs every bot in a sandbox, away from the server's settings, keys and other bots' files, and Docker's defaults do not let a container build one. For such a version the installer prepares the server (a seccomp profile in `/etc/mausbot` and an AppArmor profile in `/etc/apparmor.d`, the two the MausBot connector installs), starts the server with the four security settings in `compose.box.yaml` (no `--privileged`, no added capability), and then runs the server's own self-check, which among other things confirms that a bot cannot read `config.json`. If a check fails that means a bot could reach something it must not, or that bots would not work, the installer names it and does not report success; so does a self-check that gives no answer, or a check the installer has never heard of. Five checks that are about neither (the kernel keyring, the sandbox's host name, the CPU list, a hosting provider's address, and reaching the public internet) only print a note. For a version without the hardened profile it says the sandbox is not there yet; run the install command again after updating to one that has it. `--no-sandbox` skips all of this, for a server only you sign in to on a host without AppArmor.
+**The bots' sandbox.** A Obot version with the hardened profile runs every bot in a sandbox, away from the server's settings, keys and other bots' files, and Docker's defaults do not let a container build one. For such a version the installer prepares the server (a seccomp profile in `/etc/obot` and an AppArmor profile in `/etc/apparmor.d`, the two the Obot connector installs), starts the server with the four security settings in `compose.box.yaml` (no `--privileged`, no added capability), and then runs the server's own self-check, which among other things confirms that a bot cannot read `config.json`. If a check fails that means a bot could reach something it must not, or that bots would not work, the installer names it and does not report success; so does a self-check that gives no answer, or a check the installer has never heard of. Five checks that are about neither (the kernel keyring, the sandbox's host name, the CPU list, a hosting provider's address, and reaching the public internet) only print a note. For a version without the hardened profile it says the sandbox is not there yet; run the install command again after updating to one that has it. `--no-sandbox` skips all of this, for a server only you sign in to on a host without AppArmor.
 
 **Sign in as the first admin** with a one-time link made on the server. Run in a terminal, the installer makes one and prints it when it finishes. It does not when its output goes anywhere else, such as a log, because whoever reads the link can sign in as the admin until it is used or expires. To make one yourself:
 
 ```sh
-cd /opt/openmausbot && sudo docker compose exec omb openmausbot pair --label "First admin"
+cd /opt/obot && sudo docker compose exec omb obot pair --label "First admin"
 ```
 
 Open the link it prints, or paste it into the desktop app under **＋ → Connect to a server**. To sign in with an emailed code instead, run the installer with `--email you@example.com`.
 
-- **Update:** `sudo /opt/openmausbot/update.sh`, which backs the data up, checks the new version's health and puts the old one back if it fails. The installer places it once this repository has it and prints the command when it finishes; until then, running the install command again moves to the newest release. `update.sh` pins the version by digest in `.env`, and a later run of the installer keeps that pin.
+- **Update:** `sudo /opt/obot/update.sh`, which backs the data up, checks the new version's health and puts the old one back if it fails. The installer places it once this repository has it and prints the command when it finishes; until then, running the install command again moves to the newest release. `update.sh` pins the version by digest in `.env`, and a later run of the installer keeps that pin.
 - **Repair:** run the install command again. It checks the server, rewrites its own files and leaves `.env` and `data/` alone. That also moves an install made before Caddy got its own container: Caddy then shared the server's network, and HTTPS went down whenever the server restarted without it.
-- **Stop:** `--uninstall` stops the server and removes its containers. It deletes nothing: your data stays in `/opt/openmausbot/data`.
-- **Every other command in this guide** that starts `docker compose` for path B works from `/opt/openmausbot`.
+- **Stop:** `--uninstall` stops the server and removes its containers. It deletes nothing: your data stays in `/opt/obot/data`.
+- **Every other command in this guide** that starts `docker compose` for path B works from `/opt/obot`.
 - **What the installer contacts:** the registries and Let's Encrypt from the table, GitHub's release list, this repository's files on `raw.githubusercontent.com`, and `cloudflare.com/cdn-cgi/trace` to learn the server's public address for the DNS check. It sends no telemetry.
 - **Behind a load balancer or NAT** that forwards ports 80 and 443 to the server, set `OMB_INSTALL_SKIP_DNS=1` to skip the DNS check.
 
-The installer also accepts the one-time code of a server connected to MausBot. That offering is not available yet.
+The installer also accepts the one-time code of a server connected to Obot. That offering is not available yet.
 
 Not on Ubuntu, or prefer to do it by hand? Use one of the three ways below.
 
@@ -83,11 +83,11 @@ Three ways to make the server reachable are covered. Pick one; the rest of the g
 
 | | You need | Who can reach it | Best for |
 |---|---|---|---|
-| **A. Public address, no domain** (`serve --tunnel`) | an OpenMausBot account (email code) | anyone with a pairing code, over HTTPS | the fastest path; a phone on cellular |
+| **A. Public address, no domain** (`serve --tunnel`) | an Obot account (email code) | anyone with a pairing code, over HTTPS | the fastest path; a phone on cellular |
 | **B. Your own domain** (Docker + Caddy) | a domain name, ports 80/443 | anyone with a pairing code, over HTTPS | a permanent address you own |
 | **C. Your Tailscale network** (`serve --tailscale`) | Tailscale on the server and your devices | only your tailnet | the most private; nothing public at all |
 
-Only need the phone app? Add `--relay` to path B or C on a machine signed in with `openmausbot login --relay` (never on a machine with a path A address), or use it on its own: the app pairs by QR through MausBot Relay, end-to-end encrypted, with no domain, open port or VPN. See [Phones through MausBot Relay](phone-relay-server.md).
+Only need the phone app? Add `--relay` to path B or C on a machine signed in with `obot login --relay` (never on a machine with a path A address), or use it on its own: the app pairs by QR through Obot Relay, end-to-end encrypted, with no domain, open port or VPN. See [Phones through Obot Relay](phone-relay-server.md).
 
 Whichever you pick, the login is the same: you **pair** each device once with a short code and it stays signed in. A session lasts 30 days; using it with half that or less left renews it to a full 30, up to 180 days from pairing (`OMB_SESSION_TTL_DAYS` and `OMB_SESSION_MAX_DAYS` change both numbers). There is no password.
 
@@ -149,21 +149,21 @@ root, sign in again as `maus`; those accounts have different homes and credentia
 
 ## Path A: a public address with one command
 
-No domain, no proxy, no open port. The server gets an address like `https://c-7f3a9c.openmausbot.com` through a Cloudflare tunnel; only traffic through the tunnel reaches it, and that traffic still has to pair.
+No domain, no proxy, no open port. The server gets an address like `https://c-7f3a9c.obot.com` through a Cloudflare tunnel; only traffic through the tunnel reaches it, and that traffic still has to pair.
 
 ```sh
-npx openmausbot setup          # once: choose AI access, connect, and choose a model
-npx openmausbot login          # once: an emailed code signs this machine in and reserves its address
-npx openmausbot serve --tunnel # runs the server there and prints the pairing link with a QR code
+npx obot setup          # once: choose AI access, connect, and choose a model
+npx obot login          # once: an emailed code signs this machine in and reserves its address
+npx obot serve --tunnel # runs the server there and prints the pairing link with a QR code
 ```
 
-`setup` connects an AI provider; it is separate from the OpenMausBot account.
+`setup` connects an AI provider; it is separate from the Obot account.
 Use Codex's device-code option over SSH, or enter a hidden API key for a
 chat-only connection. More engines can be added later. See [CLI setup](cli-onboarding.md).
 
-`login` asks for your email, sends an 8-digit code, and prints the address it reserved for this machine. `serve --tunnel` downloads `cloudflared` on the first run (a pinned version with a verified digest, into `~/.openmausbot`), starts the server, connects the tunnel, and after a few seconds prints `tunnel: live at https://…`. Leave it running; see "Keep it running" for a service.
+`login` asks for your email, sends an 8-digit code, and prints the address it reserved for this machine. `serve --tunnel` downloads `cloudflared` on the first run (a pinned version with a verified digest, into `~/.obot`), starts the server, connects the tunnel, and after a few seconds prints `tunnel: live at https://…`. Leave it running; see "Keep it running" for a service.
 
-The account credentials live in `~/.openmausbot/tunnel-account.json`, readable only by your user. `npx openmausbot logout` releases the address.
+The account credentials live in `~/.obot/tunnel-account.json`, readable only by your user. `npx obot logout` releases the address.
 
 Skip to "Install and sign the engines in".
 
@@ -184,7 +184,7 @@ The [installer](#quick-start-one-command-on-your-own-domain) does these steps fo
 3. **Get the deploy files and set the name:**
 
    ```sh
-   git clone https://github.com/milind-soni/OpenMausBot && cd OpenMausBot/deploy
+   git clone https://github.com/alnatourm/Obot && cd Obot/deploy
    cp .env.example .env
    nano .env                # DOMAIN=maus.example.com ; ENGINES=@anthropic-ai/claude-code @openai/codex
    ```
@@ -201,10 +201,10 @@ The [installer](#quick-start-one-command-on-your-own-domain) does these steps fo
 
    Caddy requests the certificate on its own; give it a minute. Then `https://maus.example.com` shows a page asking for a pairing code. That is correct: nothing works until you pair.
 
-In this path, every `npx openmausbot …` command below is run inside the container instead:
+In this path, every `npx obot …` command below is run inside the container instead:
 
 ```sh
-docker compose exec omb openmausbot pair --label "My MacBook"
+docker compose exec omb obot pair --label "My MacBook"
 ```
 
 ## Path C: only your Tailscale network
@@ -212,7 +212,7 @@ docker compose exec omb openmausbot pair --label "My MacBook"
 From the administrator shell, install Tailscale on the server and sign in (`curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up`). Enable HTTPS certificates for your tailnet once at https://login.tailscale.com/admin/dns (HTTPS Certificates), then run this from the `maus` shell:
 
 ```sh
-npx openmausbot serve --tailscale
+npx obot serve --tailscale
 ```
 
 Tailscale terminates HTTPS with its own certificate and the pairing link uses the server's MagicDNS name (`https://maus.tail1234.ts.net`). `serve` runs `tailscale serve` in the foreground, so the share ends when it stops. Only devices on your tailnet can reach it, which is a very good property for a server that can run tools.
@@ -224,13 +224,13 @@ the image. For paths A and C, install Linux system libraries once from the
 administrator shell:
 
 ```sh
-sudo -H npx --yes openmausbot browser install --with-deps
+sudo -H npx --yes obot browser install --with-deps
 ```
 
 Then install the browser in the service account's home, from the `maus` shell:
 
 ```sh
-npx --yes openmausbot browser install
+npx --yes obot browser install
 ```
 
 The administrator's browser download is in a different home; it does not install
@@ -244,7 +244,7 @@ gets its own isolated session whose logins persist across restarts.
 
 ## Install and sign the engines in
 
-The npm OpenMausBot package does not install model engine CLIs. For paths A and C,
+The npm Obot package does not install model engine CLIs. For paths A and C,
 install the engine you use in the service account, then sign it in. For example,
 from the `maus` shell, for Claude:
 
@@ -260,7 +260,7 @@ engines you use. For path B, run the installed CLI inside the container, for
 example `docker compose exec omb claude`.
 
 Engine logins belong to the service user's home (for example `~/.codex` and
-`~/.claude`), separately from OpenMausBot's `~/.openmausbot`. Keep that home when
+`~/.claude`), separately from Obot's `~/.obot`. Keep that home when
 restarting or upgrading. The systemd example below includes `~/.local/bin` in PATH.
 
 ## Pair your first device
@@ -268,15 +268,15 @@ restarting or upgrading. The systemd example below includes `~/.local/bin` in PA
 `serve` already printed a pairing block when it started in a terminal (a service prints none into its log). For another device later:
 
 ```sh
-npx openmausbot pair --label "Kitchen iPad"
+npx obot pair --label "Kitchen iPad"
 ```
 
 ```
 Pairing code   RR8Y-BLR6-H939   works once, until 10:59 · everything
-Link           https://c-7f3a9c.openmausbot.com/pair#code=RR8Y-BLR6-H939
+Link           https://c-7f3a9c.obot.com/pair#code=RR8Y-BLR6-H939
 
   Desktop app   ＋ → Connect to a server, paste the link
-  Phone         scan with your camera or the MausBot app
+  Phone         scan with your camera or the Obot app
 ```
 
 - **A browser:** open the link. The code is filled in; press **Connect**. That browser is paired for 30 days, renewed on use as above.
@@ -290,28 +290,28 @@ Worth knowing: a code works **once**, for **10 minutes** (`--ttl 24h` keeps it o
 Every paired device is a session:
 
 ```sh
-npx openmausbot devices               # id, device, scope, last seen, expires
-npx openmausbot devices revoke ID     # signs that device out and closes its stream at once
-npx openmausbot status                # the address others use, and whether it answers as this server
+npx obot devices               # id, device, scope, last seen, expires
+npx obot devices revoke ID     # signs that device out and closes its stream at once
+npx obot status                # the address others use, and whether it answers as this server
 ```
 
 ## Keep it running
 
-`npx openmausbot serve` is a plain foreground process. `npx openmausbot service install --tunnel` (or `--tailscale`) writes a unit like the one below for you, with a copy of the release it runs beside your data. To write it by hand for systemd (paths A and C),
+`npx obot serve` is a plain foreground process. `npx obot service install --tunnel` (or `--tailscale`) writes a unit like the one below for you, with a copy of the release it runs beside your data. To write it by hand for systemd (paths A and C),
 install a chosen release first, from the `maus` shell. Replace `X.Y.Z` with the
 published version you want to run:
 
 ```sh
-npm install --global --prefix "$HOME/.local" openmausbot@X.Y.Z
+npm install --global --prefix "$HOME/.local" obot@X.Y.Z
 ```
 
 Stop the foreground server with Ctrl-C before enabling the service. From the
-administrator shell, save this as `/etc/systemd/system/openmausbot.service`:
+administrator shell, save this as `/etc/systemd/system/obot.service`:
 
 ```ini
-# /etc/systemd/system/openmausbot.service
+# /etc/systemd/system/obot.service
 [Unit]
-Description=OpenMausBot server
+Description=Obot server
 After=network-online.target
 
 [Service]
@@ -319,7 +319,7 @@ User=maus
 WorkingDirectory=/home/maus
 Environment=HOME=/home/maus
 Environment=PATH=/home/maus/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/home/maus/.local/bin/openmausbot serve --tunnel
+ExecStart=/home/maus/.local/bin/obot serve --tunnel
 Restart=always
 RestartSec=5
 
@@ -328,11 +328,11 @@ WantedBy=multi-user.target
 ```
 
 ```sh
-sudo systemctl daemon-reload && sudo systemctl enable --now openmausbot
-journalctl -u openmausbot -f            # the server's log, including "tunnel: live at …"
+sudo systemctl daemon-reload && sudo systemctl enable --now obot
+journalctl -u obot -f            # the server's log, including "tunnel: live at …"
 ```
 
-Use `--tailscale` instead of `--tunnel` for path C. A service is not a terminal, so `serve` writes no pairing code into the journal; mint one with `npx openmausbot pair` when you need it. Docker (path B) restarts on its own (`restart: unless-stopped`).
+Use `--tailscale` instead of `--tunnel` for path C. A service is not a terminal, so `serve` writes no pairing code into the journal; mint one with `npx obot pair` when you need it. Docker (path B) restarts on its own (`restart: unless-stopped`).
 
 Adjust the account, home, and PATH if yours differ; Node 24 must be available on
 that PATH. The service runs the installed CLI directly, so a restart uses the
@@ -341,8 +341,8 @@ same release without an npm install prompt or an implicit upgrade.
 ## Update
 
 A self-hosted server follows the **stable** channel: a released version that
-MausBot's own Clouds have run for 48 hours first. The image tag `stable` and
-[`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json)
+Obot's own Clouds have run for 48 hours first. The image tag `stable` and
+[`stable.json`](https://raw.githubusercontent.com/alnatourm/Obot/channels/stable.json)
 name it. The tag `latest` follows every change on `main`; it is for trying
 things out, not for a server you rely on. **Check for updates** in the app
 compares your server with the stable version. To hear of every release as soon
@@ -368,7 +368,7 @@ the app says so, with `sudo ./update.sh`, which moves it to the stable version
 once that is newer than the build.
 
 The installer sets this up, and every run of the installer refreshes it. In a
-checkout of this repository, add it from `OpenMausBot/deploy` (it needs
+checkout of this repository, add it from `Obot/deploy` (it needs
 systemd, and restarts the server once), and run the same command again after
 each `git pull`: until you do, the button runs nothing and the app shows this
 command.
@@ -377,9 +377,9 @@ command.
 git pull && sudo ./update-runner.sh --install
 ```
 
-That places `/usr/local/sbin/openmausbot-update-runner`, the systemd units
-`openmausbot-update.path` and `openmausbot-update.service`, and root's folder
-`/var/lib/openmausbot-update`: root's own copy of `update.sh`, which is what
+That places `/usr/local/sbin/obot-update-runner`, the systemd units
+`obot-update.path` and `obot-update.service`, and root's folder
+`/var/lib/obot-update`: root's own copy of `update.sh`, which is what
 the button runs, `request`, which the server's container writes, and `status`,
 which it reads and cannot write. One install per server: a second folder is
 refused until `--remove` on the first, and `--remove` for any other folder
@@ -408,7 +408,7 @@ belongs to anyone but you or the folder's owner; your own run of
 `./update.sh` uses links there as before.
 
 **Who can ask.** Only an admin's own signed-in session sees and presses the
-button; members never see it, and Clouds that MausBot runs never show it. The
+button; members never see it, and Clouds that Obot runs never show it. The
 request itself is a file in a folder of the server's user, and until the bots'
 sandbox is on for self-hosted servers, bots run as that user: anything running
 on the server as that user, a bot or a prompt injection included, can leave the
@@ -439,7 +439,7 @@ requests can cause:
   the stable image changed); any two runs are at least 30 seconds apart. A run during which the server restarts
   by itself counts as one that stopped it, so it can delay an admin's press by
   up to four minutes.
-- Nothing while `/etc/mausbot/policy.json` holds updates
+- Nothing while `/etc/obot/policy.json` holds updates
   (`"updates": "hold"`).
 
 It cannot choose a version, image, URL, flag or path, cannot downgrade or roll
@@ -452,7 +452,7 @@ anyway.
 **Copies of the data.** An update asked for from the app keeps your own last
 copy and its own two newest ones. A run of `./update.sh` at a terminal removes all
 but its own once that one has been checked, as above. To see them:
-`docker volume ls --filter label=com.mausbot.role=update-backup`; to remove one
+`docker volume ls --filter label=com.obot.role=update-backup`; to remove one
 yourself: `docker volume rm <name>`.
 
 Without the runner (no systemd, an npm install, Podman) the app shows the
@@ -460,7 +460,7 @@ command to run on the server instead.
 
 ### Path B (Docker): one command, with a way back
 
-From `OpenMausBot/deploy`:
+From `Obot/deploy`:
 
 ```sh
 git pull && ./update.sh
@@ -469,15 +469,15 @@ git pull && ./update.sh
 `git pull` brings the current `update.sh` and `docker-compose.yml`; the server
 image comes from the stable channel, not from your checkout. An install that
 has no checkout, with its `compose.yaml`, `.env` and `data/` in one folder such
-as `/opt/openmausbot`, runs the same script on that folder:
+as `/opt/obot`, runs the same script on that folder:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/update.sh -o update.sh
-sudo bash update.sh --dir /opt/openmausbot
+curl -fsSL https://raw.githubusercontent.com/alnatourm/Obot/main/deploy/update.sh -o update.sh
+sudo bash update.sh --dir /opt/obot
 ```
 
 An install made with the installer (`deploy/install.sh`) already has `update.sh` in
-its folder: `sudo /opt/openmausbot/update.sh`.
+its folder: `sudo /opt/obot/update.sh`.
 
 Until a first version has been made stable, `./update.sh` takes the newest
 release instead, as **Check for updates** does then.
@@ -493,13 +493,13 @@ every file's owner and mode either way. The script then:
    volumes, stops the server, checks that it has stopped, and copies
    everything under `/data` into a new Docker volume named for the update
    (`deploy_data-before-update-20261110T120000Z`;
-   `openmausbot_data-before-update-…` for `/opt/openmausbot`). It then
+   `obot_data-before-update-…` for `/opt/obot`). It then
    compares the copy with the data, every file by checksum; a copy that does
    not match is thrown away, the server is started again, and nothing has
    changed. The copy from the update before is removed only after this one
    has matched. The server is down from here until step 4; how long depends
    on how much data there is.
-3. Writes the image into `.env` (`OMB_IMAGE=ghcr.io/milind-soni/openmausbot@sha256:…`)
+3. Writes the image into `.env` (`OMB_IMAGE=ghcr.io/alnatourm/obot@sha256:…`)
    and starts it. An install the installer made while Caddy still shared the
    server's network gets the installer's current `compose.yaml` and
    `Caddyfile` here, as a run of the installer would write them (the rollback
@@ -508,7 +508,7 @@ every file's owner and mode either way. The script then:
 4. Waits, up to two minutes (`OMB_UPDATE_WAIT_S` for longer), until the new server answers `/api/health`
    steadily, says it is the new version, can still start a bot if it could
    before (the server's own count of ready engines, `GET /api/health/engines`,
-   which a hardened server answers too; `openmausbot doctor` on a version
+   which a hardened server answers too; `obot doctor` on a version
    without it), and Caddy runs again.
 5. If any of that fails: puts back the data from the copy, `.env` and the old
    image, starts the old version, and tells you what went wrong. Your server
@@ -584,30 +584,30 @@ from **Settings → Engines** live on the data volume and survive either way.
 There is no one-command updater for an npm install yet. Do what the script
 does: copy the data first, install one named version, check it, and keep the
 way back. Take the stable version number from
-[`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json)
-(`"version"`), and note the one you run now (`openmausbot --version`). From
+[`stable.json`](https://raw.githubusercontent.com/alnatourm/Obot/channels/stable.json)
+(`"version"`), and note the one you run now (`obot --version`). From
 the administrator shell, replacing `X.Y.Z`:
 
 ```sh
-sudo systemctl stop openmausbot
-sudo -iu maus sh -c 'umask 077; tar czf ~/openmausbot-before-update.tgz -C ~ .openmausbot && chmod 600 ~/openmausbot-before-update.tgz'
-sudo -iu maus npm install --global --prefix /home/maus/.local openmausbot@X.Y.Z
-sudo systemctl start openmausbot
-curl -sf http://127.0.0.1:8799/api/health && sudo -iu maus openmausbot doctor
+sudo systemctl stop obot
+sudo -iu maus sh -c 'umask 077; tar czf ~/obot-before-update.tgz -C ~ .obot && chmod 600 ~/obot-before-update.tgz'
+sudo -iu maus npm install --global --prefix /home/maus/.local obot@X.Y.Z
+sudo systemctl start obot
+curl -sf http://127.0.0.1:8799/api/health && sudo -iu maus obot doctor
 ```
 
 If the install fails, or the last line does not end with the server answering
 and an engine ready, go back (replace `OLD` with the version you noted):
 
 ```sh
-sudo systemctl stop openmausbot
-sudo -iu maus npm install --global --prefix /home/maus/.local openmausbot@OLD
-sudo -iu maus sh -c 'mv ~/.openmausbot ~/.openmausbot-failed-update && tar xzf ~/openmausbot-before-update.tgz -C ~'
-sudo systemctl start openmausbot
+sudo systemctl stop obot
+sudo -iu maus npm install --global --prefix /home/maus/.local obot@OLD
+sudo -iu maus sh -c 'mv ~/.obot ~/.obot-failed-update && tar xzf ~/obot-before-update.tgz -C ~'
+sudo systemctl start obot
 ```
 
 A service restart by itself does not update the installed package. For
-foreground `npx` usage, name the release: `npx --yes openmausbot@X.Y.Z serve --tunnel`.
+foreground `npx` usage, name the release: `npx --yes obot@X.Y.Z serve --tunnel`.
 
 ### How far behind a server may fall
 
@@ -621,7 +621,7 @@ Routines and queued work survive a restart. A teammate turn running at that mome
 ## Back up
 
 Stop the server before copying its SQLite database: Ctrl-C for a foreground
-process, or `sudo systemctl stop openmausbot` from the administrator shell for
+process, or `sudo systemctl stop obot` from the administrator shell for
 the service above. Stop any engine processes and managed desktops still writing
 files you intend to back up.
 
@@ -630,9 +630,9 @@ credentials, and paired sessions). Run it from the service account's shell:
 
 ```sh
 umask 077
-backup_dir=$(mktemp -d "$PWD/openmausbot-backup.XXXXXX")
-tar czf "$backup_dir/openmausbot-data.tgz" -C "$HOME" .openmausbot
-chmod 600 "$backup_dir/openmausbot-data.tgz"
+backup_dir=$(mktemp -d "$PWD/obot-backup.XXXXXX")
+tar czf "$backup_dir/obot-data.tgz" -C "$HOME" .obot
+chmod 600 "$backup_dir/obot-data.tgz"
 ```
 
 A full backup also needs your engine credential/configuration paths, such as
@@ -642,34 +642,34 @@ any configured home/data-directory overrides, and workspaces outside the app
 directory. These are not included in the command above.
 
 For path B, the whole `/data` volume includes the container's CLI homes. From
-`OpenMausBot/deploy`, stop the whole project before archiving, and start it
+`Obot/deploy`, stop the whole project before archiving, and start it
 again after; `deploy_data` is the default volume name, so use your actual
 volume name if you changed the Compose project:
 
 ```sh
 docker compose stop
-backup_dir=$(mktemp -d "$PWD/openmausbot-backup.XXXXXX")
-docker run --rm -v deploy_data:/data:ro -v "$backup_dir":/b alpine sh -c 'umask 077; tar czf /b/openmausbot-data.tgz -C /data . && chmod 600 /b/openmausbot-data.tgz'
+backup_dir=$(mktemp -d "$PWD/obot-backup.XXXXXX")
+docker run --rm -v deploy_data:/data:ro -v "$backup_dir":/b alpine sh -c 'umask 077; tar czf /b/obot-data.tgz -C /data . && chmod 600 /b/obot-data.tgz'
 docker compose start
 ```
 
 To restore that archive, with the project stopped, replace what is in the
-volume with it (`openmausbot-backup.XXXXXX` is the folder the backup made):
+volume with it (`obot-backup.XXXXXX` is the folder the backup made):
 
 ```sh
 docker compose stop
-docker run --rm -v deploy_data:/data -v "$PWD/openmausbot-backup.XXXXXX":/b:ro alpine sh -c 'find /data -mindepth 1 -delete && tar xzpf /b/openmausbot-data.tgz -C /data'
+docker run --rm -v deploy_data:/data -v "$PWD/obot-backup.XXXXXX":/b:ro alpine sh -c 'find /data -mindepth 1 -delete && tar xzpf /b/obot-data.tgz -C /data'
 docker compose start
 ```
 
-With the installer, the data is the folder `/opt/openmausbot/data`. This backs
-it up, with `.env`, into an archive in `/opt/openmausbot/backups`, the whole
+With the installer, the data is the folder `/opt/obot/data`. This backs
+it up, with `.env`, into an archive in `/opt/obot/backups`, the whole
 project stopped and started again around it. The folder is `700` and the archive
 `600` whatever the server's umask or the folder's default ACLs, since the archive
 holds every chat, key and session:
 
 ```sh
-cd /opt/openmausbot && sudo docker compose stop && sudo sh -c 'set -e; install -d -m 700 backups; f="backups/backup-$(date -u +%Y%m%dT%H%M%SZ).tgz"; (umask 077; tar --warning=no-file-ignored -czf "$f" data .env); chmod 600 "$f"'; sudo docker compose start
+cd /opt/obot && sudo docker compose stop && sudo sh -c 'set -e; install -d -m 700 backups; f="backups/backup-$(date -u +%Y%m%dT%H%M%SZ).tgz"; (umask 077; tar --warning=no-file-ignored -czf "$f" data .env); chmod 600 "$f"'; sudo docker compose start
 ```
 
 Copy the archive to another machine and keep it private.
@@ -682,18 +682,18 @@ data takes its place, with its owner and permissions. An archive without a
 `data/` folder changes nothing:
 
 ```sh
-cd /opt/openmausbot && sudo docker compose stop && sudo sh -c 'set -e; tar -tzf backups/backup-20261110T153000Z.tgz data/ >/dev/null; rm -rf data.before-restore; mv data data.before-restore; tar -xzpf backups/backup-20261110T153000Z.tgz data'; sudo docker compose start
+cd /opt/obot && sudo docker compose stop && sudo sh -c 'set -e; tar -tzf backups/backup-20261110T153000Z.tgz data/ >/dev/null; rm -rf data.before-restore; mv data data.before-restore; tar -xzpf backups/backup-20261110T153000Z.tgz data'; sudo docker compose start
 ```
 
-Once MausBot runs on the restored data, remove the old copy:
-`sudo rm -rf /opt/openmausbot/data.before-restore`. The restore leaves `.env` as
+Once Obot runs on the restored data, remove the old copy:
+`sudo rm -rf /opt/obot/data.before-restore`. The restore leaves `.env` as
 it is. On a new server, install first with the same `--domain`, then restore.
 
 Each path B backup creates a fresh private folder in the current directory, so it
 cannot overwrite an older archive with more permissive access. Keep the
 archive inside that folder privately on another machine. Restore paths A and C
 with the server stopped, using the same paths and original ownership. After
-backup or restore, start the service with `sudo systemctl start openmausbot`.
+backup or restore, start the service with `sudo systemctl start obot`.
 Stop and start the Docker project as a whole, as above, rather than `omb` on
 its own.
 
@@ -705,15 +705,15 @@ Read this before putting anything else in front of the server.
 - A request that arrives through a proxy or the tunnel is treated as remote and needs a session, whatever headers it carries. A proxy of your own (nginx, Traefik, Cloudflare Tunnel) must forward the real `Host` and add `X-Forwarded-For` and `X-Forwarded-Proto`, must not buffer the event stream, and must **not** rewrite `Host` to `127.0.0.1`.
 - Pairing is the login. Want a second wall in front of it? Path B's `Caddyfile` has a commented `basic_auth` block for a shared password.
 - The session cookie is marked `Secure`; do not serve this over plain HTTP on the public internet.
-- The one thing a stranger can read is `/.well-known/openmausbot/environment` (the server's id, label, version, capabilities) and `/api/health` (only the app name). Everything else answers "pair this device".
+- The one thing a stranger can read is `/.well-known/obot/environment` (the server's id, label, version, capabilities) and `/api/health` (only the app name). Everything else answers "pair this device".
 
 ## Troubleshooting
 
-**`serve --tunnel` says "no account on this machine yet".** Run `npx openmausbot login` on this machine first; the credentials are per machine.
+**`serve --tunnel` says "no account on this machine yet".** Run `npx obot login` on this machine first; the credentials are per machine.
 
-**The server does not start and says its data "was written by a newer OpenMausBot".** An older version was started on data a newer one had already changed, which happens when a version is put back without its data. Nothing was changed. Install the version the message names (or a newer one), or put back the copy of the data from before that update.
+**The server does not start and says its data "was written by a newer Obot".** An older version was started on data a newer one had already changed, which happens when a version is put back without its data. Nothing was changed. Install the version the message names (or a newer one), or put back the copy of the data from before that update.
 
-**The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx openmausbot logout && npx openmausbot login` issues a fresh address.
+**The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx obot logout && npx obot login` issues a fresh address.
 
 **Path B: the page never loads or shows a certificate error.** Caddy could not get a certificate. Check that the name resolves to the server and that ports 80 and 443 are open; `docker compose logs caddy` shows the reason.
 
@@ -725,9 +725,9 @@ Read this before putting anything else in front of the server.
 
 **A bot says the engine is not signed in.** Sign that engine in again on the server.
 
-**What does the server think it is?** `https://<address>/.well-known/openmausbot/environment` is public and shows its id, label, version and capabilities; `npx openmausbot status` prints the same on the server.
+**What does the server think it is?** `https://<address>/.well-known/obot/environment` is public and shows its id, label, version and capabilities; `npx obot status` prints the same on the server.
 
-**Something else.** `journalctl -u openmausbot --since -10m` (or `docker compose logs omb --tail 100`) shows the server's startup lines. Paste them with your question in the community channel.
+**Something else.** `journalctl -u obot --since -10m` (or `docker compose logs omb --tail 100`) shows the server's startup lines. Paste them with your question in the community channel.
 
 ### Ubuntu 24.04 browser sandbox
 
@@ -748,13 +748,13 @@ placeholder, not a fixed Chrome release. Copy the whole directory, including its
 libraries, to a new location that the service user cannot modify:
 
 ```sh
-sudo install -d -o root -g root -m 0755 /opt/openmausbot-browser
-sudo cp -R /home/maus/.agent-browser/browsers/chrome-VERSION /opt/openmausbot-browser/
-sudo chown -R root:root /opt/openmausbot-browser/chrome-VERSION
-sudo chmod -R go-w /opt/openmausbot-browser/chrome-VERSION
+sudo install -d -o root -g root -m 0755 /opt/obot-browser
+sudo cp -R /home/maus/.agent-browser/browsers/chrome-VERSION /opt/obot-browser/
+sudo chown -R root:root /opt/obot-browser/chrome-VERSION
+sudo chmod -R go-w /opt/obot-browser/chrome-VERSION
 ```
 
-Save this as the root-owned `/etc/apparmor.d/openmausbot-chrome`, replacing
+Save this as the root-owned `/etc/apparmor.d/obot-chrome`, replacing
 `VERSION` with the same value. Keep the exact executable path: a wildcard under
 the writable service home would also allow replacement executables.
 
@@ -762,7 +762,7 @@ the writable service home would also allow replacement executables.
 abi <abi/4.0>,
 include <tunables/global>
 
-profile openmausbot-chrome /opt/openmausbot-browser/chrome-VERSION/chrome flags=(unconfined) {
+profile obot-chrome /opt/obot-browser/chrome-VERSION/chrome flags=(unconfined) {
   userns,
 }
 ```
@@ -770,15 +770,15 @@ profile openmausbot-chrome /opt/openmausbot-browser/chrome-VERSION/chrome flags=
 Load the profile:
 
 ```sh
-sudo apparmor_parser -r /etc/apparmor.d/openmausbot-chrome
+sudo apparmor_parser -r /etc/apparmor.d/obot-chrome
 ```
 
 Add the following line under `[Service]` in the systemd unit above, again using
 the exact installed version, then run `sudo systemctl daemon-reload` and
-`sudo systemctl restart openmausbot`:
+`sudo systemctl restart obot`:
 
 ```ini
-Environment=AGENT_BROWSER_EXECUTABLE_PATH=/opt/openmausbot-browser/chrome-VERSION/chrome
+Environment=AGENT_BROWSER_EXECUTABLE_PATH=/opt/obot-browser/chrome-VERSION/chrome
 ```
 
 For a foreground server, export `AGENT_BROWSER_EXECUTABLE_PATH` to that same
@@ -786,3 +786,4 @@ path in the `maus` shell before starting `serve`. After a Chrome update, copy th
 new version and update both the AppArmor profile and service environment; the
 root-owned copy is not updated by the browser installer. Keep
 `kernel.apparmor_restrict_unprivileged_userns=1`.
+

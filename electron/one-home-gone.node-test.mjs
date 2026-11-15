@@ -32,7 +32,7 @@ function computer({ journal = null, marker = { frozen: true, cloud: GONE }, admi
     local: {
       async freeze(origin) { w.server.marker = { frozen: true, cloud: origin }; return { frozen: true }; },
       async unfreeze(options) {
-        if (w.unfreezeFails > 0) { w.unfreezeFails--; throw new Error("OpenMausBot on this computer could not go on again."); }
+        if (w.unfreezeFails > 0) { w.unfreezeFails--; throw new Error("Obot on this computer could not go on again."); }
         w.server.thaws.push(options ?? null);
         if (options?.automations === "off") for (const key of Object.keys(w.server.on)) w.server.on[key] = false;
         w.server.marker = { frozen: false };

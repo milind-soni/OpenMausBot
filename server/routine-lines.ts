@@ -9,7 +9,7 @@ export const ROUTINE_LINE = {
   "routines.server.nothingNew": "Nothing new since the last check",
   "routines.server.limitWait": "Waiting for the AI's usage limit to reset; this run starts again at {resets}",
   "routines.server.retryAfter": "Starting again shortly after {why}: {failure}",
-  "routines.server.retryAfterRestart": "Starting again shortly after OpenMausBot restarted while it ran",
+  "routines.server.retryAfterRestart": "Starting again shortly after Obot restarted while it ran",
   "routines.server.backupAi": "Starting again on the backup AI: this bot's AI reached its usage limit",
   "routines.server.waitingToStart": "Waiting to start: {failure}",
   "routines.server.stillBusy": "Did not start: still busy after {minutes} minutes ({failure})",

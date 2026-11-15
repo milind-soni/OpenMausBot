@@ -60,7 +60,7 @@ afterAll(async () => {
 
 describe("legacy data dir", () => {
   it("is renamed to the new name on first boot, with its contents and a fresh environment id", () => {
-    const fresh = join(home, ".openmausbot");
+    const fresh = join(home, ".obot");
     expect(existsSync(join(home, ".opengrokbot"))).toBe(false);
     expect(readFileSync(join(fresh, "keep-me.txt"), "utf8")).toBe("carried over");
     expect(readFileSync(join(fresh, "environment-id"), "utf8").trim()).toMatch(/^[0-9a-f-]{36}$/);

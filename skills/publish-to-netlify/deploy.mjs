@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 
 const NETLIFY_API = "https://api.netlify.com/api/v1";
 export const SITE_FILE = ".netlify-site.json";
-const USER_AGENT = "OpenMausBot publish-to-netlify skill";
+const USER_AGENT = "Obot publish-to-netlify skill";
 const REQUEST_TIMEOUT_MS = 60_000;
 const UPLOADS_AT_ONCE = 4;
 const UPLOAD_TRIES = 3;
@@ -27,7 +27,7 @@ const SKIPPED_FOLDERS = new Set(["node_modules", "__MACOSX"]);
 const SKIPPED_FILES = new Set(["Thumbs.db"]);
 
 /** Whether a file at this path, relative to the published folder, may be uploaded. Dotfiles and dot folders never are
- * (so `.openmausbot-secrets`, `.env`, `.git` and the site record stay home), except `.well-known`, which sites need. */
+ * (so `.obot-secrets`, `.env`, `.git` and the site record stay home), except `.well-known`, which sites need. */
 export function publishable(path) {
   const parts = path.split(/[\\/]/).filter(Boolean);
   if (!parts.length) return false;
@@ -223,7 +223,7 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
   const dir = args.dir ? realpathSync(resolve(args.dir)) : null;
   const project = resolve(args.project ?? ".");
   const tokenFile = realpathSync(resolve(args["token-file"]));
-  if (dir && tokenFile.startsWith(dir + sep)) throw new Error("the token file is inside the folder to publish; keep it in .openmausbot-secrets");
+  if (dir && tokenFile.startsWith(dir + sep)) throw new Error("the token file is inside the folder to publish; keep it in .obot-secrets");
   const token = readFileSync(tokenFile, "utf8").trim();
   if (!token) throw new Error("the token file is empty");
 

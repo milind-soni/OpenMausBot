@@ -1,4 +1,4 @@
-# Live browser and profiles
+﻿# Live browser and profiles
 
 Use installed native engine and Chrome binaries explicitly; the fixture never
 uses the operator's browser profiles, OMB home, provider logins, or API keys.
@@ -199,7 +199,7 @@ real preview recovered its injected stream failure without replaying actions
 or restoring a human lease. Windows native acceptance remains outstanding.
 Final fixture evidence: `server-1789811974163-38144.log` and
 `server-1789811974163-38144-browser.png` in the launcher's printed
-`openmausbot-verification-evidence` directory.
+`obot-verification-evidence` directory.
 
 ## Real Codex chat-to-action acceptance (opt-in)
 
@@ -231,3 +231,4 @@ data. VM/cloud transport and turn-bound switching are separately covered by
 `server/group-local-vm.e2e.test.ts`, `server/vps-routing.test.ts` and
 `server/index.test.ts` with
 isolated providers. These are not evidence of real cloud provisioning.
+

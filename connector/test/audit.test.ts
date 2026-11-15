@@ -9,7 +9,7 @@ import { localJobId, sendLocalJob, serveLocalJobs } from "../src/local.ts";
 import { parsePolicy } from "../src/policy.ts";
 import type { Job, JobReply } from "../src/protocol.ts";
 
-const HOME = `ghcr.io/milind-soni/openmausbot-cloud-home@sha256:${"a".repeat(64)}`;
+const HOME = `ghcr.io/alnatourm/obot-cloud-home@sha256:${"a".repeat(64)}`;
 const SECRET = "Bootstrap-secret-0123456789abcdefghijklmnopq";
 const dirs: string[] = [];
 afterEach(() => {
@@ -105,15 +105,15 @@ describe("the server owner's policy", () => {
     run: async (job) => { ran.push(`${job.type}`); return { id: job.id, ok: true, result: { home: { state: "running", image: HOME, health: null } } } as JobReply; },
     audit: new AuditLog(join(dir, "audit.jsonl")), log: () => {}, policyFile: join(dir, "policy.json"),
   });
-  const SELF = { id: "self-1", type: "self-update", args: { image: `ghcr.io/milind-soni/mausbot-connector@sha256:${"b".repeat(64)}` } } as Job;
+  const SELF = { id: "self-1", type: "self-update", args: { image: `ghcr.io/alnatourm/obot-connector@sha256:${"b".repeat(64)}` } } as Job;
   const UPDATE = { id: "u1", type: "update", args: { image: HOME } } as Job;
 
-  it("limits what MausBot may run here, records each refusal, and never limits root on the server or a self-update", async () => {
+  it("limits what Obot may run here, records each refusal, and never limits root on the server or a self-update", async () => {
     const dir = folder();
     ran.splice(0);
     writeFileSync(join(dir, "policy.json"), JSON.stringify({ jobs: ["status", "backup"], updates: "hold" }));
     const refused = await desk(dir).submit(UPDATE, "admin");
-    expect(refused).toEqual({ id: "u1", ok: false, error: { code: "refused_by_policy", message: `This server's policy ${join(dir, "policy.json")} does not let MausBot run update jobs.` } });
+    expect(refused).toEqual({ id: "u1", ok: false, error: { code: "refused_by_policy", message: `This server's policy ${join(dir, "policy.json")} does not let Obot run update jobs.` } });
     expect((await desk(dir).submit(SELF, "admin"))?.ok).toBe(true);
     expect((await desk(dir).submit({ ...UPDATE, id: "local-1" }, "local"))?.ok).toBe(true);
     expect(ran).toEqual(["self-update", "update"]);
@@ -123,7 +123,7 @@ describe("the server owner's policy", () => {
     expect((await desk(dir).submit({ id: "b1", type: "backup", args: {} }, "admin"))?.ok).toBe(true);
   });
 
-  it("changes nothing for MausBot while the policy cannot be used, but still answers a status and takes a self-update", async () => {
+  it("changes nothing for Obot while the policy cannot be used, but still answers a status and takes a self-update", async () => {
     const dir = folder();
     ran.splice(0);
     writeFileSync(join(dir, "policy.json"), '{"updates": "sometimes"}');
@@ -139,7 +139,7 @@ describe("the server owner's policy", () => {
 });
 
 describe.skipIf(process.platform === "win32")("jobs from root on this server", () => {
-  it("go through the same checks and desk as MausBot's, and only root can reach the socket", async () => {
+  it("go through the same checks and desk as Obot's, and only root can reach the socket", async () => {
     const dir = folder();
     const socket = join(dir, "jobs.sock");
     const submitted: { job: Job; by: string }[] = [];
@@ -165,3 +165,4 @@ describe.skipIf(process.platform === "win32")("jobs from root on this server", (
     return { id: job.id, ok: true, result: { home: { state: "running", image: HOME, health: null }, previousImage: null, snapshot: null } } as JobReply;
   }
 });
+

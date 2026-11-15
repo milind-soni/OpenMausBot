@@ -232,7 +232,7 @@ describe("a file over the download limit", () => {
 describe("a folder linked in a message", () => {
   const folderPath = "/work/Reports";
   const listing = { name: "Reports", entries: [{ name: "q3.pdf", bytes: 2048, mime: "application/pdf" }], truncated: false };
-  const authorized = () => new Response(JSON.stringify(listing), { status: 200, headers: { "content-type": "application/json", "x-openmausbot-folder": "1" } });
+  const authorized = () => new Response(JSON.stringify(listing), { status: 200, headers: { "content-type": "application/json", "x-obot-folder": "1" } });
   const refused = () => new Response(JSON.stringify({ error: "the linked file is outside this conversation's workspace", code: "outside_workspace" }), { status: 403, headers: { "content-type": "application/json" } });
 
   async function clickLink(answer: () => Response) {

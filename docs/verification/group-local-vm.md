@@ -4,7 +4,7 @@ Related: #430. This change gives a room member its configured Local VM; it does
 not create a room-owned desktop or a room Computer panel.
 
 The pre-existing direct-turn stale lease after a missing terminal event is
-tracked separately in [#860](https://github.com/milind-soni/OpenMausBot/issues/860).
+tracked separately in [#860](https://github.com/alnatourm/Obot/issues/860).
 That follow-up needs distinct direct invocation identities and tests protecting
 a replacement turn from an old watchdog callback; it is outside this room slice.
 
@@ -111,3 +111,4 @@ configured seats. `maxInstances` limits the selected mode, not the total
 containers retained across mode changes. Both scenarios use the isolated
 container boundary above and require the actual fake-engine MCP descriptors
 to match the assigned seats; no real desktop or model is contacted.
+

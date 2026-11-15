@@ -48,7 +48,7 @@ it("opens a bot whose conversation the server did not name instead of going blan
 it("opens a bot that joined without a transcript", () => {
   const added = reducer({ ...initialState, instances }, {
     type: "botAdded",
-    bot: { id: "mausbot", threadId: "own", name: "MausBot", title: "", description: "", color: "green", notifications: true, unread: false, modelSelection: { instanceId: "test", model: "m" } } as Bot,
+    bot: { id: "obot", threadId: "own", name: "Obot", title: "", description: "", color: "green", notifications: true, unread: false, modelSelection: { instanceId: "test", model: "m" } } as Bot,
   });
   expect(added.bots[0]!.messages).toEqual([]);
   expect(() => draw({ ...added, connected: true })).not.toThrow();

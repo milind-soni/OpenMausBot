@@ -68,7 +68,7 @@ function harness({ packaged = true, appleSpeech = true, remote = false, register
   const screen = { getCursorScreenPoint: () => ({ x: 0, y: 0 }), getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 25, width: 1440, height: 875 } }) };
   h.start = () => h.talk.start({ globalShortcut, screen, prefs: createDesktopPrefs({ read: () => null, write: () => {} }), remote: () => remote,
     away: failing("away", () => h.away), starting: () => h.starting,
-    localRequest: route => { h.requests.push(["local", route]); return answer(route); }, dataDir: () => "/Users/a/.openmausbot" });
+    localRequest: route => { h.requests.push(["local", route]); return answer(route); }, dataDir: () => "/Users/a/.obot" });
   h.handle = (channel, event, ...args) => h.handlers.get(channel)(event, ...args);
   h.press = () => h.registered.get("Control+Alt+Space")();
   h.page = name => new FakeBrowserWindow({ name });
@@ -227,7 +227,7 @@ test("a press, an open or a dismiss that throws is logged, never thrown at Elect
   h.talk.close();
 });
 
-test("clicking the box opens its chat by a link with both ids escaped, or else just shows MausBot", async () => {
+test("clicking the box opens its chat by a link with both ids escaped, or else just shows Obot", async () => {
   const h = harness({ serve: route => {
     if (route === "/api/bots?messages=0") return json({ bots: [{ id: "b?1&x", defaultBot: {}, tasks: [] }] });
     if (route === "/api/bots/b%3F1%26x/tasks") return json({ task: { threadId: "t 1/x" } });
@@ -244,7 +244,7 @@ test("clicking the box opens its chat by a link with both ids escaped, or else j
   sink.transcript({ text: "what's on today" });
   sink.end({ code: 0, reason: "completed" });
   h.click("open");
-  assert.deepEqual(h.links, ["openmausbot://thread/t%201%2Fx?bot=b%3F1%26x"]);
+  assert.deepEqual(h.links, ["obot://thread/t%201%2Fx?bot=b%3F1%26x"]);
   h.talk.close();
 });
 
@@ -276,7 +276,7 @@ test("a press while this computer's server is still starting says so", async () 
   h.start();
   h.press();
   await settle();
-  assert.deepEqual((await h.painted()).at(-1), { state: "error", text: "MausBot is still starting. Try again in a moment.", ...englishLabels });
+  assert.deepEqual((await h.painted()).at(-1), { state: "error", text: "Obot is still starting. Try again in a moment.", ...englishLabels });
   h.talk.close();
 });
 

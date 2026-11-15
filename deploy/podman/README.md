@@ -1,12 +1,12 @@
-# Self-host the full stack with rootless Podman
+﻿# Self-host the full stack with rootless Podman
 
-Run the OpenMausBot server, Caddy, and per-bot Linux desktops with one Podman
+Run the Obot server, Caddy, and per-bot Linux desktops with one Podman
 engine. Docker Engine, Docker Desktop, and Docker Compose are not required;
 `podman-compose` provides the Compose commands. The existing
 [`deploy/docker-compose.yml`](../docker-compose.yml) remains an independent option.
 
 ```text
-Browser -> loopback Caddy :8080 -> OpenMausBot :8799
+Browser -> loopback Caddy :8080 -> Obot :8799
                                     |
                              rootless Podman socket
                                     |
@@ -31,12 +31,12 @@ that WSL can access through `/mnt/c`, `/mnt/d`, etc. From the repository root:
 .\deploy\podman\maus.ps1 ps
 ```
 
-Setup creates/starts a WSL2 machine named `openmausbot` (4 CPUs, 10 GiB RAM,
+Setup creates/starts a WSL2 machine named `obot` (4 CPUs, 10 GiB RAM,
 60 GiB requested disk), installs `podman-compose` inside it if missing, enables
 the user socket, and generates `.env`. WSL resource limits still apply.
 It preserves an existing `.env`. Use `OMB_PODMAN_MACHINE` to select a different
 machine. The wrapper refuses a stopped machine for normal Compose commands;
-after a reboot, use `podman machine start openmausbot` before `up -d`.
+after a reboot, use `podman machine start obot` before `up -d`.
 
 Compose runs **inside** the machine, so the socket and bind paths have the same
 meaning for the server and the engine. `OMB_PODMAN_ENV_FILE` selects an alternate
@@ -92,7 +92,7 @@ existing data.
 Caddy listens on loopback only. To use Tailscale Serve, route the tailnet HTTPS
 endpoint to `http://127.0.0.1:8080`, set `OMB_PUBLIC_URL` to that HTTPS URL and
 `OMB_HTTPS_HOST` to its hostname, then recreate the services with `up -d`.
-Mint a pairing code with `maus.ps1 exec omb openmausbot pair`.
+Mint a pairing code with `maus.ps1 exec omb obot pair`.
 The proxy forwards the client address and scheme so the server's pairing checks
 remain in force. Do not publish the server, webhook listener, or Podman socket
 directly. For public-domain HTTPS, use the existing Docker deployment or design
@@ -118,3 +118,4 @@ manual noVNC access from another device needs a separate authenticated relay.
   recipe does not migrate them. For side-by-side operation, use separate data
   roots and different app/webhook/proxy ports; never share a live data directory.
 - For acceptance checks, follow the [isolated verification recipe](../../docs/verification/podman-self-hosting.md).
+

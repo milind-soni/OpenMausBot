@@ -23,7 +23,7 @@ import { createUpgrades } from "./upgrades.ts";
 const SERIAL = "PHONE1";
 const STREAM = `/api/usb-phones/${SERIAL}/stream`;
 const OWNER_TOKEN = "owner-token-123";
-const DESKTOP_APP = { "x-openmausbot-desktop-owner": OWNER_TOKEN };
+const DESKTOP_APP = { "x-obot-desktop-owner": OWNER_TOKEN };
 const DEVICES = [
   usbPhoneLine(SERIAL),
   usbPhoneLine("LOCKED", "unauthorized"),

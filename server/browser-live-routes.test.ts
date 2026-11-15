@@ -19,7 +19,7 @@ async function call(method: string, path: string, body?: unknown, headers: Recor
 
 beforeAll(async () => {
   fixture = await launchVerificationServer();
-  const env = { OPENMAUSBOT_URL: fixture.info.url };
+  const env = { OBOT_URL: fixture.info.url };
   expect((await runControlOmb(["doctor"], { env }) as any).ok).toBe(true);
   const created = await runControlOmb(["new-bot", "--name", "Browser profile fixture"], { env }) as any;
   botId = created.bot.id;

@@ -10,7 +10,7 @@ reruns and recovery. It
 builds macOS (arm64 + x64, signed, notarized, stapled), Windows, and Ubuntu
 from a single pinned commit, verifies every artifact the way a user would
 receive it, and assembles the canonical draft in
-[OpenMausBot releases](https://github.com/milind-soni/OpenMausBot/releases).
+[Obot releases](https://github.com/alnatourm/Obot/releases).
 The exact same assets are also staged in the public legacy releases repo so
 installed builds from 0.1.46 and earlier can update across the repository
 migration.
@@ -74,8 +74,8 @@ The workflow builds nothing. It:
    and reads its digest and the Cloud home image's;
 3. refuses to move stable back to an older version unless `allow_older` is
    ticked;
-4. moves the `stable` tag of `ghcr.io/milind-soni/openmausbot` and of
-   `ghcr.io/milind-soni/openmausbot-cloud-home` to those digests;
+4. moves the `stable` tag of `ghcr.io/alnatourm/obot` and of
+   `ghcr.io/alnatourm/obot-cloud-home` to those digests;
 5. commits `stable.json` (version, both images by digest, and every version
    that was stable in the last 90 days) to the `channels` branch. When that
    fails after the tags moved, the tags are put back to the digests the
@@ -87,7 +87,7 @@ it stops the run, so a network error never skips the move-back check or drops
 the history.
 
 Servers read
-`https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json`:
+`https://raw.githubusercontent.com/alnatourm/Obot/channels/stable.json`:
 the update check (`server/update-check.ts`) for the version, and
 `deploy/update.sh` for the image to pull. `latest` still follows `main` and is
 never moved by this workflow. Running it again with the same version changes
@@ -110,10 +110,10 @@ held to the same steps and the same promises:
 | --- | --- | --- |
 | Image by digest, before anything stops | `ensureImage`, `checkImage` | `docker pull` of the record's `…@sha256:…` |
 | Room for the copy | `ensureRoomForCopy` | `room_for_copy` |
-| Stop, copy `/data` aside | `stopAndCopy` → volume `mausbot-snapshot` | `stop_server` (checked stopped), `copy_aside` → a new volume `<project>_data-before-update-<time>`, compared with the data file by file; the copy before it is removed only then |
+| Stop, copy `/data` aside | `stopAndCopy` → volume `obot-snapshot` | `stop_server` (checked stopped), `copy_aside` → a new volume `<project>_data-before-update-<time>`, compared with the data file by file; the copy before it is removed only then |
 | Never older | the update runner refuses an older image (exit 5) | `older_reason`: by the version the server reports; exit 5 unless `--allow-older` |
 | Start the new image | `createContainer`, `startHome` | `OMB_IMAGE` in `.env`, `docker compose up -d` |
-| Healthy, and bots can start | signed health report names the image; the bot box still passes every check it passed before | `/api/health` three times running, the version it reports, `openmausbot doctor` if it passed before, Caddy |
+| Healthy, and bots can start | signed health report names the image; the bot box still passes every check it passed before | `/api/health` three times running, the version it reports, `obot doctor` if it passed before, Caddy |
 | On failure | `rollBack`: old image and the copy, reply `update_rolled_back` | `roll_back`: the copy (into a new folder, checked, then swapped in), `.env` and the old image, exit 1 with the reason; a restore that fails keeps the journal, exit 2 |
 | Interrupted | the operation in `home.json`; `recover` at the next start | `.update/journal`; a hangup is ignored, Ctrl-C undoes at once, and the next run keeps a healthy new version or asks before it puts data back |
 | Run twice | a job id is answered again, never run again | "already runs …, nothing to do" |
@@ -125,12 +125,12 @@ to one side's steps belongs in the other too.
 ## Updater migration invariant
 
 `app-update.yml` is baked into every packaged desktop app. Builds through
-0.1.46 point to `milind-soni/openmausbot-releases`; newer builds point to
-`milind-soni/OpenMausBot`. For that reason:
+0.1.46 point to `alnatourm/obot-releases`; newer builds point to
+`alnatourm/Obot`. For that reason:
 
 1. Every new release is published byte-for-byte to both repositories during
    the bridge period.
-2. `openmausbot-releases` must stay public. Do not delete its final bridge
+2. `obot-releases` must stay public. Do not delete its final bridge
    release, feeds, or assets.
 3. README and docs downloads point at the canonical repo, while the legacy
    mirror exists only for installed updater clients and historical releases.
@@ -161,7 +161,7 @@ must fail the build, not ship an installer that downloads them on first use.
 
 ## One-time setup: release secrets
 
-Set these in **OpenMausBot → Settings → Secrets and variables → Actions**.
+Set these in **Obot → Settings → Secrets and variables → Actions**.
 
 The **Prepare next release** workflow also needs
 **Settings → Actions → General → Workflow permissions → Allow GitHub Actions
@@ -197,7 +197,7 @@ base64 -i AuthKey_XXXXXXXX.p8 | pbcopy   # → APPLE_API_KEY_P8_BASE64
 
 A fine-grained personal access token that lets the workflow write to the
 legacy updater mirror: **GitHub → Settings → Developer settings →
-Fine-grained tokens** → repository access: only `openmausbot-releases` →
+Fine-grained tokens** → repository access: only `obot-releases` →
 permissions: **Contents: Read and write**. Set a long expiry and a calendar
 reminder. The canonical release uses the workflow's scoped `GITHUB_TOKEN` and
 does not need a PAT.
@@ -219,3 +219,4 @@ notarize with the local keychain profile (`xcrun notarytool submit …
 to both repositories, publish and verify the canonical release before the
 legacy mirror, and always verify the published bytes against the published feed
 by downloading them back.
+

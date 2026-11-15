@@ -36,7 +36,7 @@ function harness(options: { enabled?: boolean; live?: Set<string>; openAsks?: Se
   const live = options.live ?? new Set<string>();
   const push = new PhonePush({
     dataDir,
-    access: () => ({ controlPlane: "https://accounts.openmausbot.test", credential: CREDENTIAL }),
+    access: () => ({ controlPlane: "https://accounts.obot.test", credential: CREDENTIAL }),
     enabled: () => options.enabled ?? true,
     live: (key) => live.has(key),
     room: () => undefined,
@@ -63,7 +63,7 @@ function harness(options: { enabled?: boolean; live?: Set<string>; openAsks?: Se
   return { push, activity, calls, activityCalls, live, openAsks, step, tick: (ms: number) => { clock += ms; } };
 }
 
-const registration = (extra: Record<string, unknown> = {}) => activityRegistrationSchema.parse({ scheme: "openmausbot", headlines: HEADLINES, ...extra });
+const registration = (extra: Record<string, unknown> = {}) => activityRegistrationSchema.parse({ scheme: "obot", headlines: HEADLINES, ...extra });
 const notify = (kind: string) => ({ kind: "notify", notification: { kind, botId: "bot_1", botName: "Scout", threadId: "th_ask", title: "Scout needs approval", body: "PRIVATE run cat ~/payroll.csv" } });
 const runtime = (type: string) => ({ kind: "runtime", event: { type, threadId: "th_1", eventId: "e1", provider: "claudeAgent", createdAt: "" } });
 const everyone = () => true;
@@ -84,7 +84,7 @@ describe("registering a phone's activities", () => {
       { v: 1, platform: "apns", purpose: "activity-start", token: START, environment: "production" },
       { v: 1, platform: "apns", purpose: "activity", token: ACT, environment: "production" },
     ]);
-    expect(activity.registration(IPHONE)).toEqual({ scheme: "openmausbot", headlines: HEADLINES, ongoing: false, kinds: ["needsYou", "working"], activities: ["bot_1"], canStart: true });
+    expect(activity.registration(IPHONE)).toEqual({ scheme: "obot", headlines: HEADLINES, ongoing: false, kinds: ["needsYou", "working"], activities: ["bot_1"], canStart: true });
     expect(JSON.stringify(activity.registration(IPHONE))).not.toContain(ACT);
     await activity.register(IPHONE, registration({ startToken: START }));
     expect(calls.at(-1)).toEqual({ path: "/v1/installations/self/push/unregister", body: { v: 1, platform: "apns", token: ACT } });
@@ -99,7 +99,7 @@ describe("registering a phone's activities", () => {
       { scheme: "https" },
       { activities: Array.from({ length: 11 }, (_, index) => ({ botId: `b${index}`, token: ACT })) },
       { line: "text" },
-    ]) expect(activityRegistrationSchema.safeParse({ scheme: "openmausbot", headlines: HEADLINES, ...bad }).success, JSON.stringify(bad)).toBe(false);
+    ]) expect(activityRegistrationSchema.safeParse({ scheme: "obot", headlines: HEADLINES, ...bad }).success, JSON.stringify(bad)).toBe(false);
   });
 });
 
@@ -111,8 +111,8 @@ describe("pushing a bot's activity while the app is closed", () => {
     await step({}, runtime("turn.started"));
     await step({ busy: false }, runtime("turn.completed"));
     expect(activityCalls()).toEqual([
-      { v: 1, token: ACT, event: "update", activity: { botId: "bot_1", botName: "Scout", kind: "working", headline: "Scout is working", since: 1_000_000, link: "openmausbot://chat/th_1", ...VISUAL } },
-      { v: 1, token: ACT, event: "end", activity: { botId: "bot_1", botName: "Scout", kind: "working", headline: "Scout is working", since: 1_000_000, link: "openmausbot://chat/th_1", ...VISUAL } },
+      { v: 1, token: ACT, event: "update", activity: { botId: "bot_1", botName: "Scout", kind: "working", headline: "Scout is working", since: 1_000_000, link: "obot://chat/th_1", ...VISUAL } },
+      { v: 1, token: ACT, event: "end", activity: { botId: "bot_1", botName: "Scout", kind: "working", headline: "Scout is working", since: 1_000_000, link: "obot://chat/th_1", ...VISUAL } },
     ]);
     expect(calls.at(-1)).toMatchObject({ path: "/v1/installations/self/push/unregister", body: { token: ACT } });
     expect(activity.registration(IPHONE)?.activities).toEqual([]);
@@ -125,7 +125,7 @@ describe("pushing a bot's activity while the app is closed", () => {
     await step({ ask: true }, notify("approval"));
     await step({}, notify("done"));
     expect(activityCalls()).toEqual([
-      { v: 1, token: START, event: "start", alert: true, activity: { botId: "bot_1", botName: "Scout", kind: "needsYou", headline: "Scout needs you", since: 1_000_000, link: "openmausbot://chat/th_ask", ...FALLBACK_VISUAL } },
+      { v: 1, token: START, event: "start", alert: true, activity: { botId: "bot_1", botName: "Scout", kind: "needsYou", headline: "Scout needs you", since: 1_000_000, link: "obot://chat/th_ask", ...FALLBACK_VISUAL } },
     ]);
     expect(JSON.stringify(activityCalls())).not.toContain("payroll");
   });

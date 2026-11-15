@@ -328,7 +328,7 @@ describe("CursorAgentDriver", () => {
     }
   });
 
-  it("mounts OpenMausBot team tools over HTTP and respawns when their bearer changes", async () => {
+  it("mounts Obot team tools over HTTP and respawns when their bearer changes", async () => {
     ensureDirs();
     chmodSync(FAKE_CLI, 0o755);
     const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-agents-"));

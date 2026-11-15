@@ -10,7 +10,7 @@ export const BOT_PAUSED_CODE = "bot_paused";
 /** The code on a turn refused because the person paused its bot, or its department (Pause in the sidebar menus). */
 export const BOT_HELD_CODE = "bot_held";
 
-/** The bots a plan's awake limit counts. A place's MausBot comes with it; an archived bot or one that moved away isn't at work here. */
+/** The bots a plan's awake limit counts. A place's Obot comes with it; an archived bot or one that moved away isn't at work here. */
 export function botsTowardLimit(bots: ReadonlyArray<Pick<DefaultBotFields, "defaultBot"> & { hidden?: boolean; movedTo?: unknown }>): number {
   return bots.filter((bot) => !bot.defaultBot && !bot.hidden && !bot.movedTo).length;
 }

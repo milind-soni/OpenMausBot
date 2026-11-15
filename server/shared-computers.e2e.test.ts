@@ -277,7 +277,7 @@ it("disabling the local gate cancels a live job even while the remote workspace 
   await expect.poll(() => connector.state(env.id).connected, { timeout: 5000 }).toBe(false);
   expect((await pending).isError).toBe(true);
   await expect.poll(() => commandAlive(marker), { timeout: 5000 }).toBe(false);
-  expect((await api("GET", "/.well-known/openmausbot/environment")).body.capabilities.sharedComputers).toBe(true);
+  expect((await api("GET", "/.well-known/obot/environment")).body.capabilities.sharedComputers).toBe(true);
   await expect(connector.identity(env)).rejects.toThrow("turned off on this computer");
   expect((await operation("read_file", { path: "brief.txt" })).isError).toBe(true);
   evidence.push("local flag withdrawal cancels a live remote command and prevents further access despite remote opt-in");
@@ -302,6 +302,6 @@ it("withdrawing the workspace flag closes pending jobs and refuses a previously 
   const staleTool = await tool("list_shared_computers");
   expect(staleTool.isError).toBe(true);
   expect(staleTool.content[0].text).toContain("unknown internal endpoint");
-  expect((await api("GET", "/.well-known/openmausbot/environment")).body.capabilities).not.toHaveProperty("sharedComputers");
+  expect((await api("GET", "/.well-known/obot/environment")).body.capabilities).not.toHaveProperty("sharedComputers");
   evidence.push("workspace flag withdrawal closes in-flight requests and refuses tools advertised to an earlier provider turn");
 }, 45_000);

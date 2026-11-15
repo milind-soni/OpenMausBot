@@ -60,7 +60,7 @@ async function api(method: string, path: string, options: { body?: unknown; remo
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-cloud-home-server-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".obot");
   mkdirSync(dataDir, { recursive: true });
   // A signed-in Claude Code whose turns record the environment they were given.
   // While the hang marker exists, a new turn records itself elsewhere and
@@ -91,10 +91,10 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   mkdirSync(join(dataDir, ".backups"));
   writeFileSync(join(dataDir, ".backups", "last-restore.json"), JSON.stringify({ restored: true, id: "7c9e6679-7425-40de-944b-e07fc1f90ae7" }));
   mkdirSync(join(dataDir, "workspaces", "moved"), { recursive: true });
-  writeFileSync(join(dataDir, "workspaces", "moved", "MEMORY.md"), "The register is C:\\Users\\Ada\\.openmausbot\\files\\register.xlsx.\n");
+  writeFileSync(join(dataDir, "workspaces", "moved", "MEMORY.md"), "The register is C:\\Users\\Ada\\.obot\\files\\register.xlsx.\n");
   // The web UI's pages (a stand-in for the built app).
   mkdirSync(join(home, "web"));
-  writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>OpenMausBot</title>");
+  writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>Obot</title>");
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
   const offlinePrelude = `data:text/javascript,${encodeURIComponent('globalThis.fetch = async () => new Response("offline fixture", { status: 503 });')}`;
@@ -129,7 +129,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
 }, 30_000);
 
 async function ownerPairing(): Promise<string> {
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: "Obot app (Cloud)", ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const granted = await api("POST", "/api/cloud/pairing", { remote: true, headers: {
     "content-type": "application/json", "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce,
@@ -152,7 +152,7 @@ it("boots with a gateway's settings, says once that it ignores them, and never l
 
 // Cloud homes are Linux; on Windows the data folder is itself a drive path.
 it.skipIf(process.platform === "win32")("rewrites the data folder of the computer it was moved from before anything reads it", () => {
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".obot");
   expect(readFileSync(join(dataDir, "workspaces", "moved", "MEMORY.md"), "utf8")).toBe(`The register is ${dataDir}/files/register.xlsx.\n`);
   expect(JSON.parse(readFileSync(join(dataDir, ".backups", "last-restore.json"), "utf8")).pathsRewritten).toBe(true);
 });
@@ -163,7 +163,7 @@ it("offers the included computers, voice and decisions with no key, and never sh
   expect(status.body.box).toEqual({ configured: true, included: true });
   expect(status.body.tts).toMatchObject({ configured: true, ready: true, provider: "elevenlabs", voice: "preset0voice0id", included: true });
   expect(status.body.decider).toEqual({ provider: "jev", configured: true, included: true, enabled: true, jobs: { roomRouting: true } });
-  const saved = readFileSync(join(home, ".openmausbot", "config.json"), "utf8");
+  const saved = readFileSync(join(home, ".obot", "config.json"), "utf8");
   for (const includedToken of includedTokens) {
     expect(JSON.stringify(status.body)).not.toContain(includedToken);
     expect(saved).not.toContain(includedToken);
@@ -171,7 +171,7 @@ it("offers the included computers, voice and decisions with no key, and never sh
 });
 
 it("pairs the app on a signed request and tells it its first run is the engine sign-in; no gateway models are served", async () => {
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: "Obot app (Cloud)", ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const granted = await api("POST", "/api/cloud/pairing", { remote: true, headers: {
     "content-type": "application/json", "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce,
@@ -337,7 +337,7 @@ it("records when a bot's turn first finished here, once, in the Cloud's own sett
   const first = async () => (await api("GET", "/api/config")).body.onboarding?.firstTurnAt as string | undefined;
   await expect.poll(first, { timeout: 15_000 }).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   const recorded = await first();
-  expect(JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).onboarding.firstTurnAt).toBe(recorded);
+  expect(JSON.parse(readFileSync(join(home, ".obot", "config.json"), "utf8")).onboarding.firstTurnAt).toBe(recorded);
   const created = await api("POST", "/api/bots", { body: {
     name: "Second fixture", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true,
   } });

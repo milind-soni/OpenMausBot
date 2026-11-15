@@ -2,7 +2,7 @@
 //
 // The snapshot bound follows pingdotgg/t3code@00cdceb1 apps/server/src/mcp/McpHttpServer.ts (boundSnapshotMetadata),
 // MIT License, Copyright (c) 2026 T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified: a text tree with
-// refs instead of JSON, and parts shed in OpenMausBot's order.
+// refs instead of JSON, and parts shed in Obot's order.
 import { DEFAULT_BROWSER_RESULT_BUDGET, sanitizeUrl } from "../browser-tool-shape.ts";
 import { trimResultText } from "../mcp-trim.ts";
 

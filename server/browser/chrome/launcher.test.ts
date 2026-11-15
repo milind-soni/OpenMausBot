@@ -290,7 +290,7 @@ describe("the Chrome launcher", () => {
   });
 
   it("changes nothing on OMB_BROWSER_LEGACY_SHELL=1", async () => {
-    const machine = mac({ env: { OMB_BROWSER_LEGACY_SHELL: "1", OMB_RESOURCES_PATH: "/Applications/OpenMausBot.app/Contents/Resources" } });
+    const machine = mac({ env: { OMB_BROWSER_LEGACY_SHELL: "1", OMB_RESOURCES_PATH: "/Applications/Obot.app/Contents/Resources" } });
     const calibrate = vi.fn();
     const chrome = launcher(machine, { calibrate });
     expect(chrome.env()).toEqual({});

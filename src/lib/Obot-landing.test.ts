@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FLIGHT_MS, LANDING_MS, landInSidebar } from "./mausbot-landing";
+import { FLIGHT_MS, LANDING_MS, landInSidebar } from "./obot-landing";
 
 type Played = { el: Element; keyframes: Keyframe[]; options: KeyframeAnimationOptions; finish(): void };
 let played: Played[] = [];
@@ -51,7 +51,7 @@ function sidebar() {
   return { ada, bea, maus, from, commit };
 }
 
-describe("MausBot landing in the sidebar", () => {
+describe("Obot landing in the sidebar", () => {
   it("glides the rows already there down by its height, flies the avatar into the new top slot and shows the row as it lands", () => {
     const s = sidebar();
     landInSidebar({ from: s.from, botId: "maus", reduced: false, commit: s.commit });

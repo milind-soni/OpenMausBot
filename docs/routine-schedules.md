@@ -1,10 +1,10 @@
-# Routine schedules
+﻿# Routine schedules
 
 Ask a bot in ordinary language, for example:
 
 > Prepare a report at 9 am on the first of every month, in Asia/Kolkata.
 
-The bot turns calendar timing into a cron expression, and OpenMausBot validates
+The bot turns calendar timing into a cron expression, and Obot validates
 it. The change applies at once; its card shows the rule, its timezone and the
 next three dates, with Edit, Pause and Undo. The scheduler wakes the bot at the
 matching time; no model runs in the background to check the date.
@@ -30,7 +30,7 @@ it with a new time turns it back on.
 
 Deleting a bot deletes its schedules and webhooks too, and their runs. A
 webhook's address stops working at once. Automations left behind by a bot
-deleted in an earlier version are removed the next time OpenMausBot starts, and
+deleted in an earlier version are removed the next time Obot starts, and
 never run meanwhile.
 
 ## Advanced cron
@@ -75,7 +75,7 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
   own model works on its Boat. The agent tools call these `run_on: "maus"` and
   `run_on: "box"`; legacy stored `runOn: "cloud"` still means Boat and is not
   migrated to a different runner.
-- OpenMausBot must be running to dispatch routines, including cloud-targeted
+- Obot must be running to dispatch routines, including cloud-targeted
   routines. There is no external always-on scheduling service: the schedule
   runs inside the app on your computer — it is not Grok's or anyone's cloud —
   so a sleeping computer or a quit app runs nothing, and the app cannot wake
@@ -83,7 +83,7 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
   in, it keeps the computer from idle-sleeping for the hour before a due
   routine and while one runs (Automations → *Keep this computer awake for
   routines*, on by default; a closed lid still sleeps). For true 24/7, run
-  OpenMausBot on a VPS — see [deploy-vps.md](deploy-vps.md).
+  Obot on a VPS — see [deploy-vps.md](deploy-vps.md).
 - Existing catch-up policy remains: up to 12 hours late, one missed occurrence
   can be dispatched; older work receives a missed-run receipt. The next date
   advances without replaying every missed minute. Queued/running/waiting work
@@ -101,12 +101,12 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
 - An unattended run (scheduled, webhook or Run now) recovers from a passing
   failure by itself, the same on the desktop, a headless server and a Cloud
   home (`server/routine-recovery.ts`):
-  - Its engine stalled, OpenMausBot restarted while it ran, the provider
+  - Its engine stalled, Obot restarted while it ran, the provider
     rate-limited it, or the provider failed for a moment: it starts once more
     in the same conversation after a short wait (15 s; a minute after a rate
     limit), told to check what its first start already did. A second failure
     fails it: "Failed after one automatic retry: …".
-  - A run that a shutdown or crash cut off is picked up once when OpenMausBot
+  - A run that a shutdown or crash cut off is picked up once when Obot
     starts again; the same run, never a copy.
   - Its bot or conversation was busy when it started: it waits there,
     checking every 30 s, for up to an hour.
@@ -130,3 +130,4 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
 Cron series are edited through the routine editor rather than calendar dragging,
 which could otherwise ambiguously change an entire expression. Dense calendar
 projections are bounded per day; Run logs remain the source of actual outcomes.
+

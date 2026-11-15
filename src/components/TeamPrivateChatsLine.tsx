@@ -44,7 +44,7 @@ function ChatHeadAudience({ icon, label, ...data }: { icon: ReactNode; label: st
   </span>;
 }
 
-/** In a member's own MausBot's chats: that member's helper, which other members never see. */
+/** In a member's own Obot's chats: that member's helper, which other members never see. */
 export function TeamOwnHelperHeader() {
   return <ChatHeadAudience icon={<UserRound size={12} aria-hidden="true" className="shrink-0" />} label={t("team.ownHelperHeader")} data-chathead-own-helper="" />;
 }

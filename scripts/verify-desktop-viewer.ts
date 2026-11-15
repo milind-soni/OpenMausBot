@@ -26,13 +26,13 @@ try {
   writeFileSync(join(bin, "docker"), `#!${process.execPath}
 let args = process.argv.slice(2);
 if (args[0] === "-H") args = args.slice(2);
-const labels = ${JSON.stringify({ "com.openmausbot.local-vm": "1", "com.openmausbot.cua-driver": CUA_DRIVER_VERSION, "com.openmausbot.cua-base": BASE_IMAGE_DIGEST, "com.openmausbot.image-layer": IMAGE_LAYER_VERSION, "com.openmausbot.workspace": "1" })};
+const labels = ${JSON.stringify({ "com.obot.local-vm": "1", "com.obot.cua-driver": CUA_DRIVER_VERSION, "com.obot.cua-base": BASE_IMAGE_DIGEST, "com.obot.image-layer": IMAGE_LAYER_VERSION, "com.obot.workspace": "1" })};
 let result;
 const imageId = 'sha256:' + 'a'.repeat(64);
-if (args[0] === 'inspect' && /^openmausbot-vps-/.test(args[1])) result = [{
+if (args[0] === 'inspect' && /^obot-vps-/.test(args[1])) result = [{
   Id:'b'.repeat(64), Image:imageId, State:{Running:true}, Mounts:[],
   Config:{Image:${JSON.stringify(IMAGE)}, Env:['VNC_PW=fixture-password'], Labels:{...labels,
-    'com.openmausbot.vps':'1', 'com.openmausbot.container':args[1], 'com.openmausbot.vps-viewer':'1'}},
+    'com.obot.vps':'1', 'com.obot.container':args[1], 'com.obot.vps-viewer':'1'}},
   HostConfig:{Privileged:false,NetworkMode:'bridge',PortBindings:{},Memory:4294967296,MemorySwap:4294967296,NanoCpus:2000000000,
     PidsLimit:4096,CapDrop:['ALL'],CapAdd:['CAP_SETUID','CAP_SETGID'],IpcMode:'private',ShmSize:536870912,
     CgroupnsMode:'private',SecurityOpt:[],RestartPolicy:{Name:'unless-stopped',MaximumRetryCount:0}},
@@ -42,7 +42,7 @@ else if (args[0] === 'exec') result = args.includes('--version') ? 'cua-driver $
   : args.includes('health_report') ? {schema_version:'1',overall:'ok',checks:[]} : {};
 else if (args[0] === 'info') result = 'fixture';
 else if (args[0] === 'image' && args[1] === 'inspect') result = [{Id:imageId,Config:{Labels:labels}}];
-else if (args[0] === 'inspect' && args[1] === 'openmausbot-computer') result = [{
+else if (args[0] === 'inspect' && args[1] === 'obot-computer') result = [{
   Config:{Image:${JSON.stringify(IMAGE)},Labels:labels,Env:['VNC_PW=fixture-password']},
   State:{Running:true},Image:imageId,
   HostConfig:{PortBindings:{'6901/tcp':[{HostIp:'127.0.0.1',HostPort:'${desktop.port}'}]}},

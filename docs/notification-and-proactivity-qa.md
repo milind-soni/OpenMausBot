@@ -1,6 +1,6 @@
-# Agent notifications and proactivity QA
+﻿# Agent notifications and proactivity QA
 
-OpenMausBot treats **proactivity as an explicit trigger**, not as a hidden
+Obot treats **proactivity as an explicit trigger**, not as a hidden
 heartbeat. A bot may continue within an active task through Auto mode, may be
 started by a Routine or Webhook, and may coordinate peers when its engine and
 profile allow that. This change does not add background polling that invents
@@ -69,3 +69,4 @@ other:
 
 Live provider, OS-permission, backgrounding, and APNs behavior cannot be proven
 by unit tests alone and remains part of the signed desktop/iPhone release pass.
+

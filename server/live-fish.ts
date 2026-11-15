@@ -18,7 +18,7 @@ const HISTORY_TOTAL_CHARS = 6_000;
 export const FISH_DELEGATE_TOOL = "delegate";
 /** What a "fish" call reports as its voice: the voice is set on the Fish agent, not per call. */
 export const FISH_AGENT_VOICE = "agent";
-export const FISH_UPDATE_PREFIX = "[OpenMausBot]";
+export const FISH_UPDATE_PREFIX = "[Obot]";
 const MAX_QUEUED_COMMANDS = 50;
 export const RELAY_POLL_MS = 15_000;
 

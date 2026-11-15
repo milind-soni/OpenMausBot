@@ -10,7 +10,7 @@ import { parseSentinelArgs, runSentinelCli } from "./cli.ts";
 import { runScan } from "./scan.ts";
 import { fixtureDataDir, turnCompleted, type FixtureDataDir } from "./testing.ts";
 
-const ENTRY = join(dirname(fileURLToPath(import.meta.url)), "..", "openmausbot.ts");
+const ENTRY = join(dirname(fileURLToPath(import.meta.url)), "..", "obot.ts");
 const PRIVATE = "Example Client Ltd";
 
 function sentinel(...args: string[]): { status: number | null; stdout: string; stderr: string } {
@@ -18,7 +18,7 @@ function sentinel(...args: string[]): { status: number | null; stdout: string; s
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
-describe("openmausbot sentinel", () => {
+describe("obot sentinel", () => {
   let dir: string;
   let fixture: FixtureDataDir;
   beforeEach(() => {
@@ -86,7 +86,7 @@ describe("openmausbot sentinel", () => {
 
   it("parses its options and defaults the output to a folder of its own, outside the data", () => {
     const parsed = parseSentinelArgs(["--data-dir", "/data/omb"], {});
-    expect(parsed).toMatchObject({ dataDir: expect.stringMatching(/omb$/), out: expect.stringMatching(/openmausbot-sentinel[\\/]data-[0-9a-f]{12}$/), json: false });
+    expect(parsed).toMatchObject({ dataDir: expect.stringMatching(/omb$/), out: expect.stringMatching(/obot-sentinel[\\/]data-[0-9a-f]{12}$/), json: false });
     expect("out" in parsed && parsed.out.includes(join("data", "omb"))).toBe(false);
     expect(parseSentinelArgs(["--queue-wait", "600", "--cost", "2.5", "--json"], { OMB_DATA_DIR: "/d" })).toMatchObject({ queueWaitMs: 600_000, costUsd: 2.5, json: true });
     expect(parseSentinelArgs(["--cost", "-1"], {})).toEqual({ error: expect.stringContaining("--cost"), json: false });
@@ -128,16 +128,16 @@ describe("openmausbot sentinel", () => {
   it("--check-install reports a schedule whose node or script has moved", () => {
     const lines: string[] = [];
     const io = { log: (line: string) => lines.push(line), error: (line: string) => lines.push(line) };
-    const unit = "/Users/maus/Library/LaunchAgents/com.openmausbot.sentinel.plist";
-    const plist = `<key>ProgramArguments</key>\n<array>\n<string>/old/node</string>\n<string>/Applications/OpenMausBot.app/Contents/Resources/server/openmausbot.js</string>\n<string>sentinel</string>\n</array>`;
+    const unit = "/Users/maus/Library/LaunchAgents/com.obot.sentinel.plist";
+    const plist = `<key>ProgramArguments</key>\n<array>\n<string>/old/node</string>\n<string>/Applications/Obot.app/Contents/Resources/server/obot.js</string>\n<string>sentinel</string>\n</array>`;
     const host = (present: string[]) => ({ platform: "darwin" as const, home: "/Users/maus", exists: (path: string) => path === unit || present.includes(path), read: () => plist });
-    expect(runSentinelCli(["--check-install"], io, {}, host(["/Applications/OpenMausBot.app/Contents/Resources/server/openmausbot.js"]))).toBe(1);
-    expect(lines.join("\n")).toContain("stale install: /Users/maus/Library/LaunchAgents/com.openmausbot.sentinel.plist needs /old/node, which no longer exists; rerun openmausbot service install --sentinel");
+    expect(runSentinelCli(["--check-install"], io, {}, host(["/Applications/Obot.app/Contents/Resources/server/obot.js"]))).toBe(1);
+    expect(lines.join("\n")).toContain("stale install: /Users/maus/Library/LaunchAgents/com.obot.sentinel.plist needs /old/node, which no longer exists; rerun obot service install --sentinel");
     lines.length = 0;
-    expect(runSentinelCli(["--check-install", "--json"], io, {}, host(["/old/node", "/Applications/OpenMausBot.app/Contents/Resources/server/openmausbot.js"]))).toBe(0);
+    expect(runSentinelCli(["--check-install", "--json"], io, {}, host(["/old/node", "/Applications/Obot.app/Contents/Resources/server/obot.js"]))).toBe(0);
     expect(JSON.parse(lines[0]!)).toMatchObject({ ok: true, status: "ok", node: "/old/node" });
     lines.length = 0;
     expect(runSentinelCli(["--check-install"], io, {}, { ...host([]), exists: () => false })).toBe(1);
-    expect(lines.join("\n")).toContain("install one with openmausbot service install --sentinel");
+    expect(lines.join("\n")).toContain("install one with obot service install --sentinel");
   });
 });

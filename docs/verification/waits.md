@@ -1,4 +1,4 @@
-# Waits: tell me when, with no AI while waiting
+﻿# Waits: tell me when, with no AI while waiting
 
 A wait is a condition a bot sets up once ("tell me when report.txt is there"); plain server
 code checks it on a timer, and no model runs until it fires. See the
@@ -62,7 +62,7 @@ internet, and what a real model does with the follow-up (the fake engine replies
 ## Last exercised
 
 2026-10-28, Node 24, branch `feat/bot-waits` at `4fc4ef0bb`, fixture log
-`/var/folders/7b/15jj691d4tj_7vq99cqvwgbr0000gn/T/openmausbot-verification-evidence/server-1793162265419-23568.log`.
+`/var/folders/7b/15jj691d4tj_7vq99cqvwgbr0000gn/T/obot-verification-evidence/server-1793162265419-23568.log`.
 Every expectation above held. The lines below are abridged: only these fields of each
 message are kept, and `<W>` stands for the temp dir.
 
@@ -104,3 +104,4 @@ Wait notification (the two turns also left their own `"kind": "done"` notificati
 ```json
 {"kind": "wait", "botName": "Pepper", "title": "Pepper's wait is over", "body": "the report: done. <W>/report.txt is there now.", "read": false}
 ```
+

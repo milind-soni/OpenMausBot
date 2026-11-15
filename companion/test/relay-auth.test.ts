@@ -1,4 +1,4 @@
-import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+﻿import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import { once } from "node:events";
 import { afterEach, expect, it } from "vitest";
 import { createProxyHandler } from "../src/proxy.ts";
@@ -35,9 +35,9 @@ it("adds the private capability only after authenticating and authorizing, never
   const call = async (path: string, token = "paired", method = "POST") => {
     const res = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers: {
       authorization: `Bearer ${token}`,
-      "x-openmausbot-companion-auth": "forged",
-      "x-openmausbot-desktop-owner": "forged-owner",
-      "x-openmausbot-companion-device": "forged-phone",
+      "x-obot-companion-auth": "forged",
+      "x-obot-desktop-owner": "forged-owner",
+      "x-obot-companion-device": "forged-phone",
     } });
     await res.text();
     return res.status;
@@ -51,10 +51,11 @@ it("adds the private capability only after authenticating and authorizing, never
   expect(received).toHaveLength(0);
   expect(await call("/api/bots/b/read")).toBe(200);
   expect(received).toHaveLength(1);
-  expect(received[0]["x-openmausbot-companion-auth"]).toBe(capability);
-  expect(received[0]["x-openmausbot-companion-device"]).toBe("real-phone");
-  expect(received[0]["x-openmausbot-desktop-owner"]).toBeUndefined();
+  expect(received[0]["x-obot-companion-auth"]).toBe(capability);
+  expect(received[0]["x-obot-companion-device"]).toBe("real-phone");
+  expect(received[0]["x-obot-desktop-owner"]).toBeUndefined();
   expect(received[0].authorization).toBeUndefined();
   await call("/api/health", "unpaired", "GET");
-  expect(received[1]["x-openmausbot-companion-auth"]).toBeUndefined();
+  expect(received[1]["x-obot-companion-auth"]).toBeUndefined();
 });
+

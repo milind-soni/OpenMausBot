@@ -11,7 +11,7 @@ const scidHex = (scid: number) => scid.toString(16).padStart(8, "0");
 
 export const deviceSocket = (scid: number) => `localabstract:scrcpy_${scidHex(scid)}`;
 
-export const deviceDir = (scid: number) => `/data/local/tmp/openmausbot-scrcpy-${scidHex(scid)}`;
+export const deviceDir = (scid: number) => `/data/local/tmp/obot-scrcpy-${scidHex(scid)}`;
 
 /** The arguments after `com.genymobile.scrcpy.Server`. `scid` is a 31-bit number. */
 export function serverArgs(scid: number): string[] {

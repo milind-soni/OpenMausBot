@@ -12,7 +12,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 const solo: OwnServerFacts = { managed: false, shared: false, admins: [] };
 const session = (scopes: Array<"admin" | "client">, email?: string): RequestAuth => ({
   kind: "session", via: "cookie", scopes,
-  session: { id: "s1", tokenHash: "0".repeat(64), label: "OpenMausBot app", scopes, createdAt: 1, lastSeenAt: 1, expiresAt: 2, ...(email ? { email } : {}) } as SessionRecord,
+  session: { id: "s1", tokenHash: "0".repeat(64), label: "Obot app", scopes, createdAt: 1, lastSeenAt: 1, expiresAt: 2, ...(email ? { email } : {}) } as SessionRecord,
 });
 
 describe("a server of one person's own", () => {

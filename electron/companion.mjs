@@ -110,7 +110,7 @@ async function control(method, urlPath, body, { timeoutMs = 4_000 } = {}) {
   const options = {
     method,
     signal: AbortSignal.timeout(timeoutMs),
-    headers: { "x-openmausbot-control-token": controlToken },
+    headers: { "x-obot-control-token": controlToken },
   };
   if (body !== undefined) {
     options.body = JSON.stringify(body);
@@ -245,7 +245,7 @@ async function start({ resourcesPath, harnessPort, mutationToken, hostedUrl = nu
   child.once("spawn", () => {
     // Never expose this capability in argv, environment, logs or the renderer.
     try {
-      child.postMessage({ type: "openmausbot:companion-mutation-token", token: mutationToken, controlToken });
+      child.postMessage({ type: "obot:companion-mutation-token", token: mutationToken, controlToken });
       const e2e = e2eHooks.initialMessage();
       if (e2e) child.postMessage(e2e);
     } catch {
@@ -254,7 +254,7 @@ async function start({ resourcesPath, harnessPort, mutationToken, hostedUrl = nu
     }
   });
   child.on("message", (message) => {
-    if (message?.type === "openmausbot:companion-e2e-token-rejected") e2eHooks.tokenRejected();
+    if (message?.type === "obot:companion-e2e-token-rejected") e2eHooks.tokenRejected();
   });
   child.stdout?.on("data", (d) => log?.(`[companion] ${String(d).trimEnd()}`));
   child.stderr?.on("data", (d) => log?.(`[companion err] ${String(d).trimEnd()}`));

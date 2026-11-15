@@ -48,8 +48,8 @@ describe("app events in the trigger tools", () => {
     } }).context);
     expect(listed.text).toContain("GMAIL_NEW_GMAIL_MESSAGE");
     expect(listed.text).toContain("Not connected yet: Slack.");
-    const none = context({ api: { apps: [], notConnected: [], unavailable: "App events need OpenMausBot's connected apps." } });
-    expect((await callTool("list_trigger_events", {}, none.context)).text).toBe("App events need OpenMausBot's connected apps.");
+    const none = context({ api: { apps: [], notConnected: [], unavailable: "App events need Obot's connected apps." } });
+    expect((await callTool("list_trigger_events", {}, none.context)).text).toBe("App events need Obot's connected apps.");
     expect(none.calls[0]!.path).toBe("/api/internal/trigger-events?fromBotId=scout&fromThreadId=thread-1");
   });
 

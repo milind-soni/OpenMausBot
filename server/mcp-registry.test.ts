@@ -43,17 +43,17 @@ describe("custom MCP registry", () => {
     for (const key of ["OMB_HARNESS_URL", "OGB_BOX_TOKEN"]) {
       expect(parseStoredMcpServer("notes", { command: "notes-mcp", env: { [key]: "bad" } })).toEqual({
         ok: false,
-        error: `Environment variable “${key}” is reserved by OpenMausBot.`,
+        error: `Environment variable “${key}” is reserved by Obot.`,
       });
       expect(parseMcpServerMutation("notes", { command: "notes-mcp", env: { [key]: "bad" } })).toEqual({
         ok: false,
-        error: `Environment variable “${key}” is reserved by OpenMausBot.`,
+        error: `Environment variable “${key}” is reserved by Obot.`,
       });
     }
   });
 
   it("lets a custom server run an Electron binary as node, and nothing else", () => {
-    const refused = "Environment variable “ELECTRON_RUN_AS_NODE” is reserved by OpenMausBot; a custom server may set it to “1” only.";
+    const refused = "Environment variable “ELECTRON_RUN_AS_NODE” is reserved by Obot; a custom server may set it to “1” only.";
     expect(parseStoredMcpServer("notes", { command: "notes-mcp", env: { ELECTRON_RUN_AS_NODE: "0" } })).toEqual({ ok: false, error: refused });
     expect(parseMcpServerMutation("notes", { command: "notes-mcp", env: { ELECTRON_RUN_AS_NODE: "true" } })).toEqual({ ok: false, error: refused });
     const stored = parseStoredMcpServer("bundled", {

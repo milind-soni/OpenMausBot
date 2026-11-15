@@ -1,7 +1,7 @@
-# Provider images, authentication and thread approvals
+﻿# Provider images, authentication and thread approvals
 
 Every command below uses a disposable home. No real account, API key,
-provider charge, deployment, or running OpenMausBot workspace is involved.
+provider charge, deployment, or running Obot workspace is involved.
 
 ## Real CLI transport checks
 
@@ -127,3 +127,4 @@ unseen deployment refusal. See the [official Codex safety guidance](https://lear
 
 Grok's upstream image ingestion is in [its ACP prompt builder](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-shell/src/session/acp_session_impl/prompt_build.rs).
 Claude's account settings are documented in [Claude Code settings](https://code.claude.com/docs/en/settings).
+

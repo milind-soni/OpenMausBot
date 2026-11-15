@@ -1,4 +1,4 @@
-# Meeting notes
+﻿# Meeting notes
 
 A bot can join an online meeting from its cloud computer, take notes, answer questions in the meeting chat and post a
 **Meeting notes** card when it ends.
@@ -9,7 +9,7 @@ A bot can join an online meeting from its cloud computer, take notes, answer que
   get "Zoom meetings aren't supported yet."
 - The bot joins as **"<Bot name> (notes)"** ("<Bot name> notes" on Teams, which refuses brackets in guest names), with
   mic and camera off, and waits up to 10 minutes for the host to let it in.
-- The moment it is in, it posts one line in the meeting chat: *"Hi, I'm <Bot> (notes) from MausBot, taking notes for
+- The moment it is in, it posts one line in the meeting chat: *"Hi, I'm <Bot> (notes) from Obot, taking notes for
   <person>. Ask me with @notes. Type "@notes stop" and I'll leave."* Nothing is captured before that line is posted; if
   it can't be posted, the bot leaves.
 - `@notes <question>` in the meeting chat gets a short answer there. Posting in the chat follows the bot's **Sending on
@@ -22,7 +22,7 @@ A bot can join an online meeting from its cloud computer, take notes, answer que
 
 ## Speech-to-text and keys
 
-**The project's hosted ElevenLabs key is used only for MausBot Cloud plans**, through the Cloud's Admin voice relay,
+**The project's hosted ElevenLabs key is used only for Obot Cloud plans**, through the Cloud's Admin voice relay,
 metered from the plan's monthly voice allowance. When that allowance is used up the card says so plainly; the bot
 never switches to another service on its own. The person can ask for transcription on the cloud computer itself
 instead.
@@ -36,8 +36,8 @@ Everyone else uses their own keys, in this order, from the keys already in Setti
    the card shows "Setting up transcription (one-time, about a minute)…".
 
 No provider key ever reaches the cloud computer. ElevenLabs gives the computer single-use 15-minute tokens minted on the
-MausBot server (or by the Cloud's relay). With Groq or OpenAI, the computer cuts the meeting audio into short pieces at
-the pauses and hands them back to the MausBot server over the same channel it reports events on; the server
+Obot server (or by the Cloud's relay). With Groq or OpenAI, the computer cuts the meeting audio into short pieces at
+the pauses and hands them back to the Obot server over the same channel it reports events on; the server
 transcribes them and hands the words back, so the computer can label each word with who was speaking.
 
 ## Limits
@@ -46,3 +46,4 @@ transcribes them and hands the words back, so the computer can label each word w
 - Hosts must admit the bot. Google Meet often refuses guests from cloud networks ("You can't join this video call");
   the bot can also run with a Chrome profile signed in to a Google account, which is still being tried live.
 - A meeting stops after 4 hours.
+

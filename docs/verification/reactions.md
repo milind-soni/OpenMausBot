@@ -1,4 +1,4 @@
-# Reactions
+﻿# Reactions
 
 A person reacts to a message from the chat's action row. A 👍 or 👎 on a bot's
 message is their reply to it and reaches that bot at once; ❤️ 😂 🎉 👀 never
@@ -71,7 +71,7 @@ FAKE_CLAUDE_REPLY_STATE=/tmp/reactions-reply-state \
 Then, with the printed handle:
 
 ```sh
-H=/tmp/openmausbot-verify-data-XXXXXX/ui.json
+H=/tmp/obot-verify-data-XXXXXX/ui.json
 pnpm control:omb ui type --ui $H --name "Message Pepper" --text "Draft an email to Sam about Friday."
 pnpm control:omb ui press --ui $H --keys Enter
 pnpm control:omb ui wait-settle --ui $H --timeout 60
@@ -116,3 +116,4 @@ Escape closes it and returns focus to the button, and a choice is shown at once
 and sent with `on`. Chips list each reaction once with its count and who chose
 it; a viewer who cannot write in the conversation gets labels, not buttons. A
 reaction's own line draws no bubble.
+

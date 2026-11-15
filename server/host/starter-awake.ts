@@ -9,7 +9,7 @@ import { z } from "zod";
 import { botsTowardLimit } from "../../shared/bot-limit.ts";
 import { writeFileAtomic } from "../atomic.ts";
 
-/** How many bots a Starter Cloud keeps awake, not counting its MausBot or chief of staff. The one number to change. */
+/** How many bots a Starter Cloud keeps awake, not counting its Obot or chief of staff. The one number to change. */
 export const STARTER_AWAKE_LIMIT = 5;
 export const STARTER_AWAKE_FILE = "starter-awake.json";
 const fileSchema = z.object({ v: z.literal(1), awake: z.array(z.string().min(1).max(200)).max(STARTER_AWAKE_LIMIT) });

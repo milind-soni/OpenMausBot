@@ -365,7 +365,7 @@ describe("remote MCP tool directory", () => {
     const [small, page] = (await request("tools/list")).result.tools;
     expect(small).toEqual(tools[0]);
     expect(schemaBytes(page.inputSchema)).toBeLessThanOrEqual(12_000);
-    expect(page.description).toContain("OpenMausBot shortened this tool's parameters to fit Kimi's size limit");
+    expect(page.description).toContain("Obot shortened this tool's parameters to fit Kimi's size limit");
     const closed = once(child!, "close"); child!.kill(); await closed;
 
     start(mcpStdioServer(spec(fake.url))!);
@@ -505,7 +505,7 @@ describe("remote MCP tool directory", () => {
     expect(described.result.content[0].text.length).toBeGreaterThan(600);
     expect(JSON.parse(described.result.content[0].text).inputSchema).toEqual(padded.find((tool) => tool.name === "payments_list")!.inputSchema);
     const ran = (await call(CALL_TOOL, { name: "payments_list", arguments: { company_id: "biz_1" } })).result.content[0].text;
-    expect(ran).toContain("⚠️ TRUNCATED by OpenMausBot:");
+    expect(ran).toContain("⚠️ TRUNCATED by Obot:");
     expect(fake.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
   });
 

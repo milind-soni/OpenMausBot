@@ -7,8 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { UPDATE_FILES } from "../src/adopted-home.ts";
 import { CUSTOMER_HOME_IMAGE, SERVER_VERSION_FLOOR, VERSION_LABEL } from "../src/customer-run.ts";
 
-const SCRIPT = join(import.meta.dirname, "..", "host", "mausbot-update-runner.sh");
-const IMAGE = `ghcr.io/milind-soni/openmausbot@sha256:${"b".repeat(64)}`;
+const SCRIPT = join(import.meta.dirname, "..", "host", "obot-update-runner.sh");
+const IMAGE = `ghcr.io/alnatourm/obot@sha256:${"b".repeat(64)}`;
 const posix = process.platform !== "win32";
 const dirs: string[] = [];
 afterEach(() => {
@@ -20,7 +20,7 @@ function run(request: string | null, options: { exit?: number; updater?: boolean
   const dir = mkdtempSync(join(tmpdir(), "omb-update-runner-"));
   dirs.push(dir);
   const update = join(dir, "update");
-  const install = join(dir, "opt-openmausbot");
+  const install = join(dir, "opt-obot");
   mkdirSync(update);
   mkdirSync(install);
   const called = join(dir, "called");
@@ -41,16 +41,16 @@ esac
 `);
   chmodSync(join(bin, "docker"), 0o755);
   if (request !== null) writeFileSync(join(update, UPDATE_FILES.request), request);
-  const result = spawnSync("sh", [SCRIPT], { encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin`, MAUSBOT_UPDATE_DIR: update, MAUSBOT_INSTALL_DIR: install }, timeout: 30_000 });
+  const result = spawnSync("sh", [SCRIPT], { encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin`, OBOT_UPDATE_DIR: update, OBOT_INSTALL_DIR: install }, timeout: 30_000 });
   const answer = existsSync(join(update, UPDATE_FILES.result)) ? readFileSync(join(update, UPDATE_FILES.result), "utf8") : null;
   return { result, answer, calls: existsSync(called) ? readFileSync(called, "utf8").trim().split("\n") : [], install, pending: existsSync(join(update, UPDATE_FILES.request)) };
 }
 
-describe.skipIf(!posix)("mausbot-update-runner.sh", () => {
+describe.skipIf(!posix)("obot-update-runner.sh", () => {
   it("is plain POSIX sh and accepts the image the connector accepts", () => {
     expect(spawnSync("sh", ["-n", SCRIPT]).status).toBe(0);
-    expect(readFileSync(SCRIPT, "utf8")).toContain("'ghcr\\.io/milind-soni/openmausbot@sha256:[0-9a-f]{64}'");
-    expect(CUSTOMER_HOME_IMAGE.source).toBe("^ghcr\\.io\\/milind-soni\\/openmausbot@sha256:[0-9a-f]{64}$");
+    expect(readFileSync(SCRIPT, "utf8")).toContain("'ghcr\\.io/alnatourm/obot@sha256:[0-9a-f]{64}'");
+    expect(CUSTOMER_HOME_IMAGE.source).toBe("^ghcr\\.io\\/alnatourm\\/obot@sha256:[0-9a-f]{64}$");
   });
 
   it("hands a request to the install's own update.sh with the image, and writes down how it ended", () => {
@@ -63,8 +63,8 @@ describe.skipIf(!posix)("mausbot-update-runner.sh", () => {
     expect(run(`id=u3\nimage=${IMAGE}\n`, { exit: 2 }).answer).toBe("id=u3\ncode=2\n");
   });
 
-  it("runs nothing for an image that is not MausBot's server image by digest, whatever the request says", () => {
-    for (const image of ["ghcr.io/milind-soni/openmausbot:latest", "ghcr.io/someone/openmausbot@sha256:" + "b".repeat(64), `${IMAGE} --replace-local-build`, `${IMAGE};reboot`, ""]) {
+  it("runs nothing for an image that is not Obot's server image by digest, whatever the request says", () => {
+    for (const image of ["ghcr.io/alnatourm/obot:latest", "ghcr.io/someone/obot@sha256:" + "b".repeat(64), `${IMAGE} --replace-local-build`, `${IMAGE};reboot`, ""]) {
       const refused = run(`id=u1\nimage=${image}\n`);
       expect(refused.calls, image).toEqual([]);
       expect(refused.answer, image).toBe("id=u1\ncode=4\n");
@@ -97,3 +97,4 @@ describe.skipIf(!posix)("mausbot-update-runner.sh", () => {
     expect(idle.calls).toEqual([]);
   });
 });
+

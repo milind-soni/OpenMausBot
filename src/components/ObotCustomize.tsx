@@ -16,7 +16,7 @@ export const AVATAR_FILE_TYPES = "image/png,image/jpeg,image/gif,image/webp";
 const LABEL = "text-[12px] font-medium uppercase tracking-wide text-ink-secondary";
 
 /** The welcome's own profile edit: name, colour, look, then a picture of the person's own or one made with AI. */
-export function MausBotCustomize({ preview, name, nameRef, image, onName, onPatch }: {
+export function ObotCustomize({ preview, name, nameRef, image, onName, onPatch }: {
   preview: Bot;
   name: string;
   nameRef: RefObject<HTMLInputElement | null>;
@@ -35,8 +35,8 @@ export function MausBotCustomize({ preview, name, nameRef, image, onName, onPatc
           ref={nameRef}
           value={name}
           maxLength={BOT_PROFILE_LIMITS.name}
-          placeholder="MausBot"
-          data-mausbot-welcome-name=""
+          placeholder="Obot"
+          data-obot-welcome-name=""
           onChange={(event) => onName(event.target.value)}
           className="mt-1 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink focus:outline-none"
         />
@@ -52,7 +52,7 @@ export function MausBotCustomize({ preview, name, nameRef, image, onName, onPatc
               aria-checked={!picture && preview.color === color}
               aria-label={t(MAUS_COLOR_LABEL[color])}
               title={t(MAUS_COLOR_LABEL[color])}
-              data-mausbot-welcome-color={color}
+              data-obot-welcome-color={color}
               onClick={() => shape({ color })}
               className={cn("size-6 rounded-full border-2 transition-transform hover:scale-110", !picture && preview.color === color ? "border-ink" : "border-transparent")}
               style={{ background: colorSwatch(color) }}
@@ -61,7 +61,7 @@ export function MausBotCustomize({ preview, name, nameRef, image, onName, onPatc
         </div>
       </div>
       <div>
-        <span className={LABEL}>{t("mausbotWelcome.look")}</span>
+        <span className={LABEL}>{t("obotWelcome.look")}</span>
         <div className="mt-1.5 grid grid-cols-5 gap-1">
           {MASCOT_BODY_IDS.map((id) => (
             <button
@@ -70,7 +70,7 @@ export function MausBotCustomize({ preview, name, nameRef, image, onName, onPatc
               aria-pressed={!picture && (preview.mascotBody ?? "cursor") === id}
               aria-label={bodyName(id)}
               title={bodyName(id)}
-              data-mausbot-welcome-body={id}
+              data-obot-welcome-body={id}
               onClick={() => shape({ mascotBody: id })}
               className={cn("flex h-11 items-center justify-center rounded-xl", !picture && (preview.mascotBody ?? "cursor") === id ? "bg-ink/[0.08] ring-[1.5px] ring-inset ring-ink/25" : "hover:bg-ink/[0.05]")}
             >
@@ -83,27 +83,27 @@ export function MausBotCustomize({ preview, name, nameRef, image, onName, onPatc
         <div className="flex flex-wrap items-center gap-1.5 text-[13px]">
           <input ref={image.fileRef} type="file" accept={AVATAR_FILE_TYPES} className="sr-only" tabIndex={-1} aria-hidden="true"
             onChange={(event) => void image.upload(event.target.files?.[0])} />
-          <button type="button" data-mausbot-welcome-upload="" disabled={image.busy} onClick={() => image.fileRef.current?.click()}
+          <button type="button" data-obot-welcome-upload="" disabled={image.busy} onClick={() => image.fileRef.current?.click()}
             className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-ink-secondary hover:bg-ink/[0.05] hover:text-ink disabled:opacity-50">
             {image.uploading ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <ImagePlus size={14} aria-hidden="true" />}
-            {t("mausbotWelcome.upload")}
+            {t("obotWelcome.upload")}
           </button>
           <span aria-hidden="true" className="text-ink-tertiary">·</span>
-          <button type="button" data-mausbot-welcome-generate="" aria-expanded={generating} onClick={() => setGenerating(!generating)}
+          <button type="button" data-obot-welcome-generate="" aria-expanded={generating} onClick={() => setGenerating(!generating)}
             className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-ink-secondary hover:bg-ink/[0.05] hover:text-ink">
-            <Sparkles size={14} aria-hidden="true" />{t("mausbotWelcome.generate")}
+            <Sparkles size={14} aria-hidden="true" />{t("obotWelcome.generate")}
           </button>
           {picture && (
-            <div className="basis-full"><button type="button" data-mausbot-welcome-remove="" disabled={image.busy} onClick={image.removeImage}
+            <div className="basis-full"><button type="button" data-obot-welcome-remove="" disabled={image.busy} onClick={image.removeImage}
               className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-ink/[0.05] hover:text-ink disabled:opacity-50">
-              <Trash2 size={13} aria-hidden="true" />{t("mausbotWelcome.removePicture")}
+              <Trash2 size={13} aria-hidden="true" />{t("obotWelcome.removePicture")}
             </button></div>
           )}
         </div>
-        {image.error && <p role="alert" data-mausbot-welcome-error="" className="mt-1 px-2 text-[13px] text-danger">{image.error}</p>}
+        {image.error && <p role="alert" data-obot-welcome-error="" className="mt-1 px-2 text-[13px] text-danger">{image.error}</p>}
         {generating && (
           <div className="mt-2">
-            <AvatarImageGenerator botLabel={name || "MausBot"} disabled={image.uploading} generating={image.generating} onGenerate={image.generate} />
+            <AvatarImageGenerator botLabel={name || "Obot"} disabled={image.uploading} generating={image.generating} onGenerate={image.generate} />
           </div>
         )}
       </div>

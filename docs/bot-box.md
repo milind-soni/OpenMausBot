@@ -1,7 +1,7 @@
-# The bot box
+﻿# The bot box
 
-On a MausBot Cloud home every bot turn runs in a box: the engine (Claude Code, Codex, Grok, OpenCode, the ACP agents),
-every shell command it runs, the MCP servers it starts and OpenMausBot's own helper proxies all live inside one
+On a Obot Cloud home every bot turn runs in a box: the engine (Claude Code, Codex, Grok, OpenCode, the ACP agents),
+every shell command it runs, the MCP servers it starts and Obot's own helper proxies all live inside one
 unprivileged [bubblewrap](https://github.com/containers/bubblewrap) sandbox for that process's lifetime. The server,
 its database, its settings, other bots' folders and other turns' processes are not in it. Code: `server/bot-box/`.
 
@@ -11,7 +11,7 @@ its database, its settings, other bots' folders and other turns' processes are n
 |---|---|
 | `/usr`, `/etc`, `/opt`, the server's own code folder, read-only | The image: engine CLIs, node, python, git, the bots' browser |
 | `HOME`, read-write | The engines' own logins and settings (`~/.claude`, `~/.codex`, `~/.grok`). On a Team Cloud this is the turn's audience's engine home instead, with the team's engine sign-in files bound into it, and the server's HOME is not there at all ([team-cloud.md](team-cloud.md#engine-homes)) |
-| the data folder (`~/.openmausbot`), **an empty private folder** | `messages.db`, `config.json`, logins, the server's sockets, every other bot's folders are not there |
+| the data folder (`~/.obot`), **an empty private folder** | `messages.db`, `config.json`, logins, the server's sockets, every other bot's folders are not there |
 | put back inside it: the turn's working folder and the bot's own folder (`workspaces/<bot>`), read-write | What the turn works on, and the bot's memory and skills |
 | put back: this turn's permission socket (the engine's question and approval helper reaches the server through it), and, read-only, the conversation's own hook token folder (the hook helper's bearer, renewed each turn) and the files its command line names (MCP config, system prompt) | What the driver made for this one process |
 | private `/tmp`, `/var/tmp`, `/run`, `/dev`, `/proc` | Its own PID namespace: other turns' processes do not exist for it |
@@ -19,10 +19,10 @@ its database, its settings, other bots' folders and other turns' processes are n
 | a network namespace with loopback only | Two loopback ports are bridged to unix sockets from outside (below); nothing else on the machine's loopback is reachable, and there is no route out |
 
 The environment is an allow-list (`server/bot-box/env.ts`): the engine's own settings and keys, the harness capability
-tokens and a few names a shell expects. Of OpenMausBot's own `OMB_*` variables only those a bot's engine, hooks and MCP
+tokens and a few names a shell expects. Of Obot's own `OMB_*` variables only those a bot's engine, hooks and MCP
 proxies read pass (`BOX_ENV_OMB_NAMES`); every other one an operator sets on the server, such as `OMB_SIGNIN_SMTP_URL`,
 stays out. Every `OMB_CLOUD_*` setting, the server's own placement (`OMB_DATA_DIR`, `OMB_PORT`), the CLI's session
-token and server address (`OPENMAUSBOT_TOKEN`, `OPENMAUSBOT_URL`) and the workspace credentials are refused whatever
+token and server address (`OBOT_TOKEN`, `OBOT_URL`) and the workspace credentials are refused whatever
 a driver passed.
 
 ## The two gates
@@ -132,3 +132,4 @@ everything the server reads from the workspaces) which is a slice of its own, an
 sees the box as `maus` anyway. **nftables** rules would add nothing to a box with its own network namespace, and for
 the whole machine they would have to allow Fly's resolver on the private network; left for the separate-user design.
 `OMB_CLOUD_HARDEN=0` skips the two supervisor steps if a machine ever needs that.
+

@@ -15,16 +15,16 @@ import { waitForExit } from "../procs.ts";
 const bridge = { socat: "/usr/bin/socat", bridgeScript: "/app/dist-server/bot-box/box-bridge.js", node: "/usr/local/bin/node" };
 
 describe("BoxRunner.wrap", () => {
-  const setup = { dataDir: "/data/.openmausbot", home: "/data", codeRoots: ["/app"], engineRoots: engineInstallRoots("/data/.openmausbot"), bridges: [{ name: "egress", port: BOX_EGRESS_PORT, socket: "/data/.openmausbot/box/egress.sock" }, { name: "harness", port: 8799, socket: "/data/.openmausbot/box/harness.sock" }] };
+  const setup = { dataDir: "/data/.obot", home: "/data", codeRoots: ["/app"], engineRoots: engineInstallRoots("/data/.obot"), bridges: [{ name: "egress", port: BOX_EGRESS_PORT, socket: "/data/.obot/box/egress.sock" }, { name: "harness", port: 8799, socket: "/data/.obot/box/harness.sock" }] };
 
   // An engine installed in the app's npm prefix: the absolute path the driver resolved, or the bare name looked up on the
   // PATH it was handed (the prefix's bin first), both read through the bin link's relative target.
-  it.skipIf(process.platform === "win32")("an engine OpenMausBot installed runs inside: its path, the bin folder on PATH and the package the link points at are there, read-only", () => {
+  it.skipIf(process.platform === "win32")("an engine Obot installed runs inside: its path, the bin folder on PATH and the package the link points at are there, read-only", () => {
     const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() });
     const bin = join(npmEnginesPrefix(setup.dataDir), "bin");
     const target = join(bin, "..", "lib", "node_modules", "opencode-ai", "bin", "opencode.exe");
     for (const command of [join(bin, "opencode"), "opencode"]) {
-      const wrapped = runner.wrap({ command, args: ["acp"], cwd: "/data/.openmausbot/task-workspaces/b1/t1", env: { PATH: `${bin}:/usr/local/bin:/usr/bin`, HOME: "/data" } });
+      const wrapped = runner.wrap({ command, args: ["acp"], cwd: "/data/.obot/task-workspaces/b1/t1", env: { PATH: `${bin}:/usr/local/bin:/usr/bin`, HOME: "/data" } });
       const inner = wrapped.args.slice(wrapped.args.indexOf("--") + 1);
       expect(inner.slice(-2)).toEqual([command, "acp"]);
       expect(wrapped.env.PATH!.split(":")[0]).toBe(bin);
@@ -38,7 +38,7 @@ describe("BoxRunner.wrap", () => {
   it("runs the engine under bwrap with the plan, the allow-listed environment and the proxy pointed at the gate", () => {
     const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set(["COMPOSIO_API_KEY"]) });
     const wrapped = runner.wrap({
-      command: "/usr/local/bin/claude", args: ["-p", "--output-format", "stream-json"], cwd: "/data/.openmausbot/task-workspaces/b1/t1",
+      command: "/usr/local/bin/claude", args: ["-p", "--output-format", "stream-json"], cwd: "/data/.obot/task-workspaces/b1/t1",
       env: { PATH: "/usr/bin", HOME: "/data", ANTHROPIC_API_KEY: "k", COMPOSIO_API_KEY: "c", OMB_CLOUD_BOOTSTRAP_SECRET: "s", RANDOM_SECRET: "r" },
     });
     expect(wrapped.command).toBe("/usr/bin/bwrap");
@@ -64,11 +64,11 @@ describe("BoxRunner.wrap", () => {
   // The box's paths are POSIX paths inside it, which Windows' path module would write with drive letters and backslashes.
   it.skipIf(process.platform === "win32")("a relay is bound in and dialed by the Node bridge, even where socat bridges the gates; a shared-network box has none", () => {
     const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() });
-    const relay = "/data/.openmausbot/box/relay-ab12.sock";
-    const wrapped = runner.wrap({ command: "/data/.openmausbot/tools/agy", args: ["--uid="], env: { PATH: "/usr/bin" }, relay });
+    const relay = "/data/.obot/box/relay-ab12.sock";
+    const wrapped = runner.wrap({ command: "/data/.obot/tools/agy", args: ["--uid="], env: { PATH: "/usr/bin" }, relay });
     expect(wrapped.args.join(" ")).toContain(`--bind ${relay} /run/omb/relay.sock`);
     const inner = wrapped.args.slice(wrapped.args.indexOf("--") + 1);
-    expect(inner).toEqual([bridge.node, bridge.bridgeScript, "--bridge=3128=/run/omb/egress.sock", "--bridge=8799=/run/omb/harness.sock", "--relay=/run/omb/relay.sock", "--", "/data/.openmausbot/tools/agy", "--uid="]);
+    expect(inner).toEqual([bridge.node, bridge.bridgeScript, "--bridge=3128=/run/omb/egress.sock", "--bridge=8799=/run/omb/harness.sock", "--relay=/run/omb/relay.sock", "--", "/data/.obot/tools/agy", "--uid="]);
     const shared = runner.wrap({ command: "/opt/chrome", args: [], env: {}, net: "shared", relay });
     expect(shared.args).not.toContain(relay);
     expect(shared.args.slice(shared.args.indexOf("--") + 1)).toEqual(["/opt/chrome"]);
@@ -85,7 +85,7 @@ describe("the box's hardening (T0c)", () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-seccomp-"));
     const file = join(dir, "seccomp.bpf");
     writeFileSync(file, seccompBytes());
-    const setup = { dataDir: "/data/.openmausbot", home: "/data", codeRoots: ["/app"], engineRoots: [], bridges: [] };
+    const setup = { dataDir: "/data/.obot", home: "/data", codeRoots: ["/app"], engineRoots: [], bridges: [] };
     const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set(), seccompFile: file });
     const wrapped = runner.wrap({ command: "/usr/bin/x", args: [], env: {} });
     expect(wrapped.args).toContain("--seccomp");
@@ -204,7 +204,7 @@ describe("the box a bot's Chrome runs in", () => {
   it.skipIf(process.platform === "win32")("has the host's network and the read-only paths asked for, and none of HOME or the data folder", async () => {
     const box = new BotBox();
     boxes.push(box);
-    const dataDir = join(temp(), "home", ".openmausbot"), home = dirname(dataDir);
+    const dataDir = join(temp(), "home", ".obot"), home = dirname(dataDir);
     mkdirSync(dataDir, { recursive: true });
     await box.start({ dataDir, home, port: 8799, denyEnv: new Set(), env: {}, log: () => {}, detect: () => ({ box: "bwrap", reason: null, tools: { bwrap: "/usr/bin/bwrap", socat: null } }) });
     const uploads = join(dataDir, "browser-uploads");
@@ -243,7 +243,7 @@ describe("spawnCli goes through the box", () => {
       // /usr/bin/true stands in for socat: the shell init starts it, waits once, and execs the engine.
       detect: () => ({ box: "bwrap", reason: null, tools: { bwrap: fakeBwrap, socat: "/usr/bin/true" } }),
     });
-    const run = async (owner: "bot" | "openmausbot", box?: false) => {
+    const run = async (owner: "bot" | "obot", box?: false) => {
       rmSync(record, { force: true });
       const child = spawnCli("/bin/sh", ["-c", "echo ran"], { stdio: ["pipe", "pipe", "pipe"], env: { PATH: "/usr/bin:/bin", HOME: dir, SECRET_THING: "x" }, box }, owner);
       let out = "";
@@ -257,8 +257,8 @@ describe("spawnCli goes through the box", () => {
     expect(boxed.argv).toContain("--unshare-net");
     expect(boxed.argv).toContain("/run/omb/egress.sock");
     const engines = npmEnginesPrefix(join(dir, "data"));
-    expect(boxed.argv, "the engines OpenMausBot installed, read-only").toContain(`--ro-bind-try\n${engines}\n${engines}\n`);
-    expect((await run("openmausbot")).boxed).toBe(false);
+    expect(boxed.argv, "the engines Obot installed, read-only").toContain(`--ro-bind-try\n${engines}\n${engines}\n`);
+    expect((await run("obot")).boxed).toBe(false);
     expect((await run("bot", false)).boxed).toBe(false);
     expect(botBox.report().boxed).toBe(1);
   });
@@ -267,7 +267,7 @@ describe("spawnCli goes through the box", () => {
 describe("BoxRunner.lend", () => {
   // A plan over the Linux box's POSIX paths, which Windows' path module would join with backslashes.
   it.skipIf(process.platform === "win32")("puts a conversation's lent folders (a memory layer) back read-write in its boxes only, until they are taken back", () => {
-    const dataDir = "/data/.openmausbot";
+    const dataDir = "/data/.obot";
     const setup = { dataDir, home: "/data", codeRoots: ["/app"], engineRoots: [], bridges: [{ name: "egress", port: BOX_EGRESS_PORT, socket: `${dataDir}/box/egress.sock` }, { name: "harness", port: 8799, socket: `${dataDir}/box/harness.sock` }] };
     const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() });
     const layer = join(dataDir, "workspaces", "bot-a--member-p_ada");

@@ -1,11 +1,11 @@
-// @devs: a person's message that tags it sends exactly one bug report to the MausBot team. The bot answering it is
+// @devs: a person's message that tags it sends exactly one bug report to the Obot team. The bot answering it is
 // asked (a note on its turn, and report_bug) to add a summary; when none comes, because its engine has no tools, its
 // turn failed, it never called report_bug or no bot answered, the server sends the report with its own facts once
 // nothing runs in the conversation any more. The person's message and that summary are the only words that go, never
 // the conversation. A report that cannot go yet waits in devs-reports.json and is sent again on its own.
 //
 // Closing the loop: each report sent is followed (`tracked`, in the same file). The person's message shows its status
-// ("Got it, we're looking", then "Fixed in 0.1.x"), and this server asks the MausBot team about its open reports at each
+// ("Got it, we're looking", then "Fixed in 0.1.x"), and this server asks the Obot team about its open reports at each
 // start and about hourly, at the address it sends them to (devs-report-send.ts `askReportStatus`): one way on the desktop
 // and on a Cloud, so nothing ever has to reach this server, or wake a sleeping Cloud. Once it runs the fix's release, and
 // the team's answer says it may (never a former customer's Cloud), the person gets one line in the chat they reported in,
@@ -111,7 +111,7 @@ export interface DevsReportsDeps {
   lineLanguage?: LineLanguage;
   recentLog: RecentLog;
   send(payload: DevsReportPayload): Promise<SendOutcome>;
-  /** Asks the MausBot team about reports this app sent (devs-report-send.ts `askReportStatus`); null: no answer this time. */
+  /** Asks the Obot team about reports this app sent (devs-report-send.ts `askReportStatus`); null: no answer this time. */
   askStatus(question: ReportStatusQuestion): Promise<ReportStatusAnswer | null>;
   /** One notification about a line in this conversation; `person`, on a Team Cloud, the only one it reaches. */
   tell(threadId: string, text: string, person?: string): void;
@@ -136,10 +136,10 @@ export { sentLine } from "./devs-report-words.ts";
 /** The one line in the chat once this app runs the fix, in the reporter's language (clients say it from `bugReport`). */
 export const fixedLine = (version: string, language?: string) => serverLine(language, "server.reports.fixed", { version });
 /** Rides on the bot's next turn in that chat, once, so an answer to the line above makes sense to it. */
-const fixedNote = (entry: Tracked, version: string) => `\n\n[From OpenMausBot, not the person: the problem they reported with @devs on ${new Date(entry.at).toISOString().slice(0, 10)}${
+const fixedNote = (entry: Tracked, version: string) => `\n\n[From Obot, not the person: the problem they reported with @devs on ${new Date(entry.at).toISOString().slice(0, 10)}${
   entry.words ? ` ("${entry.words}")` : ""} is fixed in ${version}, which this app now runs. The chat told them so and asked whether they want to try again; if their message answers that, help them try it again.]`;
-/** A failure line names MausBot in every language: a bot reply that does has passed it on. */
-const FAILED_MARKER = "MausBot";
+/** A failure line names Obot in every language: a bot reply that does has passed it on. */
+const FAILED_MARKER = "Obot";
 
 /** The person's own words: the text outside quotes and each quote's comment. Only a @devs there tags the message,
  * never one inside a message they quoted. */
@@ -166,7 +166,7 @@ function withoutPastes(message: string): string {
 }
 
 /** Rides on the turn that answers a @devs message. */
-const TURN_NOTE = "\n\n[From OpenMausBot, not the person: this message tags @devs, so it is a bug report for the MausBot team, OpenMausBot's developers. Call report_bug once, first: what the person says went wrong; what you saw yourself in this conversation (errors, failed tools, stuck steps), or that you saw nothing unusual; and steps to reproduce. Leave out passwords, keys, tokens and file contents; OpenMausBot adds the app's own diagnostics. Then tell the person, word for word, the line report_bug returns, and help with the problem if you can.]";
+const TURN_NOTE = "\n\n[From Obot, not the person: this message tags @devs, so it is a bug report for the Obot team, Obot's developers. Call report_bug once, first: what the person says went wrong; what you saw yourself in this conversation (errors, failed tools, stuck steps), or that you saw nothing unusual; and steps to reproduce. Leave out passwords, keys, tokens and file contents; Obot adds the app's own diagnostics. Then tell the person, word for word, the line report_bug returns, and help with the problem if you can.]";
 
 const iso = (at: number) => new Date(at).toISOString();
 const firstLine = (text: string | undefined) => (text ?? "").split("\n").map((line) => line.trim()).find(Boolean) ?? "";
@@ -386,9 +386,9 @@ export function createDevsReports(deps: DevsReportsDeps) {
 
   /** Why no bot wrote the summary, read once the conversation is quiet. */
   function why(entry: Waiting): string {
-    if (entry.restored) return "OpenMausBot restarted before a bot wrote one";
+    if (entry.restored) return "Obot restarted before a bot wrote one";
     if (!entry.answered) return "no bot answered the message";
-    if (entry.offered === false) return "the bot's engine cannot use OpenMausBot's tools";
+    if (entry.offered === false) return "the bot's engine cannot use Obot's tools";
     const path = store.activePath(entry.threadId);
     const after = path.slice(path.findIndex((line) => line.id === entry.messageId) + 1);
     if (after.some((line) => line.kind === "activity" && line.tool && failedTurnCause(line.tool.name) !== null)) return "the bot's turn failed";
@@ -451,7 +451,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
     if (!bot || !entry) {
       const last = lastSent.get(threadId);
       if (last && now() - last.at < REPEAT_MS) return { status: 200, text: `Already sent as report ${last.reportId}: report_bug sends once per @devs message. Do not call it again for it.` };
-      return { status: 409, text: "report_bug sends only for a message that tags @devs, once per message. To report a problem to the MausBot team, the person types @devs and a few words about what went wrong." };
+      return { status: 409, text: "report_bug sends only for a message that tags @devs, once per message. To report a problem to the Obot team, the person types @devs and a few words about what went wrong." };
     }
     const fallingBack = inFlight.has(entry.messageId);
     const said = await deliver(entry, { bot, summary });
@@ -495,7 +495,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
 
   return {
     /** The note on a turn in this conversation while a @devs message waits for its summary (none for a turn without
-     * OpenMausBot's tools); and, on the first turn after its line, that a report's fix runs here now. Empty otherwise. */
+     * Obot's tools); and, on the first turn after its line, that a report's fix runs here now. Empty otherwise. */
     note(threadId: string, tools: boolean): string {
       const fixed = tracked.filter((one) => one.threadId === threadId && one.told !== undefined && !one.noted);
       for (const one of fixed) one.noted = true;

@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+﻿import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../../scripts/control-omb.ts";
 import type { Scenario, Step } from "../types.ts";
@@ -29,7 +29,7 @@ export class CoordinationWorld extends BaseWorld {
     for (const bot of scenario.bots) {
       const argv = ["new-bot", "--name", bot.name];
       if (bot.section !== undefined) argv.push("--section", bot.section);
-      const created = (await runControlOmb(argv, { env: { OPENMAUSBOT_URL: this.session.info.url } })) as { bot: { id: string; activeTaskId: string } };
+      const created = (await runControlOmb(argv, { env: { OBOT_URL: this.session.info.url } })) as { bot: { id: string; activeTaskId: string } };
       this.bots.set(bot.key, { id: created.bot.id, threadId: created.bot.activeTaskId });
     }
     for (const bot of scenario.bots) {
@@ -150,3 +150,4 @@ export class CoordinationWorld extends BaseWorld {
     await this.session?.close();
   }
 }
+

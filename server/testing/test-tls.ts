@@ -21,7 +21,7 @@ export function makeTestTls(dir: string): TestTls | undefined {
   // A config of its own, so no system openssl.cnf is needed (Windows).
   writeFileSync(config, [
     "[req]", "distinguished_name = dn", "x509_extensions = v3", "prompt = no",
-    "[dn]", "CN = OpenMausBot test",
+    "[dn]", "CN = Obot test",
     "[v3]", "basicConstraints = critical,CA:TRUE", "keyUsage = critical,digitalSignature,keyCertSign",
     "extendedKeyUsage = serverAuth", `subjectAltName = DNS:localhost,DNS:${TEST_TLS_HOST},IP:127.0.0.1,IP:::1`, "",
   ].join("\n"));

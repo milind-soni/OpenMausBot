@@ -262,7 +262,7 @@ export async function probeOpenCodeSession(
     void (async () => {
       const initialized = await request("initialize", {
         protocolVersion: 1,
-        clientInfo: { name: "openmausbot", version: "0.0.0" },
+        clientInfo: { name: "obot", version: "0.0.0" },
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       });
       deletesSessions = deletesAcpSessions(initialized);

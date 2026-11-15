@@ -153,7 +153,7 @@ export class FakeDocker implements Docker {
     if (container.status === "running") return;
     container.status = "running";
     container.startedAt = this.now();
-    const role = container.spec.Labels?.["com.mausbot.role"];
+    const role = container.spec.Labels?.["com.obot.role"];
     if (role === "helper") this.runHelper(container);
     else if (role === "home") this.onHomeStart?.(container);
     else if (role === "connector") await this.onConnectorStart?.(container);
@@ -213,7 +213,7 @@ export class FakeDocker implements Docker {
   }
 
   async volumeInspect(name: string): Promise<VolumeInfo | null> {
-    if (name === "mausbot-connector") return { Name: name, Labels: {}, Mountpoint: this.stateDir };
+    if (name === "obot-connector") return { Name: name, Labels: {}, Mountpoint: this.stateDir };
     const volume = this.volumes.get(name);
     return volume ? { Name: name, Labels: volume.labels, Mountpoint: `/var/lib/docker/volumes/${name}/_data` } : null;
   }

@@ -113,7 +113,7 @@ describe("optional desktop Organisation settings", () => {
     expect(bridge.begin).not.toHaveBeenCalled();
     const signIn = () => view.nodes.find(node => node.type === "button" && (node.props as { "data-organization-sign-in"?: string })["data-organization-sign-in"] === "")!.props.onClick!();
     signIn(); signIn(); await flush();
-    expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://admin.openmausbot.com" });
+    expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://admin.obot.com" });
     expect(fetch).not.toHaveBeenCalled();
     const progress = render().html;
     expect(progress).toContain("Finish signing in through your browser");

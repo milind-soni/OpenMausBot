@@ -1,4 +1,4 @@
-# Organization library: the desktop channel
+﻿# Organization library: the desktop channel
 
 What it covers: Electron main's half of the organization library
 ([../desktop-library.md](../desktop-library.md)): the capability, the session
@@ -123,5 +123,6 @@ This is not production qualification. It does not run the real Electron app,
 the OS keychain behind `company-library.bin`, a real utility process, or a
 real Admin. The cross-repository test in Admin (contract §7.4, after the
 runtime pin moves) drives this module against a real Admin fixture. The
-runtime's handling of `openmausbot:managed-library` and its
+runtime's handling of `obot:managed-library` and its
 `managed-library-state` snapshots belongs to `server/org-library.ts`.
+

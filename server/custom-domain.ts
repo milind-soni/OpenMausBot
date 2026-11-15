@@ -7,8 +7,8 @@ import { networkInterfaces } from "node:os";
 
 const CHECK_TIMEOUT_MS = 8_000;
 const MAX_RESPONSE_BYTES = 16_384;
-const DESCRIPTOR_PATH = "/.well-known/openmausbot/environment";
-export const CUSTOM_DOMAIN_CHALLENGE_PATH = "/.well-known/openmausbot/domain-check/";
+const DESCRIPTOR_PATH = "/.well-known/obot/environment";
+export const CUSTOM_DOMAIN_CHALLENGE_PATH = "/.well-known/obot/domain-check/";
 
 export class CustomDomainError extends Error {
   readonly status: number;
@@ -102,12 +102,12 @@ function requestJson(url: URL, address: LookupAddress, signal: AbortSignal): Pro
     };
     const request = httpsRequest(url, {
       method: "GET", agent: false, lookup, signal, rejectUnauthorized: true,
-      headers: { Accept: "application/json", "User-Agent": "OpenMausBot-domain-check" },
+      headers: { Accept: "application/json", "User-Agent": "Obot-domain-check" },
     }, (response) => {
       // Node's HTTPS client does not follow Location redirects.
       if (response.statusCode !== 200) {
         response.destroy();
-        reject(new CustomDomainError("The domain did not return the OpenMausBot verification page. Check your reverse proxy; redirects are not supported."));
+        reject(new CustomDomainError("The domain did not return the Obot verification page. Check your reverse proxy; redirects are not supported."));
         return;
       }
       const chunks: Buffer[] = [];
@@ -117,14 +117,14 @@ function requestJson(url: URL, address: LookupAddress, signal: AbortSignal): Pro
         size += chunk.length;
         if (size > MAX_RESPONSE_BYTES) {
           response.destroy();
-          reject(new CustomDomainError("The domain returned an unexpected response. Check that it points to OpenMausBot."));
+          reject(new CustomDomainError("The domain returned an unexpected response. Check that it points to Obot."));
           return;
         }
         chunks.push(chunk);
       });
       response.on("end", () => {
         try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8"))); }
-        catch { reject(new CustomDomainError("The domain did not return OpenMausBot data. Check that it points to this server.")); }
+        catch { reject(new CustomDomainError("The domain did not return Obot data. Check that it points to this server.")); }
       });
     });
     request.on("error", reject);
@@ -168,7 +168,7 @@ export function createCustomDomainVerifier(dependencies: CustomDomainDependencie
         const descriptor = await withAbort(request(new URL(DESCRIPTOR_PATH, origin), address, controller.signal), controller.signal);
         if (!descriptor || typeof descriptor !== "object"
           || Reflect.get(descriptor, "environmentId") !== dependencies.environmentId) {
-          throw new CustomDomainError("This domain does not point to this OpenMausBot server. Check its DNS and reverse proxy configuration.");
+          throw new CustomDomainError("This domain does not point to this Obot server. Check its DNS and reverse proxy configuration.");
         }
         active = {
           token: randomBytes(32).toString("hex"), proof: randomBytes(32).toString("hex"),
@@ -177,7 +177,7 @@ export function createCustomDomainVerifier(dependencies: CustomDomainDependencie
         const proof = await withAbort(request(new URL(`${CUSTOM_DOMAIN_CHALLENGE_PATH}${active.token}`, origin), address, controller.signal), controller.signal);
         if (!proof || typeof proof !== "object" || Reflect.get(proof, "environmentId") !== dependencies.environmentId
           || Reflect.get(proof, "proof") !== active.proof) {
-          throw new CustomDomainError("The domain could not prove it reaches this server. Forward all OpenMausBot routes through your reverse proxy and try again.");
+          throw new CustomDomainError("The domain could not prove it reaches this server. Forward all Obot routes through your reverse proxy and try again.");
         }
         return { origin, verifiedAt: new Date().toISOString() };
       } catch (error) {

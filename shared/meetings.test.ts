@@ -25,7 +25,7 @@ describe("meeting links", () => {
   });
 
   it("names the bot and the person it takes notes for", () => {
-    expect(consentLine("Ada", "Milind")).toBe("Hi, I'm Ada (notes) from MausBot, taking notes for Milind. Ask me with @notes. Type \"@notes stop\" and I'll leave.");
+    expect(consentLine("Ada", "Milind")).toBe("Hi, I'm Ada (notes) from Obot, taking notes for Milind. Ask me with @notes. Type \"@notes stop\" and I'll leave.");
     expect(consentLine("Ada", undefined)).toContain("taking notes for the person who invited me");
   });
 });

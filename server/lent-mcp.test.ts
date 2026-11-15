@@ -97,13 +97,13 @@ describe("a server that runs on the person's computer, in a turn", () => {
       return [Object.keys(lent.mounts({ id: "kiwi" }, TURN)), Object.fromEntries(lent.lines({ id: "kiwi" }, TURN))];
     };
     expect(say({ online: null })).toEqual([[], {
-      local: "local runs on your Mac (Ada's Mac), which is offline right now: OpenMausBot on it is closed, or the Mac is asleep or off.",
-      notes: "notes runs on your Mac (Ada's Mac), which is offline right now: OpenMausBot on it is closed, or the Mac is asleep or off.",
+      local: "local runs on your Mac (Ada's Mac), which is offline right now: Obot on it is closed, or the Mac is asleep or off.",
+      notes: "notes runs on your Mac (Ada's Mac), which is offline right now: Obot on it is closed, or the Mac is asleep or off.",
     }]);
-    expect(say({ online: null, known: { lent: false } })[1]).toMatchObject({ local: "local runs on your Mac (Ada's Mac), which no longer lends itself to My Cloud: OpenMausBot on it is paused or signed out." });
-    expect(say({ online: null, known: null })[1]).toMatchObject({ local: "local runs on Ada's Mac, which isn't lent to My Cloud: it works once OpenMausBot is open on that computer and signed in to My Cloud." });
-    expect(say({ online: { mcpServers: false } })[1]).toMatchObject({ local: "local runs on your Mac (Ada's Mac), whose OpenMausBot is too old to run it for My Cloud: update OpenMausBot on that Mac." });
-    expect(say({})).toEqual([["local"], { notes: "notes starts a program on your Mac (Ada's Mac), which doesn't let My Cloud run programs right now: turn on \"Let Clouds run commands on this Mac\" from the OpenMausBot icon on that Mac." }]);
+    expect(say({ online: null, known: { lent: false } })[1]).toMatchObject({ local: "local runs on your Mac (Ada's Mac), which no longer lends itself to My Cloud: Obot on it is paused or signed out." });
+    expect(say({ online: null, known: null })[1]).toMatchObject({ local: "local runs on Ada's Mac, which isn't lent to My Cloud: it works once Obot is open on that computer and signed in to My Cloud." });
+    expect(say({ online: { mcpServers: false } })[1]).toMatchObject({ local: "local runs on your Mac (Ada's Mac), whose Obot is too old to run it for My Cloud: update Obot on that Mac." });
+    expect(say({})).toEqual([["local"], { notes: "notes starts a program on your Mac (Ada's Mac), which doesn't let My Cloud run programs right now: turn on \"Let Clouds run commands on this Mac\" from the Obot icon on that Mac." }]);
   });
 
   it("an address with no port of its own, 1024 or higher, is refused here in plain words before any job goes out", async () => {
@@ -159,7 +159,7 @@ describe("a server that runs on the person's computer, in a turn", () => {
 describe("the MCP endpoint a turn's engine reaches", () => {
   it("answers initialize and ping itself, and lists and calls tools on the lent computer with the server as saved", async () => {
     const { lent, requests } = fixture();
-    expect((await route(lent, `${LENT_MCP_PATH}local`, rpc("initialize", { protocolVersion: "2025-06-18" }))).json).toHaveBeenCalledWith(expect.anything(), 200, { jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "openmausbot-local", version: "1" } } });
+    expect((await route(lent, `${LENT_MCP_PATH}local`, rpc("initialize", { protocolVersion: "2025-06-18" }))).json).toHaveBeenCalledWith(expect.anything(), 200, { jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "obot-local", version: "1" } } });
     expect(requests).toEqual([]);
     const notification = await route(lent, `${LENT_MCP_PATH}local`, { jsonrpc: "2.0", method: "notifications/initialized" });
     expect(notification.res.writeHead).toHaveBeenCalledWith(202);
@@ -189,7 +189,7 @@ describe("the MCP endpoint a turn's engine reaches", () => {
     expect(list.json.mock.calls[0]![2].error.message, "listing raises no card").not.toContain("Only the person");
     const away = fixture({ online: null });
     const offline = await route(away.lent, `${LENT_MCP_PATH}local`, rpc("tools/call", { name: "search" }));
-    expect(offline.json.mock.calls[0]![2].result).toEqual({ content: [{ type: "text", text: "local runs on your Mac (Ada's Mac), which is offline right now: OpenMausBot on it is closed, or the Mac is asleep or off." }], isError: true });
+    expect(offline.json.mock.calls[0]![2].result).toEqual({ content: [{ type: "text", text: "local runs on your Mac (Ada's Mac), which is offline right now: Obot on it is closed, or the Mac is asleep or off." }], isError: true });
     expect([...quiet.requests, ...refused.requests, ...away.requests]).toEqual([]);
   });
 
@@ -210,7 +210,7 @@ describe("Test, and adding a server that needs the person's computer", () => {
     const signal = new AbortController().signal;
     expect(await fixture().lent.test("local", local, "cloud-home", signal)).toEqual({ status: 200, body: { ok: true, tools: [{ name: "search", description: "Find notes" }] } });
     const offline = await fixture({ online: null }).lent.test("local", local, "cloud-home", signal);
-    expect(offline).toEqual({ status: 409, error: "local runs on your Mac (Ada's Mac), which is offline right now: OpenMausBot on it is closed, or the Mac is asleep or off." });
+    expect(offline).toEqual({ status: 409, error: "local runs on your Mac (Ada's Mac), which is offline right now: Obot on it is closed, or the Mac is asleep or off." });
     expect(await fixture().lent.test("notes", notes, "cloud-home", signal)).toMatchObject({ status: 409, error: expect.stringContaining("doesn't let My Cloud run programs") });
     expect(await fixture().lent.test("local", local, null, signal)).toEqual({ status: 409, error: "local runs on Ada's Mac, so it is checked there the next time one of your conversations uses it." });
     const failing = fixture({ answer: () => ({ content: [{ type: "text", text: "local is not answering at 127.0.0.1:19501 on this computer" }], isError: true }) });
@@ -263,6 +263,6 @@ describe("Test, and adding a server that needs the person's computer", () => {
 
 it("the words for each case", () => {
   const words = { personal: false, place: "this server" };
-  expect(lentLine("notes", { kind: "offline", computer: "MILIND-PC", device: "PC" }, words)).toBe("notes runs on MILIND-PC, which is offline right now: OpenMausBot on it is closed, or the PC is asleep or off.");
-  expect(lentLine("notes", { kind: "offline", computer: "MILIND-PC", device: "PC" }, { ...words, personal: true })).toBe("notes runs on your PC (MILIND-PC), which is offline right now: OpenMausBot on it is closed, or the PC is asleep or off.");
+  expect(lentLine("notes", { kind: "offline", computer: "MILIND-PC", device: "PC" }, words)).toBe("notes runs on MILIND-PC, which is offline right now: Obot on it is closed, or the PC is asleep or off.");
+  expect(lentLine("notes", { kind: "offline", computer: "MILIND-PC", device: "PC" }, { ...words, personal: true })).toBe("notes runs on your PC (MILIND-PC), which is offline right now: Obot on it is closed, or the PC is asleep or off.");
 });

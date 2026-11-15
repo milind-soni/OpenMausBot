@@ -3,7 +3,7 @@
 import { outcomesNewestFirst } from "./routine-outcomes.ts";
 import type { RoutineRun } from "./routines.ts";
 
-/** The first checks after OpenMausBot starts wait this long, so they never compete with the person's first prompt. */
+/** The first checks after Obot starts wait this long, so they never compete with the person's first prompt. */
 export const CHECK_BOOT_HOLD_MS = 2 * 60_000;
 /** AI runs a routine's checks may start in any 24 hours: email triage and meeting prep together. */
 export const CHECK_RUNS_PER_DAY = 24;

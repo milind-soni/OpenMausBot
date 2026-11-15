@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createPhonePushAccessSync, phonePushAccessMessage, PHONE_PUSH_ACCESS_MESSAGE } from "./phone-push-access.mjs";
 
 const credential = `omb_install_${"a".repeat(22)}.${"b".repeat(43)}`;
-const controlPlane = "https://accounts.openmausbot.com";
+const controlPlane = "https://accounts.obot.com";
 
 describe("phone push access on the desktop", () => {
   it("hands over only the control plane and a well-formed installation credential", () => {

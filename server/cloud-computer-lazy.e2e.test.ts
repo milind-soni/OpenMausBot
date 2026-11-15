@@ -410,7 +410,7 @@ describe("a cloud computer starts only when the bot uses it", () => {
     await finish(bot.id);
 
     const waiting = "Stranded's cloud computer stopped responding. Replace computer in the computer panel gives it a new one; files only on the old computer are lost.";
-    const line = "Stranded's cloud computer stopped responding, so MausBot replaced it with a new one. Files that were only on the old computer are gone.";
+    const line = "Stranded's cloud computer stopped responding, so Obot replaced it with a new one. Files that were only on the old computer are gone.";
     expect(await recoveryLines(bot.id)).toEqual([`recovery: ${waiting}`, `recovery: ${line}`]);
     expect(inboxNotices(bot.id)).toEqual([waiting, line]);
     await apiOk("PATCH", "/api/config", { features: { cloudComputerAutoReplace: false } });

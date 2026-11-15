@@ -297,7 +297,7 @@ export function createAppPublisher(deps: AppPublisherDeps) {
         const app = await hosting.app(key);
         const existing = await readSite(join(project, SITE_FILE), deps.env);
         const outcome = await settle(app, project, { ...input, path: folder }, existing, false);
-        return { status: 200, body: { ok: true, title: app.title, ...outcome, ...(app.state === "taken_down" ? { message: "This app was taken down by MausBot. Its link no longer works." } : {}), ...included } };
+        return { status: 200, body: { ok: true, title: app.title, ...outcome, ...(app.state === "taken_down" ? { message: "This app was taken down by Obot. Its link no longer works." } : {}), ...included } };
       } catch (error) {
         return refused(error);
       }

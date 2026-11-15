@@ -89,7 +89,7 @@ describe("the private login handoff to the desktop's main process", () => {
       { type: LOGIN_HANDOFF_REQUEST, requestId: "request-0007" },
     ]) expect(ask(malformed)).toBe(true);
     expect(posted).toEqual([]);
-    for (const other of [null, "text", [], { type: "openmausbot:phone-secret-save-result" }, { type: LOGIN_HANDOFF_RESULT, requestId: "request-0008" }]) expect(ask(other)).toBe(false);
+    for (const other of [null, "text", [], { type: "obot:phone-secret-save-result" }, { type: LOGIN_HANDOFF_RESULT, requestId: "request-0008" }]) expect(ask(other)).toBe(false);
   });
 });
 

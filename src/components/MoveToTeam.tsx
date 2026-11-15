@@ -1,7 +1,7 @@
 // "Move to Acme" on My Cloud, in the desktop app only: one item per team in a bot's menu, one confirm that names what
 // goes and what stays, the line that says how it goes (in CloudSendStrip), and the line a moved bot leaves in the
 // sidebar, which opens it in the team. Main runs the move (electron/team-move-main.mjs); the teams come from the
-// MausBot Cloud sign-in it verified, never from this page.
+// Obot Cloud sign-in it verified, never from this page.
 import { useEffect, useState, type ReactNode } from "react";
 import { ArrowRightLeft, Loader2, Users } from "lucide-react";
 import type { TeamMoveView } from "../../electron/team-move.mjs";

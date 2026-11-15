@@ -21,7 +21,7 @@ interface IntroProps {
   followup?: Message;
 }
 
-/** MausBot's first message: Simple mode's few short bubbles and follow-up, or Advanced mode's one bubble with asks. */
+/** Obot's first message: Simple mode's few short bubbles and follow-up, or Advanced mode's one bubble with asks. */
 export function HelperIntro(props: IntroProps) {
   return useAdvancedMode() ? <AdvancedHelperIntro {...props} /> : <SimpleHelperIntro {...props} />;
 }
@@ -31,7 +31,7 @@ export function HelperIntro(props: IntroProps) {
 function AdvancedHelperIntro({ botId, threadId, message, answered }: IntroProps) {
   const { state, dispatch } = useStore();
   const bot = state.bots.find((candidate) => candidate.id === botId);
-  const name = bot?.name ?? "MausBot";
+  const name = bot?.name ?? "Obot";
   const team = bot?.defaultBot?.person ? state.config?.team?.name : undefined;
   const ask = (key: LocaleKey) => dispatch({ type: "answerCard", botId, threadId, messageId: message.id, answer: t(key) });
   return (

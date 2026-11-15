@@ -105,7 +105,7 @@ it("refuses someone who left in plain words, and caps passes per conversation", 
 it("has no people on a My Cloud: message_person reaches its one person's Inbox, no tags by name, nothing new in Needs you", async () => {
   const solo = (await fx.onCloud("POST", "/api/bots", { name: "Solo" })).body.bot as { id: string; threadId: string };
   const minted = await fetch(`${fx.cloudBase}/api/testing/internal-capability`, { method: "POST",
-    headers: { "content-type": "application/json", "x-openmausbot-test-capability": CLOUD_CAPABILITY_KEY }, body: JSON.stringify({ botId: solo.id, threadId: solo.threadId }) });
+    headers: { "content-type": "application/json", "x-obot-test-capability": CLOUD_CAPABILITY_KEY }, body: JSON.stringify({ botId: solo.id, threadId: solo.threadId }) });
   expect(minted.status).toBe(201);
   const { token } = await minted.json() as { token: string };
   const answer = await fetch(`${fx.cloudBase}/api/internal/people/message`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ to: "Bob", message: "Hi" }) });

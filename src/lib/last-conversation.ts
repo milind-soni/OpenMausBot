@@ -1,4 +1,4 @@
-export const LAST_CONVERSATION_KEY = "openmausbot.lastConversation.v1";
+export const LAST_CONVERSATION_KEY = "obot.lastConversation.v1";
 
 export function readLastConversation(): string | null {
   try {

@@ -4,7 +4,7 @@ import { CLOUD_LINK_SETTINGS, openBot, StoreProvider, useStore } from "@/state/s
 import { nextShortcutBot, shortcutBots, shownBotIds } from "@/lib/sidebar-shortcut-order";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useWelcomeViewer, WelcomeGate } from "@/components/onboarding/WelcomeGate";
-import { MausBotWelcome } from "@/components/MausBotWelcome";
+import { ObotWelcome } from "@/components/ObotWelcome";
 import { NewBotNameHost } from "@/components/NewBotName";
 import { MemberApps } from "@/components/MemberApps";
 import { CloudTimeZoneSync } from "@/components/CloudTimeZone";
@@ -489,7 +489,7 @@ function Application() {
           <Shell viewer={viewer} />
         </ThreadRefsProvider>
         <WelcomeGate viewer={viewer} />
-        <MausBotWelcome viewer={viewer} />
+        <ObotWelcome viewer={viewer} />
         <NewBotNameHost />
         <CloudTimeZoneSync viewer={viewer} />
         <GuidedTour />

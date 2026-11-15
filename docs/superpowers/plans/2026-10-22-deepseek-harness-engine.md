@@ -1,8 +1,8 @@
-# DeepSeek Harness Engine Implementation Plan
+﻿# DeepSeek Harness Engine Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add DeepSeek Harness (`dsh`) as a selectable MausBot engine: an ACP driver, a default-fleet instance, a DeepSeek API-key row in Settings, an Engines-page card with mark and npm install.
+**Goal:** Add DeepSeek Harness (`dsh`) as a selectable Obot engine: an ACP driver, a default-fleet instance, a DeepSeek API-key row in Settings, an Engines-page card with mark and npm install.
 
 **Architecture:** One new ACP support file `server/drivers/acp/deepseek.ts` built on `createAcpDriver` from `server/drivers/acp/core.ts`, using the core's existing `selectModel` + `modelVariants` path (model and reasoning effort are ACP config options on dsh, exactly like OpenCode). Picker ids are `<provider>/<model>`; `resolveTurnModel` turns them into dsh's wire value `["<provider>","<model>"]`. The key follows the Groq pattern end to end (zod section, env override, sync, merge list, injected env, status flag, Settings row).
 
@@ -416,3 +416,4 @@ Use the Playwright MCP against `http://127.0.0.1:5299/` to open Settings → Eng
 - [ ] **Step 4: One real turn (only with a real key)**
 
 If a real DeepSeek key is available, send one message to a bot on `deepseek` with model `deepseek-official/deepseek-v4-flash` and reasoning `low`; expect a reply and `session.started.model` equal to `["deepseek-official","deepseek-v4-flash"]`. Without a key, record that this step was skipped in the hand-over.
+

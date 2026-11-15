@@ -67,12 +67,12 @@ export function findMeetingLink(text: string | undefined): string | null {
 }
 
 /** The name the bot shows in the meeting. */
-export const meetingDisplayName = (botName: string): string => `${botName.trim().slice(0, 40) || "MausBot"} (notes)`;
+export const meetingDisplayName = (botName: string): string => `${botName.trim().slice(0, 40) || "Obot"} (notes)`;
 
 /** Posted in the meeting chat the moment the bot is let in, before anything is captured. Not configurable. */
 export function consentLine(botName: string, personName: string | undefined): string {
   const forWhom = personName?.trim() ? `for ${personName.trim().slice(0, 60)}` : "for the person who invited me";
-  return `Hi, I'm ${meetingDisplayName(botName)} from MausBot, taking notes ${forWhom}. Ask me with @notes. Type "@notes stop" and I'll leave.`;
+  return `Hi, I'm ${meetingDisplayName(botName)} from Obot, taking notes ${forWhom}. Ask me with @notes. Type "@notes stop" and I'll leave.`;
 }
 
 export const MEETING_MAX_MS = 4 * 60 * 60_000;

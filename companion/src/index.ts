@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 // The sidecar: `node companion/src/index.ts`. Running it is the opt-in.
 //
 //   :8810  0.0.0.0    devices     token required, allowlisted, scrubbed
@@ -50,9 +50,9 @@ const controlReady = controlToken ? Promise.resolve() : new Promise<void>((resol
 parentPort?.on("message", ({ data }) => {
   if (!data || typeof data !== "object") return;
   const message = data as Record<string, unknown>;
-  if (message.type === "openmausbot:companion-e2e") return void configureE2E(message);
-  if (message.type === "openmausbot:companion-e2e-redial") return void relay?.redial();
-  if (message.type !== "openmausbot:companion-mutation-token") return;
+  if (message.type === "obot:companion-e2e") return void configureE2E(message);
+  if (message.type === "obot:companion-e2e-redial") return void relay?.redial();
+  if (message.type !== "obot:companion-mutation-token") return;
   if (typeof message.token === "string" && /^[A-Za-z0-9_-]{43}$/.test(message.token)) {
     mutationToken = message.token;
   }
@@ -72,7 +72,7 @@ const HARNESS_PORT = num(process.env.OMB_PORT, 8799);
 const WEBHOOK_PORT = num(process.env.OMB_WEBHOOK_PORT, HARNESS_PORT + 1);
 const COMPANION_PORT = num(process.env.OMB_COMPANION_PORT, 8810);
 const CONTROL_PORT = num(process.env.OMB_CONTROL_PORT, 8811);
-const SERVICE_TYPE = "_openmausbot._tcp";
+const SERVICE_TYPE = "_obot._tcp";
 let hostedUrl = hostedCompanionUrl(process.env.OMB_COMPANION_HOSTED_URL);
 directRoutesFromEnv(process.env);
 const PRIVATE_ORIGIN = companionOriginSocket(process.env.OMB_COMPANION_INTERNAL_ORIGIN);
@@ -97,7 +97,7 @@ const conflict = (name: string, port: number): string | null => {
 const fixedName = process.env.OMB_COMPANION_NAME?.trim() || "";
 let cachedName = fixedName;
 
-const machineName = (): string => cachedName || "OpenMausBot";
+const machineName = (): string => cachedName || "Obot";
 
 /** True when the name changed. */
 async function refreshMachineName(): Promise<boolean> {
@@ -209,7 +209,7 @@ function applyRelay(config: RelayConfig | null): void {
       const session = e2e.accept(transport, TRANSPORT_RELAY, "relay", (context) => e2eOrigin.connect(context));
       return session && { receive: (data, binary) => session.receive(data, binary), transportClosed: (code) => session.transportClosed(code) };
     },
-    tokenRejected: () => parentPort?.postMessage({ type: "openmausbot:companion-e2e-token-rejected" }),
+    tokenRejected: () => parentPort?.postMessage({ type: "obot:companion-e2e-token-rejected" }),
     statusChanged: (status, node) => console.log(`e2e: relay ${status}${node ? ` via ${node}` : ""}`),
     baseUrl: relayBaseUrl,
   });
@@ -393,3 +393,4 @@ main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });
+

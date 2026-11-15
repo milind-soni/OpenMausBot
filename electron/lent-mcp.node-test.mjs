@@ -70,7 +70,7 @@ test("security: only the person's own Cloud, a command only with the terminal le
   assert.match(lentMcpRefusal(cloud, { ...http("http://127.0.0.1:1/sse"), type: "sse" }), /older SSE transport/);
 });
 
-const OWN_PORT = /^Only an MCP server on its own port \(1024 or higher\) at this computer's address can be reached, never this computer's own OpenMausBot or Chrome ports$/;
+const OWN_PORT = /^Only an MCP server on its own port \(1024 or higher\) at this computer's address can be reached, never this computer's own Obot or Chrome ports$/;
 
 test("security: an address only on its own port, 1024 or higher, never one left to its default", () => {
   const cloud = { cloud: { accountId: "a", origin: "https://x" }, terminal: false };
@@ -80,7 +80,7 @@ test("security: an address only on its own port, 1024 or higher, never one left 
   for (const url of ["http://127.0.0.1:19501/mcp", "http://localhost:19501/mcp", "http://[::1]:19501/mcp", "https://127.0.0.1:1024/mcp"]) assert.equal(lentMcpRefusal(cloud, http(url)), null, url);
 });
 
-test("security: never this computer's own OpenMausBot ports or Chrome's DevTools port, and nothing is fetched", async t => {
+test("security: never this computer's own Obot ports or Chrome's DevTools port, and nothing is fetched", async t => {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-lent-mcp-ports-")));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const chrome = path.join(dir, "Google", "Chrome");

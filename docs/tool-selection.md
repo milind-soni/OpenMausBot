@@ -1,4 +1,4 @@
-# Tool selection
+﻿# Tool selection
 
 Open a bot's **Access → Tool selection** settings to reduce the tools sent to
 its model. This is useful for local models with a small context window.
@@ -70,7 +70,7 @@ Grok uses those two helpers to discover and call the selected MCP tools.
 Their results and calls are checked against the same original selectors.
 Pi sends the selected MCP schemas directly to the model.
 
-**OpenMausBot's own tools** sit on the server named `agents`. A few of them do
+**Obot's own tools** sit on the server named `agents`. A few of them do
 several things, and each of those things has a name of its own, which a
 selector can use. `trigger`, `delete_trigger` and `trigger_info` also cover
 everything they do by their own names; for the other tools, the tool's name
@@ -130,3 +130,4 @@ both filtered, including URL-backed servers and zero result budgets.
 This is tool availability, not a sandbox for commands, file access or
 credentials. Allowing a shell tool still allows that tool's existing authority.
 Bot-proposed profile changes cannot edit this owner setting.
+

@@ -15,7 +15,7 @@ import { retryTeamPeople, useTeamPeople, useTeamPeopleStatus, type TeamPerson } 
 import { PersonFace } from "./TeamOwner";
 import { HereDot } from "./TeamPresence";
 
-/** The bot that is this person's inbox: their own Chief, else their own MausBot. */
+/** The bot that is this person's inbox: their own Chief, else their own Obot. */
 export function inboxBotOf(bots: readonly Bot[], email: string | undefined): Bot | undefined {
   if (!email) return undefined;
   const own = (bot: Bot) => !bot.hidden && botOwner(bot) === email;

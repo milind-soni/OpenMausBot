@@ -5,7 +5,7 @@ import { usePrefersReducedMotion } from "@/components/mascot-clock";
 import { cn } from "@/lib/cn";
 import { chiefChoices, chiefFor, createChiefPatch, DEFAULT_BOT_NAME, myDefaultBot, setWelcomingBot, stageIntro, useViewerEmail } from "@/lib/default-bot";
 import { t } from "@/lib/i18n";
-import { FLIGHT_MS, landInSidebar } from "@/lib/mausbot-landing";
+import { FLIGHT_MS, landInSidebar } from "@/lib/obot-landing";
 import { useStore, type Bot } from "@/state/store";
 
 /** Clicks, Enter and Space wait this long after the dialog opens, so a double click on Next never presses Create. */
@@ -29,9 +29,9 @@ function canLead(bot: Bot, instances: ReturnType<typeof useStore>["state"]["inst
   return Boolean(bot.chiefOfStaff) || instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)?.capabilities?.agentsMcp === true;
 }
 
-/** The first run's second screen, over the empty app: MausBot as the person's Chief of Staff (Create), or, where they
+/** The first run's second screen, over the empty app: Obot as the person's Chief of Staff (Create), or, where they
  * already have bots, one of those (Choose, then Confirm). It shows only where no other bot is the Chief (chiefStepFits)
- * and asks for a choice, so Escape leaves only the list. Create flies MausBot onto its sidebar tile; the chat comes when
+ * and asks for a choice, so Escape leaves only the list. Create flies Obot onto its sidebar tile; the chat comes when
  * it lands (`onDone`), and `onLeave` fades the scrim with the dialog. */
 export function ChiefIntro({ replay, onDone, onLeave }: { replay: boolean; onDone: (botId: string | null) => void; onLeave?: () => void }) {
   const { state, dispatch } = useStore();

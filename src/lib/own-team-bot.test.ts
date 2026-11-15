@@ -20,6 +20,6 @@ describe("a team User's bot menu", () => {
     expect(userBotMenu({ createdBy: MARTA, yourAccess: "chat" }, RUI)).toEqual({ duplicate: false, delete: null });
     expect(userBotMenu({ createdBy: RUI, reportsTo: MARTA, yourAccess: "edit", access: { everyone: "none", people: { [RUI]: "edit" } } }, RUI).delete, "handed on").toBeNull();
     expect(userBotMenu({ createdBy: RUI, yourAccess: "edit", access: PRIVATE }, undefined).delete).toBeNull();
-    expect(userBotMenu({ defaultBot: { person: RUI }, yourAccess: "edit" }, RUI), "their own MausBot is neither copied nor deleted").toEqual({ duplicate: false, delete: null });
+    expect(userBotMenu({ defaultBot: { person: RUI }, yourAccess: "edit" }, RUI), "their own Obot is neither copied nor deleted").toEqual({ duplicate: false, delete: null });
   });
 });

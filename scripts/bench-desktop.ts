@@ -56,7 +56,7 @@ const round = (value: number, digits = 1) => Math.round(value * 10 ** digits) / 
 const median = (samples: number[]) => { const sorted = [...samples].sort((a, b) => a - b); return sorted.length ? sorted[Math.floor(sorted.length / 2)]! : NaN; };
 const percentile = (samples: number[], p: number) => { const sorted = [...samples].sort((a, b) => a - b); return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))] ?? NaN; };
 const kb = (bytes: number) => round(bytes / 1024);
-const work = mkdtempSync(join(tmpdir(), "openmausbot-bench-work-"));
+const work = mkdtempSync(join(tmpdir(), "obot-bench-work-"));
 const cleanups: Array<() => Promise<void>> = [];
 
 // A long markdown answer the fake engine streams in small chunks, after a run of tool calls.
@@ -89,7 +89,7 @@ function platformEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
 }
 
 function newDataDir(): string {
-  const dir = mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "openmausbot-bench-"));
+  const dir = mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "obot-bench-"));
   mkdirSync(join(dir, "tmp"), { recursive: true });
   writeFileSync(join(dir, "config.json"), JSON.stringify({
     features: { smartSetupChoices: false },
@@ -121,7 +121,7 @@ async function startFixture(options: { dataDir?: string; staticDir?: string; fak
     if (child.exitCode !== null) break;
     try {
       const response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1_000) });
-      if (response.ok && (await response.json() as { app?: string }).app === "openmausbot") { readyMs = performance.now() - started; break; }
+      if (response.ok && (await response.json() as { app?: string }).app === "obot") { readyMs = performance.now() - started; break; }
     } catch { /* not listening yet */ }
     await sleep(25);
   }
@@ -189,7 +189,7 @@ async function serveDist(dir: string, target: string): Promise<{ url: string; cl
   const upstream = new URL(target);
   const server: Server = createServer((req, res) => {
     const path = (req.url ?? "/").split("?")[0]!;
-    if (path.startsWith("/api") || path.startsWith("/.well-known/openmausbot")) {
+    if (path.startsWith("/api") || path.startsWith("/.well-known/obot")) {
       const forward = httpRequest({ host: upstream.hostname, port: upstream.port, path: req.url, method: req.method, headers: req.headers }, (answer) => {
         res.writeHead(answer.statusCode ?? 502, answer.headers);
         answer.pipe(res);

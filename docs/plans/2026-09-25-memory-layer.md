@@ -1,8 +1,8 @@
-# A robust memory layer (one PR)
+﻿# A robust memory layer (one PR)
 
 Date: 2026-09-25. Base: `main` @ cd4b9842. Branch: `memory/robust-layer`.
 
-Origin: a comparison of OpenMausBot's memory with a reverse-engineered
+Origin: a comparison of Obot's memory with a reverse-engineered
 description of Instinct's (git-tracked markdown notes, an always-loaded
 profile, a daily background job that does all curation, grep-style search
 with aliases). Our notes, journal and search were already comparable; what
@@ -230,3 +230,4 @@ and Undo restored the file.
   tidy-up moved "The user is vegetarian" into `Dining.md` despite the prompt.
   Lines about diet, allergies or health are now excluded from the organize
   call in code (`alwaysCore`), so no answer can move them.
+

@@ -122,7 +122,7 @@ app.whenReady().then(async () => {
   });
   if (process.argv.includes("--skill-ui-only")) {
     await require("./testing/skill-approval-ui-smoke.cjs")({ root, home, url: `http://127.0.0.1:${port}`, api, until,
-      capability: (botId, threadId) => api("/api/testing/internal-capability", "POST", { botId, threadId, skillAuthoring: true }, { "x-openmausbot-test-capability": testCapabilityKey }),
+      capability: (botId, threadId) => api("/api/testing/internal-capability", "POST", { botId, threadId, skillAuthoring: true }, { "x-obot-test-capability": testCapabilityKey }),
     });
     return;
   }
@@ -370,7 +370,7 @@ app.whenReady().then(async () => {
   const peerThread = (await api(`/api/bots/${peerTarget.id}/tasks`, "POST", { title: "Unrelated selected conversation" })).body.task;
   await coordinator.request(child, peerTarget.id, "full");
   await coordinator.request(child, peerTarget.id, "full", { threadId: peerThread.threadId });
-  const capability = await api("/api/testing/internal-capability", "POST", { botId: id, threadId: created.body.bot.threadId }, { "x-openmausbot-test-capability": testCapabilityKey });
+  const capability = await api("/api/testing/internal-capability", "POST", { botId: id, threadId: created.body.bot.threadId }, { "x-obot-test-capability": testCapabilityKey });
   assert.equal(capability.status, 201);
   const peerResponse = await api("/api/internal/coordinate-bots", "POST", { botIds: [peerTarget.id], message: "Peer-initiated permission fixture", consult: true }, { authorization: `Bearer ${capability.body.token}` });
   assert.equal(peerResponse.status, 200);

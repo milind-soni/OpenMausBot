@@ -30,7 +30,7 @@ export interface ServiceInstallInput {
   hasSentinel?: (script: string) => boolean;
   script: string;
   node: string;
-  /** Under npx: installs `openmausbot@version` into `prefix` and resolves whether npm succeeded. */
+  /** Under npx: installs `obot@version` into `prefix` and resolves whether npm succeeded. */
   installCopy?: (prefix: string, version: string) => boolean;
   platform?: NodeJS.Platform;
   home?: string;
@@ -62,7 +62,7 @@ export function runServiceCommand(input: ServiceInstallInput, io: ServiceIo): nu
   if (input.sentinel) return runSentinelService(input, platform, home, io);
   const plan = servicePlan(platform, input.dataDir, home);
   if (!plan) {
-    io.error("services are written for Linux (systemd) and macOS (launchd); on Windows, use Task Scheduler to run `openmausbot serve` at startup");
+    io.error("services are written for Linux (systemd) and macOS (launchd); on Windows, use Task Scheduler to run `obot serve` at startup");
     return 1;
   }
   if (input.action === "uninstall") {
@@ -85,7 +85,7 @@ export function runServiceCommand(input: ServiceInstallInput, io: ServiceIo): nu
     home,
     bindsLowPorts: Boolean(input.domain),
     ...(input.label ? { label: input.label } : {}),
-    ...(script !== input.script ? { cliPrefix: "npx openmausbot" } : {}),
+    ...(script !== input.script ? { cliPrefix: "npx obot" } : {}),
   };
   const rendered = platform === "darwin" ? launchdPlist(spec) : systemdUnit(spec);
   mkdirSync(input.dataDir, { recursive: true, mode: 0o700 });
@@ -96,8 +96,8 @@ export function runServiceCommand(input: ServiceInstallInput, io: ServiceIo): nu
   for (const line of plan.activate) io.log(`  ${line}`);
   io.log("");
   if (input.domain && platform === "linux") io.log("the unit grants Caddy the capability for ports 80 and 443, so no setcap is needed under the service");
-  io.log(`logs: ${platform === "darwin" ? `${input.dataDir}/logs/service.log` : "journalctl -u openmausbot -f"}`);
-  io.log(`change options later by running \`${cliCommand("service install")}\` again with the new ones, then: ${platform === "darwin" ? plan.activate[1] : "sudo systemctl daemon-reload && sudo systemctl restart openmausbot"}`);
+  io.log(`logs: ${platform === "darwin" ? `${input.dataDir}/logs/service.log` : "journalctl -u obot -f"}`);
+  io.log(`change options later by running \`${cliCommand("service install")}\` again with the new ones, then: ${platform === "darwin" ? plan.activate[1] : "sudo systemctl daemon-reload && sudo systemctl restart obot"}`);
   return 0;
 }
 
@@ -110,10 +110,10 @@ function pinnedCopy(input: ServiceInstallInput, io: ServiceIo): string | null {
     version = undefined;
   }
   const prefix = join(input.dataDir, "app", version ?? "latest");
-  const command = `npm install --prefix ${prefix} openmausbot@${version ?? "latest"}`;
-  io.log(`this run comes from npx's cache, which npm prunes: installing openmausbot ${version ?? ""} into ${prefix} for the service`.replace("  ", " "));
+  const command = `npm install --prefix ${prefix} obot@${version ?? "latest"}`;
+  io.log(`this run comes from npx's cache, which npm prunes: installing obot ${version ?? ""} into ${prefix} for the service`.replace("  ", " "));
   const installed = (input.installCopy ?? installWithNpm)(prefix, version ?? "latest");
-  const script = join(prefix, "node_modules", "openmausbot", "dist-server", "openmausbot.js");
+  const script = join(prefix, "node_modules", "obot", "dist-server", "obot.js");
   if (installed && (input.exists ?? existsSync)(script)) return script;
   io.error(`could not install that copy. Run this, then the same service install command again from it:\n  ${command}\n  node ${script} service install …`);
   return null;
@@ -122,7 +122,7 @@ function pinnedCopy(input: ServiceInstallInput, io: ServiceIo): string | null {
 function installWithNpm(prefix: string, version: string): boolean {
   mkdirSync(prefix, { recursive: true, mode: 0o700 });
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  return spawnSync(npm, ["install", "--prefix", prefix, `openmausbot@${version}`, "--no-audit", "--no-fund"], { stdio: "inherit" }).status === 0;
+  return spawnSync(npm, ["install", "--prefix", prefix, `obot@${version}`, "--no-audit", "--no-fund"], { stdio: "inherit" }).status === 0;
 }
 
 function bundleHasSentinel(script: string): boolean {
@@ -141,7 +141,7 @@ function runSentinelService(input: ServiceInstallInput, platform: NodeJS.Platfor
     // command line as one argument, with its own quotes escaped
     const command = sentinelCommand({ ...input, out }).map((arg) => `\\"${arg}\\"`).join(" ");
     io.error("services are written for Linux (systemd) and macOS (launchd); on Windows, use Task Scheduler to run Sentinel every two minutes:");
-    io.error(`  schtasks /Create /SC MINUTE /MO 2 /TN "OpenMausBot Sentinel" /TR "${command}"`);
+    io.error(`  schtasks /Create /SC MINUTE /MO 2 /TN "Obot Sentinel" /TR "${command}"`);
     return 1;
   }
   if (input.action === "uninstall") {
@@ -186,7 +186,7 @@ function runSentinelService(input: ServiceInstallInput, platform: NodeJS.Platfor
   for (const line of plan.activate) io.log(`  ${line}`);
   io.log("");
   io.log(`issues: ${join(out, "issues.jsonl")}`);
-  io.log(`logs: ${platform === "darwin" ? join(out, "sentinel.log") : "journalctl --user -u openmausbot-sentinel"}`);
-  io.log("after an app update or a Node upgrade, check the schedule still points at both: openmausbot sentinel --check-install");
+  io.log(`logs: ${platform === "darwin" ? join(out, "sentinel.log") : "journalctl --user -u obot-sentinel"}`);
+  io.log("after an app update or a Node upgrade, check the schedule still points at both: obot sentinel --check-install");
   return 0;
 }

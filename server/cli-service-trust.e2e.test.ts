@@ -11,7 +11,7 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
-const ENTRY = join(SERVER_DIR, "openmausbot.ts");
+const ENTRY = join(SERVER_DIR, "obot.ts");
 const run = promisify(execFile);
 
 let home: string;
@@ -34,7 +34,7 @@ const cli = async (args: string[]) => {
   }
 };
 
-describe.skipIf(process.platform === "win32")("openmausbot serve under service loopback trust", () => {
+describe.skipIf(process.platform === "win32")("obot serve under service loopback trust", () => {
   beforeAll(async () => {
     home = mkdtempSync(join(tmpdir(), "omb-cli-service-"));
     PORT = await freePortBlock([0, 1]);
@@ -59,13 +59,13 @@ describe.skipIf(process.platform === "win32")("openmausbot serve under service l
   it("not in a terminal, prints no code into a log; points at email sign-in, and keeps running", async () => {
     expect(output).toContain("local requests: service trust (OMB_LOOPBACK_TRUST)");
     expect(output).not.toMatch(/Pairing code {3}[A-Z0-9]{4}-/);
-    expect(output).toContain("Let people sign in with their email: openmausbot access add you@example.com");
+    expect(output).toContain("Let people sign in with their email: obot access add you@example.com");
     expect(serve.exitCode).toBeNull();
     expect((await fetch(`http://127.0.0.1:${PORT}/api/health`)).status).toBe(200);
   });
 
   it("refuses everyone else on this machine the pairing route", async () => {
-    for (const headers of [{}, { "x-openmausbot-cli-owner": "x".repeat(43) }]) {
+    for (const headers of [{}, { "x-obot-cli-owner": "x".repeat(43) }]) {
       const minted = await fetch(`http://127.0.0.1:${PORT}/api/auth/pairing`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: "{}" });
       expect(minted.status).toBe(403);
     }

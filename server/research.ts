@@ -1,6 +1,6 @@
 // Research for bots through treg (treg.to): find an endpoint for a job in treg's catalog, read it, call it. With the
 // person's own treg key the calls go straight to treg, billed to their treg balance, with no limits from this side;
-// otherwise they go through the MausBot Cloud Admin's research relay (its `/research/*` routes under the plan's X relay
+// otherwise they go through the Obot Cloud Admin's research relay (its `/research/*` routes under the plan's X relay
 // URL), within the plan's monthly research budget.
 import { createHash, randomUUID } from "node:crypto";
 
@@ -21,8 +21,8 @@ const RESEARCH_INSTEAD = "Tell the person research isn't available here and offe
 
 export const RESEARCH_MESSAGES = {
   unavailable: "Research is temporarily unavailable. Try again shortly.",
-  notOffered: `MausBot Cloud doesn't offer research yet. ${RESEARCH_INSTEAD}`,
-  off: `Research isn't on for this MausBot Cloud plan right now, so research_search and research_call can't be used. ${RESEARCH_INSTEAD}`,
+  notOffered: `Obot Cloud doesn't offer research yet. ${RESEARCH_INSTEAD}`,
+  off: `Research isn't on for this Obot Cloud plan right now, so research_search and research_call can't be used. ${RESEARCH_INSTEAD}`,
 } as const;
 
 export interface ResearchCallInput {

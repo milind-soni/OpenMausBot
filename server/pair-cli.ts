@@ -1,4 +1,4 @@
-// Alias for `openmausbot pair`: docs and images reference dist-server/pair-cli.js.
+// Alias for `obot pair`: docs and images reference dist-server/pair-cli.js.
 import { main } from "./cli.ts";
 import { endQuietlyOnClosedPipe, exitAfterFlush } from "./exit.ts";
 

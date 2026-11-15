@@ -21,7 +21,7 @@ const TEAM = { id: "team-7f3a", name: "Acme" };
 
 class Fixture {
   home = mkdtempSync(join(tmpdir(), "omb-parallel-"));
-  dataDir = join(this.home, ".openmausbot");
+  dataDir = join(this.home, ".obot");
   gates = join(this.home, "gates");
   base = "";
   log = "";
@@ -121,7 +121,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-ac
     if (this.cloud()) this.token = await this.pair();
   }
   async pair() {
-    const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300, ...(this.role === "team" ? { team: TEAM, member: { email: "owner@acme.test", role: "admin" } } : {}) });
+    const body = JSON.stringify({ label: "Obot app (Cloud)", ttlSeconds: 300, ...(this.role === "team" ? { team: TEAM, member: { email: "owner@acme.test", role: "admin" } } : {}) });
     const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
     const response = await fetch(`${this.base}/api/cloud/pairing`, { method: "POST", headers: {
       host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", "content-type": "application/json",

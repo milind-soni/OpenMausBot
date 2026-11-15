@@ -110,7 +110,7 @@ export interface ThemeHistoryItem extends LookChange {
 export const THEME_EXPORT_VERSION = 1;
 /** One file: the theme with its files inlined as data: addresses. */
 export const themeExportSchema = z.object({
-  mausbotTheme: z.literal(THEME_EXPORT_VERSION),
+  obotTheme: z.literal(THEME_EXPORT_VERSION),
   id: z.string().regex(THEME_ID).optional(),
   theme: themeFileSchema,
   assets: z.record(z.string().regex(THEME_ASSET_NAME), z.string().max(Math.ceil(THEME_LIMITS.assetBytes * 1.4)).regex(/^data:[\w/+.-]+;base64,[A-Za-z0-9+/=]+$/)).optional(),
@@ -248,7 +248,7 @@ const SHORTCUT = "Cmd+Option+Shift+R on a Mac, Ctrl+Alt+Shift+R elsewhere";
 /** What a bot needs to restyle the app; app_settings `theme` returns it. */
 export function themeGuide(): string {
   return [
-    "A theme restyles MausBot's desktop app and web app for the person who asked, in every window they have open. Phones keep their own look.",
+    "A theme restyles Obot's desktop app and web app for the person who asked, in every window they have open. Phones keep their own look.",
     "",
     "Colours first. `canvas` (hex) is the base background and `accent` (hex) the highlight; the app derives its surfaces, lines and text from them.",
     "`skin` picks the built-in skin underneath, so anything the theme leaves out comes from it. `colors` sets single roles; `light` and `dark` hold canvas, accent and colors used only in that mode.",

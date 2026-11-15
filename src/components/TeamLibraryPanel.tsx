@@ -18,7 +18,7 @@ import { ShareTeamDialog } from "./ShareTeamDialog";
 import { OrgLibraryTab } from "./TeamLibraryPanelOrg";
 import { MAX_TEAM_BACKUP_BYTES } from "../../shared/team-backup";
 import { takeImportName } from "../../shared/import-name";
-const COMMUNITY_TEAMS_REPOSITORY = "https://github.com/milind-soni/openmausbot-teams";
+const COMMUNITY_TEAMS_REPOSITORY = "https://github.com/alnatourm/obot-teams";
 
 export { TeamImportDetails };
 

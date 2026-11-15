@@ -192,7 +192,7 @@ const ROUTE_LINE = { wifi: "phone.reach.wifiLine", relay: "phone.reach.anywhereL
 
 function RouteRow({ c, state, route, blocked, onSignIn }: { c: PhoneSetupController; state: CompanionState; route: "wifi" | "relay"; blocked: string | null; onSignIn?: () => void }) {
   const current = state.routes?.[route];
-  // Anywhere needs a free MausBot sign-in: signed out, it stays in place, inert, with the way to sign in under it.
+  // Anywhere needs a free Obot sign-in: signed out, it stays in place, inert, with the way to sign in under it.
   const needsSignIn = route === "relay" && c.account?.available !== false && c.account?.status !== "ready";
   if (needsSignIn && !current?.on && !blocked) {
     return (
@@ -365,7 +365,7 @@ export function OpenCodeRow({ c, state }: { c: PhoneSetupController; state: Comp
   );
 }
 
-/** "Reaches this computer on Same Wi-Fi and anywhere through MausBot." */
+/** "Reaches this computer on Same Wi-Fi and anywhere through Obot." */
 export function reachLine(state: Pick<CompanionState, "routes">): string {
   const on = (route: CompanionRoute) => state.routes?.[route]?.on === true;
   const ways = [

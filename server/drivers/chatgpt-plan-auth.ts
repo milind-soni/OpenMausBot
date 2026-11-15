@@ -263,16 +263,16 @@ export class ChatGptPlanAuthController {
         callback = new URL(request.url, flow.redirectUri);
         if (callback.origin !== new URL(flow.redirectUri).origin) throw new Error("Unexpected callback origin.");
       } catch {
-        response.writeHead(400).end("Invalid sign-in callback. Return to OpenMausBot and try again."); return;
+        response.writeHead(400).end("Invalid sign-in callback. Return to Obot and try again."); return;
       }
       const actual = callback.searchParams.get("state") ?? "";
       if (request.method !== "GET" || callback.pathname !== "/auth/callback" || !flow || flow.server !== server || flow.consumed || flow.status.phase !== "waiting"
         || Buffer.byteLength(actual) !== Buffer.byteLength(flow.state) || !timingSafeEqual(Buffer.from(actual), Buffer.from(flow.state))
         || [...callback.searchParams.keys()].some((key) => callback.searchParams.getAll(key).length !== 1)) {
-        response.writeHead(400).end("Invalid or expired sign-in. Return to OpenMausBot and try again."); return;
+        response.writeHead(400).end("Invalid or expired sign-in. Return to Obot and try again."); return;
       }
       flow.consumed = true;
-      response.end("Finishing sign-in. You can return to OpenMausBot.");
+      response.end("Finishing sign-in. You can return to Obot.");
       server.close();
       void this.complete(flow, callback.searchParams);
     });
@@ -283,7 +283,7 @@ export class ChatGptPlanAuthController {
     const redirectUri = `http://127.0.0.1:${address.port}/auth/callback`;
     const url = new URL(`${this.issuer}/api/accounts/authorize`);
     url.search = new URLSearchParams({ client_id: clientId ?? "dynamic_agent_client", ext_agent_host_id: hostId,
-      ...(clientId ? {} : { agent_name_hint: "openmausbot" }), ...(previous?.email ? { login_hint: previous.email } : {}),
+      ...(clientId ? {} : { agent_name_hint: "obot" }), ...(previous?.email ? { login_hint: previous.email } : {}),
       ...(previous?.tokens && !previous.tokens.scopes.includes(DIRECT_SCOPE) ? { prompt: "consent" } : {}),
       response_type: "code", redirect_uri: redirectUri, scope: SCOPES, resource: this.resource, state, nonce,
       code_challenge_method: "S256", code_challenge: createHash("sha256").update(verifier).digest("base64url"),
@@ -437,7 +437,7 @@ export class ChatGptPlanAuthController {
       delete record.tokens;
       this.save(record);
       this.clearRefused();
-      if (!revoked) throw Object.assign(new Error("Signed out locally, but remote revocation was not confirmed. Disconnect OpenMausBot in ChatGPT Settings → Usage to end access there."), { code: "chatgpt_revocation_unconfirmed" });
+      if (!revoked) throw Object.assign(new Error("Signed out locally, but remote revocation was not confirmed. Disconnect Obot in ChatGPT Settings → Usage to end access there."), { code: "chatgpt_revocation_unconfirmed" });
     });
   }
 }

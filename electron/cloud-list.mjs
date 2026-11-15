@@ -41,7 +41,7 @@ function setupOf(input) {
 
 /** One Cloud, or null when anything the app acts on is malformed (never trusted in part); a malformed colour, tier,
  * setup, last-seen time or version is simply left out, and a field this app doesn't know is ignored. `managed: false`
- * (absent means MausBot runs or manages it) is a server or computer of the person's own that signed in with their
+ * (absent means Obot runs or manages it) is a server or computer of the person's own that signed in with their
  * account: always on a server of theirs, and with no address while it is only reachable on its own network. */
 function parseCloudEntry(input) {
   if (!record(input) || typeof input.id !== "string" || !CLOUD_ID.test(input.id)) return null;
@@ -79,7 +79,7 @@ export function cloudState(cloud) {
     : status === "setting_up" ? "setup" : null;
 }
 
-/** An OpenMausBot release as the Admin names it ("0.1.130"), or null: anything else is no version at all. */
+/** An Obot release as the Admin names it ("0.1.130"), or null: anything else is no version at all. */
 export const releaseVersion = value => (typeof value === "string" && VERSION.test(value) ? value : null);
 
 /** Whether `version` is an older release than `latest`, compared number by number; false when either isn't plain
@@ -93,7 +93,7 @@ export function olderRelease(version, latest) {
 }
 
 /** A Cloud this person owns that is no team's: a world of their own. Never a server that only signed in with their
- * account (`managed: false`): MausBot neither runs nor vouches for it, so it is no Cloud of theirs to pair or lend to. */
+ * account (`managed: false`): Obot neither runs nor vouches for it, so it is no Cloud of theirs to pair or lend to. */
 export const ownCloud = cloud => Boolean(cloud) && cloud.teamId === null && cloud.role === "owner" && cloud.managed !== false;
 
 /** The person's own servers and computers that signed in with their account: in the rail, each one theirs to connect. */

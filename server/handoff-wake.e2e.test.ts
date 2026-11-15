@@ -12,7 +12,7 @@ const HOUR = 60 * 60_000;
 
 it("starts a hand-off at once on a Cloud that just woke, with a dozen teammates about", async () => {
   const session = await launchVerificationServer({ ...process.env, OMB_TEST_RESUME_CLOCK: "1" }, undefined, undefined, undefined, undefined, { scripted: true });
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OBOT_URL: session.info.url } }) as Promise<any>;
   const api = (path: string, body: unknown, method: string) => request(path, { method, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
   try {
     const bots = [];

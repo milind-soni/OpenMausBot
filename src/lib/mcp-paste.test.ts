@@ -85,7 +85,7 @@ describe("pasting a claude mcp add command", () => {
     expect(one("claude mcp add —transport http docs https://docs.example/mcp —header “X-Key: k1”")).toMatchObject({ type: "http", headers: [{ name: "X-Key", value: "k1" }] });
   });
 
-  it("gives a name OpenMausBot keeps for itself an mcp- prefix and a taken one a number", () => {
+  it("gives a name Obot keeps for itself an mcp- prefix and a taken one a number", () => {
     expect(one("claude mcp add --transport http browser https://b.example/mcp").name).toBe("mcp-browser");
     expect(one(GATEWAY, ["my-mcp"]).name).toBe("my-mcp-2");
     expect(one(GATEWAY, ["my-mcp", "my-mcp-2"]).name).toBe("my-mcp-3");

@@ -1,4 +1,4 @@
-// A stand-in for the MausBot Cloud Admin's side of the connector protocol (connector/src/protocol.ts): one-time codes,
+﻿// A stand-in for the Obot Cloud Admin's side of the connector protocol (connector/src/protocol.ts): one-time codes,
 // enrolment with the box's key, the channel's handshake (challenge, the box's signed auth with its connection count,
 // the Admin's signed hello), signed jobs and their replies, signed configs, HTTP requests to the home over yamux
 // streams, revocation and export uploads. The unit tests drive it in process; the e2e runs it as a program and drives it
@@ -357,3 +357,4 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const origin = await admin.listen(Number(port ?? 0));
   console.log(`fake admin on ${origin}`);
 }
+

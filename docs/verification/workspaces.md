@@ -1,4 +1,4 @@
-# Workspaces screen and the fleet agent
+﻿# Workspaces screen and the fleet agent
 
 ## Sub-features
 
@@ -31,11 +31,11 @@ fixture performs a root deployment or proves actual
 root-to-tenant transitions; qualification still requires a disposable Linux
 server with the real service identities and protections.
 
-On a real server, after `openmausbot fleet init --domain <domain> --operator
-<user>` as root: `systemctl status openmausbot-fleet`, then `ls -l
-/run/openmausbot/fleet.sock` must show `root:<user>` and mode 660. Sign in to
+On a real server, after `obot fleet init --domain <domain> --operator
+<user>` as root: `systemctl status obot-fleet`, then `ls -l
+/run/obot/fleet.sock` must show `root:<user>` and mode 660. Sign in to
 the operator workspace and open Settings → Installations. Create one, add a
-member, suspend and resume it, and confirm `/var/log/openmausbot/fleet.jsonl`
+member, suspend and resume it, and confirm `/var/log/obot/fleet.jsonl`
 grew a line per action. A workspace other than the operator's must get 502
 from `/api/fleet`, because it cannot open the socket.
 
@@ -43,3 +43,4 @@ from `/api/fleet`, because it cannot open the socket.
 
 The real server steps need root, systemd, nftables and Caddy; the renderer's
 forms are proven from fixtures, not driven headlessly.
+

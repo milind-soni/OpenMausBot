@@ -1,4 +1,4 @@
-# Routines
+﻿# Routines
 
 ## Monthly and custom cron
 
@@ -167,7 +167,7 @@ result and scheduled/manual trigger must agree with the saved server record.
 
 ## Run on startup
 
-A repeating routine's **Advanced** section offers **Also run when OpenMausBot
+A repeating routine's **Advanced** section offers **Also run when Obot
 starts**. In the isolated renderer, create a daily routine with it ticked, then
 reopen the editor: the box stays ticked. A one-time routine does not offer it.
 Startup needs a restart on the same data, which this launcher does not do;
@@ -286,3 +286,4 @@ saved destination snapshots, captioned report lines, copied approval cards,
 deleted-thread fallback, and continued user conversations staying visible. Native decoding and
 thread-list tests retain hidden execution records for direct navigation and
 approvals while omitting them from ordinary iOS/Android thread pickers.
+

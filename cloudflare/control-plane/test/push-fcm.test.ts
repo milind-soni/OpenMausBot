@@ -7,11 +7,11 @@ import { readConfig } from "../src/config";
 import { createWorker } from "../src/index";
 import { FCM_SCOPE, GOOGLE_TOKEN_URL, forgetFcmAccessToken, readFcmConfig } from "../src/push-fcm";
 
-const BASE_URL = "https://auth.openmausbot.test";
+const BASE_URL = "https://auth.obot.test";
 const FCM_TOKEN = `cXyZ_1234567890-abc:APA91b${"F".repeat(140)}`;
 const OTHER_FCM_TOKEN = `dQwE_0987654321-xyz:APA91b${"G".repeat(140)}`;
 const APNS_TOKEN = "a1".repeat(32);
-const PROJECT = "mausbot-test-1";
+const PROJECT = "obot-test-1";
 
 type TestWorker = ReturnType<typeof createWorker>;
 
@@ -134,7 +134,7 @@ describe("phone push relay, FCM", () => {
     const apnsOnly = testEnv({
       APNS_KEY_ID: "KEY1234567",
       APNS_TEAM_ID: "TEAM123456",
-      APNS_BUNDLE_ID: "com.example.mausbot",
+      APNS_BUNDLE_ID: "com.example.obot",
       APNS_PRIVATE_KEY: await apnsKeyPem(),
     });
     const { credential } = await installation(worker, apnsOnly, "fcm-unset@example.test");
@@ -304,7 +304,7 @@ describe("phone push relay, FCM", () => {
     const environment = testEnv({
       APNS_KEY_ID: "KEY1234567",
       APNS_TEAM_ID: "TEAM123456",
-      APNS_BUNDLE_ID: "com.example.mausbot",
+      APNS_BUNDLE_ID: "com.example.obot",
       APNS_PRIVATE_KEY: await apnsKeyPem(),
     });
     const providers = fakeProviders();
@@ -337,3 +337,4 @@ describe("phone push relay, FCM", () => {
     expect(readFcmConfig(env)).toBeNull();
   });
 });
+

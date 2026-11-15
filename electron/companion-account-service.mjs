@@ -50,7 +50,7 @@ export { friendlyCompanionAccountError };
 
 export { managedEndpointNeed, PHONE_UNUSED_RELEASE_MS } from "./companion-endpoint-need.mjs";
 
-export const DEFAULT_COMPANION_CONTROL_PLANE_URL = "https://accounts.openmausbot.com";
+export const DEFAULT_COMPANION_CONTROL_PLANE_URL = "https://accounts.obot.com";
 
 const DEFAULT_HEALTH_CACHE_MS = 30_000;
 const DEFAULT_AUTO_RETRY_BASE_MS = 10 * 60_000;
@@ -127,7 +127,7 @@ export function createCompanionAccountService({
   firstEndpointCheckMs = DEFAULT_FIRST_ENDPOINT_CHECK_MS,
   onDemand = false,
   managedEndpointNeeded = async () => null,
-  /** MausBot Relay: `capable` makes a "no" need hold even right after sign-in; `legacyDevices` counts old phones. */
+  /** Obot Relay: `capable` makes a "no" need hold even right after sign-in; `legacyDevices` counts old phones. */
   relay = { capable: () => false, legacyDevices: async () => null },
   releaseGraceMs = DEFAULT_RELEASE_GRACE_MS,
   releaseJitterMs = DEFAULT_RELEASE_JITTER_MS,

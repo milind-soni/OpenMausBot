@@ -53,7 +53,7 @@ export interface ChatToolSession {
   /** Lists the turn's tools again within `limit`, after a provider refused that many; started servers keep running. */
   refit(limit: number): Promise<void>;
   validate(name: string, args: unknown): void;
-  /** Directory reads and OpenMausBot's own agents server need no card; call_tool shows the tool it runs. */
+  /** Directory reads and Obot's own agents server need no card; call_tool shows the tool it runs. */
   view(name: string, args: Record<string, unknown>): ChatToolCallView;
   execute(name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<ChatToolResult>;
   close(): Promise<void>;
@@ -265,7 +265,7 @@ export class ChatMcpClient {
       if (Date.now() >= deadline) throw new Error(STARTUP_TIMED_OUT);
       return deadline - Date.now();
     };
-    const handshake = { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "openmausbot-chat", version: "1" } };
+    const handshake = { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "obot-chat", version: "1" } };
     let initialized: unknown;
     if (observer?.mount.extension) {
       try { initialized = await this.call("initialize", withUiExtension(handshake), signal, remaining(), true, STARTUP_TIMED_OUT); }

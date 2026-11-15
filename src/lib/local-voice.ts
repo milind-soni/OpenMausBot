@@ -5,7 +5,7 @@ type Preferences = {
   voices?: Record<string, string>;
 };
 
-const STORAGE_KEY = "openmausbot.remote-voice.v1";
+const STORAGE_KEY = "obot.remote-voice.v1";
 
 function storage(): Storage | null {
   try {

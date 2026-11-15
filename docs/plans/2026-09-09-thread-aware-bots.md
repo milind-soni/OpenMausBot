@@ -1,4 +1,4 @@
-# Thread-aware bots
+﻿# Thread-aware bots
 
 A PM bot should be able to tell a QA bot "open a thread for each pull request
 still waiting on QA", and each of those should become a real, visible,
@@ -11,7 +11,7 @@ a teammate, and it does not know that it cannot.
 A user asked a bot to "create a new thread for each open PowerPM that is
 waiting for your review". The bot opened three ticket comments instead, then,
 when asked, explained correctly that it has no callable action to create
-OpenMausBot threads and that those come from separate user prompts. It was
+Obot threads and that those come from separate user prompts. It was
 right about the code and wrong to guess; the gap is that nothing told it
 either thing up front.
 
@@ -169,3 +169,4 @@ tap through to the thread by the switch route they already use.
 Cross-bot thread search, a board view of all open threads (the Hermes-style
 kanban), moving a thread between bots, and independent execution of group
 members. Each is a real follow-up; none is needed for the PM-to-QA case.
+

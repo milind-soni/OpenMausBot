@@ -1,6 +1,6 @@
 # cloudflared release provenance
 
-OpenMausBot stages the official `cloudflared` 2026.10.3 executable as a separate
+Obot stages the official `cloudflared` 2026.10.3 executable as a separate
 process. The binaries come from Cloudflare's official GitHub release:
 
 <https://github.com/cloudflare/cloudflared/releases/tag/2026.10.3>
@@ -8,7 +8,7 @@ process. The binaries come from Cloudflare's official GitHub release:
 `scripts/prepare-cloudflared.mjs` verifies these SHA-256 digests before an
 executable can be staged:
 
-| OpenMausBot target | Release asset | Release asset SHA-256 | Extracted executable SHA-256 |
+| Obot target | Release asset | Release asset SHA-256 | Extracted executable SHA-256 |
 | --- | --- | --- | --- |
 | macOS arm64 | `cloudflared-darwin-arm64.tgz` | `1165d14b6f6360a3b8c283d7d1100024d6ec7cd9bc9e32519e96150645f3ec55` | `f249139e0541fa589c987397d867cc16c83ab1236d31eb6782f2e4552ee9cf80` |
 | macOS x64 | `cloudflared-darwin-amd64.tgz` | `81b7b85f2376815c4f59b1aa323887b62e16ce8b67555c2e1577dc23f2a82000` | `947e2942d6a59922d80190d23b12f3ade8da16e23e3bd937182a48993b7c00db` |
@@ -22,7 +22,7 @@ the exact official release assets to prepare a package from a reviewed local
 download. Otherwise the preparation script downloads them from the release URL
 above.
 
-The macOS release process applies OpenMausBot's Developer ID signature to the
+The macOS release process applies Obot's Developer ID signature to the
 staged executable as part of signing the app bundle. It verifies the unsigned
 upstream digest before that necessary packaging change, then verifies the
 nested signature, signing team, and architecture before notarization. Linux

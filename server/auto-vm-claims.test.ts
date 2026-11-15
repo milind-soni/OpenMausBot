@@ -132,7 +132,7 @@ describe("startAutoVmClaim", () => {
   it("lets a later screen call claim again after a network failure, without failing the turn", async () => {
     const table: AutoVmClaimTable = new Map();
     const onRejected = vi.fn();
-    const unreachable = Object.assign(new Error("Could not reach MausBot Cloud's computer service to list cloud computers"), { transient: true });
+    const unreachable = Object.assign(new Error("Could not reach Obot Cloud's computer service to list cloud computers"), { transient: true });
     const claim = vi.fn<() => Promise<void>>().mockRejectedValueOnce(unreachable).mockResolvedValueOnce(undefined);
     table.set("t1", { ...slot(claim), label: "the cloud computer", onRejected });
     startAutoVmClaim(table, "t1", "gen-1");
@@ -141,7 +141,7 @@ describe("startAutoVmClaim", () => {
     expect(after).toMatchObject({ retryReason: unreachable.message, begin: undefined });
     expect(after.failed).toBeUndefined();
     expect(onRejected).not.toHaveBeenCalled();
-    expect(lazyClaimRetryText(after)).toBe("This turn could not reach the cloud computer just now (Could not reach MausBot Cloud's computer service to list cloud computers). This call was not performed; try it again in a moment.");
+    expect(lazyClaimRetryText(after)).toBe("This turn could not reach the cloud computer just now (Could not reach Obot Cloud's computer service to list cloud computers). This call was not performed; try it again in a moment.");
     startAutoVmClaim(table, "t1", "gen-1");
     await after.begin;
     expect(after).toMatchObject({ claimed: true, retryReason: undefined, attempts: 2 });

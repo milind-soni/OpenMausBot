@@ -24,7 +24,7 @@ function fixture(team = true) {
     team,
     privateTo: (threadId) => starters.get(threadId) ?? null,
     task: (_botId, threadId) => tasks.find((task) => task.threadId === threadId),
-    ownBot: (botId) => (botId === "bobs-mausbot" ? bob : null),
+    ownBot: (botId) => (botId === "bobs-obot" ? bob : null),
     routines: () => null,
     authors: { forget: () => {}, wrote: (id, person) => { writers.set(id, person); }, writer: (id) => writers.get(id), remove: () => {} },
     withWriter: (_writer, work) => work(),
@@ -43,7 +43,7 @@ describe("createTeamRoutines", () => {
     expect(host.opener(routine({}))).toBe(CLOUD_NOBODY_KEY);
     expect(host.opener(routine({ resultsThreadId: "main" }))).toBe(CLOUD_NOBODY_KEY);
     expect(host.opener(routine({ sourceThreadId: "bob-chat" }))).toBe(bob);
-    expect(host.opener(routine({ botId: "bobs-mausbot" }))).toBe(bob);
+    expect(host.opener(routine({ botId: "bobs-obot" }))).toBe(bob);
     writers.set("r1", CLOUD_OUTSIDE_KEY);
     expect(host.opener(routine({}))).toBe(CLOUD_OUTSIDE_KEY);
     expect(fixture(false).host.opener(routine({}))).toBeNull();
@@ -58,11 +58,11 @@ describe("createTeamRoutines", () => {
     expect(fixture(false).host.reportsElsewhere(routine({ resultsThreadId: "bob-old-results" }))).toBe(false);
   });
 
-  it("lets a member point results at any chat they read, refuses another person's MausBot, and keeps the Cloud's rule off a team", () => {
+  it("lets a member point results at any chat they read, refuses another person's Obot, and keeps the Cloud's rule off a team", () => {
     const { host } = fixture();
     expect(host.bodyRefusal(session(BOB), { botId: "scout", resultsThreadId: "main" })).toBeNull();
-    expect(host.bodyRefusal(session(OLIVE), { botId: "bobs-mausbot", name: "x" })).toEqual({ status: 404, error: "no such bot" });
-    expect(host.bodyRefusal(session(BOB), { botId: "bobs-mausbot", name: "x" })).toBeNull();
+    expect(host.bodyRefusal(session(OLIVE), { botId: "bobs-obot", name: "x" })).toEqual({ status: 404, error: "no such bot" });
+    expect(host.bodyRefusal(session(BOB), { botId: "bobs-obot", name: "x" })).toBeNull();
     expect(fixture(false).host.bodyRefusal(session(BOB), { resultsThreadId: "main" })?.status).toBe(403);
   });
 
@@ -89,8 +89,8 @@ describe("createTeamRoutines", () => {
     // A change to an existing routine that names no audience moves nothing.
     const change = { name: "Renamed" };
     expect(host.justMe(session(BOB), change, "r1")).toBe(change);
-    // Their own MausBot's are theirs already; a group chat's goal has the group chat's audience.
-    const own = { botId: "bobs-mausbot", name: "Morning note" }, goal = { botId: "scout", groupId: "room", target: "room-goal", name: "Goal" };
+    // Their own Obot's are theirs already; a group chat's goal has the group chat's audience.
+    const own = { botId: "bobs-obot", name: "Morning note" }, goal = { botId: "scout", groupId: "room", target: "room-goal", name: "Goal" };
     expect(host.justMe(session(BOB), own)).toBe(own);
     expect(host.justMe(session(BOB), goal)).toBe(goal);
     // No session (the server's own work) and anywhere off a team: as it was.

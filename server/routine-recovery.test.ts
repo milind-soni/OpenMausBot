@@ -313,7 +313,7 @@ describe("an unattended run whose bot is busy when it starts", () => {
     h.refuse(null);
     await h.advance(2 * SECOND);
     expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1"]);
-    expect(h.started[0]!.prompt).not.toContain("OpenMausBot: this run's first start");
+    expect(h.started[0]!.prompt).not.toContain("Obot: this run's first start");
     h.complete("thread-1");
     expect(h.run(run.id)).toMatchObject({ status: "completed", attention: undefined });
     expect(h.run(run.id).retried).toBeUndefined();
@@ -487,7 +487,7 @@ describe("an unattended run only its owner can fix", () => {
   });
 });
 
-describe("a run that OpenMausBot's shutdown cuts off", () => {
+describe("a run that Obot's shutdown cuts off", () => {
   it("stays running through the shutdown, and the next start picks it up once in its own thread", async () => {
     const h = harness();
     const run = await h.start(h.routine().id);
@@ -500,7 +500,7 @@ describe("a run that OpenMausBot's shutdown cuts off", () => {
     expect(h.failed).toEqual([]);
 
     h.restart();
-    expect(h.run(run.id)).toMatchObject({ status: "queued", retried: "restarted", threadId: "thread-1", attention: "Starting again shortly after OpenMausBot restarted while it ran" });
+    expect(h.run(run.id)).toMatchObject({ status: "queued", retried: "restarted", threadId: "thread-1", attention: "Starting again shortly after Obot restarted while it ran" });
     expect(h.cut.map((cut) => cut.id)).toEqual([run.id]);
     h.restart();
     expect(h.cut).toHaveLength(1);

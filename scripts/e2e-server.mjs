@@ -1,4 +1,4 @@
-// End-to-end check of a running OpenMausBot harness server over the HTTP API
+// End-to-end check of a running Obot harness server over the HTTP API
 // the app drives. No deps; Node 22+.
 //
 //   node scripts/e2e-server.mjs [--port 8799] [--with-boat] [--keep-bots]

@@ -58,11 +58,11 @@ describe("which actions a conversation offers", () => {
     expect(shareChoices(bot, { shared: true }, true)).toEqual({ team: false, person: false });
     expect(shareChoices(bot, {}, true), "a team conversation").toEqual({ team: false, person: false });
     expect(shareChoices(bot, { private: true, sharedChat: true }, true)).toEqual({ team: false, person: false });
-    expect(shareChoices({ defaultBot: { person: "rui@acme.test" } }, { private: true }, true), "their own MausBot").toEqual({ team: false, person: false });
+    expect(shareChoices({ defaultBot: { person: "rui@acme.test" } }, { private: true }, true), "their own Obot").toEqual({ team: false, person: false });
     expect(shareChoices(bot, { private: true }, false), "off a team").toEqual({ team: false, person: false });
   });
 
-  it("saves to team memory for a team bot the person can chat with, never their own MausBot", () => {
+  it("saves to team memory for a team bot the person can chat with, never their own Obot", () => {
     expect(savesToTeamMemory({ yourAccess: "chat" }, true)).toBe(true);
     expect(savesToTeamMemory({ yourAccess: "view" }, true)).toBe(false);
     expect(savesToTeamMemory({ defaultBot: { person: "rui@acme.test" } }, true)).toBe(false);

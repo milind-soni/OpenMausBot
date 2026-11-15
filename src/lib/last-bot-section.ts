@@ -1,6 +1,6 @@
 import type { BotSettingsSection } from "@/state/store";
 
-export const LAST_BOT_SECTION_KEY = "openmausbot.lastBotSection.v1";
+export const LAST_BOT_SECTION_KEY = "obot.lastBotSection.v1";
 
 export const BOT_SETTINGS_SECTION_IDS: readonly BotSettingsSection[] = [
   "overview",

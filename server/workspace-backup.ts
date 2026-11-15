@@ -31,9 +31,9 @@ const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
 const WAITS_FILE = "waits.json";
 const EXCLUDED = new Set([
   ".backups", "tools", "browser", "agent-browser-profiles", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime", "evidence",
-  ".openmausbot-server-child", "environment-id", "sessions.json", "tunnel-account.json",
+  ".obot-server-child", "environment-id", "sessions.json", "tunnel-account.json",
   "team-computers.json",
-  "openmausbot-server.lease", "box-create-requests.lock", "messages.db-wal", "messages.db-shm",
+  "obot-server.lease", "box-create-requests.lock", "messages.db-wal", "messages.db-shm",
   "runtime.db-wal", "runtime.db-shm",
   "decider-log",
   "cloud-owner.json",
@@ -91,7 +91,7 @@ export interface WorkspaceRestoreResult {
 export type LastWorkspaceRestore = WorkspaceRestoreResult & { restored: true; id: string; pathsRewritten?: true };
 
 function excluded(name: string): boolean {
-  return EXCLUDED.has(name) || excludedWorkspaceAuthPath(name) || name.startsWith("openmausbot-server.lease.") || name.startsWith("box-create-requests.lock.") || /^perm-[A-Za-z0-9_-]+\.sock$/.test(name);
+  return EXCLUDED.has(name) || excludedWorkspaceAuthPath(name) || name.startsWith("obot-server.lease.") || name.startsWith("box-create-requests.lock.") || /^perm-[A-Za-z0-9_-]+\.sock$/.test(name);
 }
 function forbiddenArchivePath(path: string): boolean {
   const folded = path.toLowerCase();
@@ -613,7 +613,7 @@ export async function stageWorkspaceBackup(dataDir: string, archivePath: string,
     const versions = [manifest.summary.appVersion, options.currentAppVersion ?? ""].map((version) => /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version)?.slice(1).map(Number));
     if (versions[0] && versions[1]) {
       for (let i = 0; i < 3; i++) {
-        if (versions[0][i] > versions[1][i]) throw new Error("This backup was made by a newer OpenMausBot version. Update the app before restoring it.");
+        if (versions[0][i] > versions[1][i]) throw new Error("This backup was made by a newer Obot version. Update the app before restoring it.");
         if (versions[0][i] < versions[1][i]) break;
       }
     }

@@ -20,7 +20,7 @@ afterEach(() => {
 
 const NOW = 1_800_000_000_000;
 const available: UpdateCheck = { current: "0.1.150", install: "docker", latest: "0.1.151", available: true, command: "git pull && ./update.sh" };
-const runner: HostFacts = { runner: { layout: "installer", dir: "/opt/openmausbot", held: false, release: true }, writable: true, last: { run: 3, state: "done", result: "updated", at: NOW - 86_400_000 } };
+const runner: HostFacts = { runner: { layout: "installer", dir: "/opt/obot", held: false, release: true }, writable: true, last: { run: 3, state: "done", result: "updated", at: NOW - 86_400_000 } };
 
 /** The two folders the installer's compose.yaml gives the server, as the runner leaves them, and a data folder. */
 function host(options: { runnerFile?: string | null; last?: string; writable?: boolean } = {}) {
@@ -31,7 +31,7 @@ function host(options: { runnerFile?: string | null; last?: string; writable?: b
   mkdirSync(join(dir, "request"), { recursive: true });
   mkdirSync(join(dir, "status"), { recursive: true });
   mkdirSync(data);
-  if (options.runnerFile !== null) writeFileSync(join(dir, "status", "runner"), options.runnerFile ?? "layout=installer\ndir=/opt/openmausbot\nheld=no\n");
+  if (options.runnerFile !== null) writeFileSync(join(dir, "status", "runner"), options.runnerFile ?? "layout=installer\ndir=/opt/obot\nheld=no\n");
   writeFileSync(join(dir, "status", "last"), options.last ?? "run=3\nstate=done\nresult=updated\nat=1700000000\nran=1700000000\n");
   if (options.writable === false) chmodSync(join(dir, "request"), 0o500);
   const request = join(dir, "request", "request");
@@ -49,8 +49,8 @@ const admin = { kind: "session", sessionId: "s1", label: "Laptop", email: "owner
 
 describe("what the host's runner wrote", () => {
   it("reads only the fields it knows, in the shapes it expects", () => {
-    expect(parseRunner("layout=installer\ndir=/opt/openmausbot\nheld=no\nrelease=yes\n")).toEqual({ layout: "installer", dir: "/opt/openmausbot", held: false, release: true });
-    expect(parseRunner("layout=compose\ndir=/srv/OpenMausBot/deploy\nheld=yes\nrelease=no\n")).toEqual({ layout: "compose", dir: "/srv/OpenMausBot/deploy", held: true, release: false });
+    expect(parseRunner("layout=installer\ndir=/opt/obot\nheld=no\nrelease=yes\n")).toEqual({ layout: "installer", dir: "/opt/obot", held: false, release: true });
+    expect(parseRunner("layout=compose\ndir=/srv/Obot/deploy\nheld=yes\nrelease=no\n")).toEqual({ layout: "compose", dir: "/srv/Obot/deploy", held: true, release: false });
     for (const bad of [null, "", "layout=podman\ndir=/opt/x", "layout=installer\ndir=relative", "layout=installer\ndir=/opt/x; rm -rf /"]) expect(parseRunner(bad), String(bad)).toBeNull();
     expect(parseRun("run=4\nstate=running\nat=1700000000\nran=1700000000\n")).toEqual({ run: 4, state: "running", at: 1_700_000_000_000 });
     expect(parseRun("run=4\nstate=done\nresult=rolled-back\nat=1700000000\n")).toEqual({ run: 4, state: "done", result: "rolled-back", at: 1_700_000_000_000 });
@@ -79,15 +79,15 @@ describe("the button's state", () => {
   it("offers the button only on a Docker install whose host has the runner, and says the commands it stands for", () => {
     expect(status({})).toEqual({
       mode: "button", current: "0.1.150", latest: "0.1.151", available: true, activeTurns: 2,
-      command: "cd /opt/openmausbot && sudo ./update.sh", rollback: "cd /opt/openmausbot && sudo ./update.sh --rollback",
-      logs: "cd /opt/openmausbot && sudo docker compose logs --tail 50 omb", setup: "cd /opt/openmausbot && sudo ./update-runner.sh --install",
+      command: "cd /opt/obot && sudo ./update.sh", rollback: "cd /opt/obot && sudo ./update.sh --rollback",
+      logs: "cd /opt/obot && sudo docker compose logs --tail 50 omb", setup: "cd /opt/obot && sudo ./update-runner.sh --install",
     });
     expect(status({ facts: { ...runner, runner: { ...runner.runner!, held: true } } }).mode).toBe("held");
   });
 
   it("never offers the button for a build of main: it says so, with the command that moves it to stable", () => {
     expect(status({ facts: { ...runner, runner: { ...runner.runner!, release: false } } })).toMatchObject({
-      mode: "command", why: "unreleased", command: "cd /opt/openmausbot && sudo ./update.sh",
+      mode: "command", why: "unreleased", command: "cd /opt/obot && sudo ./update.sh",
     });
   });
 
@@ -101,8 +101,8 @@ describe("the button's state", () => {
   it("shows the command to run instead wherever the button could not work", () => {
     expect(status({ facts: { runner: null, writable: false, last: null } })).toMatchObject({ mode: "command", command: "git pull && ./update.sh" });
     expect(status({ facts: { ...runner, writable: false } }).mode).toBe("command");
-    const npm: UpdateCheck = { ...available, install: "npm", command: "npm install -g openmausbot@0.1.151", restart: true };
-    expect(status({ install: "npm", check: npm })).toMatchObject({ mode: "command", command: "npm install -g openmausbot@0.1.151" });
+    const npm: UpdateCheck = { ...available, install: "npm", command: "npm install -g obot@0.1.151", restart: true };
+    expect(status({ install: "npm", check: npm })).toMatchObject({ mode: "command", command: "npm install -g obot@0.1.151" });
     // A runner's files somewhere else than a container are never the button: npm and Podman get their commands.
     expect(status({ install: "podman", check: { ...available, install: "podman", command: undefined } })).toMatchObject({ mode: "command" });
   });
@@ -180,7 +180,7 @@ describe("a request", () => {
   it("is refused, with nothing written, where the button cannot work", async () => {
     const none = host({ runnerFile: null });
     expect(await updater(none).request(admin)).toMatchObject({ status: 409, body: { code: "unavailable", status: { mode: "command" } } });
-    const held = host({ runnerFile: "layout=installer\ndir=/opt/openmausbot\nheld=yes\n" });
+    const held = host({ runnerFile: "layout=installer\ndir=/opt/obot\nheld=yes\n" });
     expect(await updater(held).request(admin)).toMatchObject({ status: 409, body: { code: "unavailable", status: { mode: "held" } } });
     for (const box of [none, held]) {
       expect(existsSync(box.request)).toBe(false);

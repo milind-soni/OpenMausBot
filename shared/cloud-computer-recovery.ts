@@ -1,4 +1,4 @@
-/** What MausBot is doing about a cloud computer that stopped answering, as `GET /api/bots/:id/computer/recovery` reports it.
+/** What Obot is doing about a cloud computer that stopped answering, as `GET /api/bots/:id/computer/recovery` reports it.
  * `not-responding`, `restarting` and `replacing` are under way; the others are how it ended. */
 export const CLOUD_COMPUTER_RECOVERY_STATES = [
   "not-responding", "restarting", "replacing", "restarted", "replaced", "unreachable", "capped", "needs-person",
@@ -17,7 +17,7 @@ export const recoveryUnderWay = (state: CloudComputerRecoveryState): boolean =>
 
 /** What the bot is told, in place of a computer call, while its computer is being restarted or replaced. */
 export const CLOUD_COMPUTER_NOT_RESPONDING =
-  "This bot's cloud computer isn't responding; MausBot is replacing it. Try again in a minute. Do not retry now.";
+  "This bot's cloud computer isn't responding; Obot is replacing it. Try again in a minute. Do not retry now.";
 /** Told once, on the bot's first computer call after the replacement. */
 export const CLOUD_COMPUTER_REPLACED =
   "This bot's cloud computer stopped responding and was replaced with a new one. Files that were only on the old computer are gone.";
@@ -28,7 +28,7 @@ export const CLOUD_COMPUTER_RESTARTED =
 export const CLOUD_COMPUTER_UNREACHABLE =
   "Cloud computers can't be reached right now. This call may not have run. Try again in a few minutes.";
 export const CLOUD_COMPUTER_CAPPED =
-  "This bot's cloud computer isn't responding, and it was already replaced once in the last hour, so MausBot stopped replacing it. Do not retry computer work in this turn; tell the person.";
+  "This bot's cloud computer isn't responding, and it was already replaced once in the last hour, so Obot stopped replacing it. Do not retry computer work in this turn; tell the person.";
 /** Automatic replacement is off: the person decides, from the computer panel. */
 export const CLOUD_COMPUTER_NEEDS_PERSON =
   "This bot's cloud computer isn't responding. The person can replace it from the computer panel. Do not retry computer work in this turn; tell the person.";
@@ -37,7 +37,7 @@ export const CLOUD_COMPUTER_TEAM_NOT_RESPONDING =
   "This team's shared cloud computer isn't responding. A team admin can delete it in Settings → Computers and create it again from the Team map. Do not retry computer work in this turn; tell the person.";
 /** The provider says the machine is gone, but not yet for long enough to delete it by itself. */
 export const CLOUD_COMPUTER_DEAD_WAITING =
-  "This bot's cloud computer isn't responding. MausBot replaces it if it is still down in half an hour; the person can replace it now from the computer panel. Do not retry computer work in this turn; tell the person.";
+  "This bot's cloud computer isn't responding. Obot replaces it if it is still down in half an hour; the person can replace it now from the computer panel. Do not retry computer work in this turn; tell the person.";
 /** One command got no answer; the computer is not judged on one. */
 export const CLOUD_COMPUTER_NO_ANSWER =
   "The cloud computer did not answer this call, so it may not have run. Take a fresh screenshot in a moment before repeating it.";

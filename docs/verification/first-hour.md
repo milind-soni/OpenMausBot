@@ -1,4 +1,4 @@
-# A new Cloud's first hour
+﻿# A new Cloud's first hour
 
 What a new personal Cloud's Chief does in its first hour and day
 (`server/host/first-hour.ts`), and how to see it without a real Google account,
@@ -19,9 +19,9 @@ its plan includes it. The fake CLI answers by a marker in its prompt
 
 Expected:
 
-- The Chief's chat is the first thing: one message, "Hi Sam! I'm MausBot, your
+- The Chief's chat is the first thing: one message, "Hi Sam! I'm Obot, your
   Chief of Staff. … What do you want off your plate?", the Cloud's welcome steps
-  recorded as done (`cloud-welcome-done`) and MausBot's own welcome card off.
+  recorded as done (`cloud-welcome-done`) and Obot's own welcome card off.
 - After the first answer, the Chief says why ("So I can see what needs you
   today, connect Gmail and Google Calendar…") and two connection cards follow.
   Its system prompt says it is the person's first day and never to ask for
@@ -60,3 +60,4 @@ pnpm exec vitest run server/host/first-hour.test.ts server/host/brief-morning.te
   waited for up to 20 minutes; the wake ten minutes early, through a clock
   change; nothing where no morning time is set.
 - `server/read-and-draft.test.ts`: the first look's relay fence.
+

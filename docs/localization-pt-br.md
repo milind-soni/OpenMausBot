@@ -1,6 +1,6 @@
-# Brazilian Portuguese (pt-BR) style guide and glossary
+﻿# Brazilian Portuguese (pt-BR) style guide and glossary
 
-This guide sets the voice, mechanics and terminology for OpenMausBot in
+This guide sets the voice, mechanics and terminology for Obot in
 Brazilian Portuguese. It extends [`localization.md`](localization.md), which
 covers the catalog workflow and checks. When this guide and the English source
 disagree about meaning, English wins. When they disagree about wording, this
@@ -115,7 +115,7 @@ logs, developer or CLI errors, emails sent by the control plane, the docs site
   “as habilidades de {name}”, not “ao {name}” or “do {name}”. A bot can have
   any name, and `o Ana` is wrong.
 - **Products with a fixed gender take their article:** “o Claude”, “o
-  Codex”, “o OpenMausBot”, “o Cloud”. Use an article before `{engine}`,
+  Codex”, “o Obot”, “o Cloud”. Use an article before `{engine}`,
   `{app}` or `{provider}` only when every possible value takes it.
   Otherwise, rephrase with `de`: “a conta de {provider}”, “o limite de
   {engine}”.
@@ -129,7 +129,7 @@ logs, developer or CLI errors, emails sent by the control plane, the docs site
 
 ### Grammatical gender of product nouns
 
-Masculine: `o bot`, `o app`, `o Cloud`, `o MausBot Cloud`, `o desktop`, `o
+Masculine: `o bot`, `o app`, `o Cloud`, `o Obot Cloud`, `o desktop`, `o
 navegador`, `o backup`, `o login`, `o webhook`, `o playbook`, `o plugin`, `o
 Marketplace`, `o gatilho`, `o modelo`, `o provedor`, `o plano`, `o
 servidor`.
@@ -160,7 +160,7 @@ English avoids an internal word, the Portuguese avoids it too:
 
 Everyday screens are the key prefixes listed in `everyday-words.test.ts`:
 chat, composer, approvals, sign-in, Today, notifications, the sidebar, the bot
-panel, the Screen panel, MausBot Cloud flows, routines and automations, the
+panel, the Screen panel, Obot Cloud flows, routines and automations, the
 team map, Apps, and the Settings pages that Simple mode shows. On technical
 screens, translate faithfully whatever the English says. For example,
 `servidor` and `VM local` are correct there.
@@ -183,9 +183,9 @@ These stay unchanged in every pt-BR string.
 
 | Name | Why |
 |---|---|
-| OpenMausBot, MausBot | Product names. Never write `OMB` or `T3` (`vocabulary.test.ts`). |
-| MausBot Cloud | Product name. `vocabulary.test.ts` requires it verbatim in every translation whose English contains it. Never write `OpenMausBot Cloud` or `MausBot Pro`. Treat it as masculine: “o MausBot Cloud”. |
-| Cloud (short for MausBot Cloud) | Product name, masculine: “o Cloud”, “no Cloud”. The generic sky-and-servers cloud is `nuvem`: “desktop na nuvem”. |
+| Obot, Obot | Product names. Never write `OMB` or `T3` (`vocabulary.test.ts`). |
+| Obot Cloud | Product name. `vocabulary.test.ts` requires it verbatim in every translation whose English contains it. Never write `Obot Cloud` or `Obot Pro`. Treat it as masculine: “o Obot Cloud”. |
+| Cloud (short for Obot Cloud) | Product name, masculine: “o Cloud”, “no Cloud”. The generic sky-and-servers cloud is `nuvem`: “desktop na nuvem”. |
 | Boat | Name of a third-party provider. Write it only where the English says Boat; the test fails otherwise. |
 | Jev, Maus, Grok Bot | Names of product features or characters. |
 | Claude, Claude Code, ChatGPT, Codex, Grok, Gemini, Cursor, OpenCode, Antigravity, OpenAI, Anthropic, xAI, OpenRouter, Ollama, Groq, Cerebras | Third-party product and company names. |
@@ -223,7 +223,7 @@ the whole catalog in the same change.
 | call (voice) | chamada | “tool call” → “chamada de ferramenta”. Not “ligação”. |
 | chat (the screen) | chat | The chat surface: “no chat”, “Abrir o chat”. A single thread is a `conversa`. |
 | Chief of Staff | chefe de gabinete | Role label: “Chefe de gabinete”; “Make Chief of Staff” → “Tornar chefe de gabinete”. |
-| Cloud (MausBot Cloud) | Cloud | Masculine: “o Cloud”. Generic cloud → `nuvem`. |
+| Cloud (Obot Cloud) | Cloud | Masculine: “o Cloud”. Generic cloud → `nuvem`. |
 | cloud desktop | desktop na nuvem | Never “computador na nuvem”. |
 | company | empresa | Organization → `organização`. |
 | computer | computador | “This computer” (place) → “Este computador”; “this Mac” → “este Mac”. |
@@ -258,7 +258,7 @@ the whole catalog in the same change.
 | preset | predefinição | “preset bot” → “bot predefinido”. Never `modelo`. |
 | preview | prévia | “View” as a button → `Ver`. |
 | private desktop | desktop privado | |
-| Quit (app menu, tray) | Sair do OpenMausBot | The same label on every platform. Menus use sentence case, like the rest of the app. |
+| Quit (app menu, tray) | Sair do Obot | The same label on every platform. Menus use sentence case, like the rest of the app. |
 | remove | remover | Takes something out without destroying it. |
 | retry, try again | Tentar novamente | Use “novamente” in labels and prose. If it would repeat in one sentence, use “de novo” for the first occurrence. |
 | room | grupo | “group chat” → “chat em grupo”. Not `sala`. |
@@ -360,3 +360,4 @@ catch up, `node scripts/generate-locale.mjs pt-br` drafts missing and stale
 keys; translate or review them and accept them as above. Drafts for pt-BR ask
 the model for `IA` and the core terms of this glossary, but still check each
 one against it.
+

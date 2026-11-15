@@ -79,7 +79,7 @@ export function createTailnetShare({ check, allowed = () => true, spawn = spawnC
       answered = (reply) => { clearTimeout(timer); answered = () => {}; resolve(reply); };
       server.told ||= share !== null;
       try {
-        server.proc.postMessage({ type: "openmausbot:tailnet-share", share });
+        server.proc.postMessage({ type: "obot:tailnet-share", share });
       } catch {
         answered(null);
       }
@@ -228,7 +228,7 @@ export function createTailnetShare({ check, allowed = () => true, spawn = spawnC
     },
     /** The server's answer, and its word when Tailscale's interface comes or goes. */
     receive(message) {
-      if (message?.type !== "openmausbot:tailnet-share-state") return false;
+      if (message?.type !== "obot:tailnet-share-state") return false;
       answered(message);
       if (shown.on) shown = { ...shown, origin: message.origin ?? null, problem: message.origin ? null : shown.problem ?? "not-listening" };
       return true;

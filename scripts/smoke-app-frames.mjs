@@ -48,7 +48,7 @@ const PROBE = `<!DOCTYPE html>
   out.preload = typeof window.ogb;
   out.webkitHandlers = typeof (window.webkit && window.webkit.messageHandlers);
   out.androidAppHost = typeof window.appHost;
-  out.helper = typeof (window.mausbot && window.mausbot.send);
+  out.helper = typeof (window.obot && window.obot.send);
   await attempt("fetch", () => Promise.race([fetch("SINK/fetch").then((r) => r.status), timeout(3000)]));
   await attempt("xhr", () => new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -81,7 +81,7 @@ const PROBE = `<!DOCTYPE html>
     navigator.geolocation.getCurrentPosition(() => resolve("position"), (error) => reject(new Error("geolocation " + error.code)), { timeout: 3000 });
   }));
   await attempt("notification", () => Notification.requestPermission());
-  await attempt("sendUnengaged", () => window.mausbot.send("hello from a page nobody clicked"));
+  await attempt("sendUnengaged", () => window.obot.send("hello from a page nobody clicked"));
   await new Promise((resolve) => setTimeout(resolve, 1500));
   const img = document.getElementById("img");
   out.imageLoaded = img.complete && img.naturalWidth > 0;
@@ -324,7 +324,7 @@ async function run() {
   for (const name of ["microphone", "camera", "displayMedia", "geolocation"]) assert.equal(probe[name].ok, false, `rule 8: ${name} (${JSON.stringify(probe[name])})`);
   assert.notEqual(probe.notification.value, "granted", "rule 8: notifications");
   assert.deepEqual(permissionAsks.filter((ask) => ask.granted), [], "rule 8: nothing granted");
-  assert.equal(probe.sendUnengaged.ok, false, "an unengaged mausbot.send is refused");
+  assert.equal(probe.sendUnengaged.ok, false, "an unengaged obot.send is refused");
   assert.deepEqual(calls.filter((call) => call.op === "message"), [], "no message reached the send route");
 
   await js(`window.__mount("pinned", ${JSON.stringify(input.pinnedDoc)})`);

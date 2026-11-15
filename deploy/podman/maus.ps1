@@ -1,15 +1,15 @@
-# Windows/WSL2 entry point. Run setup once, then pass Compose arguments verbatim.
+﻿# Windows/WSL2 entry point. Run setup once, then pass Compose arguments verbatim.
 $ErrorActionPreference = 'Stop'
 if (-not $args.Count -or $args[0] -in @('--help', '-h', 'help')) {
     Write-Output 'Usage: .\deploy\podman\maus.ps1 setup | <compose arguments>'
     Write-Output 'Example: .\deploy\podman\maus.ps1 up -d --build'
-    Write-Output 'Options: OMB_PODMAN_MACHINE (default openmausbot), OMB_PODMAN_ENV_FILE (default .env)'
+    Write-Output 'Options: OMB_PODMAN_MACHINE (default obot), OMB_PODMAN_ENV_FILE (default .env)'
     exit 0
 }
 $podmanCommand = Get-Command podman.exe -ErrorAction SilentlyContinue
 $podman = if ($podmanCommand) { $podmanCommand.Source } else { 'C:\Program Files\RedHat\Podman\podman.exe' }
 if (-not (Test-Path -LiteralPath $podman)) { throw 'Install Podman and WSL2 first; then reopen PowerShell.' }
-$machine = if ($env:OMB_PODMAN_MACHINE) { $env:OMB_PODMAN_MACHINE } else { 'openmausbot' }
+$machine = if ($env:OMB_PODMAN_MACHINE) { $env:OMB_PODMAN_MACHINE } else { 'obot' }
 if ($machine -notmatch '^[a-zA-Z0-9_-]+$') { throw 'Invalid Podman machine name.' }
 if ($PSScriptRoot -notmatch '^([A-Za-z]):\\(.+)$') { throw 'Place the repository on a Windows drive accessible to WSL2.' }
 $linuxProject = '/mnt/' + $Matches[1].ToLower() + '/' + $Matches[2].Replace('\', '/')
@@ -43,3 +43,4 @@ $envFile = if ($env:OMB_PODMAN_ENV_FILE) { $env:OMB_PODMAN_ENV_FILE } else { '.e
 $command = 'cd ' + $quotedProject + ' && PODMAN_COMPOSE_PROVIDER=podman-compose podman compose --env-file ' + (Quote-Posix $envFile) + ' -f compose.yaml ' + (($args | ForEach-Object { Quote-Posix $_ }) -join ' ')
 & $podman machine ssh $machine $command
 exit $LASTEXITCODE
+

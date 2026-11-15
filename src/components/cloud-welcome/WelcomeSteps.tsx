@@ -91,7 +91,7 @@ export function WelcomeDone({ name, bot, team = false, headingRef, onSayHi, onJo
   name: string; bot: Bot | null; headingRef: Ref<HTMLHeadingElement>; onSayHi: () => void; onJob: () => void;
   /** A Team Cloud: its first bot is named, never called anyone's Chief of Staff. */
   team?: boolean;
-  /** The team's People page on MausBot Cloud, for its Owner: the last step is bringing people in. */
+  /** The team's People page on Obot Cloud, for its Owner: the last step is bringing people in. */
   invite?: string | null;
 }) {
   return <section aria-labelledby="cloud-welcome-step" data-welcome-step="done" className="flex flex-col items-start gap-4">

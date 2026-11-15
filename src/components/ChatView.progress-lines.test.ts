@@ -33,7 +33,7 @@ const messages: Message[] = [
   said("answer", "Fathom, Fireflies and Granola are the three to look at.", 29_000, true),
 ].map((message, index, all): Message => ({ ...message, parentId: all[index - 1]?.id }));
 const bot: Bot = {
-  id: "maus", threadId: "maus-thread", name: "MausBot", title: "", description: "", color: "green",
+  id: "maus", threadId: "maus-thread", name: "Obot", title: "", description: "", color: "green",
   notifications: true, unread: false, busy: false, messages, activeLeafId: "answer", modelSelection: { instanceId: "test", model: "m" },
   tasks: [{ threadId: "maus-thread", title: "Thread", createdAt: 1, busy: false, activity: "idle", modelSelection: { instanceId: "test", model: "m" }, approvalMode: "ask" }],
 };

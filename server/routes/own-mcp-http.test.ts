@@ -43,11 +43,11 @@ const post = (kind: string, body: unknown, headers: Record<string, string> = { a
 const agentsHeaders = (settings: Record<string, string>) => ({ authorization: "Bearer turn-capability",
   [AGENTS_ENV_HEADER]: Buffer.from(JSON.stringify(settings)).toString("base64url") });
 
-describe("OpenMausBot's own MCP servers over HTTP", () => {
+describe("Obot's own MCP servers over HTTP", () => {
   it("answers a browser session the way its stdio proxy does, with the turn's capability on every call", async () => {
     const init = await post("browser", { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {} } });
     expect(init.status).toBe(200);
-    expect(await init.json()).toMatchObject({ id: 1, result: { protocolVersion: "2025-06-18", serverInfo: { name: "openmausbot-browser" } } });
+    expect(await init.json()).toMatchObject({ id: 1, result: { protocolVersion: "2025-06-18", serverInfo: { name: "obot-browser" } } });
     const notice = await post("browser", { jsonrpc: "2.0", method: "notifications/initialized" });
     expect([notice.status, await notice.text()]).toEqual([202, ""]);
     expect(await (await post("browser", { jsonrpc: "2.0", id: 2, method: "tools/list" })).json())

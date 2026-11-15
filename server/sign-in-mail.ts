@@ -1,4 +1,4 @@
-// Email sign-in codes sent through the server's own mail server (OMB_SIGNIN_SMTP_URL) instead of the OpenMausBot account
+// Email sign-in codes sent through the server's own mail server (OMB_SIGNIN_SMTP_URL) instead of the Obot account
 // service. A code is 8 digits, works once for ten minutes and for five tries, and only its hash is kept, in memory.
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
 
@@ -77,8 +77,8 @@ export function createSignInMail(options: { url: string; from?: string; now?: ()
       pending.set(email, { hash: digest(code), sentAt: now(), tries: 0 });
       try {
         await (await transport).sendMail({
-          from: sender, to: email, subject: target ? `Your MausBot sign-in code for ${target}` : "Your MausBot sign-in code",
-          text: `Your code to sign in to ${target ?? "MausBot"} is\n\n    ${code.slice(0, 4)} ${code.slice(4)}\n\nIt works once, for the next ten minutes.\n`
+          from: sender, to: email, subject: target ? `Your Obot sign-in code for ${target}` : "Your Obot sign-in code",
+          text: `Your code to sign in to ${target ?? "Obot"} is\n\n    ${code.slice(0, 4)} ${code.slice(4)}\n\nIt works once, for the next ten minutes.\n`
             + "If you did not ask to sign in, ignore this email: nobody gets in without the code.\n",
         });
       } catch (error) {

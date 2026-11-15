@@ -1,6 +1,6 @@
-# Included app hosting
+﻿# Included app hosting
 
-A Cloud plan includes hosting for the sites and simple apps a bot builds, a number of apps per plan, on MausBot's
+A Cloud plan includes hosting for the sites and simple apps a bot builds, a number of apps per plan, on Obot's
 hosting account. The key to that account stays on the Admin. A Cloud home gets the Admin's relay address and a token
 of its own (`OMB_CLOUD_HOSTING_URL` and `OMB_CLOUD_HOSTING_TOKEN`), held in the server's memory and never given to a
 bot, the bot box, a client, a record or a log. A bot publishes with the `publish_app` tool: the server reads the folder
@@ -51,7 +51,7 @@ pnpm exec vitest run server/host/published-apps-included.test.ts server/routes/p
   gives. A record copied into another bot's folder claims nothing.
 - The page's count is the whole Cloud's, so a team's. It is absent where there is no included hosting, where the plan
   includes none and none is published, and while the relay can't be reached (the other apps are still listed).
-- An app MausBot took down, and one that was never live, are listed as such with no address offered as live.
+- An app Obot took down, and one that was never live, are listed as such with no address offered as live.
 - An app whose project folder is gone is shown to a viewer who sees everything on a person's own Cloud, so its place
   can be freed. On a Team Cloud it is shown to nobody, an Admin included: it belongs to no conversation.
 - On a Team Cloud the same rules as every other published app: a member sees the apps from their own chats and the
@@ -102,3 +102,4 @@ Not proven here: the real Admin's relay and the real Netlify (the stand-in is wr
 relay's follow-up that makes every publish public at once is covered by both of the stand-in's modes); a Cloud home
 started by its launcher with the token on its secrets pipe; a Team Cloud in the renderer; and a real engine choosing
 to follow the skill's rule to ask before publishing.
+

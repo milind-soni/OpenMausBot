@@ -3,8 +3,8 @@
 import { EXAMPLE_ADDRESS, isLoopbackHost, parseServerInput, serverTransport } from "./server-address.mjs";
 import { inTailscaleRange, isTailnetName } from "./tailnet.mjs";
 
-const DESCRIPTOR = "/.well-known/openmausbot/environment";
-/** A MausBot desktop app's Remote access (companion/src/routes.ts) refuses the descriptor with this until a phone pairs. */
+const DESCRIPTOR = "/.well-known/obot/environment";
+/** A Obot desktop app's Remote access (companion/src/routes.ts) refuses the descriptor with this until a phone pairs. */
 const DESKTOP_APP_REFUSAL = /^pair this device from Remote access settings/;
 
 /** The sentence for each problem, in the window's catalog and main's alike ({host}, {example} filled in). */
@@ -21,7 +21,7 @@ export const CONNECT_PROBLEM_KEYS = Object.freeze({
   unreachable: "native.connect.unreachable",
   dns: "native.connect.dns",
   certificate: "native.connect.certificate",
-  notMausBot: "native.connect.notMausBot",
+  notObot: "native.connect.notObot",
   desktopApp: "native.connect.desktopApp",
   desktopAppTailnet: "native.connect.desktopAppTailnet",
   loopback: "native.connect.loopback",
@@ -98,10 +98,10 @@ async function describe(origin, fetchImpl, timeoutMs) {
   } catch (error) {
     return { ok: false, kind: failureKind(error) };
   }
-  if (response.status === 401) return { ok: false, kind: await isDesktopAppRefusal(response) ? "desktopApp" : "notMausBot" };
-  if (!response.ok) return { ok: false, kind: "notMausBot" };
+  if (response.status === 401) return { ok: false, kind: await isDesktopAppRefusal(response) ? "desktopApp" : "notObot" };
+  if (!response.ok) return { ok: false, kind: "notObot" };
   const body = await response.json().catch(() => null);
-  if (typeof body?.environmentId !== "string" || !body.environmentId) return { ok: false, kind: "notMausBot" };
+  if (typeof body?.environmentId !== "string" || !body.environmentId) return { ok: false, kind: "notObot" };
   return { ok: true, environmentId: body.environmentId, label: typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 60) : new URL(origin).host,
     version: typeof body.version === "string" ? body.version.slice(0, 32) : null };
 }
@@ -109,7 +109,7 @@ async function describe(origin, fetchImpl, timeoutMs) {
 /**
  * Reads the sheet's fields and finds the server: `{ outcome: "found", origin, label, version, transport, code, credential }`,
  * or `{ outcome: "problem", problem, host?, code? }` with one of parseServerInput's problems or: unreachable, dns,
- * certificate, notMausBot, desktopApp (another computer's MausBot desktop app, which can't be a server), loopback (an address on this computer that is this app's own workspace, or nothing at all).
+ * certificate, notObot, desktopApp (another computer's Obot desktop app, which can't be a server), loopback (an address on this computer that is this app's own workspace, or nothing at all).
  * `ownEnvironmentId()`: this app's own local workspace, so a "this computer" link copied off a server is caught.
  */
 export async function probeServer({ address, code = "", fetch: fetchImpl, ownEnvironmentId = async () => null, timeoutMs = 6_000, platform = process.platform, tailnet = () => true }) {
@@ -131,7 +131,7 @@ export async function probeServer({ address, code = "", fetch: fetchImpl, ownEnv
       if (failure?.problem === "desktopApp") continue;
       // A bare 100.64/10 address counts only on a computer that is on a tailnet: carrier NAT and other VPNs use that range.
       const bare = hostname.replace(/^\[|\]$/g, "");
-      const tailnetHost = (isTailnetName(bare) || (inTailscaleRange(bare) && tailnet())) && found.kind !== "certificate" && found.kind !== "notMausBot";
+      const tailnetHost = (isTailnetName(bare) || (inTailscaleRange(bare) && tailnet())) && found.kind !== "certificate" && found.kind !== "notObot";
       const problem = loopback ? { problem: "loopback", host } : tailnetHost ? { problem: tailnetProblem(found.kind, platform, tailnet()), host } : blockedOnMac ? { problem: "localNetwork", host }
         : { problem: kind === "refused" || kind === "timeout" ? "unreachable" : kind, host, ...(kind === "refused" || kind === "timeout" ? { reason: kind } : {}) };
       // A later guess at a tailnet name that just didn't answer says less than whatever an earlier one said.

@@ -1,4 +1,4 @@
-// A stub harness, so a test can get exactly the pathological body it needs.
+﻿// A stub harness, so a test can get exactly the pathological body it needs.
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -50,8 +50,8 @@ const device = async (
 
 beforeAll(async () => {
   harness = createServer((req, res) => {
-    companionMarker = String(req.headers["x-openmausbot-companion"] ?? "");
-    companionDevice = String(req.headers["x-openmausbot-companion-device"] ?? "");
+    companionMarker = String(req.headers["x-obot-companion"] ?? "");
+    companionDevice = String(req.headers["x-obot-companion-device"] ?? "");
     companionRange = String(req.headers.range ?? "");
     respond(res);
   });
@@ -100,7 +100,7 @@ describe("preparing a harness response for a device", () => {
       for (const path of ["computer/join", "computer/screenshot", "local-computer/screenshot", "local-computer/join"]) {
         const { status, text } = await device(`/api/bots/b1/${path}`, "POST");
         expect(status).toBe(403);
-        expect(text).toContain("enable it in OpenMausBot");
+        expect(text).toContain("enable it in Obot");
         expect(text).toContain("Settings → Remote access");
       }
     } finally {
@@ -128,7 +128,7 @@ describe("preparing a harness response for a device", () => {
     const response = await fetch(`http://127.0.0.1:${sidecarPort}/api/bots`, {
       headers: {
         authorization: `Bearer ${TOKEN}`,
-        "x-openmausbot-companion-device": "another-phone",
+        "x-obot-companion-device": "another-phone",
       },
     });
     expect(response.status).toBe(200);
@@ -341,3 +341,4 @@ describe("preparing a harness response for a device", () => {
     expect(response.status).toBe(200);
   });
 });
+

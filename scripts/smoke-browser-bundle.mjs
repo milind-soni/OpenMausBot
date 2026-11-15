@@ -276,7 +276,7 @@ try {
   assert.equal(engineVersion, `agent-browser ${engineVersionExpected}`, `Unexpected engine version: ${engineVersion}`);
   assert(chromeVersion.includes(spec.chrome.version), `Unexpected Chromium version: ${chromeVersion}`);
 
-  const title = `OpenMausBot bundled browser ${randomBytes(6).toString("hex")}`;
+  const title = `Obot bundled browser ${randomBytes(6).toString("hex")}`;
   server = createServer((_request, response) => {
     fixtureRequests += 1;
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });

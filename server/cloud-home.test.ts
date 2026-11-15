@@ -126,7 +126,7 @@ it("offers the built-in browser and cloud computers, never this computer or a Lo
 
 it("refuses the places it never offers with what is true there, not a setup step", () => {
   const local = cloudHomePlaceRefusal("local")!, vm = cloudHomePlaceRefusal("vm")!;
-  expect(local).toBe("This computer isn't a place in the Cloud. Set Works on to Auto, Cloud desktop or Browser; your own computer is reached while OpenMausBot is open on it.");
+  expect(local).toBe("This computer isn't a place in the Cloud. Set Works on to Auto, Cloud desktop or Browser; your own computer is reached while Obot is open on it.");
   expect(vm).toBe("Cloud bots can't use a private desktop. Set Works on to Auto, Cloud desktop or Browser.");
   for (const text of [local, vm]) {
     expect(text).not.toMatch(/configure|Computer panel|install|set (?:it|one) up/i);
@@ -142,7 +142,7 @@ function fixture() {
   const sessions = new SessionRegistry({ file: join(root, "sessions.json"), now: () => now });
   const pairing = createCloudPairing({ secret, sessions, now: () => now });
   let counter = 0;
-  const sign = (body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 }), options: { key?: string; at?: number; nonce?: string } = {}) => {
+  const sign = (body = JSON.stringify({ label: "Obot app (Cloud)", ttlSeconds: 300 }), options: { key?: string; at?: number; nonce?: string } = {}) => {
     const timestamp = String(Math.floor((options.at ?? now) / 1000)), nonce = options.nonce ?? `nonce-${String(++counter).padStart(12, "0")}`;
     return { timestamp, nonce, signature: `v1=${cloudPairingSignature(options.key ?? secret, timestamp, nonce, body)}`, body: Buffer.from(body) };
   };
@@ -160,7 +160,7 @@ it("opens one ordinary pairing window for a correctly signed request", () => {
   expect(granted.body.credential).toMatch(/^omb_pair_[A-Za-z0-9_-]{43}$/);
   expect(granted.body.expiresAt).toBe(f.now() + 300_000);
   const paired = f.exchange(granted.body.code as string);
-  expect(paired).toMatchObject({ ok: true, session: { label: "OpenMausBot app (Cloud)", scopes: ["admin", "client"] } });
+  expect(paired).toMatchObject({ ok: true, session: { label: "Obot app (Cloud)", scopes: ["admin", "client"] } });
 });
 
 it("matches the Admin's signature byte for byte", () => {
@@ -182,7 +182,7 @@ it("refuses a wrong key, a tampered request or a malformed signature, and counts
   const good = f.sign();
   const variants = [
     f.sign(undefined, { key: "W".repeat(43) }),
-    { ...good, body: Buffer.from(JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 600 })) },
+    { ...good, body: Buffer.from(JSON.stringify({ label: "Obot app (Cloud)", ttlSeconds: 600 })) },
     { ...good, nonce: "nonce-tampered-000" },
     { ...good, timestamp: String(Number(good.timestamp) + 1) },
     { ...good, signature: good.signature.slice(3) },
@@ -235,7 +235,7 @@ it("keeps every window single use and short lived, capping what the Admin asks f
   expect(f.exchange(long.body.code as string).ok).toBe(false);
   const plain = f.mint(f.sign("{}"));
   expect(plain.body.expiresAt).toBe(f.now() + 300_000);
-  expect(f.exchange(plain.body.code as string)).toMatchObject({ ok: true, session: { label: "MausBot Cloud" } });
+  expect(f.exchange(plain.body.code as string)).toMatchObject({ ok: true, session: { label: "Obot Cloud" } });
 });
 
 it("opens a browser sign-in only a browser redeems, by credential alone, for at most two minutes", () => {
@@ -310,8 +310,8 @@ it("binds a fresh volume to its machine and refuses anyone else's data", () => {
 it("a new home on a kept volume clears the data-directory lease the previous machine left, once the volume is confirmed its own, and never this machine's or another Cloud's (2026-10-23)", () => {
   const home = directory(), dataDir = cloudHomeDataDir({}, home);
   // The image runs on Linux, so the server is given a POSIX path; here only where it sits under the home is the point.
-  expect(relative(home, dataDir)).toBe(".openmausbot");
-  expect(cloudHomeDataDir({}, "/data")).toBe("/data/.openmausbot");
+  expect(relative(home, dataDir)).toBe(".obot");
+  expect(cloudHomeDataDir({}, "/data")).toBe("/data/.obot");
   expect(cloudHomeDataDir({ OMB_DATA_DIR: "/elsewhere" }, home)).toBe("/elsewhere");
   mkdirSync(join(home, "lost+found"));
   const locked: string[] = [];
@@ -319,7 +319,7 @@ it("a new home on a kept volume clears the data-directory lease the previous mac
   expect(prepareCloudHomeData(home, dataDir, "home-7f3k2", lock)).toEqual({ volume: "new", cleared: [] });
   expect(locked).toEqual([home]);
   // The lease the home destroyed mid-boot left (its hostname is Fly's machine id), and the previous machine's own pid.
-  const lease = join(dataDir, "openmausbot-server.lease");
+  const lease = join(dataDir, "obot-server.lease");
   mkdirSync(dataDir, { recursive: true });
   const left = (host: string) => writeFileSync(lease, `${JSON.stringify({ version: 1, pid: 613, host, token: "0f5e6c4a-1b2c-4d3e-8f9a-0b1c2d3e4f5a", createdAt: 1, boot: "boot-of-the-old-machine", uptime: 44_000 })}\n`);
   left("d8d9e0f1a2b3c4");
@@ -327,7 +327,7 @@ it("a new home on a kept volume clears the data-directory lease the previous mac
   expect(() => prepareCloudHomeData(home, dataDir, "home-other", lock)).toThrow(/another Cloud machine/);
   expect(readFileSync(lease, "utf8")).toContain("d8d9e0f1a2b3c4");
   // A volume another live home holds: refused before the volume is even checked.
-  const held = () => { throw new Error("Another MausBot home is already running on this volume. No data was changed."); };
+  const held = () => { throw new Error("Another Obot home is already running on this volume. No data was changed."); };
   expect(() => prepareCloudHomeData(home, dataDir, "home-7f3k2", held)).toThrow(/already running on this volume/);
   expect(readFileSync(lease, "utf8")).toContain("d8d9e0f1a2b3c4");
   expect(prepareCloudHomeData(home, dataDir, "home-7f3k2", lock)).toEqual({ volume: "existing", cleared: [{ path: lease, host: "d8d9e0f1a2b3c4", pid: 613 }] });
@@ -342,7 +342,7 @@ it("holds its volume for as long as it lives, and says plainly why it will not s
   const home = directory();
   const calls: number[] = [];
   const answer = (status: number | null, extra: { error?: Error; stderr?: string } = {}) => (fd: number) => { calls.push(fd); return { status, ...extra }; };
-  expect(() => holdVolume(home, answer(75))).toThrow("Another MausBot home is already running on this volume. No data was changed.");
+  expect(() => holdVolume(home, answer(75))).toThrow("Another Obot home is already running on this volume. No data was changed.");
   expect(() => holdVolume(home, answer(null, { error: new Error("spawnSync /usr/bin/flock ENOENT") }))).toThrow(/could not lock its volume \(spawnSync \/usr\/bin\/flock ENOENT\)/);
   expect(() => holdVolume(home, answer(1, { stderr: "flock: 3: Bad file descriptor\n" }))).toThrow(/could not lock its volume \(flock: 3: Bad file descriptor\)/);
   holdVolume(home, answer(0));
@@ -361,7 +361,7 @@ it.skipIf(!existsSync("/usr/bin/flock"))("a second home on a volume a live home 
       holder.stdout.on("data", (chunk: Buffer) => { if (chunk.toString().includes("held")) resolve(); });
       holder.once("exit", (code) => reject(new Error(`the holder exited ${code}`)));
     });
-    expect(() => holdVolume(home)).toThrow("Another MausBot home is already running on this volume. No data was changed.");
+    expect(() => holdVolume(home)).toThrow("Another Obot home is already running on this volume. No data was changed.");
   } finally {
     holder.kill("SIGKILL");
   }
@@ -390,7 +390,7 @@ it("gives the edge only its routing name and the server the contract, never a ga
     OMB_CLOUD_AI_TOKEN: `omb_ai_${"a".repeat(43)}` };
   const config = cloudHomeConfiguration(withGateway())!;
   const { server, edge, secrets } = cloudHomeChildEnvironments(config, { ...withGateway(), ...relay, PATH: "/usr/bin" }, "/data");
-  expect(server).toMatchObject({ HOME: "/data", OMB_DATA_DIR: "/data/.openmausbot", NODE_COMPILE_CACHE: "/data/.openmausbot/cache/node-compile", OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800",
+  expect(server).toMatchObject({ HOME: "/data", OMB_DATA_DIR: "/data/.obot", NODE_COMPILE_CACHE: "/data/.obot/cache/node-compile", OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800",
     OMB_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_WEBHOOK_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_CLOUD_SECRETS_FD: "3" });
   for (const key of CLOUD_IGNORED_KEYS) expect(server).not.toHaveProperty(key);
   // The bot box switch reaches the server; an unknown name does not.
@@ -733,14 +733,14 @@ it("reads a capability bit the way the kernel writes it", () => {
 });
 
 it("takes an own server's secrets from the root-only file the connector mounts, and only the secrets it knows", () => {
-  const file = "/run/mausbot/secrets.json";
+  const file = "/run/obot/secrets.json";
   const fs = (overrides: { file?: { uid: number; mode: number; symlink?: boolean }; dir?: { uid: number; mode: number }; text?: string; exists?: boolean } = {}) => ({
     exists: () => overrides.exists ?? true,
     lstat: () => {
       const entry = overrides.file ?? { uid: 0, mode: 0o100400 };
       return { ...entry, isFile: () => !entry.symlink, isSymbolicLink: () => Boolean(entry.symlink) };
     },
-    stat: (path: string) => (path === file ? overrides.file ?? { uid: 0, mode: 0o100400 } : path === "/run/mausbot" ? overrides.dir ?? { uid: 0, mode: 0o40700 } : { uid: 0, mode: 0o40755 }),
+    stat: (path: string) => (path === file ? overrides.file ?? { uid: 0, mode: 0o100400 } : path === "/run/obot" ? overrides.dir ?? { uid: 0, mode: 0o40700 } : { uid: 0, mode: 0o40755 }),
     read: () => overrides.text ?? JSON.stringify({
       OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}`, OMB_CLOUD_TUNNEL_TOKEN: "t".repeat(40),
       OMB_PUBLIC_URL: "https://elsewhere.example", PATH: "/tmp",
@@ -750,7 +750,7 @@ it("takes an own server's secrets from the root-only file the connector mounts, 
   expect(readCloudSecretsFile("/data", file, fs({ exists: false }))).toEqual({});
   expect(() => readCloudSecretsFile("/data", file, fs({ file: { uid: 0, mode: 0o100644 } }))).toThrow("readable by others than root");
   expect(() => readCloudSecretsFile("/data", file, fs({ file: { uid: 1001, mode: 0o100400 } }))).toThrow(`${file} is not root's`);
-  expect(() => readCloudSecretsFile("/data", file, fs({ dir: { uid: 0, mode: 0o40777 } }))).toThrow("/run/mausbot is writable by others than root");
+  expect(() => readCloudSecretsFile("/data", file, fs({ dir: { uid: 0, mode: 0o40777 } }))).toThrow("/run/obot is writable by others than root");
   expect(() => readCloudSecretsFile("/data", file, fs({ file: { uid: 0, mode: 0o120777, symlink: true } }))).toThrow("is not a plain file");
   expect(() => readCloudSecretsFile("/data", file, fs({ text: "[1]" }))).toThrow("is not a JSON object");
   expect(() => readCloudSecretsFile("/data", "/data/secrets.json", fs())).toThrow("is on the volume");
@@ -782,7 +782,7 @@ it("a Team Cloud's pairing binds the Admin's member claim to the session it open
   const pairing = createCloudPairing({ secret, sessions, team: { id: "team-1", name: "Acme" }, now: () => now });
   let counter = 0;
   const mint = (claims: Record<string, unknown>) => {
-    const body = JSON.stringify({ label: "OpenMausBot app (Team Cloud)", ttlSeconds: 300, ...claims });
+    const body = JSON.stringify({ label: "Obot app (Team Cloud)", ttlSeconds: 300, ...claims });
     const timestamp = String(Math.floor(now / 1000)), nonce = `nonce-${String(++counter).padStart(12, "0")}`;
     return pairing.handle({ timestamp, nonce, signature: `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}`, body: Buffer.from(body), source: "203.0.113.9" });
   };
@@ -821,7 +821,7 @@ it("a Team Cloud pairing at a new role ends that person's sessions, phones and w
   const pairing = createCloudPairing({ secret, sessions, team: { id: "team-1", name: "Acme" }, now: () => now });
   let counter = 0;
   const mint = (email: string, role: string) => {
-    const body = JSON.stringify({ label: "OpenMausBot app (Team Cloud)", ttlSeconds: 300, member: { email, role } });
+    const body = JSON.stringify({ label: "Obot app (Team Cloud)", ttlSeconds: 300, member: { email, role } });
     const timestamp = String(Math.floor(now / 1000)), nonce = `nonce-${String(++counter).padStart(12, "0")}`;
     return pairing.handle({ timestamp, nonce, signature: `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}`, body: Buffer.from(body), source: "203.0.113.9" });
   };

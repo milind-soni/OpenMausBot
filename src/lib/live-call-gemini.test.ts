@@ -162,11 +162,11 @@ describe("a Gemini Live session", () => {
   it("passes the bot's updates on, answering only those meant to be heard", async () => {
     const t = harness();
     const session = await t.connect();
-    session.sendUserMessage("[OpenMausBot] two emails", { audio: true });
-    session.sendUserMessage("[OpenMausBot] still looking", { audio: false });
+    session.sendUserMessage("[Obot] two emails", { audio: true });
+    session.sendUserMessage("[Obot] still looking", { audio: false });
     expect(t.socket().sent.slice(-2)).toEqual([
-      { clientContent: { turns: [{ role: "user", parts: [{ text: "[OpenMausBot] two emails" }] }], turnComplete: true } },
-      { clientContent: { turns: [{ role: "user", parts: [{ text: "[OpenMausBot] still looking" }] }], turnComplete: false } },
+      { clientContent: { turns: [{ role: "user", parts: [{ text: "[Obot] two emails" }] }], turnComplete: true } },
+      { clientContent: { turns: [{ role: "user", parts: [{ text: "[Obot] still looking" }] }], turnComplete: false } },
     ]);
   });
 
@@ -174,12 +174,12 @@ describe("a Gemini Live session", () => {
     const t = harness();
     const session = await t.connect();
     t.socket().receive({ serverContent: { modelTurn: { parts: [{ inlineData: { mimeType: "audio/pcm", data: AUDIO } }] } } });
-    session.sendUserMessage("[OpenMausBot] two emails", { audio: true });
+    session.sendUserMessage("[Obot] two emails", { audio: true });
     expect(t.socket().sent.at(-1)).not.toHaveProperty("clientContent");
     t.socket().receive({ serverContent: { turnComplete: true } });
     expect(t.socket().sent.at(-1)).not.toHaveProperty("clientContent");
     t.audio().finish();
-    expect(t.socket().sent.at(-1)).toEqual({ clientContent: { turns: [{ role: "user", parts: [{ text: "[OpenMausBot] two emails" }] }], turnComplete: true } });
+    expect(t.socket().sent.at(-1)).toEqual({ clientContent: { turns: [{ role: "user", parts: [{ text: "[Obot] two emails" }] }], turnComplete: true } });
   });
 
   it("sends no microphone audio while muted", async () => {
@@ -335,7 +335,7 @@ describe("a Gemini Live session", () => {
     t.socket().drop(1000);
     answer("On it.");
     await settle();
-    session.sendUserMessage("[OpenMausBot] done", { audio: true });
+    session.sendUserMessage("[Obot] done", { audio: true });
     t.socket().open();
     expect(t.socket().sent).toHaveLength(1);
     t.socket().receive({ setupComplete: {} });
@@ -359,7 +359,7 @@ describe("a Gemini Live session", () => {
     answer("On it.");
     await settle();
     expect(t.socket().sent.slice(1)).toEqual([
-      { clientContent: { turns: [{ role: "user", parts: [{ text: "[OpenMausBot] On it." }] }], turnComplete: true } },
+      { clientContent: { turns: [{ role: "user", parts: [{ text: "[Obot] On it." }] }], turnComplete: true } },
     ]);
   });
 

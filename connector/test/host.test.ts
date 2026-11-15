@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 describe("the server's facts and checks", () => {
-  it("reports what MausBot needs to know, from Docker's own report and the host's /proc", () => {
+  it("reports what Obot needs to know, from Docker's own report and the host's /proc", () => {
     expect(hostFacts(info, reader())).toEqual({ os: "Ubuntu 24.04.3 LTS", kernel: "6.8.0-1021-azure", arch: "x86_64", cpus: 4, memMb: 16384, diskGb: 120, docker: "28.0.4", apparmor: true, userns: true });
     expect(hostHealth(info, reader(), { clockSkewS: 2, box: { ok: true } })).toMatchObject({ diskTotalGb: 200, memAvailableMb: 8000, load1: 0.42, uptimeS: 12345, clockSkewS: 2 });
     expect(failing(hostChecks(info, reader(), { clockSkewS: 2, box: { ok: true } }))).toEqual([]);
@@ -38,8 +38,8 @@ describe("the server's facts and checks", () => {
 
   it("says what is wrong in plain words, with the exact fix, for each check that fails", () => {
     const fixes = (value: DockerInfo, read: HostReader, extra = { clockSkewS: 0 as number | null, box: { ok: true } as { ok: boolean; fix?: string } }) => failing(hostChecks(value, read, extra));
-    expect(fixes({ ...info, Architecture: "aarch64" }, reader())).toEqual([{ id: "arch", ok: false, fix: "This server has an ARM processor. MausBot runs on Intel or AMD (x86-64) servers for now. Please pick an x86-64 server." }]);
-    expect(fixes({ ...info, ServerVersion: "20.10.24" }, reader())[0]).toEqual({ id: "docker", ok: false, fix: "Docker 20.10.24 is too old; MausBot needs Docker 24 or newer. Run: curl -fsSL https://get.docker.com | sudo sh" });
+    expect(fixes({ ...info, Architecture: "aarch64" }, reader())).toEqual([{ id: "arch", ok: false, fix: "This server has an ARM processor. Obot runs on Intel or AMD (x86-64) servers for now. Please pick an x86-64 server." }]);
+    expect(fixes({ ...info, ServerVersion: "20.10.24" }, reader())[0]).toEqual({ id: "docker", ok: false, fix: "Docker 20.10.24 is too old; Obot needs Docker 24 or newer. Run: curl -fsSL https://get.docker.com | sudo sh" });
     expect(fixes({ ...info, SecurityOptions: [...info.SecurityOptions!, "name=rootless"] }, reader())[0].id).toBe("rootless");
     expect(fixes({ ...info, SecurityOptions: ["name=seccomp,profile=builtin"] }, reader())[0]).toMatchObject({ id: "apparmor", fix: expect.stringContaining("sudo apt-get install -y apparmor") });
     expect(fixes(info, reader({ installedSeccomp: () => null }))[0]).toEqual({ id: "profiles", ok: false, fix: "The bot box's security profiles on this server are missing or out of date. Run the install command again." });
@@ -47,7 +47,7 @@ describe("the server's facts and checks", () => {
     expect(fixes(info, reader({ procs: { "/proc/sys/kernel/unprivileged_userns_clone": "0\n" } }))[0]).toMatchObject({ id: "userns", fix: expect.stringContaining("kernel.unprivileged_userns_clone=1") });
     expect(fixes(info, reader({ procs: { "/proc/sys/user/max_user_namespaces": "0" } }))[0].id).toBe("userns");
     expect(fixes(info, reader(), { clockSkewS: 0, box: { ok: false, fix: "the probe's words" } })).toEqual([{ id: "box", ok: false, fix: "the probe's words" }]);
-    expect(fixes(info, reader({ disk: () => ({ free: 12e9, total: 200e9 }) }))).toEqual([{ id: "disk", ok: false, fix: "Your server has only 12 GB free. MausBot needs at least 20 GB: free some space or add a disk." }]);
+    expect(fixes(info, reader({ disk: () => ({ free: 12e9, total: 200e9 }) }))).toEqual([{ id: "disk", ok: false, fix: "Your server has only 12 GB free. Obot needs at least 20 GB: free some space or add a disk." }]);
     expect(fixes(info, reader({ disk: () => ({ free: 25e9, total: 200e9 }) }))).toEqual([{ id: "disk", ok: true, fix: "Your server's disk is 88% full. Free some space or add a disk before it fills up." }]);
     expect(fixes({ ...info, MemTotal: 2 * 1073741824 }, reader())).toEqual([{ id: "memory", ok: true, fix: "This server has 2 GB of memory; bots will be slow or stop. We suggest at least 4 GB, and 32 GB for a team of five." }]);
     expect(fixes(info, reader(), { clockSkewS: -700, box: { ok: true } })).toEqual([{ id: "clock", ok: false, fix: "Your server's clock is 12 minutes off, so it can't check our messages. Run: sudo timedatectl set-ntp true" }]);
@@ -58,7 +58,7 @@ describe("the server's facts and checks", () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-connector-probe-"));
     dirs.push(dir);
     const docker = new FakeDocker(dir);
-    const image = `ghcr.io/milind-soni/mausbot-connector@sha256:${"1".repeat(64)}`;
+    const image = `ghcr.io/alnatourm/obot-connector@sha256:${"1".repeat(64)}`;
     docker.publish(image, null);
     await docker.pull(image);
     expect(await probeBox(docker, image, "{}")).toEqual({ ok: true });
@@ -66,7 +66,7 @@ describe("the server's facts and checks", () => {
     docker.probe = { code: 1, output: "bwrap: Failed to make / slave: Permission denied\n" };
     expect(await probeBox(docker, image, "{}")).toEqual({ ok: false, fix: "Our bots' safety box can't start on this server yet: its AppArmor profile is not loaded. Run the install command again to repair it." });
     expect([...docker.containers.keys()]).toEqual([]);
-    const created = docker.calls.filter((call) => call.startsWith("create mausbot-probe-"));
+    const created = docker.calls.filter((call) => call.startsWith("create obot-probe-"));
     expect(created).toHaveLength(2);
     expect(boxProbeFix("bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces.")).toContain("its seccomp profile was not applied");
     expect(boxProbeFix("bwrap: Can't mount proc on /newroot/proc: Operation not permitted")).toContain("Docker here is too old");
@@ -101,7 +101,7 @@ describe("speaking to Docker", () => {
 
   it("pulls by digest, and reads a failure Docker reports inside a 200 stream", () => {
     const digest = `sha256:${"a".repeat(64)}`;
-    expect(pullParams(`ghcr.io/milind-soni/openmausbot-cloud-home@${digest}`)).toEqual({ fromImage: "ghcr.io/milind-soni/openmausbot-cloud-home", tag: digest });
+    expect(pullParams(`ghcr.io/alnatourm/obot-cloud-home@${digest}`)).toEqual({ fromImage: "ghcr.io/alnatourm/obot-cloud-home", tag: digest });
     expect(pullParams("localhost:5000/x:tag")).toEqual({ fromImage: "localhost:5000/x", tag: "tag" });
     expect(pullParams("localhost:5000/x")).toEqual({ fromImage: "localhost:5000/x", tag: "latest" });
     expect(pullFailure('{"status":"Pulling fs layer"}\n{"errorDetail":{"message":"manifest unknown"},"error":"manifest unknown"}\n')).toBe("manifest unknown");
@@ -120,3 +120,4 @@ describe("speaking to Docker", () => {
     expect(demuxLogs(Buffer.alloc(3))).toBe("");
   });
 });
+

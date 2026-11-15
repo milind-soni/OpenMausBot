@@ -20,7 +20,7 @@ function agentsMcpEntry(): McpEntry | null {
     const config = JSON.parse(
       readFileSync(join(home, ".gemini", "config", "mcp_config.json"), "utf8"),
     );
-    const entry = config.mcpServers?.["openmausbot-agents"];
+    const entry = config.mcpServers?.["obot-agents"];
     if (!entry?.command) return null;
     return {
       command: String(entry.command),
@@ -110,7 +110,7 @@ function driveMcp(
       params: {
         protocolVersion: "2024-11-05",
         capabilities: {},
-        clientInfo: { name: "openmausbot-fake-antigravity", version: "1.0.0" },
+        clientInfo: { name: "obot-fake-antigravity", version: "1.0.0" },
       },
     });
   });

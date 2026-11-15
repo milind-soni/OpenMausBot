@@ -39,7 +39,7 @@ export async function found(h, { manual = false, version = "2.0.0" } = {}) {
   await h.coordinator.check(manual);
 }
 
-export async function downloadInto(h, files = ["/tmp/OpenMausBot-2.0.0-amd64.deb"]) {
+export async function downloadInto(h, files = ["/tmp/Obot-2.0.0-amd64.deb"]) {
   h.updater.downloadUpdate = () => {
     h.updater.emit("update-downloaded", { version: "2.0.0" });
     return Promise.resolve(files);

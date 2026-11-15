@@ -1,6 +1,6 @@
 // The tab strip and address bar above a bot's browser. The address bar follows pingdotgg/t3code@00cdceb1
 // apps/web/src/components/preview/PreviewChromeRow.tsx, MIT License, Copyright (c) 2026 T3 Tools Inc. (full text in
-// third_party/t3-code/LICENSE); modified: OpenMausBot's tabs, control pill and profile button.
+// third_party/t3-code/LICENSE); modified: Obot's tabs, control pill and profile button.
 import { AppWindow, ArrowLeft, ArrowRight, Globe, Hand, Loader2, Maximize, Minimize, Plus, RotateCw, Shrink, UserRound, X } from "lucide-react";
 import { forwardRef, useState, type ReactNode } from "react";
 

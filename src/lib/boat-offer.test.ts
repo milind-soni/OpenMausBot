@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { BOAT_OFFER, boatClaimMailto, boatOfferRuns } from "./boat-offer";
 
-const SUBJECT = "MausBot introduced me: $50 Boat credit";
-const BODY = "Hi Boat team,\n\nMausBot introduced me to Boat. I'm on the $___ plan.\nMy Boat account email: ___\n\nThanks!";
+const SUBJECT = "Obot introduced me: $50 Boat credit";
+const BODY = "Hi Boat team,\n\nObot introduced me to Boat. I'm on the $___ plan.\nMy Boat account email: ___\n\nThanks!";
 
 describe("Boat's credit offer", () => {
   it("goes to boat.dev and claims at Boat's billing address, with no end date until Boat names one", () => {
@@ -14,8 +14,8 @@ describe("Boat's credit offer", () => {
   it("drafts the claim to that address with the subject and body Boat asked for, for the person to send", () => {
     const mailto = boatClaimMailto();
     expect(mailto).toBe("mailto:support@ascii.dev"
-      + "?subject=MausBot%20introduced%20me%3A%20%2450%20Boat%20credit"
-      + "&body=Hi%20Boat%20team%2C%0D%0A%0D%0AMausBot%20introduced%20me%20to%20Boat.%20I'm%20on%20the%20%24___%20plan.%0D%0AMy%20Boat%20account%20email%3A%20___%0D%0A%0D%0AThanks!");
+      + "?subject=Obot%20introduced%20me%3A%20%2450%20Boat%20credit"
+      + "&body=Hi%20Boat%20team%2C%0D%0A%0D%0AObot%20introduced%20me%20to%20Boat.%20I'm%20on%20the%20%24___%20plan.%0D%0AMy%20Boat%20account%20email%3A%20___%0D%0A%0D%0AThanks!");
     const url = new URL(mailto);
     expect(`${url.protocol}${url.pathname}`).toBe("mailto:support@ascii.dev");
     expect([...url.searchParams.keys()]).toEqual(["subject", "body"]);

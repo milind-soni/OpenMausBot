@@ -1,4 +1,4 @@
-# Chat galleries, tool details, and settings
+﻿# Chat galleries, tool details, and settings
 
 ## Launch the disposable app
 
@@ -64,7 +64,7 @@ advanced without a media error. Both gallery expansion directions, the image
 dialog, settings search/Escape, and the New Bot shortcut hint were exercised.
 At 390 px, document scroll width remained 390 px. No browser console errors were
 reported in this run. The retained fixture log was
-`server-1789307799660-26000.log` in the temporary `openmausbot-verification-evidence`
+`server-1789307799660-26000.log` in the temporary `obot-verification-evidence`
 directory printed by the launcher.
 
 These are offline provider fixtures and browser renderer checks, not live-model
@@ -72,3 +72,4 @@ or packaged Electron/phone tests. Older messages or providers with no result
 payload show an explicit missing-output message. Video preview does not add new
 composer upload formats or enable remote embedded video. Existing approvals and
 file-access authorization are unchanged.
+

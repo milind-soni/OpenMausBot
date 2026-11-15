@@ -1,4 +1,4 @@
-// @devs: a person's message that tags it is a bug report for the MausBot team. The renderer draws the tag and the
+// @devs: a person's message that tags it is a bug report for the Obot team. The renderer draws the tag and the
 // server sends one report per message that tags it, both by these rules, the same as for a bot's tag.
 import { isMentionBoundary, isMentionNameContinuation } from "./mention-boundary.ts";
 import { proseOnly } from "./person-mention.ts";

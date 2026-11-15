@@ -16,7 +16,7 @@ import { takeImportName } from "../shared/import-name.ts";
 import { decodeBase64, type PackageAgent, type PackageDocument, type PackageTrust } from "../shared/package-format.ts";
 import type { BotVisibility, ModelSelection } from "../shared/wire.ts";
 
-export const NO_BOTS_MESSAGE = "This package has no bots. Add it from your organization's shelf, or update OpenMausBot.";
+export const NO_BOTS_MESSAGE = "This package has no bots. Add it from your organization's shelf, or update Obot.";
 export const NO_PRESETS_MESSAGE = "This file has no bots or preset bots to add. Its skills can be added from your organization's shelf.";
 
 export type PackageImportErrorCode = "no_bots" | "invalid_package" | "too_many_bots";

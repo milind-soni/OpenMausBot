@@ -1,7 +1,7 @@
-/** One full-screen ask per launch after the welcome: MausBot's first-launch card, or the notices queue's Cloud Pro popup
+/** One full-screen ask per launch after the welcome: Obot's first-launch card, or the notices queue's Cloud Pro popup
  * with the product-updates question after it. Whichever opens first owns the launch; the other waits for a later one.
  * Kept for the window's session, so a reload counts as the same launch (like welcomeFinishedThisLaunch). */
-export type LaunchDialog = "mausbot" | "notices";
+export type LaunchDialog = "obot" | "notices";
 
 const KEY = "omb.launch.dialog";
 // Where browser storage is blocked, this page's memory stands in for it, so a claim still holds for the session.
@@ -10,7 +10,7 @@ let remembered: LaunchDialog | null = null;
 export function launchDialogShown(): LaunchDialog | null {
   try {
     const owner = sessionStorage.getItem(KEY);
-    return owner === "mausbot" || owner === "notices" ? owner : null;
+    return owner === "obot" || owner === "notices" ? owner : null;
   } catch {
     return remembered;
   }

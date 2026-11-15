@@ -113,7 +113,7 @@ beforeAll(async () => {
   const relay = `http://127.0.0.1:${(stub.address() as AddressInfo).port}${RELAY_PATH}/v1`;
 
   home = mkdtempSync(join(tmpdir(), "omb-cloud-credit-"));
-  data = join(home, ".openmausbot");
+  data = join(home, ".obot");
   mkdirSync(data, { recursive: true });
   // The person's own Claude Code, as on the image: signed out until the test
   // signs the person in. Each turn is a fresh process, which records its
@@ -156,10 +156,10 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     },
   }));
   mkdirSync(join(home, "web"));
-  writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>OpenMausBot</title>");
+  writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>Obot</title>");
   relayUrl = relay;
   await boot();
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: "Obot app (Cloud)", ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const granted = await api("POST", "/api/cloud/pairing", { remote: true, headers: {
     "content-type": "application/json", "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce,
@@ -211,7 +211,7 @@ describe("the free trial's Claude credit on a Cloud home", { timeout: 90_000 }, 
     expect(relayed).toContainEqual(expect.objectContaining({ method: "GET", path: `${RELAY_PATH}/v1/models`, bearer: `Bearer ${TOKEN}` }));
   });
 
-  it("answers on Sonnet through the relay's chat completions, on OpenMausBot's own chat engine: never Claude Code, never an Anthropic route", async () => {
+  it("answers on Sonnet through the relay's chat completions, on Obot's own chat engine: never Claude Code, never an Anthropic route", async () => {
     const settled = await turn("hello");
     expect(answered(settled)).toBe(true);
     expect(completions().at(-1)).toMatchObject({ method: "POST", path: `${RELAY_PATH}/v1/chat/completions`, bearer: `Bearer ${TOKEN}`, model: "claude-sonnet-5" });

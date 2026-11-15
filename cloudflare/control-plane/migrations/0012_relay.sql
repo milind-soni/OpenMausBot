@@ -1,4 +1,4 @@
--- MausBot Relay: each installation gets one stable relay host id the first time it asks for a relay token, and the
+-- Obot Relay: each installation gets one stable relay host id the first time it asks for a relay token, and the
 -- adoption counts that gate retiring the tunnel path. The counts carry no device identifiers.
 ALTER TABLE installations ADD COLUMN relay_host_id TEXT;
 ALTER TABLE installations ADD COLUMN relay_blocked_at INTEGER;

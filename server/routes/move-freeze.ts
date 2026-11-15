@@ -25,14 +25,14 @@ const thawBody = z.object({ automations: z.literal("off").optional() });
 
 export function createMoveFreezeRoutes({ freeze, busy, restart, automationsOff, platform = process.platform }: MoveFreezeRouteDeps): RouteHandler {
   return async ({ req, res, path, method, auth, json, readBody }) => {
-    // Health still answers: without it the companion tells the phone OpenMausBot isn't ready here, and the phone keeps
+    // Health still answers: without it the companion tells the phone Obot isn't ready here, and the phone keeps
     // trying instead of reading the reason.
     if (auth.kind === "loopback" && auth.companionDevice && freeze.frozen() && freeze.lifts() && !(method === "GET" && path === "/api/health")) {
       const place = freeze.place();
       return json(res, 410, { error: phoneMovedRefusal(place, platform), code: "home_moved", ...(place ? { place } : {}) });
     }
     if (path === "/api/move/forget") {
-      if (auth.kind !== "loopback") return json(res, 403, { error: "Only OpenMausBot on this computer can do this." });
+      if (auth.kind !== "loopback") return json(res, 403, { error: "Only Obot on this computer can do this." });
       if (method !== "POST") return json(res, 405, { error: "method not allowed" });
       if (!freeze.forget()) return json(res, 409, { error: "Only a computer whose bots moved to My Cloud deletes its copy." });
       json(res, 200, { forgot: true });
@@ -40,7 +40,7 @@ export function createMoveFreezeRoutes({ freeze, busy, restart, automationsOff, 
       return;
     }
     if (path === "/api/move/freeze") {
-      if (auth.kind !== "loopback") return json(res, 403, { error: "Only OpenMausBot on this computer can do this." });
+      if (auth.kind !== "loopback") return json(res, 403, { error: "Only Obot on this computer can do this." });
       if (method === "GET") {
         const who = busy();
         const cloud = freeze.cloud(), place = freeze.place();

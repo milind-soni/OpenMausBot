@@ -1,4 +1,4 @@
-// The Admin's HTTP requests to the home, one per stream it opens: each is read up to its end, written to the audit log
+﻿// The Admin's HTTP requests to the home, one per stream it opens: each is read up to its end, written to the audit log
 // with the home's answer, and passed to the home's edge on this server's loopback, the only place a stream can reach.
 // A second request on the same stream, a protocol upgrade or a chunked body is refused, so nothing passes unrecorded.
 import { Transform, type Duplex, type TransformCallback } from "node:stream";
@@ -21,7 +21,7 @@ export interface RequestHead {
 export function parseHead(head: string): { ok: true; head: RequestHead } | { ok: false; why: string } {
   const lines = head.split("\r\n");
   const match = /^([A-Z]{3,7}) (\/[^\s]*) HTTP\/1\.1$/.exec(lines[0] ?? "");
-  if (!match || !METHODS.has(match[1]!)) return { ok: false, why: "not an HTTP/1.1 request MausBot may send" };
+  if (!match || !METHODS.has(match[1]!)) return { ok: false, why: "not an HTTP/1.1 request Obot may send" };
   let length = 0;
   for (const line of lines.slice(1)) {
     const colon = line.indexOf(":");
@@ -157,3 +157,4 @@ export function serveRequest(stream: Duplex, accept: () => void, options: { conn
   accept();
   stream.pipe(gate);
 }
+

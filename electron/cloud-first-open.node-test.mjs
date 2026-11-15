@@ -61,7 +61,7 @@ function world({ journal = null, state = settingUp(), found = true, url = `${LOC
       const route = String(url).replace(CLOUD, "");
       if (route === "/api/health") return new Response("", { status: 200 });
       if (route === "/api/auth/session") return w.server.signedIn ? json({ kind: "session" }) : json({ error: "sign in" }, 401);
-      if (route === "/.well-known/openmausbot/environment") return json({ version: "0.1.122" });
+      if (route === "/.well-known/obot/environment") return json({ version: "0.1.122" });
       return json({}, 404);
     },
     power: { asleep: () => false, hold: () => {}, woke: () => {} },

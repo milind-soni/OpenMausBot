@@ -1,4 +1,4 @@
-# My Chrome on My Cloud Implementation Plan
+﻿# My Chrome on My Cloud Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -211,8 +211,8 @@ export function lentChromeGuidance(problem: LentChromeProblem, lender: ChromeLen
      - Every non-join outcome answers `502`.
 - Idle: a joined connection with no bytes from agent-browser for `idleMs()` is destroyed. The sweep runs every `sweepMs ?? 30_000`, and its timers are `unref`'d.
 - Guidance copy (bot-facing; `name` and `device` come from the lender, with "your computer" when there is none):
-  - `offline`: `${name} is lent but offline: OpenMausBot on it is closed or the ${device} is asleep. Tell the person in one sentence to open OpenMausBot on that ${device}. Do not switch to another browser.`
-  - `not-lent`: `No computer lends its Chrome to My Cloud now. Tell the person in one sentence to turn on Your Chrome under Settings → MausBot Cloud in OpenMausBot on their Mac or PC.`
+  - `offline`: `${name} is lent but offline: Obot on it is closed or the ${device} is asleep. Tell the person in one sentence to open Obot on that ${device}. Do not switch to another browser.`
+  - `not-lent`: `No computer lends its Chrome to My Cloud now. Tell the person in one sentence to turn on Your Chrome under Settings → Obot Cloud in Obot on their Mac or PC.`
   - `no-chrome`: `Chrome on ${name} isn't open with remote debugging on. Tell the person in one sentence to open Chrome on that ${device}, turn on remote debugging at chrome://inspect/#remote-debugging, and allow the connection when Chrome asks.`
   - `unreachable`: `Chrome on ${name} did not accept the connection; it may be waiting for the person to click Allow. Tell them in one sentence to check Chrome on that ${device}.`
   - `not-allowed`: `Someone else wrote in this conversation, so it can't use your Chrome. Start a new conversation to use it.`
@@ -225,7 +225,7 @@ export function lentChromeGuidance(problem: LentChromeProblem, lender: ChromeLen
   - `"each way of not reaching Chrome is recorded"`: a table of route outcomes → problem: `null` route → `offline`, `{ gone: true }` → `offline`, `{ refused: "not-lent" }` → `not-lent`, `{ refused: "port" }` → `unreachable`, `{ failed: "no-chrome" }` → `no-chrome`, `{ failed: "timeout" }` → `unreachable`. Each answer starts `HTTP/1.1 50`. A later joined connection clears the problem.
   - `"drop ends the session's open connections and nothing else's"`: with s1 and s2 joined, after `drop("s1")` s1's client sees close and s2 still echoes.
   - `"a connection unused for the idle time is closed"`: with `idleMs: () => 50` and `sweepMs: 10`, the client sees close within 1 s.
-  - `"guidance names the computer and what to do"`: `lentChromeGuidance("offline", { name: "Omkar's MacBook", device: "Mac", online: false })` contains `Omkar's MacBook` and `open OpenMausBot on that Mac`. `lentChromeGuidance("no-chrome", null)` contains `chrome://inspect/#remote-debugging`.
+  - `"guidance names the computer and what to do"`: `lentChromeGuidance("offline", { name: "Omkar's MacBook", device: "Mac", online: false })` contains `Omkar's MacBook` and `open Obot on that Mac`. `lentChromeGuidance("no-chrome", null)` contains `chrome://inspect/#remote-debugging`.
 
 - [ ] **Step 2: Run, expect FAIL**: `npx vitest run server/browser/lent-chrome.test.ts`
 
@@ -294,9 +294,9 @@ export function lentChromeGuidance(problem: LentChromeProblem, lender: ChromeLen
 **Interfaces:**
 - Consumes: Task 6's summary fields and Task 3's `CloudLendingState.chrome` and `chromeLink`.
 - Copy (en.json, exact):
-  - `"settings.profiles.myChromeLent": "On My Cloud this is the Chrome on {name}, your {device}. It works while that {device} is awake with OpenMausBot open, in conversations you started yourself."`
+  - `"settings.profiles.myChromeLent": "On My Cloud this is the Chrome on {name}, your {device}. It works while that {device} is awake with Obot open, in conversations you started yourself."`
   - `"settings.profiles.myChromeLentOffline": "{name} is offline right now."`
-  - `"settings.profiles.myChromeLend": "To use My Chrome on My Cloud, lend it from your Mac or PC: open OpenMausBot there, go to Settings → MausBot Cloud, and turn on Your Chrome."`
+  - `"settings.profiles.myChromeLend": "To use My Chrome on My Cloud, lend it from your Mac or PC: open Obot there, go to Settings → Obot Cloud, and turn on Your Chrome."`
   - `"lending.chrome": "Your Chrome"`
   - `"lending.chromeHelp": "Bots on My Cloud can use Chrome on this computer, signed in as you, in your own conversations and routines. That reaches every site you're signed in to. Turn on remote debugging at chrome://inspect/#remote-debugging first; Chrome asks you to allow the connection."`
   - `"lending.chromeUnsupported": "My Cloud is updating. Your bots can use your Chrome once it's done."`
@@ -340,3 +340,4 @@ export function lentChromeGuidance(problem: LentChromeProblem, lender: ChromeLen
 - [ ] **Step 4: Full check**: `npx vitest run server/ src/components/BrowserProfilesManager.test.ts src/components/CloudLending.test.ts` and `pnpm test:electron`. Only the known local failures may remain.
 
 - [ ] **Step 5: Commit** `test(cloud): My Chrome on My Cloud end to end; docs`
+

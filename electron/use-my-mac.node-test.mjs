@@ -31,7 +31,7 @@ function cloudHome({ link = true, chrome = false } = {}) {
     const route = new URL(url).pathname;
     state.calls.push(route);
     if (route === "/api/auth/session") return json({ kind: "session", id: state.sessionId, scopes: ["admin", "client"], cloudHome: true });
-    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, lendingDetails: true, ...(link ? { deviceLink: true } : {}), ...(chrome ? { myChromeLink: true } : {}) } });
+    if (route === "/.well-known/obot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, lendingDetails: true, ...(link ? { deviceLink: true } : {}), ...(chrome ? { myChromeLink: true } : {}) } });
     const body = init?.body ? JSON.parse(init.body) : {};
     if (route === "/api/shared-computers/connect") { state.connects.push(body); state.registered.add(body.id); return json({ ok: true }); }
     if (route.endsWith("/poll")) {
@@ -245,24 +245,24 @@ test("lending on opens the app at login, out of sight; off removes only the logi
   assert.equal(theirs.settings.openAtLogin, true, "a login item the person set up is theirs");
   assert.equal(kept.startedHidden(), false, "and it opens the window as before");
   const windows = fakeApp();
-  const win = createOpenAtLogin({ app: windows, file: path.join(dir, "win.json"), platform: "win32", home: dir, argv: ["OpenMausBot.exe", HIDDEN_ARG] });
+  const win = createOpenAtLogin({ app: windows, file: path.join(dir, "win.json"), platform: "win32", home: dir, argv: ["Obot.exe", HIDDEN_ARG] });
   win.follow(true);
   assert.deepEqual(calls.filter(([kind]) => kind === "set").at(-1), ["set", { openAtLogin: true, args: [HIDDEN_ARG] }]);
   assert.equal(win.startedHidden(), true);
-  assert.equal(createOpenAtLogin({ app: windows, file: path.join(dir, "win.json"), platform: "win32", home: dir, argv: ["OpenMausBot.exe"] }).startedHidden(), false);
+  assert.equal(createOpenAtLogin({ app: windows, file: path.join(dir, "win.json"), platform: "win32", home: dir, argv: ["Obot.exe"] }).startedHidden(), false);
   const config = path.join(dir, "config");
   const linux = createOpenAtLogin({ app: fakeApp(), file: path.join(dir, "linux.json"), platform: "linux", home: dir, env: { XDG_CONFIG_HOME: config, APPIMAGE: "/home/me/Apps/Open Maus$Bot.AppImage" } });
   linux.follow(true);
-  const entry = path.join(config, "autostart", "openmausbot.desktop");
+  const entry = path.join(config, "autostart", "obot.desktop");
   assert.equal(await readFile(entry, "utf8"), autostartEntry("/home/me/Apps/Open Maus$Bot.AppImage"));
   assert.match(await readFile(entry, "utf8"), /^Exec="\/home\/me\/Apps\/Open Maus\\\$Bot\.AppImage" --omb-hidden$/m);
   linux.follow(false);
   await assert.rejects(readFile(entry, "utf8"), { code: "ENOENT" });
   await mkdir(path.dirname(entry), { recursive: true });
-  await writeFile(entry, "[Desktop Entry]\nExec=openmausbot\n");
+  await writeFile(entry, "[Desktop Entry]\nExec=obot\n");
   linux.follow(true);
   linux.follow(false);
-  assert.equal(await readFile(entry, "utf8"), "[Desktop Entry]\nExec=openmausbot\n", "an autostart entry the person wrote is never replaced or removed");
+  assert.equal(await readFile(entry, "utf8"), "[Desktop Entry]\nExec=obot\n", "an autostart entry the person wrote is never replaced or removed");
   const unpackaged = { ...fakeApp(), isPackaged: false };
   createOpenAtLogin({ app: unpackaged, file: path.join(dir, "dev.json"), platform: "darwin", home: dir }).follow(true);
   assert.equal(unpackaged.settings.openAtLogin, false, "a development build never registers itself");

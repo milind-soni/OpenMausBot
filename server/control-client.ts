@@ -26,7 +26,7 @@ export const CONTROL_BUSY =
   "Another thread is using this computer. This call was not performed. This turn gets the computer as soon as it is free: " +
   `to keep waiting, take a screenshot (each computer call waits up to ${WAIT_WORDS}) instead of ending your turn.`;
 export const CONTROL_UNCONFIRMED =
-  "OpenMausBot could not confirm that this computer is free, so this call was NOT performed and nothing happened on the screen. " +
+  "Obot could not confirm that this computer is free, so this call was NOT performed and nothing happened on the screen. " +
   "Retry in a few seconds.";
 /** The gate no longer accepts this call's turn capability (401: the turn settled, or its computer was switched or taken back), so no retry can succeed. */
 export const CONTROL_TURN_ENDED =

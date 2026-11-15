@@ -68,7 +68,7 @@ test("endpoint failure retains the installation across immediate Retry and resta
     switch (key) {
       case "GET /healthz":
         assert.equal(body, null);
-        return reply(response, 200, { ok: true, service: "openmausbot-control-plane" });
+        return reply(response, 200, { ok: true, service: "obot-control-plane" });
       case "POST /api/auth/email-otp/send-verification-otp":
         assert.deepEqual(body, { email: EMAIL, type: "sign-in" });
         return reply(response, 200, { success: true });
@@ -235,7 +235,7 @@ test("a reclaimed endpoint is re-provisioned at restart and a full provider retr
     }
     switch (key) {
       case "GET /healthz":
-        return reply(response, 200, { ok: true, service: "openmausbot-control-plane" });
+        return reply(response, 200, { ok: true, service: "obot-control-plane" });
       case "GET /v1/installations/self":
         return reply(response, 200, { installation, credentialExpiresAt });
       case "GET /v1/installations/self/endpoint":
@@ -348,7 +348,7 @@ test("on demand, an address nothing needs is given back and comes back the same 
     assert.equal(request.headers.authorization, expectedBearer, `unexpected bearer for ${key}`);
     switch (key) {
       case "GET /healthz":
-        return reply(response, 200, { ok: true, service: "openmausbot-control-plane" });
+        return reply(response, 200, { ok: true, service: "obot-control-plane" });
       case "POST /api/auth/email-otp/send-verification-otp":
         return reply(response, 200, { success: true });
       case "POST /api/auth/sign-in/email-otp":
@@ -535,7 +535,7 @@ test("on demand, a give-back the control plane left pending is finished before t
     }
     switch (key) {
       case "GET /healthz":
-        return reply(response, 200, { ok: true, service: "openmausbot-control-plane" });
+        return reply(response, 200, { ok: true, service: "obot-control-plane" });
       case "GET /v1/installations/self":
         return reply(response, 200, { installation, credentialExpiresAt: Date.now() + 86_400_000 });
       case "DELETE /v1/installations/self/endpoint":

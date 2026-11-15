@@ -111,7 +111,7 @@ describe("official ChatGPT plan OAuth", () => {
     const controller = create();
     expect((await callback(controller)).phase).toBe("succeeded");
     expect(authorization.searchParams.get("client_id")).toBe("dynamic_agent_client");
-    expect(authorization.searchParams.get("agent_name_hint")).toBe("openmausbot");
+    expect(authorization.searchParams.get("agent_name_hint")).toBe("obot");
     expect(authorization.searchParams.get("ext_agent_host_id")).toMatch(/^urn:uuid:/);
     const exchange = calls.find((call) => call.path.endsWith("/token"))!;
     expect(exchange.params.get("client_id")).toBe("oaiapp_fixture_account_1");

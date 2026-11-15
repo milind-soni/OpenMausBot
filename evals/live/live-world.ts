@@ -1,4 +1,4 @@
-import { join } from "node:path";
+﻿import { join } from "node:path";
 import { runControlOmb } from "../../scripts/control-omb.ts";
 import { readHandoffs as readRuntimeHandoffs } from "../../server/testing/handoff-rows.ts";
 import type { Scenario, Step } from "../types.ts";
@@ -47,7 +47,7 @@ export class LiveWorld extends BaseWorld {
    * never pollute the scenario bot's evidence). */
   async createBot(key: string, name: string): Promise<void> {
     const created = (await runControlOmb(["new-bot", "--name", name], {
-      env: { OPENMAUSBOT_URL: this.session!.url },
+      env: { OBOT_URL: this.session!.url },
     })) as { bot: { id: string; activeTaskId: string } };
     this.bots.set(key, { id: created.bot.id, threadId: created.bot.activeTaskId });
     const response = await this.api.patch("/api/bots/" + created.bot.id, {
@@ -122,3 +122,4 @@ export class LiveWorld extends BaseWorld {
     await this.session?.close();
   }
 }
+

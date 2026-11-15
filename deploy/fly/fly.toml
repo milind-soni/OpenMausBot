@@ -1,4 +1,4 @@
-# OMB Cloud Pro home machine: one Fly app per customer (docs/cloud-pro.md).
+﻿# OMB Cloud Pro home machine: one Fly app per customer (docs/cloud-pro.md).
 # The Admin creates it through the Machines API with these settings; this file
 # is the same shape for a manual deploy. Fill the {{…}} values per customer.
 # Create each app in its own private network (`fly apps create --network
@@ -15,7 +15,7 @@ kill_timeout = "30s"
 
 # Not secret. The Admin (openmaus-cloud) sets these on the machine and
 # applies two Fly secrets, never in this file:
-#   OMB_CLOUD_ADMIN_URL         the Cloud origin, e.g. https://cloud.openmausbot.com
+#   OMB_CLOUD_ADMIN_URL         the Cloud origin, e.g. https://cloud.obot.com
 #   OMB_CLOUD_BOOTSTRAP_SECRET  the key the Admin signs pairing requests with
 # Cloud Pro includes no AI: there is no model gateway to configure. The person
 # signs in on the machine with their own Claude or ChatGPT account, or an API key.
@@ -56,3 +56,4 @@ kill_timeout = "30s"
 [[vm]]
   size = "shared-cpu-1x"
   memory = "2gb"
+

@@ -36,10 +36,10 @@ body{margin:0;font:15px/1.4 var(--font-sans);color:var(--color-text-primary)}
 #out{position:absolute;left:16px;top:104px;margin:0;font-weight:600}
 </style></head><body><p id="mode"></p><button id="send">Send "3 cups" to the bot</button><p id="out">Not clicked yet</p>
 <div id="room" style="height:160px"></div><script>
-document.getElementById("mode").textContent = "mausbot.room is " + window.mausbot.room + ": this page is view-only here";
+document.getElementById("mode").textContent = "obot.room is " + window.obot.room + ": this page is view-only here";
 document.getElementById("send").onclick = function () {
-  window.mausbot.setContext("3 cups on screen");
-  window.mausbot.send("I have had 3 cups").then(function () {
+  window.obot.setContext("3 cups on screen");
+  window.obot.send("I have had 3 cups").then(function () {
     document.getElementById("out").textContent = "Clicked: send() resolved and posted nothing";
     document.getElementById("room").style.height = "300px";
   }, function (error) {

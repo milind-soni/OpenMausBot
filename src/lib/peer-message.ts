@@ -13,7 +13,7 @@ export interface PeerLine {
 
 /** The one note, `[From @X (bot) · message | assignment · …]`, and the openings rows stored before it carry. */
 const PROVENANCE_NOTE =
-  /^\[(?:From @([^·\]]+?) \(bot\) · (message|assignment) · |(Message from|Delegated by|Thread opened by) @([^,\]]+), another bot in this OpenMausBot workspace)[^\]]*\]\s*/;
+  /^\[(?:From @([^·\]]+?) \(bot\) · (message|assignment) · |(Message from|Delegated by|Thread opened by) @([^,\]]+), another bot in this Obot workspace)[^\]]*\]\s*/;
 
 const DELIVERY: Record<string, PeerDelivery> = {
   message: "ask_bot",

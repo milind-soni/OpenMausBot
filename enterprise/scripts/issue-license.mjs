@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Issue OpenMausBot enterprise license keys.
+// Issue Obot enterprise license keys.
 //
-//   node enterprise/scripts/issue-license.mjs keygen [--out ~/.config/openmausbot-enterprise/signing-key.json]
+//   node enterprise/scripts/issue-license.mjs keygen [--out ~/.config/obot-enterprise/signing-key.json]
 //     Creates an Ed25519 signing key (file mode 0600) and prints the public
 //     part to append to LICENSE_PUBLIC_KEYS in enterprise/server/license.ts.
 //
@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 
 import { issueLicenseKey } from "../server/license.ts";
 
-const DEFAULT_KEY_PATH = join(homedir(), ".config", "openmausbot-enterprise", "signing-key.json");
+const DEFAULT_KEY_PATH = join(homedir(), ".config", "obot-enterprise", "signing-key.json");
 
 function fail(message) {
   console.error(message);

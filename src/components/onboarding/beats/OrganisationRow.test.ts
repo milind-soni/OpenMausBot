@@ -68,7 +68,7 @@ async function mount(state: ManagedDesktopState = { status: "signed-out" }) {
 
 const connecting: ManagedDesktopState = {
   status: "connecting",
-  enrollment: { userCode: "ABCDE-FGHIJ", verificationUri: "https://admin.openmausbot.com/enroll?code=ABCDE-FGHIJ", expiresAt: Date.now() + 60_000 },
+  enrollment: { userCode: "ABCDE-FGHIJ", verificationUri: "https://admin.obot.com/enroll?code=ABCDE-FGHIJ", expiresAt: Date.now() + 60_000 },
 };
 const connected: ManagedDesktopState = {
   status: "connected",
@@ -114,7 +114,7 @@ describe("organisation sign-in row in the welcome flow", () => {
     expect(render().html).toBe("");
     await mount();
     const html = render().html;
-    expect(html).toContain("Using MausBot at work?");
+    expect(html).toContain("Using Obot at work?");
     expect(html).toContain("Sign in with your organization.");
     expect(html).toContain("Other Admin address");
     expect(bridge.begin).not.toHaveBeenCalled();
@@ -128,12 +128,12 @@ describe("organisation sign-in row in the welcome flow", () => {
     signIn.props.onClick!();
     signIn.props.onClick!();
     await flush();
-    expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://admin.openmausbot.com" });
+    expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://admin.obot.com" });
 
     let html = render().html;
     expect(html).toContain("Finish in your browser");
     expect(html).toContain("ABCDE-FGHIJ");
-    expect(html).not.toContain("Using MausBot at work?");
+    expect(html).not.toContain("Using Obot at work?");
     expect(onConnected).not.toHaveBeenCalled();
 
     push(connected);
@@ -152,7 +152,7 @@ describe("organisation sign-in row in the welcome flow", () => {
     button("Cancel sign-in")!.props.onClick!();
     await flush();
     expect(bridge.cancelEnrollment).toHaveBeenCalledOnce();
-    expect(render().html).toContain("Using MausBot at work?");
+    expect(render().html).toContain("Using Obot at work?");
   });
 
   it("sends another Admin address to Settings instead of asking here", async () => {

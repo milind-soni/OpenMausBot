@@ -99,8 +99,8 @@ export function createOutboundHold(deps: OutboundHoldDeps): OutboundHold {
           }
           return refuseOutbound(
             answer === "timeout"
-              ? "OpenMausBot did not send this: nobody answered the approval in time. Ask the user before trying again."
-              : "OpenMausBot did not send this: the user declined. Do not retry it; ask the user what they would like instead.",
+              ? "Obot did not send this: nobody answered the approval in time. Ask the user before trying again."
+              : "Obot did not send this: the user declined. Do not retry it; ask the user what they would like instead.",
           );
         }
         return { ok: true, approved: true };

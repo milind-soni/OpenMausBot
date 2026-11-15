@@ -26,9 +26,9 @@ const IDLE_MS = 10 * 60_000;
 const RESULT_LIMIT = 3_900_000;
 const MAX_PAGES = 10;
 const PROTOCOL = "2025-03-26";
-/** Security: a port under 1024 is a system service's, and this computer's own OpenMausBot server and Chrome's DevTools
+/** Security: a port under 1024 is a system service's, and this computer's own Obot server and Chrome's DevTools
  * take commands from any local caller, so a lent address on one of them would hand a Cloud's bot this computer. */
-const OWN_PORT = "Only an MCP server on its own port (1024 or higher) at this computer's address can be reached, never this computer's own OpenMausBot or Chrome ports";
+const OWN_PORT = "Only an MCP server on its own port (1024 or higher) at this computer's address can be reached, never this computer's own Obot or Chrome ports";
 
 /** What a lent server inherits from this app: where things live, never a key. */
 const INHERITED = ["HOME", "USERPROFILE", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "TEMP", "TMP", "PATHEXT", "SystemRoot", "SystemDrive", "windir", "ComSpec", "APPDATA", "LOCALAPPDATA", "ProgramData"];
@@ -67,13 +67,13 @@ export function lentMcpRefusal(grant, server) {
   return null;
 }
 
-/** This computer's own ports: its OpenMausBot servers', and Chrome's DevTools port while Chrome is running. */
+/** This computer's own ports: its Obot servers', and Chrome's DevTools port while Chrome is running. */
 export async function ownPorts({ serverPorts = [], dirs = chromeDataDirs({ platform: process.platform, home: os.homedir(), localAppData: process.env.LOCALAPPDATA }), readFile = fs.promises.readFile } = {}) {
   const chrome = await Promise.all(dirs.map(dir => readFile(path.join(dir, DEVTOOLS_FILE), "utf8").then(parseDevtoolsActivePort, () => null)));
   return [...DESKTOP_PORTS, ...serverPorts, ...chrome.flatMap(found => (found ? [found.port] : []))];
 }
 
-/** This computer's own OpenMausBot installs, by the environment id each keeps in its data folder. */
+/** This computer's own Obot installs, by the environment id each keeps in its data folder. */
 export function ownEnvironmentIds(dataDirs) {
   const ids = new Set();
   for (const dir of dataDirs) {
@@ -142,7 +142,7 @@ function stdioClient(server, { environment, home }) {
     let message; try { message = JSON.parse(line); } catch { return; }
     if (!record(message)) return;
     // A server's own request (roots, sampling) is one this client does not offer.
-    if (typeof message.method === "string" && Object.hasOwn(message, "id")) return void write({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Not offered by OpenMausBot" } });
+    if (typeof message.method === "string" && Object.hasOwn(message, "id")) return void write({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Not offered by Obot" } });
     const waiting = pending.get(message.id);
     if (!waiting) return;
     pending.delete(message.id); bytes = 0;
@@ -258,7 +258,7 @@ export function createLentMcp({ environment = async () => ({ ...inheritedEnviron
     const client = "command" in server ? stdioClient(server, { environment: await environment(), home }) : httpClient(server, { fetch: fetchImpl });
     const live = { key, client, idle: null, failed: false, started: null };
     running.set(server.name, live);
-    live.started = client.request("initialize", { protocolVersion: PROTOCOL, capabilities: {}, clientInfo: { name: "openmausbot-lent", version: "1" } }, signal, START_MS).then(result => {
+    live.started = client.request("initialize", { protocolVersion: PROTOCOL, capabilities: {}, clientInfo: { name: "obot-lent", version: "1" } }, signal, START_MS).then(result => {
       client.started?.(result?.protocolVersion);
       client.notify("notifications/initialized");
     });

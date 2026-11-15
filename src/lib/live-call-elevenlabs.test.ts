@@ -167,7 +167,7 @@ describe("an ElevenLabs Live session", () => {
     vi.useFakeTimers();
     try {
       t.socket().receive({ type: "audio", audio_event: { audio_base_64: AUDIO, event_id: 1 } });
-      session.sendUserMessage("[OpenMausBot] You have two new emails.");
+      session.sendUserMessage("[Obot] You have two new emails.");
       t.audio().finish();
       vi.advanceTimersByTime(1_000);
       t.socket().receive({ type: "audio", audio_event: { audio_base_64: AUDIO, event_id: 1 } });
@@ -177,7 +177,7 @@ describe("an ElevenLabs Live session", () => {
       expect(t.socket().sent.map((m) => m.type)).not.toContain("user_message");
       t.socket().receive({ type: "agent_response_complete" });
       expect(t.callbacks.onModeChange).toHaveBeenLastCalledWith("listening");
-      expect(t.socket().sent.at(-1)).toEqual({ type: "user_message", text: "[OpenMausBot] You have two new emails." });
+      expect(t.socket().sent.at(-1)).toEqual({ type: "user_message", text: "[Obot] You have two new emails." });
     } finally {
       vi.useRealTimers();
     }
@@ -208,7 +208,7 @@ describe("an ElevenLabs Live session", () => {
       t.audio().finish();
       expect(t.callbacks.onModeChange).toHaveBeenLastCalledWith("listening");
       audio(2);
-      session.sendUserMessage("[OpenMausBot] You have two new emails.");
+      session.sendUserMessage("[Obot] You have two new emails.");
       t.audio().finish();
       vi.advanceTimersByTime(2_000);
       expect(t.callbacks.onModeChange).toHaveBeenLastCalledWith("speaking");
@@ -217,7 +217,7 @@ describe("an ElevenLabs Live session", () => {
       t.audio().finish();
       t.socket().receive({ type: "agent_response_complete" });
       expect(t.callbacks.onModeChange).toHaveBeenLastCalledWith("listening");
-      expect(t.socket().sent.at(-1)).toEqual({ type: "user_message", text: "[OpenMausBot] You have two new emails." });
+      expect(t.socket().sent.at(-1)).toEqual({ type: "user_message", text: "[Obot] You have two new emails." });
       // A turn whose end never comes still ends once its audio has long stopped.
       audio(4);
       t.audio().finish();
@@ -250,15 +250,15 @@ describe("an ElevenLabs Live session", () => {
     const t = harness();
     const session = await t.connect();
     t.socket().receive({ type: "audio", audio_event: { audio_base_64: AUDIO } });
-    session.sendUserMessage("[OpenMausBot] You have two new emails.");
+    session.sendUserMessage("[Obot] You have two new emails.");
     expect(t.socket().sent.at(-1)).not.toHaveProperty("type", "user_message");
-    session.sendUserMessage("[OpenMausBot] still looking", { audio: false });
+    session.sendUserMessage("[Obot] still looking", { audio: false });
     expect(t.socket().sent.at(-1)).not.toHaveProperty("type", "contextual_update");
     t.audio().finish();
     t.socket().receive({ type: "agent_response_complete" });
     expect(t.socket().sent.slice(-2)).toEqual([
-      { type: "user_message", text: "[OpenMausBot] You have two new emails." },
-      { type: "contextual_update", text: "[OpenMausBot] still looking" },
+      { type: "user_message", text: "[Obot] You have two new emails." },
+      { type: "contextual_update", text: "[Obot] still looking" },
     ]);
   });
 

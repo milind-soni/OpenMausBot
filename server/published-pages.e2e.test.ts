@@ -60,7 +60,7 @@ async function serveStub() {
 
 beforeAll(async () => {
   stub = await serveStub();
-  globalThis.fetch = (input, init = {}) => realFetch(input, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": owner } });
+  globalThis.fetch = (input, init = {}) => realFetch(input, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-obot-desktop-owner": owner } });
   fixture = await launchVerificationServer({ ...process.env, OMB_TEST_DESKTOP_OWNER_TOKEN: owner, OMB_TEST_INTERNAL_CAPABILITY_KEY: CAPABILITY_KEY,
     OMB_TEST_DESKTOP_PAGES_ACCESS: JSON.stringify({ url: `${stub.url}/api/cloud/pages/token`, token: FAKE_DESKTOP_TOKEN }) }, undefined, undefined, undefined, undefined, { scripted: true });
 }, 90_000);
@@ -71,7 +71,7 @@ afterAll(async () => {
 });
 
 it("publishes a bot's page to a link shown inline, keeps the link and the card on a republish, and unpublishes it from the card", async () => {
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: fixture.info.url } }) as Promise<any>;
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OBOT_URL: fixture.info.url } }) as Promise<any>;
   const api = async (path: string, init: RequestInit = {}) => (await fetch(`${fixture.info.url}${path}`, { ...init, headers: { "content-type": "application/json" } })).json() as Promise<any>;
   const planPath = join(fixture.info.dataDir, "room-plan.json");
   const bot = (await cli("new-bot", "--name", "Publisher")).bot;
@@ -91,7 +91,7 @@ it("publishes a bot's page to a link shown inline, keeps the link and the card o
   const first = await turn([{ tool: "publish_page", arguments: { path: "site", title: "Bake sale" } }]);
   expect(first.tools).toEqual(expect.arrayContaining(["publish_page", "unpublish_page"]));
   const [pageId] = [...stub.service.pages.keys()];
-  const url = `https://${pageId}.mausbot.page/`;
+  const url = `https://${pageId}.obot.page/`;
   expect(first.results[0]).toContain(`Published “Bake sale” at ${url}`);
   expect(stub.service.minted).toEqual([{ action: "create", caller: "desktop" }]);
 
@@ -116,14 +116,14 @@ it("publishes a bot's page to a link shown inline, keeps the link and the card o
 }, 120_000);
 
 it.each([false, true])("keeps an Unpublish card when Stop aborts an upload whose Worker committed: %s", async (committed) => {
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: fixture.info.url } }) as Promise<any>;
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OBOT_URL: fixture.info.url } }) as Promise<any>;
   const api = async (path: string, init: RequestInit & { headers?: Record<string, string> } = {}) =>
     fetch(`${fixture.info.url}${path}`, { ...init, headers: { "content-type": "application/json", ...init.headers } });
   const bot = (await cli("new-bot", "--name", "Stopped publisher")).bot;
   const site = join(fixture.info.dataDir, "workspaces", bot.id, "site");
   mkdirSync(site, { recursive: true });
   writeFileSync(join(site, "index.html"), "<!doctype html><h1>Draft</h1>");
-  const minted = await api("/api/testing/internal-capability", { method: "POST", headers: { "x-openmausbot-test-capability": CAPABILITY_KEY },
+  const minted = await api("/api/testing/internal-capability", { method: "POST", headers: { "x-obot-test-capability": CAPABILITY_KEY },
     body: JSON.stringify({ botId: bot.id, threadId: bot.activeTaskId }) });
   const { token } = await minted.json() as { token: string };
   const pagesBefore = stub.service.pages.size;

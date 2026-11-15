@@ -11,7 +11,7 @@ const CLOUD = "https://omb-t-1.fly.dev";
 const ACCOUNT = { id: "acct-1", email: "person@example.test" };
 const reply = (status, body = {}) => ({ ok: status < 400, status, body });
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status });
-/** The MausBot Cloud sign-in's state (cloud-account.mjs) for an account with a ready Cloud of its own it may move to. */
+/** The Obot Cloud sign-in's state (cloud-account.mjs) for an account with a ready Cloud of its own it may move to. */
 const signedIn = (patch = {}) => ({ status: "connected", account: ACCOUNT, deviceId: "device-1", entitlement: { plan: "pro", tier: "personal", status: "active", expiresAt: 1, version: 1 },
   machine: { status: "ready", origin: CLOUD, moves: true }, ...patch });
 const journalOf = (patch = {}) => ({ v: 1, phase: "copy", cloud: { origin: CLOUD, account: ACCOUNT.id, machine: CLOUD }, startedAt: 1_700_000_000_000, ...patch });
@@ -151,12 +151,12 @@ test("every phase's failure has its own code", async () => {
   const limited = new CloudSendError("session", "Too many connection links.", { cause: Object.assign(new Error("Cloud request failed."), { status: 429 }) });
   const cases = [
     { name: "an owner session refused for too many requests", moves: [limited], expect: { phase: "copy", code: "rate_limited" } },
-    { name: "this computer's server not answering the pass", moves: [new CloudSendError("local", "OpenMausBot on this computer did not answer. Try again in a moment.")], expect: { phase: "copy", code: "local" } },
+    { name: "this computer's server not answering the pass", moves: [new CloudSendError("local", "Obot on this computer did not answer. Try again in a moment.")], expect: { phase: "copy", code: "local" } },
     { name: "My Cloud answering nothing usable", moves: [new CloudSendError("unreachable", "My Cloud said: Bot \"Sales team\" can't be read")], expect: { phase: "copy", code: "unreachable", message: "My Cloud said: …" } },
     { name: "My Cloud refusing the final pass", moves: [undefined, new CloudSendError("refused", "My Cloud could not add the chats.")], expect: { phase: "final", code: "refused" } },
     { name: "something unforeseen", moves: [new Error("Cannot read properties of undefined (reading 'items')")], expect: { phase: "copy", code: "error" } },
     { name: "the check still missing things after three passes", checks: [false, false, false], expect: { phase: "check", code: "incomplete", message: "Missing: something. " + INCOMPLETE } },
-    { name: "this computer's server refusing to pause", freezeError: Object.assign(new Error("OpenMausBot on this computer could not pause."), { status: 500 }), expect: { phase: "freeze", code: "freeze" } },
+    { name: "this computer's server refusing to pause", freezeError: Object.assign(new Error("Obot on this computer could not pause."), { status: 500 }), expect: { phase: "freeze", code: "freeze" } },
     { name: "My Cloud refusing to switch an automation on", cloudAnswer: (method) => (method === "PATCH" ? reply(500, { error: "Routines are busy." }) : null), expect: { phase: "switch", code: "switch_refused", message: "Routines are busy." } },
   ];
   for (const { name, moves = [], checks = [], freezeError = null, cloudAnswer = null, expect } of cases) {

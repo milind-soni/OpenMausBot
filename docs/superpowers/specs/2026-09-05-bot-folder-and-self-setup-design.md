@@ -1,4 +1,4 @@
-# Bot instructions, setup by chat, and settings
+﻿# Bot instructions, setup by chat, and settings
 
 Feature/design contributed by Omkar Satpute in PR #833. This document records
 the product contract; tests and implementation define API details.
@@ -19,7 +19,7 @@ the product contract; tests and implementation define API details.
 ## One source of truth
 
 Canonical instructions live in BotRecord.soul in bots.json.
-~/.openmausbot/bots/<id>/SOUL.md is a readable mirror, not another database.
+~/.obot/bots/<id>/SOUL.md is a readable mirror, not another database.
 The prompt always uses the canonical record. Existing memory, skills, and
 workspace storage stay where they are.
 
@@ -119,3 +119,4 @@ tests; phone builds do not prove a physical-device workflow.
 
 Deferred: bundled setup-plan cards, undo beyond soul, per-bot MCP grants, and
 live prompt receipts. Each needs its own product and safety decision.
+

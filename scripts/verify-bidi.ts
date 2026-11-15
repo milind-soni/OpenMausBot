@@ -56,7 +56,7 @@ const ENGLISH_REPLY = [
 // Each turn spawns a fresh CLI, so the reply cursor lives in a file — in this
 // launcher's own scratch directory, since the fixture home does not exist
 // until the server is up. The launcher forwards FAKE_CLAUDE_* to its engine.
-const scratch = mkdtempSync(join(tmpdir(), "openmausbot-verify-bidi-"));
+const scratch = mkdtempSync(join(tmpdir(), "obot-verify-bidi-"));
 const fixture = await launchVerificationServer({
   ...process.env,
   FAKE_CLAUDE_REPLIES: JSON.stringify([ARABIC_REPLY, ENGLISH_REPLY]),

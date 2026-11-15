@@ -63,7 +63,7 @@ posixOnly("work digest e2e (every fake engine)", () => {
   beforeAll(async () => {
     for (const e of ENGINES) chmodSync(fake(e.cli), 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-digest-e2e-"));
-    mkdirSync(join(home, ".openmausbot"), { recursive: true });
+    mkdirSync(join(home, ".obot"), { recursive: true });
     const instances: Record<string, unknown> = {};
     for (const e of ENGINES) {
       instances[e.id] = { driver: e.driver, environment: e.env, config: { cli: fake(e.cli), fullAuto: true } };
@@ -80,7 +80,7 @@ posixOnly("work digest e2e (every fake engine)", () => {
       environment: { FAKE_ACP_MODE: "echo-gated" },
       config: { cli: fake("fake-acp-cli.ts"), fullAuto: true },
     };
-    writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({ instances }));
+    writeFileSync(join(home, ".obot", "config.json"), JSON.stringify({ instances }));
 
     const env: NodeJS.ProcessEnv = { HOME: home, USERPROFILE: home, OMB_PORT: String(PORT) };
     if (process.env.PATH) env.PATH = process.env.PATH;

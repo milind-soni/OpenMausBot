@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
-const ENTRY = join(import.meta.dirname, "openmausbot.ts");
+const ENTRY = join(import.meta.dirname, "obot.ts");
 
 interface Ran { code: number | null; stdout: string; stderr: string }
 
@@ -17,14 +17,14 @@ let dir: string;
 function cli(args: string[], env: NodeJS.ProcessEnv = {}): Promise<Ran> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["--experimental-strip-types", ENTRY, ...args], {
-      env: { ...process.env, OPENMAUSBOT_TOKEN: "", OMB_PORT: "", OPENMAUSBOT_URL: session.info.url, ...env },
+      env: { ...process.env, OBOT_TOKEN: "", OMB_PORT: "", OBOT_URL: session.info.url, ...env },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
-    const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error(`openmausbot ${args.join(" ")} did not finish: ${stderr}`)); }, 90_000);
+    const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error(`obot ${args.join(" ")} did not finish: ${stderr}`)); }, 90_000);
     child.on("error", reject);
     child.on("close", (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
   });
@@ -43,7 +43,7 @@ afterAll(async () => {
   if (dir) await removeTempDir(dir);
 });
 
-describe("openmausbot headless: team apply → run --wait job → export", () => {
+describe("obot headless: team apply → run --wait job → export", () => {
   let model: string;
   let lead: any;
   let priya: any;

@@ -21,7 +21,7 @@
 - No new runtime dependency, branding change, generated `dist-server` edits, or release changes.
 - Node 24 and portable process launching; no shell commands in production process launches.
 - All verification uses disposable fixtures and explicit isolated targets.
-- Leave other projects and live OpenMausBot data untouched.
+- Leave other projects and live Obot data untouched.
 - No new upstream submission until behavior and validation are reviewable; never merge.
 
 ## Review Focus
@@ -160,8 +160,8 @@
 - [x] Recheck issue and overlapping PRs, then open the authorized draft PR with screenshots, exact checks and live-device/model evidence.
 - [x] Attach every created PR to this Codex task; report its URL, validation and remaining limitations. Never merge.
 
-Submitted drafts: [tool selection #2101](https://github.com/milind-soni/OpenMausBot/pull/2101)
-and [Windows fixture cleanup #2100](https://github.com/milind-soni/OpenMausBot/pull/2100).
+Submitted drafts: [tool selection #2101](https://github.com/alnatourm/Obot/pull/2101)
+and [Windows fixture cleanup #2100](https://github.com/alnatourm/Obot/pull/2100).
 The feature diff excludes its CI prerequisites, maintainer PR #2088 and the
 separate cleanup PR. The full composed fork run passed all 26 selected checks;
 the [verification record](../../verification/tool-selection.md#completed-contribution-checks)
@@ -170,3 +170,4 @@ identifies the tested commits and the local suite's limits.
 Maintainer agreement on the approach and engine support boundary, prerequisite
 merges, and green upstream CI on the clean feature branch remain required before
 presenting the draft as merge ready. No whole-issue closure or merge is claimed.
+

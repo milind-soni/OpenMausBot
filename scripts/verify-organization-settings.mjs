@@ -68,7 +68,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
       assert.equal(message.connection.token, modelToken, "native provider gets model-only capability");
       grantsApplied++;
     } else clearsApplied++;
-    queueMicrotask(() => relay.receive(fakeProcess, { type: "openmausbot:managed-desktop-result", requestId: message.requestId, ok: true }));
+    queueMicrotask(() => relay.receive(fakeProcess, { type: "obot:managed-desktop-result", requestId: message.requestId, ok: true }));
   } };
   const client = createManagedDesktopClient({
     store: { read: async () => saved, write: async value => { saved = structuredClone(value); } },
@@ -197,7 +197,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     const beginsBeforeApp = begins;
     win.setSize(1180, 850);
     await win.loadURL(`${url}?app=1`);
-    await until(() => evaluate("document.body.textContent.includes('Meet OpenMausBot')"), "normal optional welcome flow");
+    await until(() => evaluate("document.body.textContent.includes('Meet Obot')"), "normal optional welcome flow");
     assert.equal(await evaluate(`Boolean(${button("Sign in with your organization")})`), false);
     assert.equal(begins, beginsBeforeApp);
     win.webContents.send("app:open-settings");
@@ -254,7 +254,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     const previousWindow = win;
     win = await open(true, activeEnvironment(readEnvironments())?.origin ?? `${url}?app=1`);
     previousWindow.destroy();
-    await until(() => evaluate("document.body.textContent.includes('Meet OpenMausBot')"), "local choice survives recreated renderer");
+    await until(() => evaluate("document.body.textContent.includes('Meet Obot')"), "local choice survives recreated renderer");
     assert.equal(await evaluate("typeof window.ogb.organization"), "object");
     assert.equal(new URL(win.webContents.getURL()).origin, localOrigin);
     // Simulate the already-confirmed companion disconnect's one-bit restart

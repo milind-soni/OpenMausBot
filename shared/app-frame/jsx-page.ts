@@ -17,7 +17,7 @@ export const JSX_PAGE_LIBRARIES = {
 const NPM = "https://cdn.jsdelivr.net/npm";
 const REACT = `${NPM}/react@${JSX_PAGE_LIBRARIES.react}/+esm`;
 
-/** What a page's file may import. `mausbot` is the shell's own: Chart, useTheme, send, open and setContext. */
+/** What a page's file may import. `obot` is the shell's own: Chart, useTheme, send, open and setContext. */
 export const JSX_PAGE_IMPORTS: Readonly<Record<string, string>> = {
   react: REACT,
   "react/jsx-runtime": `${NPM}/react@${JSX_PAGE_LIBRARIES.react}/jsx-runtime/+esm`,
@@ -26,7 +26,7 @@ export const JSX_PAGE_IMPORTS: Readonly<Record<string, string>> = {
   "lucide-react": `${NPM}/lucide-react@${JSX_PAGE_LIBRARIES["lucide-react"]}/+esm`,
   echarts: `${NPM}/echarts@${JSX_PAGE_LIBRARIES.echarts}/dist/echarts.esm.min.js`,
 };
-export const JSX_PAGE_MODULES: readonly string[] = [...Object.keys(JSX_PAGE_IMPORTS), "mausbot"];
+export const JSX_PAGE_MODULES: readonly string[] = [...Object.keys(JSX_PAGE_IMPORTS), "obot"];
 
 const CODEC = `${NPM}/@jridgewell/sourcemap-codec`;
 /** Fixes for jsDelivr's on-demand ESM builds, by address. react-dom/client and lucide-react import React by its peer
@@ -62,12 +62,12 @@ export const JSX_RUNTIME_SOURCE = `(function (env) {
   var MODULES = ${scriptJson(JSX_PAGE_MODULES)};
   var OPTIONS = ${scriptJson(JSX_TRANSFORM_OPTIONS)};
   var html = doc.documentElement;
-  var mount = doc.getElementById("mausbot-root");
+  var mount = doc.getElementById("obot-root");
   if (!html.getAttribute("data-theme")) {
     var dark = win.matchMedia && win.matchMedia("(prefers-color-scheme: dark)");
     var follow = function () { html.setAttribute("data-theme", dark && dark.matches ? "dark" : "light"); };
     follow();
-    if (dark && dark.addEventListener && !(win.mausbot && win.mausbot.send)) dark.addEventListener("change", follow);
+    if (dark && dark.addEventListener && !(win.obot && win.obot.send)) dark.addEventListener("change", follow);
   }
   var clip = function (text, limit) { text = String(text == null ? "" : text); return text.length > limit ? text.slice(0, limit - 1) + "\\u2026" : text; };
   var fail = function (kind, message, extra) { var error = new Error(message); error.pageProblem = kind; if (extra) for (var key in extra) error[key] = extra[key]; return error; };
@@ -89,8 +89,8 @@ export const JSX_RUNTIME_SOURCE = `(function (env) {
   var shown = false;
   var report = function (problem) {
     try {
-      if (win.mausbot && typeof win.mausbot.setContext === "function") {
-        win.mausbot.setContext(clip("The page \\u201c" + env.title + "\\u201d shows an error instead of its content. " + problem.message +
+      if (win.obot && typeof win.obot.setContext === "function") {
+        win.obot.setContext(clip("The page \\u201c" + env.title + "\\u201d shows an error instead of its content. " + problem.message +
           (problem.line ? " (line " + problem.line + ")" : "") + (problem.excerpt ? "\\n" + problem.excerpt : ""), 1500));
       }
     } catch (ignored) { /* the bridge went away */ }
@@ -103,7 +103,7 @@ export const JSX_RUNTIME_SOURCE = `(function (env) {
     var box = doc.createElement("div");
     box.setAttribute("role", "alert");
     box.setAttribute("data-page-problem", problem.kind);
-    box.className = "mausbot-problem";
+    box.className = "obot-problem";
     var title = doc.createElement("strong");
     title.textContent = TITLES[problem.kind] || TITLES.run;
     var body = doc.createElement("p");
@@ -116,7 +116,7 @@ export const JSX_RUNTIME_SOURCE = `(function (env) {
       box.appendChild(code);
     }
     var note = doc.createElement("p");
-    note.className = "mausbot-problem-note";
+    note.className = "obot-problem-note";
     note.textContent = problem.kind === "offline" ? "" : "The bot hears about this with your next message, so it can fix it.";
     if (note.textContent) box.appendChild(note);
     (doc.body || html).appendChild(box);
@@ -157,7 +157,7 @@ export const JSX_RUNTIME_SOURCE = `(function (env) {
       return React.createElement("div", { ref: box, className: props.className, role: "img", "aria-label": props.label,
         style: Object.assign({ width: "100%", height: props.height || 320 }, props.style) });
     };
-    var bridge = function () { return win.mausbot && typeof win.mausbot.send === "function" ? win.mausbot : null; };
+    var bridge = function () { return win.obot && typeof win.obot.send === "function" ? win.obot : null; };
     return {
       __esModule: true, Chart: Chart, useTheme: useTheme,
       send: function (text) { return bridge() ? bridge().send(text) : Promise.resolve(); },
@@ -190,7 +190,7 @@ export const JSX_RUNTIME_SOURCE = `(function (env) {
       }
       var needed = ["react", "react-dom/client"];
       names.forEach(function (name) {
-        var real = name === "mausbot" ? "echarts" : name;
+        var real = name === "obot" ? "echarts" : name;
         if (needed.indexOf(real) === -1) needed.push(real);
       });
       var loaded = {};
@@ -201,7 +201,7 @@ export const JSX_RUNTIME_SOURCE = `(function (env) {
       var React = ready.loaded.react;
       var modules = {};
       Object.keys(ready.loaded).forEach(function (name) { modules[name] = wrap(ready.loaded[name]); });
-      modules.mausbot = shellModule(React, ready.loaded.echarts);
+      modules.obot = shellModule(React, ready.loaded.echarts);
       var require = function (name) {
         if (!Object.prototype.hasOwnProperty.call(modules, name)) throw fail("import", "It imports " + name + ", which isn't loaded.");
         return modules[name];
@@ -234,13 +234,13 @@ const BASE_STYLE = [
   "html,body{margin:0}",
   "body{font-family:var(--font-sans,system-ui,sans-serif);color:var(--color-text-primary,#1d1d1f);",
   "background:var(--color-background-primary,#fff);-webkit-font-smoothing:antialiased}",
-  "#mausbot-root:empty::before{content:\"Loading\\2026\";display:block;box-sizing:border-box;min-height:100vh;padding:24px;font:14px/20px system-ui,sans-serif;opacity:.6}",
-  ".mausbot-problem{position:fixed;inset:12px;overflow:auto;z-index:2147483646;border-radius:12px;padding:16px 18px;",
+  "#obot-root:empty::before{content:\"Loading\\2026\";display:block;box-sizing:border-box;min-height:100vh;padding:24px;font:14px/20px system-ui,sans-serif;opacity:.6}",
+  ".obot-problem{position:fixed;inset:12px;overflow:auto;z-index:2147483646;border-radius:12px;padding:16px 18px;",
   "font:14px/1.5 system-ui,sans-serif;background:#fff6f5;color:#5c1712;border:1px solid #f3c2bd;box-shadow:0 8px 24px rgba(0,0,0,.12)}",
-  "[data-theme=dark] .mausbot-problem{background:#2a1513;color:#ffd9d4;border-color:#6b2a24}",
-  ".mausbot-problem strong{display:block;font-size:15px;margin-bottom:6px}.mausbot-problem p{margin:0 0 8px}",
-  ".mausbot-problem pre{margin:8px 0;padding:10px 12px;border-radius:8px;background:rgba(0,0,0,.06);font:12px/1.5 ui-monospace,Menlo,monospace;",
-  "white-space:pre-wrap;overflow-wrap:anywhere}.mausbot-problem-note{opacity:.75;font-size:12.5px}",
+  "[data-theme=dark] .obot-problem{background:#2a1513;color:#ffd9d4;border-color:#6b2a24}",
+  ".obot-problem strong{display:block;font-size:15px;margin-bottom:6px}.obot-problem p{margin:0 0 8px}",
+  ".obot-problem pre{margin:8px 0;padding:10px 12px;border-radius:8px;background:rgba(0,0,0,.06);font:12px/1.5 ui-monospace,Menlo,monospace;",
+  "white-space:pre-wrap;overflow-wrap:anywhere}.obot-problem-note{opacity:.75;font-size:12.5px}",
 ].join("");
 
 /** Tailwind's `dark:` follows the theme the chat hands the page, not only the system setting. */
@@ -257,7 +257,7 @@ function shell(input: { title: string; head: string; boot: string }): string {
     `<style type="text/tailwindcss">${TAILWIND_SETUP}</style>`,
     `<style>${BASE_STYLE}</style>`,
     input.head,
-    "</head><body><div id=\"mausbot-root\"></div>",
+    "</head><body><div id=\"obot-root\"></div>",
     `<script type="module">${input.boot}</script>`,
     "</body></html>",
   ].join("");
@@ -277,7 +277,7 @@ export function scriptSafe(code: string): string {
 /** A published page: the server's transpiled code in a plain function, the theme colours the chat would give it, and no
  * compiler and no eval. */
 export function jsxPublishedHtml(input: { title: string; compiled: string }): string {
-  const page = `<script>window.__mausbotPage=function(require,module,exports){${scriptSafe(input.compiled)}\n};</script>`;
-  const env = `{ doc: document, win: window, load: function (name) { return import(name); }, title: ${scriptJson(input.title)}, page: window.__mausbotPage }`;
+  const page = `<script>window.__obotPage=function(require,module,exports){${scriptSafe(input.compiled)}\n};</script>`;
+  const env = `{ doc: document, win: window, load: function (name) { return import(name); }, title: ${scriptJson(input.title)}, page: window.__obotPage }`;
   return shell({ title: input.title, head: `<style>${APP_THEME_STYLE}</style>${page}`, boot: `(${JSX_RUNTIME_SOURCE})(${env});` });
 }

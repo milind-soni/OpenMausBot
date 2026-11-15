@@ -1,4 +1,4 @@
-// What turns end-to-end on: the transport key, and the relay identity once the computer holds a relay token. The
+﻿// What turns end-to-end on: the transport key, and the relay identity once the computer holds a relay token. The
 // desktop app sends both over its private port; a standalone sidecar keeps its own key file.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -35,7 +35,7 @@ export function parseRelayConfig(value: unknown): RelayConfig | null | "invalid"
   return { hostId: id, nodes: [...nodes], token: relayToken };
 }
 
-/** The desktop app's `openmausbot:companion-e2e` message: `{transportKey, relay}`, the key as b64u of the 32-byte
+/** The desktop app's `obot:companion-e2e` message: `{transportKey, relay}`, the key as b64u of the 32-byte
  * private scalar. */
 export function parseE2EMessage(message: Record<string, unknown>): E2EConfig | null {
   let transportKey: KeyPair | null = null;
@@ -76,3 +76,4 @@ export function relayBaseUrlOverride(value: string | undefined): ((node: string)
   if (!/^(wss:\/\/[a-z0-9.-]+(:\d+)?|ws:\/\/(127\.0\.0\.1|localhost)(:\d+)?)$/.test(value)) return undefined;
   return () => value;
 }
+

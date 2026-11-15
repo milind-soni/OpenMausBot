@@ -43,7 +43,7 @@ function bringTogether(place: Place, self: Elsewhere["self"], to: "bot" | "perso
     return `To bring ${to === "bot" ? "their" : "your"} bots together by hand, export a backup in Settings → Backups on one place and import it on the other.`;
   }
   const how = home.kind === "cloud"
-    ? `in the app, choose "Bring them together", or turn off "Keep this computer's bots on this computer" in Settings → MausBot Cloud`
+    ? `in the app, choose "Bring them together", or turn off "Keep this computer's bots on this computer" in Settings → Obot Cloud`
     : `in the app, right-click ${home.name}'s icon on the left of the app and choose "Make ${home.name} my home"`;
   return to === "bot" ? `Offer to bring their bots together on ${home.name}: ${how}.` : `To bring your bots together on ${home.name}, ${how}.`;
 }

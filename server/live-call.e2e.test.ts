@@ -85,13 +85,13 @@ posixOnly("Live call e2e", () => {
     chmodSync(FAKE_CODEX, 0o755);
     live = await startFakeOpenAiLive();
     home = mkdtempSync(join(tmpdir(), "omb-live-call-"));
-    mkdirSync(join(home, ".openmausbot"), { recursive: true });
+    mkdirSync(join(home, ".obot"), { recursive: true });
     steerGate = join(home, "steer.gate");
     titleRoutes = join(home, "title-routes.json");
     writeFileSync(titleRoutes, JSON.stringify({ "Requests:\nwhat is six times seven": "Times table question" }));
     queueSteerGate = join(home, "queue-steer.gate");
     writeFileSync(
-      join(home, ".openmausbot", "config.json"),
+      join(home, ".obot", "config.json"),
       JSON.stringify({
         instances: {
           claude: {
@@ -163,7 +163,7 @@ posixOnly("Live call e2e", () => {
       expect(JSON.stringify(started.body)).not.toContain(LIVE_KEY);
       expect(call).toMatchObject({ botId: bot.id, threadId: bot.threadId, client: "desktop" });
       expect(session.body).toMatchObject({ session: { client: { data_channel: { allowed_client_events: ["session.close"] } } } });
-      expect((session.body.session as { instructions: string }).instructions).toContain("runs in OpenMausBot on the user's own computer.");
+      expect((session.body.session as { instructions: string }).instructions).toContain("runs in Obot on the user's own computer.");
       await live.waitForAttach(session.id);
       await sse.until((frame) => frame.kind === "live.call" && frame.call?.callId === call.callId && frame.call?.status === "live");
 
@@ -348,7 +348,7 @@ posixOnly("Live call e2e", () => {
 
   it("ends a phone's call, and refuses it another, once the companion says it was unpaired", async () => {
     const bot = await createBot();
-    const phone = { "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-e2e" };
+    const phone = { "x-obot-companion": "1", "x-obot-companion-device": "phone-e2e" };
     const sse = await openSse(`${base}/api/events`);
     try {
       const before = live.sessions.length;
@@ -359,7 +359,7 @@ posixOnly("Live call e2e", () => {
       await live.waitForAttach(session.id);
       await sse.until((frame) => frame.kind === "live.call" && frame.call?.callId === call.callId && frame.call?.status === "live");
 
-      expect(await post("/api/live/device-revoked", {}, { ...phone, "x-openmausbot-companion-device": "phone-other" }))
+      expect(await post("/api/live/device-revoked", {}, { ...phone, "x-obot-companion-device": "phone-other" }))
         .toEqual({ status: 200, body: { call: null } });
       expect(await post("/api/live/device-revoked", {}, phone)).toMatchObject({ status: 200, body: { call: { callId: call.callId } } });
       await live.waitForCommand(session.id, (c) => c.type === "session.close", 5_000);
@@ -653,7 +653,7 @@ posixOnly("Live call on the person's Cloud", () => {
     chmodSync(FAKE_CLAUDE, 0o755);
     live = await startFakeOpenAiLive();
     home = mkdtempSync(join(tmpdir(), "omb-live-cloud-"));
-    const dataDir = join(home, ".openmausbot");
+    const dataDir = join(home, ".obot");
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({
       instances: {
@@ -663,7 +663,7 @@ posixOnly("Live call on the person's Cloud", () => {
       },
     }));
     mkdirSync(join(home, "web"));
-    writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>OpenMausBot</title>");
+    writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>Obot</title>");
     const port = await freePortBlock([0, 1]);
     base = `http://127.0.0.1:${port}`;
     // Only loopback answers: the fake GPT-Live. The Admin and OpenAI are offline.
@@ -696,7 +696,7 @@ posixOnly("Live call on the person's Cloud", () => {
       if (Date.now() > deadline) throw new Error(`the Cloud home never came up. output:\n${output}`);
       await new Promise((r) => setTimeout(r, 150));
     }
-    const pairing = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+    const pairing = JSON.stringify({ label: "Obot app (Cloud)", ttlSeconds: 300 });
     const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
     const granted = await request("POST", "/api/cloud/pairing", JSON.parse(pairing), {
       "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce,
@@ -751,7 +751,7 @@ posixOnly("Live call on the person's Cloud", () => {
 // No plan anywhere and no Live key: a phone's call starts once the person's own OpenAI key is in Settings → API keys.
 posixOnly("Live calls for everyone, with the person's own OpenAI key", () => {
   const OPENAI_KEY = "sk-fake-api-keys-openai";
-  const phone = { "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-byok" };
+  const phone = { "x-obot-companion": "1", "x-obot-companion-device": "phone-byok" };
   let child: ChildProcess;
   let home = "";
   let base = "";
@@ -772,7 +772,7 @@ posixOnly("Live calls for everyone, with the person's own OpenAI key", () => {
     chmodSync(FAKE_CLAUDE, 0o755);
     live = await startFakeOpenAiLive();
     home = mkdtempSync(join(tmpdir(), "omb-live-byok-"));
-    const dataDir = join(home, ".openmausbot");
+    const dataDir = join(home, ".obot");
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({
       instances: {

@@ -123,6 +123,6 @@ export function appHostContext(args: { width: number; maxHeight: number }): AppH
     ...(timeZone ? { timeZone } : {}),
     platform: appPlatform(),
     deviceCapabilities: { touch: matches("(pointer: coarse)") || (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0), hover: matches("(hover: hover)") },
-    userAgent: `MausBot/${appVersion()}`,
+    userAgent: `Obot/${appVersion()}`,
   };
 }

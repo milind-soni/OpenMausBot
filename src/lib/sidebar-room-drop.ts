@@ -1,4 +1,4 @@
-export const ROOM_ROW_DRAG_TYPE = "application/x-openmausbot-sidebar-room";
+export const ROOM_ROW_DRAG_TYPE = "application/x-obot-sidebar-room";
 
 /** Where a dragged room lands against the room row under the pointer. */
 export type RoomDropPlace = "before" | "after";

@@ -1,4 +1,4 @@
-# In-chat team coordination
+﻿# In-chat team coordination
 
 Independent bot conversations now dispatch as soon as a handoff is accepted;
 speakers in the same group chat still serialize (and say so; with parallel room jobs on, several room jobs run side by side, see below). A Chief waiting for returned
@@ -19,7 +19,7 @@ At the next start (the runtime's restart policy, `server/runtime/runtime.ts` `op
   cut review, "Resumed with … results after a restart, reviewing"), and a
   direct requester's chat shows "Mira was cut off by a restart; resuming".
 - Never a second automatic run. A restart that cuts that rerun too ends it,
-  failed: "Interrupted by another OpenMausBot restart after resuming once; not
+  failed: "Interrupted by another Obot restart after resuming once; not
   resumed again. Some of its steps may already have taken effect." The
   requester gets that result like any other; a Chief's own review ended that
   way says so in the Chief's conversation.
@@ -41,13 +41,13 @@ At the next start (the runtime's restart policy, `server/runtime/runtime.ts` `op
   started, "Stopped before it resumed", and a rerun already running, like any
   teammate mid-turn.
 - A routine run still going at a restart fails, as before, and its
-  teammates' work ends with it, "OpenMausBot restarted while this routine was
+  teammates' work ends with it, "Obot restarted while this routine was
   running": none of it runs again, so no result lands after the person was
   told the routine failed.
 - On a quit or update, shutdown dispatches nothing more and leaves the turns
   it tears down cut for the next start, so a quit ends where a crash does,
   whatever the engine. Each conversation with a turn still running gets
-  "error: turn interrupted — OpenMausBot restarted", as a provider reload's
+  "error: turn interrupted — Obot restarted", as a provider reload's
   does, and nothing more (no unread mark, no notification), unless the next
   start goes on with that turn: a cut teammate turn, or a requester's turn
   that had sent work, says what happened when it resumes instead (a failed
@@ -471,3 +471,4 @@ now explicitly require real coordination receipts for named-bot participation;
 this is guidance, not a guarantee that every model report is truthful. The
 explicit nested run proves actual recipient execution, not merely a plausible
 final summary. These live results do not establish every provider's quality.
+

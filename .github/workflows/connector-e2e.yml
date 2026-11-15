@@ -1,6 +1,6 @@
-name: Connector e2e
+﻿name: Connector e2e
 
-# The MausBot connector on a stock ubuntu-24.04 runner, as a person installs it on their own server: a fake Admin,
+# The Obot connector on a stock ubuntu-24.04 runner, as a person installs it on their own server: a fake Admin,
 # install.sh with a one-time code, then start, update, an unclean kill and a forced rollback (connector/e2e/run.sh).
 # It pulls published home images and talks to no production service.
 on:
@@ -57,3 +57,4 @@ jobs:
           name: connector-e2e
           path: ${{ runner.temp }}/connector-e2e
           retention-days: 14
+

@@ -1,5 +1,5 @@
-// The audit log on the server: one JSON line for each job and for each request MausBot's Admin makes to the home, written
-// by the connector to /var/log/mausbot/audit.jsonl on the host, root's, for the server's owner to read. It is only ever
+// The audit log on the server: one JSON line for each job and for each request Obot's Admin makes to the home, written
+// by the connector to /var/log/obot/audit.jsonl on the host, root's, for the server's owner to read. It is only ever
 // appended to. Each line carries the SHA-256 of the line before it, so a line taken out or changed breaks the chain
 // (verifyAudit). It never holds a secret, an environment value or a pairing code.
 import { createHash } from "node:crypto";
@@ -8,12 +8,12 @@ import { dirname } from "node:path";
 
 import type { Job, JobError, JobErrorCode, JobType, ServerMode } from "./protocol.ts";
 
-/** Who asked: the Admin over the connector's connection, or root on this server through `mausbot-connector job`. */
+/** Who asked: the Admin over the connector's connection, or root on this server through `obot-connector job`. */
 export type AuditSource = "admin" | "local";
 
 export type AuditEvent =
   | { event: "connector"; what: "started" | "enrolled"; version: string; image: string | null; boxId?: string; mode?: ServerMode }
-  /** The server's admin paused or resumed remote management (`mausbot-connector pause`, `resume`). */
+  /** The server's admin paused or resumed remote management (`obot-connector pause`, `resume`). */
   | { event: "management"; what: "paused" | "resumed"; by: "local" }
   | { event: "refused"; by: "admin"; code: JobErrorCode; why: string; id?: string; type?: string }
   | { event: "job"; by: AuditSource; id: string; type: JobType; args: Record<string, unknown> }
@@ -122,3 +122,4 @@ export function verifyAudit(text: string): { ok: true; lines: number } | { ok: f
   }
   return { ok: true, lines: lines.length };
 }
+

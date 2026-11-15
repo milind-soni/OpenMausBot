@@ -18,22 +18,22 @@ export function authConfigUseLine(toolkit: string, choice: AuthConfigChoice): st
 }
 
 const MANAGED_NOTE = (toolkit: string) =>
-  `OpenMausBot note: ${toolkit} has no Composio-managed sign-in, so it needs the person's own OAuth app, which `
-  + "OpenMausBot's built-in connected apps cannot use. Tell the person: add their own Composio project key in "
-  + `Settings → API keys (the project that has their ${toolkit} auth config); OpenMausBot then picks that auth config up `
+  `Obot note: ${toolkit} has no Composio-managed sign-in, so it needs the person's own OAuth app, which `
+  + "Obot's built-in connected apps cannot use. Tell the person: add their own Composio project key in "
+  + `Settings → API keys (the project that has their ${toolkit} auth config); Obot then picks that auth config up `
   + `on its own, and they connect ${toolkit} again. Do not retry this call.`;
 
 function selfHostedNote(toolkit: string, ready: ToolkitSession | Error): string {
-  if (ready instanceof Error) return `OpenMausBot note: ${ready.message} Tell the person this. Do not retry this call.`;
+  if (ready instanceof Error) return `Obot note: ${ready.message} Tell the person this. Do not retry this call.`;
   if (ready.choice) {
-    return `OpenMausBot note: ${toolkit} has no Composio-managed sign-in. ${authConfigUseLine(toolkit, ready.choice)} `
+    return `Obot note: ${toolkit} has no Composio-managed sign-in. ${authConfigUseLine(toolkit, ready.choice)} `
       + `Call COMPOSIO_MANAGE_CONNECTIONS with toolkits ["${toolkit}"] to show the person a card that connects it, then `
       + "end the turn. Do not retry this call before that.";
   }
-  const unread = ready.readError ? ` OpenMausBot could not read their auth configs just now (Composio said: ${ready.readError}).` : "";
-  return `OpenMausBot note: ${toolkit} has no Composio-managed sign-in, so it needs an auth config with the person's own `
+  const unread = ready.readError ? ` Obot could not read their auth configs just now (Composio said: ${ready.readError}).` : "";
+  return `Obot note: ${toolkit} has no Composio-managed sign-in, so it needs an auth config with the person's own `
     + `OAuth app in their Composio project, and there is no enabled one for ${toolkit}.${unread} Tell them to create one `
-    + "(Auth Configs → Create in their Composio project, with their app's client ID and secret); OpenMausBot then uses "
+    + "(Auth Configs → Create in their Composio project, with their app's client ID and secret); Obot then uses "
     + `it on its own, and they connect ${toolkit} again. Do not retry this call.`;
 }
 

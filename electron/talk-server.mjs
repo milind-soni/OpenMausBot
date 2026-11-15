@@ -8,7 +8,7 @@ export class TalkServerError extends Error {
   }
 }
 
-export function findMausBot(bots) {
+export function findObot(bots) {
   return bots.find(bot => bot.defaultBot && !bot.defaultBot.person?.trim())
     ?? bots.find(bot => bot.chiefOfStaff && !bot.hidden)
     ?? null;
@@ -110,8 +110,8 @@ export function createTalkServer({ request, prefs, serverKey, starting = () => f
     const listing = await request("/api/bots?messages=0").catch(() => null);
     const bots = listing?.ok ? (await listing.json().catch(() => null))?.bots : null;
     if (!Array.isArray(bots)) throw down();
-    const bot = findMausBot(bots);
-    if (!bot) throw new TalkServerError("no-mausbot");
+    const bot = findObot(bots);
+    if (!bot) throw new TalkServerError("no-obot");
     const server = serverKey();
     const saved = prefs.quickAsksChat(server);
     if (saved?.botId === bot.id && bot.tasks?.some(task => task.threadId === saved.threadId)) return saved;

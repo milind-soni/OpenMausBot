@@ -38,7 +38,7 @@ describe("where the person's other bots live", () => {
     here.write({ v: 1, self: { name: "this computer", kind: "computer" }, places: [GARAGE, CLOUD] });
     expect((here.explain("Ledger") as { where: string }).where).toBe("Ledger lives on Garage server, not here. Bots work together only within one place, so it can't be reached from here. "
       + "Tell the person plainly. Offer to bring their bots together on Garage server: in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\".");
-    expect((here.explain("Chief") as { where: string }).where).toContain("Offer to bring their bots together on My Cloud: in the app, choose \"Bring them together\", or turn off \"Keep this computer's bots on this computer\" in Settings → MausBot Cloud.");
+    expect((here.explain("Chief") as { where: string }).where).toContain("Offer to bring their bots together on My Cloud: in the app, choose \"Bring them together\", or turn off \"Keep this computer's bots on this computer\" in Settings → Obot Cloud.");
   });
 
   it("an @mention of a bot that lives elsewhere: told to the bot answering it, and said once to the person in a room; never for a bot named like one here", () => {

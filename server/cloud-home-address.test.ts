@@ -18,7 +18,7 @@ afterEach(async () => { for (const directory of directories.splice(0)) await rem
 const secret = "S".repeat(43);
 const ownServer = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
   OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: "team-1", OMB_CLOUD_TEAM_NAME: "Acme", OMB_CLOUD_MACHINE_ID: "box-1a2b3c",
-  OMB_CLOUD_ADMIN_URL: "https://cloud.example.test", OMB_PUBLIC_URL: "https://mausbot.acme.example", OMB_CLOUD_BOOTSTRAP_SECRET: secret,
+  OMB_CLOUD_ADMIN_URL: "https://cloud.example.test", OMB_PUBLIC_URL: "https://obot.acme.example", OMB_CLOUD_BOOTSTRAP_SECRET: secret,
   PATH: "/usr/bin", ...extra,
 });
 const edgeOf = (env: NodeJS.ProcessEnv, home = "/data") => cloudHomeChildEnvironments(cloudHomeConfiguration(env)!, env, home);
@@ -66,7 +66,7 @@ it("serves HTTPS on the home's own domain only when asked, with the certificate 
 
   const tls = edgeOf(ownServer({ OMB_CLOUD_EDGE_TLS: "1" }));
   expect(tls.edgeFiles).toEqual({ config: "/app/cloud/Caddyfile.tls", routes: "/app/cloud/edge-routes.caddy" });
-  expect(tls.edge.OMB_CLOUD_PUBLIC_HOST).toBe("mausbot.acme.example");
+  expect(tls.edge.OMB_CLOUD_PUBLIC_HOST).toBe("obot.acme.example");
   // A new container (an update, a rollback, a restart on a new host) finds the same certificate; Let's Encrypt issues
   // one name at most 5 times a week.
   expect(tls.edge.OMB_CLOUD_EDGE_STORAGE).toBe("/data/.omb-edge/caddy");

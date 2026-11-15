@@ -91,12 +91,12 @@ describe("failed turn text", () => {
 });
 
 describe("a failed turn the server words as a notice", () => {
-  const restarted = { name: "error: turn interrupted — OpenMausBot restarted", ok: false as const, nameCode: "chat.notice.restartInterrupted" };
+  const restarted = { name: "error: turn interrupted — Obot restarted", ok: false as const, nameCode: "chat.notice.restartInterrupted" };
   it("previews in the person's language with its code, and in English without one", () => {
     setLocale("pt-br");
     try {
-      expect(activityPreview(restarted, undefined)).toBe("Sessão interrompida: o OpenMausBot reiniciou.");
-      expect(activityPreview({ name: restarted.name, ok: false }, undefined)).toBe("turn interrupted — OpenMausBot restarted");
+      expect(activityPreview(restarted, undefined)).toBe("Sessão interrompida: o Obot reiniciou.");
+      expect(activityPreview({ name: restarted.name, ok: false }, undefined)).toBe("turn interrupted — Obot restarted");
     } finally {
       setLocale("en");
     }

@@ -1,7 +1,7 @@
 # OpenMausMobile privacy
 
-OpenMausMobile is a companion for an OpenMausBot service chosen and operated
-by the user. Local Wi-Fi and Tailscale connections work without an OpenMausBot
+OpenMausMobile is a companion for an Obot service chosen and operated
+by the user. Local Wi-Fi and Tailscale connections work without an Obot
 account. A user may separately sign in on the desktop to enable the optional
 **Use your phone anywhere** HTTPS connection.
 
@@ -13,7 +13,7 @@ account. A user may separately sign in on the desktop to enable the optional
   private App Group and its pairing token through a shared Keychain access
   group. No other app receives those values.
 - The computer remains the source of bots, transcripts, approvals, credentials,
-  SQLite data, and screen images. OpenMausBot's hosted control plane does not
+  SQLite data, and screen images. Obot's hosted control plane does not
   store a copy of that content.
 - When a user completes a supported credential request on the phone, the value
   exists only in the native secure field long enough to encrypt it with the
@@ -34,7 +34,7 @@ account. A user may separately sign in on the desktop to enable the optional
   may separately store it under that provider's own settings and privacy terms.
 - On a local Wi-Fi or Tailscale connection, phone traffic goes directly to the
   user's computer. Tailscale is a separate service with its own privacy terms.
-- If the desktop user enables optional hosted access, OpenMausBot stores the
+- If the desktop user enables optional hosted access, Obot stores the
   account email address, an internal account ID, and computer installation
   metadata: an opaque installation ID, opaque client ID, computer display name,
   operating system, app version, status, and security timestamps. It also stores
@@ -44,8 +44,8 @@ account. A user may separately sign in on the desktop to enable the optional
 - The optional HTTPS route is proxied by Cloudflare to an outbound-only
   `cloudflared` connector on the user's computer. Messages, approvals,
   transcript responses, and screen frames pass through Cloudflare in transit,
-  but are not written to the OpenMausBot control-plane database. Cloudflare may
-  process IP addresses and connection/request metadata as OpenMausBot's service
+  but are not written to the Obot control-plane database. Cloudflare may
+  process IP addresses and connection/request metadata as Obot's service
   provider under Cloudflare's privacy terms.
 - Connector tokens stay in the desktop operating system's encrypted credential
   store. Pairing tokens and the phone's device credential are not stored in
@@ -53,14 +53,14 @@ account. A user may separately sign in on the desktop to enable the optional
 - Closed-app alerts: when the phone allows notifications, the app gives its
   paired computer the Apple Push Notification service device token for this
   app install. A computer with optional hosted access registers that token
-  with the OpenMausBot control plane, which stores it with the installation
+  with the Obot control plane, which stores it with the installation
   ID, the APNs environment and timestamps so it can ask Apple to deliver an
   alert. An alert carries only its kind, the bot's and room's names and
   opaque IDs; never message text, replies, file paths or secrets. Apple
   processes the token and alert under its own terms. The token is deleted
   when the phone is unpaired or removes the computer, when Apple reports it
   invalid, and when the computer's hosted access is revoked.
-- When a user explicitly chooses OpenMausBot from another app's Share sheet, or
+- When a user explicitly chooses Obot from another app's Share sheet, or
   uses the attachment button in a chat, the selected text, link, image, or
   supported document is sent to the bot or room the user confirms. Images and
   documents are stored in the attachments directory on the user's computer with
@@ -91,8 +91,8 @@ remote networks; neither makes a sleeping or powered-off computer reachable.
 ## Retention, control, and deletion
 
 Unpairing removes the computer address and pairing token from the phone.
-Revoking the phone in OpenMausBot's Companion settings invalidates that device
-credential. Transcript deletion is controlled by the OpenMausBot installation
+Revoking the phone in Obot's Companion settings invalidates that device
+credential. Transcript deletion is controlled by the Obot installation
 that stores the transcript.
 
 Signing out of optional hosted access stops advertising the hosted address,
@@ -104,7 +104,7 @@ holder asks for deletion. Some minimal records may be retained when required
 for security, fraud prevention, dispute resolution, or law.
 
 To request a copy or deletion of hosted account data, open an
-[OpenMausBot Support](https://github.com/milind-soni/OpenMausBot/issues) request
+[Obot Support](https://github.com/alnatourm/Obot/issues) request
 without posting an OTP, pairing code, device token, connector token, or other
 secret. The maintainer will provide a private way to verify control of the
 email address. Deleting hosted account data does not delete transcripts stored
@@ -113,4 +113,5 @@ on the user's own computer.
 ## Support
 
 Privacy questions can be opened at
-[OpenMausBot Support](https://github.com/milind-soni/OpenMausBot/issues).
+[Obot Support](https://github.com/alnatourm/Obot/issues).
+

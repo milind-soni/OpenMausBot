@@ -161,7 +161,7 @@ export async function prepareAntigravityProfile(input: {
 
   const executable = process.platform === "win32" ? process.execPath.replaceAll("\\", "/") : process.execPath;
   if (/\r|\n|\0|%s/u.test(executable) || executable.includes(delimiter)) {
-    throw new Error("The OpenMausBot runtime path cannot safely suppress Antigravity browser launches.");
+    throw new Error("The Obot runtime path cannot safely suppress Antigravity browser launches.");
   }
   const browserCommand = [executable, "-e", browserHelperSource, "--", "%s"]
     .map(quoteBrowserArgument)
@@ -390,12 +390,12 @@ export class AntigravityAcpClient {
         (this.nativeStartupHint ? `${this.nativeStartupHint} ` : "") +
         `Startup output: ${this.startupOutputBytes} bytes; diagnostic output: ${this.startupDiagnosticBytes} bytes. ` +
         (this.tempDirectory ? `Unpacked into temp: ${Math.round(Math.max(0, now - before) / 1_000_000)} MB. ` : "") +
-        "Retry setup. If it still fails, share this error and your OpenMausBot version; do not paste Google sign-in links or tokens.",
+        "Retry setup. If it still fails, share this error and your Obot version; do not paste Google sign-in links or tokens.",
       );
     };
     const initialized = await this.request("initialize", {
       protocolVersion: 1,
-      clientInfo: { name: "openmausbot", version: "0.0.0" },
+      clientInfo: { name: "obot", version: "0.0.0" },
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
     }, Math.min(windowMs, Math.max(0, deadline - Date.now())), expired);
     this.initializationComplete = true;

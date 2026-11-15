@@ -118,7 +118,7 @@ function stringValue(raw: string): string | null {
 
 function overrides(env: Record<string, string | undefined>, provider: string, entries: Entry[]): string[] {
   const args: string[] = [];
-  const variable = (suffix: string) => `OPENMAUSBOT_CODEX_${provider.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_${suffix}`;
+  const variable = (suffix: string) => `OBOT_CODEX_${provider.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_${suffix}`;
   const set = (key: string, raw: string) => args.push("-c", `model_providers.${[provider, key].filter(Boolean).join(".")}=${raw}`);
   const token = entries.find((entry) => entry.path.join(".") === "experimental_bearer_token");
   const bearer = token ? stringValue(token.raw) : null;

@@ -10,7 +10,7 @@ describe("rankCategories", () => {
     expect(rankCategories([])).toEqual({ inline: [], more: [] });
   });
 
-  it("keeps a category OpenMausBot's own app lives in among the inline ones, taking the last place", () => {
+  it("keeps a category Obot's own app lives in among the inline ones, taking the last place", () => {
     const cards = [card("a", "Productivity"), card("b", "Productivity"), card("c", "Design"), card("d", "Design"), card("e", "Files"), card("postiz", "Social")];
     expect(rankCategories(cards, 2, ["Social"])).toEqual({ inline: ["Design", "Social"], more: ["Productivity", "Files"] });
     expect(rankCategories(cards, 3, ["Social"]).inline).toEqual(["Design", "Productivity", "Social"]);

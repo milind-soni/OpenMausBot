@@ -1,11 +1,11 @@
-// What a person types or pastes to reach a MausBot server: a pairing link, an address, an address and a code typed
-// apart, or a code on its own. One reader for the desktop's Connect sheet, `openmausbot connect` and the MCP bridge.
+// What a person types or pastes to reach a Obot server: a pairing link, an address, an address and a code typed
+// apart, or a code on its own. One reader for the desktop's Connect sheet, `obot connect` and the MCP bridge.
 import { isTailnetHost, isTailnetName } from "./tailnet.mjs";
 
 export const PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 export const PAIRING_CODE_LENGTH = 12;
 const PAIRING_CREDENTIAL = /^omb_pair_[A-Za-z0-9_-]{43}$/;
-/** The port `openmausbot serve` and the desktop app listen on. */
+/** The port `obot serve` and the desktop app listen on. */
 export const DEFAULT_PORT = 8799;
 export const EXAMPLE_ADDRESS = `http://192.168.1.20:${DEFAULT_PORT}`;
 
@@ -100,7 +100,7 @@ export function formatPairingCode(code) {
 /**
  * A pairing code as typed: `{ kind: "code", code }` (formatted XXXX-XXXX-XXXX), the high-entropy credential a QR may
  * carry, nothing, or the wrong kind of secret with what it is: an emailed sign-in code (8 digits), a code from an older
- * MausBot (6 digits), a script key (`omb_sess_…`), or not a code at all.
+ * Obot (6 digits), a script key (`omb_sess_…`), or not a code at all.
  */
 export function readPairingCode(raw) {
   const value = String(raw ?? "").trim();
@@ -123,7 +123,7 @@ function decoded(value) {
   }
 }
 
-/** `{ address, secret }` from an `openmausbot://pair` link; only one naming a server's own http(s) origin. */
+/** `{ address, secret }` from an `obot://pair` link; only one naming a server's own http(s) origin. */
 function appLink(url) {
   const address = url.searchParams.get("address") ?? "";
   if (!/^https?:\/\//i.test(address)) return null;
@@ -150,7 +150,7 @@ export function parseServerInput(addressInput, codeInput = "") {
   if (asCode.kind === "wrong" && asCode.problem !== "notACode") return { ok: false, problem: asCode.problem };
   if (/[\s\\]/.test(text)) return { ok: false, problem: "notAnAddress" };
   let secret = null;
-  if (/^openmausbot:/i.test(text)) {
+  if (/^obot:/i.test(text)) {
     let link;
     try {
       link = appLink(new URL(text));

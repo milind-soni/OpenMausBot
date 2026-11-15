@@ -30,7 +30,7 @@ async function withFixture(test: (f: Fixture) => Promise<void>, options: { hosti
   const fake = await startFakeAppHosting(TOKEN, { apps: options.apps ?? 10 });
   const env = options.hosting ? { OMB_CLOUD_HOSTING_URL: fake.url, OMB_CLOUD_HOSTING_TOKEN: TOKEN } : {};
   const session = await launchVerificationServer({ ...process.env, ...env }, undefined, undefined, undefined, undefined, { scripted: true });
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OBOT_URL: session.info.url } }) as Promise<any>;
   const planPath = join(session.info.dataDir, "room-plan.json");
   const turnFor = (botId: string) => {
     const lines = existsSync(planPath + ".evidence.jsonl") ? readFileSync(planPath + ".evidence.jsonl", "utf8").trim().split("\n").filter(Boolean) : [];

@@ -1,4 +1,4 @@
-# My Chrome on My Cloud
+﻿# My Chrome on My Cloud
 
 **Asked for (Omkar, 2026-10-26):** on My Cloud the Browser profiles dialog greys out My Chrome. Bots should have both
 options anywhere: their own browser, or the person's Chrome on their Mac or PC, whenever that computer is online. A
@@ -6,7 +6,7 @@ Cloud bot may use the Mac while it is live.
 
 ## Behaviour
 
-- **Mac or PC (desktop app):** Settings → MausBot Cloud → what's lent gets a fourth switch, **Your Chrome**, off by
+- **Mac or PC (desktop app):** Settings → Obot Cloud → what's lent gets a fourth switch, **Your Chrome**, off by
   default and never part of the default grant. While it is on and lending runs, My Cloud's bots can drive the Chrome
   on this computer over the device link that already carries the internet connection.
 - **My Cloud (personal Cloud home only, never a Team Cloud):** once a computer lends its Chrome, a browser profile's
@@ -66,3 +66,4 @@ agent-browser (Cloud) ──ws──▶ Cloud door 127.0.0.1:<port>/devtools/bro
 A process running as the server's own user on the Cloud could read the token from agent-browser's environment.
 That user can already read the server's data, so this is no new reach. The token is there to keep out other users and
 port probes.
+

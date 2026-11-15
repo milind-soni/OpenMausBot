@@ -63,7 +63,7 @@ export function parseConnections(value) {
 /** This computer's connections, by name only, and the computer they are on. */
 export async function collectConnections(local) {
   const listed = parseConnections(await local.json("/api/cloud-connections").catch(() => null));
-  if (!listed) throw new ConnectionMoveError("local", "OpenMausBot on this computer did not list its apps and keys. Try again in a moment.");
+  if (!listed) throw new ConnectionMoveError("local", "Obot on this computer did not list its apps and keys. Try again in a moment.");
   return { computer: listed.computer, connections: listed.connections };
 }
 
@@ -115,7 +115,7 @@ async function letGo(local, target, item, digest) {
 }
 
 /**
- * Makes My Cloud act as this computer's connected-apps account: with OpenMausBot's service, a one-time code minted for
+ * Makes My Cloud act as this computer's connected-apps account: with Obot's service, a one-time code minted for
  * My Cloud's own installation; with the person's own Composio project, the same key and user. A Cloud whose own apps
  * are connected keeps them, and says which apps connected here it lacks (`missing`).
  * `here` and `there`: the "composio" connection of this computer and of My Cloud (null when My Cloud has none yet).

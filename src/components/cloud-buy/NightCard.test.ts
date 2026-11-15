@@ -15,7 +15,7 @@ const { NightCard } = await import("./NightCard");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement, root: Root;
-const render = async (small = false) => { await act(async () => { root.render(createElement(NightCard, { small, children: createElement("h2", null, "MausBot Cloud") })); }); };
+const render = async (small = false) => { await act(async () => { root.render(createElement(NightCard, { small, children: createElement("h2", null, "Obot Cloud") })); }); };
 const card = () => host.querySelector<HTMLElement>("[data-night-card]")!;
 const mascots = () => [...host.querySelectorAll<HTMLElement>("[data-maus]")];
 const animated = () => mascots().map(node => node.dataset.animated);
@@ -32,7 +32,7 @@ afterEach(async () => {
 it("the scene is hidden from screen readers: the card's own text is what is read", async () => {
   await render();
   expect(card().querySelector("svg")!.getAttribute("aria-hidden")).toBe("true");
-  expect(card().textContent).toBe("MausBot Cloud");
+  expect(card().textContent).toBe("Obot Cloud");
   expect(card().querySelector("h2")!.closest("svg"), "the text sits outside the scene").toBeNull();
 });
 

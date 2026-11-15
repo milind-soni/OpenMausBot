@@ -1,4 +1,4 @@
-// A harness for the sidecar to front in tests: health, an event stream with resume, uploads, a Range download and a
+﻿// A harness for the sidecar to front in tests: health, an event stream with resume, uploads, a Range download and a
 // long wait before headers.
 import { createHash } from "node:crypto";
 import { createServer, type ServerResponse } from "node:http";
@@ -26,7 +26,7 @@ export async function startFakeHarness(): Promise<FakeHarness> {
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://harness");
     const path = url.pathname;
-    if (path === "/api/health") return void res.writeHead(200, { "content-type": "application/json" }).end('{"app":"openmausbot"}');
+    if (path === "/api/health") return void res.writeHead(200, { "content-type": "application/json" }).end('{"app":"obot"}');
     if (path === "/api/config") return void res.writeHead(200, { "content-type": "application/json" }).end('{"computerName":"Test Mac"}');
     if (path === "/api/events") {
       const since = Number(req.headers["last-event-id"] ?? url.searchParams.get("since") ?? 0) || 0;
@@ -113,3 +113,4 @@ export async function startFakeHarness(): Promise<FakeHarness> {
     },
   };
 }
+

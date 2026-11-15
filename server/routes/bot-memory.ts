@@ -199,7 +199,7 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
       if (!parsed.success) return json(res, 400, { error: "target must be obsidian or folder" });
       const workspacePath = memoryOverview(m[1]).workspacePath;
       if (auth.kind !== "loopback") {
-        return json(res, 403, { error: `This only works on the computer running OpenMausBot. The memory folder there is ${workspacePath}`, workspacePath });
+        return json(res, 403, { error: `This only works on the computer running Obot. The memory folder there is ${workspacePath}`, workspacePath });
       }
       const opened = await openMemoryLocation(m[1], parsed.data.target);
       if (!opened.ok) return json(res, 500, { error: opened.error, workspacePath: opened.workspacePath });

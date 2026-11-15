@@ -1,4 +1,4 @@
-# Gesture Core Implementation Plan
+﻿# Gesture Core Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -1197,8 +1197,8 @@ git commit -m "test(ios): shared gesture parity fixture and runner"
 ### Task 8: Kotlin value types and viewport mapping
 
 **Files:**
-- Create: `android/core/src/main/kotlin/com/openmausbot/companion/core/RemoteGestures.kt`
-- Test: `android/core/src/test/kotlin/com/openmausbot/companion/core/RemoteGestureMappingTest.kt`
+- Create: `android/core/src/main/kotlin/com/obot/companion/core/RemoteGestures.kt`
+- Test: `android/core/src/test/kotlin/com/obot/companion/core/RemoteGestureMappingTest.kt`
 
 **Interfaces:**
 - Consumes: nothing.
@@ -1209,7 +1209,7 @@ git commit -m "test(ios): shared gesture parity fixture and runner"
 Port `RemoteGestureMappingTests` verbatim in behaviour:
 
 ```kotlin
-package com.openmausbot.companion.core
+package com.obot.companion.core
 
 import kotlin.math.abs
 import kotlin.test.Test
@@ -1263,7 +1263,7 @@ Expected: PASS, 3 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add android/core/src/main/kotlin/com/openmausbot/companion/core/RemoteGestures.kt android/core/src/test/kotlin/com/openmausbot/companion/core/RemoteGestureMappingTest.kt
+git add android/core/src/main/kotlin/com/obot/companion/core/RemoteGestures.kt android/core/src/test/kotlin/com/obot/companion/core/RemoteGestureMappingTest.kt
 git commit -m "feat(android): gesture value types and viewport mapping"
 ```
 
@@ -1272,8 +1272,8 @@ git commit -m "feat(android): gesture value types and viewport mapping"
 ### Task 9: Kotlin click sequencing, long press and drags
 
 **Files:**
-- Modify: `android/core/src/main/kotlin/com/openmausbot/companion/core/RemoteGestures.kt`
-- Test: `android/core/src/test/kotlin/com/openmausbot/companion/core/RemoteGestureClickTest.kt`
+- Modify: `android/core/src/main/kotlin/com/obot/companion/core/RemoteGestures.kt`
+- Test: `android/core/src/test/kotlin/com/obot/companion/core/RemoteGestureClickTest.kt`
 
 **Interfaces:**
 - Consumes: Task 8's types.
@@ -1302,7 +1302,7 @@ Expected: PASS, 9 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add android/core/src/main/kotlin/com/openmausbot/companion/core/RemoteGestures.kt android/core/src/test/kotlin/com/openmausbot/companion/core/RemoteGestureClickTest.kt
+git add android/core/src/main/kotlin/com/obot/companion/core/RemoteGestures.kt android/core/src/test/kotlin/com/obot/companion/core/RemoteGestureClickTest.kt
 git commit -m "feat(android): click sequencing, long press and held-button drags"
 ```
 
@@ -1311,8 +1311,8 @@ git commit -m "feat(android): click sequencing, long press and held-button drags
 ### Task 10: Kotlin trackpad mode
 
 **Files:**
-- Modify: `android/core/src/main/kotlin/com/openmausbot/companion/core/RemoteGestures.kt`
-- Test: `android/core/src/test/kotlin/com/openmausbot/companion/core/RemoteGestureTrackpadTest.kt`
+- Modify: `android/core/src/main/kotlin/com/obot/companion/core/RemoteGestures.kt`
+- Test: `android/core/src/test/kotlin/com/obot/companion/core/RemoteGestureTrackpadTest.kt`
 
 **Interfaces:**
 - Consumes: Task 9's `GestureCore`.
@@ -1339,7 +1339,7 @@ Expected: PASS, 5 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add android/core/src/main/kotlin/com/openmausbot/companion/core/RemoteGestures.kt android/core/src/test/kotlin/com/openmausbot/companion/core/RemoteGestureTrackpadTest.kt
+git add android/core/src/main/kotlin/com/obot/companion/core/RemoteGestures.kt android/core/src/test/kotlin/com/obot/companion/core/RemoteGestureTrackpadTest.kt
 git commit -m "feat(android): trackpad mode with a virtual cursor and acceleration"
 ```
 
@@ -1348,8 +1348,8 @@ git commit -m "feat(android): trackpad mode with a virtual cursor and accelerati
 ### Task 11: Kotlin scroll, momentum, zoom, driving gate and flush
 
 **Files:**
-- Modify: `android/core/src/main/kotlin/com/openmausbot/companion/core/RemoteGestures.kt`
-- Test: `android/core/src/test/kotlin/com/openmausbot/companion/core/RemoteGestureScrollZoomTest.kt`
+- Modify: `android/core/src/main/kotlin/com/obot/companion/core/RemoteGestures.kt`
+- Test: `android/core/src/test/kotlin/com/obot/companion/core/RemoteGestureScrollZoomTest.kt`
 
 **Interfaces:**
 - Consumes: Task 10's `GestureCore`.
@@ -1376,7 +1376,7 @@ Expected: PASS, whole `:core` suite including the pre-existing tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add android/core/src/main/kotlin/com/openmausbot/companion/core/RemoteGestures.kt android/core/src/test/kotlin/com/openmausbot/companion/core/RemoteGestureScrollZoomTest.kt
+git add android/core/src/main/kotlin/com/obot/companion/core/RemoteGestures.kt android/core/src/test/kotlin/com/obot/companion/core/RemoteGestureScrollZoomTest.kt
 git commit -m "feat(android): scroll, momentum, zoom, driving gate and flush"
 ```
 
@@ -1386,7 +1386,7 @@ git commit -m "feat(android): scroll, momentum, zoom, driving gate and flush"
 
 **Files:**
 - Create: `android/core/src/test/resources/gesture-parity.json` (symlink or copy of the iOS fixture)
-- Create: `android/core/src/test/kotlin/com/openmausbot/companion/core/RemoteGestureParityTest.kt`
+- Create: `android/core/src/test/kotlin/com/obot/companion/core/RemoteGestureParityTest.kt`
 - Modify: `docs/superpowers/specs/2026-09-18-mobile-touch-control-design.md` — record where the fixture lives and that both suites must load it.
 
 **Interfaces:**
@@ -1398,7 +1398,7 @@ The fixture must exist once, not twice. Copy it in a Gradle `processTestResource
 - [ ] **Step 1: Write the failing test**
 
 ```kotlin
-package com.openmausbot.companion.core
+package com.obot.companion.core
 
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
@@ -1481,7 +1481,7 @@ short.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add android/core/build.gradle.kts android/core/src/test/kotlin/com/openmausbot/companion/core/RemoteGestureParityTest.kt docs/superpowers/specs/2026-09-18-mobile-touch-control-design.md
+git add android/core/build.gradle.kts android/core/src/test/kotlin/com/obot/companion/core/RemoteGestureParityTest.kt docs/superpowers/specs/2026-09-18-mobile-touch-control-design.md
 git commit -m "test(android): run the shared gesture parity fixture"
 ```
 
@@ -1496,3 +1496,4 @@ git commit -m "test(android): run the shared gesture parity fixture"
 - Cellular frame-rate capping and the 429 contention message.
 
 Each depends on the core's interface being settled, which is what this plan delivers.
+

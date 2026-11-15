@@ -1,5 +1,5 @@
 // Where a person enters the one-time code that signs an engine's CLI in on
-// the machine running OpenMausBot (`codex login --device-auth`, `grok login
+// the machine running Obot (`codex login --device-auth`, `grok login
 // --device-auth`, `kimi login`), or, for a CLI that prints no code (`cursor-agent
 // login`), the one link that finishes its sign-in. The server reads the page and
 // the code from the CLI's output with these rules, and the app checks them again

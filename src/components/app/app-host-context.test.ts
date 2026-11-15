@@ -42,7 +42,7 @@ describe("the host context", () => {
     const context = appHostContext({ width: 612.4, maxHeight: 700 });
     expect(context).toMatchObject({
       displayMode: "inline", availableDisplayModes: ["inline"], containerDimensions: { width: 612, maxHeight: 700 },
-      platform: "web", userAgent: expect.stringMatching(/^MausBot\//),
+      platform: "web", userAgent: expect.stringMatching(/^Obot\//),
     });
     vi.stubGlobal("window", { innerHeight: 2_000, ogb: {} });
     expect(appMaxHeight()).toBe(720);

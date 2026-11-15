@@ -17,7 +17,7 @@ export interface PublishedPageCard {
   plan?: string;
 }
 
-/** The MausBot pages Worker's page ids: one DNS label of lowercase letters and digits. */
+/** The Obot pages Worker's page ids: one DNS label of lowercase letters and digits. */
 export const PAGE_ID = /^[a-z0-9]{20,63}$/;
 
 /** What a page's files may be, by extension, and the Content-Type each is served with: the same list as the pages

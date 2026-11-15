@@ -4,7 +4,7 @@ description: Every event and property the optional product analytics can send, h
 icon: ChartColumn
 ---
 
-MausBot can send anonymous product analytics to PostHog (US cloud, `us.i.posthog.com`), so its maintainers can see
+Obot can send anonymous product analytics to PostHog (US cloud, `us.i.posthog.com`), so its maintainers can see
 which features people set up and use. This page lists every event and every property the app can send. Nothing else is
 sent.
 
@@ -15,7 +15,7 @@ sent.
 - Autocapture, pageviews, surveys and feature flags are off. Events come only from the calls listed on this page, and
   switching analytics back on sends no event of its own.
 - Every event carries `app_version` (for example `0.1.112`) and `surface`: `local` for the desktop app's own window,
-  `server` for a page a server serves (MausBot Cloud, a self-hosted server, or the app in a browser).
+  `server` for a page a server serves (Obot Cloud, a self-hosted server, or the app in a browser).
 - PostHog adds its standard device facts to every event: operating system, browser and its version, device type,
   screen and window size, language and time zone. Like any server, PostHog sees the IP address a request comes from.
 - Events are tied to a random id that PostHog keeps in the page's storage. Nothing ties them to you: the app never sends
@@ -30,7 +30,7 @@ The desktop app keeps the switch for this computer's page itself, so it holds wh
 (it moves to another when its usual one is taken). It is read before anything loads, and before any email is tied to
 your events. A switch turned off only in the page's storage, before the app kept it, does not hold on another port until
 the app serves its page on that port again, which moves it to the app; while the app has kept no choice yet, its page on
-a port other than its first ties no email to your events. Each server page (your MausBot Cloud, a self-hosted server,
+a port other than its first ties no email to your events. Each server page (your Obot Cloud, a self-hosted server,
 each browser you use) keeps its own switch in that page's storage. With the switch off in the desktop app, a server page
 that the app's window shows, My Cloud's included, starts with it off too once that server runs this version; turning it
 on there lasts until that page reloads. In a browser, switch it off on each server's page.
@@ -74,7 +74,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 - It counts what the app has already loaded. It also asks, once: this server for its signed-in devices (counted, never
   listed) and its connected-app inventory; on the desktop app, the app itself for the number of paired phones and the
   Cloud plan; and, when a Boat account is set, this server for the number of cloud computers. To answer that, the server
-  lists the computers once at boat.dev with your Boat key, or at MausBot Cloud's relay for computers included with a
+  lists the computers once at boat.dev with your Boat key, or at Obot Cloud's relay for computers included with a
   plan. That listing only reads: it never changes a computer.
 - When a source fails, its properties are left out and the rest is sent.
 
@@ -114,7 +114,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `paired_devices` | count | Devices signed in to this server without an email, other than this one |
 | `phone_paired` | true/false | Either count above is more than zero |
 | `members` | count | People signed in to this server with an email, other than you |
-| `cloud_home` | true/false | This server is a MausBot Cloud |
+| `cloud_home` | true/false | This server is a Obot Cloud |
 | `cloud_plan` | `starter`, `personal`, `pro`, `max`, `other`, `none`, `unknown` | The Cloud plan: `none` when free or signed out, `unknown` when the app cannot tell |
 | `cloud_trial` | true/false | A Cloud trial is running |
 | `edition` | `oss`, `enterprise` | The edition |
@@ -134,7 +134,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `onboarding_step` | A first-run screen is shown | `step`: `meet`, `chief`; `replay`: true/false |
 | `onboarding_completed` | The first run ends in the chat | `reason`: `completed`; `at`: the screen it ended on; `replay`: true/false |
 | `setup_import_applied` | You bring in the skills and MCP servers found from other AI tools on this computer, in Settings → Import & export | `skills`, `tools`: how many were added. Never their names or where they came from |
-| `onboarding_cloud` | You tap Try Cloud under MausBot's first messages, which opens Add a Cloud | `action`: `start_trial` |
+| `onboarding_cloud` | You tap Try Cloud under Obot's first messages, which opens Add a Cloud | `action`: `start_trial` |
 | `message_sent` | You send a message | To a bot: `driver`: engine; `queued`: true/false. To a room: `room`: true; `mode`: `chat`, `goal`; `queued`: true/false |
 | `call_started` | You start a call with a bot | `driver`: engine; `mode`: `turns`, `live` |
 | `group_call_started` | You start a call with a room | `memberCount`: count |
@@ -148,13 +148,13 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `engine_signed_in` | You finish signing in to an engine inside the app | `engine`: `claude`, `codex`, `grok`, `kimi`; `method`: `code`, `device_code`, `browser` |
 | `connector_connect` | A Connect you started in Connected apps ends | `app`: app; `result`: `connected` (the account it added works), `failed` or `expired` (that account failed or expired), `timed_out` (neither within two minutes) |
 | `app_snapshot` | Once a day, as described above | The properties in the snapshot table |
-| `cloud_card_shown` | The MausBot Cloud card is shown | `variant`: `signed_out`, `free` |
-| `cloud_card_action` | You act on the MausBot Cloud card | `action`: `start`, `howto`, `signin`, `not_now`, `close` |
-| `whats_new` | The What's new popup (once per person after an update, on this computer's page): a slide comes on screen, counted once per slide each time the popup is up, or you act on it | `action`: `seen`, `next`, `back` (the slide changed, by its buttons, its dots or the arrow keys), `get_pro` (Get Pro, which opens Add a Cloud), `see_cloud` (See the new Cloud, which opens the Cloud website), `start_team` (Start a Team, which opens the Team plan's checkout on the Cloud website, or Add a Cloud for someone with a plan of their own), `not_now`, `close` (the X, Escape or a click outside); `slide`: the slide it happened on: `pro` (the new MausBot Cloud), `team` (Team); `audience`: `no_plan` (both slides), `own_plan` (a Cloud plan of one's own: the Team slide only); `signed_in`: true/false, signed in to MausBot Cloud in the app; `campaign`: the popup's campaign, `whats-new-2026-11` |
+| `cloud_card_shown` | The Obot Cloud card is shown | `variant`: `signed_out`, `free` |
+| `cloud_card_action` | You act on the Obot Cloud card | `action`: `start`, `howto`, `signin`, `not_now`, `close` |
+| `whats_new` | The What's new popup (once per person after an update, on this computer's page): a slide comes on screen, counted once per slide each time the popup is up, or you act on it | `action`: `seen`, `next`, `back` (the slide changed, by its buttons, its dots or the arrow keys), `get_pro` (Get Pro, which opens Add a Cloud), `see_cloud` (See the new Cloud, which opens the Cloud website), `start_team` (Start a Team, which opens the Team plan's checkout on the Cloud website, or Add a Cloud for someone with a plan of their own), `not_now`, `close` (the X, Escape or a click outside); `slide`: the slide it happened on: `pro` (the new Obot Cloud), `team` (Team); `audience`: `no_plan` (both slides), `own_plan` (a Cloud plan of one's own: the Team slide only); `signed_in`: true/false, signed in to Obot Cloud in the app; `campaign`: the popup's campaign, `whats-new-2026-11` |
 | `cloud_howto` | The "Show me how" tip ends | `result`: `no_button`, `skipped`, `closed` |
-| `cloud_dialog_shown` | The Add a Cloud dialog opens | `source`: `app_card`, `app_howto`, `app_menu`, `app_settings`, `app_routines`, `app_whats_new_pro` (Get Pro in the What's new popup), `app_whats_new_team` (Start a Team in it, for someone with a plan of their own), `app_onboarding` (Try Cloud under MausBot's first messages); `view`: the dialog's first screen |
+| `cloud_dialog_shown` | The Add a Cloud dialog opens | `source`: `app_card`, `app_howto`, `app_menu`, `app_settings`, `app_routines`, `app_whats_new_pro` (Get Pro in the What's new popup), `app_whats_new_team` (Start a Team in it, for someone with a plan of their own), `app_onboarding` (Try Cloud under Obot's first messages); `view`: the dialog's first screen |
 | `cloud_dialog_view` | The Add a Cloud dialog reaches a step | `view`: `received`, `starting`, `ready` |
-| `cloud_signin` | Signing in to MausBot Cloud inside the Add a Cloud dialog takes a step | `step`: `code_sent` (a sign-in code was emailed), `signed_in`, `browser` (Continue in browser); `source`: as for `cloud_dialog_shown` |
+| `cloud_signin` | Signing in to Obot Cloud inside the Add a Cloud dialog takes a step | `step`: `code_sent` (a sign-in code was emailed), `signed_in`, `browser` (Continue in browser); `source`: as for `cloud_dialog_shown` |
 | `cloud_checkout_opened` | A Cloud checkout opens in the browser | `plan`: Cloud plan; `trial`: true/false; `source`: as for `cloud_dialog_shown` |
 | `cloud_add_another` | Buying another Cloud, for someone who has one, takes a step | `step`: `plan` (a plan chosen), `checkout_opened`, `ready`; `plan`: Cloud plan, for `plan` and `checkout_opened` |
 | `rail_place_opened` | You open a place from the rail of Clouds at the window's left edge | `kind`: `computer`, `cloud`, `team`, `server` |
@@ -167,7 +167,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `product_hunt_card` | You act on the Product Hunt card | `action`: `upvote`, `not_now`, `close` |
 | `boat_offer` | Boat's credit offer: its one-time card is shown or you act on it, or you act on it on the Boat card in Settings → API keys | `action`: `shown` (the card only), `get_boat`, `claim` (the drafted email to Boat opened), `not_now`, `close`; `place`: `card`, `settings` |
 | `modelgo_offer` | ModelGo, a sponsor: its one-time popup or its first-run option is shown, or you act on the popup, the first-run option or the ModelGo row in Settings → API keys | `action`: `shown` (the popup and the first-run option), `get_key` (ModelGo's site opened), `add_key` (Settings: a key was saved there; first run: you opened the ModelGo row to add one; never the popup), `not_now`, `close` (the popup only); `place`: `popup`, `onboarding`, `settings` |
-| `announcement` | A card from the project's public announcements file (sponsor offers, product news, tips; [Announcements](https://github.com/milind-soni/OpenMausBot/blob/main/docs/announcements.md)) is shown, or you act on it | `id`: the card's own id from that file, the same for everyone who sees the card; `kind`: `sponsor`, `product`, `tip`; `action`: `shown`, `primary` (its main button), `secondary` (its second button), `close` (Not now, the X or Escape) |
+| `announcement` | A card from the project's public announcements file (sponsor offers, product news, tips; [Announcements](https://github.com/alnatourm/Obot/blob/main/docs/announcements.md)) is shown, or you act on it | `id`: the card's own id from that file, the same for everyone who sees the card; `kind`: `sponsor`, `product`, `tip`; `action`: `shown`, `primary` (its main button), `secondary` (its second button), `close` (Not now, the X or Escape) |
 | `simple_mode_prompt` | The Simple mode popup, shown once in each browser after an update when nothing else is on screen, is shown, its Simple mode switch is flipped, or it is closed (Done, the X, Escape or a click outside) | `action`: `shown`, `toggled`, `closed`; `mode`: `simple`, `advanced`, the mode it was shown or closed in, or the one a flip turned on |
 | `new_look_notice` | The notice that Simple is now the only look, shown once in each browser that was on Advanced mode, when nothing else is on screen, is shown or closed (Done, the X, Escape or a click outside) | `action`: `shown`, `closed` |
 | `advanced_back_notice` | The notice that Advanced mode is back, shown once in each browser that was on Advanced mode before Simple became the only look and is put back on it, when nothing else is on screen, is shown or closed (Done, the X, Escape or a click outside) | `action`: `shown`, `closed` |

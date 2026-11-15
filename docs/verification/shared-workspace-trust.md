@@ -1,4 +1,4 @@
-# Shared-workspace trust: loopback, card answerers, decision log
+﻿# Shared-workspace trust: loopback, card answerers, decision log
 
 A hosted or shared workspace runs every bot's shell on the server as the
 same user, so "a request from 127.0.0.1" no longer means "the owner". These
@@ -22,11 +22,11 @@ description is in [self-hosting](../self-hosting.md#loopback-trust-owner-or-serv
   exactly the set the cloud Slack worker calls (checked against the cloud
   repository's worker source, every released version), so the deployed
   worker needs no change.
-- **The CLI under service trust.** `openmausbot serve` hands the server it
+- **The CLI under service trust.** `obot serve` hands the server it
   starts a per-launch secret over the server's stdin; that secret opens
   `/api/auth/pairing` for that CLI alone, so `serve` still prints the first
   pairing code, and if a code is refused anyway it says why and keeps the
-  server running. Later `openmausbot pair` and `openmausbot sessions` are
+  server running. Later `obot pair` and `obot sessions` are
   refused with an explanation. A browser on an SSH tunnel gets the sign-in
   page, not an app whose every admin call fails.
 - **Who may answer a card.** With portal membership or an email sign-in list
@@ -91,7 +91,7 @@ pnpm exec vitest run server/request-auth.test.ts server/decision-log.test.ts \
   cannot approve (or use the bot-scoped route or always-allow) but can
   decline, while a Slack-shaped guarded request stays answerable by any
   member. Each answer's decision row and card name who answered.
-- `server/cli-service-trust.e2e.test.ts` runs the real `openmausbot serve`
+- `server/cli-service-trust.e2e.test.ts` runs the real `obot serve`
   with `OMB_LOOPBACK_TRUST=service`: it prints a pairing code and keeps
   running, the pairing route refuses every other local caller, and later
   `pair` and `sessions` commands exit with the explanation.
@@ -112,7 +112,7 @@ pnpm exec vitest run server/request-auth.test.ts server/decision-log.test.ts \
 
 ## Observed local result — 2026-09-23
 
-On a disposable worktree rebased onto OpenMausBot main `0bb37982`:
+On a disposable worktree rebased onto Obot main `0bb37982`:
 `pnpm typecheck`, `pnpm lint`, `pnpm i18n:check`, `pnpm test:packaged-server`,
 and the files above plus `server/index.test.ts`,
 `server/chat-followups-restart.test.ts`, `server/steer-e2e.test.ts`,
@@ -131,3 +131,4 @@ answerer; month pruning off by one month; the portal People table offering
 edits. Every server, session, engine and identity service was a local
 fixture. This is not production qualification: no hosted tenant, Slack
 worker, Admin or real email was involved.
+

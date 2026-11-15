@@ -11,7 +11,7 @@ import { StateStore, type Operation } from "../src/state.ts";
 import type { Transfer } from "../src/transfer.ts";
 import { FakeDocker } from "./fake-docker.ts";
 
-const image = (letter: string) => `ghcr.io/milind-soni/openmausbot-cloud-home@sha256:${letter.repeat(64)}`;
+const image = (letter: string) => `ghcr.io/alnatourm/obot-cloud-home@sha256:${letter.repeat(64)}`;
 const A = image("a"), B = image("b"), C = image("c"), D = image("d");
 const SECRET = "Bootstrap-secret-0123456789abcdefghijklmnopq";
 const RELAY = "box_omb_relay-token-0123456789abcdefghijklmnop";
@@ -20,7 +20,7 @@ const env = {
   OMB_PUBLIC_URL: "https://acme.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: SECRET, OMB_CLOUD_BOAT_TOKEN: RELAY,
 };
 const SECCOMP = '{"defaultAction":"SCMP_ACT_ERRNO","syscalls":[]}';
-const LEASE = ".openmausbot/openmausbot-server.lease";
+const LEASE = ".obot/obot-server.lease";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -42,10 +42,10 @@ function fixture(options: { free?: number } = {}) {
   const refused = new Set<string>();
   const lines: string[] = [];
   const readHealth: HealthRead = async (target) => {
-    const home = docker.container("mausbot-home");
+    const home = docker.container("obot-home");
     if (!home || home.status !== "running") return { status: 0, report: null };
     // As the launcher does: its environment, and the secrets file when one is mounted.
-    const secrets = home.spec.HostConfig.Mounts?.find((mount) => mount.Target === "/run/mausbot");
+    const secrets = home.spec.HostConfig.Mounts?.find((mount) => mount.Target === "/run/obot");
     const homeEnv: Record<string, string> = {
       ...Object.fromEntries((home.spec.Env ?? []).map((entry) => [entry.slice(0, entry.indexOf("=")), entry.slice(entry.indexOf("=") + 1)])),
       ...(secrets ? JSON.parse(readFileSync(join(secrets.Source, "secrets.json"), "utf8")) as Record<string, string> : {}),
@@ -76,11 +76,11 @@ function fixture(options: { free?: number } = {}) {
     now: () => clock,
     sleep: async (ms) => { clock += ms; },
     updateWindowMs: 600_000, startWindowMs: 600_000, pollMs: 2_000,
-    checkImage: async (ref) => { if (refused.has(ref)) throw new Error("it is not signed by MausBot"); },
+    checkImage: async (ref) => { if (refused.has(ref)) throw new Error("it is not signed by Obot"); },
     onStep: ({ id, step }) => steps.push(`${id} ${step}`),
   });
-  const data = () => docker.files("mausbot-data");
-  const write = (path: string, content: string) => docker.volume("mausbot-data").files.set(path, content);
+  const data = () => docker.files("obot-data");
+  const write = (path: string, content: string) => docker.volume("obot-data").files.set(path, content);
   return {
     dir, state, docker, home, healthy, boxes, steps, refused, lines, uploads, downloads, data, write,
     clock: () => clock,
@@ -110,12 +110,12 @@ describe("the home on an own server", () => {
     const f = fixture();
     const result = await started(f);
     expect(result.home.health?.box).toEqual({ box: "bwrap", checks: "32/32", failed: [] });
-    const spec = f.docker.container("mausbot-home")!.spec;
+    const spec = f.docker.container("obot-home")!.spec;
     expect(spec).toEqual(homeSpec(A, env, SECCOMP));
     expect(spec.HostConfig).toMatchObject({
       Init: true, ShmSize: 512 * 1024 * 1024, MaskedPaths: [], ReadonlyPaths: [], CapDrop: ["ALL"], CapAdd: ["CHOWN", "SETUID", "SETGID", "KILL"], OomScoreAdj: -800,
       SecurityOpt: ["apparmor=omb-home-narrow", `seccomp=${SECCOMP}`, "no-new-privileges=true"], RestartPolicy: { Name: "no" },
-      PortBindings: { "8080/tcp": [{ HostIp: "127.0.0.1", HostPort: "8080" }] }, Mounts: [{ Type: "volume", Source: "mausbot-data", Target: "/data" }],
+      PortBindings: { "8080/tcp": [{ HostIp: "127.0.0.1", HostPort: "8080" }] }, Mounts: [{ Type: "volume", Source: "obot-data", Target: "/data" }],
     });
     expect(spec.StopTimeout).toBe(30);
     expect(Object.keys(spec.HostConfig)).not.toContain("Privileged");
@@ -135,7 +135,7 @@ describe("the home on an own server", () => {
   it("gives a hardened launcher its secrets in a read-only file, never its environment, and the two capabilities it drops", async () => {
     const f = fixture();
     await started(f, D);
-    const spec = f.docker.container("mausbot-home")!.spec;
+    const spec = f.docker.container("obot-home")!.spec;
     // The host's path as Docker reports the state volume's mount point, with a / like any Linux path.
     const secretsDir = `${f.state.dir}/home-secrets`;
     expect(spec).toEqual(homeSpec(D, env, SECCOMP, { secretsDir, dropsCapabilities: true }));
@@ -145,8 +145,8 @@ describe("the home on an own server", () => {
       "OMB_CLOUD_ROLE=home", `OMB_CLOUD_MACHINE_ID=${env.OMB_CLOUD_MACHINE_ID}`, `OMB_CLOUD_ADMIN_URL=${env.OMB_CLOUD_ADMIN_URL}`, `OMB_PUBLIC_URL=${env.OMB_PUBLIC_URL}`, `OMB_CLOUD_IMAGE=${D}`,
     ]);
     expect(spec.HostConfig.Mounts).toEqual([
-      { Type: "volume", Source: "mausbot-data", Target: "/data" },
-      { Type: "bind", Source: secretsDir, Target: "/run/mausbot", ReadOnly: true },
+      { Type: "volume", Source: "obot-data", Target: "/data" },
+      { Type: "bind", Source: secretsDir, Target: "/run/obot", ReadOnly: true },
     ]);
     expect(spec.HostConfig.CapAdd).toEqual(["CHOWN", "SETUID", "SETGID", "KILL", "SYS_ADMIN", "SETPCAP"]);
     expect(readdirSync(secretsDir)).toEqual(["secrets.json"]);
@@ -166,13 +166,13 @@ describe("the home on an own server", () => {
     const f = fixture();
     const tunnel = "t".repeat(40);
     await f.home.start("start-1", D, { ...env, OMB_CLOUD_EDGE_TLS: "1" });
-    const spec = f.docker.container("mausbot-home")!.spec;
+    const spec = f.docker.container("obot-home")!.spec;
     expect(spec.HostConfig.PortBindings).toEqual({ "8080/tcp": [{ HostIp: "127.0.0.1", HostPort: "8080" }], "443/tcp": [{ HostIp: "0.0.0.0", HostPort: "443" }] });
     expect(spec.ExposedPorts).toEqual({ "8080/tcp": {}, "443/tcp": {} });
     expect(spec.Env).toContain("OMB_CLOUD_EDGE_TLS=1");
     // A home reached through a tunnel publishes nothing more, and its token rides the secrets file, not the environment.
     await f.home.start("start-2", D, { ...env, OMB_CLOUD_TUNNEL_TOKEN: tunnel });
-    const tunnelled = f.docker.container("mausbot-home")!.spec;
+    const tunnelled = f.docker.container("obot-home")!.spec;
     expect(tunnelled.HostConfig.PortBindings).toEqual({ "8080/tcp": [{ HostIp: "127.0.0.1", HostPort: "8080" }] });
     expect(JSON.stringify(tunnelled)).not.toContain(tunnel);
     expect(JSON.parse(readFileSync(join(f.state.dir, "home-secrets", "secrets.json"), "utf8")).OMB_CLOUD_TUNNEL_TOKEN).toBe(tunnel);
@@ -182,12 +182,12 @@ describe("the home on an own server", () => {
     const f = fixture();
     await started(f);
     await f.home.update("update-1", D);
-    expect(f.docker.container("mausbot-home")!.spec.HostConfig.CapAdd).toContain("SYS_ADMIN");
+    expect(f.docker.container("obot-home")!.spec.HostConfig.CapAdd).toContain("SYS_ADMIN");
     await f.home.update("update-2", C);
-    const old = f.docker.container("mausbot-home")!.spec;
+    const old = f.docker.container("obot-home")!.spec;
     expect(old.Image).toBe(C);
     expect(old.HostConfig.CapAdd).toEqual(["CHOWN", "SETUID", "SETGID", "KILL"]);
-    expect(old.HostConfig.Mounts).toEqual([{ Type: "volume", Source: "mausbot-data", Target: "/data" }]);
+    expect(old.HostConfig.Mounts).toEqual([{ Type: "volume", Source: "obot-data", Target: "/data" }]);
     expect(old.Env).toContain(`OMB_CLOUD_BOOTSTRAP_SECRET=${SECRET}`);
     expect(launcherOf(null)).toEqual({ secretsFile: false, dropsCapabilities: false });
     expect(launcherOf([0, 1, 144])).toEqual({ secretsFile: false, dropsCapabilities: false });
@@ -204,13 +204,13 @@ describe("the home on an own server", () => {
 
   it("clears the lease a killed home left before each start, until the image clears it itself, and never while a home runs", async () => {
     const f = fixture();
-    await f.docker.createVolume("mausbot-data", {});
-    for (const path of [LEASE, `${LEASE}.reap-0f5e6c4a-1b2c-4d3e-8f9a-0b1c2d3e4f5a`, ".openmausbot/.openmausbot-server-child/openmausbot-server.lease"]) f.write(path, "{}");
-    f.write(".openmausbot/state.json", "keep");
-    f.write("notes/openmausbot-server.lease", "someone's file");
+    await f.docker.createVolume("obot-data", {});
+    for (const path of [LEASE, `${LEASE}.reap-0f5e6c4a-1b2c-4d3e-8f9a-0b1c2d3e4f5a`, ".obot/.obot-server-child/obot-server.lease"]) f.write(path, "{}");
+    f.write(".obot/state.json", "keep");
+    f.write("notes/obot-server.lease", "someone's file");
     await started(f);
-    expect(f.data()).toEqual({ ".openmausbot/state.json": "keep", "notes/openmausbot-server.lease": "someone's file" });
-    expect(f.lines.some((line) => line.startsWith("cleared the data-directory lease records a stopped home left: /data/.openmausbot/openmausbot-server.lease"))).toBe(true);
+    expect(f.data()).toEqual({ ".obot/state.json": "keep", "notes/obot-server.lease": "someone's file" });
+    expect(f.lines.some((line) => line.startsWith("cleared the data-directory lease records a stopped home left: /data/.obot/obot-server.lease"))).toBe(true);
     // A start while the home runs never touches its live lease.
     f.write(LEASE, "{}");
     const finds = () => f.docker.helperRuns.filter((command) => command[0] === "find" && command[1] === "/data").length;
@@ -220,7 +220,7 @@ describe("the home on an own server", () => {
     expect(f.data()[LEASE]).toBe("{}");
     // Nor while any other container runs on the volume.
     await f.home.stop();
-    await f.docker.createContainer("someones-own", { Image: A, HostConfig: { Mounts: [{ Type: "volume", Source: "mausbot-data", Target: "/data" }] } });
+    await f.docker.createContainer("someones-own", { Image: A, HostConfig: { Mounts: [{ Type: "volume", Source: "obot-data", Target: "/data" }] } });
     await f.docker.startContainer("someones-own");
     await f.home.restart();
     expect(finds()).toBe(before);
@@ -242,10 +242,10 @@ describe("the home on an own server", () => {
     f.docker.calls.splice(0);
     const result = await f.home.update("update-1", B);
     expect(result).toMatchObject({ home: { state: "running", image: B, health: { ok: true, image: B } }, previousImage: A, snapshot: { id: "snapshot", kind: "snapshot", image: A } });
-    expect(f.docker.files("mausbot-snapshot")).toEqual({ "a.txt": "1" });
+    expect(f.docker.files("obot-snapshot")).toEqual({ "a.txt": "1" });
     expect(f.data()).toEqual({ "a.txt": "1" });
-    const order = f.docker.calls.filter((call) => /^(pull|stop|rm|create|start) (mausbot-home|ghcr)/.test(call));
-    expect(order).toEqual([`pull ${B}`, "stop mausbot-home", "rm mausbot-home", `create mausbot-home ${B}`, "start mausbot-home"]);
+    const order = f.docker.calls.filter((call) => /^(pull|stop|rm|create|start) (obot-home|ghcr)/.test(call));
+    expect(order).toEqual([`pull ${B}`, "stop obot-home", "rm obot-home", `create obot-home ${B}`, "start obot-home"]);
     expect(f.state.home()).toMatchObject({ desired: "running", image: B, previousImage: A, operation: null });
     expect(f.docker.images.has(A)).toBe(true);
     await f.home.update("update-2", C);
@@ -269,7 +269,7 @@ describe("the home on an own server", () => {
       message: `The new version did not become healthy (it did not report ${B} within 10 minutes). The previous version and its data are back.`,
     });
     expect(f.clock() - began).toBeGreaterThanOrEqual(600_000);
-    expect(f.docker.container("mausbot-home")).toMatchObject({ status: "running", spec: { Image: A } });
+    expect(f.docker.container("obot-home")).toMatchObject({ status: "running", spec: { Image: A } });
     expect(f.data()).toEqual({ "a.txt": "1" });
     expect(f.state.home()).toMatchObject({ desired: "running", image: A, operation: null });
     expect((await f.home.report())).toMatchObject({ state: "running", image: A, health: { ok: true, image: A } });
@@ -289,7 +289,7 @@ describe("the home on an own server", () => {
     expect(failed.code).toBe("update_rolled_back");
     expect(failed.message).toContain("the home stopped: This volume belongs to another Cloud machine. No data was changed.");
     expect(f.clock() - began).toBeLessThan(60_000);
-    expect(f.docker.container("mausbot-home")?.spec.Image).toBe(A);
+    expect(f.docker.container("obot-home")?.spec.Image).toBe(A);
   });
 
   it("puts the data back even when the new version is frozen, and says so when the old one does not come back either", async () => {
@@ -321,7 +321,7 @@ describe("the home on an own server", () => {
     const admin = { origin: "https://cloud.example.test", authorization: (jobId: string) => `Box token-for-${jobId}` };
     for (const job of [() => f.home.update("update-1", B), () => f.home.restore("restore-1", backup.id), () => f.home.importDisk("import-1", "https://storage.example.test/d.tgz", admin)]) {
       expect(await failure(job())).toMatchObject({ code: "docker", message: "Copying the data failed (cp: error writing '/to/big.bin': No space left on device); nothing was changed." });
-      expect(f.docker.container("mausbot-home")).toMatchObject({ status: "running", spec: { Image: A } });
+      expect(f.docker.container("obot-home")).toMatchObject({ status: "running", spec: { Image: A } });
       expect(f.state.home()).toMatchObject({ image: A, desired: "running", operation: null });
       expect(f.data()).toEqual({ "a.txt": "1" });
     }
@@ -335,7 +335,7 @@ describe("the home on an own server", () => {
     const missing = image("e");
     expect((await failure(f.home.update("update-1", missing))).toJobError()).toMatchObject({ code: "pull_failed" });
     expect(f.docker.calls.filter((call) => call.startsWith("stop") || call.startsWith("rm"))).toEqual([]);
-    expect(f.docker.container("mausbot-home")).toMatchObject({ status: "running", spec: { Image: A } });
+    expect(f.docker.container("obot-home")).toMatchObject({ status: "running", spec: { Image: A } });
     expect(f.state.home().operation).toBeNull();
 
     const tight = fixture({ free: 0.5e9 });
@@ -343,7 +343,7 @@ describe("the home on an own server", () => {
     const full = await failure(tight.home.update("update-2", B));
     expect(full.toJobError()).toMatchObject({ code: "disk_full" });
     expect(full.message).toMatch(/needs about [\d.]+ GB and 0.5 GB are free/);
-    expect(tight.docker.container("mausbot-home")).toMatchObject({ status: "running", spec: { Image: A } });
+    expect(tight.docker.container("obot-home")).toMatchObject({ status: "running", spec: { Image: A } });
   });
 
   it("records each step of an update as it begins it", async () => {
@@ -362,18 +362,18 @@ describe("the home on an own server", () => {
     const f = fixture();
     f.refused.add(A);
     expect((await failure(f.home.start("start-1", A, env))).toJobError()).toEqual({
-      code: "image_refused", message: `${A} was refused (it is not signed by MausBot). Nothing was changed.`,
+      code: "image_refused", message: `${A} was refused (it is not signed by Obot). Nothing was changed.`,
     });
     expect(f.state.home()).toMatchObject({ desired: "stopped", image: null, operation: null });
     expect(f.state.homeEnv()).toBeNull();
     await f.home.supervise();
-    expect(f.docker.container("mausbot-home")).toBeNull();
+    expect(f.docker.container("obot-home")).toBeNull();
     await started(f, B);
     f.refused.add(C);
     f.docker.calls.splice(0);
     expect((await failure(f.home.update("update-1", C))).toJobError()).toMatchObject({ code: "image_refused" });
     expect(f.docker.calls.filter((call) => /^(stop|rm|create) /.test(call))).toEqual([]);
-    expect(f.docker.container("mausbot-home")).toMatchObject({ status: "running", spec: { Image: B } });
+    expect(f.docker.container("obot-home")).toMatchObject({ status: "running", spec: { Image: B } });
     expect(f.state.home()).toMatchObject({ image: B, operation: null });
   });
 
@@ -386,7 +386,7 @@ describe("the home on an own server", () => {
       code: "update_rolled_back", image: A,
       message: "The new version did not become healthy (its bot box failed server-pid-hidden (31/32)). The previous version and its data are back.",
     });
-    expect(f.docker.container("mausbot-home")).toMatchObject({ status: "running", spec: { Image: A } });
+    expect(f.docker.container("obot-home")).toMatchObject({ status: "running", spec: { Image: A } });
     expect(f.data()).toEqual({ "a.txt": "1" });
     f.boxes.set(B, { box: "off", checks: null, failed: [] });
     expect((await failure(f.home.update("update-2", B))).message).toContain("(its bot box is off)");
@@ -415,13 +415,13 @@ describe("the home on an own server", () => {
     }
     const { backups } = await f.home.copies();
     expect(backups.map((copy) => copy.id).sort()).toEqual(made.slice(1).sort());
-    expect(f.docker.files(`mausbot-backup-${made[1]}`)).toEqual({ "n.txt": "2" });
-    expect(f.docker.container("mausbot-home")?.status).toBe("running");
+    expect(f.docker.files(`obot-backup-${made[1]}`)).toEqual({ "n.txt": "2" });
+    expect(f.docker.container("obot-home")?.status).toBe("running");
     f.write("n.txt", "now");
     const restored = await f.home.restore("restore-1", made[1]);
     expect(restored).toMatchObject({ backupId: made[1], home: { state: "running" } });
     expect(f.data()).toEqual({ "n.txt": "2" });
-    expect(f.docker.files("mausbot-snapshot")).toEqual({ "n.txt": "now" });
+    expect(f.docker.files("obot-snapshot")).toEqual({ "n.txt": "now" });
     expect((await failure(f.home.restore("restore-2", "20260101-000000-0000"))).code).toBe("not_found");
   });
 
@@ -433,7 +433,7 @@ describe("the home on an own server", () => {
     expect(result).toEqual({ bytes: f.uploads[0].body.length, sha256: "0".repeat(64) });
     expect(f.uploads).toEqual([{ url: "https://cloud.example.test/api/cloud/box/v1/export/export-1", headers: { authorization: "Box token-for-export-1" }, body: JSON.stringify([["a.txt", "1"]]) }]);
     expect(readdirSync(f.state.dir).filter((name) => name.startsWith("export-"))).toEqual([]);
-    expect(f.docker.container("mausbot-home")?.status).toBe("running");
+    expect(f.docker.container("obot-home")?.status).toBe("running");
   });
 
   it("replaces /data with an archive, sends the token only to the Admin, and puts the data back when the archive is bad", async () => {
@@ -444,7 +444,7 @@ describe("the home on an own server", () => {
     const imported = await f.home.importDisk("import-1", "https://storage.example.test/disk.tgz?sig=x", admin);
     expect(imported).toMatchObject({ bytes: expect.any(Number), home: { state: "running" } });
     expect(f.data()).toEqual({ "imported.txt": "from the old home" });
-    expect(f.docker.files("mausbot-snapshot")).toEqual({ "old.txt": "1" });
+    expect(f.docker.files("obot-snapshot")).toEqual({ "old.txt": "1" });
     expect(f.downloads[0]).toEqual({ url: "https://storage.example.test/disk.tgz?sig=x", headers: {} });
     await f.home.importDisk("import-2", "https://cloud.example.test/api/cloud/box/v1/import/import-2", admin);
     expect(f.downloads[1].headers).toEqual({ authorization: "Box token-for-import-2" });
@@ -453,28 +453,28 @@ describe("the home on an own server", () => {
     expect(bad.toJobError()).toMatchObject({ code: "transfer_failed" });
     expect(bad.message).toContain("the data is as it was");
     expect(f.data()).toEqual({ "imported.txt": "from the old home" });
-    expect(f.docker.container("mausbot-home")?.status).toBe("running");
+    expect(f.docker.container("obot-home")?.status).toBe("running");
     expect(readdirSync(f.state.dir).filter((name) => name.startsWith("import-"))).toEqual([]);
   });
 
   it("starts a home that stopped on its own again, waiting longer each time, and never one the Admin stopped", async () => {
     const f = fixture();
     await started(f);
-    const crash = () => Object.assign(f.docker.container("mausbot-home")!, { status: "exited", exitCode: 137 });
+    const crash = () => Object.assign(f.docker.container("obot-home")!, { status: "exited", exitCode: 137 });
     crash();
     f.write(LEASE, "{}");
     await f.home.supervise();
-    expect(f.docker.container("mausbot-home")?.status).toBe("running");
+    expect(f.docker.container("obot-home")?.status).toBe("running");
     expect(f.data()[LEASE]).toBeUndefined();
     expect(f.lines).toContain("the home stopped on its own (exit 137); starting it again");
     crash();
     await f.home.supervise();
-    expect(f.docker.container("mausbot-home")?.status).toBe("exited");
+    expect(f.docker.container("obot-home")?.status).toBe("exited");
     expect((await f.home.report()).state).toBe("crashed");
     await f.home.stop();
     expect((await f.home.report()).state).toBe("stopped");
     await f.home.supervise();
-    expect(f.docker.container("mausbot-home")?.status).toBe("exited");
+    expect(f.docker.container("obot-home")?.status).toBe("exited");
   });
 
   it("finishes an update the connector was in the middle of: kept when the new home is healthy, else rolled back", async () => {
@@ -494,13 +494,13 @@ describe("the home on an own server", () => {
     back.write("a.txt", "changed by C");
     back.state.saveHome({ ...back.state.home(), operation: op({ previousImage: B, nextImage: C }) });
     await back.docker.pull(C);
-    await back.docker.removeContainer("mausbot-home");
-    await back.docker.createContainer("mausbot-home", homeSpec(C, env, SECCOMP));
-    await back.docker.startContainer("mausbot-home");
+    await back.docker.removeContainer("obot-home");
+    await back.docker.createContainer("obot-home", homeSpec(C, env, SECCOMP));
+    await back.docker.startContainer("obot-home");
     const reply = await back.home.recover();
     expect(reply).toEqual({ id: "update-9", ok: false, error: { code: "interrupted", image: B, message: `The connector restarted during this update; the data was put back as it was before, and the home runs ${B} again.` } });
     expect(back.data()).toEqual({ "a.txt": "1" });
-    expect(back.docker.container("mausbot-home")).toMatchObject({ status: "running", spec: { Image: B } });
+    expect(back.docker.container("obot-home")).toMatchObject({ status: "running", spec: { Image: B } });
     expect(await back.home.recover()).toBeNull();
   });
 
@@ -509,15 +509,15 @@ describe("the home on an own server", () => {
     const f = fixture();
     await started(f);
     await f.home.stop();
-    f.docker.startFailures.set("mausbot-home", `container create failed: env OMB_CLOUD_BOOTSTRAP_SECRET=${SECRET} rejected`);
+    f.docker.startFailures.set("obot-home", `container create failed: env OMB_CLOUD_BOOTSTRAP_SECRET=${SECRET} rejected`);
     const failed = await failure(f.home.restart());
     expect(failed.code).toBe("docker");
     expect(JSON.stringify(failed.toJobError())).not.toContain(SECRET);
-    f.docker.startFailures.set("mausbot-home", "driver failed programming external connectivity: Bind for 127.0.0.1:8080 failed: port is already allocated");
-    expect((await failure(f.home.restart())).toJobError()).toEqual({ code: "port_in_use", message: "Port 8080 on this server is used by another program, and MausBot's home needs it." });
-    f.docker.startFailures.set("mausbot-home", "driver failed programming external connectivity: Bind for 0.0.0.0:443 failed: port is already allocated");
-    expect((await failure(f.home.restart())).message).toBe("Port 443 on this server is used by another program, and MausBot's home needs it.");
-    f.docker.startFailures.set("mausbot-home", "OCI runtime create failed: apparmor failed to apply profile: write /proc/self/attr/apparmor/exec: no such file or directory");
+    f.docker.startFailures.set("obot-home", "driver failed programming external connectivity: Bind for 127.0.0.1:8080 failed: port is already allocated");
+    expect((await failure(f.home.restart())).toJobError()).toEqual({ code: "port_in_use", message: "Port 8080 on this server is used by another program, and Obot's home needs it." });
+    f.docker.startFailures.set("obot-home", "driver failed programming external connectivity: Bind for 0.0.0.0:443 failed: port is already allocated");
+    expect((await failure(f.home.restart())).message).toBe("Port 443 on this server is used by another program, and Obot's home needs it.");
+    f.docker.startFailures.set("obot-home", "OCI runtime create failed: apparmor failed to apply profile: write /proc/self/attr/apparmor/exec: no such file or directory");
     expect((await failure(f.home.restart())).code).toBe("box_unavailable");
     expect(existsSync(f.state.path("agent.json"))).toBe(false);
   });
@@ -530,3 +530,4 @@ describe("the home on an own server", () => {
     expect((await f.home.report()).state).toBe("absent");
   });
 });
+

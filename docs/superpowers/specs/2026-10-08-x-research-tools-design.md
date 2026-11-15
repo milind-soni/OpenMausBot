@@ -1,10 +1,10 @@
-# X Research Tools
+﻿# X Research Tools
 
 ## Summary
 
 Grok Bot can search, read, and monitor X. Squad does the same through
 third-party scrapers, routed to the best one per job, so its users never
-connect an X account. MausBot today reaches X only through the built-in browser
+connect an X account. Obot today reaches X only through the built-in browser
 (slow, token-heavy, needs an X login) or the Composio `twitter` toolkit (off on
 the managed service; needs the user's own X Developer app).
 
@@ -16,7 +16,7 @@ tools only when the token is saved **and** the user has turned X research on
 for that bot. With a routine, the same tools cover monitoring.
 
 This is step 1. Step 2 (later, separate spec) runs the same tools on
-MausBot's own treg token, tagged per customer with `X-Treg-Meta` and billed
+Obot's own treg token, tagged per customer with `X-Treg-Meta` and billed
 from `usage/by-tag`, so users need no token at all. treg's licence allows using
 the hosted treg.to API inside our product this way.
 
@@ -56,7 +56,7 @@ Published catalog prices, checked 2026-10-08:
 - Posting, liking, replying, following, or DMs. The tools only read.
 - The managed (no-token) service. That is step 2.
 - treg's other catalogs (YouTube, Reddit, SEO). Later, on the same token.
-- A spend cap in MausBot beyond a per-call ceiling. treg is prepaid, so the
+- A spend cap in Obot beyond a per-call ceiling. treg is prepaid, so the
   balance is the ceiling.
 - Phone UI. Phones cannot change bot settings or keys; they show the bot's
   replies and tool activity as they already do.
@@ -71,7 +71,7 @@ Published catalog prices, checked 2026-10-08:
 2. **Bot settings → Access** has a new **X research** card with one switch,
    off by default. With no token saved, the switch is disabled and the card says
    "Add a treg token in Settings → API keys" with a link there.
-3. With both set, the user asks the bot "what are people saying about MausBot
+3. With both set, the user asks the bot "what are people saying about Obot
    on X this week?" and the bot answers from real posts with links.
 4. The Activity log lists the calls under **X** ("Searched X", "Read X posts",
    "Read an X post", "Looked up an X profile").
@@ -318,7 +318,7 @@ the Composio connector is only needed for posting.
 - Request-auth test: a phone token's `PATCH /api/bots/:id` with `xResearch` is
   refused.
 - Manual: an OMB2 build. Omkar pastes a real treg token, Test shows the
-  balance, he turns X on for one bot, asks for this week's MausBot mentions,
+  balance, he turns X on for one bot, asks for this week's Obot mentions,
   then sets an hourly routine and checks that the second run reports only new
   posts.
 
@@ -332,3 +332,4 @@ These need a real token:
   output, or an error status), so the profile not-found path matches it.
 - Whether `/auth/me` and `/orgs/{id}/balance` accept the `X-Treg-Token` header
   for a token minted by `treg login --token`.
+

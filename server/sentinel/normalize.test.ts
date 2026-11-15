@@ -52,7 +52,7 @@ describe("sentinel signatures", () => {
     expect(signatureOf("tool_error", "mcp__agents__send", "no client named <q>")).toBe(sig);
   });
 
-  it("ranks OpenMausBot's own tools as harness, shells as shell, everything else as external", () => {
+  it("ranks Obot's own tools as harness, shells as shell, everything else as external", () => {
     expect(toolOrigin("mcp__agents__coordinate_bots")).toBe("harness");
     expect(toolOrigin("mcp__computer__screenshot")).toBe("harness");
     expect(toolOrigin(HARNESS_NOTICE)).toBe("harness");

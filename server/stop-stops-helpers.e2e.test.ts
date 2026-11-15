@@ -10,7 +10,7 @@ import { readHandoffs } from "./testing/handoff-rows.ts";
 
 it("stops the teammates working for a request when the person stops the chat that asked, with no late results", async () => {
   const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OBOT_URL: session.info.url } }) as Promise<any>;
   const api = (path: string, body?: unknown, method = "POST") =>
     request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
   try {

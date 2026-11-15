@@ -84,7 +84,7 @@ export function markOpenCodeCatalogRefreshed(instanceId: string, at: number): vo
 
 async function readListing(list: LiveModelList, key: string, fetcher: typeof fetch): Promise<string[]> {
   const response = await fetcher(list.url, {
-    headers: { accept: "application/json", authorization: `Bearer ${key}`, "user-agent": "OpenMausBot" },
+    headers: { accept: "application/json", authorization: `Bearer ${key}`, "user-agent": "Obot" },
     redirect: "error",
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });

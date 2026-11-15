@@ -1,20 +1,20 @@
-# Bring Your Own VPS
+﻿# Bring Your Own VPS
 
-OpenMausBot can turn a Linux server you already own into a bot's computer. The agent process stays on your
+Obot can turn a Linux server you already own into a bot's computer. The agent process stays on your
 machine; Docker's own SSH transport reaches the daemon on the VPS, and each bot gets one managed, hardened
 Cua container there — a Linux desktop it can see and control. SSH is the only credential involved and the
-only surface exposed: OpenMausBot never opens a public port on the VPS, never stores your SSH key or
+only surface exposed: Obot never opens a public port on the VPS, never stores your SSH key or
 passphrase, and never runs an agent remotely.
 
 ## Choosing the backend
 
-The published [Your own VPS guide](https://docs.openmausbot.com/docs/computers/byo-vps)
+The published [Your own VPS guide](https://docs.obot.com/docs/computers/byo-vps)
 shows the setup steps and configuration fields. In 0.1.151 and 0.1.152, the Simple layout can
 hide the backend selector for an existing bot (#5225; selector fix #5228). The guide
 includes a stopped-app `bots.json` workaround for affected builds. Do not look for
 an Advanced-only Access page in that layout.
 
-Using a VPS only as a bot’s computer leaves MausBot and its agents on their current
+Using a VPS only as a bot’s computer leaves Obot and its agents on their current
 host. To move the whole server to a VPS, use [Deploy on a VPS](deploy-vps.md).
 
 ## What works
@@ -60,10 +60,10 @@ transport runs it. Podman cannot replace the Docker CLI here: this backend only 
 
 ## The required SSH config alias
 
-OpenMausBot connects only through a named alias in your `~/.ssh/config` — you type the alias into
+Obot connects only through a named alias in your `~/.ssh/config` — you type the alias into
 Settings → API keys, nothing else. Every bot action becomes a `docker exec` over SSH, so the app
 supplies connection sharing and fail-fast timeouts itself: it runs each VPS command through its own
-`ssh_config` (under `~/.openmausbot/ssh/`) that includes your file first and fills in `ControlMaster`,
+`ssh_config` (under `~/.obot/ssh/`) that includes your file first and fills in `ControlMaster`,
 `ControlPersist`, keepalives and a connect timeout wherever your alias leaves them unset. Anything your
 alias sets wins. Startup, previews, bot tools and their connection probes use the same settings.
 The live desktop's tunnel is the exception: it opens its own connection (`ControlPath=none`), so
@@ -104,7 +104,7 @@ computer with the alias that holds it.
 
 A bot cannot be moved to another server while its computer still lives on the old one, and the default alias
 cannot change while any computer it manages still exists: remove the computer first from Settings → Local VM →
-Self-hosted VPS computers (or by hand: `docker -H ssh://old-server rm -f openmausbot-vps-<bot>-<hash>`). A server
+Self-hosted VPS computers (or by hand: `docker -H ssh://old-server rm -f obot-vps-<bot>-<hash>`). A server
 that cannot be reached never traps a bot: moving the bot to another server, switching its computer, or deleting
 it goes ahead, and the app says what may be left on that server and the command that removes it once the server
 is back. (Changing the default alias still waits until its server can be listed.) Any alias from your
@@ -114,7 +114,7 @@ is back. (Changing the default alias still waits until its server can be listed.
 
 Some cloud boxes pause after a while without traffic and refuse SSH until they are resumed. On macOS and Linux
 you can give the app a wake step: put an executable script named `wake` in the app's SSH folder
-(`~/.openmausbot/ssh/wake`, or `ssh/wake` in your data directory). When a server cannot be reached, the app
+(`~/.obot/ssh/wake`, or `ssh/wake` in your data directory). When a server cannot be reached, the app
 runs it once with the alias as its only argument (`wake my-vps`), then tries the connection once more. Make the
 script resume the box with your provider's command or API and return once the server accepts SSH again; it gets
 up to two minutes. If it exits with an error, the app shows that error next to the SSH one. Without the file
@@ -122,11 +122,11 @@ nothing changes. Only someone who can write to the data directory can add it; no
 
 ```sh
 #!/bin/sh
-# ~/.openmausbot/ssh/wake: $1 is the SSH alias the app could not reach.
+# ~/.obot/ssh/wake: $1 is the SSH alias the app could not reach.
 my-provider resume "$1" && my-provider wait-ready "$1"
 ```
 
-**Host key first, by hand.** Connect once manually before pointing OpenMausBot at the alias:
+**Host key first, by hand.** Connect once manually before pointing Obot at the alias:
 
 ```sh
 ssh my-vps true
@@ -143,7 +143,7 @@ still gets its own managed desktop container on that machine; it does not take o
 
 1. On that machine: install Docker and Tailscale, sign in to Tailscale, and add the SSH user to the `docker`
    group.
-2. On the computer running OpenMausBot: join the same tailnet and add an alias whose `HostName` is the
+2. On the computer running Obot: join the same tailnet and add an alias whose `HostName` is the
    machine's Tailscale name (its MagicDNS name or `100.x` address):
 
    ```
@@ -164,13 +164,13 @@ internet, so firewall the machine: its SSH and Docker ports should accept connec
 
 ## Security
 
-- **No public ports.** The managed container is created with no published ports, and OpenMausBot refuses to
+- **No public ports.** The managed container is created with no published ports, and Obot refuses to
   use a container that publishes any — the check runs before every attach, not just at creation. Live view
   reaches the container's private bridge address through SSH and is loopback-only on your computer.
-- **Firewall the VPS to SSH only**, ideally from your IP. Nothing OpenMausBot does needs any other inbound
+- **Firewall the VPS to SSH only**, ideally from your IP. Nothing Obot does needs any other inbound
   port open, so anything else open is pure attack surface.
-- **Nothing sensitive is stored.** The only thing OpenMausBot persists is the alias name itself
-  (`~/.openmausbot/config.json`, plus a bot's own alias in `bots.json` when it has one); keys, passphrases,
+- **Nothing sensitive is stored.** The only thing Obot persists is the alias name itself
+  (`~/.obot/config.json`, plus a bot's own alias in `bots.json` when it has one); keys, passphrases,
   and agent state stay with SSH. Aliases are also kept out of the settings and bot records that paired phones
   and members of a shared workspace receive — they get configured-or-not, never the name. An SSH or Docker
   error that a bot reports in its conversation can still quote a server's name.
@@ -180,14 +180,14 @@ internet, so firewall the machine: its SSH and Docker ports should accept connec
 
 ## Container lifecycle
 
-Each bot owns one container on the VPS, named `openmausbot-vps-<bot>-<hash>` — stable across restarts and
+Each bot owns one container on the VPS, named `obot-vps-<bot>-<hash>` — stable across restarts and
 independent of the bot's display name. It lives on the bot's server: the default alias, or the bot's own
 when it has one.
 
 New containers default to 4 GiB memory with no extra swap, 2 CPUs, 512 PIDs, 512 MiB shared memory and an
 `unless-stopped` restart policy. These are creation defaults, not compatibility requirements. Existing
 managed containers can keep customized resource and OOM settings, unlimited budgets, or other restart
-policies, including the legacy `no` policy. OpenMausBot does not reset those settings or recreate a
+policies, including the legacy `no` policy. Obot does not reset those settings or recreate a
 container to enforce its defaults. Restart behavior follows the chosen Docker policy; for example,
 `always` can wake a slept container after a Docker daemon restart.
 
@@ -196,7 +196,7 @@ container to enforce its defaults. Restart behavior follows the chosen Docker po
 - **Start** only wakes an existing stopped container; it never creates one.
 - **Sleep** stops the container. The VPS stops spending CPU on it; the filesystem stays put.
 - **Remove** is yours, done by hand when a bot no longer needs the server:
-  `docker -H ssh://my-vps rm -f <container>`. OpenMausBot never deletes a container on its own.
+  `docker -H ssh://my-vps rm -f <container>`. Obot never deletes a container on its own.
 
 What survives what: sleep/start preserves the container's filesystem; removal — including the recreate that
 follows a Cua image upgrade, since a container pinned to an old image is refused rather than reused — wipes
@@ -254,3 +254,4 @@ Work up the same path the app takes, cheapest signal first:
 4. **Read the status states.** The panel surfaces exactly what the server found, in check order: alias not
    configured → daemon unreachable → image missing → container missing / stopped → container unmanaged or
    unsafe (ports, mounts, hardening) → desktop not ready. Each message names the step to fix.
+

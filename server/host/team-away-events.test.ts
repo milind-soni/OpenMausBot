@@ -27,7 +27,7 @@ function world(messages: Record<string, Partial<Message>[]> = {}, unread?: (pers
   return { events, ...events_, setUnseen: (next: { id: string }[]) => { unseen = next; } };
 }
 
-const item = (over: Partial<Item> = {}): Item => ({ id: "line-1", person: MAYA, botId: "mausbot", threadId: "inbox", kind: "message", from: "Ben", text: "secret words", at: 1, ...over });
+const item = (over: Partial<Item> = {}): Item => ({ id: "line-1", person: MAYA, botId: "obot", threadId: "inbox", kind: "message", from: "Ben", text: "secret words", at: 1, ...over });
 const delivery = (over: Partial<Delivery>): Delivery => ({ kind: "message", from: { name: "Ben", email: "ben@example.com" }, text: "the words: never sent", title: "Ben mentioned you in Scout", notify: "mention", ...over });
 const plain = (event: AwayEvent) => ({ ...event, still: undefined });
 

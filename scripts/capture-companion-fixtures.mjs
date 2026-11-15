@@ -29,7 +29,7 @@ const HARNESS = `http://127.0.0.1:${HARNESS_PORT}`;
 const SIDECAR = `http://127.0.0.1:${COMPANION_PORT}`;
 const CONTROL = `http://127.0.0.1:${CONTROL_PORT}`;
 const CONTROL_TOKEN = randomBytes(32).toString("base64url");
-const controlHeaders = { "x-openmausbot-control-token": CONTROL_TOKEN };
+const controlHeaders = { "x-obot-control-token": CONTROL_TOKEN };
 
 const PROFILE = { name: "Ada Lovelace", email: "ada@example.com" };
 
@@ -127,8 +127,8 @@ async function captureFrames(wanted, during) {
 async function main() {
   mkdirSync(OUT, { recursive: true });
   home = mkdtempSync(join(tmpdir(), "companion-fixtures-"));
-  mkdirSync(join(home, ".openmausbot"), { recursive: true });
-  writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({
+  mkdirSync(join(home, ".obot"), { recursive: true });
+  writeFileSync(join(home, ".obot", "config.json"), JSON.stringify({
     profile: PROFILE,
     instances: {
       claude: {

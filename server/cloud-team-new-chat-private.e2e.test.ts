@@ -1,6 +1,6 @@
 // A conversation a person opens on a Team Cloud is private to them from its first frame: another member and an admin,
 // listening on their streams while it is made, never get its id or its title in any frame, live or replayed, and their
-// copy of the bot (its threads, their labels, its main chat) does not change at all. A new member's own MausBot is theirs
+// copy of the bot (its threads, their labels, its main chat) does not change at all. A new member's own Obot is theirs
 // from its first frame too: nobody else is ever sent its main chat.
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -81,7 +81,7 @@ it("never shows another member or an admin a conversation someone opens, from it
   for (const stream of [...Object.values(streams), own]) await stream.close();
 }, hostTimeout(90_000));
 
-it("never sends anyone else a new member's own MausBot's main chat, from its first frame on", async () => {
+it("never sends anyone else a new member's own Obot's main chat, from its first frame on", async () => {
   const streams = { ada: await listen(ada), ben: await listen(ben) };
   const cleo = (await team.pair(CLEO)).token!;
   const own = await expect.poll(async () => ((await team.as(cleo, "GET", "/api/bots?messages=0")).body.bots as Bot[]).find((bot) => bot.defaultBot?.person === CLEO.email), { timeout: 20_000 })

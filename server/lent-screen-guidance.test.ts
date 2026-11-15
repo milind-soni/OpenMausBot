@@ -34,13 +34,13 @@ describe("a lent screen's answers carry the fix", () => {
   });
 
   it("replaces an older desktop's raw failure with the fix, and never passes its path on", () => {
-    const quarantined = lentScreenResult(call("get_desktop_state"), failed("spawn C:\\Users\\Ana\\AppData\\Local\\Programs\\OpenMausBot\\resources\\cua-driver.exe ENOENT"));
+    const quarantined = lentScreenResult(call("get_desktop_state"), failed("spawn C:\\Users\\Ana\\AppData\\Local\\Programs\\Obot\\resources\\cua-driver.exe ENOENT"));
     expect(texts(quarantined)).toHaveLength(1);
     expect(texts(quarantined)[0]).toMatch(/^Computer control could not start on this computer: its helper, cua-driver, is missing or blocked\. .*Protection history/);
     expect(JSON.stringify(quarantined)).not.toContain("Ana");
     expect(texts(lentScreenResult(call("click"), failed("Computer-control transport closed")))[0]).toMatch(/^Computer control stopped on this computer because .*try the action once more/);
     expect(texts(lentScreenResult(call("click"), failed("Computer control is unavailable. Enable it in the local app and grant OS permissions first.")))[0]).toMatch(/^Computer control is not running on this computer\./);
-    expect(texts(lentScreenResult(call("click"), failed("fetch failed")))[0]).toMatch(/restart OpenMausBot on that computer/);
+    expect(texts(lentScreenResult(call("click"), failed("fetch failed")))[0]).toMatch(/restart Obot on that computer/);
   });
   it("answers a click that was sent but whose after-check failed as sent; the same words from typing stay a failure", () => {
     const after = failed("foreground_unavailable: exact target HWND 0x30a5c or a verified same-process post-action window was not foreground after the click (actual foreground HWND 0x1f00)");

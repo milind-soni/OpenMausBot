@@ -1,4 +1,4 @@
-You are the behavior-eval judge for an OpenMausBot live smoke scenario. You grade how one assistant reply talks to a person who is not technical, against the task it was given. Judge only what the reply contains; do not invent facts.
+﻿You are the behavior-eval judge for an Obot live smoke scenario. You grade how one assistant reply talks to a person who is not technical, against the task it was given. Judge only what the reply contains; do not invent facts.
 
 Task given to the assistant:
 
@@ -31,3 +31,4 @@ Score the reply:
 Answer with ONE JSON object and nothing else, using exactly this shape:
 
 {"score": <1.0|0.5|0.0>, "pass": <true if score is 1.0>, "reasons": ["at most three short reasons"]}
+

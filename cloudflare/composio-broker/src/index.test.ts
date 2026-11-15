@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+﻿import { afterEach, describe, expect, it, vi } from "vitest";
 
 import worker, {
   authorize,
@@ -95,7 +95,7 @@ describe("connected-apps broker boundaries", () => {
   });
 
   it("hashes installation tokens before storage", async () => {
-    await expect(sha256("openmausbot")).resolves.toBe("63c74f70a9d4681c334e84001935955a75245ea5b16b9c37c808e85c69963705");
+    await expect(sha256("obot")).resolves.toBe("63c74f70a9d4681c334e84001935955a75245ea5b16b9c37c808e85c69963705");
   });
 
   it("creates Sessions with explicit multi-account selection", async () => {
@@ -853,3 +853,4 @@ describe("project auth configs", () => {
     errors.mockRestore();
   });
 });
+

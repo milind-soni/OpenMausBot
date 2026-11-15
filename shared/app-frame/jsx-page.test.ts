@@ -40,12 +40,12 @@ afterEach(() => {
   for (const root of roots.splice(0)) root.unmount();
   document.body.innerHTML = "";
   document.documentElement.removeAttribute("data-theme");
-  delete (window as { mausbot?: unknown }).mausbot;
+  delete (window as { obot?: unknown }).obot;
   fakeEcharts.made = [];
 });
 
 async function start(source: string, more: Record<string, unknown> = {}) {
-  document.body.innerHTML = "<div id=\"mausbot-root\"></div>";
+  document.body.innerHTML = "<div id=\"obot-root\"></div>";
   const problems: Problem[] = [];
   const loads: string[] = [];
   const root = await runtime({
@@ -56,7 +56,7 @@ async function start(source: string, more: Record<string, unknown> = {}) {
   }) as { unmount(): void } | null;
   if (root) roots.push(root);
   await new Promise((resolve) => setTimeout(resolve, 30));
-  return { problems, loads, overlay: document.querySelector<HTMLElement>("[data-page-problem]"), rendered: document.getElementById("mausbot-root")! };
+  return { problems, loads, overlay: document.querySelector<HTMLElement>("[data-page-problem]"), rendered: document.getElementById("obot-root")! };
 }
 
 const PRICING = `import { useState } from "react";
@@ -85,7 +85,7 @@ describe("a jsx page in the shell", () => {
 
   it("shows a syntax error as a readable overlay with the line, and tells the bot through the page's context", async () => {
     const setContext = vi.fn(async () => {});
-    (window as { mausbot?: unknown }).mausbot = { send: vi.fn(), open: vi.fn(), setContext };
+    (window as { obot?: unknown }).obot = { send: vi.fn(), open: vi.fn(), setContext };
     const { problems, overlay } = await start("export default function Page() {\n  const total = ;\n  return <p>{total}</p>;\n}");
     expect(problems).toHaveLength(1);
     expect(problems[0]).toMatchObject({ kind: "syntax", message: "Unexpected token", line: 2 });
@@ -120,9 +120,9 @@ describe("a jsx page in the shell", () => {
     expect(overlay?.getAttribute("data-page-problem")).toBe("offline");
   });
 
-  it("gives the page mausbot's Chart and useTheme, drawing ECharts in the chat's theme", async () => {
+  it("gives the page obot's Chart and useTheme, drawing ECharts in the chat's theme", async () => {
     document.documentElement.setAttribute("data-theme", "dark");
-    const source = `import { Chart, useTheme } from "mausbot";
+    const source = `import { Chart, useTheme } from "obot";
 export default function Page() { const theme = useTheme(); return <div><p id="theme">{theme}</p><Chart label="Sales" option={{ series: [{ type: "bar", data: [1, 2] }] }} /></div>; }`;
     const { problems, loads, rendered } = await start(source);
     expect(problems).toEqual([]);
@@ -150,7 +150,7 @@ describe("the shell's HTML", () => {
       expect(url, url).toMatch(/\/npm\/(@[\w-]+\/)?[\w.-]+@\d+\.\d+\.\d+\//);
     }
     expect(JSX_PAGE_LIBRARIES.sucrase).toBe(packageJson.dependencies.sucrase);
-    expect(JSX_PAGE_MODULES).toEqual(["react", "react/jsx-runtime", "react-dom", "react-dom/client", "lucide-react", "echarts", "mausbot"]);
+    expect(JSX_PAGE_MODULES).toEqual(["react", "react/jsx-runtime", "react-dom", "react-dom/client", "lucide-react", "echarts", "obot"]);
   });
 
   it("carries the file as JSON no script element can be closed by, with the import map and Tailwind ahead of it", () => {
@@ -171,7 +171,7 @@ describe("the shell's HTML", () => {
     const compiled = "\"use strict\";exports.default = function () { return \"</script>\"; };";
     const html = jsxPublishedHtml({ title: "Pricing", compiled });
     expect(html.startsWith("<!DOCTYPE html>")).toBe(true);
-    expect(html).toContain("window.__mausbotPage=function(require,module,exports){\"use strict\";exports.default = function () { return \"<\\/script>\"; };");
+    expect(html).toContain("window.__obotPage=function(require,module,exports){\"use strict\";exports.default = function () { return \"<\\/script>\"; };");
     expect(html).toContain("--color-text-primary:light-dark(");
     expect(html).not.toContain("source:");
     expect(html.match(/<\/script>/g)).toHaveLength(4);

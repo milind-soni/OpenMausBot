@@ -1,4 +1,4 @@
-# Sharing a whole department
+﻿# Sharing a whole department
 
 The sidebar groups bots into departments. **Share department…** saves one department as a single file (`<team>-<version>.openmaus.json`).
 Someone else adds it in **Templates → Import**, or an organization uploads it
@@ -114,7 +114,7 @@ writes down its own setup.
    `grok-bot-export-<name>.json` or replies with it.
 2. Bring that back: paste the whole reply (chat text and code fences are fine),
    drop the file or choose it. In the desktop app, on the computer running
-   OpenMausBot, files named `grok-bot-export*` in Downloads are offered in one
+   Obot, files named `grok-bot-export*` in Downloads are offered in one
    tap; a split or re-saved export joins up.
 3. The preview names the Bot and counts its skills, routines and memories. Nothing
    is written yet.
@@ -125,10 +125,10 @@ writes down its own setup.
 
 ### Connect Grok Bot
 
-In the desktop app, on the computer running OpenMausBot, the dialog can also take
+In the desktop app, on the computer running Obot, the dialog can also take
 every Bot in one go. **Get the link** gives an address to add in Grok Bot as a
 custom connector (Connect apps → Add a custom connector → Server URL). The
-[MausBot bot in Grok Bot](https://x.ai/bot/3i4Tvjckmdk05UwntFeNo) then sends each
+[Obot bot in Grok Bot](https://x.ai/bot/3i4Tvjckmdk05UwntFeNo) then sends each
 Bot's export through it, and the dialog lists the Bots as they arrive. They go
 through the same preview as a file, and nothing is imported until you choose
 Import.
@@ -185,7 +185,7 @@ the rest nothing.
 
 The earlier `openmaus.grok/1` export still reads.
 
-After the button is pressed, and on the computer running OpenMausBot only, the
+After the button is pressed, and on the computer running Obot only, the
 desktop app reads through `GET /api/setup-import/grok` (its own window only, never
 a paired device, a browser, a bot's shell, a Cloud or a hosted server) those
 Downloads files and one slice of the Grok Bot app's UI cache in
@@ -224,3 +224,4 @@ true` adds the New bot defaults preset, and `kind: "library"` (instead of
 `team`) saves a preset file; both are described in [presets.md](presets.md).
 A body without `version: 2` keeps the original whole-installation Markdown
 export.
+

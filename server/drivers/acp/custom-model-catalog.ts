@@ -15,7 +15,7 @@ const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const MAX_LINE_BYTES = 1024 * 1024;
 const MAX_MODELS = 128;
 /** The `clientInfo.name` every discovery session is opened with. */
-export const DISCOVERY_CLIENT_NAME = "openmausbot-model-discovery";
+export const DISCOVERY_CLIENT_NAME = "obot-model-discovery";
 
 export interface AcpDiscoveryOptions {
   /** A saved id listed first that leaves the native session's model unchanged; it becomes the default. */

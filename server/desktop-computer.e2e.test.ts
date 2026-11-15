@@ -1,4 +1,4 @@
-// Only the desktop app's own server may use this computer. A second OpenMausBot server on the same computer (a copy run
+// Only the desktop app's own server may use this computer. A second Obot server on the same computer (a copy run
 // from source, a demo) finds the app's driver record on disk, in the folder the app keeps it in, and still never mounts
 // this computer or drives it; the app's own server, which hears the record over its parent port, still can.
 import { spawn, type ChildProcess } from "node:child_process";
@@ -12,7 +12,7 @@ import { freePortBlock } from "./testing/ports.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const NOT_THE_APP = "Only the OpenMausBot app on this computer can let a bot use it.";
+const NOT_THE_APP = "Only the Obot app on this computer can let a bot use it.";
 
 describe("this computer belongs to the desktop app's own server", () => {
   let home = "";
@@ -113,7 +113,7 @@ describe("this computer belongs to the desktop app's own server", () => {
     mkdirSync(join(ui, "assets"), { recursive: true });
     writeFileSync(join(ui, "index.html"), "<title>Desktop computer</title>");
     writeFileSync(join(ui, "assets", "test.css"), "body{}");
-    for (const folder of [join(home, "user-data"), join(home, "Library", "Application Support", "OpenMausBot")]) {
+    for (const folder of [join(home, "user-data"), join(home, "Library", "Application Support", "Obot")]) {
       mkdirSync(folder, { recursive: true, mode: 0o700 });
       writeFileSync(join(folder, "cua-connection.json"), JSON.stringify(record), { mode: 0o600 });
     }

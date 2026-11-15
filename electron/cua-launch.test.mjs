@@ -82,7 +82,7 @@ beforeEach(async () => {
   fixture.hosts = [];
   fixture.hostOptions = [];
   fixture.handlers.clear();
-  vi.stubEnv("OPENMAUSBOT_CUA_EMBEDDED", "1");
+  vi.stubEnv("OBOT_CUA_EMBEDDED", "1");
   vi.stubEnv("CUA_DRIVER_PATH", "/fixture/cua-driver");
   vi.resetModules();
   cua = await import("./cua.mjs");

@@ -1,4 +1,4 @@
-# Image generation
+﻿# Image generation
 
 Bots can create images in a chat: ask "make an image of…" and the bot calls
 its `generate_image` tool, on any engine. Bot avatars use the same providers.
@@ -65,7 +65,7 @@ same rule the text backups follow:
 
 A timeout or an HTTP 5xx stays on the base, because the image may already have
 been made and billed. A refused request (HTTP 400, including a moderation
-block) also stays on the base: OpenMausBot does not retry a refused prompt
+block) also stays on the base: Obot does not retry a refused prompt
 with another provider.
 
 When the backup makes the image, the bot is told why the base did not, such as
@@ -83,9 +83,9 @@ the engine gives up on the call), and nothing is attached.
 ## Custom gateway compatibility
 
 For a local gateway such as OmniRoute, a base URL might be
-`http://127.0.0.1:20128/v1`. OpenMausBot appends `/images/generations`; pasting
+`http://127.0.0.1:20128/v1`. Obot appends `/images/generations`; pasting
 that complete endpoint is also accepted. `localhost` and `127.0.0.1` refer to
-the machine running the OpenMausBot server, including when you open the app
+the machine running the Obot server, including when you open the app
 remotely. Public endpoints require HTTPS. HTTP is supported for local/private
 endpoints. URLs must not contain embedded credentials, query parameters, or
 fragments.
@@ -101,3 +101,4 @@ redirects, and asynchronous job responses are not supported.
 Each decoded image is limited to 10 MiB, the response to 15 MiB, and
 generation to two minutes. Provider error bodies are never shown or stored:
 an error names only the provider, the HTTP status and the model ID.
+

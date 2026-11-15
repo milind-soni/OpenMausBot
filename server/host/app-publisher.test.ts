@@ -204,13 +204,13 @@ describe("what never leaves the bot's folder", () => {
   it("leaves out dotfiles, env files, keys, node_modules and links, and says which", async () => {
     site("mira", "bakery");
     write("otto", "notes.txt", "otto's private notes");
-    for (const path of [".env", ".git/config", ".openmausbot-secrets/netlify", "prod.env", "server.pem", "id_rsa", "credentials.json", "node_modules/pkg/index.js", "Thumbs.db", ...(ODD_NAMES ? ["what?.html"] : [])]) write("mira", `bakery/${path}`, "SECRET");
+    for (const path of [".env", ".git/config", ".obot-secrets/netlify", "prod.env", "server.pem", "id_rsa", "credentials.json", "node_modules/pkg/index.js", "Thumbs.db", ...(ODD_NAMES ? ["what?.html"] : [])]) write("mira", `bakery/${path}`, "SECRET");
     write("mira", "bakery/.well-known/security.txt", "Contact: hello@example.test");
     if (FILE_LINKS) symlinkSync(join(workspace("otto"), "notes.txt"), join(workspace("mira"), "bakery", "linked.txt"));
     folderLink(workspace("otto"), join(workspace("mira"), "bakery", "linked-folder"));
     const answer = await publisher().publisher.publish({ botId: "mira", roots: roots("mira"), path: "bakery", title: "Bakery order page" });
     expect(answer.body).toMatchObject({ ok: true, live: true, files: 3 });
-    expect((answer.body.skipped as string[]).sort()).toEqual([".env", ".git", ".openmausbot-secrets", "Thumbs.db", "credentials.json", "id_rsa", "linked-folder", ...(FILE_LINKS ? ["linked.txt"] : []),
+    expect((answer.body.skipped as string[]).sort()).toEqual([".env", ".git", ".obot-secrets", "Thumbs.db", "credentials.json", "id_rsa", "linked-folder", ...(FILE_LINKS ? ["linked.txt"] : []),
       "node_modules", "prod.env", "server.pem", ...(ODD_NAMES ? ["what?.html"] : [])]);
     expect(Object.keys([...fake.apps.values()][0]!.files).sort()).toEqual([".well-known/security.txt", "index.html", "style.css"]);
     expect(fake.uploads.sort()).toEqual([".well-known/security.txt", "index.html", "style.css"]);
@@ -268,11 +268,11 @@ describe("what never leaves the bot's folder", () => {
   });
 
   it("refuses the secret folder, a file, a missing folder and a folder with no index.html in plain words", async () => {
-    write("mira", ".openmausbot-secrets/site/index.html", "x");
+    write("mira", ".obot-secrets/site/index.html", "x");
     write("mira", "notes/readme.md", "x");
     const { publisher: made } = publisher();
     const ask = async (path: string, title = "Site") => (await made.publish({ botId: "mira", roots: roots("mira"), path, title })).body.error;
-    expect(await ask(".openmausbot-secrets/site")).toContain("holds a secret the person gave");
+    expect(await ask(".obot-secrets/site")).toContain("holds a secret the person gave");
     expect(await ask("notes/readme.md")).toBe("notes/readme.md is a file. Publish the folder that holds the app's index.html.");
     expect(await ask("nowhere")).toBe("No folder was found at nowhere. Pass the exact path of the folder to publish.");
     expect(await ask("notes")).toBe("notes has no index.html at its top. Publish the built output folder.");
@@ -345,7 +345,7 @@ describe("what included hosting leaves to the person's own Netlify account", () 
       [502, { error: "upstream_error", message: "RELAY WORDS" }, "unavailable", "Included hosting isn't available right now."],
       [429, { error: "busy", message: "RELAY WORDS" }, "busy", "Included hosting is busy right now. Try again in a few minutes."],
       [409, { error: "change_in_progress", message: "RELAY WORDS" }, "in_progress", "Another change to this app is still running."],
-      [409, { error: "app_taken_down", message: "RELAY WORDS" }, "taken_down", "This app was taken down by MausBot, so it can't be published again."],
+      [409, { error: "app_taken_down", message: "RELAY WORDS" }, "taken_down", "This app was taken down by Obot, so it can't be published again."],
       [413, { error: "too_many_files", message: "RELAY WORDS", files: 612, max: 500 }, "too_large", "The app has 612 files; included hosting takes at most 500."],
       [413, { error: "file_too_large", message: "RELAY WORDS", path: "film.mp4", size: 9 * 1024 * 1024, max: 8 * 1024 * 1024 }, "too_large", "\"film.mp4\" is 9 MB; included hosting takes files up to 8 MB."],
       [413, { error: "app_too_large", message: "RELAY WORDS", bytes: 30 * 1024 * 1024, max: 25 * 1024 * 1024 }, "too_large", "The app is 30 MB; included hosting takes apps up to 25 MB."],
@@ -397,17 +397,17 @@ describe("deleting, a takedown and a server with no included hosting", () => {
     expect(readFileSync(join(workspace("mira"), "bakery", SITE_FILE), "utf8")).toBe(own);
   });
 
-  it("reports an app MausBot took down and refuses to publish it again", async () => {
+  it("reports an app Obot took down and refuses to publish it again", async () => {
     site("mira", "bakery");
     const { publisher: made } = publisher();
     await made.publish({ botId: "mira", roots: roots("mira"), path: "bakery", title: "Bakery order page" });
     fake.takeDown(String(record("mira", "bakery").appKey));
     const status = await made.status({ botId: "mira", roots: roots("mira"), path: "bakery" });
-    expect(status.body).toMatchObject({ ok: true, state: "taken_down", live: false, message: "This app was taken down by MausBot. Its link no longer works." });
+    expect(status.body).toMatchObject({ ok: true, state: "taken_down", live: false, message: "This app was taken down by Obot. Its link no longer works." });
     expect(record("mira", "bakery").deployState).toBe("taken_down");
     const again = await made.publish({ botId: "mira", roots: roots("mira"), path: "bakery", title: "Bakery order page" });
     expect(again).toMatchObject({ status: 409, body: { code: "taken_down" } });
-    expect(String(again.body.error)).toContain("was taken down by MausBot, so it can't be published again");
+    expect(String(again.body.error)).toContain("was taken down by Obot, so it can't be published again");
   });
 
   it("answers that there is no included hosting where the Admin gave none, and reaches nothing", async () => {

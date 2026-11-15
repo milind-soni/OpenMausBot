@@ -68,11 +68,11 @@ export function companyInstanceConfigs(connection: ManagedDesktopConnection, run
     };
     if (provider.id === "openai") entries[id] = {
       driver: "codex", displayName, config: { managed: { url: `${base}/v1`, models: provider.models } },
-      environment: { OPENMAUSBOT_COMPANY_API_KEY: connection.token, CODEX_HOME: join(runtimeDirectory, id, "codex") },
+      environment: { OBOT_COMPANY_API_KEY: connection.token, CODEX_HOME: join(runtimeDirectory, id, "codex") },
     };
     if (provider.id === "openrouter") entries[id] = {
-      driver: "openai-compat", displayName, config: { url: `${base}/v1`, apiKeyEnv: "OPENMAUSBOT_COMPANY_API_KEY", model: provider.models[0], provider: "" },
-      environment: { OPENMAUSBOT_COMPANY_API_KEY: connection.token },
+      driver: "openai-compat", displayName, config: { url: `${base}/v1`, apiKeyEnv: "OBOT_COMPANY_API_KEY", model: provider.models[0], provider: "" },
+      environment: { OBOT_COMPANY_API_KEY: connection.token },
     };
   }
   return entries;

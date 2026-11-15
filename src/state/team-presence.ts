@@ -58,7 +58,7 @@ export function useThreadPresence(threadId: string | null | undefined): { here: 
 }
 
 /** The conversation in front of the person when it is one others can read too: a team bot's shared chat or a group
- * chat. Null for a private chat, a member's own MausBot, and anywhere that is not a chat. */
+ * chat. Null for a private chat, a member's own Obot, and anywhere that is not a chat. */
 export function sharedThreadOf(state: Pick<AppState, "activeView" | "selectedId" | "bots" | "groups">): string | null {
   if (state.activeView !== "chat") return null;
   const group = state.groups.find((one) => one.id === state.selectedId);

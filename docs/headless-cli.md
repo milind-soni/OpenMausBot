@@ -1,6 +1,6 @@
-# Run OpenMausBot from scripts and CI
+# Run Obot from scripts and CI
 
-The `openmausbot` command can drive a running workspace without a screen: set
+The `obot` command can drive a running workspace without a screen: set
 up a team from a file, give a bot a job, wait until it and every teammate it
 asked are done, and keep what they made. It works against the server on this
 computer or one somewhere else, and it is built for scripts, CI and other
@@ -8,11 +8,11 @@ agents: every command can print one JSON document, and the exit code says how
 things went.
 
 ```sh
-npm install -g openmausbot            # or use npx openmausbot …
-openmausbot serve --no-pair &         # a workspace with no screen (or use your desktop app)
-openmausbot engine set claude --key-env ANTHROPIC_API_KEY
-openmausbot team apply launch-room.yaml
-openmausbot run "Room Lead" "Rehearse the launch of https://example.com" --export ./rehearsal
+npm install -g obot            # or use npx obot …
+obot serve --no-pair &         # a workspace with no screen (or use your desktop app)
+obot engine set claude --key-env ANTHROPIC_API_KEY
+obot team apply launch-room.yaml
+obot run "Room Lead" "Rehearse the launch of https://example.com" --export ./rehearsal
 ```
 
 `run` prints progress as it goes, then the Room Lead's final reply and the
@@ -20,7 +20,7 @@ files it links, and writes everything to `./rehearsal`.
 
 ## Which workspace, and as whom
 
-- `--url URL` or `OPENMAUSBOT_URL`: a workspace somewhere else. `https://`
+- `--url URL` or `OBOT_URL`: a workspace somewhere else. `https://`
   works anywhere; plain `http://` works only on this computer or a private
   network (a LAN address, Tailscale's 100.x or `*.ts.net`, `*.local`).
 - `--port N` or `OMB_PORT`: this computer, on that port.
@@ -31,35 +31,35 @@ On this computer a headless server treats you as its owner, and no token is
 needed. Anywhere else you need a token:
 
 ```sh
-openmausbot connect https://maus.example.com --code 7KQ2-M9XD-H4TP --out ~/.openmausbot-token
-openmausbot doctor --url https://maus.example.com --token-file ~/.openmausbot-token
+obot connect https://maus.example.com --code 7KQ2-M9XD-H4TP --out ~/.obot-token
+obot doctor --url https://maus.example.com --token-file ~/.obot-token
 ```
 
 `connect` also takes the whole link the server printed
 (`https://maus.example.com/pair#code=…`), so `--code` can be left out then.
-Make the pairing code on the server with `openmausbot pair` (add
+Make the pairing code on the server with `obot pair` (add
 `--client --ttl 24h` for a chat-only code that stays open up to a day; a code
 works once). On this
 computer's own server, `connect` makes the code itself (`--client` gives a
 token that can chat but not change settings). The token goes to a file only
 you can read, and is never printed. Pass it with `--token-file FILE` or
-`OPENMAUSBOT_TOKEN`; there is no `--token` flag, because a command line can be
+`OBOT_TOKEN`; there is no `--token` flag, because a command line can be
 read by other programs. A token is never sent while the command is still
 looking for a server: with a token, name the server.
 
 For CI, make an access token that ends on a date you choose:
 
 ```sh
-openmausbot token create "Nightly CI" --scope client --expires 90d --out ci-token   # on the server, or with an admin token
-openmausbot token list                     # name, scope, end date, last used (never the token)
-openmausbot token revoke ID                # it stops working at once
+obot token create "Nightly CI" --scope client --expires 90d --out ci-token   # on the server, or with an admin token
+obot token list                     # name, scope, end date, last used (never the token)
+obot token revoke ID                # it stops working at once
 ```
 
 A `connect` session renews itself while it is used, up to 180 days; an access
 token never renews and ends on its date. `--expires` is at most the server's
 session limit (180 days unless `OMB_SESSION_MAX_DAYS` says otherwise), and
 `--scope client`, the default, can chat and answer approvals but not change
-settings. Tokens are listed and revoked like any session (`openmausbot
+settings. Tokens are listed and revoked like any session (`obot
 sessions`, and Settings), and the token itself is written only to `--out`.
 
 ## Output and exit codes
@@ -84,13 +84,13 @@ redaction the transcript uses). Durations are written `90`, `90s`, `5m`, `2h` or
 
 ## Commands
 
-Run `openmausbot help VERB` for any of these. A TARGET is a bot or room by
+Run `obot help VERB` for any of these. A TARGET is a bot or room by
 name or id, or `--bot ID`, `--channel ID` or `--thread ID`; `--task ID` picks
 one of its conversations.
 
 | Command | What it does |
 |---|---|
-| `doctor [--wait 2m]` | Checks the server answers, is new enough, who you are to it (and when your session expires), that an engine is ready, and whether bots have a browser. On a shared server without a session (`docker compose exec omb openmausbot doctor`), it learns only how many engines are ready, not which (`GET /api/health/engines`). |
+| `doctor [--wait 2m]` | Checks the server answers, is new enough, who you are to it (and when your session expires), that an engine is ready, and whether bots have a browser. On a shared server without a session (`docker compose exec omb obot doctor`), it learns only how many engines are ready, not which (`GET /api/health/engines`). |
 | `doctor --host` | Checks this Linux machine can run the server and the bots' sandbox (below). |
 | `bots`, `channels`, `models` | Your bots and what each is doing, your rooms, the engines and the models each offers. |
 | `messages TARGET [--limit 30]` | The latest messages of a conversation. |
@@ -105,7 +105,7 @@ one of its conversations.
 | `connect [URL]` | Gets a token for a workspace elsewhere. |
 | `token create NAME`, `token list`, `token revoke ID` | Access tokens for CI that end on their date (above). |
 | `new-bot`, `new-channel`, `set-model`, `edit` | Make a bot or a room, change a bot's model, rewrite an earlier message. |
-| `mcp` | The OpenMausBot MCP server on stdin and stdout ([docs/mcp-server.md](mcp-server.md)). |
+| `mcp` | The Obot MCP server on stdin and stdout ([docs/mcp-server.md](mcp-server.md)). |
 
 The message for `send` and `run` can be the next word, `--text TEXT`,
 `--message-file FILE`, or `-` to read it from stdin.
@@ -115,7 +115,7 @@ The message for `send` and `run` can be the next word, `--text TEXT`,
 Before you install a server, check the machine it will run on:
 
 ```text
-$ sudo openmausbot doctor --host --data-dir /srv/mausbot
+$ sudo obot doctor --host --data-dir /srv/obot
 ok    Ubuntu 24.04.1 LTS, kernel 6.8.0-45-generic
 ok    x86_64
 ok    Docker 27.3.1
@@ -123,8 +123,8 @@ FAIL  Bot sandbox: AppArmor blocks unprivileged user namespaces
       fix: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0   (and put it in /etc/sysctl.d/ to keep it after a reboot)
 ok    seccomp is available
 ok    cgroup v2
-ok    412 GB free for /srv/mausbot
-warn  /srv/mausbot is not on an encrypted disk
+ok    412 GB free for /srv/obot
+warn  /srv/obot is not on an encrypted disk
       fix: use LUKS full-disk encryption, unless your provider encrypts the disk at rest
 ok    8 CPUs, 31 GB memory (a team of 20 needs 8 CPUs and 16 GB)
 ok    Port 8799 is free for the server
@@ -137,14 +137,14 @@ It checks the system (Ubuntu 24.04 or 22.04, or Debian 12, are the ones we
 test), the processor (x86_64; arm64 runs a server but not a self-hosted Team
 server), Docker or Podman, that unprivileged user namespaces are allowed (the
 AppArmor and Debian switches), seccomp, cgroup v2, free disk for the data
-folder (`--data-dir`, else `OMB_DATA_DIR` or `~/.openmausbot`: at least 10 GB,
+folder (`--data-dir`, else `OMB_DATA_DIR` or `~/.obot`: at least 10 GB,
 and 100 GB for a Team server), disk encryption, CPUs and memory (a Team needs
 4 CPUs and 8 GB), the server's port (`--port`, else 8799), ports 80 and 443
 (required with `--domain HOST`, else only a warning), and the clock against
 network time (signed requests allow 300 seconds). It changes nothing.
 
-On a server that runs MausBot's own connector (a team on its own server), it
-also asks the connector for its checks (`mausbot-connector probe --json`,
+On a server that runs Obot's own connector (a team on its own server), it
+also asks the connector for its checks (`obot-connector probe --json`,
 which starts the bots' box once under the home's own security settings) and
 lists any that fail. There the home runs under its own AppArmor profile, so
 AppArmor's server-wide switch can stay on: the user-namespace check passes
@@ -159,14 +159,14 @@ servers, and exits 7.
 ## run and wait
 
 ```sh
-openmausbot run "Room Lead" --message-file brief.md --timeout 45m --on-input exit --export ./out
+obot run "Room Lead" --message-file brief.md --timeout 45m --on-input exit --export ./out
 ```
 
 `run` starts a new conversation (titled by `--title` or the message's first
 line) unless `--task current` or `--task ID` says otherwise, sends the message
 once, and waits for the whole job: the bot's own turn and every piece of work
 it handed to a teammate, and theirs in turn. Its first progress line names the
-conversation and when the job began (`since`), so a later `openmausbot wait
+conversation and when the job began (`since`), so a later `obot wait
 --thread ID --since MS` can pick the same job up again.
 
 - `--wait job` (the default) waits for the bot and every teammate; `--wait turn`
@@ -221,8 +221,8 @@ have).
 ## export
 
 ```sh
-openmausbot export "Room Lead" --out ./rehearsal          # its current conversation
-openmausbot export --thread 3f2a… --out ./rehearsal --root ROOT_ID
+obot export "Room Lead" --out ./rehearsal          # its current conversation
+obot export --thread 3f2a… --out ./rehearsal --root ROOT_ID
 ```
 
 | Written | What it holds |
@@ -245,7 +245,7 @@ lists are removed first, and nothing else in the folder is touched.
 ## events
 
 ```sh
-openmausbot events --job 3f2a… --until-settled > events.jsonl
+obot events --job 3f2a… --until-settled > events.jsonl
 ```
 
 One JSON line per event: messages as they are written and changed, threads,
@@ -262,8 +262,8 @@ always JSON lines; `--jsonl` is accepted and changes nothing.
 ## engine
 
 ```sh
-openmausbot engine set claude --key-env ANTHROPIC_API_KEY --base-url https://gateway.example.com --install
-openmausbot engine list
+obot engine set claude --key-env ANTHROPIC_API_KEY --base-url https://gateway.example.com --install
+obot engine list
 ```
 
 KIND is `claude`, `openai`, `openrouter`, `openai-compatible` (needs
@@ -286,10 +286,10 @@ with their standing instructions, models, approval levels and computers,
 skills, rooms, and the engines they run on. Write it in YAML or JSON.
 
 ```sh
-openmausbot team apply launch-room.yaml             # plan, then apply
-openmausbot team apply launch-room.yaml --dry-run   # only the plan
-openmausbot team apply launch-room.yaml --check     # exit 6 if anything would change (CI)
-openmausbot team export --team "Launch Room" --out exported.yaml
+obot team apply launch-room.yaml             # plan, then apply
+obot team apply launch-room.yaml --dry-run   # only the plan
+obot team apply launch-room.yaml --check     # exit 6 if anything would change (CI)
+obot team export --team "Launch Room" --out exported.yaml
 ```
 
 Apply prints its plan, then makes the changes:
@@ -343,7 +343,7 @@ bots:                                       # at least one
     chief: true                             # Chief of Staff of its team (one per team); false removes it
     manages: [Support]                      # other teams this Chief is also in charge of (every bot reaches every bot anyway)
     soul: TEXT | { file: PATH }             # standing instructions, at most 24,000 bytes
-    model: claude/claude-sonnet-5-5         # INSTANCE/MODEL; openmausbot models lists them
+    model: claude/claude-sonnet-5-5         # INSTANCE/MODEL; obot models lists them
     effort: none | low | medium | high | xhigh | max
     approval: ask | edits | auto | full     # a new bot starts at full; Custom is set in the desktop app
     computer: auto | off | browser | local | vm | cloud
@@ -399,7 +399,7 @@ One Room Lead and the visitors who rehearse a launch, on a sandbox with no
 Claude login: the key runs every Claude bot.
 
 ```yaml
-# launch-room.yaml — openmausbot team apply launch-room.yaml
+# launch-room.yaml — obot team apply launch-room.yaml
 version: 1
 
 engines:
@@ -457,7 +457,7 @@ Then rehearse, wait for every visitor, and keep the report, transcripts and
 screenshots:
 
 ```sh
-openmausbot run "Room Lead" "Rehearse the launch of https://example.com with every visitor, then write report.md." \
+obot run "Room Lead" "Rehearse the launch of https://example.com with every visitor, then write report.md." \
   --timeout 45m --export ./rehearsal
 ```
 
@@ -473,27 +473,28 @@ an engine that can limit built-in tools.
 
 ```yaml
 # .github/workflows/rehearse.yml (a sketch)
-- run: npm install -g openmausbot @anthropic-ai/claude-code
-- run: openmausbot serve --no-pair --data-dir "$RUNNER_TEMP/omb" &
+- run: npm install -g obot @anthropic-ai/claude-code
+- run: obot serve --no-pair --data-dir "$RUNNER_TEMP/omb" &
   env: { OMB_ANTHROPIC_API_KEY: "${{ secrets.ANTHROPIC_API_KEY }}" }   # the workspace's Claude key from the start
-- run: openmausbot doctor --wait 2m          # the server answers and an engine is ready
-- run: openmausbot team apply team.yaml
-- run: openmausbot run "Release checker" "Check the deploy at ${{ env.URL }}" --timeout 20m --strict --export ./out
+- run: obot doctor --wait 2m          # the server answers and an engine is ready
+- run: obot team apply team.yaml
+- run: obot run "Release checker" "Check the deploy at ${{ env.URL }}" --timeout 20m --strict --export ./out
 - uses: actions/upload-artifact@v4
   with: { name: release-check, path: ./out }
 ```
 
 `doctor --wait` waits for an engine too, so the server gets its key in its
 own environment, as here (`OMB_ANTHROPIC_API_KEY`; the team file's `engines:`
-section, or `openmausbot engine set`, can set it later instead).
+section, or `obot engine set`, can set it later instead).
 
 The step fails when the job fails (exit 1), needs someone (exit 3) or runs out
 of time (exit 4). To drive a workspace that is already running elsewhere, set
-`OPENMAUSBOT_URL` and pass a token made with `openmausbot connect` as a secret
+`OBOT_URL` and pass a token made with `obot connect` as a secret
 file (`--token-file`).
 
 ## For other agents
 
-`openmausbot mcp` serves the same operations as MCP tools on stdin and stdout
+`obot mcp` serves the same operations as MCP tools on stdin and stdout
 ([docs/mcp-server.md](mcp-server.md)): `wait_for_conversation` waits on the
 same job, and returns the same result, as `wait`.
+

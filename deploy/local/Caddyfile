@@ -1,7 +1,7 @@
 :80 {
 	encode zstd gzip
 	handle /hooks/* {
-		reverse_proxy unix//run/openmausbot/hooks.sock
+		reverse_proxy unix//run/obot/hooks.sock
 	}
 	# HTTPS is claimed by the peer that terminates TLS: the ranges named in
 	# OMB_TRUSTED_PROXY_CIDRS may present the HTTPS hostname, anyone else is
@@ -11,14 +11,14 @@
 		remote_ip {$OMB_TRUSTED_PROXY_CIDRS}
 	}
 	handle @trusted_https {
-		reverse_proxy unix//run/openmausbot/http.sock {
+		reverse_proxy unix//run/obot/http.sock {
 			header_up X-Forwarded-Proto https
 			header_up -Accept-Encoding
 			flush_interval -1
 		}
 	}
 	handle {
-		reverse_proxy unix//run/openmausbot/http.sock {
+		reverse_proxy unix//run/obot/http.sock {
 			header_up X-Forwarded-Proto http
 			header_up -Accept-Encoding
 			flush_interval -1

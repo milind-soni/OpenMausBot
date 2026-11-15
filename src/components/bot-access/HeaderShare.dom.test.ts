@@ -101,7 +101,7 @@ it("someone who can only chat or view sees that it is shared, never who with", (
   expect(sharedWith({ yourAccess: "view", onlyPeopleAdded: true, access: only(MARTA, BOB) } as never), "even a list that should never have been sent is not read").toEqual({ kind: "added" });
 });
 
-it("shows nothing off a team or on a person's own MausBot", () => {
+it("shows nothing off a team or on a person's own Obot", () => {
   render(quotes({ yourAccess: "edit", access: only(MARTA), defaultBot: { person: RUI.email } }));
   expect(host.innerHTML).toBe("");
   server.team = false;

@@ -235,7 +235,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
   ];
 
   const provider = (id: string, label: string, synonyms: string[], current: () => string | undefined, patch: (text: string) => Record<string, unknown>): SettingEntry => writable({
-    id, label, help: `${label}: the address MausBot sends requests to. Empty uses the provider's own.`, where: "Settings → AI", synonyms: [...synonyms, "url", "base url", "endpoint", "address", "proxy"],
+    id, label, help: `${label}: the address Obot sends requests to. Empty uses the provider's own.`, where: "Settings → AI", synonyms: [...synonyms, "url", "base url", "endpoint", "address", "proxy"],
     value: url, allowed: "an http(s) address, or empty to clear", current: () => current() ?? "", write: config(patch),
   });
   const providers: SettingEntry[] = [
@@ -311,7 +311,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
 
   const ownerOnly = (id: string, label: string, help: string, where: Where, synonyms: string[], read: () => string): SettingEntry => ({ id, label, help, where, synonyms, tier: "owner-only", read });
   const owner: SettingEntry[] = [
-    ownerOnly("cloud.account", "MausBot Cloud account", "The account this app is signed in with, and its plan.", "Settings → Your account", ["account", "sign in", "sign out", "plan", "billing", "subscription"], () => "managed in Settings"),
+    ownerOnly("cloud.account", "Obot Cloud account", "The account this app is signed in with, and its plan.", "Settings → Your account", ["account", "sign in", "sign out", "plan", "billing", "subscription"], () => "managed in Settings"),
     ownerOnly("vault.logins", "Vault and logins", "Saved website logins and secrets bots may use.", "Settings → Vault", ["vault", "password", "passwords", "login", "logins", "1password"], () => "managed in Settings"),
     ownerOnly("data.backups", "Backups", "Making a backup (it takes a password), restoring or deleting one, and the daily company backup (it takes a typed confirmation).", "Settings → Data",
       ["backup", "backups", "restore", "export", "import", "schedule"], () => "managed in Settings"),
@@ -323,7 +323,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
       ["keep here", "move to cloud", "move back", "bring back"], () => "managed in Settings"),
     ownerOnly("appearance.sidebarPicture", "Sidebar picture", "The picture at the top of the sidebar; it is a file the person picks or removes.", "Settings → Overview",
       ["wallpaper", "background", "banner", "sidebar image", "picture"], () => "managed in Settings"),
-    ownerOnly("account.organization", "Organization", "Joining or leaving a company's managed MausBot; it signs in through the company's portal.", "Settings → Your account",
+    ownerOnly("account.organization", "Organization", "Joining or leaving a company's managed Obot; it signs in through the company's portal.", "Settings → Your account",
       ["organization", "organisation", "company", "managed"], () => "managed in Settings"),
     ownerOnly("people.signIn", "Who may sign in", "On a self-hosted server, the emails or @domains that may sign in, as admins or members. A change could lock someone out, or hand every setting to someone new.",
       "Settings → Your account", ["people", "members", "invite", "roles", "admins", "sign in access"], () => "managed in Settings"),

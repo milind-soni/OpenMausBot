@@ -11,7 +11,7 @@ const toolsOf = (turn: TraceTurn): TraceTool[] => turn.children.flatMap((child) 
 
 it("traces a person's message to the Chief through the teammate it delegated to and the tools that teammate used", async () => {
   const session = await launchVerificationServer({ ...process.env }, undefined, undefined, undefined, undefined, { scripted: true });
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OBOT_URL: session.info.url } }) as Promise<any>;
   const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
   try {
     const chief = (await cli("new-bot", "--name", "Clive", "--section", "Leadership")).bot;

@@ -4,17 +4,17 @@ import { defaultSentinelOut, isInside } from "./paths.ts";
 
 describe("sentinel paths", () => {
   it("keeps Sentinel's files in the platform's state folder, outside the data dir", () => {
-    expect(defaultSentinelOut("/Users/maus/.openmausbot", "darwin", "/Users/maus", {})).toBe("/Users/maus/Library/Application Support/openmausbot-sentinel");
-    expect(defaultSentinelOut("/home/maus/.openmausbot", "linux", "/home/maus", {})).toBe("/home/maus/.local/state/openmausbot-sentinel");
-    expect(defaultSentinelOut("/home/maus/.openmausbot", "linux", "/home/maus", { XDG_STATE_HOME: "/var/state/maus" })).toBe("/var/state/maus/openmausbot-sentinel");
+    expect(defaultSentinelOut("/Users/maus/.obot", "darwin", "/Users/maus", {})).toBe("/Users/maus/Library/Application Support/obot-sentinel");
+    expect(defaultSentinelOut("/home/maus/.obot", "linux", "/home/maus", {})).toBe("/home/maus/.local/state/obot-sentinel");
+    expect(defaultSentinelOut("/home/maus/.obot", "linux", "/home/maus", { XDG_STATE_HOME: "/var/state/maus" })).toBe("/var/state/maus/obot-sentinel");
     // a relative XDG_STATE_HOME is invalid by the spec and ignored
-    expect(defaultSentinelOut("/home/maus/.openmausbot", "linux", "/home/maus", { XDG_STATE_HOME: "state" })).toBe("/home/maus/.local/state/openmausbot-sentinel");
-    expect(defaultSentinelOut("C:\\Users\\maus\\.openmausbot", "win32", "C:\\Users\\maus", { LOCALAPPDATA: "D:\\Local" })).toBe("D:\\Local\\openmausbot-sentinel");
+    expect(defaultSentinelOut("/home/maus/.obot", "linux", "/home/maus", { XDG_STATE_HOME: "state" })).toBe("/home/maus/.local/state/obot-sentinel");
+    expect(defaultSentinelOut("C:\\Users\\maus\\.obot", "win32", "C:\\Users\\maus", { LOCALAPPDATA: "D:\\Local" })).toBe("D:\\Local\\obot-sentinel");
   });
 
   it("gives any other data dir its own subfolder, the same one every time", () => {
     const other = defaultSentinelOut("/srv/omb-data", "linux", "/home/maus", {});
-    expect(other).toMatch(/^\/home\/maus\/\.local\/state\/openmausbot-sentinel\/data-[0-9a-f]{12}$/);
+    expect(other).toMatch(/^\/home\/maus\/\.local\/state\/obot-sentinel\/data-[0-9a-f]{12}$/);
     expect(defaultSentinelOut("/srv/omb-data", "linux", "/home/maus", {})).toBe(other);
     expect(defaultSentinelOut("/srv/omb-data-2", "linux", "/home/maus", {})).not.toBe(other);
   });

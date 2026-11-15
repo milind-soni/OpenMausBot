@@ -1,19 +1,19 @@
 {
-  "name": "openmausbot",
+  "name": "obot",
   "private": true,
   "version": "0.1.160",
   "description": "A local-first chat app for running a team of AI agents.",
-  "homepage": "https://github.com/milind-soni/OpenMausBot",
+  "homepage": "https://github.com/alnatourm/Obot",
   "repository": {
     "type": "git",
-    "url": "https://github.com/milind-soni/OpenMausBot.git"
+    "url": "https://github.com/alnatourm/Obot.git"
   },
   "author": {
     "name": "Milind Soni",
-    "email": "46266943+milind-soni@users.noreply.github.com"
+    "email": "46266943+alnatourm@users.noreply.github.com"
   },
   "license": "Apache-2.0",
-  "desktopName": "com.openmausbot.app.desktop",
+  "desktopName": "com.obot.app.desktop",
   "type": "module",
   "main": "electron/main.mjs",
   "engines": {
@@ -27,12 +27,12 @@
     "check:contrast": "node scripts/check-skin-contrast.mjs",
     "i18n:check": "node scripts/generate-locale.mjs --check",
     "dev": "vite",
-    "docs:dev": "pnpm --filter @openmausbot/docs dev",
-    "docs:build": "pnpm --filter @openmausbot/docs build",
-    "docs:preview": "pnpm --filter @openmausbot/docs preview",
+    "docs:dev": "pnpm --filter @obot/docs dev",
+    "docs:build": "pnpm --filter @obot/docs build",
+    "docs:preview": "pnpm --filter @obot/docs preview",
     "companion": "node --experimental-strip-types companion/src/index.ts",
-    "omb": "node --experimental-strip-types server/openmausbot.ts",
-    "pair": "node --experimental-strip-types server/openmausbot.ts pair",
+    "omb": "node --experimental-strip-types server/obot.ts",
+    "pair": "node --experimental-strip-types server/obot.ts pair",
     "dev:server": "node --experimental-strip-types server/dev-server.ts",
     "mcp": "node --experimental-strip-types scripts/mcp-server.ts",
     "control:omb": "node --experimental-strip-types scripts/control-omb.ts",
@@ -86,10 +86,10 @@
     "broker:check": "pnpm broker:types && tsc -p cloudflare/composio-broker/tsconfig.json",
     "broker:test": "vitest run --config cloudflare/composio-broker/vitest.config.ts",
     "broker:deploy": "wrangler deploy --config cloudflare/composio-broker/wrangler.jsonc",
-    "control-plane:types": "pnpm --filter @openmausbot/control-plane types",
-    "control-plane:check": "pnpm --filter @openmausbot/control-plane check",
-    "control-plane:test": "pnpm --filter @openmausbot/control-plane test",
-    "control-plane:dry-run": "pnpm --filter @openmausbot/control-plane dry-run"
+    "control-plane:types": "pnpm --filter @obot/control-plane types",
+    "control-plane:check": "pnpm --filter @obot/control-plane check",
+    "control-plane:test": "pnpm --filter @obot/control-plane test",
+    "control-plane:dry-run": "pnpm --filter @obot/control-plane dry-run"
   },
   "dependencies": {
     "@1password/sdk": "0.5.0",

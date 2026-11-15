@@ -9,7 +9,7 @@
 // summarize anyway). It is skipped while background work is about to wake the conversation, retried while the bot is busy,
 // and given up once the cache has gone cold. A turn that starts meanwhile wins: the summary is abandoned, except when that
 // turn would summarize at its start anyway, which then waits for the summary already being written rather than start its own.
-// How a summary is written (the engine's own compaction on a fork of its session, or OpenMausBot's fold) and what it keeps
+// How a summary is written (the engine's own compaction on a fork of its session, or Obot's fold) and what it keeps
 // word for word belong to the host: server/host/warm-summary-host.ts.
 
 /** Below this a conversation's turns stay fast and cheap enough without a summary, and summarizing would only lose detail. */
@@ -31,7 +31,7 @@ export interface WarmSummaryTarget {
   instanceId: string;
 }
 
-/** `native`: the engine's own compaction (Claude Code's /compact on a fork); `harness`: OpenMausBot's fold, for engines
+/** `native`: the engine's own compaction (Claude Code's /compact on a fork); `harness`: Obot's fold, for engines
  * whose context it rebuilds. `soon`: the next turn would summarize at its start anyway. */
 export interface WarmSummaryPlan {
   way: "native" | "harness";

@@ -283,11 +283,11 @@ function myCloudFixture() {
   const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86_400_000, device: { id: "device-1" }, account: ACCOUNT });
   f.saved = { origin: ADMIN, token: `omc_${"T".repeat(43)}`, ...identity() };
   delete f.saved.cloudContractVersion;
-  // `f.cloud`: the machine OpenMausBot Cloud names for this account (null: none).
+  // `f.cloud`: the machine Obot Cloud names for this account (null: none).
   f.cloud = { state: "ready", origin: CLOUD };
   const session = () => ({ ...identity(), cloud: f.cloud,
     entitlement: { plan: "pro", tier: "pro", status: "active", expiresAt: f.now + 30 * 86_400_000, version: 1 } });
-  // OpenMausBot Cloud answers now ("ready"), later (a promise the test releases), never ("down"), or with the sign-in ended ("ended").
+  // Obot Cloud answers now ("ready"), later (a promise the test releases), never ("down"), or with the sign-in ended ("ended").
   const fetch = async (url, { method = "GET" } = {}) => {
     if (!url.endsWith("/api/cloud/desktop/session")) return new Response(JSON.stringify({ error: "not_found" }), { status: 404 });
     if (method === "DELETE") return Response.json({ revoked: true });
@@ -349,7 +349,7 @@ test("a restore that ends without this Cloud, or outlasts the wait, refuses rath
   assert.equal(await f.ask("media", MIC).done, false);
 });
 
-test("with OpenMausBot Cloud unreachable past the verified window, the same account's Cloud keeps the microphone", async () => {
+test("with Obot Cloud unreachable past the verified window, the same account's Cloud keeps the microphone", async () => {
   const f = myCloudFixture();
   await f.restore();
   assert.equal(f.client.homeTarget()?.origin, CLOUD);

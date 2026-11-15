@@ -215,7 +215,7 @@ function coordinated(options) {
   updater.checkForUpdates = async () => { updater.emit("checking-for-update"); updater.emit("update-available", { version: "0.1.130" }); };
   updater.downloadUpdate = async () => {
     updater.emit("update-downloaded", { version: "0.1.130" });
-    return ["/tmp/OpenMausBot-0.1.130.zip"];
+    return ["/tmp/Obot-0.1.130.zip"];
   };
   const states = [];
   const coordinator = createUpdaterCoordinator(updater, (patch) => states.push(patch), options);
@@ -254,7 +254,7 @@ test("macOS installs by itself only once Squirrel.Mac has staged the update", as
   let finish;
   updater.downloadUpdate = () => new Promise((resolve) => {
     updater.emit("update-downloaded", { version: "0.1.130" });
-    finish = () => resolve(["/tmp/OpenMausBot-0.1.130-arm64-mac.zip"]);
+    finish = () => resolve(["/tmp/Obot-0.1.130-arm64-mac.zip"]);
   });
   await coordinator.check();
   assert.equal(coordinator.installable(), null, "preparing");

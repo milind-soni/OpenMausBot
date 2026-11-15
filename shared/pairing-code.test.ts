@@ -14,8 +14,8 @@ describe("readPairingInput", () => {
   it("reads the code or credential out of every link that carries one", () => {
     expect(readPairingInput("https://maus.example.com/pair#code=7KQ2-M9XD-H4TP")).toEqual({ kind: "code", code: "7KQ2M9XDH4TP" });
     expect(readPairingInput("http://192.168.1.20:8799/pair?code=7KQ2-M9XD-H4TP")).toEqual({ kind: "code", code: "7KQ2M9XDH4TP" });
-    expect(readPairingInput(`openmausbot://pair?address=192.168.1.20%3A8810&token=${credential}`)).toEqual({ kind: "credential", credential });
-    expect(readPairingInput("openmausbot://pair?address=https%3A%2F%2Fmaus.example.com&code=7KQ2-M9XD-H4TP")).toEqual({ kind: "code", code: "7KQ2M9XDH4TP" });
+    expect(readPairingInput(`obot://pair?address=192.168.1.20%3A8810&token=${credential}`)).toEqual({ kind: "credential", credential });
+    expect(readPairingInput("obot://pair?address=https%3A%2F%2Fmaus.example.com&code=7KQ2-M9XD-H4TP")).toEqual({ kind: "code", code: "7KQ2M9XDH4TP" });
     expect(readPairingInput(credential)).toEqual({ kind: "credential", credential });
   });
 

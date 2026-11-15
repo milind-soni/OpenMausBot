@@ -11,7 +11,7 @@ describe("how many more bots this plan makes", () => {
     expect(botRoom({ config: null, bots: made(50) })).toBeNull();
   });
 
-  it("counts as the server does: not the MausBot, an archived bot, or one that moved away", () => {
+  it("counts as the server does: not the Obot, an archived bot, or one that moved away", () => {
     expect(botRoom(state(5, [{ defaultBot: {} }, { hidden: true }, { movedTo: { state: "moved" } }, {}]))).toBe(4);
   });
 

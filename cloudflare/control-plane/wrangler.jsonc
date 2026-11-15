@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "openmausbot-control-plane",
+  "name": "obot-control-plane",
   "main": "src/index.ts",
   "account_id": "0c92969a82eb9e173b013a7e7a02333d",
   "compatibility_date": "2026-08-25",
@@ -8,17 +8,17 @@
   "workers_dev": false,
   "routes": [
     {
-      "pattern": "accounts.openmausbot.com",
+      "pattern": "accounts.obot.com",
       "custom_domain": true
     }
   ],
   "vars": {
-    "BETTER_AUTH_URL": "https://accounts.openmausbot.com",
-    "EMAIL_FROM": "noreply@openmausbot.com",
+    "BETTER_AUTH_URL": "https://accounts.obot.com",
+    "EMAIL_FROM": "noreply@obot.com",
     "ALLOWED_ORIGINS": "",
     "CLOUDFLARE_ACCOUNT_ID": "0c92969a82eb9e173b013a7e7a02333d",
     "CLOUDFLARE_ZONE_ID": "bae08399bb6f96eb7266c65ac0057eee",
-    "COMPANION_HOST_SUFFIX": "openmausbot.com",
+    "COMPANION_HOST_SUFFIX": "obot.com",
     // More Cloudflare accounts for managed endpoints (README "Several
     // Cloudflare accounts"). Unset: the account above is the only one. A new
     // endpoint goes to the account with the most room; an endpoint never
@@ -26,20 +26,20 @@
     // accountId, zoneId or companionHostSuffix once it holds endpoints (add a
     // new entry instead). The same JSON may be a secret to keep the IDs out of
     // this file. Each entry's token is the secret named by apiTokenSecret
-    // (wrangler secret put CLOUDFLARE_API_TOKEN_MAUSBOT_SI), never a var, and
+    // (wrangler secret put CLOUDFLARE_API_TOKEN_OBOT_SI), never a var, and
     // is listed in secrets.required below (as is this JSON when it is a
     // secret) so every deploy keeps it. To stop new endpoints going to an
     // account and keep its own, set its "newEndpoints": false.
-    // Supamaus account, zone mausbot.si. dnsRecordLimit 3500 is the Pro (upgraded Oct 21; was 200 on Free)
+    // Supamaus account, zone obot.si. dnsRecordLimit 3500 is the Pro (upgraded Oct 21; was 200 on Free)
     // plan's record quota for a zone added after Sep 2024; on Pro it is 3,500
     // (set it here once the zone is on Pro), and the tunnel quota (1,000)
-    // binds first. Desktop apps accept mausbot.si hostnames from 0.1.104 (#2582).
+    // binds first. Desktop apps accept obot.si hostnames from 0.1.104 (#2582).
     "CLOUDFLARE_ENDPOINT_ACCOUNTS": [
       {
         "accountId": "bbb5305f06e28a6f2abaac299f3b09dc",
         "zoneId": "4ded3da43e7b2c3a5f27b0fb33e5bd7a",
-        "companionHostSuffix": "mausbot.si",
-        "apiTokenSecret": "CLOUDFLARE_API_TOKEN_MAUSBOT_SI",
+        "companionHostSuffix": "obot.si",
+        "apiTokenSecret": "CLOUDFLARE_API_TOKEN_OBOT_SI",
         "tunnelLimit": 1000,
         "dnsRecordLimit": 3500,
         "minAppVersion": "0.1.104"
@@ -50,7 +50,7 @@
     // quota. They drive the 90% usage alert and /healthz, rank accounts for
     // new endpoints, and tell a tunnel-quota 429 from a rate limit, so keep
     // them equal to Cloudflare's real quotas. They never refuse an
-    // allocation on their own. The openmausbot.com zone is on Pro: 3,500
+    // allocation on their own. The obot.com zone is on Pro: 3,500
     // DNS records.
     "OMB_TUNNEL_LIMIT": "1000",
     "OMB_DNS_RECORD_LIMIT": "3500",
@@ -67,13 +67,13 @@
     // Cleanup rows per five-minute cron run. 20 needs Workers Paid; use 4 on
     // Workers Free (50 subrequests per invocation).
     "OMB_CLEANUP_SWEEP_LIMIT": "20",
-    // MausBot Relay (README "MausBot Relay"). Host tokens are signed with RELAY_TOKEN_SIGNING_KEY (b64u of a 32-byte
+    // Obot Relay (README "Obot Relay"). Host tokens are signed with RELAY_TOKEN_SIGNING_KEY (b64u of a 32-byte
     // Ed25519 seed, `wrangler secret put`). It is in secrets.required so a deploy can't drop it: set it before the
     // first deploy that lists it. The relay holds only the matching public key. RELAY_NODES lists only nodes that
     // exist; add relay2 when its box and DNS are up.
     // RELAY_ROLLOUT_PERCENT (0-100) admits computers by a stable hash of their host id; RELAY_ALLOW_INSTALLATIONS
     // (comma-separated installation ids) admits a few by name; RELAY_DISABLED "1" turns every token off.
-    "RELAY_NODES": "relay1.openmausbot.com,relay2.openmausbot.com",
+    "RELAY_NODES": "relay1.obot.com,relay2.obot.com",
     "RELAY_NODES_AMERICAS": "",
     "RELAY_TOKEN_KID": "k1",
     "RELAY_ROLLOUT_PERCENT": "100",
@@ -105,12 +105,12 @@
     "TUNNEL_REASON_MIN_VERSION": "0.1.152"
   },
   "secrets": {
-    "required": ["BETTER_AUTH_SECRET", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN_MAUSBOT_SI", "RELAY_TOKEN_SIGNING_KEY"]
+    "required": ["BETTER_AUTH_SECRET", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN_OBOT_SI", "RELAY_TOKEN_SIGNING_KEY"]
   },
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "openmausbot-control-plane",
+      "database_name": "obot-control-plane",
       "database_id": "8a7c34ed-5428-4ae2-8722-fef2fe9bf160",
       "migrations_dir": "migrations"
     }
@@ -118,7 +118,7 @@
   "send_email": [
     {
       "name": "EMAIL",
-      "allowed_sender_addresses": ["noreply@openmausbot.com"]
+      "allowed_sender_addresses": ["noreply@obot.com"]
     }
   ],
   "triggers": {

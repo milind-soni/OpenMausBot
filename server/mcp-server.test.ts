@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// scripts/mcp-server.ts snapshots process.env at import time: scrub ambient OMB_* / OPENMAUSBOT_* values first.
+// scripts/mcp-server.ts snapshots process.env at import time: scrub ambient OMB_* / OBOT_* values first.
 import "./testing/scrub-ambient-omb-env.ts";
 
 import {
   handleToolCall,
-  OpenMausBotApiError,
+  ObotApiError,
   probeBaseUrls,
   processMcpMessage,
   request,
@@ -30,7 +30,7 @@ function jsonResponse(body: unknown, options: { ok?: boolean; status?: number; s
 afterEach(() => {
   vi.restoreAllMocks();
   globalThis.fetch = ORIGINAL_FETCH;
-  delete process.env.OPENMAUSBOT_TOKEN;
+  delete process.env.OBOT_TOKEN;
 });
 
 describe("MCP JSON-RPC protocol", () => {
@@ -43,7 +43,7 @@ describe("MCP JSON-RPC protocol", () => {
     })))!);
     expect(supported.result).toMatchObject({
       protocolVersion: "2024-11-05",
-      serverInfo: { name: "openmausbot-mcp", version: "1.1.0" },
+      serverInfo: { name: "obot-mcp", version: "1.1.0" },
       capabilities: { tools: {} },
     });
 
@@ -314,16 +314,16 @@ describe("MCP tool execution", () => {
 
     await expect(handleToolCall("update_bot_profile", {
       bot_id: "bot-1", name: "Mira",
-    }, fetcher)).rejects.toThrow("OpenMausBot did not return the updated bot");
+    }, fetcher)).rejects.toThrow("Obot did not return the updated bot");
     await expect(handleToolCall("update_channel", {
       channel_id: "channel-1", name: "Launch",
-    }, fetcher)).rejects.toThrow("OpenMausBot did not return the updated channel");
+    }, fetcher)).rejects.toThrow("Obot did not return the updated channel");
     await expect(handleToolCall("create_task", {
       target_type: "bot", target_id: "bot-1", title: "Fresh",
-    }, fetcher)).rejects.toThrow("OpenMausBot did not return the created task");
+    }, fetcher)).rejects.toThrow("Obot did not return the created task");
     await expect(handleToolCall("rename_task", {
       target_type: "bot", target_id: "bot-1", task_id: "task-1", title: "Renamed",
-    }, fetcher)).rejects.toThrow("OpenMausBot did not return the renamed task");
+    }, fetcher)).rejects.toThrow("Obot did not return the renamed task");
   });
 
   it("searches with encoded, bounded parameters", async () => {
@@ -659,12 +659,12 @@ describe("waiting on a conversation's job", () => {
   it("names an older server that cannot report a job, and a conversation that is gone as gone", async () => {
     const answering = (body: string) => vi.fn(async (path: string) => {
       if (path === "/api/bots?messages=0") return bot();
-      throw new OpenMausBotApiError(404, `OpenMausBot API error (404): ${body}`);
+      throw new ObotApiError(404, `Obot API error (404): ${body}`);
     });
     await expect(handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1" }, answering("not found")))
       .rejects.toThrow("cannot report a conversation's job");
     await expect(handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1" }, answering('{"error":"no such conversation"}')))
-      .rejects.toThrow('OpenMausBot API error (404): {"error":"no such conversation"}');
+      .rejects.toThrow('Obot API error (404): {"error":"no such conversation"}');
   });
 
   it("sends with the caller's send id, returns the receipt, and refuses a malformed id before sending", async () => {
@@ -717,15 +717,15 @@ describe("connection security and discovery", () => {
 
   it("skips a foreign process and discovers the real fallback port", async () => {
     globalThis.fetch = vi.fn(async (url: any) => {
-      if (String(url).includes(":8799")) return jsonResponse({ app: "not-openmausbot" });
-      if (String(url).includes(":18799")) return jsonResponse({ app: "openmausbot" });
+      if (String(url).includes(":8799")) return jsonResponse({ app: "not-obot" });
+      if (String(url).includes(":18799")) return jsonResponse({ app: "obot" });
       throw new Error("unexpected port");
     }) as any;
     await expect(probeBaseUrls(["http://127.0.0.1:8799", "http://127.0.0.1:18799"])).resolves.toBe("http://127.0.0.1:18799");
   });
 
   it("rejects successful non-JSON responses and sends an optional bearer token", async () => {
-    process.env.OPENMAUSBOT_TOKEN = "proxy-token";
+    process.env.OBOT_TOKEN = "proxy-token";
     globalThis.fetch = vi.fn(async (_url: any, options: any) => {
       expect(new Headers(options.headers).get("Authorization")).toBe("Bearer proxy-token");
       return { ...jsonResponse({}), json: vi.fn(async () => { throw new Error("not json"); }) };
@@ -755,8 +755,8 @@ describe("connection security and discovery", () => {
   });
 
   it("requires an explicit destination before sending a bearer token", async () => {
-    process.env.OPENMAUSBOT_TOKEN = "proxy-token";
-    await expect(resolveBaseUrl()).rejects.toThrow("OPENMAUSBOT_URL or OMB_PORT");
+    process.env.OBOT_TOKEN = "proxy-token";
+    await expect(resolveBaseUrl()).rejects.toThrow("OBOT_URL or OMB_PORT");
   });
 
   it("validates direct tool arguments", () => {

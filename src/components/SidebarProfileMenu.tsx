@@ -604,7 +604,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
     onHelp: () => void openExternalLink(HELP_CENTER_URL),
     onFeedback: () => void openExternalLink(FEEDBACK_URL),
     onWhatsNew: () => void openExternalLink(RELEASES_URL),
-    // Every Sign out asks first: "Sign out of MausBot?" and what keeps running.
+    // Every Sign out asks first: "Sign out of Obot?" and what keeps running.
     signOut: accounts.view?.active ? null
       : !desktop && session?.kind === "session" ? () => setSigningOut("browser")
       : desktop && !remote && window.ogb?.cloudAccount && summary.signedIn ? () => setSigningOut("desktop")

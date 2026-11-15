@@ -25,8 +25,8 @@ export function recoveryLine(recovery: CloudComputerRecovery, name: string): str
   return t(LINES[recovery.state], { name });
 }
 
-/** What MausBot is doing about a cloud computer that stopped answering, and the person's Restart computer and Replace computer. */
-/** `always`: the buttons show even while nothing is wrong (Advanced); otherwise only once MausBot is dealing with the computer. */
+/** What Obot is doing about a cloud computer that stopped answering, and the person's Restart computer and Replace computer. */
+/** `always`: the buttons show even while nothing is wrong (Advanced); otherwise only once Obot is dealing with the computer. */
 export function CloudComputerRecoveryRow({ botId, name, always }: { botId: string; name: string; always?: boolean }) {
   const [recovery, setRecovery] = useState<CloudComputerRecovery | null>(null);
   const [pending, setPending] = useState<"restart" | "replace" | null>(null);

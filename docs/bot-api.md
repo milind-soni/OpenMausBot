@@ -1,4 +1,4 @@
-# Bot API
+﻿# Bot API
 
 Each bot can take messages from outside: an app or a script sends it a message
 with a key and gets its reply. It is off by default, per bot.
@@ -68,7 +68,7 @@ saved memory and the thread itself, whoever writes there next:
 - It runs confined and in Ask, whatever the bot's own level, with none of its
   saved allowances. Nothing answers an approval for the caller.
 - It has no shell, computer, browser, phone, connected apps, MCP servers or data
-  tools, and none of OpenMausBot's own tools, so it can't start a thread, ask a
+  tools, and none of Obot's own tools, so it can't start a thread, ask a
   teammate, make a routine or webhook, change the bot, write its memory or search
   other conversations.
 - It works in the thread's own empty folder, and its words stay out of the person's
@@ -83,3 +83,4 @@ teammate who made it leaves.
 Each call is kept with the bot's API settings and shown on the card (count, last
 call, recent calls) to those who can manage the key. Refused calls roll up into
 one row per burst. Neither ever holds the key.
+

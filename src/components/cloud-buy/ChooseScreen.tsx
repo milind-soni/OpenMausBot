@@ -1,4 +1,4 @@
-// Screen 1: MausBot Cloud in a line, then the plans the Admin sells now as cards that show only what sets each apart,
+// Screen 1: Obot Cloud in a line, then the plans the Admin sells now as cards that show only what sets each apart,
 // each with its own button; what every plan includes and the money are said once, under them.
 import { useState } from "react";
 import { AudioLines, ChevronDown, CloudUpload, HardDrive, Lock, Monitor, Moon, Power, Smartphone, Timer, type LucideIcon } from "lucide-react";

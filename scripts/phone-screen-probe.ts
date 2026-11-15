@@ -20,7 +20,7 @@ const KEY_GAP_MS = 1_000;
 const START_CODE = Buffer.from("00000001", "hex");
 // H.264: the low five bits of a NAL header are its type, and 7 is a sequence parameter set; the bits above vary.
 const startsWithSps = (data: Buffer) => data.subarray(0, START_CODE.length).equals(START_CODE) && (data[START_CODE.length] & 0x1f) === 7;
-const LEFTOVERS = "/data/local/tmp/openmausbot-scrcpy-*";
+const LEFTOVERS = "/data/local/tmp/obot-scrcpy-*";
 const SCRCPY_STOPS_WITHIN_MS = 5_000;
 const LIST_PROCESSES = ["ps", "-A", "-o", "PID,ARGS"];
 const FEWEST_PROCESS_LINES = 5;

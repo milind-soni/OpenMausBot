@@ -139,7 +139,7 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
       says: (proxy) => (proxy ? "Send bots' browsers to public sites through the SOCKS5 proxy you named" : "Send bots' browsers to public sites directly, with no proxy"),
     }),
     section({
-      id: "desktops.browserEngine", label: "Browser engine", help: "What runs bots' browsers: agent-browser (the default) or MausBot's own Chrome driver (early).", where: "Settings → Desktops & browser",
+      id: "desktops.browserEngine", label: "Browser engine", help: "What runs bots' browsers: agent-browser (the default) or Obot's own Chrome driver (early).", where: "Settings → Desktops & browser",
       synonyms: ["browser engine", "chrome", "new browser", "agent-browser"], value: z.enum(["agent-browser", "chrome"]), allowed: "agent-browser or chrome",
       current: () => cfg().browserEngine?.engine ?? "agent-browser", patch: (engine) => ({ browserEngine: { engine } }),
     }),

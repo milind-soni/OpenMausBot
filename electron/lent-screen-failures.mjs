@@ -11,7 +11,7 @@ export const SCREEN_LOCKED =
 export function helperMissing(platform = process.platform, t = nativeText.englishText.t) {
   return platform === "win32"
     ? t("native.screen.windowsHelperBlocked")
-    : "Computer control could not start on this computer: its helper, cua-driver, is missing or blocked. Reinstall OpenMausBot, then restart it.";
+    : "Computer control could not start on this computer: its helper, cua-driver, is missing or blocked. Reinstall Obot, then restart it.";
 }
 
 /** `reason` is the desktop's own cua start-up failure, which never crosses to the server as written. */
@@ -19,9 +19,9 @@ export function cuaUnavailable(reason, platform = process.platform, t = nativeTe
   const why = String(reason ?? "");
   if (driverBlocked(why)) return helperMissing(platform, t);
   if (/Accessibility|Screen Recording|permission/i.test(why)) {
-    return "Computer control needs permission on this computer: allow Accessibility and Screen Recording for OpenMausBot in System Settings → Privacy & Security, then restart OpenMausBot.";
+    return "Computer control needs permission on this computer: allow Accessibility and Screen Recording for Obot in System Settings → Privacy & Security, then restart Obot.";
   }
-  return "Computer control is not running on this computer. Open OpenMausBot on it, check that computer control is on in Settings, then try again.";
+  return "Computer control is not running on this computer. Open Obot on it, check that computer control is on in Settings, then try again.";
 }
 
 const PANES = Object.freeze(["accessibility", "screen"]);

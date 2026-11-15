@@ -192,14 +192,14 @@ describe("included Boat computers", () => {
     expect((await boat.listManagedBoats({ box: { token: "box_own" } }, [])).problem).toMatch(/update it in Settings/);
   });
 
-  it("lists again once after a dropped connection, and names MausBot Cloud's computer service when it stays unreachable", async () => {
+  it("lists again once after a dropped connection, and names Obot Cloud's computer service when it stays unreachable", async () => {
     const lists = () => requests.filter((request) => request.path === "/relay/api/box/v1/boxes");
     dropLists = 1;
     await expect(boat.findBoat({}, "unlisted-bot")).resolves.toBeNull();
     expect(lists()).toHaveLength(2);
     dropLists = 2;
     await expect(boat.findBoat({}, "unlisted-bot")).rejects.toMatchObject({
-      message: "Could not reach MausBot Cloud's computer service to list cloud computers — check your connection and refresh", status: 503, transient: true,
+      message: "Could not reach Obot Cloud's computer service to list cloud computers — check your connection and refresh", status: 503, transient: true,
     });
     expect(lists()).toHaveLength(4);
     dropLists = 2;

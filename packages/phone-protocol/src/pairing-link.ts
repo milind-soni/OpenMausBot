@@ -1,4 +1,4 @@
-// The one `openmausbot://pair` link builder, read by the Android and iOS
+// The one `obot://pair` link builder, read by the Android and iOS
 // scanners (`PairingInvite.parse`). Every value is written with
 // encodeURIComponent, so a space is `%20`.
 
@@ -18,7 +18,7 @@ export interface PairingE2EDescriptor {
 }
 
 const B64U_FIELD = /^[A-Za-z0-9_-]+$/;
-const RELAY_HOST = /^relay[1-9][0-9]?\.openmausbot\.com$/;
+const RELAY_HOST = /^relay[1-9][0-9]?\.obot\.com$/;
 
 /** The QR's `e2e` value, or null for anything a phone would refuse: then the link goes out without it, as from a
  * computer without the encrypted connection. A QR never says "local": a restriction is set per phone, later. */
@@ -194,5 +194,5 @@ export function phonePairingLink({
   const descriptor = encodePairingE2E(e2e);
   if (descriptor) fields.push(["e2e", descriptor]);
 
-  return `openmausbot://pair?${fields.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&")}`;
+  return `obot://pair?${fields.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&")}`;
 }

@@ -1,4 +1,4 @@
-// A Team Cloud member's own MausBot when they leave (team-member-left.ts `stopBot` and `deleteBot`): every turn of it
+// A Team Cloud member's own Obot when they leave (team-member-left.ts `stopBot` and `deleteBot`): every turn of it
 // stops, then it is deleted the app's own way.
 import type { RoutineManager } from "../routines.ts";
 import type { BotRecord, Store } from "../store.ts";
@@ -37,7 +37,7 @@ export function createMemberOwnBot(deps: MemberOwnBotDeps) {
       ]);
       if (groupTurn) deps.closeOpenApprovals(groupTurn.threadId);
     },
-    /** Deletes a member's own MausBot, which stops being their default bot first; it is theirs again if that fails. */
+    /** Deletes a member's own Obot, which stops being their default bot first; it is theirs again if that fails. */
     async remove(botId: string): Promise<boolean> {
       const store = deps.store();
       const bot = store.bot(botId);
@@ -45,7 +45,7 @@ export function createMemberOwnBot(deps: MemberOwnBotDeps) {
       store.patchBot(botId, { defaultBot: undefined, sidebarHidden: undefined });
       const result = await deps.deleteBot(botId).catch((error: unknown) => ({ status: 500, body: { error: error instanceof Error ? error.message : String(error) } }));
       if (result.status < 400) return true;
-      console.warn(`team member left: could not delete their MausBot ${botId}: ${result.body.error ?? result.status}`);
+      console.warn(`team member left: could not delete their Obot ${botId}: ${result.body.error ?? result.status}`);
       if (store.bot(botId)) store.patchBot(botId, { defaultBot: bot.defaultBot, sidebarHidden: bot.sidebarHidden });
       return false;
     },

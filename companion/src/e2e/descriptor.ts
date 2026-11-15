@@ -1,4 +1,4 @@
-// The `e2e` pairing descriptor: in the QR link's `e2e` parameter, in the pair response and in the endpoint list.
+﻿// The `e2e` pairing descriptor: in the QR link's `e2e` parameter, in the pair response and in the endpoint list.
 // Wire spec: companion/src/e2e/README.md, "Pairing payload and descriptors".
 import { b64u, fromB64u, HOST_ID_BYTES } from "./credentials.ts";
 import { isPublicKey, PUBLIC_KEY_BYTES } from "./noise.ts";
@@ -6,7 +6,7 @@ import { isPublicKey, PUBLIC_KEY_BYTES } from "./noise.ts";
 export const DESCRIPTOR_VERSION = 1;
 export const MAX_DESCRIPTOR_CHARS = 1024;
 export const MAX_RELAY_NODES = 4;
-export const RELAY_HOST = /^relay[1-9][0-9]?\.openmausbot\.com$/;
+export const RELAY_HOST = /^relay[1-9][0-9]?\.obot\.com$/;
 
 export type DescriptorRoutes = "any" | "local";
 
@@ -42,7 +42,7 @@ export function descriptorFor(
   return routes === "local" ? { ...base, routes: "local" } : base;
 }
 
-/** `update` means a newer version: the phone says "Update the MausBot app" and never falls back to plain pairing.
+/** `update` means a newer version: the phone says "Update the Obot app" and never falls back to plain pairing.
  * `reject` refuses the whole invite. */
 export type DescriptorParse =
   | { outcome: "ok"; descriptor: E2EDescriptor; transportKey: Buffer; hostId: Buffer | null }
@@ -82,3 +82,4 @@ export function parseDescriptor(input: unknown): DescriptorParse {
   if (!relays.every((host): host is string => typeof host === "string" && RELAY_HOST.test(host))) return reject("relay_host");
   return { outcome: "ok", descriptor: { v: 1, k: fields.k as string, h: fields.h as string, r: [...relays], ...routes }, transportKey, hostId };
 }
+

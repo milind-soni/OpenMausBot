@@ -148,7 +148,7 @@ export function useShowComputers(defaultOn: boolean): { show: boolean; loaded: b
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let active = true;
-    void api("/.well-known/openmausbot/environment", { signal: AbortSignal.timeout(5_000) }).then((environment) => {
+    void api("/.well-known/obot/environment", { signal: AbortSignal.timeout(5_000) }).then((environment) => {
       if (!active || typeof environment.environmentId !== "string") return;
       const storageKey = `omb-team-canvas:${environment.environmentId}:computers`;
       setKey(storageKey);

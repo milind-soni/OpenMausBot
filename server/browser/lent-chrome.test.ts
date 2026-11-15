@@ -207,11 +207,11 @@ describe("LentChromeDoors", () => {
   it("guidance names the computer and what to do", () => {
     const text = lentChromeGuidance("offline", { name: "Omkar's MacBook", device: "Mac", online: false });
     expect(text).toContain("Omkar's MacBook");
-    expect(text).toContain("open OpenMausBot on that Mac");
+    expect(text).toContain("open Obot on that Mac");
     expect(lentChromeGuidance("no-chrome", null)).toContain("chrome://inspect/#remote-debugging");
     const notLent = lentChromeGuidance("not-lent", null);
-    expect(notLent, "the app lends its Chrome by itself, and an older one needs updating").toContain("open OpenMausBot on their Mac or PC, which lends its Chrome by itself (updating OpenMausBot there if it is an older version)");
-    expect(notLent, "no switch to send the person to").not.toMatch(/turn on|Settings → MausBot Cloud/u);
+    expect(notLent, "the app lends its Chrome by itself, and an older one needs updating").toContain("open Obot on their Mac or PC, which lends its Chrome by itself (updating Obot there if it is an older version)");
+    expect(notLent, "no switch to send the person to").not.toMatch(/turn on|Settings → Obot Cloud/u);
     expect(notLent, "or the way back to the built-in browser").toContain("switch this profile to Built-in under Settings → Browser profiles");
   });
 });

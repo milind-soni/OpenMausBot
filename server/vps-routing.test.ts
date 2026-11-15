@@ -189,7 +189,7 @@ posixOnly("VPS turn routing e2e (fake ACP fleet + fake docker over SSH)", () => 
   beforeAll(async () => {
     chmodSync(FAKE_CLI, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-vps-routing-"));
-    mkdirSync(join(home, ".openmausbot"), { recursive: true });
+    mkdirSync(join(home, ".obot"), { recursive: true });
     const fakeBin = join(home, "fakebin");
     mkdirSync(fakeBin, { recursive: true });
     gateFile = join(home, "turn.gate");
@@ -220,7 +220,7 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
     writeFileSync(dockerLog, "");
 
     writeFileSync(
-      join(home, ".openmausbot", "config.json"),
+      join(home, ".obot", "config.json"),
       JSON.stringify({
         instances: {
           vps: {
@@ -739,7 +739,7 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
       const thread = await replies();
       expect(thread.filter((message) => String(message.tool?.name ?? "").startsWith("error:"))).toEqual([]);
       const echo = thread.find((message) => message.text?.startsWith("echo: ")).text as string;
-      expect(echo).toContain("This bot's VPS computer is unavailable this turn (The OpenMausBot VPS container is stopped)");
+      expect(echo).toContain("This bot's VPS computer is unavailable this turn (The Obot VPS container is stopped)");
       expect(echo).toContain("Open Computer and enable Start VPS automatically");
     } finally {
       writeFileSync(template, original);

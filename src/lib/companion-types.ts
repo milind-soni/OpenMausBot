@@ -17,7 +17,7 @@ export interface PhoneDevice {
   route?: "wifi" | "tailscale" | "relay" | null;
 }
 
-/** Same Wi-Fi, Anywhere through MausBot, Tailscale, and the HTTPS address. */
+/** Same Wi-Fi, Anywhere through Obot, Tailscale, and the HTTPS address. */
 export type CompanionRoute = "wifi" | "relay" | "tailscale" | "https";
 
 export interface TailnetShareState {

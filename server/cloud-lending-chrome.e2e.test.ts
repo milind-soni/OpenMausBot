@@ -58,7 +58,7 @@ async function api(cloud: Cloud, method: string, path: string, body?: unknown) {
 }
 
 async function adminPairing(cloud: Cloud): Promise<string> {
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: "Obot app (Cloud)", ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const response = await fetch(`${cloud.base}/api/cloud/pairing`, { method: "POST", signal: AbortSignal.timeout(20_000), headers: {
     ...edge, "content-type": "application/json",
@@ -72,7 +72,7 @@ async function adminPairing(cloud: Cloud): Promise<string> {
 
 /** A personal Cloud home whose browser engine is `agentBrowser`, off the internet: its own fetches go nowhere. */
 async function bootCloud(home: string, agentBrowser: string, env: Record<string, string> = {}): Promise<Cloud> {
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".obot");
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(join(home, "turns"), { recursive: true });
   const cli = join(home, "fixture-claude.mjs");

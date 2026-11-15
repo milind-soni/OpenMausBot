@@ -1,6 +1,6 @@
 // The browser panel's menu. Its zoom row follows pingdotgg/t3code@00cdceb1
 // apps/web/src/components/preview/PreviewMoreMenu.tsx, MIT License, Copyright (c) 2026 T3 Tools Inc. (full text in
-// third_party/t3-code/LICENSE); modified: OpenMausBot's items, and viewport sizes instead of a device toolbar.
+// third_party/t3-code/LICENSE); modified: Obot's items, and viewport sizes instead of a device toolbar.
 import { Check, EllipsisVertical, Minus, Plus, RotateCcw } from "lucide-react";
 import { useRef, type ReactNode } from "react";
 

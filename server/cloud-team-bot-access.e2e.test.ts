@@ -400,7 +400,7 @@ describe("the owner of a bot", () => {
     expect((await botOf("ada", desk.id))?.access?.people).toEqual({ [BOB.email]: "edit" });
   });
 
-  it("keeps a person's own MausBot private to them", async () => {
+  it("keeps a person's own Obot private to them", async () => {
     const own = (await bots("eve")).find((bot) => (bot as { defaultBot?: { person?: string } }).defaultBot?.person === EVE.email);
     expect(own).toMatchObject({ yourAccess: "edit" });
     expect(await botOf("cara", own!.id)).toBeUndefined();
