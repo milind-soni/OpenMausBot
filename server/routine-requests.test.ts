@@ -1932,6 +1932,12 @@ describe("consequenceLine", () => {
     );
     expect(consequenceLine({ type: "once", at: 0 })).toBe("Will run once; that run starts a fresh session.");
   });
+
+  it("says a one-time run continues the conversation when it keeps one", () => {
+    expect(consequenceLine({ type: "once", at: 0 }, false, true)).toBe(
+      "Will run once; each run continues the previous run's conversation.",
+    );
+  });
 });
 
 describe("a bot's own routine changes", () => {

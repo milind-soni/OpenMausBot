@@ -577,7 +577,7 @@ export function scheduleText(schedule: RoutineRequestSchedule, timeZone: string,
 export function consequenceLine(schedule: RoutineRequestSchedule, continuity = false, sameConversation = false, language?: string): string {
   const session = sameConversation ? serverLine(language, "server.routines.card.sessionContinues") : continuity ? "each run starts a fresh session with the previous run's report" : "each run starts a fresh session";
   if (schedule.type === "cron") return `Will run at matching calendar times, ${plainTimeZone(schedule.timeZone)}; ${session}.`;
-  if (schedule.type === "once") return "Will run once; that run starts a fresh session.";
+  if (schedule.type === "once") return sameConversation ? `Will run once; ${session}.` : "Will run once; that run starts a fresh session.";
   if (schedule.type === "limit_reset") {
     return schedule.repeat === "every_reset"
       ? "Will run a minute after each time that usage limit resets, in this conversation."
