@@ -8,6 +8,7 @@ import { completionPatch } from "@/lib/onboarding";
 import { updaterMessage, useUpdaterState } from "@/lib/updater";
 import { productName } from "../lib/brand";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
+import { ParallelRoomJobsSettings } from "./ParallelRoomJobsSettings";
 import { UsbPhoneTakeoverSettings } from "./UsbPhoneTakeoverSettings";
 import { MoreText, SettingRow, SettingsGroup, SettingsRows, Switch } from "./SettingsPrimitives";
 import { LearnedSkillsSettings } from "./ShareLearnedSkillsSettings";
@@ -422,6 +423,7 @@ export function ExperimentalFeaturesRow() {
           />
         </SettingRow>
         <LearnedSkillsSettings />
+        <ParallelRoomJobsSettings />
         <UsbPhoneTakeoverSettings />
       </SettingsRows>
     </SettingsGroup>

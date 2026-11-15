@@ -196,7 +196,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "parallel", page: "bots", anchor: "parallel", labelKey: "settings.threads.title", sectionKey: "settings.simple.more.limits", advanced: true, synonyms: ["parallel", "threads", "concurrency"] },
   { id: "group-turns", page: "bots", anchor: "group-turns", labelKey: "settings.roomTurns.title", sectionKey: "settings.simple.more.limits", advanced: true, synonyms: ["group", "turns"] },
   { id: "skills", page: "bots", anchor: "skills", labelKey: "settings.section.skills", when: (ctx) => ctx.skills, synonyms: ["skills", "library"] },
-  { id: "early", page: "bots", anchor: "early", labelKey: "settings.bots.early", advanced: true, synonyms: ["experimental", "early", "preview", "write their own skills"] },
+  { id: "early", page: "bots", anchor: "early", labelKey: "settings.bots.early", advanced: true, synonyms: ["experimental", "early", "preview", "write their own skills", "room jobs side by side"] },
   { id: "all-bots", page: "bots", labelKey: "settings.page.bots", topFor: ["all bots"] },
   { id: "browser", page: "desktops", anchor: "browser", labelKey: "settings.experimental.browser", synonyms: ["browser", "profiles", "browser profiles", "open sites", "new browser"] },
   { id: "desktop-kinds", page: "desktops", anchor: "desktops", labelKey: "settings.desktops.title", topFor: ["private desktop", "sandbox", "docker", "podman", "container", "vps", "own server"], synonyms: ["cloud desktops", "desktop", "vm"] },

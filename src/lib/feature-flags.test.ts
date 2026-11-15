@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { builtInBrowserEnabled, llmThreadTitlesEnabled, parseSkillReviewSteps, roomMemoryCaptureEnabled, savedStepsEnabled, shareLearnedSkillsMode, sharedComputersEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillReviewEnabled, skillReviewSteps, skillReviewUnavailableEngines, usbPhoneTakeoverEnabled } from "./feature-flags";
+import { builtInBrowserEnabled, llmThreadTitlesEnabled, parallelRoomJobsEnabled, parseSkillReviewSteps, roomMemoryCaptureEnabled, savedStepsEnabled, shareLearnedSkillsMode, sharedComputersEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillReviewEnabled, skillReviewSteps, skillReviewUnavailableEngines, usbPhoneTakeoverEnabled } from "./feature-flags";
 
 describe("experimental feature flags", () => {
   it("keeps skill authoring on by default, before and after the config arrives", () => {
@@ -80,6 +80,12 @@ describe("experimental feature flags", () => {
     expect(roomMemoryCaptureEnabled(null)).toBe(false);
     expect(roomMemoryCaptureEnabled({ features: {} })).toBe(false);
     expect(roomMemoryCaptureEnabled({ features: { roomMemoryCapture: true } })).toBe(true);
+  });
+
+  it("keeps room jobs in sequence until side-by-side jobs are switched on", () => {
+    expect(parallelRoomJobsEnabled(null)).toBe(false);
+    expect(parallelRoomJobsEnabled({ features: {} })).toBe(false);
+    expect(parallelRoomJobsEnabled({ features: { parallelRoomJobs: true } })).toBe(true);
   });
 
   it("keeps the USB phone's screen and takeover off until switched on", () => {
