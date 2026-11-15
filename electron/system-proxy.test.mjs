@@ -140,4 +140,16 @@ describe("main.mjs's use of the system proxy", () => {
     await cache.refresh();
     expect(cache.latest()).toEqual({});
   });
+
+  it("keeps the newest refresh when an older lookup finishes after it", async () => {
+    const pending = [];
+    const cache = createSystemProxyCache(() => new Promise((resolve) => pending.push(resolve)));
+    const older = cache.refresh();
+    const newer = cache.refresh();
+    pending[1]({ HTTPS_PROXY: "http://new:2" });
+    await newer;
+    pending[0]({});
+    await older;
+    expect(cache.latest()).toEqual({ HTTPS_PROXY: "http://new:2" });
+  });
 });

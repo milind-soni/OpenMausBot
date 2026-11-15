@@ -73,5 +73,13 @@ export async function systemProxyEnvironment({ platform = process.platform, env 
  * and its fork would let a recovery restart and an environment switch both fork a child. */
 export function createSystemProxyCache(lookup = systemProxyEnvironment) {
   let latest = {};
-  return { latest: () => latest, async refresh() { latest = await lookup(); } };
+  let started = 0;
+  return {
+    latest: () => latest,
+    async refresh() {
+      const generation = ++started;
+      const found = await lookup();
+      if (generation === started) latest = found;
+    },
+  };
 }
