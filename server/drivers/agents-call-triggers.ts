@@ -6,8 +6,9 @@ import { plainTimeZone } from "../../shared/plain-time-zone.ts";
 import { plainWhen } from "../plain-time.ts";
 
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
-import { WEEKDAYS } from "./agents-catalog.ts";
+import { WEEKDAYS, fullInputSchema } from "./agents-catalog.ts";
 import type { Json } from "./agents-client.ts";
+import { argumentNames } from "./agents-schema.ts";
 
 export const TRIGGER_TOOL_NAMES: ReadonlySet<string> = new Set(["trigger_info", "trigger", "delete_trigger"]);
 
@@ -16,6 +17,7 @@ const EVENTS_ROUTE = "/api/internal/trigger-events";
 const APP_ONLY = ["app", "event", "account"] as const;
 const SAME_CONVERSATION_ONLY = "same_conversation applies only to when=app_event or when=webhook.";
 const REQUEST_ROUTE = "/api/internal/trigger-requests";
+const TAKES = () => ` trigger takes ${argumentNames(fullInputSchema("trigger"))}.`;
 const SCHEDULE_ONLY = ["schedule", "timeout_minutes", "timeoutMinutes", "clear_timeout", "continuity", "overlap", "run_on_startup", "runOnStartup"] as const;
 
 function jsonRecord(value: unknown): value is Json {
@@ -37,9 +39,10 @@ const SHORT_WEEKDAYS = {
 
 const SUPPORTED_SCHEDULES =
   'Supported schedules: {"type":"once","at":"2026-09-01T09:00:00+05:30"} (future RFC3339 with explicit offset), ' +
-  '{"type":"weekly","time":"09:00","weekdays":["monday","friday"]}, {"type":"daily","time":"09:00"}, ' +
-  '{"type":"interval","every_minutes":15,"weekdays":["monday","friday"],"window_start":"09:00","window_end":"17:00"}, ' +
-  'or {"type":"cron","expression":"0 9 1 * *","timeZone":"Asia/Kolkata"} (monthly at 09:00 on day 1; five fields and an explicit IANA timezone).';
+  '{"type":"weekly","time":"09:00","weekdays":["monday","friday"]}, {"type":"daily","time":"09:00"} (the computer\'s local time), ' +
+  '{"type":"interval","every_minutes":15,"weekdays":["monday","friday"],"window_start":"09:00","window_end":"17:00"} (every_minutes 5 to 1440; optional starts_at and ends_at), ' +
+  'or {"type":"cron","expression":"0 9 1 * *","timeZone":"Asia/Kolkata"} (monthly at 09:00 on day 1; five fields, L for the last day, MON#2 for the second Monday, ' +
+  'no seconds, year or @ macros, and an explicit IANA timezone).';
 
 interface NormalizedSchedule {
   schedule?: Json;
@@ -389,7 +392,7 @@ export async function callTriggerTool(name: string, args: Json, context: ToolCal
   // Deleting is its own tool, so an engine's remembered allow for trigger never covers it.
   if (name === "trigger" && args.action === "delete") return { text: "trigger does not delete: call delete_trigger with the trigger_id.", isError: true };
   const action = name === "delete_trigger" ? "delete" : routineAction(args.action);
-  if (!action) return { text: "trigger needs action: create, or update, pause, resume or run_now with a trigger_id from trigger_info.", isError: true };
+  if (!action) return { text: `trigger needs action: create, or update, pause, resume or run_now with a trigger_id from trigger_info.${name === "trigger" ? TAKES() : ""}`, isError: true };
   if (!triggerId) return { text: `${name === "delete_trigger" ? "delete_trigger" : `trigger action=${action}`} needs the trigger_id from trigger_info.`, isError: true };
   const createOnly = CREATE_ONLY.find((key) => args[key] !== undefined && args[key] !== null);
   if (createOnly) return { text: `${createOnly} applies only to action=create.`, isError: true };
@@ -397,7 +400,7 @@ export async function callTriggerTool(name: string, args: Json, context: ToolCal
   if (error) return { text: error, isError: true };
   const body: Json = { action, triggerId, ...(forBotId ? { forBotId } : {}) };
   if (action === "update") {
-    if (!Object.keys(fields).length) return { text: "The update action needs at least one supported field to change.", isError: true };
+    if (!Object.keys(fields).length) return { text: `The update action needs at least one supported field to change.${TAKES()}`, isError: true };
     body.changes = fields;
   } else if (Object.keys(fields).length) {
     return { text: name === "delete_trigger" ? "delete_trigger takes only trigger_id and for_bot_id." : `The ${action} action changes no fields; send them with action=update.`, isError: true };
@@ -445,14 +448,14 @@ async function listEvents(args: Json, context: ToolCallContext): Promise<ToolCal
 
 async function createTrigger(args: Json, forBotId: string | undefined, context: ToolCallContext): Promise<ToolCallResult> {
   const when = args.when;
-  if (when !== "schedule" && when !== "webhook" && when !== "app_event" && when !== "limit_reset") return { text: 'trigger action=create needs when: "schedule", "app_event", "webhook" or "limit_reset".', isError: true };
+  if (when !== "schedule" && when !== "webhook" && when !== "app_event" && when !== "limit_reset") return { text: `trigger action=create needs when: "schedule", "app_event", "webhook" or "limit_reset".${TAKES()}`, isError: true };
   if (when !== "limit_reset") {
     const limitOnly = ["engine", "repeat"].find((key) => args[key] !== undefined && args[key] !== null);
     if (limitOnly) return { text: `${limitOnly} applies only to when=limit_reset.`, isError: true };
   }
   const { fields, error } = triggerFields(args);
   if (error) return { text: error, isError: true };
-  if (!fields.name || !fields.instructions) return { text: "trigger action=create needs name and instructions.", isError: true };
+  if (!fields.name || !fields.instructions) return { text: `trigger action=create needs name and instructions.${TAKES()}`, isError: true };
   if (when !== "app_event") {
     const appOnly = [...APP_ONLY, "filter", "event_config"].find((key) => args[key] !== undefined && args[key] !== null);
     if (appOnly) return { text: `${appOnly} applies only to when=app_event.`, isError: true };
@@ -483,7 +486,7 @@ async function createTrigger(args: Json, forBotId: string | undefined, context: 
   }
   const label = `the ${when === "webhook" ? "webhook" : "schedule"} trigger “${String(fields.name)}”`;
   if (when === "schedule") {
-    if (!fields.schedule) return { text: "A schedule trigger needs schedule.", isError: true };
+    if (!fields.schedule) return { text: `A schedule trigger needs schedule. ${SUPPORTED_SCHEDULES}`, isError: true };
     if (fields.eventTypes) return { text: "webhook_event_types applies only to when=webhook.", isError: true };
     if (fields.payloadFilter) return { text: "webhook_payload_filter applies only to when=webhook.", isError: true };
     const { eventTypes: _unused, payloadFilter: _unusedFilter, ...routine } = fields;

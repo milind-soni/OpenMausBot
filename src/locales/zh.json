@@ -8644,6 +8644,7 @@
   "settings.ai.ready": "就绪",
   "settings.ai.notSetUp": "未设置",
   "settings.ai.attention": "需要处理",
+  "settings.ai.hiddenStatus": "已从所有模型列表中隐藏",
   "settings.ai.otherServices": "其他服务",
   "backup.exportShort": "有密码保护。不包含已保存的登录信息。",
   "backup.importShort": "从备份文件恢复机器人和对话。",

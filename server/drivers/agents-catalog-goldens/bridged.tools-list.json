@@ -38,42 +38,42 @@
     },
     {
       "name": "coordinate_bots",
-      "description": "The one way to hand work on: ask existing OpenMausBot teammates a question or assign them concrete work. In a room it defaults to this room; use group_id from list_room_targets for a specific room. Outside a room, what you send a teammate from this conversation goes to one standing work thread with them; thread \"new\" opens a fresh one, a thread id picks one you opened. Where work you gave is still open, it goes into that work: it answers the question that work waits on, or reaches the turn running it. Give 1-4 bot_ids — teammate ids as list_bots or your roster prints them; a unique teammate name also resolves: they see only what you send them and use their own model, tools and permissions. They can consult their own specialists; every result returns here and resumes you automatically, so after sending all assignments END your turn: do not poll or wait, and never call assignment_status in the same turn. consult true asks a question the teammate answers from what it knows, acting on nothing; reply \"none\" is a one-way notice nothing comes back from. Include exact file paths, constraints and what must be verified (done_when). On return, resolve tradeoffs, verify the requested outcome and request concrete corrections with rework true if necessary before giving one final answer. Never target whoever assigned you this work or anyone above it: to ask or report back, end your turn and your reply resumes them. Never thank or approve a finished teammate; its result already returned. Never repeat a refused call unchanged.",
+      "description": "The one way to hand work on: ask existing OpenMausBot teammates a question or assign them concrete work. Give 1-4 bot_ids from list_bots; they see only what you send, so include exact file paths, constraints and done_when. In a room it goes to this room; elsewhere to your standing work thread with each teammate. Results return here and resume you, so end your turn after sending; on return, verify the outcome and send fixes with rework true. Never target whoever assigned you this work or anyone above it: end your turn and your reply reaches them. Never thank a finished teammate or repeat a refused call unchanged.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "group_id": {
             "type": "string",
-            "description": "Optional destination room; omit for this room or, outside a room, your thread with each teammate."
+            "description": "Another room, from list_room_targets."
           },
           "bot_ids": {
             "type": "array",
             "items": {
               "type": "string",
-              "description": "A teammate's id exactly as list_bots or your roster prints it ([id: …]). A teammate's unique display name also resolves; a name shared by two reachable teammates is refused."
+              "description": "A teammate's id as list_bots prints it, or its unique name."
             }
           },
           "message": {
             "type": "string",
-            "description": "Question or task for these teammates; later requests in the same conversation can build on earlier ones. Send separate requests when responsibilities differ."
+            "description": "The question or task; separate calls for different responsibilities."
           },
           "reason": {
             "type": "string",
-            "description": "Optional one line for the person about why this goes to them (shown as a chip)."
+            "description": "Optional one line for the person on why (shown as a chip)."
           },
           "rework": {
             "type": "boolean",
-            "description": "True only to send concrete work again to someone whose request already finished or failed: a correction, a re-check or a retry."
+            "description": "True only to resend finished or failed work: a fix, a re-check or a retry."
           },
           "thread": {
             "type": "string",
-            "description": "standing (default): this conversation's one work thread with each teammate. new: a new thread on the teammate, its own history and run. Or a threadId from your receipts or list_threads. Results return here."
+            "description": "standing (default), new (its own history and run), or a threadId from your receipts or list_threads."
           },
           "title": {
             "type": "string",
             "maxLength": 80,
-            "description": "With thread \"new\": the new thread's sidebar name, short and specific (e.g. \"Launch: Reddit draft\"). Defaults to the start of message."
+            "description": "With thread \"new\": its short sidebar name."
           },
           "in_my_folder": {
             "type": "boolean",
@@ -85,19 +85,19 @@
               "resume",
               "none"
             ],
-            "description": "resume (default): the result resumes you. none: a one-way notice that is never awaited; nothing comes back and nothing resumes you."
+            "description": "none: a one-way notice; nothing comes back."
           },
           "consult": {
             "type": "boolean",
-            "description": "True for a question: the teammate answers from what it knows, acting on nothing, and you are resumed with the answer. Leave out for work."
+            "description": "True for a question answered from what they know, acting on nothing."
           },
           "done_when": {
             "type": "string",
-            "description": "Optional: what must be true for this to count as done, in one or two sentences; the teammate is held to it."
+            "description": "What must be true to count as done; the teammate is held to it."
           },
           "answers": {
             "type": "string",
-            "description": "Only to answer a teammate's question instead of sending work: the assignment id its question note names. message is the answer."
+            "description": "Only to answer a teammate's question: the assignment id its note names; message is the answer."
           }
         },
         "required": [

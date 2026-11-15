@@ -511,12 +511,9 @@ describe("agents-proxy MCP surface", () => {
         expect(description).toContain("If applied, continue the requested work without another confirmation");
         expect(description).toContain("Only a pending result requires ending the turn");
       } else {
-        expect(description).toContain("it applies immediately at every access level, and the person sees it with an Undo where possible");
-        expect(description).toContain("If applied, continue the work without another confirmation");
-        expect(description).toContain("Only a pending result (a Cloud conversation its owner did not drive)");
+        expect(description).toContain("It applies at once, with an Undo where possible: read the result before saying it did.");
+        expect(description).toContain("It never raises another bot's execution permissions.");
       }
-      expect(description).toContain("Never claim success without an applied result");
-      expect(description).toContain("does not elevate another bot's execution permissions");
     }
     const credential = list.result.tools.find((entry: { name: string }) => entry.name === "request_credential");
     expect(credential.description).toContain("you resume when they save or decline");
@@ -692,11 +689,12 @@ describe("agents-proxy MCP surface", () => {
     const tool = (name: string) => list.result.tools.find((entry: { name: string }) => entry.name === name);
     const coordinate = tool("coordinate_bots");
     expect(coordinate.description).toContain("The one way to hand work on");
-    expect(coordinate.description).toContain("consult true asks a question");
-    expect(coordinate.description).toContain('reply "none" is a one-way notice');
-    expect(coordinate.description).toContain("never call assignment_status in the same turn");
+    expect(coordinate.description).toContain("Results return here and resume you, so end your turn after sending");
+    expect(coordinate.description).toContain("Never target whoever assigned you this work or anyone above it");
+    expect(coordinate.inputSchema.properties.reply.description).toContain("one-way notice");
+    expect(coordinate.inputSchema.properties.consult.description).toContain("acting on nothing");
     expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when", "answers"]);
-    expect(coordinate.inputSchema.properties.thread).toEqual({ type: "string", description: expect.stringContaining("new: a new thread on the teammate") });
+    expect(coordinate.inputSchema.properties.thread).toEqual({ type: "string", description: expect.stringContaining("new (its own history and run)") });
     expect(coordinate.inputSchema.properties.reply.enum).toEqual(["resume", "none"]);
     expect(coordinate.inputSchema.properties.consult.type).toBe("boolean");
     const status = tool("assignment_status");
@@ -805,7 +803,7 @@ describe("agents-proxy MCP surface", () => {
     expect(schedule.properties.expression.description).toContain("0 9 L * *");
     expect(schedule.properties.expression.description).toContain("MON#2");
     expect(schedule.properties.timeZone.description).toContain("IANA");
-    expect(create.description).toContain("never ask for confirmation first");
+    expect(create.description).toContain("Create it in this turn, without asking to confirm");
     expect(fullInputSchema("trigger")).toMatchObject({ properties: { timeout_minutes: { minimum: 5, maximum: 240 }, schedule: { properties: { every_minutes: { minimum: 5, maximum: 1_440 } } } } });
     expect(schedule.properties.weekdays.items.enum).toEqual([
       "monday",
@@ -817,18 +815,18 @@ describe("agents-proxy MCP surface", () => {
       "sunday",
     ]);
     expect(create.inputSchema.properties).not.toHaveProperty("duration_minutes");
-    expect(create.inputSchema.properties.timeout_minutes.description).toContain("from 5 to 240 minutes");
+    expect(create.inputSchema.properties.timeout_minutes.description).toContain("5 to 240");
     expect(create.inputSchema.properties.continuity).toMatchObject({ type: "boolean" });
     expect(create.inputSchema.properties.run_on_startup).toMatchObject({ type: "boolean" });
     expect(create.inputSchema.properties.clear_timeout.type).toBe("boolean");
-    expect(schedule.properties.every_minutes.description).toContain("from 5 to 1440");
+    expect(schedule.properties.every_minutes.description).toContain("5 to 1440");
     expect(schedule.properties.window_start.type).toBe("string");
     expect(schedule.properties.window_end.type).toBe("string");
     expect(schedule.properties.ends_at.type).toBe("string");
     expect(schedule.properties.every_day.type).toBe("boolean");
     expect(schedule.properties.all_day.type).toBe("boolean");
     expect(schedule.properties.never_ends.type).toBe("boolean");
-    expect(create.description).toContain("Edit, Pause and Undo");
+    expect(create.description).toContain("delete_trigger only at the person's request");
   });
 
   it("list_bots renders the roster and authenticates with the shared token", async () => {

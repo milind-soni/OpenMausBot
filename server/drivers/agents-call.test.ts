@@ -217,6 +217,19 @@ describe("mcp_server", () => {
   });
 });
 
+describe("skill_manage", () => {
+  it("names the arguments it takes when the action is wrong, and shows a SKILL.md when one is missing, before anything is sent", async () => {
+    const sent: unknown[] = [];
+    const ctx = context({ client: { api: async (path) => { sent.push(path); return {}; }, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } });
+    expect(await callTool("skill_manage", { action: "save" }, ctx)).toEqual({
+      text: 'skill_manage action must be "create", "update", "enable", "disable" or "delete". It takes action, skill_name, skill_md, references, gist, base_revision, source.',
+      isError: true,
+    });
+    expect((await callTool("skill_manage", { action: "create", source: "conversation" }, ctx)).text).toContain("---\\nname: file-expense\\ndescription:");
+    expect(sent).toEqual([]);
+  });
+});
+
 describe("app_settings", () => {
   it("posts the action, id and value and returns the route's text or refusal", async () => {
     const calls: Array<{ path: string; method?: string; body: unknown }> = [];
