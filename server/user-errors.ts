@@ -200,6 +200,7 @@ export const USER_ERROR = {
   "serverError.attachment.alreadyInMessage": "This file is already in a message, so it stays.",
   "serverError.engine.signedOut": "{name} is signed out.",
   "serverError.bot.viewOnly": "You can view {bot}, not chat with it.",
+  "serverError.bot.alwaysAllowFull": "This bot already always-allows {max} tools. Remove one under Access in its settings, then try again.",
   "serverError.share.ownBot": "Chats with your own MausBot stay yours, so they can't be shared.",
   "serverError.share.alreadyTeam": "This conversation is already shared with the team.",
   "serverError.share.notYours": "Only the person this conversation belongs to can share it.",

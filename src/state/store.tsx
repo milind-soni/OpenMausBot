@@ -2448,15 +2448,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 const bot = stateRef.current.bots.find((candidate) => candidate.id === action.alwaysAllow?.botId);
                 const owner = bot?.tasks?.some((task) => task.threadId === action.threadId);
                 const next = [...new Set([...(bot ? currentTaskBot(bot, action.threadId).alwaysAllow ?? [] : []), action.alwaysAllow.key])];
-                // Save the grant BEFORE releasing the bot: it may ask again within milliseconds.
-                try {
-                  await api(owner ? `/api/bots/${action.alwaysAllow.botId}/always-allow` : `/api/bots/${action.alwaysAllow.botId}`, {
-                    method: owner ? "POST" : "PATCH",
-                    body: JSON.stringify(owner ? { threadId: action.threadId, allowKey: action.alwaysAllow.key } : { alwaysAllow: next }),
-                  });
-                } catch (error) {
-                  showError(error);
-                }
+                // Save the grant BEFORE releasing the bot: it may ask again within milliseconds. A grant that was not
+                // saved leaves the request waiting (the catch below), never allowed as if it had been remembered.
+                await api(owner ? `/api/bots/${action.alwaysAllow.botId}/always-allow` : `/api/bots/${action.alwaysAllow.botId}`, {
+                  method: owner ? "POST" : "PATCH",
+                  body: JSON.stringify(owner ? { threadId: action.threadId, allowKey: action.alwaysAllow.key } : { alwaysAllow: next }),
+                });
               }
               const response = await respond();
               if (response?.settlementPending && typeof response.message === "string") {
@@ -2464,7 +2461,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }
             })
             .catch((error) => {
-              // A failed settings flush stops the response so work never resumes under a stale approval level.
+              // A failed settings flush or grant save stops the response so work never resumes under a stale approval level.
               showError(error);
               action.onError?.(error instanceof Error ? error.message : String(error));
             });

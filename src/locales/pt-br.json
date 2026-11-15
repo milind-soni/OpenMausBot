@@ -10154,6 +10154,7 @@
   "time.invalid": "Data inválida",
   "shortcuts.send-follow-up": "Enquanto um bot trabalha: colocar na fila em vez de enviar agora, ou o contrário",
   "serverError.bot.viewOnly": "Você pode ver {bot}, mas não conversar com ele.",
+  "serverError.bot.alwaysAllowFull": "Este bot já permite sempre {max} ferramentas. Remova uma em Acesso nas configurações dele e tente de novo.",
   "serverError.share.ownBot": "As conversas com o seu próprio MausBot são só suas, então não podem ser compartilhadas.",
   "serverError.share.alreadyTeam": "Esta conversa já está compartilhada com a equipe.",
   "serverError.share.notYours": "Só a pessoa dona desta conversa pode compartilhá-la.",
