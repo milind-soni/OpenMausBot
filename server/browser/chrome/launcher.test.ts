@@ -231,6 +231,21 @@ describe("the Chrome launcher", () => {
     expect(managed.runsShellForWantOfChrome()).toBe(false);
   });
 
+  it("counts a downloaded Chrome that then fails its checks as the engine's own shell", async () => {
+    const install = vi.fn(async (options: Parameters<typeof installChromeForTesting>[0]) => {
+      const path = chromeForTestingExecutable(options.dataDir, options.pin);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, "#!/bin/sh\n", { mode: 0o755 });
+      return path;
+    });
+    const cached = launcher(mac({ chrome: false }), { install, calibrate: async () => { throw new Error("the browser exited (1) before it answered"); } });
+    await cached.prepare();
+    expect(install).toHaveBeenCalledTimes(1);
+    expect(cached.plan()).toMatchObject({ kind: "chrome", chrome: { source: "downloaded" } });
+    expect(cached.env()).toEqual({});
+    expect(cached.runsShellForWantOfChrome()).toBe(true);
+  });
+
   it("keeps what the host needs behind the error a viewer gets, when Chrome cannot start there", async () => {
     const named = mkdtempSync(join(tmpdir(), "omb-named-"));
     folders.push(named);

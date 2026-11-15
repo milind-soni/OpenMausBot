@@ -120,8 +120,9 @@ export class ChromeLauncher implements BrowserLaunch {
   runsShellForWantOfChrome(): boolean {
     const plan = this.plan();
     if (plan.kind === "legacy") return plan.noChrome === true;
-    // A download that failed leaves the engine on its own shell; an installed Chrome it would use instead does not.
-    return this.state.kind === "failed" && plan.kind === "download" && installedGoogleChrome(this.host) === null;
+    // A download that failed, or a downloaded Chrome that then failed its checks, leaves the engine on its own shell; an installed Chrome it would use instead does not.
+    const downloadFailed = plan.kind === "download" || (plan.kind === "chrome" && plan.chrome.source === "downloaded");
+    return this.state.kind === "failed" && downloadFailed && installedGoogleChrome(this.host) === null;
   }
 
   /** Keep the shared agent-browser launcher and sidecar in the application's current language. */
