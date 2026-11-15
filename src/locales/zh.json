@@ -10221,5 +10221,15 @@
   "devices.computers.pairButton": "配对电脑",
   "devices.computers.title": "你的其他电脑",
   "devices.computers.pairTitle": "配对另一台电脑",
-  "remote.tailscale.needsApproval": "这台电脑正在等待你的 Tailscale 网络批准。请在 Tailscale 管理控制台中批准它，然后重试。"
+  "remote.tailscale.needsApproval": "这台电脑正在等待你的 Tailscale 网络批准。请在 Tailscale 管理控制台中批准它，然后重试。",
+  "devices.computers.typeCode": "在另一台电脑上，在 {app} 中打开“连接到服务器”并输入此代码。",
+  "together.onCloud": "在 My Cloud 上",
+  "together.onComputer": "在这台电脑上",
+  "together.state.asleep": "My Cloud 已休眠。打开一个机器人即可唤醒。",
+  "together.state.waking": "My Cloud 正在唤醒…",
+  "together.state.offlineCloud": "现在无法连接 My Cloud。",
+  "together.state.offlineComputer": "现在无法读取这台电脑上的机器人。",
+  "together.switch.title": "这台电脑和 My Cloud 合在一起",
+  "together.switch.line": "默认关闭。Cloud 上的机器人和这台电脑上的机器人显示在同一个列表中，各自在所在的位置打开。",
+  "together.switch.failed": "未能保存。请重试。"
 }

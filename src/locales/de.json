@@ -3990,5 +3990,9 @@
   "devices.computers.pairButton": "Computer koppeln",
   "devices.computers.title": "Deine anderen Computer",
   "devices.computers.pairTitle": "Anderen Computer koppeln",
-  "remote.tailscale.needsApproval": "Dieser Computer wartet auf die Genehmigung in Ihrem Tailscale-Netzwerk. Genehmigen Sie ihn in der Tailscale-Admin-Konsole und versuchen Sie es dann erneut."
+  "remote.tailscale.needsApproval": "Dieser Computer wartet auf die Genehmigung in Ihrem Tailscale-Netzwerk. Genehmigen Sie ihn in der Tailscale-Admin-Konsole und versuchen Sie es dann erneut.",
+  "devices.computers.typeCode": "Öffne auf deinem anderen Computer in {app} „Mit einem Server verbinden“ und gib diesen Code ein.",
+  "together.switch.title": "Dieser Computer und Meine Cloud zusammen",
+  "together.switch.line": "Standardmäßig aus. Die Bots der Cloud und die Bots dieses Computers stehen in einer Liste, und jeder öffnet sich dort, wo er läuft.",
+  "together.switch.failed": "Das konnte nicht gespeichert werden. Versuch es noch einmal."
 }

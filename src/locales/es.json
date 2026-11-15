@@ -6504,5 +6504,9 @@
   "devices.computers.pairButton": "Vincular un ordenador",
   "devices.computers.title": "Tus otros ordenadores",
   "devices.computers.pairTitle": "Vincular otro ordenador",
-  "remote.tailscale.needsApproval": "Este ordenador espera la aprobación en tu red de Tailscale. Apruébalo en la consola de administración de Tailscale y vuelve a intentarlo."
+  "remote.tailscale.needsApproval": "Este ordenador espera la aprobación en tu red de Tailscale. Apruébalo en la consola de administración de Tailscale y vuelve a intentarlo.",
+  "devices.computers.typeCode": "En tu otro ordenador, abre Conectar a un servidor en {app} y escribe este código.",
+  "together.switch.title": "Este equipo y My Cloud juntos",
+  "together.switch.line": "Desactivado de forma predeterminada. Los bots del Cloud y los de este equipo aparecen en una sola lista, y cada uno se abre donde está.",
+  "together.switch.failed": "No se pudo guardar. Inténtalo de nuevo."
 }

@@ -220,6 +220,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "organization", page: "account", anchor: "organization", labelKey: "settings.section.organization", when: (ctx) => ctx.organization, synonyms: ["company", "organisation", "managed"] },
   { id: "emails", page: "account", anchor: "emails", labelKey: "settings.account.emails", when: desk, synonyms: ["newsletter", "product updates", "email updates"] },
   { id: "plan", page: "plan", anchor: "plan", labelKey: "settings.page.plan", topFor: ["billing", "subscription", "invoice", "receipt", "payment", "card", "upgrade", "plan", "trial", "cancel", "cancel plan", "cancel subscription", "cancel trial", "unsubscribe", "refund"], synonyms: ["usage & billing", "manage subscription"] },
+  { id: "together", page: "plan", anchor: "together", labelKey: "together.switch.title", sectionKey: "settings.page.plan", synonyms: ["together", "one list", "both places", "cloud bots", "sidebar"] },
   { id: "this-week", page: "plan", anchor: "this-week", labelKey: "settings.plan.thisWeek", sectionKey: "settings.page.plan", synonyms: ["usage", "weekly", "limits", "cloud desktop hours", "voice replies"] },
   { id: "updates", page: "app", anchor: "updates", labelKey: "settings.updates.title", when: desk, synonyms: ["update", "version", "check for updates", "release"] },
   { id: "your-computers", page: "app", anchor: "your-computers", labelKey: "settings.app.computers", when: desk, synonyms: ["servers", "connect to a server", "environments", "switch"] },

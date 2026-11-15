@@ -4081,5 +4081,9 @@
   "devices.computers.pairButton": "Підключити комп’ютер",
   "devices.computers.title": "Ваші інші комп’ютери",
   "devices.computers.pairTitle": "Підключити інший комп’ютер",
-  "remote.tailscale.needsApproval": "Цей комп’ютер чекає на схвалення у вашій мережі Tailscale. Схваліть його в консолі адміністратора Tailscale, потім спробуйте ще раз."
+  "remote.tailscale.needsApproval": "Цей комп’ютер чекає на схвалення у вашій мережі Tailscale. Схваліть його в консолі адміністратора Tailscale, потім спробуйте ще раз.",
+  "devices.computers.typeCode": "На іншому комп’ютері відкрийте «Підключитися до сервера» в {app} і введіть цей код.",
+  "together.switch.title": "Цей комп'ютер і Моя хмара разом",
+  "together.switch.line": "Типово вимкнено. Боти з хмари й боти цього комп'ютера показані в одному списку, і кожен відкривається там, де він є.",
+  "together.switch.failed": "Не вдалося зберегти. Спробуйте ще раз."
 }
