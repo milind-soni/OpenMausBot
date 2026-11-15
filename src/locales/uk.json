@@ -1078,6 +1078,8 @@
   "chat.liveness.outputJustNow": "останній вивід щойно",
   "chat.liveness.outputMinutes": "останній вивід {count} хв тому",
   "chat.liveness.outputHours": "останній вивід {count} год тому",
+  "chat.liveness.silentMinutes": "нічого нового вже {count} хв",
+  "chat.liveness.silentHours": "нічого нового вже {count} год",
   "chat.liveness.network": "чекає на мережу",
   "chat.liveness.busy": "зайнятий, виводу ще немає",
   "chat.liveness.idle": "простоює, виводу ще немає",

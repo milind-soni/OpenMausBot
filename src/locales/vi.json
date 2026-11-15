@@ -1822,6 +1822,8 @@
   "chat.liveness.outputJustNow": "đầu ra gần nhất: vừa xong",
   "chat.liveness.outputMinutes": "đầu ra gần nhất: {count} phút trước",
   "chat.liveness.outputHours": "đầu ra gần nhất: {count} giờ trước",
+  "chat.liveness.silentMinutes": "không có gì mới trong {count} phút",
+  "chat.liveness.silentHours": "không có gì mới trong {count} giờ",
   "chat.liveness.network": "đang chờ mạng",
   "chat.liveness.busy": "đang bận, chưa có đầu ra",
   "chat.liveness.idle": "đang rảnh, chưa có đầu ra",

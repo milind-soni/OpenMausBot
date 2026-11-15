@@ -2283,6 +2283,8 @@
   "chat.liveness.outputJustNow": "последний вывод только что",
   "chat.liveness.outputMinutes": "последний вывод {count} мин назад",
   "chat.liveness.outputHours": "последний вывод {count} ч назад",
+  "chat.liveness.silentMinutes": "ничего нового уже {count} мин",
+  "chat.liveness.silentHours": "ничего нового уже {count} ч",
   "chat.liveness.network": "ждёт сеть",
   "chat.liveness.busy": "занят, вывода пока нет",
   "chat.liveness.idle": "простаивает, вывода пока нет",

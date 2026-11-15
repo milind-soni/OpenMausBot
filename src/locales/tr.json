@@ -1822,6 +1822,8 @@
   "chat.liveness.outputJustNow": "son çıktı az önce",
   "chat.liveness.outputMinutes": "son çıktı {count} dk önce",
   "chat.liveness.outputHours": "son çıktı {count} sa önce",
+  "chat.liveness.silentMinutes": "{count} dakikadır yeni bir şey yok",
+  "chat.liveness.silentHours": "{count} saattir yeni bir şey yok",
   "chat.liveness.network": "ağı bekliyor",
   "chat.liveness.busy": "meşgul, henüz çıktı yok",
   "chat.liveness.idle": "boşta, henüz çıktı yok",

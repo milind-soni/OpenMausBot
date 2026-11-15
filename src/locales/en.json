@@ -2904,6 +2904,8 @@
   "chat.liveness.outputJustNow": "last output just now",
   "chat.liveness.outputMinutes": "last output {count} min ago",
   "chat.liveness.outputHours": "last output {count} h ago",
+  "chat.liveness.silentMinutes": "nothing new for {count} min",
+  "chat.liveness.silentHours": "nothing new for {count} h",
   "chat.liveness.network": "waiting on the network",
   "chat.liveness.busy": "busy, no output yet",
   "chat.liveness.idle": "idle, no output yet",
