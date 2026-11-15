@@ -440,6 +440,9 @@ it("tells the Admin's signed health read a failed turn's code, never its words, 
   const report = await read();
   expect(report.status).toBe(200);
   expect(report.body).toMatchObject({ v: 1, turns: { failed24h: expect.any(Number) }, engines: expect.arrayContaining([expect.objectContaining({ kind: "claudeAgent", used: true })]) });
+  expect(report.body.perf).toMatchObject({ v: 1, h24: { turns: expect.any(Number), failed: expect.any(Number) }, holds: expect.any(Array) });
+  expect(report.body.perf.h24.turns).toBeGreaterThanOrEqual(1);
+  expect(JSON.stringify(report.body.perf).length).toBeLessThanOrEqual(8 * 1024);
   expect(report.body.incidents).toContainEqual(expect.objectContaining({ kind: "turn", code: "quota", engine: "claudeAgent", botId, count: 1 }));
   for (const planted of ["weekly limit", "ada.lovelace@example.test", "Secret Merger Plans", "Tallyspoon Ops", "Draft the ACME", "person@example.test"]) {
     expect(JSON.stringify(report.body), planted).not.toContain(planted);

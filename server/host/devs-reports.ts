@@ -111,6 +111,8 @@ export interface DevsReportsDeps {
   /** The language a line for this person is written in; absent, the one set on this server. */
   lineLanguage?: LineLanguage;
   recentLog: RecentLog;
+  /** Timing lines for these conversations and bots: numbers, fixed codes and opaque ids only. */
+  performance?(filter: { threadIds: readonly string[]; botIds: readonly string[] }): string[];
   send(payload: DevsReportPayload): Promise<SendOutcome>;
   /** Asks the MausBot team about reports this app sent (devs-report-send.ts `askReportStatus`); null: no answer this time. */
   askStatus(question: ReportStatusQuestion): Promise<ReportStatusAnswer | null>;
@@ -350,6 +352,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
       bots: bots.map((bot) => reported(bot, entry.threadId)),
       ...("bot" in author ? { summary: { by: author.bot.name, text: author.summary } } : { noSummary: author.why }),
       problems: conversationProblems(store.activePath(entry.threadId)), log: deps.recentLog(), cloudComputers: cloudComputerCounters.lines(), contactEmail: contact,
+      ...(deps.performance ? { performance: deps.performance({ threadIds: [entry.threadId], botIds: bots.map((bot) => bot.id) }) } : {}),
     }, secrets());
     return { payload, ...(contact ? { contact } : {}) };
   }

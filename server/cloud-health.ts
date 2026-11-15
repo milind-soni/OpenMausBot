@@ -14,6 +14,7 @@ import type { ValueReport } from "./host/value-ledger.ts";
 import type { ProviderSnapshot, RuntimeEvent } from "./contracts.ts";
 import { createCloudSpeed, type CloudSpeed } from "./cloud-speed.ts";
 import { classifyError } from "./drivers/retry.ts";
+import type { PerfHealth } from "./perf/perf-report.ts";
 import type { Message, StoreChange } from "./store.ts";
 
 /** The report's largest JSON body; incidents past it wait for the next poll. */
@@ -256,6 +257,8 @@ export interface CloudHealthDeps {
   room?: () => RoomReport;
   /** CPU steal and pressure, boot and wake times, and how long messages wait for their engine. */
   speed?: CloudSpeed;
+  /** Turn phase timings, usage-limit holds, process buckets and event-loop lag: at most PERF_HEALTH_MAX_BYTES. */
+  perf?: () => PerfHealth;
   now?: () => number;
 }
 
@@ -304,7 +307,7 @@ export function createCloudHealth(deps: CloudHealthDeps) {
         turns: read.turns, routines: read.routines, engines: engines(), connectors: connectorState(),
         browser: { available: browser.available, installing: browser.installing, interrupted: browser.interrupted },
         box: boxSummary(deps.box?.()),
-        firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null, speed: speed.report(),
+        firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null, speed: speed.report(), perf: deps.perf?.() ?? null,
         system: { ...memory, rssBytes: process.memoryUsage.rss(), load1: loadavg()[0] ?? 0, cpus: availableParallelism(), disk: diskBytes(deps.dataDir), eventLogWritable: writable(deps.eventsDir) },
       };
       let budget = CLOUD_HEALTH_MAX_BYTES - JSON.stringify({ ...base, cursor: ledger.cursor(read.seq), truncated: true, incidents: [] }).length;
