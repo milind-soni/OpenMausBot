@@ -15,6 +15,7 @@ const MODELS: ModelCatalog = {
   default: "MiniMax-M3",
   // `custom: true` is load-bearing: a custom-access engine's picker pane lists only custom-flagged models.
   options: [
+    { id: "MiniMax-M3.1-Flash", label: "MiniMax M3.1 Flash", contextWindow: 1_000_000, custom: true },
     { id: "MiniMax-M3", label: "MiniMax M3", contextWindow: 1_000_000, custom: true },
     { id: "MiniMax-M2.7", label: "MiniMax M2.7", contextWindow: 204_800, custom: true },
     { id: "MiniMax-M2.7-highspeed", label: "MiniMax M2.7 Highspeed", contextWindow: 204_800, custom: true },

@@ -865,6 +865,28 @@ describe("createOpenAIChatRuntime refused tool calls", () => {
     expect(events.find((event) => event.type === "runtime.error")?.message).toMatch(/^The model tried to use a tool it was not given \("JSON"\)/);
   });
 
+  // oMLX's in-stream frame when a local model writes a tool call it cannot parse.
+  const omlxFailure = (code: string) => sse(`data: ${JSON.stringify({ error: {
+    message: "Model output contains an unrecoverable tool call. Previously delivered tool calls must not be executed again on retry.",
+    type: "server_error", param: null, code,
+  } })}\n\ndata: [DONE]\n\n`);
+
+  it.each(["invalid_tool_call", "incomplete_tool_call"])("sends the request again when oMLX reports %s mid-stream", async (code) => {
+    let requests = 0;
+    const events = await runTurn(() => ++requests === 1 ? omlxFailure(code) : answer());
+    expect(requests).toBe(2);
+    expect(events.find((event) => event.type === "turn.retrying")).toMatchObject({ attempt: 1, delayMs: 0, reason: "tool_use_failed" });
+    expect(events.some((event) => event.type === "runtime.error")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  });
+
+  it("stops after three oMLX tool call failures and says nothing ran", async () => {
+    let requests = 0;
+    const events = await runTurn(() => (requests++, omlxFailure("invalid_tool_call")));
+    expect(requests).toBe(3);
+    expect(events.find((event) => event.type === "runtime.error")?.message).toMatch(/^The model made a tool call the provider rejected\. Nothing ran\./);
+  });
+
   it("does not resend other provider errors", async () => {
     let requests = 0;
     const events = await runTurn(() => (requests++, sse(`data: ${JSON.stringify({ error: { ...refusal, code: "invalid_request_error" } })}\n\n`)));

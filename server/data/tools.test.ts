@@ -483,7 +483,7 @@ describe("data_show", () => {
     const card = sheet.card("c_1")!;
     expect(card).toMatchObject({ status: "ready", result: "c_1", rowCount: 12, truncated: false, by: "bot", sql: "SELECT * FROM orders" });
     expect(card.columns).toHaveLength(2);
-    expect(database.calls.find((call) => call.method === "materialise")).toMatchObject({ sql: `SELECT * FROM (SELECT * FROM orders) LIMIT ${DATA_LIMITS.showTableRowsMax}`, name: "c_1" });
+    expect(database.calls.find((call) => call.method === "materialise")).toMatchObject({ sql: `SELECT * FROM (SELECT * FROM orders\n) LIMIT ${DATA_LIMITS.showTableRowsMax}`, name: "c_1" });
   });
 
   it("points a card at a loaded table through resolveTable", async () => {
@@ -605,8 +605,8 @@ describe("data_show", () => {
     const card = sheet.card("c_1")!;
     expect(card).toMatchObject({ kind: "chart", title: "bar of count by region", status: "ready", result: "c_1", chart: { type: "bar", x: "region" }, vegaLite: { mark: "bar", columns: ["region", "n"] } });
     const materialised = database.calls.find((call) => call.method === "materialise")!;
-    expect(materialised.sql).toBe("SELECT region, count(*) AS n FROM (SELECT * FROM orders) GROUP BY ALL");
-    expect(database.calls.some((call) => call.sql === "SELECT * FROM (SELECT * FROM orders) LIMIT 0")).toBe(true);
+    expect(materialised.sql).toBe("SELECT region, count(*) AS n FROM (SELECT * FROM orders\n) GROUP BY ALL");
+    expect(database.calls.some((call) => call.sql === "SELECT * FROM (SELECT * FROM orders\n) LIMIT 0")).toBe(true);
     database.onRun = (sql) => (sql.startsWith("SELECT count(*)") ? { columns: [{ name: "n", type: "BIGINT" }], rows: [[3]], rowCount: 1, truncated: false, elapsedMs: 1 } : undefined);
     const whole = await showCard(ctx, { kind: "chart", sql: "SELECT * FROM small", chart: { type: "scatter", x: "a", y: "b" } });
     expect(whole.reduction).toEqual({ method: "none", inputRows: 3, outputRows: 3 });
@@ -655,7 +655,7 @@ describe("data_show", () => {
     const out = await showCard(ctx, { kind: "chart", sql: "SELECT a, b FROM t", vegaLite: { mark: "line" }, limit: 100 });
     expect(out.reduction).toEqual({ method: "none", inputRows: 1234, outputRows: 3 });
     expect(sheet.card("c_1")!.vegaLite).toEqual({ mark: "line", validated: true });
-    expect(database.calls.find((call) => call.method === "materialise")!.sql).toBe("SELECT * FROM (SELECT a, b FROM t) LIMIT 101");
+    expect(database.calls.find((call) => call.method === "materialise")!.sql).toBe("SELECT * FROM (SELECT a, b FROM t\n) LIMIT 101");
     expect(await failure(showCard(ctx, { kind: "chart", sql: "SELECT 1", vegaLite: { nope: true } }))).toMatchObject({ code: "spec_invalid" });
   });
 
@@ -763,7 +763,7 @@ describe("data_export", () => {
     expect(again.path).toBe(join(dir, "work", "paid_orders-2.csv"));
     const parquet = await exportData(ctx, { sql: "SELECT 1 AS one", format: "parquet", path: "out/one" });
     expect(parquet.path).toBe(join(dir, "work", "out", "one.parquet"));
-    expect(database.calls.at(-1)!.sql).toBe(`COPY (SELECT * FROM (SELECT 1 AS one)) TO '${parquet.path}' (FORMAT parquet)`);
+    expect(database.calls.at(-1)!.sql).toBe(`COPY (SELECT * FROM (SELECT 1 AS one\n)) TO '${parquet.path}' (FORMAT parquet)`);
     const xlsx = await exportData(ctx, { sql: "SELECT 1", format: "xlsx", path: join(dir, "Downloads") });
     expect(xlsx.path).toBe(join(dir, "Downloads", "query.xlsx"));
     expect(database.calls.at(-1)!.sql).toContain("(FORMAT xlsx, HEADER true)");
