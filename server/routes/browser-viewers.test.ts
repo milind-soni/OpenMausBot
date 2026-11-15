@@ -310,6 +310,7 @@ describe("the v2 stream", () => {
   it.each([
     { error: new BrowserHostError("sandbox"), need: "sandbox" },
     { error: new BrowserHostError("libraries", ["libnss3.so"]), need: "libraries" },
+    { error: new Error("Chrome could not be started.", { cause: new BrowserHostError("container") }), need: "container" },
   ])("tells viewers what the host needs ($need), never a command that does not exist", async ({ error, need }) => {
     const fixture = await serve({ attach: async () => { throw error; } });
     const socket = new WebSocket(`ws://${fixture.origin}/api/bots/pepper/browser/stream`);

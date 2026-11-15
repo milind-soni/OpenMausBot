@@ -29,6 +29,11 @@ The updatable model manifest (server/model-manifest/) adapts the model manifest
 cache and schema of an MIT-licensed project, Copyright 2026 T3 Tools Inc., used
 under the MIT License (third_party/t3-code/LICENSE).
 
+The remote access diagnosis (src/lib/remote-access-diagnosis.ts) adapts the
+connection diagnosis model (packages/client-runtime/src/connection/diagnosis.ts)
+of an MIT-licensed project, Copyright 2026 T3 Tools Inc., used under the MIT
+License (third_party/t3-code/LICENSE).
+
 Prompt-cache keep-warm (server/cache-keepwarm.ts and
 server/drivers/claude-keepwarm.ts) ports the design of Cache Tax,
 https://github.com/karanb192/claude-code-mods, Copyright (c) 2026 Karan
@@ -65,6 +70,12 @@ library.
 Selected provider icon paths are from Simple Icons, used under CC0 1.0.
 The Cohere provider icon path is from Lobe Icons, Copyright 2023 LobeHub,
 used under the MIT License.
+
+The Cursor provider mark (src/components/CursorMark.tsx) adapts the Cursor
+provider icon path of T3 Code (packages/provider-cursor/src/client.ts),
+Copyright 2026 T3 Tools Inc., used under the MIT License
+(third_party/t3-code/LICENSE). The mark is Cursor's trademark and is shown
+only to identify the Cursor provider.
 
 The model provider catalog bundles provider and model data from models.dev,
 https://github.com/anomalyco/models.dev, Copyright (c) 2025 models.dev, used

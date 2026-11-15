@@ -6,7 +6,7 @@
 // and a fake 1Password SDK; no network.
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -165,7 +165,10 @@ exports.createClient = async ({ auth }) => {
 export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, toolCalls = 0, broker, env = {}, cloudEnv = {}, cloudEngine = "", desktopEngine = "", space, cloudSignedIn = true, team }: {
   onePasswordToken: string; cloudOnePasswordToken?: string; toolCalls?: number;
   /** A Team Cloud too (OMB_CLOUD_ROLE=team), with its own environment and synthetic Claude CLI lines. */
-  team?: { id: string; name: string; env?: NodeJS.ProcessEnv; engine?: string; noAi?: boolean };
+  team?: { id: string; name: string; env?: NodeJS.ProcessEnv; engine?: string; noAi?: boolean;
+    /** Scopes of this checkout's node_modules (`@duckdb`) linked into the Team Cloud's native tree before it starts: the
+     * server can load DuckDB at its first config broadcast, and a failed load stays failed for the server's life. */
+    native?: string[] };
   broker?: { url: string; install(): Promise<{ id: string; token: string; userId: string }> };
   env?: NodeJS.ProcessEnv;
   /** My Cloud's own environment only (a store limit, say). */
@@ -285,6 +288,10 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     if (team.noAi) {
       mkdirSync(join(root, "team", ".openmausbot"), { recursive: true });
       writeFileSync(join(root, "team", ".openmausbot", "config.json"), JSON.stringify({ instances: Object.fromEntries(["claude", "codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi", "grok"].map((id) => [id, { driver: "not-a-real-driver" }])) }));
+    }
+    for (const scope of team.native ?? []) {
+      mkdirSync(join(root, "team", "native", "node_modules"), { recursive: true });
+      symlinkSync(join(SERVER_DIR, "..", "node_modules", scope), join(root, "team", "native", "node_modules", scope), "junction");
     }
     const startTeam = (more: NodeJS.ProcessEnv = {}) => start("team", { OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: team.id, OMB_CLOUD_TEAM_NAME: team.name,
       OMB_CLOUD_MACHINE_ID: "0d9e8f7a-6b5c-4d3e-9f8a-7b6c5d4e3f2a", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: secret,

@@ -1,7 +1,8 @@
 // The inbox of a place that is no team's: this computer, or a Cloud of one person. There is one person here, so nothing is
 // copied and nothing routed. An ask is the open card itself, read where it was asked, so one tap answers the one card
 // however many surfaces show it, and whatever was waiting before this inbox existed is listed. What a bot sent the person
-// is a line of its conversation, and a reply there is an ordinary line of theirs.
+// is a line of its conversation, and a reply there is an ordinary line of theirs. Work one bot handed another files no line
+// when it finishes: that is the asking bot's news, and its own answer to the person is what lands here.
 // Security: a guest's conversation stays out of the owner's lines, and the owner's stays out of a guest's. An ask is listed
 // only for someone who may answer it, so a guest's questions reach the owner labelled with who asked, never as their own.
 import { readFileSync } from "node:fs";
@@ -90,7 +91,8 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
   let seenAsks = new Set<string>();
   try {
     const parsed = fileSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
-    if (parsed.success) { lines = parsed.data.lines; seenAsks = new Set(parsed.data.seenAsks); }
+    // A hand-off result filed before hand-offs stopped filing lines (its job is the asking conversation, not its own) goes.
+    if (parsed.success) { lines = parsed.data.lines.filter((line) => !(line.kind === "result" && line.workingFor && line.job && line.job !== line.threadId)); seenAsks = new Set(parsed.data.seenAsks); }
     else console.warn(`place inbox: ${file} is not an inbox file; starting fresh`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`place inbox: ${file} is unreadable; starting fresh`);
@@ -235,18 +237,6 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     return notification;
   }
 
-  /** Work handed on finished: one line, so the result is here even if the conversation that asked never reports back. It
-   * sends nothing, and that conversation's next result or its summary replaces it. */
-  function handedResult(work: { botId: string; threadId: string; groupId?: string; text: string }, requester: { botId: string; threadId: string }): void {
-    const bot = store.bot(work.botId);
-    const text = work.text.trim();
-    if (!bot || bot.notifications === false || !text) return;
-    const asked = store.bot(requester.botId);
-    const guest = deps.guestOf(requester.threadId);
-    addLine({ id: crypto.randomUUID(), botId: bot.id, threadId: work.threadId, ...(work.groupId ? { groupId: work.groupId } : {}), kind: "result", from: bot.name.slice(0, 200),
-      ...(asked ? { workingFor: { botId: asked.id, name: asked.name } } : {}), ...(guest ? { guest } : {}), text: clip(text, NOTICE_TEXT_MAX), at: now(), job: requester.threadId });
-  }
-
   const unsubscribe = store.onChange((change: StoreChange) => {
     if (change.type !== "thread.deleted") return;
     const before = lines.length;
@@ -258,7 +248,6 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     view,
     message,
     route,
-    handedResult,
     /** What waits on this viewer: every open ask, and news they have not read. */
     count(auth: RequestAuth): number {
       return view(auth).rows.filter((row) => row.tab === "needs-you" || (row.tab === "info" && row.unread)).length;

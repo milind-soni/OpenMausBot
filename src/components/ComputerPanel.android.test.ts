@@ -169,7 +169,7 @@ describe("Computer panel Android tab", () => {
     panelViewStore.current = "android";
     await check(makeBot(), async () => ({ available: true, devices: [PHONE] }));
     // Connected: nothing to fall back to, nothing persists.
-    expect(selectedTab()).toBe("Android");
+    expect(selectedTab()).toBe("Phone");
     expect(panelViewStore.current).toBe("android");
 
     // A transient adb failure is not a disconnect, even after a success.
@@ -216,7 +216,7 @@ describe("Computer panel Android tab", () => {
 
     expect(asked()).toEqual(["/api/usb-phones"]);
     expect(bridge.status).not.toHaveBeenCalled();
-    expect(selectedTab()).toBe("Android");
+    expect(selectedTab()).toBe("Phone");
     expect(androidPanel.props).toEqual({ status: { available: true, devices: [PHONE], scanned: true }, serverPhones: true });
   });
 

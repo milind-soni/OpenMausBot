@@ -13,7 +13,7 @@ import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 import { intervalAllowsOccurrence, intervalHasRestrictions, isSameLocalDay, latestIntervalOccurrence } from "./routine-intervals.ts";
 import { cloneSchedule, limitResetOccurrence, mergeScheduleUpdate, nextOccurrence, RoutineScheduleError, type RoutineSchedule, type RoutineScheduleInput } from "./routine-schedules.ts";
-import { runsOnce } from "../shared/limit-reset.ts";
+import { runsOnce } from "../shared/limit-reset.ts"; import { limitResetRunOwed } from "./limit-reset-owed.ts";
 import {
   ROUTINE_HANDOFF_WAIT, isRoutineProblemRun, type RoutineAccess, type RoutineCheck, type RoutineContextAttachment, type RoutineDelivery, type RoutineIntervalWindow, type RoutineRetryCause,
   type RoutineHoldCause, type RoutineRunReport, type RoutineRunStatus, type RoutineRunTrigger,
@@ -34,7 +34,7 @@ import { loadInstalledPackage, loadRequestReceipts, loadRoutine, loadRun } from 
 import { applyHolds, holdCauses, type AppliedHolds } from "./routine-holds.ts";
 import { cancelUnfinishedRuns, interruptRunTurns } from "./routine-stops.ts";
 import { sanitizeInput } from "./routine-input.ts";
-import { applyCheckResult, routineLine, runLineFields, type RoutineLineCodes, type RoutineTroubleCode } from "./routine-lines.ts";
+import { applyCheckResult, clipRunOutput, routineLine, runLineFields, type RoutineLineCodes, type RoutineTroubleCode } from "./routine-lines.ts";
 import { checkHold, CHECK_BOOT_HOLD_MS, type CheckHold } from "./routine-check-pacing.ts";
 import { resolveRoutineResultsThread, routineRunDefinition, type ResultsThreadAllocation } from "./routine-run-definition.ts";
 
@@ -226,7 +226,7 @@ export interface RoutineManagerOptions {
   /** Every payload must be `{ kind, … }`: the server numbers and replays frames by it. */
   emit?: (payload: Record<string, unknown>) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
-  /** Why this bot takes no runs now, in the person's words (a Starter Cloud keeps only so many bots awake); null when it does. */ pausedText?: (botId: string) => string | null;
+  /** Why this bot takes no runs now, in the person's words (a Starter Cloud keeps only so many bots awake); null when it does. */ pausedText?: (botId: string) => string | null; /** The person paused this bot: its runs are let go quietly, not failed into To review. */ held?: (botId: string) => boolean;
   goalState?: (groupId: string | undefined, coordinatorBotId: string) => "ready" | "busy" | "missing";
   createTask: (botId: string, title: string, run?: RoutineRun) => { threadId: string } | null;
   joinConversation?: (run: RoutineRun) => string | null;
@@ -880,10 +880,10 @@ export class RoutineManager {
     return moved.length;
   }
 
-  /** The engines' reset times changed: each limit-reset routine that is on takes its engine's new time. */
+  /** The engines' reset times changed: each limit-reset routine that is on takes its engine's new time, once the run it owes a passed reset was made (limit-reset-owed.ts). */
   retimeLimitResets(): number {
     const moved = this.routines.filter((routine) => {
-      if (!routine.enabled || routine.schedule.type !== "limit_reset") return false;
+      if (!routine.enabled || routine.schedule.type !== "limit_reset" || limitResetRunOwed(routine, this.runs, this.now())) return false;
       const schedule = this.timedSchedule(routine.schedule, routine.id);
       if (schedule.type !== "limit_reset" || (schedule.at === routine.schedule.at && schedule.at === routine.nextRunAt)) return false;
       routine.schedule = schedule;
@@ -1113,7 +1113,7 @@ export class RoutineManager {
         }
         if (state === "missing") { this.failRun(run, this.missingTargetMessage(run.target)); continue; }
         const paused = run.target === "room-goal" ? null : this.options.pausedText?.(run.botId);
-        if (paused) { this.failRun(run, paused); continue; }
+        if (paused) { if (triggerSource !== "manual" && this.options.held?.(run.botId)) void this.cancelRun(run.id, paused); else this.failRun(run, paused); continue; }
         const startedAt = this.now();
         const suffix = ` · ${new Date(startedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
         const title = `${run.routineName.slice(0, 80 - suffix.length).trimEnd()}${suffix}`;
@@ -1253,7 +1253,7 @@ export class RoutineManager {
       run.status = "running";
       run.attention = undefined;
     } else if (event.type === "item.completed" && event.itemType === "assistant_text") {
-      run.output = redactSecretsInText(event.text).trim().slice(0, 2_000);
+      run.output = clipRunOutput(redactSecretsInText(event.text).trim(), 2_000);
     } else if (event.type === "runtime.error") {
       Object.assign(run, runLineFields("error", event.message, event.text));
       this.failureFacts.set(run.id, engineFacts(event));

@@ -11,11 +11,13 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { botBox, type WrappedSpawn } from "../bot-box/box.ts";
+import { boxEnvironment } from "../bot-box/env.ts";
 import { visibleInBox } from "../bot-box/plan.ts";
 import { DATA_DIR, ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
+import { DEFER_TOOLS_ENV } from "./agents-claude-defer.ts";
 import { ClaudeDriver, hookTokenFile } from "./claude.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
@@ -198,5 +200,38 @@ describe("a Claude turn in the bot box", () => {
     expect(boxed, "the engine ran in the box").toBeTruthy();
     expect(boxed!.plan.mounts, "the endpoint folder is bound on its own line").toContainEqual(expect.objectContaining({ source: configDir, target: configDir }));
     expect(visibleInBox(boxed!.plan, configDir)).toBe("rw");
+  }, 60_000);
+
+  it.skipIf(process.platform === "win32")("defers the agents tools in the box as outside it", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-claude-box-defer-"));
+    dirs.push(scratch);
+    const fakeBwrap = join(scratch, "fake-bwrap.sh");
+    writeFileSync(fakeBwrap, `#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done; shift\nexec "$@"\n`);
+    chmodSync(fakeBwrap, 0o755);
+    await botBox.start({
+      dataDir: DATA_DIR, home: homedir(), port: 8799, denyEnv: new Set(), env: {}, log: () => {},
+      detect: () => ({ box: "bwrap", reason: null, tools: { bwrap: fakeBwrap, socat: "/usr/bin/true" } }),
+    });
+    const wrap = vi.spyOn(botBox, "wrap");
+    delete process.env.TMPDIR;
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    instance = await ClaudeDriver.create({ instanceId: "claude-box", displayName: "Claude", environment: {}, enabled: true, config: { cli: FAKE_CLI, permissionMode: "acceptEdits" } });
+    const recorder = recordEvents(instance.adapter);
+    const cwd = join(DATA_DIR, "task-workspaces", "bot-a", "t-boxed-defer");
+    mkdirSync(cwd, { recursive: true });
+
+    await instance.adapter.sendTurn({
+      threadId: "t-boxed-defer", botId: "bot-a", text: "hi", approvalMode: "full", cwd,
+      integrations: { agents: { command: process.execPath, args: ["/fake/agents-proxy.js"], env: { OMB_BOT_ID: "bot-a" } } },
+    });
+    await recorder.until((event) => event.type === "turn.completed", 30_000);
+
+    expect(wrap.mock.results.some((result) => (result.value as WrappedSpawn | null)?.plan.botId === "bot-a"), "the engine ran in the box").toBe(true);
+    const agents = JSON.parse(readFileSync(dump, "utf8")).mcpConfig.mcpServers.agents as { alwaysLoad?: boolean; env: Record<string, string> };
+    expect(agents).toMatchObject({ alwaysLoad: true, env: { [DEFER_TOOLS_ENV]: "1" } });
+    expect(boxEnvironment(agents.env)[DEFER_TOOLS_ENV], "the box passes the switch to the proxy").toBe("1");
   }, 60_000);
 });

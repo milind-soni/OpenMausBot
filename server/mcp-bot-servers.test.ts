@@ -147,6 +147,30 @@ describe("a bot adding a server where bots are boxed", () => {
   });
 });
 
+describe("a bot adding its own server when another bot already has 20 of its own", () => {
+  const paulsOwn = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`paul${i}`, { command: "npx", args: [`p${i}`], env: {}, enabled: false, bot: "paul" }]));
+
+  it("counts a server in this bot's own folder as its own, so it fits", () => {
+    const data = dataDir();
+    const script = file(join(data, "workspaces", "iris", "srv", "server.py"));
+    const added = addBotMcpServer(paulsOwn, { name: "linear", ...python(script) }, "iris", data, true);
+    if (!added.ok) throw new Error(added.error);
+    expect(added.server).toMatchObject({ bot: "iris", enabled: false });
+  });
+
+  it("still refuses one every bot would use, and never takes the owner from the request", () => {
+    const data = dataDir();
+    const notes = { name: "notes", command: "npx", args: ["-y", "@x/notes-mcp"] };
+    expect(addBotMcpServer(paulsOwn, notes, "iris", data, true))
+      .toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/at most 20 MCP servers/) });
+    expect(addBotMcpServer(paulsOwn, { ...notes, bot: "iris" }, "iris", data, true))
+      .toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/at most 20 MCP servers/) });
+    const script = file(join(data, "workspaces", "iris", "srv", "server.py"));
+    expect(addBotMcpServer(paulsOwn, { name: "linear", ...python(script) }, "iris", data, false))
+      .toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/at most 20 MCP servers/) });
+  });
+});
+
 describe("a bot adding a server that names the server's own files, where bots are boxed", () => {
   it("is refused for settings, sessions, the chats and the data folder itself, however the path is written", () => {
     const data = dataDir();

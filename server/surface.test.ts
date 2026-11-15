@@ -8,6 +8,7 @@ import {
   computerToolsRefusal,
   handoffUsesOwnCloud,
   isHandedWork,
+  openBrowserBeside,
   ownCloudStateWithin,
   parseSurface,
   pinSource,
@@ -70,6 +71,25 @@ describe("handoffUsesOwnCloud", () => {
   });
 });
 
+describe("openBrowserBeside", () => {
+  it("leaves out a browser that fails beside a computer, so the turn goes on with the computer", async () => {
+    const skipped: unknown[] = [];
+    const failing = () => Promise.reject(new Error("Could not safely prepare saved browser logins."));
+    for (const computer of ["cloud", "vm", "local"] as const) {
+      await expect(openBrowserBeside(failing, computer, (error) => skipped.push(error))).resolves.toBeNull();
+    }
+    expect(skipped).toHaveLength(3);
+  });
+
+  it("keeps the failure where the browser is the only place, and opens it as usual otherwise", async () => {
+    const skipped: unknown[] = [];
+    await expect(openBrowserBeside(() => Promise.reject(new Error("no browser")), null, (error) => skipped.push(error))).rejects.toThrow("no browser");
+    await expect(openBrowserBeside(() => Promise.resolve({ session: "s" }), "cloud", (error) => skipped.push(error))).resolves.toEqual({ session: "s" });
+    await expect(openBrowserBeside(() => Promise.resolve(null), null, (error) => skipped.push(error))).resolves.toBeNull();
+    expect(skipped).toEqual([]);
+  });
+});
+
 describe("pinSource", () => {
   it("counts a turn's own pin to the place Works on names as Works on, so This computer is not asked for again", () => {
     expect(pinSource("local", { surfaceSource: "auto" }, "local")).toBe("works-on");
@@ -121,14 +141,22 @@ describe("resolveSurface", () => {
     expect(plan.note).toMatch(/no browser and no computer/);
   });
 
-  it("a computer destination mounts only that computer: one place per turn", () => {
+  it("a computer destination mounts the built-in browser beside it, so one task can use both", () => {
     for (const destination of ["cloud", "vm", "local"] as const) {
-      expect(resolveSurface({ destination, browserOn: true })).toEqual({ computer: destination, browser: false, pinned: null, note: "" });
+      expect(resolveSurface({ destination, browserOn: true })).toEqual({ computer: destination, browser: true, pinned: null, note: "" });
       expect(resolveSurface({ destination, browserOn: false })).toMatchObject({ computer: destination, browser: false });
     }
   });
 
-  it("a thread a bot opened mounts the built-in browser beside any computer, since no person watches it", () => {
+  it("a pinned computer keeps the built-in browser beside it, in a person's thread and a bot's", () => {
+    for (const pinnedSurface of ["cloud", "vm", "local"] as const) {
+      expect(resolveSurface({ destination: undefined, pinnedSurface, browserOn: true })).toEqual({ computer: pinnedSurface, browser: true, pinned: pinnedSurface, note: "" });
+      expect(resolveSurface({ destination: "browser", pinnedSurface, browserOn: true })).toMatchObject({ computer: pinnedSurface, browser: true });
+      expect(resolveSurface({ destination: undefined, pinnedSurface, browserOn: false })).toMatchObject({ computer: pinnedSurface, browser: false });
+    }
+  });
+
+  it("a thread a bot opened is marked, and gets the same places as a person's", () => {
     for (const destination of ["cloud", "vm", "local"] as const) {
       expect(resolveSurface({ destination, browserOn: true, botOpened: true })).toEqual({ computer: destination, browser: true, pinned: null, note: "", botOpened: true });
       expect(resolveSurface({ destination, browserOn: false, botOpened: true })).toMatchObject({ computer: destination, browser: false });
@@ -170,7 +198,7 @@ describe("resolveSurface", () => {
     for (const destination of ["browser", undefined] as const) {
       for (const pin of ["cloud", "vm", "local"] as const) {
         expect(resolveSurface({ destination, pinnedSurface: pin, browserOn: true }))
-          .toEqual({ computer: pin, browser: false, pinned: pin, note: "" });
+          .toEqual({ computer: pin, browser: true, pinned: pin, note: "" });
       }
     }
   });
@@ -200,8 +228,12 @@ describe("surfacePrompt", () => {
     expect(text).toMatch(/Two surfaces are mounted/);
     expect(text).toMatch(/Web tasks → the built-in browser/);
     expect(text).toMatch(/Desktop apps, files and shell → the cloud computer tools/);
-    expect(text).toMatch(/Pick one surface for a task and stay on it/);
+    expect(text).not.toMatch(/Pick one surface for a task and stay on it/);
+    expect(text).toContain("one task can use each for its own part (for example a website in the built-in browser and a desktop app or file on the computer) without asking anyone to switch");
+    expect(text).toContain("keep any one website on one surface for the whole task");
     expect(text).toMatch(/say which surface — the Browser tab or the cloud computer/);
+    expect(surfacePrompt({ computer: "local", browser: true })).toContain("one task can use each for its own part");
+    expect(surfacePrompt({ computer: "cloud", browser: false })).not.toContain("one task can use each for its own part");
   });
 
   it("starts a new task on the computer where the bot already saw its site signed in, without a check that would start it", () => {

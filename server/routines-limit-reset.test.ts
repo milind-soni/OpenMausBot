@@ -163,6 +163,65 @@ describe("Move to after reset", () => {
     expect(h.manager.listRoutines()[0]!.nextRunAt).toBe(START + 25 * HOUR);
   });
 
+  it("a usage read just after the reset leaves the run it owes in place: it starts once, then the next window is timed", async () => {
+    const h = harness();
+    const reset = START + 60 * 60_000 + 30_000;
+    h.reset("claude", reset);
+    const routine = h.create("every_reset");
+    expect(routine.nextRunAt).toBe(reset + 60_000);
+    // A read at reset + 30 s already shows the next five-hour window.
+    h.at(reset + 30_000);
+    h.reset("claude", reset + 5 * HOUR);
+    expect(h.manager.retimeLimitResets(), "the run for this reset is still owed").toBe(0);
+    expect(h.manager.listRoutines()[0]!.nextRunAt).toBe(reset + 60_000);
+    h.at(reset + 61_000);
+    expect(h.manager.retimeLimitResets()).toBe(0);
+    await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    expect(h.manager.listRoutines()[0]!.nextRunAt, "then the next window").toBe(reset + 5 * HOUR + 60_000);
+    h.at(reset + 2 * 60_000);
+    h.manager.retimeLimitResets();
+    await h.manager.tick();
+    expect(h.started, "exactly once").toHaveLength(1);
+  });
+
+  it("a Claude window that has not started again reports only the weekly reset: the owed run still starts at the reset", async () => {
+    const h = harness();
+    const reset = START + HOUR;
+    h.reset("claude", reset);
+    h.create("once");
+    h.at(reset + 10_000);
+    h.reset("claude", START + 4 * 24 * HOUR);
+    h.manager.retimeLimitResets();
+    expect(h.manager.listRoutines()[0]!.nextRunAt, "not moved days away").toBe(reset + 60_000);
+    h.at(reset + 60_000);
+    await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+  });
+
+  it("after a sleep past the reset, a read that comes before the wake's scheduler pass moves nothing; the run starts on the pass", async () => {
+    const h = harness();
+    const reset = START + HOUR;
+    h.reset("claude", reset);
+    h.create("every_reset");
+    h.at(reset + 3 * HOUR);
+    h.reset("claude", reset + 5 * HOUR);
+    expect(h.manager.retimeLimitResets()).toBe(0);
+    await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    expect(h.manager.listRoutines()[0]!.nextRunAt).toBe(reset + 5 * HOUR + 60_000);
+  });
+
+  it("still moves an automation whose reset has not come yet", () => {
+    const h = harness();
+    h.reset("claude", START + 2 * HOUR);
+    h.create("once");
+    h.at(START + 2 * HOUR - 61_000);
+    h.reset("claude", START + 3 * HOUR);
+    expect(h.manager.retimeLimitResets()).toBe(1);
+    expect(h.manager.listRoutines()[0]!.nextRunAt).toBe(START + 3 * HOUR + 60_000);
+  });
+
   it("moves a one-time schedule's time, and leaves a run already after the reset alone", () => {
     const h = harness();
     const once = h.manager.create({ name: "Once", prompt: "Do it.", botId: "scout", schedule: { type: "once", at: START + HOUR } });

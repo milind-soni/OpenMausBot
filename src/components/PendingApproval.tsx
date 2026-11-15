@@ -186,7 +186,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
               ? t("approval.aria.pendingProfile")
               : t("approval.aria.pending")
       }
-      data-ask-card="approval"
+      data-ask-card="approval" data-look="approval-card"
       className="px-4 pb-3.5 pt-3"
     >
       <div className="flex min-w-0 items-center gap-2" aria-live="polite">

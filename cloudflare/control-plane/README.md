@@ -190,42 +190,74 @@ unbounded scheduled invocation.
 
 ### Phone push relay
 
-Closed-app alerts for the iOS app (harness side: `server/phone-push.ts`,
-wire contract version 1 in `shared/phone-push.ts`; app side:
-`docs/ios-companion.md`). Apple accepts pushes for an App Store or
-TestFlight build only when they are signed with the publishing team's key, and
-a harness may run on a VPS or in a container. So the project's key lives here,
-and a harness asks this Worker to push with the installation credential it
-already holds. Account bearer tokens are refused. All three routes take
-`application/json` and answer with the usual `{ "error": "<code>" }` shape.
+Closed-app alerts for the phone app, on iPhone through APNs and on Android
+through Firebase Cloud Messaging (HTTP v1). The design, the threat model and
+the switch-on steps are in `docs/phone-push.md`; the harness side is
+`server/phone-push.ts`, its wire types `packages/phone-protocol/src/phone-push.ts`.
+Apple accepts pushes for an App Store or TestFlight build only when they are
+signed with the publishing team's key, and Google only from a service account
+of the Firebase project the Android build is registered in. So the project's
+keys live here, and a harness asks this Worker to push with the installation
+credential it already holds. Account bearer tokens are refused. All three
+routes take `application/json` and answer with the usual `{ "error": "<code>" }`
+shape.
 
-- `register` `{ "v": 1, "token": "<lowercase hex>", "environment": "production" | "sandbox" }`
-  stores the APNs device token for this installation (idempotent; it updates
-  the environment). At most 50 tokens per installation (`409
-  push_device_limit`) and 120 registrations per hour. An environment
-  `APNS_ENVIRONMENTS` does not list is `400 push_environment_not_allowed`.
-- `unregister` `{ "v": 1, "token": "…" }` deletes it. `204`.
-- `send` `{ "v": 1, "token": "…", "pairing"?: "…", "notification": { "kind",
-  "title", "botId", "botName", "threadId", "roomId"?, "roomName"? } }` pushes
-  to a token **this** installation registered, else `404
-  push_device_unknown` (the harness then registers and retries once). The
-  schema is strict: `kind` is `[a-z-]`, ids are `[\w-]{1,120}`, `title` is one
-  line of at most 200 characters, names at most 80. Any other field (a
-  `body`, a message) is `400 invalid_request`, never silently dropped, so no
-  message text can reach Apple through this route. `202 { "sent": true }` on
+- `register` `{ "v": 1, "platform"?: "apns", "token": "<lowercase hex>", "environment": "production" | "sandbox" }`
+  or `{ "v": 1, "platform": "fcm", "token": "<FCM registration token>" }`
+  stores the device token for this installation (idempotent; it updates the
+  platform and environment). `platform` defaults to `apns`, so a harness that
+  predates FCM keeps working. An FCM token has no environment (`production`
+  is stored). At most 50 tokens per installation (`409 push_device_limit`)
+  and 120 registrations per hour. An environment `APNS_ENVIRONMENTS` does not
+  list is `400 push_environment_not_allowed`; a platform whose secrets are not
+  set is `503 push_unavailable`.
+- `unregister` `{ "v": 1, "platform"?: …, "token": "…" }` deletes it. `204`.
+- `send` `{ "v": 1, "token": "…", "pairing"?: "…", "collapseId"?: "…",
+  "notification": { "kind", "title", "botId", "botName", "threadId",
+  "roomId"?, "roomName"? } }` pushes to a token **this** installation
+  registered, else `404 push_device_unknown` (the harness then registers and
+  retries once). The schema is strict: `kind` is `[a-z-]`, ids are
+  `[\w-]{1,120}`, `title` is one line of at most 200 characters, names at most
+  80, `collapseId` is `[A-Za-z0-9._:-]{1,64}`. Any other field (a `body`, a
+  message) is `400 invalid_request`, never silently dropped, so no message
+  text can reach Apple or Google through this route. `202 { "sent": true }` on
   success. Limits: 600 sends per installation and 60 per token per hour (`429
   rate_limited`, `Retry-After: 60`).
 
-The APNs request is `POST https://api.push.apple.com/3/device/<token>` (or
+- `register` also takes `"purpose": "activity"` (one Live Activity's update
+  token) or `"activity-start"` (the app's Live Activity push-to-start token) for
+  an APNs token; the default is `alert`. A send is refused (`404
+  push_device_unknown`) for a token registered for another purpose: alerts go
+  to `alert` tokens, a start to the `activity-start` token, an update or end to
+  that activity's own token.
+- `activity` `{ "v": 1, "token", "event": "start" | "update" | "end", "alert"?,
+  "activity": { "botId", "botName", "kind": "needsYou" | "working", "headline",
+  "since", "link", "color", "gradient", "body" } }` starts, updates or ends a
+  bot's Live Activity on iPhone, or sends an FCM token the data message the
+  Android app turns into its ongoing "working" notification. The schema is as
+  strict as `send`'s: `headline` is one line of at most 120 characters (the
+  phone's own words, "Scout needs you", with the name filled in), `link` must
+  be the app's chat link, colours are `#rrggbb`, and there is no field for a
+  line of text or an answer. Same limits and answers as `send`.
+
+`collapseId` is the identifier the phone gives the notification the live
+stream would have posted (`openmaus.<threadId>.<seq>`), so a push and that
+notification replace each other instead of showing twice. Without one, the
+Worker uses the first 32 hex characters of SHA-256(`kind:threadId`).
+
+**APNs.** `POST https://api.push.apple.com/3/device/<token>` (or
 `api.sandbox.push.apple.com` for a `sandbox` token) with `apns-push-type:
 alert`, `apns-priority: 10`, a 24-hour `apns-expiration`, `apns-topic` set to
-the bundle id, and an `apns-collapse-id` derived from the kind and thread, so
-a repeat replaces the older alert. The payload is
-`{ "aps": { "alert": { "title" }, "sound": "default", "thread-id",
+the bundle id, and `apns-collapse-id`. The payload is
+`{ "aps": { "alert": { "title" }, "sound": "default", "thread-id", "category",
 "interruption-level" }, "omb": { "v": 1, "kind", "botId", "botName",
-"threadId", "roomId"?, "roomName"?, "pairing"? } }`; `interruption-level` is
-`time-sensitive` for `approval`, `question`, `sign-in` and `mention`, else
-`active`.
+"threadId", "roomId"?, "roomName"?, "pairing"? }, "body": <the same as omb> }`.
+`category` is the app's `OPENMAUS_APPROVAL`, `OPENMAUS_QUESTION` or
+`OPENMAUS_UPDATE`, so the notification carries the app's buttons.
+`interruption-level` is `time-sensitive` for `approval`, `question`,
+`sign-in` and `mention`, else `active`. `body` repeats `omb` because the
+phone's notification library hands the app only `body` as a remote
+notification's data.
 
 The provider token is an ES256 JWT signed with WebCrypto (no dependency):
 `{ "alg": "ES256", "kid": APNS_KEY_ID }`, `{ "iss": APNS_TEAM_ID, "iat" }`.
@@ -233,19 +265,48 @@ Its `iat` is the start of the current 50-minute window, so every isolate
 signs for the same window and Apple's 20-to-60-minute refresh rule holds
 however many isolates send; each isolate caches its token for the window.
 
-APNs answers are mapped for the harness: `410 Unregistered`,
-`BadDeviceToken` and `DeviceTokenNotForTopic` delete the token for every
-installation that registered it in the same APNs environment (for a `410`,
-only registrations older than Apple's `timestamp`) and return `410
-push_device_unregistered` (the harness drops it too); an expired or invalid provider token is re-signed and retried once,
-then `503 push_unavailable`; APNs `429` is `429 rate_limited`; anything else
-is `502 push_failed`. Failures log the request id, APNs status and reason
-only, never the token or payload.
+**Live Activities.** `POST https://api.push.apple.com/3/device/<token>`
+with `apns-push-type: liveactivity`, `apns-topic: <bundle id>.push-type.liveactivity`,
+priority 10 for a start or a ringing update and 5 otherwise, a 15-minute
+expiration, and `{ "aps": { "timestamp", "event", "content-state": { "name":
+"BotActivity", "props": <the app's BotActivityProps as JSON, with an empty line
+and no answers> }, "stale-date" (now + 15 min) | "dismissal-date" (an end),
+"attributes-type": "LiveActivityAttributes" and "attributes": { "url" } (a
+start), "alert"? } }`. `BotActivity` and `LiveActivityAttributes` are the
+names the phone app's Live Activity is registered under (expo-widgets). For an
+FCM token: a data-only message `{ "omb_kind": "activity", "event", "bot_id",
+"bot_name", "kind", "headline", "since", "link", "alert", "sent_at" }`, priority
+`HIGH` when the bot needs the person or the activity ends, else `NORMAL`.
 
-Without all of the settings below every push route answers `503
-push_unavailable` and harnesses back off for an hour. Revoking an
-installation deletes its tokens. D1 stores, per row, the installation id, the
-token, its SHA-256, the environment and timestamps (`migrations/0008`).
+**FCM.** An OAuth access token from `https://oauth2.googleapis.com/token`
+(the JWT bearer grant: an RS256 assertion signed with the service account's
+key, scope `firebase.messaging`; the file's own `token_uri` is ignored),
+cached per isolate until five minutes before it expires. Then
+`POST https://fcm.googleapis.com/v1/projects/<project_id>/messages:send` with
+a data-only message the phone's notification library presents itself:
+`{ "message": { "token", "data": { "title", "tag": <collapse id>,
+"channelId", "categoryId", "threadIdentifier": <threadId>, "body": <omb as
+JSON> }, "android": { "priority": "HIGH", "ttl": "86400s" } } }`. There is no
+`message` key, so the notification shows its title and nothing else.
+`channelId` is the app's `approval_question` for approvals, questions and
+sign-ins, `routine_failed` for routines and `bot_messages` for the rest.
+
+Provider answers are mapped for the harness. A dead token is deleted for
+every installation that registered it and answers `410
+push_device_unregistered` (the harness drops it too): APNs `410
+Unregistered`, `BadDeviceToken` and `DeviceTokenNotForTopic` (in the same APNs
+environment; for a `410`, only registrations older than Apple's `timestamp`),
+FCM `UNREGISTERED`, `SENDER_ID_MISMATCH`, and an `INVALID_ARGUMENT` about the
+registration token. An expired or refused provider or access token is renewed
+and retried once, then `503 push_unavailable`; a `429` is `429 rate_limited`;
+anything else is `502 push_failed`. Failures log the request id, the
+platform, the provider's status and reason only, never the token or payload.
+
+Without the secrets for a platform its routes answer `503 push_unavailable`
+and harnesses back off for an hour. Revoking an installation deletes its
+tokens. D1 stores, per row, the installation id, the token, its SHA-256, the
+platform, the purpose, the environment and timestamps (`migrations/0008`, `0017`,
+`0018`).
 
 **Secrets the maintainer sets** (all with `wrangler secret put <NAME>
 --config wrangler.jsonc`; none belongs in `vars`, this file, or CI output):
@@ -257,12 +318,14 @@ token, its SHA-256, the environment and timestamps (`migrations/0008`).
 | `APNS_PRIVATE_KEY` | The whole `.p8` file, PEM, e.g. `wrangler secret put APNS_PRIVATE_KEY < AuthKey_XXXXXXXXXX.p8`. Escaped `\n` newlines are accepted too. |
 | `APNS_BUNDLE_ID` | The iOS app's bundle id, which is the APNs topic. |
 | `APNS_ENVIRONMENTS` | Optional. `production` (default), `sandbox`, or `production,sandbox` to also accept development builds' tokens. |
+| `FCM_SERVICE_ACCOUNT` | The whole service-account JSON file of the Firebase project (Project settings → Service accounts → Generate new private key), e.g. `wrangler secret put FCM_SERVICE_ACCOUNT < service-account.json`. Only `project_id`, `client_email` and `private_key` are read. |
 
 They are deliberately not in `secrets.required`: the Worker is complete
-without them, with phone push off, until the Apple key exists. Apply `migrations/0008` before
-deploying the Worker that uses it. For a local trial with `wrangler dev`,
-`.dev.vars` is read only for declared names, so add these names to
-`secrets.required` in a local, uncommitted copy of the config.
+without them, with phone push off, until the keys exist. Apply
+`migrations/0008`, `0017` and `0018` before deploying the Worker that uses them. For
+a local trial with `wrangler dev`, `.dev.vars` is read only for declared
+names, so add these names to `secrets.required` in a local, uncommitted copy
+of the config.
 
 ### Tunnel capacity and idle reclaim
 
@@ -854,9 +917,9 @@ Before a production deployment, an operator must:
    and added later (see **Several Cloudflare accounts**).
 7. Replace `ALLOWED_ORIGINS` with a comma-separated allow-list of exact HTTPS
    application origins. Wildcards are deliberately unsupported.
-8. Optional, for closed-app phone alerts: apply `migrations/0008`, then set
-   the APNs secrets listed under **Phone push relay**. Without them the push
-   routes answer `503 push_unavailable` and nothing else changes.
+8. Optional, for closed-app phone alerts: apply `migrations/0008`, `0017` and `0018`, then set
+   the APNs and FCM secrets listed under **Phone push relay**. Without them the
+   push routes answer `503 push_unavailable` and nothing else changes.
 9. Deploy the Worker and verify that `GET <BETTER_AUTH_URL>/healthz` returns
    `"ok": true` and `"service": "openmausbot-control-plane"` over HTTPS
    before shipping the desktop build. Electron probes this endpoint and

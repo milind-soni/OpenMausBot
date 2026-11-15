@@ -5414,12 +5414,17 @@ describe("harness HTTP API", () => {
     expect(zipResult).toMatchObject({ name: "payload.zip", mime: "application/zip", bytes: archive.byteLength });
     expect(zipResult.path).toMatch(/\.zip$/);
 
-    const unsupported = await fetch(`${BASE}/api/files?name=payload.exe`, {
+    const binary = await fetch(`${BASE}/api/files?name=payload.exe`, {
       method: "POST",
       headers: { "content-type": "application/x-msdownload" },
       body: Buffer.from("binary"),
     });
-    expect(unsupported.status).toBe(400);
+    expect(binary.status).toBe(201);
+    const binaryResult = await binary.json() as { path: string; name: string; mime: string };
+    expect(binaryResult).toMatchObject({ name: "payload.exe", mime: "application/octet-stream" });
+    expect(binaryResult.path).toMatch(/[\\/]attachments[\\/][0-9a-f-]+\.bin$/);
+    const served = await fetch(`${BASE}/api/attachments/${binaryResult.path.split(/[\\/]/).at(-1)}`);
+    expect(served.status).toBe(404);
 
     const missingName = await fetch(`${BASE}/api/files`, {
       method: "POST",
@@ -6807,7 +6812,7 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "local" })).status).toBe(200);
       const onScreen = await fill();
       expect(onScreen.ok).toBe(false);
-      expect(onScreen.text).toContain("it never types one on the screen of this computer");
+      expect(onScreen.text).toContain("On the screen of this computer it cannot prove which site a box belongs to, so it never types one there");
       expect(onScreen.text).toContain("Call request_sign_in so the person signs in on this computer.");
       expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "browser" })).status).toBe(200);
       const inBrowser = await fill();
@@ -10297,6 +10302,33 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("tells a bot its current browser profile and who can change it when it asks select_computer", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      expect((await api("PATCH", "/api/config", { features: { browser: true }, browserProfiles: [{ id: "work", name: "Work" }] })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        browserProfile: "work",
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "stay active" })).status).toBe(202);
+      const dump = await readJsonFileWhenReady<{ mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } } }>(fakeClaudeDump);
+      const asked = await fetch(`${BASE}/api/internal/computer/select`, {
+        headers: { authorization: `Bearer ${dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN}` },
+      });
+      expect(asked.status).toBe(200);
+      expect(((await asked.json()) as { browserProfile: unknown }).browserProfile).toEqual({
+        id: "work",
+        name: '"Work"',
+        changedBy: expect.stringMatching(/the person, in this bot's Browser tab; a Chief of Staff can set it for an idle teammate/),
+      });
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+      await api("PATCH", "/api/config", { features: { browser: false }, browserProfiles: [] }).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+    }
+  }, 60_000);
+
   it.each(["direct", "room"] as const)("mounts the browser engine's MCP server and the sign-in policy in %s turns and preview", async (target) => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     let room: any;
@@ -12031,10 +12063,10 @@ describe("harness HTTP API", () => {
       };
 
       expect((await post({ action: "create", skill_md: skillMd() })).status).toBe(201);
-      const tooBig = await post({ action: "update", skill_name: "expense-rules", skill_md: skillMd("- one more rule\n".repeat(2_500)) });
+      const tooBig = await post({ action: "update", skill_name: "expense-rules", skill_md: skillMd("- one more rule\n".repeat(5_000)) });
       expect(tooBig.status).toBe(422);
       expect(((await tooBig.json()) as { error: string }).error).toMatch(
-        /at most 32KB; this SKILL\.md is \d+\.\dKB, the current version is 0\.\dKB\. .*references\/<topic>\.md/,
+        /at most 64KB; this SKILL\.md is \d+\.\dKB, the current version is 0\.\dKB\. .*references\/<topic>\.md/,
       );
 
       const moved = await post({

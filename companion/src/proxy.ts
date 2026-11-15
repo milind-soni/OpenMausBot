@@ -6,7 +6,7 @@ import type { Duplex, Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import { createGzip, type Gzip } from "node:zlib";
 
-import { bearerToken } from "./devices.ts";
+import { bearerToken, type PairingRefusal } from "./devices.ts";
 import type { E2EDescriptor } from "./e2e/descriptor.ts";
 import { e2eContextOf } from "./e2e/origin.ts";
 import type { E2EContext } from "./e2e/registry.ts";
@@ -38,7 +38,7 @@ export interface ProxyOptions {
     code: string,
     deviceName: unknown,
     pairRequestId?: unknown,
-  ) => { token: string; device: unknown } | { error: string };
+  ) => { token: string; device: unknown } | PairingRefusal;
   serverName: () => string;
   /** The desktop app's version: told only to a paired device. */
   version?: string;
@@ -455,14 +455,14 @@ export function createProxyHandler(options: ProxyOptions) {
         (body) => {
           const credential = body.credential ?? body.code;
           if (!isPlainValue(credential) || !isPlainValue(body.deviceName)) {
-            return sendJson(res, 400, { error: "invalid pairing request" });
+            return sendJson(res, 400, { error: "invalid pairing request", code: "pairing_bad_request" } satisfies PairingRefusal);
           }
           const result = options.redeem(
             String(credential ?? ""),
             body.deviceName,
             body.pairRequestId,
           );
-          if ("error" in result) return sendJson(res, 401, { error: result.error });
+          if ("error" in result) return sendJson(res, 401, { error: result.error, code: result.code } satisfies PairingRefusal);
           const pairedId = (result.device as { id?: unknown } | null)?.id;
           if (e2e && typeof pairedId === "string") options.e2ePaired?.(e2e, pairedId);
           const hosts = options.hosts?.() ?? [];
@@ -482,10 +482,10 @@ export function createProxyHandler(options: ProxyOptions) {
           if (descriptor) response.e2e = descriptor;
           return sendJson(res, 201, response);
         },
-        (error: Error) => sendJson(res, 400, { error: error.message }),
+        (error: Error) => sendJson(res, 400, { error: error.message, code: "pairing_bad_request" } satisfies PairingRefusal),
       ).catch((error: unknown) => {
         console.error("companion: pairing failed", error);
-        sendJson(res, 500, { error: "could not complete the pairing" });
+        sendJson(res, 500, { error: "could not complete the pairing", code: "pairing_failed" } satisfies PairingRefusal);
       });
       return;
     }

@@ -401,6 +401,41 @@ describe("a sign-in app registered in advance", () => {
     expect(oauth.counts.refresh).toBe(0);
   });
 
+  it("lets two connections to one server sign in at the same time", async () => {
+    await setup({ noRegistration: true, preRegistered: { "app-a": null, "app-b": null } });
+    const two = new McpOAuthManager({
+      file: join(dir, "mcp-oauth-two.json"),
+      clients: (name) => (name === "docs" ? { clientId: "app-a" } : name === "mirror" ? { clientId: "app-b" } : undefined),
+    });
+    const wait = async (name: string, flowId: string) => {
+      for (let i = 0; i < 100; i++) {
+        const status = two.status(name, flowId);
+        if (status && status.phase !== "waiting") return status;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error("sign-in never settled");
+    };
+    try {
+      const a = await two.start("docs", mcp.url);
+      const b = await two.start("mirror", mcp.url);
+      expect(a.phase).toBe("waiting");
+      expect(b.phase).toBe("waiting");
+      const address = (status: McpSignInStatus) => new URL(status.authorizationUrl!).searchParams.get("redirect_uri");
+      expect(address(a)).toBe(address(b));
+      await approve(a);
+      await approve(b);
+      expect((await wait("docs", a.flowId!)).phase).toBe("succeeded");
+      expect((await wait("mirror", b.flowId!)).phase).toBe("succeeded");
+      const tokenA = await two.accessToken("docs", mcp.url);
+      const tokenB = await two.accessToken("mirror", mcp.url);
+      expect(tokenA).not.toBe(tokenB);
+      expect(oauth.isValid(`Bearer ${tokenA}`)).toBe(true);
+      expect(oauth.isValid(`Bearer ${tokenB}`)).toBe(true);
+    } finally {
+      two.dispose();
+    }
+  });
+
   it("explains a busy redirect port instead of moving to another one", async () => {
     await setup({ noRegistration: true, preRegistered: { corp: null } });
     registered = { clientId: "corp" };

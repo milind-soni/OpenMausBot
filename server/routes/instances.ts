@@ -28,13 +28,14 @@ import {
 } from "../claude-bedrock.ts";
 import { updateClaudeCli } from "../claude-update.ts";
 import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
-import { addEndpoint, addEndpointSchema, endpointBaseUrl, isAddedEndpoint, withEndpointUrls } from "../openai-compat-endpoints.ts";
+import { addEndpoint, addEndpointSchema, endpointBaseUrl, isAddedEndpoint, localServerAlreadyAdded, withEndpointUrls } from "../openai-compat-endpoints.ts";
 import { findOllama, probeOllama } from "../drivers/ollama.ts";
 import type { InstanceConfigMap, ModelSelection, ProviderInstance } from "../contracts.ts";
 import { removeAntigravityProfile } from "../drivers/antigravity-acp.ts";
 import { BUILT_IN_DRIVERS } from "../drivers/builtIn.ts";
 import { findCliCandidates, resetPathCache } from "../env-path.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
+import { productName } from "../brand.ts";
 import { checkEngine, type EngineCheck } from "../engine-check.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import type { ProviderAuthSessions } from "../provider-auth-sessions.ts";
@@ -191,6 +192,9 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       providerConfigBusy.set(true);
       try {
         const instances = persistableInstanceConfigs(cfg);
+        // Checked again here, inside the busy section, so two quick adds cannot both pass the settings check.
+        const duplicate = parsed.data.catalog ? localServerAlreadyAdded(instances, parsed.data.url) : null;
+        if (duplicate) return json(res, 409, { error: duplicate });
         const added = addEndpoint(instances, parsed.data);
         if ("error" in added) return json(res, 400, { error: added.error });
         await persistProviderInstance(added.instanceId, instances);
@@ -357,7 +361,11 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           const instance = registry.get(instanceId);
           if (!instance) return json(res, 404, { error: "unknown instance" });
           // The official local OAuth callback terminates on this machine, not a phone or a remote browser.
-          if (instance.authenticationMethod === "browser-pkce" && (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress))) {
+          if ((instance.authenticationMethod === "browser-pkce" || instance.authenticationMethod === "browser")
+            && (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress))) {
+            if (instance.authenticationMethod === "browser") {
+              return json(res, 403, { error: `This sign-in happens in a browser on the computer running ${productName()}. Open ${productName()} there to sign in.` });
+            }
             return json(res, 403, { error: "Continue with ChatGPT on the computer running OpenMausBot. Hosted Pro sign-in requires OpenAI's hosted-app approval." });
           }
           const started = await providerAuthSessions.start(instance, owner);

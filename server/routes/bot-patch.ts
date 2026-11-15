@@ -5,7 +5,9 @@ import { normalizeConnectorScopes } from "../../shared/connector-scopes.ts";
 import { normalizeOutboundPolicy } from "../../shared/outbound.ts";
 import { normalizePhoneApps } from "../../shared/phone-apps.ts";
 import { parseToolScope, toolScopeWidens } from "../../shared/tool-scope.ts";
-import { isMausColor, MAUS_COLOR_NAMES, type WireBot, type WireGroup } from "../../shared/wire.ts";
+import { parseToolsOff, TOOL_GROUPS } from "../../shared/tool-groups.ts";
+import { isMausColor, MAUS_COLOR_NAMES, type BotUpdateResponse, type WireBot, type WireGroup } from "../../shared/wire.ts";
+import { checkBrowserProfileChange, settleBrowserChange } from "../bot-browser-profile.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
 import { accessFromVisibility } from "../../shared/bot-access.ts";
@@ -134,7 +136,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (defaultBotRefused) return json(res, 400, { error: defaultBotRefused });
       if (existingBot && typeof body.unread === "boolean" && deps.shownThread && deps.personMarkThread?.(auth, deps.shownThread(auth, existingBot), body.unread)) {
         delete body.unread;
-        if (!Object.keys(body).length) return json(res, 200, { bot: wireBot(existingBot) });
+        if (!Object.keys(body).length) return json(res, 200, { bot: wireBot(existingBot) } satisfies BotUpdateResponse);
       }
       const rawSelection = (body as Record<string, unknown>).modelSelection;
       if (body.threadId !== undefined && rawSelection === undefined) {
@@ -296,6 +298,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.xResearch !== "boolean") return json(res, 400, { error: "xResearch must be true or false" });
         patch.xResearch = body.xResearch;
       }
+      if (body.toolsOff !== undefined) {
+        const toolsOff = body.toolsOff === null ? [] : parseToolsOff(body.toolsOff);
+        if (!toolsOff) return json(res, 400, { error: `toolsOff must be a list of ${TOOL_GROUPS.join(", ")}` });
+        patch.toolsOff = toolsOff.length ? toolsOff : undefined;
+      }
       if (body.memoryEnabled !== undefined) {
         if (typeof body.memoryEnabled !== "boolean") return json(res, 400, { error: "memoryEnabled must be true or false" });
         if (existingBot && (existingBot.busy || activeGroupTurnForBot(existingBot.id)) &&
@@ -368,25 +375,12 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.recordBrowserSteps !== "boolean") return json(res, 400, { error: "recordBrowserSteps must be true or false" });
         patch.recordBrowserSteps = body.recordBrowserSteps;
       }
-      // null/"" = the bot's own session.
       if (body.browserProfile !== undefined) {
-        const requestedProfile = body.browserProfile === null || body.browserProfile === ""
-          ? undefined
-          : body.browserProfile;
-        if (existingBot?.busy && requestedProfile !== existingBot.browserProfile) {
-          return json(res, 409, { error: "stop this bot's turn before changing its browser profile" });
-        }
-        if (existingBot && requestedProfile !== existingBot.browserProfile &&
-            browserRuntime.heldBy(currentBrowserSession(existingBot.id, existingBot.browserProfile))) {
-          return json(res, 409, { error: "Release browser control before changing its profile." });
-        }
-        if (requestedProfile === undefined) patch.browserProfile = undefined;
-        else if (
-          typeof requestedProfile === "string" &&
-          (requestedProfile === "guest" || (cfg.browserProfiles ?? []).some((profile) => profile.id === requestedProfile))
-        ) {
-          patch.browserProfile = requestedProfile;
-        } else return json(res, 400, { error: "browserProfile must name an existing browser profile" });
+        const checked = checkBrowserProfileChange(existingBot, body.browserProfile, {
+          profiles: () => cfg.browserProfiles ?? [], heldBy: (session) => browserRuntime.heldBy(session), currentBrowserSession,
+        });
+        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        patch.browserProfile = checked.profile;
       }
       if (body.cloudBackend !== undefined && !["box", "vps"].includes(String(body.cloudBackend))) {
         return json(res, 400, { error: "cloudBackend must be box or vps" });
@@ -706,11 +700,8 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (computerSpecified && requestedComputer !== undefined) store.clearAutoSurfacePins(m[1], requestedComputer);
       if (normalizedSelection && movedTask) store.patchTask(bot.id, movedTask.threadId, { modelSelection: undefined,
         ...hostedModels?.resetTask(movedTask.modelSelection, normalizedSelection) });
-      if (existingBot && (bot.browserProfile !== beforeBrowserProfile || bot.browser !== beforeBrowserEnabled)) {
-        browserLive.closeForBot(bot.id);
-        if (beforeBrowserProfile === "guest" && (bot.browserProfile !== "guest" || bot.browser === false)) {
-          void forgetTemporaryBrowser(bot.id).catch((error) => console.warn("temporary browser cleanup failed", error));
-        }
+      if (existingBot) {
+        settleBrowserChange(bot, { browserProfile: beforeBrowserProfile, browser: beforeBrowserEnabled }, { closeForBot: (id) => browserLive.closeForBot(id), forgetTemporaryBrowser });
       }
       const chiefChanges =
         body.chiefOfStaff === true || chiefMovedSections
@@ -730,7 +721,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         audienceChanged();
       }
       return json(res, 200, { bot: wireBot(store.bot(bot.id)!),
-        ...(vpsLeftOn ? { notice: vpsLeftBehindNotice("Moved", vpsLeftOn, vps.vpsContainerName(bot.id)) } : {}) });
+        ...(vpsLeftOn ? { notice: vpsLeftBehindNotice("Moved", vpsLeftOn, vps.vpsContainerName(bot.id)) } : {}) } satisfies BotUpdateResponse);
     }
     return PASS;
   };

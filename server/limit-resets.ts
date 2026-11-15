@@ -5,11 +5,11 @@ import { readFileSync } from "node:fs";
 
 import { NEAR_LIMIT_PERCENT, type EngineLimit, type EngineLimitsReport, type LimitWindowName } from "../shared/limit-reset.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { LIMIT_POLL_MS, limitReadDue } from "./limit-poll.ts";
 import { claudeHasExtraUsageRoom, loadPlanUsage, type PlanAccount, type PlanProviderRow, type PlanUsageReport, type PlanWindow } from "./plan-usage.ts";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
 
-/** How often a waiting limit-reset automation checks usage again, and how fresh a shown limit must be. */
-export const LIMIT_POLL_MS = 5 * 60_000;
+export { LIMIT_POLL_MS };
 /** A refusal's reset is kept a little past its time, so a run due right then still finds it. */
 const REFUSAL_GRACE_MS = 10 * 60_000;
 const SOON_AFTER_REFUSAL_MS = 5_000;
@@ -114,6 +114,10 @@ export class LimitResetClock {
   private readonly heldAt = new Map<string, number>();
   private readonly turnEngines = new Map<string, string>();
   private checkedAt = 0;
+  /** The last runtime event of any turn: while turns run, usage is kept five minutes fresh (limit-poll.ts). */
+  private lastTurnAt = -Infinity;
+  /** Reads in a row that failed: a quiet home retries them sooner than its hourly read (limit-poll.ts). */
+  private failures = 0;
   private loading: Promise<void> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private soon: ReturnType<typeof setTimeout> | null = null;
@@ -169,6 +173,7 @@ export class LimitResetClock {
   /** Every runtime event, with the engine its turn runs on when known: a refusal holds the engine, and a turn that
    * works on it afterwards ends the hold, since the account plainly has room again (another model, plan or account). */
   noteRuntimeEvent(engine: string | undefined, event: RuntimeEvent): void {
+    this.lastTurnAt = this.now();
     if (event.type === "turn.started" && engine) this.turnEngines.set(event.threadId, engine);
     else if (event.type === "runtime.error") {
       const refused = engine ?? this.turnEngines.get(event.threadId);
@@ -254,10 +259,14 @@ export class LimitResetClock {
     const accounts = this.options.accounts();
     this.loading = (async () => {
       try {
-        if (accounts.length) this.noteUsage(await this.load(accounts, force));
-        else this.checkedAt = this.now();
+        if (!accounts.length) { this.checkedAt = this.now(); this.failures = 0; return; }
+        const report = await this.load(accounts, force);
+        // No account answered (offline, a laptop just woke): a quiet home tries again in minutes, not in an hour.
+        this.failures = report.providers.length && report.providers.every((row) => !row.ok) ? this.failures + 1 : 0;
+        this.noteUsage(report);
       } catch {
         this.checkedAt = this.now();
+        this.failures += 1;
       }
     })().finally(() => {
       this.loading = null;
@@ -267,9 +276,20 @@ export class LimitResetClock {
 
   start(): void {
     if (this.timer) return;
-    // While an engine is held its usage is read every few minutes too, so a limit that reset early ends the hold.
-    this.timer = setInterval(() => { if (this.holding() || this.options.waiting?.()) void this.ensureFresh(LIMIT_POLL_MS - 1_000); }, 60_000);
+    // While an engine is held its usage is read again too, so a limit that reset early ends the hold: every few minutes
+    // while turns run, else just after each known reset and hourly (limit-poll.ts), so a quiet home reads nothing more.
+    this.timer = setInterval(() => {
+      if (!this.holding() && !this.options.waiting?.()) return;
+      if (limitReadDue({ now: this.now(), checkedAt: this.checkedAt, lastTurnAt: this.lastTurnAt, resets: this.knownResets(), failures: this.failures })) void this.refresh(false);
+    }, 60_000);
     this.timer.unref?.();
+  }
+
+  /** Every reset time known now: the holds' and each usage window's. */
+  private knownResets(): number[] {
+    const resets = [...this.refusals.values()];
+    for (const limit of this.usage.values()) for (const window of limit.windows ?? []) if (window.resetsAt !== null) resets.push(window.resetsAt);
+    return resets;
   }
 
   stop(): void {
