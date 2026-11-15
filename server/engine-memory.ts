@@ -266,6 +266,9 @@ export class EngineMemory {
     this.arm();
   }
 
+  /** The engine processes tracked now, with the threads each runs: for the performance sampler's buckets. */
+  enginePids(): Array<{ pid: number; threads: string[] }> { return [...this.engines].map(([pid, engine]) => ({ pid, threads: [...engine.threads] })); }
+
   /** A thread's session now runs in this already tracked engine process. */
   attach(child: ChildProcess, threadId: string): void {
     if (child.pid) this.engines.get(child.pid)?.threads.add(threadId);

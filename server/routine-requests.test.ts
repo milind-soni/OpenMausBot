@@ -711,7 +711,7 @@ describe("RoutineRequestService", () => {
         threadId: "thread-a",
         proposal: createProposal({ timeoutMinutes: 4 }),
       }),
-    ).rejects.toThrow("timeoutMinutes must be a whole number from 5 to 240");
+    ).rejects.toThrow("timeoutMinutes must be a whole number from 5 to 1440");
     await expect(
       service.propose({
         botId: "bot-a",
@@ -781,7 +781,7 @@ describe("RoutineRequestService", () => {
     expect(proposed.summary).toContain("Monday, Friday");
     expect(proposed.summary).toContain("during 9:00–17:00 India time");
     expect(proposed.summary).toContain("Sep 30, 2026");
-    expect(proposed.summary).toContain("no run limit");
+    expect(proposed.summary).toContain("default run limit (3 hours of work)");
     expect(store.messagesFor("thread-a")[0]?.card?.routineRequest?.operation).toMatchObject({
       action: "create",
       routine: {

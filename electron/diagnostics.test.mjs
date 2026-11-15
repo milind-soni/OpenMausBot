@@ -61,6 +61,15 @@ describe("buildDiagnosticsReport", () => {
     expect(report).toContain("(updater log unavailable)");
   });
 
+  it("carries the server's performance lines, scrubbed again, and says when the server gave none", () => {
+    const performance = "## Performance (timings only: no messages, names, files or addresses)\nLast hour: 3 turns, 0 failed\nOPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz";
+    const report = buildDiagnosticsReport({ appInfo, performance });
+    expect(report).toContain("## Performance (timings only: no messages, names, files or addresses)\nLast hour: 3 turns, 0 failed");
+    expect(report).not.toContain("sk-proj-abcdefghijklmnopqrstuvwxyz");
+    expect(report.indexOf("## Performance")).toBeLessThan(report.indexOf("## Desktop crash events"));
+    expect(buildDiagnosticsReport({ appInfo })).toContain("## Performance\n(server timings unavailable)");
+  });
+
   it("includes updater diagnostics separately and redacts signed redirects and headers", () => {
     const report = buildDiagnosticsReport({
       appInfo,

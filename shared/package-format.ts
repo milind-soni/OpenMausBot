@@ -244,7 +244,7 @@ const packageDocumentV1Schema = z.object({
       runOn: z.enum(["maus", "cloud"]),
       schedule: packageRoutineScheduleSchema,
       durationMinutes: z.number().int().min(5).max(240),
-      timeoutMinutes: z.number().int().min(5).max(240).optional(),
+      timeoutMinutes: z.number().int().min(5).max(1_440).optional(),
       overlap: z.enum(["skip", "queue"]).optional(),
       enabledAfterInstall: z.literal(false),
     })).max(50).optional(),

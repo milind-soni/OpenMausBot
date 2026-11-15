@@ -53,7 +53,7 @@ export interface RoutineRequestDefinition {
   runOn: RoutineRequestRunOn;
   /** Calendar/display length only: it does not stop an active run. */
   durationMinutes: number;
-  /** Optional safety cap for active work. Missing means no timeout. */
+  /** Optional limit on a run, 5 to 1,440 minutes. Missing means the default limit on its work (ROUTINE_RUN_LIMIT_MINUTES). */
   timeoutMinutes?: number;
   /** Carry the previous run's report into the next run. */
   continuity?: boolean;

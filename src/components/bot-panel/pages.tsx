@@ -147,6 +147,7 @@ export function RoutinesPage({ bot, derived }: PageContext) {
         heldBots={state.config?.heldBots}
         loading={state.routinesLoadState === "loading" && derived.botRoutines.length === 0}
         error={state.routinesLoadState === "error"}
+        unreadable={state.config?.routinesUnreadable}
         onOpen={setEditing}
         onLogs={(routine) => dispatch({ type: "showRoutines", section: "logs", botId: bot.id, routineId: routine.id })}
         onToggle={(routine) => dispatch({ type: "updateRoutine", routineId: routine.id, patch: { enabled: !routine.enabled } })}

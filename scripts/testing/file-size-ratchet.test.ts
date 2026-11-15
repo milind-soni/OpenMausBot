@@ -24,7 +24,7 @@ const LINES: Record<string, number> = {
   "server/drivers/claude.ts": 2085,
   "server/drivers/acp/core.ts": 1678,
   "server/drivers/codex.ts": 1718,
-  "server/routines.ts": 1555,
+  "server/routines.ts": 1553,
   "src/components/ComputerPanel.tsx": 1782,
   "src/components/RoutineCalendarPage.tsx": 1622,
   "server/config.ts": 1244,

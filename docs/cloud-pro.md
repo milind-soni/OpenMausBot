@@ -1719,6 +1719,7 @@ wait for the next read, `truncated: true`):
     "botId": "<uuid>", "threadId": "<uuid>", "seq": 12 }],
   "turns": { "started15m": 6, "failed15m": 3, "started24h": 40, "failed24h": 5 },
   "routines": [{ "routineId": "<uuid>", "status": "failed", "at": 1790000200000, "consecutiveFailures": 2 }],
+  "schedule": { "unreadable": false, "slowStops": 0 },
   "engines": [{ "kind": "codex", "used": true, "available": true, "authenticated": false, "version": "0.130.0" }],
   "connectors": { "checkedAt": 1790000000000, "failed": false, "items": [{ "slug": "gmail", "connected": false }] },
   "browser": { "available": true, "installing": false, "interrupted": 0 },
@@ -1794,7 +1795,16 @@ place's state (`shared/place-view.ts`); a cause the server words itself
 else `unknown`. A turn that ends in `shutdown_timeout`, `auth_required`,
 `update_required`, `spawn_error` or `rpc_error` without a failed row of its own
 counts once too. `turns` counts turns started and failed rows per minute;
-`routines` keeps each routine's last outcome and its failures in a row.
+`routines` gives, for each routine that is on and each outside trigger, its last
+outcome and its failures in a row, counted from the saved run rows at every read,
+so a restart does not start the count again. A row that only counts occurrences
+skipped while the routine was at work is not a result and is left out. `schedule.unreadable` is true while
+the home cannot read its saved routines (none runs until it can), and
+`schedule.slowStops` counts, since boot, the times stopping a turn took the
+scheduler longer than 10 seconds and it went on without waiting. This `schedule`
+section carries no `v`: a reader that requires a versioned section (`v: 1` with
+every field of that version) takes it as "no section", which is intended. The
+versioned section, with its required fields, comes with the run ledger.
 
 **What it never carries:** a failure's words, a bot's name, a thread's title,
 a prompt, a URL, an email address, a token, or an engine's account

@@ -130,6 +130,16 @@ export const PHONE_ACTIVITY_RELAY_PATH = "/v1/installations/self/push/activity";
 
 /** What a bot's activity shows: it needs the person, or it is working. */
 export type ActivityKind = "needsYou" | "working";
+/** What a bot that needs the person waits for, as the phone's content state version 1 names it. */
+export type ActivityAsk = "approval" | "question" | "signIn" | "other";
+export const ACTIVITY_ASKS: readonly ActivityAsk[] = ["approval", "question", "signIn", "other"];
+
+/** The phone's words for an activity's status line in content state version 1 ("Working", "Needs your approval"):
+ * no name, it sits under the bot's name. */
+export interface ActivityStatuses {
+  working: string;
+  needsYou: Record<ActivityAsk, string>;
+}
 export type ActivityEvent = "start" | "update" | "end";
 
 /** How the phone draws a bot: its colour, body gradient and mascot body, as its own widgets do. */
@@ -156,6 +166,9 @@ export interface PhoneActivityRegistration {
   ongoing?: boolean;
   /** Which kinds the phone wants, from its Settings switches. Absent: both. */
   kinds?: ActivityKind[];
+  /** The status words for content state version 1. A phone that registers them draws version 1, and a pushed
+   * activity is sent in it; without them the earlier shape (`headline`) is sent. */
+  statuses?: ActivityStatuses;
 }
 
 /** What the server sends the relay for one activity change. */
@@ -163,6 +176,8 @@ export interface PushRelayActivityRequest {
   v: typeof PHONE_PUSH_WIRE_VERSION;
   token: string;
   event: ActivityEvent;
+  /** A push-to-start `start` only, where ActivityKit requires one. An update or an end never alerts: an alerting
+   * update lights the screen and expands the Dynamic Island. */
   alert?: boolean;
   activity: {
     botId: string;
@@ -171,5 +186,10 @@ export interface PushRelayActivityRequest {
     headline: string;
     since: number;
     link: string;
+    /** Content state version 1, for a phone that registered `statuses`: all four, or none. */
+    version?: 1;
+    ask?: ActivityAsk;
+    status?: string;
+    waiting?: number;
   } & ActivityVisual;
 }
