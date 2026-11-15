@@ -10742,8 +10742,8 @@ function startGroupTurn(
     throw Object.assign(new Error("the selected goal coordinator is not an active room member"), { status: 409 });
   }
   // Read the room before this message is appended just below.
-  const autoCandidate = !group.dm && channelMode === "chat" && group.defaultResponder.kind === "auto" &&
-    deciderReady(cfg, "roomRouting");
+  const replyBot = !group.dm && channelMode === "chat" && group.defaultResponder.kind === "auto" && replyTo?.role === "bot" ? routableMembers.find((member) => member.id === replyTo.from?.botId) : undefined;
+  const autoCandidate = !replyBot && !group.dm && channelMode === "chat" && group.defaultResponder.kind === "auto" && deciderReady(cfg, "roomRouting");
   const historyBeforeSend = autoCandidate
     ? (() => {
         const before = store.messagesFor(threadId);
@@ -10811,7 +10811,7 @@ function startGroupTurn(
     });
   }
   const pageBots = channelMode === "chat" ? pointedResponders(options.pointed, availableMembers, () => roomResponders(text, availableMembers, { kind: "mentions" }, options.mentions)) : [];
-  let responders = pageBots.length ? pageBots : roomResponders(text, members, group.defaultResponder, options.mentions);
+  let responders = pageBots.length ? pageBots : roomResponders(text, members, replyBot ? { kind: "member", botId: replyBot.id } : group.defaultResponder, options.mentions);
   if (!group.dm) {
     const addressed = stopWordPlacement(text) === "adjacent" ? undefined : message.id;
     for (const held of responders.filter(isHeld)) noteHeldSkip(group.id, threadId, held, addressed);
