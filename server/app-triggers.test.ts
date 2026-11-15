@@ -73,6 +73,22 @@ async function gmailTrigger(triggers: AppTriggerManager, filter = { from: "acme.
 }
 
 describe("AppTriggerManager", () => {
+  it("rejects a concurrent duplicate before one event can queue two runs", async () => {
+    const client = brokerClient(() => ({ url: broker.url, token: owner.token }));
+    const type = await client.triggerType("GMAIL_NEW_GMAIL_MESSAGE");
+    vi.spyOn(client, "triggerType").mockResolvedValue(type);
+    const triggers = manager({ broker: client });
+    const results = await Promise.allSettled([gmailTrigger(triggers), gmailTrigger(triggers)]);
+    const created = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    expect(created).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toMatchObject([{ reason: { status: 409 } }]);
+    expect(triggers.list()).toHaveLength(1);
+    expect(broker.harness.composio.instances.size).toBe(1);
+    await broker.deliver(created[0]!.remote.triggerId!, { subject: "Order #7", sender: "person@acme.com" }, "msg_concurrent");
+    await triggers.pollOnce(undefined, 0);
+    expect(routines.listRuns()).toHaveLength(1);
+  });
+
   it("refuses a bot replacement when a direct edit adds protected instructions during its network wait", async () => {
     const client = brokerClient(() => ({ url: broker.url, token: owner.token }));
     const triggers = manager({ broker: client });

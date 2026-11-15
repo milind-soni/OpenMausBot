@@ -218,7 +218,8 @@ export async function runVerb(ctx: VerbContext): Promise<VerbOutcome> {
   }
   const { result, human } = report(waited, threadId, { sendId, since, ...(exported ? { export: exported } : {}) });
   if (exported) human.push(exported.ok === false ? `Export failed: ${exported.error}` : `Exported to ${exported.out} (${exported.files?.length ?? 0} files, ${exported.transcripts?.length ?? 0} transcripts).`);
-  return { result, exitCode: exported?.ok === false && waited.exitCode === EXIT.done ? EXIT.failed : waited.exitCode, human };
+  const exitCode = exported?.ok === false && waited.exitCode === EXIT.done ? EXIT.failed : waited.exitCode;
+  return { result: { ...result, ok: exitCode === EXIT.done, exitCode }, exitCode, human };
 }
 
 export async function waitVerb(ctx: VerbContext): Promise<VerbOutcome> {
