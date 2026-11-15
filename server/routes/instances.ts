@@ -357,7 +357,11 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           const instance = registry.get(instanceId);
           if (!instance) return json(res, 404, { error: "unknown instance" });
           // The official local OAuth callback terminates on this machine, not a phone or a remote browser.
-          if (instance.authenticationMethod === "browser-pkce" && (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress))) {
+          if ((instance.authenticationMethod === "browser-pkce" || instance.authenticationMethod === "browser")
+            && (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress))) {
+            if (instance.authenticationMethod === "browser") {
+              return json(res, 403, { error: "This sign-in happens in a browser on the computer running OpenMausBot. Open OpenMausBot there to sign in." });
+            }
             return json(res, 403, { error: "Continue with ChatGPT on the computer running OpenMausBot. Hosted Pro sign-in requires OpenAI's hosted-app approval." });
           }
           const started = await providerAuthSessions.start(instance, owner);

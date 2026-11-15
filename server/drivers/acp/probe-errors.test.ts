@@ -9,7 +9,7 @@ import { KimiAgentDriver } from "./kimi.ts";
 afterEach(() => vi.restoreAllMocks());
 
 it.each([
-  [{ code: "ENOENT" }, "isn't installed, or isn't on this app's PATH"],
+  [{ code: "ENOENT" }, "isn't installed where the app runs"],
   [{ code: "EACCES" }, "isn't executable"],
   [{ killed: true, signal: "SIGTERM" }, "timed out"],
   [{ code: 1 }, "version check failed"],
