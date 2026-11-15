@@ -169,7 +169,7 @@ describe("Simple mode's bot menu", () => {
     point(more(), 200);
     await wait(320);
     expect(flyout()).not.toBeNull();
-    expect([...flyout()!.querySelectorAll("button")].map((node) => node.textContent)).toEqual(["Edit profile", "Make Chief of Staff", "Duplicate", "Delete all conversations…"]);
+    expect([...flyout()!.querySelectorAll("button")].map((node) => node.textContent)).toEqual(["Edit profile", "Pause bot", "Make Chief of Staff", "Duplicate", "Delete all conversations…"]);
     point(pin, 80);
     await wait(20);
     expect(flyout()).toBeNull();
