@@ -15,7 +15,7 @@ import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
 import { boundedAgentResult } from "./agents-result.ts";
-import { outOfBounds } from "./agents-schema.ts";
+import { argumentNames, outOfBounds } from "./agents-schema.ts";
 import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
@@ -918,11 +918,11 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       };
     }
     if (args.action !== "create" && args.action !== "update") {
-      return { text: 'skill_manage action must be "create", "update", "enable", "disable" or "delete".', isError: true };
+      return { text: `skill_manage action must be "create", "update", "enable", "disable" or "delete". It takes ${argumentNames(fullInputSchema(name))}.`, isError: true };
     }
     const skillMd = typeof args.skill_md === "string" ? args.skill_md : "";
     if (!skillMd.trim()) {
-      return { text: 'skill_manage needs skill_md: the full SKILL.md including YAML frontmatter.', isError: true };
+      return { text: 'skill_manage needs skill_md: the full SKILL.md including YAML frontmatter, e.g. "---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n".', isError: true };
     }
     const source = typeof args.source === "string" ? args.source.trim() : "";
     if (!source) {
