@@ -16,7 +16,9 @@ export const CONVERSATION_SHARES_FILE = "conversation-shares.json";
 const MAX_SHARES = 50_000;
 
 const person = z.string().regex(/^p_[\w-]{22}$/);
-const shareSchema = z.object({ owner: person, with: z.union([z.literal("team"), person]), at: z.number(), before: z.object({ with: person, at: z.number() }).optional() });
+const shareSchema = z.object({ owner: person, with: z.union([z.literal("team"), person]), at: z.number(), before: z.object({ with: person, at: z.number() }).optional(),
+  /** Its person opened it from a Slack channel, shared with the team from its first line (host/team-slack-host.ts). */
+  from: z.literal("slack").optional() });
 const fileSchema = z.record(z.string().regex(/^[\w-]{1,128}$/), shareSchema);
 
 export type ConversationShare = z.infer<typeof shareSchema>;
@@ -59,6 +61,10 @@ export function createConversationShares(deps: { dataDir: string; team: boolean 
       if (!share) return null;
       return share.with === "team" ? "team" : memberAudience(shareKey(threadId));
     },
+    /** A Slack channel's conversation: the team's, and never the chat its bot opens to. */
+    fromSlack(threadId: string): boolean {
+      return deps.team && shares[threadId]?.from === "slack";
+    },
     /** Who reads a conversation shared with one person: its owner and that person. Null for any other conversation. */
     readers(threadId: string): readonly string[] | null {
       const share = deps.team ? shares[threadId] : undefined;
@@ -84,10 +90,10 @@ export function createConversationShares(deps: { dataDir: string; team: boolean 
       if (!share || entry.at >= share.at || person === share.owner) return true;
       return Boolean(share.before && person === share.before.with && entry.at >= share.before.at);
     },
-    share(threadId: string, owner: string, to: "team" | string, at = Date.now()): ConversationShare {
+    share(threadId: string, owner: string, to: "team" | string, at = Date.now(), from?: "slack"): ConversationShare {
       const earlier = shares[threadId];
       const before = earlier && earlier.with !== "team" ? { with: earlier.with, at: earlier.at } : undefined;
-      const share = shareSchema.parse({ owner, with: to, at, ...(before ? { before } : {}) });
+      const share = shareSchema.parse({ owner, with: to, at, ...(before ? { before } : {}), ...(from ? { from } : {}) });
       shares[threadId] = share;
       save();
       return share;
