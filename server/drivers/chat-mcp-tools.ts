@@ -100,6 +100,13 @@ function object(value: unknown): value is Record<string, unknown> {
 function aborted(): Error { return new Error("MCP operation cancelled"); }
 class McpRequestRefused extends Error {}
 
+/** The refusal text keeps the request's method and the server's error code — never its message, which is
+ * the server's own text and may hold anything. */
+function mcpRefusalText(method: string | undefined, error: unknown): string {
+  const code = object(error) && typeof error.code === "number" && Number.isFinite(error.code) ? error.code : "?";
+  return `MCP request failed; inspect the configured integration (method ${method ?? "?"}, JSON-RPC code ${code})`;
+}
+
 /** A chat-runtime bot's tools never get the operator's control-plane secrets; the entry's own env is applied last. */
 export function chatMcpEnvironment(serverEnv: Record<string, string>, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...source, PATH: augmentedPath() };
@@ -118,7 +125,7 @@ export class ChatMcpClient {
   private failure?: string;
   private stderrTail = "";
   private readonly configured: string[];
-  private pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
+  private pending = new Map<number, { method: string; resolve(value: unknown): void; reject(error: Error): void }>();
 
   /** `configured`: a server the person set up, whose own environment passes the bot box as theirs. */
   constructor(server: Server, computerUse = false, configured = false) {
@@ -215,7 +222,7 @@ export class ChatMcpClient {
       const entry = this.pending.get(message.id);
       if (!entry) continue;
       this.pending.delete(message.id);
-      if ("error" in message) entry.reject(new McpRequestRefused("MCP request failed; inspect the configured integration"));
+      if ("error" in message) entry.reject(new McpRequestRefused(mcpRefusalText(entry.method, message.error)));
       else if (!("result" in message)) entry.reject(new Error("MCP response has no result"));
       else entry.resolve(message.result);
     }
@@ -242,7 +249,7 @@ export class ChatMcpClient {
         const timer = setTimeout(() => finish(new Error(timedOut)), timeout);
         timer.unref();
         signal.addEventListener("abort", cancel, { once: true });
-        this.pending.set(id, { resolve: (value) => finish(undefined, value), reject: (error) => finish(error) });
+        this.pending.set(id, { method, resolve: (value) => finish(undefined, value), reject: (error) => finish(error) });
         try { this.write({ jsonrpc: "2.0", id, method, params }); }
         catch { finish(new Error("MCP request could not be sent")); }
       });
