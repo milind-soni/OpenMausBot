@@ -470,7 +470,7 @@ describe("Chat MCP session", () => {
     const f = fixture(`if (message.method === "tools/call") { send({jsonrpc:"2.0",id:message.id,error:{code:-1,message:"secret-fixture-key"}}); continue; }`);
     const session = await f.mount();
     const result = await session.execute("audit_write", { value: "test" }, f.controller.signal);
-    expect(result).toMatchObject({ ok: false, text: 'MCP request failed; inspect the configured integration That was the MCP server "audit".' });
+    expect(result).toMatchObject({ ok: false, text: 'MCP request failed; inspect the configured integration (method tools/call, JSON-RPC code -1) That was the MCP server "audit".' });
     expect(result.text).not.toContain("secret-fixture-key");
     expect(alive(f.read().pid)).toBe(true);
   });
