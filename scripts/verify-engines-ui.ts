@@ -32,6 +32,7 @@ const instances: InstanceInfo[] = [
   ["qwen", "qwenAgent", "Qwen", false, ""],
   ["pi", "piAgent", "Pi", false, ""],
   ["omp", "ompAgent", "OMP", false, ""],
+  ["mistralVibe", "mistralVibeAgent", "Mistral (Vibe)", false, ""],
   ["deepseek", "deepseekAgent", "DeepSeek Harness", false, ""],
   ["githubCopilot", "copilotAgent", "GitHub Copilot", true, "1.0.103"],
   ["commandCode", "commandCodeAgent", "Command Code", true, "1.88.4"],

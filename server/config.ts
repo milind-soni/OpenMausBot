@@ -1110,9 +1110,9 @@ export function instanceOwnsRouting(
     case "modelgo": return own(entry.environment?.MODELGO_API_KEY) || ownUrl("https://api.modelgo.ai/v1");
     case "meta":
       return own(entry.environment?.META_API_KEY) || ownUrl("https://api.meta.ai/v1", cfg.meta?.url);
-    case "deepseekAgent":
-      // A second DeepSeek Harness account brings its own key; the workspace key fills only an instance without one.
-      return own(entry.environment?.DEEPSEEK_API_KEY);
+    case "deepseekAgent": case "mistralVibeAgent":
+      // A second DeepSeek Harness or Vibe CLI account brings its own key; the workspace key fills only an instance without one.
+      return own(entry.environment?.[entry.driver === "deepseekAgent" ? "DEEPSEEK_API_KEY" : "MISTRAL_API_KEY"]);
     case "grok":
       return own(entry.environment?.XAI_API_KEY) || (own(config.apiKeyEnv) && config.apiKeyEnv !== "XAI_API_KEY")
         || ownUrl("https://api.x.ai/v1", cfg.xai?.url);
@@ -1124,7 +1124,7 @@ export function instanceOwnsRouting(
 /** Each secret goes only to the driver that reads it; the Boat token reaches no engine. */
 function injectedEnvironment(cfg: AppConfig, instanceId: string, driver: string): Map<string, string> {
   const environment = new Map<string, string>();
-  if (driver === "mistral" && cfg.mistral?.key) environment.set("MISTRAL_API_KEY", cfg.mistral.key);
+  if ((driver === "mistral" || driver === "mistralVibeAgent") && cfg.mistral?.key) environment.set("MISTRAL_API_KEY", cfg.mistral.key);
   if (driver === "cerebras" && cfg.cerebras?.key) environment.set("CEREBRAS_API_KEY", cfg.cerebras.key);
   if (driver === "groq" && cfg.groq?.key) environment.set("GROQ_API_KEY", cfg.groq.key);
   if (driver === "greenference" && cfg.greenference?.key) environment.set("GREENFERENCE_API_KEY", cfg.greenference.key); if (driver === "modelgo" && cfg.modelgo?.key) environment.set("MODELGO_API_KEY", cfg.modelgo.key);
