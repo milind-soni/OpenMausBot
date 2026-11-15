@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
 import { EXCERPT_SUMMARY_HEADER } from "../shared/wire.ts";
 import { deterministicSummary, draftSummary, foldPoint, summaryPrompt } from "./compaction-summary.ts";
-import type { ReplayEntry } from "./context-rebuild.ts";
+import { MAX_SUMMARY_BYTES, selectReplay, type ReplayEntry } from "./context-rebuild.ts";
 import { createSideJobs, type SideJobInstance, type SideJobsDeps } from "./side-jobs.ts";
 
 const history: ReplayEntry[] = [
@@ -48,6 +48,26 @@ it("opens only the excerpt fallback with the header stored records are recognise
   expect(deterministicSummary(history).split("\n")[0]).toBe(EXCERPT_SUMMARY_HEADER);
   const written = await draftSummary(history, { signal: new AbortController().signal, generateText: async () => "The person cancelled the deployment." });
   expect(written.startsWith(EXCERPT_SUMMARY_HEADER)).toBe(false);
+});
+
+it("does not re-escape the previous summary across repeated manual compactions", () => {
+  const longestBackslashRun = (text: string) => Math.max(0, ...(text.match(/\\+/g) ?? []).map(run => run.length));
+  let transcript: ReplayEntry[] = [{ id: "m1", role: "user", text: "Deploy to \"staging\"\nthen run the tests" }];
+  let summary = "";
+  const runs: number[] = [];
+  for (let round = 1; round <= 4; round++) {
+    summary = deterministicSummary(transcript.filter(entry => entry.id));
+    runs.push(longestBackslashRun(summary));
+    const record = { id: `c${round}`, firstKeptId: "", foldedThroughId: `m${round}`, summary, tokensBefore: 0, by: "person" as const };
+    const next: ReplayEntry = { id: `m${round + 1}`, role: "user", text: `Round ${round + 1} note` };
+    const replay = selectReplay([...transcript.filter(entry => entry.id !== `c${round - 1}`), { id: record.foldedThroughId, role: "user", text: "x" }, { id: record.id, role: "assistant", text: "" }, next], { compaction: record });
+    transcript = replay.transcript;
+  }
+  expect(runs.every(run => run === runs[0])).toBe(true);
+  expect(summary).toContain("Deploy to \\\"staging\\\"\\nthen run the tests");
+  expect(summary).toContain("Round 4 note");
+  expect(summary.split(EXCERPT_SUMMARY_HEADER).length).toBe(2);
+  expect(Buffer.byteLength(summary)).toBeLessThanOrEqual(MAX_SUMMARY_BYTES);
 });
 
 it("works without a model helper", async () => {
