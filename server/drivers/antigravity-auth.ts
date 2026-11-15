@@ -29,7 +29,7 @@ const CANCELLED = "Google sign-in was cancelled.";
 const FAILED = "Google sign-in failed. Start sign-in again.";
 const NOT_APPROVED = "Google sign-in was not approved. Start sign-in again.";
 const NOT_ELIGIBLE = "Google requires an eligible Antigravity subscription for this account.";
-const NOT_DELIVERED = "Could not deliver the sign-in response. Start sign-in again.";
+const NOT_DELIVERED = "Could not deliver the sign-in response. If Google already finished in your browser, wait a moment. Otherwise send it again.";
 const ALREADY_SENT = "The sign-in response was already sent. Wait for Google to finish.";
 
 class SignInExpired extends Error {}
@@ -51,7 +51,8 @@ interface AuthFlow {
   completed: Promise<void>;
   pending: { redirectUri: string; state: string };
   expiresAt: number;
-  /** The runtime's listener takes one response: a second would be read as another sign-in's. */
+  /** The runtime's listener takes one response: a second would be read as another sign-in's. Cleared when a
+   * delivery fails, which the listener having closed after the browser's own redirect also looks like. */
   callbackSent: boolean;
 }
 
@@ -173,10 +174,7 @@ export class AntigravityAuthController {
     try {
       await forwardAntigravityCallback(callback, flow.relay ?? undefined);
     } catch {
-      if (this.end(flow, "failed", NOT_DELIVERED)) {
-        flow.client.close();
-        flow.relay?.close();
-      }
+      flow.callbackSent = false;
       throw new Error(NOT_DELIVERED);
     }
     await flow.completed;

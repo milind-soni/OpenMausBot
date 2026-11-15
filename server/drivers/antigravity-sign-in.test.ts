@@ -2,7 +2,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import type { ChildProcess } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs } from "../config.ts";
@@ -23,7 +23,7 @@ import {
 } from "./antigravity-acp.ts";
 import { AntigravityAuthController } from "./antigravity-auth.ts";
 import { resolveAntigravityRuntime } from "./antigravity-runtime.ts";
-import { AntigravityDriver } from "./antigravity.ts";
+import { AntigravityDriver, antigravitySignInError } from "./antigravity.ts";
 
 const TESTING = join(dirname(fileURLToPath(import.meta.url)), "..", "testing");
 const FAKE_ACP = join(TESTING, "fake-acp-cli.ts");
@@ -132,6 +132,38 @@ describe("a sign-in the runtime asks for in the middle of a turn", () => {
     expect((await instance.snapshot()).authenticated).toBe(false);
   }, 60_000);
 
+  it("reads signed in again after a sign-in that succeeds without rewriting the stored token", async () => {
+    ensureDirs();
+    const fake = fakeRuntime();
+    const mode = join(fake.directory, "mode");
+    writeFileSync(mode, "auth-required");
+    writeFileSync(fake.executable, `#!/usr/bin/env node\nimport { readFileSync } from 'node:fs';\nprocess.env.FAKE_ACP_MODE = readFileSync(${JSON.stringify(mode)}, 'utf8');\nawait import(${JSON.stringify(pathToFileURL(FAKE_ACP).href)});\n`);
+    const instanceId = "antigravity-signed-in-again";
+    const token = storeToken(instanceId);
+    const stored = readFileSync(token, "utf8");
+    const instance = await create(instanceId, fake.executable);
+    const recorder = recordEvents(instance.adapter);
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "again", text: "hello", cwd: fake.directory });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    expect((await instance.snapshot()).authenticated).toBe(false);
+    writeFileSync(mode, "happy");
+    expect(await instance.startAuthentication!()).toMatchObject({ phase: "succeeded" });
+    expect(readFileSync(token, "utf8")).toBe(stored);
+    expect((await instance.snapshot()).authenticated).toBe(true);
+  }, 60_000);
+
+  it.each([
+    [{ code: -32000, message: "Authentication required" }, true],
+    [{ code: -32000, message: "Internal", data: { reason: "UNAUTHENTICATED" } }, true],
+    [{ code: -32000, message: "Request failed", data: "Please sign in again" }, true],
+    [{ code: -32000, message: "Server overloaded" }, false],
+    [{ code: -32000 }, false],
+    [{ code: -32603, message: "Authentication required" }, false],
+    [null, false],
+  ])("reads a sign-in request only where the error's code and words agree (%j)", (error, expected) => {
+    expect(antigravitySignInError(error)).toBe(expected);
+  });
+
   it("stops a model lookup the same way instead of waiting on a link nobody sees", async () => {
     const fake = fakeRuntime(runtimeSource(ASKS_FOR_SIGN_IN));
     const runtime = await resolveAntigravityRuntime(fake.executable);
@@ -143,7 +175,7 @@ describe("a sign-in the runtime asks for in the middle of a turn", () => {
 });
 
 describe("signing out of Antigravity", () => {
-  it("stops the account's running runtime before it forgets the sign-in", async () => {
+  it("forgets the sign-in at once and stops the account's running runtime", async () => {
     ensureDirs();
     const fake = fakeRuntime();
     const instanceId = "antigravity-pooled";
@@ -163,10 +195,13 @@ describe("signing out of Antigravity", () => {
     expect(children).toHaveLength(1);
     expect(children[0]!.exitCode).toBeNull();
 
+    const started = Date.now();
     await instance.signOut!();
-    expect(children[0]!.exitCode !== null || children[0]!.signalCode !== null).toBe(true);
+    expect(Date.now() - started).toBeLessThan(3_000);
     expect(existsSync(token)).toBe(false);
     expect((await instance.snapshot()).authenticated).toBe(false);
+    await vi.waitFor(() => expect(children[0]!.exitCode !== null || children[0]!.signalCode !== null).toBe(true), { timeout: 15_000 });
+    expect(existsSync(token)).toBe(false);
   }, 90_000);
 });
 
@@ -241,14 +276,31 @@ describe("the Google sign-in's state", () => {
     }
   }, 60_000);
 
-  it("lets a redirect that fails validation be corrected, and ends the sign-in when delivery fails", async () => {
+  it("lets a redirect that fails validation or delivery be sent again", async () => {
     const { controller, flow } = await signIn("state-undelivered", runtimeSource(ASKS_FOR_SIGN_IN));
     try {
       await expect(controller.complete(flow.flowId!, "http://127.0.0.1:54321/?state=wrong&code=x")).rejects.toThrow("does not belong");
       expect((await controller.get(flow.flowId!)).phase).toBe("waiting");
-      await expect(controller.complete(flow.flowId!, "http://127.0.0.1:54321/?state=fixture&code=x"))
-        .rejects.toThrow("Could not deliver the sign-in response. Start sign-in again.");
-      expect(await controller.get(flow.flowId!)).toMatchObject({ phase: "failed", message: "Could not deliver the sign-in response. Start sign-in again." });
+      for (const attempt of [1, 2]) {
+        await expect(controller.complete(flow.flowId!, `http://127.0.0.1:54321/?state=fixture&code=${attempt}`))
+          .rejects.toThrow("Could not deliver the sign-in response.");
+        expect((await controller.get(flow.flowId!)).phase).toBe("waiting");
+      }
+    } finally {
+      controller.cancel();
+    }
+  }, 60_000);
+
+  it("still succeeds when the redirect is pasted after the browser already delivered it", async () => {
+    const closes = String(readFileSync(FAKE_SIGNIN)).replace("if (pending !== null) reply(pending, {});", "callback.close(); setTimeout(() => reply(pending, {}), 1_500);");
+    const { controller, flow, signedIn, profile } = await signIn("state-browser-first", closes);
+    try {
+      const redirect = `${new URL(flow.authorizationUrl!).searchParams.get("redirect_uri")!}?state=fixture&code=browser`;
+      expect((await fetch(redirect, { headers: { connection: "close" } })).status).toBe(200);
+      await expect(controller.complete(flow.flowId!, redirect)).rejects.toThrow("Could not deliver the sign-in response.");
+      await vi.waitFor(async () => expect((await controller.get(flow.flowId!)).phase).toBe("succeeded"), { timeout: 10_000 });
+      expect(signedIn).toHaveBeenCalledOnce();
+      expect(await antigravityProfileAuthenticated(profile)).toBe(true);
     } finally {
       controller.cancel();
     }
@@ -320,6 +372,13 @@ describe("the runtime's launch environment", () => {
     const noisy = join(fake.directory, process.platform === "win32" ? "noisy.cmd" : "noisy");
     writeFileSync(noisy, process.platform === "win32" ? "@echo off\r\necho opened a browser\r\n" : "#!/bin/sh\necho opened a browser\n");
     if (process.platform !== "win32") chmodSync(noisy, 0o755);
-    await expect(verifyAntigravityBrowserHelper(profile, noisy)).rejects.toThrow("Antigravity browser suppression could not be verified.");
+    await expect(verifyAntigravityBrowserHelper(profile, noisy)).rejects.toThrow(/Google sign-in cannot start: .*\((?:it did not hand the sign-in link to the app|it could not be started|it stopped with an error)\)/u);
+    await expect(verifyAntigravityBrowserHelper(profile, join(fake.directory, "absent"))).rejects.toThrow("(it could not be started)");
+    if (process.platform !== "win32") {
+      const warns = join(fake.directory, "warns");
+      writeFileSync(warns, `#!/bin/sh\necho "(node) a warning the runtime also prints" >&2\nexec ${JSON.stringify(process.execPath)} "$@"\n`);
+      chmodSync(warns, 0o755);
+      await expect(verifyAntigravityBrowserHelper(profile, warns)).resolves.toBeUndefined();
+    }
   }, 60_000);
 });

@@ -10,9 +10,7 @@
 //   - apps/server/src/provider/antigravityCallback.ts (the redirect's
 //     validation and delivery);
 //   - apps/server/src/provider/acp/AntigravityAcpSupport.ts:55-79, 108-121
-//     (the session setup for releases that write a workflow skill file);
-//   - apps/server/src/provider/AntigravityAuth.ts:486-535 (sign-out through
-//     the runtime's own logout).
+//     (the session setup for releases that write a workflow skill file).
 // The temp folder stays one per instance, the redirect can go through a relay into a boxed runtime, and startup waits
 // while a Windows unpack is still growing.
 import { execFile } from "node:child_process";
@@ -111,17 +109,21 @@ export function linuxCaBundle(env: NodeJS.ProcessEnv, exists: (path: string) => 
 }
 
 /** A sign-in must hand its link to the app and never open a browser on the server: run the helper once the way the
- * runtime will, and refuse the sign-in unless it prints exactly the marked link. */
+ * runtime will, and refuse the sign-in unless it prints the marked link. Other stderr lines (a runtime warning) pass. */
 export async function verifyAntigravityBrowserHelper(profile: AntigravityProfile, executable = process.execPath): Promise<void> {
   const helper = process.platform === "win32" ? executable.replaceAll("\\", "/") : executable;
   if (verifiedBrowserHelpers.has(helper)) return;
-  const outcome = await new Promise<{ failed: boolean; stdout: string; stderr: string }>((resolveRun) => {
+  const reason = await new Promise<string | null>((resolveRun) => {
     execFile(helper, ["-e", browserHelperSource, "--", BROWSER_PREFLIGHT_URL],
-      { env: profile.environment, timeout: BROWSER_PREFLIGHT_MS, maxBuffer: 4_096, windowsHide: true },
-      (error, stdout, stderr) => resolveRun({ failed: error !== null, stdout: String(stdout), stderr: String(stderr) }));
+      { env: profile.environment, timeout: BROWSER_PREFLIGHT_MS, maxBuffer: 64 * 1024, windowsHide: true },
+      (error, _stdout, stderr) => {
+        if (error) return resolveRun(error.killed ? "it did not answer in 30 seconds" : typeof error.code === "string" ? "it could not be started" : "it stopped with an error");
+        const marked = String(stderr).split(/\r?\n/u).includes(`${BROWSER_MARKER}"${BROWSER_PREFLIGHT_URL}"`);
+        resolveRun(marked ? null : "it did not hand the sign-in link to the app");
+      });
   });
-  if (outcome.failed || outcome.stdout !== "" || outcome.stderr !== `${BROWSER_MARKER}"${BROWSER_PREFLIGHT_URL}"\n`) {
-    throw new Error("Antigravity browser suppression could not be verified.");
+  if (reason) {
+    throw new Error(`Google sign-in cannot start: the helper that passes the sign-in link to OpenMausBot failed a check (${reason}). Restart OpenMausBot and try again. If it keeps failing, share this message.`);
   }
   verifiedBrowserHelpers.add(helper);
 }
@@ -198,11 +200,16 @@ export class AntigravitySignInRequired extends Error {
 const refusedTokens = new Map<string, string>();
 const tokenStamp = (info: { mtimeMs: number; size: number; ino: number | bigint }) => `${info.mtimeMs}:${info.size}:${info.ino}`;
 
-/** The stored token no longer signs this account in. It counts as signed out until a sign-in writes the file again. */
+/** The stored token no longer signs this account in. It counts as signed out until a sign-in succeeds or writes the
+ * file again. */
 export function noteAntigravitySignInRequired(tokenPath: string): void {
   try {
     refusedTokens.set(tokenPath, tokenStamp(statSync(tokenPath)));
   } catch {}
+}
+
+export function noteAntigravitySignedIn(tokenPath: string): void {
+  refusedTokens.delete(tokenPath);
 }
 
 /** An isolated Google profile per instance; foreign Google credentials are stripped so the account
@@ -680,22 +687,6 @@ export async function probeAntigravityModels(input: {
     throw error;
   } finally {
     client.close();
-  }
-}
-
-const LOGOUT_TIMEOUT_MS = 30_000;
-
-/** Has the runtime drop the Google sign-in it stored, where it offers ACP logout. Waits for the process to end, so it
- * cannot write the token file afterwards. */
-export async function logoutAntigravity(runtime: AntigravityRuntime, profile: AntigravityProfile, timeoutMs = LOGOUT_TIMEOUT_MS): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  const client = new AntigravityAcpClient(runtime, profile, profile.directory);
-  try {
-    const initialized = await client.initialize(timeoutMs, deadline);
-    if (!initialized?.agentCapabilities?.auth?.logout) return;
-    await client.request("logout", {}, Math.max(1_000, deadline - Date.now()));
-  } finally {
-    await client.closeAndWait();
   }
 }
 
