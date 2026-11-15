@@ -25,7 +25,7 @@ import { clientGroupPatchViolation, requestSource, type RequestAuth } from "../r
 import type { RoomContextTracker } from "../room-context.ts";
 import { parseConversationTurnTimeout } from "../room-turn-timeout.ts";
 import type { RoutineManager } from "../routines.ts";
-import { acceptedSendMatch, parseSendId, sendFingerprint, type SendSequencer } from "../send-idempotency.ts";
+import { acceptedSendMatch, parseSendId, parseStopId, sendFingerprint, StopReceipts, type SendSequencer } from "../send-idempotency.ts";
 import type { SkillReview } from "../skill-review.ts";
 import { assertWithinBudget } from "../spend.ts";
 import type { BotRecord, GroupRecord, GroupTaskPatch, Message, Store } from "../store.ts";
@@ -109,6 +109,8 @@ export interface ChannelRouteDeps {
 
 const createGroupTaskRequestSchema = z.object({ title: z.string().optional() });
 
+type StopAnswer = { status: 200 | 403 | 409; body: { ok: true } | { error: string; code?: "stop_not_yours" } };
+
 export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
   const {
     store, cfg, broadcast, notificationListed, actorKey, threadStarters, phoneSecretSubmissions, sendSequencer, roomMemberContexts, skillReview,
@@ -119,6 +121,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
     stagedSkillCleanupsForThread, rejectDeletedThreadSkillStages,
   } = deps; const owners = routeRunOwners(deps.runOwners, deps.runActor);
   const DESKTOP_MANAGED = deps.desktopManaged;
+  const roomStops = new StopReceipts<StopAnswer>();
   const deleteRefusal = (auth: RequestAuth, groupId: string, threadId: string): { status: 403 | 404 | 409; error: string } | null => {
     if (phoneSecretSubmissions.hasThread(threadId)) {
       return { status: 409, error: "this task is securely saving a credential — try again when it finishes" };
@@ -634,43 +637,48 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (body.threadId !== undefined && (typeof body.threadId !== "string" || !/^[\w-]+$/.test(body.threadId))) {
         return json(res, 400, { error: "threadId must be a task id" });
       }
-      if (body.threadId !== undefined) {
-        const ownsThread = group.dm
-          ? body.threadId === group.threadId
-          : Boolean(store.groupTaskByThread(group.id, body.threadId));
-        if (!ownsThread) {
-          return json(res, 409, { error: "the channel switched tasks before it could be interrupted" });
+      const stopId = parseStopId(body.stopId);
+      if (stopId === null) return json(res, 400, { error: "stopId must be a client-generated id" });
+      const answer = await roomStops.run(stopId && `${group.id}:${stopId}`, async (): Promise<StopAnswer> => {
+        if (body.threadId !== undefined) {
+          const ownsThread = group.dm
+            ? body.threadId === group.threadId
+            : Boolean(store.groupTaskByThread(group.id, body.threadId));
+          if (!ownsThread) {
+            return { status: 409, body: { error: "the channel switched tasks before it could be interrupted" } };
+          }
         }
-      }
-      const activeOperations = [...(groupTurnOperations.get(group.id) ?? [])]
-        .filter((operation) => !operation.cancelled);
-      const targetThreadIds = body.threadId !== undefined
-        ? [body.threadId]
-        : activeOperations.length > 0
-          ? [...new Set(activeOperations.map((operation) => operation.threadId))]
-          : [group.threadId];
-      const interruptTargets = targetThreadIds.map((threadId) => {
-        const speaker = groupSpeakers.get(threadId);
-        const busy = speaker
-          ? store.bot(speaker.botId)
-          : threadId === group.threadId && group.busyBotId
-            ? store.bot(group.busyBotId)
-            : undefined;
-        return {
-          threadId,
-          instance: busy ? runningTurnInstance(busy, threadId) : undefined,
-        };
+        const activeOperations = [...(groupTurnOperations.get(group.id) ?? [])]
+          .filter((operation) => !operation.cancelled);
+        const targetThreadIds: string[] = body.threadId !== undefined
+          ? [body.threadId]
+          : activeOperations.length > 0
+            ? [...new Set(activeOperations.map((operation) => operation.threadId))]
+            : [group.threadId];
+        const interruptTargets = targetThreadIds.map((threadId) => {
+          const speaker = groupSpeakers.get(threadId);
+          const busy = speaker
+            ? store.bot(speaker.botId)
+            : threadId === group.threadId && group.busyBotId
+              ? store.bot(group.busyBotId)
+              : undefined;
+          return {
+            threadId,
+            instance: busy ? runningTurnInstance(busy, threadId) : undefined,
+          };
+        });
+        const refusal = targetThreadIds.map((threadId) => owners.stopRefusal(auth, threadId)).find(Boolean);
+        if (refusal) return { status: 403, body: { error: refusal, code: "stop_not_yours" } };
+        // Abort every queued operation before the first provider round trip, so none begins while Stop awaits.
+        for (const { threadId } of interruptTargets) cancelGroupTurnOperations(group.id, threadId);
+        for (const { threadId, instance } of interruptTargets) {
+          revokeInternalCapabilitiesForThread(threadId);
+          await instance?.adapter.interruptTurn(threadId).catch(() => {});
+          closeOpenApprovals(threadId);
+        }
+        return { status: 200, body: { ok: true } };
       });
-      const refusal = targetThreadIds.map((threadId) => owners.stopRefusal(auth, threadId)).find(Boolean);
-      if (refusal) return json(res, 403, { error: refusal, code: "stop_not_yours" });
-      // Abort every queued operation before the first provider round trip, so none begins while Stop awaits.
-      for (const { threadId } of interruptTargets) cancelGroupTurnOperations(group.id, threadId);
-      for (const { threadId, instance } of interruptTargets) {
-        revokeInternalCapabilitiesForThread(threadId);
-        await instance?.adapter.interruptTurn(threadId).catch(() => {});
-        closeOpenApprovals(threadId);
-      }
-      return json(res, 200, { ok: true });
+      return json(res, answer.status, answer.body);
     }
     return PASS;
   };
