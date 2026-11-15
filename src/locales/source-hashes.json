@@ -47228,6 +47228,8 @@
       "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174",
       "engineSetup.cloudPasteSummary": "99bef9b03db7662e2944939a6bf8e904d5c674c3577540ef994a9f5c4862ed5f",
       "engineSetup.cloudPasteHint": "e6e7b723c8ec76caec36a54986610db04f079430fd3a7a1986c627e18480a7ea",
+      "chat.cloudGuest.ownerApproves": "aadd80b6e03cb0cd6d217c5365ea5bab64c4ab20460ae213b1ca6b0f3bac46c2",
+      "serverError.card.cloudOwnerOnly": "0e42ca25d5bb39f9d127462765bc2430a5c6792e130b80fbb30ea68e54be8ae4",
       "routines.noStartStreak": "fb107024c4705682465cf381239f9ecfc60e2e5dca2776c8082236b44ef38a9d",
       "routines.unreadable": "389a5c2a0eaa1366fc44c538daef1c28f2271aba90e806be13da78c14c1d3ced",
       "routines.server.busyTooLong": "4127f973deb204a8156c2c823319287c125b4e457d6ffe467c3597846b656d3b",
@@ -57610,7 +57612,9 @@
       "devices.computers.pairTitle": "b7cda6a11ab410daa4b8977624ca72261c0168e7c3d83ae0eed93ac4e3540bc8",
       "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174",
       "engineSetup.cloudPasteSummary": "99bef9b03db7662e2944939a6bf8e904d5c674c3577540ef994a9f5c4862ed5f",
-      "engineSetup.cloudPasteHint": "e6e7b723c8ec76caec36a54986610db04f079430fd3a7a1986c627e18480a7ea"
+      "engineSetup.cloudPasteHint": "e6e7b723c8ec76caec36a54986610db04f079430fd3a7a1986c627e18480a7ea",
+      "chat.cloudGuest.ownerApproves": "aadd80b6e03cb0cd6d217c5365ea5bab64c4ab20460ae213b1ca6b0f3bac46c2",
+      "serverError.card.cloudOwnerOnly": "0e42ca25d5bb39f9d127462765bc2430a5c6792e130b80fbb30ea68e54be8ae4"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

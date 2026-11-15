@@ -6,8 +6,11 @@ there), which works out the team member who wrote and hands each message to that
 for that member**. This page is the Cloud's side: three routes the Admin calls, and one signed report back. The Slack bot
 token never reaches this machine, and this machine never talks to Slack.
 
-Only a Team Cloud (`OMB_CLOUD_ROLE=team`, [team-cloud.md](team-cloud.md)) has any of it. Everywhere else every route
-below answers 404 with no `code`, and nothing is reported anywhere.
+A Team Cloud (`OMB_CLOUD_ROLE=team`, [team-cloud.md](team-cloud.md)) has all of it. A My Cloud, one person's own
+(`OMB_CLOUD_ROLE=home`), has the same routes and reports for its owner: see
+[On a My Cloud](#on-a-my-cloud-one-persons-own) for what differs. Everywhere else (the desktop app, a self-hosted
+server) every route below answers 404 with no `code`, and nothing is reported anywhere. Which plans may connect Slack
+is the Admin's to decide: the app checks no plan.
 
 ## A Slack message is the member's own request
 
@@ -56,6 +59,26 @@ Team by the same answer as every conversation.
 A channel's conversation is also recorded as from Slack where its sharing is (`conversation-shares.json`, `from:
 "slack"`). It is never the chat its bot opens to: the bot's shared chat stays the shared chat, however often Slack
 threads are written in after it.
+
+## On a My Cloud, one person's own
+
+The Admin opens the session through the same signed pairing with no member's claim, so it is the owner's own session,
+as their app's is. The three routes, their answers, the idempotent `id`, the queue, Stop and the signed reports are the
+ones on this page. What differs, because there is one person and no team:
+
+- **Who asks.** The owner: a session with full access, whichever one the Admin opened (a new session per message is the
+  same person). Any other session (a guest's) answers `404 not_a_member`.
+- **Both audiences are the owner's ordinary conversation.** `team` and `member` each open a conversation as the owner
+  opens one in the app, and the line is their own request through the same `acceptDirectSend`. Nothing is shared
+  (`conversation-shares.json` is a Team Cloud's), no audience is compared, and `conversationId` continues any
+  conversation the owner can write in, whichever audience the request names. There is no `bot_private`.
+- **Bots.** `GET /api/slack/team/bots` lists every bot, each `shared: true`: all are the owner's, in a channel as in a
+  direct message. `{ default: true }` is the Cloud's MausBot, else the first bot.
+- **Where it came from.** The titles are the same. A conversation a channel's message opened is still never the chat
+  its bot opens to; with no sharing to record it in, its id is kept in `team-slack-messages.json` (`channels`), after
+  its messages are dropped. A direct message's conversation is as any the owner opens, so the one they last wrote in
+  is the chat the bot opens to.
+- **Nobody leaves.** Nothing is forgotten for a person; the record keeps its week, month and 2,000.
 
 ## The routes
 
@@ -107,8 +130,9 @@ answers; a `running` nobody answered is not. `{ done: true }` and a 404 end the 
 the Admin may put in its answer is not read: only a member's own session stops a run.
 
 `team-slack-messages.json` (0600) keeps each message's id, its person's key, bot, conversation, audience and state: a
-week after it is over, a month at most, 2,000 at most. Never the words, the channel, the Slack user or an address. It
-is left out of a workspace export.
+week after it is over, a month at most, 2,000 at most. Never the words, the channel, the Slack user or an address. On
+a My Cloud it also keeps the ids of the conversations a channel opened (`channels`, 2,000 at most). It is left out of
+a workspace export.
 
 ## Cards
 
