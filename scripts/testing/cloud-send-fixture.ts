@@ -124,6 +124,9 @@ export interface CloudTeamFixture {
   home: string;
   id: string;
   name: string;
+  /** What the Admin signs with and this Cloud reports with, and the machine id it reports as. */
+  secret: string;
+  machineId: string;
   /** The Admin's signed pairing for one member, as the Admin hands it to the app: a one-time code, not redeemed. */
   grant(member: TeamMember): Promise<{ origin: string; code: string; expiresAt: number }>;
   /** The Admin's signed pairing for one member, redeemed into a bearer. `body` replaces the member and team claims
@@ -139,6 +142,8 @@ export interface CloudTeamFixture {
   /** The server stopped and started again on the same data (a deploy). */
   relaunch(env?: NodeJS.ProcessEnv): Promise<void>;
 }
+
+const TEAM_MACHINE_ID = "0d9e8f7a-6b5c-4d3e-9f8a-7b6c5d4e3f2a";
 
 function fakeOnePassword(at: string, token: string): string {
   const sdk = join(at, "node_modules", "@1password", "sdk");
@@ -294,7 +299,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       symlinkSync(join(SERVER_DIR, "..", "node_modules", scope), join(root, "team", "native", "node_modules", scope), "junction");
     }
     const startTeam = (more: NodeJS.ProcessEnv = {}) => start("team", { OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: team.id, OMB_CLOUD_TEAM_NAME: team.name,
-      OMB_CLOUD_MACHINE_ID: "0d9e8f7a-6b5c-4d3e-9f8a-7b6c5d4e3f2a", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: secret,
+      OMB_CLOUD_MACHINE_ID: TEAM_MACHINE_ID, OMB_CLOUD_ADMIN_URL: "https://cloud.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: secret,
       OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, OMB_TEST_INTERNAL_CAPABILITY_KEY: CAPABILITY_KEY, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}), ...team.env, ...more },
       teamPort, stopOverIpc ? ["--import", stopOnMessage] : [], stopOverIpc, onePasswordToken, 0, team.engine ?? "", true);
     let teamServer = await startTeam();
@@ -320,7 +325,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       if (renamed.status !== 200) throw new Error(`could not name the team's Chief: ${renamed.status} ${JSON.stringify(renamed.body)}`);
     };
     teamFixture = {
-      base: teamBase, home: join(root, "team"), id: team.id, name: team.name,
+      base: teamBase, home: join(root, "team"), id: team.id, name: team.name, secret, machineId: TEAM_MACHINE_ID,
       async grant(member) {
         const body = JSON.stringify({ label: "OpenMausBot app (Team Cloud)", ttlSeconds: 300, team: { id: team.id, name: team.name }, member });
         const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
