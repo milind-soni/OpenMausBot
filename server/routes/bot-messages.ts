@@ -39,7 +39,7 @@ import { noteTypedSend } from "../typed-sends.ts";
 import { startFresh } from "../fresh-start.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
-import { refusalBody, userError } from "../user-errors.ts";
+import { refusalBody, refusalText, userError } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 type RunningInstance = ReturnType<ProviderRegistry["get"]>;
@@ -576,7 +576,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (!behavior) return json(res, 400, { error: "behavior must be allow, deny, or answer" });
       const refusal = cardAnswerRefusal(auth, selected.threadId, String(body.requestId), behavior) ??
         (selected.threadId === bot.threadId ? null : cardAnswerRefusal(auth, bot.threadId, String(body.requestId), behavior));
-      if (refusal) return json(res, 403, { error: refusal });
+      if (refusal) return json(res, 403, refusalText(refusal));
       if (body.rememberCommand === true) {
         const refusal = commandRememberRefusal(auth, bot.threadId, String(body.requestId), behavior);
         if (refusal) return json(res, 403, { error: refusal });
@@ -647,7 +647,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const requestId = String(body.requestId);
       const threadId = answeredIn(m[1], requestId);
       const refusal = cardAnswerRefusal(auth, m[1], requestId, behavior) ?? (threadId === m[1] ? null : cardAnswerRefusal(auth, threadId, requestId, behavior));
-      if (refusal) return json(res, 403, { error: refusal });
+      if (refusal) return json(res, 403, refusalText(refusal));
       if (body.rememberCommand === true) {
         const refusal = commandRememberRefusal(auth, threadId, requestId, behavior);
         if (refusal) return json(res, 403, { error: refusal });

@@ -80,7 +80,7 @@ import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, effectiveRoomTurnTimeoutMinutes, parseConversationTurnTimeout, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import { roomTurnEnd, type RoomClaimEnd } from "./room-turn-end.ts";
 import { applyHoldDirective, classifyHoldDirective, heldMemberLine, rememberHeldMessage, stopWordPlacement } from "./room-holds.ts";
-import { refusalBody, userError, userErrorFields, userErrorThrown } from "./user-errors.ts";
+import { refusalBody, USER_ERROR, userError, userErrorFields, userErrorThrown } from "./user-errors.ts";
 import { chatNotice, failedNoticeTool, noticeTool, runtimeNoticeTool } from "./chat-notices.ts";
 import type { ServerErrorBody } from "../shared/server-text.ts";
 import { emailSignInRoute } from "./routes/email-sign-in.ts";
@@ -1060,7 +1060,7 @@ function cloudOwnerDevice(person: string): boolean {
 }
 
 function cloudCardRefusal(auth: RequestAuth & { kind: "session" }): string | null {
-  return auth.scopes.includes("admin") ? null : "Only the owner of this Cloud can answer this card.";
+  return auth.scopes.includes("admin") ? null : USER_ERROR["serverError.card.cloudOwnerOnly"];
 }
 
 /** Decides only whose answer to an existing card counts; it adds no card, gate or prompt. */

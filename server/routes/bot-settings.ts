@@ -19,7 +19,7 @@ import type { ModelSelectionCheck } from "./bots-create.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { sawThread } from "../thread-presence.ts";
-import { refusalBody } from "../user-errors.ts";
+import { refusalBody, refusalText } from "../user-errors.ts";
 import { readThreadNotifications, type NotificationListed } from "./notifications.ts";
 
 export interface BotSettingsRouteDeps {
@@ -221,7 +221,7 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       }
       // A standing grant is an approval: only those who may approve the card may remember it.
       const refusal = cardAnswerRefusal(auth, bot.threadId, pending.card!.requestId!, "allow");
-      if (refusal) return json(res, 403, { error: refusal });
+      if (refusal) return json(res, 403, refusalText(refusal));
       const savedBot = store.bot(bot.id)!;
       store.patchBot(bot.id, {
         alwaysAllow: [...new Set([...(savedBot.alwaysAllow ?? []), allowKey])].slice(0, 200),
