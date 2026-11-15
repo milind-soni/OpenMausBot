@@ -30,7 +30,7 @@ export function RowDot({ waiting = false }: { waiting?: boolean }) {
   const tone = cn("size-2 shrink-0 rounded-full", waiting ? "bg-warning" : "bg-accent");
   return (
     <>
-      <span aria-hidden="true" data-row-dot="" className="pointer-events-none absolute right-2 top-1 flex size-7 items-center justify-center transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 touch:opacity-0 max-md:hidden">
+      <span aria-hidden="true" data-row-dot="" className="pointer-events-none absolute right-[3px] top-1.5 flex size-6 items-center justify-center transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 touch:opacity-0 max-md:hidden">
         <span data-testid={waiting ? "waiting-dot" : "unread-dot"} title={label} className={tone} />
       </span>
       <span aria-hidden="true" title={label} className={cn(tone, "hidden self-center max-md:block touch:block")} />
