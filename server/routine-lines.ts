@@ -30,6 +30,14 @@ export const ROUTINE_LINE = {
   "routines.server.part.stillRunning": "the previous run of this routine is still running",
   "routines.server.part.notStarted": "the previous run of this routine has not started yet",
   "routines.server.part.computerNoStart": "its cloud desktop has not started, so its next tries are spaced out",
+  "routines.server.missedOne": "Missed because {why}",
+  "routines.server.missedMany": "Missed {count} scheduled runs because {why}",
+  "routines.server.missedTooLate": "Missed because {why} until more than {hours} hours after its time",
+  "routines.server.part.computerOff": "this computer was asleep or OpenMausBot was not running",
+  "routines.server.part.cloudDown": "this Cloud was asleep or restarting",
+  "routines.server.restored": "Not run again: this schedule was restored from a backup made before this run had its turn",
+  "routines.server.restoredMany": "Not run again: {count} scheduled runs from before this schedule was restored from a backup",
+  "routines.server.duplicate": "Not started: this scheduled run had already started once",
 } as const;
 
 export type RoutineLineKey = keyof typeof ROUTINE_LINE;

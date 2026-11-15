@@ -15,6 +15,7 @@ import { createCloudSpeed, type CloudSpeed } from "./cloud-speed.ts";
 import { classifyError } from "./drivers/retry.ts";
 import type { PerfHealth } from "./perf/perf-report.ts";
 import type { RoutineHealth } from "./routine-health.ts";
+import type { ScheduleSection } from "./routine-schedule-report.ts";
 import type { Message, StoreChange } from "./store.ts";
 
 /** The report's largest JSON body; incidents past it wait for the next poll. */
@@ -245,8 +246,8 @@ export interface CloudHealthDeps {
   room?: () => RoomReport;
   /** Each routine's newest ended run and its failures in a row, from the saved run rows (routine-health.ts), at most `cap`. */
   routines?: (cap: number) => RoutineHealth[];
-  /** Whether routines.json cannot be read, and how often stopping a turn outlasted the scheduler's wait since boot. */
-  schedule?: () => { unreadable: boolean; slowStops: number };
+  /** What is due, what has not started and what last did (routine-schedule-report.ts), read from the scheduler each time; null while there is none. */
+  schedule?: () => ScheduleSection | null;
   /** CPU steal and pressure, boot and wake times, and how long messages wait for their engine. */
   speed?: CloudSpeed;
   /** Turn phase timings, usage-limit holds, process buckets and event-loop lag: at most PERF_HEALTH_MAX_BYTES. A throw

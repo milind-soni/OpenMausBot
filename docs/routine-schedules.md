@@ -84,12 +84,81 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
   routine and while one runs (Automations → *Keep this computer awake for
   routines*, on by default; a closed lid still sleeps). For true 24/7, run
   OpenMausBot on a VPS — see [deploy-vps.md](deploy-vps.md).
-- Existing catch-up policy remains: up to 12 hours late, one missed occurrence
-  can be dispatched; older work receives a missed-run receipt. The next date
-  advances without replaying every missed minute. Queued/running/waiting work
-  for the same cron routine does not accumulate overlapping copies (a run is
-  waiting while teammates still owe it results on the job runtime,
-  docs/runtime-contract.md §9).
+- Catching up after downtime (the app closed, the computer asleep, a Cloud
+  home off or restarting): for each routine, the newest occurrence that came
+  due meanwhile runs late, if it is no more than 12 hours past its time, and
+  the ones before it close on one **Missed** row that counts them and says why
+  ("Missed 3 scheduled runs because this computer was asleep or OpenMausBot
+  was not running"; on a Cloud, "because this Cloud was asleep or
+  restarting"). That row is shown as already seen: the newest one is running,
+  so it asks nothing of you. When even the newest is more than 12 hours old,
+  nothing runs: all of them close on one Missed row that you are told about.
+  The next date advances without replaying every missed minute. Routines found
+  late in the same pass start 15 seconds apart (at most 40 steps, then again
+  from the first), so a long downtime does not start them all in one second.
+  A "when my limit resets" routine runs however late it is found.
+  Queued/running/waiting work for the same cron routine does not accumulate
+  overlapping copies (a run is waiting while teammates still owe it results on
+  the job runtime, docs/runtime-contract.md §9).
+- **The occurrence ledger.** Beside `routines.json` the scheduler keeps
+  `routines.ledger.jsonl`: one record per scheduled occurrence of each routine,
+  keyed by the routine's id and the scheduled-for time. A record says how the
+  occurrence ended (`ran`, `failed`, `missed` or `skipped`, or that it is
+  `queued` or `running`), a fixed word for why, how often it started, when its
+  first start was, and which run rows it produced. It holds ids, times, counts
+  and fixed words only: never a name, a prompt or an output. The run rows stay
+  in `routines.json`, and a row and its routine's next time are still saved in
+  one write; the ledger is worked out from the rows at every save.
+  - **Each occurrence starts once.** Before the scheduler makes a row for an
+    occurrence it asks the ledger whether that occurrence already has a
+    record; one that has is not made again, whatever brought it back (a
+    `routines.json` put back from a copy, a clock set back, an edit made while
+    the clock was wrong, a second process on the same files). A start is
+    appended to the ledger and flushed to disk before its turn begins; if that
+    write fails, the run stays queued and is tried at the next pass. A retry
+    is a further start of the same record, counted on it.
+  - **Leases.** A started occurrence's record carries a lease naming the
+    machine and process that run it, renewed every minute for three, and given
+    up at a clean shutdown. A process that starts on the same machine takes a
+    cut run over at once (only one server holds a data folder). One that
+    starts on another machine, a copy of the disk, waits until the lease has
+    lapsed before it starts that run again.
+  - **A restore from a backup.** A small file, `routines.ledger.mark`, keeps
+    the ledger's sequence number and the time of its last change. A ledger
+    with a lower number than the mark was brought back from a backup: every
+    occurrence up to the mark's time already had its turn, so runs the backup
+    held unfinished are let go ("Not run again: this schedule was restored
+    from a backup…") and the occurrences up to then close on one counted row
+    per routine; what came due after that is caught up as after any downtime.
+    When a whole disk is restored, mark included, there is nothing to tell it
+    by, and the catch-up rule above applies.
+  - **Size.** The file is appended to and rewritten whole, through a temporary
+    file and a rename, once it holds 500 more lines than records. Records that
+    have ended are all kept for 48 hours; after that each routine keeps its
+    200 newest for 90 days, and the file never holds more than 10,000. A
+    record that has not ended is never dropped. A torn last line (a crash in
+    the middle of an append) is dropped at the next start and the rest kept;
+    a ledger that is lost is made again from the run rows, and its sequence
+    number carries on from the mark.
+  - **Earlier versions.** A version from before the ledger reads and writes
+    `routines.json` as it always did and ignores the two new files, so going
+    back loses no routine and no run row. Coming forward again, the ledger
+    takes in the rows that version made. At the first start with the ledger,
+    it is made from the run rows already saved; none is moved or dropped.
+  - `GET /api/routines?history=<routine id>` adds `occurrences`: that
+    routine's records, newest first, for a routine the asker may see.
+- The run rows in `routines.json` are still capped at 2,000. When the cap is
+  reached, the row dropped is the oldest ended one of the routine that holds
+  the most ended rows, so a routine that runs every five minutes uses up its
+  own history and not the others'.
+- **A run whose turn is gone.** A run that shows as running while its
+  conversation has had no turn of its own for five minutes of scheduler
+  passes, and has sent no event in that time, is treated like a run that
+  failed: it starts once more ("Starting again shortly after a failure: its
+  turn ended without reporting back"), and a second loss fails it. A run that
+  waits on you or on work it handed on is never taken for lost, nor is a room
+  goal's run. The five minutes are added up a pass at a time, so the hours a
+  computer slept are not in them.
 - Every occurrence that does not run leaves a **Missed** row with its reason in
   the routine's log. Occurrences skipped behind the same earlier run share one
   row, which counts them ("Skipped 12 scheduled runs because the previous run
