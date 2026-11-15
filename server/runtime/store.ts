@@ -160,15 +160,28 @@ const SCHEMA = `
 
 type Row = Record<string, unknown>;
 
+/** A parsed row is remembered by its JSON text: the parse is a pure function of that text, so a changed
+ * row (different text) can never hit a stale entry. Callers get a clone, so none can alter another's copy. */
+const ASSIGNMENT_MEMO_LIMIT = 8_192;
+const assignmentMemo = new Map<string, Assignment>();
+
 function readAssignment(row: Row): Assignment {
+  const memoKey = String(row.json);
+  const memo = assignmentMemo.get(memoKey);
+  if (memo !== undefined) return structuredClone(memo);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(String(row.json));
+    parsed = JSON.parse(memoKey);
   } catch (error) {
     throw new Error(`runtime.db: assignment ${String(row.id)} holds invalid JSON (${String(error)})`);
   }
   const result = assignmentSchema.safeParse(parsed);
   if (!result.success) throw new Error(`runtime.db: assignment ${String(row.id)} does not match the record schema: ${result.error.message}`);
+  if (assignmentMemo.size >= ASSIGNMENT_MEMO_LIMIT) {
+    const oldest = assignmentMemo.keys().next().value;
+    if (oldest !== undefined) assignmentMemo.delete(oldest);
+  }
+  assignmentMemo.set(memoKey, structuredClone(result.data));
   return result.data;
 }
 
