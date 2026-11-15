@@ -5,8 +5,7 @@ import type { ReplyBlock } from "@/lib/formatted-reply";
 import { joinedCorners, SIMPLE_BOT_BUBBLE, type BubbleJoin } from "./chat-bubble";
 
 /** Simple mode's reply with tables: one bubble holding the prose and each table in order. The bubble may grow to the
- * message's card width so a table's columns show. Prose widens the bubble only up to the reading width (its max-width),
- * then fills whatever width the tables gave it (its min-width, which outranks max-width). The hover tray sits beside it. */
+ * message's card width so a table's columns show, and its prose runs to the same edge. The hover tray sits beside it. */
 export function ReplyBlocks({ blocks, join, citation, tray, render }: {
   blocks: readonly ReplyBlock[];
   join?: BubbleJoin;
