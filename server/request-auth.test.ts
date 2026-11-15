@@ -27,6 +27,8 @@ import {
   resolveRequestAuth,
   sanitizeSource,
   serializeSessionCookie,
+  serviceAllowed,
+  SERVICE_ALLOW,
   sessionCookieName,
 } from "./request-auth.ts";
 import { SESSION_TTL_MS, SessionRegistry } from "./sessions.ts";
@@ -932,5 +934,51 @@ describe("a browser on this machine is not the owner", () => {
     expect(pick({ ...dev, OMB_LOOPBACK_TRUST: "service" }, { fromSource: true }).localBrowsers).toBe(false);
     expect(pick({ OMB_DEV_TRUST_LOCAL_BROWSER: "true" }, { fromSource: true })).toEqual({ trust: "owner", reason: "self-hosted default", localBrowsers: false });
     expect(resolveLoopbackTrust({ env: dev, desktopManaged: false, hostedWorkspace: false, cloudHome: true, fromSource: true }).localBrowsers).toBe(false);
+  });
+
+  describe("service-trust loopback characterization (F2)", () => {
+    it("characterizes exact SERVICE_ALLOW entries", () => {
+      expect(SERVICE_ALLOW.length).toBeGreaterThan(0);
+      expect(serviceAllowed("GET", "/api/health")).toBe(true);
+      expect(serviceAllowed("GET", "/api/health/engines")).toBe(true);
+      expect(serviceAllowed("GET", "/api/auth/session")).toBe(true);
+      expect(serviceAllowed("GET", "/api/edition")).toBe(true);
+      expect(serviceAllowed("GET", "/api/brand")).toBe(true);
+      expect(serviceAllowed("GET", "/api/seats")).toBe(true);
+      expect(serviceAllowed("GET", "/api/bots")).toBe(true);
+      expect(serviceAllowed("GET", "/api/threads/t-123/messages")).toBe(true);
+      expect(serviceAllowed("GET", "/api/attachments/pic.png")).toBe(true);
+
+      expect(serviceAllowed("POST", "/api/bots/bot-1/tasks")).toBe(true);
+      expect(serviceAllowed("POST", "/api/bots/bot-1/messages/guarded")).toBe(true);
+      expect(serviceAllowed("GET", "/api/bots/bot-1/requests/req-1")).toBe(true);
+      expect(serviceAllowed("POST", "/api/bots/bot-1/requests/req-1/interrupt")).toBe(true);
+      expect(serviceAllowed("DELETE", "/api/bots/bot-1/queue/item-1")).toBe(true);
+      expect(serviceAllowed("POST", "/api/threads/t-123/respond")).toBe(true);
+
+      expect(serviceAllowed("GET", "/api/internal/capabilities")).toBe(true);
+      expect(serviceAllowed("POST", "/api/internal/capabilities")).toBe(true);
+      expect(serviceAllowed("POST", "/api/testing/internal-capability")).toBe(true);
+
+      expect(serviceAllowed("GET", "/api/webhooks")).toBe(false);
+      expect(serviceAllowed("POST", "/api/webhooks")).toBe(false);
+      expect(serviceAllowed("GET", "/api/sessions")).toBe(false);
+      expect(serviceAllowed("POST", "/api/bots")).toBe(false);
+      expect(serviceAllowed("DELETE", "/api/bots/bot-1")).toBe(false);
+      expect(serviceAllowed("PATCH", "/api/bots/bot-1")).toBe(false);
+      expect(serviceAllowed("GET", "/api/config")).toBe(false);
+      expect(serviceAllowed("PUT", "/api/config")).toBe(false);
+    });
+
+    it("resolves loopback auth under service trust to client scope without admin", () => {
+      const loopbackHeaders = { host: "127.0.0.1:8799" };
+      const allowed = check(loopbackHeaders, "/api/bots", "GET", { trust: "service" });
+      expect(allowed.auth).toEqual({ kind: "loopback", scopes: ["client"], trust: "service" });
+
+      const denied = check(loopbackHeaders, "/api/config", "GET", { trust: "service" });
+      expect(denied.auth).toBeNull();
+      expect(denied.status).toBe(403);
+      expect(denied.error).toContain("forbidden: on this shared server a local request without a session may only use the service routes");
+    });
   });
 });
