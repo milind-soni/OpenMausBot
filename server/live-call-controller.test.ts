@@ -5,6 +5,7 @@ import {
   LIVE_FISH_NEEDS_APP, LIVE_ELEVENLABS_NEEDS_APP, LIVE_GEMINI_NEEDS_APP, LiveCallBusyError, LiveCallController, LiveCallSignedOutError, type LiveActivity, type LiveCallDeps, type LiveSocket,
 } from "./live-call-controller.ts";
 import { LIVE_COPY } from "../shared/live-approval.ts";
+import { LIVE_CUSTOM_REFUSAL } from "./live-access.ts";
 import { LIVE_NEEDS_AZURE, LIVE_NEEDS_KEY, LiveSessionError, type LiveEndpoint } from "./live-call.ts";
 import { FishRelays, FISH_AGENT_VOICE } from "./live-fish.ts";
 import type { LiveElevenLabsSession, LiveFishSessionToken, LiveGeminiSession } from "../shared/wire.ts";
@@ -190,6 +191,28 @@ describe("LiveCallController lifecycle", () => {
       await expect(second).rejects.not.toBeInstanceOf(LiveCallBusyError);
     });
 
+  });
+
+  describe("with a custom endpoint chosen", () => {
+    const CUSTOM: LiveEndpoint = { provider: "custom", apiBase: "https://gateway.example.com/v1", model: "gpt-live-1" };
+    const member: RequestAuth = { kind: "loopback", scopes: ["client"], trust: "service" };
+    const custom = (overrides: Partial<LiveCallDeps> = {}) => {
+      const t = setup(overrides);
+      t.settings.endpoint = CUSTOM;
+      t.settings.provider = "custom";
+      return t;
+    };
+
+    it("holds the call to Azure's limit, in the custom endpoint's own words, and starts it like OpenAI when allowed", async () => {
+      const refused = custom({ azureRefusal: () => "Azure's words" });
+      await expect(refused.controller.start({ auth: member, ...BOT, client: "web", sdp: "a" })).rejects.toMatchObject({ status: 403, message: LIVE_CUSTOM_REFUSAL });
+      expect(refused.deps.createSession).not.toHaveBeenCalled();
+      const t = custom();
+      await t.controller.start({ auth: owner, ...BOT, client: "web", sdp: "a" });
+      expect(t.deps.azureRefusal).toHaveBeenCalledWith(owner);
+      expect(t.deps.fishRefusal).not.toHaveBeenCalled();
+      expect(t.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ endpoint: CUSTOM }));
+    });
   });
 
   describe("with Fish Audio chosen", () => {

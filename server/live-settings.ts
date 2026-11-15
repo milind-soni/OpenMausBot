@@ -1,6 +1,6 @@
 import type { LiveKeySource, LiveSettings } from "../shared/wire.ts";
 import { saveConfig, syncCredentialEnv, type AppConfig } from "./config.ts";
-import { azureLiveEndpoint, LIVE_NEEDS_AZURE, LIVE_NEEDS_ELEVENLABS, LIVE_NEEDS_FISH, LIVE_NEEDS_GEMINI, LIVE_NEEDS_KEY, openAiLiveEndpoint, type LiveEndpoint } from "./live-call.ts";
+import { azureLiveEndpoint, customLiveEndpoint, LIVE_NEEDS_AZURE, LIVE_NEEDS_CUSTOM, LIVE_NEEDS_ELEVENLABS, LIVE_NEEDS_FISH, LIVE_NEEDS_GEMINI, LIVE_NEEDS_KEY, openAiLiveEndpoint, type LiveEndpoint } from "./live-call.ts";
 import { liveSavePatch, usableLiveKey, type LiveConfig as LiveConfigSection } from "./live-config.ts";
 import { fishLiveEndpoint, usableFishAgent } from "./live-fish.ts";
 import { voiceCredential } from "./included-services.ts";
@@ -13,7 +13,7 @@ type LiveConfig = Pick<AppConfig, "live" | "openai" | "tts">;
 
 /** A saved Live key goes only to the provider and host it was saved for (`usableLiveKey`), the OpenAI API key only ever to
  * OpenAI, the Fish Audio key only to Fish Audio, the Gemini key only to Gemini and the person's own ElevenLabs key only to
- * ElevenLabs. */
+ * ElevenLabs. A custom endpoint gets only the key saved for it. */
 export function liveCallKey(cfg: LiveConfig, env: NodeJS.ProcessEnv = process.env): { key: string; source: LiveKeySource } | null {
   if (cfg.live?.provider === "fish") {
     const fish = cfg.tts?.fishKey?.trim();
@@ -30,15 +30,16 @@ export function liveCallKey(cfg: LiveConfig, env: NodeJS.ProcessEnv = process.en
   }
   const live = usableLiveKey(cfg.live);
   if (live) return { key: live, source: "live" };
-  if (cfg.live?.provider === "azure") return null;
+  if (cfg.live?.provider === "azure" || cfg.live?.provider === "custom") return null;
   const openai = cfg.openai?.key?.trim();
   return openai ? { key: openai, source: "openai" } : null;
 }
 
-/** null when Azure is chosen but its endpoint or deployment is missing or not valid. On Fish Audio, `model` is "" until the
+/** null when Azure (or a custom endpoint) is chosen but its endpoint or deployment (model) is missing or not valid. On Fish Audio, `model` is "" until the
  * harness has set up an agent on the account of the Fish Audio key. */
 export function liveCallEndpoint(cfg: LiveConfig, env: NodeJS.ProcessEnv = process.env): LiveEndpoint | null {
   if (cfg.live?.provider === "azure") return azureLiveEndpoint(cfg.live.azureEndpoint, cfg.live.azureDeployment);
+  if (cfg.live?.provider === "custom") return customLiveEndpoint(cfg.live.customEndpoint, cfg.live.customModel);
   if (cfg.live?.provider === "fish") return fishLiveEndpoint(usableFishAgent(cfg.live, cfg.tts?.fishKey ?? ""), env);
   if (cfg.live?.provider === "gemini") return geminiLiveEndpoint(env);
   if (cfg.live?.provider === "elevenlabs") return elevenLabsLiveEndpoint(usableElevenLabsAgent(cfg.live, cfg.tts?.key ?? ""), env);
@@ -48,7 +49,7 @@ export function liveCallEndpoint(cfg: LiveConfig, env: NodeJS.ProcessEnv = proce
 export function liveSetupProblem(cfg: LiveConfig): string | null {
   const provider = cfg.live?.provider;
   const missing = provider === "azure" ? LIVE_NEEDS_AZURE : provider === "fish" ? LIVE_NEEDS_FISH : provider === "gemini" ? LIVE_NEEDS_GEMINI
-    : provider === "elevenlabs" ? LIVE_NEEDS_ELEVENLABS : LIVE_NEEDS_KEY;
+    : provider === "elevenlabs" ? LIVE_NEEDS_ELEVENLABS : provider === "custom" ? LIVE_NEEDS_CUSTOM : LIVE_NEEDS_KEY;
   if (!liveCallKey(cfg)) return missing;
   return liveCallEndpoint(cfg) ? null : missing;
 }
@@ -65,8 +66,8 @@ export function liveCallSettings(cfg: AppConfig) {
   return { key: liveCallKey(cfg)?.key ?? "", endpoint: liveCallEndpoint(cfg), setupProblem: liveSetupProblem(cfg), ...liveSettingsFor(cfg) };
 }
 
-/** A caller without the admin scope learns which service calls use, not which Azure resource. */
-export function liveSettingsForClient({ azureEndpoint: _endpoint, azureDeployment: _deployment, ...settings }: LiveSettings): LiveSettings {
+/** A caller without the admin scope learns which service calls use, not which Azure resource or custom endpoint. */
+export function liveSettingsForClient({ azureEndpoint: _endpoint, azureDeployment: _deployment, customEndpoint: _custom, customModel: _model, ...settings }: LiveSettings): LiveSettings {
   return settings;
 }
 
@@ -77,9 +78,11 @@ export function liveSettingsFor(cfg: AppConfig): LiveSettings {
   return {
     configured: liveSetupProblem(cfg) === null,
     ...(key ? { keySource: key.source } : {}),
-    ...(provider === "azure" || provider === "fish" || provider === "gemini" || provider === "elevenlabs" ? { provider } : {}),
+    ...(provider === "azure" || provider === "fish" || provider === "gemini" || provider === "elevenlabs" || provider === "custom" ? { provider } : {}),
     ...(cfg.live?.azureEndpoint ? { azureEndpoint: cfg.live.azureEndpoint } : {}),
     ...(cfg.live?.azureDeployment ? { azureDeployment: cfg.live.azureDeployment } : {}),
+    ...(cfg.live?.customEndpoint ? { customEndpoint: cfg.live.customEndpoint } : {}),
+    ...(cfg.live?.customModel ? { customModel: cfg.live.customModel } : {}),
     voice: cfg.live?.voice ?? "",
     ...(cfg.live?.geminiVoice ? { geminiVoice: cfg.live.geminiVoice } : {}),
     readTypedReplies: cfg.live?.readTypedReplies ?? true,

@@ -3,7 +3,7 @@ import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 import type { LiveFishRelayCommand, LiveFishRelayEvent, LiveProvider, LiveSettings } from "../../shared/wire.ts";
 import { GEMINI_LIVE_VOICE_OPTIONS } from "../../shared/live-call.ts";
-import { azureLiveDeployment, azureOpenAiRoot, LiveSessionError, MAX_SDP_BYTES } from "../live-call.ts";
+import { azureLiveDeployment, azureOpenAiRoot, customLiveApiBase, customLiveModel, LiveSessionError, MAX_SDP_BYTES } from "../live-call.ts";
 import { LiveCallBusyError, type LiveCallController } from "../live-call-controller.ts";
 import { RELAY_POLL_MS } from "../live-fish.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
@@ -14,7 +14,7 @@ export interface LiveRouteDeps {
   deviceRevoked?: (device: string) => void;
   resolveTarget(botId: string, threadId: string | undefined): { botId: string; botName: string; threadId: string } | null;
   settings(): LiveSettings;
-  saveSettings(patch: { provider?: LiveProvider; azureEndpoint?: string; azureDeployment?: string; voice?: string; geminiVoice?: string; readTypedReplies?: boolean; idleMinutes?: number }): Promise<LiveSettings>;
+  saveSettings(patch: { provider?: LiveProvider; azureEndpoint?: string; azureDeployment?: string; customEndpoint?: string; customModel?: string; voice?: string; geminiVoice?: string; readTypedReplies?: boolean; idleMinutes?: number }): Promise<LiveSettings>;
   /** A running relayed (Fish Audio, Gemini or ElevenLabs) call's relay, only for the token its start answered with. */
   fishRelay(sessionId: string, token: string): { receive(events: LiveFishRelayEvent[], from?: number): void; poll(waitMs: number): Promise<{ commands: LiveFishRelayCommand[]; closed: boolean }> } | null;
 }
@@ -46,10 +46,13 @@ const relayBody = z.object({
 }).strict();
 // Strict, so `key` is refused rather than ignored: the key is saved only through the credential store or PUT /api/config.
 const settingsBody = z.object({
-  provider: z.enum(["openai", "azure", "fish", "gemini", "elevenlabs"]).optional(),
+  provider: z.enum(["openai", "azure", "fish", "gemini", "elevenlabs", "custom"]).optional(),
   // "" clears the field. Anything else must be an https Azure OpenAI host, since the key is sent there.
   azureEndpoint: z.string().trim().max(300).refine((url) => url === "" || azureOpenAiRoot(url) !== null).optional(),
   azureDeployment: z.string().trim().max(64).refine((name) => name === "" || azureLiveDeployment(name) === name).optional(),
+  // The same for a custom endpoint: https, or http only on this computer's loopback.
+  customEndpoint: z.string().trim().max(300).refine((url) => url === "" || customLiveApiBase(url) !== null).optional(),
+  customModel: z.string().trim().max(64).refine((name) => name === "" || customLiveModel(name) === name).optional(),
   voice: z.string().trim().max(40).regex(/^[a-z]*$/).optional(),
   // "" goes back to the default voice.
   geminiVoice: z.string().trim().refine((name) => name === "" || GEMINI_LIVE_VOICE_OPTIONS.some((option) => option.id === name)).optional(),
@@ -128,6 +131,8 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
         const field = parsed.error.issues[0]?.path[0];
         if (field === "azureEndpoint") return json(res, 400, { error: "The Azure endpoint must be the https address of an Azure OpenAI resource, like https://my-resource.openai.azure.com." });
         if (field === "azureDeployment") return json(res, 400, { error: "The Azure deployment name may use letters, digits, '-', '_' and '.', up to 64 characters." });
+        if (field === "customEndpoint") return json(res, 400, { error: "The custom endpoint must be an https address, like https://gateway.example.com/v1, or http only on this computer (127.0.0.1 or localhost)." });
+        if (field === "customModel") return json(res, 400, { error: "The model may use letters, digits, '-', '_', '.', ':' and '/', up to 64 characters." });
         return json(res, 400, { error: "Those Live settings are not valid." });
       }
       if (!Object.keys(parsed.data).length) return json(res, 400, { error: "nothing to save" });

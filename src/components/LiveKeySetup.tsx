@@ -18,6 +18,7 @@ export function LiveKeySetup({ onSaved, onSaving, locked = false, compact = fals
   const { state, dispatch } = useStore();
   const provider = state.config?.live?.provider;
   const azure = provider === "azure";
+  const custom = provider === "custom";
   const fish = provider === "fish";
   const gemini = provider === "gemini";
   const elevenlabs = provider === "elevenlabs";
@@ -65,14 +66,14 @@ export function LiveKeySetup({ onSaved, onSaving, locked = false, compact = fals
     >
       <div className="text-[14px] font-medium text-ink">{t(copy.title)}</div>
       <div className="text-[13px] leading-[1.45] text-ink-secondary">{t(copy.explain)}</div>
-      <div className="text-[13px] leading-[1.45] text-ink-secondary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, fish, gemini, elevenlabs })}</div>
+      <div className="text-[13px] leading-[1.45] text-ink-secondary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, custom, fish, gemini, elevenlabs })}</div>
       <input
         type="password"
         autoComplete="off"
         spellCheck={false}
         value={key}
         onChange={(event) => setKey(event.target.value)}
-        placeholder={azure || fish || gemini ? "…" : elevenlabs ? "sk_…" : "sk-…"}
+        placeholder={azure || custom || fish || gemini ? "…" : elevenlabs ? "sk_…" : "sk-…"}
         aria-label={t(copy.field)}
         className="rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent/60"
       />
